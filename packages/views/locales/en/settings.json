@@ -30,6 +30,10 @@
     "sticky_comment_bar": {
       "title": "Sticky comment bar",
       "hint": "Keep the comment bar pinned to the bottom while scrolling an issue page."
+    },
+    "issue_link_new_tab": {
+      "title": "Open issue links in new tab",
+      "hint": "Issue links in descriptions, comments, and chat open in a new tab instead of navigating in place."
     }
   },
   "shortcuts": {
@@ -66,7 +70,7 @@
       "createIssue": { "label": "Create issue", "description": "Open your preferred issue creation flow." },
       "toggleSidebar": { "label": "Toggle sidebar", "description": "Show or hide the main sidebar." },
       "findInIssue": { "label": "Find in issue", "description": "Search within the open issue detail." },
-      "send": { "label": "Send", "description": "Send chat messages, comments, replies, feedback, and prompts." },
+      "send": { "label": "Send", "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog." },
       "goInbox": { "label": "Go to Inbox", "description": "Open the workspace inbox." },
       "goChat": { "label": "Go to Chat", "description": "Open workspace chat." },
       "goMyIssues": { "label": "Go to My Issues", "description": "Open issues assigned to you." },
@@ -95,6 +99,22 @@
     "floating_label": "Floating chat window",
     "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab."
   },
+  "issue": {
+    "description": "Choose which fields each create dialog keeps on its toolbar. Hidden fields stay available from the ⋯ menu and reappear while they hold a value.",
+    "quick_create_title": "Create with agent",
+    "quick_create_description": "Fields shown in the quick create toolbar.",
+    "manual_create_title": "Create manually",
+    "manual_create_description": "Fields shown in the manual create toolbar.",
+    "fields": {
+      "status": "Status",
+      "priority": "Priority",
+      "assignee": "Assignee",
+      "labels": "Labels",
+      "project": "Project",
+      "due_date": "Due date",
+      "start_date": "Start date"
+    }
+  },
   "page": {
     "title": "Settings",
     "my_account": "My Account",
@@ -103,6 +123,7 @@
       "profile": "Profile",
       "preferences": "Preferences",
       "shortcuts": "Shortcuts",
+      "issue": "Issue",
       "chat": "Chat",
       "notifications": "Notifications",
       "tokens": "API Tokens",
@@ -112,7 +133,74 @@
       "integrations": "Integrations",
       "labs": "Labs",
       "members": "Members",
-      "labels": "Labels"
+      "labels": "Labels",
+      "properties": "Properties"
+    }
+  },
+  "properties": {
+    "title": "Properties",
+    "description": "Define typed custom properties for issues in this workspace. Values are set on each issue and are readable and writable by agents.",
+    "search_placeholder": "Filter by name...",
+    "new_property": "New property",
+    "show_archived": "Show archived",
+    "columns": {
+      "name": "Name",
+      "type": "Type",
+      "options": "Options",
+      "usage": "Used by",
+      "updated": "Updated"
+    },
+    "usage_count_one": "{{count}} issue",
+    "usage_count_other": "{{count}} issues",
+    "loading": "Loading properties...",
+    "empty": "No properties yet",
+    "empty_hint": "Create typed fields like Severity or Environment — agents can read and write them with validation.",
+    "no_results": "No matching properties",
+    "save_failed": "Couldn't save property",
+    "limit_hint": "{{count}}/{{max}} active properties",
+    "archived_badge": "Archived",
+    "types": {
+      "text": "Text",
+      "number": "Number",
+      "select": "Select",
+      "multi_select": "Multi-select",
+      "date": "Date",
+      "checkbox": "Checkbox",
+      "url": "URL"
+    },
+    "actions": {
+      "open": "Actions for {{name}}",
+      "edit": "Edit",
+      "archive": "Archive",
+      "unarchive": "Restore"
+    },
+    "editor": {
+      "create_title": "New property",
+      "edit_title": "Edit property",
+      "admin_hint": "Only workspace owners and admins can manage property definitions.",
+      "icon": "Icon",
+      "choose_icon": "Choose icon",
+      "remove_icon": "Remove icon",
+      "name": "Name",
+      "name_placeholder": "e.g. Severity",
+      "type": "Type",
+      "type_locked_hint": "Type can't be changed after creation.",
+      "description": "Description",
+      "description_placeholder": "What this property means and when to set it",
+      "options": "Options",
+      "option_name_placeholder": "Option name",
+      "add_option": "Add option",
+      "remove_option": "Remove option",
+      "cancel": "Cancel",
+      "save": "Save property",
+      "saving": "Saving..."
+    },
+    "archive_dialog": {
+      "title": "Archive property?",
+      "description": "\"{{name}}\" will be hidden from pickers and filters. Existing values on issues are preserved. You can restore it later.",
+      "cancel": "Cancel",
+      "confirm": "Archive property",
+      "failed": "Couldn't archive property"
     }
   },
   "labels": {
@@ -150,7 +238,6 @@
       "description": "Description",
       "description_placeholder": "Describe when this label should be used",
       "color": "Color",
-      "custom_color": "Choose a custom color",
       "cancel": "Cancel",
       "save": "Save label",
       "saving": "Saving..."
@@ -536,10 +623,13 @@
     },
     "updates": {
       "title": "Updates",
-      "description": "The desktop app checks for new versions automatically once an hour and shortly after launch, downloading them in the background. You'll be prompted to restart once an update is ready.",
+      "description": "Control automatic background updates or check for a new version manually.",
       "current_version": "Current version",
+      "automatic_updates_title": "Automatic background updates",
+      "automatic_updates_description": "Check shortly after launch and every hour, then download available updates in the background.",
+      "automatic_updates_save_failed": "Failed to save automatic update settings",
       "check_section_title": "Check for updates",
-      "check_section_description": "Trigger a check now instead of waiting for the next automatic poll. Available updates download in the background and show a restart prompt when ready.",
+      "check_section_description": "Check now regardless of your automatic update preference. Available updates download in the background and show a restart prompt when ready.",
       "up_to_date": "You're on the latest version.",
       "downloading": "v{{version}} is downloading in the background — you'll be notified when it's ready to install.",
       "check_now": "Check now",

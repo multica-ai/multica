@@ -163,6 +163,10 @@ export const ProjectSchema = z.object({
   priority: z.string(),
   lead_type: z.string().nullable(),
   lead_id: z.string().nullable(),
+  // .default(null) so a project from an older backend that omits these keys
+  // parses to null instead of degrading the batch to the empty fallback.
+  start_date: z.string().nullable().default(null),
+  due_date: z.string().nullable().default(null),
   created_at: z.string(),
   updated_at: z.string(),
   issue_count: z.number().default(0),
@@ -196,6 +200,8 @@ export const EMPTY_PROJECT: Project = {
   priority: "none",
   lead_type: null,
   lead_id: null,
+  start_date: null,
+  due_date: null,
   created_at: "",
   updated_at: "",
   issue_count: 0,
@@ -687,6 +693,7 @@ export const EMPTY_ISSUE_FALLBACK: import("@multica/core/types").Issue = {
   start_date: null,
   due_date: null,
   metadata: {},
+  properties: {},
   created_at: "",
   updated_at: "",
 };

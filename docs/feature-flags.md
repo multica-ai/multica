@@ -179,6 +179,39 @@ function Checkout() {
 
 Outside a `FeatureFlagsProvider` (Storybook, unit tests, error pages) `useFlag` / `useVariant` return the supplied default. You never have to mount the provider just to render a component in isolation.
 
+### v0.3.44 compatibility rollout
+
+The following release flag defaults to `false` so the schema can ship before
+the new persisted state is visible to older server pods or a rollback:
+
+```yaml
+# Enable only after every v0.3.43 server pod has drained and rollback reads
+# have been validated against the migrated database.
+settings_resource_labels:
+  default: true
+```
+
+Keep it off for v0.3.44: it is a schema-only deployment for resource labels. A
+later rollout may enable it only after it ships and verifies a rollback
+normalizer for resource-label rows. Do not rely on turning the flag off to make
+a database safe for an older binary; it prevents new writes but cannot remove
+states that already exist. Until that normalizer exists, rollbacks must target
+a version that understands these states or happen before the flag is enabled.
+
+Agent Builder has completed this rollout and is now always available. Current
+clients always render the AI creation entry, and the backend no longer gates the
+session endpoint. `/api/config` still reports `agents_agent_builder: true` so
+installed desktop clients that still gate the entry on this config decision
+also receive the permanently enabled behavior; this is a client-compatibility
+decision, not an operator-controlled flag.
+
+Agent skill toggles have completed this rollout and are now always available.
+Current clients render the switch without a release flag, and the backend no
+longer gates the write endpoint. `/api/config` still reports
+`agents_skill_toggles: true` so installed v0.4.0 desktop clients also expose the
+switch; this is a client-compatibility decision, not an operator-controlled
+flag.
+
 ### Security note: never rely on the frontend alone
 
 A frontend feature flag controls what the user *sees*. It does NOT enforce access. Any API route exposing the same capability MUST evaluate the matching backend flag independently. The two flags can share a key but they live in two `Service` instances and the backend value is the source of truth.

@@ -68,6 +68,9 @@ postgres:
     limits:
       cpu: 1000m
       memory: 1Gi
+  # Standard Kubernetes scheduling constraints for the postgres Deployment.
+  affinity: {}
+  tolerations: []
 
 # -----------------------------------------------------------------------------
 # Backend (Go API + WS server)
@@ -135,6 +138,9 @@ backend:
     limits:
       cpu: 1000m
       memory: 1Gi
+  # Standard Kubernetes scheduling constraints for the backend Deployment.
+  affinity: {}
+  tolerations: []
 
 # -----------------------------------------------------------------------------
 # Frontend (Next.js standalone)
@@ -162,6 +168,9 @@ frontend:
     limits:
       cpu: 1000m
       memory: 1Gi
+  # Standard Kubernetes scheduling constraints for the frontend Deployment.
+  affinity: {}
+  tolerations: []
 
 # -----------------------------------------------------------------------------
 # Ingress

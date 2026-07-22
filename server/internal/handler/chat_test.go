@@ -695,3 +695,173 @@ VALUES ($1, 'feishu', $2, $3, 'final')
 		t.Fatal("deleted chat session's channel_outbound_card_message was not pruned (no reaper would ever collect it)")
 	}
 }
+
+// TestSetChatSessionArchived_ClearsChannelBinding verifies the archive path
+// severs the external-channel link (MUL-4372): the channel engine resolves
+// inbound Feishu/Slack traffic through channel_chat_session_binding without
+// checking session status, so an archived-but-still-bound session kept
+// accumulating agent replies and a stuck, uncleared unread badge. Archiving must
+// drop the binding so the next inbound message forks a fresh session; unarchive
+// must NOT recreate it (a later session may already own the channel).
+func TestSetChatSessionArchived_ClearsChannelBinding(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatArchiveBindingAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	ctx := context.Background()
+
+	const appID = "cli_chat_archive_binding"
+	const channelChatID = "oc_chat_archive_binding"
+
+	// channel_* rows have no FK to chat_session/workspace (MUL-3515 §4), so they
+	// outlive the helper's chat_session cleanup; clear by deterministic key.
+	cleanChannel := func() {
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM channel_chat_session_binding WHERE channel_chat_id = $1`, channelChatID)
+		_, _ = testPool.Exec(context.Background(),
+			`DELETE FROM channel_installation WHERE channel_type = 'feishu' AND config->>'app_id' = $1`, appID)
+	}
+	cleanChannel()
+	t.Cleanup(cleanChannel)
+
+	var installID string
+	if err := testPool.QueryRow(ctx, `
+INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id)
+VALUES ($1, $2, 'feishu', jsonb_build_object('app_id', $3::text), $4)
+RETURNING id
+`, testWorkspaceID, agentID, appID, testUserID).Scan(&installID); err != nil {
+		t.Fatalf("insert channel_installation: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
+VALUES ($1, $2, 'feishu', $3, 'p2p')
+`, sessionID, installID, channelChatID); err != nil {
+		t.Fatalf("insert channel_chat_session_binding: %v", err)
+	}
+
+	archive := func(archived bool) {
+		t.Helper()
+		payload := `{"archived":false}`
+		if archived {
+			payload = `{"archived":true}`
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/chat/sessions/"+sessionID+"/archive", bytes.NewReader([]byte(payload)))
+		req.Header.Set("X-User-ID", testUserID)
+		req = withURLParam(req, "sessionId", sessionID)
+		req = withChatTestWorkspaceCtx(t, req)
+		w := httptest.NewRecorder()
+		testHandler.SetChatSessionArchived(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("SetChatSessionArchived(%v): expected 200, got %d: %s", archived, w.Code, w.Body.String())
+		}
+	}
+
+	bindingExists := func() bool {
+		t.Helper()
+		var exists bool
+		if err := testPool.QueryRow(ctx,
+			`SELECT EXISTS (SELECT 1 FROM channel_chat_session_binding WHERE channel_chat_id = $1)`, channelChatID).Scan(&exists); err != nil {
+			t.Fatalf("query chat session binding: %v", err)
+		}
+		return exists
+	}
+
+	// Archive → binding must be gone so future channel traffic cannot revive
+	// this now read-only session.
+	archive(true)
+	if bindingExists() {
+		t.Fatal("archived chat session's channel_chat_session_binding was not cleared")
+	}
+
+	var status string
+	if err := testPool.QueryRow(ctx,
+		`SELECT status FROM chat_session WHERE id = $1`, sessionID).Scan(&status); err != nil {
+		t.Fatalf("query chat session status: %v", err)
+	}
+	if status != "archived" {
+		t.Fatalf("expected chat session status 'archived', got %q", status)
+	}
+
+	// Unarchive → must NOT recreate/steal the binding. A later inbound message
+	// may already have forked a new session that owns the channel now.
+	archive(false)
+	if bindingExists() {
+		t.Fatal("unarchive recreated the channel_chat_session_binding; it must not restore or steal the channel")
+	}
+}
+
+// TestListChatSessions_ArchivedSessionReportsZeroUnread pins the MUL-4360 fix:
+// ListAllChatSessionsByCreator forces unread_count/has_unread to 0 for archived
+// rows even when assistant messages sit past the read cursor, so a stuck unread
+// badge cannot survive on any surface (FAB, sidebar Chat tab, chat-window
+// header). Because archiving deliberately does NOT advance last_read_at,
+// unarchiving must restore the session's true unread count.
+func TestListChatSessions_ArchivedSessionReportsZeroUnread(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "ChatArchivedUnreadAgent", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	ctx := context.Background()
+
+	// An assistant reply the user never read.
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO chat_message (chat_session_id, role, content) VALUES ($1, 'assistant', 'unread reply')`,
+		sessionID); err != nil {
+		t.Fatalf("insert assistant message: %v", err)
+	}
+	// Pin the read cursor firmly before that message so it counts as unread
+	// regardless of insert-time clock skew (last_read_at defaults to now()).
+	if _, err := testPool.Exec(ctx,
+		`UPDATE chat_session SET last_read_at = 'epoch' WHERE id = $1`, sessionID); err != nil {
+		t.Fatalf("reset last_read_at: %v", err)
+	}
+
+	unreadOf := func() (int, bool) {
+		t.Helper()
+		req := newRequest("GET", "/api/chat/sessions?status=all", nil)
+		req = withChatTestWorkspaceCtx(t, req)
+		w := httptest.NewRecorder()
+		testHandler.ListChatSessions(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListChatSessions: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp []ChatSessionResponse
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode list: %v", err)
+		}
+		for _, s := range resp {
+			if s.ID == sessionID {
+				return s.UnreadCount, s.HasUnread
+			}
+		}
+		t.Fatalf("session %s not found in list of %d", sessionID, len(resp))
+		return 0, false
+	}
+
+	archive := func(archived bool) {
+		t.Helper()
+		req := newRequest("PATCH", "/api/chat/sessions/"+sessionID+"/archive", map[string]any{"archived": archived})
+		req = withURLParam(req, "sessionId", sessionID)
+		req = withChatTestWorkspaceCtx(t, req)
+		w := httptest.NewRecorder()
+		testHandler.SetChatSessionArchived(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("SetChatSessionArchived(%v): expected 200, got %d: %s", archived, w.Code, w.Body.String())
+		}
+	}
+
+	// Active baseline: the unread reply counts (guards against a regression that
+	// would zero unread for live sessions too).
+	if n, has := unreadOf(); n != 1 || !has {
+		t.Fatalf("active session unread: want count=1 has=true, got count=%d has=%v", n, has)
+	}
+
+	// Archived: unread forced to 0 even though the message still sits past the cursor.
+	archive(true)
+	if n, has := unreadOf(); n != 0 || has {
+		t.Fatalf("archived session unread: want count=0 has=false, got count=%d has=%v", n, has)
+	}
+
+	// Unarchive restores the true unread state (last_read_at was never touched).
+	archive(false)
+	if n, has := unreadOf(); n != 1 || !has {
+		t.Fatalf("unarchived session unread: want count=1 has=true, got count=%d has=%v", n, has)
+	}
+}

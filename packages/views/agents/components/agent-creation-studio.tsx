@@ -26,7 +26,10 @@ import {
 } from "@multica/core/chat/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { runtimeListOptions } from "@multica/core/runtimes";
+import {
+  runtimeListOptions,
+  runtimeModelsOptions,
+} from "@multica/core/runtimes";
 import type {
   Agent,
   AgentInvocationTargetInput,
@@ -35,6 +38,7 @@ import type {
   CreateAgentRequest,
   MemberWithUser,
   RuntimeDevice,
+  RuntimeModel,
 } from "@multica/core/types";
 import {
   agentListOptions,
@@ -48,7 +52,9 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { cn } from "@multica/ui/lib/utils";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
+import { useAppForeground } from "../../common/use-app-foreground";
 import { ChatInput } from "../../chat/components/chat-input";
+import { useChatDraftRestore } from "../../chat/components/use-chat-draft-restore";
 import {
   ChatMessageList,
   ChatMessageSkeleton,
@@ -148,6 +154,28 @@ export function AgentCreationStudio() {
   const appliedAssistantMessageRef = useRef<string | null>(null);
   const builderSessionIdRef = useRef("");
 
+  // The builder chat is a real chat_session, so cancelling a started-but-empty
+  // run defers the empty/non-empty judgment exactly as it does in the main chat
+  // (#5219): stopBuilder's response carries no restore_to_input, and the prompt
+  // arrives later as a durable chat_draft_restore row. Without this hook the
+  // studio composer would simply never see it. The two sources are exclusive —
+  // the synchronous cancel answers immediately, the durable one lands after the
+  // daemon acks — so whichever exists is handed to the composer.
+  //
+  // Gated on app foreground: this studio is a dedicated route, so being mounted
+  // means the surface is on screen, but a backgrounded tab must not fetch/apply/
+  // consume a restore the user is waiting on elsewhere. It recovers on its next
+  // fetch once the tab is refocused.
+  const appForeground = useAppForeground();
+  const {
+    restoreDraftRequest: durableRestoreRequest,
+    handleRestoreDraftApplied: handleDurableRestoreApplied,
+  } = useChatDraftRestore(builderSessionId || null, appForeground);
+  const builderRestoreRequest = useMemo(
+    () => pickBuilderRestore(builderRestoreDraft, durableRestoreRequest),
+    [builderRestoreDraft, durableRestoreRequest],
+  );
+
   useEffect(() => {
     builderSessionIdRef.current = builderSessionId;
   }, [builderSessionId]);
@@ -223,6 +251,34 @@ export function AgentCreationStudio() {
       ),
     [currentUser?.id, runtimes],
   );
+  const selectedRuntime =
+    runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
+  const builderModelsQuery = useQuery(
+    runtimeModelsOptions(
+      mode === "ai" && selectedRuntime?.status === "online"
+        ? selectedRuntime.id
+        : null,
+    ),
+  );
+  // `null` means discovery is not available yet (or failed), while `[]` is
+  // an authoritative catalog with no selectable models. In both cases the
+  // builder may preserve the user's current value but cannot invent one.
+  const builderModelCatalog = useMemo(
+    () =>
+      builderModelsQuery.isSuccess
+        ? builderModelsQuery.data.supported
+          ? builderModelsQuery.data.models
+          : []
+        : null,
+    [builderModelsQuery.data, builderModelsQuery.isSuccess],
+  );
+  const validBuilderModelIds = useMemo(
+    () =>
+      builderModelCatalog === null
+        ? null
+        : new Set(builderModelCatalog.map((model) => model.id)),
+    [builderModelCatalog],
+  );
 
   useEffect(() => {
     if (draft.runtimeId || usableRuntimes.length === 0) return;
@@ -284,12 +340,21 @@ export function AgentCreationStudio() {
     const payload = parseBuilderDraft(latestBuilderDraftMessageContent);
     if (!payload) return;
     appliedAssistantMessageRef.current = latestBuilderDraftMessageId;
-    setDraft((current) => mergeBuilderDraft(current, payload, skillIdSet, memberIdSet));
+    setDraft((current) =>
+      mergeBuilderDraft(
+        current,
+        payload,
+        skillIdSet,
+        memberIdSet,
+        validBuilderModelIds,
+      ),
+    );
   }, [
     latestBuilderDraftMessageContent,
     latestBuilderDraftMessageId,
     memberIdSet,
     skillIdSet,
+    validBuilderModelIds,
   ]);
 
   const filteredTemplates = useMemo(() => {
@@ -303,8 +368,6 @@ export function AgentCreationStudio() {
     );
   }, [templateSearch, templates]);
 
-  const selectedRuntime =
-    runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
   const accessInvalid =
     draft.permissionScope === "members" &&
     draft.memberIds.size === 0 &&
@@ -425,6 +488,8 @@ export function AgentCreationStudio() {
         draft,
         workspaceSkills,
         members,
+        selectedRuntime,
+        builderModelCatalog,
       );
       const result = await api.sendChatMessage(
         builderSessionId,
@@ -618,7 +683,6 @@ export function AgentCreationStudio() {
       {mode === "choose" && (
         <ModeChooser
           onBlank={chooseBlank}
-          onTemplate={() => setMode("templates")}
           onAI={() => setMode("ai")}
         />
       )}
@@ -690,8 +754,14 @@ export function AgentCreationStudio() {
             runtimeOnline={selectedRuntime?.status === "online"}
             onSend={sendBuilderMessage}
             onStop={() => void stopBuilder()}
-            restoreDraftRequest={builderRestoreDraft}
-            onRestoreDraftConsumed={() => setBuilderRestoreDraft(null)}
+            restoreDraftRequest={builderRestoreRequest}
+            onRestoreDraftApplied={() => {
+              if (builderRestoreDraft) {
+                setBuilderRestoreDraft(null);
+                return;
+              }
+              handleDurableRestoreApplied();
+            }}
             error={builderError}
           />
           <div className="min-h-0 overflow-y-auto border-l bg-muted/10">
@@ -728,13 +798,11 @@ export function AgentCreationStudio() {
   );
 }
 
-function ModeChooser({
+export function ModeChooser({
   onBlank,
-  onTemplate,
   onAI,
 }: {
   onBlank: () => void;
-  onTemplate: () => void;
   onAI: () => void;
 }) {
   const { t } = useT("agents");
@@ -744,12 +812,6 @@ function ModeChooser({
       title: t(($) => $.creation_studio.modes.blank.title),
       description: t(($) => $.creation_studio.modes.blank.description),
       action: onBlank,
-    },
-    {
-      icon: Bot,
-      title: t(($) => $.creation_studio.modes.template.title),
-      description: t(($) => $.creation_studio.modes.template.description),
-      action: onTemplate,
     },
     {
       icon: MessageSquare,
@@ -773,7 +835,7 @@ function ModeChooser({
             {t(($) => $.creation_studio.choose_description)}
           </p>
         </div>
-        <div className="mt-9 grid gap-4 md:grid-cols-3">
+        <div className="mx-auto mt-9 grid max-w-3xl gap-4 md:grid-cols-2">
           {modes.map(({ icon: Icon, title, description, action, recommended }) => (
             <button
               key={title}
@@ -1028,7 +1090,11 @@ function ConfigurationPanel({
               members={members}
               currentUserId={currentUserId}
               selectedRuntimeId={draft.runtimeId}
-              onSelect={(id) => set("runtimeId", id)}
+              onSelect={(id) => {
+                // Model is per-runtime; clear it on runtime change so the new
+                // runtime resolves its own default instead of a stale value.
+                if (id !== draft.runtimeId) onChange({ ...draft, runtimeId: id, model: "" });
+              }}
             />
             <ModelDropdown
               runtimeId={selectedRuntime?.id ?? null}
@@ -1178,7 +1244,7 @@ function DraftFieldRow({
 function BuilderSetup({ draft, onChange, runtimes, runtimesLoading, members, currentUserId, selectedRuntime, starting, error, onStart, onConnectRuntime }: { draft: AgentDraft; onChange: (draft: AgentDraft) => void; runtimes: RuntimeDevice[]; runtimesLoading: boolean; members: MemberWithUser[]; currentUserId: string | null; selectedRuntime: RuntimeDevice | null; starting: boolean; error: string | null; onStart: () => void; onConnectRuntime: () => void; }) {
   const { t } = useT("agents");
   const hasOnline = runtimes.some((runtime) => runtime.status === "online" && isRuntimeUsableForUser(runtime, currentUserId));
-  return <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-10"><div className="w-full max-w-xl rounded-xl border bg-card p-6 shadow-sm"><span className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary"><MessageSquare className="size-5" /></span><h2 className="mt-5 text-xl font-semibold">{t(($) => $.creation_studio.builder.setup_title)}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{t(($) => $.creation_studio.builder.setup_description)}</p><div className="mt-6 space-y-4"><RuntimePicker runtimes={runtimes} runtimesLoading={runtimesLoading} members={members} currentUserId={currentUserId} selectedRuntimeId={draft.runtimeId} onSelect={(runtimeId) => onChange({ ...draft, runtimeId })} /><ModelDropdown runtimeId={selectedRuntime?.id ?? null} runtimeOnline={selectedRuntime?.status === "online"} value={draft.model} onChange={(model) => onChange({ ...draft, model })} disabled={!selectedRuntime} /></div>{error && <div role="alert" className="mt-4 text-sm text-destructive">{error}</div>}<div className="mt-6 flex justify-end">{hasOnline ? <Button onClick={onStart} disabled={starting || selectedRuntime?.status !== "online"}>{starting && <Loader2 className="size-4 animate-spin" />}{t(($) => $.creation_studio.builder.start)}</Button> : <Button onClick={onConnectRuntime}>{t(($) => $.creation_studio.builder.connect_runtime)}</Button>}</div></div></main>;
+  return <main className="flex min-h-0 flex-1 items-center justify-center overflow-y-auto px-5 py-10"><div className="w-full max-w-xl rounded-xl border bg-card p-6 shadow-sm"><span className="flex size-11 items-center justify-center rounded-lg bg-primary/10 text-primary"><MessageSquare className="size-5" /></span><h2 className="mt-5 text-xl font-semibold">{t(($) => $.creation_studio.builder.setup_title)}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{t(($) => $.creation_studio.builder.setup_description)}</p><div className="mt-6 space-y-4"><RuntimePicker runtimes={runtimes} runtimesLoading={runtimesLoading} members={members} currentUserId={currentUserId} selectedRuntimeId={draft.runtimeId} onSelect={(runtimeId) => { if (runtimeId !== draft.runtimeId) onChange({ ...draft, runtimeId, model: "" }); }} /><ModelDropdown runtimeId={selectedRuntime?.id ?? null} runtimeOnline={selectedRuntime?.status === "online"} value={draft.model} onChange={(model) => onChange({ ...draft, model })} disabled={!selectedRuntime} /></div>{error && <div role="alert" className="mt-4 text-sm text-destructive">{error}</div>}<div className="mt-6 flex justify-end">{hasOnline ? <Button onClick={onStart} disabled={starting || selectedRuntime?.status !== "online"}>{starting && <Loader2 className="size-4 animate-spin" />}{t(($) => $.creation_studio.builder.start)}</Button> : <Button onClick={onConnectRuntime}>{t(($) => $.creation_studio.builder.connect_runtime)}</Button>}</div></div></main>;
 }
 
 function BuilderConversation({
@@ -1190,7 +1256,7 @@ function BuilderConversation({
   onSend,
   onStop,
   restoreDraftRequest,
-  onRestoreDraftConsumed,
+  onRestoreDraftApplied,
   error,
 }: {
   sessionId: string;
@@ -1201,7 +1267,7 @@ function BuilderConversation({
   onSend: (content: string) => Promise<boolean>;
   onStop: () => void;
   restoreDraftRequest: { id: string; content: string } | null;
-  onRestoreDraftConsumed: () => void;
+  onRestoreDraftApplied: () => void;
   error: string | null;
 }) {
   const { t } = useT("agents");
@@ -1291,7 +1357,7 @@ function BuilderConversation({
         draftKeyOverride={draftKey}
         editorKeyOverride={draftKey}
         restoreDraftRequest={restoreDraftRequest}
-        onRestoreDraftConsumed={onRestoreDraftConsumed}
+        onRestoreDraftApplied={onRestoreDraftApplied}
       />
     </section>
   );
@@ -1429,6 +1495,8 @@ export function encodeBuilderInput(
   draft: AgentDraft,
   skills: Array<{ id: string; name: string; description: string }>,
   members: Array<{ user_id: string; name: string }>,
+  runtime: Pick<RuntimeDevice, "id" | "name" | "provider"> | null,
+  models: RuntimeModel[] | null,
 ): string {
   return (
     BUILDER_INPUT_PREFIX +
@@ -1444,6 +1512,21 @@ export function encodeBuilderInput(
           permission_scope: draft.permissionScope,
           member_ids: [...draft.memberIds],
         },
+        selected_runtime: runtime
+          ? {
+              id: runtime.id,
+              name: runtime.name,
+              provider: runtime.provider,
+            }
+          : null,
+        available_runtime_models:
+          models === null
+            ? null
+            : models.map((model) => ({
+                id: model.id,
+                label: model.label,
+                provider: model.provider,
+              })),
         available_workspace_skills: skills.map((skill) => ({
           id: skill.id,
           name: skill.name,
@@ -1474,11 +1557,41 @@ export function decodeBuilderInput(content: string): string {
   }
 }
 
+export interface BuilderRestore {
+  id: string;
+  content: string;
+}
+
+/**
+ * Chooses which cancelled prompt the builder composer should adopt (#5219).
+ *
+ * Two sources, never both: cancelling a task the daemon never started answers
+ * synchronously (`cancelled_chat_message.restore_to_input`), while cancelling a
+ * started-but-empty one defers the judgment and delivers the prompt later as a
+ * durable chat_draft_restore row. The durable copy is the raw chat_message
+ * content, i.e. still in the builder's encoded wire form, so it is decoded here
+ * exactly as the synchronous path decodes its own.
+ *
+ * The session id is deliberately not carried over: the builder composer keys its
+ * draft by `agent-builder:<id>`, so ChatInput's session guard would never match
+ * a raw session id — and it does not need to, since this composer only ever
+ * shows the builder session.
+ */
+export function pickBuilderRestore(
+  synchronous: BuilderRestore | null,
+  durable: { id: string; content: string } | null,
+): BuilderRestore | null {
+  if (synchronous) return synchronous;
+  if (!durable) return null;
+  return { id: durable.id, content: decodeBuilderInput(durable.content) };
+}
+
 export function mergeBuilderDraft(
   current: AgentDraft,
   payload: BuilderDraftPayload,
   validSkillIds: Set<string>,
   validMemberIds: Set<string>,
+  validModelIds: ReadonlySet<string> | null,
 ): AgentDraft {
   const scope =
     payload.permission_scope === "workspace" ||
@@ -1498,6 +1611,17 @@ export function mergeBuilderDraft(
           typeof id === "string" && validMemberIds.has(id),
       )
     : [...current.memberIds];
+  // The current value may be a deliberate custom entry from ModelDropdown,
+  // so preserving it is always safe. Only catalog IDs may be introduced by
+  // the builder; failed discovery therefore cannot turn into fail-open input.
+  const model =
+    typeof payload.model === "string" &&
+    (payload.model === current.model ||
+      (validModelIds !== null &&
+        validModelIds.size > 0 &&
+        (payload.model === "" || validModelIds.has(payload.model))))
+      ? payload.model
+      : current.model;
 
   return {
     ...current,
@@ -1510,7 +1634,7 @@ export function mergeBuilderDraft(
       typeof payload.instructions === "string"
         ? payload.instructions
         : current.instructions,
-    model: typeof payload.model === "string" ? payload.model : current.model,
+    model,
     skillIds: new Set(skillIds),
     permissionScope: scope,
     memberIds: new Set(scope === "members" ? memberIds : []),

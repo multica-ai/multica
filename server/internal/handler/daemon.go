@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -1101,8 +1102,9 @@ func (h *Handler) processHeartbeat(ctx context.Context, rt db.AgentRuntime, supp
 	slog.Debug("daemon heartbeat", "runtime_id", runtimeID)
 
 	ack := &protocol.DaemonHeartbeatAckPayload{
-		RuntimeID: runtimeID,
-		Status:    "ok",
+		RuntimeID:          runtimeID,
+		Status:             "ok",
+		ServerCapabilities: []string{protocol.DaemonCapabilityRPCV1},
 	}
 
 	probeUpdateCtx, cancelProbeUpdate := context.WithTimeout(ctx, heartbeatHasPendingTimeout)
@@ -1296,7 +1298,9 @@ func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, cl
 	)
 }
 
-func requestHasDaemonCapability(r *http.Request, capability string) bool {
+// requestHasClientCapability reports whether the caller advertised a capability
+// in X-Client-Capabilities. Daemons and app clients share the header.
+func requestHasClientCapability(r *http.Request, capability string) bool {
 	for _, part := range strings.Split(r.Header.Get("X-Client-Capabilities"), ",") {
 		if strings.TrimSpace(part) == capability {
 			return true
@@ -1321,123 +1325,282 @@ func parseRuntimeConnectedAppsForClaim(raw []byte, taskID pgtype.UUID) []runtime
 	return apps
 }
 
-// ClaimTaskByRuntime atomically claims the next queued task for a runtime.
-// The response includes the agent's name and skills, fetched fresh from the DB.
-func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
-	runtimeID := chi.URLParam(r, "runtimeId")
+// repairStaleCommentPlanIfNeeded handles the edit/delete race where a claimed
+// task's trigger_comment_id was cleared but coalesced_comment_ids survive: such
+// a task must never be dispatched as a generic assignment — its user-scoped MCP
+// overlay still belongs to the deleted author, and the prompt would read issue
+// history exposing that stale user's capabilities. When it applies, the task is
+// cancelled and its surviving comments are replayed through normal routing
+// (which recomputes originator + connected-app context).
+//
+// Returns handled=true when the task must NOT be dispatched — either a clean
+// repair (failure==nil) or a hard failure (failure!=nil, carrying the
+// status/message/outcome the per-runtime endpoint renders). handled=false means
+// proceed with a normal claim. Shared by the per-runtime and batch claim
+// handlers so the batch path can't silently drop surviving comments (MUL-4257).
+func (h *Handler) repairStaleCommentPlanIfNeeded(ctx context.Context, task *db.AgentTaskQueue, runtimeWorkspaceID string) (handled bool, failure *claimBuildFailure) {
+	if task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) == 0 {
+		return false, nil
+	}
+	if !task.IssueID.Valid {
+		return true, &claimBuildFailure{outcome: "error_stale_comment_plan", status: http.StatusInternalServerError, message: "comment task has no issue"}
+	}
+	issue, loadErr := h.Queries.GetIssue(ctx, task.IssueID)
+	if loadErr != nil {
+		return true, &claimBuildFailure{outcome: "error_stale_comment_plan", status: http.StatusInternalServerError, message: "failed to repair stale comment task"}
+	}
+	if uuidToString(issue.WorkspaceID) != runtimeWorkspaceID {
+		if _, cancelErr := h.TaskService.CancelTask(ctx, task.ID); cancelErr != nil {
+			slog.Error("task claim: cancel stale cross-workspace task failed",
+				"task_id", uuidToString(task.ID), "error", cancelErr)
+		}
+		return true, &claimBuildFailure{outcome: "error_workspace", status: http.StatusInternalServerError, message: "task workspace isolation check failed"}
+	}
+	cancelled, cancelErr := h.TaskService.CancelTask(ctx, task.ID)
+	if cancelErr != nil {
+		return true, &claimBuildFailure{outcome: "error_stale_comment_plan", status: http.StatusInternalServerError, message: "failed to repair stale comment task"}
+	}
+	h.retriggerCancelledTaskSurvivors(ctx, issue, []db.AgentTaskQueue{*cancelled}, pgtype.UUID{})
+	return true, nil
+}
+
+// claimBatchMaxTasksCap bounds how many tasks a single machine-level batch
+// claim may return, so one request can neither build an unbounded payload nor
+// hold the DB for an unbounded number of per-agent claim transactions. The
+// daemon never asks for more than its free execution-slot count anyway.
+const claimBatchMaxTasksCap = 32
+
+// ClaimTasksByRuntime is the machine-level (MUL-4257) batch claim endpoint. A
+// daemon posts every runtime_id it hosts plus its free execution-slot count and
+// receives up to max_tasks already-claimed tasks in ONE round trip — each
+// carrying its runtime_id so the daemon routes it to the matching runtime
+// locally. This collapses the per-runtime idle-poll fan-out (one HTTP request
+// plus one promote/reclaim/list cycle per runtime) into a single request backed
+// by = ANY merged queries.
+//
+// Each returned task goes through the same FinalizeTaskClaim as the per-runtime
+// endpoint, so the task-scoped token AND the comment-delivery receipt
+// (delivered_comment_ids) are persisted atomically; a finalization failure
+// requeues that exact claim and omits it from the batch. Unknown/unauthorized
+// runtime_ids are skipped silently (a daemon may send a just-deleted runtime;
+// it self-heals via the heartbeat path).
+func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-
-	var (
-		outcome                  = "unauth"
-		authMs, claimMs, buildMs int64
-		payloadBytes             int
-		agentSkillCount          int
-		builtinSkillCount        int
-		skillPayloadBytes        int
-		buildStart               time.Time
-	)
-	defer func() {
-		// Emit at function exit so error / unauth paths also carry timing.
-		// build_ms is computed from buildStart only when we entered the
-		// response-build phase (otherwise stays 0).
-		if !buildStart.IsZero() {
-			buildMs = time.Since(buildStart).Milliseconds()
-		}
-		logClaimEndpointSlow(runtimeID, outcome, start, authMs, claimMs, buildMs, payloadBytes, agentSkillCount, builtinSkillCount, skillPayloadBytes)
-	}()
-
-	// Verify the caller owns this runtime's workspace. The runtime's
-	// workspace_id is the authoritative value a claimed task must match
-	// below — a task whose resolved workspace doesn't equal this runtime's
-	// workspace is rejected even if it was enqueued against this
-	// runtime_id (defense-in-depth against upstream routing bugs).
-	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
-	if !ok {
+	var req struct {
+		DaemonID   string   `json:"daemon_id"`
+		RuntimeIDs []string `json:"runtime_ids"`
+		MaxTasks   int      `json:"max_tasks"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	runtimeWorkspaceID := uuidToString(runtime.WorkspaceID)
-	supportsCoalescedComments := requestHasDaemonCapability(r, protocol.DaemonCapabilityCoalescedCommentsV1)
-	authMs = time.Since(start).Milliseconds()
 
-	claimStart := time.Now()
-	task, err := h.TaskService.ClaimTaskForRuntime(r.Context(), parseUUID(runtimeID))
-	claimMs = time.Since(claimStart).Milliseconds()
+	// Machine-level ownership (MUL-4257 review): the batch claim is scoped to a
+	// single daemon. daemon_id is required so the server can reject any
+	// runtime_id that belongs to a different machine (guards against a stale /
+	// crossed runtime set claiming another daemon's tasks — which would land
+	// local_directory / machine-local work on the wrong host). For an mdt_
+	// token the body daemon_id must equal the token's daemon_id, so a
+	// workspace-scoped token can't spoof a peer.
+	if req.DaemonID == "" {
+		writeError(w, http.StatusBadRequest, "daemon_id is required")
+		return
+	}
+	if ctxDaemonID := middleware.DaemonIDFromContext(r.Context()); ctxDaemonID != "" && ctxDaemonID != req.DaemonID {
+		writeError(w, http.StatusForbidden, "daemon_id does not match token")
+		return
+	}
+
+	// max_tasks semantics (MUL-4257 review): a negative count is malformed; zero
+	// is a valid "no free slots" poll that must claim nothing — never coerce to
+	// 1, which would dispatch a task the daemon cannot run and strand it until
+	// stale reclaim. Positive counts are capped so one request can't build an
+	// unbounded payload.
+	if req.MaxTasks < 0 {
+		writeError(w, http.StatusBadRequest, "max_tasks must not be negative")
+		return
+	}
+	if req.MaxTasks == 0 {
+		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
+		return
+	}
+	maxTasks := req.MaxTasks
+	if maxTasks > claimBatchMaxTasksCap {
+		maxTasks = claimBatchMaxTasksCap
+	}
+
+	// Parse + de-dup requested ids with the NON-panicking parser (MUL-4257
+	// review): the handler-local parseUUID panics on malformed input, which
+	// would turn a single bad id into a 500. Invalid ids are skipped, matching
+	// this endpoint's "unknown id skipped" semantics. Key by the canonical uuid
+	// string so the post-claim lookup by task.RuntimeID always matches.
+	idByKey := make(map[string]pgtype.UUID, len(req.RuntimeIDs))
+	for _, rid := range req.RuntimeIDs {
+		ruid, err := util.ParseUUID(rid)
+		if err != nil {
+			continue
+		}
+		idByKey[util.UUIDToString(ruid)] = ruid
+	}
+	if len(idByKey) == 0 {
+		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
+		return
+	}
+	ids := make([]pgtype.UUID, 0, len(idByKey))
+	for _, id := range idByKey {
+		ids = append(ids, id)
+	}
+
+	// Resolve all requested runtimes in one query (instead of a point lookup
+	// per runtime), then authorize each; skip (don't fail) unknown/unauthorized
+	// ids so a single stale runtime can't sink the whole batch.
+	runtimes, err := h.Queries.GetAgentRuntimes(r.Context(), ids)
 	if err != nil {
-		outcome = "error_claim"
-		writeError(w, http.StatusInternalServerError, "failed to claim task: "+err.Error())
+		writeError(w, http.StatusInternalServerError, "failed to load runtimes")
+		return
+	}
+	runtimeByID := make(map[string]db.AgentRuntime, len(runtimes))
+	authorized := make([]pgtype.UUID, 0, len(runtimes))
+	for _, rt := range runtimes {
+		if !h.verifyDaemonWorkspaceAccess(r, uuidToString(rt.WorkspaceID)) {
+			continue
+		}
+		// Group-ownership check (mirrors the WS path, daemon_ws.go): a runtime
+		// bound to a different daemon must not be claimed by this one. Runtimes
+		// with a NULL daemon_id (e.g. cloud runtimes) are not machine-pinned, so
+		// they stay claimable — same tolerance as the WS handler.
+		if rt.DaemonID.Valid && rt.DaemonID.String != req.DaemonID {
+			continue
+		}
+		runtimeByID[uuidToString(rt.ID)] = rt
+		authorized = append(authorized, rt.ID)
+	}
+	if len(authorized) == 0 {
+		writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": []AgentTaskResponse{}})
 		return
 	}
 
-	if task == nil {
-		slog.Debug("no task to claim", "runtime_id", runtimeID)
-		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
-		outcome = "no_task"
+	claimed, err := h.TaskService.ClaimTasksForRuntimes(r.Context(), authorized, maxTasks)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to claim tasks: "+err.Error())
 		return
 	}
-	if !task.TriggerCommentID.Valid && len(task.CoalescedCommentIds) > 0 {
-		// A legacy edit/delete race can leave a plan whose trigger FK was
-		// cleared while its user-scoped MCP overlay still belongs to the deleted
-		// author. Never dispatch it as a generic assignment: that prompt reads
-		// issue history and would still expose the stale user's capabilities.
-		// Cancel the stale row and replay every survivor through normal routing,
-		// which recomputes originator and connected-app context.
-		if !task.IssueID.Valid {
-			outcome = "error_stale_comment_plan"
-			writeError(w, http.StatusInternalServerError, "comment task has no issue")
-			return
+
+	out := make([]AgentTaskResponse, 0, len(claimed))
+	for i := range claimed {
+		task := claimed[i]
+		rt, ok := runtimeByID[uuidToString(task.RuntimeID)]
+		if !ok {
+			// Service guards claims to the authorized set; a miss here would be
+			// a stray cross-daemon claim. Leave it for the owning daemon's
+			// reclaim path rather than shipping it to the wrong machine.
+			continue
 		}
-		issue, loadErr := h.Queries.GetIssue(r.Context(), task.IssueID)
-		if loadErr != nil {
-			outcome = "error_stale_comment_plan"
-			writeError(w, http.StatusInternalServerError, "failed to repair stale comment task")
-			return
+		rtWorkspaceID := uuidToString(rt.WorkspaceID)
+		// Stale comment-plan repair must run for the batch path too: otherwise a
+		// task whose trigger was deleted (only coalesced survive) would be
+		// finalized+dispatched with no comment input, silently dropping the
+		// surviving user comment. On repair (or hard failure) the task is
+		// cancelled / left for reclaim and omitted from the batch.
+		if handled, _ := h.repairStaleCommentPlanIfNeeded(r.Context(), &task, rtWorkspaceID); handled {
+			continue
 		}
-		if uuidToString(issue.WorkspaceID) != runtimeWorkspaceID {
-			outcome = "error_workspace"
-			if _, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID); cancelErr != nil {
-				slog.Error("task claim: cancel stale cross-workspace task failed",
-					"task_id", uuidToString(task.ID), "error", cancelErr)
+		resp, deliveredCommentIDs, _, _, failure := h.buildClaimedTaskResponse(r, &task, rt, uuidToString(task.RuntimeID), rtWorkspaceID)
+		if failure != nil {
+			// Builder rejected this task (workspace isolation / chat-input);
+			// it has already cancelled the task where the failure requires it.
+			// Skip it — non-cancelling failures leave the task dispatched for
+			// the reclaim path.
+			continue
+		}
+		if !rt.OwnerID.Valid {
+			slog.Error("batch claim: runtime owner missing; cancelling task to avoid unscoped agent credentials",
+				"task_id", uuidToString(task.ID), "runtime_id", uuidToString(task.RuntimeID))
+			if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
+				slog.Error("batch claim: cancel after missing runtime owner failed",
+					"task_id", uuidToString(task.ID), "error", cerr)
 			}
-			writeError(w, http.StatusInternalServerError, "task workspace isolation check failed")
-			return
+			continue
 		}
-		cancelled, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID)
-		if cancelErr != nil {
-			outcome = "error_stale_comment_plan"
-			writeError(w, http.StatusInternalServerError, "failed to repair stale comment task")
-			return
+		tokenStr, terr := auth.GenerateAgentTaskToken()
+		if terr != nil {
+			slog.Error("batch claim: generate task token failed; requeueing claim",
+				"task_id", uuidToString(task.ID), "error", terr)
+			if _, rerr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), task); rerr != nil {
+				slog.Error("batch claim: requeue after token-gen failure failed",
+					"task_id", uuidToString(task.ID), "error", rerr)
+			}
+			continue
 		}
-		h.retriggerCancelledTaskSurvivors(r.Context(), issue, []db.AgentTaskQueue{*cancelled}, pgtype.UUID{})
-		outcome = "repaired_stale_comment_plan"
-		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
-		return
+		// Route through the SAME finalization as the per-runtime endpoint so the
+		// token and the comment-delivery receipt (delivered_comment_ids for
+		// comment/coalesced-comment tasks) are persisted atomically; on failure
+		// the exact claim is requeued and omitted from this batch.
+		commentBackedTask := task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0
+		receipt, ferr := h.TaskService.FinalizeTaskClaim(r.Context(), task, db.CreateTaskTokenParams{
+			TokenHash:   auth.HashToken(tokenStr),
+			TaskID:      task.ID,
+			AgentID:     task.AgentID,
+			WorkspaceID: parseUUID(resp.WorkspaceID),
+			UserID:      rt.OwnerID,
+			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+		}, deliveredCommentIDs, commentBackedTask)
+		if ferr != nil {
+			slog.Error("batch claim: finalize task claim failed; requeueing claim",
+				"task_id", uuidToString(task.ID), "error", ferr)
+			if _, rerr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), task); rerr != nil {
+				slog.Error("batch claim: requeue after finalize failure failed",
+					"task_id", uuidToString(task.ID), "error", rerr)
+			}
+			continue
+		}
+		resp.AuthToken = tokenStr
+		resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
+		out = append(out, resp)
 	}
 
-	outcome = "claimed"
-	buildStart = time.Now()
+	if len(out) > 0 {
+		slog.Info("tasks claimed by runtime batch",
+			"runtimes", len(authorized), "requested_max", maxTasks, "claimed", len(out),
+			"total_ms", time.Since(start).Milliseconds())
+	}
+	writeMeasuredJSON(w, http.StatusOK, map[string]any{"tasks": out})
+}
 
+// claimBuildFailure captures a pre-response failure from
+// buildClaimedTaskResponse (workspace isolation, chat-input load/empty, ...) so
+// the per-runtime handler can render the exact status/message/outcome and the
+// batch handler can skip the task. Any task cancellation is already performed
+// inside the builder before it returns one.
+type claimBuildFailure struct {
+	outcome string
+	status  int
+	message string
+}
+
+// buildClaimedTaskResponse assembles the full daemon claim payload for a
+// single already-claimed task and computes the exact comment ids embedded in
+// it (deliveredCommentIDs). Shared by the per-runtime handler
+// (ClaimTaskByRuntime) and the machine-level batch handler
+// (ClaimTasksByRuntime, MUL-4257) so both build byte-identical payloads and
+// feed the same delivery receipt into FinalizeTaskClaim. A non-nil failure
+// means the task must not be dispatched; the builder has already cancelled it
+// where the failure semantics require it.
+func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQueue, runtime db.AgentRuntime, runtimeID, runtimeWorkspaceID string) (resp AgentTaskResponse, deliveredCommentIDs []pgtype.UUID, agentSkillCount, builtinSkillCount int, failure *claimBuildFailure) {
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
-	resp := taskToResponse(*task, runtimeWorkspaceID)
+	resp = taskToResponse(*task, runtimeWorkspaceID)
+	supportsCoalescedComments := requestHasClientCapability(r, protocol.DaemonCapabilityCoalescedCommentsV1)
 	// Empty-but-non-nil so pgx persists '{}' rather than NULL for tasks without
 	// comment input. Comment tasks replace this with the ids actually embedded
 	// in the capability-aware response built below.
-	deliveredCommentIDs := []pgtype.UUID{}
-	commentBackedTask := task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0
-	requeueFailedClaim := func(reason string) {
-		if _, err := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); err != nil {
-			slog.Error("task claim: failed to requeue after finalization error",
-				"task_id", uuidToString(task.ID),
-				"reason", reason,
-				"error", err,
-			)
-		}
-	}
+	deliveredCommentIDs = []pgtype.UUID{}
 	composioMCPEnabled := h.composioMCPAppsEnabled(r.Context())
 	if composioMCPEnabled {
 		resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(task.RuntimeConnectedApps, task.ID)
 	}
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
-		useSkillRefs := requestHasDaemonCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
+		useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 		var customEnv map[string]string
 		if agent.CustomEnv != nil {
 			if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
@@ -1803,24 +1966,49 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			resp.TriggerCommentContent = "The newest triggering comment is no longer available. Address every earlier comment included below."
 		}
 
-		// Look up the prior session for this (agent, issue) pair so the daemon
-		// can resume the Claude Code conversation context.
-		//
-		// Skip all prior state when the task was flagged as a manual rerun:
-		// the user just judged the prior output bad, so the daemon must start a
-		// fresh agent session in a fresh workdir instead of resuming anything
-		// from the same conversation that produced that output.
-		if !task.ForceFreshSession {
+		// Resolve the prior agent session / workdir to resume.
+		if task.RerunOfTaskID.Valid {
+			// Manual retry: resume precisely from the source task the user
+			// clicked, NOT the most-recent (agent, issue) row — a parallel task
+			// on the same issue must never hijack the resume (MUL-4869). The
+			// workdir is ALWAYS reused when it still exists; the session is
+			// resumed only when the source failure did not poison the
+			// conversation AND the source ran on this runtime.
+			//
+			// Resume-safety is computed HERE from the source task, not read off
+			// task.ForceFreshSession: RerunIssue pins that flag to true so an OLD
+			// claim handler mid rolling-deploy degrades to a clean start instead
+			// of resuming a different execution via the (agent, issue) lookup.
+			// service.ResumeUnsafeFailure mirrors GetLastTaskSession, including
+			// its 400/invalid_request_error text defense for legacy /
+			// mis-classified rows that the exact-source path would otherwise miss.
+			//
+			// When the source workdir is gone (GC'd), absent on this runtime, or
+			// was never recorded (failed too early), execenv.Reuse falls back to a
+			// fresh Prepare and gateResumeToReusedWorkdir drops the now-unusable
+			// session — reuse is best-effort, never a silent swap onto a stale
+			// directory. PriorWorkDir is offered regardless of runtime (a shared
+			// mount may still resolve it); only the per-cwd session is
+			// runtime-gated.
+			if src, err := h.Queries.GetAgentTask(r.Context(), task.RerunOfTaskID); err == nil {
+				if src.WorkDir.Valid {
+					resp.PriorWorkDir = src.WorkDir.String
+				}
+				if !service.ResumeUnsafeFailure(src.FailureReason.String, src.Error.String) &&
+					src.SessionID.Valid && src.RuntimeID == task.RuntimeID {
+					resp.PriorSessionID = src.SessionID.String
+				}
+			}
+		} else if !task.ForceFreshSession {
+			// Non-rerun follow-up on the same issue: resume the most recent
+			// (agent, issue) session so the agent keeps the issue's conversation
+			// context across turns. The "Focus on THIS comment" guard in
+			// prompt.go defends against inheriting the prior turn's "Done."
+			// marker, and GetLastTaskSession already excludes poisoned sessions.
 			if prior, err := h.Queries.GetLastTaskSession(r.Context(), db.GetLastTaskSessionParams{
 				AgentID: task.AgentID,
 				IssueID: task.IssueID,
 			}); err == nil && prior.SessionID.Valid {
-				// Resume the prior session when it ran on the same runtime —
-				// including comment-triggered follow-ups, so the agent keeps the
-				// issue's conversation context across turns. The "Focus on THIS
-				// comment" guard in prompt.go defends against inheriting the prior
-				// turn's "Done." marker, and GetLastTaskSession already excludes
-				// poisoned sessions.
 				if prior.RuntimeID == task.RuntimeID {
 					resp.PriorSessionID = prior.SessionID.String
 				}
@@ -1853,21 +2041,39 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					resp.ChatIntro = !hasUser
 				}
 			}
-			// Flag a channel-backed session so the daemon makes the agent aware
-			// it is operating inside Slack — read this conversation's history
-			// from the channel via `multica chat history` / `multica chat thread`,
-			// not from Multica (MUL-3871). Empty for a web-only chat session.
-			// ChatInThread tells the agent which command to start with: the
-			// latest trigger was a thread reply iff its reply-target thread
-			// (last_thread_id) differs from its own message id (a top-level
-			// @mention records its own ts as both).
-			if binding, berr := h.Queries.GetChannelChatSessionBindingBySession(r.Context(), db.GetChannelChatSessionBindingBySessionParams{
-				ChatSessionID: cs.ID,
-				ChannelType:   string(slack.TypeSlack),
-			}); berr == nil {
-				resp.ChatChannelType = string(slack.TypeSlack)
-				resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
-					binding.LastThreadID.String != binding.LastMessageID.String
+			// Flag a channel-backed session so the daemon makes the agent aware it
+			// is operating inside an IM conversation and not the Multica web app
+			// (MUL-3871). Empty for a web-only chat session.
+			//
+			// Every registered channel type is probed, not just Slack: a Feishu
+			// session writes the same channel_chat_session_binding row under
+			// channel_type='feishu' (lark/channel_store.go), so the Slack-only
+			// lookup used to report a Feishu chat as web-backed. Downstream that
+			// mis-flag made the brief inject `multica attachment upload` guidance
+			// into a conversation that cannot carry attachments at all (MUL-4899).
+			//
+			// ChatInThread stays Slack-only on purpose. It selects between
+			// `multica chat history` and `multica chat thread`, and those two
+			// endpoints are hardwired to h.SlackHistory (chat_history.go) — there
+			// is no Feishu history reader, so the flag has nothing to select
+			// between on any other channel and must not imply one exists.
+			for _, channelType := range []channel.Type{slack.TypeSlack, channel.TypeFeishu} {
+				binding, berr := h.Queries.GetChannelChatSessionBindingBySession(r.Context(), db.GetChannelChatSessionBindingBySessionParams{
+					ChatSessionID: cs.ID,
+					ChannelType:   string(channelType),
+				})
+				if berr != nil {
+					continue
+				}
+				resp.ChatChannelType = string(channelType)
+				if channelType == slack.TypeSlack {
+					// The latest trigger was a thread reply iff its reply-target
+					// thread (last_thread_id) differs from its own message id (a
+					// top-level @mention records its own ts as both).
+					resp.ChatInThread = binding.LastThreadID.Valid && binding.LastThreadID.String != "" &&
+						binding.LastThreadID.String != binding.LastMessageID.String
+				}
+				break
 			}
 			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
@@ -1924,13 +2130,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			// and reject the claim with 5xx, rather than cancelling a valid direct
 			// task on a transient DB error (MUL-4351 review).
 			if inputLoadErr != nil {
-				outcome = "error_chat_input_load"
 				slog.Error("chat claim: load chat input messages failed; preserving task for redelivery",
 					"task_id", uuidToString(task.ID),
 					"chat_session_id", uuidToString(cs.ID),
 					"error", inputLoadErr)
-				writeError(w, http.StatusInternalServerError, "failed to load chat input")
-				return
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+					outcome: "error_chat_input_load",
+					status:  http.StatusInternalServerError,
+					message: "failed to load chat input",
+				}
 			}
 
 			parts := make([]string, 0, len(unanswered))
@@ -1960,7 +2168,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			// corrupt state — cancel the just-dispatched task and reject the claim
 			// rather than run the agent with nothing to answer (MUL-4351).
 			if task.ChatInputTaskID.Valid && !resp.ChatIntro && strings.TrimSpace(resp.ChatMessage) == "" {
-				outcome = "error_empty_chat_input"
 				slog.Error("chat claim: task-owned direct task has no user input; cancelling",
 					"task_id", uuidToString(task.ID),
 					"chat_session_id", uuidToString(cs.ID),
@@ -1970,8 +2177,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					slog.Error("chat claim: cancel after empty input failed",
 						"task_id", uuidToString(task.ID), "error", cerr)
 				}
-				writeError(w, http.StatusInternalServerError, "chat task has no user input")
-				return
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+					outcome: "error_empty_chat_input",
+					status:  http.StatusInternalServerError,
+					message: "chat task has no user input",
+				}
 			}
 
 			if strings.TrimSpace(resp.ThreadName) == "" && resp.ChatMessage != "" {
@@ -2024,6 +2234,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if json.Unmarshal(task.Context, &qc) == nil && qc.Type == service.QuickCreateContextType {
 			hasQuickCreate = true
 			resp.QuickCreatePrompt = qc.Prompt
+			resp.QuickCreatePriority = qc.Priority
+			resp.QuickCreateDueDate = qc.DueDate
 			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
 			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
@@ -2154,7 +2366,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	// fail AND cancel the just-dispatched task so the queue / agent status
 	// don't sit stuck until the stale-task sweeper fires minutes later.
 	if resp.WorkspaceID == "" || resp.WorkspaceID != runtimeWorkspaceID {
-		outcome = "error_workspace"
 		slog.Error("task claim: workspace isolation check failed, cancelling task",
 			"task_id", uuidToString(task.ID),
 			"runtime_id", runtimeID,
@@ -2169,8 +2380,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			slog.Error("task claim: cancel after workspace check failed",
 				"task_id", uuidToString(task.ID), "error", cerr)
 		}
-		writeError(w, http.StatusInternalServerError, "task workspace isolation check failed")
-		return
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+			outcome: "error_workspace",
+			status:  http.StatusInternalServerError,
+			message: "task workspace isolation check failed",
+		}
 	}
 
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
@@ -2191,6 +2405,94 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		)
 	}
 
+	return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil
+}
+
+// ClaimTaskByRuntime atomically claims the next queued task for a runtime.
+// The response includes the agent's name and skills, fetched fresh from the DB.
+func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
+	runtimeID := chi.URLParam(r, "runtimeId")
+	start := time.Now()
+
+	var (
+		outcome                  = "unauth"
+		authMs, claimMs, buildMs int64
+		payloadBytes             int
+		agentSkillCount          int
+		builtinSkillCount        int
+		skillPayloadBytes        int
+		buildStart               time.Time
+	)
+	defer func() {
+		// Emit at function exit so error / unauth paths also carry timing.
+		// build_ms is computed from buildStart only when we entered the
+		// response-build phase (otherwise stays 0).
+		if !buildStart.IsZero() {
+			buildMs = time.Since(buildStart).Milliseconds()
+		}
+		logClaimEndpointSlow(runtimeID, outcome, start, authMs, claimMs, buildMs, payloadBytes, agentSkillCount, builtinSkillCount, skillPayloadBytes)
+	}()
+
+	// Verify the caller owns this runtime's workspace. The runtime's
+	// workspace_id is the authoritative value a claimed task must match
+	// below — a task whose resolved workspace doesn't equal this runtime's
+	// workspace is rejected even if it was enqueued against this
+	// runtime_id (defense-in-depth against upstream routing bugs).
+	runtime, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID)
+	if !ok {
+		return
+	}
+	runtimeWorkspaceID := uuidToString(runtime.WorkspaceID)
+	authMs = time.Since(start).Milliseconds()
+
+	claimStart := time.Now()
+	task, err := h.TaskService.ClaimTaskForRuntime(r.Context(), parseUUID(runtimeID))
+	claimMs = time.Since(claimStart).Milliseconds()
+	if err != nil {
+		outcome = "error_claim"
+		writeError(w, http.StatusInternalServerError, "failed to claim task: "+err.Error())
+		return
+	}
+
+	if task == nil {
+		slog.Debug("no task to claim", "runtime_id", runtimeID)
+		payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
+		outcome = "no_task"
+		return
+	}
+	if !task.TriggerCommentID.Valid && len(task.CoalescedCommentIds) > 0 {
+		handled, failure := h.repairStaleCommentPlanIfNeeded(r.Context(), task, runtimeWorkspaceID)
+		if handled {
+			if failure != nil {
+				outcome = failure.outcome
+				writeError(w, failure.status, failure.message)
+				return
+			}
+			outcome = "repaired_stale_comment_plan"
+			payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": nil})
+			return
+		}
+	}
+
+	outcome = "claimed"
+	buildStart = time.Now()
+
+	resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure := h.buildClaimedTaskResponse(r, task, runtime, runtimeID, runtimeWorkspaceID)
+	if failure != nil {
+		outcome = failure.outcome
+		writeError(w, failure.status, failure.message)
+		return
+	}
+	commentBackedTask := task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0
+	requeueFailedClaim := func(reason string) {
+		if _, err := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); err != nil {
+			slog.Error("task claim: failed to requeue after finalization error",
+				"task_id", uuidToString(task.ID),
+				"reason", reason,
+				"error", err,
+			)
+		}
+	}
 	// Mint a task-scoped `mat_` token bound to (agent, task, workspace,
 	// owner). The daemon will inject this as MULTICA_TOKEN into the agent
 	// process instead of its own credential, so any API call the agent
@@ -2550,6 +2852,10 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// by the existing per-(issue, agent) dedup, and terminating because the
 	// triggering comment always predates the follow-up run's started_at.
 	h.reconcileCommentsOnCompletion(r.Context(), task)
+	// The terminal transaction and completion reconciliation are committed.
+	// Wake the owning runtime now so queued work that was blocked by this
+	// task's agent capacity or serialization key is re-claimed immediately.
+	h.TaskService.NotifyTaskFinished(*task)
 
 	// Best-effort revoke of any agent task token minted at claim time.
 	// The token would naturally expire at the 24h watermark and is also
@@ -2726,12 +3032,21 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		actorType := c.AuthorType
 		actorID := uuidToString(c.AuthorID)
 		originatorUserID := actorID
+		var delegationAuthority string
 		if actorType != "member" {
 			originatorUserID = uuidToString(h.TaskService.ResolveOriginatorFromTriggerComment(ctx, issue.WorkspaceID, c.ID))
+			// MUL-4857: this is the deferred replay of an already-accepted delegation
+			// (e.g. the mentioned target was busy at create time). Restore the SAME
+			// verified authorization context from the comment's stored source_task_id,
+			// so an unattributed autopilot delegation's follow-up still fires once the
+			// busy target frees up. The source_task_id is re-stamped on edit, so this
+			// tracks the current content's authoring action, not a stale one.
+			delegationAuthority = h.autopilotDelegationAuthorityFromComment(ctx, issue, c)
 		}
-		triggers := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
-			ExcludeTriggerCommentID: c.ID,
-			OriginatorUserID:        originatorUserID,
+		triggers, _ := h.computeCommentAgentTriggers(ctx, issue, c.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
+			ExcludeTriggerCommentID:            c.ID,
+			OriginatorUserID:                   originatorUserID,
+			AutopilotDelegationAuthorityUserID: delegationAuthority,
 		})
 		// For an AGENT author, compensate ONLY explicit @agent/@squad mentions.
 		// computeCommentAgentTriggers can also return the assigned-squad-leader
@@ -3130,6 +3445,7 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	h.TaskService.NotifyTaskFinished(*task)
 
 	// Best-effort revoke of the mat_ task token minted at claim. Same
 	// rationale as CompleteTask — eager deletion shrinks the post-
@@ -3225,6 +3541,20 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
+// AckTaskCancelled receives the daemon's acknowledgement that it observed a
+// task cancellation and finished flushing the transcript. Settles the chat
+// finalization that CancelTaskWithResult deferred for a started-but-empty
+// transcript (#5219); idempotent when nothing was deferred.
+func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
+	taskID := chi.URLParam(r, "taskId")
+	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
+	if !ok {
+		return
+	}
+	h.TaskService.FinalizeDeferredCancelledChat(r.Context(), task.ID)
+	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+}
+
 func taskMessageToPayload(m db.TaskMessage, taskID, issueID string) protocol.TaskMessagePayload {
 	var input map[string]any
 	if m.Input != nil {
@@ -3308,6 +3638,8 @@ func (h *Handler) GetActiveTaskForIssue(w http.ResponseWriter, r *http.Request) 
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
 	}
+	// Same issue-facing attribution surface as ListTasksByIssue — hydrate names.
+	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, map[string]any{"tasks": resp})
 }
@@ -3338,7 +3670,11 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	slog.Info("task cancelled by user", "task_id", taskID, "issue_id", uuidToString(task.IssueID))
-	writeJSON(w, http.StatusOK, taskToResponse(*task, uuidToString(issue.WorkspaceID)))
+	resp := taskToResponse(*task, uuidToString(issue.WorkspaceID))
+	// Keep this issue-scoped surface consistent with the list endpoints so a
+	// cancelled row keeps its resolved "on behalf of" name in the UI.
+	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // ListTasksByIssue returns all tasks (any status) for an issue — used for execution history.
@@ -3360,6 +3696,10 @@ func (h *Handler) ListTasksByIssue(w http.ResponseWriter, r *http.Request) {
 	for i, t := range tasks {
 		resp[i] = taskToResponse(t, workspaceID)
 	}
+	// Execution-log rows render the "on behalf of <member>" badge, so this
+	// issue-facing surface must resolve initiator/originator names (departed-safe,
+	// one batch) — otherwise the badge falls back to "someone" on issue detail.
+	h.hydrateTaskAttributions(r.Context(), attributionsOf(resp))
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -3442,7 +3782,91 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// GetIssueGCCheck returns minimal issue info needed by the daemon GC loop.
+const (
+	maxIssueGCBatchSize      = 500
+	maxIssueGCBatchBodyBytes = 64 << 10
+)
+
+type batchIssueGCCheckRequest struct {
+	IssueIDs []string `json:"issue_ids"`
+}
+
+type batchIssueGCCheckItem struct {
+	ID        string     `json:"id"`
+	Found     bool       `json:"found"`
+	Status    string     `json:"status,omitempty"`
+	UpdatedAt *time.Time `json:"updated_at,omitempty"`
+}
+
+// BatchIssueGCCheck returns one explicit result for every requested issue ID.
+// The query is workspace-scoped at the SQL layer; missing rows and IDs owned by
+// another workspace both become found=false so the endpoint is not an
+// enumeration oracle. Requests are capped because installed daemons run this
+// endpoint periodically and must not be able to produce unbounded DB work.
+func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "workspaceId")
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	if !h.requireDaemonWorkspaceAccess(w, r, workspaceID) {
+		return
+	}
+
+	r.Body = http.MaxBytesReader(w, r.Body, maxIssueGCBatchBodyBytes)
+	var req batchIssueGCCheckRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if len(req.IssueIDs) > maxIssueGCBatchSize {
+		writeError(w, http.StatusBadRequest, "too many issue_ids")
+		return
+	}
+
+	parsedIDs := make([]pgtype.UUID, 0, len(req.IssueIDs))
+	canonicalIDs := make([]string, 0, len(req.IssueIDs))
+	for _, issueID := range req.IssueIDs {
+		parsedID, err := util.ParseUUID(issueID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid issue_id")
+			return
+		}
+		parsedIDs = append(parsedIDs, parsedID)
+		canonicalIDs = append(canonicalIDs, uuidToString(parsedID))
+	}
+
+	rows := make(map[string]db.ListIssueGCStatusesRow, len(parsedIDs))
+	if len(parsedIDs) > 0 {
+		result, err := h.Queries.ListIssueGCStatuses(r.Context(), db.ListIssueGCStatusesParams{
+			WorkspaceID: workspaceUUID,
+			IssueIds:    parsedIDs,
+		})
+		if err != nil {
+			slog.Warn("list issue GC statuses failed", "workspace_id", workspaceID, "count", len(parsedIDs), "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to check issues")
+			return
+		}
+		for _, row := range result {
+			rows[uuidToString(row.ID)] = row
+		}
+	}
+
+	items := make([]batchIssueGCCheckItem, 0, len(req.IssueIDs))
+	for i, issueID := range req.IssueIDs {
+		row, found := rows[canonicalIDs[i]]
+		item := batchIssueGCCheckItem{ID: issueID, Found: found}
+		if found {
+			item.Status = row.Status
+			updatedAt := row.UpdatedAt.Time
+			item.UpdatedAt = &updatedAt
+		}
+		items = append(items, item)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"issues": items})
+}
+
+// GetIssueGCCheck returns minimal issue info needed by older daemon GC loops.
 // Gated on workspace access so a daemon token scoped to workspace A cannot
 // read issue metadata from workspace B via UUID enumeration.
 func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
@@ -3451,7 +3875,7 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	issue, err := h.Queries.GetIssue(r.Context(), issueUUID)
+	issue, err := h.Queries.GetIssueGCStatus(r.Context(), issueUUID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
 		return

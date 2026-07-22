@@ -21,13 +21,13 @@ func TestNewReturnsCursorBackend(t *testing.T) {
 func TestBuildCursorArgs(t *testing.T) {
 	t.Parallel()
 
-	args := buildCursorArgs("do something", ExecOptions{
+	args := buildCursorArgs(ExecOptions{
 		Cwd:   "/tmp/work",
 		Model: "composer-1.5",
 	}, slog.Default())
 
 	expected := []string{
-		"-p", "do something",
+		"-p",
 		"--output-format", "stream-json",
 		"--yolo",
 		"--workspace", "/tmp/work",
@@ -47,7 +47,7 @@ func TestBuildCursorArgs(t *testing.T) {
 func TestBuildCursorArgsWithResume(t *testing.T) {
 	t.Parallel()
 
-	args := buildCursorArgs("continue", ExecOptions{
+	args := buildCursorArgs(ExecOptions{
 		ResumeSessionID: "sess-123",
 	}, slog.Default())
 
@@ -65,8 +65,8 @@ func TestBuildCursorArgsWithResume(t *testing.T) {
 func TestBuildCursorArgsMinimal(t *testing.T) {
 	t.Parallel()
 
-	args := buildCursorArgs("hello", ExecOptions{}, slog.Default())
-	expected := []string{"-p", "hello", "--output-format", "stream-json", "--yolo"}
+	args := buildCursorArgs(ExecOptions{}, slog.Default())
+	expected := []string{"-p", "--output-format", "stream-json", "--yolo"}
 
 	if len(args) != len(expected) {
 		t.Fatalf("expected %d args, got %d: %v", len(expected), len(args), args)
@@ -78,7 +78,7 @@ func TestBuildCursorArgsIgnoresSystemPromptAndMaxTurns(t *testing.T) {
 
 	// cursor-agent CLI does not support --system-prompt or --max-turns;
 	// verify they are NOT emitted even when set in ExecOptions.
-	args := buildCursorArgs("task", ExecOptions{
+	args := buildCursorArgs(ExecOptions{
 		SystemPrompt: "You are helpful",
 		MaxTurns:     5,
 	}, slog.Default())
@@ -96,7 +96,7 @@ func TestBuildCursorArgsIgnoresSystemPromptAndMaxTurns(t *testing.T) {
 func TestBuildCursorArgsCustomArgs(t *testing.T) {
 	t.Parallel()
 
-	args := buildCursorArgs("task", ExecOptions{
+	args := buildCursorArgs(ExecOptions{
 		CustomArgs: []string{"--extra", "val", "--yolo", "--output-format", "text"},
 	}, slog.Default())
 
@@ -154,6 +154,30 @@ func TestNormalizeCursorStreamLine(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("normalizeCursorStreamLine(%q) = %q, want %q", tc.input, got, tc.want)
 		}
+	}
+}
+
+func TestObservedCursorEventTypeIsBoundedAndContentFree(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "known type", value: "tool_result", want: "tool_result"},
+		{name: "trimmed", value: "  step-finish  ", want: "step-finish"},
+		{name: "empty", value: " ", want: "unknown"},
+		{name: "content-like", value: "result secret-value", want: "invalid"},
+		{name: "oversized", value: strings.Repeat("x", 65), want: "invalid"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := observedCursorEventType(tc.value); got != tc.want {
+				t.Fatalf("observedCursorEventType(%q) = %q, want %q", tc.value, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -255,10 +279,10 @@ func TestCursorUsageModelFallback(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name             string
-		evtModel         string
-		configuredModel  string
-		want             string
+		name            string
+		evtModel        string
+		configuredModel string
+		want            string
 	}{
 		{"event model wins", "gpt-5.3-codex", "composer-2.5", "gpt-5.3-codex"},
 		{"configured model fallback", "", "composer-2.5", "composer-2.5"},

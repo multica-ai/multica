@@ -11,12 +11,14 @@ export type IssueCreateDefaults = Partial<
   assignee_type?: CreateIssueRequest["assignee_type"] | null;
   assignee_id?: string | null;
   parent_issue_id?: string | null;
+  /** Display-only context for the create dialog while the parent query loads. */
+  parent_issue_identifier?: string;
   project_id?: string | null;
 };
 
 export type IssueSurfaceMode = Extract<
   ViewMode,
-  "board" | "list" | "swimlane" | "gantt"
+  "board" | "list" | "table" | "swimlane" | "gantt"
 >;
 
 export interface IssueSurfaceProps {

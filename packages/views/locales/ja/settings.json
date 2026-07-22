@@ -30,6 +30,10 @@
     "sticky_comment_bar": {
       "title": "コメントバーを固定",
       "hint": "イシューのページをスクロールしても、コメントバーを常に下部に固定します。"
+    },
+    "issue_link_new_tab": {
+      "title": "イシューリンクを新しいタブで開く",
+      "hint": "説明・コメント・チャット内のイシューリンクを、その場で移動せず新しいタブで開きます。"
     }
   },
   "shortcuts": {
@@ -63,7 +67,7 @@
       "createIssue": { "label": "Issueを作成", "description": "優先するissue作成フローを開きます。" },
       "toggleSidebar": { "label": "サイドバーを切り替え", "description": "メインサイドバーの表示を切り替えます。" },
       "findInIssue": { "label": "Issue内を検索", "description": "開いているissueの詳細を検索します。" },
-      "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信します。" },
+      "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログで issue を作成します。" },
       "goInbox": { "label": "受信トレイへ移動", "description": "ワークスペースの受信トレイを開きます。" },
       "goChat": { "label": "チャットへ移動", "description": "ワークスペースのチャットを開きます。" },
       "goMyIssues": { "label": "自分のIssuesへ移動", "description": "自分に割り当てられたissueを開きます。" },
@@ -92,6 +96,22 @@
     "floating_label": "フローティングチャット",
     "floating_hint": "すべてのページの隅にフローティングチャットボタンを表示します。デフォルトはオフ——オンにするとどこからでもチャットを呼び出せます。オフのときは専用タブでのみ利用できます。"
   },
+  "issue": {
+    "description": "各作成ダイアログのツールバーに常時表示するフィールドを選択します。非表示のフィールドは ⋯ メニューから引き続き使用でき、値がある間は自動的に表示されます。",
+    "quick_create_title": "エージェントで作成",
+    "quick_create_description": "クイック作成ツールバーに表示するフィールド。",
+    "manual_create_title": "手動で作成",
+    "manual_create_description": "手動作成ツールバーに表示するフィールド。",
+    "fields": {
+      "status": "ステータス",
+      "priority": "優先度",
+      "assignee": "担当者",
+      "labels": "ラベル",
+      "project": "プロジェクト",
+      "due_date": "期限",
+      "start_date": "開始日"
+    }
+  },
   "page": {
     "title": "設定",
     "my_account": "マイアカウント",
@@ -100,6 +120,7 @@
       "profile": "プロフィール",
       "preferences": "環境設定",
       "shortcuts": "ショートカット",
+      "issue": "イシュー",
       "chat": "チャット",
       "notifications": "通知",
       "tokens": "API トークン",
@@ -109,7 +130,73 @@
       "integrations": "連携",
       "labs": "ラボ",
       "members": "メンバー",
-      "labels": "ラベル"
+      "labels": "ラベル",
+      "properties": "プロパティ"
+    }
+  },
+  "properties": {
+    "title": "プロパティ",
+    "description": "このワークスペースの Issue に型付きカスタムプロパティを定義します。値は各 Issue に設定され、エージェントが読み書きできます。",
+    "search_placeholder": "名前で絞り込み...",
+    "new_property": "新規プロパティ",
+    "show_archived": "アーカイブ済みを表示",
+    "columns": {
+      "name": "名前",
+      "type": "タイプ",
+      "options": "オプション",
+      "usage": "使用数",
+      "updated": "更新日時"
+    },
+    "usage_count_other": "{{count}} 件の Issue",
+    "loading": "プロパティを読み込み中...",
+    "empty": "プロパティはまだありません",
+    "empty_hint": "Severity や Environment のような型付きフィールドを作成できます。エージェントはバリデーション付きで読み書きします。",
+    "no_results": "一致するプロパティがありません",
+    "save_failed": "プロパティを保存できませんでした",
+    "limit_hint": "{{count}}/{{max}} 個の有効なプロパティ",
+    "archived_badge": "アーカイブ済み",
+    "types": {
+      "text": "テキスト",
+      "number": "数値",
+      "select": "選択",
+      "multi_select": "複数選択",
+      "date": "日付",
+      "checkbox": "チェックボックス",
+      "url": "URL"
+    },
+    "actions": {
+      "open": "{{name}} の操作",
+      "edit": "編集",
+      "archive": "アーカイブ",
+      "unarchive": "復元"
+    },
+    "editor": {
+      "create_title": "新規プロパティ",
+      "edit_title": "プロパティを編集",
+      "admin_hint": "プロパティ定義を管理できるのはワークスペースのオーナーと管理者のみです。",
+      "icon": "アイコン",
+      "choose_icon": "アイコンを選択",
+      "remove_icon": "アイコンを削除",
+      "name": "名前",
+      "name_placeholder": "例: Severity",
+      "type": "タイプ",
+      "type_locked_hint": "作成後にタイプは変更できません。",
+      "description": "説明",
+      "description_placeholder": "このプロパティの意味と設定するタイミング",
+      "options": "オプション",
+      "option_name_placeholder": "オプション名",
+      "add_option": "オプションを追加",
+      "remove_option": "オプションを削除",
+      "cancel": "キャンセル",
+      "save": "プロパティを保存",
+      "saving": "保存中..."
+    },
+    "archive_dialog": {
+      "title": "プロパティをアーカイブしますか？",
+      "description": "「{{name}}」はピッカーとフィルターから非表示になります。Issue 上の既存の値は保持され、後で復元できます。",
+      "cancel": "キャンセル",
+      "confirm": "プロパティをアーカイブ",
+      "failed": "プロパティをアーカイブできませんでした"
     }
   },
   "labels": {
@@ -143,7 +230,6 @@
       "description": "説明",
       "description_placeholder": "このラベルを使用する条件を説明",
       "color": "色",
-      "custom_color": "カスタム色を選択",
       "cancel": "キャンセル",
       "save": "ラベルを保存",
       "saving": "保存中..."
@@ -529,10 +615,13 @@
     },
     "updates": {
       "title": "アップデート",
-      "description": "デスクトップアプリは 1 時間に 1 回、および起動直後に新しいバージョンを自動で確認し、バックグラウンドでダウンロードします。アップデートの準備が整うと、再起動を促すメッセージが表示されます。",
+      "description": "バックグラウンドでの自動アップデートを設定するか、新しいバージョンを手動で確認します。",
       "current_version": "現在のバージョン",
+      "automatic_updates_title": "バックグラウンドで自動アップデート",
+      "automatic_updates_description": "有効にすると、起動直後と 1 時間ごとにアップデートを確認し、利用可能なバージョンをバックグラウンドでダウンロードします。",
+      "automatic_updates_save_failed": "自動アップデート設定を保存できませんでした",
       "check_section_title": "アップデートを確認",
-      "check_section_description": "次回の自動確認を待たずに、今すぐ確認します。利用可能なアップデートはバックグラウンドでダウンロードされ、準備が整うと再起動を促すメッセージが表示されます。",
+      "check_section_description": "自動アップデートの設定にかかわらず、今すぐ確認します。利用可能なアップデートはバックグラウンドでダウンロードされ、準備が整うと再起動を促すメッセージが表示されます。",
       "up_to_date": "最新バージョンを使用しています。",
       "downloading": "v{{version}} をバックグラウンドでダウンロード中です。インストールの準備が整うとお知らせします。",
       "check_now": "今すぐ確認",

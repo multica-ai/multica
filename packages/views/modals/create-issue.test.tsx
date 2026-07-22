@@ -1,14 +1,16 @@
 import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enModals from "../locales/en/modals.json";
+import enEditor from "../locales/en/editor.json";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, modals: enModals },
+  // `editor` carries the shared upload-gate copy ("Uploading…").
+  en: { common: enCommon, modals: enModals, editor: enEditor },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -21,6 +23,9 @@ function I18nWrapper({ children }: { children: ReactNode }) {
 
 const mockPush = vi.hoisted(() => vi.fn());
 const mockCreateIssue = vi.hoisted(() => vi.fn());
+const mockAttachLabel = vi.hoisted(() => vi.fn());
+const mockListProperties = vi.hoisted(() => vi.fn());
+const mockSetIssueProperty = vi.hoisted(() => vi.fn());
 const mockSetDraft = vi.hoisted(() => vi.fn());
 const mockClearDraft = vi.hoisted(() => vi.fn());
 const mockSetLastAssignee = vi.hoisted(() => vi.fn());
@@ -41,6 +46,7 @@ const mockDraftStore = {
     startDate: null,
     dueDate: null,
     labelIds: [] as string[],
+    propertyValues: {} as Record<string, string | number | boolean | string[]>,
     attachments: [] as Array<{
       id: string;
       workspace_id: string;
@@ -71,6 +77,27 @@ const mockQuickCreateStore = {
   setKeepOpen: mockSetKeepOpen,
 };
 
+type ManualCreateField =
+  | "status"
+  | "priority"
+  | "assignee"
+  | "labels"
+  | "project"
+  | "due_date"
+  | "start_date";
+
+const DEFAULT_MANUAL_FIELDS: ManualCreateField[] = [
+  "status",
+  "priority",
+  "assignee",
+  "labels",
+  "project",
+];
+
+const mockCreateSettingsStore = {
+  manualCreateFields: DEFAULT_MANUAL_FIELDS as ManualCreateField[],
+};
+
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: mockPush }),
 }));
@@ -79,6 +106,7 @@ vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ name: "Test Workspace" }),
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/ws-test/issues/${id}`,
+    settings: () => "/ws-test/settings",
   }),
 }));
 
@@ -133,10 +161,34 @@ vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
     (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
 }));
 
+vi.mock("@multica/core/issues/stores/issue-create-settings-store", () => ({
+  useIssueCreateSettingsStore: (
+    selector?: (state: typeof mockCreateSettingsStore) => unknown,
+  ) => (selector ? selector(mockCreateSettingsStore) : mockCreateSettingsStore),
+}));
+
 vi.mock("@multica/core/issues/mutations", () => ({
   useCreateIssue: () => ({ mutateAsync: mockCreateIssue }),
   useUpdateIssue: () => ({ mutate: vi.fn() }),
 }));
+
+vi.mock("@multica/core/labels", () => ({
+  useAttachLabelToIssue: () => ({ mutateAsync: mockAttachLabel }),
+}));
+
+vi.mock("@multica/core/properties", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@multica/core/properties")>();
+  return {
+    ...actual,
+    useSetIssueProperty: () => ({
+      mutateAsync: ({ issueId, propertyId, value }: {
+        issueId: string;
+        propertyId: string;
+        value: string | number | boolean | string[];
+      }) => mockSetIssueProperty(issueId, propertyId, value),
+    }),
+  };
+});
 
 vi.mock("@multica/core/hooks/use-file-upload", () => ({
   useFileUpload: () => ({ uploadWithToast: mockUploadWithToast }),
@@ -175,24 +227,46 @@ vi.mock("@multica/core/api", async () => {
     typeof import("@multica/core/api/schemas")
   >("@multica/core/api/schemas");
   return {
-    api: {},
+    api: {
+      listProperties: mockListProperties,
+      setIssueProperty: mockSetIssueProperty,
+    },
     ApiError,
     parseWithFallback,
     DuplicateIssueErrorBodySchema,
   };
 });
 
-vi.mock("../editor", () => {
-  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onUploadFile, placeholder, attachments }: any, ref: any) => {
+vi.mock("../editor", async () => {
+  // Real submit gate (pure React) driven by the mock editor's
+  // `hasActiveUploads` / `onUploadingChange`.
+  const uploadGate = await vi.importActual<typeof import("../editor/use-upload-gate")>(
+    "../editor/use-upload-gate",
+  );
+  const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder, attachments }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    // Mirrors the real editor's `uploading` node attrs: the placeholder is in
+    // the doc from before the await until the upload settles, and the host
+    // hears about it through onUploadingChange.
+    const inFlightRef = useRef(0);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
       clearContent: () => {
         valueRef.current = "";
         setValue("");
       },
-      uploadFile: (file: File) => onUploadFile?.(file),
+      uploadFile: async (file: File) => {
+        inFlightRef.current += 1;
+        if (inFlightRef.current === 1) onUploadingChange?.(true);
+        try {
+          return await onUploadFile?.(file);
+        } finally {
+          inFlightRef.current -= 1;
+          if (inFlightRef.current === 0) onUploadingChange?.(false);
+        }
+      },
+      hasActiveUploads: () => inFlightRef.current > 0,
     }));
     return (
       <>
@@ -205,20 +279,32 @@ vi.mock("../editor", () => {
             setValue(e.target.value);
             onUpdate?.(e.target.value);
           }}
+          // Stands in for createSubmitShortcutExtension with the default
+          // `send` binding (Mod+Enter). Plain Enter stays a newline.
+          onKeyDown={(e) => {
+            if ((e.metaKey || e.ctrlKey) && e.key === "Enter") onSubmit?.();
+          }}
         />
       </>
     );
   });
   ContentEditor.displayName = "ContentEditor";
 
-  return {
-    useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
-    FileDropOverlay: () => null,
-    ContentEditor,
-    TitleEditor: ({ defaultValue, placeholder, onChange, onSubmit }: any) => {
+  // Mirrors the real split: plain Enter is the keymap's `onSubmit` path, the
+  // configured `send` chord (default Mod+Enter) is `onSubmitShortcut`. The
+  // real component never routes plain Enter to onSubmitShortcut.
+  const TitleEditor = forwardRef(
+    ({ defaultValue, placeholder, onChange, onSubmit, onSubmitShortcut }: any, ref: any) => {
       const [value, setValue] = useState(defaultValue || "");
+      const inputRef = useRef<HTMLInputElement>(null);
+      useImperativeHandle(ref, () => ({
+        getText: () => value,
+        focus: () => inputRef.current?.focus(),
+        focusAtCoords: () => inputRef.current?.focus(),
+      }));
       return (
         <input
+          ref={inputRef}
           value={value}
           placeholder={placeholder}
           onChange={(e) => {
@@ -226,11 +312,27 @@ vi.mock("../editor", () => {
             onChange?.(e.target.value);
           }}
           onKeyDown={(e) => {
-            if (e.key === "Enter") onSubmit?.();
+            if (e.key !== "Enter") return;
+            if (e.metaKey || e.ctrlKey) onSubmitShortcut?.();
+            else onSubmit?.();
           }}
         />
       );
     },
+  );
+  TitleEditor.displayName = "TitleEditor";
+
+  return {
+    ...uploadGate,
+    useEditorUpload: () => ({
+      uploadWithToast: mockUploadWithToast,
+      upload: vi.fn(),
+      uploading: false,
+    }),
+    useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
+    FileDropOverlay: () => null,
+    ContentEditor,
+    TitleEditor,
   };
 });
 
@@ -258,7 +360,28 @@ vi.mock("../issues/components", () => ({
       onClick={() => onOpenChange?.(false)}
     />
   ),
-  LabelPicker: () => <div data-testid="label-picker" />,
+  // Labels can now be hidden via Settings → Issue and revealed from the
+  // overflow, so surface open/onOpenChange like the date pickers.
+  LabelPicker: ({ open, onOpenChange }: { open?: boolean; onOpenChange?: (v: boolean) => void }) => (
+    <div
+      data-testid="label-picker"
+      data-open={open ? "true" : "false"}
+      onClick={() => onOpenChange?.(false)}
+    />
+  ),
+}));
+
+vi.mock("../issues/components/pickers/custom-property-picker", () => ({
+  CustomPropertyValueInput: ({ property, onChange }: any) => (
+    <button
+      type="button"
+      aria-label={`Edit ${property.name}`}
+      onClick={() => onChange("option-enterprise")}
+    >
+      {property.name}
+    </button>
+  ),
+  CustomPropertyValueDisplay: ({ value }: any) => <span>{String(value)}</span>,
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
@@ -283,6 +406,9 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
     <button type="button" onClick={onClick}>{children}</button>
   ),
   DropdownMenuSeparator: () => null,
+  DropdownMenuSub: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuSubTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DropdownMenuSubContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
 vi.mock("./issue-picker-modal", () => ({
@@ -302,13 +428,17 @@ vi.mock("@multica/ui/components/ui/button", () => ({
     disabled,
     onClick,
     type = "button",
+    ...rest
   }: {
     children: React.ReactNode;
     disabled?: boolean;
     onClick?: () => void;
     type?: "button" | "submit" | "reset";
+    // The real Button spreads the rest onto the element; forwarding them keeps
+    // accessibility props (aria-busy / aria-disabled) assertable here.
+    [key: string]: unknown;
   }) => (
-    <button type={type} disabled={disabled} onClick={onClick}>
+    <button type={type} disabled={disabled} onClick={onClick} {...rest}>
       {children}
     </button>
   ),
@@ -368,6 +498,7 @@ describe("CreateIssueModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockQuickCreateStore.keepOpen = false;
+    mockCreateSettingsStore.manualCreateFields = DEFAULT_MANUAL_FIELDS;
     mockSetKeepOpen.mockImplementation((v: boolean) => {
       mockQuickCreateStore.keepOpen = v;
     });
@@ -382,6 +513,7 @@ describe("CreateIssueModal", () => {
     mockDraftStore.draft.startDate = null;
     mockDraftStore.draft.dueDate = null;
     mockDraftStore.draft.labelIds = [];
+    mockDraftStore.draft.propertyValues = {};
     mockDraftStore.draft.attachments = [];
     mockSetDraft.mockImplementation((patch: Partial<typeof mockDraftStore.draft>) => {
       mockDraftStore.draft = { ...mockDraftStore.draft, ...patch };
@@ -397,6 +529,7 @@ describe("CreateIssueModal", () => {
         startDate: null,
         dueDate: null,
         labelIds: [],
+        propertyValues: {},
         attachments: [],
       };
     });
@@ -424,6 +557,34 @@ describe("CreateIssueModal", () => {
       identifier: "TES-123",
       title: "Ship create issue regression coverage",
       status: "todo",
+      // Current backend echoes the attached labels, so the create flow skips
+      // the legacy per-label attach fallback. Empty is enough — what matters
+      // is that the field is present (not undefined).
+      labels: [],
+    });
+    mockAttachLabel.mockResolvedValue({ labels: [] });
+    mockListProperties.mockResolvedValue({
+      properties: [
+        {
+          id: "property-tier",
+          workspace_id: "ws-test",
+          name: "Customer tier",
+          type: "select",
+          config: {
+            options: [
+              { id: "option-enterprise", name: "Enterprise", color: "#3b82f6" },
+            ],
+          },
+          position: 0,
+          archived: false,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+      total: 1,
+    });
+    mockSetIssueProperty.mockResolvedValue({
+      properties: { "property-tier": "option-enterprise" },
     });
   });
 
@@ -474,6 +635,71 @@ describe("CreateIssueModal", () => {
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
   });
 
+  it("forwards selected labels in the create payload so they attach in the same transaction", async () => {
+    const user = userEvent.setup();
+    mockDraftStore.draft.labelIds = [
+      "aaaaaaaa-1111-2222-3333-444444444444",
+      "bbbbbbbb-1111-2222-3333-444444444444",
+    ];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Labeled issue" },
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Labeled issue",
+          label_ids: [
+            "aaaaaaaa-1111-2222-3333-444444444444",
+            "bbbbbbbb-1111-2222-3333-444444444444",
+          ],
+        }),
+      );
+    });
+    // Backend echoed `labels`, so the atomic path handled it — no legacy
+    // per-label attach fallback should run.
+    expect(mockAttachLabel).not.toHaveBeenCalled();
+  });
+
+  it("falls back to per-label attach when an older backend omits labels from the create response", async () => {
+    const user = userEvent.setup();
+    // Older backend: ignores label_ids and returns an issue with no `labels`
+    // field (the rolling-deploy window where web is ahead of the backend).
+    mockCreateIssue.mockResolvedValueOnce({
+      id: "issue-123",
+      identifier: "TES-123",
+      title: "Labeled issue",
+      status: "todo",
+    });
+    mockDraftStore.draft.labelIds = [
+      "aaaaaaaa-1111-2222-3333-444444444444",
+      "bbbbbbbb-1111-2222-3333-444444444444",
+    ];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    fireEvent.change(screen.getByPlaceholderText("Issue title"), {
+      target: { value: "Labeled issue" },
+    });
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockAttachLabel).toHaveBeenCalledTimes(2);
+    });
+    expect(mockAttachLabel).toHaveBeenCalledWith({
+      issueId: "issue-123",
+      labelId: "aaaaaaaa-1111-2222-3333-444444444444",
+    });
+    expect(mockAttachLabel).toHaveBeenCalledWith({
+      issueId: "issue-123",
+      labelId: "bbbbbbbb-1111-2222-3333-444444444444",
+    });
+  });
+
   it("keeps manual mode open and clears content when create another is enabled", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
@@ -514,8 +740,30 @@ describe("CreateIssueModal", () => {
       startDate: null,
       dueDate: null,
       labelIds: [],
+      propertyValues: {},
       attachments: [],
     });
+  });
+
+  it("sets configured custom property values after the issue is created", async () => {
+    const user = userEvent.setup();
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await screen.findByText("Customer tier");
+    await user.click(screen.getByText("Customer tier"));
+    await user.click(screen.getByRole("button", { name: "Edit Customer tier" }));
+    await user.type(screen.getByPlaceholderText("Issue title"), "Enterprise follow-up");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockSetIssueProperty).toHaveBeenCalledWith(
+        "issue-123",
+        "property-tier",
+        "option-enterprise",
+      );
+    });
+    expect(mockClearDraft).toHaveBeenCalled();
   });
 
   it("persists manual-mode uploads in the issue draft", async () => {
@@ -861,6 +1109,55 @@ describe("CreateIssueModal", () => {
     expect(screen.queryByTestId("due-date-picker")).not.toBeInTheDocument();
   });
 
+  it("hides toolbar fields turned off in Settings → Issue and re-reveals them from the overflow", async () => {
+    const user = userEvent.setup();
+    mockCreateSettingsStore.manualCreateFields = ["status", "priority", "assignee", "project"];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.queryByTestId("label-picker")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Set labels/i }));
+
+    const picker = await screen.findByTestId("label-picker");
+    expect(picker).toHaveAttribute("data-open", "true");
+
+    await user.click(picker);
+
+    expect(screen.queryByTestId("label-picker")).not.toBeInTheDocument();
+  });
+
+  it("keeps a hidden field on the toolbar while it holds a value", () => {
+    mockCreateSettingsStore.manualCreateFields = ["status", "priority", "assignee", "project"];
+    mockDraftStore.draft.labelIds = ["label-1"];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByTestId("label-picker")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Set labels/i })).not.toBeInTheDocument();
+  });
+
+  it("renders due date inline when enabled in Settings → Issue", () => {
+    mockCreateSettingsStore.manualCreateFields = [...DEFAULT_MANUAL_FIELDS, "due_date"];
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    expect(screen.getByTestId("due-date-picker")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Set due date/i })).not.toBeInTheDocument();
+  });
+
+  it("routes Customize fields to Settings → Issue and closes the dialog", async () => {
+    const user = userEvent.setup();
+    const onClose = vi.fn();
+
+    renderModal(<CreateIssueModal onClose={onClose} />);
+
+    await user.click(screen.getByRole("button", { name: /Customize fields/i }));
+
+    expect(onClose).toHaveBeenCalled();
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
+  });
+
   // Title + description are packed into the agent prompt on switch; if we
   // leave them in the shared draft store, the next agent→manual switch
   // surfaces the stale manual draft on top of the prompt-as-description,
@@ -884,5 +1181,235 @@ describe("CreateIssueModal", () => {
     await user.click(screen.getByRole("button", { name: /Switch to Agent/i }));
 
     expect(mockSetDraft).toHaveBeenCalledWith({ title: "", description: "" });
+  });
+
+  // MUL-4808 — manual create had no upload gate at all: Create, Enter on the
+  // title, and Switch to Agent would each fix the draft while an image was
+  // still uploading, dropping it from the description with no warning.
+  describe("upload submit gate", () => {
+    /** Attach a file whose upload stays in flight until the caller releases it. */
+    function startPendingUpload() {
+      let release!: (result: unknown) => void;
+      mockUploadWithToast.mockImplementationOnce(
+        () => new Promise((resolve) => { release = resolve; }),
+      );
+      fireEvent.click(screen.getByRole("button", { name: "Upload file" }));
+      return { release: (result: unknown) => release(result) };
+    }
+
+    function renderManual(onSwitchMode = vi.fn()) {
+      const view = renderModal(
+        <ManualCreatePanel
+          onClose={vi.fn()}
+          onSwitchMode={onSwitchMode}
+          isExpanded={false}
+          setIsExpanded={vi.fn()}
+        />,
+      );
+      return { ...view, onSwitchMode };
+    }
+
+    it("disables Create and shows Uploading… while an upload is in flight", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      await user.type(screen.getByPlaceholderText("Issue title"), "Has a screenshot");
+
+      const pending = startPendingUpload();
+
+      const createButton = await screen.findByRole("button", { name: "Uploading…" });
+      await waitFor(() => expect(createButton).toBeDisabled());
+      expect(createButton).toHaveAttribute("aria-busy", "true");
+
+      await act(async () => { pending.release({ id: "att-1", url: "https://cdn/x.png" }); });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Create Issue" })).not.toBeDisabled(),
+      );
+    });
+
+    // Plain Enter in the title was removed as a create trigger in #5532 — it
+    // fired from a half-typed title. MUL-4931 adds the explicit `send` chord
+    // alongside it; plain Enter must stay inert.
+    it("never submits manual create from plain Enter in the title", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      const title = screen.getByPlaceholderText("Issue title");
+      await user.type(title, "Has a screenshot");
+
+      fireEvent.keyDown(title, { key: "Enter" });
+      await Promise.resolve();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
+    });
+
+    it("blocks the title send chord while an upload is in flight", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      const title = screen.getByPlaceholderText("Issue title");
+      await user.type(title, "Has a screenshot");
+
+      startPendingUpload();
+
+      // The chord bypasses the button, so the handler's own gate is what stops
+      // this from serializing a description whose image hasn't landed yet.
+      fireEvent.keyDown(title, { key: "Enter", metaKey: true });
+      await Promise.resolve();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
+    });
+
+    it("blocks Switch to Agent while an upload is in flight", async () => {
+      const user = userEvent.setup();
+      const onSwitchMode = vi.fn();
+      renderManual(onSwitchMode);
+      await user.type(screen.getByPlaceholderText("Issue title"), "Has a screenshot");
+
+      startPendingUpload();
+
+      // The switch packs the description into an agent prompt and clears the
+      // manual draft — doing that mid-upload loses the image for good.
+      const switchButton = screen.getByRole("button", { name: /Switch to Agent/i });
+      await waitFor(() => expect(switchButton).toBeDisabled());
+      fireEvent.click(switchButton);
+      expect(onSwitchMode).not.toHaveBeenCalled();
+    });
+  });
+
+  // MUL-4931 — manual create had no submit shortcut at all, while agent create
+  // has had one all along.
+  describe("send shortcut", () => {
+    function renderManual() {
+      return renderModal(
+        <ManualCreatePanel
+          onClose={vi.fn()}
+          onSwitchMode={vi.fn()}
+          isExpanded={false}
+          setIsExpanded={vi.fn()}
+        />,
+      );
+    }
+
+    it("creates from the send chord in the title", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      const title = screen.getByPlaceholderText("Issue title");
+      await user.type(title, "Shortcut from title");
+
+      fireEvent.keyDown(title, { key: "Enter", metaKey: true });
+
+      await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(1));
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({ title: "Shortcut from title" }),
+      );
+    });
+
+    it("creates from the send chord in the description", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      await user.type(screen.getByPlaceholderText("Issue title"), "Shortcut from body");
+      const description = screen.getByPlaceholderText("Add description...");
+      await user.type(description, "Body text");
+
+      fireEvent.keyDown(description, { key: "Enter", ctrlKey: true });
+
+      await waitFor(() => expect(mockCreateIssue).toHaveBeenCalledTimes(1));
+      expect(mockCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: "Shortcut from body",
+          description: "Body text",
+        }),
+      );
+    });
+
+    it("leaves plain Enter in the description as a newline, not a create", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      await user.type(screen.getByPlaceholderText("Issue title"), "Still typing");
+
+      fireEvent.keyDown(screen.getByPlaceholderText("Add description..."), { key: "Enter" });
+      await Promise.resolve();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
+    });
+
+    it("focuses the title instead of silently doing nothing when it is empty", async () => {
+      const user = userEvent.setup();
+      renderManual();
+      const description = screen.getByPlaceholderText("Add description...");
+      await user.type(description, "Body but no title");
+
+      fireEvent.keyDown(description, { key: "Enter", metaKey: true });
+
+      await Promise.resolve();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
+      // The shortcut path can't rely on the button's tooltip, so it has to say
+      // where the problem is some other way.
+      expect(screen.getByPlaceholderText("Issue title")).toHaveFocus();
+    });
+
+    it("creates once when the chord is pressed twice in the same tick", async () => {
+      const user = userEvent.setup();
+      // Hold the create open so both presses land inside the in-flight window.
+      let release!: (v: unknown) => void;
+      mockCreateIssue.mockImplementationOnce(
+        () => new Promise((resolve) => { release = resolve; }),
+      );
+      renderManual();
+      const title = screen.getByPlaceholderText("Issue title");
+      await user.type(title, "Double tap");
+
+      // Both presses are dispatched inside ONE act, so React cannot re-render
+      // between them and the second handler still closes over `submitting ===
+      // false`. `fireEvent` would flush in between and hide the race — only a
+      // ref that flips synchronously stops the second create here.
+      await act(async () => {
+        const press = () =>
+          title.dispatchEvent(
+            new KeyboardEvent("keydown", { key: "Enter", metaKey: true, bubbles: true }),
+          );
+        press();
+        press();
+      });
+
+      await act(async () => {
+        release({ id: "issue-1", identifier: "MUL-1", title: "Double tap", status: "todo" });
+      });
+      expect(mockCreateIssue).toHaveBeenCalledTimes(1);
+    });
+
+    it("renders the send keycaps on Create without renaming the button", async () => {
+      const user = userEvent.setup();
+      renderManual();
+
+      // Accessible name must stay the label alone — the keycaps are decorative.
+      expect(screen.getByRole("button", { name: "Create Issue" })).toBeInTheDocument();
+      expect(document.querySelector("[data-slot='shortcut-keycaps']")).toBeInTheDocument();
+
+      // And the affordance survives the empty → filled transition.
+      await user.type(screen.getByPlaceholderText("Issue title"), "Now valid");
+      expect(screen.getByRole("button", { name: "Create Issue" })).toBeInTheDocument();
+      expect(document.querySelector("[data-slot='shortcut-keycaps']")).toBeInTheDocument();
+    });
+
+    it("keeps Create focusable via aria-disabled while the title is empty", () => {
+      renderManual();
+      const createButton = screen.getByRole("button", { name: "Create Issue" });
+
+      // Native `disabled` would drop it out of the tab order, hiding the
+      // "Enter a title to create" tooltip from keyboard and SR users.
+      expect(createButton).toHaveAttribute("aria-disabled", "true");
+      expect(createButton).not.toBeDisabled();
+      createButton.focus();
+      expect(createButton).toHaveFocus();
+    });
+
+    it("carries its own disabled visuals, since the Button base only styles native disabled", () => {
+      renderManual();
+      const createButton = screen.getByRole("button", { name: "Create Issue" });
+
+      // Without these the control reads as a live primary button while
+      // aria-disabled. `pointer-events-none` is deliberately absent: it would
+      // kill the tooltip hover and the click that focuses the title.
+      expect(createButton.className).toContain("aria-disabled:opacity-50");
+      expect(createButton.className).toContain("aria-disabled:cursor-not-allowed");
+      expect(createButton.className).toContain("aria-disabled:active:translate-y-0");
+      expect(createButton.className).not.toContain("aria-disabled:pointer-events-none");
+    });
   });
 });

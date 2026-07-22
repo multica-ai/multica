@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
+import { CurrencyNumberFlow } from "@multica/ui/components/ui/number-flow";
 import type {
   Agent,
   AgentRuntime,
@@ -360,8 +361,9 @@ function HealthCell({
 const COST_CELL_DAYS = 14;
 
 export function CostCell({ runtimeId }: { runtimeId: string }) {
-  const { t } = useT("runtimes");
+  const { t, i18n } = useT("runtimes");
   const tz = useViewingTimezone();
+  const locales = i18n.resolvedLanguage ?? i18n.language;
   const { data: usage = [] } = useQuery(
     runtimeUsageOptions(runtimeId, COST_CELL_DAYS, tz),
   );
@@ -396,7 +398,12 @@ export function CostCell({ runtimeId }: { runtimeId: string }) {
         : `${delta > 0 ? "↑" : "↓"}${Math.abs(delta)}%`;
   return (
     <div className="flex w-full flex-col items-end leading-tight">
-      <span className="text-sm font-medium tabular-nums">{fmt}</span>
+      <CurrencyNumberFlow
+        value={cost7d}
+        locales={locales}
+        aria-label={fmt}
+        className="text-sm font-medium"
+      />
       {deltaLabel && (
         <span className={`text-[11px] tabular-nums ${deltaTone}`}>
           {deltaLabel}
@@ -457,8 +464,8 @@ export function CliCell({ runtime }: { runtime: AgentRuntime }) {
   // The separate `cli_version` is the shared multica daemon CLI, identical
   // for every runtime on one machine; surfacing it here made all agents
   // show the same number (#3838). The daemon CLI version and its update
-  // prompt belong to the machine — they live in the machine meta strip and
-  // the detail page's UpdateSection, not on a per-agent row.
+  // prompt belong to the machine — they live in the machine header, not on a
+  // per-agent row.
   const version =
     meta && typeof meta.version === "string" ? meta.version : null;
 
@@ -606,23 +613,14 @@ export function RuntimeRowMenu({
 
 export function RuntimeList({
   runtimes,
-  updatableIds,
   now,
   runtimeHref,
 }: {
   runtimes: AgentRuntime[];
-  // Kept on the API surface for callers, but unused here: the CLI column
-  // shows each agent's own tool version, while the multica daemon CLI
-  // update prompt lives at the machine/detail level (UpdateSection), so the
-  // table no longer derives per-row update state. Left to avoid scope creep
-  // on the page-level wrapper that still computes the set.
-  updatableIds?: Set<string>;
   now: number;
   /** Machine-detail pages keep runtime settings nested under the machine. */
   runtimeHref?: (runtimeId: string) => string;
 }) {
-  void updatableIds;
-
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();

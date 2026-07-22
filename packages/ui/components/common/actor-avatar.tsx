@@ -53,7 +53,6 @@ function ActorAvatar({
         "rounded-full"
       )}
       style={{ width: px, height: px, fontSize: px * 0.45 }}
-      title={name}
     >
       {avatarUrl && !imgError ? (
         <img

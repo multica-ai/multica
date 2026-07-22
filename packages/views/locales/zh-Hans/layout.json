@@ -13,12 +13,27 @@
     "skills": "Skills",
     "settings": "设置"
   },
+  "tab": {
+    "issue": "Issue",
+    "project": "项目",
+    "autopilot": "自动化",
+    "agent": "智能体",
+    "member": "成员",
+    "squad": "小队",
+    "skill": "Skill",
+    "machine": "机器",
+    "runtime": "运行时",
+    "attachment": "附件",
+    "create_agent": "创建智能体",
+    "unknown": "未知页面"
+  },
   "help": {
     "trigger": "帮助",
     "docs": "文档",
     "changelog": "更新日志",
     "discord": "Discord",
-    "feedback": "反馈"
+    "feedback": "反馈",
+    "server_version": "服务器版本 {{version}}"
   },
   "workspace_loader": {
     "loading_workspace": "正在加载工作区...",

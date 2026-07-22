@@ -23,9 +23,11 @@ var providerHTTP5xxRe = regexp.MustCompile(`(^|[^0-9])5[0-9][0-9]([^0-9]|$)`)
 // e.g. "402913 tokens", "15290ms", "exit status 4030" — misclassifying process
 // or unknown failures as provider billing / rate-limit errors. That pollutes
 // failure observability: a genuine process crash gets filed under a provider
-// bucket, masking the real cause on failure dashboards. (It does not change
-// auto-retry — Classify only ever returns agent_error.* reasons, none of which
-// are in internal/service/task.go's retryableReasons set.) The 5xx bucket was
+// bucket, masking the real cause on failure dashboards. (A misfire here still
+// can't cause a spurious retry: the auth / quota / capacity buckets these
+// regexes guard are all non-retryable. The only agent_error.* reason on
+// internal/service/task.go's retryableReasons allowlist is provider_network
+// — MUL-4910 — and these regexes never route into it.) The 5xx bucket was
 // already anchored for exactly this reason (MUL-1949); these codes were not.
 var (
 	httpAuthCodeRe     = regexp.MustCompile(`(^|[^0-9])(401|403)([^0-9]|$)`)
@@ -158,9 +160,18 @@ func Classify(rawError string) Reason {
 		return ReasonAgentProviderServerError
 
 	// 7. Provider network. Stream cut, dial failures, DNS / I/O
-	//    timeout below the HTTP layer.
+	//    timeout below the HTTP layer. "connection closed" / "mid-response"
+	//    catch the Claude Code CLI's mid-stream disconnect
+	//    ("API Error: Connection closed mid-response. ...") so a transient cut
+	//    lands in the retryable provider_network bucket (with session resume)
+	//    instead of falling through to agent_error.unknown / process_failure
+	//    and terminating the task (MUL-4910). Checked before rule 13 so the
+	//    "... exited with error: exit status N ..." variant still routes here.
+	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
 	case containsAny(lower,
 		"stream disconnected",
+		"connection closed",
+		"mid-response",
 		"error sending request",
 		"unable to connect",
 		"dial tcp",

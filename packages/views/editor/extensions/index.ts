@@ -22,7 +22,6 @@
 import type { RefObject } from "react";
 import StarterKit from "@tiptap/starter-kit";
 import CodeBlockLowlight from "@tiptap/extension-code-block-lowlight";
-import { common, createLowlight } from "lowlight";
 import Placeholder from "@tiptap/extension-placeholder";
 import Link from "@tiptap/extension-link";
 import Typography from "@tiptap/extension-typography";
@@ -36,6 +35,7 @@ import { Markdown } from "@tiptap/markdown";
 import { ReactNodeViewRenderer } from "@tiptap/react";
 import type { AnyExtension } from "@tiptap/core";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import { shouldAutoLink } from "@multica/ui/markdown";
 import { escapeMarkdownLabel } from "../utils/escape-markdown-label";
 import { BaseMentionExtension } from "./mention-extension";
 import { createMentionSuggestion, type MentionItem } from "./mention-suggestion";
@@ -56,15 +56,14 @@ import { FileCardExtension } from "./file-card";
 import { ImageView } from "./image-view";
 import { BlockMathExtension, InlineMathExtension } from "./math";
 import { HighlightExtension } from "./highlight";
-import { AutolinkEmailRepairExtension } from "./autolink-email-repair";
-
-const lowlight = createLowlight(common);
+import { codeLowlight } from "../syntax-highlight";
 
 const LinkExtension = Link.extend({ inclusive: false }).configure({
   openOnClick: false,
   autolink: true,
   linkOnPaste: true,
   defaultProtocol: "https",
+  shouldAutoLink,
 });
 
 export const ImageExtension = Image.extend({
@@ -174,6 +173,13 @@ export function createEditorExtensions(
       heading: { levels: [1, 2, 3] },
       link: false,
       codeBlock: false,
+      // Underline has no Markdown representation. Tiptap's extension serializes
+      // the mark as `++text++`, which is not CommonMark or GFM, so ReadonlyContent
+      // (react-markdown + remark-gfm) renders the delimiters literally. Disabling
+      // the extension drops the mark at parse time instead: pasted `<u>` /
+      // `text-decoration: underline` keep their text, and Cmd+U becomes a no-op
+      // rather than a way to produce content the display layer cannot render.
+      underline: false,
       // Disable StarterKit's stock ListItem — its Enter keybind binds only
       // `splitListItem`, which leaves the user stuck inside an empty top-level
       // list item (see list-item.ts). PatchedListItem below restores the
@@ -192,12 +198,11 @@ export function createEditorExtensions(
       addNodeView() {
         return ReactNodeViewRenderer(CodeBlockView);
       },
-    }).configure({ lowlight }),
+    }).configure({ lowlight: codeLowlight }),
     // ⚠️ Link MUST appear before markdownPaste in this array.
     // linkOnPaste relies on Link's handlePaste plugin firing first;
     // markdownPaste's handlePaste is a catch-all that returns true.
     LinkExtension,
-    AutolinkEmailRepairExtension,
     ImageExtension,
     // renderWrapper wraps the table in `<div class="tableWrapper">` (the same
     // wrapper the resizable NodeView emits), which prose.css styles with

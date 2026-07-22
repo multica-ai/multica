@@ -79,11 +79,31 @@
   "file_card": {
     "uploading": "Uploading {{filename}}"
   },
+  "upload": {
+    "failed": "Couldn't upload {{filename}}: {{reason}}",
+    "in_progress": "Uploading…"
+  },
   "title_editor": {
     "title_aria_label": "Title"
   },
   "mermaid": {
     "render_error": "Unable to render Mermaid diagram.",
-    "rendering": "Rendering diagram…"
+    "rendering": "Rendering diagram…",
+    "viewer_title": "Diagram",
+    "canvas_label": "Diagram canvas. Drag to pan, scroll to zoom.",
+    "open_viewer": "Open diagram viewer",
+    "close_viewer": "Close",
+    "copy_source": "Copy diagram source",
+    "show_source": "Show source",
+    "show_diagram": "Show diagram",
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "zoom_fit": "Fit to view",
+    "zoom_actual": "Actual size",
+    "reset_view": "Reset view",
+    "export": "Export",
+    "export_png": "Download PNG",
+    "export_svg": "Download SVG",
+    "export_source": "Download .mmd"
   }
 }

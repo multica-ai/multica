@@ -3,6 +3,8 @@ package daemon
 import (
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 // TestBuildQuickCreatePromptRules locks in the rules that govern how the
@@ -151,6 +153,26 @@ func TestBuildQuickCreatePromptProjectPinning(t *testing.T) {
 	}
 	if strings.Contains(plain, "--project") {
 		t.Errorf("buildQuickCreatePrompt without project must NOT mention --project, got:\n%s", plain)
+	}
+}
+
+func TestBuildQuickCreatePromptExplicitPriorityAndDueDate(t *testing.T) {
+	out := buildQuickCreatePrompt(Task{
+		QuickCreatePrompt:   "fix the login button color",
+		QuickCreatePriority: "urgent",
+		QuickCreateDueDate:  "2026-08-01",
+	})
+	for _, want := range []string{
+		"--priority urgent",
+		"--due-date 2026-08-01",
+		"quick-create selection is authoritative",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("buildQuickCreatePrompt with explicit fields missing %q\n--- output ---\n%s", want, out)
+		}
+	}
+	if strings.Contains(out, "Map P0/P1") {
+		t.Errorf("explicit priority must replace inference rules, got:\n%s", out)
 	}
 }
 
@@ -307,6 +329,101 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 			t.Fatalf("web-only chat prompt should not mention channel history, got:\n%s", out)
 		}
 	})
+}
+
+// TestBuildChatPromptTwoLayerChannelPolicy pins the two INDEPENDENT axes of the
+// chat channel policy (MUL-4899). Collapsing them into one condition is exactly
+// the bug this matrix exists to catch:
+//
+//   - delivery: `attachment upload` guidance is injected iff there is NO channel.
+//     Any IM reply leaves Multica, where the upload has nothing to bind to.
+//   - history: the `chat history` / `chat thread` commands are injected iff the
+//     channel is Slack. Those endpoints are hardwired to h.SlackHistory
+//     (handler/chat_history.go) — on Feishu they answer "no channel
+//     integration", so teaching them there sends the agent down a dead path.
+//
+// Feishu is the case that proves the axes are separate: no upload AND no
+// history. A single `ChatChannelType != ""` gate cannot express it.
+func TestBuildChatPromptTwoLayerChannelPolicy(t *testing.T) {
+	// Match the IMPERATIVE, not the bare command name. An IM prompt names
+	// `multica attachment upload` on purpose — to state that it does not apply
+	// here. That negation is the useful copy (the agent knows the command exists
+	// from the brief's Available Commands; silence would leave it guessing), so
+	// asserting on the bare name would forbid the very sentence we want.
+	const uploadGuidance = "run `multica attachment upload <local-path>`"
+	const historyGuidance = "multica chat history"
+
+	cases := []struct {
+		name        string
+		channelType string
+		wantUpload  bool
+		wantHistory bool
+		wantPhrases []string
+	}{
+		{
+			name:        "direct chat: upload, no history",
+			channelType: "",
+			wantUpload:  true,
+			wantHistory: false,
+		},
+		{
+			name:        "slack: no upload, has history",
+			channelType: execenv.ChannelTypeSlack,
+			wantUpload:  false,
+			wantHistory: true,
+			wantPhrases: []string{"Slack", "delivered to Slack as text", "You cannot attach a file to it"},
+		},
+		{
+			name:        "feishu: no upload, no history",
+			channelType: execenv.ChannelTypeFeishu,
+			wantUpload:  false,
+			wantHistory: false,
+			wantPhrases: []string{
+				"Feishu/Lark",
+				"no history reader for Feishu/Lark",
+				"delivered to Feishu/Lark as text",
+				"You cannot attach a file to it",
+			},
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			out := buildChatPrompt(Task{
+				ChatSessionID:   "sess-1",
+				ChatChannelType: tc.channelType,
+				ChatMessage:     "hi",
+			})
+			if got := strings.Contains(out, uploadGuidance); got != tc.wantUpload {
+				t.Errorf("upload guidance present=%v, want %v\n--- output ---\n%s", got, tc.wantUpload, out)
+			}
+			if got := strings.Contains(out, historyGuidance); got != tc.wantHistory {
+				t.Errorf("history guidance present=%v, want %v\n--- output ---\n%s", got, tc.wantHistory, out)
+			}
+			for _, phrase := range tc.wantPhrases {
+				if !strings.Contains(out, phrase) {
+					t.Errorf("missing %q\n--- output ---\n%s", phrase, out)
+				}
+			}
+		})
+	}
+}
+
+// ChatInThread only ever selects between `chat history` and `chat thread`. With
+// no Feishu history reader there is nothing to select between, so the flag must
+// not leak either command into a Feishu prompt even if the server sets it.
+func TestBuildChatPromptFeishuIgnoresChatInThread(t *testing.T) {
+	out := buildChatPrompt(Task{
+		ChatSessionID:   "sess-1",
+		ChatChannelType: execenv.ChannelTypeFeishu,
+		ChatInThread:    true,
+		ChatMessage:     "hi",
+	})
+	for _, unwanted := range []string{"multica chat thread", "multica chat history"} {
+		if strings.Contains(out, unwanted) {
+			t.Errorf("feishu prompt must not teach %q (no Feishu history reader exists)\n--- output ---\n%s", unwanted, out)
+		}
+	}
 }
 
 func TestBuildChatPromptAgentIntro(t *testing.T) {

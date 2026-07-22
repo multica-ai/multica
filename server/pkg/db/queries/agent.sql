@@ -193,7 +193,8 @@ ORDER BY created_at DESC;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
     coalesced_comment_ids, trigger_summary, force_fresh_session, is_leader_task, handoff_note,
-    squad_id, context, originator_user_id, runtime_mcp_overlay, runtime_connected_apps
+    squad_id, context, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, delegated_from_task_id, rule_version_id, rerun_of_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     $1, $2, $3, 'queued', $4, sqlc.narg(trigger_comment_id),
@@ -209,8 +210,15 @@ VALUES (
         ELSE NULL
     END,
     sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps)
+    sqlc.narg(runtime_connected_apps),
+    sqlc.narg(originator_source),
+    sqlc.narg(delegated_from_task_id),
+    sqlc.narg(rule_version_id),
+    sqlc.narg(rerun_of_task_id),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id)
 )
 RETURNING *;
 
@@ -218,15 +226,23 @@ RETURNING *;
 -- Quick-create tasks have no issue / chat / autopilot link; the entire job
 -- description (prompt, requester, workspace) lives in context JSONB. The
 -- daemon detects this variant via context.type == "quick_create".
+-- The requester who opened the quick-create modal is a direct_human originator
+-- and accountable; attribution provenance is stamped so this path is not a
+-- NULL-source enqueue bypass (MUL-4302 §2).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
-    runtime_mcp_overlay, runtime_connected_apps
+    accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     $1, $2, NULL, 'queued', $3, $4,
     sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
-    sqlc.narg(runtime_connected_apps)
+    sqlc.narg(runtime_connected_apps),
+    sqlc.narg(originator_source),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id)
 )
 RETURNING *;
 
@@ -234,9 +250,15 @@ RETURNING *;
 -- Deferred tasks are inert until PromoteDueDeferredTasksForRuntime flips them
 -- to queued. Used for comment-routing escalation: a thread-owner primary task
 -- gets a delayed assignee fallback without waking both agents at t=0.
+-- Attribution is resolved and stamped at creation (not at promotion), from the
+-- same trigger comment as the primary task, so the fallback assignee's run
+-- carries a non-NULL source and evidence rather than bypassing attribution
+-- (MUL-4302 §2).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
-    trigger_summary, is_leader_task, squad_id, escalation_for_task_id, fire_at
+    trigger_summary, is_leader_task, squad_id, escalation_for_task_id, fire_at,
+    originator_user_id, accountable_user_id, originator_source,
+    delegated_from_task_id, trigger_evidence_kind, trigger_evidence_ref_id
 )
 VALUES (
     @agent_id, @runtime_id, @issue_id, 'deferred', @priority,
@@ -245,7 +267,13 @@ VALUES (
     COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE),
     sqlc.narg(squad_id),
     @escalation_for_task_id,
-    @fire_at
+    @fire_at,
+    sqlc.narg(originator_user_id),
+    sqlc.narg(accountable_user_id),
+    sqlc.narg(originator_source),
+    sqlc.narg(delegated_from_task_id),
+    sqlc.narg(trigger_evidence_kind),
+    sqlc.narg(trigger_evidence_ref_id)
 )
 RETURNING *;
 
@@ -277,6 +305,12 @@ WHERE id = $1 AND issue_id IS NULL;
 -- run has not changed. The Composio overlay follows the agent's invocation
 -- permission and uses the agent owner's connection (MUL-3963); originator is
 -- carried for A2A/audit, not as an originator == agent.owner_id gate.
+-- A system retry is NOT a new attribution event (MUL-4302 §5): it inherits the
+-- parent's accountable human, source label, delegation lineage, rule version,
+-- and trigger evidence UNCHANGED, and records retry_of_task_id = p.id so retry
+-- and manual rerun stay separable in reporting. parent_task_id keeps its
+-- existing meaning for the retry/resume machinery; retry_of_task_id is the
+-- attribution-facing lineage column.
 --
 -- chat_input_task_id is inherited straight from the parent so the whole retry
 -- chain keeps consuming the ORIGINAL root input batch (MUL-4351): the root
@@ -292,29 +326,48 @@ WHERE id = $1 AND issue_id IS NULL;
 -- queued while the failing turn was still running — the retry continues the
 -- older turn first. Combined with creating the retry inside FailTask's
 -- transaction, this leaves no window for a newer input task to jump ahead.
+--
+-- fire_at arms a backoff before the retry: when non-NULL the child is inserted
+-- as 'deferred' with that fire_at and stays inert until the existing
+-- PromoteDueDeferredTasksForRuntime sweeper (run promote-first on every claim
+-- poll) flips it to 'queued'. Used for provider_network's final attempt so it
+-- waits ~5s instead of firing back-to-back with the immediate retry (MUL-4910).
+-- NULL keeps the historical behaviour: an immediately-claimable 'queued' child.
+--
+-- max_attempts overrides the inherited budget when non-NULL (NULL inherits
+-- p.max_attempts unchanged). Callers persist the reason-aware effective ceiling
+-- here so the row stays self-consistent — e.g. provider_network's chain records
+-- attempt=3, max_attempts=3 rather than leaking attempt=3, max_attempts=2 to the
+-- task API (MUL-4910). The Go retryAttemptCeiling already refuses to raise a
+-- disabled (max_attempts<=1) task, so this only ever widens, never revives.
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, coalesced_comment_ids, trigger_summary, context,
     session_id, work_dir,
     attempt, max_attempts, parent_task_id, force_fresh_session, is_leader_task,
-    squad_id, originator_user_id, runtime_mcp_overlay, runtime_connected_apps,
-    chat_input_task_id
+    squad_id, originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, delegated_from_task_id, rule_version_id,
+    trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
+    chat_input_task_id, fire_at
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
-    'queued',
+    CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
-    p.attempt + 1, p.max_attempts, p.id,
+    p.attempt + 1, COALESCE(sqlc.narg(max_attempts)::int, p.max_attempts), p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
     p.squad_id,
     p.originator_user_id,
+    p.accountable_user_id,
     sqlc.narg(runtime_mcp_overlay),
     sqlc.narg(runtime_connected_apps),
-    p.chat_input_task_id
+    p.originator_source, p.delegated_from_task_id, p.rule_version_id,
+    p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
+    p.chat_input_task_id, sqlc.narg(fire_at)
 FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
@@ -322,9 +375,9 @@ RETURNING *;
 -- name: CancelAgentTasksByIssue :many
 -- Cancels every active task on the issue and returns the affected rows so the
 -- caller can reconcile each agent's status and broadcast task:cancelled events
--- (#1587). Prior :exec form silently dropped that info, so internal cancel
--- paths (issue status flips to cancelled/done, etc.) left agents stuck at
--- status="working" with no self-correction.
+-- (#1587). Prior :exec form silently dropped that info, leaving agents stuck at
+-- status="working" with no self-correction. Only issue-deletion cleanup calls
+-- this now; a status flip to cancelled/done no longer does (MUL-4465).
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
@@ -494,6 +547,30 @@ WHERE id = (
 )
 RETURNING *;
 
+-- name: ReclaimStaleDispatchedTasksForRuntimes :many
+-- Batch variant of ReclaimStaleDispatchedTaskForRuntime (MUL-4257): re-delivers
+-- up to @max_tasks tasks across the whole runtime set in one round trip, so a
+-- machine-level batch claim recovers lost-response dispatches for every runtime
+-- it hosts without one query per runtime. Same eligibility as the singular
+-- query (dispatched, never started, past the recovery window, expired/absent
+-- prepare lease) and the same dispatched_at refresh; only the runtime filter
+-- (= ANY) and the LIMIT (max_tasks instead of 1) differ.
+UPDATE agent_task_queue
+SET dispatched_at = now(),
+    prepare_lease_expires_at = now() + make_interval(secs => @prepare_lease_secs::double precision)
+WHERE id IN (
+    SELECT atq.id FROM agent_task_queue atq
+    WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
+      AND atq.status = 'dispatched'
+      AND atq.started_at IS NULL
+      AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
+      AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
+    ORDER BY atq.priority DESC, atq.dispatched_at ASC
+    LIMIT @max_tasks::int
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING *;
+
 -- name: ExtendAgentTaskPrepareLease :one
 -- Keeps a dispatched task protected while the daemon resolves/cache/materializes
 -- startup inputs before StartTask. Once the daemon stops extending this short
@@ -556,19 +633,26 @@ RETURNING *;
 -- conversation and lose the in-flight context — exactly what MUL-1128's B
 -- branch is meant to fix.
 --
--- Manual rerun (TaskService.RerunIssue) does NOT take this path: it sets
--- force_fresh_session=true on the new task, and the daemon claim handler
--- skips this lookup entirely. The user already judged the prior output bad;
--- resuming the same conversation would replay a poisoned state.
+-- Manual rerun (TaskService.RerunIssue) does NOT take this path. The claim
+-- handler branches on rerun_of_task_id FIRST and resolves the session/workdir
+-- from that exact source task (so a parallel task on the same issue can't be
+-- resumed by mistake), reusing the source workdir and resuming its session only
+-- when the source failure is resume-safe. The rerun row still carries
+-- force_fresh_session=true purely as a rollback-safe signal: an OLD claim
+-- handler that predates the rerun_of_task_id branch falls back to this query,
+-- and force_fresh_session=true makes it start clean instead of resuming the
+-- wrong execution (MUL-4869).
 --
 -- Tasks that ended in a known "poisoned" terminal state are also excluded
 -- here so even auto-retry does not inherit the bad session. The daemon
 -- classifies these failures (iteration_limit, agent_fallback_message,
--- api_invalid_request, codex_semantic_inactivity) when it detects either an
--- agent fallback marker in the output, an upstream API 400 that means the
--- conversation history itself is unprocessable (oversized image, malformed
--- base64, etc.), or a Codex semantic inactivity timeout whose recorded
--- session may replay the same stuck state.
+-- api_invalid_request, codex_semantic_inactivity, agent_error.context_overflow)
+-- when it detects either an agent fallback marker in the output, an upstream
+-- API 400 that means the conversation history itself is unprocessable
+-- (oversized image, malformed base64, etc.), a Codex semantic inactivity
+-- timeout whose recorded session may replay the same stuck state, or a context
+-- window overflow that would immediately overflow again on resume. Keep this
+-- list in sync with resumeUnsafeFailureReason and GetLastChatTaskSession.
 --
 -- The error-text ILIKE clause is defense-in-depth for the api_invalid_request
 -- shape: a legacy row tagged 'agent_error' (pre-MUL-1921), a deploy-window
@@ -584,7 +668,7 @@ WHERE agent_id = $1 AND issue_id = $2
     status = 'completed'
     OR (
       status = 'failed'
-      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity')
+      AND COALESCE(failure_reason, '') NOT IN ('iteration_limit', 'agent_fallback_message', 'api_invalid_request', 'codex_semantic_inactivity', 'agent_error.context_overflow')
       AND NOT (COALESCE(error, '') ILIKE '%400%' AND COALESCE(error, '') ILIKE '%invalid_request_error%')
     )
   )
@@ -760,6 +844,32 @@ SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
+-- name: MarkChatFinalizeDeferred :one
+-- Arms the deferred chat-finalize marker for a cancelled chat task whose
+-- empty-transcript judgment must wait for the daemon's flush ack (#5219).
+UPDATE agent_task_queue
+SET chat_finalize_deferred_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClaimChatFinalizeDeferred :one
+-- Atomically claims the deferred marker so the daemon ack and the sweeper
+-- cannot both finalize the same task (double-"Stopped." guard).
+UPDATE agent_task_queue
+SET chat_finalize_deferred_at = NULL
+WHERE id = $1 AND chat_finalize_deferred_at IS NOT NULL
+RETURNING *;
+
+-- name: ListChatFinalizeDeferredExpired :many
+-- Deferred chat finalizations whose grace period elapsed without a daemon
+-- ack (dead or partitioned daemon). Batch-capped like the other sweeper
+-- queries so one tick can't monopolise the DB.
+SELECT * FROM agent_task_queue
+WHERE chat_finalize_deferred_at IS NOT NULL
+  AND chat_finalize_deferred_at < now() - make_interval(secs => @grace_secs::double precision)
+ORDER BY chat_finalize_deferred_at
+LIMIT @max_per_tick::int;
+
 -- name: CountRunningTasks :one
 SELECT count(*) FROM agent_task_queue
 WHERE agent_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory');
@@ -868,7 +978,20 @@ SET coalesced_comment_ids = (
     ),
     trigger_comment_id = @new_trigger_comment_id::uuid,
     trigger_summary = COALESCE(sqlc.narg('new_trigger_summary'), trigger_summary),
+    -- Re-attribution is ATOMIC (MUL-4302): folding a newly-arrived comment moves the
+    -- WHOLE attribution snapshot to that comment's human — person columns, source
+    -- label, delegation lineage, rule version, and evidence — computed by the caller
+    -- as one attribution.Result. Re-stamping only the person columns would leave a
+    -- run showing B accountable while still pointing at A's stale source / evidence /
+    -- level. accountable comes from the resolved Result (finalizeAttribution already
+    -- guaranteed originator ⟹ accountable == originator; the cross-column CHECK backs it).
     originator_user_id = sqlc.narg('new_originator_user_id')::uuid,
+    accountable_user_id = sqlc.narg('new_accountable_user_id')::uuid,
+    originator_source = sqlc.narg('new_originator_source'),
+    delegated_from_task_id = sqlc.narg('new_delegated_from_task_id')::uuid,
+    rule_version_id = sqlc.narg('new_rule_version_id')::uuid,
+    trigger_evidence_kind = sqlc.narg('new_trigger_evidence_kind'),
+    trigger_evidence_ref_id = sqlc.narg('new_trigger_evidence_ref_id')::uuid,
     runtime_mcp_overlay = sqlc.narg('new_runtime_mcp_overlay'),
     runtime_connected_apps = sqlc.narg('new_runtime_connected_apps')
 WHERE id = (
@@ -927,6 +1050,31 @@ ORDER BY priority DESC, created_at ASC;
 UPDATE agent_task_queue
 SET status = 'queued'
 WHERE runtime_id = @runtime_id
+  AND status = 'deferred'
+  AND fire_at <= now()
+RETURNING *;
+
+-- name: ListQueuedClaimCandidatesByRuntimes :many
+-- Batch variant of ListQueuedClaimCandidatesByRuntime (MUL-4257): returns
+-- queued claim candidates across every runtime_id in the input set in ONE round
+-- trip, so a daemon can list candidates for all of its runtimes with a single
+-- query instead of one per runtime. Ordering matches the singular query
+-- (priority, then FIFO) so the batch claim loop keeps the same fairness. The
+-- runtime_id filter is served by the partial index
+-- idx_agent_task_queue_claim_candidates; the cross-runtime ORDER BY still needs
+-- a sort step (each runtime's slice is index-ordered, but merging several
+-- runtimes' rows into one priority/FIFO order is not). The per-machine
+-- candidate set is small, so this is cheap in practice.
+SELECT * FROM agent_task_queue
+WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND status = 'queued'
+ORDER BY priority DESC, created_at ASC;
+
+-- name: PromoteDueDeferredTasksForRuntimes :many
+-- Batch variant of PromoteDueDeferredTasksForRuntime (MUL-4257): promotes all
+-- due deferred tasks across the runtime set in one UPDATE.
+UPDATE agent_task_queue
+SET status = 'queued'
+WHERE runtime_id = ANY(@runtime_ids::uuid[])
   AND status = 'deferred'
   AND fire_at <= now()
 RETURNING *;

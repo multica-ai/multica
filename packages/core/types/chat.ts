@@ -155,6 +155,32 @@ export interface CancelTaskResponse extends AgentTask {
 }
 
 /**
+ * One durable draft restore from GET /api/chat/sessions/{id}/draft-restores
+ * (#5219): a deferred cancellation settled as empty-transcript after the
+ * cancel HTTP response had returned, so the deleted prompt is held
+ * server-side until the creator's client applies it to the composer and
+ * consumes it (DELETE, idempotent). The chat:cancel_finalized event is only
+ * an invalidation hint for this fetch.
+ */
+export interface ChatDraftRestore {
+  /** The deleted user chat message id — stable dedup and consume key. */
+  id: string;
+  chat_session_id: string;
+  task_id?: string;
+  content: string;
+  /**
+   * Attachments detached from the deleted message so a restored draft can
+   * re-bind them on re-send.
+   */
+  attachments?: import("./attachment").Attachment[];
+  created_at?: string;
+}
+
+export interface ChatDraftRestoresResponse {
+  restores: ChatDraftRestore[];
+}
+
+/**
  * Response from GET /api/chat/sessions/{id}/pending-task.
  * All fields are absent when the session has no in-flight task.
  *

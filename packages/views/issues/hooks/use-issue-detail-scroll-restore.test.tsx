@@ -97,6 +97,22 @@ describe("useIssueDetailScrollRestore", () => {
     expect(scroller.scrollTop).toBe(500);
   });
 
+  it("keeps positions when navigating through a page that unmounts issue detail", () => {
+    const issueA = nextKey("issue-a");
+    const issueB = nextKey("issue-b");
+
+    const firstPage = render(<Harness restoreKey={issueA} />);
+    setScroll(firstPage.getByTestId("scroller"), 610);
+    firstPage.unmount();
+
+    const secondPage = render(<Harness restoreKey={issueB} />);
+    expect(secondPage.getByTestId("scroller").scrollTop).toBe(0);
+    secondPage.unmount();
+
+    const returnedPage = render(<Harness restoreKey={issueA} />);
+    expect(returnedPage.getByTestId("scroller").scrollTop).toBe(610);
+  });
+
   it("waits until the page is ready before restoring a saved scrollTop", () => {
     const issueA = nextKey("issue-a");
     const issueB = nextKey("issue-b");
@@ -189,6 +205,29 @@ describe("useIssueDetailScrollRestore", () => {
     canScroll = true;
     flushNextAnimationFrame();
     expect(scroller.scrollTop).toBe(480);
+  });
+
+  it("restores again when a virtualized timeline resets scroll after the initial write", () => {
+    const issueA = nextKey("issue-a");
+    const issueB = nextKey("issue-b");
+
+    const { getByTestId, rerender } = render(<Harness restoreKey={issueA} />);
+    const scroller = getByTestId("scroller") as HTMLElement;
+
+    setScroll(scroller, 520);
+
+    rerender(<Harness restoreKey={issueB} />);
+    expect(scroller.scrollTop).toBe(0);
+
+    rerender(<Harness restoreKey={issueA} />);
+    expect(scroller.scrollTop).toBe(520);
+
+    // Virtuoso initializes after the parent's layout effect and can reset a
+    // successful synchronous restore before the next animation frame.
+    scroller.scrollTop = 0;
+    flushNextAnimationFrame();
+
+    expect(scroller.scrollTop).toBe(520);
   });
 
   it("cancels a pending restore retry when the issue key changes", () => {

@@ -32,6 +32,8 @@ type WebhookDeliveryResponse struct {
 	SignatureStatus        string  `json:"signature_status"`
 	Status                 string  `json:"status"`
 	AttemptCount           int32   `json:"attempt_count"`
+	DispatchAttempts       int32   `json:"dispatch_attempts"`
+	AvailableAt            string  `json:"available_at"`
 	ContentType            *string `json:"content_type"`
 	ResponseStatus         *int32  `json:"response_status"`
 	AutopilotRunID         *string `json:"autopilot_run_id"`
@@ -53,21 +55,23 @@ type WebhookDeliveryResponse struct {
 // selected_headers / response_body) into the wire response shape.
 func slimDeliveryToResponse(d db.ListWebhookDeliveriesByAutopilotRow) WebhookDeliveryResponse {
 	resp := WebhookDeliveryResponse{
-		ID:              uuidToString(d.ID),
-		WorkspaceID:     uuidToString(d.WorkspaceID),
-		AutopilotID:     uuidToString(d.AutopilotID),
-		TriggerID:       uuidToString(d.TriggerID),
-		Provider:        d.Provider,
-		Event:           d.Event,
-		DedupeKey:       textToPtr(d.DedupeKey),
-		DedupeSource:    textToPtr(d.DedupeSource),
-		SignatureStatus: d.SignatureStatus,
-		Status:          d.Status,
-		AttemptCount:    d.AttemptCount,
-		ContentType:     textToPtr(d.ContentType),
-		ReceivedAt:      timestampToString(d.ReceivedAt),
-		LastAttemptAt:   timestampToString(d.LastAttemptAt),
-		CreatedAt:       timestampToString(d.CreatedAt),
+		ID:               uuidToString(d.ID),
+		WorkspaceID:      uuidToString(d.WorkspaceID),
+		AutopilotID:      uuidToString(d.AutopilotID),
+		TriggerID:        uuidToString(d.TriggerID),
+		Provider:         d.Provider,
+		Event:            d.Event,
+		DedupeKey:        textToPtr(d.DedupeKey),
+		DedupeSource:     textToPtr(d.DedupeSource),
+		SignatureStatus:  d.SignatureStatus,
+		Status:           d.Status,
+		AttemptCount:     d.AttemptCount,
+		DispatchAttempts: d.DispatchAttempts,
+		AvailableAt:      timestampToString(d.AvailableAt),
+		ContentType:      textToPtr(d.ContentType),
+		ReceivedAt:       timestampToString(d.ReceivedAt),
+		LastAttemptAt:    timestampToString(d.LastAttemptAt),
+		CreatedAt:        timestampToString(d.CreatedAt),
 	}
 	if d.ResponseStatus.Valid {
 		v := d.ResponseStatus.Int32
@@ -90,21 +94,23 @@ func slimDeliveryToResponse(d db.ListWebhookDeliveriesByAutopilotRow) WebhookDel
 
 func deliveryToResponse(d db.WebhookDelivery, detail bool) WebhookDeliveryResponse {
 	resp := WebhookDeliveryResponse{
-		ID:              uuidToString(d.ID),
-		WorkspaceID:     uuidToString(d.WorkspaceID),
-		AutopilotID:     uuidToString(d.AutopilotID),
-		TriggerID:       uuidToString(d.TriggerID),
-		Provider:        d.Provider,
-		Event:           d.Event,
-		DedupeKey:       textToPtr(d.DedupeKey),
-		DedupeSource:    textToPtr(d.DedupeSource),
-		SignatureStatus: d.SignatureStatus,
-		Status:          d.Status,
-		AttemptCount:    d.AttemptCount,
-		ContentType:     textToPtr(d.ContentType),
-		ReceivedAt:      timestampToString(d.ReceivedAt),
-		LastAttemptAt:   timestampToString(d.LastAttemptAt),
-		CreatedAt:       timestampToString(d.CreatedAt),
+		ID:               uuidToString(d.ID),
+		WorkspaceID:      uuidToString(d.WorkspaceID),
+		AutopilotID:      uuidToString(d.AutopilotID),
+		TriggerID:        uuidToString(d.TriggerID),
+		Provider:         d.Provider,
+		Event:            d.Event,
+		DedupeKey:        textToPtr(d.DedupeKey),
+		DedupeSource:     textToPtr(d.DedupeSource),
+		SignatureStatus:  d.SignatureStatus,
+		Status:           d.Status,
+		AttemptCount:     d.AttemptCount,
+		DispatchAttempts: d.DispatchAttempts,
+		AvailableAt:      timestampToString(d.AvailableAt),
+		ContentType:      textToPtr(d.ContentType),
+		ReceivedAt:       timestampToString(d.ReceivedAt),
+		LastAttemptAt:    timestampToString(d.LastAttemptAt),
+		CreatedAt:        timestampToString(d.CreatedAt),
 	}
 	if d.ResponseStatus.Valid {
 		v := d.ResponseStatus.Int32

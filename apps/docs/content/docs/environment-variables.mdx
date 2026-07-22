@@ -19,6 +19,9 @@ These are the core variables you must think about before deploying — some have
 | `APP_ENV` | empty | **Yes** (must be `production`) |
 | `FRONTEND_ORIGIN` | empty | **Yes** (self-host must set its own domain) |
 | `MULTICA_DEV_VERIFICATION_CODE` | empty | No (must stay empty in production) |
+| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | No. Optional delay after `SIGTERM`/`SIGINT` before graceful shutdown begins. Accepts non-negative Go duration strings such as `300s` or `5m`; empty or `0` starts shutdown immediately |
+
+When using `MULTICA_SHUTDOWN_HOLD_DURATION` under Kubernetes, set `terminationGracePeriodSeconds` longer than the hold plus the server's subsequent graceful-shutdown budget. Setting both to the same duration can make kubelet send `SIGKILL` before cleanup finishes.
 
 <Callout type="warning">
 **Keep `MULTICA_DEV_VERIFICATION_CODE` empty in production.** A fixed local test code is disabled by default, but if you opt in with `MULTICA_DEV_VERIFICATION_CODE=888888`, anyone who can request a code can sign in with that fixed value while `APP_ENV` is non-production. The shortcut is ignored when `APP_ENV=production`.
@@ -42,7 +45,7 @@ Multica supports two delivery backends — [Resend](https://resend.com/) for clo
 | Variable | Default | Description |
 |---|---|---|
 | `RESEND_API_KEY` | empty | Resend API key |
-| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Sender address (must be a domain verified in your Resend account; also reused as the `From:` header when SMTP is in use) |
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Sender address for Resend (must be a domain verified in your Resend account). SMTP also uses it when `SMTP_FROM_EMAIL` is unset |
 
 ### SMTP relay
 
@@ -52,6 +55,7 @@ Multica supports two delivery backends — [Resend](https://resend.com/) for clo
 | `SMTP_PORT` | `25` | SMTP port. Use `587` for STARTTLS submission, or `465` for SMTPS (implicit TLS, auto-enabled) |
 | `SMTP_USERNAME` | empty | SMTP username. Leave empty for unauthenticated relay |
 | `SMTP_PASSWORD` | empty | SMTP password |
+| `SMTP_FROM_EMAIL` | empty | Sender address for SMTP `MAIL FROM` and `From:`. Falls back to `RESEND_FROM_EMAIL` when unset |
 | `SMTP_TLS` | `starttls` | TLS mode. `implicit` (aliases `smtps`, `ssl`) forces an immediate TLS handshake on connect (SMTPS); port `465` auto-enables it. Unset / `starttls` upgrades via STARTTLS after connect |
 | `SMTP_TLS_INSECURE` | `false` | Set `true` to skip TLS certificate verification (private CA / self-signed only) |
 | `SMTP_EHLO_NAME` | machine hostname | EHLO/HELO name announced to the relay. Set a real FQDN when a strict relay (e.g. Google Workspace `smtp-relay.gmail.com`) rejects the default greeting from a public IP — otherwise the relay drops the connection and it surfaces as an opaque `EOF` on a later command |
@@ -177,14 +181,49 @@ The daemon runs on the user's local machine, and its config is read from local e
 | Variable | Default | Description |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | Server address (self-host: replace with your domain) |
+| `MULTICA_DAEMON_DEVICE_NAME` | hostname | Human-readable device label shown in the Runtimes UI |
+| `MULTICA_AGENT_RUNTIME_NAME` | built-in default | Runtime display name |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat interval |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | Task polling interval |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Max concurrent tasks |
+| `MULTICA_AGENT_TIMEOUT` | `0` | Absolute wall-clock cap per agent run. `0` disables the cap and lets the inactivity watchdogs alone bound long runs. Set a positive Go duration when you want a hard resource/cost ceiling |
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex-specific inactivity watchdog window |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex `app-server` startup RPC timeout |
+| `MULTICA_DAEMON_AUTO_UPDATE` | cloud: `true`, self-host: `false` | Set to `false`/`0`/`no`/`off` to turn off the daemon's periodic CLI self-update; `true`/`1`/`yes`/`on` opts a self-host daemon into upstream updates |
+| `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | How often the daemon polls GitHub for a newer CLI release |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | Global no-message watchdog for runs with no tool in flight. `0` disables the whole watchdog, including provider-specific overrides |
+| `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode-specific no-message window for missing first tokens or stalled streams. `0` falls back to `MULTICA_AGENT_IDLE_WATCHDOG`; larger values cannot extend that global bound |
+| `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | Silence budget while a tool call is in flight. `0` disables the stuck-tool backstop |
 | `MULTICA_<PROVIDER>_PATH` | matches the CLI name | Path to each AI coding tool's executable (for example `MULTICA_CLAUDE_PATH`) |
 | `MULTICA_<PROVIDER>_MODEL` | empty | Default model for each AI coding tool |
 | `MULTICA_<PROVIDER>_ARGS` | empty | Daemon-wide default CLI arguments for a backend, applied to every task before each agent's own `custom_args`. Supported for `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, and `MULTICA_CODEBUDDY_ARGS` |
 
 For a full explanation of how each parameter affects daemon behavior, see [Daemon and runtimes](/daemon-runtimes).
+
+### Persisting daemon settings in `config.json`
+
+Every daemon knob in the table above — `device_name`, `runtime_name`, `max_concurrent_tasks`, `poll_interval`, `heartbeat_interval`, `agent_timeout`, `codex_semantic_inactivity_timeout`, `codex_handshake_timeout`, `disable_auto_update`, `auto_update_check_interval` — can also be persisted in the profile's `~/.multica/config.json` (or `~/.multica/profiles/<name>/config.json`) so you don't have to re-pass flags or export env vars on every `daemon start`. Set them with:
+
+```bash
+multica config set device_name my-vm-custom-name
+multica config set runtime_name worker-a
+multica config set max_concurrent_tasks 8
+multica config set poll_interval 10s          # Go duration, must be > 0
+multica config set heartbeat_interval 30s
+multica config set agent_timeout 1h           # or 0s to explicitly disable the cap
+multica config set codex_semantic_inactivity_timeout 15m
+multica config set codex_handshake_timeout 45s
+multica config set disable_auto_update true   # single-direction: only turns auto-update off
+multica config set auto_update_check_interval 12h
+```
+
+Duration keys accept any positive Go duration (`500ms`, `10s`, `1m30s`, ...). Values ≤ 0 (`0s`, `-5s`) and un-parseable strings are rejected at `config set` time — **except `agent_timeout`, where `0s` is a meaningful "disable the wall-clock cap" sentinel** (negative values are still rejected). To clear a persisted value and fall back to the env / built-in default, pass an empty string: `multica config set poll_interval ""`.
+
+`disable_auto_update` is a single-direction bool: setting it to `true` turns off the daemon's periodic CLI self-update, and setting it to `false` (or clearing with `""`) hands the decision back to `MULTICA_DAEMON_AUTO_UPDATE` / the cloud-vs-self-host default. It cannot be used to *force* auto-update on from the config file.
+
+Precedence, highest first: `--flag` on `daemon start` > `MULTICA_…` env var > `config.json` value > built-in default. A live env override (typical for systemd units) always wins over the file, and an explicit CLI flag wins over both.
+
+This is especially useful when running multiple daemons on one host via `--profile <name>`: each profile can pin its own `device_name` so the Runtimes UI shows distinct rows instead of collapsing them under the shared hostname.
 
 ### Default agent arguments (`MULTICA_<PROVIDER>_ARGS`)
 
@@ -199,14 +238,14 @@ These set a **fleet-wide default** layer of CLI flags for a backend — a conven
 
 | Variable | Default | Description |
 |---|---|---|
-| `FRONTEND_ORIGIN` | empty | Frontend address. Invite email links, the CORS allowlist, and the cookie domain are all derived from this. When unset, invite email links fall back to the hosted domain `https://app.multica.ai` — self-host must set this explicitly |
+| `FRONTEND_ORIGIN` | empty | Frontend address. Invite email links, the CORS allowlist, and the cookie domain are all derived from this. When unset, invite email links fall back to the hosted domain `https://multica.ai` — self-host must set this explicitly |
 | `MULTICA_APP_URL` | empty | Frontend URL for CLI login flow. Also used by the web UI to show self-host daemon setup commands with your app domain; for same-origin deployments this is also used as daemon `server_url` when `MULTICA_PUBLIC_URL` is unset |
 | `MULTICA_PUBLIC_URL` | empty | Public API URL, without trailing slash. Used for autopilot webhook URLs and by the web UI as the daemon `server_url` |
 | `CORS_ALLOWED_ORIGINS` | empty | Additional allowed CORS origins (comma-separated) |
 | `ALLOWED_ORIGINS` | empty | WebSocket-specific origin allowlist (comma-separated); when unset, fallback order is `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` |
 
 <Callout type="warning">
-**Leaving `FRONTEND_ORIGIN` unset creates two silent failures**: (1) invite email links point at `https://app.multica.ai` (the hosted domain), and clicking them doesn't bring users back to your self-hosted instance; (2) WebSocket Origin checks fall back to `localhost:3000 / 5173 / 5174`, so every WebSocket connection in a production deployment is rejected and the frontend appears to "lose real-time updates."
+**Leaving `FRONTEND_ORIGIN` unset creates two silent failures**: (1) invite email links point at `https://multica.ai` (the hosted domain), and clicking them doesn't bring users back to your self-hosted instance; (2) WebSocket Origin checks fall back to `localhost:3000 / 5173 / 5174`, so every WebSocket connection in a production deployment is rejected and the frontend appears to "lose real-time updates."
 </Callout>
 
 ## GitHub integration

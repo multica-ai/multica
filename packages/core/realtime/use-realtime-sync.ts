@@ -15,6 +15,7 @@ import { pinKeys } from "../pins/queries";
 import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
+import { propertyKeys } from "../properties/queries";
 import {
   agentTaskSnapshotKeys,
   agentActivityKeys,
@@ -29,8 +30,10 @@ import {
   onIssueUpdated,
   onIssueDeleted,
   onIssueLabelsChanged,
+  onIssuePropertiesChanged,
   onIssueMetadataChanged,
 } from "../issues/ws-updaters";
+import { invalidateUpdatedAtSortedIssueLists } from "../issues/cache-coordinator";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
 import {
@@ -57,6 +60,7 @@ import type {
   IssueDeletedPayload,
   IssueLabelsChangedPayload,
   IssueMetadataChangedPayload,
+  IssuePropertiesChangedPayload,
   InboxNewPayload,
   InboxItem,
   NotificationPreferenceResponse,
@@ -81,6 +85,7 @@ import type {
   TaskFailedPayload,
   TaskCancelledPayload,
   ChatDonePayload,
+  ChatCancelFinalizedPayload,
   ChatMessage,
   ChatPendingTask,
   ChatMessagesPage,
@@ -184,13 +189,148 @@ function patchLatestChatMessagePage(
   };
 }
 
+type ChatSessionUpdatedPayload = {
+  chat_session_id: string;
+  title?: string;
+  pinned?: boolean;
+  status?: "active" | "archived";
+  updated_at?: string;
+};
+
 /**
- * Apply a workspace:updated event to the cache. Always refreshes the
- * workspace list. If the incoming `issue_prefix` differs from what's
- * currently cached, also invalidates issueKeys.all for that workspace,
- * since every issue's rendered identifier (`MUL-123`) is recomputed from
- * the workspace prefix at read time. Without this, the UI keeps showing
- * the old `OLD-N` keys until the next hard refresh.
+ * Patch the cached sessions row for a `chat:session_updated` event (rename,
+ * pin/unpin, archive/unarchive from any tab/device) instead of refetching the
+ * whole list. `pinned` is present only on pin/unpin events and `status` only on
+ * archive/unarchive; a plain rename omits both, so absent fields leave existing
+ * state untouched. When either changes we re-sort so the row lands in the right
+ * place (pin → top; archive → the other list) like the server order.
+ *
+ * Archiving MUST also zero the row's unread here: the server payload carries
+ * only status/updated_at, and chatSessionsOptions is `staleTime: Infinity`, so a
+ * stale cache in another tab/device would otherwise keep an archived session's
+ * unread badge lit forever — the same MUL-4360 stuck-badge bug, one surface over.
+ * This mirrors the archive mutation's optimistic patch and the backend deriving
+ * unread_count=0 for archived rows. Unarchive does NOT fabricate a count — the
+ * true unread state comes back from the server refetch (last_read_at is
+ * untouched), so we leave the row's unread fields as-is for `active`.
+ */
+export function applyChatSessionUpdatedToCache(
+  qc: QueryClient,
+  wsId: string,
+  payload: ChatSessionUpdatedPayload,
+): void {
+  qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), (old) => {
+    if (!old) return old;
+    const next = old.map((s) =>
+      s.id === payload.chat_session_id
+        ? {
+            ...s,
+            title: payload.title ?? s.title,
+            pinned: payload.pinned ?? s.pinned,
+            status: payload.status ?? s.status,
+            updated_at: payload.updated_at ?? s.updated_at,
+            ...(payload.status === "archived"
+              ? { unread_count: 0, has_unread: false }
+              : {}),
+          }
+        : s,
+    );
+    return payload.pinned === undefined && payload.status === undefined
+      ? next
+      : sortChatSessions(next);
+  });
+}
+
+function removeChatMessageFromPageCache(
+  qc: QueryClient,
+  sessionId: string,
+  messageId: string,
+) {
+  qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
+    chatKeys.messagesPage(sessionId),
+    (old) => {
+      if (!old) return old;
+      return {
+        ...old,
+        pages: old.pages.map((page) => ({
+          ...page,
+          messages: page.messages.filter((m) => m.id !== messageId),
+        })),
+      };
+    },
+  );
+}
+
+export function removeChatMessageFromCaches(
+  qc: QueryClient,
+  sessionId: string,
+  messageId: string,
+) {
+  qc.setQueryData<ChatMessage[]>(
+    chatKeys.messages(sessionId),
+    (old) => old?.filter((m) => m.id !== messageId) ?? old,
+  );
+  removeChatMessageFromPageCache(qc, sessionId, messageId);
+}
+
+/**
+ * Apply a chat:cancel_finalized event (#5219): the deferred outcome of a
+ * cancelled chat task, settled after the daemon's transcript flush.
+ *
+ * - outcome "stopped": a late "Stopped." assistant row was persisted —
+ *   insert it exactly like a chat:done message.
+ * - outcome "restored": the triggering user message was deleted — drop it
+ *   from the caches. The deleted prompt itself never rides this
+ *   workspace-wide broadcast: it is durable server-side and only the
+ *   initiator's client refetches it through the creator-authorized
+ *   draft-restores query, which the session's composer applies and consumes.
+ *
+ * The draft-restores invalidation is gated to the task's initiator and fails
+ * closed when initiator_user_id is missing — nothing is lost either way,
+ * because the durable restore is fetched again on the next composer mount or
+ * network reconnect. Cache patches stay unconditional — they are no-ops for
+ * anyone not viewing the session.
+ */
+export function applyChatCancelFinalizedToCache(
+  qc: QueryClient,
+  payload: ChatCancelFinalizedPayload,
+  currentUserId?: string,
+) {
+  const sessionId = payload.chat_session_id;
+  if (!sessionId) return;
+  if (payload.outcome === "stopped") {
+    applyChatDoneToCache(qc, {
+      chat_session_id: sessionId,
+      task_id: payload.task_id,
+      message_id: payload.message_id,
+      content: payload.content,
+      elapsed_ms: payload.elapsed_ms,
+      created_at: payload.created_at,
+      message_kind: payload.message_kind,
+    });
+    return;
+  }
+  if (payload.outcome === "restored") {
+    if (payload.message_id) {
+      removeChatMessageFromCaches(qc, sessionId, payload.message_id);
+    }
+    qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+    invalidateChatMessageQueries(qc, sessionId);
+    const isInitiator =
+      !!payload.initiator_user_id &&
+      !!currentUserId &&
+      payload.initiator_user_id === currentUserId;
+    if (isInitiator) {
+      void qc.invalidateQueries({ queryKey: chatKeys.draftRestores(sessionId) });
+    }
+  }
+}
+
+/**
+ * Apply a workspace:updated event directly to the cached workspace list.
+ * If the incoming `issue_prefix` differs from what's currently cached, also
+ * invalidates issueKeys.all for that workspace, since every issue's rendered
+ * identifier (`MUL-123`) is recomputed from the workspace prefix at read time.
  *
  * If the workspace isn't in the cached list (first observation), we
  * conservatively invalidate — the prefix is effectively "new" relative to
@@ -203,13 +343,21 @@ export function applyWorkspaceUpdatedToCache(
 ): void {
   const next = payload.workspace;
   if (next?.id) {
-    const cached =
-      qc
-        .getQueryData<Workspace[]>(workspaceKeys.list())
-        ?.find((w) => w.id === next.id) ?? null;
-    if (!cached || cached.issue_prefix !== next.issue_prefix) {
+    const list = qc.getQueryData<Workspace[]>(workspaceKeys.list());
+    const cached = list?.find((w) => w.id === next.id) ?? null;
+    if (cached && cached.issue_prefix !== next.issue_prefix) {
       qc.invalidateQueries({ queryKey: issueKeys.all(next.id) });
     }
+    if (cached && list) {
+      qc.setQueryData<Workspace[]>(
+        workspaceKeys.list(),
+        list.map((workspace) => (workspace.id === next.id ? next : workspace)),
+      );
+      return;
+    }
+    // Do not seed an absent list with one workspace: staleTime is Infinity,
+    // so doing so would hide every other membership until a hard refresh.
+    qc.invalidateQueries({ queryKey: issueKeys.all(next.id) });
   }
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
@@ -350,6 +498,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
   }
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
@@ -375,6 +524,10 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: chatKeys.messagesPageAll() });
   qc.invalidateQueries({ queryKey: chatKeys.pendingTaskAll() });
   qc.invalidateQueries({ queryKey: chatKeys.taskMessagesAll() });
+  // A chat:cancel_finalized broadcast missed while disconnected is exactly
+  // what the durable draft-restore rows exist for (#5219) — re-pull them so
+  // a mounted composer recovers the prompt without a remount.
+  qc.invalidateQueries({ queryKey: chatKeys.draftRestoresAll() });
   qc.invalidateQueries({ queryKey: workspaceKeys.list() });
 }
 
@@ -436,11 +589,12 @@ export function useRealtimeSync(
       inbox: () => {
         const wsId = getCurrentWsId();
         if (wsId) onInboxInvalidate(qc, wsId);
-        // inbox:read / inbox:archived / batch events arrive here. They can
-        // originate from a workspace other than the active one (personal
-        // events fan out to all the user's connections), so always refresh
-        // the cross-workspace summary — its dot must clear when another
-        // workspace's items are read/archived.
+        // inbox:read / inbox:archived / inbox:unarchived / batch events arrive
+        // here. They can originate from a workspace other than the active one
+        // (personal events fan out to all the user's connections), so always
+        // refresh the cross-workspace summary — its dot must clear when another
+        // workspace's items are read/archived, and light again when an unread
+        // item is restored from the archive.
         onInboxSummaryInvalidate(qc);
       },
       agent: () => {
@@ -600,7 +754,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
-      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "issue_metadata:changed", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -609,8 +763,8 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:session_read", "chat:session_deleted",
-      "chat:session_updated",
+      "chat:message", "chat:done", "chat:cancel_finalized", "chat:session_read",
+      "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
       // every message would flood the network. Specific chat handlers below
@@ -683,6 +837,28 @@ export function useRealtimeSync(
       if (wsId) onIssueMetadataChanged(qc, wsId, issue_id, metadata ?? {});
     });
 
+    const unsubIssuePropertiesChanged = ws.on("issue_properties:changed", (p) => {
+      const { issue_id, properties } = p as IssuePropertiesChangedPayload;
+      if (!issue_id) return;
+      const wsId = getCurrentWsId();
+      if (wsId) {
+        onIssuePropertiesChanged(qc, wsId, issue_id, properties ?? {});
+        // The catalog embeds per-definition usage counts; every value
+        // set/unset shifts them. The list is tiny, so a refetch beats
+        // trying to patch counts client-side.
+        qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+      }
+    });
+
+    // Definition changes (create / rename / options / archive) — refetch the
+    // catalog; issue caches keep raw value bags so they stay valid.
+    const unsubPropertyChanged = ["property:created", "property:updated"].map((event) =>
+      ws.on(event as "property:created" | "property:updated", () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+      }),
+    );
+
     const unsubInboxNew = ws.on("inbox:new", async (p) => {
       const { item } = p as InboxNewPayload;
       if (!item) return;
@@ -714,7 +890,15 @@ export function useRealtimeSync(
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (!comment?.issue_id) return;
+      invalidateTimeline(comment.issue_id);
+      // A new comment bumps the parent issue's updated_at server-side
+      // (MUL-5009), so any open board/list sorted by "Updated date" has
+      // drifted. Refetch just those keys to re-sort the commented card into
+      // place; every other sort is untouched. Only comment:created bumps
+      // updated_at, so the other comment events below deliberately do not.
+      const wsId = getCurrentWsId();
+      if (wsId) invalidateUpdatedAtSortedIssueLists(qc, wsId);
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
@@ -975,6 +1159,24 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
+    // Deferred cancellation outcome (#5219): the server settles the
+    // empty/non-empty judgment only after the daemon's transcript flush, so
+    // this event arrives seconds after the cancel HTTP response — nothing
+    // else re-fetches at that point.
+    const unsubChatCancelFinalized = ws.on("chat:cancel_finalized", (p) => {
+      const payload = p as ChatCancelFinalizedPayload;
+      chatWsLogger.info("chat:cancel_finalized (global)", {
+        task_id: payload.task_id,
+        chat_session_id: payload.chat_session_id,
+        outcome: payload.outcome,
+      });
+      applyChatCancelFinalizedToCache(qc, payload, authStore.getState().user?.id);
+      if (payload.outcome === "stopped") {
+        // A Stopped. assistant row just landed → session previews change.
+        invalidateSessionLists();
+      }
+    });
+
     // Chat task lifecycle writethrough: keep `chatKeys.pendingTask(sessionId)`
     // synchronized with the server state machine via setQueryData rather than
     // invalidate-refetch. Same pattern as task:message — the WS payload
@@ -1123,42 +1325,16 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
-    // chat:session_updated fires after the creator renames a session in
-    // any tab/device. Patch the cached row inline so the dropdown reflects
-    // the new title without a full sessions-list refetch.
+    // chat:session_updated fires after the creator renames, pins, or archives
+    // a session in any tab/device. Patch the cached row inline so the dropdown
+    // and badges reflect the change without a full sessions-list refetch — see
+    // applyChatSessionUpdatedToCache for why archive must also zero unread.
     const unsubChatSessionUpdated = ws.on("chat:session_updated", (p) => {
-      const payload = p as {
-        chat_session_id: string;
-        title?: string;
-        pinned?: boolean;
-        status?: "active" | "archived";
-        updated_at?: string;
-      };
+      const payload = p as ChatSessionUpdatedPayload;
       chatWsLogger.info("chat:session_updated (global)", payload);
       const id = getCurrentWsId();
       if (!id) return;
-      // `pinned` is present only on pin/unpin events and `status` only on
-      // archive/unarchive; a plain rename omits both, so leave the existing
-      // state untouched then. When either changes we re-sort so the row lands
-      // in the right place (pin → top; archive → the other list) like the
-      // server order.
-      qc.setQueryData<ChatSession[]>(chatKeys.sessions(id), (old) => {
-        if (!old) return old;
-        const next = old.map((s) =>
-          s.id === payload.chat_session_id
-            ? {
-                ...s,
-                title: payload.title ?? s.title,
-                pinned: payload.pinned ?? s.pinned,
-                status: payload.status ?? s.status,
-                updated_at: payload.updated_at ?? s.updated_at,
-              }
-            : s,
-        );
-        return payload.pinned === undefined && payload.status === undefined
-          ? next
-          : sortChatSessions(next);
-      });
+      applyChatSessionUpdatedToCache(qc, id, payload);
     });
 
     // chat:session_deleted fires after a hard delete. The originating tab has
@@ -1192,6 +1368,8 @@ export function useRealtimeSync(
       unsubIssueDeleted();
       unsubIssueLabelsChanged();
       unsubIssueMetadataChanged();
+      unsubIssuePropertiesChanged();
+      unsubPropertyChanged.forEach((unsub) => unsub());
       unsubInboxNew();
       unsubCommentCreated();
       unsubCommentUpdated();
@@ -1216,6 +1394,7 @@ export function useRealtimeSync(
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();
+      unsubChatCancelFinalized();
       unsubTaskQueued();
       unsubTaskDispatch();
       unsubTaskRunning();

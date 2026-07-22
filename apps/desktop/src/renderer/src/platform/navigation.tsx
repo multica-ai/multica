@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
-import type { DataRouter } from "react-router-dom";
+import { useMemo } from "react";
 import {
   NavigationProvider,
   type NavigationAdapter,
@@ -8,10 +7,9 @@ import { useAuthStore } from "@multica/core/auth";
 import { isReservedSlug } from "@multica/core/paths";
 import {
   useTabStore,
-  resolveRouteIcon,
-  useActiveTabIdentity,
-  useActiveTabRouter,
   getActiveTab,
+  splitTabUrl,
+  useActiveTabUrl,
 } from "@/stores/tab-store";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 
@@ -41,35 +39,24 @@ function extractWorkspaceSlug(path: string): string | null {
  * desktop are rendered as a window-level overlay instead of a tab route.
  * Returns `true` if the navigation was handled (caller should NOT proceed).
  *
- * Side effect: when opening the new-workspace overlay, the tab router is
- * ALSO reset to "/". Rationale — the only way a push lands on
- * /workspaces/new is that the workspace context is gone (fresh install,
- * delete-last, leave-last). Leaving the tab parked on a workspace-scoped
- * path would keep those components mounted under the overlay; the next
- * render after the list cache updates would then throw (useWorkspaceId
- * etc) because the slug no longer resolves.
+ * MUL-4741 note: the old adapter also parked the tab's router at "/" when
+ * opening these overlays. Under the session architecture the Coordinator
+ * parks the single router automatically whenever `activeWorkspaceSlug` goes
+ * null (the zero-workspace flows), and an overlay opened over a still-valid
+ * workspace simply covers the mounted tab — no navigation happens at all.
  */
-function tryRouteToOverlay(path: string, router?: DataRouter): boolean {
+function tryRouteToOverlay(path: string): boolean {
   const overlay = useWindowOverlayStore.getState();
   if (path === "/workspaces/new") {
     overlay.open({ type: "new-workspace" });
-    if (router && router.state.location.pathname !== "/") {
-      router.navigate("/", { replace: true });
-    }
     return true;
   }
   if (path === "/onboarding") {
     overlay.open({ type: "onboarding" });
-    if (router && router.state.location.pathname !== "/") {
-      router.navigate("/", { replace: true });
-    }
     return true;
   }
   if (path === "/invitations") {
     overlay.open({ type: "invitations" });
-    if (router && router.state.location.pathname !== "/") {
-      router.navigate("/", { replace: true });
-    }
     return true;
   }
   if (path.startsWith("/invite/")) {
@@ -87,11 +74,6 @@ function tryRouteToOverlay(path: string, router?: DataRouter): boolean {
   // Any other navigation cancels a live overlay.
   if (overlay.overlay) overlay.close();
   return false;
-}
-
-function routerLocationPath(router: DataRouter): string {
-  const { pathname, search, hash } = router.state.location;
-  return `${pathname}${search ?? ""}${hash ?? ""}`;
 }
 
 /**
@@ -121,35 +103,33 @@ function tryRouteToOtherWorkspace(path: string): boolean {
  * still work — see RFC §3 D2a (FINAL: any pathname change → new tab) and
  * D2b (FINAL: same pathname → allowed in pinned tab).
  *
- * Dedupe is preserved (D4a): `openTab` activates an existing same-path tab
- * if one exists, otherwise creates a new one. The newly-focused tab is
- * activated foreground — a pinned-tab push is an explicit user action, not
- * a background cmd+click, so the focus follows.
+ * Dedupe is preserved (D4a): `openTab` activates an existing tab with the
+ * same resourceKey if one exists, otherwise creates a new one. The
+ * newly-focused tab is activated foreground — a pinned-tab push is an
+ * explicit user action, not a background cmd+click, so the focus follows.
  */
 function tryRouteToPinnedNewTab(path: string): boolean {
   const store = useTabStore.getState();
   const active = getActiveTab(store);
   if (!active?.pinned) return false;
 
-  // Use the live router pathname rather than `active.path` so query-only
-  // navigations performed via React Router (which only sync pathname back
-  // to the store) still compare correctly.
-  const currentPathname = active.router.state.location.pathname;
-  const newPathname = path.split("?")[0].split("#")[0];
+  const currentPathname = splitTabUrl(active.url).pathname;
+  const newPathname = splitTabUrl(path).pathname;
   if (currentPathname === newPathname) return false;
 
-  const icon = resolveRouteIcon(path);
-  const newId = store.openTab(path, path, icon);
-  if (newId) store.setActiveTab(newId);
+  store.openTab(path, "", { activate: true });
   return true;
 }
 
 /**
- * Root-level navigation provider for components outside the per-tab
- * RouterProviders (sidebar, search dialog, modals, WindowOverlay contents).
+ * Navigation provider for the whole desktop shell — sidebar, search dialog,
+ * modals, WindowOverlay contents, AND the page tree inside the single
+ * RouterProvider (there is no per-tab provider anymore; the active session's
+ * URL is the location for everyone).
  *
- * Reads from the active tab's memory router via router.subscribe().
- * Does NOT use any react-router hooks — it's above all RouterProviders.
+ * MUL-4741 invariant 1: none of these operations touch the router. They
+ * mutate tab sessions in the store; the Coordinator reconciles the single
+ * router to the active session URL with a navigation token.
  */
 export function DesktopNavigationProvider({
   children,
@@ -157,39 +137,16 @@ export function DesktopNavigationProvider({
   children: React.ReactNode;
 }) {
   const appUrl = requireRuntimeAppUrl("DesktopNavigationProvider");
-  // Primitive-only subscriptions so this component doesn't re-render on
-  // unrelated store updates (e.g. an inactive tab's router tick). We
-  // resolve the active router here only to subscribe once per tab switch.
-  const { tabId: activeTabId } = useActiveTabIdentity();
-  const router = useActiveTabRouter();
-  // Mirror the active tab router's full location (pathname + search) so
-  // shell-level consumers of useNavigation() — ChatWindow in particular —
-  // can read URL search params. Must stay in sync with TabNavigationProvider
-  // below; a partial shape here (just pathname) silently broke focus-mode
-  // anchor resolution on `/inbox?issue=…`.
-  const [location, setLocation] = useState<{ pathname: string; search: string }>(
-    () => ({
-      pathname: router?.state.location.pathname ?? "/",
-      search: router?.state.location.search ?? "",
-    }),
-  );
-
-  useEffect(() => {
-    if (!router) {
-      setLocation({ pathname: "/", search: "" });
-      return;
-    }
-    setLocation({
-      pathname: router.state.location.pathname,
-      search: router.state.location.search,
-    });
-    return router.subscribe((state) => {
-      setLocation({
-        pathname: state.location.pathname,
-        search: state.location.search,
-      });
-    });
-  }, [activeTabId, router]);
+  // The active session's url IS the location. Primitive subscription: this
+  // only re-renders when the active url actually changes.
+  const activeUrl = useActiveTabUrl();
+  const location = useMemo(() => {
+    const url = activeUrl ?? "/";
+    const { pathname, suffix } = splitTabUrl(url);
+    const hashIdx = suffix.indexOf("#");
+    const search = hashIdx === -1 ? suffix : suffix.slice(0, hashIdx);
+    return { pathname, search };
+  }, [activeUrl]);
 
   const adapter: NavigationAdapter = useMemo(
     () => ({
@@ -198,21 +155,21 @@ export function DesktopNavigationProvider({
           useAuthStore.getState().logout();
           return;
         }
-        const active = currentActiveTab();
-        if (tryRouteToOverlay(path, active?.router)) return;
-        if (active && routerLocationPath(active.router) === path) return;
+        if (tryRouteToOverlay(path)) return;
+        const store = useTabStore.getState();
+        const active = getActiveTab(store);
+        if (active && active.url === path) return;
         if (tryRouteToOtherWorkspace(path)) return;
         if (tryRouteToPinnedNewTab(path)) return;
-        active?.router.navigate(path);
+        store.navigateActiveSession(path);
       },
       replace: (path: string) => {
-        const active = currentActiveTab();
-        if (tryRouteToOverlay(path, active?.router)) return;
+        if (tryRouteToOverlay(path)) return;
         if (tryRouteToOtherWorkspace(path)) return;
-        active?.router.navigate(path, { replace: true });
+        useTabStore.getState().navigateActiveSession(path, { replace: true });
       },
       back: () => {
-        currentActiveTab()?.router.navigate(-1);
+        useTabStore.getState().goBack();
       },
       pathname: location.pathname,
       searchParams: new URLSearchParams(location.search),
@@ -232,84 +189,11 @@ export function DesktopNavigationProvider({
           store.switchWorkspace(slug, path);
           return;
         }
-        const icon = resolveRouteIcon(path);
-        const newId = store.openTab(path, title ?? path, icon);
-        if (opts?.activate && newId) {
-          store.setActiveTab(newId);
-        }
+        store.openTab(path, title ?? "", { activate: opts?.activate });
       },
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),
     [appUrl, location],
-  );
-
-  return <NavigationProvider value={adapter}>{children}</NavigationProvider>;
-}
-
-function currentActiveTab() {
-  return getActiveTab(useTabStore.getState());
-}
-
-/**
- * Per-tab navigation provider rendered inside each tab's Activity wrapper.
- * Subscribes to the tab's own router for up-to-date pathname.
- *
- * This is what @multica/views page components read via useNavigation().
- */
-export function TabNavigationProvider({
-  router,
-  children,
-}: {
-  router: DataRouter;
-  children: React.ReactNode;
-}) {
-  const appUrl = requireRuntimeAppUrl("TabNavigationProvider");
-  const [location, setLocation] = useState(router.state.location);
-
-  useEffect(() => {
-    setLocation(router.state.location);
-    return router.subscribe((state) => {
-      setLocation(state.location);
-    });
-  }, [router]);
-
-  const adapter: NavigationAdapter = useMemo(
-    () => ({
-      push: (path: string) => {
-        if (tryRouteToOverlay(path, router)) return;
-        if (routerLocationPath(router) === path) return;
-        if (tryRouteToOtherWorkspace(path)) return;
-        if (tryRouteToPinnedNewTab(path)) return;
-        router.navigate(path);
-      },
-      replace: (path: string) => {
-        if (tryRouteToOverlay(path, router)) return;
-        if (tryRouteToOtherWorkspace(path)) return;
-        router.navigate(path, { replace: true });
-      },
-      back: () => router.navigate(-1),
-      pathname: location.pathname,
-      searchParams: new URLSearchParams(location.search),
-      openInNewTab: (
-        path: string,
-        title?: string,
-        opts?: { activate?: boolean },
-      ) => {
-        const slug = extractWorkspaceSlug(path);
-        const store = useTabStore.getState();
-        if (slug && slug !== store.activeWorkspaceSlug) {
-          store.switchWorkspace(slug, path);
-          return;
-        }
-        const icon = resolveRouteIcon(path);
-        const newId = store.openTab(path, title ?? path, icon);
-        if (opts?.activate && newId) {
-          store.setActiveTab(newId);
-        }
-      },
-      getShareableUrl: (path: string) => `${appUrl}${path}`,
-    }),
-    [appUrl, router, location],
   );
 
   return <NavigationProvider value={adapter}>{children}</NavigationProvider>;

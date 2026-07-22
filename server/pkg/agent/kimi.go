@@ -53,8 +53,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 	// `kimi acp` ignores --yolo / --auto-approve (they're flags on the
 	// root `kimi` command, not on the `acp` subcommand). Instead, the
-	// daemon auto-approves in hermesClient.handleAgentRequest by replying
-	// "approve_for_session" to every session/request_permission request.
+	// daemon auto-approves in hermesClient.handleAgentRequest by selecting
+	// a safe granting option the agent offered (see
+	// selectACPApprovalOptionID) for each session/request_permission request.
 	kimiArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, kimiBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, kimiArgs...)
 	hideAgentWindow(cmd)
@@ -178,6 +179,10 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		finalStatus := "completed"
 		var finalError string
 		var sessionID string
+		// Set when the ACP runtime refuses the session we asked to
+		// resume. Only that is curable by starting a fresh session, so
+		// handshake/network failures below must leave it false.
+		var resumeRejected bool
 
 		// 1. Initialize handshake.
 		initResult, err := c.request(runCtx, "initialize", map[string]any{
@@ -283,12 +288,14 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 						"session_id", sessionID,
 					)
 					sessionID = ""
+					resumeRejected = true
 				}
 				resCh <- Result{
-					Status:     finalStatus,
-					Error:      finalError,
-					DurationMs: time.Since(startTime).Milliseconds(),
-					SessionID:  sessionID,
+					Status:         finalStatus,
+					Error:          finalError,
+					DurationMs:     time.Since(startTime).Milliseconds(),
+					SessionID:      sessionID,
+					ResumeRejected: resumeRejected,
 				}
 				return
 			}
@@ -330,6 +337,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 						"session_id", sessionID,
 					)
 					sessionID = ""
+					resumeRejected = true
 				}
 			}
 		} else {
@@ -384,12 +392,13 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  sessionID,
-			Usage:      usageMap,
+			Status:         finalStatus,
+			Output:         finalOutput,
+			Error:          finalError,
+			DurationMs:     duration.Milliseconds(),
+			SessionID:      sessionID,
+			ResumeRejected: resumeRejected,
+			Usage:          usageMap,
 		}
 	}()
 

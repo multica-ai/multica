@@ -2,11 +2,13 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -26,6 +28,8 @@ Rules:
 - name is concise and suitable for a workspace list.
 - description is one sentence, at most 200 characters.
 - instructions are a complete Markdown system prompt describing role, workflow, output, and constraints.
+- model must be empty, preserve current_draft.model, or exactly match an id explicitly listed in AVAILABLE RUNTIME MODELS. Never use a model label as the id.
+- When AVAILABLE RUNTIME MODELS is null or empty, preserve current_draft.model and never invent a model id.
 - skill_ids may only contain IDs explicitly listed in AVAILABLE WORKSPACE SKILLS.
 - permission_scope must be private, workspace, or members. Default to private unless the user explicitly requests sharing.
 - member_ids may only contain IDs explicitly listed in AVAILABLE WORKSPACE MEMBERS, and only when permission_scope is members.
@@ -104,6 +108,18 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+
+	// FOR KEY SHARE on the workspace row before creating the builder's chat_session
+	// — the creator half of the #5219 delete/create protocol, so a session cannot
+	// be created into a workspace mid-delete (see LockWorkspaceForChatSessionCreate).
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(r.Context(), workspaceUUID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock workspace")
+		return
+	}
 
 	builder, err := qtx.CreateAgentBuilder(r.Context(), db.CreateAgentBuilderParams{
 		WorkspaceID:  workspaceUUID,

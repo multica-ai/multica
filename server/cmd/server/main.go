@@ -124,6 +124,41 @@ func envDuration(name string, def time.Duration) time.Duration {
 	return v
 }
 
+func envNonNegativeDuration(name string, def time.Duration) time.Duration {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	v, err := time.ParseDuration(raw)
+	if err != nil || v < 0 {
+		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", def.String(), "error", err)
+		return def
+	}
+	return v
+}
+
+func holdBeforeShutdown(sig os.Signal, signals <-chan os.Signal, duration time.Duration) {
+	if duration <= 0 {
+		return
+	}
+	slog.Info("termination signal received; holding before shutdown",
+		"signal", sig.String(),
+		"duration", duration.String(),
+	)
+	timer := time.NewTimer(duration)
+	defer timer.Stop()
+
+	select {
+	case <-timer.C:
+		slog.Info("shutdown hold complete", "duration", duration.String())
+	case interruptSig := <-signals:
+		slog.Info("shutdown hold interrupted by signal",
+			"signal", interruptSig.String(),
+			"configured_duration", duration.String(),
+		)
+	}
+}
+
 func envBool(name string, def bool) bool {
 	raw := os.Getenv(name)
 	if raw == "" {
@@ -159,6 +194,7 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	shutdownHoldDuration := envNonNegativeDuration("MULTICA_SHUTDOWN_HOLD_DURATION", 0)
 
 	// Feature flags: loaded once at startup from MULTICA_FEATURE_FLAGS_FILE
 	// (a YAML rule set) with FF_<KEY> env overrides layered on top.
@@ -389,6 +425,9 @@ func main() {
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+	if h.WebhookDeliveryWorker != nil {
+		go h.WebhookDeliveryWorker.Run(sweepCtx)
+	}
 
 	// Channel inbound supervisor (MUL-3620): holds the §4.4 WS lease per
 	// installation and drives each channel.Channel. It is built
@@ -451,7 +490,11 @@ func main() {
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	sig := <-quit
+	holdBeforeShutdown(sig, quit, shutdownHoldDuration)
+	// Restore the default behavior so another signal during graceful shutdown
+	// can still terminate the process instead of being left unread in quit.
+	signal.Stop(quit)
 
 	slog.Info("shutting down server")
 	autopilotCancel()
@@ -472,6 +515,9 @@ func main() {
 	// final batch of queued heartbeat bumps.
 	sweepCancel()
 	heartbeatScheduler.Stop()
+	if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
+		slog.Warn("webhook delivery worker did not exit within shutdown timeout")
+	}
 
 	// Join the channel supervisor's per-installation goroutines so the
 	// lease renewer can issue a final release before process exit;

@@ -30,6 +30,10 @@
     "sticky_comment_bar": {
       "title": "댓글 입력창 고정",
       "hint": "이슈 페이지를 스크롤할 때 댓글 입력창을 항상 하단에 고정합니다."
+    },
+    "issue_link_new_tab": {
+      "title": "이슈 링크를 새 탭에서 열기",
+      "hint": "설명, 댓글, 채팅의 이슈 링크를 현재 페이지에서 이동하지 않고 새 탭에서 엽니다."
     }
   },
   "shortcuts": {
@@ -63,7 +67,7 @@
       "createIssue": { "label": "Issue 만들기", "description": "선호하는 issue 만들기 흐름을 엽니다." },
       "toggleSidebar": { "label": "사이드바 전환", "description": "기본 사이드바를 표시하거나 숨깁니다." },
       "findInIssue": { "label": "Issue에서 찾기", "description": "열린 issue 상세 내용에서 검색합니다." },
-      "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보냅니다." },
+      "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 이슈를 만듭니다." },
       "goInbox": { "label": "받은 편지함으로 이동", "description": "워크스페이스 받은 편지함을 엽니다." },
       "goChat": { "label": "채팅으로 이동", "description": "워크스페이스 채팅을 엽니다." },
       "goMyIssues": { "label": "내 Issues로 이동", "description": "나에게 할당된 issue를 엽니다." },
@@ -92,6 +96,22 @@
     "floating_label": "플로팅 채팅 창",
     "floating_hint": "모든 페이지 모서리에 플로팅 채팅 버튼을 표시합니다. 기본값은 꺼짐 — 켜면 어디서나 채팅을 불러올 수 있고, 꺼면 채팅은 이 탭에서만 사용할 수 있습니다."
   },
+  "issue": {
+    "description": "각 생성 방식의 툴바에 항상 표시할 필드를 선택합니다. 숨긴 필드는 ⋯ 메뉴에서 계속 사용할 수 있으며, 값이 있는 동안에는 자동으로 표시됩니다.",
+    "quick_create_title": "에이전트로 만들기",
+    "quick_create_description": "빠른 생성 툴바에 표시할 필드입니다.",
+    "manual_create_title": "직접 만들기",
+    "manual_create_description": "직접 만들기 툴바에 표시할 필드입니다.",
+    "fields": {
+      "status": "상태",
+      "priority": "우선순위",
+      "assignee": "담당자",
+      "labels": "레이블",
+      "project": "프로젝트",
+      "due_date": "마감일",
+      "start_date": "시작일"
+    }
+  },
   "page": {
     "title": "설정",
     "my_account": "내 계정",
@@ -100,6 +120,7 @@
       "profile": "프로필",
       "preferences": "환경설정",
       "shortcuts": "단축키",
+      "issue": "이슈",
       "chat": "채팅",
       "notifications": "알림",
       "tokens": "API 토큰",
@@ -109,7 +130,73 @@
       "integrations": "연동",
       "labs": "실험실",
       "members": "멤버",
-      "labels": "레이블"
+      "labels": "레이블",
+      "properties": "속성"
+    }
+  },
+  "properties": {
+    "title": "속성",
+    "description": "이 워크스페이스의 Issue에 타입이 있는 사용자 지정 속성을 정의합니다. 값은 각 Issue에 설정되며 에이전트가 읽고 쓸 수 있습니다.",
+    "search_placeholder": "이름으로 필터...",
+    "new_property": "새 속성",
+    "show_archived": "보관된 항목 표시",
+    "columns": {
+      "name": "이름",
+      "type": "유형",
+      "options": "옵션",
+      "usage": "사용",
+      "updated": "업데이트"
+    },
+    "usage_count_other": "{{count}}개 Issue",
+    "loading": "속성을 불러오는 중...",
+    "empty": "아직 속성이 없습니다",
+    "empty_hint": "Severity, Environment 같은 타입 필드를 만들어 보세요. 에이전트가 검증과 함께 읽고 씁니다.",
+    "no_results": "일치하는 속성이 없습니다",
+    "save_failed": "속성을 저장하지 못했습니다",
+    "limit_hint": "활성 속성 {{count}}/{{max}}",
+    "archived_badge": "보관됨",
+    "types": {
+      "text": "텍스트",
+      "number": "숫자",
+      "select": "선택",
+      "multi_select": "다중 선택",
+      "date": "날짜",
+      "checkbox": "체크박스",
+      "url": "URL"
+    },
+    "actions": {
+      "open": "{{name}} 작업",
+      "edit": "편집",
+      "archive": "보관",
+      "unarchive": "복원"
+    },
+    "editor": {
+      "create_title": "새 속성",
+      "edit_title": "속성 편집",
+      "admin_hint": "워크스페이스 소유자와 관리자만 속성 정의를 관리할 수 있습니다.",
+      "icon": "아이콘",
+      "choose_icon": "아이콘 선택",
+      "remove_icon": "아이콘 제거",
+      "name": "이름",
+      "name_placeholder": "예: Severity",
+      "type": "유형",
+      "type_locked_hint": "생성 후에는 유형을 변경할 수 없습니다.",
+      "description": "설명",
+      "description_placeholder": "이 속성의 의미와 설정 시점",
+      "options": "옵션",
+      "option_name_placeholder": "옵션 이름",
+      "add_option": "옵션 추가",
+      "remove_option": "옵션 제거",
+      "cancel": "취소",
+      "save": "속성 저장",
+      "saving": "저장 중..."
+    },
+    "archive_dialog": {
+      "title": "속성을 보관할까요?",
+      "description": "\"{{name}}\"이(가) 선택기와 필터에서 숨겨집니다. Issue의 기존 값은 유지되며 나중에 복원할 수 있습니다.",
+      "cancel": "취소",
+      "confirm": "속성 보관",
+      "failed": "속성을 보관하지 못했습니다"
     }
   },
   "labels": {
@@ -143,7 +230,6 @@
       "description": "설명",
       "description_placeholder": "이 레이블을 사용할 때를 설명하세요",
       "color": "색상",
-      "custom_color": "사용자 지정 색상 선택",
       "cancel": "취소",
       "save": "레이블 저장",
       "saving": "저장 중..."
@@ -381,10 +467,13 @@
     },
     "updates": {
       "title": "업데이트",
-      "description": "데스크톱 앱은 한 시간에 한 번, 그리고 실행 직후 새 버전을 자동으로 확인하고 백그라운드에서 다운로드합니다. 업데이트가 준비되면 다시 시작하라는 안내가 표시됩니다.",
+      "description": "자동 백그라운드 업데이트를 설정하거나 새 버전을 직접 확인합니다.",
       "current_version": "현재 버전",
+      "automatic_updates_title": "자동 백그라운드 업데이트",
+      "automatic_updates_description": "사용하면 앱 실행 직후와 한 시간마다 업데이트를 확인하고 사용 가능한 버전을 백그라운드에서 다운로드합니다.",
+      "automatic_updates_save_failed": "자동 업데이트 설정을 저장하지 못했습니다",
       "check_section_title": "업데이트 확인",
-      "check_section_description": "다음 자동 확인을 기다리지 않고 지금 확인합니다. 사용 가능한 업데이트는 백그라운드에서 다운로드되며 준비되면 다시 시작 안내가 표시됩니다.",
+      "check_section_description": "자동 업데이트 설정과 관계없이 지금 확인합니다. 사용 가능한 업데이트는 백그라운드에서 다운로드되며 준비되면 다시 시작 안내가 표시됩니다.",
       "up_to_date": "최신 버전입니다.",
       "downloading": "v{{version}}을(를) 백그라운드에서 다운로드 중입니다. 설치 준비가 끝나면 알림을 드립니다.",
       "check_now": "지금 확인",

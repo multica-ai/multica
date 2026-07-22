@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen } from "@testing-library/react";
-import { createRef } from "react";
+import { createRef, useState } from "react";
 import type { Attachment } from "@multica/core/types";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 
@@ -33,6 +33,7 @@ const providerProps = vi.hoisted<{ attachments: Attachment[] | undefined }>(
 );
 
 const uploadAndInsertFileMock = vi.hoisted(() => vi.fn());
+const preprocessMarkdownMock = vi.hoisted(() => vi.fn((value: string) => value));
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({}),
@@ -52,7 +53,7 @@ vi.mock("./extensions/file-upload", () => ({
 }));
 
 vi.mock("./utils/preprocess", () => ({
-  preprocessMarkdown: (value: string) => value,
+  preprocessMarkdown: preprocessMarkdownMock,
 }));
 
 // Empty-list repair needs a live ProseMirror doc (covered by
@@ -81,6 +82,13 @@ vi.mock("./attachment-download-context", () => ({
 
 const editorRef = vi.hoisted<{ current: unknown }>(() => ({ current: null }));
 const onCreateFired = vi.hoisted(() => ({ value: false }));
+// Transaction listeners registered via `editor.on("transaction", …)`. The
+// upload-state publisher subscribes here; `emitTransaction` stands in for
+// ProseMirror dispatching a doc change.
+const transactionListeners = vi.hoisted(() => ({ current: [] as Array<() => void> }));
+const emitTransaction = () => {
+  for (const listener of [...transactionListeners.current]) listener();
+};
 const latestEditorOptions = vi.hoisted<{
   current?: { onUpdate?: (args: { editor: unknown }) => void };
 }>(() => ({}));
@@ -106,6 +114,15 @@ vi.mock("@tiptap/react", () => ({
           setTextSelection: mockSetTextSelection,
         },
         getMarkdown: () => editorState.markdown,
+        on: (event: string, cb: () => void) => {
+          if (event === "transaction") transactionListeners.current.push(cb);
+        },
+        off: (event: string, cb: () => void) => {
+          if (event !== "transaction") return;
+          transactionListeners.current = transactionListeners.current.filter(
+            (listener) => listener !== cb,
+          );
+        },
         view: { dispatch: mockDispatch },
         state: {
           get tr() {
@@ -146,10 +163,12 @@ describe("ContentEditor", () => {
     editorState.markdown = "";
     editorState.uploadingNodes = [];
     editorRef.current = null;
+    transactionListeners.current = [];
     onCreateFired.value = false;
     latestEditorOptions.current = undefined;
     providerProps.attachments = undefined;
     capturedExtOptions.current = undefined;
+    preprocessMarkdownMock.mockImplementation((value: string) => value);
   });
 
   afterEach(() => {
@@ -175,15 +194,15 @@ describe("ContentEditor", () => {
     expect(mockFocus).not.toHaveBeenCalled();
   });
 
-  it("syncs editor content when defaultValue changes externally and editor is unfocused", () => {
+  it("syncs editor content when value changes externally and editor is unfocused", () => {
     editorState.markdown = "old content";
-    const { rerender } = render(<ContentEditor defaultValue="old content" />);
+    const { rerender } = render(<ContentEditor value="old content" />);
 
     expect(mockSetContent).not.toHaveBeenCalled();
 
     // Editor still holds the old, in-sync content; external value changes.
     editorState.markdown = "old content";
-    rerender(<ContentEditor defaultValue="new content from server" />);
+    rerender(<ContentEditor value="new content from server" />);
 
     expect(mockSetContent).toHaveBeenCalledTimes(1);
     expect(mockSetContent).toHaveBeenCalledWith(
@@ -192,35 +211,109 @@ describe("ContentEditor", () => {
     );
   });
 
-  it("does not sync while a file upload is in flight (in-flight upload node must survive external defaultValue changes)", () => {
+  it("treats defaultValue as mount-only", () => {
+    editorState.markdown = "initial draft";
+    const { rerender } = render(<ContentEditor defaultValue="initial draft" />);
+
+    rerender(<ContentEditor defaultValue="draft store echo" />);
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("does not parse the initial defaultValue twice when markdown round-trip canonicalizes it", () => {
+    // useEditor already parsed defaultValue through its `content` option. The
+    // editor's canonical Markdown can legitimately differ from the source, so
+    // that difference alone must not trigger an immediate second setContent.
+    editorState.markdown = "- [ ] canonical task";
+
+    render(
+      <ContentEditor defaultValue={"- [ ] source task\n\ncontinuation"} />,
+    );
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("does not feed a locally emitted draft back through preprocessing", () => {
+    vi.useFakeTimers();
+    preprocessMarkdownMock.mockImplementation((value: string) =>
+      value === "dev.de" ? "[dev.de](http://dev.de)" : value,
+    );
+
+    function EchoingDraftHost() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ContentEditor
+          defaultValue={draft}
+          onUpdate={setDraft}
+          debounceMs={100}
+        />
+      );
+    }
+
+    render(<EchoingDraftHost />);
+    editorState.markdown = "dev.de";
+
+    act(() => {
+      latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("recognizes a synchronized value echo before preprocessing it", () => {
+    vi.useFakeTimers();
+    preprocessMarkdownMock.mockImplementation((value: string) =>
+      value === "dev.de" ? "[dev.de](http://dev.de)" : value,
+    );
+
+    function SynchronizedDraftHost() {
+      const [draft, setDraft] = useState("");
+      return (
+        <ContentEditor value={draft} onUpdate={setDraft} debounceMs={100} />
+      );
+    }
+
+    render(<SynchronizedDraftHost />);
+    editorState.markdown = "dev.de";
+
+    act(() => {
+      latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(mockSetContent).not.toHaveBeenCalled();
+  });
+
+  it("does not sync while a file upload is in flight (in-flight upload node must survive external value changes)", () => {
     editorState.markdown = "old content";
-    const { rerender } = render(<ContentEditor defaultValue="old content" />);
+    const { rerender } = render(<ContentEditor value="old content" />);
 
     // A file is uploading: the doc holds a node with attrs.uploading. An
-    // external defaultValue change (e.g. chat lazy-creating a session mid-upload
-    // flips the draft key → defaultValue) must NOT setContent over it, or the
+    // external value change (e.g. chat lazy-creating a session mid-upload
+    // flips the draft key → value) must NOT setContent over it, or the
     // uploading node is wiped and the upload's finalize can't find it.
     editorState.uploadingNodes = [{ attrs: { uploading: true } }];
-    rerender(<ContentEditor defaultValue="" />);
+    rerender(<ContentEditor value="" />);
 
     expect(mockSetContent).not.toHaveBeenCalled();
 
     // Once the upload settles (no uploading node), a later external change syncs.
     editorState.uploadingNodes = [];
-    rerender(<ContentEditor defaultValue="new content from server" />);
+    rerender(<ContentEditor value="new content from server" />);
     expect(mockSetContent).toHaveBeenCalledTimes(1);
   });
 
   it("does not sync when editor is focused and has unsaved local edits", () => {
     editorState.markdown = "old content";
-    const { rerender } = render(<ContentEditor defaultValue="old content" />);
+    const { rerender } = render(<ContentEditor value="old content" />);
 
     // User is typing — focused AND dirty (markdown diverges from
     // lastEmittedRef, which was seeded with "old content" by onCreate).
     editorState.isFocused = true;
     editorState.markdown = "user-typed-content";
 
-    rerender(<ContentEditor defaultValue="incoming external change" />);
+    rerender(<ContentEditor value="incoming external change" />);
 
     expect(mockSetContent).not.toHaveBeenCalled();
   });
@@ -232,12 +325,12 @@ describe("ContentEditor", () => {
     // With an unconditional `if (isFocused) return`, this sync would be lost
     // forever because onBlur has no replay path.
     editorState.markdown = "old content";
-    const { rerender } = render(<ContentEditor defaultValue="old content" />);
+    const { rerender } = render(<ContentEditor value="old content" />);
 
     editorState.isFocused = true;
     editorState.markdown = "old content"; // clean — no typing happened
 
-    rerender(<ContentEditor defaultValue="new content from server" />);
+    rerender(<ContentEditor value="new content from server" />);
 
     expect(mockSetContent).toHaveBeenCalledTimes(1);
     expect(mockSetContent).toHaveBeenCalledWith(
@@ -249,7 +342,7 @@ describe("ContentEditor", () => {
   it("does not sync when editor is unfocused but has unsaved local edits (blur-before-debounce window)", () => {
     editorState.markdown = "old content";
     const { rerender } = render(
-      <ContentEditor defaultValue="old content" onUpdate={() => {}} />,
+      <ContentEditor value="old content" onUpdate={() => {}} />,
     );
 
     // User typed locally, then blurred. Debounce hasn't flushed yet so
@@ -259,7 +352,7 @@ describe("ContentEditor", () => {
 
     rerender(
       <ContentEditor
-        defaultValue="external update from another agent"
+        value="external update from another agent"
         onUpdate={() => {}}
       />,
     );
@@ -267,14 +360,97 @@ describe("ContentEditor", () => {
     expect(mockSetContent).not.toHaveBeenCalled();
   });
 
-  it("does not sync when defaultValue normalizes to the current editor markdown", () => {
-    editorState.markdown = "same content";
-    const { rerender } = render(<ContentEditor defaultValue="same content" />);
+  // flushPendingUpdate exists for hosts that re-point ONE editor instance at a
+  // different destination mid-debounce (chat swapping draftKey between
+  // sessions). Without it the armed debounce fires after the switch and, since
+  // onUpdate always resolves to the latest render's closure, files the old
+  // document under the new destination (MUL-4864).
+  describe("flushPendingUpdate", () => {
+    it("hands back the pending markdown and cancels the debounce so it cannot fire later", () => {
+      vi.useFakeTimers();
+      const onUpdate = vi.fn();
+      const ref = createRef<ContentEditorRef>();
+      editorState.markdown = "old content";
+      render(
+        <ContentEditor ref={ref} defaultValue="old content" onUpdate={onUpdate} debounceMs={100} />,
+      );
 
-    // Different `defaultValue` string forces the effect to re-run (the dep
+      editorState.markdown = "typed but not yet flushed";
+      act(() => {
+        latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      });
+
+      // Taken back, not emitted — the host routes it to the source draft.
+      expect(ref.current?.flushPendingUpdate()).toBe("typed but not yet flushed");
+      expect(onUpdate).not.toHaveBeenCalled();
+
+      // The armed timer must be dead: firing now would write these bytes into
+      // whatever destination the host has since switched to.
+      act(() => {
+        vi.advanceTimersByTime(500);
+      });
+      expect(onUpdate).not.toHaveBeenCalled();
+    });
+
+    it("returns null when nothing is pending", () => {
+      const ref = createRef<ContentEditorRef>();
+      editorState.markdown = "settled";
+      render(<ContentEditor ref={ref} defaultValue="settled" onUpdate={vi.fn()} />);
+
+      expect(ref.current?.flushPendingUpdate()).toBeNull();
+    });
+
+    it("leaves the editor clean so the next value sync is no longer blocked by the dirty guard", () => {
+      vi.useFakeTimers();
+      const ref = createRef<ContentEditorRef>();
+      editorState.markdown = "draft A text";
+      const { rerender } = render(
+        <ContentEditor ref={ref} value="draft A text" onUpdate={vi.fn()} debounceMs={100} />,
+      );
+
+      // Unflushed local edits — this is what makes the editor dirty.
+      editorState.markdown = "draft A text, still typing";
+      act(() => {
+        latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      });
+      act(() => {
+        ref.current?.flushPendingUpdate();
+      });
+
+      // Host has taken the bytes, so switching destination must now load the
+      // incoming draft rather than leaving the old document on screen.
+      rerender(
+        <ContentEditor ref={ref} value="draft B text" onUpdate={vi.fn()} debounceMs={100} />,
+      );
+      expect(mockSetContent).toHaveBeenCalled();
+    });
+
+    it("still blocks the sync when the pending update was NOT flushed (guard intact)", () => {
+      vi.useFakeTimers();
+      editorState.markdown = "draft A text";
+      const { rerender } = render(
+        <ContentEditor value="draft A text" onUpdate={vi.fn()} debounceMs={100} />,
+      );
+
+      editorState.markdown = "draft A text, still typing";
+      act(() => {
+        latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      });
+
+      // No flush → dirty → the guard must still protect the unsaved bytes.
+      rerender(<ContentEditor value="draft B text" onUpdate={vi.fn()} debounceMs={100} />);
+      expect(mockSetContent).not.toHaveBeenCalled();
+    });
+  });
+
+  it("does not sync when value normalizes to the current editor markdown", () => {
+    editorState.markdown = "same content";
+    const { rerender } = render(<ContentEditor value="same content" />);
+
+    // Different `value` string forces the effect to re-run (the dep
     // array sees a new value), but the trailing whitespace normalises away
     // via `trimEnd()`, so `setContent` must still short-circuit.
-    rerender(<ContentEditor defaultValue={"same content\n"} />);
+    rerender(<ContentEditor value={"same content\n"} />);
 
     expect(mockSetContent).not.toHaveBeenCalled();
   });
@@ -447,6 +623,121 @@ function makeAttachment(id: string, overrides: Partial<Attachment> = {}): Attach
 function asUploadResult(att: Attachment): UploadResult {
   return { ...att, link: att.url, markdownLink: `/api/attachments/${att.id}/download` };
 }
+
+// MUL-4808 — the document IS the upload queue, so hosts gate submit off it
+// instead of each keeping a counter. These pin the publisher's contract.
+describe("ContentEditor — onUploadingChange (MUL-4808)", () => {
+  const uploadingNode = { attrs: { uploading: true } };
+  const settledNode = { attrs: { uploading: false } };
+
+  it("publishes true when a node starts uploading and false once it settles", () => {
+    const onUploadingChange = vi.fn();
+    render(<ContentEditor onUploadingChange={onUploadingChange} />);
+    // Mount publishes the current answer so the host can't be left holding a
+    // stale one from a previous editor instance (see the remount case below).
+    expect(onUploadingChange).toHaveBeenLastCalledWith(false);
+
+    editorState.uploadingNodes = [uploadingNode];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(true);
+
+    editorState.uploadingNodes = [settledNode];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("keeps publishing true until the LAST concurrent upload settles", () => {
+    const onUploadingChange = vi.fn();
+    render(<ContentEditor onUploadingChange={onUploadingChange} />);
+
+    editorState.uploadingNodes = [{ attrs: { uploading: true } }, { attrs: { uploading: true } }];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(true);
+
+    // First of two finishes — submit must STAY gated.
+    editorState.uploadingNodes = [settledNode, { attrs: { uploading: true } }];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(true);
+
+    editorState.uploadingNodes = [settledNode, settledNode];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(false);
+  });
+
+  // The regression that rules out driving this off `onUpdate`: a failed upload
+  // removes its placeholder, and since the blob URL was stripped from
+  // serialized markdown all along, the markdown is byte-identical before and
+  // after. onUpdate is debounced AND skips no-change emissions, so the host
+  // would stay gated forever with no pending upload left to un-gate it.
+  it("publishes false when a failed upload's placeholder is removed, even though the markdown never changed", () => {
+    const onUploadingChange = vi.fn();
+    const onUpdate = vi.fn();
+    editorState.markdown = "same body";
+    render(<ContentEditor onUploadingChange={onUploadingChange} onUpdate={onUpdate} />);
+
+    editorState.uploadingNodes = [uploadingNode];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(true);
+
+    // Upload fails → node removed. Markdown is unchanged throughout.
+    editorState.uploadingNodes = [];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(false);
+    expect(editorState.markdown).toBe("same body");
+  });
+
+  it("publishes only on flips, not on every transaction", () => {
+    const onUploadingChange = vi.fn();
+    render(<ContentEditor onUploadingChange={onUploadingChange} />);
+    onUploadingChange.mockClear(); // drop the mount publish
+
+    editorState.uploadingNodes = [uploadingNode];
+    act(() => emitTransaction());
+    // Typing while the upload is still in flight: same answer, no re-publish.
+    act(() => emitTransaction());
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenCalledTimes(1);
+  });
+
+  // An editor torn down mid-upload takes its pending node with it, but the
+  // host's gate state survives. Hosts that remount the editor under a living
+  // parent — comment edit (cancel → re-enter) and chat (agent switch rebuilds
+  // it by `key`) — would otherwise be stuck disabled forever, with no pending
+  // upload left in the document to ever flip them back.
+  it("republishes on remount so a host can't stay gated by a dead editor's upload", () => {
+    const onUploadingChange = vi.fn();
+    const { unmount } = render(<ContentEditor onUploadingChange={onUploadingChange} />);
+
+    editorState.uploadingNodes = [uploadingNode];
+    act(() => emitTransaction());
+    expect(onUploadingChange).toHaveBeenLastCalledWith(true);
+
+    // Editor dies while the upload is still pending; the host stays mounted
+    // holding `uploading: true`.
+    unmount();
+    editorRef.current = null;
+    onCreateFired.value = false;
+    editorState.uploadingNodes = [];
+
+    onUploadingChange.mockClear();
+    render(<ContentEditor onUploadingChange={onUploadingChange} />);
+    expect(onUploadingChange).toHaveBeenCalledWith(false);
+  });
+
+  it("does not subscribe at all when the host omits onUploadingChange", () => {
+    render(<ContentEditor />);
+    // Non-gating hosts (the autosaved description editor) must not pay for a
+    // doc scan on every keystroke.
+    expect(transactionListeners.current).toHaveLength(0);
+  });
+
+  it("unsubscribes on unmount", () => {
+    const { unmount } = render(<ContentEditor onUploadingChange={vi.fn()} />);
+    expect(transactionListeners.current).toHaveLength(1);
+    unmount();
+    expect(transactionListeners.current).toHaveLength(0);
+  });
+});
 
 // MUL-3192 — surfaces like the quick-create modal upload images through the
 // editor without a server-supplied `attachments` prop. Without in-session

@@ -1,10 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { forwardRef, useImperativeHandle } from "react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { forwardRef, useImperativeHandle, useRef } from "react";
 
 let storedDraftMessage = "saved draft";
 let liveEditorMarkdown = "";
 const feedbackMocks = vi.hoisted(() => ({ mutateAsync: vi.fn() }));
+// Deferred controlling the mock editor's in-flight upload: `reset` arms a new
+// pending upload, `resolve` lands it so a test can watch the gate re-open.
+const pendingUpload = vi.hoisted(() => {
+  const deferred = {
+    promise: Promise.resolve() as Promise<void>,
+    resolve: () => {},
+    reset() {
+      deferred.promise = new Promise<void>((res) => {
+        deferred.resolve = res;
+      });
+    },
+  };
+  return deferred;
+});
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({ t: (key: string) => key, i18n: { changeLanguage: vi.fn() } }),
@@ -28,6 +42,11 @@ vi.mock("../i18n", () => ({
           sending: "Sending",
           send: "Send",
         },
+        // The `editor` namespace's shared upload-gate copy. This mock ignores
+        // the namespace argument, so both bundles live in one object.
+        upload: {
+          in_progress: "Uploading…",
+        },
       }),
   }),
 }));
@@ -44,13 +63,31 @@ vi.mock("@multica/core/feedback", () => ({
   useFeedbackDraftStore: (selector: any) =>
     selector({ draft: { message: storedDraftMessage }, setDraft: vi.fn(), clearDraft: vi.fn() }),
 }));
-vi.mock("../editor", () => {
-  const ContentEditor = forwardRef(({ defaultValue, onSubmit }: any, ref) => {
+vi.mock("../editor", async () => {
+  // Real submit gate (pure React) driven by the mock editor's
+  // `hasActiveUploads` / `onUploadingChange`.
+  const uploadGate = await vi.importActual<typeof import("../editor/use-upload-gate")>(
+    "../editor/use-upload-gate",
+  );
+  const ContentEditor = forwardRef(({ defaultValue, onSubmit, onUploadingChange }: any, ref) => {
     liveEditorMarkdown = defaultValue;
+    // Mirrors the real editor: the placeholder node is in the doc from before
+    // the await until the upload settles, and the host hears about it through
+    // onUploadingChange rather than polling.
+    const inFlightRef = useRef(0);
     useImperativeHandle(ref, () => ({
-      hasActiveUploads: () => false,
+      hasActiveUploads: () => inFlightRef.current > 0,
       getMarkdown: () => liveEditorMarkdown,
-      uploadFile: vi.fn(),
+      uploadFile: async () => {
+        inFlightRef.current += 1;
+        if (inFlightRef.current === 1) onUploadingChange?.(true);
+        try {
+          await pendingUpload.promise;
+        } finally {
+          inFlightRef.current -= 1;
+          if (inFlightRef.current === 0) onUploadingChange?.(false);
+        }
+      },
     }));
     return (
       <textarea
@@ -65,6 +102,12 @@ vi.mock("../editor", () => {
   });
   ContentEditor.displayName = "MockContentEditor";
   return {
+    ...uploadGate,
+    useEditorUpload: () => ({
+      uploadWithToast: vi.fn(),
+      upload: vi.fn(),
+      uploading: false,
+    }),
     ContentEditor,
     useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
     FileDropOverlay: () => null,
@@ -114,6 +157,57 @@ describe("FeedbackModal", () => {
       expect(feedbackMocks.mutateAsync).toHaveBeenCalledWith(
         expect.objectContaining({ message: "fresh feedback" }),
       );
+    });
+  });
+
+  // MUL-4808 — Feedback refused to submit mid-upload inside the handler, but
+  // the Send button stayed enabled, so the only signal was a toast fired after
+  // a click that looked like it should have worked.
+  describe("upload submit gate", () => {
+    function startPendingUpload() {
+      pendingUpload.reset();
+      // The modal renders through a portal, so its file input lives on
+      // document.body rather than under render()'s container.
+      const input = document.body.querySelector('input[type="file"]');
+      if (!input) throw new Error("Expected a file input to render");
+      fireEvent.change(input, {
+        target: { files: [new File(["x"], "shot.png", { type: "image/png" })] },
+      });
+    }
+
+    it("disables Send and shows Uploading… while an upload is in flight", async () => {
+      // Seeded through the draft so `message` is non-empty on mount — that
+      // isolates the disabled state to the upload gate rather than the
+      // empty-content check.
+      storedDraftMessage = "here's a screenshot";
+      render(<FeedbackModal onClose={vi.fn()} />);
+
+      startPendingUpload();
+
+      const send = await screen.findByRole("button", { name: "Uploading…" });
+      await waitFor(() => expect(send).toBeDisabled());
+      expect(send).toHaveAttribute("aria-busy", "true");
+
+      await act(async () => { pendingUpload.resolve(); });
+      await waitFor(() =>
+        expect(screen.getByRole("button", { name: "Send" })).not.toBeDisabled(),
+      );
+    });
+
+    it("blocks the Cmd+Enter path while an upload is in flight", async () => {
+      storedDraftMessage = "here's a screenshot";
+      render(<FeedbackModal onClose={vi.fn()} />);
+      const editor = screen.getByLabelText("feedback editor");
+
+      startPendingUpload();
+
+      fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
+      await Promise.resolve();
+      expect(feedbackMocks.mutateAsync).not.toHaveBeenCalled();
+
+      await act(async () => { pendingUpload.resolve(); });
+      fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
+      await waitFor(() => expect(feedbackMocks.mutateAsync).toHaveBeenCalled());
     });
   });
 });

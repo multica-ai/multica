@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -578,49 +579,161 @@ func (b *bufferWriter) String() string {
 	return b.buf.String()
 }
 
-// TestHermesClientAutoApprovesPermissionRequest asserts that when an
-// ACP agent sends us `session/request_permission` (kimi does this on
-// every Shell / file-mutating tool call), the client replies with
-// `approve_for_session` — without this the agent blocks 300s and the
-// task hangs. The id in the reply must match the agent's request id
-// so its in-flight future resolves.
+// TestHermesClientAutoApprovesPermissionRequest asserts how the client
+// answers an ACP agent's `session/request_permission`. It must select an
+// optionId the agent *actually offered* — an id the agent never offered is
+// treated as a denial and, on Hermes' edit path, silently blocks every file
+// write (GitHub multica#5300). It prefers a session-scoped grant over a
+// single-use one, refuses to auto-select a permanent "allow_always" (which
+// persists to the runtime owner's on-disk allowlist), denies a single action
+// by selecting an offered reject_once rather than replying "cancelled" (which
+// other ACP backends read as cancelling the whole turn), and returns a
+// protocol error when nothing is safely selectable. The reply always echoes
+// the agent's request id.
 func TestHermesClientAutoApprovesPermissionRequest(t *testing.T) {
 	t.Parallel()
 
-	w := &bufferWriter{}
-	c := &hermesClient{
-		cfg:     Config{Logger: slog.Default()},
-		stdin:   w,
-		pending: make(map[int]*pendingRPC),
+	cases := []struct {
+		name    string
+		options string
+		wantErr bool   // true → JSON-RPC error reply, no outcome
+		wantID  string // expected selected optionId when wantErr == false
+	}{
+		{
+			// Hermes edit-approval offers only these two and requires
+			// exactly "allow_once"; this is the multica#5300 regression
+			// the old hardcoded "approve_for_session" reply broke.
+			name:    "hermes edit approval selects allow_once",
+			options: `[{"optionId":"allow_once","name":"Allow edit","kind":"allow_once"},{"optionId":"deny","name":"Deny","kind":"reject_once"}]`,
+			wantID:  "allow_once",
+		},
+		{
+			// Hermes command approval offers a session option; prefer it over
+			// both the permanent "allow_always" and single-use "allow_once".
+			name:    "command approval prefers session over permanent",
+			options: `[{"optionId":"allow_once","kind":"allow_once"},{"optionId":"allow_session","kind":"allow_always"},{"optionId":"allow_always","kind":"allow_always"},{"optionId":"deny","kind":"reject_once"},{"optionId":"deny_always","kind":"reject_always"}]`,
+			wantID:  "allow_session",
+		},
+		{
+			// Other ACP agents' session-scoped id is honoured when offered.
+			name:    "session-scoped id honoured",
+			options: `[{"optionId":"approve","kind":"allow_once"},{"optionId":"approve_for_session","kind":"allow_always"},{"optionId":"reject","kind":"reject_once"}]`,
+			wantID:  "approve_for_session",
+		},
+		{
+			// Grant nature comes from the ACP kind, not the opaque optionId:
+			// a single-use option with a non-standard id is still selected.
+			name:    "non-standard single-use id selected by kind",
+			options: `[{"optionId":"yolo-42","kind":"allow_once"},{"optionId":"nope","kind":"reject_once"}]`,
+			wantID:  "yolo-42",
+		},
+		{
+			// Only a permanent grant offered: never auto-persist it; deny this
+			// action by selecting the offered single-use reject instead.
+			name:    "permanent grant refused, offered reject_once selected",
+			options: `[{"optionId":"allow_always","kind":"allow_always"},{"optionId":"deny","kind":"reject_once"}]`,
+			wantID:  "deny",
+		},
+		{
+			// No grant at all: deny this action via the offered reject_once.
+			name:    "reject-only selects reject_once",
+			options: `[{"optionId":"deny","kind":"reject_once"},{"optionId":"deny_always","kind":"reject_always"}]`,
+			wantID:  "deny",
+		},
+		{
+			// Unknown / future kind is not a grant; fall through to reject_once.
+			name:    "unknown kind selects offered reject_once",
+			options: `[{"optionId":"allow_forever","kind":"allow_super"},{"optionId":"deny","kind":"reject_once"}]`,
+			wantID:  "deny",
+		},
+		{
+			// Permanent grant with no single-use reject: nothing safely
+			// selectable → protocol error, not a fabricated outcome.
+			name:    "permanent-only without reject_once errors",
+			options: `[{"optionId":"allow_always","kind":"allow_always"}]`,
+			wantErr: true,
+		},
+		{
+			// Only a permanent reject offered: we don't auto-persist a denial
+			// either → protocol error.
+			name:    "reject_always-only errors",
+			options: `[{"optionId":"deny_always","kind":"reject_always"}]`,
+			wantErr: true,
+		},
+		{
+			// No options at all: protocol error rather than fabricate a reply.
+			name:    "empty options errors",
+			options: `[]`,
+			wantErr: true,
+		},
+		{
+			// Malformed options payload (not an array): protocol error.
+			name:    "malformed options errors",
+			options: `"not-an-array"`,
+			wantErr: true,
+		},
 	}
 
-	c.handleLine(`{"jsonrpc":"2.0","id":42,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"approve","name":"Approve once","kind":"allow_once"},{"optionId":"approve_for_session","name":"Approve for this session","kind":"allow_always"},{"optionId":"reject","name":"Reject","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_1","title":"Shell","content":[]}}}`)
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	got := w.String()
-	var resp struct {
-		JSONRPC string `json:"jsonrpc"`
-		ID      int    `json:"id"`
-		Result  struct {
-			Outcome struct {
-				Outcome  string `json:"outcome"`
-				OptionID string `json:"optionId"`
-			} `json:"outcome"`
-		} `json:"result"`
-	}
-	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &resp); err != nil {
-		t.Fatalf("reply is not valid JSON: %q err=%v", got, err)
-	}
-	if resp.JSONRPC != "2.0" {
-		t.Errorf("jsonrpc: got %q, want 2.0", resp.JSONRPC)
-	}
-	if resp.ID != 42 {
-		t.Errorf("id: got %d, want 42 (must echo agent's request id)", resp.ID)
-	}
-	if resp.Result.Outcome.Outcome != "selected" {
-		t.Errorf("outcome.outcome: got %q, want %q", resp.Result.Outcome.Outcome, "selected")
-	}
-	if resp.Result.Outcome.OptionID != "approve_for_session" {
-		t.Errorf("outcome.optionId: got %q, want %q", resp.Result.Outcome.OptionID, "approve_for_session")
+			w := &bufferWriter{}
+			c := &hermesClient{
+				cfg:     Config{Logger: slog.Default()},
+				stdin:   w,
+				pending: make(map[int]*pendingRPC),
+			}
+
+			c.handleLine(`{"jsonrpc":"2.0","id":42,"method":"session/request_permission","params":{"sessionId":"ses_1","options":` + tc.options + `,"toolCall":{"toolCallId":"tc_1","title":"write: reply.md","content":[]}}}`)
+
+			got := w.String()
+			var resp struct {
+				JSONRPC string `json:"jsonrpc"`
+				ID      int    `json:"id"`
+				Result  *struct {
+					Outcome struct {
+						Outcome  string `json:"outcome"`
+						OptionID string `json:"optionId"`
+					} `json:"outcome"`
+				} `json:"result"`
+				Error *struct {
+					Code    int    `json:"code"`
+					Message string `json:"message"`
+				} `json:"error"`
+			}
+			if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &resp); err != nil {
+				t.Fatalf("reply is not valid JSON: %q err=%v", got, err)
+			}
+			if resp.JSONRPC != "2.0" {
+				t.Errorf("jsonrpc: got %q, want 2.0", resp.JSONRPC)
+			}
+			if resp.ID != 42 {
+				t.Errorf("id: got %d, want 42 (must echo agent's request id)", resp.ID)
+			}
+			if tc.wantErr {
+				if resp.Error == nil {
+					t.Errorf("want a JSON-RPC error reply, got result %+v", resp.Result)
+				}
+				if resp.Result != nil {
+					t.Errorf("error reply must not carry a result, got %+v", resp.Result)
+				}
+				return
+			}
+			if resp.Error != nil {
+				t.Fatalf("unexpected JSON-RPC error reply: %+v", resp.Error)
+			}
+			if resp.Result == nil {
+				t.Fatalf("want a selected outcome, got no result: %q", got)
+			}
+			if resp.Result.Outcome.Outcome != "selected" {
+				t.Errorf("outcome.outcome: got %q, want %q", resp.Result.Outcome.Outcome, "selected")
+			}
+			if resp.Result.Outcome.OptionID != tc.wantID {
+				t.Errorf("outcome.optionId: got %q, want %q", resp.Result.Outcome.OptionID, tc.wantID)
+			}
+		})
 	}
 }
 
@@ -747,6 +860,131 @@ func TestHermesClientAcceptNotificationGate(t *testing.T) {
 	}
 	if got[0].Content != "current" {
 		t.Fatalf("got content %q, want \"current\"", got[0].Content)
+	}
+}
+
+func TestHermesBackendDrainsLateFinalNotificationAfterPromptResponse(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_resumed"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      sleep 0.05
+      printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_resumed","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Current answer"}}}}\n'
+      ;;
+  esac
+done
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{
+		ResumeSessionID: "ses_resumed",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+		}
+		if result.Output != "Current answer" {
+			t.Fatalf("expected late current-turn output, got %q", result.Output)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+func TestHermesBackendCancelsBeforeWaitingForLingeringProcess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_lingering"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exec 1>&-
+      exec 2>&-
+      while :; do :; done
+      ;;
+  esac
+done
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	select {
+	case _, ok := <-session.Result:
+		if ok {
+			t.Fatal("result channel produced an unexpected second value")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("result channel did not close; cmd.Wait likely ran before cancel")
 	}
 }
 
@@ -1229,6 +1467,152 @@ func TestHermesClientExtractPromptResultNoUsage(t *testing.T) {
 	}
 	if got.usage.InputTokens != 0 {
 		t.Errorf("inputTokens: got %d, want 0", got.usage.InputTokens)
+	}
+}
+
+// TestHermesClientExtractPromptResultMetaUsage covers the Grok Build ACP
+// shape: session/prompt returns only stopReason at the top level, with token
+// counters under `_meta.usage` (and mirrored flat fields on `_meta`).
+// Captured from grok 0.2.106 against a live `grok agent stdio` session.
+func TestHermesClientExtractPromptResultMetaUsage(t *testing.T) {
+	t.Parallel()
+
+	var got hermesPromptResult
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onPromptDone: func(result hermesPromptResult) {
+			got = result
+		},
+	}
+
+	// Minimal real-world payload (ids truncated). Nested usage is the
+	// authoritative block; flat _meta counters mirror it.
+	data := json.RawMessage(`{
+		"stopReason": "end_turn",
+		"_meta": {
+			"sessionId": "019f8516-4fee-7c23-9766-ec748929e01a",
+			"modelId": "grok-4.5",
+			"inputTokens": 12929,
+			"outputTokens": 29,
+			"cachedReadTokens": 10880,
+			"reasoningTokens": 24,
+			"usage": {
+				"inputTokens": 12929,
+				"outputTokens": 29,
+				"totalTokens": 12958,
+				"cachedReadTokens": 10880,
+				"reasoningTokens": 24,
+				"modelCalls": 1,
+				"costUsdTicks": 75360000
+			}
+		}
+	}`)
+	c.extractPromptResult(data)
+
+	if got.stopReason != "end_turn" {
+		t.Errorf("stopReason: got %q, want %q", got.stopReason, "end_turn")
+	}
+	if got.usage.InputTokens != 12929 {
+		t.Errorf("inputTokens: got %d, want 12929", got.usage.InputTokens)
+	}
+	if got.usage.OutputTokens != 29 {
+		t.Errorf("outputTokens: got %d, want 29", got.usage.OutputTokens)
+	}
+	if got.usage.CacheReadTokens != 10880 {
+		t.Errorf("cacheReadTokens: got %d, want 10880", got.usage.CacheReadTokens)
+	}
+}
+
+// TestHermesClientExtractPromptResultMetaFlatOnly covers agents that put
+// counters on `_meta` without a nested `usage` object.
+func TestHermesClientExtractPromptResultMetaFlatOnly(t *testing.T) {
+	t.Parallel()
+
+	var got hermesPromptResult
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onPromptDone: func(result hermesPromptResult) {
+			got = result
+		},
+	}
+
+	data := json.RawMessage(`{
+		"stopReason": "end_turn",
+		"_meta": {
+			"inputTokens": 50,
+			"outputTokens": 10,
+			"cachedReadTokens": 5
+		}
+	}`)
+	c.extractPromptResult(data)
+
+	if got.usage.InputTokens != 50 || got.usage.OutputTokens != 10 || got.usage.CacheReadTokens != 5 {
+		t.Fatalf("unexpected usage from flat _meta: %+v", got.usage)
+	}
+}
+
+// TestHermesClientExtractPromptResultTopLevelBeatsMeta ensures the standard
+// ACP top-level `usage` field still wins when both shapes are present.
+func TestHermesClientExtractPromptResultTopLevelBeatsMeta(t *testing.T) {
+	t.Parallel()
+
+	var got hermesPromptResult
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onPromptDone: func(result hermesPromptResult) {
+			got = result
+		},
+	}
+
+	data := json.RawMessage(`{
+		"stopReason": "end_turn",
+		"usage": {"inputTokens": 1, "outputTokens": 2},
+		"_meta": {"usage": {"inputTokens": 999, "outputTokens": 999}}
+	}`)
+	c.extractPromptResult(data)
+
+	if got.usage.InputTokens != 1 || got.usage.OutputTokens != 2 {
+		t.Fatalf("top-level usage should win: %+v", got.usage)
+	}
+}
+
+// TestHermesClientExtractPromptResultTopLevelZeroFallsBackToMeta pins the
+// semantic-empty behavior: an explicit top-level usage object with no
+// effective counters must not hide usable metering supplied by the agent in
+// _meta.
+func TestHermesClientExtractPromptResultTopLevelZeroFallsBackToMeta(t *testing.T) {
+	t.Parallel()
+
+	var got hermesPromptResult
+	c := &hermesClient{
+		pending: make(map[int]*pendingRPC),
+		onPromptDone: func(result hermesPromptResult) {
+			got = result
+		},
+	}
+
+	data := json.RawMessage(`{
+		"stopReason": "end_turn",
+		"usage": {
+			"inputTokens": 0,
+			"outputTokens": 0,
+			"cacheReadTokens": 0,
+			"cacheWriteTokens": 0
+		},
+		"_meta": {
+			"usage": {
+				"inputTokens": 100,
+				"outputTokens": 20,
+				"cachedReadTokens": 5,
+				"cachedWriteTokens": 2
+			}
+		}
+	}`)
+	c.extractPromptResult(data)
+
+	want := TokenUsage{InputTokens: 100, OutputTokens: 20, CacheReadTokens: 5, CacheWriteTokens: 2}
+	if got.usage != want {
+		t.Fatalf("zero top-level usage should fall back to _meta: got %+v, want %+v", got.usage, want)
 	}
 }
 
@@ -2037,6 +2421,58 @@ done
 `
 }
 
+// fakeACPRecordingScriptWithCurrentModel is like fakeACPRecordingScript but
+// makes session/new and session/resume advertise a `models.currentModelId`,
+// so tests can drive the "session is already on this model" branch of the
+// set_model gate.
+func fakeACPRecordingScriptWithCurrentModel(recordPath, sessionID, currentModelID string) string {
+	return `#!/bin/sh
+RECORD_PATH=` + recordPath + `
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$RECORD_PATH"
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*|*'"method":"session/resume"'*|*'"method":"session/load"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"` + sessionID + `","models":{"currentModelId":"` + currentModelID + `"}}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// assertNoRecordedFrame fails if any recorded JSON-RPC frame used the given
+// method. The mirror of findRecordedFrame, for asserting a call was skipped.
+func assertNoRecordedFrame(t *testing.T, recordPath, method string) {
+	t.Helper()
+	data, err := os.ReadFile(recordPath)
+	if err != nil {
+		t.Fatalf("read record file: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		var frame map[string]any
+		if err := json.Unmarshal([]byte(line), &frame); err != nil {
+			continue
+		}
+		if frame["method"] == method {
+			t.Fatalf("unexpected recorded frame for method %q in %s", method, string(data))
+		}
+	}
+}
+
 // findRecordedFrame returns the first recorded JSON-RPC frame whose
 // `method` matches the requested one. Used by the resume / capability
 // tests below to inspect what we actually sent on the wire.
@@ -2107,6 +2543,97 @@ func TestHermesSetModelPreservesCustomModelIDWithColon(t *testing.T) {
 	}
 	if params["modelId"] != "custom:lfm2.5:8b" {
 		t.Errorf("session/set_model.modelId must be passed verbatim, got %v", params["modelId"])
+	}
+}
+
+// TestHermesSkipsRedundantSetModelWhenAlreadyCurrent pins the MUL-5029 fix:
+// when session/new already reports the requested model as current, we must
+// NOT replay session/set_model. Hermes' set_model re-runs provider
+// auto-detection and can mis-route a `provider:model` id (e.g.
+// custom:deepseek-v4-pro) to OpenRouter, failing with an auth error on the
+// first turn. Re-selecting the model the session is already on is pure
+// downside, so the call is skipped.
+func TestHermesSkipsRedundantSetModelWhenAlreadyCurrent(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScriptWithCurrentModel(recordPath, "ses_new", "custom:deepseek-v4-pro")))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		Model:   "custom:deepseek-v4-pro",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	assertNoRecordedFrame(t, recordPath, "session/set_model")
+}
+
+// TestHermesSendsSetModelWhenModelDiffersFromCurrent is the counterpart to the
+// skip test: when the requested model differs from the session's current one,
+// the explicit switch must still be sent verbatim.
+func TestHermesSendsSetModelWhenModelDiffersFromCurrent(t *testing.T) {
+	t.Parallel()
+
+	recordPath := filepath.Join(t.TempDir(), "frames.jsonl")
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	writeTestExecutable(t, fakePath, []byte(fakeACPRecordingScriptWithCurrentModel(recordPath, "ses_new", "custom:some-default-model")))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+		Model:   "custom:deepseek-v4-pro",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	select {
+	case result := <-session.Result:
+		if result.Status != "completed" {
+			t.Fatalf("expected completed result, got %q: %s", result.Status, result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+
+	frame := findRecordedFrame(t, recordPath, "session/set_model")
+	params, ok := frame["params"].(map[string]any)
+	if !ok {
+		t.Fatalf("session/set_model params: got %T, want map", frame["params"])
+	}
+	if params["modelId"] != "custom:deepseek-v4-pro" {
+		t.Errorf("session/set_model.modelId = %v, want custom:deepseek-v4-pro", params["modelId"])
 	}
 }
 
@@ -2261,5 +2788,99 @@ func TestHermesKeepsRemoteMcpWhenCapabilityAdvertised(t *testing.T) {
 	servers := params["mcpServers"].([]any)
 	if len(servers) != 3 {
 		t.Fatalf("session/new.mcpServers: got %d entries, want 3", len(servers))
+	}
+}
+
+// TestParseHermesProfileArgs covers the parser's fidelity to Hermes'
+// _apply_profile_override step 1/1b: first occurrence, both spellings, the inline
+// empty value, the space-form profile-id guard, value-flag skipping, and the
+// `--` / `mcp add --args` boundaries.
+func TestParseHermesProfileArgs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name     string
+		args     []string
+		wantName string
+		found    bool
+		inline   bool
+		from     int
+		length   int
+	}{
+		{"none", []string{"--yolo"}, "", false, false, -1, 0},
+		{"short flag", []string{"-p", "research"}, "research", true, false, 0, 2},
+		{"long flag", []string{"--profile", "research"}, "research", true, false, 0, 2},
+		{"inline", []string{"--profile=research"}, "research", true, true, 0, 1},
+		{"inline empty value", []string{"--profile="}, "", true, true, 0, 1},
+		{"trailing short flag with no value", []string{"--yolo", "-p"}, "", false, false, -1, 0},
+		{"amid other args", []string{"--yolo", "--profile", "coder", "-x"}, "coder", true, false, 1, 2},
+		{"space-form invalid value ignored", []string{"-p", "no:xdist"}, "", false, false, -1, 0},
+		{"value-flag hides a following -p", []string{"-m", "-p", "research"}, "", false, false, -1, 0},
+		{"double-dash sentinel stops scan", []string{"--", "-p", "research"}, "", false, false, -1, 0},
+		{"mcp add --args passthrough stops scan", []string{"mcp", "add", "srv", "--args", "-p", "research"}, "", false, false, -1, 0},
+		{"only the first occurrence is selected", []string{"-p", "research", "--profile", "coder"}, "research", true, false, 0, 2},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			sel := ParseHermesProfileArgs(tc.args)
+			if sel.Name != tc.wantName || sel.Found != tc.found || sel.Inline != tc.inline ||
+				sel.ArgFrom != tc.from || sel.ArgLen != tc.length {
+				t.Errorf("ParseHermesProfileArgs(%v) = %+v, want name=%q found=%v inline=%v from=%d len=%d",
+					tc.args, sel, tc.wantName, tc.found, tc.inline, tc.from, tc.length)
+			}
+		})
+	}
+}
+
+// TestStripHermesProfileArgs asserts only the parsed occurrence is removed (not
+// every -p/--profile spelling), and that the base blocked set does NOT strip the
+// profile flags, so a skill-less task's profile passes through unchanged.
+func TestStripHermesProfileArgs(t *testing.T) {
+	t.Parallel()
+	args := []string{"-p", "research", "--yolo", "--profile", "coder"}
+	sel := ParseHermesProfileArgs(args)
+	got := StripHermesProfileArgs(args, sel)
+	want := []string{"--yolo", "--profile", "coder"}
+	if len(got) != len(want) {
+		t.Fatalf("StripHermesProfileArgs = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("StripHermesProfileArgs = %v, want %v", got, want)
+		}
+	}
+	if none := StripHermesProfileArgs([]string{"--yolo"}, ParseHermesProfileArgs([]string{"--yolo"})); len(none) != 1 || none[0] != "--yolo" {
+		t.Fatalf("no selection should leave args unchanged, got %v", none)
+	}
+	if _, ok := hermesBlockedArgs["-p"]; ok {
+		t.Error("hermesBlockedArgs must not unconditionally strip -p")
+	}
+	if _, ok := hermesBlockedArgs["--profile"]; ok {
+		t.Error("hermesBlockedArgs must not unconditionally strip --profile")
+	}
+}
+
+// TestACPRawText covers the rawOutput/output shape tolerance added for the
+// GPT-5.6 Sol path (#5509): a string is returned verbatim, an object/array is
+// preserved as raw JSON text, and empty input yields "".
+func TestACPRawText(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{"empty", ``, ""},
+		{"json null", `null`, ""},
+		{"plain string", `"created comment"`, "created comment"},
+		{"object (gpt-5.6-sol shape)", `{"items":[{"Json":{"stdout":"ok\n"}}]}`, `{"items":[{"Json":{"stdout":"ok\n"}}]}`},
+		{"array", `["a","b"]`, `["a","b"]`},
+	}
+	for _, tt := range tests {
+		got := acpRawText(json.RawMessage(tt.raw))
+		if got != tt.want {
+			t.Errorf("%s: acpRawText(%q) = %q, want %q", tt.name, tt.raw, got, tt.want)
+		}
 	}
 }

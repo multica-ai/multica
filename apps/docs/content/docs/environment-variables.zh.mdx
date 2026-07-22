@@ -19,6 +19,9 @@ Multica 的 [自部署](/self-host-quickstart) 服务器启动时从环境变量
 | `APP_ENV` | 空 | **是**（必须 `production`）|
 | `FRONTEND_ORIGIN` | 空 | **是**（self-host 要填你自己的域名）|
 | `MULTICA_DEV_VERIFICATION_CODE` | 空 | 否（生产必须保持为空）|
+| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 否。收到 `SIGTERM`/`SIGINT` 后、开始优雅退出前的可选等待时间。接受 `300s`、`5m` 等非负 Go duration；留空或设为 `0` 时立即开始退出 |
+
+在 Kubernetes 中使用 `MULTICA_SHUTDOWN_HOLD_DURATION` 时，`terminationGracePeriodSeconds` 必须大于 hold 时长与后续优雅退出预算之和。如果两者配置成相同时长，kubelet 可能在清理完成前发送 `SIGKILL`。
 
 <Callout type="warning">
 **生产环境保持 `MULTICA_DEV_VERIFICATION_CODE` 为空。** 固定本地测试验证码默认关闭；如果你设置 `MULTICA_DEV_VERIFICATION_CODE=888888`，在 `APP_ENV` 非 production 时，任何能请求验证码的人都能用这个固定值登录。`APP_ENV=production` 时该快捷码会被忽略。
@@ -42,7 +45,7 @@ Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `RESEND_API_KEY` | 空 | Resend API key |
-| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | 发件地址（必须是 Resend 账号已验证的域名；走 SMTP 时同时作为 `From:` 头）|
+| `RESEND_FROM_EMAIL` | `noreply@multica.ai` | Resend 发件地址（必须是 Resend 账号已验证的域名；`SMTP_FROM_EMAIL` 未设置时，SMTP 也会使用它）|
 
 ### SMTP relay
 
@@ -52,6 +55,7 @@ Multica 支持两种邮件发送通道——[Resend](https://resend.com/) 适合
 | `SMTP_PORT` | `25` | SMTP 端口。STARTTLS 提交端口用 `587`；SMTPS（隐式 TLS，自动启用）用 `465` |
 | `SMTP_USERNAME` | 空 | SMTP 用户名。留空表示未认证 relay |
 | `SMTP_PASSWORD` | 空 | SMTP 密码 |
+| `SMTP_FROM_EMAIL` | 空 | SMTP 的 `MAIL FROM` 和 `From:` 发件地址。未设置时回退到 `RESEND_FROM_EMAIL` |
 | `SMTP_TLS` | `starttls` | TLS 模式。`implicit`（别名 `smtps`、`ssl`）在连接时立即进行 TLS 握手（SMTPS）；`465` 端口会自动启用。未设置 / `starttls` 则在连接后通过 STARTTLS 升级 |
 | `SMTP_TLS_INSECURE` | `false` | 设为 `true` 跳过 TLS 证书校验（仅限私有 CA / 自签证书）|
 | `SMTP_EHLO_NAME` | 机器主机名 | 向 relay 通告的 EHLO/HELO 名称。当严格的 relay（例如 Google Workspace `smtp-relay.gmail.com`）拒绝来自公网 IP 的默认问候时，填一个真实的 FQDN——否则 relay 会直接断开连接，并在后续某条命令上表现为一个不知所云的 `EOF` |
@@ -177,17 +181,49 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
 | `MULTICA_SERVER_URL` | `ws://localhost:8080/ws` | server 地址（self-host 换成你的域名）|
+| `MULTICA_DAEMON_DEVICE_NAME` | 主机名 | 运行时页面显示的设备名 |
+| `MULTICA_AGENT_RUNTIME_NAME` | 内置默认 | 运行时显示名 |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | 心跳频率 |
 | `MULTICA_DAEMON_POLL_INTERVAL` | `3s` | 任务轮询频率 |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | 并发任务上限 |
 | `MULTICA_AGENT_TIMEOUT` | `0` | 单次任务的绝对墙钟上限；`0` = 不设上限，任务只受看门狗约束（活跃任务不会因为跑得久被杀）。想要硬性成本/资源天花板时再设一个正值 |
-| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 空闲看门狗：backend 持续静默（无消息、消息队列为空、且没有工具在途）这么久就 force-stop。`0` = 关闭整套看门狗 |
+| `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | 空闲看门狗：backend 持续静默（无消息、消息队列为空、且没有工具在途）这么久就 force-stop。`0` = 关闭整套看门狗，包括 provider 专用阈值 |
+| `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode 首 token 未到或流式回复中断时的专用无消息阈值；`0` = 回退到 `MULTICA_AGENT_IDLE_WATCHDOG`，更大的值不能放宽全局阈值 |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | 工具在途时的静默上限：某个工具调用发出后长时间无任何输出（疑似卡死的子进程）这么久就 force-stop。`0` = 关闭该兜底（在途工具永不被停）|
+| `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex 专用的静默看门狗窗口 |
+| `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex `app-server` 启动 RPC 超时 |
+| `MULTICA_DAEMON_AUTO_UPDATE` | cloud：`true`，self-host：`false` | 设为 `false`/`0`/`no`/`off` 关闭守护进程的 CLI 自动更新轮询；`true`/`1`/`yes`/`on` 让 self-host 守护进程订阅上游更新 |
+| `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | 守护进程轮询 GitHub 检查 CLI 新版本的间隔 |
 | `MULTICA_<PROVIDER>_PATH` | 对应 CLI 名 | 各 AI 编程工具的可执行文件路径（如 `MULTICA_CLAUDE_PATH`）|
 | `MULTICA_<PROVIDER>_MODEL` | 空 | 各 AI 编程工具的默认模型 |
 | `MULTICA_<PROVIDER>_ARGS` | 空 | 守护进程级的默认 CLI 参数，作用于该后端的每个任务，并排在各智能体自身的 `custom_args` 之前。支持 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS` |
 
 完整解释每个参数对守护进程行为的影响，见 [守护进程与运行时](/daemon-runtimes)。
+
+### 把守护进程参数持久化到 `config.json`
+
+上面表格里的每个守护进程键 —— `device_name`、`runtime_name`、`max_concurrent_tasks`、`poll_interval`、`heartbeat_interval`、`agent_timeout`、`codex_semantic_inactivity_timeout`、`codex_handshake_timeout`、`disable_auto_update`、`auto_update_check_interval` —— 都可以持久化到 profile 对应的 `~/.multica/config.json`（或 `~/.multica/profiles/<name>/config.json`），这样就不用每次 `daemon start` 都重传 flag 或 export 环境变量。写入方式：
+
+```bash
+multica config set device_name my-vm-custom-name
+multica config set runtime_name worker-a
+multica config set max_concurrent_tasks 8
+multica config set poll_interval 10s          # Go 时长格式，必须 > 0
+multica config set heartbeat_interval 30s
+multica config set agent_timeout 1h           # 或 0s 显式关闭墙钟上限
+multica config set codex_semantic_inactivity_timeout 15m
+multica config set codex_handshake_timeout 45s
+multica config set disable_auto_update true   # 单向：只能关闭自动更新
+multica config set auto_update_check_interval 12h
+```
+
+时长类键只接受**正的** Go 时长（`500ms`、`10s`、`1m30s` 等）。`0s`、负值以及无法解析的字符串在 `config set` 阶段就会被拒绝——**唯一例外是 `agent_timeout`：这里 `0s` 是有意义的"显式关闭墙钟上限"哨兵**（负值仍然被拒）。若要清除已持久化的值、退回到环境变量 / 内置默认，传空串：`multica config set poll_interval ""`。
+
+`disable_auto_update` 是单向布尔：设为 `true` 会关闭守护进程的 CLI 自动更新轮询；设为 `false`（或用 `""` 清除）会把决策交回 `MULTICA_DAEMON_AUTO_UPDATE` / cloud-vs-self-host 默认。它不能从 config 文件强制开启自动更新。
+
+优先级从高到低：`--flag`（`daemon start` 命令行）> `MULTICA_…` 环境变量 > `config.json` > 内置默认。运行时环境变量（如 systemd unit 里设的）优先级高于 config 文件；显式命令行 flag 又高于两者。
+
+当你在同一台机器上用 `--profile <name>` 起多个 daemon 时，尤为好用：给每个 profile 独立设置 `device_name`，运行时页面就能看到独立的机器，而不是全部挤在同一个主机名下。
 
 ### 默认智能体参数（`MULTICA_<PROVIDER>_ARGS`）
 
@@ -202,14 +238,14 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 
 | 环境变量 | 默认值 | 说明 |
 |---|---|---|
-| `FRONTEND_ORIGIN` | 空 | 前端地址。邀请邮件里的链接、CORS 白名单、cookie domain 都从这里推导。邮件链接在不设时会 fallback 到托管版域名 `https://app.multica.ai`——self-host 必须显式填 |
+| `FRONTEND_ORIGIN` | 空 | 前端地址。邀请邮件里的链接、CORS 白名单、cookie domain 都从这里推导。邮件链接在不设时会 fallback 到托管版域名 `https://multica.ai`——self-host 必须显式填 |
 | `MULTICA_APP_URL` | 空 | CLI 登录流程使用的前端 URL。Web UI 也会用它显示带你自己 app domain 的 self-host 守护进程 setup 命令；同源部署中，如果 `MULTICA_PUBLIC_URL` 未设置，它也会作为守护进程的 `server_url` |
 | `MULTICA_PUBLIC_URL` | 空 | 公开 API URL，不带结尾 slash。用于 autopilot webhook URL，也会被 Web UI 用作守护进程的 `server_url` |
 | `CORS_ALLOWED_ORIGINS` | 空 | 额外的 CORS 允许来源（逗号分隔）|
 | `ALLOWED_ORIGINS` | 空 | WebSocket 专用的 origin 白名单（逗号分隔）；不设就按 `CORS_ALLOWED_ORIGINS` → `FRONTEND_ORIGIN` → `localhost:3000/5173/5174` 顺序回落 |
 
 <Callout type="warning">
-**`FRONTEND_ORIGIN` 不设就有两个静默失败**：（1）邀请邮件里的链接指向 `https://app.multica.ai`（托管版的域名），用户点了跳不回你的 self-host 实例；（2）WebSocket 连接的 Origin 校验回落到 `localhost:3000 / 5173 / 5174`，生产部署的 WebSocket 全部被拒，前端看起来「实时更新不工作」。
+**`FRONTEND_ORIGIN` 不设就有两个静默失败**：（1）邀请邮件里的链接指向 `https://multica.ai`（托管版的域名），用户点了跳不回你的 self-host 实例；（2）WebSocket 连接的 Origin 校验回落到 `localhost:3000 / 5173 / 5174`，生产部署的 WebSocket 全部被拒，前端看起来「实时更新不工作」。
 </Callout>
 
 ## GitHub 集成
