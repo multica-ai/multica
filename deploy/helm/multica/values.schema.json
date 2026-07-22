@@ -13,6 +13,7 @@
     "backend",
     "frontend",
     "ingress",
+    "httpRoute",
     "networkPolicy",
     "monitoring"
   ],
@@ -254,6 +255,47 @@
         "tls": { "$ref": "#/definitions/objectArray" }
       }
     },
+    "httpRoute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "annotations", "frontend", "backend"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "annotations": { "$ref": "#/definitions/stringMap" },
+        "frontend": { "$ref": "#/definitions/httpRouteComponent" },
+        "backend": { "$ref": "#/definitions/httpRouteComponent" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "enabled": { "const": true } },
+            "required": ["enabled"]
+          },
+          "then": {
+            "properties": {
+              "frontend": {
+                "if": {
+                  "properties": { "enabled": { "const": true } },
+                  "required": ["enabled"]
+                },
+                "then": {
+                  "properties": { "parentRefs": { "minItems": 1 } }
+                }
+              },
+              "backend": {
+                "if": {
+                  "properties": { "enabled": { "const": true } },
+                  "required": ["enabled"]
+                },
+                "then": {
+                  "properties": { "parentRefs": { "minItems": 1 } }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
     "networkPolicy": {
       "type": "object",
       "additionalProperties": false,
@@ -385,6 +427,21 @@
       "properties": {
         "host": { "type": "string" },
         "annotations": { "$ref": "#/definitions/stringMap" }
+      }
+    },
+    "httpRouteComponent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "annotations", "parentRefs", "hostnames", "rules"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "annotations": { "$ref": "#/definitions/stringMap" },
+        "parentRefs": { "$ref": "#/definitions/objectArray" },
+        "hostnames": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "rules": { "$ref": "#/definitions/objectArray" }
       }
     },
     "componentRules": {

@@ -12,12 +12,14 @@ pod security settings, and optional Prometheus Operator resources.
 - A default StorageClass when bundled PostgreSQL or local uploads are enabled.
 - A pre-created Secret named by `existingSecret`.
 - Prometheus Operator CRDs only when `ServiceMonitor` or `PrometheusRule` is enabled.
+- Gateway API CRDs, a controller, and an existing Gateway only when HTTPRoute is enabled.
 
 The chart creates one ServiceAccount and ConfigMap; backend and frontend
 Deployments and Services; two Ingress objects when enabled; and the frontend
 compatibility Service named `backend`. It conditionally creates PostgreSQL and
 uploads PVCs, the bundled PostgreSQL Deployment and Service, NetworkPolicies,
 PodDisruptionBudgets, a metrics Service, ServiceMonitor, and PrometheusRule.
+It can also create separate frontend and backend HTTPRoutes.
 
 ## Secrets
 
@@ -200,6 +202,15 @@ CIDRs appropriate to the cluster.
 Common Ingress annotations apply to both Ingress objects. Component annotations
 are merged over them and let operators configure backend WebSocket and long
 connections without coupling the chart to an ingress controller.
+
+Gateway API is available through `httpRoute.enabled`. The chart creates separate
+frontend and backend `gateway.networking.k8s.io/v1` HTTPRoutes and attaches them
+to the supplied `parentRefs`; at least one parent is required for every enabled
+component. Empty component `rules` produce a default
+`PathPrefix /` rule for the corresponding Service; non-empty rules are rendered
+verbatim for filters, timeouts, or advanced routing. Common and component
+annotations merge with the same precedence as Ingress. Set `ingress.enabled=false`
+when HTTPRoute is the only desired entrypoint.
 
 ## Monitoring
 

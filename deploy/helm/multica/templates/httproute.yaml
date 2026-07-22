@@ -1,0 +1,71 @@
+{{- if .Values.httpRoute.enabled -}}
+{{- $frontendAnnotations := mergeOverwrite (deepCopy (default dict .Values.httpRoute.annotations)) (default dict .Values.httpRoute.frontend.annotations) -}}
+{{- $backendAnnotations := mergeOverwrite (deepCopy (default dict .Values.httpRoute.annotations)) (default dict .Values.httpRoute.backend.annotations) -}}
+{{- if .Values.httpRoute.frontend.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "multica.frontend.fullname" . }}
+  labels:
+    {{- include "multica.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+  {{- with $frontendAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml .Values.httpRoute.frontend.parentRefs | nindent 4 }}
+  {{- with .Values.httpRoute.frontend.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- if .Values.httpRoute.frontend.rules }}
+    {{- toYaml .Values.httpRoute.frontend.rules | nindent 4 }}
+    {{- else }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "multica.frontend.fullname" . }}
+          port: 3000
+    {{- end }}
+{{- end }}
+{{- if and .Values.httpRoute.frontend.enabled .Values.httpRoute.backend.enabled }}
+---
+{{- end }}
+{{- if .Values.httpRoute.backend.enabled }}
+apiVersion: gateway.networking.k8s.io/v1
+kind: HTTPRoute
+metadata:
+  name: {{ include "multica.backend.fullname" . }}
+  labels:
+    {{- include "multica.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+  {{- with $backendAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  parentRefs:
+    {{- toYaml .Values.httpRoute.backend.parentRefs | nindent 4 }}
+  {{- with .Values.httpRoute.backend.hostnames }}
+  hostnames:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- if .Values.httpRoute.backend.rules }}
+    {{- toYaml .Values.httpRoute.backend.rules | nindent 4 }}
+    {{- else }}
+    - matches:
+        - path:
+            type: PathPrefix
+            value: /
+      backendRefs:
+        - name: {{ include "multica.backend.fullname" . }}
+          port: 8080
+    {{- end }}
+{{- end }}
+{{- end }}

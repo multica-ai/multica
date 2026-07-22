@@ -217,6 +217,26 @@ ingress:
     annotations: {}
   tls: []
 
+# Gateway API HTTPRoutes. The Gateway and its listeners must already exist.
+# Disable ingress.enabled when HTTPRoute should be the only public entrypoint.
+httpRoute:
+  enabled: false
+  annotations: {}
+  frontend:
+    enabled: true
+    annotations: {}
+    parentRefs: []
+    hostnames: []
+    # Empty uses a PathPrefix / rule targeting the chart frontend Service.
+    rules: []
+  backend:
+    enabled: true
+    annotations: {}
+    parentRefs: []
+    hostnames: []
+    # Empty uses a PathPrefix / rule targeting the chart backend Service.
+    rules: []
+
 # The chart renders these rules verbatim. When enabled, empty rule lists deny
 # traffic in that direction; provide every rule required by the deployment.
 networkPolicy:
