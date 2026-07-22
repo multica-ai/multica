@@ -2,6 +2,8 @@ package handler
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -90,7 +92,7 @@ func TestFetchFromSkillsSh_UsesEntryURLForNestedDirectories(t *testing.T) {
 		}
 	})
 
-	result, err := fetchFromSkillsSh(client, "https://skills.sh/acme/skills/pptx")
+	result, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/acme/skills/pptx")
 	if err != nil {
 		t.Fatalf("fetchFromSkillsSh: %v", err)
 	}
@@ -152,7 +154,7 @@ func TestFetchFromSkillsSh_FallbackDoesNotDoubleEscapeDirectoryNames(t *testing.
 		}
 	})
 
-	result, err := fetchFromSkillsSh(client, "https://skills.sh/acme/skills/pptx")
+	result, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/acme/skills/pptx")
 	if err != nil {
 		t.Fatalf("fetchFromSkillsSh: %v", err)
 	}
@@ -212,7 +214,7 @@ func TestFetchFromSkillsSh_LogsSubdirectoryFailures(t *testing.T) {
 		slog.SetDefault(prev)
 	})
 
-	result, err := fetchFromSkillsSh(client, "https://skills.sh/acme/skills/pptx")
+	result, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/acme/skills/pptx")
 	if err != nil {
 		t.Fatalf("fetchFromSkillsSh: %v", err)
 	}
@@ -246,19 +248,8 @@ func TestFetchFromSkillsSh_ResolvesAliasedSkillNamesViaFrontmatter(t *testing.T)
 				writeJSON(w, http.StatusOK, githubTreeResponse{
 					Tree: []githubTreeEntry{
 						{Path: "skills/composition-patterns/SKILL.md", Type: "blob"},
+						{Path: "skills/composition-patterns/rules.md", Type: "blob", Size: 5},
 						{Path: "skills/react-best-practices/SKILL.md", Type: "blob"},
-					},
-				})
-			case "/repos/vercel-labs/agent-skills/contents/skills/composition-patterns":
-				if got := r.URL.Query().Get("ref"); got != "main" {
-					t.Fatalf("resolved dir ref = %q, want main", got)
-				}
-				writeJSON(w, http.StatusOK, []githubContentEntry{
-					{
-						Name:        "rules.md",
-						Path:        "skills/composition-patterns/rules.md",
-						Type:        "file",
-						DownloadURL: "https://raw.githubusercontent.com/vercel-labs/agent-skills/main/skills/composition-patterns/rules.md",
 					},
 				})
 			default:
@@ -280,7 +271,7 @@ func TestFetchFromSkillsSh_ResolvesAliasedSkillNamesViaFrontmatter(t *testing.T)
 		}
 	})
 
-	result, err := fetchFromSkillsSh(client, "https://skills.sh/vercel-labs/agent-skills/vercel-composition-patterns")
+	result, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/vercel-labs/agent-skills/vercel-composition-patterns")
 	if err != nil {
 		t.Fatalf("fetchFromSkillsSh: %v", err)
 	}
@@ -294,7 +285,7 @@ func TestFetchFromSkillsSh_ResolvesAliasedSkillNamesViaFrontmatter(t *testing.T)
 		t.Fatalf("files = %v, want %v", gotPaths, wantPaths)
 	}
 	if !containsString(*requests, "api.github.com /repos/vercel-labs/agent-skills/git/trees/main?recursive=1") {
-		t.Fatalf("expected fallback tree lookup, got requests %v", *requests)
+		t.Fatalf("expected primary tree lookup, got requests %v", *requests)
 	}
 	for _, request := range *requests {
 		if request == "raw.githubusercontent.com /vercel-labs/agent-skills/main/skills/react-best-practices/SKILL.md" {
@@ -316,43 +307,10 @@ func TestFetchFromSkillsSh_ResolvesRootLevelSkillMd(t *testing.T) {
 				}
 				writeJSON(w, http.StatusOK, githubTreeResponse{
 					Tree: []githubTreeEntry{
-						{Path: "README.md", Type: "blob"},
-						{Path: "SKILL.md", Type: "blob"},
+						{Path: "README.md", Type: "blob", Size: 8},
+						{Path: "SKILL.md", Type: "blob", Size: 40},
 						{Path: "assets", Type: "tree"},
-						{Path: "assets/logo.png", Type: "blob"},
-					},
-				})
-			case "/repos/alchaincyf/huashu-design/contents":
-				if got := r.URL.Query().Get("ref"); got != "master" {
-					t.Fatalf("root contents ref = %q, want master", got)
-				}
-				writeJSON(w, http.StatusOK, []githubContentEntry{
-					{
-						Name:        "README.md",
-						Path:        "README.md",
-						Type:        "file",
-						DownloadURL: "https://raw.githubusercontent.com/alchaincyf/huashu-design/master/README.md",
-					},
-					{
-						Name:        "SKILL.md",
-						Path:        "SKILL.md",
-						Type:        "file",
-						DownloadURL: "https://raw.githubusercontent.com/alchaincyf/huashu-design/master/SKILL.md",
-					},
-					{
-						Name: "assets",
-						Path: "assets",
-						Type: "dir",
-						URL:  "https://api.github.com/repos/alchaincyf/huashu-design/contents/assets?ref=master",
-					},
-				})
-			case "/repos/alchaincyf/huashu-design/contents/assets":
-				writeJSON(w, http.StatusOK, []githubContentEntry{
-					{
-						Name:        "logo.png",
-						Path:        "assets/logo.png",
-						Type:        "file",
-						DownloadURL: "https://raw.githubusercontent.com/alchaincyf/huashu-design/master/assets/logo.png",
+						{Path: "assets/logo.png", Type: "blob", Size: 8},
 					},
 				})
 			default:
@@ -374,7 +332,7 @@ func TestFetchFromSkillsSh_ResolvesRootLevelSkillMd(t *testing.T) {
 		}
 	})
 
-	result, err := fetchFromSkillsSh(client, "https://skills.sh/alchaincyf/huashu-design/huashu-design")
+	result, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/alchaincyf/huashu-design/huashu-design")
 	if err != nil {
 		t.Fatalf("fetchFromSkillsSh: %v", err)
 	}
@@ -384,25 +342,32 @@ func TestFetchFromSkillsSh_ResolvesRootLevelSkillMd(t *testing.T) {
 	if !strings.HasPrefix(result.content, "---\nname: huashu-design") {
 		t.Fatalf("SKILL.md content not populated, got %q", result.content)
 	}
-	// assets/logo.png is intentionally dropped by addFile's binary-extension
-	// guard — PG TEXT columns can't store image bytes, and agents never read
-	// them as text. The directory is still walked (the listing request below
-	// confirms it), but the .png never reaches result.files.
+	// assets/logo.png is intentionally dropped by the binary-extension guard —
+	// PG TEXT columns can't store image bytes, and agents never read them as
+	// text. With tree-based enumeration the .png is filtered out from the tree
+	// metadata, so it is never even downloaded.
 	gotPaths := importedFilePaths(result.files)
 	wantPaths := []string{"README.md"}
 	if !equalStrings(gotPaths, wantPaths) {
 		t.Fatalf("files = %v, want %v", gotPaths, wantPaths)
 	}
-	if !containsString(*requests, "api.github.com /repos/alchaincyf/huashu-design/contents?ref=master") {
-		t.Fatalf("expected root contents listing, got %v", *requests)
+	if !containsString(*requests, "api.github.com /repos/alchaincyf/huashu-design/git/trees/master?recursive=1") {
+		t.Fatalf("expected recursive tree fetch, got %v", *requests)
+	}
+	for _, request := range *requests {
+		if request == "raw.githubusercontent.com /alchaincyf/huashu-design/master/assets/logo.png" {
+			t.Fatalf("binary asset must not be downloaded, got %v", *requests)
+		}
 	}
 }
 
-func TestFetchFromSkillsSh_RootSkillMdFastPathSkipsFrontmatterMismatch(t *testing.T) {
+func TestFetchFromSkillsSh_PrefersMostSpecificDirOverCollidingRoot(t *testing.T) {
 	// Multi-skill repo with an unrelated root SKILL.md (skill "other") plus a
-	// subdir skill "wanted". URL requests "wanted". The fast-path must reject
-	// the root SKILL.md on frontmatter mismatch and fall through to the tree
-	// fallback, which then resolves "wanted" correctly.
+	// subdir skill "wanted". URL requests "wanted". Tree-first resolution must
+	// pick the most specific matching directory (extras/wanted) instead of
+	// letting the repo-root SKILL.md hijack the request — this is the
+	// api-gateway-skill root-collision that used to make the importer crawl the
+	// whole repository.
 	client, requests := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Header.Get("X-Test-Original-Host") {
 		case "api.github.com":
@@ -414,15 +379,7 @@ func TestFetchFromSkillsSh_RootSkillMdFastPathSkipsFrontmatterMismatch(t *testin
 					Tree: []githubTreeEntry{
 						{Path: "SKILL.md", Type: "blob"},
 						{Path: "extras/wanted/SKILL.md", Type: "blob"},
-					},
-				})
-			case "/repos/acme/multi/contents/extras/wanted":
-				writeJSON(w, http.StatusOK, []githubContentEntry{
-					{
-						Name:        "ref.md",
-						Path:        "extras/wanted/ref.md",
-						Type:        "file",
-						DownloadURL: "https://raw.githubusercontent.com/acme/multi/main/extras/wanted/ref.md",
+						{Path: "extras/wanted/ref.md", Type: "blob", Size: 3},
 					},
 				})
 			default:
@@ -444,7 +401,7 @@ func TestFetchFromSkillsSh_RootSkillMdFastPathSkipsFrontmatterMismatch(t *testin
 		}
 	})
 
-	result, err := fetchFromSkillsSh(client, "https://skills.sh/acme/multi/wanted")
+	result, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/acme/multi/wanted")
 	if err != nil {
 		t.Fatalf("fetchFromSkillsSh: %v", err)
 	}
@@ -457,7 +414,7 @@ func TestFetchFromSkillsSh_RootSkillMdFastPathSkipsFrontmatterMismatch(t *testin
 		t.Fatalf("files = %v, want %v", gotPaths, wantPaths)
 	}
 	if !containsString(*requests, "api.github.com /repos/acme/multi/git/trees/main?recursive=1") {
-		t.Fatalf("expected tree fallback to run after fast-path frontmatter miss, got %v", *requests)
+		t.Fatalf("expected recursive tree lookup for skill resolution, got %v", *requests)
 	}
 }
 
@@ -509,7 +466,7 @@ func TestFetchFromSkillsSh_ReturnsActionableErrorForTruncatedTrees(t *testing.T)
 		}
 	})
 
-	_, err := fetchFromSkillsSh(client, "https://skills.sh/acme/skills/vercel-composition-patterns")
+	_, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/acme/skills/vercel-composition-patterns")
 	if err == nil {
 		t.Fatal("expected error for truncated tree fallback miss")
 	}
@@ -521,12 +478,143 @@ func TestFetchFromSkillsSh_ReturnsActionableErrorForTruncatedTrees(t *testing.T)
 	}
 }
 
+// A skill whose tree exceeds the file-count cap must fail fast from the tree
+// metadata alone, before any supporting file is downloaded. This is the
+// api-gateway case: an over-limit skill returns a clear error in one tree call
+// instead of crawling hundreds of directories until the reverse proxy times
+// out (504).
+func TestFetchFromSkillsSh_TreeFileCountCapFailsFastWithoutDownloads(t *testing.T) {
+	tree := []githubTreeEntry{{Path: "skills/foo/SKILL.md", Type: "blob"}}
+	for i := 0; i < maxImportFileCount+1; i++ {
+		tree = append(tree, githubTreeEntry{
+			Path: fmt.Sprintf("skills/foo/ref-%d.md", i),
+			Type: "blob",
+			Size: 4,
+		})
+	}
+
+	client, requests := newGitHubFixtureClient(t, treeOnlySkillFixture(tree))
+
+	_, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/acme/skills/foo")
+	if err == nil {
+		t.Fatal("expected file-count cap error")
+	}
+	if !isCapError(err) || !strings.Contains(err.Error(), "file limit") {
+		t.Fatalf("error = %q, want file-count cap error", err.Error())
+	}
+	for _, req := range *requests {
+		if strings.Contains(req, "ref-") {
+			t.Fatalf("no supporting file should be downloaded before the cap check, saw %q", req)
+		}
+	}
+}
+
+// The total-byte cap is likewise enforced from tree sizes before any download.
+func TestFetchFromSkillsSh_TreeTotalByteCapFailsFast(t *testing.T) {
+	tree := []githubTreeEntry{{Path: "skills/foo/SKILL.md", Type: "blob"}}
+	for i := 0; i < 9; i++ { // 9 MiB total > 8 MiB bundle cap, each at the per-file cap
+		tree = append(tree, githubTreeEntry{
+			Path: fmt.Sprintf("skills/foo/big-%d.md", i),
+			Type: "blob",
+			Size: maxImportFileSize,
+		})
+	}
+
+	client, requests := newGitHubFixtureClient(t, treeOnlySkillFixture(tree))
+
+	_, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/acme/skills/foo")
+	if err == nil {
+		t.Fatal("expected total-byte cap error")
+	}
+	if !isCapError(err) || !strings.Contains(err.Error(), "byte limit") {
+		t.Fatalf("error = %q, want total-byte cap error", err.Error())
+	}
+	for _, req := range *requests {
+		if strings.Contains(req, "big-") {
+			t.Fatalf("no supporting file should be downloaded before the cap check, saw %q", req)
+		}
+	}
+}
+
+// A skill under the raised 256-file cap imports its full supporting-file set
+// from the tree via concurrent downloads, in a stable path order regardless of
+// completion timing.
+func TestFetchFromSkillsSh_TreeEnumerationImportsManyFiles(t *testing.T) {
+	const count = 40
+	tree := []githubTreeEntry{{Path: "skills/foo/SKILL.md", Type: "blob"}}
+	for i := 0; i < count; i++ {
+		tree = append(tree, githubTreeEntry{
+			Path: fmt.Sprintf("skills/foo/ref-%02d.md", i),
+			Type: "blob",
+			Size: 3,
+		})
+	}
+
+	client, _ := newGitHubFixtureClient(t, treeOnlySkillFixture(tree))
+
+	result, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/acme/skills/foo")
+	if err != nil {
+		t.Fatalf("fetchFromSkillsSh: %v", err)
+	}
+	if len(result.files) != count {
+		t.Fatalf("imported %d files, want %d", len(result.files), count)
+	}
+	for i := 1; i < len(result.files); i++ {
+		if result.files[i-1].path >= result.files[i].path {
+			t.Fatalf("files not in stable sorted order: %q then %q", result.files[i-1].path, result.files[i].path)
+		}
+	}
+}
+
+func TestImportFetchErrorResponse(t *testing.T) {
+	capErr := fmt.Errorf("%w: import bundle would contain 999 files", errImportCapExceeded)
+	if status, _ := importFetchErrorResponse(context.Background(), capErr); status != http.StatusRequestEntityTooLarge {
+		t.Fatalf("cap error status = %d, want 413", status)
+	}
+	if status, _ := importFetchErrorResponse(context.Background(), context.DeadlineExceeded); status != http.StatusGatewayTimeout {
+		t.Fatalf("deadline error status = %d, want 504", status)
+	}
+	if status, _ := importFetchErrorResponse(context.Background(), fmt.Errorf("boom")); status != http.StatusBadGateway {
+		t.Fatalf("generic error status = %d, want 502", status)
+	}
+}
+
+// treeOnlySkillFixture serves the default branch, one recursive tree, the
+// skills/foo/SKILL.md body, and a stub body for every skills/foo/* supporting
+// file. It is the minimal fixture for exercising the tree-first primary path.
+func treeOnlySkillFixture(tree []githubTreeEntry) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{Tree: tree})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch {
+			case r.URL.Path == "/acme/skills/main/skills/foo/SKILL.md":
+				w.Write([]byte("---\nname: foo\n---\nbody"))
+			case strings.HasPrefix(r.URL.Path, "/acme/skills/main/skills/foo/"):
+				w.Write([]byte("x"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}
+}
+
 func TestFetchFromSkillsSh_AnthropicPptxIntegration(t *testing.T) {
 	if os.Getenv("MULTICA_RUN_SKILLS_SH_INTEGRATION") == "" {
 		t.Skip("set MULTICA_RUN_SKILLS_SH_INTEGRATION=1 to run live GitHub integration test")
 	}
 
-	result, err := fetchFromSkillsSh(&http.Client{Timeout: 30 * time.Second}, "https://skills.sh/anthropics/skills/pptx")
+	result, err := fetchFromSkillsSh(t.Context(), &http.Client{Timeout: 30 * time.Second}, "https://skills.sh/anthropics/skills/pptx")
 	if err != nil {
 		t.Fatalf("fetchFromSkillsSh: %v", err)
 	}
@@ -687,7 +775,7 @@ func TestFetchFromGitHub_TreeURLImportsSkillDirectory(t *testing.T) {
 		}
 	})
 
-	result, err := fetchFromGitHub(client, "https://github.com/anthropics/skills/tree/main/document-skills/pptx")
+	result, err := fetchFromGitHub(t.Context(), client, "https://github.com/anthropics/skills/tree/main/document-skills/pptx")
 	if err != nil {
 		t.Fatalf("fetchFromGitHub: %v", err)
 	}
@@ -757,7 +845,7 @@ func TestFetchFromGitHub_RepoRootResolvesDefaultBranch(t *testing.T) {
 		}
 	})
 
-	result, err := fetchFromGitHub(client, "https://github.com/alice/single-skill")
+	result, err := fetchFromGitHub(t.Context(), client, "https://github.com/alice/single-skill")
 	if err != nil {
 		t.Fatalf("fetchFromGitHub: %v", err)
 	}
@@ -789,7 +877,7 @@ func TestFetchFromGitHub_RepoRootMissingSKILLmdReturnsActionableError(t *testing
 		}
 	})
 
-	_, err := fetchFromGitHub(client, "https://github.com/alice/multi")
+	_, err := fetchFromGitHub(t.Context(), client, "https://github.com/alice/multi")
 	if err == nil {
 		t.Fatal("expected error for missing root SKILL.md")
 	}
@@ -821,7 +909,7 @@ func TestFetchFromGitHub_BlobURLImportsSpecificSkill(t *testing.T) {
 		}
 	})
 
-	result, err := fetchFromGitHub(client, "https://github.com/acme/skills/blob/main/skills/foo/SKILL.md")
+	result, err := fetchFromGitHub(t.Context(), client, "https://github.com/acme/skills/blob/main/skills/foo/SKILL.md")
 	if err != nil {
 		t.Fatalf("fetchFromGitHub: %v", err)
 	}
@@ -864,7 +952,7 @@ func TestNewRawFileRequest_AttachesGitHubTokenOnlyForRawGitHubHost(t *testing.T)
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			req, err := newRawFileRequest(tc.url)
+			req, err := newRawFileRequest(t.Context(), tc.url)
 			if err != nil {
 				t.Fatalf("newRawFileRequest(%q): %v", tc.url, err)
 			}
@@ -878,7 +966,7 @@ func TestNewRawFileRequest_AttachesGitHubTokenOnlyForRawGitHubHost(t *testing.T)
 func TestNewRawFileRequest_NoAuthHeaderWhenTokenUnset(t *testing.T) {
 	t.Setenv("GITHUB_TOKEN", "")
 
-	req, err := newRawFileRequest("https://raw.githubusercontent.com/acme/private/main/SKILL.md")
+	req, err := newRawFileRequest(t.Context(), "https://raw.githubusercontent.com/acme/private/main/SKILL.md")
 	if err != nil {
 		t.Fatalf("newRawFileRequest: %v", err)
 	}
@@ -895,7 +983,7 @@ func TestFetchRawFile_ReturnsErrorOnOversizedFile(t *testing.T) {
 	}))
 	t.Cleanup(server.Close)
 
-	_, err := fetchRawFile(&http.Client{}, server.URL+"/big.bin")
+	_, err := fetchRawFile(t.Context(), &http.Client{}, server.URL+"/big.bin")
 	if err == nil {
 		t.Fatal("expected error for oversized file, got nil")
 	}
@@ -975,7 +1063,7 @@ func TestFetchFromGitHub_OversizedSupportingFileFailsImport(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	_, err := fetchFromGitHub(client, "https://github.com/acme/skills/tree/main/foo")
+	_, err := fetchFromGitHub(t.Context(), client, "https://github.com/acme/skills/tree/main/foo")
 	if err == nil {
 		t.Fatal("expected oversized supporting file to fail the whole import")
 	}
@@ -1018,7 +1106,7 @@ func TestFetchFromSkillsSh_OversizedSupportingFileFailsImport(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	_, err := fetchFromSkillsSh(client, "https://skills.sh/acme/skills/foo")
+	_, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/acme/skills/foo")
 	if err == nil {
 		t.Fatal("expected oversized supporting file to fail the whole import")
 	}
@@ -1060,7 +1148,7 @@ func TestFetchFromGitHub_ResolvesSlashRefAgainstAPI(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	result, err := fetchFromGitHub(client, "https://github.com/acme/skills/tree/release/v2/skills/foo")
+	result, err := fetchFromGitHub(t.Context(), client, "https://github.com/acme/skills/tree/release/v2/skills/foo")
 	if err != nil {
 		t.Fatalf("fetchFromGitHub: %v", err)
 	}
@@ -1091,7 +1179,7 @@ func TestFetchFromGitHub_UnresolvableRefFailsLoudly(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	_, err := fetchFromGitHub(client, "https://github.com/acme/skills/tree/nope/skills/foo")
+	_, err := fetchFromGitHub(t.Context(), client, "https://github.com/acme/skills/tree/nope/skills/foo")
 	if err == nil {
 		t.Fatal("expected error when no candidate ref resolves")
 	}
@@ -1131,7 +1219,7 @@ func TestFetchFromGitHub_FallsBackOnAPIBlocked(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	result, err := fetchFromGitHub(client, "https://github.com/anthropics/skills/tree/main/skills/pptx")
+	result, err := fetchFromGitHub(t.Context(), client, "https://github.com/anthropics/skills/tree/main/skills/pptx")
 	if err != nil {
 		t.Fatalf("fetchFromGitHub: %v", err)
 	}
@@ -1185,7 +1273,7 @@ func TestFetchFromGitHub_SendsAuthHeaderWhenTokenSet(t *testing.T) {
 			http.NotFound(w, r)
 		}
 	})
-	if _, err := fetchFromGitHub(client, "https://github.com/acme/skills/tree/main/skills/foo"); err != nil {
+	if _, err := fetchFromGitHub(t.Context(), client, "https://github.com/acme/skills/tree/main/skills/foo"); err != nil {
 		t.Fatalf("fetchFromGitHub: %v", err)
 	}
 	mu.Lock()
