@@ -2155,6 +2155,8 @@ type QuickCreateIssueRequest struct {
 	DueDate       string `json:"due_date,omitempty"`
 	ProjectID     string `json:"project_id,omitempty"`
 	ParentIssueID string `json:"parent_issue_id,omitempty"`
+	// CEREBRO-PATCH(quick-create-custom-properties): FIR-3447 — values selected before the async issue exists.
+	PropertyValues map[string]json.RawMessage `json:"property_values,omitempty"`
 	// CEREBRO-PATCH(quick-create-workflow-id): FIR-2283 followup — optional
 	// Issue workflow recipe to start the created issue on (the Create-with-
 	// agent modal's workflow picker). The agent creates the issue async, so
@@ -2363,7 +2365,27 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		workflowUUID = wid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, workflowUUID)
+	// CEREBRO-PATCH(quick-create-custom-properties): validate ownership and type at the HTTP trust boundary, then carry canonical JSON to completion.
+	propertyValues := make(map[string]json.RawMessage, len(req.PropertyValues))
+	for propertyID, raw := range req.PropertyValues {
+		pid, ok := parseUUIDOrBadRequest(w, propertyID, "property_id")
+		if !ok {
+			return
+		}
+		definition, err := h.Queries.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: pid, WorkspaceID: wsUUID})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "issue property not found")
+			return
+		}
+		canonical, err := ValidateIssuePropertyValue(definition, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		propertyValues[propertyID] = canonical
+	}
+
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, workflowUUID, propertyValues)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")

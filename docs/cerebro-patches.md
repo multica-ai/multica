@@ -1704,6 +1704,7 @@ Approved by Jesper Hvejsel on FIR-3212 ("Vi skal kun lave agent configuration fu
 | `settings-page-issue-content` | `packages/views/settings/components/settings-page.tsx` | Mount the upstream property and create-field configuration inside the existing Cerebro settings layout. |
 | `workspace-default-issue-properties` | `server/internal/handler/workspace.go` | Create Business value (DKK) and Effort (DKK) as number properties for new workspaces while preserving the existing default workspace setup. |
 | `property-task-routes` | `server/cmd/server/router.go`; `server/internal/middleware/auth.go` | Bind `mat_` requests to their task context, allow agents to read the workspace property catalog, and restrict value writes to the issue that created the task. Property-definition writes remain human-only. |
+| `quick-create-custom-properties` | `packages/views/modals/quick-create-issue.tsx`; `server/internal/handler/issue.go`; `server/internal/service/task.go` | Show the settings-enabled custom fields in Quick create, validate their values before queueing, and apply them when the asynchronously created issue is resolved. The reusable typed controls stay isolated in `packages/cerebro-issue-properties`. |
 
 Approved by Jesper Hvejsel through FIR-3447 and plan artifact `019f704e-3865-7220-a109-6df596ccdf28`, 2026-07-17.
 

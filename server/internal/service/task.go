@@ -930,6 +930,8 @@ type QuickCreateContext struct {
 	// attached once the completion handler resolves that issue by origin; this
 	// carries the recipe id across that async gap.
 	WorkflowID string `json:"workflow_id,omitempty"`
+	// CEREBRO-PATCH(quick-create-custom-properties): canonical values applied once the async-created issue is resolved.
+	PropertyValues map[string]json.RawMessage `json:"property_values,omitempty"`
 }
 
 // QuickCreateContextType marks a task as a quick-create job.
@@ -954,7 +956,7 @@ const QuickCreateContextType = "quick_create"
 // parentIssueID is optional (zero-valued pgtype.UUID when the user didn't
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
-func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID, workflowID pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID, workflowID pgtype.UUID, propertyValues map[string]json.RawMessage) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -967,12 +969,13 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 
 	payload := QuickCreateContext{
-		Type:        QuickCreateContextType,
-		Prompt:      prompt,
-		RequesterID: util.UUIDToString(requesterID),
-		WorkspaceID: util.UUIDToString(workspaceID),
-		Priority:    priority,
-		DueDate:     dueDate,
+		Type:           QuickCreateContextType,
+		Prompt:         prompt,
+		RequesterID:    util.UUIDToString(requesterID),
+		WorkspaceID:    util.UUIDToString(workspaceID),
+		Priority:       priority,
+		DueDate:        dueDate,
+		PropertyValues: propertyValues,
 	}
 	if projectID.Valid {
 		payload.ProjectID = util.UUIDToString(projectID)
@@ -2989,6 +2992,18 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 			"issue_id", util.UUIDToString(issue.ID),
 			"error", err,
 		)
+	}
+
+	// CEREBRO-PATCH(quick-create-custom-properties): apply pre-validated values after the agent-created issue is deterministically resolved.
+	for propertyID, value := range qc.PropertyValues {
+		pid, perr := util.ParseUUID(propertyID)
+		if perr != nil {
+			slog.Warn("quick-create completion: invalid property id", "property_id", propertyID, "error", perr)
+			continue
+		}
+		if _, perr = s.Queries.SetIssuePropertyValue(ctx, db.SetIssuePropertyValueParams{ID: issue.ID, WorkspaceID: workspaceID, Key: propertyID, Value: value}); perr != nil {
+			slog.Warn("quick-create completion: custom property failed", "issue_id", util.UUIDToString(issue.ID), "property_id", util.UUIDToString(pid), "error", perr)
+		}
 	}
 
 	// CEREBRO-PATCH(quick-create-workflow-activate): FIR-2283 followup — if the

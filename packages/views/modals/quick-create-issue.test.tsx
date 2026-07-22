@@ -11,6 +11,7 @@ const mockClearPrompt = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
+const mockCustomPropertyValues = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
 
 const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
@@ -27,7 +28,19 @@ const mockQuickCreateStore = {
 
 const mockIssueCreateSettingsStore = {
   quickCreateFields: ["project"] as Array<"project" | "priority" | "due_date">,
+  hiddenManualPropertyIds: [] as string[],
 };
+
+vi.mock("@multica/cerebro-issue-properties/views", () => ({
+  CreateIssueProperties: forwardRef((_props: unknown, ref) => {
+    useImperativeHandle(ref, () => ({
+      getValues: () => mockCustomPropertyValues.current,
+      applyToIssue: vi.fn(),
+      reset: vi.fn(),
+    }));
+    return <div>Business value (DKK)</div>;
+  }),
+}));
 
 // Per-test override for the projects query, so tests can swap between
 // "loaded as empty" (the deleted-project case) and "still loading" without
@@ -359,6 +372,7 @@ describe("AgentCreatePanel", () => {
     mockQuickCreateStore.prompt = "Persisted draft prompt";
     mockQuickCreateStore.keepOpen = false;
     mockIssueCreateSettingsStore.quickCreateFields = ["project"];
+    mockCustomPropertyValues.current = {};
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
@@ -403,6 +417,23 @@ describe("AgentCreatePanel", () => {
         due_date: "2026-08-01",
       });
     });
+  });
+
+  it("shows enabled custom fields and submits their values", async () => {
+    mockCustomPropertyValues.current = { "business-value": 125000, effort: 25000 };
+    const user = userEvent.setup();
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.getByText("Business value (DKK)")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Create \(/i }));
+
+    await waitFor(() =>
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          property_values: { "business-value": 125000, effort: 25000 },
+        }),
+      ),
+    );
   });
 
   it("keeps unconfigured quick-create fields off the toolbar", () => {

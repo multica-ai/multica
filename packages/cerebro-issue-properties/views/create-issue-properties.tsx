@@ -26,6 +26,7 @@ import { toast } from "sonner";
 
 export interface CreateIssuePropertiesHandle {
   applyToIssue: (issueId: string) => Promise<void>;
+  getValues: () => Record<string, IssuePropertyValue>;
   reset: () => void;
 }
 
@@ -56,6 +57,7 @@ export const CreateIssueProperties = forwardRef<
     useImperativeHandle(
       ref,
       () => ({
+        getValues: () => ({ ...values }),
         applyToIssue: async (issueId) => {
           let failures = 0;
           for (const [propertyId, value] of Object.entries(values)) {

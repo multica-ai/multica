@@ -82,6 +82,8 @@ import { useWorkspacePaths } from "@multica/core/paths";
 // hook that auto-switches the modal to manual create when the picked agent's
 // daemon CLI is below the quick-create gate (instead of warning-only).
 import { useQuickCreateVersionAutoSwitch } from "@multica/cerebro-quick-create/views";
+// CEREBRO-PATCH(quick-create-custom-properties): FIR-3447 — collect enabled custom fields for the async create completion path.
+import { CreateIssueProperties, type CreateIssuePropertiesHandle } from "@multica/cerebro-issue-properties/views";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -171,6 +173,7 @@ export function AgentCreatePanel({
   const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
   const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
   const visibleFields = useIssueCreateSettingsStore((s) => s.quickCreateFields);
+  const hiddenPropertyIds = useIssueCreateSettingsStore((s) => s.hiddenManualPropertyIds);
   const promptDraft = useQuickCreateStore((s) => s.prompt);
   const setPrompt = useQuickCreateStore((s) => s.setPrompt);
   const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
@@ -308,6 +311,8 @@ export function AgentCreatePanel({
   // submit/switch time. `hasContent` mirrors emptiness so the Create button
   // can disable correctly without a controlled-input rerender on every keystroke.
   const editorRef = useRef<ContentEditorRef>(null);
+  // CEREBRO-PATCH(quick-create-custom-properties): values travel with the queued task because no issue id exists at submit time.
+  const issuePropertiesRef = useRef<CreateIssuePropertiesHandle>(null);
   const [hasContent, setHasContent] = useState(initialPrompt.trim().length > 0);
   const [submitting, setSubmitting] = useState(false);
   const [justSent, setJustSent] = useState(false);
@@ -394,6 +399,7 @@ export function AgentCreatePanel({
     setSubmitting(true);
     setError(null);
     try {
+      const propertyValues = issuePropertiesRef.current?.getValues() ?? {};
       await api.quickCreateIssue({
         ...(actor.type === "agent"
           ? { agent_id: actor.id }
@@ -403,6 +409,7 @@ export function AgentCreatePanel({
         ...(priority !== "none" ? { priority } : {}),
         ...(dueDate ? { due_date: dueDate } : {}),
         parent_issue_id: parentIssueId,
+        ...(Object.keys(propertyValues).length > 0 ? { property_values: propertyValues } : {}),
         // CEREBRO-PATCH(quick-create-workflow-submit): FIR-2283 followup.
         workflow_id: workflowId || undefined,
       });
@@ -417,6 +424,7 @@ export function AgentCreatePanel({
         // Stay open for continuous creation — clear the editor so the
         // user can immediately type the next prompt.
         editorRef.current?.clearContent();
+        issuePropertiesRef.current?.reset();
         setHasContent(false);
         setSentCount((c) => c + 1);
         setJustSent(true);
@@ -669,6 +677,8 @@ export function AgentCreatePanel({
             className="max-w-48"
             triggerRender={<PillButton />}
           />
+          {/* CEREBRO-PATCH(quick-create-custom-properties): settings-enabled fields are editable in the central Quick create flow. */}
+          <CreateIssueProperties ref={issuePropertiesRef} hiddenPropertyIds={hiddenPropertyIds} />
           <DropdownMenu>
             <DropdownMenuTrigger
               render={
