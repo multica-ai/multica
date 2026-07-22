@@ -379,6 +379,15 @@ export class ApiClient {
     this.token = token;
   }
 
+  // Authorization header value ("Bearer <token>") for requests that bypass
+  // the fetch-based client — notably Electron's native
+  // `webContents.downloadURL`, which cannot see the in-memory token. Returns
+  // null when unauthenticated. Callers MUST only hand this to same-origin API
+  // URLs (never an off-origin CloudFront/S3 presigned download_url).
+  getAuthorizationHeader(): string | null {
+    return this.token ? `Bearer ${this.token}` : null;
+  }
+
   private readCsrfToken(): string | null {
     if (typeof document === "undefined") return null;
     const match = document.cookie

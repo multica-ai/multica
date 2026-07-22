@@ -8,7 +8,7 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT } from "../i18n";
 
 interface DesktopBridge {
-  downloadURL?: (u: string) => Promise<void> | void;
+  downloadURL?: (u: string, authorization?: string) => Promise<void> | void;
 }
 
 function attachmentDownloadEndpoint(
@@ -93,7 +93,22 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
           const bridge = (
             window as unknown as { desktopAPI?: DesktopBridge }
           ).desktopAPI;
-          await bridge!.downloadURL!(downloadUrl);
+          // Hand the API bearer token to the native downloader ONLY when the
+          // resolved URL is our own API origin. Electron's downloadURL runs
+          // outside the fetch client, so without this the request is
+          // unauthenticated and 401s silently (no save dialog). In
+          // CloudFront/S3 presign mode `download_url` is an off-origin signed
+          // CDN URL that already carries its own auth and must NOT receive our
+          // Authorization header.
+          let authorization: string | undefined;
+          try {
+            if (new URL(downloadUrl).origin === new URL(api.getBaseUrl()).origin) {
+              authorization = api.getAuthorizationHeader() ?? undefined;
+            }
+          } catch {
+            authorization = undefined;
+          }
+          await bridge!.downloadURL!(downloadUrl, authorization);
         } catch {
           failed();
         }
