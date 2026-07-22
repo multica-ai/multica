@@ -47,6 +47,12 @@ func (p forgejoProvider) EventKind(h http.Header) EventKind {
 // VerifySignature checks X-Gitea-Signature, a bare hex HMAC-SHA256 of the body
 // (no "sha256=" prefix — that is GitHub's convention; tolerate it anyway).
 func (p forgejoProvider) VerifySignature(secret string, h http.Header, body []byte) bool {
+	// HMAC with an empty key is forgeable, so reject an empty secret outright
+	// (mirrors the GitLab verifier). Not reachable today — the secret is always
+	// 32 random bytes — but keep the auth boundary safe regardless.
+	if secret == "" {
+		return false
+	}
 	sig := strings.TrimSpace(h.Get("X-Gitea-Signature"))
 	sig = strings.TrimPrefix(sig, "sha256=")
 	want, err := hex.DecodeString(sig)

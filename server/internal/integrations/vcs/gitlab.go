@@ -168,8 +168,16 @@ func (gitlabProvider) ParseCIStatus(body []byte) (CIStatusEvent, error) {
 	}
 	return CIStatusEvent{
 		SHA: d.ObjectAttributes.SHA,
-		// GitLab pipelines are one per commit, not per named check, so a stable
-		// synthetic context keys the single status row.
+		// GitLab pipelines are modelled as one status per commit, not per named
+		// check, so a stable synthetic context keys the single status row.
+		// Known limitations of this simplification (acceptable for the default
+		// branch-pipeline config; revisit if needed):
+		//   - Merge-train / merged-results pipelines run on a synthetic merge
+		//     commit whose SHA differs from the MR head (last_commit.id), so the
+		//     head_sha join won't match and the card shows no checks.
+		//   - Multiple pipelines on one commit (e.g. a scheduled pipeline plus an
+		//     MR pipeline) collapse into this single context, so the last one to
+		//     fire wins per commit.
 		Context:   "gitlab/pipeline",
 		State:     normalizeGitLabPipelineState(d.ObjectAttributes.Status),
 		TargetURL: d.ObjectAttributes.URL,

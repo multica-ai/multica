@@ -67,6 +67,14 @@ func TestForgejoVerifySignature(t *testing.T) {
 	if p.VerifySignature(secret, h, []byte("tampered")) {
 		t.Error("tampered body accepted")
 	}
+	// An empty secret must be rejected outright — HMAC with an empty key is
+	// forgeable. Sign the body with the empty key and confirm it's still refused.
+	emptyMac := hmac.New(sha256.New, []byte(""))
+	emptyMac.Write(body)
+	h.Set("X-Gitea-Signature", hex.EncodeToString(emptyMac.Sum(nil)))
+	if p.VerifySignature("", h, body) {
+		t.Error("empty secret accepted")
+	}
 }
 
 func TestGitlabVerifySignature(t *testing.T) {
