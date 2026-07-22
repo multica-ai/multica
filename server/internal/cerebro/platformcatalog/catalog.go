@@ -1237,6 +1237,7 @@ var excluded = map[string]string{
 	"POST /api/cerebro/rounds/":                              "self_only — caller's own inbox rounds (FIR-2736)",
 	"PATCH /api/cerebro/rounds/{roundId}/":                   "self_only — caller's own inbox rounds (FIR-2736)",
 	"DELETE /api/cerebro/rounds/{roundId}/":                  "self_only — caller's own inbox rounds (FIR-2736)",
+	"POST /api/cerebro/rounds/reorder":                       "self_only — caller's own inbox rounds (FIR-3646)",
 	"POST /api/cerebro/rounds/{roundId}/members":             "self_only — caller's own inbox rounds (FIR-2736)",
 	"DELETE /api/cerebro/rounds/{roundId}/members/{issueId}": "self_only — caller's own inbox rounds (FIR-2736)",
 	"POST /api/cerebro/rounds/{roundId}/pause":               "self_only — caller's own inbox rounds (FIR-3429)",

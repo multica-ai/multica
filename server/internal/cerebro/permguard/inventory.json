@@ -261,6 +261,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/rounds/reorder",
+      "gate": "self_only"
+    },
+    {
       "id": "POST /api/cerebro/rounds/{roundId}/members",
       "gate": "self_only"
     },
