@@ -49,4 +49,14 @@ describe("createBestEffortDevLog", () => {
 
     expect(sink.write).not.toHaveBeenCalled();
   });
+
+  it("skips writes after the sink is destroyed", () => {
+    const sink = makeSink();
+    const log = createBestEffortDevLog(sink);
+    sink.destroyed = true;
+
+    log("console", "ignored");
+
+    expect(sink.write).not.toHaveBeenCalled();
+  });
 });
