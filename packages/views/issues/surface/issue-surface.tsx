@@ -214,6 +214,7 @@ function IssueSurfaceContent({
               controller.viewMode !== "table"
             }
             tableFacetCounts={controller.tableFacetCounts}
+            onTableFacetChange={controller.setActiveTableFacet}
           />
         )}
         {controller.isLoading ? (

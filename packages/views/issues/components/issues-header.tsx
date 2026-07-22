@@ -63,6 +63,7 @@ import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import type {
   Issue,
   IssueProperty,
+  IssueTableFacetSpec,
   IssueTableFacetsResponse,
 } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
@@ -800,6 +801,7 @@ export function IssuesHeader({
   isRefreshing = false,
   facetCountsExact = true,
   tableFacetCounts,
+  onTableFacetChange,
 }: {
   scopedIssues: Issue[];
   /** The rows the agents-working filter would leave on screen — undefined
@@ -813,6 +815,7 @@ export function IssuesHeader({
   /** See IssueDisplayControls.facetCountsExact. */
   facetCountsExact?: boolean;
   tableFacetCounts?: IssueTableFacetsResponse;
+  onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -908,6 +911,7 @@ export function IssuesHeader({
             onDateFilterChange={onDateFilterChange}
             facetCountsExact={facetCountsExact}
             tableFacetCounts={tableFacetCounts}
+            onTableFacetChange={onTableFacetChange}
           />
           <ViewRefreshIndicator active={isRefreshing} />
         </div>
@@ -924,6 +928,7 @@ export function IssueDisplayControls({
   onDateFilterChange,
   facetCountsExact = true,
   tableFacetCounts,
+  onTableFacetChange,
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
@@ -940,6 +945,7 @@ export function IssueDisplayControls({
    */
   facetCountsExact?: boolean;
   tableFacetCounts?: IssueTableFacetsResponse;
+  onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
 }) {
   const { t } = useT("issues");
   const [tableGroupMenuOpen, setTableGroupMenuOpen] = useState(false);
@@ -1091,7 +1097,11 @@ export function IssueDisplayControls({
   return (
     <div className="flex shrink-0 items-center gap-1">
         {/* Filter */}
-        <DropdownMenu>
+        <DropdownMenu
+          onOpenChange={(open) => {
+            if (!open) onTableFacetChange?.(null);
+          }}
+        >
           <Tooltip>
             <DropdownMenuTrigger
               render={
@@ -1124,7 +1134,11 @@ export function IssueDisplayControls({
           </Tooltip>
           <DropdownMenuContent align="end" className="w-auto">
             {/* Status */}
-            <DropdownMenuSub>
+            <DropdownMenuSub
+              onOpenChange={(open) =>
+                onTableFacetChange?.(open ? { kind: "status" } : null)
+              }
+            >
               <DropdownMenuSubTrigger>
                 <CircleDot className="size-3.5" />
                 <span className="flex-1">{t(($) => $.filters.section_status)}</span>
@@ -1160,7 +1174,11 @@ export function IssueDisplayControls({
             </DropdownMenuSub>
 
             {/* Priority */}
-            <DropdownMenuSub>
+            <DropdownMenuSub
+              onOpenChange={(open) =>
+                onTableFacetChange?.(open ? { kind: "priority" } : null)
+              }
+            >
               <DropdownMenuSubTrigger>
                 <SignalHigh className="size-3.5" />
                 <span className="flex-1">{t(($) => $.filters.section_priority)}</span>
@@ -1216,7 +1234,11 @@ export function IssueDisplayControls({
             )}
 
             {/* Assignee */}
-            <DropdownMenuSub>
+            <DropdownMenuSub
+              onOpenChange={(open) =>
+                onTableFacetChange?.(open ? { kind: "assignee" } : null)
+              }
+            >
               <DropdownMenuSubTrigger>
                 <User className="size-3.5" />
                 <span className="flex-1">{t(($) => $.filters.section_assignee)}</span>
@@ -1240,7 +1262,11 @@ export function IssueDisplayControls({
             </DropdownMenuSub>
 
             {/* Creator */}
-            <DropdownMenuSub>
+            <DropdownMenuSub
+              onOpenChange={(open) =>
+                onTableFacetChange?.(open ? { kind: "creator" } : null)
+              }
+            >
               <DropdownMenuSubTrigger>
                 <UserPen className="size-3.5" />
                 <span className="flex-1">{t(($) => $.filters.section_creator)}</span>
@@ -1261,7 +1287,11 @@ export function IssueDisplayControls({
             </DropdownMenuSub>
 
             {/* Project */}
-            <DropdownMenuSub>
+            <DropdownMenuSub
+              onOpenChange={(open) =>
+                onTableFacetChange?.(open ? { kind: "project" } : null)
+              }
+            >
               <DropdownMenuSubTrigger>
                 <FolderKanban className="size-3.5" />
                 <span className="flex-1">{t(($) => $.filters.section_project)}</span>
@@ -1284,7 +1314,11 @@ export function IssueDisplayControls({
             </DropdownMenuSub>
 
             {/* Label */}
-            <DropdownMenuSub>
+            <DropdownMenuSub
+              onOpenChange={(open) =>
+                onTableFacetChange?.(open ? { kind: "label" } : null)
+              }
+            >
               <DropdownMenuSubTrigger>
                 <Tag className="size-3.5" />
                 <span className="flex-1">{t(($) => $.filters.section_label)}</span>
@@ -1308,7 +1342,16 @@ export function IssueDisplayControls({
             {filterableProperties.map((property) => {
               const selected = propertyFilters[property.id] ?? [];
               return (
-                <DropdownMenuSub key={property.id}>
+                <DropdownMenuSub
+                  key={property.id}
+                  onOpenChange={(open) =>
+                    onTableFacetChange?.(
+                      open
+                        ? { kind: "property", property_id: property.id }
+                        : null,
+                    )
+                  }
+                >
                   <DropdownMenuSubTrigger>
                     {property.icon ? (
                       <PropertyIcon property={property} className="size-3.5 text-xs" />

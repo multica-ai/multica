@@ -8,6 +8,7 @@ import type {
   Issue,
   IssueAssigneeGroup,
   IssueStatus,
+  IssueTableFacetSpec,
   IssueTableFacetsResponse,
   IssueTableQuerySpec,
   Project,
@@ -93,8 +94,10 @@ export interface IssueSurfaceController {
   tableSearch: string;
   /** Canonical server-owned Table membership. */
   tableQuerySpec: IssueTableQuerySpec;
-  /** Exact disjunctive counts for the active Table membership. */
+  /** Exact disjunctive counts for the active Table filter submenu. */
   tableFacetCounts?: IssueTableFacetsResponse;
+  /** Load one Table facet when its filter submenu is opened. */
+  setActiveTableFacet: (facet: IssueTableFacetSpec | null) => void;
   setTableSearch: (query: string) => void;
   exportTableIssues: () => Promise<Issue[]>;
   isLoading: boolean;
@@ -351,32 +354,37 @@ export function useIssueSurfaceController({
     viewProjectFilters,
   ]);
 
+  const [activeTableFacet, setActiveTableFacet] =
+    useState<IssueTableFacetSpec | null>(null);
   const tableFacetRequest = useMemo(
     () => ({
       query: tableQuerySpec,
-      facets: [
-        { kind: "status" as const },
-        { kind: "priority" as const },
-        { kind: "assignee" as const },
-        { kind: "creator" as const },
-        { kind: "project" as const },
-        { kind: "label" as const },
-        ...workspaceProperties
-          .filter((property) =>
-            ["select", "multi_select", "checkbox"].includes(property.type),
-          )
-          .map((property) => ({
-            kind: "property" as const,
-            property_id: property.id,
-          })),
-      ],
+      // The endpoint requires at least one facet. This fallback is never
+      // fetched while activeTableFacet is null; it only keeps the request
+      // shape total for React Query's option factory.
+      facets: [activeTableFacet ?? { kind: "status" as const }],
+      // Filter option badges do not consume the query-wide total; rows/groups
+      // already own the displayed Table total.
+      include_total: false,
     }),
-    [tableQuerySpec, workspaceProperties],
+    [activeTableFacet, tableQuerySpec],
   );
   const tableFacetsQuery = useQuery({
     ...issueTableFacetsOptions(wsId, tableFacetRequest),
-    enabled: usesTable,
+    // Counts are only visible inside one open filter submenu. Eagerly loading
+    // every custom-property facet made a Table mount issue up to 47 SQL
+    // statements and repeatedly scan the issue table after invalidation.
+    enabled: usesTable && activeTableFacet !== null,
   });
+  useEffect(() => {
+    if (!usesTable) setActiveTableFacet(null);
+  }, [usesTable]);
+  const requestActiveTableFacet = useCallback(
+    (facet: IssueTableFacetSpec | null) => {
+      setActiveTableFacet(usesTable ? facet : null);
+    },
+    [usesTable],
+  );
 
   // Selection is only meaningful within the current membership window: batch
   // actions act on selected ids while export/common-field consumers intersect
@@ -523,7 +531,11 @@ export function useIssueSurfaceController({
     selection,
     tableSearch,
     tableQuerySpec,
-    tableFacetCounts: usesTable ? tableFacetsQuery.data : undefined,
+    tableFacetCounts:
+      usesTable && activeTableFacet !== null
+        ? tableFacetsQuery.data
+        : undefined,
+    setActiveTableFacet: requestActiveTableFacet,
     setTableSearch,
     openCreateIssue,
     moveIssue,

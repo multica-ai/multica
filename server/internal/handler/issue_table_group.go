@@ -70,10 +70,13 @@ func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request,
 		return resolvedIssueTableGroup{
 			kind:      "assignee",
 			groupExpr: "CASE WHEN i.assignee_type IS NULL OR i.assignee_id IS NULL THEN '__unassigned__' ELSE i.assignee_type || ':' || i.assignee_id::text END",
-			groupSortExpr: `LOWER(COALESCE(CASE i.assignee_type
-  WHEN 'member' THEN (SELECT u.name FROM "user" u WHERE u.id = i.assignee_id)
-  WHEN 'agent' THEN (SELECT a.name FROM agent a WHERE a.workspace_id = $1 AND a.id = i.assignee_id)
-  WHEN 'squad' THEN (SELECT s.name FROM squad s WHERE s.workspace_id = $1 AND s.id = i.assignee_id)
+			// groupSortExpr runs after issues have been reduced to one row per
+			// actor. Resolving display names before GROUP BY executes one lookup
+			// per issue and turns large assignee groups into an N+1 query plan.
+			groupSortExpr: `LOWER(COALESCE(CASE split_part(group_value, ':', 1)
+  WHEN 'member' THEN (SELECT u.name FROM "user" u WHERE u.id = split_part(group_value, ':', 2)::uuid)
+  WHEN 'agent' THEN (SELECT a.name FROM agent a WHERE a.workspace_id = $1 AND a.id = split_part(group_value, ':', 2)::uuid)
+  WHEN 'squad' THEN (SELECT s.name FROM squad s WHERE s.workspace_id = $1 AND s.id = split_part(group_value, ':', 2)::uuid)
 END, ''))`,
 		}, true
 	case "property":
@@ -157,11 +160,11 @@ func (group resolvedIssueTableGroup) expression(addArg func(any) string) string 
 	return group.groupExpr
 }
 
-func (group resolvedIssueTableGroup) sortExpression(groupExpression string) string {
+func (group resolvedIssueTableGroup) sortExpression() string {
 	if group.groupSortExpr != "" {
 		return group.groupSortExpr
 	}
-	return groupExpression
+	return "group_value"
 }
 
 func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) string {
@@ -378,7 +381,7 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
 		return "$" + strconv.Itoa(len(args))
 	}
 	groupExpr := group.expression(addArg)
-	groupSortExpr := group.sortExpression(groupExpr)
+	groupSortExpr := group.sortExpression()
 	orderExpr := group.orderExpression(addArg)
 	cursorPredicate := "TRUE"
 	if cursor != nil {
@@ -397,21 +400,23 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	limitRef := addArg(limit + 1)
 	query := fmt.Sprintf(`WITH grouped AS (
-	  SELECT %s AS group_value, COUNT(*)::bigint AS issue_count,
-	         MIN(%s)::text AS group_sort
+	  SELECT %s AS group_value, COUNT(*)::bigint AS issue_count
 	  FROM issue i
 	  WHERE %s
 	  GROUP BY 1
+	), sorted AS (
+	  SELECT group_value, issue_count, (%s)::text AS group_sort
+	  FROM grouped
 	), ranked AS (
 	  SELECT group_value, issue_count, group_sort, (%s)::int AS group_order,
 	         SUM(issue_count) OVER ()::bigint AS total
-	  FROM grouped
+	  FROM sorted
 	)
 	SELECT group_value, issue_count, group_sort, group_order, total
 	FROM ranked
 	WHERE %s
 	ORDER BY group_order ASC, group_sort ASC, group_value ASC
-	LIMIT %s`, groupExpr, groupSortExpr, compiled.where, orderExpr, cursorPredicate, limitRef)
+	LIMIT %s`, groupExpr, compiled.where, groupSortExpr, orderExpr, cursorPredicate, limitRef)
 
 	rows, err := h.DB.Query(r.Context(), query, args...)
 	if err != nil {

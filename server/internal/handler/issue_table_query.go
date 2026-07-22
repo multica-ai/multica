@@ -142,8 +142,9 @@ type issueTableFacetSpec struct {
 }
 
 type issueTableFacetsRequest struct {
-	Query  issueTableQuerySpec   `json:"query"`
-	Facets []issueTableFacetSpec `json:"facets"`
+	Query        issueTableQuerySpec   `json:"query"`
+	Facets       []issueTableFacetSpec `json:"facets"`
+	IncludeTotal *bool                 `json:"include_total,omitempty"`
 }
 
 type issueTableSQL struct {

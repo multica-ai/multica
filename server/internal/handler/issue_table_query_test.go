@@ -17,6 +17,8 @@ type issueTableEnrichmentFailTxStarter struct {
 	inner           txStarter
 	labelCalls      *int
 	tableQueryCalls *int
+	rowQuerySQL     *string
+	groupQuerySQL   *string
 }
 
 func (s issueTableEnrichmentFailTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
@@ -28,6 +30,8 @@ func (s issueTableEnrichmentFailTxStarter) Begin(ctx context.Context) (pgx.Tx, e
 		Tx:              tx,
 		labelCalls:      s.labelCalls,
 		tableQueryCalls: s.tableQueryCalls,
+		rowQuerySQL:     s.rowQuerySQL,
+		groupQuerySQL:   s.groupQuerySQL,
 	}, nil
 }
 
@@ -35,15 +39,22 @@ type issueTableEnrichmentFailTx struct {
 	pgx.Tx
 	labelCalls      *int
 	tableQueryCalls *int
+	rowQuerySQL     *string
+	groupQuerySQL   *string
 }
 
 func (tx *issueTableEnrichmentFailTx) recordTableQuery(sql string) {
-	if tx.tableQueryCalls == nil {
-		return
+	if tx.tableQueryCalls != nil {
+		if strings.Contains(sql, "page AS MATERIALIZED (") ||
+			strings.Contains(sql, "SELECT COUNT(*)::bigint FROM issue i WHERE") {
+			*tx.tableQueryCalls = *tx.tableQueryCalls + 1
+		}
 	}
-	if strings.Contains(sql, "WITH filtered_group AS (") ||
-		strings.Contains(sql, "SELECT COUNT(*)::bigint FROM issue i WHERE") {
-		*tx.tableQueryCalls = *tx.tableQueryCalls + 1
+	if tx.rowQuerySQL != nil && strings.Contains(sql, "page AS MATERIALIZED (") {
+		*tx.rowQuerySQL = sql
+	}
+	if tx.groupQuerySQL != nil && strings.Contains(sql, "WITH grouped AS (") {
+		*tx.groupQuerySQL = sql
 	}
 }
 
@@ -169,11 +180,13 @@ func TestIssueTableRowsCommitsBeforeBestEffortEnrichment(t *testing.T) {
 
 	labelCalls := 0
 	tableQueryCalls := 0
+	rowQuerySQL := ""
 	handler := *testHandler
 	handler.TxStarter = issueTableEnrichmentFailTxStarter{
 		inner:           testHandler.TxStarter,
 		labelCalls:      &labelCalls,
 		tableQueryCalls: &tableQueryCalls,
+		rowQuerySQL:     &rowQuerySQL,
 	}
 	recorder := httptest.NewRecorder()
 	handler.ListIssueTableRows(recorder, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
@@ -204,6 +217,11 @@ func TestIssueTableRowsCommitsBeforeBestEffortEnrichment(t *testing.T) {
 	}
 	if tableQueryCalls != 2 {
 		t.Fatalf("ungrouped root head executed %d table queries, want 2", tableQueryCalls)
+	}
+	if !strings.Contains(rowQuerySQL, "WITH page AS MATERIALIZED") ||
+		strings.Contains(rowQuerySQL, "membership AS") ||
+		strings.Contains(rowQuerySQL, "FROM membership child") {
+		t.Fatalf("flat rows query must page directly without hierarchy work:\n%s", rowQuerySQL)
 	}
 }
 
@@ -483,6 +501,108 @@ func TestIssueTableStatusGroupingOverOneThousandRows(t *testing.T) {
 	if facetCounts["todo"] != 501 || facetCounts["done"] != 500 {
 		t.Fatalf("status facet must ignore its own active filter: %#v", facetCounts)
 	}
+
+	includeTotal := false
+	facetCountQueries := 0
+	facetsHandler := *testHandler
+	facetsHandler.TxStarter = issueTableEnrichmentFailTxStarter{
+		inner:           testHandler.TxStarter,
+		tableQueryCalls: &facetCountQueries,
+	}
+	noTotalRecorder := httptest.NewRecorder()
+	facetsHandler.ListIssueTableFacets(noTotalRecorder, newRequest("POST", "/api/issues/table/facets", issueTableFacetsRequest{
+		Query:        filteredQuery,
+		Facets:       []issueTableFacetSpec{{Kind: "status"}},
+		IncludeTotal: &includeTotal,
+	}))
+	if noTotalRecorder.Code != http.StatusOK {
+		t.Fatalf("facets without total status = %d: %s", noTotalRecorder.Code, noTotalRecorder.Body.String())
+	}
+	var noTotal issueTableFacetsResponse
+	if err := json.NewDecoder(noTotalRecorder.Body).Decode(&noTotal); err != nil {
+		t.Fatalf("decode facets without total: %v", err)
+	}
+	if noTotal.Total != 0 || len(noTotal.Facets) != 1 {
+		t.Fatalf("unexpected facets without total: %#v", noTotal)
+	}
+	if facetCountQueries != 0 {
+		t.Fatalf("include_total=false executed %d total count queries, want 0", facetCountQueries)
+	}
+}
+
+func TestIssueTableAssigneeNamesResolveAfterGrouping(t *testing.T) {
+	ctx := context.Background()
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, 'Server table assignee grouping')
+		RETURNING id
+	`, testWorkspaceID).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE project_id = $1`, projectID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+	})
+
+	var finalNumber int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = GREATEST(
+			issue_counter,
+			(SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)
+		) + 2
+		WHERE id = $1
+		RETURNING issue_counter
+	`, testWorkspaceID).Scan(&finalNumber); err != nil {
+		t.Fatalf("reserve issue numbers: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, assignee_type, assignee_id,
+			creator_type, creator_id, position, number, project_id
+		)
+		VALUES
+			($1, 'Assigned row', 'todo', 'none', 'member', $2, 'member', $2, 1, $3, $4),
+			($1, 'Unassigned row', 'todo', 'none', NULL, NULL, 'member', $2, 2, $3 + 1, $4)
+	`, testWorkspaceID, testUserID, finalNumber-1, projectID); err != nil {
+		t.Fatalf("seed issues: %v", err)
+	}
+
+	groupQuerySQL := ""
+	handler := *testHandler
+	handler.TxStarter = issueTableEnrichmentFailTxStarter{
+		inner:         testHandler.TxStarter,
+		groupQuerySQL: &groupQuerySQL,
+	}
+	recorder := httptest.NewRecorder()
+	handler.ListIssueTableGroups(recorder, newRequest("POST", "/api/issues/table/groups", issueTableGroupsRequest{
+		Query: issueTableQuerySpec{
+			Scope: issueTableScope{Kind: "project", ProjectID: projectID},
+			Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+		},
+		Group: issueTableGroupSpec{Kind: "assignee"},
+		Page:  issueTablePageRequest{Limit: 10},
+	}))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("groups status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response issueTableGroupsResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode groups: %v", err)
+	}
+	counts := make(map[string]int64, len(response.Groups))
+	for _, group := range response.Groups {
+		counts[group.Key] = group.Count
+	}
+	if counts["assignee:member:"+testUserID] != 1 || counts["assignee:unassigned"] != 1 {
+		t.Fatalf("unexpected assignee groups: %#v", counts)
+	}
+	sortedAt := strings.Index(groupQuerySQL, "), sorted AS (")
+	nameLookupAt := strings.Index(groupQuerySQL, `SELECT u.name FROM "user" u`)
+	if sortedAt < 0 || nameLookupAt < sortedAt {
+		t.Fatalf("assignee names must resolve after actor aggregation:\n%s", groupQuerySQL)
+	}
 }
 
 func TestIssueTableHierarchyDoesNotCrossGroups(t *testing.T) {
@@ -540,10 +660,16 @@ func TestIssueTableHierarchyDoesNotCrossGroups(t *testing.T) {
 		Filters: issueTableFiltersRequest{},
 		Sort:    issueTableSortRequest{Field: "position", Direction: "asc"},
 	}
+	rowQuerySQL := ""
+	rowsHandler := *testHandler
+	rowsHandler.TxStarter = issueTableEnrichmentFailTxStarter{
+		inner:       testHandler.TxStarter,
+		rowQuerySQL: &rowQuerySQL,
+	}
 	listGroup := func(groupKey string) issueTableRowsResponse {
 		t.Helper()
 		w := httptest.NewRecorder()
-		testHandler.ListIssueTableRows(w, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
+		rowsHandler.ListIssueTableRows(w, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
 			Query:     query,
 			Group:     issueTableGroupSpec{Kind: "status"},
 			GroupKey:  &groupKey,
@@ -570,5 +696,12 @@ func TestIssueTableHierarchyDoesNotCrossGroups(t *testing.T) {
 	}
 	if todoRows.Rows[0].DirectChildCount != 0 {
 		t.Fatalf("cross-group child leaked into todo parent count: %d", todoRows.Rows[0].DirectChildCount)
+	}
+	if !strings.Contains(rowQuerySQL, "membership AS NOT MATERIALIZED") ||
+		!strings.Contains(rowQuerySQL, "page AS MATERIALIZED") ||
+		!strings.Contains(rowQuerySQL, "(SELECT parent.id FROM membership parent") ||
+		strings.Contains(rowQuerySQL, "NOT EXISTS (SELECT 1 FROM membership parent") ||
+		strings.Contains(rowQuerySQL, "child_counts AS") {
+		t.Fatalf("hierarchy rows query must preserve ordered paging and page-local counts:\n%s", rowQuerySQL)
 	}
 }

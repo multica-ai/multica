@@ -270,7 +270,10 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 	branchPredicate := "TRUE"
 	if request.Hierarchy.Enabled {
 		if request.ParentID == nil {
-			branchPredicate = "NOT EXISTS (SELECT 1 FROM filtered_group parent WHERE parent.id = i.parent_issue_id)"
+			// Keep parent membership as a scalar lookup. NOT EXISTS is equivalent
+			// semantically, but PostgreSQL turns it into a full hash anti-join and
+			// loses the ordered workspace index before LIMIT.
+			branchPredicate = "i.parent_issue_id IS NULL OR (SELECT parent.id FROM membership parent WHERE parent.id = i.parent_issue_id) IS NULL"
 		} else {
 			parentUUID, err := util.ParseUUID(*request.ParentID)
 			if err != nil {
@@ -278,7 +281,7 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			parentRef := addArg(parentUUID)
-			branchPredicate = fmt.Sprintf("i.parent_issue_id = %s::uuid AND EXISTS (SELECT 1 FROM filtered_group parent WHERE parent.id = %s::uuid)", parentRef, parentRef)
+			branchPredicate = fmt.Sprintf("i.parent_issue_id = %s::uuid AND EXISTS (SELECT 1 FROM membership parent WHERE parent.id = %s::uuid)", parentRef, parentRef)
 		}
 	}
 	cursorPredicate, ok := resolvedSort.cursorPredicate(w, cursor, addArg)
@@ -287,32 +290,43 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 	}
 	limitRef := addArg(limit + 1)
 
-	cte := fmt.Sprintf(`WITH filtered_group AS (
+	// Pick the requested page before computing hierarchy metadata. The old query
+	// materialized every matching issue and aggregated every parent before LIMIT,
+	// which made a 51-row page spill the entire workspace membership to disk.
+	// NOT MATERIALIZED lets PostgreSQL push parent_id/id predicates into issue and
+	// use the parent indexes for child branches and per-page child counts.
+	ctePrefix := "WITH "
+	pageSource := "issue"
+	pagePredicate := fmt.Sprintf("(%s) AND (%s)", compiled.where, groupPredicate)
+	if request.Hierarchy.Enabled {
+		ctePrefix += fmt.Sprintf(`membership AS NOT MATERIALIZED (
   SELECT i.*
   FROM issue i
   WHERE %s AND (%s)
-), child_counts AS (
-  SELECT parent_issue_id, COUNT(*)::bigint AS child_count
-  FROM filtered_group
-  WHERE parent_issue_id IS NOT NULL
-  GROUP BY parent_issue_id
-), branch AS (
-  SELECT i.*, COALESCE(cc.child_count, 0)::bigint AS direct_child_count
-  FROM filtered_group i
-  LEFT JOIN child_counts cc ON cc.parent_issue_id = i.id
-  WHERE %s
-)`, compiled.where, groupPredicate, branchPredicate)
+), `, compiled.where, groupPredicate)
+		pageSource = "membership"
+		pagePredicate = branchPredicate
+	}
+	cte := fmt.Sprintf(`%spage AS MATERIALIZED (
+  SELECT i.*, (%s)::text AS table_sort_key
+  FROM %s i
+  WHERE %s AND %s
+  ORDER BY %s
+  LIMIT %s
+)`, ctePrefix, resolvedSort.expression, pageSource, pagePredicate, cursorPredicate, resolvedSort.orderBy(), limitRef)
+	childCountExpr := "0::bigint"
+	if request.Hierarchy.Enabled {
+		childCountExpr = "(SELECT COUNT(*)::bigint FROM membership child WHERE child.parent_issue_id = i.id)"
+	}
 
 	query := fmt.Sprintf(`%s
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at,
 	       i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
-	       i.direct_child_count, (%s)::text AS table_sort_key
-	FROM branch i
-	WHERE %s
-	ORDER BY %s
-	LIMIT %s`, cte, resolvedSort.expression, cursorPredicate, resolvedSort.orderBy(), limitRef)
+	       %s AS direct_child_count, i.table_sort_key
+	FROM page i
+	ORDER BY %s`, cte, childCountExpr, resolvedSort.orderBy())
 
 	rows, err := h.DB.Query(r.Context(), query, args...)
 	if err != nil {

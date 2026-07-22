@@ -517,6 +517,50 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.isEmpty).toBe(false);
   });
 
+  it("loads only the Table facet whose filter submenu is active", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("table");
+    const listIssueTableFacets = vi.fn().mockResolvedValue({
+      query_fingerprint: "sha256:facets",
+      total: 0,
+      facets: [{ kind: "status", values: [{ key: "todo", count: 2 }] }],
+    });
+    setApiInstance({
+      listIssues,
+      listIssueTableFacets,
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
+      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+      getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    expect(listIssueTableFacets).not.toHaveBeenCalled();
+    act(() => result.current.setActiveTableFacet({ kind: "status" }));
+    await waitFor(() => expect(listIssueTableFacets).toHaveBeenCalledTimes(1));
+    expect(listIssueTableFacets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        facets: [{ kind: "status" }],
+        include_total: false,
+      }),
+    );
+    await waitFor(() =>
+      expect(result.current.tableFacetCounts?.facets[0]?.kind).toBe("status"),
+    );
+
+    act(() => result.current.setActiveTableFacet(null));
+    expect(result.current.tableFacetCounts).toBeUndefined();
+  });
+
   it("fails Table export closed when schema fallback would truncate the CSV", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");

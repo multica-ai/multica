@@ -15,7 +15,11 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-const issueTableMaxFacets = 200
+// The workspace property catalog is capped at 20 active definitions. Six
+// built-in dimensions plus that catalog fit under this guard with headroom,
+// while preventing a single request from scheduling hundreds of sequential
+// aggregation scans inside one snapshot transaction.
+const issueTableMaxFacets = 32
 
 type issueTableFacetValueResponse struct {
 	Key   string `json:"key"`
@@ -193,10 +197,13 @@ func (h *Handler) ListIssueTableFacets(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var total int64
-	if err := h.DB.QueryRow(r.Context(), fmt.Sprintf("SELECT COUNT(*)::bigint FROM issue i WHERE %s", base.where), base.args...).Scan(&total); err != nil {
-		slog.Warn("ListIssueTableFacets total failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeIssueTableQueryFailure(w, r, "failed to count table facets")
-		return
+	includeTotal := request.IncludeTotal == nil || *request.IncludeTotal
+	if includeTotal {
+		if err := h.DB.QueryRow(r.Context(), fmt.Sprintf("SELECT COUNT(*)::bigint FROM issue i WHERE %s", base.where), base.args...).Scan(&total); err != nil {
+			slog.Warn("ListIssueTableFacets total failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeIssueTableQueryFailure(w, r, "failed to count table facets")
+			return
+		}
 	}
 
 	seen := make(map[string]struct{}, len(request.Facets))

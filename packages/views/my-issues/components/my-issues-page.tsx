@@ -47,6 +47,7 @@ export function MyIssuesPage() {
               isRefreshing={controller.isRefreshing}
               facetCountsExact={controller.viewMode !== "table"}
               tableFacetCounts={controller.tableFacetCounts}
+              onTableFacetChange={controller.setActiveTableFacet}
             />
           )}
           renderEmpty={() => (

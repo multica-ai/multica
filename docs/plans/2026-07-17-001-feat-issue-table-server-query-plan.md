@@ -13,7 +13,7 @@ execution: code
 
 > 本文定义 Table View 的目标产品语义、前后端边界和分阶段实施方案。核心目标不是提高当前的 `1000` 上限，而是移除“前端必须拥有完整结果集才能 Group/Hierarchy”的架构前提。
 
-> **Implementation status (2026-07-21):** 新 Table 路径的 canonical compiler、U2–U3、U5–U7，以及 U8 的 exact facets / cache invalidation 已落地；标准字段所需 concurrent indexes 已加入。Legacy GET handlers 尚未迁入同一 compiler。Table 采用 hard cutover，新旧客户端仍可分别使用 additive table endpoints 与 legacy endpoints，不维护两套前端 Table truth。当前显式导出由浏览器遍历同一 rows Query Spec，并在 schema fallback、fingerprint/cursor 漂移、重复行或最终数量不等于首屏 total 时 fail closed；server-stream / async export job、observability、100k/1m staging SLO 与 browser network smoke 属于后续收口项。
+> **Implementation status (2026-07-22):** 新 Table 路径的 canonical compiler、U2–U3、U5–U7，以及 U8 的 exact facets / cache invalidation 已落地；标准字段和默认 position keyset 顺序所需 concurrent indexes 已加入。Rows 先裁 page，再只为当前页解析 hierarchy；assignee 显示名在 actor 聚合后解析。Legacy GET handlers 尚未迁入同一 compiler。Table 采用 hard cutover，新旧客户端仍可分别使用 additive table endpoints 与 legacy endpoints，不维护两套前端 Table truth。当前显式导出由浏览器遍历同一 rows Query Spec，并在 schema fallback、fingerprint/cursor 漂移、重复行或最终数量不等于首屏 total 时 fail closed；server-stream / async export job、observability、100k/1m staging SLO 与 browser network smoke 属于后续收口项。
 
 ## Goal Capsule
 
@@ -495,17 +495,14 @@ Request 复用 Query Spec，并声明需要的 facets：
 ```json
 {
   "query": { "...": "IssueTableQuerySpec" },
-  "facets": [
-    { "kind": "status" },
-    { "kind": "priority" },
-    { "kind": "assignee" },
-    { "kind": "project" },
-    { "kind": "label" }
-  ]
+  "facets": [{ "kind": "status" }],
+  "include_total": false
 }
 ```
 
-Response 返回 query fingerprint、query total，以及每个 facet 的 kind、可选 property ID 和 `{key,count}` values。Custom property facets 可按当前打开的 property submenu 单独请求，避免一次计算 workspace 全部 properties。
+Response 返回 query fingerprint、query total，以及每个 facet 的 kind、可选 property ID 和 `{key,count}` values。`include_total` 省略时默认为 `true`，保留原 endpoint contract；筛选选项不消费 query total，因此前端传 `false`，跳过额外 COUNT。
+
+Table 初始渲染不请求 facets。用户打开某个标准字段或 custom property 的筛选子菜单时，只请求该维度；关闭筛选菜单后停用查询。这样一次正常交互最多执行当前维度的聚合，不会在每次 Table mount / realtime invalidation 时依次扫描全部标准字段和工作区 properties。
 
 前端不再用 `scopedIssues` 计算 Table facet counts；Board/List 在统一 Query API 前可保留现有行为。
 

@@ -352,6 +352,8 @@ export type IssueTableFacetSpec =
 export interface IssueTableFacetsRequest {
   query: IssueTableQuerySpec;
   facets: IssueTableFacetSpec[];
+  /** Existing callers default to true. Count-only UIs can skip the extra scan. */
+  include_total?: boolean;
 }
 
 export interface IssueTableFacetValue {
