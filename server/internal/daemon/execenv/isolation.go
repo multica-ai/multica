@@ -31,6 +31,28 @@ type preparationRequest struct {
 	Reuse   *ReuseParams   `json:"reuse,omitempty"`
 }
 
+// preparationOpenclawGatewayPin is the private helper-protocol view of an
+// OpenclawGatewayPin. Defining a new type intentionally drops MarshalJSON,
+// whose public/logging contract masks Token. The helper needs the real token
+// over its stdin pipe so it can materialize a working per-task wrapper.
+type preparationOpenclawGatewayPin OpenclawGatewayPin
+
+type preparationPrepareParams struct {
+	*PrepareParams
+	OpenclawGateway preparationOpenclawGatewayPin `json:"OpenclawGateway"`
+}
+
+type preparationReuseParams struct {
+	*ReuseParams
+	OpenclawGateway preparationOpenclawGatewayPin `json:"OpenclawGateway"`
+}
+
+type preparationRequestPayload struct {
+	Action  string                    `json:"action"`
+	Prepare *preparationPrepareParams `json:"prepare,omitempty"`
+	Reuse   *preparationReuseParams   `json:"reuse,omitempty"`
+}
+
 type preparationResponse struct {
 	Environment *Environment `json:"environment,omitempty"`
 	Error       string       `json:"error,omitempty"`
@@ -63,7 +85,7 @@ func runPreparationProcess(ctx context.Context, command []string, request prepar
 	if ctx.Err() != nil {
 		return nil, context.Cause(ctx)
 	}
-	payload, err := json.Marshal(request)
+	payload, err := marshalPreparationRequest(request)
 	if err != nil {
 		return nil, fmt.Errorf("execenv: encode preparation request: %w", err)
 	}
@@ -149,15 +171,44 @@ func runPreparationProcess(ctx context.Context, command []string, request prepar
 	return response.Environment, nil
 }
 
+// marshalPreparationRequest builds the private parent-to-helper payload. A
+// methodless view is required for OpenclawGateway so its bearer token survives
+// this trusted local process boundary; ordinary json.Marshal calls on the
+// public type remain redacted.
+func marshalPreparationRequest(request preparationRequest) ([]byte, error) {
+	payload := preparationRequestPayload{Action: request.Action}
+	if request.Prepare != nil {
+		payload.Prepare = &preparationPrepareParams{
+			PrepareParams:   request.Prepare,
+			OpenclawGateway: preparationOpenclawGatewayPin(request.Prepare.OpenclawGateway),
+		}
+	}
+	if request.Reuse != nil {
+		payload.Reuse = &preparationReuseParams{
+			ReuseParams:     request.Reuse,
+			OpenclawGateway: preparationOpenclawGatewayPin(request.Reuse.OpenclawGateway),
+		}
+	}
+	return json.Marshal(payload)
+}
+
+func decodePreparationRequest(in io.Reader) (preparationRequest, error) {
+	var request preparationRequest
+	decoder := json.NewDecoder(in)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		return preparationRequest{}, err
+	}
+	return request, nil
+}
+
 // RunPreparationHelper serves the private helper protocol on stdin/stdout.
 // Operational errors from Prepare are encoded in the response so the parent
 // can preserve them; malformed protocol input/output is returned as a process
 // error because the parent cannot safely interpret the result.
 func RunPreparationHelper(in io.Reader, out io.Writer, logger *slog.Logger) error {
-	var request preparationRequest
-	decoder := json.NewDecoder(in)
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&request); err != nil {
+	request, err := decodePreparationRequest(in)
+	if err != nil {
 		return fmt.Errorf("decode preparation request: %w", err)
 	}
 

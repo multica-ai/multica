@@ -12,6 +12,12 @@ func TestBusinessMetricLabelsRejectHighCardinalityNames(t *testing.T) {
 	}
 }
 
+func TestNormalizeRuntimeProviderRecognizesQwen(t *testing.T) {
+	if got := NormalizeRuntimeProvider("QWEN"); got != "qwen" {
+		t.Fatalf("NormalizeRuntimeProvider(QWEN) = %q, want qwen", got)
+	}
+}
+
 func TestNormalizeLabelsCollapseUnknownValues(t *testing.T) {
 	if got := NormalizeRuntimeProvider("provider-from-user-input"); got != "other" {
 		t.Fatalf("NormalizeRuntimeProvider unknown = %q, want other", got)

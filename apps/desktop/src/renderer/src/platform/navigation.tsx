@@ -7,7 +7,6 @@ import { useAuthStore } from "@multica/core/auth";
 import { isReservedSlug } from "@multica/core/paths";
 import {
   useTabStore,
-  resolveRouteIcon,
   getActiveTab,
   splitTabUrl,
   useActiveTabUrl,
@@ -118,8 +117,7 @@ function tryRouteToPinnedNewTab(path: string): boolean {
   const newPathname = splitTabUrl(path).pathname;
   if (currentPathname === newPathname) return false;
 
-  const icon = resolveRouteIcon(path);
-  store.openTab(path, path, icon, { activate: true });
+  store.openTab(path, "", { activate: true });
   return true;
 }
 
@@ -191,8 +189,7 @@ export function DesktopNavigationProvider({
           store.switchWorkspace(slug, path);
           return;
         }
-        const icon = resolveRouteIcon(path);
-        store.openTab(path, title ?? path, icon, { activate: opts?.activate });
+        store.openTab(path, title ?? "", { activate: opts?.activate });
       },
       getShareableUrl: (path: string) => `${appUrl}${path}`,
     }),

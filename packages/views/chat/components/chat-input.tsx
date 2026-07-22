@@ -537,9 +537,13 @@ export function ChatInput({
             mentionMode={contextItems ? "context" : "default"}
             mentionContextItems={contextItems}
             enableSlashCommands
-            // Chat is short-form — the floating formatting toolbar is
-            // more distraction than feature here.
-            showBubbleMenu={false}
+            // The bubble menu carries the only affordance that can strip
+            // formatting — "Normal text" (setParagraph) plus the mark/list
+            // toggles. Once a `# ` input rule or a Markdown/HTML paste turns a
+            // line into a heading, chat has no other way to remove it, so
+            // without the bubble menu formatting can be created but never
+            // undone (MUL-5106).
+            showBubbleMenu
           />
         </div>
         {(uploadEnabled || leftAdornment) && (

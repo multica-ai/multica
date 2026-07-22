@@ -674,6 +674,12 @@ export function childIssuesOptions(wsId: string, id: string) {
   return queryOptions({
     queryKey: issueKeys.children(wsId, id),
     queryFn: () => api.listChildIssues(id).then((r) => r.issues),
+    // Child creation can happen while this workspace is not the active
+    // realtime subscription (for example, an agent creates it while a
+    // desktop tab is showing another workspace). The global Infinity
+    // staleTime would otherwise reuse an incomplete children snapshot when
+    // the parent is opened again, with no later event guaranteed to heal it.
+    refetchOnMount: "always",
   });
 }
 

@@ -161,6 +161,71 @@ func TestSetAgentSkillEnabledControlsExecutionWithoutRemovingAssignment(t *testi
 	}
 }
 
+func TestSetAgentRuntimeSkillEnabledPersistsScopedOverride(t *testing.T) {
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id
+		)
+		VALUES ($1, $2, '', 'local', '{}'::jsonb, $3, 'private', 'private', 1, $4)
+		RETURNING id
+	`, testWorkspaceID, "Runtime Skill Toggle "+t.Name(), runtimeID, testUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	setEnabled := func(enabled bool) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("PUT", "/api/agents/"+agentID+"/runtime-skills/enabled", map[string]any{
+			"runtime_id": runtimeID,
+			"root":       "provider",
+			"key":        "review",
+			"name":       "Review Helper",
+			"enabled":    enabled,
+		})
+		req = withURLParam(req, "id", agentID)
+		testHandler.SetAgentRuntimeSkillEnabled(w, req)
+		return w
+	}
+
+	if w := setEnabled(false); w.Code != 204 {
+		t.Fatalf("disable inherited skill: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	row, err := testHandler.Queries.GetAgent(context.Background(), parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+	disabled := decodeDisabledRuntimeSkills(row.DisabledRuntimeSkills)
+	if len(disabled) != 1 || disabled[0].RuntimeID != runtimeID ||
+		disabled[0].Provider != "claude" || disabled[0].Root != "provider" || disabled[0].Key != "review" ||
+		disabled[0].Name != "Review Helper" {
+		t.Fatalf("unexpected disabled runtime skills: %+v", disabled)
+	}
+	if w := setEnabled(false); w.Code != 204 {
+		t.Fatalf("repeat disable inherited skill: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	row, err = testHandler.Queries.GetAgent(context.Background(), parseUUID(agentID))
+	if err != nil || len(decodeDisabledRuntimeSkills(row.DisabledRuntimeSkills)) != 1 {
+		t.Fatalf("repeat disable was not idempotent: row=%+v err=%v", row, err)
+	}
+
+	if w := setEnabled(true); w.Code != 204 {
+		t.Fatalf("enable inherited skill: expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	row, err = testHandler.Queries.GetAgent(context.Background(), parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("reload agent: %v", err)
+	}
+	if disabled = decodeDisabledRuntimeSkills(row.DisabledRuntimeSkills); len(disabled) != 0 {
+		t.Fatalf("re-enabled skill still disabled: %+v", disabled)
+	}
+}
+
 // TestGetSkill_MalformedUUIDReturns400 guards the handler UUID parsing
 // convention (CLAUDE.md → "Backend Handler UUID Parsing Convention"): raw
 // `id` URL params on the request boundary must be validated with

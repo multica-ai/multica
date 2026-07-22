@@ -126,6 +126,7 @@ func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 				"provider":    "claude",
 				"root":        "plugin",
 				"plugin":      "paper-desktop@paper",
+				"can_disable": true,
 				"file_count":  2,
 			},
 		},
@@ -160,6 +161,9 @@ func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 	}
 	if got.Skills[0].FileCount != 2 {
 		t.Fatalf("file_count = %d", got.Skills[0].FileCount)
+	}
+	if !got.Skills[0].CanDisable {
+		t.Fatal("can_disable capability was not preserved")
 	}
 }
 

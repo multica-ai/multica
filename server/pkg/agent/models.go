@@ -165,6 +165,11 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 			annotateCodebuddyThinking(ctx, models, executablePath)
 			return models, nil
 		})
+	case "qwen":
+		// Qwen Code has no account-independent headless model catalog. An
+		// empty list keeps the runtime default and manual model entry available
+		// without advertising a Token-Plan-specific model to other accounts.
+		return []Model{}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
