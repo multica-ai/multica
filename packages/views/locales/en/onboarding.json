@@ -123,7 +123,7 @@
   },
   "cloud_waitlist": {
     "intro_main": "Cloud runtimes aren't live yet. Leave your email and we'll reach out when they are.",
-    "intro_warning": "Heads-up: without a runtime, agents can't run tasks — your workspace stays read-only until you connect one.",
+    "intro_warning": "Heads-up: agents can't run tasks until you connect a runtime.",
     "email_label": "Email",
     "email_placeholder": "you@work.com",
     "reason_label": "Why cloud?",

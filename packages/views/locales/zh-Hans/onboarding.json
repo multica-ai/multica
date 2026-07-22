@@ -123,7 +123,7 @@
   },
   "cloud_waitlist": {
     "intro_main": "云运行时尚未上线。留下邮箱，上线时通过邮件通知你。",
-    "intro_warning": "提示：没有运行时，智能体无法执行 task —— 在你连接运行时之前，工作区将保持只读。",
+    "intro_warning": "提示：连接运行时之前，智能体无法执行 task。",
     "email_label": "邮箱",
     "email_placeholder": "you@work.com",
     "reason_label": "为什么选择云？",

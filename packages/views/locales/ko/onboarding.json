@@ -123,7 +123,7 @@
   },
   "cloud_waitlist": {
     "intro_main": "클라우드 런타임은 아직 제공되지 않습니다. 이메일을 남겨주시면 준비되는 대로 연락드리겠습니다.",
-    "intro_warning": "주의: 런타임이 없으면 에이전트가 작업을 실행할 수 없습니다. 연결하기 전까지 워크스페이스는 읽기 전용입니다.",
+    "intro_warning": "주의: 런타임을 연결하기 전까지 에이전트는 작업을 실행할 수 없습니다.",
     "email_label": "이메일",
     "email_placeholder": "you@work.com",
     "reason_label": "클라우드를 원하는 이유",
