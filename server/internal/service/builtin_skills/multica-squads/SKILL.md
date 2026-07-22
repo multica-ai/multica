@@ -161,7 +161,13 @@ Current behavior:
 - assignment while status is `backlog` does not immediately start work;
 - moving a squad-assigned issue out of `backlog` can trigger the leader;
 - changing assignee cancels existing tasks for the issue before enqueueing the
-  new assignee path.
+  new assignee path;
+- parent issue status is agent-managed (same model as direct agent assignment):
+  the leader's first assignment turn should move the parent to `in_progress`
+  and keep it there while members work; the leader moves the parent to
+  `in_review` only when a later re-trigger confirms the overall goal is met.
+  Completing a leader `task` (including the first dispatch) does not itself
+  change issue status.
 
 Assignment validation rejects a missing type/id pair, non-existent squad,
 archived squad, archived leader, and private leader when the actor cannot access
@@ -245,6 +251,10 @@ authorizes them.
 - `description` is not proven runtime prompt content.
 - `role` is roster context, not automatic scheduling.
 - Backlog assignment does not immediately start work.
+- First leader dispatch is not parent completion — parent stays `in_progress`
+  until the leader later confirms the overall goal and moves it to `in_review`.
+- The server does not auto-flip parent status when child issues finish; it only
+  wakes the leader with an explicit ask (including `in_review` when wrapping up).
 
 ## References
 

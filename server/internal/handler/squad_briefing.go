@@ -66,6 +66,14 @@ Your responsibilities, in order:
    the human reporter, or close the loop. If no action is needed
    (e.g. a member posted a progress update that requires no response),
    record ` + "`" + `no_action` + "`" + ` and exit silently.
+6. **Own the parent issue status.** On the first assignment turn, move
+   the parent to ` + "`" + `in_progress` + "`" + ` (unless Agent Identity forbids
+   status changes) and keep it there while members work — a successful
+   dispatch is not completion. On later turns, do not flip status for
+   routine progress updates. Only when you confirm the overall goal is
+   met, run ` + "`" + `multica issue status <issue-id> in_review` + "`" + `. Leave
+   ` + "`" + `done` + "`" + ` to a human reviewer or existing integrations (for
+   example a PR with close intent that merges).
 
 Hard rules:
 - EVERY delegation MUST use the full mention markdown syntax

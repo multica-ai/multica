@@ -13,6 +13,25 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// TestSquadOperatingProtocolOwnsParentStatus locks the parent-issue status
+// contract: first dispatch moves todo→in_progress and stays there; only a
+// later confirmation of overall completion may advance to in_review; done is
+// left to humans / integrations.
+func TestSquadOperatingProtocolOwnsParentStatus(t *testing.T) {
+	compact := strings.Join(strings.Fields(squadOperatingProtocol), " ")
+	for _, want := range []string{
+		"Own the parent issue status",
+		"move the parent to `in_progress`",
+		"successful dispatch is not completion",
+		"multica issue status <issue-id> in_review",
+		"Leave `done` to a human reviewer",
+	} {
+		if !strings.Contains(compact, want) {
+			t.Errorf("expected squad operating protocol to contain %q\n--- protocol ---\n%s", want, squadOperatingProtocol)
+		}
+	}
+}
+
 // TestSquadOperatingProtocolWarnsAgainstDualTrigger locks in the rule
 // added for #3033: the protocol must tell the squad leader that a `todo`
 // child issue with an agent assignee already fires that agent, so they

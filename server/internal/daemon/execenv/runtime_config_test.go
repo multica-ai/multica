@@ -327,6 +327,39 @@ func TestAssignmentTriggeredProtocolHonorsAgentIdentity(t *testing.T) {
 	}
 }
 
+// Squad-leader assignment briefs must open the parent with in_progress, but
+// must not treat the first dispatch turn as completion (no unconditional
+// in_review). Leaders move the parent to in_review only on a later re-trigger
+// once the overall goal is met.
+func TestSquadLeaderAssignmentProtocolKeepsParentInProgress(t *testing.T) {
+	t.Parallel()
+	const issueID = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID:       issueID,
+		IsSquadLeader: true,
+	})
+
+	for _, want := range []string{
+		"Run `multica issue status " + issueID + " in_progress` unless your Agent Identity forbids issue status changes; if it does, skip this step.",
+		"After this initial dispatch, leave the parent issue `in_progress`",
+		"do NOT run `multica issue status " + issueID + " in_review` or `done` on this turn",
+		"only then, if the overall goal is met, move the parent to `in_review`",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("squad-leader assignment brief missing %q\n---\n%s", want, out)
+		}
+	}
+
+	for _, banned := range []string{
+		"When done, run `multica issue status " + issueID + " in_review`",
+		"8. When done, run `multica issue status " + issueID + " in_review`",
+	} {
+		if strings.Contains(out, banned) {
+			t.Errorf("squad-leader assignment brief must not contain ordinary-agent completion step %q\n---\n%s", banned, out)
+		}
+	}
+}
+
 func TestInstructionPrecedenceOnlyAppliesToAssignmentWorkflow(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
