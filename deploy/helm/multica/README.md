@@ -205,12 +205,30 @@ connections without coupling the chart to an ingress controller.
 
 Gateway API is available through `httpRoute.enabled`. The chart creates separate
 frontend and backend `gateway.networking.k8s.io/v1` HTTPRoutes and attaches them
-to the supplied `parentRefs`; at least one parent is required for every enabled
-component. Empty component `rules` produce a default
+to the existing Gateway supplied in `httpRoute.parentRefs`. Component
+`parentRefs` can override the common reference. Empty component `rules` produce a default
 `PathPrefix /` rule for the corresponding Service; non-empty rules are rendered
 verbatim for filters, timeouts, or advanced routing. Common and component
 annotations merge with the same precedence as Ingress. Set `ingress.enabled=false`
 when HTTPRoute is the only desired entrypoint.
+
+```yaml
+ingress:
+  enabled: false
+
+httpRoute:
+  enabled: true
+  parentRefs:
+    - name: internal-gateway
+      namespace: gateway-system
+      sectionName: https
+  frontend:
+    hostnames:
+      - multica.internal.example
+  backend:
+    hostnames:
+      - api.multica.internal.example
+```
 
 ## Monitoring
 

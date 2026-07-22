@@ -258,10 +258,11 @@
     "httpRoute": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["enabled", "annotations", "frontend", "backend"],
+      "required": ["enabled", "annotations", "parentRefs", "frontend", "backend"],
       "properties": {
         "enabled": { "type": "boolean" },
         "annotations": { "$ref": "#/definitions/stringMap" },
+        "parentRefs": { "$ref": "#/definitions/objectArray" },
         "frontend": { "$ref": "#/definitions/httpRouteComponent" },
         "backend": { "$ref": "#/definitions/httpRouteComponent" }
       },
@@ -272,26 +273,49 @@
             "required": ["enabled"]
           },
           "then": {
-            "properties": {
-              "frontend": {
-                "if": {
-                  "properties": { "enabled": { "const": true } },
-                  "required": ["enabled"]
-                },
-                "then": {
-                  "properties": { "parentRefs": { "minItems": 1 } }
-                }
+            "anyOf": [
+              {
+                "properties": { "parentRefs": { "minItems": 1 } }
               },
-              "backend": {
-                "if": {
-                  "properties": { "enabled": { "const": true } },
-                  "required": ["enabled"]
-                },
-                "then": {
-                  "properties": { "parentRefs": { "minItems": 1 } }
-                }
+              {
+                "allOf": [
+                  {
+                    "if": {
+                      "properties": {
+                        "frontend": {
+                          "properties": { "enabled": { "const": true } },
+                          "required": ["enabled"]
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "frontend": {
+                          "properties": { "parentRefs": { "minItems": 1 } }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "if": {
+                      "properties": {
+                        "backend": {
+                          "properties": { "enabled": { "const": true } },
+                          "required": ["enabled"]
+                        }
+                      }
+                    },
+                    "then": {
+                      "properties": {
+                        "backend": {
+                          "properties": { "parentRefs": { "minItems": 1 } }
+                        }
+                      }
+                    }
+                  }
+                ]
               }
-            }
+            ]
           }
         }
       ]

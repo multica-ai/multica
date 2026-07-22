@@ -1,6 +1,8 @@
 {{- if .Values.httpRoute.enabled -}}
 {{- $frontendAnnotations := mergeOverwrite (deepCopy (default dict .Values.httpRoute.annotations)) (default dict .Values.httpRoute.frontend.annotations) -}}
 {{- $backendAnnotations := mergeOverwrite (deepCopy (default dict .Values.httpRoute.annotations)) (default dict .Values.httpRoute.backend.annotations) -}}
+{{- $frontendParentRefs := default .Values.httpRoute.parentRefs .Values.httpRoute.frontend.parentRefs -}}
+{{- $backendParentRefs := default .Values.httpRoute.parentRefs .Values.httpRoute.backend.parentRefs -}}
 {{- if .Values.httpRoute.frontend.enabled }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute
@@ -15,7 +17,7 @@ metadata:
   {{- end }}
 spec:
   parentRefs:
-    {{- toYaml .Values.httpRoute.frontend.parentRefs | nindent 4 }}
+    {{- toYaml $frontendParentRefs | nindent 4 }}
   {{- with .Values.httpRoute.frontend.hostnames }}
   hostnames:
     {{- toYaml . | nindent 4 }}
@@ -50,7 +52,7 @@ metadata:
   {{- end }}
 spec:
   parentRefs:
-    {{- toYaml .Values.httpRoute.backend.parentRefs | nindent 4 }}
+    {{- toYaml $backendParentRefs | nindent 4 }}
   {{- with .Values.httpRoute.backend.hostnames }}
   hostnames:
     {{- toYaml . | nindent 4 }}

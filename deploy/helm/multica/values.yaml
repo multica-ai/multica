@@ -222,9 +222,16 @@ ingress:
 httpRoute:
   enabled: false
   annotations: {}
+  # Existing Gateway used by both routes. namespace is optional when the
+  # Gateway is in the release namespace; sectionName selects a listener.
+  parentRefs: []
+  # - name: internal-gateway
+  #   namespace: gateway-system
+  #   sectionName: https
   frontend:
     enabled: true
     annotations: {}
+    # Optional component override; empty inherits httpRoute.parentRefs.
     parentRefs: []
     hostnames: []
     # Empty uses a PathPrefix / rule targeting the chart frontend Service.
@@ -232,6 +239,7 @@ httpRoute:
   backend:
     enabled: true
     annotations: {}
+    # Optional component override; empty inherits httpRoute.parentRefs.
     parentRefs: []
     hostnames: []
     # Empty uses a PathPrefix / rule targeting the chart backend Service.
