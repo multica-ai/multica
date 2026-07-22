@@ -7,77 +7,98 @@
 // `executionLogPageOptions` and renders one virtualized Virtuoso row per loaded
 // message. Scope is strictly the terminal path — the live/chat streaming path
 // still uses the shared task-messages cache and AgentTranscriptDialog.
+//
+// Rows follow the reading hierarchy from `trace-event-presenter`: Agent text and
+// errors are the primary reading layer (multi-line, readable body), tool calls /
+// results / thinking are the secondary layer (compact one line + expandable
+// detail), and #seq / time are tertiary chrome.
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Virtuoso, type Components } from "react-virtuoso";
-import { AlertCircle, Brain, ChevronRight, Copy, Check, Loader2, X } from "lucide-react";
+import {
+  AlertCircle,
+  ArrowDownNarrowWide,
+  ArrowUpNarrowWide,
+  Brain,
+  Check,
+  ChevronRight,
+  Copy,
+  Loader2,
+  X,
+} from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@multica/ui/components/ui/collapsible";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   executionLogPageOptions,
   flattenExecutionLogPages,
   type ExecutionLogFilters,
 } from "@multica/core/chat/queries";
+import {
+  useTranscriptViewStore,
+  type TranscriptSortDirection,
+} from "@multica/core/agents/stores";
 import type { AgentTask } from "@multica/core/types/agent";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { redactSecrets } from "./redact";
 import {
+  TRACE_RESULT_PREVIEW_LINES,
+  TRACE_TEXT_PREVIEW_LINES,
   traceEventHasDetail,
   traceEventKind,
   traceEventLabel,
   traceEventSummary,
-  type TraceEventKind,
+  traceToolArgSummary,
 } from "./trace-event-presenter";
 import { useT } from "../../i18n";
 
 const TOOL_KEY_PREFIX = "tool:";
 const OUTPUT_DETAIL_CAP = 4000;
+// Errors are primary but usually shorter than an Agent conclusion; six lines
+// keep a stack-trace head readable without dominating the list.
+const TRACE_ERROR_PREVIEW_LINES = 6;
+// Cap the tool-result preview string so a single 50k-char line never enters the
+// DOM just to be visually clamped away.
+const RESULT_PREVIEW_CHARS = 600;
 
-interface ExecutionLogDialogProps {
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  task: AgentTask;
-  agentName: string;
-  /**
-   * Optional content rendered between the header and the event list. Mirrors
-   * AgentTranscriptDialog's slot so the terminal path keeps surfacing the
-   * autopilot webhook payload preview for completed runs.
-   */
-  headerSlot?: React.ReactNode;
+/** Stable identity for a loaded event, used as the shared expand-set key. Seq is
+ *  unique within a Run; the rest disambiguate defensively if seq ever repeats. */
+function execEventKey(m: TaskMessagePayload): string {
+  return `${m.seq}|${m.created_at ?? ""}|${m.type}|${m.tool ?? ""}`;
 }
-
-// Badge color per presenter kind. Thinking is de-emphasized (muted) and error is
-// destructive; the rest mirror AgentTranscriptDialog so the two dialogs read the
-// same.
-const KIND_BADGE_CLASS: Record<TraceEventKind, string> = {
-  agent: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  tool_use: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
-  tool_result: "bg-muted text-muted-foreground",
-  thinking: "bg-muted text-muted-foreground",
-  error: "bg-destructive/15 text-destructive",
-  generic: "bg-muted text-muted-foreground",
-};
 
 /** A human label for a type facet key ("text" → "Agent", etc.). */
 function typeFacetLabel(key: string): string {
   return traceEventLabel({ type: key });
 }
 
-// ─── Virtuoso Header (loading-older / older-page error) ──────────────────────
+/** First `n` newline-delimited lines of a block, for a bounded inline preview. */
+function firstLines(text: string, n: number): string {
+  return text.split("\n").slice(0, n).join("\n");
+}
+
+/** `-webkit-line-clamp` as an inline style so the line count can vary per kind
+ *  without depending on which `line-clamp-N` utilities Tailwind emits. */
+function clampStyle(lines: number): React.CSSProperties {
+  return {
+    display: "-webkit-box",
+    WebkitBoxOrient: "vertical",
+    WebkitLineClamp: lines,
+    overflow: "hidden",
+  };
+}
+
+// ─── Virtuoso loading-edge slot (loading-older / older-page error) ───────────
 //
 // Module-scope + context-driven, matching chat-message-list: an inline
-// components prop rebuilds the Header type every render and remounts its
-// subtree, which is exactly the churn MUL-3960 fixed. Per-render data reaches
-// the Header through Virtuoso's `context` prop instead.
+// components prop rebuilds the slot type every render and remounts its subtree,
+// which is exactly the churn MUL-3960 fixed. Per-render data reaches the slot
+// through Virtuoso's `context` prop instead. In chronological order older events
+// load at the START (Header slot); in newest-first order they load at the END
+// (Footer slot) — the content is identical, only the slot differs.
 
 interface LogListContext {
   isFetchingEarlier: boolean;
@@ -85,7 +106,7 @@ interface LogListContext {
   onRetryEarlier: () => void;
 }
 
-function LogListHeader({ context }: { context?: LogListContext }) {
+function LogListEdge({ context }: { context?: LogListContext }) {
   const { t } = useT("issues");
   if (!context) return null;
   if (context.earlierError) {
@@ -113,11 +134,27 @@ function LogListHeader({ context }: { context?: LogListContext }) {
   return null;
 }
 
-const LOG_COMPONENTS: Components<TaskMessagePayload, LogListContext> = {
-  Header: LogListHeader,
+const HEADER_COMPONENTS: Components<TaskMessagePayload, LogListContext> = {
+  Header: LogListEdge,
+};
+const FOOTER_COMPONENTS: Components<TaskMessagePayload, LogListContext> = {
+  Footer: LogListEdge,
 };
 
 // ─── Main dialog ─────────────────────────────────────────────────────────────
+
+interface ExecutionLogDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  task: AgentTask;
+  agentName: string;
+  /**
+   * Optional content rendered between the header and the event list. Mirrors
+   * AgentTranscriptDialog's slot so the terminal path keeps surfacing the
+   * autopilot webhook payload preview for completed runs.
+   */
+  headerSlot?: React.ReactNode;
+}
 
 export function ExecutionLogDialog({
   open,
@@ -130,6 +167,14 @@ export function ExecutionLogDialog({
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
   const [selectedKeys, setSelectedKeys] = useState<string[]>([]);
   const [copied, setCopied] = useState(false);
+  // Shared expand set owned by the dialog so a bulk action can expand/collapse
+  // every loaded row at once. Holds `execEventKey` values; a row is open iff its
+  // key is present.
+  const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
+
+  const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
+  const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
+  const chronological = sortDirection === "chronological";
 
   // Selected chip keys are in the presenter's traceEventFilterKey format
   // ("error" or "tool:Bash"); split them back into the API's type/tool arrays.
@@ -160,12 +205,24 @@ export function ExecutionLogDialog({
 
   const messages = useMemo(() => flattenExecutionLogPages(data?.pages), [data?.pages]);
 
+  // Newest-first is a pure presentation reverse; seq numbers and detail are
+  // untouched, so filters/copy keep working against the same data.
+  const orderedMessages = useMemo(
+    () => (chronological ? messages : [...messages].reverse()),
+    [messages, chronological],
+  );
+
   const pages = data?.pages ?? [];
-  // firstItemIndex anchors scroll position when older pages prepend: every page
-  // after page 0 is older history, so the running big-constant minus their count
-  // keeps already-rendered rows in place across a prepend.
+  // Chronological: older pages prepend at the START, so firstItemIndex counts
+  // down by their length to keep already-rendered rows anchored across a
+  // prepend. Newest-first: older pages append at the END and never shift the
+  // existing indices, so a fixed 0 anchor is correct.
   const olderCount = pages.slice(1).reduce((sum, page) => sum + page.messages.length, 0);
-  const firstItemIndex = messages.length > 0 ? 1_000_000 - olderCount : 0;
+  const firstItemIndex = chronological
+    ? messages.length > 0
+      ? 1_000_000 - olderCount
+      : 0
+    : 0;
 
   // Totals and facets are full-Run context, identical on every page.
   const first = pages[0];
@@ -196,14 +253,40 @@ export function ExecutionLogDialog({
     );
   }, []);
 
+  // Bulk expand is bounded to LOADED rows with detail — never the unfetched
+  // history (which could be tens of thousands of events).
+  const expandableKeys = useMemo(
+    () => messages.filter((m) => traceEventHasDetail(m)).map(execEventKey),
+    [messages],
+  );
+  const allExpanded =
+    expandableKeys.length > 0 && expandableKeys.every((k) => expandedKeys.has(k));
+
+  const toggleExpanded = useCallback((key: string) => {
+    setExpandedKeys((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  const handleBulkExpand = useCallback(() => {
+    setExpandedKeys(allExpanded ? new Set() : new Set(expandableKeys));
+  }, [allExpanded, expandableKeys]);
+
   const handleRetryEarlier = useCallback(() => {
     void fetchNextPage();
   }, [fetchNextPage]);
 
+  const handleEdgeReached = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
   // Copies only the currently loaded (and filtered) window — not the whole Run,
-  // which may still have unfetched older pages.
+  // which may still have unfetched older pages. Uses the on-screen order.
   const handleCopyLoaded = useCallback(() => {
-    const text = messages
+    const text = orderedMessages
       .map((m) => `[${traceEventLabel(m)}] ${traceEventSummary(m)}`)
       .join("\n");
     void copyText(text).then((ok) => {
@@ -211,7 +294,7 @@ export function ExecutionLogDialog({
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     });
-  }, [messages]);
+  }, [orderedMessages]);
 
   const listContext: LogListContext = {
     isFetchingEarlier: isFetchingNextPage,
@@ -246,17 +329,28 @@ export function ExecutionLogDialog({
   } else if (scrollEl) {
     body = (
       <Virtuoso<TaskMessagePayload, LogListContext>
+        // Remount when direction flips so the list lands at that direction's
+        // start point (bottom for chronological, top for newest-first).
+        key={sortDirection}
         customScrollParent={scrollEl}
-        data={messages}
+        data={orderedMessages}
         firstItemIndex={firstItemIndex}
-        initialTopMostItemIndex={{ index: "LAST", align: "end" }}
+        initialTopMostItemIndex={chronological ? { index: "LAST", align: "end" } : 0}
         increaseViewportBy={{ top: 400, bottom: 600 }}
-        startReached={() => {
-          if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
-        }}
+        startReached={chronological ? handleEdgeReached : undefined}
+        endReached={chronological ? undefined : handleEdgeReached}
         context={listContext}
-        components={LOG_COMPONENTS}
-        itemContent={(_, message) => <ExecutionLogRow message={message} />}
+        components={chronological ? HEADER_COMPONENTS : FOOTER_COMPONENTS}
+        itemContent={(_, message) => {
+          const key = execEventKey(message);
+          return (
+            <ExecutionLogRow
+              message={message}
+              open={expandedKeys.has(key)}
+              onToggle={() => toggleExpanded(key)}
+            />
+          );
+        }}
       />
     );
   }
@@ -279,6 +373,43 @@ export function ExecutionLogDialog({
             </div>
 
             <div className="ml-auto flex shrink-0 items-center gap-1">
+              {expandableKeys.length > 0 && (
+                <button
+                  type="button"
+                  data-testid={
+                    allExpanded ? "execution-log-collapse-all" : "execution-log-expand-all"
+                  }
+                  onClick={handleBulkExpand}
+                  aria-label={
+                    allExpanded
+                      ? t(($) => $.execution_log.collapse_all)
+                      : t(($) => $.execution_log.expand_loaded)
+                  }
+                  className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <ChevronRight
+                    className={cn("h-3 w-3 transition-transform", !allExpanded && "rotate-90")}
+                  />
+                  <span className="hidden sm:inline">
+                    {allExpanded
+                      ? t(($) => $.execution_log.collapse_all)
+                      : t(($) => $.execution_log.expand_loaded)}
+                  </span>
+                </button>
+              )}
+
+              {messages.length > 0 && (
+                <SortDirectionToggle
+                  value={sortDirection}
+                  onChange={setSortDirection}
+                  labels={{
+                    chronological: t(($) => $.execution_log.sort_chronological),
+                    newestFirst: t(($) => $.execution_log.sort_newest_first),
+                    ariaLabel: t(($) => $.execution_log.sort_label),
+                  }}
+                />
+              )}
+
               <button
                 type="button"
                 onClick={handleCopyLoaded}
@@ -360,6 +491,56 @@ export function ExecutionLogDialog({
   );
 }
 
+// ─── Sort direction toggle ───────────────────────────────────────────────────
+
+interface SortDirectionToggleProps {
+  value: TranscriptSortDirection;
+  onChange: (dir: TranscriptSortDirection) => void;
+  labels: { chronological: string; newestFirst: string; ariaLabel: string };
+}
+
+function SortDirectionToggle({ value, onChange, labels }: SortDirectionToggleProps) {
+  return (
+    <div
+      role="group"
+      data-testid="execution-log-sort"
+      aria-label={labels.ariaLabel}
+      className="inline-flex shrink-0 items-center rounded border bg-muted/40 p-0.5 text-xs"
+    >
+      <button
+        type="button"
+        aria-pressed={value === "chronological"}
+        title={labels.chronological}
+        onClick={() => onChange("chronological")}
+        className={cn(
+          "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
+          value === "chronological"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <ArrowDownNarrowWide className="h-3 w-3" />
+        <span className="hidden sm:inline">{labels.chronological}</span>
+      </button>
+      <button
+        type="button"
+        aria-pressed={value === "newest_first"}
+        title={labels.newestFirst}
+        onClick={() => onChange("newest_first")}
+        className={cn(
+          "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
+          value === "newest_first"
+            ? "bg-background text-foreground shadow-sm"
+            : "text-muted-foreground hover:text-foreground",
+        )}
+      >
+        <ArrowUpNarrowWide className="h-3 w-3" />
+        <span className="hidden sm:inline">{labels.newestFirst}</span>
+      </button>
+    </div>
+  );
+}
+
 // ─── Skeleton ────────────────────────────────────────────────────────────────
 
 function ExecutionLogSkeleton() {
@@ -378,14 +559,17 @@ function ExecutionLogSkeleton() {
 // ─── Event row ───────────────────────────────────────────────────────────────
 
 // One row per loaded message. Rows are intentionally NOT coalesced: Virtuoso's
-// firstItemIndex math requires row count to equal loaded message count. Each row
-// owns its own expansion state so opening one never opens the rest.
-function ExecutionLogRow({ message }: { message: TaskMessagePayload }) {
-  const [open, setOpen] = useState(false);
-  const kind = traceEventKind(message);
-  const label = traceEventLabel(message);
-  const summary = traceEventSummary(message);
-  const hasDetail = traceEventHasDetail(message);
+// firstItemIndex math requires row count to equal loaded message count. The row
+// owns layout + tertiary meta; the per-kind body owns the reading hierarchy.
+function ExecutionLogRow({
+  message,
+  open,
+  onToggle,
+}: {
+  message: TaskMessagePayload;
+  open: boolean;
+  onToggle: () => void;
+}) {
   const time = message.created_at
     ? new Date(message.created_at).toLocaleTimeString(undefined, {
         hour: "2-digit",
@@ -394,96 +578,333 @@ function ExecutionLogRow({ message }: { message: TaskMessagePayload }) {
     : null;
 
   return (
-    <div data-testid="execution-log-row" className="border-b">
-      <Collapsible open={open} onOpenChange={setOpen}>
-        <div className="flex items-start gap-2 px-4 py-2">
-          <span
-            className={cn(
-              "mt-0.5 inline-flex min-w-[60px] shrink-0 items-center justify-center rounded px-1.5 py-0.5 text-[11px] font-medium",
-              KIND_BADGE_CLASS[kind],
-            )}
-          >
-            {kind === "thinking" && <Brain className="mr-1 h-3 w-3 shrink-0" />}
-            {kind === "error" && <AlertCircle className="mr-1 h-3 w-3 shrink-0" />}
-            {label}
-          </span>
-
-          <CollapsibleTrigger
-            disabled={!hasDetail}
-            className={cn(
-              "min-w-0 flex-1 py-0.5 text-left text-xs transition-colors",
-              hasDetail ? "cursor-pointer hover:text-foreground" : "cursor-default",
-              kind === "error" ? "text-destructive" : "text-muted-foreground",
-            )}
-          >
-            <div className="flex items-start gap-1.5">
-              {hasDetail && (
-                <ChevronRight
-                  className={cn(
-                    "mt-0.5 h-3 w-3 shrink-0 text-muted-foreground/50 transition-transform",
-                    open && "rotate-90",
-                  )}
-                />
-              )}
-              <span className="truncate">{summary || "(empty)"}</span>
-            </div>
-          </CollapsibleTrigger>
-
-          <span className="mt-1 shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
-            #{message.seq}
-          </span>
-          {time && (
-            <span className="mt-1 shrink-0 text-[10px] tabular-nums text-muted-foreground/50">
-              {time}
-            </span>
-          )}
+    <div data-testid="execution-log-row" className="border-b px-4 py-2.5">
+      <div className="flex items-start gap-3">
+        <div className="min-w-0 flex-1">
+          <ExecutionLogRowBody message={message} open={open} onToggle={onToggle} />
         </div>
-
-        {hasDetail && (
-          <CollapsibleContent>
-            <div className="px-4 pb-3">
-              <div className="ml-[72px] rounded border bg-muted/40">
-                <ExecutionLogRowDetail message={message} />
-              </div>
-            </div>
-          </CollapsibleContent>
-        )}
-      </Collapsible>
+        <div className="flex shrink-0 flex-col items-end gap-0.5 pt-0.5 text-[10px] tabular-nums text-muted-foreground/50">
+          <span>#{message.seq}</span>
+          {time && <span>{time}</span>}
+        </div>
+      </div>
     </div>
   );
 }
 
-function ExecutionLogRowDetail({ message }: { message: TaskMessagePayload }) {
-  if (message.type === "tool_use") {
-    return (
-      <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all p-3 text-[11px] text-muted-foreground">
-        {message.input ? redactSecrets(JSON.stringify(message.input, null, 2)) : ""}
-      </pre>
-    );
+function ExecutionLogRowBody({
+  message,
+  open,
+  onToggle,
+}: {
+  message: TaskMessagePayload;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const { t } = useT("issues");
+  const kind = traceEventKind(message);
+  const label = traceEventLabel(message);
+  const hasDetail = traceEventHasDetail(message);
+  const moreLabel = t(($) => $.execution_log.show_more);
+  const lessLabel = t(($) => $.execution_log.show_less);
+
+  switch (kind) {
+    case "agent": {
+      const content = redactSecrets(message.content ?? "");
+      return (
+        <div className="space-y-1">
+          <RowKindLabel className="text-muted-foreground/70">{label}</RowKindLabel>
+          <ClampedText
+            text={content}
+            lines={TRACE_TEXT_PREVIEW_LINES}
+            open={open}
+            onToggle={onToggle}
+            className="whitespace-pre-wrap text-sm leading-relaxed text-foreground"
+            moreLabel={moreLabel}
+            lessLabel={lessLabel}
+          />
+        </div>
+      );
+    }
+
+    case "error": {
+      const content = redactSecrets(message.content ?? "");
+      return (
+        <div className="space-y-1">
+          <RowKindLabel className="text-destructive" icon={<AlertCircle className="h-3 w-3" />}>
+            {label}
+          </RowKindLabel>
+          <ClampedText
+            text={content}
+            lines={TRACE_ERROR_PREVIEW_LINES}
+            open={open}
+            onToggle={onToggle}
+            className="whitespace-pre-wrap text-sm leading-relaxed text-destructive"
+            moreLabel={moreLabel}
+            lessLabel={lessLabel}
+          />
+        </div>
+      );
+    }
+
+    case "thinking": {
+      const preview = redactSecrets(traceEventSummary(message));
+      const full = redactSecrets(message.content ?? "");
+      return (
+        <div className="space-y-1">
+          <ChevronLabel
+            label={label}
+            icon={<Brain className="h-3 w-3" />}
+            open={open}
+            hasDetail={hasDetail}
+            onToggle={onToggle}
+            className="text-muted-foreground/70"
+          />
+          {open && hasDetail ? (
+            <p className="whitespace-pre-wrap text-xs italic leading-relaxed text-muted-foreground">
+              {full}
+            </p>
+          ) : (
+            <p className="truncate text-xs italic text-muted-foreground">{preview}</p>
+          )}
+        </div>
+      );
+    }
+
+    case "tool_use": {
+      const argSummary = redactSecrets(traceToolArgSummary(message.input));
+      const inputJson = message.input
+        ? redactSecrets(JSON.stringify(message.input, null, 2))
+        : "";
+      return (
+        <div className="space-y-1">
+          <button
+            type="button"
+            onClick={onToggle}
+            disabled={!hasDetail}
+            className={cn(
+              "flex w-full min-w-0 items-center gap-1.5 text-left text-xs",
+              hasDetail ? "cursor-pointer" : "cursor-default",
+            )}
+          >
+            {hasDetail && (
+              <ChevronRight
+                className={cn(
+                  "h-3 w-3 shrink-0 text-muted-foreground/50 transition-transform",
+                  open && "rotate-90",
+                )}
+              />
+            )}
+            <span className="shrink-0 font-medium text-foreground">{label}</span>
+            {argSummary && (
+              <>
+                <span className="shrink-0 text-muted-foreground/60">·</span>
+                <span className="truncate text-muted-foreground">{argSummary}</span>
+              </>
+            )}
+          </button>
+          {open && hasDetail && (
+            <pre className="max-h-72 overflow-auto rounded border bg-muted/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">
+              {inputJson}
+            </pre>
+          )}
+        </div>
+      );
+    }
+
+    case "tool_result": {
+      const rawOutput = message.output ?? "";
+      const fullOutput =
+        rawOutput.length > OUTPUT_DETAIL_CAP
+          ? redactSecrets(rawOutput.slice(0, OUTPUT_DETAIL_CAP)) + "\n... (truncated)"
+          : redactSecrets(rawOutput);
+      const preview = redactSecrets(
+        firstLines(rawOutput, TRACE_RESULT_PREVIEW_LINES).slice(0, RESULT_PREVIEW_CHARS),
+      );
+      return (
+        <div className="space-y-1">
+          <button
+            type="button"
+            onClick={onToggle}
+            disabled={!hasDetail}
+            className={cn(
+              "flex w-full min-w-0 items-center gap-1.5 text-left text-xs",
+              hasDetail ? "cursor-pointer" : "cursor-default",
+            )}
+          >
+            {hasDetail && (
+              <ChevronRight
+                className={cn(
+                  "h-3 w-3 shrink-0 text-muted-foreground/50 transition-transform",
+                  open && "rotate-90",
+                )}
+              />
+            )}
+            <span className="shrink-0 font-medium text-foreground">{label}</span>
+          </button>
+          {open && hasDetail ? (
+            <pre className="max-h-72 overflow-auto rounded border bg-muted/40 p-2 font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground">
+              {fullOutput}
+            </pre>
+          ) : (
+            preview && (
+              <pre
+                className="overflow-hidden font-mono text-[11px] leading-relaxed whitespace-pre-wrap break-words text-muted-foreground/80"
+                style={clampStyle(TRACE_RESULT_PREVIEW_LINES)}
+              >
+                {preview}
+              </pre>
+            )
+          )}
+        </div>
+      );
+    }
+
+    default: {
+      // Generic/unknown — label is the raw type; surface content, then output,
+      // then input JSON (monospace) so nothing is silently dropped.
+      const detail = redactSecrets(
+        message.content ??
+          message.output ??
+          (message.input ? JSON.stringify(message.input, null, 2) : ""),
+      );
+      const mono = !message.content && !message.output && !!message.input;
+      return (
+        <div className="space-y-1">
+          <RowKindLabel className="text-muted-foreground/70">{label}</RowKindLabel>
+          <ClampedText
+            text={detail}
+            lines={TRACE_ERROR_PREVIEW_LINES}
+            open={open}
+            onToggle={onToggle}
+            className={cn(
+              "whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground",
+              mono && "font-mono",
+            )}
+            moreLabel={moreLabel}
+            lessLabel={lessLabel}
+          />
+        </div>
+      );
+    }
   }
-  if (message.type === "tool_result") {
-    const output = message.output ?? "";
-    return (
-      <pre className="max-h-60 overflow-auto whitespace-pre-wrap break-all p-3 text-[11px] text-muted-foreground">
-        {output.length > OUTPUT_DETAIL_CAP
-          ? redactSecrets(output.slice(0, OUTPUT_DETAIL_CAP)) + "\n... (truncated)"
-          : redactSecrets(output)}
-      </pre>
-    );
-  }
-  // text / thinking / error / generic — surface content, then output, then input.
-  const detail =
-    message.content ??
-    message.output ??
-    (message.input ? JSON.stringify(message.input, null, 2) : "");
+}
+
+// ─── Row building blocks ─────────────────────────────────────────────────────
+
+/** Small, subtle kind label for primary bodies (Agent / Error). The body — not
+ *  this label — is meant to dominate the row. */
+function RowKindLabel({
+  children,
+  icon,
+  className,
+}: {
+  children: React.ReactNode;
+  icon?: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <pre
+    <span
       className={cn(
-        "max-h-60 overflow-auto whitespace-pre-wrap break-words p-3 text-[11px]",
-        message.type === "error" ? "text-destructive" : "text-muted-foreground",
+        "inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide",
+        className,
       )}
     >
-      {redactSecrets(detail)}
-    </pre>
+      {icon}
+      {children}
+    </span>
+  );
+}
+
+/** Clickable kind label with a rotating chevron — the expand entry for secondary
+ *  bodies that toggle via the label (thinking). */
+function ChevronLabel({
+  label,
+  icon,
+  open,
+  hasDetail,
+  onToggle,
+  className,
+}: {
+  label: string;
+  icon?: React.ReactNode;
+  open: boolean;
+  hasDetail: boolean;
+  onToggle: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={!hasDetail}
+      className={cn(
+        "inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide transition-colors",
+        hasDetail ? "cursor-pointer hover:text-foreground" : "cursor-default",
+        className,
+      )}
+    >
+      {icon}
+      {label}
+      {hasDetail && (
+        <ChevronRight className={cn("h-3 w-3 transition-transform", open && "rotate-90")} />
+      )}
+    </button>
+  );
+}
+
+/** Multi-line text preview clamped to `lines` when collapsed, with a
+ *  Show more / Show less toggle that appears only when the text actually
+ *  overflows the clamp. Drives (and reflects) the shared `open` state. */
+function ClampedText({
+  text,
+  lines,
+  open,
+  onToggle,
+  className,
+  moreLabel,
+  lessLabel,
+}: {
+  text: string;
+  lines: number;
+  open: boolean;
+  onToggle: () => void;
+  className?: string;
+  moreLabel: string;
+  lessLabel: string;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+
+  // Measure only while clamped: scrollHeight (full) vs clientHeight (clamped)
+  // reveals whether there's hidden text worth a toggle. When open, keep the last
+  // measured value so "Show less" stays available.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || open) return;
+    setOverflowing(el.scrollHeight - el.clientHeight > 1);
+  }, [text, lines, open]);
+
+  const showToggle = open || overflowing;
+
+  return (
+    <div className="space-y-1">
+      <div
+        ref={ref}
+        className={cn(className, !open && "overflow-hidden")}
+        style={open ? undefined : clampStyle(lines)}
+      >
+        {text || "(empty)"}
+      </div>
+      {showToggle && (
+        <button
+          type="button"
+          onClick={onToggle}
+          className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+        >
+          {open ? lessLabel : moreLabel}
+        </button>
+      )}
+    </div>
   );
 }
