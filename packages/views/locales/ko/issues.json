@@ -123,8 +123,6 @@
     "empty": "이 보기에 일치하는 이슈가 없습니다.",
     "search_placeholder": "제목 또는 이슈 ID 검색…",
     "search_clear": "검색 지우기",
-    "loaded_count": "{{total}}개 중 {{count}}개 불러옴",
-    "structure_paused": "그룹화와 계층이 일시 중지되었습니다 — 이슈 {{total}}개가 상한 {{limit}}개를 초과했습니다. 필터로 좁히면 다시 활성화됩니다.",
     "load_failed": "이슈를 불러오지 못했습니다.",
     "load_failed_retry": "다시 시도",
     "load_more_failed_retry": "추가 항목을 불러오지 못했습니다 — 다시 시도",

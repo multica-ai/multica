@@ -111,7 +111,6 @@ import {
 } from "./pickers";
 import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import {
-  TABLE_STRUCTURE_MAX_WINDOW,
   buildIssueTableCsv,
   buildIssueTableRows,
   getIssueTableSelectionRange,
@@ -1141,11 +1140,10 @@ export function TableView({
   // is persisted view state and hierarchy is on by default, so an unbounded
   // loop would re-download entire large workspaces on every visit (round-3
   // review P1#1). Below the ceiling the remaining pages load sequentially
-  // (one per completed fetch — the toolbar's loaded-of-total line is the
-  // visible progress, and flipping the toggles off stops the loop), which
-  // also makes hierarchy apply without scrolling to the last page (round-3
-  // P1#2). Above the ceiling both features suspend and the toolbar notice
-  // explains why; the window keeps the one-page-per-scroll sentinel.
+  // (one per completed fetch — flipping the toggles off stops the loop),
+  // which also makes hierarchy apply without scrolling to the last page
+  // (round-3 P1#2). Above the ceiling both features suspend silently; the
+  // window keeps the one-page-per-scroll sentinel.
   // Advancement gates (error stop, hard loaded-count ceiling, fresh total)
   // live in shouldAutoLoadNextWindowPage — see its doc for the failure
   // modes each gate closes (round-4 review P1#1/P1#2).
@@ -1582,23 +1580,14 @@ export function TableView({
           clearLabel={t(($) => $.table.search_clear)}
         />
         <span className="mr-auto min-w-0 truncate text-xs text-muted-foreground">
-          {t(($) => $.table.loaded_count, { count: issues.length, total })}
           {windowError && hasNextPage && (
             <button
               type="button"
               onClick={() => void fetchNextPage()}
-              className="ml-2 text-destructive underline-offset-2 hover:underline"
+              className="text-destructive underline-offset-2 hover:underline"
             >
               {t(($) => $.table.load_more_failed_retry)}
             </button>
-          )}
-          {structureSuspended && structureWanted && (
-            <span className="ml-2">
-              {t(($) => $.table.structure_paused, {
-                total,
-                limit: TABLE_STRUCTURE_MAX_WINDOW,
-              })}
-            </span>
           )}
         </span>
         <DropdownMenu>
