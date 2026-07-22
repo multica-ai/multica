@@ -15,8 +15,8 @@ Multica backend, so it needs no inbound port, DNS, domain, or tunnel.
 
 - the cerebro `multica` binary (from `server/`, so it carries our patches — not
   the upstream GitHub release),
-- the **Claude Code CLI**, pinned **Pi Coding Agent** and pinned **Hermes Agent**
-  that the daemon shells out to,
+- the **Claude Code CLI**, pinned **Cursor Agent CLI**, pinned **Pi Coding
+  Agent**, and pinned **Hermes Agent** that the daemon shells out to,
 - `git` (per-task repo checkouts), `ripgrep`, `curl`, `jq`,
 - a non-root `multica` user.
 
@@ -33,6 +33,7 @@ with a 30-minute TTL and will fail on the next restart.
 |---|---|---|
 | `CLAUDE_AUTH_MODE` | no | `api_key` (use `ANTHROPIC_API_KEY`) or `max` (use a persisted Claude Max/OAuth login). Defaults to `api_key` when a key is set, else `max`. See the auth note below. |
 | `ANTHROPIC_API_KEY` | for api_key mode | Auth for Claude Code in `api_key` mode. |
+| `CURSOR_API_KEY` | for Cursor Agent | API key for headless Cursor Agent runs. Store it as a secret in the runtime environment. |
 | `MULTICA_SERVER_URL` | yes | Backend API base URL the daemon connects to. |
 | `MULTICA_DAEMON_TOKEN` | one path | Long-lived daemon token (a Multica PAT, `mul_…`). Pair with `MULTICA_WORKSPACE_ID`. |
 | `MULTICA_WORKSPACE_ID` | with token | Workspace the runtime serves. |
@@ -71,8 +72,8 @@ issue.
 3. Set the env vars above from Infisical.
 4. Attach the two persistent volumes.
 5. Deploy. Confirm it comes online in the workspace's **Runtimes** list and that
-   `multica daemon status` (via Sliplane shell) shows `running` with `claude`
-   and `pi` detected.
+   `multica daemon status` (via Sliplane shell) shows `running` with `claude`,
+   `cursor`, and `pi` detected.
 
 ## ChatGPT Pro primary, Firtal AI Gateway backup
 

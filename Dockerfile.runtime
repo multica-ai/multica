@@ -1,7 +1,7 @@
 # --- Cloud runtime image ---
 # A headless Multica daemon ("runtime") that runs in a container instead of on a
 # developer Mac. It connects OUTBOUND to a Multica backend, polls for tasks, and
-# executes them with the Claude Code CLI. No inbound ports — the worker is
+# executes them with the configured agent CLI. No inbound ports — the worker is
 # private with only outgoing traffic, so it needs no DNS, domain, or tunnel.
 #
 # See CLOUD_RUNTIME.md for the env vars, volumes, and deploy steps (Sliplane).
@@ -38,19 +38,33 @@ ARG VERSION=v1.11.2
 ARG COMMIT=unknown
 RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/multica ./cmd/multica
 
-# --- Runtime stage: Node base for the Claude Code CLI + git for repo checkouts ---
+# --- Runtime stage: agent CLIs + git for repo checkouts ---
 FROM node:22-bookworm-slim
+
+ARG CURSOR_AGENT_VERSION=2026.07.20-8cc9c0b
 
 # git: the daemon checks out repos into per-task worktrees.
 # ripgrep: Claude Code's search backend. curl/jq/ca-certificates: setup-token
 # exchange + TLS. tini: clean PID 1 signal handling for the long-running daemon.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      git ripgrep curl jq ca-certificates tini python3 python3-venv \
+      git ripgrep curl jq ca-certificates tini python3 python3-venv tar \
     && rm -rf /var/lib/apt/lists/*
 
-# Agent CLIs that the daemon shells out to. Pi is pinned so an upstream CLI
-# release cannot change the runtime protocol without a reviewed image update.
+# Agent CLIs that the daemon shells out to. Cursor Agent and Pi are pinned so an
+# upstream CLI release cannot change the runtime protocol without review.
 RUN npm install -g @anthropic-ai/claude-code && claude --version
+RUN set -eux; \
+    case "$(uname -m)" in \
+      x86_64|amd64) cursor_arch=x64 ;; \
+      aarch64|arm64) cursor_arch=arm64 ;; \
+      *) echo "Unsupported Cursor Agent architecture: $(uname -m)" >&2; exit 1 ;; \
+    esac; \
+    cursor_dir="/opt/cursor-agent/${CURSOR_AGENT_VERSION}"; \
+    mkdir -p "$cursor_dir"; \
+    curl -fsSL "https://downloads.cursor.com/lab/${CURSOR_AGENT_VERSION}/linux/${cursor_arch}/agent-cli-package.tar.gz" \
+      | tar --strip-components=1 -xzf - -C "$cursor_dir"; \
+    ln -s "$cursor_dir/cursor-agent" /usr/local/bin/cursor-agent; \
+    cursor-agent --version
 RUN npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.80.7 \
     && pi --version
 RUN python3 -m venv /opt/hermes \
@@ -75,6 +89,7 @@ WORKDIR /home/multica
 ENV HOME=/home/multica \
     MULTICA_WORKSPACES_ROOT=/home/multica/workspaces \
     MULTICA_CLAUDE_PATH=/usr/local/bin/claude \
+    MULTICA_CURSOR_PATH=/usr/local/bin/cursor-agent \
     MULTICA_PI_PATH=/usr/local/bin/pi \
     MULTICA_HERMES_PATH=/usr/local/bin/hermes \
     PI_CODING_AGENT_DIR=/home/multica/.multica/pi \
