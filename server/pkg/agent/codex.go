@@ -1140,9 +1140,12 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("codex initialize failed: %v", err)
-			if !timedOut {
+			contextEnded := errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+			if !timedOut && !contextEnded {
 				// Timeout stderr is untrusted provider output and may echo opaque
 				// Config.Env/auth values that pattern sanitization cannot identify.
+				// The same applies when the parent task deadline/cancellation wins
+				// the race against the per-RPC handshake timeout.
 				// Keep it out of persisted/user-visible Results; cleanup lifecycle
 				// still records bounded byte/truncation metadata.
 				finalError = withAgentStderr(finalError, "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
