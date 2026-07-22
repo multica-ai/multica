@@ -128,6 +128,11 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 			continue
 		}
 		meta, metaErr := execenv.ReadGCMeta(taskDir)
+		if !isManagedGCEnvRoot(filepath.Base(wsDir), taskDir, meta, metaErr) {
+			d.logger.Warn("gc: skipping unmanaged workspace directory", "dir", taskDir)
+			stats.skipped++
+			continue
+		}
 		if metaErr == nil && meta.Kind == execenv.GCKindIssue && strings.TrimSpace(meta.IssueID) != "" {
 			issueCandidates = append(issueCandidates, issueGCCandidate{taskDir: taskDir, meta: meta})
 			continue
@@ -337,11 +342,22 @@ func isManagedGCEnvRoot(workspaceID, taskDir string, meta *execenv.GCMeta, metaE
 		return false
 	}
 
-	if metaErr == nil && meta != nil && strings.TrimSpace(meta.WorkspaceID) == workspaceID {
+	metaMatches := metaErr == nil && meta != nil && strings.TrimSpace(meta.WorkspaceID) == workspaceID
+	// A readable ownership record that names a different workspace is an
+	// explicit contradiction, not a reason to fall through to a weaker proof.
+	if metaErr == nil && meta != nil && !metaMatches {
+		return false
+	}
+
+	prov, provErr := execenv.ReadManagedEnvProvenance(taskDir)
+	if provErr == nil && prov != nil {
+		if strings.TrimSpace(prov.WorkspaceID) != workspaceID {
+			return false
+		}
 		return true
 	}
 
-	if prov, err := execenv.ReadManagedEnvProvenance(taskDir); err == nil && prov != nil && strings.TrimSpace(prov.WorkspaceID) == workspaceID {
+	if metaMatches {
 		return true
 	}
 
