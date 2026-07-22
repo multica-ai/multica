@@ -29,8 +29,13 @@ export function shiftByCadence(iso: string, unit: MeetingCadenceUnit, count: num
     return toIso(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
   }
   const months = unit === "quarter" ? magnitude * 3 : magnitude;
-  const date = new Date(Date.UTC(year, month - 1 + months, day));
-  return toIso(date.getUTCFullYear(), date.getUTCMonth() + 1, date.getUTCDate());
+  // Keep the day-of-month, clamped to the target month's length — the way a
+  // calendar reads a month step. Handing Date a day the month does not have
+  // (Feb 31) makes it roll into the next month (Mar 3), which skips a whole
+  // cycle and can place a "past" occurrence after the current one.
+  const target = new Date(Date.UTC(year, month - 1 + months, 1));
+  const daysInTarget = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  return toIso(target.getUTCFullYear(), target.getUTCMonth() + 1, Math.min(day, daysInTarget));
 }
 
 export function formatCycleDate(iso: string): string {
