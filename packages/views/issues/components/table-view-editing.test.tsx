@@ -300,11 +300,11 @@ describe("TableView cell editors under data refresh", () => {
 
   it("opens title and row clicks in a foreground Desktop tab", async () => {
     const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
-    serverIssues = [makeIssue("a", "Alpha task", "todo")];
 
     renderWithI18n(
       <QueryClientProvider client={queryClient}>
         <Harness
+          issues={[makeIssue("a", "Alpha task", "todo")]}
           childProgressMap={new Map()}
           surfaceKey={`test-new-tab-${Math.floor(Math.random() * 1e9)}`}
         />
@@ -335,11 +335,11 @@ describe("TableView cell editors under data refresh", () => {
     const windowOpen = vi.fn();
     vi.stubGlobal("open", windowOpen);
     navigationState.hasOpenInNewTab = false;
-    serverIssues = [makeIssue("a", "Alpha task", "todo")];
 
     renderWithI18n(
       <QueryClientProvider client={queryClient}>
         <Harness
+          issues={[makeIssue("a", "Alpha task", "todo")]}
           childProgressMap={new Map()}
           surfaceKey={`test-browser-tab-${Math.floor(Math.random() * 1e9)}`}
         />
