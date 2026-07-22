@@ -1494,6 +1494,10 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	if err != nil {
 		return "", false, fmt.Errorf("codex thread/start failed: %w", err)
 	}
+	threadID := extractThreadID(startResult)
+	if threadID == "" {
+		return "", false, fmt.Errorf("codex thread/start returned no thread ID")
+	}
 	logger.Info("codex lifecycle",
 		"phase", "thread_start_response",
 		"task_id", c.cfg.TaskID,
@@ -1505,10 +1509,6 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"latency", time.Since(c.threadStartStarted).Round(time.Millisecond).String(),
 		"latency_ms", time.Since(c.threadStartStarted).Milliseconds(),
 	)
-	threadID := extractThreadID(startResult)
-	if threadID == "" {
-		return "", false, fmt.Errorf("codex thread/start returned no thread ID")
-	}
 	c.trySetThreadName(ctx, threadID, opts.ThreadName, logger)
 	return threadID, false, nil
 }

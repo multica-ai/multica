@@ -2236,6 +2236,50 @@ func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteThreadStartResponseRequiresThreadID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{}}}'`+"\n")
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" || !strings.Contains(result.Error, "returned no thread ID") {
+		t.Fatalf("expected missing thread ID failure, got %+v", result)
+	}
+
+	phaseCounts := map[string]int{}
+	for _, entry := range parseJSONLogEntries(t, logs.String()) {
+		if phase, ok := entry["phase"].(string); ok {
+			phaseCounts[phase]++
+		}
+	}
+	if phaseCounts["thread_start_sent"] != 1 || phaseCounts["thread_start_failure"] != 1 {
+		t.Fatalf("expected one sent and one failure phase, got %v", phaseCounts)
+	}
+	if phaseCounts["thread_start_response"] != 0 {
+		t.Fatalf("invalid thread/start response emitted success phase: %v", phaseCounts)
+	}
+}
+
 func TestCodexExecuteConcurrentThreadStartTimeoutsRemainUnserialized(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
