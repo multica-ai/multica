@@ -1,0 +1,231 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/cerebro/grantrecovery"
+)
+
+type options struct {
+	sourceURL         string
+	targetURL         string
+	workspaceID       string
+	apply             bool
+	approvedBy        string
+	approvalReference string
+}
+
+func main() {
+	if err := run(context.Background(), os.Args[1:]); err != nil {
+		fmt.Fprintln(os.Stderr, "permission recovery:", err)
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context, args []string) error {
+	flags := flag.NewFlagSet("cerebro_permission_recovery", flag.ContinueOnError)
+	var opts options
+	flags.StringVar(&opts.sourceURL, "source-url", os.Getenv("RECOVERY_SOURCE_DATABASE_URL"), "read-only PITR database URL")
+	flags.StringVar(&opts.targetURL, "target-url", os.Getenv("DATABASE_URL"), "current database URL")
+	flags.StringVar(&opts.workspaceID, "workspace-id", "", "workspace UUID to reconcile")
+	flags.BoolVar(&opts.apply, "apply", false, "apply a safe diff; default is dry-run")
+	flags.StringVar(&opts.approvedBy, "approved-by", "", "member UUID that approved the production import")
+	flags.StringVar(&opts.approvalReference, "approval-reference", "", "durable approval reference, for example FIR-3388 comment link")
+	if err := flags.Parse(args); err != nil {
+		return err
+	}
+	if err := validateOptions(opts); err != nil {
+		return err
+	}
+
+	sourceConfig, err := pgxpool.ParseConfig(opts.sourceURL)
+	if err != nil {
+		return fmt.Errorf("parse source URL: %w", err)
+	}
+	if sourceConfig.ConnConfig.RuntimeParams == nil {
+		sourceConfig.ConnConfig.RuntimeParams = map[string]string{}
+	}
+	sourceConfig.ConnConfig.RuntimeParams["default_transaction_read_only"] = "on"
+	source, err := pgxpool.NewWithConfig(ctx, sourceConfig)
+	if err != nil {
+		return fmt.Errorf("open source: %w", err)
+	}
+	defer source.Close()
+	target, err := pgxpool.New(ctx, opts.targetURL)
+	if err != nil {
+		return fmt.Errorf("open target: %w", err)
+	}
+	defer target.Close()
+
+	grants, err := loadLegacyGrants(ctx, source, opts.workspaceID)
+	if err != nil {
+		return err
+	}
+	existing, agents, err := loadTargetState(ctx, target, opts.workspaceID)
+	if err != nil {
+		return err
+	}
+	diff := grantrecovery.BuildDiff(grants, existing, agents)
+	if err := printJSON(diff); err != nil {
+		return err
+	}
+	if !opts.apply {
+		return nil
+	}
+	if !diff.SafeToApply() {
+		return fmt.Errorf("apply refused: %d conflicting and %d unmapped rows", len(diff.Conflicting), len(diff.Unmapped))
+	}
+	return apply(ctx, target, opts, grants)
+}
+
+func validateOptions(opts options) error {
+	if strings.TrimSpace(opts.sourceURL) == "" || strings.TrimSpace(opts.targetURL) == "" || strings.TrimSpace(opts.workspaceID) == "" {
+		return errors.New("source-url, target-url, and workspace-id are required")
+	}
+	if opts.sourceURL == opts.targetURL {
+		return errors.New("source and target database URLs must be different")
+	}
+	if opts.apply && (strings.TrimSpace(opts.approvedBy) == "" || strings.TrimSpace(opts.approvalReference) == "") {
+		return errors.New("apply requires approved-by and approval-reference")
+	}
+	return nil
+}
+
+func loadLegacyGrants(ctx context.Context, source *pgxpool.Pool, workspaceID string) ([]grantrecovery.LegacyGrant, error) {
+	rows, err := source.Query(ctx, `
+		SELECT ag.workspace_id::text, atg.agent_id::text, atg.tool_name, atg.enabled, atg.config_json
+		FROM agent_tool_grant atg
+		JOIN agent ag ON ag.id = atg.agent_id
+		WHERE ag.workspace_id = $1
+		ORDER BY atg.agent_id, atg.tool_name
+	`, workspaceID)
+	if err != nil {
+		return nil, fmt.Errorf("read legacy grants from PITR source: %w", err)
+	}
+	defer rows.Close()
+	var grants []grantrecovery.LegacyGrant
+	for rows.Next() {
+		var grant grantrecovery.LegacyGrant
+		var config []byte
+		if err := rows.Scan(&grant.WorkspaceID, &grant.AgentID, &grant.ToolName, &grant.Enabled, &config); err != nil {
+			return nil, fmt.Errorf("scan legacy grant: %w", err)
+		}
+		grant.Config = config
+		grants = append(grants, grant)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read legacy grants: %w", err)
+	}
+	return grants, nil
+}
+
+type targetQuerier interface {
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+func loadTargetState(ctx context.Context, target targetQuerier, workspaceID string) ([]grantrecovery.Rule, map[string]bool, error) {
+	agentRows, err := target.Query(ctx, `SELECT id::text FROM agent WHERE workspace_id = $1`, workspaceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read target agents: %w", err)
+	}
+	agents := map[string]bool{}
+	for agentRows.Next() {
+		var id string
+		if err := agentRows.Scan(&id); err != nil {
+			agentRows.Close()
+			return nil, nil, err
+		}
+		agents[id] = true
+	}
+	agentRows.Close()
+	if err := agentRows.Err(); err != nil {
+		return nil, nil, err
+	}
+
+	rows, err := target.Query(ctx, `
+		SELECT workspace_id::text, subject_id::text, tool_key, setting, resource_pattern, conditions
+		FROM cerebro_tool_policy
+		WHERE workspace_id = $1 AND layer = 'agent'
+	`, workspaceID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read target policies: %w", err)
+	}
+	defer rows.Close()
+	var rules []grantrecovery.Rule
+	for rows.Next() {
+		var rule grantrecovery.Rule
+		var conditions []byte
+		if err := rows.Scan(&rule.WorkspaceID, &rule.AgentID, &rule.ToolKey, &rule.Setting, &rule.ResourcePattern, &conditions); err != nil {
+			return nil, nil, err
+		}
+		rule.Conditions = conditions
+		rules = append(rules, rule)
+	}
+	return rules, agents, rows.Err()
+}
+
+func apply(ctx context.Context, target *pgxpool.Pool, opts options, grants []grantrecovery.LegacyGrant) error {
+	tx, err := target.BeginTx(ctx, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtext($1))`, "permission-recovery:"+opts.workspaceID); err != nil {
+		return err
+	}
+	existing, agents, err := loadTargetState(ctx, tx, opts.workspaceID)
+	if err != nil {
+		return err
+	}
+	diff := grantrecovery.BuildDiff(grants, existing, agents)
+	if !diff.SafeToApply() {
+		return fmt.Errorf("target changed: %d conflicting and %d unmapped rows", len(diff.Conflicting), len(diff.Unmapped))
+	}
+
+	identities := make([]string, 0, len(diff.Mapped))
+	for _, rule := range diff.Mapped {
+		result, err := tx.Exec(ctx, `
+			INSERT INTO cerebro_tool_policy (
+				workspace_id, tool_key, layer, subject_id, setting, resource_pattern, conditions, updated_by
+			) VALUES ($1, $2, 'agent', $3, $4, $5, $6, $7)
+			ON CONFLICT (workspace_id, tool_key, layer, subject_id, resource_pattern) DO NOTHING
+		`, rule.WorkspaceID, rule.ToolKey, rule.AgentID, rule.Setting, rule.ResourcePattern, rule.Conditions, opts.approvedBy)
+		if err != nil {
+			return fmt.Errorf("insert %s/%s: %w", rule.AgentID, rule.ToolKey, err)
+		}
+		if result.RowsAffected() != 1 {
+			return fmt.Errorf("insert %s/%s raced with another policy change", rule.AgentID, rule.ToolKey)
+		}
+		identities = append(identities, strings.Join([]string{rule.AgentID, rule.ToolKey, rule.ResourcePattern}, ":"))
+	}
+	identityJSON, _ := json.Marshal(identities)
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cerebro_permission_recovery_audit (
+			workspace_id, source_fingerprint, approval_reference, approved_by,
+			imported_count, already_present_count, imported_identities
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (workspace_id, source_fingerprint) DO NOTHING
+	`, opts.workspaceID, diff.SourceFingerprint, opts.approvalReference, opts.approvedBy, len(diff.Mapped), len(diff.AlreadyPresent), identityJSON); err != nil {
+		return fmt.Errorf("write recovery audit: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	fmt.Fprintf(os.Stderr, "applied %d policy rows at %s\n", len(diff.Mapped), time.Now().UTC().Format(time.RFC3339))
+	return nil
+}
+
+func printJSON(value any) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
+}

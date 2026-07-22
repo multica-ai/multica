@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/capabilityregistry"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
@@ -31,6 +33,10 @@ type CapabilityLister interface {
 
 type PolicyResolver interface {
 	Resolve(ctx context.Context, in toolpolicy.Query) (toolpolicy.Effective, error)
+}
+
+type platformPolicyResolver interface {
+	ResolvePlatformAction(ctx context.Context, in toolpolicy.Query, enforcement platformaccess.Enforcement, actor platformaccess.Actor) (toolpolicy.Effective, error)
 }
 
 type Service struct {
@@ -125,7 +131,7 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 	out := make([]EffectiveTool, 0, len(tools))
 	for _, t := range tools {
 		desc := DescriptorForCapability(t)
-		policy, err := s.policy.Resolve(ctx, toolpolicy.Query{
+		policyQuery := toolpolicy.Query{
 			WorkspaceID:  q.WorkspaceID,
 			ToolKey:      desc.ToolKey,
 			RuntimeID:    q.RuntimeID,
@@ -133,7 +139,8 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 			UserID:       q.UserID,
 			OnBehalfOfID: q.OnBehalfOfID,
 			Base:         toolpolicy.SettingAllow,
-		})
+		}
+		policy, err := s.resolvePolicy(ctx, policyQuery, q.AgentID.Valid)
 		if err != nil {
 			return nil, fmt.Errorf("resolve policy for %s: %w", desc.ToolKey, err)
 		}
@@ -154,6 +161,22 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 		})
 	}
 	return out, nil
+}
+
+func (s *Service) resolvePolicy(ctx context.Context, query toolpolicy.Query, agentActor bool) (toolpolicy.Effective, error) {
+	capability, bound := platformcatalog.ByToolBinding(query.ToolKey)
+	if !bound {
+		return s.policy.Resolve(ctx, query)
+	}
+	resolver, ok := s.policy.(platformPolicyResolver)
+	if !ok {
+		return toolpolicy.Effective{}, fmt.Errorf("platform action resolver not configured for %s", query.ToolKey)
+	}
+	query.ToolKey = capability.Key
+	return resolver.ResolvePlatformAction(ctx, query, capability.Enforcement, platformaccess.Actor{
+		Authenticated: true,
+		Agent:         agentActor,
+	})
 }
 
 func DescriptorForCapability(t capabilityregistry.View) Descriptor {

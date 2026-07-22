@@ -165,9 +165,11 @@ func (d *Daemon) prepareToolPolicySpawn(provider, workdir string, fastMode bool)
 		return nil, fmt.Errorf("local provider %q does not support mandatory tool-policy enforcement", provider)
 	case "claude", "codex", "cursor", "gemini":
 		// Enforced below through a provider-specific adapter.
-	default:
+	case "firtal-gateway":
 		// Managed HTTP providers do not dispatch local CLI tools.
 		return nil, nil
+	default:
+		return nil, fmt.Errorf("local provider %q does not support mandatory tool-policy enforcement", provider)
 	}
 
 	exe, err := os.Executable()

@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 )
 
@@ -179,7 +180,20 @@ func (s *Store) appendPlatformRows(ctx context.Context, in TableQuery, groupIDs 
 				row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 			}
 		}
-		row.Effective = Resolve(Input{Settings: row.Layers, Base: in.Base})
+		input := Input{Settings: row.Layers, Base: in.Base}
+		if c.Enforcement == "" || c.Enforcement == platformaccess.EnforcementPolicy {
+			row.Effective = ResolveWithMode(in.mode, input)
+		} else {
+			row.Effective = ResolvePlatformAction(
+				input,
+				c.Enforcement,
+				platformaccess.Actor{
+					Authenticated: in.AgentID.Valid || in.UserID.Valid,
+					Agent:         in.AgentID.Valid,
+					Owner:         in.PlatformActorOwner,
+				},
+			)
+		}
 		out = append(out, row)
 	}
 	return out, nil

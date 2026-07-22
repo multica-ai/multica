@@ -29,6 +29,28 @@ CREATE TABLE IF NOT EXISTS cerebro_task_mandate (
 CREATE INDEX IF NOT EXISTS idx_cerebro_task_mandate_agent_expiry
     ON cerebro_task_mandate (agent_id, expires_at);
 
+-- Keep an inert, auditable copy of the complete legacy payload before the
+-- enforcing table is retired. Generic allow/deny choices migrate into the
+-- canonical policy below; tool-specific config that has no canonical mapping
+-- must never disappear silently. No runtime reader uses this archive.
+CREATE TABLE IF NOT EXISTS cerebro_legacy_agent_tool_grant_archive (
+    workspace_id UUID NOT NULL,
+    agent_id UUID NOT NULL,
+    tool_name TEXT NOT NULL,
+    enabled BOOLEAN NOT NULL,
+    config_json JSONB,
+    archived_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (workspace_id, agent_id, tool_name)
+);
+
+INSERT INTO cerebro_legacy_agent_tool_grant_archive (
+    workspace_id, agent_id, tool_name, enabled, config_json
+)
+SELECT ag.workspace_id, atg.agent_id, atg.tool_name, atg.enabled, atg.config_json
+FROM agent_tool_grant atg
+JOIN agent ag ON ag.id = atg.agent_id
+ON CONFLICT (workspace_id, agent_id, tool_name) DO NOTHING;
+
 -- Preserve every legacy direct tool choice before the config-bearing table is
 -- retired. Existing explicit policy wins on conflict; otherwise enabled maps
 -- to Allow and disabled maps to Deny at the agent layer.

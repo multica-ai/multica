@@ -55,6 +55,18 @@
 //     routes each owns, so the partition is explicit and the test can check it.
 package platformcatalog
 
+import "github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
+
+type Enforcement = platformaccess.Enforcement
+
+const (
+	EnforcementPolicy            = platformaccess.EnforcementPolicy
+	EnforcementAuthenticatedRead = platformaccess.EnforcementAuthenticatedRead
+	EnforcementActorOptIn        = platformaccess.EnforcementActorOptIn
+	EnforcementHumanOptIn        = platformaccess.EnforcementHumanOptIn
+	EnforcementOwnerOnly         = platformaccess.EnforcementOwnerOnly
+)
+
 // Category groups capabilities for the permission table's facet sidebar. Values
 // are stable display strings (the table groups by category verbatim).
 const (
@@ -102,6 +114,15 @@ type Capability struct {
 	// ManagedExternally is true when the tool-policy gate is NOT this action's
 	// enforcement point (see package doc). Shown for visibility; phase 2 skips it.
 	ManagedExternally bool
+	// Enforcement is the action's call-time contract. Empty is the ordinary
+	// policy-chain model; special floors such as Workflow hooks declare their
+	// real opt-in/human/owner semantics here so read surfaces can use the same
+	// decision as the authorizer.
+	Enforcement Enforcement
+	// ToolBindings names runtime tools that invoke this platform capability.
+	// Registration remains separate from permission, but the binding makes the
+	// relationship complete and mechanically testable.
+	ToolBindings []string
 	// Surfaced marks a capability that appears in the Permissions table behind the
 	// light agent-start gate (cerebro_agent_trigger_permissions), NOT only behind
 	// the full-catalog flag (cerebro_platform_capabilities). It is set on the
@@ -1095,6 +1116,8 @@ var catalog = []Capability{
 		Description:   "Read visible Workflow hook policies, effective bindings, and run history.",
 		DescriptionZh: "读取可见的工作流钩子策略、有效绑定和运行历史。",
 		Evidence:      []string{"server/internal/cerebro/workflows/hook_permissions.go:27"},
+		Enforcement:   EnforcementAuthenticatedRead,
+		ToolBindings:  []string{"get_effective_workflow_hooks", "get_workflow_hook", "list_workflow_hook_runs", "list_workflow_hooks"},
 	},
 	{
 		Key:           "hooks:write",
@@ -1109,6 +1132,8 @@ var catalog = []Capability{
 			"POST /api/cerebro/workflow-hooks/{id}/disable",
 			"DELETE /api/cerebro/workflow-hooks/{id}",
 		},
+		Enforcement:  EnforcementActorOptIn,
+		ToolBindings: []string{"create_workflow_hook", "test_workflow_hook", "update_workflow_hook"},
 	},
 	{
 		Key:           "hooks:enforce",
@@ -1117,6 +1142,8 @@ var catalog = []Capability{
 		Description:   "Publish a tested Workflow hook so that it can enforce decisions. Human-only.",
 		DescriptionZh: "发布已测试的工作流钩子，使其能够强制执行决策。仅限人员。",
 		Ops:           []string{"POST /api/cerebro/workflow-hooks/{id}/publish"},
+		Enforcement:   EnforcementHumanOptIn,
+		ToolBindings:  []string{"publish_workflow_hook"},
 	},
 	{
 		Key:           "hooks:manage_managed",
@@ -1125,6 +1152,7 @@ var catalog = []Capability{
 		Description:   "Change locked Managed workflow hooks. Workspace owner-only.",
 		DescriptionZh: "更改锁定的托管工作流钩子。仅限工作区所有者。",
 		Evidence:      []string{"server/internal/cerebro/workflows/hook_permissions.go:29"},
+		Enforcement:   EnforcementOwnerOnly,
 	},
 
 	// --- Channels -------------------------------------------------------------
@@ -1445,6 +1473,21 @@ func ByKey(key string) (Capability, bool) {
 	for _, c := range catalog {
 		if c.Key == key {
 			return c, true
+		}
+	}
+	return Capability{}, false
+}
+
+// ByToolBinding resolves a concrete runtime tool to the platform capability
+// whose call-time contract governs it. Tool registration remains independent;
+// this lookup only prevents read surfaces from treating registration as an
+// implicit permission.
+func ByToolBinding(tool string) (Capability, bool) {
+	for _, capability := range catalog {
+		for _, binding := range capability.ToolBindings {
+			if binding == tool {
+				return capability, true
+			}
 		}
 	}
 	return Capability{}, false

@@ -292,7 +292,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "delete_group", Description: "Delete a workspace group.", Status: ToolStatusExcluded},
 	{Name: "delete_workflow", Description: "Delete a workflow by UUID. CLI-runtime MCP tool over DELETE /api/cerebro/workflows/{id}.", Status: ToolStatusExcluded},
 	{Name: "fork_session", Description: "Fork an attached work session for a subtask.", Status: ToolStatusExcluded},
-	{Name: "get_agent_capabilities", Description: "Get YOUR OWN capabilities card — what you can do (skills), may use (tools, with allow/ask/deny), have access to (credentials/data by name only, never secret values), and are limited by (sandbox + MCP). Omit agent_id to inspect yourself. Call this whenever you are unsure what you are allowed to do. CLI-runtime MCP tool over GET /api/agents/{id}/capabilities.", Status: ToolStatusNewlyImplemented},
+	{Name: "get_agent_capabilities", Description: "Get YOUR OWN capabilities card — what you can do (skills), which actions are allowed, available, enforced, callable, and verified, why a call is blocked, how to fix it, and what limits apply. Tool registration is not permission. Omit agent_id to inspect yourself. CLI-runtime MCP tool over GET /api/agents/{id}/capabilities.", Status: ToolStatusNewlyImplemented},
 	{Name: "get_active_workflow", Description: "Get the Issue workflow currently active on an issue. CLI-runtime MCP tool over GET /api/cerebro/workflows/for-issue/{issueId}.", Status: ToolStatusExcluded},
 	{Name: "get_artifact", Description: "Fetch one artifact with metadata and content.", Status: ToolStatusExcluded},
 	{Name: "get_connection", Description: "Get one workspace connection by UUID. Auth secrets are returned masked.", Status: ToolStatusNewlyImplemented},

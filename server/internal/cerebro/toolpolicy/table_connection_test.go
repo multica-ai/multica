@@ -9,6 +9,29 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 )
 
+func TestConnectionDefaultBaseMatchesCallTimeContract(t *testing.T) {
+	tests := []struct {
+		name     string
+		conn     connectionRow
+		fallback Setting
+		want     Setting
+	}{
+		{"mcp keeps allow baseline", connectionRow{kind: "mcp_http", defaultAccess: "deny"}, SettingAllow, SettingAllow},
+		{"api allow", connectionRow{kind: "api", defaultAccess: "allow"}, SettingDeny, SettingAllow},
+		{"api ask", connectionRow{kind: "api", defaultAccess: "ask"}, SettingAllow, SettingAsk},
+		{"api deny", connectionRow{kind: "api", defaultAccess: "deny"}, SettingAllow, SettingDeny},
+		{"api empty fails closed", connectionRow{kind: "api"}, SettingAllow, SettingDeny},
+		{"api invalid fails closed", connectionRow{kind: "api", defaultAccess: "unknown"}, SettingAllow, SettingDeny},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := connectionDefaultBase(tt.conn, tt.fallback); got != tt.want {
+				t.Fatalf("connectionDefaultBase() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 // TestDeniedConnectionTools_AgentDenyProducesToken seeds an MCP connection with
 // two tools, denies one at the agent layer, and asserts only that tool surfaces
 // as a Claude --disallowedTools token. Skips when the workspace_connection table

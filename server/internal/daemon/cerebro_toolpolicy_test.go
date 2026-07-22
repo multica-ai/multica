@@ -97,6 +97,16 @@ func TestPrepareToolPolicySpawn_NonTargetProviderUnaffected(t *testing.T) {
 	}
 }
 
+func TestPrepareToolPolicySpawn_RejectsUnknownLocalProviderByDefault(t *testing.T) {
+	got, err := (&Daemon{}).prepareToolPolicySpawn("new-local-cli", t.TempDir(), false)
+	if err == nil || got != nil {
+		t.Fatalf("unknown provider = %+v, %v; want fail-closed rejection", got, err)
+	}
+	if !strings.Contains(err.Error(), "does not support mandatory tool-policy enforcement") {
+		t.Fatalf("error = %q, want explicit tool-policy rejection", err)
+	}
+}
+
 func TestLocalToolPolicyRolloutFlagsCannotReturn(t *testing.T) {
 	master := "cerebro_local_" + "tool_policy"
 	enforce := master + "_enforce"

@@ -49,7 +49,11 @@
 // the two models side by side.
 package toolpolicy
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
+)
 
 // Setting is the per-layer choice for a single tool.
 type Setting string
@@ -523,6 +527,56 @@ func ResolveActorOptIn(in Input, agentActor bool) bool {
 		}
 	}
 	return in.Settings[LayerAgent] == SettingAllow
+}
+
+// ResolvePlatformAction is the pure effective decision shared by platform
+// capability read surfaces and their call-time authorizers. Tool registration
+// never enters this decision.
+func ResolvePlatformAction(in Input, enforcement platformaccess.Enforcement, actor platformaccess.Actor) Effective {
+	switch enforcement {
+	case "", platformaccess.EnforcementPolicy:
+		return Resolve(in)
+	case platformaccess.EnforcementAuthenticatedRead:
+		if actor.Authenticated {
+			return Effective{Setting: SettingAllow, Reason: "Available to authenticated members and agents"}
+		}
+		return Effective{Setting: SettingDeny, Reason: "Authenticated actor required"}
+	case platformaccess.EnforcementOwnerOnly:
+		if actor.Owner {
+			return Effective{Setting: SettingAllow, Reason: "Workspace owner"}
+		}
+		return Effective{Setting: SettingDeny, Reason: "Workspace owner only"}
+	case platformaccess.EnforcementHumanOptIn:
+		if actor.Agent {
+			return Effective{Setting: SettingDeny, Reason: "Human-only capability"}
+		}
+		return resolveActorOptInEffective(in, false)
+	case platformaccess.EnforcementActorOptIn:
+		return resolveActorOptInEffective(in, actor.Agent)
+	default:
+		return Effective{Setting: SettingDeny, Reason: "Unknown platform enforcement model"}
+	}
+}
+
+func resolveActorOptInEffective(in Input, agentActor bool) Effective {
+	if !ResolveActorOptIn(in, agentActor) {
+		if in.Settings[LayerWorkspace] == SettingDisable {
+			return Effective{Setting: SettingDeny, DecidedBy: LayerWorkspace, Reason: "Disabled by workspace"}
+		}
+		for _, layer := range []Layer{LayerUser, LayerGroup, LayerRuntime, LayerOnBehalfOf, LayerSystem} {
+			if setting := in.Settings[layer]; setting == SettingDeny || setting == SettingAsk || setting == SettingDisable {
+				return Effective{Setting: SettingDeny, DecidedBy: layer, CappedBy: layer, Reason: "Explicit opt-in is capped by " + string(layer)}
+			}
+		}
+		return Effective{Setting: SettingDeny, Reason: "Explicit grant required"}
+	}
+	if agentActor {
+		return Effective{Setting: SettingAllow, DecidedBy: LayerAgent, Reason: "Allowed by explicit agent grant"}
+	}
+	if in.Settings[LayerUser] == SettingAllow {
+		return Effective{Setting: SettingAllow, DecidedBy: LayerUser, Reason: "Allowed by explicit user grant"}
+	}
+	return Effective{Setting: SettingAllow, DecidedBy: LayerGroup, Reason: "Allowed by explicit group grant"}
 }
 
 // CombineGroups collapses the settings from every group a user belongs to into

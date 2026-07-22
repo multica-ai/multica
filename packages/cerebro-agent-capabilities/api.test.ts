@@ -130,3 +130,94 @@ describe("AgentCapabilitiesSchema availability", () => {
     expect(parsed.availability.status).toBe("unknown");
   });
 });
+
+describe("AgentCapabilitiesSchema effective capability truth", () => {
+  it("keeps policy, availability, enforcement, callability, and proof separate", () => {
+    const parsed = AgentCapabilitiesSchema.parse({
+      tools: [
+        {
+          key: "hooks:write",
+          permission: "deny",
+          allowed: false,
+          available: true,
+          enforced: true,
+          callable: false,
+          verified: false,
+          blocked_reason: "An explicit agent grant is required",
+          how_to_fix: "Ask a workspace owner or admin to grant hooks:write.",
+        },
+      ],
+    });
+
+    expect(parsed.tools[0]).toMatchObject({
+      allowed: false,
+      available: true,
+      enforced: true,
+      callable: false,
+      verified: false,
+      blocked_reason: "An explicit agent grant is required",
+      how_to_fix: "Ask a workspace owner or admin to grant hooks:write.",
+    });
+  });
+
+  it("keeps the same truth fields for external connection actions", () => {
+    const parsed = AgentCapabilitiesSchema.parse({
+      connections: [{
+        name: "registry",
+        type: "api",
+        enabled: false,
+        tools: [],
+        endpoints: [{
+          path: "/datasets",
+          methods: ["GET"],
+          permission: "allow",
+          allowed: true,
+          available: false,
+          enforced: true,
+          callable: false,
+          verified: false,
+          blocked_reason: "The connection is disabled",
+          how_to_fix: "Enable and test the connection before relying on this action.",
+        }],
+      }],
+    });
+
+    expect(parsed.connections[0]?.endpoints[0]).toMatchObject({
+      permission: "allow",
+      allowed: true,
+      available: false,
+      enforced: true,
+      callable: false,
+      verified: false,
+    });
+  });
+
+  it("drops malformed truth fields instead of turning them into permissions", () => {
+    const parsed = AgentCapabilitiesSchema.parse({
+      tools: [
+        {
+          key: "hooks:write",
+          permission: "deny",
+          allowed: "yes",
+          available: 1,
+          enforced: null,
+          callable: "no",
+          verified: {},
+          blocked_reason: 42,
+          how_to_fix: false,
+        },
+      ],
+    });
+
+    expect(parsed.tools[0]).toMatchObject({
+      permission: "deny",
+      blocked_reason: "",
+      how_to_fix: "",
+    });
+    expect(parsed.tools[0]?.allowed).toBeUndefined();
+    expect(parsed.tools[0]?.available).toBeUndefined();
+    expect(parsed.tools[0]?.enforced).toBeUndefined();
+    expect(parsed.tools[0]?.callable).toBeUndefined();
+    expect(parsed.tools[0]?.verified).toBeUndefined();
+  });
+});

@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -262,6 +263,38 @@ func (s *Store) ResolveActorOptIn(ctx context.Context, in Query, agentActor bool
 		return false, err
 	}
 	return ResolveActorOptIn(input, agentActor), nil
+}
+
+// ResolvePlatformAction loads authored policy only when the capability model
+// needs it, then applies the same pure platform decision used by table/card
+// surfaces. Static authenticated/owner floors remain available even when the
+// policy store is absent.
+func (s *Store) ResolvePlatformAction(ctx context.Context, in Query, enforcement platformaccess.Enforcement, actor platformaccess.Actor) (Effective, error) {
+	if enforcement == "" || enforcement == platformaccess.EnforcementPolicy {
+		return s.Resolve(ctx, in)
+	}
+	if enforcement == platformaccess.EnforcementAuthenticatedRead || enforcement == platformaccess.EnforcementOwnerOnly {
+		return ResolvePlatformAction(Input{}, enforcement, actor), nil
+	}
+	input, err := s.loadInput(ctx, in)
+	if err != nil {
+		return Effective{}, err
+	}
+	return ResolvePlatformAction(input, enforcement, actor), nil
+}
+
+func (s *Store) workspaceActorIsOwner(ctx context.Context, workspaceID, userID pgtype.UUID) bool {
+	if s == nil || s.pool == nil || !workspaceID.Valid || !userID.Valid {
+		return false
+	}
+	var role string
+	if err := s.pool.QueryRow(ctx, `
+		SELECT role FROM member
+		WHERE workspace_id = $1 AND user_id = $2
+	`, workspaceID, userID).Scan(&role); err != nil {
+		return false
+	}
+	return role == "owner"
 }
 
 // loadInput fetches the rows for the query and assembles a chain Input. Several

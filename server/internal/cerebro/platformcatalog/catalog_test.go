@@ -61,6 +61,61 @@ func TestCatalogInvariants(t *testing.T) {
 	}
 }
 
+func TestWorkflowHookCapabilityContracts(t *testing.T) {
+	byKey := map[string]Capability{}
+	for _, c := range All() {
+		byKey[c.Key] = c
+	}
+
+	want := map[string]struct {
+		enforcement Enforcement
+		tools       []string
+	}{
+		"hooks:read": {
+			enforcement: EnforcementAuthenticatedRead,
+			tools:       []string{"get_effective_workflow_hooks", "get_workflow_hook", "list_workflow_hook_runs", "list_workflow_hooks"},
+		},
+		"hooks:write": {
+			enforcement: EnforcementActorOptIn,
+			tools:       []string{"create_workflow_hook", "test_workflow_hook", "update_workflow_hook"},
+		},
+		"hooks:enforce": {
+			enforcement: EnforcementHumanOptIn,
+			tools:       []string{"publish_workflow_hook"},
+		},
+		"hooks:manage_managed": {
+			enforcement: EnforcementOwnerOnly,
+		},
+	}
+
+	for key, expected := range want {
+		capability, ok := byKey[key]
+		if !ok {
+			t.Fatalf("capability %q missing", key)
+		}
+		if capability.Enforcement != expected.enforcement {
+			t.Errorf("%s enforcement = %q, want %q", key, capability.Enforcement, expected.enforcement)
+		}
+		if strings.Join(capability.ToolBindings, ",") != strings.Join(expected.tools, ",") {
+			t.Errorf("%s tool bindings = %v, want %v", key, capability.ToolBindings, expected.tools)
+		}
+	}
+
+	owners := map[string]string{}
+	for _, capability := range All() {
+		for _, tool := range capability.ToolBindings {
+			if previous, duplicate := owners[tool]; duplicate {
+				t.Errorf("tool binding %q is owned by both %q and %q", tool, previous, capability.Key)
+			}
+			owners[tool] = capability.Key
+			resolved, ok := ByToolBinding(tool)
+			if !ok || resolved.Key != capability.Key {
+				t.Errorf("ByToolBinding(%q) = %+v, %v; want %q", tool, resolved, ok, capability.Key)
+			}
+		}
+	}
+}
+
 // inventory mirrors the permguard inventory.json shape (only the http surface
 // and the id field matter here).
 type inventory struct {

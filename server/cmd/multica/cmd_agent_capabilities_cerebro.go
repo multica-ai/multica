@@ -48,22 +48,23 @@ func runAgentCapabilities(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, caps)
 	}
 
-	// Table view: the card is nested, so summarise each section as a count.
-	enabledTools := 0
+	// Table view: count what the effective model says this actor can actually
+	// call. Registration or a legacy permission summary is not callability.
+	callableTools := 0
 	for _, t := range asSlice(caps["tools"]) {
 		if m, ok := t.(map[string]any); ok {
-			if enabled, _ := m["enabled"].(bool); enabled {
-				enabledTools++
+			if callable, _ := m["callable"].(bool); callable {
+				callableTools++
 			}
 		}
 	}
-	headers := []string{"ID", "NAME", "MODEL", "SKILLS", "TOOLS_ENABLED", "CREDENTIALS"}
+	headers := []string{"ID", "NAME", "MODEL", "SKILLS", "TOOLS_CALLABLE", "CREDENTIALS"}
 	rows := [][]string{{
 		strVal(caps, "agent_id"),
 		strVal(caps, "name"),
 		strVal(caps, "model"),
 		fmt.Sprintf("%d", len(asSlice(caps["skills"]))),
-		fmt.Sprintf("%d", enabledTools),
+		fmt.Sprintf("%d", callableTools),
 		fmt.Sprintf("%d", len(asSlice(caps["credentials"]))),
 	}}
 	cli.PrintTable(os.Stdout, headers, rows)

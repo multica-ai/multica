@@ -128,6 +128,10 @@ type TableQuery struct {
 	// checks the cerebro_platform_capabilities flag) so prod sees nothing new
 	// until an admin turns the flag on (FIR-2594).
 	IncludePlatform bool
+	// PlatformActorOwner is trusted caller context for owner-only platform
+	// capabilities. Agent cards leave it false; member-facing callers set it
+	// only after membership/ownership has been verified.
+	PlatformActorOwner bool
 	// IncludeAgentStart appends ONLY the surfaced platform capabilities
 	// (platformcatalog.SurfacedKeys — the "start someone else's agent" family) to
 	// the listing, without the rest of the catalog. Gated by the caller (the

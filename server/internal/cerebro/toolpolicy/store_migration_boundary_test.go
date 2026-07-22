@@ -503,6 +503,7 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 		INSERT INTO agent_tool_grant (agent_id, tool_name, enabled, config_json)
 		VALUES ($1, 'legacy.allowed_tool', true, NULL),
 		       ($1, 'legacy.denied_tool', false, NULL),
+		       ($1, 'legacy.configured_tool', true, '{"mode":"restricted","scope":["one"]}'::jsonb),
 		       ($1, 'firtal_registry', true, '{"allowed_apps": true, "allow_write": false}'::jsonb)
 	`, agent); err != nil {
 		t.Fatalf("seed legacy direct grants: %v", err)
@@ -542,8 +543,9 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 	}
 
 	for legacyTool, wantSetting := range map[string]string{
-		"legacy.allowed_tool": "allow",
-		"legacy.denied_tool":  "deny",
+		"legacy.allowed_tool":    "allow",
+		"legacy.denied_tool":     "deny",
+		"legacy.configured_tool": "allow",
 	} {
 		var raw []byte
 		if err := tx.QueryRow(ctx, `
@@ -580,5 +582,21 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 	}
 	if registryByPattern[""] != "allow" || registryByPattern["action:list_apps"] != "allow" || registryByPattern["action:update_app"] != "deny" {
 		t.Fatalf("Registry rules = %v, want generic allow + preserved action allow/deny", registryByPattern)
+	}
+
+	var archivedConfig []byte
+	if err := tx.QueryRow(ctx, `
+		SELECT config_json
+		FROM cerebro_legacy_agent_tool_grant_archive
+		WHERE workspace_id = $1 AND agent_id = $2 AND tool_name = 'legacy.configured_tool'
+	`, tpTestWorkspaceID, agent).Scan(&archivedConfig); err != nil {
+		t.Fatalf("read archived legacy config: %v", err)
+	}
+	var archived map[string]any
+	if err := json.Unmarshal(archivedConfig, &archived); err != nil {
+		t.Fatalf("decode archived legacy config: %v", err)
+	}
+	if archived["mode"] != "restricted" {
+		t.Fatalf("archived config = %v, want complete legacy payload", archived)
 	}
 }

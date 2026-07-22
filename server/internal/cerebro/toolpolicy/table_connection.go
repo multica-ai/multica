@@ -88,10 +88,11 @@ type endpointPermission struct {
 // "api"), and the per-tool rows (MCP tools, or synthesized "<METHOD> <path>"
 // entries for API endpoints).
 type connectionRow struct {
-	name        string
-	displayName string
-	kind        string
-	tools       []connectionTool
+	name          string
+	displayName   string
+	kind          string
+	defaultAccess string
+	tools         []connectionTool
 }
 
 // sourceForKind maps a connection type to the row Source the UI groups on.
@@ -153,7 +154,7 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 	for _, conn := range conns {
 		toolKey := connectionToolKeyPrefix + conn.name
 		source := sourceForKind(conn.kind)
-		base := in.Base
+		base := connectionDefaultBase(conn, in.Base)
 		if w, ok := authoredWideBase[toolKey]; ok && rank(w) >= 0 {
 			base = w
 		}
@@ -284,7 +285,7 @@ func (s *Store) connectionWideAuthoredBases(ctx context.Context, in TableQuery, 
 // from endpoint_permissions, so the same Configure sheet drives CRUD control.
 func (s *Store) discoverConnectionTools(ctx context.Context, workspaceID pgtype.UUID) ([]connectionRow, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT name, display_name, type, tools, endpoint_permissions
+		SELECT name, display_name, type, tools, endpoint_permissions, default_access
 		FROM workspace_connection
 		WHERE workspace_id = $1 AND enabled = true AND type IN ('mcp_http', 'api')
 		ORDER BY created_at ASC
@@ -299,9 +300,9 @@ func (s *Store) discoverConnectionTools(ctx context.Context, workspaceID pgtype.
 
 	var out []connectionRow
 	for rows.Next() {
-		var name, displayName, kind string
+		var name, displayName, kind, defaultAccess string
 		var toolsRaw, endpointsRaw []byte
-		if err := rows.Scan(&name, &displayName, &kind, &toolsRaw, &endpointsRaw); err != nil {
+		if err := rows.Scan(&name, &displayName, &kind, &toolsRaw, &endpointsRaw, &defaultAccess); err != nil {
 			return nil, fmt.Errorf("toolpolicy: scan connection: %w", err)
 		}
 		var tools []connectionTool
@@ -313,12 +314,29 @@ func (s *Store) discoverConnectionTools(ctx context.Context, workspaceID pgtype.
 		if len(tools) == 0 {
 			continue
 		}
-		out = append(out, connectionRow{name: name, displayName: displayName, kind: kind, tools: tools})
+		out = append(out, connectionRow{name: name, displayName: displayName, kind: kind, defaultAccess: defaultAccess, tools: tools})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("toolpolicy: iterate connections: %w", err)
 	}
 	return out, nil
+}
+
+// connectionDefaultBase mirrors the call-time API connection baseline. MCP
+// connections keep their historical allow baseline; API connections use the
+// configured default_access, with an empty or invalid value failing closed.
+// Without this, the capabilities table could show Allow while the actual API
+// call gate correctly denied the same endpoint.
+func connectionDefaultBase(conn connectionRow, fallback Setting) Setting {
+	if conn.kind != "api" {
+		return fallback
+	}
+	switch Setting(conn.defaultAccess) {
+	case SettingAllow, SettingAsk, SettingDeny:
+		return Setting(conn.defaultAccess)
+	default:
+		return SettingDeny
+	}
 }
 
 // endpointMethodTools expands an api connection's endpoint_permissions JSON into
