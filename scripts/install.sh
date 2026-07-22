@@ -428,12 +428,25 @@ setup_server() {
 # Main: Default mode (install / upgrade CLI only)
 # ---------------------------------------------------------------------------
 run_default() {
+  local setup_token="${1:-}"
+
   printf "\n"
   printf "${BOLD}  Multica — Installer${RESET}\n"
   printf "\n"
 
   detect_os
   install_cli
+
+  # One-command connect: a setup token was passed, so finish the whole flow
+  # (authenticate + start the daemon) without a browser. install_cli guarantees
+  # `multica` is on PATH by this point (MUL-5112).
+  if [ -n "$setup_token" ]; then
+    printf "\n"
+    printf "${BOLD}  Connecting this machine to Multica...${RESET}\n"
+    printf "\n"
+    multica setup --token "$setup_token"
+    return $?
+  fi
 
   printf "\n"
   printf "${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}\n"
@@ -520,18 +533,26 @@ run_stop() {
 # ---------------------------------------------------------------------------
 main() {
   local mode="default"
+  local setup_token=""
 
   while [ $# -gt 0 ]; do
     case "$1" in
       --with-server) mode="with-server" ;;
       --local)       mode="with-server" ;;  # backwards compat alias
       --stop)        mode="stop" ;;
+      # One-command connect: `curl ... | bash -s -- --token mst_xxx` installs
+      # the CLI and immediately runs `multica setup --token ...` (MUL-5112).
+      --token)   setup_token="${2:-}"; if [ $# -ge 2 ]; then shift; fi ;;
+      --token=*) setup_token="${1#*=}" ;;
       --help|-h)
-        echo "Usage: install.sh [--with-server | --stop]"
+        echo "Usage: install.sh [--with-server | --stop | --token <mst_...>]"
         echo ""
         echo "  (default)       Install / upgrade the Multica CLI"
         echo "  --with-server   Install CLI + provision a self-host server (Docker)"
         echo "  --stop          Stop a self-hosted installation"
+        echo "  --token <t>     Install the CLI, then connect this machine with a"
+        echo "                  setup token from the web \"Connect from the terminal\""
+        echo "                  dialog — no browser needed"
         echo ""
         echo "Environment variables:"
         echo "  MULTICA_INSTALL_DIR   Self-host server install directory"
@@ -551,7 +572,7 @@ main() {
   done
 
   case "$mode" in
-    default)     run_default ;;
+    default)     run_default "$setup_token" ;;
     with-server) run_with_server ;;
     stop)        run_stop ;;
   esac

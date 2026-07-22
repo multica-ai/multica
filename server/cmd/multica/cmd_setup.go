@@ -13,8 +13,17 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cli"
 )
+
+// setupTokenFlag lets a headless machine connect with one pasted command:
+// `multica setup --token <mst_...>` exchanges the token minted by the web
+// connect dialog for a PAT, writes the config, and starts the daemon — no
+// browser, no localhost callback, no SSH tunnel (MUL-5112).
+const setupTokenFlag = "token"
+
+const setupTokenFlagHelp = "Connect non-interactively with a setup token from the web \"Connect from the terminal\" dialog (mst_...). Skips the browser sign-in — ideal for servers and headless hosts."
 
 var setupCmd = &cobra.Command{
 	Use:   "setup",
@@ -26,9 +35,16 @@ If a configuration already exists, you will be prompted before overwriting.
 
 Use 'multica setup self-host' to connect to a self-hosted server instead.
 
-If you run this command over SSH on a remote machine, keep the localhost
-callback and follow the SSH tunnel hint printed during browser login. If your
-browser can reach this CLI directly on a private network address, pass
+On a headless server or remote dev box, skip the browser entirely: open the
+"Connect from the terminal" dialog in the web app and paste the one-command
+form it shows you:
+  multica setup --token mst_xxxxxxxx
+That exchanges the setup token for an access token and starts the daemon with
+no browser round-trip and no SSH tunnel.
+
+Otherwise, if you run this command over SSH on a remote machine, keep the
+localhost callback and follow the SSH tunnel hint printed during browser login.
+If your browser can reach this CLI directly on a private network address, pass
 --callback-host <host-or-ip>.
 
 Use --profile to create an isolated configuration for a separate environment:
@@ -71,13 +87,16 @@ Examples:
 
 func init() {
 	setupCmd.Flags().String(callbackHostFlag, "", callbackHostFlagHelp)
+	setupCmd.Flags().String(setupTokenFlag, "", setupTokenFlagHelp)
 	setupCloudCmd.Flags().String(callbackHostFlag, "", callbackHostFlagHelp)
+	setupCloudCmd.Flags().String(setupTokenFlag, "", setupTokenFlagHelp)
 
 	setupSelfHostCmd.Flags().String("server-url", "", "Backend server URL (e.g. https://api.internal.co) (env: MULTICA_SERVER_URL)")
 	setupSelfHostCmd.Flags().String("app-url", "", "Frontend app URL (e.g. https://app.internal.co) (env: MULTICA_APP_URL)")
 	setupSelfHostCmd.Flags().Int("port", 8080, "Backend server port (used when --server-url is not set)")
 	setupSelfHostCmd.Flags().Int("frontend-port", 3000, "Frontend port (used when --app-url is not set)")
 	setupSelfHostCmd.Flags().String(callbackHostFlag, "", callbackHostFlagHelp)
+	setupSelfHostCmd.Flags().String(setupTokenFlag, "", setupTokenFlagHelp)
 
 	setupCmd.AddCommand(setupCloudCmd)
 	setupCmd.AddCommand(setupSelfHostCmd)
@@ -146,6 +165,12 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 		AppURL:    defaultCloudAppURL,
 	}
 
+	// One-command connect: `multica setup --token <mst_...>` skips the browser
+	// sign-in entirely and runs non-interactively (MUL-5112).
+	if token, _ := cmd.Flags().GetString(setupTokenFlag); strings.TrimSpace(token) != "" {
+		return runSetupWithToken(cmd, profile, cfg.ServerURL, cfg.AppURL, token)
+	}
+
 	ok, err := confirmOverwrite(profile, cfg.ServerURL, cfg.AppURL)
 	if err != nil {
 		return err
@@ -195,6 +220,24 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	serverURL, userProvidedServerURL := resolveSelfHostServerURL(cmd, existing)
 	appURL := resolveSelfHostAppURL(cmd, existing)
 	frontendPort, _ := cmd.Flags().GetInt("frontend-port")
+
+	// One-command connect for self-hosted servers (MUL-5112). Runs
+	// non-interactively, so we resolve app_url without ever prompting — the web
+	// dialog that generates this command always passes --app-url for a remote
+	// host, and a local server falls back to the localhost default.
+	if token, _ := cmd.Flags().GetString(setupTokenFlag); strings.TrimSpace(token) != "" {
+		if appURL == "" {
+			if userProvidedServerURL && !serverHostIsLocal(serverURL) {
+				return fmt.Errorf("--app-url is required with --token when --server-url points at a remote host (e.g. --app-url https://app.internal.co)")
+			}
+			appURL = fmt.Sprintf("http://localhost:%d", frontendPort)
+		}
+		if !probeServer(serverURL) {
+			fmt.Fprintf(os.Stderr, "\n⚠ Server at %s is not reachable. Verify the URL and try again.\n", serverURL)
+			return nil
+		}
+		return runSetupWithToken(cmd, profile, serverURL, appURL, token)
+	}
 
 	if appURL == "" {
 		if userProvidedServerURL && !serverHostIsLocal(serverURL) {
@@ -254,6 +297,72 @@ func runSetupSelfHost(cmd *cobra.Command, args []string) error {
 	}
 	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 
+	return nil
+}
+
+// runSetupWithToken performs the browser-free connect flow behind
+// `multica setup --token` (MUL-5112): it exchanges an mst_ setup token for a
+// PAT, writes the config, discovers the user's workspaces, and starts the
+// daemon — all non-interactively, so it runs cleanly over SSH on a headless
+// server where the localhost-callback browser flow cannot. serverURL/appURL
+// are already resolved by the caller (cloud defaults, or the self-host flags).
+func runSetupWithToken(cmd *cobra.Command, profile, serverURL, appURL, token string) error {
+	token = strings.TrimSpace(token)
+	if !strings.HasPrefix(token, auth.SetupTokenPrefix) {
+		return fmt.Errorf("invalid setup token: must start with %s (copy it from the web \"Connect from the terminal\" dialog)", auth.SetupTokenPrefix)
+	}
+
+	hostname, _ := os.Hostname()
+	if hostname == "" {
+		hostname = "unknown"
+	}
+
+	fmt.Fprintln(os.Stderr, "Connecting with setup token...")
+	client := cli.NewAPIClient(serverURL, "", "")
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var resp struct {
+		Token string `json:"token"`
+		Name  string `json:"name"`
+		Email string `json:"email"`
+	}
+	err := client.PostJSON(ctx, "/api/setup-tokens/exchange", map[string]any{
+		"token": token,
+		"name":  fmt.Sprintf("CLI (%s)", hostname),
+	}, &resp)
+	if err != nil {
+		return cli.WithUserMessage("Could not connect with that setup token — it may have expired or already been used. Open the \"Connect from the terminal\" dialog again for a fresh command.", err)
+	}
+	if resp.Token == "" {
+		return fmt.Errorf("setup token exchange returned an empty token")
+	}
+
+	// Persist config with the exchanged PAT. Reset the workspace like the other
+	// login paths so a stale default can't linger from a prior profile.
+	cfg, _ := cli.LoadCLIConfigForProfile(profile)
+	cfg.WorkspaceID = ""
+	cfg.Token = resp.Token
+	cfg.ServerURL = serverURL
+	cfg.AppURL = appURL
+	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+	fmt.Fprintf(os.Stderr, "Authenticated as %s (%s)\n", resp.Name, resp.Email)
+	printConfigLocation(profile)
+
+	// Discover + watch workspaces so the daemon has something to serve. Best
+	// effort: a discovery hiccup shouldn't abort a successful authentication.
+	if err := autoWatchWorkspaces(cmd); err != nil {
+		fmt.Fprintf(os.Stderr, "\nCould not auto-configure workspaces: %v\n", err)
+		fmt.Fprintln(os.Stderr, "Run 'multica workspace list' then 'multica workspace watch <id>' to set up manually.")
+	}
+
+	fmt.Fprintln(os.Stderr, "\nStarting daemon...")
+	if err := runDaemonBackground(cmd); err != nil {
+		return fmt.Errorf("start daemon: %w", err)
+	}
+	fmt.Fprintln(os.Stderr, "\n✓ Setup complete! Your machine is now connected to Multica.")
 	return nil
 }
 

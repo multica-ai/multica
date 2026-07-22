@@ -24,6 +24,18 @@ vi.mock("../components/use-runtime-picker", () => ({
   useRuntimePicker: () => mocks.pickerState,
 }));
 
+// The setup-command card mints a token via TanStack Query + the API client;
+// it has its own tests. Stub it here so the fork test stays focused on the
+// fork/dialog wiring without a QueryClient.
+vi.mock("../../runtimes/components/setup-command-card", () => ({
+  SetupCommandCard: () => <div data-testid="setup-command-card">connect command</div>,
+}));
+
+// The CLI dialog subscribes to setup_token:redeemed; no realtime stack here.
+vi.mock("@multica/core/realtime", () => ({
+  useWSEvent: () => {},
+}));
+
 import { StepPlatformFork } from "./step-platform-fork";
 
 function makeRuntime(overrides: Partial<AgentRuntime> = {}): AgentRuntime {
@@ -51,12 +63,7 @@ function renderFork(
   const onNext = vi.fn();
   render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <StepPlatformFork
-        wsId="ws_test"
-        onNext={onNext}
-        cliInstructions={<div data-testid="cli-instructions">install me</div>}
-        {...overrides}
-      />
+      <StepPlatformFork wsId="ws_test" onNext={onNext} {...overrides} />
     </I18nProvider>,
   );
   return { onNext };
@@ -86,8 +93,8 @@ describe("StepPlatformFork", () => {
     expect(
       screen.queryByRole("button", { name: /^coming soon$/i }),
     ).not.toBeInTheDocument();
-    // CLI dialog closed at rest → no CLI instructions.
-    expect(screen.queryByTestId("cli-instructions")).not.toBeInTheDocument();
+    // CLI dialog closed at rest → no connect command card.
+    expect(screen.queryByTestId("setup-command-card")).not.toBeInTheDocument();
   });
 
   it("footer: Skip only + explanatory hint (no Continue)", () => {
@@ -139,9 +146,9 @@ describe("StepPlatformFork", () => {
     await user.click(screen.getByRole("button", { name: /show steps/i }));
 
     const dialog = await screen.findByRole("dialog");
-    expect(within(dialog).getByTestId("cli-instructions")).toBeInTheDocument();
+    expect(within(dialog).getByTestId("setup-command-card")).toBeInTheDocument();
     expect(
-      within(dialog).getByText(/waiting for your computer/i),
+      within(dialog).getByText(/waiting for your agent runtime/i),
     ).toBeInTheDocument();
     // Start exploring stays disabled while no runtime is selected.
     expect(

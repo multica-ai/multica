@@ -323,11 +323,12 @@ export function OnboardingFlow({
   }
 
   // Step 3. Both paths own full-bleed two-column layouts.
-  //   - Desktop (no cliInstructions slot) → StepRuntimeConnect drives
+  //   - Desktop (no runtimeInstructions signal) → StepRuntimeConnect drives
   //     the local daemon's runtime list directly.
-  //   - Web → StepPlatformFork offers Download / CLI / Cloud paths.
-  //     Under the CLI path it embeds StepRuntimeConnect for the live
-  //     probe; the Cloud path is a soft exit via the waitlist.
+  //   - Web → StepPlatformFork offers Download / CLI / Cloud paths. The CLI
+  //     dialog mints its own setup token and renders the one-command connect
+  //     flow, so the web shell no longer injects a static instructions slot —
+  //     `runtimeInstructions` now serves only as the web/desktop signal.
   if (step === "runtime" && workspace) {
     if (!runtimeInstructions) {
       return (
@@ -344,7 +345,6 @@ export function OnboardingFlow({
         wsId={workspace.id}
         onNext={handleRuntimeNext}
         onBack={() => handleBack("runtime")}
-        cliInstructions={runtimeInstructions}
       />
     );
   }

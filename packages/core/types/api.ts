@@ -294,6 +294,14 @@ export interface CreatePersonalAccessTokenResponse extends PersonalAccessToken {
   token: string;
 }
 
+// Setup token — the short-lived, single-use credential the web "Connect from
+// the terminal" dialog mints and renders into `multica setup --token <token>`
+// so a headless machine connects with one pasted command (MUL-5112).
+export interface MintSetupTokenResponse {
+  token: string;
+  expires_at: string;
+}
+
 // Pagination
 export interface PaginationParams {
   limit?: number;

@@ -208,6 +208,13 @@
     "view_runtime": "View runtime",
     "create_agent": "Create an agent"
   },
+  "setup_command": {
+    "install_label": "Install the Multica CLI",
+    "connect_label": "Install & connect",
+    "preparing": "Preparing your one-time connect command…",
+    "expires_hint": "This command carries a single-use token that expires in a few minutes. Reopen this dialog for a fresh one.",
+    "fallback_hint": "Runs a browser sign-in to connect. On a headless server, reopen this dialog to get a token-based command instead."
+  },
   "cloud_runtime": {
     "action": "Cloud Runtime",
     "title": "Cloud Runtime",

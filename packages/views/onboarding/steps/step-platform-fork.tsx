@@ -13,12 +13,14 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
+import { useWSEvent } from "@multica/core/realtime";
 import type { AgentRuntime } from "@multica/core/types";
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "../components/step-header";
 import { RuntimeAsidePanel } from "../components/runtime-aside-panel";
 import { CompactRuntimeRow } from "../components/compact-runtime-row";
 import { useRuntimePicker } from "../components/use-runtime-picker";
+import { SetupCommandCard } from "../../runtimes/components/setup-command-card";
 import { useT } from "../../i18n";
 
 /**
@@ -54,13 +56,10 @@ export function StepPlatformFork({
   wsId,
   onNext,
   onBack,
-  cliInstructions,
 }: {
   wsId: string;
   onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
   onBack?: () => void;
-  /** Platform-specific CLI install card, rendered inside the CLI dialog. */
-  cliInstructions?: ReactNode;
 }) {
   const { t } = useT("onboarding");
   const mainRef = useRef<HTMLElement>(null);
@@ -180,6 +179,7 @@ export function StepPlatformFork({
 
       <CliInstallDialog
         open={dialog === "cli"}
+        wsId={wsId}
         onClose={() => setDialog(null)}
         onConnect={handleCliConnect}
         runtimes={picker.runtimes}
@@ -188,7 +188,6 @@ export function StepPlatformFork({
         hasRuntimes={picker.hasRuntimes}
         canConnect={picker.selected !== null}
         selectedName={picker.selected?.name ?? null}
-        cliInstructions={cliInstructions}
       />
     </div>
   );
@@ -294,14 +293,15 @@ function ForkAlt({
 // ------------------------------------------------------------
 
 /**
- * Modal dialog for the CLI install path. Contains the real install
- * instructions card (via the `cliInstructions` slot) plus the live
- * runtime probe. Owns its own "Connect & continue" advancement — when
- * a runtime has registered and the user picks it, clicking that button
- * closes the dialog and fires the parent's `onConnect`.
+ * Modal dialog for the CLI install path. Renders the one-command connect
+ * flow (SetupCommandCard mints a setup token and shows the paste-once
+ * command) plus the live runtime probe. Owns its own "Connect & continue"
+ * advancement — when a runtime has registered and the user picks it,
+ * clicking that button closes the dialog and fires the parent's `onConnect`.
  */
 function CliInstallDialog({
   open,
+  wsId,
   onClose,
   onConnect,
   runtimes,
@@ -310,9 +310,9 @@ function CliInstallDialog({
   hasRuntimes,
   canConnect,
   selectedName,
-  cliInstructions,
 }: {
   open: boolean;
+  wsId: string;
   onClose: () => void;
   onConnect: () => void;
   runtimes: AgentRuntime[];
@@ -321,9 +321,19 @@ function CliInstallDialog({
   hasRuntimes: boolean;
   canConnect: boolean;
   selectedName: string | null;
-  cliInstructions?: ReactNode;
 }) {
   const { t } = useT("onboarding");
+
+  // Server-observable confirmation that the pasted command actually ran: the
+  // exchange endpoint publishes setup_token:redeemed the instant the CLI
+  // redeems, ahead of the daemon:register that follows. Reset when the dialog
+  // reopens so a stale "received" from a prior attempt can't leak in.
+  const [redeemed, setRedeemed] = useState(false);
+  useWSEvent("setup_token:redeemed", () => setRedeemed(true));
+  useEffect(() => {
+    if (!open) setRedeemed(false);
+  }, [open]);
+
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? null : onClose())}>
       <DialogContent className="flex max-h-[85vh] flex-col sm:max-w-[560px]">
@@ -335,7 +345,7 @@ function CliInstallDialog({
         </DialogHeader>
 
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pt-2">
-          {cliInstructions}
+          <SetupCommandCard wsId={wsId} open={open} />
 
           {hasRuntimes ? (
             <>
@@ -360,7 +370,7 @@ function CliInstallDialog({
               </div>
             </>
           ) : (
-            <CliWaitingStatus dialogOpen={open} />
+            <CliWaitingStatus dialogOpen={open} redeemed={redeemed} />
           )}
         </div>
 
@@ -422,7 +432,13 @@ function formatElapsed(seconds: number) {
  * Elapsed-time counter only ticks while the dialog is open so reopen
  * after closing resets the staging.
  */
-function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
+function CliWaitingStatus({
+  dialogOpen,
+  redeemed,
+}: {
+  dialogOpen: boolean;
+  redeemed: boolean;
+}) {
   const { t } = useT("onboarding");
   const [elapsed, setElapsed] = useState(0);
 
@@ -471,6 +487,15 @@ function CliWaitingStatus({ dialogOpen }: { dialogOpen: boolean }) {
           {formatElapsed(elapsed)}
         </span>
       </div>
+
+      {/* Once the CLI redeems the setup token the server tells us the command
+          actually ran — surface that ahead of the daemon:register, so the user
+          sees their paste landed instead of an unchanging "waiting". */}
+      {redeemed && (
+        <p className="text-[12.5px] font-medium leading-[1.55] text-success">
+          {t(($) => $.step_platform.stage_received)}
+        </p>
+      )}
 
       <p
         aria-live="polite"

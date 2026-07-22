@@ -22,11 +22,10 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
+import { SetupCommandCard } from "./setup-command-card";
 
 type Step = "instructions" | "success";
 
-const INSTALL_CMD =
-  "curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash";
 const CLOUD_SERVER_URL = "https://api.multica.ai";
 const CLOUD_APP_URL = "https://multica.ai";
 
@@ -100,7 +99,9 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-lg">
-        {step === "instructions" && <InstructionsStep onClose={onClose} />}
+        {step === "instructions" && (
+          <InstructionsStep wsId={wsId} onClose={onClose} />
+        )}
         {step === "success" && (
           <SuccessStep
             onGoToAgents={handleGoToAgents}
@@ -188,11 +189,13 @@ function CommandStep({
 // Step 1: Instructions
 // ---------------------------------------------------------------------------
 
-function InstructionsStep({ onClose }: { onClose: () => void }) {
+function InstructionsStep({ wsId, onClose }: { wsId: string; onClose: () => void }) {
   const { t } = useT("runtimes");
   const daemonServerUrl = useConfigStore((s) => s.daemonServerUrl);
   const daemonAppUrl = useConfigStore((s) => s.daemonAppUrl);
-  const { setupCmd, tokenCmd } = daemonCommands(daemonServerUrl, daemonAppUrl);
+  // Only the manual token fallback still needs a hand-built command; the
+  // primary flow is the token-based one-command card below (MUL-5112).
+  const { tokenCmd } = daemonCommands(daemonServerUrl, daemonAppUrl);
   return (
     <>
       <DialogHeader className="px-6 pt-6 pb-2">
@@ -206,24 +209,12 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-4">
         <div className="space-y-4">
-          <CommandStep
-            n={1}
-            label={t(($) => $.connect.step1_label)}
-            cmd={INSTALL_CMD}
-            copyAria={t(($) => $.connect.copy_aria)}
+          <SetupCommandCard
+            wsId={wsId}
+            open
+            serverUrl={daemonServerUrl}
+            appUrl={daemonAppUrl}
           />
-
-          <div>
-            <CommandStep
-              n={2}
-              label={t(($) => $.connect.step2_label)}
-              cmd={setupCmd}
-              copyAria={t(($) => $.connect.copy_aria)}
-            />
-            <p className="mt-1.5 text-[11px] leading-[1.55] text-muted-foreground">
-              {t(($) => $.connect.step2_hint)}
-            </p>
-          </div>
 
           <LiveListening />
 

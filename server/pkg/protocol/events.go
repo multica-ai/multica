@@ -140,6 +140,13 @@ const (
 	EventDaemonRPCRequest  = "daemon:rpc_request"
 	EventDaemonRPCResponse = "daemon:rpc_response"
 
+	// EventSetupTokenRedeemed fires when a headless machine runs
+	// `multica setup --token <mst_...>` and the CLI exchanges that token for a
+	// PAT (MUL-5112). Published to the workspace the connect dialog was open
+	// in, so the dialog can confirm "command received" the instant the CLI
+	// runs — ahead of the daemon:register that follows once the daemon boots.
+	EventSetupTokenRedeemed = "setup_token:redeemed"
+
 	// GitHub integration events
 	EventGitHubInstallationCreated = "github_installation:created"
 	EventGitHubInstallationDeleted = "github_installation:deleted"

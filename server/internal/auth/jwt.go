@@ -59,6 +59,23 @@ func GenerateAgentTaskToken() (string, error) {
 	return "mat_" + hex.EncodeToString(b), nil
 }
 
+// SetupTokenPrefix identifies an mst_ setup token — the short-lived, single-use
+// credential minted by the web connect dialog and exchanged for a mul_ PAT by
+// `multica setup --token`. Unlike the other prefixes it is NOT recognised by
+// the auth middleware: an mst_ token is only ever presented to the public
+// /api/setup-tokens/exchange endpoint, never used as a bearer credential.
+const SetupTokenPrefix = "mst_"
+
+// GenerateSetupToken creates a new setup token: "mst_" + 40 random hex chars.
+// See SetupTokenPrefix and MUL-5112 for the one-command connect flow it backs.
+func GenerateSetupToken() (string, error) {
+	b := make([]byte, 20) // 20 bytes = 40 hex chars
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate setup token: %w", err)
+	}
+	return SetupTokenPrefix + hex.EncodeToString(b), nil
+}
+
 // HashToken returns the hex-encoded SHA-256 hash of a token string.
 func HashToken(token string) string {
 	h := sha256.Sum256([]byte(token))

@@ -50,6 +50,7 @@ import type {
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
+  MintSetupTokenResponse,
   RuntimeUsage,
   IssueUsageSummary,
   RuntimeHourlyActivity,
@@ -196,6 +197,8 @@ import {
   EMPTY_USER,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
+  MintSetupTokenResponseSchema,
+  EMPTY_MINT_SETUP_TOKEN_RESPONSE,
   AppConfigSchema,
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
@@ -1899,6 +1902,23 @@ export class ApiClient {
 
   async revokePersonalAccessToken(id: string): Promise<void> {
     await this.fetch(`/api/tokens/${id}`, { method: "DELETE" });
+  }
+
+  // Mint a short-lived, single-use setup token for the one-command connect flow
+  // (MUL-5112). The dialog renders it into `multica setup --token <token>`.
+  // Scoped to the workspace so the redeem event routes back to the right
+  // dialog; membership is enforced server-side.
+  async mintSetupToken(wsId: string): Promise<MintSetupTokenResponse> {
+    const raw = await this.fetch<unknown>("/api/setup-tokens", {
+      method: "POST",
+      body: JSON.stringify({ workspace_id: wsId }),
+    });
+    return parseWithFallback(
+      raw,
+      MintSetupTokenResponseSchema,
+      EMPTY_MINT_SETUP_TOKEN_RESPONSE,
+      { endpoint: "POST /api/setup-tokens" },
+    );
   }
 
   // File Upload & Attachments

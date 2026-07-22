@@ -196,6 +196,13 @@
     "view_runtime": "查看运行时",
     "create_agent": "创建智能体"
   },
+  "setup_command": {
+    "install_label": "安装 Multica CLI",
+    "connect_label": "安装并连接",
+    "preparing": "正在生成一次性连接命令……",
+    "expires_hint": "该命令带有一个一次性 token，几分钟后过期。需要新的就重新打开此弹窗。",
+    "fallback_hint": "通过浏览器登录来连接。在无头服务器上，重新打开此弹窗可获得基于 token 的命令。"
+  },
   "cloud_runtime": {
     "action": "云端运行时",
     "title": "云端运行时",

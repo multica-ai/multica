@@ -975,3 +975,46 @@ describe("ApiClient", () => {
     });
   });
 });
+
+describe("ApiClient setup tokens", () => {
+  it("mints a setup token scoped to the workspace and parses the response", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ token: "mst_abc123", expires_at: "2026-07-21T10:15:00Z" }),
+        { status: 201, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const response = await client.mintSetupToken("ws-42");
+
+    expect(response).toEqual({ token: "mst_abc123", expires_at: "2026-07-21T10:15:00Z" });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/setup-tokens",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ workspace_id: "ws-42" }),
+      }),
+    );
+  });
+
+  it("falls back to an empty token when the mint response drifts", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        // token is a number, not a string — schema rejects it.
+        new Response(JSON.stringify({ token: 123, expires_at: null }), {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.mintSetupToken("ws-42")).resolves.toEqual({
+      token: "",
+      expires_at: "",
+    });
+  });
+});

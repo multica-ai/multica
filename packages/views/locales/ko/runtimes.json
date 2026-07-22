@@ -196,6 +196,13 @@
     "view_runtime": "런타임 보기",
     "create_agent": "에이전트 만들기"
   },
+  "setup_command": {
+    "install_label": "Multica CLI 설치",
+    "connect_label": "설치 후 연결",
+    "preparing": "일회용 연결 명령을 준비 중입니다…",
+    "expires_hint": "이 명령에는 몇 분 후 만료되는 일회용 토큰이 포함됩니다. 새 명령이 필요하면 이 대화 상자를 다시 여세요.",
+    "fallback_hint": "브라우저 로그인으로 연결합니다. headless 서버에서는 이 대화 상자를 다시 열면 토큰 기반 명령을 받을 수 있습니다."
+  },
   "cloud_runtime": {
     "action": "클라우드 런타임",
     "title": "클라우드 런타임",

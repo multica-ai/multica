@@ -1,6 +1,27 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 
+export const setupTokenKeys = {
+  mint: (wsId: string) => ["setup-token", wsId] as const,
+};
+
+// Mints a setup token for the "Connect from the terminal" dialog (MUL-5112).
+// Only fires while `enabled` (the dialog is open) so we don't create tokens on
+// mount. staleTime sits under the server TTL (SetupTokenTTL, 15m) so a
+// long-open dialog re-mints before the rendered command can lapse; gcTime 0
+// drops the token the moment the dialog closes. One retry only — the dialog
+// falls back to the manual command if minting fails.
+export function setupTokenOptions(wsId: string, enabled: boolean) {
+  return queryOptions({
+    queryKey: setupTokenKeys.mint(wsId),
+    queryFn: () => api.mintSetupToken(wsId),
+    enabled: enabled && wsId.length > 0,
+    staleTime: 10 * 60 * 1000,
+    gcTime: 0,
+    retry: 1,
+  });
+}
+
 export const runtimeKeys = {
   all: (wsId: string) => ["runtimes", wsId] as const,
   list: (wsId: string) => [...runtimeKeys.all(wsId), "list"] as const,

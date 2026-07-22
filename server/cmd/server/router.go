@@ -723,10 +723,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	authRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH", 5), time.Minute, trustedProxies)
 	authVerifyRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH_VERIFY", 20), time.Minute, trustedProxies)
 	contactSalesRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_CONTACT_SALES", 5), time.Hour, trustedProxies)
+	setupExchangeRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_SETUP_EXCHANGE", 20), time.Minute, trustedProxies)
 	r.With(authRL).Post("/auth/send-code", h.SendCode)
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
+
+	// Setup-token exchange (MUL-5112). Public on purpose: the mst_ token in the
+	// body IS the credential, like the autopilot webhook path — `multica setup
+	// --token` presents it to swap for a PAT. Per-IP rate limited to blunt
+	// brute-force guessing of the token space.
+	r.With(setupExchangeRL).Post("/api/setup-tokens/exchange", h.ExchangeSetupToken)
 
 	// Public API
 	r.Get("/api/config", h.GetConfig)
@@ -986,6 +993,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/current/renew", h.RenewCurrentPersonalAccessToken)
 			r.Delete("/{id}", h.RevokePersonalAccessToken)
 		})
+
+		// Mint a short-lived, single-use setup token for the one-command
+		// `multica setup --token` connect flow (MUL-5112). Authed + workspace
+		// membership-gated inside the handler; the matching public exchange
+		// endpoint lives with the other credential-in-body routes above.
+		r.Post("/api/setup-tokens", h.MintSetupToken)
 
 		// Cloud Billing proxy. Same upstream service / port as
 		// cloud-runtime — multica-cloud's Fleet and Billing share

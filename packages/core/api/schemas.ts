@@ -28,6 +28,7 @@ import type {
   ListIssuesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
+  MintSetupTokenResponse,
   NotificationPreferenceResponse,
   ResourceLabelsResponse,
   SearchIssuesResponse,
@@ -1527,4 +1528,17 @@ export const CreateBillingPortalSessionResponseSchema = z.object({
 
 export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSessionResponse = {
   url: "",
+};
+
+// Setup-token mint response (MUL-5112). `.loose()` tolerates extra fields on
+// newer backends; an empty-token fallback lets the dialog render a safe
+// disabled state instead of throwing if a malformed body ever slips through.
+export const MintSetupTokenResponseSchema = z.object({
+  token: z.string(),
+  expires_at: z.string(),
+}).loose();
+
+export const EMPTY_MINT_SETUP_TOKEN_RESPONSE: MintSetupTokenResponse = {
+  token: "",
+  expires_at: "",
 };
