@@ -45,6 +45,12 @@ func (handlerAttachmentRunner) Run(_ context.Context, dir, name string, args ...
 	return nil, nil
 }
 
+type unavailableAttachmentRunner struct{}
+
+func (unavailableAttachmentRunner) Run(_ context.Context, _, name string, _ ...string) ([]byte, error) {
+	return nil, fmt.Errorf("%s unavailable", name)
+}
+
 // createHandlerTestChatSession seeds a chat_session row owned by testUserID
 // targeting the given agent and returns the session UUID. Cleanup runs after
 // the test. Used by attachment / chat tests that need an existing session.
@@ -844,6 +850,10 @@ func TestGetAttachmentContent_PDFText(t *testing.T) { // CEREBRO-PATCH(pdf-attac
 }
 
 func TestGetAttachmentContent_PDFWithoutTextAndNoOCRBinary(t *testing.T) {
+	originalRunner := attachmenttext.DefaultRunner
+	attachmenttext.DefaultRunner = unavailableAttachmentRunner{}
+	defer func() { attachmenttext.DefaultRunner = originalRunner }()
+
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
 	testHandler.Storage = store
