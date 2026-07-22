@@ -132,7 +132,7 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 	if staged {
 		closedStage = issue.Stage.Int32
 	}
-	h.postChildDoneComment(ctx, parent, issue, children, staged, closedStage, false)
+	h.postChildDoneComment(ctx, parent, issue, children, staged, closedStage, false, []db.Issue{issue})
 }
 
 // notifyParentsOfBatchChildDone emits child-done parent notifications for a
@@ -210,7 +210,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			if !stageBarrierClosed(children, g.children[0]) {
 				continue
 			}
-			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch)
+			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch, g.children)
 			continue
 		}
 
@@ -241,7 +241,13 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		if !found {
 			continue
 		}
-		h.postChildDoneComment(ctx, parent, rep, children, true, bestStage, batch)
+		dispatchCandidates := make([]db.Issue, 0, len(g.children))
+		for _, c := range g.children {
+			if c.Stage.Valid && c.Stage.Int32 == bestStage {
+				dispatchCandidates = append(dispatchCandidates, c)
+			}
+		}
+		h.postChildDoneComment(ctx, parent, rep, children, true, bestStage, batch, dispatchCandidates)
 	}
 }
 
@@ -256,7 +262,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 // an unstaged set). `batch` selects batch-aware wording: a single update keeps
 // its historical byte-identical copy, while a batch that finished several
 // children at once must not claim "the last sub-issue just finished".
-func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db.Issue, children []db.Issue, staged bool, closedStage int32, batch bool) {
+func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db.Issue, children []db.Issue, staged bool, closedStage int32, batch bool, dispatchCandidates []db.Issue) {
 	prefix := h.getIssuePrefix(ctx, completed.WorkspaceID)
 	identifier := prefix + "-" + strconv.Itoa(int(completed.Number))
 	childID := uuidToString(completed.ID)
@@ -267,11 +273,11 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	// issue. If that task created this child, its task row is durable proof of
 	// the orchestration owner and can carry the stage-complete handoff back to
 	// the same squad (GH #5706). A real parent assignee always wins.
-	dispatchTarget := h.resolveChildDoneDispatchTarget(ctx, parent, completed)
+	dispatchTarget := h.resolveChildDoneDispatchTarget(ctx, parent, dispatchCandidates)
 
 	// Build the dispatch-target mention prefix. Empty when neither a parent
 	// assignee nor a proven originating squad context exists.
-	mentionPrefix := h.buildParentAssigneeMention(ctx, dispatchTarget)
+	mentionPrefix := h.buildParentAssigneeMention(ctx, dispatchTarget.Issue)
 
 	var content string
 	if staged {
@@ -339,45 +345,74 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	h.dispatchParentAssigneeTrigger(ctx, dispatchTarget, comment)
 }
 
-// resolveChildDoneDispatchTarget returns the durable owner of a child-done
-// handoff without mutating the parent issue's assignment.
+type childDoneDispatchTarget struct {
+	Issue      db.Issue
+	OriginTask *db.AgentTaskQueue
+}
+
+// resolveChildDoneDispatchTarget returns the durable owner and attribution
+// source of a child-done handoff without mutating the parent issue's assignment.
 //
 // Assigned parents keep their explicit assignee. For an unassigned parent, an
-// agent-created child's origin_id names the exact task that created it. That
-// task's squad_id is the fallback routing target only when it is a leader task
-// on this parent by this child creator. This avoids guessing from timestamps or
-// unrelated runs by a leader that may lead more than one squad.
-func (h *Handler) resolveChildDoneDispatchTarget(ctx context.Context, parent, completed db.Issue) db.Issue {
+// agent-created child's origin_id names the exact task that created it. Every
+// child participating in one batch handoff must name the same task; otherwise
+// request order would decide which squad and human authority receive the wake.
+// The task's squad_id is the fallback routing target only when it is a leader
+// task on this parent by every child creator.
+func (h *Handler) resolveChildDoneDispatchTarget(ctx context.Context, parent db.Issue, completed []db.Issue) childDoneDispatchTarget {
+	target := childDoneDispatchTarget{Issue: parent}
 	if parent.AssigneeType.Valid || parent.AssigneeID.Valid {
-		return parent
+		return target
 	}
-	if completed.CreatorType != "agent" || !completed.CreatorID.Valid ||
-		!completed.OriginType.Valid || completed.OriginType.String != "agent_create" || !completed.OriginID.Valid {
-		return parent
+	if len(completed) == 0 {
+		return target
 	}
 
-	originTask, err := h.Queries.GetAgentTask(ctx, completed.OriginID)
+	originTaskID := completed[0].OriginID
+	for _, child := range completed {
+		if child.CreatorType != "agent" || !child.CreatorID.Valid ||
+			!child.OriginType.Valid || child.OriginType.String != "agent_create" || !child.OriginID.Valid {
+			return target
+		}
+		if uuidToString(child.OriginID) != uuidToString(originTaskID) {
+			slog.Warn("child done: batch has ambiguous squad orchestration provenance",
+				"child_id", uuidToString(child.ID),
+				"parent_id", uuidToString(parent.ID),
+				"first_origin_task_id", uuidToString(originTaskID),
+				"conflicting_origin_task_id", uuidToString(child.OriginID))
+			return target
+		}
+	}
+
+	originTask, err := h.Queries.GetAgentTask(ctx, originTaskID)
 	if err != nil {
 		slog.Warn("child done: failed to load exact origin task",
 			"error", err,
-			"child_id", uuidToString(completed.ID),
+			"child_id", uuidToString(completed[0].ID),
 			"parent_id", uuidToString(parent.ID),
-			"origin_task_id", uuidToString(completed.OriginID))
-		return parent
+			"origin_task_id", uuidToString(originTaskID))
+		return target
 	}
-	if uuidToString(originTask.IssueID) != uuidToString(parent.ID) ||
-		uuidToString(originTask.AgentID) != uuidToString(completed.CreatorID) ||
-		!originTask.IsLeaderTask || !originTask.SquadID.Valid {
+	if uuidToString(originTask.IssueID) != uuidToString(parent.ID) || !originTask.IsLeaderTask || !originTask.SquadID.Valid {
 		slog.Warn("child done: exact origin task is not valid squad orchestration context",
-			"child_id", uuidToString(completed.ID),
+			"child_id", uuidToString(completed[0].ID),
 			"parent_id", uuidToString(parent.ID),
 			"origin_task_id", uuidToString(originTask.ID))
-		return parent
+		return target
+	}
+	for _, child := range completed {
+		if uuidToString(originTask.AgentID) != uuidToString(child.CreatorID) {
+			slog.Warn("child done: exact origin task creator does not match batch child",
+				"child_id", uuidToString(child.ID),
+				"parent_id", uuidToString(parent.ID),
+				"origin_task_id", uuidToString(originTask.ID))
+			return target
+		}
 	}
 
-	target := parent
-	target.AssigneeType = pgtype.Text{String: "squad", Valid: true}
-	target.AssigneeID = originTask.SquadID
+	target.Issue.AssigneeType = pgtype.Text{String: "squad", Valid: true}
+	target.Issue.AssigneeID = originTask.SquadID
+	target.OriginTask = &originTask
 	return target
 }
 
@@ -630,7 +665,8 @@ func sanitizeMentionLabel(name string) string {
 //     itself push a child back into a terminal transition.
 //   - Readiness: archived agents / missing runtimes are silently skipped
 //     so a closed-out agent does not surface as a phantom assignee.
-func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.Issue, systemComment db.Comment) {
+func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, target childDoneDispatchTarget, systemComment db.Comment) {
+	parent := target.Issue
 	if !parent.AssigneeType.Valid || !parent.AssigneeID.Valid {
 		return
 	}
@@ -639,7 +675,7 @@ func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, parent db.I
 	case "agent":
 		h.triggerChildDoneAgent(ctx, parent, systemComment.ID)
 	case "squad":
-		h.triggerChildDoneSquad(ctx, parent, systemComment.ID)
+		h.triggerChildDoneSquad(ctx, parent, systemComment.ID, target.OriginTask)
 	}
 }
 
@@ -708,7 +744,7 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 //
 // Re-triggering is bounded by the HasPendingTaskForIssueAndAgent idempotency
 // check below, exactly as the agent path relies on it.
-func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID) {
+func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID, originTask *db.AgentTaskQueue) {
 	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
@@ -732,9 +768,15 @@ func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, tr
 		return
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID); err != nil {
+	var enqueueErr error
+	if originTask != nil {
+		_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeaderFromOriginTask(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID, *originTask)
+	} else {
+		_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID)
+	}
+	if enqueueErr != nil {
 		slog.Warn("child done: enqueue parent squad leader task failed",
-			"error", err,
+			"error", enqueueErr,
 			"parent_id", uuidToString(parent.ID),
 			"squad_id", uuidToString(squad.ID),
 			"leader_id", uuidToString(squad.LeaderID))

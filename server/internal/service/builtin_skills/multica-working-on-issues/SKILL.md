@@ -219,9 +219,13 @@ i.e. every sub-issue in the lowest unfinished stage has reached a terminal
 status (`done`/`cancelled`). The coordinator is normally the parent assignee.
 For an unassigned parent reached through `@Squad`, an agent-created child's
 exact `origin_id` can instead resume the same squad leader task context without
-assigning the parent. A completion that does not close a stage is silent (no
-comment, no wake). A sibling set with **no** stages is one implicit stage, so
-the parent is woken once when the *last* sub-issue finishes — not on every child.
+assigning the parent or changing the human authority behind the run. A batch
+handoff resumes only when its relevant completed children share that exact
+origin task; ambiguous mixed-origin batches post the completion comment but do
+not guess a coordinator. A completion that does not close a stage is silent
+(no comment, no wake). A sibling set with **no** stages is one implicit stage,
+so the parent is woken once when the *last* sub-issue finishes — not on every
+child.
 
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the resolved parent coordinator, who then decides whether to promote the

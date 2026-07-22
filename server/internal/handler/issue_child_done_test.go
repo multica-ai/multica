@@ -295,6 +295,49 @@ func countPendingTasksForAgent(t *testing.T, issueID, agentID string) int {
 	return n
 }
 
+func createChildDoneSibling(t *testing.T, parentID string) IssueResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           "child-done sibling " + time.Now().Format(time.RFC3339Nano),
+		"status":          "in_progress",
+		"parent_issue_id": parentID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create sibling: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var child IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&child); err != nil {
+		t.Fatalf("decode sibling: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, child.ID)
+	})
+	return child
+}
+
+func createChildDoneLeaderOriginTask(t *testing.T, parentID, leaderID, squadID, originatorID string) string {
+	t.Helper()
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority, is_leader_task, squad_id,
+			originator_user_id, accountable_user_id, originator_source
+		)
+		SELECT a.id, a.runtime_id, $2, 'completed', 0, true, $3, $4, $4, 'direct_human'
+		FROM agent a
+		WHERE a.id = $1
+		RETURNING id
+	`, leaderID, parentID, squadID, originatorID).Scan(&taskID); err != nil {
+		t.Fatalf("create child-done leader origin task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+	return taskID
+}
+
 func countInboxItems(t *testing.T, recipientUserID, issueID string) int {
 	t.Helper()
 	var n int
@@ -500,6 +543,158 @@ func TestChildDoneWakesSquadThatCreatedChildForUnassignedParent(t *testing.T) {
 	}
 	if assigneeType != nil || assigneeID != nil {
 		t.Fatalf("parent should remain unassigned, got type=%v id=%v", assigneeType, assigneeID)
+	}
+}
+
+// TestChildDoneSquadContinuationInheritsOriginTaskAttribution proves that the
+// mention-started coordinator's human authority follows the stage handoff. The
+// parent creator is deliberately a different member: falling through the
+// system comment to parent provenance would attach the wrong user's connected
+// apps and A2A authority to the continuation task.
+func TestChildDoneSquadContinuationInheritsOriginTaskAttribution(t *testing.T) {
+	ctx := context.Background()
+	fx := newChildDoneFixture(t, "in_progress")
+	sq := newSquadCommentTriggerFixture(t)
+
+	var mentionerID string
+	mentionerEmail := "child-done-mentioner-" + time.Now().Format("20060102150405.000000000") + "@multica.test"
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email) VALUES ('Child Done Mentioner', $1) RETURNING id
+	`, mentionerEmail).Scan(&mentionerID); err != nil {
+		t.Fatalf("create mentioner: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
+	`, testWorkspaceID, mentionerID); err != nil {
+		t.Fatalf("add mentioner to workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, mentionerID)
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, mentionerID)
+	})
+
+	originTaskID := createChildDoneLeaderOriginTask(t, fx.parent.ID, sq.LeaderID, sq.SquadID, mentionerID)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue
+		SET creator_type = 'agent', creator_id = $2, stage = 1,
+		    origin_type = 'agent_create', origin_id = $3
+		WHERE id = $1
+	`, fx.child.ID, sq.LeaderID, originTaskID); err != nil {
+		t.Fatalf("stamp child provenance: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "done")
+
+	var originatorID, accountableID, source, delegatedFrom string
+	if err := testPool.QueryRow(ctx, `
+		SELECT COALESCE(originator_user_id::text, ''), COALESCE(accountable_user_id::text, ''),
+		       COALESCE(originator_source, ''), COALESCE(delegated_from_task_id::text, '')
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND id <> $2
+		  AND status IN ('queued', 'dispatched', 'running')
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, fx.parent.ID, originTaskID).Scan(&originatorID, &accountableID, &source, &delegatedFrom); err != nil {
+		t.Fatalf("load continuation task attribution: %v", err)
+	}
+	if originatorID != mentionerID || accountableID != mentionerID {
+		t.Errorf("continuation human attribution = originator %q accountable %q, want mentioner %q", originatorID, accountableID, mentionerID)
+	}
+	if source != "delegation" || delegatedFrom != originTaskID {
+		t.Errorf("continuation lineage = source %q delegated_from %q, want delegation from %q", source, delegatedFrom, originTaskID)
+	}
+}
+
+// TestBatchChildDoneDoesNotChooseAmongDifferentOriginTasks covers the batch
+// ordering boundary. Two children in the same closing stage came from distinct
+// squad leader tasks. Choosing the request's first representative would make
+// issue_ids order decide which squad runs; ambiguous provenance must fail
+// closed while still recording the stage-complete system comment.
+func TestBatchChildDoneDoesNotChooseAmongDifferentOriginTasks(t *testing.T) {
+	ctx := context.Background()
+	fx := newChildDoneFixture(t, "in_progress")
+	otherChild := createChildDoneSibling(t, fx.parent.ID)
+	sqA := newSquadCommentTriggerFixture(t)
+	leaderB := createHandlerTestAgent(t, "Child Done Batch Leader B", nil)
+
+	var squadBID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, 'Child Done Batch Squad B', '', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, leaderB, testUserID).Scan(&squadBID); err != nil {
+		t.Fatalf("create second squad: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadBID)
+	})
+
+	originA := createChildDoneLeaderOriginTask(t, fx.parent.ID, sqA.LeaderID, sqA.SquadID, testUserID)
+	originB := createChildDoneLeaderOriginTask(t, fx.parent.ID, leaderB, squadBID, testUserID)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue
+		SET creator_type = 'agent', creator_id = CASE id WHEN $1 THEN $3::uuid ELSE $4::uuid END,
+		    stage = 1, origin_type = 'agent_create',
+		    origin_id = CASE id WHEN $1 THEN $5::uuid ELSE $6::uuid END
+		WHERE id IN ($1, $2)
+	`, fx.child.ID, otherChild.ID, sqA.LeaderID, leaderB, originA, originB); err != nil {
+		t.Fatalf("stamp ambiguous child provenance: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
+	})
+
+	batchSetStatus(t, []string{fx.child.ID, otherChild.ID}, "done")
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	for _, squadID := range []string{sqA.SquadID, squadBID} {
+		if strings.Contains(content, "mention://squad/"+squadID) {
+			t.Errorf("ambiguous batch must not mention squad %s, got: %s", squadID, content)
+		}
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, sqA.LeaderID); got != 0 {
+		t.Errorf("ambiguous batch queued %d tasks for first squad leader, want 0", got)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, leaderB); got != 0 {
+		t.Errorf("ambiguous batch queued %d tasks for second squad leader, want 0", got)
+	}
+}
+
+// TestBatchChildDoneWakesSquadForOneSharedOriginTask keeps the positive batch
+// boundary explicit: a leader task commonly creates several same-stage
+// children, and closing them together must still produce one coordinator wake.
+func TestBatchChildDoneWakesSquadForOneSharedOriginTask(t *testing.T) {
+	ctx := context.Background()
+	fx := newChildDoneFixture(t, "in_progress")
+	otherChild := createChildDoneSibling(t, fx.parent.ID)
+	sq := newSquadCommentTriggerFixture(t)
+	originTaskID := createChildDoneLeaderOriginTask(t, fx.parent.ID, sq.LeaderID, sq.SquadID, testUserID)
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue
+		SET creator_type = 'agent', creator_id = $3, stage = 1,
+		    origin_type = 'agent_create', origin_id = $4
+		WHERE id IN ($1, $2)
+	`, fx.child.ID, otherChild.ID, sq.LeaderID, originTaskID); err != nil {
+		t.Fatalf("stamp shared child provenance: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
+	})
+
+	// Reverse creation order to prove routing is not coupled to the presentation
+	// representative selected from issue_ids.
+	batchSetStatus(t, []string{otherChild.ID, fx.child.ID}, "done")
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "mention://squad/"+sq.SquadID) {
+		t.Errorf("expected shared originating squad mention, got: %s", content)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, sq.LeaderID); got != 1 {
+		t.Errorf("expected one shared-origin leader task, got %d", got)
 	}
 }
 

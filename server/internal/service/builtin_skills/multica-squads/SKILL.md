@@ -186,8 +186,12 @@ A squad mention does not assign the issue. If that mention-started leader task
 creates child issues, however, each agent-created child's exact `origin_id`
 preserves the scoped orchestration handoff. When a child closes a stage barrier
 under an otherwise unassigned parent, Multica wakes that same squad leader
-without changing the parent's assignee. Missing or mismatched provenance does
-not fall back to timestamp or latest-task inference.
+without changing the parent's assignee, and the continuation inherits the
+origin task's human authority and accountability. Missing or mismatched
+provenance does not fall back to timestamp or latest-task inference. A batch
+handoff wakes the leader only when its relevant completed children share the
+same exact origin task; mixed origins still produce the stage-complete comment
+but do not dispatch a coordinator.
 
 ## Autopilot behavior
 
