@@ -14,7 +14,7 @@ import {
   Search,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import {
   agentTemplateDetailOptions,
@@ -118,6 +118,22 @@ export interface BuilderDraftPayload {
   member_ids?: unknown;
 }
 
+export interface AgentCreateErrors {
+  nameError: string | null;
+  formError: string | null;
+}
+
+export function classifyAgentCreateError(
+  error: unknown,
+  fallbackMessage: string,
+): AgentCreateErrors {
+  const message =
+    error instanceof Error && error.message ? error.message : fallbackMessage;
+  return error instanceof ApiError && error.status === 409
+    ? { nameError: message, formError: null }
+    : { nameError: null, formError: message };
+}
+
 const BUILDER_INPUT_PREFIX = "MULTICA_AGENT_BUILDER_INPUT\n";
 const EMPTY_CHAT_MESSAGES: ChatMessage[] = [];
 const EMPTY_DRAFT: AgentDraft = {
@@ -165,7 +181,8 @@ export function AgentCreationStudio() {
   const [selectedTemplate, setSelectedTemplate] = useState<AgentTemplateSummary | null>(null);
   const [templateSearch, setTemplateSearch] = useState("");
   const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [builderSessionId, setBuilderSessionId] = useState("");
   const [builderStarting, setBuilderStarting] = useState(false);
   const [builderClosing, setBuilderClosing] = useState(false);
@@ -418,6 +435,8 @@ export function AgentCreationStudio() {
     setSelectedTemplate(null);
     setSourceTemplate(null);
     setBuilderSessionId("");
+    setNameError(null);
+    setFormError(null);
   };
 
   const deleteBuilderSession = async () => {
@@ -638,7 +657,8 @@ export function AgentCreationStudio() {
   const createAgent = async () => {
     if (!canCreate || !selectedRuntime) return;
     setCreating(true);
-    setCreateError(null);
+    setNameError(null);
+    setFormError(null);
     try {
       const invocationTargets = buildInvocationTargets(draft);
       let agent: Agent;
@@ -718,9 +738,12 @@ export function AgentCreationStudio() {
       toast.success(t(($) => $.creation_studio.created, { name: agent.name || draft.name.trim() }));
       navigation.push(squadId ? paths.squadDetail(squadId) : paths.agentDetail(agent.id));
     } catch (error) {
-      setCreateError(
-        error instanceof Error ? error.message : t(($) => $.creation_studio.create_failed),
+      const nextErrors = classifyAgentCreateError(
+        error,
+        t(($) => $.creation_studio.create_failed),
       );
+      setNameError(nextErrors.nameError);
+      setFormError(nextErrors.formError);
       setCreating(false);
     }
   };
@@ -841,13 +864,15 @@ export function AgentCreationStudio() {
               runtimesLoading={runtimesLoading}
               members={members}
               currentUserId={currentUser?.id ?? null}
-              createError={createError}
+              nameError={nameError}
+              onNameEdited={() => setNameError(null)}
             />
           </div>
           <StudioFooter
             canCreate={canCreate}
             creating={creating}
             squad={!!squadId}
+            error={formError}
             onCreate={createAgent}
           />
         </div>
@@ -907,7 +932,8 @@ export function AgentCreationStudio() {
                 runtimesLoading={runtimesLoading}
                 members={members}
                 currentUserId={currentUser?.id ?? null}
-                createError={createError}
+                nameError={nameError}
+                onNameEdited={() => setNameError(null)}
                 onRuntimeSelect={(runtimeId) => {
                   void switchBuilderRuntime(runtimeId);
                 }}
@@ -919,6 +945,7 @@ export function AgentCreationStudio() {
               canCreate={canCreate && !builderPending}
               creating={creating}
               squad={!!squadId}
+              error={formError}
               onCreate={createAgent}
             />
           </div>
@@ -1104,7 +1131,8 @@ function ConfigurationPanel({
   runtimesLoading,
   members,
   currentUserId,
-  createError,
+  nameError,
+  onNameEdited,
   compact = false,
   onRuntimeSelect,
   runtimeSwitchPending = false,
@@ -1116,7 +1144,8 @@ function ConfigurationPanel({
   runtimesLoading: boolean;
   members: MemberWithUser[];
   currentUserId: string | null;
-  createError: string | null;
+  nameError: string | null;
+  onNameEdited: () => void;
   compact?: boolean;
   /** Builder sessions rebind the server-side carrier instead of only editing
    *  the draft. Absent for the plain create flows, where the draft is the only
@@ -1165,21 +1194,15 @@ function ConfigurationPanel({
               />
             </div>
           </DraftFieldRow>
-          <DraftFieldRow
+          <AgentNameField
             compact={compact}
-            label={t(($) => $.create_dialog.name_label)}
-            htmlFor="agent-create-name"
-          >
-            <Input
-              id="agent-create-name"
-              name="agent-name"
-              autoComplete="off"
-              aria-label={t(($) => $.create_dialog.name_label)}
-              value={draft.name}
-              onChange={(event) => set("name", event.target.value)}
-              placeholder={t(($) => $.create_dialog.name_placeholder)}
-            />
-          </DraftFieldRow>
+            name={draft.name}
+            error={nameError}
+            onChange={(name) => {
+              onNameEdited();
+              set("name", name);
+            }}
+          />
           <DraftFieldRow
             compact={compact}
             align="start"
@@ -1355,17 +1378,55 @@ function ConfigurationPanel({
           ) : null}
         </SettingsCard>
       </SettingsSection>
-
-      {createError ? (
-        <div
-          role="alert"
-          aria-live="polite"
-          className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
-        >
-          {createError}
-        </div>
-      ) : null}
     </div>
+  );
+}
+
+export function AgentNameField({
+  name,
+  error,
+  onChange,
+  compact = false,
+}: {
+  name: string;
+  error: string | null;
+  onChange: (name: string) => void;
+  compact?: boolean;
+}) {
+  const { t } = useT("agents");
+  const errorId = "agent-create-name-error";
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (error) inputRef.current?.focus();
+  }, [error]);
+
+  return (
+    <DraftFieldRow
+      compact={compact}
+      label={t(($) => $.create_dialog.name_label)}
+      htmlFor="agent-create-name"
+    >
+      <div className="space-y-1.5">
+        <Input
+          ref={inputRef}
+          id="agent-create-name"
+          name="agent-name"
+          autoComplete="off"
+          aria-label={t(($) => $.create_dialog.name_label)}
+          aria-invalid={!!error}
+          aria-describedby={error ? errorId : undefined}
+          value={name}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={t(($) => $.create_dialog.name_placeholder)}
+        />
+        {error ? (
+          <p id={errorId} role="alert" className="text-xs text-destructive">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </DraftFieldRow>
   );
 }
 
@@ -1526,7 +1587,46 @@ function BuilderConversation({
   );
 }
 
-function StudioFooter({ canCreate, creating, squad, onCreate }: { canCreate: boolean; creating: boolean; squad: boolean; onCreate: () => void; }) { const { t } = useT("agents"); return <div className="sticky bottom-0 mt-8 flex items-center justify-end gap-3 border-t bg-background/95 px-5 py-3 backdrop-blur"><Button type="button" onClick={onCreate} disabled={!canCreate}>{creating && <Loader2 className="size-4 animate-spin" />}{creating ? t(($) => $.creation_studio.creating) : squad ? t(($) => $.creation_studio.create_and_add) : t(($) => $.creation_studio.create_and_open)}</Button></div>; }
+export function StudioFooter({
+  canCreate,
+  creating,
+  squad,
+  error,
+  onCreate,
+}: {
+  canCreate: boolean;
+  creating: boolean;
+  squad: boolean;
+  error: string | null;
+  onCreate: () => void;
+}) {
+  const { t } = useT("agents");
+  return (
+    <div className="sticky bottom-0 mt-8 flex items-center justify-between gap-3 border-t bg-background/95 px-5 py-3 backdrop-blur">
+      {error ? (
+        <p
+          role="alert"
+          className="min-w-0 flex-1 break-words text-sm text-destructive"
+        >
+          {error}
+        </p>
+      ) : null}
+      <Button
+        type="button"
+        className="ml-auto shrink-0"
+        onClick={onCreate}
+        disabled={!canCreate}
+      >
+        {creating && <Loader2 className="size-4 animate-spin" />}
+        {creating
+          ? t(($) => $.creation_studio.creating)
+          : squad
+            ? t(($) => $.creation_studio.create_and_add)
+            : t(($) => $.creation_studio.create_and_open)}
+      </Button>
+    </div>
+  );
+}
 export function buildInvocationTargets(
   draft: AgentDraft,
 ): AgentInvocationTargetInput[] {
