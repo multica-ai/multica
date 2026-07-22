@@ -1051,7 +1051,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			// Wait returning with a ProcessState is the os/exec reap boundary.
 			// On Unix, ProcessState.Exited reports false for a process terminated
 			// by SIGKILL even though Wait successfully reaped it.
-			cleanupConfirmed = waitReturned && cmd.ProcessState != nil
+			cleanupConfirmed = waitReturned && cmd.ProcessState != nil && waitProcessGroupGone(cmd.Process, grace)
 			if codexCleanupConfirmationOverride.Load() < 0 {
 				cleanupConfirmed = false
 			}
@@ -1068,7 +1068,6 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				"wait_error", cleanupWaitErr,
 				"stderr_bytes", stderrBuf.TotalBytes(),
 				"stderr_truncated", stderrBuf.TotalBytes() > codexStderrTailBytes,
-				"stderr_tail", sanitizeCodexDiagnostic(stderrBuf.Tail()),
 			)
 		})
 	}
@@ -1125,13 +1124,19 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// back to a fresh thread so the task still makes progress.
 		threadID, resumed, err := c.startOrResumeThread(runCtx, opts, b.cfg.Logger)
 		if err != nil {
+			var handshakeErr *codexHandshakeTimeoutError
+			timedOut := errors.As(err, &handshakeErr) && handshakeErr.Method == "thread/start"
+			if timedOut {
+				// A timed-out thread/start has an uncertain provider outcome. Kill
+				// the whole process group before waiting so a leader that exits on
+				// EOF cannot leave detached-stdio descendants behind.
+				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+			}
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
 			stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
-			finalError = withAgentStderr(err.Error(), "codex", stderrTail)
+			finalError = err.Error()
 			if c.threadStartSent {
-				var handshakeErr *codexHandshakeTimeoutError
-				timedOut := errors.As(err, &handshakeErr) && handshakeErr.Method == "thread/start"
 				classification := classifyCodexStartupStderr(stderrTail, timedOut)
 				b.cfg.Logger.Warn("codex lifecycle",
 					"phase", "thread_start_failure",

@@ -2280,6 +2280,51 @@ func TestCodexExecuteThreadStartResponseRequiresThreadID(t *testing.T) {
 	}
 }
 
+func TestCodexThreadStartTimeoutDoesNotPersistSensitiveInputs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	const envSecret = "opaque-env-sentinel-9382"
+	const systemSecret = "opaque-system-sentinel-4721"
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo "$OPAQUE_AUTH_VALUE" >&2`+"\n"+
+		`echo "$line" >&2`+"\n"+
+		`sleep 5`+"\n")
+
+	var logs bytes.Buffer
+	backend, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.New(slog.NewJSONHandler(&logs, nil)),
+		Env:            map[string]string{"OPAQUE_AUTH_VALUE": envSecret},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+		Timeout:          5 * time.Second,
+		HandshakeTimeout: time.Second,
+		SystemPrompt:     systemSecret,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	combined := result.Error + "\n" + logs.String()
+	for _, secret := range []string{envSecret, systemSecret} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("sensitive input persisted in timeout diagnostics")
+		}
+	}
+}
+
 func TestCodexExecuteConcurrentThreadStartTimeoutsRemainUnserialized(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
