@@ -24,6 +24,14 @@ func TestFetchFromSkillsSh_UsesEntryURLForNestedDirectories(t *testing.T) {
 			switch r.URL.Path {
 			case "/repos/acme/skills":
 				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/git/trees/main":
+				// Truncated tree: resolution still succeeds by frontmatter, but
+				// enumeration falls through to the per-directory crawl exercised
+				// by this test.
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree:      []githubTreeEntry{{Path: "skills/pptx/SKILL.md", Type: "blob"}},
+					Truncated: true,
+				})
 			case "/repos/acme/skills/contents/skills/pptx":
 				if got := r.URL.Query().Get("ref"); got != "main" {
 					t.Fatalf("top-level ref = %q, want main", got)
@@ -78,7 +86,7 @@ func TestFetchFromSkillsSh_UsesEntryURLForNestedDirectories(t *testing.T) {
 		case "raw.githubusercontent.com":
 			switch r.URL.Path {
 			case "/acme/skills/main/skills/pptx/SKILL.md":
-				w.Write([]byte("---\nname: PPTX\n---\ncontent"))
+				w.Write([]byte("---\nname: pptx\n---\ncontent"))
 			case "/acme/skills/main/skills/pptx/editing.md":
 				w.Write([]byte("editing"))
 			case "/acme/skills/main/skills/pptx/scripts/add_slide.py":
@@ -118,6 +126,11 @@ func TestFetchFromSkillsSh_FallbackDoesNotDoubleEscapeDirectoryNames(t *testing.
 			switch r.URL.Path {
 			case "/repos/acme/skills":
 				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree:      []githubTreeEntry{{Path: "skills/pptx/SKILL.md", Type: "blob"}},
+					Truncated: true,
+				})
 			case "/repos/acme/skills/contents/skills/pptx":
 				writeJSON(w, http.StatusOK, []githubContentEntry{
 					{
@@ -144,7 +157,7 @@ func TestFetchFromSkillsSh_FallbackDoesNotDoubleEscapeDirectoryNames(t *testing.
 		case "raw.githubusercontent.com":
 			switch r.URL.Path {
 			case "/acme/skills/main/skills/pptx/SKILL.md":
-				w.Write([]byte("---\nname: PPTX\n---\ncontent"))
+				w.Write([]byte("---\nname: pptx\n---\ncontent"))
 			case "/acme/skills/main/skills/pptx/my dir/note.md":
 				w.Write([]byte("note"))
 			default:
@@ -182,6 +195,11 @@ func TestFetchFromSkillsSh_LogsSubdirectoryFailures(t *testing.T) {
 			switch r.URL.Path {
 			case "/repos/acme/skills":
 				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree:      []githubTreeEntry{{Path: "skills/pptx/SKILL.md", Type: "blob"}},
+					Truncated: true,
+				})
 			case "/repos/acme/skills/contents/skills/pptx":
 				writeJSON(w, http.StatusOK, []githubContentEntry{
 					{
@@ -199,7 +217,7 @@ func TestFetchFromSkillsSh_LogsSubdirectoryFailures(t *testing.T) {
 		case "raw.githubusercontent.com":
 			switch r.URL.Path {
 			case "/acme/skills/main/skills/pptx/SKILL.md":
-				w.Write([]byte("---\nname: PPTX\n---\ncontent"))
+				w.Write([]byte("---\nname: pptx\n---\ncontent"))
 			default:
 				http.NotFound(w, r)
 			}
@@ -668,6 +686,207 @@ func TestFetchFromSkillsSh_ContextCancelledMidDownloadAborts(t *testing.T) {
 	}
 }
 
+// When the tree fetch fails (e.g. GitHub API rate limiting) for the real
+// api-gateway-skill shape — a same-named repo-root SKILL.md plus the actual
+// skill nested at a non-conventional path — the importer must NOT fall back to
+// resolving the repository root and "succeed" with the wrong SKILL.md and zero
+// files. It must return a retryable error.
+func TestFetchFromSkillsSh_TreeFetchFailureReturnsRetryableError(t *testing.T) {
+	var rootProbed bool
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/maton/api-gateway-skill":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/maton/api-gateway-skill/git/trees/main":
+				// Rate limited.
+				http.Error(w, "rate limited", http.StatusForbidden)
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			if r.URL.Path == "/maton/api-gateway-skill/main/SKILL.md" {
+				rootProbed = true
+				w.Write([]byte("---\nname: api-gateway\n---\nroot"))
+				return
+			}
+			http.NotFound(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/maton/api-gateway-skill/api-gateway")
+	if err == nil {
+		t.Fatalf("expected a retryable error on tree fetch failure, got skill %+v", result)
+	}
+	if !errors.Is(err, errImportSourceUnavailable) {
+		t.Fatalf("error = %q, want errImportSourceUnavailable", err.Error())
+	}
+	if rootProbed {
+		t.Fatal("the colliding repo-root SKILL.md must not be probed/selected when the tree is unavailable")
+	}
+}
+
+// A skill at a conventional path with a display-name frontmatter must import
+// identically whether or not GitHub truncated the tree — the truncated branch
+// must also honor path-based acceptance (Elon review point 3).
+func TestFetchFromSkillsSh_TruncatedTreeAcceptsConventionalPathDespiteNameMismatch(t *testing.T) {
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree:      []githubTreeEntry{{Path: "skills/foo/SKILL.md", Type: "blob"}},
+					Truncated: true,
+				})
+			case "/repos/acme/skills/contents/skills/foo":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "ref.md",
+						Path:        "skills/foo/ref.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/skills/foo/ref.md",
+					},
+				})
+			default:
+				// skills/.claude/skills/plugin conventional-prefix listings 404.
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/skills/main/skills/foo/SKILL.md":
+				w.Write([]byte("---\nname: Foo\ndescription: display name\n---\nbody"))
+			case "/acme/skills/main/skills/foo/ref.md":
+				w.Write([]byte("ref"))
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	result, err := fetchFromSkillsSh(t.Context(), client, "https://skills.sh/acme/skills/foo")
+	if err != nil {
+		t.Fatalf("fetchFromSkillsSh (truncated): %v", err)
+	}
+	if result.name != "Foo" {
+		t.Fatalf("name = %q, want Foo", result.name)
+	}
+	if !equalStrings(importedFilePaths(result.files), []string{"ref.md"}) {
+		t.Fatalf("files = %v, want [ref.md]", importedFilePaths(result.files))
+	}
+}
+
+// The crawl fallback (used by the truncated-tree branch) must also treat a
+// mid-download cancellation as fatal, not silently drop the remaining files.
+func TestFetchFromSkillsSh_CrawlFallbackContextCancelledAborts(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	client, _ := newGitHubFixtureClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.Header.Get("X-Test-Original-Host") {
+		case "api.github.com":
+			switch r.URL.Path {
+			case "/repos/acme/skills":
+				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/git/trees/main":
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree:      []githubTreeEntry{{Path: "skills/foo/SKILL.md", Type: "blob"}},
+					Truncated: true,
+				})
+			case "/repos/acme/skills/contents/skills/foo":
+				writeJSON(w, http.StatusOK, []githubContentEntry{
+					{
+						Name:        "ref.md",
+						Path:        "skills/foo/ref.md",
+						Type:        "file",
+						DownloadURL: "https://raw.githubusercontent.com/acme/skills/main/skills/foo/ref.md",
+					},
+				})
+			default:
+				http.NotFound(w, r)
+			}
+		case "raw.githubusercontent.com":
+			switch r.URL.Path {
+			case "/acme/skills/main/skills/foo/SKILL.md":
+				w.Write([]byte("---\nname: foo\n---\nbody"))
+			case "/acme/skills/main/skills/foo/ref.md":
+				cancel()
+				<-r.Context().Done()
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	_, err := fetchFromSkillsSh(ctx, client, "https://skills.sh/acme/skills/foo")
+	if err == nil {
+		t.Fatal("expected crawl fallback to abort on cancellation")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %q, want context.Canceled", err.Error())
+	}
+}
+
+// ClawHub imports must likewise abort when the context is cancelled during a
+// supporting-file download rather than reporting a half-populated success.
+func TestFetchFromClawHub_ContextCancelledMidDownloadAborts(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	slug := "review-helper"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/skills/"+slug:
+			writeJSON(w, http.StatusOK, map[string]any{
+				"skill": map[string]any{
+					"slug": slug, "displayName": slug, "summary": "s",
+					"tags": map[string]string{"latest": "1.0.0"},
+				},
+			})
+		case r.URL.Path == "/api/v1/skills/"+slug+"/versions/1.0.0":
+			writeJSON(w, http.StatusOK, map[string]any{
+				"version": map[string]any{
+					"version": "1.0.0",
+					"files": []map[string]any{
+						{"path": "SKILL.md", "size": 16},
+						{"path": "ref.md", "size": 8},
+					},
+				},
+			})
+		case r.URL.Path == "/api/v1/skills/"+slug+"/file":
+			switch r.URL.Query().Get("path") {
+			case "SKILL.md":
+				w.Write([]byte("# Imported\n"))
+			case "ref.md":
+				cancel()
+				<-r.Context().Done()
+			default:
+				http.NotFound(w, r)
+			}
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	prev := clawHubAPIBase
+	clawHubAPIBase = srv.URL + "/api/v1"
+	t.Cleanup(func() { clawHubAPIBase = prev; srv.Close() })
+
+	_, err := fetchFromClawHub(ctx, &http.Client{}, "https://clawhub.ai/acme/"+slug)
+	if err == nil {
+		t.Fatal("expected ClawHub import to abort on cancellation")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error = %q, want context.Canceled", err.Error())
+	}
+}
+
 func TestImportFetchErrorResponse(t *testing.T) {
 	capErr := fmt.Errorf("%w: import bundle would contain 999 files", errImportCapExceeded)
 	if status, _ := importFetchErrorResponse(context.Background(), capErr); status != http.StatusRequestEntityTooLarge {
@@ -675,6 +894,10 @@ func TestImportFetchErrorResponse(t *testing.T) {
 	}
 	if status, _ := importFetchErrorResponse(context.Background(), context.DeadlineExceeded); status != http.StatusGatewayTimeout {
 		t.Fatalf("deadline error status = %d, want 504", status)
+	}
+	unavailErr := fmt.Errorf("%w: could not read tree", errImportSourceUnavailable)
+	if status, _ := importFetchErrorResponse(context.Background(), unavailErr); status != http.StatusServiceUnavailable {
+		t.Fatalf("source-unavailable status = %d, want 503", status)
 	}
 	if status, _ := importFetchErrorResponse(context.Background(), fmt.Errorf("boom")); status != http.StatusBadGateway {
 		t.Fatalf("generic error status = %d, want 502", status)
@@ -1183,6 +1406,13 @@ func TestFetchFromSkillsSh_OversizedSupportingFileFailsImport(t *testing.T) {
 			switch r.URL.Path {
 			case "/repos/acme/skills":
 				writeJSON(w, http.StatusOK, map[string]any{"default_branch": "main"})
+			case "/repos/acme/skills/git/trees/main":
+				// Truncated so enumeration goes through the crawl fallback,
+				// which enforces the per-file cap during download.
+				writeJSON(w, http.StatusOK, githubTreeResponse{
+					Tree:      []githubTreeEntry{{Path: "skills/foo/SKILL.md", Type: "blob"}},
+					Truncated: true,
+				})
 			case "/repos/acme/skills/contents/skills/foo":
 				writeJSON(w, http.StatusOK, []githubContentEntry{
 					{

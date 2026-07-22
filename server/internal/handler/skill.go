@@ -623,6 +623,12 @@ type importedFile struct {
 // produce an incomplete skill that looks valid to the user.
 var errImportCapExceeded = errors.New("import cap exceeded")
 
+// errImportSourceUnavailable marks a transient failure to read the upstream
+// source (e.g. the GitHub tree API rate limiting). The import can't proceed
+// safely but should be retried, so it maps to a retryable HTTP status rather
+// than a permanent error.
+var errImportSourceUnavailable = errors.New("import source temporarily unavailable")
+
 // isCapError reports whether err is (or wraps) errImportCapExceeded.
 func isCapError(err error) bool {
 	return errors.Is(err, errImportCapExceeded)
@@ -1006,6 +1012,12 @@ func fetchFromClawHub(ctx context.Context, httpClient *http.Client, rawURL strin
 			if isCapError(err) || fp == "SKILL.md" {
 				return nil, fmt.Errorf("clawhub import: %s: %w", fp, err)
 			}
+			// A cancelled context (overall deadline / client disconnect) is
+			// fatal for the same reason: skipping every remaining file would
+			// persist a half-populated bundle as a success.
+			if ctx.Err() != nil {
+				return nil, fmt.Errorf("clawhub import: fetch aborted at %s: %w", fp, ctx.Err())
+			}
 			slog.Warn("clawhub import: file download failed", "path", fp, "error", err)
 			continue
 		}
@@ -1060,12 +1072,18 @@ func fetchFromSkillsSh(ctx context.Context, httpClient *http.Client, rawURL stri
 
 	tree, truncated, treeErr := fetchGitHubTree(ctx, httpClient, owner, repo, defaultBranch)
 	if treeErr != nil {
-		// The tree fetch itself failed (e.g. GitHub API rate limiting). Fall
-		// back to the legacy raw-probe resolution + per-directory crawl so a
-		// single bad tree probe doesn't fail an otherwise importable skill.
-		slog.Warn("skills.sh import: tree fetch failed, falling back to legacy crawl",
+		// The tree fetch failed (typically GitHub API rate limiting, which also
+		// takes down the contents API). Without the tree we cannot safely
+		// resolve which directory is the skill: a raw-probe + root-SKILL.md
+		// fallback would re-select the repository root whenever its name
+		// collides with the slug (the api-gateway-skill case) and the same
+		// rate limiting would then leave the crawl empty — persisting the wrong
+		// SKILL.md with zero supporting files as a "successful" import. Fail
+		// with a retryable error instead so nothing incorrect is saved.
+		slog.Warn("skills.sh import: repository tree fetch failed",
 			"owner", owner, "repo", repo, "error", treeErr)
-		return fetchFromSkillsShLegacy(ctx, httpClient, owner, repo, skillName, defaultBranch, rawPrefix, rawURL)
+		return nil, fmt.Errorf("%w: could not read the %s/%s repository tree (usually GitHub API rate limiting — set GITHUB_TOKEN on the server or retry): %v",
+			errImportSourceUnavailable, owner, repo, treeErr)
 	}
 
 	skillDir, skillMdBody, err := resolveSkillDirFromTree(ctx, httpClient, owner, repo, defaultBranch, rawPrefix, skillName, tree, truncated)
@@ -1085,62 +1103,6 @@ func fetchFromSkillsSh(ctx context.Context, httpClient *http.Client, rawURL stri
 	}
 
 	if err := addSupportingFilesFromTree(ctx, httpClient, result, tree, rawPrefix, skillDir); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
-// fetchFromSkillsShLegacy is the fallback used when the recursive tree cannot be
-// fetched (e.g. the GitHub API is rate limiting). It resolves the skill
-// directory with raw candidate probes (which hit raw.githubusercontent.com and
-// so survive api.github.com rate limiting) and enumerates supporting files with
-// the per-directory contents crawl.
-func fetchFromSkillsShLegacy(ctx context.Context, httpClient *http.Client, owner, repo, skillName, defaultBranch, rawPrefix, rawURL string) (*importedSkill, error) {
-	// Skills can be at different paths depending on the repo structure:
-	//   skills/{name}/SKILL.md          (most common)
-	//   .claude/skills/{name}/SKILL.md  (Claude Code native discovery)
-	//   plugin/skills/{name}/SKILL.md   (e.g. microsoft repos)
-	//   {name}/SKILL.md                 (e.g. anthropics/skills layout)
-	//   SKILL.md                        (single-skill repo: the repo is the skill)
-	candidatePaths := []string{
-		"skills/" + skillName,
-		".claude/skills/" + skillName,
-		"plugin/skills/" + skillName,
-		skillName,
-	}
-
-	var skillMdBody []byte
-	var skillDir string
-	for _, dir := range candidatePaths {
-		body, err := fetchRawFile(ctx, httpClient, buildRawGitHubURL(rawPrefix, dir+"/SKILL.md"))
-		if err == nil {
-			skillMdBody = body
-			skillDir = dir
-			break
-		}
-	}
-	// Single-skill repos place SKILL.md at the repository root. Verify the
-	// frontmatter name matches so a stray root SKILL.md in a multi-skill repo
-	// can't get picked up for an unrelated skill URL.
-	if skillMdBody == nil {
-		body, err := fetchRawFile(ctx, httpClient, buildRawGitHubURL(rawPrefix, "SKILL.md"))
-		if err == nil {
-			if name, _ := skillpkg.ParseSkillFrontmatter(string(body)); name == skillName {
-				skillMdBody = body
-				skillDir = ""
-			}
-		}
-	}
-	if skillMdBody == nil {
-		dir, body, ok := findSkillDirFromConventionalPrefixes(ctx, httpClient, owner, repo, defaultBranch, rawPrefix, skillName)
-		if !ok {
-			return nil, skillMdNotFoundError(owner, repo, skillName)
-		}
-		skillDir, skillMdBody = dir, body
-	}
-
-	result := newSkillsShImportedSkill(skillMdBody, skillName, rawURL, owner, repo)
-	if err := addSupportingFilesViaCrawl(ctx, httpClient, result, owner, repo, defaultBranch, skillDir); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -1179,6 +1141,12 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 		if dirResp != nil {
 			dirResp.Body.Close()
 		}
+		// A cancelled context (overall deadline / client disconnect) must abort
+		// rather than being swallowed as "no supporting files", which would
+		// persist an incomplete bundle as a success.
+		if ctx.Err() != nil {
+			return fmt.Errorf("github import: directory listing aborted: %w", ctx.Err())
+		}
 		return nil
 	}
 	defer dirResp.Body.Close()
@@ -1191,6 +1159,11 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 
 	var allFiles []githubContentEntry
 	collectGitHubFiles(ctx, httpClient, entries, &allFiles, apiURL)
+	// collectGitHubFiles is lenient on a failed subdirectory listing; if the
+	// context was cancelled mid-crawl the collected set is incomplete, so abort.
+	if ctx.Err() != nil {
+		return fmt.Errorf("github import: directory crawl aborted: %w", ctx.Err())
+	}
 
 	basePath := ""
 	if skillDir != "" {
@@ -1204,6 +1177,9 @@ func addSupportingFilesViaCrawl(ctx context.Context, httpClient *http.Client, re
 		if err != nil {
 			if isCapError(err) {
 				return fmt.Errorf("github import: %s: %w", entry.Path, err)
+			}
+			if ctx.Err() != nil {
+				return fmt.Errorf("github import: fetch aborted at %s: %w", entry.Path, ctx.Err())
 			}
 			slog.Warn("github import: file download failed", "path", entry.Path, "error", err)
 			continue
@@ -1268,7 +1244,7 @@ func resolveSkillDirFromTree(ctx context.Context, httpClient *http.Client, owner
 		// only the tree we already have (at most one extra raw fetch, never a
 		// directory crawl). Kept after the frontmatter pass so the bare repo
 		// root is never eligible here — the collision fix stays intact.
-		if dir, body, ok := acceptConventionalSkillDirFromTree(ctx, httpClient, rawPrefix, skillName, skillPaths); ok {
+		if dir, body, ok := acceptConventionalSkillDir(ctx, httpClient, rawPrefix, skillName, skillPaths, true); ok {
 			return dir, body, nil
 		}
 		return "", nil, skillMdNotFoundError(owner, repo, skillName)
@@ -1276,6 +1252,13 @@ func resolveSkillDirFromTree(ctx context.Context, httpClient *http.Client, owner
 
 	slog.Warn("github import: repository tree listing truncated", "owner", owner, "repo", repo, "branch", defaultBranch)
 	if dir, body, ok := findSkillDirFromConventionalPrefixes(ctx, httpClient, owner, repo, defaultBranch, rawPrefix, skillName); ok {
+		return dir, body, nil
+	}
+	// Same path-based acceptance as the untruncated branch, so a conventional
+	// skill with a display-name frontmatter imports identically regardless of
+	// whether GitHub truncated the tree. The tree can't prove absence here, so
+	// the helper probes each candidate directly.
+	if dir, body, ok := acceptConventionalSkillDir(ctx, httpClient, rawPrefix, skillName, skillPaths, false); ok {
 		return dir, body, nil
 	}
 	return "", nil, fmt.Errorf("repository %s/%s tree is too large to scan exhaustively for skill %s", owner, repo, skillName)
@@ -1293,23 +1276,36 @@ func conventionalSkillMdPaths(skillName string) []string {
 	}
 }
 
-// acceptConventionalSkillDirFromTree accepts a skill by its conventional path
-// when that path is present in the already-extracted tree SKILL.md set, without
-// requiring a frontmatter name match. It deliberately excludes the bare repo
-// root SKILL.md, which stays reachable only through the frontmatter pass, so a
-// root SKILL.md whose name collides with the slug can never be selected here.
-func acceptConventionalSkillDirFromTree(ctx context.Context, httpClient *http.Client, rawPrefix, skillName string, skillPaths []string) (string, []byte, bool) {
-	present := make(map[string]struct{}, len(skillPaths))
-	for _, p := range skillPaths {
+// acceptConventionalSkillDir accepts a skill by its conventional path
+// (skills/<name>/SKILL.md, etc.) without requiring a frontmatter name match,
+// restoring the pre-tree importer's lenient path-based acceptance. It never
+// accepts the bare repo root, so a root SKILL.md whose name collides with the
+// slug can only be selected through the frontmatter pass — the collision fix
+// stays intact.
+//
+// When treeComplete is true, the untruncated tree proves which conventional
+// paths exist, so absent candidates are skipped without a network call. When
+// the tree was truncated it can't prove absence, so each candidate is probed
+// directly (a missing candidate simply 404s and is skipped).
+func acceptConventionalSkillDir(ctx context.Context, httpClient *http.Client, rawPrefix, skillName string, treeSkillPaths []string, treeComplete bool) (string, []byte, bool) {
+	present := make(map[string]struct{}, len(treeSkillPaths))
+	for _, p := range treeSkillPaths {
 		present[p] = struct{}{}
 	}
 	for _, candidate := range conventionalSkillMdPaths(skillName) {
-		if _, ok := present[candidate]; !ok {
-			continue
+		if treeComplete {
+			if _, ok := present[candidate]; !ok {
+				continue // a complete tree proves this path is absent
+			}
 		}
 		body, err := fetchRawFile(ctx, httpClient, buildRawGitHubURL(rawPrefix, candidate))
 		if err != nil {
-			slog.Warn("skills.sh import: conventional SKILL.md fetch failed", "path", candidate, "error", err)
+			// With a complete tree the path was proven present, so a fetch
+			// error is unexpected and worth a breadcrumb; with a truncated tree
+			// this is just a probe miss.
+			if treeComplete {
+				slog.Warn("skills.sh import: conventional SKILL.md fetch failed", "path", candidate, "error", err)
+			}
 			continue
 		}
 		return skillDirFromSkillFilePath(candidate), body, true
@@ -1446,6 +1442,11 @@ func (e githubTreeEntry) size() int64 {
 // collectGitHubFiles recursively collects file entries from a GitHub directory listing.
 func collectGitHubFiles(ctx context.Context, httpClient *http.Client, entries []githubContentEntry, out *[]githubContentEntry, parentURL string) {
 	for _, entry := range entries {
+		// Stop descending once the context is cancelled; the caller checks
+		// ctx.Err() afterwards and aborts rather than importing a partial crawl.
+		if ctx.Err() != nil {
+			return
+		}
 		lower := strings.ToLower(entry.Name)
 		if lower == "skill.md" || lower == "license" || lower == "license.txt" || lower == "license.md" {
 			continue
@@ -2226,13 +2227,17 @@ const importFetchTimeout = 45 * time.Second
 
 // importFetchErrorResponse maps a fetch failure onto an HTTP status and message.
 // Cap violations become 413 (the skill is too large to import), an exhausted
-// deadline becomes 504 with an actionable hint, and everything else stays 502.
+// deadline becomes 504, a transiently unavailable source becomes a retryable
+// 503, and everything else stays 502.
 func importFetchErrorResponse(ctx context.Context, err error) (int, string) {
 	if isCapError(err) {
 		return http.StatusRequestEntityTooLarge, err.Error()
 	}
 	if errors.Is(err, context.DeadlineExceeded) || ctx.Err() == context.DeadlineExceeded {
 		return http.StatusGatewayTimeout, "skill import timed out fetching source files; the skill may be too large or the source too slow"
+	}
+	if errors.Is(err, errImportSourceUnavailable) {
+		return http.StatusServiceUnavailable, err.Error()
 	}
 	return http.StatusBadGateway, err.Error()
 }
