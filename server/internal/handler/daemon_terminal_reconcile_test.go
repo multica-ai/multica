@@ -428,6 +428,10 @@ func TestFailTask_IdempotentCallback_RecoveryFromSkippedReconcile(t *testing.T) 
 
 	origReconcile := testHandler.TaskService.ReconcileTerminal
 	testHandler.TaskService.ReconcileTerminal = nil
+	// Safety net: restore even if a panic fires between now and the inline restore
+	// below. Without this, a panic leaves the shared testHandler corrupted for
+	// every subsequent test in the binary run.
+	t.Cleanup(func() { testHandler.TaskService.ReconcileTerminal = origReconcile })
 	if w := failTaskViaHandler(t, taskID); w.Code != http.StatusOK {
 		t.Fatalf("FailTask #1 (no reconcile): expected 200, got %d: %s", w.Code, w.Body.String())
 	}
@@ -435,6 +439,7 @@ func TestFailTask_IdempotentCallback_RecoveryFromSkippedReconcile(t *testing.T) 
 		t.Fatalf("expected 0 follow-ups before recovery, got %d", n)
 	}
 
+	// Restore before the second call so the early-exit path can reconcile.
 	testHandler.TaskService.ReconcileTerminal = origReconcile
 
 	// Second call hits the already-finalized early-exit, which calls
@@ -460,6 +465,10 @@ func TestCompleteTask_IdempotentCallback_RecoveryFromSkippedReconcile(t *testing
 
 	origReconcile := testHandler.TaskService.ReconcileTerminal
 	testHandler.TaskService.ReconcileTerminal = nil
+	// Safety net: restore even if a panic fires between now and the inline restore
+	// below. Without this, a panic leaves the shared testHandler corrupted for
+	// every subsequent test in the binary run.
+	t.Cleanup(func() { testHandler.TaskService.ReconcileTerminal = origReconcile })
 	if _, err := testHandler.TaskService.CompleteTask(context.Background(),
 		parseUUID(taskID), completeResult(t, "done"), "", ""); err != nil {
 		t.Fatalf("CompleteTask #1 (no reconcile): %v", err)
@@ -468,6 +477,7 @@ func TestCompleteTask_IdempotentCallback_RecoveryFromSkippedReconcile(t *testing
 		t.Fatalf("expected 0 follow-ups before recovery, got %d", n)
 	}
 
+	// Restore before the second call so the early-exit path can reconcile.
 	testHandler.TaskService.ReconcileTerminal = origReconcile
 
 	if _, err := testHandler.TaskService.CompleteTask(context.Background(),

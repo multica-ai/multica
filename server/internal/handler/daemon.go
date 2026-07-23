@@ -3683,7 +3683,11 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	taskID := chi.URLParam(r, "taskId")
-	existing, err := h.Queries.GetAgentTask(r.Context(), parseUUID(taskID))
+	taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "taskId")
+	if !ok {
+		return
+	}
+	existing, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 	if err != nil || uuidToString(existing.IssueID) != uuidToString(issue.ID) {
 		writeError(w, http.StatusNotFound, "task not found")
 		return
