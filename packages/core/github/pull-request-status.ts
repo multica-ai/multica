@@ -1,97 +1,40 @@
 import type { GitHubPullRequest } from "../types";
 
-// Status kinds rendered in the PR sidebar row's detail line. Order in the
-// pass-through table matters — the first matching rule wins. The order is
-// chosen so terminal PR states (closed / merged) short-circuit before any
-// transient CI/conflict signal, since those signals are no longer actionable
-// on a terminal PR.
+// Fail-only alert model for the PR sidebar row (MUL-5180).
 //
-// Priority (high → low):
-//   1. closed (not merged)        → status_closed
-//   2. merged                     → status_merged
-//   3. mergeable_state = "dirty"  → status_conflicts
-//   4. any failed suite           → status_checks_failed
-//   5. any pending suite          → status_checks_pending
-//   6. any passed suite           → status_checks_passed
-//   7. no suite + mergeable=clean → status_ready
-//   8. otherwise                  → status_unknown
+// The read-only GitHub App only ever receives *completed* check suites, so
+// "some observed suite failed" is the single CI signal Multica can vouch for.
+// "Everything passed", "still running", and "all done" are unknowable from
+// webhooks alone: a green roll-up could just mean the slower provider has not
+// reported yet. Rather than render answers we cannot stand behind, the row
+// stays silent unless something needs attention:
 //
-// Completeness caveat (MUL-5180): these counts only ever cover check suites
-// Multica has actually observed, which is NOT the same as "every suite that
-// will run". GitHub delivers `check_suite.requested` / `.rerequested` only to
-// Apps holding Checks *write*; the Multica App deliberately stays read-only,
-// so in practice only `completed` suites arrive. A PR with two reporting apps
-// therefore passes through a window where the first has completed and the
-// second has not yet been seen at all.
+//   - checksFailed: a completed suite on the current head concluded failure.
+//   - conflicts:    GitHub says the PR cannot merge (mergeable_state dirty).
 //
-// That is why rule 6 renders as "Checks passed" and not "All checks passed" —
-// we can report what reported, never that everything did. Do not reintroduce
-// completeness wording here without also fixing the underlying signal.
+// Both are suppressed on terminal PRs (closed / merged) — the alert is no
+// longer actionable and the row's state icon already tells the story.
 //
-// Note: this table is the single source of truth for the sidebar PR row. The
-// older row-with-badges implementation used a separate "hide status row for
-// terminal PRs" branch — the current row renders
-// with status_closed / status_merged text, never falling through to a
-// conflicts / checks line on a terminal PR. Keep this priority order in sync
-// with the i18n keys `pull_request_card_status_*` and with the progress-strip
-// derivation in `derivePullRequestProgressSegments` (terminal kinds get a
-// solid bar; the rest map onto the per-suite counts).
-export type PullRequestStatusKind =
-  | "closed"
-  | "merged"
-  | "conflicts"
-  | "checks_failed"
-  | "checks_pending"
-  | "checks_passed"
-  | "ready"
-  | "unknown";
-
-export interface PullRequestStatusInput {
+// Do not add passed / pending / progress states back here without a data
+// source that actually observes them (check_run events or a checks API
+// reconciliation) — see the MUL-5180 discussion.
+export interface PullRequestAlertsInput {
   state: GitHubPullRequest["state"];
   mergeable_state?: string | null;
   checks_failed?: number;
-  checks_pending?: number;
-  checks_passed?: number;
 }
 
-export function derivePullRequestStatusKind(input: PullRequestStatusInput): PullRequestStatusKind {
-  if (input.state === "closed") return "closed";
-  if (input.state === "merged") return "merged";
-  if (input.mergeable_state === "dirty") return "conflicts";
-  if ((input.checks_failed ?? 0) > 0) return "checks_failed";
-  if ((input.checks_pending ?? 0) > 0) return "checks_pending";
-  if ((input.checks_passed ?? 0) > 0) return "checks_passed";
-  if (input.mergeable_state === "clean") return "ready";
-  return "unknown";
+export interface PullRequestAlerts {
+  checksFailed: boolean;
+  conflicts: boolean;
 }
 
-export interface PullRequestProgressSegment {
-  kind: "failed" | "pending" | "passed";
-  ratio: number;
-}
-
-// Segmented progress bar input. Returns null when:
-//   - the PR is terminal (closed/merged) — the card paints a solid bar
-//     in a state-specific color, no segmentation needed;
-//   - no check_suite has been observed (total === 0) — the card hides
-//     the bar entirely.
-// Otherwise emits the segments left-to-right: failed → pending → passed.
-// "Failure first" is intentional: problems should be visible before signal
-// that everything is fine.
-export function derivePullRequestProgressSegments(
-  input: PullRequestStatusInput,
-): PullRequestProgressSegment[] | null {
-  if (input.state === "closed" || input.state === "merged") return null;
-  const failed = input.checks_failed ?? 0;
-  const pending = input.checks_pending ?? 0;
-  const passed = input.checks_passed ?? 0;
-  const total = failed + pending + passed;
-  if (total === 0) return null;
-  const segments: PullRequestProgressSegment[] = [];
-  if (failed > 0) segments.push({ kind: "failed", ratio: failed / total });
-  if (pending > 0) segments.push({ kind: "pending", ratio: pending / total });
-  if (passed > 0) segments.push({ kind: "passed", ratio: passed / total });
-  return segments;
+export function derivePullRequestAlerts(input: PullRequestAlertsInput): PullRequestAlerts {
+  const terminal = input.state === "closed" || input.state === "merged";
+  return {
+    checksFailed: !terminal && (input.checks_failed ?? 0) > 0,
+    conflicts: !terminal && input.mergeable_state === "dirty",
+  };
 }
 
 export interface PullRequestStatsInput {

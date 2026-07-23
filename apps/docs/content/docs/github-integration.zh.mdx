@@ -189,7 +189,7 @@ curl -i -X POST https://<api-host>/api/webhooks/github \
 
 ### PR 行不显示 CI 状态
 
-每个 PR 行都写着 **Checks 还没有汇报**，但 GitHub 上 CI 明明跑过。这说明 App 收得到 `pull_request`，收不到 `check_suite`——关联和 merge 转 Done 都正常，唯独 CI 状态一直空着。
+GitHub 上 checks 明明挂了，PR 行却始终不出现 **Checks 失败** 提示。注意这一行是刻意的 fail-only 设计——通过和运行中本来就什么都不显示，所以在健康的 PR 上订阅缺失是看不出来的，判断配置是否正确要看 App 配置本身而不是 UI。出现上述症状说明 App 收得到 `pull_request`，收不到 `check_suite`——关联和 merge 转 Done 都正常，唯独 CI 数据一直空着。
 
 先确认 App 实际订阅了什么（这个接口是公开的，不需要鉴权）：
 
@@ -207,7 +207,7 @@ curl -s https://api.github.com/apps/<你的-app-slug> | jq '{events, permissions
 **已经装好的 installation 必须手动接受新权限。** 加 `checks` 权限不会自动生效——GitHub 会给每个装了这个 App 的账号发邮件，在有人批准之前一直挂起，这期间该 installation 依然一条 `check_suite` 都不投递。到 **Settings → Applications → Installed GitHub Apps → 你的 App → Review request** 批准（组织安装需要组织 owner 操作）。批准后 Multica 会自动处理 `new_permissions_accepted` 事件，不需要重新部署。
 </Callout>
 
-CI 状态只对之后的事件生效——Multica 按收到的 suite 记录，不会回填历史。想立刻看到效果，往一个开着的 PR 推一个 commit，或者 re-run 一次它的 checks。
+CI 状态只对之后的事件生效——Multica 按收到的 suite 记录，不会回填历史。往一个开着的 PR 推一个 commit（或 re-run 一次它的 checks）即可记录新的 suite；只有其中出现失败时，侧栏才会显示提示。
 
 ### CI 状态能说明什么、不能说明什么
 
@@ -222,8 +222,8 @@ GitHub 的 [webhook 契约](https://docs.github.com/en/webhooks/webhook-events-a
 
 所以在推荐的只读配置下，Multica 只知道一个 suite **跑完了**，永远不知道它**开始了**。由此有两个结论：
 
-- **运行中的 CI 不会显示，任何权限级别都一样。** check 还在跑的 PR 显示「Checks 还没有汇报」，和一个根本没配 CI 的 PR 长得一模一样。没有运行中指示。
-- **绿色那一行的意思是「已汇报的都通过了」，不是「全都通过了」。** 如果一个仓库有两个上报方（比如 GitHub Actions 和 Vercel），只有一个跑完时，这一行就会基于那一个 suite 显示**检查通过**。这正是文案是「检查通过」而不是「全部检查通过」的原因。把这一行当作下界看，真要合并之前还是去 GitHub 上确认。
+- **运行中的 CI 不会显示，任何权限级别都一样。** check 还在跑的 PR 什么都不显示，和检查全部通过的 PR、根本没配 CI 的 PR 长得一模一样。没有运行中指示。
+- **不显示 ≠ 通过。** 这一行是 fail-only 的：webhook 分不清「全都跑完且通过」和「跑得慢的上报方还没汇报」（比如 GitHub Actions 和 Vercel 都上报、只有一个跑完时，另一个完全不可见），所以 Multica 不渲染自己背不了书的绿色状态。这一行唯一敢断言的是红色 **Checks 失败** 提示——它一出现就可靠，re-run 或新 push 通过后自动消失。合并前想看全貌，去 GitHub 上打开 PR。
 
 <Callout type="info">
 **那把权限提上去不就好了？** 不行——`checks: write` 不是「读得更多」。GitHub 发 `requested` / `rerequested` 的意思是「**GitHub 已经在这个 commit 上为你的 App 建了一个 check suite，现在请你往里加 check run**」，而不是「别的 CI 提供方开始跑了」。Multica 是观察者，从不创建 check run，所以这些事件根本不携带关于 GitHub Actions 或 Vercel 的任何信息。webhook handler 正是因此只接受 `completed`，其他 action 一律忽略。真正的运行中状态需要换机制——轮询 checks API，或者改用基于 `check_run` 的模型——提权解决不了。
@@ -234,9 +234,9 @@ GitHub 的 [webhook 契约](https://docs.github.com/en/webhooks/webhook-events-a
 目前还没做的几个边界：
 
 - **手动 link UI 暂未提供**——关联 PR 的唯一方法是把 issue 编号写到 PR 分支 / 标题 / 正文
-- **CI 状态按 check suite 聚合，不细到 job**——每个上报方（GitHub Actions、Vercel……）折叠成一个通过 / 失败的结果，具体 job 名称和日志仍然只在 GitHub 上。reviewer 评论和 reviewer 列表没接进 Multica
-- **看不到运行中的 CI，绿色只是下界**——Multica 只会记录 `completed` 的 suite，所以正在跑的 check 完全不可见，而且在另一个上报方还没跑完时行里就可能显示「检查通过」。细节见 [CI 状态能说明什么、不能说明什么](#ci-状态能说明什么不能说明什么)
-- **CI 状态依赖 `check_suite` 订阅**——在补上这个事件之前创建的 App，每个 PR 会永远显示「Checks 还没有汇报」。见 [PR 行不显示 CI 状态](#pr-行不显示-ci-状态)
+- **CI 状态按 check suite 聚合，不细到 job**——每个上报方（GitHub Actions、Vercel……）记录一个结果，具体 job 名称、逐 job 进度和日志仍然只在 GitHub 上。reviewer 评论和 reviewer 列表没接进 Multica
+- **fail-only 显示**——侧栏只显示失败和合并冲突；通过和运行中的 check 什么都不渲染，因为只收 `completed` suite 的 webhook 为它们背不了书。细节见 [CI 状态能说明什么、不能说明什么](#ci-状态能说明什么不能说明什么)
+- **CI 状态依赖 `check_suite` 订阅**——在补上这个事件之前创建的 App 永远不会出现「Checks 失败」提示。见 [PR 行不显示 CI 状态](#pr-行不显示-ci-状态)
 - **没有工作区级别的 merge → status 映射配置**——默认固定是 `merged → done`（cancelled 除外）。可配置映射是后续迭代
 - **同 issue 多 PR 时，merge 行为偏激进**——两个 PR 都引用 `MUL-123` 时，第一个 merge 就把 issue 转 Done。"等所有关联 PR 都解决再推进 issue 状态"的优化已经在做了
 

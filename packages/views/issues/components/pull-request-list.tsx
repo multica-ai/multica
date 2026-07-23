@@ -3,8 +3,6 @@
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
-  CheckCircle2,
-  CircleDashed,
   GitMerge,
   GitPullRequest,
   GitPullRequestArrow,
@@ -15,17 +13,10 @@ import {
 } from "lucide-react";
 import {
   issuePullRequestsOptions,
-  derivePullRequestStatusKind,
-  derivePullRequestProgressSegments,
+  derivePullRequestAlerts,
   shouldShowPullRequestStats,
-  type PullRequestStatusKind,
-  type PullRequestProgressSegment,
 } from "@multica/core/github";
-import type {
-  GitHubPullRequest,
-  GitHubPullRequestChecksConclusion,
-  GitHubPullRequestState,
-} from "@multica/core/types";
+import type { GitHubPullRequest, GitHubPullRequestState } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
 
@@ -43,36 +34,6 @@ const STATE_ICON: Record<
   draft: { icon: GitPullRequestDraft, className: "text-muted-foreground" },
   merged: { icon: GitMerge, className: "text-violet-600 dark:text-violet-400" },
   closed: { icon: GitPullRequestClosed, className: "text-rose-600 dark:text-rose-400" },
-};
-
-const CHECKS_ICON: Record<
-  GitHubPullRequestChecksConclusion,
-  { icon: React.ComponentType<{ className?: string }>; className: string }
-> = {
-  passed: { icon: CheckCircle2, className: "text-emerald-600 dark:text-emerald-400" },
-  failed: { icon: XCircle, className: "text-rose-600 dark:text-rose-400" },
-  pending: { icon: CircleDashed, className: "text-amber-600 dark:text-amber-400" },
-};
-
-// Status line treatment per status kind. Only the *actionable* kinds get an
-// icon and a color: CI outcome and merge conflicts are the signals a reader
-// scans this row for, and rendering them in plain muted text made them
-// indistinguishable from the neighbouring diff stats (MUL-5180).
-//
-// Terminal kinds (closed / merged) and `unknown` stay muted on purpose — the
-// state icon at the head of the row already carries that meaning, so a second
-// colored glyph would be noise.
-const STATUS_KIND_STYLE: Partial<
-  Record<
-    PullRequestStatusKind,
-    { icon: React.ComponentType<{ className?: string }>; className: string }
-  >
-> = {
-  checks_failed: { icon: XCircle, className: "text-rose-600 dark:text-rose-400" },
-  checks_pending: { icon: CircleDashed, className: "text-amber-600 dark:text-amber-400" },
-  checks_passed: { icon: CheckCircle2, className: "text-emerald-600 dark:text-emerald-400" },
-  conflicts: { icon: TriangleAlert, className: "text-rose-600 dark:text-rose-400" },
-  ready: { icon: CheckCircle2, className: "text-emerald-600 dark:text-emerald-400" },
 };
 
 export function PullRequestList({ issueId }: { issueId: string }) {
@@ -129,26 +90,6 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
   const { t } = useT("issues");
   const cfg = STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
   const StateIcon = cfg.icon;
-  const kind = derivePullRequestStatusKind({
-    state: pr.state,
-    mergeable_state: pr.mergeable_state,
-    checks_failed: pr.checks_failed,
-    checks_pending: pr.checks_pending,
-    checks_passed: pr.checks_passed,
-  });
-  const segments = derivePullRequestProgressSegments({
-    state: pr.state,
-    checks_failed: pr.checks_failed,
-    checks_pending: pr.checks_pending,
-    checks_passed: pr.checks_passed,
-  });
-  const showStats = shouldShowPullRequestStats({
-    additions: pr.additions,
-    deletions: pr.deletions,
-    changed_files: pr.changed_files,
-  });
-  const statusText = useStatusText(kind);
-  const draftPrefix = pr.state === "draft";
   const stateLabel = getStateLabel(pr.state, t);
 
   return (
@@ -159,7 +100,7 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
       rel="noreferrer noopener"
       className={cn(
         "flex items-start gap-2 rounded-md px-2 py-1.5 -mx-2 hover:bg-accent/50 transition-colors group",
-        draftPrefix ? "opacity-80" : null,
+        pr.state === "draft" ? "opacity-80" : null,
       )}
     >
       <StateIcon className={cn("h-3.5 w-3.5 mt-0.5 shrink-0", cfg.className)} />
@@ -171,77 +112,70 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
           {pr.repo_owner}/{pr.repo_name}#{pr.number} · {stateLabel}
           {pr.author_login ? ` · @${pr.author_login}` : null}
         </p>
-        <PullRequestRowDetails
-          pr={pr}
-          segments={segments}
-          showStats={showStats}
-          statusText={
-            draftPrefix
-              ? t(($) => $.detail.pull_request_card_draft_prefix, { status: statusText })
-              : statusText
-          }
-          statusKind={kind}
-        />
+        <PullRequestRowDetails pr={pr} />
       </div>
     </a>
   );
 }
 
-function PullRequestRowDetails({
-  pr,
-  segments,
-  showStats,
-  statusText,
-  statusKind,
-}: {
-  pr: GitHubPullRequest;
-  segments: PullRequestProgressSegment[] | null;
-  showStats: boolean;
-  statusText: string;
-  statusKind: PullRequestStatusKind;
-}) {
+// Fail-only detail line (MUL-5180): diff stats plus at most two alerts. The
+// row is an alarm, not a dashboard — passed / pending / ready states render
+// nothing because completed-suite webhooks cannot vouch for them (a green
+// roll-up may just mean the slower provider has not reported yet). Failure
+// and conflicts are the two signals GitHub delivers reliably, so they are
+// the only ones shown; both can be true at once and must not mask each other.
+function PullRequestRowDetails({ pr }: { pr: GitHubPullRequest }) {
   const { t } = useT("issues");
-  const checksBadge = getChecksBadge(pr, t);
-  const conflictsBadge = getConflictsBadge(pr, t);
-  const isTerminal = statusKind === "closed" || statusKind === "merged";
-  const showChecksBadge =
-    !isTerminal &&
-    !!checksBadge &&
-    statusKind !== "checks_failed" &&
-    statusKind !== "checks_pending" &&
-    statusKind !== "checks_passed";
-  const showConflictsBadge =
-    !isTerminal && !!conflictsBadge && statusKind !== "conflicts" && statusKind !== "ready";
+  const alerts = derivePullRequestAlerts({
+    state: pr.state,
+    mergeable_state: pr.mergeable_state,
+    checks_failed: pr.checks_failed,
+  });
+  const showStats = shouldShowPullRequestStats({
+    additions: pr.additions,
+    deletions: pr.deletions,
+    changed_files: pr.changed_files,
+  });
+  if (!showStats && !alerts.checksFailed && !alerts.conflicts) return null;
 
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
       {showStats ? <PullRequestStats pr={pr} /> : null}
-      <PullRequestProgressStrip segments={segments} />
-      <PullRequestStatusText kind={statusKind} text={statusText} />
-      {showChecksBadge ? <PullRequestBadge badge={checksBadge} /> : null}
-      {showConflictsBadge ? <PullRequestBadge badge={conflictsBadge} /> : null}
+      {alerts.checksFailed ? (
+        <PullRequestAlertText
+          kind="checks_failed"
+          icon={XCircle}
+          label={t(($) => $.detail.pull_request_checks_failed)}
+        />
+      ) : null}
+      {alerts.conflicts ? (
+        <PullRequestAlertText
+          kind="conflicts"
+          icon={TriangleAlert}
+          label={t(($) => $.detail.pull_request_card_status_conflicts)}
+        />
+      ) : null}
     </div>
   );
 }
 
-function PullRequestStatusText({
+function PullRequestAlertText({
   kind,
-  text,
+  icon: Icon,
+  label,
 }: {
-  kind: PullRequestStatusKind;
-  text: string;
+  kind: "checks_failed" | "conflicts";
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
 }) {
-  const style = STATUS_KIND_STYLE[kind];
-  if (!style) return <span className="truncate">{text}</span>;
-  const Icon = style.icon;
   return (
     <span
-      data-testid="pull-request-status"
-      data-status-kind={kind}
-      className={cn("inline-flex min-w-0 items-center gap-1 font-medium", style.className)}
+      data-testid="pull-request-alert"
+      data-alert-kind={kind}
+      className="inline-flex min-w-0 items-center gap-1 font-medium text-rose-600 dark:text-rose-400"
     >
       <Icon className="h-3 w-3 shrink-0" />
-      <span className="truncate">{text}</span>
+      <span className="truncate">{label}</span>
     </span>
   );
 }
@@ -262,85 +196,6 @@ function PullRequestStats({ pr }: { pr: GitHubPullRequest }) {
   );
 }
 
-function PullRequestProgressStrip({
-  segments,
-}: {
-  segments: PullRequestProgressSegment[] | null;
-}) {
-  if (!segments) return null;
-  return (
-    <span className="flex h-1 w-12 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-      {segments.map((seg) => (
-        <span
-          key={seg.kind}
-          className={cn(
-            "h-full block",
-            seg.kind === "failed" && "bg-rose-500 dark:bg-rose-400",
-            seg.kind === "pending" && "bg-amber-500 dark:bg-amber-400",
-            seg.kind === "passed" && "bg-emerald-500 dark:bg-emerald-400",
-          )}
-          style={{ width: `${seg.ratio * 100}%` }}
-        />
-      ))}
-    </span>
-  );
-}
-
-interface PullRequestBadgeConfig {
-  icon: React.ComponentType<{ className?: string }>;
-  label: string;
-  className: string;
-}
-
-function PullRequestBadge({ badge }: { badge: PullRequestBadgeConfig }) {
-  const Icon = badge.icon;
-  return (
-    <span className="inline-flex items-center gap-1">
-      <Icon className={cn("h-3 w-3", badge.className)} />
-      {badge.label}
-    </span>
-  );
-}
-
-function getConflictsBadge(
-  pr: GitHubPullRequest,
-  t: IssuesT,
-): PullRequestBadgeConfig | null {
-  const mergeable = pr.mergeable_state ?? null;
-  return mergeable === "dirty"
-    ? {
-        icon: TriangleAlert,
-        label: t(($) => $.detail.pull_request_conflicts_dirty),
-        className: "text-rose-600 dark:text-rose-400",
-      }
-    : mergeable === "clean"
-      ? {
-          icon: CheckCircle2,
-          label: t(($) => $.detail.pull_request_conflicts_clean),
-          className: "text-emerald-600 dark:text-emerald-400",
-        }
-      : null;
-}
-
-function getChecksBadge(
-  pr: GitHubPullRequest,
-  t: IssuesT,
-): PullRequestBadgeConfig | null {
-  const checks = pr.checks_conclusion ?? null;
-  return checks && CHECKS_ICON[checks]
-    ? {
-        icon: CHECKS_ICON[checks].icon,
-        className: CHECKS_ICON[checks].className,
-        label:
-          checks === "passed"
-            ? t(($) => $.detail.pull_request_checks_passed)
-            : checks === "failed"
-              ? t(($) => $.detail.pull_request_checks_failed)
-              : t(($) => $.detail.pull_request_checks_pending),
-      }
-    : null;
-}
-
 function getStateLabel(
   state: GitHubPullRequestState,
   t: IssuesT,
@@ -354,26 +209,4 @@ function getStateLabel(
         : state === "closed"
           ? t(($) => $.detail.pull_request_state_closed)
           : state;
-}
-
-function useStatusText(kind: PullRequestStatusKind): string {
-  const { t } = useT("issues");
-  switch (kind) {
-    case "closed":
-      return t(($) => $.detail.pull_request_card_status_closed);
-    case "merged":
-      return t(($) => $.detail.pull_request_card_status_merged);
-    case "conflicts":
-      return t(($) => $.detail.pull_request_card_status_conflicts);
-    case "checks_failed":
-      return t(($) => $.detail.pull_request_card_status_checks_failed);
-    case "checks_pending":
-      return t(($) => $.detail.pull_request_card_status_checks_pending);
-    case "checks_passed":
-      return t(($) => $.detail.pull_request_card_status_checks_passed);
-    case "ready":
-      return t(($) => $.detail.pull_request_card_status_ready);
-    case "unknown":
-      return t(($) => $.detail.pull_request_card_status_unknown);
-  }
 }

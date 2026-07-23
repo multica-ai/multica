@@ -1,133 +1,60 @@
 import { describe, expect, it } from "vitest";
 import {
-  derivePullRequestStatusKind,
-  derivePullRequestProgressSegments,
+  derivePullRequestAlerts,
   shouldShowPullRequestStats,
-  type PullRequestStatusInput,
+  type PullRequestAlertsInput,
 } from "./pull-request-status";
 
-const base: PullRequestStatusInput = { state: "open" };
+const base: PullRequestAlertsInput = { state: "open" };
 
-describe("derivePullRequestStatusKind", () => {
-  it("closed beats every other signal", () => {
-    expect(
-      derivePullRequestStatusKind({
-        state: "closed",
-        mergeable_state: "dirty",
-        checks_failed: 99,
-        checks_pending: 99,
-        checks_passed: 99,
-      }),
-    ).toBe("closed");
+describe("derivePullRequestAlerts", () => {
+  it("raises checksFailed when any observed suite failed", () => {
+    expect(derivePullRequestAlerts({ ...base, checks_failed: 1 })).toEqual({
+      checksFailed: true,
+      conflicts: false,
+    });
   });
 
-  it("merged beats every other signal except closed", () => {
-    expect(
-      derivePullRequestStatusKind({
-        state: "merged",
-        mergeable_state: "dirty",
-        checks_failed: 5,
-      }),
-    ).toBe("merged");
+  it("raises conflicts when mergeable_state=dirty", () => {
+    expect(derivePullRequestAlerts({ ...base, mergeable_state: "dirty" })).toEqual({
+      checksFailed: false,
+      conflicts: true,
+    });
   });
 
-  it("dirty conflicts wins over check signals", () => {
+  it("raises both alerts independently — conflicts must not mask a failure", () => {
     expect(
-      derivePullRequestStatusKind({
-        ...base,
-        mergeable_state: "dirty",
-        checks_passed: 3,
-      }),
-    ).toBe("conflicts");
+      derivePullRequestAlerts({ ...base, mergeable_state: "dirty", checks_failed: 2 }),
+    ).toEqual({ checksFailed: true, conflicts: true });
   });
 
-  it("any failed check beats pending and passed", () => {
-    expect(
-      derivePullRequestStatusKind({
-        ...base,
-        checks_failed: 1,
-        checks_pending: 3,
-        checks_passed: 5,
-      }),
-    ).toBe("checks_failed");
-  });
-
-  it("pending beats passed when no failure", () => {
-    expect(
-      derivePullRequestStatusKind({
-        ...base,
-        checks_pending: 1,
-        checks_passed: 5,
-      }),
-    ).toBe("checks_pending");
-  });
-
-  it("all-passed is checks_passed regardless of mergeable=clean", () => {
-    expect(
-      derivePullRequestStatusKind({
-        ...base,
-        mergeable_state: "clean",
-        checks_passed: 5,
-      }),
-    ).toBe("checks_passed");
-  });
-
-  it("clean + no suites is ready-to-merge", () => {
-    expect(
-      derivePullRequestStatusKind({ ...base, mergeable_state: "clean" }),
-    ).toBe("ready");
-  });
-
-  it("opaque mergeable values render as unknown", () => {
-    for (const m of ["blocked", "behind", "unstable", "has_hooks", "unknown", null, undefined]) {
-      expect(derivePullRequestStatusKind({ ...base, mergeable_state: m })).toBe("unknown");
+  // MUL-5180 fail-only contract: green / pending / ready are unknowable from
+  // completed-suite webhooks, so no-failure inputs raise nothing at all.
+  it("stays silent for passed, pending, clean, unknown, and empty inputs", () => {
+    for (const input of [
+      base,
+      { ...base, mergeable_state: "clean" },
+      { ...base, mergeable_state: "unstable" },
+      { ...base, mergeable_state: null },
+      { ...base, checks_failed: 0 },
+    ]) {
+      expect(derivePullRequestAlerts(input)).toEqual({ checksFailed: false, conflicts: false });
     }
   });
-});
 
-describe("derivePullRequestProgressSegments", () => {
-  it("returns null for terminal PRs (merged / closed)", () => {
-    expect(derivePullRequestProgressSegments({ state: "merged", checks_passed: 5 })).toBeNull();
-    expect(derivePullRequestProgressSegments({ state: "closed", checks_failed: 3 })).toBeNull();
+  it("suppresses both alerts on terminal PRs", () => {
+    for (const state of ["closed", "merged"] as const) {
+      expect(
+        derivePullRequestAlerts({ state, mergeable_state: "dirty", checks_failed: 99 }),
+      ).toEqual({ checksFailed: false, conflicts: false });
+    }
   });
 
-  it("returns null when no suite has been observed", () => {
-    expect(derivePullRequestProgressSegments({ ...base })).toBeNull();
-    expect(
-      derivePullRequestProgressSegments({ ...base, checks_failed: 0, checks_pending: 0, checks_passed: 0 }),
-    ).toBeNull();
-  });
-
-  it("orders segments failed → pending → passed (failure leftmost)", () => {
-    const segs = derivePullRequestProgressSegments({
-      ...base,
-      checks_failed: 1,
-      checks_pending: 2,
-      checks_passed: 3,
+  it("keeps alerts live on draft PRs — a failing draft is still actionable", () => {
+    expect(derivePullRequestAlerts({ state: "draft", checks_failed: 1 })).toEqual({
+      checksFailed: true,
+      conflicts: false,
     });
-    expect(segs).not.toBeNull();
-    expect(segs!.map((s) => s.kind)).toEqual(["failed", "pending", "passed"]);
-  });
-
-  it("emits a zero-width segment-free output (no entry with ratio 0)", () => {
-    const segs = derivePullRequestProgressSegments({
-      ...base,
-      checks_failed: 0,
-      checks_pending: 0,
-      checks_passed: 4,
-    });
-    expect(segs).toEqual([{ kind: "passed", ratio: 1 }]);
-  });
-
-  it("ratios sum to ~1 across segments", () => {
-    const segs = derivePullRequestProgressSegments({
-      ...base,
-      checks_failed: 1,
-      checks_pending: 1,
-      checks_passed: 2,
-    })!;
-    const total = segs.reduce((acc, s) => acc + s.ratio, 0);
-    expect(total).toBeCloseTo(1, 6);
   });
 });
 
