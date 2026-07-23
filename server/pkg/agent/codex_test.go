@@ -3248,9 +3248,11 @@ func TestBuildCodexArgsExplicitFastOverridesLowerPriorityDisable(t *testing.T) {
 			"--disable", codexFastModeFeature,
 			"--disable", "memory_tool",
 			"-c", "features.fast_mode=false",
+			"-c", "features.memory_tool=false",
 		},
 		CustomArgs: []string{
 			"'--disable=fast_mode'",
+			`--config=features.fast_mode="false"`,
 			"--enable", "multi_agent",
 		},
 	}, slog.Default())
@@ -3258,7 +3260,7 @@ func TestBuildCodexArgsExplicitFastOverridesLowerPriorityDisable(t *testing.T) {
 	want := []string{
 		"app-server", "--listen", "stdio://",
 		"--disable", "memory_tool",
-		"-c", "features.fast_mode=false",
+		"-c", "features.memory_tool=false",
 		"--enable", "multi_agent",
 		"--enable", codexFastModeFeature,
 	}

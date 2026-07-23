@@ -181,13 +181,21 @@ func NormalizeCodexLaunchArgs(extraArgs, customArgs []string, mcpConfig json.Raw
 // authoritative over daemon ExtraArgs, per-agent CustomArgs, and inherited
 // config.toml. Codex's `--disable fast_mode` wins over `--enable fast_mode`
 // regardless of argv order, so conflicting lower-priority disable flags must
-// be removed before the managed enable is appended. Config-file and `-c
-// features.fast_mode=false` values do respect the CLI enable and can remain.
+// be removed before the managed enable is appended. Conflicting `-c` /
+// `--config features.fast_mode=...` overrides are removed for the same
+// precedence reason, even though current Codex versions let `--enable` win:
+// the final argv should encode one unambiguous owner for this setting.
 //
 // Other disabled features are preserved, and this helper is used only for the
 // catalog-owned `priority` tier. Future service tiers must not accidentally
 // inherit Fast mode semantics.
 func enforceCodexFastMode(args []string, logger *slog.Logger) []string {
+	args = filterCodexConfigOverrides(
+		args,
+		codexManagedFastModeConfigKeyRe,
+		"features.fast_mode",
+		logger,
+	)
 	filtered := make([]string, 0, len(args)+2)
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
@@ -234,6 +242,9 @@ func hasManagedCodexMcpConfig(raw json.RawMessage) bool {
 // overrides that would otherwise shadow what the MCP Tab writes into
 // `$CODEX_HOME/config.toml`.
 var codexManagedMcpConfigKeyRe = regexp.MustCompile(`^\s*mcp_servers(?:\s*\.|\s*=|\s*$)`)
+
+var codexManagedFastModeConfigKeyRe = regexp.MustCompile(
+	`^\s*features\s*\.\s*fast_mode\s*(?:=|$)`)
 
 // A daemon-managed shell_environment_policy must also win over profile and
 // custom-arg overrides. Match root and profile policy keys without catching an
