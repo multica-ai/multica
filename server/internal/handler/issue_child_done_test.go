@@ -675,3 +675,25 @@ func TestStageLeaderPrepareTimeoutRetryCanAdvanceNextStage(t *testing.T) {
 		t.Fatalf("promoted Stage 2 queued %d leader tasks, want 1", got)
 	}
 }
+
+// TestTerminalChildStatusKeysOffCategory pins the stage barrier to the status
+// Category rather than the raw token (MUL-4809). done / cancelled close a stage;
+// in_review and blocked are in_progress-Category built-ins that keep their own
+// token, so they must keep holding a stage OPEN. Custom statuses project their
+// Category into the legacy token, so a custom "Shipped" in the done Category
+// arrives here as "done" and closes the stage like the built-in.
+func TestTerminalChildStatusKeysOffCategory(t *testing.T) {
+	terminal := []string{"done", "cancelled"}
+	open := []string{"backlog", "todo", "in_progress", "in_review", "blocked"}
+
+	for _, s := range terminal {
+		if !isTerminalChildStatus(s) {
+			t.Errorf("status %q should be terminal (done/cancelled Category)", s)
+		}
+	}
+	for _, s := range open {
+		if isTerminalChildStatus(s) {
+			t.Errorf("status %q must NOT be terminal — it should keep the stage open", s)
+		}
+	}
+}

@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -100,12 +101,16 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 	switch {
 	case in.IsCreate || in.AssigneeChanged:
 		// Backlog is the parking lot: assigning into backlog never starts a run.
-		if issue.Status == "backlog" {
+		// Keyed on the Category, not the token, so a custom "Icebox" status in
+		// the backlog Category parks the same way the built-in does (MUL-4809).
+		if issuestatus.CategoryForStatusToken(issue.Status) == "backlog" {
 			return IssueRunTrigger{}, false
 		}
 		source = RunSourceAssign
-	case in.StatusChanged && in.PrevStatus == "backlog" &&
-		issue.Status != "done" && issue.Status != "cancelled":
+	// Leaving the backlog Category into any non-terminal Category starts the run.
+	case in.StatusChanged &&
+		issuestatus.CategoryForStatusToken(in.PrevStatus) == "backlog" &&
+		!issuestatus.IsTerminalCategory(issuestatus.CategoryForStatusToken(issue.Status)):
 		if probe.IsSelfLoop != nil && probe.IsSelfLoop() {
 			return IssueRunTrigger{}, false
 		}
