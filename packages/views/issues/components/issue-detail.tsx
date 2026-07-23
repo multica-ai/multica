@@ -91,7 +91,7 @@ import { IssueAttachmentsSlot, AttachmentsTab, AttachmentsTabLabel } from "@mult
 import { ApprovalRealtime, InlineApprovalCards } from "@multica/cerebro-approvals/views";
 // CEREBRO-PATCH(description-image-gallery): FIR-2710 — one image gallery for the description (inline + attachments).
 import { ImageGalleryProvider } from "@multica/cerebro-attachments/views";
-import { ArtifactList } from "@multica/cerebro-artifacts/views/components";
+import { ArtifactList, WorkpadPanel } from "@multica/cerebro-artifacts/views/components"; // CEREBRO-PATCH(issue-workpad-panel): FIR-3659 — WorkpadPanel added to the existing cerebro-artifacts import.
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -2899,6 +2899,15 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
             </div>
             </>
             )}
+
+            {/* CEREBRO-PATCH(issue-workpad-panel): FIR-3659 — the Workpad renders
+                the issue's plan (a kind:"plan" artifact coupled to the issue) as a
+                checklist directly above the composer. It is driven purely by the
+                plan's existence: no plan → nothing renders; a plan exists → the
+                panel appears automatically. Gated inside WorkpadPanel by
+                cerebro_workpad. Uses issue.id (UUID) like ArtifactList, not the
+                route id. */}
+            {!isChat && <WorkpadPanel issueId={issue.id} className="mt-4" />}
 
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">

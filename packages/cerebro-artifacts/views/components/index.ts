@@ -6,6 +6,7 @@ export {
   type ArtifactFilterState,
 } from "./artifact-filters";
 export { ArtifactList, type ArtifactListProps } from "./artifact-list";
+export { WorkpadPanel } from "./workpad-panel";
 export { ArtifactSheet } from "./artifact-sheet";
 export { CreateArtifactSheet, type CreateArtifactSheetProps } from "./create-artifact-sheet";
 export { DocumentToolsSidebar } from "./document-tools-sidebar";
