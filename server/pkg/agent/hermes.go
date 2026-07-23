@@ -599,6 +599,13 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// "API call failed after N retries..." turn the adapter
 		// injects on give-up, or there's no output to fall back on.
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
+		// A poisoned session history (400 "assistant must not be empty")
+		// will fail on every resume. Signal the daemon to drop the old
+		// session so it can retry fresh via the tools==0 gate instead of
+		// re-submitting the broken transcript indefinitely.
+		if finalStatus == "failed" && providerErr.isPoisonedHistory() {
+			resumeRejected = true
+		}
 
 		// Build usage map.
 		c.usageMu.Lock()
@@ -2141,7 +2148,9 @@ var acpErrorHeaderRe = regexp.MustCompile(
 // acpErrorDetailRe pulls the most useful single-line messages out of
 // the error block (the line whose "Error:" / "Details:" tag or whose
 // "provider.api_error: NNN " prefix spells out what happened).
-var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:|provider\.api_error: [0-9]+)\s+(.+)`)
+// The existing branches use \s* so that "detail:value" (no space) is
+// captured as well as "Error: message" (with space).
+var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:|provider\.api_error: [0-9]+)\s*(.+)`)
 
 // acpTerminalErrorRe matches markers that only appear when the
 // adapter has *given up* on the upstream call — either after
@@ -2149,9 +2158,12 @@ var acpErrorDetailRe = regexp.MustCompile(`(?:Error:|detail:|Details:|provider\.
 // classified as non-retryable up front (Non-retryable, BadRequest /
 // Authentication errors, ❌ / [ERROR] log levels). Per-attempt
 // warnings ("(attempt 1/3)") deliberately do NOT match this pattern.
-// "provider.api_error: 4" covers kimi-style 4xx responses which are always
-// client errors and cannot be resolved by retrying the same request.
-var acpTerminalErrorRe = regexp.MustCompile(`(?:❌|\[ERROR\]|after \d+ retr|Non-retryable|BadRequestError|AuthenticationError|provider\.api_error: 4)`)
+// "provider.api_error: (?:400|401|403)" covers kimi-style client
+// errors that are never resolved by retrying the same request.
+// 429 (rate-limit) and 408 (timeout) are intentionally excluded:
+// the kimi adapter retries those internally, and a run that
+// eventually succeeds must stay status=completed.
+var acpTerminalErrorRe = regexp.MustCompile(`(?:❌|\[ERROR\]|after \d+ retr|Non-retryable|BadRequestError|AuthenticationError|provider\.api_error: (?:400|401|403))`)
 
 // acpAgentOutputTerminalRe matches the synthetic agent-text turn that
 // hermes-style ACP adapters inject when they exhaust retries against
@@ -2241,6 +2253,29 @@ func (s *acpProviderErrorSniffer) terminalMessage() string {
 		return ""
 	}
 	return s.messageLocked()
+}
+
+// isPoisonedHistory reports whether the terminal error is the
+// kimi "assistant message must not be empty" pattern — a sign that
+// the session history is permanently corrupted and resuming it will
+// keep failing with the same 400. When true, the caller should set
+// ResumeRejected=true on the Result so the daemon starts a fresh
+// session next time rather than re-submitting the broken history.
+func (s *acpProviderErrorSniffer) isPoisonedHistory() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if !s.terminal {
+		return false
+	}
+	for _, line := range s.lines {
+		if strings.Contains(line, "provider.api_error: 400") &&
+			strings.Contains(line, "role") &&
+			strings.Contains(line, "must not be empty") {
+			return true
+		}
+	}
+	return false
 }
 
 // messageLocked is the lock-held implementation shared by message()
