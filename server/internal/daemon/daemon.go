@@ -3714,9 +3714,9 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	}
 }
 
-// gateResumeToReusedWorkdir clears the task's prior session unless the task
-// runs in the exact workdir the session was recorded against, and reports
-// whether that workdir was reused. CLI backends key their session stores to
+// gateResumeToReusedWorkdir clears the task's prior session unless the caller
+// has object-bound proof that the environment was reused and it runs in the
+// exact workdir the session was recorded against. CLI backends key their session stores to
 // the cwd (Claude Code looks sessions up under ~/.claude/projects/<encoded-cwd>/),
 // so a session id from a different workdir can never resolve: the CLI exits
 // within a second and the run fails before doing any work — permanently,
@@ -3724,8 +3724,8 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 // same stale pointer again. This fires whenever the prior workdir no longer
 // exists (GC'd after the issue went done, daemon reinstall, manual cleanup)
 // and execenv.Reuse fell back to a fresh Prepare (GitHub #3854).
-func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, envWorkDir string, taskLog *slog.Logger) bool {
-	reused := task.PriorWorkDir != "" && envWorkDir == task.PriorWorkDir
+func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, envWorkDir string, envWasReused bool, taskLog *slog.Logger) bool {
+	reused := envWasReused && task.PriorWorkDir != "" && envWorkDir == task.PriorWorkDir
 	if !reused && task.PriorSessionID != "" {
 		taskLog.Info("dropping prior session: workdir not reused, per-cwd session cannot resolve",
 			"session_id", task.PriorSessionID,
@@ -4399,7 +4399,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
-	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
+	// Pathname-based reuse is disabled above, so a matching workdir string is
+	// not proof of reuse (fresh Prepare may return the same stable path).
+	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, false, taskLog)
 	// A reused workdir is necessary but not sufficient for a Codex resume: the
 	// prior thread's rollout must actually be present in this task's CODEX_HOME
 	// sessions (MUL-4424 isolates them). Drop the resume before the brief is

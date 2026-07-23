@@ -84,6 +84,35 @@ func TestRunTaskSquadLeaderDoesNotReuseExternalPriorWorkdir(t *testing.T) {
 	}
 }
 
+func TestRunTaskFreshPrepareSamePriorPathDoesNotResumeSession(t *testing.T) {
+	t.Parallel()
+
+	d, argsFile, cleanup := newLeaderReuseTestDaemon(t)
+	defer cleanup()
+
+	task := leaderReuseTestTask("task-fresh-same-path")
+	task.PriorWorkDir = filepath.Join(
+		execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID),
+		"workdir",
+	)
+	task.PriorSessionID = "session-must-not-resume"
+
+	result, err := d.runTask(context.Background(), task, "claude", 0, d.logger)
+	if err != nil {
+		t.Fatalf("runTask: %v", err)
+	}
+	if result.WorkDir != task.PriorWorkDir {
+		t.Fatalf("fresh Prepare workdir = %q, want same pathname %q", result.WorkDir, task.PriorWorkDir)
+	}
+	args, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read claude args: %v", err)
+	}
+	if strings.Contains(string(args), "--resume\nsession-must-not-resume\n") {
+		t.Fatalf("fresh Prepare resumed session from pathname equality; args:\n%s", args)
+	}
+}
+
 func TestRunTaskPriorWorkdirRetargetAfterLeaseFailsClosed(t *testing.T) {
 	t.Parallel()
 	d, _, cleanup := newLeaderReuseTestDaemon(t)

@@ -1275,20 +1275,30 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		sessionID   string
-		priorDir    string
-		envDir      string
-		wantSession string
-		wantReused  bool
+		name         string
+		sessionID    string
+		priorDir     string
+		envDir       string
+		envWasReused bool
+		wantSession  string
+		wantReused   bool
 	}{
 		{
-			name:        "same workdir keeps session",
+			name:        "same workdir from fresh prepare drops session",
 			sessionID:   "sess-1",
 			priorDir:    "/ws/task-a/workdir",
 			envDir:      "/ws/task-a/workdir",
-			wantSession: "sess-1",
-			wantReused:  true,
+			wantSession: "",
+			wantReused:  false,
+		},
+		{
+			name:         "object-bound reused workdir keeps session",
+			sessionID:    "sess-1",
+			priorDir:     "/ws/task-a/workdir",
+			envDir:       "/ws/task-a/workdir",
+			envWasReused: true,
+			wantSession:  "sess-1",
+			wantReused:   true,
 		},
 		{
 			name:        "fresh workdir drops session",
@@ -1321,7 +1331,7 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: tt.priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reused := gateResumeToReusedWorkdir(&task, &taskCtx, tt.envDir, slog.Default())
+			reused := gateResumeToReusedWorkdir(&task, &taskCtx, tt.envDir, tt.envWasReused, slog.Default())
 
 			if reused != tt.wantReused {
 				t.Fatalf("reused = %v, want %v", reused, tt.wantReused)
