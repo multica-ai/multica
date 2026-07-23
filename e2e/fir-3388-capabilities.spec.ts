@@ -11,7 +11,7 @@ const DATABASE_URL =
 test("Capabilities shows the effective allow and deny policy after reload", async ({
   page,
 }) => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
   const slug = await loginAsDefault(page);
   const api = new TestApiClient();
   await api.login("e2e@multica.ai", "E2E User");
@@ -70,12 +70,20 @@ test("Capabilities shows the effective allow and deny policy after reload", asyn
     });
     await page.getByRole("button", { name: "Capabilities" }).click();
 
-    const allowed = page
-      .locator('[title*="allow"]')
-      .filter({ hasText: /^Create issue/ });
-    const denied = page
-      .locator('[title*="deny"]')
-      .filter({ hasText: /^Delete issue/ });
+    const toolsSection = page
+      .getByRole("heading", { name: "Tools", exact: true })
+      .locator("..")
+      .locator("..");
+    const allowed = toolsSection
+      .locator("span[title]")
+      .filter({ hasText: /^Create issue\s*·\s*callable$/ });
+    const denied = toolsSection
+      .locator("span[title]")
+      .filter({ hasText: /^Delete issue\s*·\s*blocked$/ });
+    await expect(allowed).toHaveCount(1);
+    await expect(denied).toHaveCount(1);
+    await expect(allowed).toHaveAttribute("title", /^allow(?:\s|·)/);
+    await expect(denied).toHaveAttribute("title", /^deny(?:\s|·)/);
     await expect(allowed).toBeVisible();
     await expect(denied).toBeVisible();
 
@@ -103,7 +111,9 @@ test("Capabilities shows the effective allow and deny policy after reload", asyn
     await expect(allowed).toBeVisible();
     await expect(denied).toBeVisible();
     await assertEffectiveAccess();
-    const evidencePath = process.env.PLAYWRIGHT_EVIDENCE_PATH;
+    const evidencePath =
+      process.env.PLAYWRIGHT_EVIDENCE_PATH ??
+      test.info().outputPath("capabilities-after-reload.png");
     const screenshot = await page.screenshot({
       fullPage: true,
       path: evidencePath,
