@@ -28,8 +28,13 @@ spec:
           env:
             - name: PARAM_NAME
               value: "slug"
+            # Optional ".<vault-slug>" suffix carries the squad's 1Password vault
+            # through the registry filename (AIPLAT-106) — the plugin can't emit
+            # a 2nd field, so the ApplicationSet splits this composite id back
+            # into workspace/vault parts (goTemplate splitList "."). Absent
+            # suffix = no squad = no 1Password store for that workspace.
             - name: ID_REGEX
-              value: "^[a-z0-9-]+$"
+              value: '^[a-z0-9-]+(\.[a-z0-9-]+)?$'
             - name: REGISTRY_DIR
               value: /run/registry
             - name: TOKEN_FILE

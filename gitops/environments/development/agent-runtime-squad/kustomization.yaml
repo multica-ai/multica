@@ -1,0 +1,39 @@
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Squad-scoped variant of ../agent-runtime: same runner workload, plus the
+# per-squad 1Password vault SecretStore + ExternalSecret (AIPLAT-106). Selected
+# by the agentrunner-appset (g2crowd/configuration) only for workspaces whose
+# composite registry slug carries a ".<vault-slug>" suffix — i.e. workspaces
+# with a squad. The appset additionally patches:
+#   - SecretStore.spec.provider.onepasswordSDK.vault: PLACEHOLDER_VAULT -> vault slug
+#   - the same PLACEHOLDER -> workspace-slug patches as the plain overlay
+resources:
+  - ../../../base/agent-runtime
+  - ../../../base/agent-runtime-1password
+images:
+  - name: ghcr.io/g2crowd/agentrunner-runtime-prod
+    newTag: "7ce95940"
+patches:
+  # Add the 1Password Secret as a 2nd envFrom, after the SSM-backed one so
+  # squad secrets take precedence on key collision (AIPLAT-106 C4). Protected
+  # identity vars (GIT_USER_*, GITHUB_APP_ID, ...) are plain `env` entries in
+  # deployment.yaml, which always outrank envFrom regardless of order.
+  - target:
+      kind: Deployment
+      name: agentrunner
+    patch: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: agentrunner
+      spec:
+        template:
+          spec:
+            containers:
+              - name: opencode
+                envFrom:
+                  - secretRef:
+                      name: agentrunner-secrets
+                  - secretRef:
+                      name: agentrunner-1password-secrets
