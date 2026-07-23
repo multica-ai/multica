@@ -482,7 +482,7 @@
     "status_failed": "Failed",
     "status_cancelled": "Cancelled",
     "attribution": {
-      "on_behalf_of": "on behalf of {{name}}",
+      "on_behalf_of": "On behalf of {{name}}",
       "someone": "someone",
       "source_direct_human": "Direct member action",
       "source_delegation": "Delegated from another run",

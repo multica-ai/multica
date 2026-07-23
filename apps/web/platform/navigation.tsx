@@ -1,11 +1,30 @@
 "use client";
 
-import { Suspense } from "react";
+import { Suspense, useEffect } from "react";
 import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   NavigationProvider,
   type NavigationAdapter,
 } from "@multica/views/navigation";
+
+/**
+ * Web half of the `multica:navigate` bridge — the event shared content
+ * (comments, chat, issue descriptions) fires when a link resolves to an in-app
+ * destination. Desktop's shell answers it by opening a tab; on the web the
+ * equivalent is a router push in place. Without this the event has no listener
+ * and such links do nothing at all.
+ */
+function useInternalLinkHandler(router: ReturnType<typeof useRouter>) {
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const path = (e as CustomEvent<{ path?: string }>).detail?.path;
+      if (!path) return;
+      router.push(path);
+    };
+    window.addEventListener("multica:navigate", handler);
+    return () => window.removeEventListener("multica:navigate", handler);
+  }, [router]);
+}
 
 function NavigationProviderInner({
   children,
@@ -15,6 +34,7 @@ function NavigationProviderInner({
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  useInternalLinkHandler(router);
 
   const adapter: NavigationAdapter = {
     push: router.push,

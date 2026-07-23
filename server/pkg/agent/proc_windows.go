@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 )
 
 // createNewConsole allocates a fresh console for the child process. Combined
@@ -51,3 +52,5 @@ func signalProcessGroup(p *os.Process, _ syscall.Signal) {
 	}
 	_ = p.Kill()
 }
+
+func waitProcessGroupGone(_ *os.Process, _ time.Duration) bool { return false }

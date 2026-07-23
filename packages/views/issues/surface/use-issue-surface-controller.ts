@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import type { QueryKey } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type {
@@ -10,10 +10,13 @@ import type {
   IssueStatus,
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
+  IssueTableGroupsRequest,
   IssueTableQuerySpec,
   Project,
 } from "@multica/core/types";
+import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { ALL_STATUSES } from "@multica/core/issues/config";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import type {
   AssigneeGroupedIssuesFilter,
@@ -34,7 +37,6 @@ import type { IssueFilters } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
 import { IssueTableExportIntegrityError } from "../components/table-view-model";
 import type { IssueSurfaceMode } from "./types";
-import { useIssueSurfaceActivity, type IssueSurfaceActivity } from "./activity";
 import type { IssueSurfaceActions } from "./actions-context";
 import {
   type IssueSurfaceSelection,
@@ -46,11 +48,20 @@ import {
   type MoveIssueUpdates,
 } from "./use-issue-surface-actions";
 import { useIssueSurfaceData } from "./use-issue-surface-data";
+import {
+  useIssueStatusBranches,
+  type IssueStatusPagination,
+} from "./use-issue-status-branches";
+import {
+  useIssueGroupBranches,
+  type IssueGroupBranches,
+} from "./use-issue-group-branches";
 
 interface UseIssueSurfaceControllerInput {
   scope: IssueScope;
   modes: IssueSurfaceMode[];
   createDefaults?: IssueCreateDefaults;
+  search?: string;
 }
 
 export interface IssueSurfaceController {
@@ -78,8 +89,15 @@ export interface IssueSurfaceController {
   ganttIssues: Issue[];
   visibleStatuses: IssueStatus[];
   hiddenStatuses: IssueStatus[];
-  activeFilters: Omit<IssueFilters, "statusFilters" | "runningIssueIds">;
-  activity: IssueSurfaceActivity;
+  /** Exact server counts plus cursor controls for List/status Board. */
+  statusPagination?: IssueStatusPagination;
+  /** Exact group catalog plus independent row cursors for Assignee/Property
+   * Board and compound Swimlane cells. */
+  groupBranches?: IssueGroupBranches;
+  activeFilters: Omit<
+    IssueFilters,
+    "statusFilters" | "agentRunningFilter" | "runningIssueIds"
+  >;
   actions: IssueSurfaceActions;
   selection: IssueSurfaceSelection;
   childProgressMap: Map<string, ChildProgress>;
@@ -94,9 +112,11 @@ export interface IssueSurfaceController {
   tableSearch: string;
   /** Canonical server-owned Table membership. */
   tableQuerySpec: IssueTableQuerySpec;
-  /** Exact disjunctive counts for the active Table filter submenu. */
+  /** Exact disjunctive counts for the active server-backed filter submenu. */
   tableFacetCounts?: IssueTableFacetsResponse;
-  /** Load one Table facet when its filter submenu is opened. */
+  /** Whether scopedIssues is a complete client window for local count use. */
+  facetCountsExact: boolean;
+  /** Load one server facet when its filter submenu is opened. */
   setActiveTableFacet: (facet: IssueTableFacetSpec | null) => void;
   setTableSearch: (query: string) => void;
   exportTableIssues: () => Promise<Issue[]>;
@@ -149,6 +169,7 @@ export function useIssueSurfaceController({
   scope,
   modes,
   createDefaults,
+  search = "",
 }: UseIssueSurfaceControllerInput): IssueSurfaceController {
   const wsId = useWorkspaceId();
   const queryPlan = useMemo<IssueSurfaceQueryPlan>(
@@ -179,8 +200,8 @@ export function useIssueSurfaceController({
   const cardProperties = useViewStore((s) => s.cardProperties);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const tableColumns = useViewStore((s) => s.tableColumns);
+  const listCollapsedStatuses = useViewStore((s) => s.listCollapsedStatuses);
   const [tableSearch, setTableSearch] = useState("");
-  const debouncedTableSearch = useDebouncedTableSearch(tableSearch);
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
   const fallbackMode = modes[0] ?? "list";
@@ -252,10 +273,43 @@ export function useIssueSurfaceController({
     };
   }, [dateParams, effectivePropertyFilters, propertySortId, rawPropertySortId, sortBy, sortDirection]);
 
+  const groupingPropertyId = propertyIdFromViewKey(grouping);
+  const activeGroupingProperty = groupingPropertyId
+    ? workspaceProperties.find(
+        (property) =>
+          property.id === groupingPropertyId && property.type === "select",
+      ) ?? null
+    : null;
+  const effectiveGrouping =
+    groupingPropertyId && catalogSettled && !activeGroupingProperty
+      ? "status"
+      : grouping;
   const usesAssigneeBoard =
-    effectiveViewMode === "board" && grouping === "assignee";
+    effectiveViewMode === "board" && effectiveGrouping === "assignee";
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
   const usesTable = effectiveViewMode === "table";
+  const activeSearch = usesTable ? tableSearch : search;
+  const debouncedActiveSearch = useDebouncedTableSearch(activeSearch);
+  const usesServerStatusSurface =
+    effectiveViewMode === "list" ||
+    (effectiveViewMode === "board" && effectiveGrouping === "status");
+  const usesServerGroupSurface =
+    (effectiveViewMode === "board" && effectiveGrouping !== "status") ||
+    effectiveViewMode === "swimlane";
+  const usesServerFacets =
+    usesTable || usesServerStatusSurface || usesServerGroupSurface;
+  const serverStatuses = useMemo<IssueStatus[]>(
+    () => {
+      const visible =
+        statusFilters.length > 0
+          ? ALL_STATUSES.filter((status) => statusFilters.includes(status))
+          : [...ALL_STATUSES];
+      return effectiveViewMode === "list"
+        ? visible.filter((status) => !listCollapsedStatuses.includes(status))
+        : visible;
+    },
+    [effectiveViewMode, listCollapsedStatuses, statusFilters],
+  );
 
   const projectFilterState = useMemo(
     () => ({
@@ -267,7 +321,39 @@ export function useIssueSurfaceController({
   const { projectFilters: viewProjectFilters, includeNoProject: viewIncludeNoProject } =
     projectFilterState;
 
-  const activity = useIssueSurfaceActivity();
+  const workingAgentMineRelation =
+    scope.type === "my"
+      ? scope.relation === "all"
+        ? "any"
+        : scope.relation
+      : undefined;
+  const { data: workspaceWorkingAgents = [] } = useQuery(
+    workspaceWorkingAgentsOptions(wsId, "issue", workingAgentMineRelation),
+  );
+  const workingAssigneeFilters = useMemo(() => {
+    const workingAgentIds = new Set(
+      workspaceWorkingAgents.map((agent) => agent.id),
+    );
+    if (assigneeFilters.length === 0) {
+      return workspaceWorkingAgents.map((agent) => ({
+        type: "agent" as const,
+        id: agent.id,
+      }));
+    }
+
+    // The quick filter and the regular assignee picker are both predicates
+    // on the same field, so compose them with intersection (AND semantics).
+    return assigneeFilters.filter(
+      (assignee) =>
+        assignee.type === "agent" && workingAgentIds.has(assignee.id),
+    );
+  }, [assigneeFilters, workspaceWorkingAgents]);
+  const effectiveAssigneeFilters = agentRunningFilter
+    ? workingAssigneeFilters
+    : assigneeFilters;
+  const effectiveIncludeNoAssignee = agentRunningFilter
+    ? false
+    : includeNoAssignee;
 
   const tableQuerySpec = useMemo<IssueTableQuerySpec>(() => {
     let queryScope: IssueTableQuerySpec["scope"];
@@ -314,8 +400,14 @@ export function useIssueSurfaceController({
       filters: {
         ...(statusFilters.length > 0 ? { statuses: statusFilters } : {}),
         ...(priorityFilters.length > 0 ? { priorities: priorityFilters } : {}),
-        ...(assigneeFilters.length > 0 ? { assignees: assigneeFilters } : {}),
-        ...(includeNoAssignee ? { include_no_assignee: true } : {}),
+        ...(agentRunningFilter
+          ? { assignees: effectiveAssigneeFilters }
+          : assigneeFilters.length > 0
+            ? { assignees: assigneeFilters }
+            : {}),
+        ...(effectiveIncludeNoAssignee
+          ? { include_no_assignee: true }
+          : {}),
         ...(creatorFilters.length > 0 ? { creators: creatorFilters } : {}),
         ...(viewProjectFilters.length > 0
           ? { project_ids: viewProjectFilters }
@@ -326,10 +418,9 @@ export function useIssueSurfaceController({
           ? { properties: effectivePropertyFilters }
           : {}),
         ...(date ? { date } : {}),
-        ...(agentRunningFilter ? { working_only: true } : {}),
         include_sub_issues: showSubIssues,
       },
-      ...(debouncedTableSearch ? { search: debouncedTableSearch } : {}),
+      ...(debouncedActiveSearch ? { search: debouncedActiveSearch } : {}),
       sort: {
         field: sort.sort_by ?? "position",
         direction: sort.sort_direction ?? "asc",
@@ -340,9 +431,10 @@ export function useIssueSurfaceController({
     assigneeFilters,
     creatorFilters,
     dateParams,
-    debouncedTableSearch,
+    debouncedActiveSearch,
+    effectiveAssigneeFilters,
+    effectiveIncludeNoAssignee,
     effectivePropertyFilters,
-    includeNoAssignee,
     labelFilters,
     priorityFilters,
     scope,
@@ -356,35 +448,102 @@ export function useIssueSurfaceController({
 
   const [activeTableFacet, setActiveTableFacet] =
     useState<IssueTableFacetSpec | null>(null);
+  const requestedFacets = useMemo<IssueTableFacetSpec[]>(() => {
+    const facets: IssueTableFacetSpec[] = [];
+    if (usesServerStatusSurface) facets.push({ kind: "status" });
+    if (
+      activeTableFacet &&
+      !facets.some(
+        (facet) =>
+          facet.kind === activeTableFacet.kind &&
+          (facet.kind !== "property" ||
+            activeTableFacet.kind !== "property" ||
+            facet.property_id === activeTableFacet.property_id),
+      )
+    ) {
+      facets.push(activeTableFacet);
+    }
+    // The request shape remains total while disabled.
+    return facets.length > 0 ? facets : [{ kind: "status" }];
+  }, [activeTableFacet, usesServerStatusSurface]);
   const tableFacetRequest = useMemo(
     () => ({
       query: tableQuerySpec,
-      // The endpoint requires at least one facet. This fallback is never
-      // fetched while activeTableFacet is null; it only keeps the request
-      // shape total for React Query's option factory.
-      facets: [activeTableFacet ?? { kind: "status" as const }],
-      // Filter option badges do not consume the query-wide total; rows/groups
-      // already own the displayed Table total.
-      include_total: false,
+      facets: requestedFacets,
+      // Status surfaces consume the facet total as their authoritative empty
+      // state. Table rows/groups already own the displayed total.
+      include_total: usesServerStatusSurface,
     }),
-    [activeTableFacet, tableQuerySpec],
+    [requestedFacets, tableQuerySpec, usesServerStatusSurface],
   );
   const tableFacetsQuery = useQuery({
     ...issueTableFacetsOptions(wsId, tableFacetRequest),
+    placeholderData: keepPreviousData,
     // Counts are only visible inside one open filter submenu. Eagerly loading
     // every custom-property facet made a Table mount issue up to 47 SQL
     // statements and repeatedly scan the issue table after invalidation.
-    enabled: usesTable && activeTableFacet !== null,
+    enabled:
+      usesServerStatusSurface ||
+      ((usesTable || usesServerGroupSurface) && activeTableFacet !== null),
   });
   useEffect(() => {
-    if (!usesTable) setActiveTableFacet(null);
-  }, [usesTable]);
+    if (!usesServerFacets) setActiveTableFacet(null);
+  }, [usesServerFacets]);
   const requestActiveTableFacet = useCallback(
     (facet: IssueTableFacetSpec | null) => {
-      setActiveTableFacet(usesTable ? facet : null);
+      setActiveTableFacet(usesServerFacets ? facet : null);
     },
-    [usesTable],
+    [usesServerFacets],
   );
+  const serverStatusBranches = useIssueStatusBranches({
+    wsId,
+    query: tableQuerySpec,
+    statuses: serverStatuses,
+    facets: tableFacetsQuery.data,
+    facetsPending: tableFacetsQuery.isPending,
+    facetsFetching: tableFacetsQuery.isFetching,
+    enabled: usesServerStatusSurface,
+  });
+  const serverGroupSpec = useMemo<IssueTableGroupsRequest["group"]>(() => {
+    if (effectiveViewMode === "swimlane") {
+      return {
+        kind: "compound",
+        primary: swimlaneGrouping,
+        secondary: "status",
+        secondary_values: serverStatuses,
+      };
+    }
+    const propertyId = propertyIdFromViewKey(effectiveGrouping);
+    if (propertyId) {
+      return {
+        kind: "property",
+        property_id: propertyId,
+        include_empty: true,
+      };
+    }
+    return { kind: "assignee" };
+  }, [
+    effectiveGrouping,
+    effectiveViewMode,
+    serverStatuses,
+    swimlaneGrouping,
+  ]);
+  const serverGroupQuery = useMemo<IssueTableQuerySpec>(() => {
+    if (effectiveViewMode !== "swimlane") return tableQuerySpec;
+    const { statuses: _statuses, ...filters } = tableQuerySpec.filters;
+    return { ...tableQuerySpec, filters };
+  }, [effectiveViewMode, tableQuerySpec]);
+  const serverGroupBranches = useIssueGroupBranches({
+    wsId,
+    query: serverGroupQuery,
+    group: serverGroupSpec,
+    secondaryValues:
+      effectiveViewMode === "swimlane" ? serverStatuses : undefined,
+    observeEmptyBranches:
+      effectiveViewMode === "swimlane" ||
+      (effectiveViewMode === "board" && activeGroupingProperty !== null),
+    enabled: usesServerGroupSurface,
+  });
 
   // Selection is only meaningful within the current membership window: batch
   // actions act on selected ids while export/common-field consumers intersect
@@ -409,14 +568,14 @@ export function useIssueSurfaceController({
         agentRunningFilter,
         showSubIssues,
         dateParams,
-        debouncedTableSearch,
+        debouncedActiveSearch,
       ]),
     [
       agentRunningFilter,
       assigneeFilters,
       creatorFilters,
       dateParams,
-      debouncedTableSearch,
+      debouncedActiveSearch,
       effectivePropertyFilters,
       includeNoAssignee,
       labelFilters,
@@ -439,19 +598,21 @@ export function useIssueSurfaceController({
     usesAssigneeBoard,
     usesGantt,
     usesTable,
+    serverStatusBranches,
+    serverGroupBranches,
     ganttShowCompleted,
     sort,
-    activity,
     statusFilters,
     priorityFilters,
-    assigneeFilters,
-    includeNoAssignee,
+    assigneeFilters: effectiveAssigneeFilters,
+    includeNoAssignee: effectiveIncludeNoAssignee,
+    assigneeFilterActive: agentRunningFilter,
     creatorFilters,
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,
     labelFilters,
     propertyFilters: effectivePropertyFilters,
-    agentRunningFilter,
+    workingAssigneeFilters,
     showSubIssues,
     loadProjects:
       cardProperties.project ||
@@ -519,22 +680,32 @@ export function useIssueSurfaceController({
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
     ...data,
+    statusPagination: usesServerStatusSurface
+      ? data.statusPagination
+      : undefined,
+    groupBranches: usesServerGroupSurface
+      ? serverGroupBranches
+      : undefined,
     // Keep TableView mounted for an empty search result so its local search
     // control remains available to refine or clear the query. Include the
     // debounced value as well to avoid a brief empty-screen flash while a
     // cleared query is waiting to re-fetch the unsearched window.
     isEmpty:
       data.isEmpty &&
-      !(usesTable && (tableSearch.trim() || debouncedTableSearch)),
+      !data.isRefreshing &&
+      !(usesTable && (tableSearch.trim() || debouncedActiveSearch)),
     sort,
     actions,
     selection,
     tableSearch,
     tableQuerySpec,
     tableFacetCounts:
-      usesTable && activeTableFacet !== null
+      usesServerStatusSurface ||
+      ((usesTable || usesServerGroupSurface) && activeTableFacet !== null)
         ? tableFacetsQuery.data
         : undefined,
+    facetCountsExact:
+      !usesTable && !usesServerStatusSurface && !usesServerGroupSurface,
     setActiveTableFacet: requestActiveTableFacet,
     setTableSearch,
     openCreateIssue,

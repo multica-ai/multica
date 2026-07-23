@@ -1647,6 +1647,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			McpConfig:             mcpConfig,
 			Model:                 agent.Model.String,
 			ThinkingLevel:         agent.ThinkingLevel.String,
+			ServiceTier:           agent.ServiceTier.String,
 			RuntimeConfig:         runtimeConfig,
 			DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 		}

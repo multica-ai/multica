@@ -18,8 +18,6 @@ import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-ki
 import { Virtuoso } from "react-virtuoso";
 import { Button } from "@multica/ui/components/ui/button";
 import type { Issue, IssueStatus, Project } from "@multica/core/types";
-import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
@@ -33,6 +31,7 @@ import {
   buildColumns,
   computePosition,
   findColumn,
+  getMoveAnchors,
   insertIdByPosition,
   issueMatchesGroup,
   getMoveUpdates,
@@ -40,6 +39,10 @@ import {
 import type { BoardColumnGroup } from "./board-column";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 import type { IssueCreateDefaults } from "../surface/types";
+import type {
+  IssueStatusPageState,
+  IssueStatusPagination,
+} from "../surface/use-issue-status-branches";
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { useRestoredScrollRef } from "../../platform";
@@ -73,23 +76,19 @@ function ListViewImpl({
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
   projectMap,
-  myIssuesScope,
-  myIssuesFilter,
+  statusPagination,
   projectId,
   onMoveIssue,
   onCreateIssue,
-  sort,
 }: {
   issues: Issue[];
   visibleStatuses: IssueStatus[];
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
-  myIssuesScope?: string;
-  myIssuesFilter?: MyIssuesFilter;
+  statusPagination: IssueStatusPagination;
   projectId?: string;
   onMoveIssue?: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
-  sort?: IssueSortParam;
 }) {
   const listCollapsedStatuses = useViewStore(
     (s) => s.listCollapsedStatuses
@@ -112,10 +111,6 @@ function ListViewImpl({
       ),
     [visibleStatuses, listCollapsedStatuses]
   );
-
-  const myIssuesOpts = myIssuesScope
-    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
-    : undefined;
 
   const dragEnabled = !!onMoveIssue;
 
@@ -275,17 +270,24 @@ function ListViewImpl({
         // jumped across when the mutation settled — the same "snaps back, then
         // moves" glitch the board view had. Placement mirrors the cache
         // (insertIdByPosition) so the settle rebuild is a visual no-op.
+        const targetIds = insertIdByPosition(
+          (cols[finalCol] ?? []).filter((id) => id !== activeId),
+          activeId,
+          currentIssue.position,
+          map,
+        );
         setColumns((prev) => {
           const fromIds = (prev[activeCol] ?? []).filter((cid) => cid !== activeId);
-          const toIds = insertIdByPosition(
-            prev[finalCol] ?? [],
-            activeId,
-            currentIssue.position,
-            map,
-          );
-          return { ...prev, [activeCol]: fromIds, [finalCol]: toIds };
+          return { ...prev, [activeCol]: fromIds, [finalCol]: targetIds };
         });
-        onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position), beginSettle());
+        onMoveIssue(
+          activeId,
+          {
+            ...getMoveUpdates(finalGroup, currentIssue.position),
+            ...getMoveAnchors(targetIds, activeId),
+          },
+          beginSettle(),
+        );
         return;
       }
 
@@ -304,7 +306,14 @@ function ListViewImpl({
       // beginSettle() also bumps settleVersion on settle (board-view did, this
       // branch did not) so a failed position move reverts instead of stranding
       // the row at the drop target.
-      onMoveIssue(activeId, getMoveUpdates(finalGroup, newPosition), beginSettle());
+      onMoveIssue(
+        activeId,
+        {
+          ...getMoveUpdates(finalGroup, newPosition),
+          ...getMoveAnchors(finalIds, activeId),
+        },
+        beginSettle(),
+      );
     },
     [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef],
   );
@@ -353,13 +362,12 @@ function ListViewImpl({
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
             projectMap={projectMap}
-            myIssuesOpts={myIssuesOpts}
+            page={statusPagination[status]}
             projectId={projectId}
             onCreateIssue={onCreateIssue}
             dragEnabled={dragEnabled}
             isExpanded={isExpanded}
             sortLabel={sortLabel}
-            sort={sort}
             scrollParent={scrollEl}
           />
         );
@@ -405,13 +413,12 @@ function StatusAccordionItem({
   issueMap,
   childProgressMap,
   projectMap,
-  myIssuesOpts,
+  page,
   projectId,
   onCreateIssue,
   dragEnabled,
   isExpanded,
   sortLabel,
-  sort,
   scrollParent,
 }: {
   status: IssueStatus;
@@ -419,13 +426,12 @@ function StatusAccordionItem({
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  page: IssueStatusPageState;
   projectId?: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   dragEnabled: boolean;
   isExpanded: boolean;
   sortLabel: string | null;
-  sort?: IssueSortParam;
   scrollParent: HTMLElement | null;
 }) {
   const { t } = useT("issues");
@@ -433,11 +439,6 @@ function StatusAccordionItem({
   const selectedIds = selection.selectedIds;
   const select = selection.select;
   const deselect = selection.deselect;
-  const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
-    status,
-    myIssuesOpts,
-    sort,
-  );
 
   const issues = useMemo(
     () => issueIds.flatMap((id) => {
@@ -461,11 +462,33 @@ function StatusAccordionItem({
   // The infinite-scroll sentinel rides Virtuoso's Footer so it sits at the true
   // end of the virtualized rows and still fires loadMore when scrolled to it.
   const listComponents = useMemo(
-    () =>
-      hasMore
-        ? { Footer: () => <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} /> }
-        : EMPTY_VIRTUOSO_COMPONENTS,
-    [hasMore, loadMore, isLoading],
+    () => {
+      if (page.isError) {
+        return {
+          Footer: () => (
+            <button
+              type="button"
+              className="w-full py-2 text-xs text-destructive hover:underline"
+              onClick={page.retry}
+            >
+              {t(($) => $.table.load_more_failed_retry)}
+            </button>
+          ),
+        };
+      }
+      if (page.hasMore) {
+        return {
+          Footer: () => (
+            <InfiniteScrollSentinel
+              onVisible={page.loadMore}
+              loading={page.isLoading || page.isFetching}
+            />
+          ),
+        };
+      }
+      return EMPTY_VIRTUOSO_COMPONENTS;
+    },
+    [page, t],
   );
 
   const computeItemKey = (_index: number, issue: Issue) => issue.id;
@@ -549,7 +572,7 @@ function StatusAccordionItem({
         </div>
         <Accordion.Trigger className="group/trigger flex flex-1 items-center gap-2 px-2 h-full text-left outline-none cursor-pointer">
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
-          <StatusHeading status={status} count={total} />
+          <StatusHeading status={status} count={page.total} />
         </Accordion.Trigger>
         {onCreateIssue && (
           <div className="pr-2">

@@ -15,14 +15,12 @@ import { IssuesHeader } from "./issues-header";
 
 function IssuesSurfaceHeader({
   issues,
-  workingIssues,
   isRefreshing,
   facetCountsExact,
   tableFacetCounts,
   onTableFacetChange,
 }: {
   issues: Issue[];
-  workingIssues: Issue[] | undefined;
   isRefreshing: boolean;
   facetCountsExact: boolean;
   tableFacetCounts?: IssueTableFacetsResponse;
@@ -34,7 +32,6 @@ function IssuesSurfaceHeader({
   return (
     <IssuesHeader
       scopedIssues={issues}
-      workingIssues={workingIssues}
       dateFilter={dateFilter}
       onDateFilterChange={setDateFilter}
       isRefreshing={isRefreshing}
@@ -60,12 +57,11 @@ export function IssuesPage() {
         scope={{ type: "workspace", actorKind: scope }}
         modes={["board", "list", "table", "swimlane"]}
         batchToolbar="list"
-        renderHeader={({ controller, workingIssues }) => (
+        renderHeader={({ controller }) => (
           <IssuesSurfaceHeader
             issues={controller.surfaceIssues}
-            workingIssues={workingIssues}
             isRefreshing={controller.isRefreshing}
-            facetCountsExact={controller.viewMode !== "table"}
+            facetCountsExact={controller.facetCountsExact}
             tableFacetCounts={controller.tableFacetCounts}
             onTableFacetChange={controller.setActiveTableFacet}
           />

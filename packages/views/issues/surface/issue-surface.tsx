@@ -53,6 +53,7 @@ export function IssueSurface({
   modes,
   surfaceKey,
   createDefaults,
+  search,
   renderHeader,
   renderEmpty,
   renderLoading,
@@ -98,6 +99,7 @@ export function IssueSurface({
         scope={scope}
         modes={modes}
         createDefaults={createDefaults}
+        search={search}
         renderHeader={renderHeader}
         renderEmpty={renderEmpty}
         renderLoading={renderLoading}
@@ -114,6 +116,7 @@ function IssueSurfaceContent({
   scope,
   modes,
   createDefaults,
+  search,
   renderHeader,
   renderEmpty,
   renderLoading,
@@ -127,6 +130,7 @@ function IssueSurfaceContent({
     scope,
     modes,
     createDefaults,
+    search,
   });
   const [tableLoadedIssues, setTableLoadedIssues] = useState<Issue[]>([]);
   const handleTableLoadedIssuesChange = useCallback((next: Issue[]) => {
@@ -207,11 +211,10 @@ function IssueSurfaceContent({
         ) : (
           <IssuesHeader
             scopedIssues={controller.surfaceIssues}
-            workingIssues={workingIssues}
             allowGantt={controller.allowGantt}
             isRefreshing={controller.isRefreshing}
             facetCountsExact={
-              controller.viewMode !== "table"
+              controller.facetCountsExact
             }
             tableFacetCounts={controller.tableFacetCounts}
             onTableFacetChange={controller.setActiveTableFacet}
@@ -260,6 +263,8 @@ function IssueSurfaceContent({
                 sort={controller.sort}
                 projectId={controller.projectId}
                 onCreateIssue={openCreateIssue}
+                statusPagination={controller.statusPagination}
+                groupBranches={controller.groupBranches}
               />
             )}
             {controller.viewMode === "list" && (
@@ -268,12 +273,10 @@ function IssueSurfaceContent({
                 visibleStatuses={controller.visibleStatuses}
                 childProgressMap={controller.childProgressMap}
                 projectMap={controller.projectMap}
-                myIssuesScope={controller.loadMoreScope}
-                myIssuesFilter={controller.loadMoreFilter}
-                sort={controller.sort}
                 projectId={controller.projectId}
                 onMoveIssue={controller.moveIssue}
                 onCreateIssue={openCreateIssue}
+                statusPagination={controller.statusPagination!}
               />
             )}
             {controller.viewMode === "table" && (
@@ -305,8 +308,8 @@ function IssueSurfaceContent({
                 myIssuesFilter={controller.loadMoreFilter}
                 sort={controller.sort}
                 projectId={controller.projectId}
-                activityByIssueId={controller.activity.activityByIssueId}
                 onCreateIssue={openCreateIssue}
+                groupBranches={controller.groupBranches}
               />
             )}
           </div>

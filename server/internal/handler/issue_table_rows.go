@@ -312,6 +312,26 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 ), `, compiled.where, groupPredicate)
 		pageSource = "membership"
 		pagePredicate = branchPredicate
+	} else if group.kind == "compound" &&
+		group.primary != nil &&
+		group.primary.kind == "parent" &&
+		group.secondaryFiltered {
+		visibleRef := addArg(group.secondaryValues)
+		ctePrefix += fmt.Sprintf(`membership AS NOT MATERIALIZED (
+  SELECT i.*
+  FROM issue i
+  WHERE %s
+), promoted_parents AS (
+  SELECT DISTINCT child.parent_issue_id AS id
+  FROM membership child
+  WHERE child.parent_issue_id IS NOT NULL
+    AND child.status = ANY(%s::text[])
+), `, compiled.where, visibleRef)
+		pageSource = "membership"
+		pagePredicate = fmt.Sprintf(`(%s) AND NOT (
+  i.parent_issue_id IS NULL AND
+  EXISTS (SELECT 1 FROM promoted_parents p WHERE p.id = i.id)
+)`, groupPredicate)
 	}
 	cte := fmt.Sprintf(`%spage AS MATERIALIZED (
   SELECT i.*, (%s)::text AS table_sort_key

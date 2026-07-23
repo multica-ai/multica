@@ -28,7 +28,11 @@ import {
   type IssueFilters,
 } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
-import type { IssueSurfaceActivity } from "./activity";
+import type {
+  IssueStatusBranches,
+  IssueStatusPagination,
+} from "./use-issue-status-branches";
+import type { IssueGroupBranches } from "./use-issue-group-branches";
 
 const EMPTY_ISSUES: Issue[] = [];
 const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
@@ -76,8 +80,11 @@ export interface IssueSurfaceData {
   ganttIssues: Issue[];
   visibleStatuses: IssueStatus[];
   hiddenStatuses: IssueStatus[];
-  activeFilters: Omit<IssueFilters, "statusFilters" | "runningIssueIds">;
-  activity: IssueSurfaceActivity;
+  statusPagination: IssueStatusPagination;
+  activeFilters: Omit<
+    IssueFilters,
+    "statusFilters" | "agentRunningFilter" | "runningIssueIds"
+  >;
   childProgressMap: Map<string, ChildProgress>;
   projectMap: Map<string, Project>;
   resolveTableExportLookups: (needs: {
@@ -103,19 +110,21 @@ export function useIssueSurfaceData({
   usesAssigneeBoard,
   usesGantt,
   usesTable,
+  serverStatusBranches,
+  serverGroupBranches,
   ganttShowCompleted,
   sort,
-  activity,
   statusFilters,
   priorityFilters,
   assigneeFilters,
   includeNoAssignee,
+  assigneeFilterActive,
   creatorFilters,
   projectFilters,
   includeNoProject,
   labelFilters,
   propertyFilters,
-  agentRunningFilter,
+  workingAssigneeFilters,
   showSubIssues,
   loadProjects,
 }: {
@@ -125,31 +134,30 @@ export function useIssueSurfaceData({
   usesAssigneeBoard: boolean;
   usesGantt: boolean;
   usesTable: boolean;
+  serverStatusBranches: IssueStatusBranches;
+  serverGroupBranches: IssueGroupBranches;
   /** Gantt's "show completed" display toggle. The canvas hides done/cancelled
    *  rows without it, so the working scope has to honour it too. */
   ganttShowCompleted: boolean;
   sort: IssueSortParam;
-  /** Owned by the controller so the agents-working facet and the client
-   *  display filters read the same task snapshot. */
-  activity: IssueSurfaceActivity;
   statusFilters: IssueStatus[];
   priorityFilters: IssueFilterState["priorityFilters"];
   assigneeFilters: IssueFilterState["assigneeFilters"];
   includeNoAssignee: boolean;
+  /** True when the working-agent quick filter owns the assignee predicate,
+   *  including when its API-derived intersection is explicitly empty. */
+  assigneeFilterActive: boolean;
   creatorFilters: IssueFilterState["creatorFilters"];
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
   propertyFilters: Record<string, string[]>;
-  agentRunningFilter: boolean;
+  /** The working-agent API projected into the same typed assignee predicate
+   *  used by the canonical Table query. */
+  workingAssigneeFilters: IssueFilterState["assigneeFilters"];
   showSubIssues: boolean;
   loadProjects: boolean;
 }): IssueSurfaceData {
-  const filterContext = useMemo(
-    () => ({ activityByIssueId: activity.activityByIssueId }),
-    [activity.activityByIssueId],
-  );
-
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
       ...queryPlan.groupedScopeFilter,
@@ -184,22 +192,39 @@ export function useIssueSurfaceData({
 
   const statusIssuesQuery = useQuery({
     ...issueSurfaceListOptions(wsId, queryPlan, sort),
-    enabled: !usesAssigneeBoard && !usesGantt && !usesTable,
+    enabled:
+      !usesAssigneeBoard &&
+      !usesGantt &&
+      !usesTable &&
+      !serverStatusBranches.enabled &&
+      !serverGroupBranches.enabled,
   });
   const assigneeGroupsQuery = useQuery({
     ...activeAssigneeGroupsOptions,
-    enabled: usesAssigneeBoard,
+    enabled: usesAssigneeBoard && !serverGroupBranches.enabled,
   });
   const ganttIssuesQuery = useQuery({
     ...issueSurfaceGanttOptions(wsId, projectId ?? ""),
     enabled: usesGantt,
   });
-  const hasRunningIssues = activity.runningIssueIds.size > 0;
+  const hasWorkingAssignees = workingAssigneeFilters.length > 0;
   const bucketedIssues = useMemo(() => {
-    return usesAssigneeBoard
+    return serverStatusBranches.enabled
+      ? serverStatusBranches.issues
+      : serverGroupBranches.enabled
+      ? serverGroupBranches.issues
+      : usesAssigneeBoard
       ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
       : (statusIssuesQuery.data ?? EMPTY_ISSUES);
-  }, [assigneeGroupsQuery.data?.groups, statusIssuesQuery.data, usesAssigneeBoard]);
+  }, [
+    assigneeGroupsQuery.data?.groups,
+    serverStatusBranches.enabled,
+    serverStatusBranches.issues,
+    serverGroupBranches.enabled,
+    serverGroupBranches.issues,
+    statusIssuesQuery.data,
+    usesAssigneeBoard,
+  ]);
 
   // `cancelled` is a first-class default status (MUL-4290): it is fetched into
   // the cache like every other status and flows straight through to list /
@@ -219,17 +244,18 @@ export function useIssueSurfaceData({
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,
+      assigneeFilterActive,
       creatorFilters,
       projectFilters,
       includeNoProject,
       labelFilters,
       propertyFilters,
-      workingOnly: agentRunningFilter,
+      workingOnly: false,
       showSubIssues,
     }),
     [
-      agentRunningFilter,
       assigneeFilters,
+      assigneeFilterActive,
       creatorFilters,
       includeNoAssignee,
       includeNoProject,
@@ -243,8 +269,15 @@ export function useIssueSurfaceData({
   );
 
   const issues = useMemo(
-    () => applyIssueFilters(surfaceIssues, baseFilterState, filterContext),
-    [baseFilterState, filterContext, surfaceIssues],
+    () =>
+      serverStatusBranches.enabled
+        ? surfaceIssues
+        : applyIssueFilters(surfaceIssues, baseFilterState),
+    [
+      baseFilterState,
+      serverStatusBranches.enabled,
+      surfaceIssues,
+    ],
   );
 
   const statuslessFilterState = useMemo<IssueFilterState>(
@@ -256,48 +289,54 @@ export function useIssueSurfaceData({
   );
 
   const swimlaneIssues = useMemo(
-    () => applyIssueFilters(surfaceIssues, statuslessFilterState, filterContext),
-    [filterContext, statuslessFilterState, surfaceIssues],
+    () => applyIssueFilters(surfaceIssues, statuslessFilterState),
+    [statuslessFilterState, surfaceIssues],
   );
 
   const filteredGanttIssues = useMemo(
     () =>
       ganttCanvasRows(
-        applyIssueFilters(ganttIssues, baseFilterState, filterContext),
+        applyIssueFilters(ganttIssues, baseFilterState),
         ganttShowCompleted,
       ),
-    [baseFilterState, filterContext, ganttIssues, ganttShowCompleted],
+    [baseFilterState, ganttIssues, ganttShowCompleted],
   );
 
   // The assignee-grouped board renders straight from `groups`, bypassing the
-  // flat applyIssueFilters output — re-apply the client-only display filters
-  // (Show sub-issues + agents-working) per group.
+  // flat applyIssueFilters output — re-apply the remaining client-only
+  // display filters per group. Working-agent membership is already encoded
+  // in the assignee predicate sent to the server.
   const filteredAssigneeGroups = useMemo(
     () =>
       filterAssigneeGroups(assigneeGroupsQuery.data?.groups, {
         showSubIssues,
-        agentRunningFilter,
-        runningIssueIds: activity.runningIssueIds,
         propertyFilters,
       }),
     [
-      activity.runningIssueIds,
-      agentRunningFilter,
       assigneeGroupsQuery.data?.groups,
       propertyFilters,
       showSubIssues,
     ],
   );
 
+  const workingFilterState = useMemo<IssueFilterState>(
+    () => ({
+      ...baseFilterState,
+      assigneeFilters: workingAssigneeFilters,
+      includeNoAssignee: false,
+      assigneeFilterActive: true,
+      workingOnly: false,
+    }),
+    [baseFilterState, workingAssigneeFilters],
+  );
+
   // The rows the agents-working filter leaves on screen — i.e. exactly what
   // you get when you click the header chip.
   //
-  // This is deliberately a PROJECTION OF THE RENDER PIPELINE, not a second
-  // pass over the task snapshot: it reuses the same predicates, the same
-  // filter state and the same per-mode source as the rows below, with
-  // `workingOnly` forced on. Turning the filter on only adds `workingOnly` to
-  // this same pipeline, so the set is the post-click list whether the filter
-  // is currently on or off.
+  // This is deliberately a projection of the render pipeline. The controller
+  // translates `/api/working-agents` into a typed assignee predicate once;
+  // both the canonical server query and client-only Gantt/extra-child paths
+  // reuse that predicate, so there is no task-snapshot membership fallback.
   //
   // The chip counts AGENTS, not this list's length, so these are not equal
   // (one agent can hold two of these rows). What this set does decide is
@@ -324,51 +363,45 @@ export function useIssueSurfaceData({
       return ganttCanvasRows(
         applyIssueFilters(
           ganttIssues,
-          { ...baseFilterState, workingOnly: true },
-          filterContext,
+          workingFilterState,
         ),
         ganttShowCompleted,
       );
     }
-    if (usesAssigneeBoard) {
-      return (
+    if (usesAssigneeBoard && !serverGroupBranches.enabled) {
+      const groupedIssues = (
         filterAssigneeGroups(assigneeGroupsQuery.data?.groups, {
           showSubIssues,
-          agentRunningFilter: true,
-          runningIssueIds: activity.runningIssueIds,
           propertyFilters,
         }) ?? []
       ).flatMap((group) => group.issues);
+      return applyIssueFilters(groupedIssues, workingFilterState);
     }
-    if (usesTable) {
+    if (usesTable || serverStatusBranches.enabled || serverGroupBranches.enabled) {
       // Table membership is server-owned and cursor paged. Do not rebuild a
       // second complete issue window merely to decorate the activity chip:
       // that was the final hidden auto-materialization loop behind the old
-      // 1,000-row ceiling. An empty task set is trivially known; otherwise
-      // keep the chip indeterminate until a bounded server facet supplies
-      // the matching task/issue projection.
-      if (!hasRunningIssues) return EMPTY_ISSUES;
+      // 1,000-row ceiling. An empty working-assignee intersection is trivially
+      // known; otherwise keep the chip indeterminate until a bounded server
+      // facet supplies the matching task/issue projection.
+      if (!hasWorkingAssignees) return EMPTY_ISSUES;
       return undefined;
     }
-    return applyIssueFilters(
-      surfaceIssues,
-      { ...baseFilterState, workingOnly: true },
-      filterContext,
-    );
+    return applyIssueFilters(surfaceIssues, workingFilterState);
   }, [
-    activity.runningIssueIds,
     assigneeGroupsQuery.data?.groups,
-    baseFilterState,
-    filterContext,
     ganttIssues,
     ganttShowCompleted,
-    hasRunningIssues,
+    hasWorkingAssignees,
     propertyFilters,
     showSubIssues,
     surfaceIssues,
     usesAssigneeBoard,
     usesGantt,
     usesTable,
+    serverStatusBranches.enabled,
+    serverGroupBranches.enabled,
+    workingFilterState,
   ]);
 
   const {
@@ -443,17 +476,17 @@ export function useIssueSurfaceData({
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,
+      assigneeFilterActive,
       creatorFilters,
       projectFilters,
       includeNoProject,
       labelFilters,
       propertyFilters,
-      agentRunningFilter,
       showSubIssues,
     }),
     [
-      agentRunningFilter,
       assigneeFilters,
+      assigneeFilterActive,
       creatorFilters,
       includeNoAssignee,
       includeNoProject,
@@ -465,24 +498,32 @@ export function useIssueSurfaceData({
     ],
   );
 
-  const isLoading = usesAssigneeBoard
-    ? assigneeGroupsQuery.isLoading
-    : usesGantt
+  const isLoading = serverGroupBranches.enabled
+    ? serverGroupBranches.isLoading
+    : usesAssigneeBoard
+      ? assigneeGroupsQuery.isLoading
+      : usesGantt
       ? ganttIssuesQuery.isLoading
       : usesTable
         ? false
-        : statusIssuesQuery.isLoading;
+        : serverStatusBranches.enabled
+          ? serverStatusBranches.isLoading
+          : statusIssuesQuery.isLoading;
 
   // Placeholder-backed revalidation of the ACTIVE query only. First loads are
   // isLoading (no previous data to place-hold); gantt has no placeholder
   // phase (its key carries no sort/filter).
-  const isRefreshing = usesAssigneeBoard
-    ? assigneeGroupsQuery.isPlaceholderData
-    : usesGantt
+  const isRefreshing = serverGroupBranches.enabled
+    ? serverGroupBranches.isRefreshing
+    : usesAssigneeBoard
+      ? assigneeGroupsQuery.isPlaceholderData
+      : usesGantt
       ? false
       : usesTable
         ? false
-        : statusIssuesQuery.isPlaceholderData;
+        : serverStatusBranches.enabled
+          ? serverStatusBranches.isRefreshing
+          : statusIssuesQuery.isPlaceholderData;
 
   return {
     surfaceIssues,
@@ -502,8 +543,8 @@ export function useIssueSurfaceData({
     ganttIssues,
     visibleStatuses,
     hiddenStatuses,
+    statusPagination: serverStatusBranches.pagination,
     activeFilters,
-    activity,
     childProgressMap,
     projectMap,
     resolveTableExportLookups,
@@ -521,6 +562,12 @@ export function useIssueSurfaceData({
       !isLoading &&
       !usesGantt &&
       !usesTable &&
-      surfaceIssues.length === 0,
+      (serverStatusBranches.enabled
+        ? serverStatusBranches.isTotalKnown &&
+          serverStatusBranches.total === 0
+        : serverGroupBranches.enabled
+          ? !serverGroupBranches.isError &&
+            serverGroupBranches.total === 0
+        : surfaceIssues.length === 0),
   };
 }
