@@ -155,7 +155,7 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Copilot:  writes {workDir}/AGENTS.md  (skills discovered natively from .github/skills/)
 // For OpenCode: writes {workDir}/AGENTS.md  (skills discovered natively from .opencode/skills/)
 // For OpenClaw: writes {workDir}/AGENTS.md  (skills discovered natively from {workDir}/skills/ via per-task openclaw-config.json that pins agents.defaults.workspace)
-// For Hermes:   writes {workDir}/AGENTS.md  (skills fall back to .agent_context/skills/; AGENTS.md points there)
+// For Hermes:   writes {workDir}/AGENTS.md  (skills discovered natively from a per-task HERMES_HOME/skills seeded by the daemon; see hermes_home.go)
 // For Gemini:   writes {workDir}/GEMINI.md  (discovered natively by the Gemini CLI)
 // For Pi:       writes {workDir}/AGENTS.md  (skills discovered natively from .pi/skills/)
 // For Cursor:   writes {workDir}/AGENTS.md  (skills discovered natively from .cursor/skills/)
@@ -750,7 +750,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		case "claude":
 			// Claude discovers skills natively from .claude/skills/ — just list names.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "antigravity":
+		case "codex", "copilot", "opencode", "openclaw", "pi", "cursor", "kimi", "kiro", "antigravity", "hermes":
 			// Codex, Copilot, OpenCode, OpenClaw, Pi, Cursor, Kimi, Kiro, and
 			// Antigravity discover skills natively from their respective paths.
 			// For OpenClaw, the daemon also writes a per-task openclaw-config.json
@@ -759,10 +759,9 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			// Antigravity inherits Gemini CLI's workspace skill layout —
 			// {workDir}/.agents/skills/ — see resolveSkillsDir.
 			b.WriteString("You have the following skills installed (discovered automatically):\n\n")
-		case "gemini", "hermes":
-			// Gemini reads GEMINI.md directly. Hermes has no native skill
-			// discovery path wired up in resolveSkillsDir; both fall back to
-			// referencing the files explicitly under .agent_context/skills/.
+		case "gemini":
+			// Gemini reads GEMINI.md directly and still relies on the explicit
+			// .agent_context/skills/ reference.
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 		default:
 			b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")

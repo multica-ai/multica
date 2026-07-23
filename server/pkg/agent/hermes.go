@@ -24,8 +24,128 @@ import (
 // overridden by user-configured custom_args. `acp` is the protocol
 // subcommand that drives the ACP JSON-RPC transport; overriding it
 // would break the daemon↔Hermes communication contract.
+//
+// The daemon strips the selected `-p`/`--profile` occurrence via
+// StripHermesProfileArgs after resolving the profile and building every task's
+// overlay. This prevents Hermes from re-pointing HERMES_HOME past the overlay.
 var hermesBlockedArgs = map[string]blockedArgMode{
 	"acp": blockedStandalone,
+}
+
+// hermesArgProfileRe mirrors the space-form guard in Hermes'
+// hermes_cli.main._apply_profile_override step 1b: a `-p <value>` whose value
+// doesn't match the profile-id shape is not a profile selection at all (e.g.
+// pytest's `-p no:xdist`), so it is ignored rather than consumed. The inline
+// `--profile=<value>` form is NOT guarded here — Hermes forwards it verbatim to
+// resolve_profile_env, which validates and hard-fails on an invalid value; that
+// validation lives in the daemon-side resolver (execenv.ResolveHermesProfile).
+var hermesArgProfileRe = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]{0,63}$`)
+
+// hermesValueFlags and hermesOptionalValueFlags mirror the value-taking flags
+// Hermes skips while scanning argv for -p/--profile, so a value like the `coder`
+// in `-m coder -p research` is never misread as the profile. Kept in sync with
+// _apply_profile_override.value_flags / optional_value_flags.
+var hermesValueFlags = map[string]struct{}{
+	"-z": {}, "--oneshot": {}, "-m": {}, "--model": {}, "--provider": {},
+	"-t": {}, "--toolsets": {}, "-r": {}, "--resume": {}, "-s": {},
+	"--skills": {}, "--usage-file": {},
+}
+var hermesOptionalValueFlags = map[string]struct{}{"-c": {}, "--continue": {}}
+
+// HermesProfileSelection is the profile selection parsed out of custom_args by
+// ParseHermesProfileArgs. It carries the exact argv occurrence to consume so the
+// daemon-side resolver and the launch-arg stripping act on one authoritative
+// parse instead of each re-approximating Hermes' argv handling.
+type HermesProfileSelection struct {
+	Name    string // the selected value; "" for the empty inline `--profile=` value
+	Found   bool   // a -p/--profile selection with a value was matched
+	Inline  bool   // matched the `--profile=<value>` form (value validated downstream)
+	ArgFrom int    // index of the first token to strip, or -1 when nothing matched
+	ArgLen  int    // tokens to strip: 2 for `-p <value>`, 1 for `--profile=<value>`
+}
+
+// ParseHermesProfileArgs finds the first Hermes profile selection in custom_args,
+// mirroring hermes_cli.main._apply_profile_override step 1/1b: it scans for the
+// first `-p`/`--profile <value>` or `--profile=<value>`, skipping value-taking
+// flags and stopping at a `--` sentinel or an `mcp add --args` command-argv
+// passthrough region. A space-form value that fails the profile-id shape is
+// ignored (matches Hermes discarding it). Args are unquoted with the same helper
+// as filterCustomArgs so quoting is handled consistently.
+func ParseHermesProfileArgs(args []string) HermesProfileSelection {
+	none := HermesProfileSelection{ArgFrom: -1}
+	i := 0
+	for i < len(args) {
+		arg := unshellQuoteArg(args[i])
+		if arg == "--" {
+			break
+		}
+		if arg == "--args" && hermesInsideMcpAdd(args, i) {
+			break
+		}
+		if arg == "-p" || arg == "--profile" {
+			if i+1 < len(args) {
+				val := unshellQuoteArg(args[i+1])
+				if !hermesArgProfileRe.MatchString(val) {
+					return none // step 1b: not a valid profile value, ignore
+				}
+				return HermesProfileSelection{Name: val, Found: true, ArgFrom: i, ArgLen: 2}
+			}
+			return none // trailing flag with no value
+		}
+		if v, ok := strings.CutPrefix(arg, "--profile="); ok {
+			return HermesProfileSelection{Name: v, Found: true, Inline: true, ArgFrom: i, ArgLen: 1}
+		}
+		if _, ok := hermesValueFlags[arg]; ok && i+1 < len(args) {
+			i += 2
+			continue
+		}
+		if _, ok := hermesOptionalValueFlags[arg]; ok && i+1 < len(args) &&
+			!strings.HasPrefix(unshellQuoteArg(args[i+1]), "-") {
+			i += 2
+			continue
+		}
+		i++
+	}
+	return none
+}
+
+// hermesInsideMcpAdd reports whether argv position index sits inside an
+// `mcp add ... --args <child argv>` passthrough region, where flags belong to
+// the child MCP command and must not be read as Hermes' own profile selector.
+func hermesInsideMcpAdd(args []string, index int) bool {
+	mcp := -1
+	for j := 0; j < index; j++ {
+		if unshellQuoteArg(args[j]) == "mcp" {
+			mcp = j
+			break
+		}
+	}
+	if mcp < 0 {
+		return false
+	}
+	for j := mcp + 1; j < index; j++ {
+		if unshellQuoteArg(args[j]) == "add" {
+			return true
+		}
+	}
+	return false
+}
+
+// StripHermesProfileArgs removes exactly the argv occurrence ParseHermesProfileArgs
+// selected. The daemon calls this after it builds the per-task overlay, so
+// Hermes uses the overlay's HERMES_HOME instead of re-resolving the profile.
+func StripHermesProfileArgs(args []string, sel HermesProfileSelection) []string {
+	if !sel.Found || sel.ArgFrom < 0 || sel.ArgLen <= 0 {
+		return args
+	}
+	end := sel.ArgFrom + sel.ArgLen
+	if end > len(args) {
+		end = len(args)
+	}
+	out := make([]string, 0, len(args)-(end-sel.ArgFrom))
+	out = append(out, args[:sel.ArgFrom]...)
+	out = append(out, args[end:]...)
+	return out
 }
 
 // hermesBackend implements Backend by spawning `hermes acp` and communicating
