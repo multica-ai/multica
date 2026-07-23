@@ -403,6 +403,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
   let qc: QueryClient;
   let updateIssue: ReturnType<typeof vi.fn<(id: string, data: unknown) => Promise<Issue>>>;
+  let moveIssue: ReturnType<typeof vi.fn<(id: string, data: unknown) => Promise<Issue>>>;
 
   function makeBucketed(): ListIssuesCache {
     return {
@@ -430,7 +431,8 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     updateIssue = vi.fn();
-    setApiInstance({ updateIssue } as unknown as ApiClient);
+    moveIssue = vi.fn();
+    setApiInstance({ updateIssue, moveIssue } as unknown as ApiClient);
     qc.setQueryData<ListIssuesCache>(wsKey, makeBucketed());
     qc.setQueryData<ListIssuesCache>(myKey, makeBucketed());
     qc.setQueryData<ListIssuesCache>(projectKey, makeBucketed());
@@ -475,6 +477,39 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     for (const key of [wsKey, myKey, projectKey]) {
       expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
     }
+  });
+
+  it("uses server move intent while keeping provisional position optimistic-only", async () => {
+    moveIssue.mockResolvedValue(
+      makeIssue(1, { status: "in_progress", position: 15 }),
+    );
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: "issue-1",
+        status: "in_progress",
+        position: 12,
+        move_intent: {
+          before_id: "issue-0",
+          after_id: "issue-2",
+        },
+      });
+    });
+
+    expect(moveIssue).toHaveBeenCalledWith("issue-1", {
+      status: "in_progress",
+      before_id: "issue-0",
+      after_id: "issue-2",
+    });
+    expect(updateIssue).not.toHaveBeenCalled();
+    expect(
+      qc
+        .getQueryData<ListIssuesCache>(wsKey)
+        ?.byStatus.in_progress?.issues[0]?.position,
+    ).toBe(15);
   });
 
   it("optimistically patches the linked inbox row status and reconciles with the server response", async () => {

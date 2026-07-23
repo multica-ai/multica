@@ -496,6 +496,67 @@ func TestCodexRawTurnCompleted(t *testing.T) {
 	}
 }
 
+func TestCodexTurnNotificationGateDropsResumeReplayAndOtherTurns(t *testing.T) {
+	t.Parallel()
+
+	gate := &codexTurnNotificationGate{}
+	previousCompleted := map[string]any{
+		"threadId": "thr-resumed",
+		"turn": map[string]any{
+			"id":     "turn-previous",
+			"status": "completed",
+		},
+	}
+	if gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("resume replay must stay blocked before the current turn is armed")
+	}
+
+	gate.arm()
+	if !gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("armed gate must preserve older streams that omit turn/started")
+	}
+	if !gate.accept("turn/started", map[string]any{
+		"threadId": "thr-resumed",
+		"turn":     map[string]any{"id": "turn-current"},
+	}) {
+		t.Fatal("current turn/started should open the lifecycle gate")
+	}
+	if gate.accept("turn/completed", previousCompleted) {
+		t.Fatal("completion from another turn must not finish the current turn")
+	}
+	if !gate.accept("item/completed", map[string]any{
+		"threadId": "thr-resumed",
+		"turnId":   "turn-current",
+	}) {
+		t.Fatal("current-turn item should pass the gate")
+	}
+	if !gate.accept("turn/completed", map[string]any{
+		"threadId": "thr-resumed",
+		"turn": map[string]any{
+			"id":     "turn-current",
+			"status": "completed",
+		},
+	}) {
+		t.Fatal("current turn completion should pass the gate")
+	}
+
+	legacy := &codexTurnNotificationGate{}
+	legacyComplete := map[string]any{"msg": map[string]any{"type": "task_complete"}}
+	if legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("legacy resume replay must stay blocked before the current turn is armed")
+	}
+	legacy.arm()
+	if !legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("armed gate must preserve legacy streams that omit task_started")
+	}
+	if !legacy.accept("codex/event", map[string]any{"msg": map[string]any{"type": "task_started"}}) {
+		t.Fatal("legacy current task_started should open the lifecycle gate")
+	}
+	if !legacy.accept("codex/event", legacyComplete) {
+		t.Fatal("legacy current task completion should pass the gate")
+	}
+}
+
 func TestCodexRawTurnCompletedSubtractsCachedInput(t *testing.T) {
 	t.Parallel()
 
@@ -741,6 +802,7 @@ func TestCodexSessionRootPrefersExplicitTaskHome(t *testing.T) {
 func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 	t.Parallel()
 	taskHome := t.TempDir()
+	threadID := "task-thread"
 	startTime := time.Now().Add(-time.Minute)
 	dateDir := filepath.Join(taskHome, "sessions",
 		fmt.Sprintf("%04d", startTime.Year()),
@@ -751,15 +813,15 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 		t.Fatalf("mkdir date dir: %v", err)
 	}
 	content := strings.Join([]string{
-		`{"timestamp":"2026-07-13T00:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`,
-		`{"timestamp":"2026-07-13T00:00:01.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20},"model":"gpt-5.6-sol"}}}`,
+		fmt.Sprintf(`{"timestamp":%q,"type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`, startTime.Add(time.Second).UTC().Format(time.RFC3339Nano)),
+		fmt.Sprintf(`{"timestamp":%q,"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":500,"output_tokens":20},"model":"gpt-5.6-sol"}}}`, startTime.Add(2*time.Second).UTC().Format(time.RFC3339Nano)),
 		"",
 	}, "\n")
-	if err := os.WriteFile(filepath.Join(dateDir, "rollout.jsonl"), []byte(content), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
 		t.Fatalf("write session file: %v", err)
 	}
 
-	got := scanCodexSessionUsage(startTime, taskHome)
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, false)
 	if got == nil {
 		t.Fatal("expected usage scanned from the per-task home")
 	}
@@ -768,6 +830,308 @@ func TestScanCodexSessionUsageReadsPerTaskHome(t *testing.T) {
 	}
 	if got.model != "gpt-5.6-sol" {
 		t.Errorf("model = %q, want gpt-5.6-sol", got.model)
+	}
+}
+
+func TestScanCodexSessionUsageSubtractsResumeBaseline(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "resumed-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-13T00:00:00.000Z","type":"turn_context","payload":{"model":"gpt-5.6-sol"}}`,
+		`{"timestamp":"2026-07-13T00:00:05.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":700,"output_tokens":50,"reasoning_output_tokens":10},"model":"gpt-5.6-sol"}}}`,
+		`{"timestamp":"2026-07-13T00:00:11.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1300,"cached_input_tokens":900,"output_tokens":70,"reasoning_output_tokens":15},"model":"gpt-5.6-sol"}}}`,
+		`{"timestamp":"2026-07-13T00:00:12.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":1400,"output_tokens":100,"reasoning_output_tokens":25},"model":"gpt-5.6-sol"}}}`,
+		"",
+	}, "\n")
+	if err := os.WriteFile(filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl"), []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
+	if got == nil {
+		t.Fatal("expected usage")
+	}
+	// total_token_usage is cumulative for the resumed Codex session. This task
+	// should report only the delta after startTime, not the whole session total.
+	want := TokenUsage{InputTokens: 100, OutputTokens: 65, CacheReadTokens: 700}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want resumed-task delta %+v", got.usage, want)
+	}
+}
+
+func TestParseCodexSessionFileSinceResumeEdgeCases(t *testing.T) {
+	t.Parallel()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	tests := []struct {
+		name  string
+		lines []string
+		want  TokenUsage
+	}{
+		{
+			name: "final last usage wins over earlier total",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":20}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":7,"output_tokens":3}}}}`,
+			},
+			want: TokenUsage{InputTokens: 7, OutputTokens: 3},
+		},
+		{
+			name: "final total wins over earlier last usage",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":7,"output_tokens":3}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":20}}}}`,
+			},
+			want: TokenUsage{InputTokens: 60, OutputTokens: 10},
+		},
+		{
+			name: "cache alias changes from cache read to cached input",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cache_read_input_tokens":700}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cached_input_tokens":1400}}}}`,
+			},
+			want: TokenUsage{InputTokens: 100, CacheReadTokens: 700},
+		},
+		{
+			name: "cache alias changes from cached input to cache read",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1000,"cached_input_tokens":700}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":1800,"cache_read_input_tokens":1400}}}}`,
+			},
+			want: TokenUsage{InputTokens: 100, CacheReadTokens: 700},
+		},
+		{
+			name: "counter reset accumulates every segment",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":50}}}}`,
+				`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"output_tokens":60}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":10,"output_tokens":5}}}}`,
+				`{"timestamp":"2026-07-13T00:00:13Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"output_tokens":70}}}}`,
+			},
+			want: TokenUsage{InputTokens: 170, OutputTokens: 80},
+		},
+		{
+			name: "one counter reset does not reset monotonic fields",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":50}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":120,"output_tokens":5}}}}`,
+			},
+			want: TokenUsage{InputTokens: 20, OutputTokens: 5},
+		},
+		{
+			name: "missing timestamp before boundary is baseline only",
+			lines: []string{
+				`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+			},
+			want: TokenUsage{InputTokens: 60, OutputTokens: 15},
+		},
+		{
+			name: "missing timestamp after boundary remains in delta",
+			lines: []string{
+				`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+				`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+				`{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":180,"output_tokens":30}}}}`,
+			},
+			want: TokenUsage{InputTokens: 80, OutputTokens: 20},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "session.jsonl")
+			content := strings.Join(append(tc.lines, ""), "\n")
+			if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+				t.Fatalf("write fixture: %v", err)
+			}
+			got := parseCodexSessionFileSince(path, startTime, true)
+			if got == nil {
+				t.Fatal("expected usage")
+			}
+			if got.usage != tc.want {
+				t.Fatalf("usage = %+v, want %+v", got.usage, tc.want)
+			}
+		})
+	}
+}
+
+func TestParseCodexSessionFileSinceAllMissingTimestamps(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "session.jsonl")
+	content := `{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write fixture: %v", err)
+	}
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+
+	if got := parseCodexSessionFileSince(path, startTime, true); got != nil {
+		t.Fatalf("ambiguous resumed usage = %+v, want nil", got.usage)
+	}
+	got := parseCodexSessionFileSince(path, startTime, false)
+	if got == nil {
+		t.Fatal("fresh rollout should retain timestamp-less usage")
+	}
+	want := TokenUsage{InputTokens: 100, OutputTokens: 10}
+	if got.usage != want {
+		t.Fatalf("fresh usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageFindsCrossDayResumeWithCacheOnlyDelta(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	threadID := "cross-day-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	previousDateDir := filepath.Join(taskHome, "sessions", "2026", "07", "12")
+	if err := os.MkdirAll(previousDateDir, 0o755); err != nil {
+		t.Fatalf("mkdir previous date dir: %v", err)
+	}
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-12T23:59:59Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"cached_input_tokens":100}}}}`,
+		`{"timestamp":"2026-07-13T00:00:11Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":150,"cached_input_tokens":150}}}}`,
+		"",
+	}, "\n")
+	path := filepath.Join(previousDateDir, "rollout-2026-07-12T23-59-59-"+threadID+".jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write session file: %v", err)
+	}
+	if err := os.Chtimes(path, startTime.Add(time.Second), startTime.Add(time.Second)); err != nil {
+		t.Fatalf("set session mtime: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
+	if got == nil {
+		t.Fatal("expected cross-day cache-only usage")
+	}
+	want := TokenUsage{CacheReadTokens: 50}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageFollowsLinkedSessionsRoot(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("directory symlink setup requires Windows developer mode")
+	}
+
+	root := t.TempDir()
+	taskHome := filepath.Join(root, "task-home")
+	store := filepath.Join(root, "session-store")
+	threadID := "linked-thread"
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(store, "2026", "07", "12")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir store date dir: %v", err)
+	}
+	if err := os.MkdirAll(taskHome, 0o755); err != nil {
+		t.Fatalf("mkdir task home: %v", err)
+	}
+	if err := os.Symlink(store, filepath.Join(taskHome, "sessions")); err != nil {
+		t.Fatalf("link sessions root: %v", err)
+	}
+
+	content := strings.Join([]string{
+		`{"timestamp":"2026-07-13T00:00:05Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":100,"output_tokens":10}}}}`,
+		`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":160,"output_tokens":25}}}}`,
+		"",
+	}, "\n")
+	path := filepath.Join(dateDir, "rollout-2026-07-12T23-59-59-"+threadID+".jsonl")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write linked rollout: %v", err)
+	}
+	if err := os.Chtimes(path, startTime.Add(time.Second), startTime.Add(time.Second)); err != nil {
+		t.Fatalf("set rollout mtime: %v", err)
+	}
+
+	got := scanCodexSessionUsage(startTime, taskHome, threadID, true)
+	if got == nil {
+		t.Fatal("expected usage through linked sessions root")
+	}
+	want := TokenUsage{InputTokens: 60, OutputTokens: 15}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageSelectsCurrentThread(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+
+	writeRollout := func(threadID string, input int, modTime time.Time) {
+		t.Helper()
+		content := fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d}}}}`+"\n", input)
+		path := filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+threadID+".jsonl")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s rollout: %v", threadID, err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatalf("set %s rollout mtime: %v", threadID, err)
+		}
+	}
+
+	writeRollout("current-thread", 60, startTime.Add(time.Second))
+	writeRollout("newer-subagent-thread", 900, startTime.Add(2*time.Second))
+
+	got := scanCodexSessionUsage(startTime, taskHome, "current-thread", false)
+	if got == nil {
+		t.Fatal("expected current thread usage")
+	}
+	want := TokenUsage{InputTokens: 60}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want current thread %+v", got.usage, want)
+	}
+}
+
+func TestScanCodexSessionUsageUsesSessionMetadataWhenFilenameDrifts(t *testing.T) {
+	t.Parallel()
+	taskHome := t.TempDir()
+	startTime := time.Date(2026, time.July, 13, 0, 0, 10, 0, time.UTC)
+	dateDir := filepath.Join(taskHome, "sessions", "2026", "07", "13")
+	if err := os.MkdirAll(dateDir, 0o755); err != nil {
+		t.Fatalf("mkdir date dir: %v", err)
+	}
+
+	writeRollout := func(filenameID, metadataID string, input int, modTime time.Time) {
+		t.Helper()
+		content := strings.Join([]string{
+			fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:11Z","type":"session_meta","payload":{"id":%q}}`, metadataID),
+			fmt.Sprintf(`{"timestamp":"2026-07-13T00:00:12Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":%d}}}}`, input),
+			"",
+		}, "\n")
+		path := filepath.Join(dateDir, "rollout-2026-07-13T00-00-00-"+filenameID+".jsonl")
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s rollout: %v", filenameID, err)
+		}
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatalf("set %s rollout mtime: %v", filenameID, err)
+		}
+	}
+
+	// The apparent filename match belongs to another thread and must be rejected.
+	writeRollout("current-thread", "other-thread", 900, startTime.Add(2*time.Second))
+	// A future filename format can still be attributed by canonical session_meta.
+	writeRollout("future-filename", "current-thread", 60, startTime.Add(time.Second))
+
+	got := scanCodexSessionUsage(startTime, taskHome, "current-thread", false)
+	if got == nil {
+		t.Fatal("expected current thread usage from session metadata")
+	}
+	want := TokenUsage{InputTokens: 60}
+	if got.usage != want {
+		t.Fatalf("usage = %+v, want metadata-owned thread %+v", got.usage, want)
 	}
 }
 
@@ -871,6 +1235,55 @@ func TestCodexRawTurnCompletedFromSubagentIgnored(t *testing.T) {
 	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_main","turn":{"id":"turn-main","status":"completed"}}}`)
 	if doneCount != 1 {
 		t.Fatalf("matching threadId should trigger onTurnDone exactly once, got %d", doneCount)
+	}
+}
+
+func TestCodexTurnNotificationGateIgnoresSubagentTurnStarted(t *testing.T) {
+	t.Parallel()
+
+	gate := &codexTurnNotificationGate{}
+	gate.arm()
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+	c.threadID = "thr_main"
+	c.acceptNotification = gate.accept
+
+	var (
+		gotText        string
+		doneCount      int
+		discardedCount int
+	)
+	c.onMessage = func(msg Message) {
+		if msg.Type == MessageText {
+			gotText = msg.Content
+		}
+	}
+	c.onTurnDone = func(aborted bool) {
+		doneCount++
+	}
+	c.onDiscardedNotification = func(string, map[string]any) {
+		discardedCount++
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr_main","turn":{"id":"turn-main"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr_subagent","turn":{"id":"turn-sub"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_main","turnId":"turn-main","item":{"type":"agentMessage","id":"msg-main","text":"Main answer"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr_main","turn":{"id":"turn-main","status":"completed"}}}`)
+
+	if gate.turnID != "turn-main" {
+		t.Fatalf("subagent turn/started replaced gate turnID: got %q", gate.turnID)
+	}
+	if c.turnID != "turn-main" {
+		t.Fatalf("subagent turn/started replaced client turnID: got %q", c.turnID)
+	}
+	if gotText != "Main answer" {
+		t.Fatalf("main turn text was lost after subagent start: got %q", gotText)
+	}
+	if doneCount != 1 {
+		t.Fatalf("main turn completion count = %d, want 1", doneCount)
+	}
+	if discardedCount != 0 {
+		t.Fatalf("subagent notification should be filtered before the gate, discarded callback count = %d", discardedCount)
 	}
 }
 
@@ -1736,6 +2149,255 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`echo 1 > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`echo 'ERROR mcp_manager_init: transport error: channel closed' >&2`+"\n"+
+		`sleep 5`+"\n"+
+		// This response is deliberately later than the host timeout. Killing
+		// the process tree must prevent it from reaching turn/start.
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-late"}}}'`+"\n"+
+		`read line && echo "$line" > "$DIR/turn-start"`+"\n")
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	backend, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Logger:         logger,
+		TaskID:         "task-thread-start-timeout",
+		RuntimeID:      "runtime-thread-start-timeout",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "secret prompt must not be logged", ExecOptions{
+		Timeout:                   5 * time.Second,
+		HandshakeTimeout:          3 * time.Second,
+		SemanticInactivityTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" || !strings.Contains(result.Error, "thread/start") {
+		t.Fatalf("expected thread/start timeout failure, got %+v", result)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+	if _, err := os.Stat(filepath.Join(filepath.Dir(fakePath), "turn-start")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("late response reached turn/start; stat err=%v", err)
+	}
+
+	entries := parseJSONLogEntries(t, logs.String())
+	sent := findCodexLifecyclePhase(t, entries, "thread_start_sent")
+	failure := findCodexLifecyclePhase(t, entries, "thread_start_failure")
+	for key, want := range map[string]any{
+		"task_id":         "task-thread-start-timeout",
+		"runtime_id":      "runtime-thread-start-timeout",
+		"attempt":         float64(1),
+		"active_launches": float64(1),
+		"method":          "thread/start",
+	} {
+		if got := sent[key]; got != want {
+			t.Fatalf("sent[%s]=%v, want %v; entry=%v", key, got, want, sent)
+		}
+	}
+	if failure["cleanup_confirmed"] != true || failure["reaped"] != true {
+		t.Fatalf("failure lacks confirmed cleanup/reap: %v", failure)
+	}
+	if failure["retry_safe"] != false || failure["retry_attempted"] != false {
+		t.Fatalf("thread/start timeout must remain fail-closed: %v", failure)
+	}
+	if failure["stderr_model_refresh_timeout_count"] != float64(1) ||
+		failure["stderr_mcp_init_transport_count"] != float64(1) ||
+		failure["stderr_bare_timeout_count"] != float64(0) {
+		t.Fatalf("unexpected stderr classification: %v", failure)
+	}
+	if _, ok := failure["latency_ms"]; !ok {
+		t.Fatalf("failure lacks monotonic latency: %v", failure)
+	}
+	if strings.Contains(logs.String(), "secret prompt must not be logged") {
+		t.Fatalf("prompt leaked into lifecycle logs: %s", logs.String())
+	}
+}
+
+func TestCodexExecuteThreadStartResponseRequiresThreadID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{}}}'`+"\n")
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" || !strings.Contains(result.Error, "returned no thread ID") {
+		t.Fatalf("expected missing thread ID failure, got %+v", result)
+	}
+
+	phaseCounts := map[string]int{}
+	for _, entry := range parseJSONLogEntries(t, logs.String()) {
+		if phase, ok := entry["phase"].(string); ok {
+			phaseCounts[phase]++
+		}
+	}
+	if phaseCounts["thread_start_sent"] != 1 || phaseCounts["thread_start_failure"] != 1 {
+		t.Fatalf("expected one sent and one failure phase, got %v", phaseCounts)
+	}
+	if phaseCounts["thread_start_response"] != 0 {
+		t.Fatalf("invalid thread/start response emitted success phase: %v", phaseCounts)
+	}
+}
+
+func TestCodexThreadStartTimeoutDoesNotPersistSensitiveInputs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	const envSecret = "opaque-env-sentinel-9382"
+	const systemSecret = "opaque-system-sentinel-4721"
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo "$OPAQUE_AUTH_VALUE" >&2`+"\n"+
+		`echo "$line" >&2`+"\n"+
+		`sleep 5`+"\n")
+
+	var logs bytes.Buffer
+	backend, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.New(slog.NewJSONHandler(&logs, nil)),
+		Env:            map[string]string{"OPAQUE_AUTH_VALUE": envSecret},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+		Timeout:          5 * time.Second,
+		HandshakeTimeout: time.Second,
+		SystemPrompt:     systemSecret,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	combined := result.Error + "\n" + logs.String()
+	for _, secret := range []string{envSecret, systemSecret} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("sensitive input persisted in timeout diagnostics")
+		}
+	}
+}
+
+func TestCodexExecuteConcurrentThreadStartTimeoutsRemainUnserialized(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`sleep 5`+"\n")
+
+	maxActiveCodexLaunchesObserved.Store(0)
+	results := make(chan Result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+			if err != nil {
+				results <- Result{Status: "failed", Error: err.Error()}
+				return
+			}
+			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+				Timeout:          5 * time.Second,
+				HandshakeTimeout: 3 * time.Second,
+			})
+			if err != nil {
+				results <- Result{Status: "failed", Error: err.Error()}
+				return
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+			results <- <-session.Result
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		result := <-results
+		if result.Status != "failed" || !strings.Contains(result.Error, "thread/start") {
+			t.Fatalf("concurrent timeout result=%+v", result)
+		}
+	}
+	if got := maxActiveCodexLaunchesObserved.Load(); got < 2 {
+		t.Fatalf("thread/start timeout handling serialized launches: max active=%d", got)
+	}
+}
+
+func parseJSONLogEntries(t *testing.T, raw string) []map[string]any {
+	t.Helper()
+	var entries []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		if line == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("parse log entry: %v: %q", err, line)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func findCodexLifecyclePhase(t *testing.T, entries []map[string]any, phase string) map[string]any {
+	t.Helper()
+	for _, entry := range entries {
+		if entry["msg"] == "codex lifecycle" && entry["phase"] == phase {
+			return entry
+		}
+	}
+	t.Fatalf("missing codex lifecycle phase %q in %v", phase, entries)
+	return nil
+}
+
 func TestCodexExecuteRetriesInitializeTimeoutOnceAfterCleanup(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
@@ -1756,8 +2418,11 @@ func TestCodexExecuteRetriesInitializeTimeoutOnceAfterCleanup(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-retried","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
-		Timeout:                   10 * time.Second,
-		HandshakeTimeout:          100 * time.Millisecond,
+		Timeout: 10 * time.Second,
+		// Forked shell startup regularly exceeds 100ms on loaded CI runners.
+		// Keep the first attempt's 5s hang above this bound while giving the
+		// successful second initialize enough scheduling headroom.
+		HandshakeTimeout:          2 * time.Second,
 		SemanticInactivityTimeout: time.Second,
 	})
 	if result.Status != "completed" {
@@ -1783,8 +2448,8 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 			`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
 			`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
 			`read line`+"\n"+
-			`sleep 1`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+			`sleep 3.2`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second})
 		if result.Status != "failed" || !strings.Contains(result.Error, CodexHandshakeTimeoutMarker) {
 			t.Fatalf("expected final initialize timeout, got status=%q error=%q", result.Status, result.Error)
 		}
@@ -1800,8 +2465,8 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 			`echo x >> `+countPath+"\n"+
 			`read line`+"\n"+
 			`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"unexpected","item":{"type":"commandExecution","id":"cmd-1","command":"true"}}}'`+"\n"+
-			`sleep 1`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+			`sleep 3.2`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second})
 		if result.Status != "failed" {
 			t.Fatalf("expected failed, got %q", result.Status)
 		}
@@ -1818,8 +2483,8 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 		fakePath := writeFakeCodexAppServer(t, ""+
 			`echo x >> `+countPath+"\n"+
 			`read line`+"\n"+
-			`sleep 1`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+			`sleep 3.2`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second})
 		if !strings.Contains(result.Error, "retry suppressed: process cleanup/reap not confirmed") {
 			t.Fatalf("expected cleanup reason, got %q", result.Error)
 		}
@@ -1880,6 +2545,41 @@ func TestSanitizeCodexDiagnosticRedactsSecrets(t *testing.T) {
 		if strings.Contains(got, secret) {
 			t.Fatalf("sanitized diagnostic leaked %q: %q", secret, got)
 		}
+	}
+}
+
+func TestClassifyCodexStartupStderr(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		want   codexStderrClassification
+	}{
+		{
+			name:   "model refresh timeout",
+			stderr: "failed to refresh available models: timeout waiting for child process to exit",
+			want:   codexStderrClassification{modelRefreshTimeout: 1},
+		},
+		{
+			name:   "mcp init transport",
+			stderr: "mcp_manager_init transport error: channel closed",
+			want:   codexStderrClassification{mcpInitTransport: 1},
+		},
+		{
+			name: "bare timeout",
+			want: codexStderrClassification{bareTimeout: 1},
+		},
+		{
+			name: "non-timeout error is not bare timeout",
+			want: codexStderrClassification{},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			timedOut := i != len(tests)-1
+			if got := classifyCodexStartupStderr(tc.stderr, timedOut); got != tc.want {
+				t.Fatalf("classification=%+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -2021,10 +2721,14 @@ func TestCodexExecuteTimesOutWhenTurnStopsAfterToolResult(t *testing.T) {
 }
 
 func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
-	t.Parallel()
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	// The model catalog signal below makes both attempts retry safe, so this
+	// exercises the exhausted-retry path and pays two cleanup windows.
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
 
 	fakePath := writeFakeCodexAppServer(t, ""+
 		`read line`+"\n"+
@@ -2036,7 +2740,7 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-stuck","turn":{"id":"turn-stuck"}}}'`+"\n"+
 		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
-		`sleep 5`+"\n")
+		`sleep 2`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
 		Timeout:                   5 * time.Second,
@@ -2051,9 +2755,9 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 		"turn-stuck",
 		`model="default(empty)"`,
 		`codex_version="codex-cli 0.0.0-test"`,
-		"model catalog refresh timed out",
+		"Codex could not load its model catalog",
 		"codex stderr:",
-		codexModelCatalogRefreshTimeoutSignal,
+		codexModelCatalogRefreshFailureSignal,
 	} {
 		if !strings.Contains(result.Error, want) {
 			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
@@ -2402,6 +3106,272 @@ func TestCodexExecuteSemanticInactivityDoesNotAffectNormalTurnCompletion(t *test
 	}
 }
 
+// TestCodexExecuteRetriesAfterModelCatalogRefreshFailure covers the MUL-5110
+// hot path: Codex accepts the turn, fails to load its model catalog, and never
+// emits an item. The daemon must retry once and surface the second attempt.
+func TestCodexExecuteRetriesAfterModelCatalogRefreshFailure(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	// The fixture counts invocations next to itself so attempt 1 can stall and
+	// attempt 2 can succeed on a different thread.
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-cold"}}}'`+"\n"+
+		`  read line`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-cold","turn":{"id":"turn-cold"}}}'`+"\n"+
+		`  echo 'ERROR codex_models_manager::manager: failed to refresh available models: stream disconnected before completion' >&2`+"\n"+
+		`  sleep 2`+"\n"+
+		`else`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-warm"}}}'`+"\n"+
+		`  read line`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-warm","turn":{"id":"turn-warm"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-warm","item":{"type":"agentMessage","id":"msg-1","text":"Recovered"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-warm","turn":{"id":"turn-warm","status":"completed"}}}'`+"\n"+
+		`fi`+"\n")
+
+	result, messages := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		Timeout:                   20 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	}, 20*time.Second)
+
+	if result.Status != "completed" {
+		t.Fatalf("expected the retry to complete, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Recovered" {
+		t.Fatalf("expected output from the second attempt, got %q", result.Output)
+	}
+	if result.SessionID != "thr-warm" {
+		t.Fatalf("expected the surviving thread id, got %q", result.SessionID)
+	}
+	// The discarded attempt must not pin the resume pointer to a thread that
+	// never produced a turn.
+	for _, msg := range messages {
+		if msg.SessionID == "thr-cold" {
+			t.Fatalf("discarded attempt leaked a session pin for thr-cold: %+v", msg)
+		}
+	}
+}
+
+// TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume covers the
+// resume case: the stalled attempt already reached turn/started on the prior
+// thread, so the retry must not resume it again. It starts a fresh thread and
+// keeps ResumeExpected so the lost context is disclosed to the agent.
+func TestCodexExecuteRetryAfterCatalogFailureStartsFreshThreadForResume(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	// Each invocation records the JSON-RPC lines it received so the test can
+	// assert which thread RPC the retry used.
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`LOG="$DIR/rpc-$ATTEMPT.log"`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`read line; echo "$line" >> "$LOG"`+"\n"+
+		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-prior"}}}'`+"\n"+
+		`  read line; echo "$line" >> "$LOG"`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-prior","turn":{"id":"turn-prior"}}}'`+"\n"+
+		`  echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`  sleep 2`+"\n"+
+		`else`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-fresh"}}}'`+"\n"+
+		`  read line; echo "$line" >> "$LOG"`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-fresh","turn":{"id":"turn-fresh"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-fresh","item":{"type":"agentMessage","id":"msg-1","text":"Fresh"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-fresh","turn":{"id":"turn-fresh","status":"completed"}}}'`+"\n"+
+		`fi`+"\n")
+
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, ExecOptions{
+		ResumeSessionID:           "thr-prior",
+		ResumeExpected:            true,
+		Timeout:                   20 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	}, 20*time.Second)
+
+	if result.Status != "completed" {
+		t.Fatalf("expected the retry to complete, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.SessionID != "thr-fresh" {
+		t.Fatalf("expected the retry to land on a fresh thread, got %q", result.SessionID)
+	}
+	dir := filepath.Dir(fakePath)
+	first, err := os.ReadFile(filepath.Join(dir, "rpc-1.log"))
+	if err != nil {
+		t.Fatalf("read first attempt rpc log: %v", err)
+	}
+	if !strings.Contains(string(first), "thread/resume") {
+		t.Fatalf("expected the first attempt to resume the prior thread, got %s", first)
+	}
+	second, err := os.ReadFile(filepath.Join(dir, "rpc-2.log"))
+	if err != nil {
+		t.Fatalf("read second attempt rpc log: %v", err)
+	}
+	if strings.Contains(string(second), "thread/resume") {
+		t.Fatalf("retry must not resume the stalled thread, got %s", second)
+	}
+	if !strings.Contains(string(second), "thread/start") {
+		t.Fatalf("expected the retry to start a fresh thread, got %s", second)
+	}
+	// ResumeExpected survives the cleared pointer, so the agent is told the
+	// prior context could not be restored.
+	if !strings.Contains(string(second), "previous conversation context could not be restored") {
+		t.Fatalf("expected the retry input to carry the continuity notice, got %s", second)
+	}
+}
+
+// TestCodexExecuteDoesNotRetryCatalogFailureWhenCleanupUnconfirmed keeps the
+// retry gate tied to a reaped process tree: a surviving app-server would race
+// the second attempt, so an unconfirmed cleanup must not retry.
+func TestCodexExecuteDoesNotRetryCatalogFailureWhenCleanupUnconfirmed(t *testing.T) {
+	// Not t.Parallel(): this test mutates package-level Codex overrides.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+	codexCleanupConfirmationOverride.Store(-1)
+	t.Cleanup(func() { codexCleanupConfirmationOverride.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-unreaped"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-unreaped","turn":{"id":"turn-unreaped"}}}'`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+// TestCodexExecuteDoesNotRetryCatalogFailureAfterSemanticProgress is the core
+// no-duplicate-side-effects guard: once a turn has produced content or run a
+// tool, the catalog signal must not buy it a replay.
+func TestCodexExecuteDoesNotRetryCatalogFailureAfterSemanticProgress(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-worked"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-worked","turn":{"id":"turn-worked"}}}'`+"\n"+
+		// A tool ran: this turn has side effects and must never be replayed,
+		// even though the catalog signal is present in stderr.
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-worked","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"deployed"}}}'`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
+func assertCodexAttemptCount(t *testing.T, fakePath, want string) {
+	t.Helper()
+	attempts, err := os.ReadFile(filepath.Join(filepath.Dir(fakePath), "attempts"))
+	if err != nil {
+		t.Fatalf("read attempt counter: %v", err)
+	}
+	if got := strings.TrimSpace(string(attempts)); got != want {
+		t.Fatalf("expected %s attempt(s), got %q", want, got)
+	}
+}
+
+// TestCodexExecuteDoesNotRetryFirstTurnNoProgressWithoutCatalogSignal keeps the
+// retry gate narrow: a stalled first turn with no model catalog evidence in
+// stderr is not known to be transient, so it must fail on the first attempt.
+func TestCodexExecuteDoesNotRetryFirstTurnNoProgressWithoutCatalogSignal(t *testing.T) {
+	// Not t.Parallel(): this test mutates codexGracefulShutdownTimeoutNanos.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`STATE="$(dirname "$0")/attempts"`+"\n"+
+		`ATTEMPT=$(cat "$STATE" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$STATE"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-quiet"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-quiet","turn":{"id":"turn-quiet"}}}'`+"\n"+
+		`echo 'ERROR something else entirely went wrong' >&2`+"\n"+
+		`sleep 2`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "timeout" {
+		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+}
+
 func TestCodexExecuteTurnCompletionCanPrecedeTurnStartResponse(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -2431,6 +3401,38 @@ func TestCodexExecuteTurnCompletionCanPrecedeTurnStartResponse(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteResumeIgnoresPreviousTurnCompletion(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-resumed","turn":{"id":"turn-previous","status":"completed"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-resumed"}}}'`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-resumed","turn":{"id":"turn-current"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-resumed","turnId":"turn-current","item":{"type":"agentMessage","id":"msg-current","text":"Current answer"}}}'`+"\n"+
+		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-resumed","turn":{"id":"turn-current","status":"completed"}}}'`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		ResumeSessionID:           "thr-resumed",
+		ResumeExpected:            true,
+		Timeout:                   5 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Current answer" {
+		t.Fatalf("expected current-turn output, got %q", result.Output)
+	}
+}
+
 func writeFakeCodexAppServer(t *testing.T, body string) string {
 	t.Helper()
 	fakePath := filepath.Join(t.TempDir(), "codex")
@@ -2443,18 +3445,34 @@ func writeFakeCodexAppServer(t *testing.T, body string) string {
 
 func executeFakeCodex(t *testing.T, fakePath string, opts ExecOptions) Result {
 	t.Helper()
+	result, _ := executeFakeCodexCollectingMessages(t, fakePath, opts, 10*time.Second)
+	return result
+}
+
+// executeFakeCodexCollectingMessages runs the fixture and returns the streamed
+// messages alongside the result. budget bounds both the execution context and
+// the wait, so retry-exercising tests can ask for more than the default.
+func executeFakeCodexCollectingMessages(t *testing.T, fakePath string, opts ExecOptions, budget time.Duration) (Result, []Message) {
+	t.Helper()
 	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
 	if err != nil {
 		t.Fatalf("new codex backend: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), budget)
 	defer cancel()
 	session, err := backend.Execute(ctx, "prompt", opts)
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
+	var (
+		mu       sync.Mutex
+		messages []Message
+	)
 	go func() {
-		for range session.Messages {
+		for msg := range session.Messages {
+			mu.Lock()
+			messages = append(messages, msg)
+			mu.Unlock()
 		}
 	}()
 	select {
@@ -2462,10 +3480,13 @@ func executeFakeCodex(t *testing.T, fakePath string, opts ExecOptions) Result {
 		if !ok {
 			t.Fatal("result channel closed without a value")
 		}
-		return result
-	case <-time.After(10 * time.Second):
+		mu.Lock()
+		collected := append([]Message(nil), messages...)
+		mu.Unlock()
+		return result, collected
+	case <-time.After(budget):
 		t.Fatal("timeout waiting for result")
-		return Result{}
+		return Result{}, nil
 	}
 }
 
@@ -2505,6 +3526,50 @@ func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
 	}
 }
 
+func TestBuildCodexArgsExplicitFastOverridesLowerPriorityDisable(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgs(ExecOptions{
+		ServiceTier: codexFastServiceTier,
+		ExtraArgs: []string{
+			"--disable", codexFastModeFeature,
+			"--disable", "memory_tool",
+			"-c", "features.fast_mode=false",
+			"-c", "features.memory_tool=false",
+		},
+		CustomArgs: []string{
+			"'--disable=fast_mode'",
+			`--config=features.fast_mode="false"`,
+			"--enable", "multi_agent",
+		},
+	}, slog.Default())
+
+	want := []string{
+		"app-server", "--listen", "stdio://",
+		"--disable", "memory_tool",
+		"-c", "features.memory_tool=false",
+		"--enable", "multi_agent",
+		"--enable", codexFastModeFeature,
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("buildCodexArgs explicit Fast = %v, want %v", args, want)
+	}
+}
+
+func TestBuildCodexArgsFutureServiceTierDoesNotForceFastMode(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgs(ExecOptions{
+		ServiceTier: "future-tier",
+		CustomArgs:  []string{"--disable", codexFastModeFeature},
+	}, slog.Default())
+
+	want := []string{"app-server", "--listen", "stdio://", "--disable", codexFastModeFeature}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("buildCodexArgs future tier = %v, want %v", args, want)
+	}
+}
+
 func TestBuildCodexArgsDoesNotLeakMcpToArgv(t *testing.T) {
 	t.Parallel()
 
@@ -2540,6 +3605,27 @@ func TestBuildCodexArgsDoesNotLeakMcpToArgv(t *testing.T) {
 	}
 	if !foundModel {
 		t.Fatalf("expected non-mcp -c override to be preserved, got %v", args)
+	}
+}
+
+// TestNormalizeCodexLaunchArgsStripsShellQuotes locks the normalization the
+// daemon reuses for the Windows sandbox decision (MUL-4957): a shell-quoted
+// `-c windows.sandbox=...` opt-in must come out as clean tokens, and
+// buildCodexArgs must be exactly the transport prefix followed by this result,
+// so the sandbox decision and the launch argv can never diverge.
+func TestNormalizeCodexLaunchArgsStripsShellQuotes(t *testing.T) {
+	t.Parallel()
+
+	got := NormalizeCodexLaunchArgs(nil, []string{"'-c'", "'windows.sandbox=unelevated'"}, nil, slog.Default())
+	want := []string{"-c", "windows.sandbox=unelevated"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("NormalizeCodexLaunchArgs = %v, want %v", got, want)
+	}
+
+	launch := buildCodexArgs(ExecOptions{CustomArgs: []string{"'-c'", "'windows.sandbox=unelevated'"}}, slog.Default())
+	wantLaunch := append([]string{"app-server", "--listen", "stdio://"}, want...)
+	if !reflect.DeepEqual(launch, wantLaunch) {
+		t.Fatalf("buildCodexArgs = %v, want %v", launch, wantLaunch)
 	}
 }
 

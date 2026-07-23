@@ -31,7 +31,7 @@ describe("AttributionBadge", () => {
     };
     renderWithI18n(<AttributionBadge attribution={attribution} />);
 
-    expect(screen.getByText("on behalf of Ada Lovelace")).toBeInTheDocument();
+    expect(screen.getByText("On behalf of Ada Lovelace")).toBeInTheDocument();
     expect(screen.getByTitle("Direct member action")).toBeInTheDocument();
   });
 
@@ -45,7 +45,7 @@ describe("AttributionBadge", () => {
       <AttributionBadge attribution={attribution} />,
     );
 
-    expect(screen.getByText("on behalf of Grace")).toBeInTheDocument();
+    expect(screen.getByText("On behalf of Grace")).toBeInTheDocument();
     expect(container.querySelector(".text-warning")).not.toBeNull();
     expect(screen.getByTitle("No precise owner — attributed to the agent owner"))
       .toBeInTheDocument();
@@ -64,7 +64,7 @@ describe("AttributionBadge", () => {
       <AttributionBadge attribution={attribution} />,
     );
 
-    expect(screen.getByText("on behalf of Bohan")).toBeInTheDocument();
+    expect(screen.getByText("On behalf of Bohan")).toBeInTheDocument();
     // No warning tone — the confusing yellow that flagged backfilled runs is gone.
     expect(container.querySelector(".text-warning")).toBeNull();
     expect(container.querySelector(".text-muted-foreground")).not.toBeNull();
@@ -93,7 +93,7 @@ describe("AttributionBadge", () => {
     };
     renderWithI18n(<AttributionBadge attribution={attribution} />);
 
-    expect(screen.getByText("on behalf of someone")).toBeInTheDocument();
+    expect(screen.getByText("On behalf of someone")).toBeInTheDocument();
   });
 
   it("renders nothing when no responsible member resolved (MUL-4765)", () => {
@@ -134,7 +134,7 @@ describe("AttributionBadge", () => {
 
     // Only the avatar (name plumbs through the stub) — no "on behalf of" chip.
     expect(screen.getByTestId("actor-avatar")).toHaveTextContent("Ada Lovelace");
-    expect(screen.queryByText("on behalf of Ada Lovelace")).toBeNull();
+    expect(screen.queryByText("On behalf of Ada Lovelace")).toBeNull();
   });
 
   it("avatar variant renders nothing without an accountable member", () => {

@@ -19,6 +19,9 @@ These are the core variables you must think about before deploying — some have
 | `APP_ENV` | empty | **Yes** (must be `production`) |
 | `FRONTEND_ORIGIN` | empty | **Yes** (self-host must set its own domain) |
 | `MULTICA_DEV_VERIFICATION_CODE` | empty | No (must stay empty in production) |
+| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | No. Optional delay after `SIGTERM`/`SIGINT` before graceful shutdown begins. Accepts non-negative Go duration strings such as `300s` or `5m`; empty or `0` starts shutdown immediately |
+
+When using `MULTICA_SHUTDOWN_HOLD_DURATION` under Kubernetes, set `terminationGracePeriodSeconds` longer than the hold plus the server's subsequent graceful-shutdown budget. Setting both to the same duration can make kubelet send `SIGKILL` before cleanup finishes.
 
 <Callout type="warning">
 **Keep `MULTICA_DEV_VERIFICATION_CODE` empty in production.** A fixed local test code is disabled by default, but if you opt in with `MULTICA_DEV_VERIFICATION_CODE=888888`, anyone who can request a code can sign in with that fixed value while `APP_ENV` is non-production. The shortcut is ignored when `APP_ENV=production`.

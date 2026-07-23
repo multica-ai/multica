@@ -13,6 +13,76 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// TestSquadOperatingProtocolOwnsParentStatus locks the parent-issue status
+// contract: first dispatch moves todo→in_progress and stays there; only a
+// later confirmation of overall completion may advance to in_review; done is
+// left to humans / integrations.
+func TestSquadOperatingProtocolOwnsParentStatus(t *testing.T) {
+	protocol := squadOperatingProtocolFor(true)
+	compact := strings.Join(strings.Fields(protocol), " ")
+	for _, want := range []string{
+		"Own the parent issue status",
+		"move the parent to `in_progress`",
+		"successful dispatch is not completion",
+		"multica issue status <issue-id> in_review",
+		"Leave `done` to a human reviewer",
+	} {
+		if !strings.Contains(compact, want) {
+			t.Errorf("expected squad operating protocol to contain %q\n--- protocol ---\n%s", want, protocol)
+		}
+	}
+}
+
+// TestSquadOperatingProtocolScopesParentStatusOwnership is the guard for the
+// MUL-5156 review finding: the briefing is injected on every leader path,
+// including an @squad mention on an issue assigned to someone else. Status
+// ownership must not ride along — a guest leader gets an explicit prohibition
+// instead of the grant, so the model never has to infer the boundary.
+func TestSquadOperatingProtocolScopesParentStatusOwnership(t *testing.T) {
+	guest := squadOperatingProtocolFor(false)
+	compactGuest := strings.Join(strings.Fields(guest), " ")
+
+	for _, want := range []string{
+		"Do NOT change this issue's status",
+		"not assigned to your squad",
+		"never run `multica issue status` on it",
+	} {
+		if !strings.Contains(compactGuest, want) {
+			t.Errorf("expected guest-leader protocol to contain %q\n--- protocol ---\n%s", want, guest)
+		}
+	}
+	// The grant must be entirely absent — not merely qualified.
+	for _, forbidden := range []string{
+		"Own the parent issue status",
+		"multica issue status <issue-id> in_review",
+	} {
+		if strings.Contains(compactGuest, forbidden) {
+			t.Errorf("guest-leader protocol must not contain status grant %q\n--- protocol ---\n%s", forbidden, guest)
+		}
+	}
+
+	// Everything that is not the status responsibility is identical, so a
+	// guest leader still coordinates, delegates, and records activity.
+	owner := squadOperatingProtocolFor(true)
+	for _, shared := range []string{
+		"## Squad Operating Protocol",
+		"Delegate by @mention",
+		"Record your evaluation",
+		"Stop after dispatching",
+		"Never both for the same work.",
+	} {
+		if !strings.Contains(owner, shared) || !strings.Contains(guest, shared) {
+			t.Errorf("expected %q in both protocol variants", shared)
+		}
+	}
+
+	// The IsSquadLeader marker the daemon greps for must survive both ways,
+	// or a guest leader silently loses its no_action / silent-exit behavior.
+	if !strings.Contains(guest, "## Squad Operating Protocol") {
+		t.Error("guest-leader protocol lost the header the daemon keys IsSquadLeader off")
+	}
+}
+
 // TestSquadOperatingProtocolWarnsAgainstDualTrigger locks in the rule
 // added for #3033: the protocol must tell the squad leader that a `todo`
 // child issue with an agent assignee already fires that agent, so they
@@ -20,13 +90,14 @@ import (
 // same work. Asserts behavior, not exact wording — keep the substrings
 // narrow so harmless rewording doesn't break the test.
 func TestSquadOperatingProtocolWarnsAgainstDualTrigger(t *testing.T) {
-	compact := strings.Join(strings.Fields(squadOperatingProtocol), " ")
+	protocol := squadOperatingProtocolFor(true)
+	compact := strings.Join(strings.Fields(protocol), " ")
 	for _, want := range []string{
 		"--status todo` and an agent assignee already fires that agent automatically",
 		"Never both for the same work.",
 	} {
 		if !strings.Contains(compact, want) {
-			t.Errorf("expected squad operating protocol to contain %q\n--- protocol ---\n%s", want, squadOperatingProtocol)
+			t.Errorf("expected squad operating protocol to contain %q\n--- protocol ---\n%s", want, protocol)
 		}
 	}
 }
@@ -124,7 +195,7 @@ func TestBuildSquadLeaderBriefing_FullSquad(t *testing.T) {
 	_ = memberRowID
 	addHumanMember(t, squad.ID, userID, "reviewer")
 
-	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad)
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true)
 
 	for _, want := range []string{
 		"## Squad Operating Protocol",
@@ -200,7 +271,7 @@ func TestBuildSquadLeaderBriefing_MemberSkillsInRoster(t *testing.T) {
 	_ = memberRowID
 	addHumanMember(t, squad.ID, userID, "reviewer")
 
-	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad)
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true)
 
 	if !strings.Contains(out, "skills: polars, statistical-analysis") {
 		t.Errorf("expected skilled member skills in roster, got:\n%s", out)
@@ -219,7 +290,7 @@ func TestBuildSquadLeaderBriefing_OnlyLeader(t *testing.T) {
 	leaderID, _ := seededLeaderAgent(t)
 	squad := seedSquadForBriefing(t, leaderID, "Solo Squad", "")
 
-	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad)
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true)
 	if !strings.Contains(out, "Members: (none — you are the only member of this squad)") {
 		t.Errorf("expected lone-leader fallback line, got:\n%s", out)
 	}
@@ -243,7 +314,7 @@ func TestBuildSquadLeaderBriefing_SkipsArchivedAgent(t *testing.T) {
 		t.Fatalf("archive agent: %v", err)
 	}
 
-	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad)
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true)
 	if strings.Contains(out, "Retired Bot") {
 		t.Errorf("archived agent should not appear in roster:\n%s", out)
 	}
@@ -268,7 +339,7 @@ func TestBuildSquadLeaderBriefing_MentionsRoundTrip(t *testing.T) {
 	_ = memberRowID
 	addHumanMember(t, squad.ID, userID, "")
 
-	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad)
+	out := buildSquadLeaderBriefing(ctx, testHandler.Queries, squad, true)
 	mentions := util.ParseMentions(out)
 
 	wantIDs := map[string]string{

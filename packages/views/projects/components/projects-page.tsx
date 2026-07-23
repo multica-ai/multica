@@ -27,6 +27,7 @@ import {
   type ProjectColumnKey,
   type ProjectListFilters,
   type ProjectSortField,
+  type ProjectViewMode,
 } from "@multica/core/projects";
 import {
   pinListOptions,
@@ -58,7 +59,9 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
   DropdownMenuSeparator,
@@ -1150,32 +1153,55 @@ export function ProjectsPage() {
                   </PopoverContent>
                 </Popover>
 
-              {/* View toggle — a single button that flips table ⇄ cards.
-                  Pure presentation; coupled to nothing else. */}
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
-                      onClick={() => setViewMode(isCompact ? "comfortable" : "compact")}
-                    >
-                      {isCompact ? (
-                        <Rows3 className="size-3.5" />
-                      ) : (
-                        <LayoutGrid className="size-3.5" />
-                      )}
-                      <span className="hidden md:inline">
-                        {isCompact ? t(($) => $.page.view_table) : t(($) => $.page.view_cards)}
-                      </span>
-                    </Button>
-                  }
-                />
-                <TooltipContent side="bottom">
-                  {isCompact ? t(($) => $.page.view_cards) : t(($) => $.page.view_table)}
-                </TooltipContent>
-              </Tooltip>
+              {/* View selector — a dropdown menu to pick the list view,
+                  aligned with the issue list's view menu. The trigger shows
+                  the active view; the menu carries every mode so new views
+                  can be added as menu items. Pure presentation. */}
+              <DropdownMenu>
+                <Tooltip>
+                  <DropdownMenuTrigger
+                    render={
+                      <TooltipTrigger
+                        render={
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="h-8 w-8 gap-1 px-0 text-muted-foreground md:w-auto md:px-2.5"
+                          >
+                            {isCompact ? (
+                              <Rows3 className="size-3.5" />
+                            ) : (
+                              <LayoutGrid className="size-3.5" />
+                            )}
+                            <span className="hidden md:inline">
+                              {isCompact ? t(($) => $.page.view_table) : t(($) => $.page.view_cards)}
+                            </span>
+                          </Button>
+                        }
+                      />
+                    }
+                  />
+                  <TooltipContent side="bottom">{t(($) => $.toolbar.view)}</TooltipContent>
+                </Tooltip>
+                <DropdownMenuContent align="end" className="w-auto">
+                  <DropdownMenuGroup>
+                    <DropdownMenuLabel>{t(($) => $.toolbar.view)}</DropdownMenuLabel>
+                  </DropdownMenuGroup>
+                  <DropdownMenuRadioGroup
+                    value={viewMode}
+                    onValueChange={(v) => setViewMode(v as ProjectViewMode)}
+                  >
+                    <DropdownMenuRadioItem value="compact">
+                      <Rows3 />
+                      {t(($) => $.page.view_table)}
+                    </DropdownMenuRadioItem>
+                    <DropdownMenuRadioItem value="comfortable">
+                      <LayoutGrid />
+                      {t(($) => $.page.view_cards)}
+                    </DropdownMenuRadioItem>
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
 

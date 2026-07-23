@@ -74,10 +74,9 @@ func TestClaimTasksWSFirst_LegacyFallbackWhenBatchRouteMissing(t *testing.T) {
 
 // TestClaimTasksWSFirst_NoDoubleClaimOnDetach pins the Sol-Boy review fix: if
 // the WS connection detaches while a tasks.claim RPC is in flight (its frame
-// already sent), ClaimTasksWSFirst must NOT fall back to an HTTP claim for the
-// same free slots — the WS claim may have committed server-side, and a second
-// HTTP claim would double-claim. It returns no tasks; reclaim / the next poll
-// recovers.
+// already sent), ClaimTasksWSFirst must NOT fall back to an HTTP claim in the
+// same call — the WS claim may have committed server-side, and an immediate
+// second HTTP claim would double-claim.
 func TestClaimTasksWSFirst_NoDoubleClaimOnDetach(t *testing.T) {
 	var httpClaims atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -130,6 +129,106 @@ func TestClaimTasksWSFirst_NoDoubleClaimOnDetach(t *testing.T) {
 	}
 	if httpClaims.Load() != 0 {
 		t.Fatalf("HTTP fallback claimed %d times after an uncertain WS claim; must be 0 to avoid double-claim", httpClaims.Load())
+	}
+}
+
+// TestClaimTasksWSFirst_HTTPFallbackAfterUncertainCooldown covers #5404: a
+// flaky WS can reconnect and advertise rpc-v1 before the next poll. After one
+// uncertain sent-frame outcome, the daemon must not immediately HTTP fallback,
+// but it must bypass WS once after the safety window so queued tasks cannot wedge
+// behind repeated uncertain WS attempts.
+func TestClaimTasksWSFirst_HTTPFallbackAfterUncertainCooldown(t *testing.T) {
+	originalDelay := wsClaimUncertainFallbackDelay
+	wsClaimUncertainFallbackDelay = 25 * time.Millisecond
+	t.Cleanup(func() { wsClaimUncertainFallbackDelay = originalDelay })
+
+	var httpClaims, wsClaims atomic.Int64
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/claim") {
+			httpClaims.Add(1)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"tasks":[{"id":"http-t","runtime_id":"rt1","agent":{"name":"a"}}]}`))
+	}))
+	defer srv.Close()
+
+	d := New(Config{ServerBaseURL: srv.URL, MaxConcurrentTasks: 4}, slog.New(slog.NewTextHandler(noopWriter{}, nil)))
+
+	var mu sync.Mutex
+	var item *wsOutbound
+	frameQueued := make(chan struct{})
+	generation := d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		mu.Lock()
+		defer mu.Unlock()
+		item = &wsOutbound{data: frame}
+		close(frameQueued)
+		return item, nil
+	})
+	d.wsRPC.markRPCV1Supported(generation)
+
+	done := make(chan struct{})
+	var tasks []*Task
+	var err error
+	go func() {
+		tasks, err = d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
+		close(done)
+	}()
+
+	select {
+	case <-frameQueued:
+	case <-time.After(time.Second):
+		t.Fatal("WS claim frame was not queued")
+	}
+	mu.Lock()
+	item.beginWrite()
+	mu.Unlock()
+	d.wsRPC.attach(nil)
+
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("ClaimTasksWSFirst did not return after detach")
+	}
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("expected no tasks on uncertain WS outcome, got %d", len(tasks))
+	}
+	if httpClaims.Load() != 0 {
+		t.Fatalf("HTTP fallback claimed immediately after uncertain WS outcome; calls=%d", httpClaims.Load())
+	}
+
+	reconnectGeneration := d.wsRPC.attach(func(frame []byte) (*wsOutbound, error) {
+		wsClaims.Add(1)
+		return &wsOutbound{data: frame}, nil
+	})
+	d.wsRPC.markRPCV1Supported(reconnectGeneration)
+
+	tasks, err = d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
+	if err != nil {
+		t.Fatalf("cooldown ClaimTasksWSFirst: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("cooldown claim returned %d tasks, want 0", len(tasks))
+	}
+	if httpClaims.Load() != 0 || wsClaims.Load() != 0 {
+		t.Fatalf("cooldown attempted claims: http=%d ws=%d, want 0/0", httpClaims.Load(), wsClaims.Load())
+	}
+
+	time.Sleep(2 * wsClaimUncertainFallbackDelay)
+	tasks, err = d.ClaimTasksWSFirst(context.Background(), "daemon-x", []string{"rt1"}, 2)
+	if err != nil {
+		t.Fatalf("post-cooldown ClaimTasksWSFirst: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "http-t" {
+		t.Fatalf("tasks = %#v, want one HTTP fallback task", tasks)
+	}
+	if httpClaims.Load() != 1 {
+		t.Fatalf("HTTP fallback claims = %d, want 1", httpClaims.Load())
+	}
+	if wsClaims.Load() != 0 {
+		t.Fatalf("WS claims after uncertain cooldown = %d, want 0", wsClaims.Load())
 	}
 }
 

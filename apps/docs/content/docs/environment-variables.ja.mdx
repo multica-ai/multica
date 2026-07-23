@@ -19,6 +19,9 @@ import { Callout } from "fumadocs-ui/components/callout";
 | `APP_ENV` | 空 | **はい**（`production` である必要があります） |
 | `FRONTEND_ORIGIN` | 空 | **はい**（セルフホストは自身のドメインを設定する必要があります） |
 | `MULTICA_DEV_VERIFICATION_CODE` | 空 | いいえ（プロダクションでは必ず空のままにしてください） |
+| `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | いいえ。`SIGTERM`/`SIGINT` の受信後、グレースフルシャットダウンを開始する前の任意の待機時間。`300s` や `5m` などの非負の Go duration を受け付けます。空または `0` の場合は直ちにシャットダウンを開始します |
+
+Kubernetes で `MULTICA_SHUTDOWN_HOLD_DURATION` を使用する場合、`terminationGracePeriodSeconds` は hold 時間とその後のグレースフルシャットダウン時間の合計より長く設定してください。両方を同じ時間にすると、クリーンアップが完了する前に kubelet が `SIGKILL` を送信する可能性があります。
 
 <Callout type="warning">
 **プロダクションでは `MULTICA_DEV_VERIFICATION_CODE` を空のままにしてください。** 固定のローカルテストコードはデフォルトで無効になっていますが、`MULTICA_DEV_VERIFICATION_CODE=888888` で有効にすると、`APP_ENV` が production 以外の間は、コードを要求できる誰もがその固定値でサインインできてしまいます。このショートカットは `APP_ENV=production` のときには無視されます。

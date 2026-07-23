@@ -169,8 +169,59 @@ jobs:
       - name: Run migrations
         run: cd server && go run ./cmd/migrate up
 
+      - name: Verify Go test wrapper
+        run: bash scripts/test-go.test.sh
+
       - name: Test
-        run: cd server && go test -race ./...
+        run: bash scripts/test-go.sh --race
+
+  windows-execenv:
+    # The environment-preparation deadline owns a process tree, not just a Go
+    # process. This Windows runtime test verifies Job Object cancellation kills
+    # a delayed descendant before an immediate retry can reuse the same root.
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+          cache-dependency-path: server/go.sum
+
+      - name: Test Windows execution-environment isolation
+        working-directory: server
+        # Keep this job scoped to the runtime regression it exists to prove.
+        # The package's legacy OpenClaw HOME tests are not Windows-safe and are
+        # outside this PR; the normal backend job still runs the full package.
+        run: go test ./internal/daemon/execenv -run '^TestPrepareIsolated_WindowsKillsDescendantBeforeRetry$' -count=1 -timeout=5m
+
+      - name: Test Windows agent launcher argv/stdin handling
+        working-directory: server
+        # Agent prompts must never reach a Windows launcher through argv: the
+        # official cursor-agent.ps1 ends in `& node.exe index.js $args`, and
+        # PowerShell re-serialises $args onto the child command line. Under
+        # Legacy native argument passing (powershell.exe 5.1, pwsh <= 7.2) a
+        # prompt holding embedded quotes is re-tokenised and fragments like
+        # `-X` become flags (#5649). Only a real PowerShell host proves this,
+        # so it cannot live in the ubuntu backend job. Scoped to the launcher
+        # tests, which are windows-tagged and therefore run nowhere else today;
+        # the backend job still runs the full package on Linux.
+        # -v so a silent skip (no PowerShell host resolved, or a -run pattern
+        # that stops matching) is visible in the log instead of passing as "ok".
+        run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
+
+      - name: Test bounded Codex cleanup with inherited stdout descendant
+        working-directory: server
+        # Windows cannot prove whole-tree termination without a Job Object,
+        # but a descendant holding inherited stdout must never keep Result
+        # blocked forever. -v makes RUN/PASS evidence explicit in CI logs.
+        run: go test ./pkg/agent -v -run '^TestCodexWindowsInheritedStdoutDescendantCleanupIsBounded$' -count=1 -timeout=5m
+
+      - name: Build Windows CLI helper entrypoint
+        working-directory: server
+        run: go build ./cmd/multica
 
   installer:
     # Stub-driven shell tests for scripts/install.sh. Kept off the heavy

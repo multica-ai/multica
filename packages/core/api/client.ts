@@ -2,6 +2,7 @@ import type {
   Issue,
   IssuePriority,
   CreateIssueRequest,
+  MoveIssueRequest,
   UpdateIssueRequest,
   GroupedIssuesResponse,
   ListIssuesResponse,
@@ -12,12 +13,19 @@ import type {
   UpdateMemberRequest,
   ListIssuesParams,
   ListGroupedIssuesParams,
+  IssueTableFacetsRequest,
+  IssueTableFacetsResponse,
+  IssueTableGroupsRequest,
+  IssueTableGroupsResponse,
+  IssueTableRowsRequest,
+  IssueTableRowsResponse,
   Agent,
   CreateAgentRequest,
   AgentTemplate,
   AgentTemplateSummary,
   CreateAgentFromTemplateRequest,
   CreateAgentFromTemplateResponse,
+  AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
   UpdateAgentRequest,
   AgentEnvResponse,
@@ -25,6 +33,9 @@ import type {
   AgentTask,
   AgentActivityBucket,
   AgentRunCount,
+  WorkspaceWorkingAgent,
+  WorkspaceWorkingAgentMineRelation,
+  WorkspaceWorkingAgentType,
   AgentRuntime,
   RuntimeProfile,
   CreateRuntimeProfileRequest,
@@ -47,6 +58,7 @@ import type {
   CreateSkillRequest,
   UpdateSkillRequest,
   SetAgentSkillsRequest,
+  SetAgentRuntimeSkillEnabledRequest,
   PersonalAccessToken,
   CreatePersonalAccessTokenRequest,
   CreatePersonalAccessTokenResponse,
@@ -172,7 +184,9 @@ import {
   CloudRuntimeNodeListSchema,
   CloudRuntimeNodeSchema,
   CreateAgentFromTemplateResponseSchema,
+  AgentBuilderRuntimeSwitchSchema,
   AgentBuilderSessionSchema,
+  agentBuilderRuntimeSwitchFallback,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
   DashboardUsageByAgentListSchema,
@@ -186,6 +200,9 @@ import {
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
   EMPTY_AGENT_BUILDER_SESSION,
   EMPTY_GROUPED_ISSUES_RESPONSE,
+  EMPTY_ISSUE_TABLE_FACETS_RESPONSE,
+  EMPTY_ISSUE_TABLE_GROUPS_RESPONSE,
+  EMPTY_ISSUE_TABLE_ROWS_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_SEARCH_ISSUES_RESPONSE,
   EMPTY_SEARCH_PROJECTS_RESPONSE,
@@ -199,6 +216,9 @@ import {
   AppConfigSchema,
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
+  IssueTableFacetsResponseSchema,
+  IssueTableGroupsResponseSchema,
+  IssueTableRowsResponseSchema,
   ListAutopilotsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   AutopilotRunSchema,
@@ -270,7 +290,7 @@ export interface ApiClientIdentity {
   platform?: string;
   /** Client/app version string (e.g. "0.1.0", git tag, commit). */
   version?: string;
-  /** Operating system the client is running on: "macos" | "windows" | "linux". */
+  /** Coarse operating-system bucket (for example "macos", "windows", or "linux"). */
   os?: string;
 }
 
@@ -279,6 +299,19 @@ export interface ApiClientOptions {
   onUnauthorized?: () => void;
   /** Identifies the client to the server. Sent as X-Client-* headers. */
   identity?: ApiClientIdentity;
+}
+
+export interface ClientRuntimeSnapshot {
+  probe_result: "success" | "error";
+  runtime_count?: number;
+  provider_summary?: Record<string, number>;
+  online_count?: number;
+  offline_count?: number;
+}
+
+export interface ClientUsageRequest {
+  install_id: string;
+  runtime?: ClientRuntimeSnapshot;
 }
 
 export interface LoginResponse {
@@ -663,6 +696,45 @@ export class ApiClient {
     });
   }
 
+  async listIssueTableGroups(params: IssueTableGroupsRequest): Promise<IssueTableGroupsResponse> {
+    const raw = await this.fetch<unknown>("/api/issues/table/groups", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+    return parseWithFallback(
+      raw,
+      IssueTableGroupsResponseSchema,
+      EMPTY_ISSUE_TABLE_GROUPS_RESPONSE,
+      { endpoint: "POST /api/issues/table/groups" },
+    );
+  }
+
+  async listIssueTableRows(params: IssueTableRowsRequest): Promise<IssueTableRowsResponse> {
+    const raw = await this.fetch<unknown>("/api/issues/table/rows", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+    return parseWithFallback(
+      raw,
+      IssueTableRowsResponseSchema,
+      EMPTY_ISSUE_TABLE_ROWS_RESPONSE,
+      { endpoint: "POST /api/issues/table/rows" },
+    );
+  }
+
+  async listIssueTableFacets(params: IssueTableFacetsRequest): Promise<IssueTableFacetsResponse> {
+    const raw = await this.fetch<unknown>("/api/issues/table/facets", {
+      method: "POST",
+      body: JSON.stringify(params),
+    });
+    return parseWithFallback(
+      raw,
+      IssueTableFacetsResponseSchema,
+      EMPTY_ISSUE_TABLE_FACETS_RESPONSE,
+      { endpoint: "POST /api/issues/table/facets" },
+    );
+  }
+
   async searchIssues(params: { q: string; limit?: number; offset?: number; include_closed?: boolean; signal?: AbortSignal }): Promise<SearchIssuesResponse> {
     const search = new URLSearchParams({ q: params.q });
     if (params.limit !== undefined) search.set("limit", String(params.limit));
@@ -749,9 +821,23 @@ export class ApiClient {
     });
   }
 
+  async upsertClientUsage(data: ClientUsageRequest): Promise<void> {
+    await this.fetch("/api/client-usage", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
   async updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {
     return this.fetch(`/api/issues/${id}`, {
       method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async moveIssue(id: string, data: MoveIssueRequest): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/move`, {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }
@@ -984,6 +1070,29 @@ export class ApiClient {
       AgentBuilderSessionSchema,
       EMPTY_AGENT_BUILDER_SESSION,
       { endpoint: "POST /api/agent-builder/sessions" },
+    );
+  }
+
+  /** Rebinds a live builder conversation to another runtime. Callers must not
+   *  show the new runtime as selected until this resolves — the whole point is
+   *  that the UI's runtime and the executing runtime agree.
+   *
+   *  A non-2xx throws before we get here and nothing was committed. Reaching the
+   *  parse means the server bound `data.runtime_id`, so that is the fallback for
+   *  an unparseable body — see agentBuilderRuntimeSwitchFallback. */
+  async switchAgentBuilderRuntime(
+    sessionId: string,
+    data: { runtime_id: string },
+  ): Promise<AgentBuilderRuntimeSwitch> {
+    const raw = await this.fetch<unknown>(
+      `/api/agent-builder/sessions/${sessionId}/runtime`,
+      { method: "PATCH", body: JSON.stringify(data) },
+    );
+    return parseWithFallback(
+      raw,
+      AgentBuilderRuntimeSwitchSchema,
+      agentBuilderRuntimeSwitchFallback(data.runtime_id),
+      { endpoint: "PATCH /api/agent-builder/sessions/{id}/runtime" },
     );
   }
 
@@ -1577,6 +1686,24 @@ export class ApiClient {
     return this.fetch(`/api/agent-task-snapshot`);
   }
 
+  // Independent workspace-level projection. Unlike the task snapshot, this
+  // already deduplicates running agents and returns only the display fields
+  // consumers need. Callers may narrow the projection by task source and, for
+  // issue work, the authenticated member's My Issues relation.
+  async getWorkspaceWorkingAgents(
+    type?: WorkspaceWorkingAgentType,
+    mineRelation?: WorkspaceWorkingAgentMineRelation,
+  ): Promise<WorkspaceWorkingAgent[]> {
+    const search = new URLSearchParams();
+    if (type) search.set("type", type);
+    if (mineRelation) {
+      search.set("scope", "mine");
+      search.set("relation", mineRelation);
+    }
+    const query = search.toString();
+    return this.fetch(`/api/working-agents${query ? `?${query}` : ""}`);
+  }
+
   // Per-agent daily activity for the last 30 days, anchored on
   // completed_at. One workspace-wide fetch backs both the Agents-list
   // sparkline (uses trailing 7 buckets) and the agent detail "Last 30
@@ -1878,6 +2005,16 @@ export class ApiClient {
 			body: JSON.stringify({ enabled }),
 		});
 	}
+
+  async setAgentRuntimeSkillEnabled(
+    agentId: string,
+    data: SetAgentRuntimeSkillEnabledRequest,
+  ): Promise<void> {
+    await this.fetch(`/api/agents/${agentId}/runtime-skills/enabled`, {
+      method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
 
 	async removeAgentSkill(agentId: string, skillId: string): Promise<void> {
 		await this.fetch(`/api/agents/${agentId}/skills/${skillId}`, {

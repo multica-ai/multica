@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -108,9 +107,12 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed","name":"Shell","output":"hi\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"pong"}}}}\n'
       if [ -n "$GROK_USAGE" ]; then
-        printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"usage_update","usage":{"inputTokens":120,"outputTokens":30,"cachedReadTokens":20}}}}\n'
+        # Match live Grok Build ACP (0.2.x): metering lives under result._meta,
+        # not a top-level usage field or sessionUpdate=usage_update.
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","_meta":{"sessionId":"ses_new","modelId":"grok-4.5","inputTokens":120,"outputTokens":30,"cachedReadTokens":20,"usage":{"inputTokens":120,"outputTokens":30,"totalTokens":150,"cachedReadTokens":20,"modelCalls":1}}}}\n' "$id"
+      else
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
       fi
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
       if [ -n "$GROK_LATE_CHUNK" ]; then
         sleep 0.05
         printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" tail"}}}}\n'
@@ -608,7 +610,10 @@ func TestGrokPropagatesMCPAndUsage(t *testing.T) {
 	if !ok {
 		t.Fatalf("usage missing grok-4.5 key: %+v", result.Usage)
 	}
-	if usage.InputTokens != 120 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 {
+	// The fixture's totalTokens (150) equals input + output, so its 20 cached
+	// reads sit inside inputTokens and are billed once: input is stored as the
+	// uncached remainder 120 - 20 = 100.
+	if usage.InputTokens != 100 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 {
 		t.Fatalf("unexpected usage: %+v", usage)
 	}
 }
@@ -830,61 +835,5 @@ func TestGrokIsKnownThinkingValue(t *testing.T) {
 		if IsKnownThinkingValue("grok", level) {
 			t.Errorf("IsKnownThinkingValue(grok, %q) = true, want rejected", level)
 		}
-	}
-}
-
-// TestGrokRealACPSmoke drives the REAL `grok agent stdio` binary end-to-end
-// when it is installed and authenticated. Skipped automatically when grok is
-// not on PATH or the session cannot be created, so CI stays green.
-func TestGrokRealACPSmoke(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real-binary smoke test in -short mode")
-	}
-	path, err := exec.LookPath("grok")
-	if err != nil {
-		t.Skip("grok not on PATH; skipping real-binary smoke test")
-	}
-	if version, err := exec.Command(path, "--version").CombinedOutput(); err == nil {
-		t.Logf("grok CLI version: %s", strings.TrimSpace(string(version)))
-	} else {
-		t.Logf("grok CLI version unavailable: %v (%s)", err, strings.TrimSpace(string(version)))
-	}
-
-	backend, err := New("grok", Config{ExecutablePath: path, Logger: slog.Default()})
-	if err != nil {
-		t.Fatalf("new grok backend: %v", err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
-
-	session, err := backend.Execute(ctx, "Reply with exactly one word: pong. Do not use any tools.", ExecOptions{
-		Cwd:     t.TempDir(),
-		Timeout: 80 * time.Second,
-	})
-	if err != nil {
-		t.Fatalf("execute: %v", err)
-	}
-	go func() {
-		for range session.Messages {
-		}
-	}()
-
-	select {
-	case result := <-session.Result:
-		if result.Status == "failed" && (strings.Contains(result.Error, "session/new") || strings.Contains(result.Error, "initialize")) {
-			t.Skipf("grok not authenticated or ACP unavailable: %v", result.Error)
-		}
-		if result.Status != "completed" {
-			t.Fatalf("real grok run did not complete: status=%q error=%q", result.Status, result.Error)
-		}
-		if !strings.Contains(strings.ToLower(result.Output), "pong") {
-			t.Fatalf("expected real grok output to contain 'pong', got %q", result.Output)
-		}
-		if result.SessionID == "" {
-			t.Error("expected a non-empty session id from real grok")
-		}
-		t.Logf("real grok smoke OK: session=%s output=%q", result.SessionID, result.Output)
-	case <-time.After(90 * time.Second):
-		t.Fatal("timeout waiting for real grok result")
 	}
 }

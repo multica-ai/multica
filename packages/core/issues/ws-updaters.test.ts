@@ -27,6 +27,7 @@ import type {
   Issue,
   IssueReaction,
   IssueLabelsResponse,
+  IssueTableRowsResponse,
   IssueSubscriber,
   IssueUsageSummary,
   Label,
@@ -105,6 +106,35 @@ function makeListCache(...issues: Issue[]): ListIssuesCache {
   };
 }
 
+const tableRowKey = [
+  ...issueKeys.tableRows(
+    WS_ID,
+    {
+      scope: { kind: "workspace" },
+      filters: {},
+      sort: { field: "position", direction: "asc" },
+    },
+    { kind: "none" },
+    null,
+    false,
+    null,
+  ),
+  "page",
+  null,
+] as const;
+
+function seedTableRow(qc: QueryClient, issue = baseIssue) {
+  qc.setQueryData<IssueTableRowsResponse>(tableRowKey, {
+    query_fingerprint: "sha256:table",
+    group_key: null,
+    parent_id: null,
+    total: 1,
+    rows: [{ issue, direct_child_count: 0 }],
+    branch_total: 1,
+    next_cursor: null,
+  });
+}
+
 function makeTask(issueId = ISSUE_ID): AgentTask {
   return {
     id: `task-${issueId}`,
@@ -151,11 +181,12 @@ describe("onIssueLabelsChanged", () => {
     expect(qc.getQueryData(labelKeys.byIssue(WS_ID, ISSUE_ID))).toBeUndefined();
   });
 
-  it("still patches the list and detail caches", () => {
+  it("still patches the list, Table row, and detail caches", () => {
     qc.setQueryData<ListIssuesCache>(issueKeys.list(WS_ID), {
       byStatus: { todo: { issues: [baseIssue], total: 1 } },
     });
     qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), baseIssue);
+    seedTableRow(qc);
 
     onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
 
@@ -164,6 +195,10 @@ describe("onIssueLabelsChanged", () => {
 
     const detail = qc.getQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID));
     expect(detail?.labels).toEqual([labelB]);
+    expect(
+      qc.getQueryData<IssueTableRowsResponse>(tableRowKey)?.rows[0]?.issue
+        .labels,
+    ).toEqual([labelB]);
   });
 
   it("patches the Project Gantt cache so label filters react in place", () => {
@@ -203,6 +238,44 @@ describe("onIssueLabelsChanged", () => {
     onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
     expectInvalidated(qc, flatKey);
   });
+
+  it("patches the parent's children cache so the sub-issues panel stays fresh", () => {
+    const child = { ...baseIssue, parent_issue_id: PARENT_ISSUE_ID };
+    const childrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    qc.setQueryData<Issue[]>(childrenKey, [
+      child,
+      otherIssue,
+    ]);
+    // A children cache that does NOT hold the issue must keep its reference
+    // (no pointless rerender of unrelated sub-issue panels).
+    const unrelated = [otherIssue];
+    qc.setQueryData<Issue[]>(issueKeys.children(WS_ID, "parent-9"), unrelated);
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
+
+    const children = qc.getQueryData<Issue[]>(
+      issueKeys.children(WS_ID, PARENT_ISSUE_ID),
+    );
+    expect(children?.find((i) => i.id === ISSUE_ID)?.labels).toEqual([labelB]);
+    expect(children?.find((i) => i.id === OTHER_ISSUE_ID)?.labels).toEqual([
+      labelA,
+    ]);
+    expect(qc.getQueryData<Issue[]>(issueKeys.children(WS_ID, "parent-9"))).toBe(
+      unrelated,
+    );
+    // The committed WS/mutation snapshot also marks active children queries
+    // stale, preventing an older in-flight response from overwriting the patch.
+    expectInvalidated(qc, childrenKey);
+  });
+
+  it("invalidates batched children caches (Map-shaped, not patchable)", () => {
+    const batchedKey = issueKeys.childrenByParents(WS_ID, [PARENT_ISSUE_ID]);
+    qc.setQueryData(batchedKey, new Map([[PARENT_ISSUE_ID, [baseIssue]]]));
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
+
+    expectInvalidated(qc, batchedKey);
+  });
 });
 
 describe("onIssueMetadataChanged", () => {
@@ -225,6 +298,10 @@ describe("onIssueMetadataChanged", () => {
         },
       },
     });
+    seedTableRow(qc, {
+      ...baseIssue,
+      metadata: { pr_number: 1, stale: "yes" },
+    });
 
     onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { pr_number: 2 });
 
@@ -232,6 +309,10 @@ describe("onIssueMetadataChanged", () => {
     expect(detail?.metadata).toEqual({ pr_number: 2 });
     const list = qc.getQueryData<ListIssuesCache>(issueKeys.list(WS_ID));
     expect(list?.byStatus.todo?.issues[0]?.metadata).toEqual({ pr_number: 2 });
+    expect(
+      qc.getQueryData<IssueTableRowsResponse>(tableRowKey)?.rows[0]?.issue
+        .metadata,
+    ).toEqual({ pr_number: 2 });
   });
 
   it("leaves untouched caches as undefined (no spurious writes)", () => {
@@ -240,9 +321,70 @@ describe("onIssueMetadataChanged", () => {
     expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
     expect(qc.getQueryData(issueKeys.list(WS_ID))).toBeUndefined();
   });
+
+  it("re-sorts an updated_at-sorted board but not a position-sorted one", () => {
+    // A metadata write bumps updated_at server-side (MUL-5016), so a board
+    // sorted by "Updated date" must refetch; a position-sorted board must not.
+    const boardUpdatedKey = issueKeys.listSorted(WS_ID, {
+      sort_by: "updated_at",
+      sort_direction: "desc",
+    });
+    const boardPositionKey = issueKeys.listSorted(WS_ID, { sort_by: "position" });
+    qc.setQueryData<ListIssuesCache>(boardUpdatedKey, makeListCache(baseIssue));
+    qc.setQueryData<ListIssuesCache>(boardPositionKey, makeListCache(baseIssue));
+
+    onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { foo: "bar" });
+
+    expectInvalidated(qc, boardUpdatedKey);
+    expect(qc.getQueryState(boardPositionKey)?.isInvalidated).toBe(false);
+  });
 });
 
 describe("issue property snapshots", () => {
+  it("patches per-parent children and invalidates every children projection on commit", () => {
+    const qc = new QueryClient();
+    const childrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    const unrelatedKey = issueKeys.children(WS_ID, "parent-9");
+    const batchedKey = issueKeys.childrenByParents(WS_ID, [PARENT_ISSUE_ID]);
+    const child = {
+      ...parentedIssue,
+      properties: { estimate: 1, environment: "staging" },
+    };
+    const unrelated = [otherIssue];
+    qc.setQueryData<Issue[]>(childrenKey, [child, otherIssue]);
+    qc.setQueryData<Issue[]>(unrelatedKey, unrelated);
+    qc.setQueryData(batchedKey, new Map([[PARENT_ISSUE_ID, [child]]]));
+
+    // The optimistic leg is deterministic: patch immediately without a
+    // premature refetch that could still return the pre-mutation value.
+    patchIssueProperties(qc, WS_ID, ISSUE_ID, {
+      estimate: 2,
+      environment: "staging",
+    });
+
+    expect(
+      qc.getQueryData<Issue[]>(childrenKey)?.find((candidate) => candidate.id === ISSUE_ID)
+        ?.properties,
+    ).toEqual({ estimate: 2, environment: "staging" });
+    expect(qc.getQueryState(childrenKey)?.isInvalidated).toBe(false);
+    expect(qc.getQueryData<Issue[]>(unrelatedKey)).toBe(unrelated);
+
+    // The committed response/event keeps the immediate patch, then marks both
+    // per-parent and batched projections stale for authoritative convergence.
+    onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, {
+      estimate: 3,
+      environment: "staging",
+    });
+
+    expect(
+      qc.getQueryData<Issue[]>(childrenKey)?.find((candidate) => candidate.id === ISSUE_ID)
+        ?.properties,
+    ).toEqual({ estimate: 3, environment: "staging" });
+    expectInvalidated(qc, childrenKey);
+    expectInvalidated(qc, batchedKey);
+    expect(qc.getQueryData<Issue[]>(unrelatedKey)).toBe(unrelated);
+  });
+
   it("keeps optimistic patches local, then invalidates property windows after commit", () => {
     const qc = new QueryClient();
     const flatKey = issueKeys.flat(
@@ -255,6 +397,7 @@ describe("issue property snapshots", () => {
       pages: [{ issues: [baseIssue], total: 1 }],
       pageParams: [0],
     });
+    seedTableRow(qc);
 
     patchIssueProperties(qc, WS_ID, ISSUE_ID, { estimate: 3 });
 
@@ -263,10 +406,37 @@ describe("issue property snapshots", () => {
       qc.getQueryData<{ pages: { issues: Issue[] }[] }>(flatKey)?.pages[0]
         ?.issues[0]?.properties,
     ).toEqual({ estimate: 3 });
+    expect(
+      qc.getQueryData<IssueTableRowsResponse>(tableRowKey)?.rows[0]?.issue
+        .properties,
+    ).toEqual({ estimate: 3 });
 
     onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, { estimate: 4 });
 
     expectInvalidated(qc, flatKey);
+  });
+
+  it("re-sorts an updated_at-sorted board but not a position-sorted one after commit", () => {
+    // A property write also bumps updated_at server-side (MUL-5016), so a board
+    // sorted by "Updated date" (no property param) must refetch on commit while
+    // a position-sorted board stays put.
+    const qc = new QueryClient();
+    const boardUpdatedKey = issueKeys.listSorted(WS_ID, {
+      sort_by: "updated_at",
+      sort_direction: "desc",
+    });
+    const boardPositionKey = issueKeys.listSorted(WS_ID, { sort_by: "position" });
+    qc.setQueryData<ListIssuesCache>(boardUpdatedKey, makeListCache(baseIssue));
+    qc.setQueryData<ListIssuesCache>(boardPositionKey, makeListCache(baseIssue));
+
+    // Optimistic leg patches only — no premature refetch of either board.
+    patchIssueProperties(qc, WS_ID, ISSUE_ID, { estimate: 3 });
+    expect(qc.getQueryState(boardUpdatedKey)?.isInvalidated).toBe(false);
+
+    onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, { estimate: 4 });
+
+    expectInvalidated(qc, boardUpdatedKey);
+    expect(qc.getQueryState(boardPositionKey)?.isInvalidated).toBe(false);
   });
 });
 

@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentTemplate,
   AgentTemplateSummary,
+  AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
   Attachment,
   AutopilotRun,
@@ -25,6 +26,10 @@ import type {
   IssueProperty,
   ListPropertiesResponse,
   IssuePropertiesResponse,
+  IssueTableGroupDescriptor,
+  IssueTableFacetsResponse,
+  IssueTableGroupsResponse,
+  IssueTableRowsResponse,
   ListIssuesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
@@ -565,6 +570,117 @@ export const EMPTY_GROUPED_ISSUES_RESPONSE: GroupedIssuesResponse = {
   groups: [],
 };
 
+const IssueTableActorRefSchema = z.object({
+  // Server-driven enums stay open so installed desktop clients survive a
+  // backend that introduces another actor kind.
+  type: z.string(),
+  id: z.string(),
+}).loose();
+
+const IssueTableParentRefSchema = z.object({
+  id: z.string(),
+  number: z.number(),
+  identifier: z.string(),
+  title: z.string(),
+  status: z.string(),
+}).loose();
+
+const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("status"),
+    status: z.string(),
+  }).loose(),
+  z.object({
+    kind: z.literal("assignee"),
+    actor: IssueTableActorRefSchema.nullable(),
+  }).loose(),
+  z.object({
+    kind: z.literal("project"),
+    project_id: z.string().nullable().optional().default(null),
+  }).loose(),
+  z.object({
+    kind: z.literal("parent"),
+    parent_id: z.string().nullable().optional().default(null),
+    parent: IssueTableParentRefSchema.nullable().optional().default(null),
+    value_state: z.enum(["value", "unavailable", "unset"]),
+  }).loose(),
+  z.object({
+    kind: z.literal("property"),
+    property_id: z.string(),
+    value: z.union([z.string(), z.boolean(), z.null()]).optional(),
+    value_state: z.enum(["value", "unavailable", "unset"]),
+  }).loose(),
+]);
+
+const IssueTableGroupDescriptorSchema: z.ZodType<IssueTableGroupDescriptor> = z.lazy(() => z.object({
+  key: z.string(),
+  value: IssueTableGroupValueSchema,
+  count: z.number(),
+  secondary_groups: z.array(IssueTableGroupDescriptorSchema).optional(),
+}).loose());
+
+export const IssueTableGroupsResponseSchema = z.object({
+  query_fingerprint: z.string(),
+  total: z.number(),
+  groups: z.array(IssueTableGroupDescriptorSchema).default([]),
+  next_cursor: z.string().nullable().default(null),
+}).loose();
+
+export const EMPTY_ISSUE_TABLE_GROUPS_RESPONSE: IssueTableGroupsResponse = {
+  query_fingerprint: "",
+  total: 0,
+  groups: [],
+  next_cursor: null,
+};
+
+const IssueTableRowSchema = z.object({
+  issue: IssueSchema,
+  direct_child_count: z.number().default(0),
+}).loose();
+
+export const IssueTableRowsResponseSchema = z.object({
+  query_fingerprint: z.string(),
+  group_key: z.string().nullable().default(null),
+  parent_id: z.string().nullable().default(null),
+  total: z.number(),
+  rows: z.array(IssueTableRowSchema).default([]),
+  branch_total: z.number(),
+  next_cursor: z.string().nullable().default(null),
+}).loose();
+
+export const EMPTY_ISSUE_TABLE_ROWS_RESPONSE: IssueTableRowsResponse = {
+  query_fingerprint: "",
+  group_key: null,
+  parent_id: null,
+  total: 0,
+  rows: [],
+  branch_total: 0,
+  next_cursor: null,
+};
+
+const IssueTableFacetValueSchema = z.object({
+  key: z.string(),
+  count: z.number(),
+}).loose();
+
+const IssueTableFacetSchema = z.object({
+  kind: z.enum(["status", "priority", "assignee", "creator", "project", "label", "property"]),
+  property_id: z.string().optional(),
+  values: z.array(IssueTableFacetValueSchema).default([]),
+}).loose();
+
+export const IssueTableFacetsResponseSchema = z.object({
+  query_fingerprint: z.string(),
+  total: z.number(),
+  facets: z.array(IssueTableFacetSchema).default([]),
+}).loose();
+
+export const EMPTY_ISSUE_TABLE_FACETS_RESPONSE: IssueTableFacetsResponse = {
+  query_fingerprint: "",
+  total: 0,
+  facets: [],
+};
+
 const SubscriberSchema = z.object({
   issue_id: z.string(),
   user_type: z.string(),
@@ -982,6 +1098,20 @@ export const EMPTY_AGENT_BUILDER_SESSION: AgentBuilderSession = {
   builder_agent_id: "",
   runtime_id: "",
 };
+
+export const AgentBuilderRuntimeSwitchSchema = z.object({
+  runtime_id: z.string(),
+}).loose();
+
+// This endpoint returns 2xx only after the carrier has been bound to the
+// runtime the caller asked for; anything else is a thrown error and no commit.
+// So the safe fallback for an unparseable SUCCESS body is the requested id, not
+// an empty one: the rebind did happen, and reporting "unknown" would leave the
+// picker showing a runtime that is no longer executing — the exact split this
+// endpoint exists to close.
+export const agentBuilderRuntimeSwitchFallback = (
+  requestedRuntimeID: string,
+): AgentBuilderRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
 
 // Squad list responses carry lightweight membership previews used by hover
 // cards. The preview fields are additive API fields, so older backends default

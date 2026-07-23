@@ -24,8 +24,8 @@ multica agent env get <agent-id> --output json  # plaintext env (owner/admin onl
 ```
 
 `agent get` returns the persisted agent including `runtime_id`, `model`,
-`thinking_level`, `custom_args`, `has_custom_env`, `custom_env_key_count`, and
-`skills`. It never returns plaintext `custom_env`.
+`thinking_level`, `service_tier`, `custom_args`, `has_custom_env`,
+`custom_env_key_count`, and `skills`. It never returns plaintext `custom_env`.
 
 ## Core model
 
@@ -58,12 +58,13 @@ multica agent create --name <name> --runtime-id <runtime-id> \
 `runAgentCreate` builds a JSON body and posts it to `/api/agents`. It only
 adds a key when its flag was provided — `description`/`instructions` on a
 non-empty value, the rest (`runtime-config`, `custom-args`, `model`,
-`thinking-level`, `visibility`, …) on the flag being `Changed` — so omitted
+`thinking-level`, `service-tier`, `visibility`, …) on the flag being `Changed` — so omitted
 flags fall through to server defaults rather than sending empty strings.
 
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
-`instructions`, `runtime_id`, `runtime_config`, `custom_env`, `custom_args`,
-`model`, `thinking_level`, `visibility`, `max_concurrent_tasks`, `mcp_config`.
+`instructions`, `avatar_url`, `runtime_id`, `runtime_config`, `custom_env`,
+`custom_args`, `model`, `thinking_level`, `service_tier`, `visibility`,
+`max_concurrent_tasks`, `mcp_config`.
 
 ## Field contracts
 
@@ -72,18 +73,21 @@ The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 | `name` | `agent.name` | required, 400 if empty | listings, runtime payload |
 | `description` | `agent.description` | 400 if > 255 code points | catalog/listing only — NOT the runtime prompt |
 | `instructions` | `agent.instructions` | none | daemon → provider at claim time |
+| `avatar_url` | `agent.avatar_url` | none; an explicit non-empty value is preserved, while omitted/empty creates a random `emoji:<glyph>` avatar | catalog/listing UI only — NOT the runtime prompt |
 | `runtime_id` | `agent.runtime_id` | required (400) + must resolve to a runtime in this workspace | selects runtime/provider |
 | `model` | `agent.model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |
 | `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum; unknown literal → 400 | daemon; empty = runtime default |
+| `service_tier` | `agent.service_tier` (nullable) | Codex-only safe token; other providers reject; exact model/tier pair checked by daemon | daemon → Codex app-server; empty = local Codex config |
 | `custom_args` | `agent.custom_args` (JSON array) | JSON shape checked CLI-side; server stores as-is | daemon (extra CLI switches); defaults to `[]` |
 | `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
 | `custom_env` | `agent.custom_env` (JSON object) | — | daemon (process env); see Env & secrets |
-| `mcp_config` | `agent.mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the column | daemon → provider (MCP servers) — **runtime-consumed**; redacted on read |
+| `mcp_config` | `agent.mcp_config` (raw JSON) | CLI checks it is a JSON object or `null`; server stores as-is. At create, literal `null` is dropped (no-op); at update, `null` clears the column | daemon → provider (provider-specific MCP handling); redacted on read |
 | `visibility` | `agent.visibility` | — | access control; defaults to `private`; gates who can read/route a private agent (e.g. a private squad leader) — NOT the runtime prompt |
 | `max_concurrent_tasks` | `agent.max_concurrent_tasks` | — | scheduler task cap; defaults to `6` |
 
 Defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
-`custom_args` → `[]`, `visibility` → `private`, `max_concurrent_tasks` → `6`
+`custom_args` → `[]`, `avatar_url` → a random `emoji:<glyph>`, `visibility` →
+`private`, `max_concurrent_tasks` → `6`
 (all materialized server-side before the insert). `custom_args`/`runtime_config`
 are typed `[]string`/`any` and marshaled as-is — the JSON-shape rejection
 happens in the CLI, not the create handler.
@@ -104,6 +108,14 @@ model catalog). It forwards the token, the server applies the provider's
 fixed-enum or safe-token gate, and the daemon performs the exact model/level
 check. A runtime whose provider has no thinking concept rejects any non-empty
 value with a 400.
+
+`service_tier` is the matching first-class Codex speed control. Set it with
+`--service-tier <catalog-id>` on create/update; use `--service-tier ""` on
+update to clear it. The runtime model catalog owns both availability and
+display copy (currently `priority`, shown as Fast). The server accepts safe
+future Codex catalog IDs, while the daemon verifies the exact model/tier pair
+before execution and omits a stale incompatible override. Agents without an
+explicit model fail closed because the effective config.toml model is unknown.
 
 ### model vs custom_args
 
@@ -171,6 +183,8 @@ Two ways `mcp_config` differs from `custom_env`:
   `mcp_config` only to callers allowed to view agent secrets; otherwise the
   field is `null` and `mcp_config_redacted` is `true`. Agent actors never see
   it, and a workspace may force redaction for everyone.
+
+Provider support is not uniform: Qwen Code accepts a managed `mcp_config` through a daemon-owned 0600 temporary JSON file passed with `--mcp-config`; it is removed when the run exits. Leave the field unset (`null`) to inherit Qwen Code native settings.
 
 ## Skill binding
 

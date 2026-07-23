@@ -14,11 +14,11 @@ import { Callout } from "fumadocs-ui/components/callout";
 | 위치 | 동작 |
 |---|---|
 | **설정 → GitHub** | 워크스페이스 admin에게는 마스터 토글, **Connect GitHub** 버튼, 기능 스위치(PR 사이드바, Co-authored-by, 자동 연결)가 있는 GitHub 탭이 보입니다. 설치 후에는 GitHub 탭으로 다시 돌아옵니다. |
-| **이슈 사이드바 → Pull requests** | 이 이슈에 자동 연결된 모든 PR이 제목, 저장소, 상태(`Open` / `Draft` / `Merged` / `Closed`), 작성자와 함께 표시됩니다. 행을 클릭하면 GitHub의 해당 PR로 이동합니다. |
+| **이슈 사이드바 → Pull requests** | 이 이슈에 자동 연결된 모든 PR이 제목, 저장소, 상태(`Open` / `Draft` / `Merged` / `Closed`), 작성자, diff 통계, CI 상태와 함께 표시됩니다. 행을 클릭하면 GitHub의 해당 PR로 이동합니다. |
 | **Webhook(백그라운드)** | 모든 `pull_request` 이벤트에서 Multica는 PR 행을 upsert하고, PR에서 이슈 식별자를 스캔한 뒤, 연결 행을 (다시) 구성합니다. 멱등성이 있어 동일 delivery를 재전송해도 변화가 없습니다. |
 | **머지 시 상태 자동 변경** | PR이 `merged`로 전환되면, 아직 `Done`이나 `Cancelled`가 아닌 모든 연결된 이슈가 `Done`으로 이동합니다. 상태 변경은 source `github_pr_merged`로 타임라인에 기록됩니다. |
 
-미러링되는 것은 PR 자체뿐입니다. 커밋, 열린 PR이 없는 브랜치 ref, CI 체크 상태는 모델링되지 **않습니다**. 이 연동은 의도적으로 좁게 설계되었습니다.
+미러링되는 것은 PR 자체뿐입니다. 커밋과 열린 PR이 없는 브랜치 ref는 모델링되지 **않습니다**. 이 연동은 의도적으로 좁게 설계되었습니다.
 
 ## 식별자 매칭 방식
 
@@ -94,8 +94,9 @@ Multica Cloud에서 Multica를 실행 중이라면 연동이 이미 구성되어
 | **Webhook URL** | `https://<api-host>/api/webhooks/github`. |
 | **Webhook secret** | 긴 무작위 문자열을 생성하세요(예: `openssl rand -hex 32`). 2단계에서 동일한 값을 Multica의 env에 붙여넣게 됩니다. |
 | **Permissions → Repository → Pull requests** | **Read-only**. |
+| **Permissions → Repository → Checks** | **Read-only**. PR 사이드바의 CI 상태에 필요합니다 — 이 권한이 없으면 GitHub은 `check_suite`를 전달하지 않습니다. read-only에서는 Multica가 **완료된** suite만 볼 수 있습니다. [CI 상태로 알 수 있는 것과 없는 것](#ci-상태로-알-수-있는-것과-없는-것)을 참고하세요. |
 | **Permissions → Repository → Metadata** | Read-only(필수). |
-| **Subscribe to events** | **Pull request**를 체크하세요. |
+| **Subscribe to events** | **Pull request**와 **Check suite**를 체크하세요. |
 | **Where can this GitHub App be installed?** | 선택 사항. 단일 조직 설정에는 `Only on this account`로 충분합니다. |
 
 **Create GitHub App** 후, App 상세 페이지에서 두 가지를 기록해 두세요.
@@ -174,12 +175,56 @@ curl -i -X POST https://<api-host>/api/webhooks/github \
 | `401 invalid signature` | 서버가 로드한 secret이 생각하는 값이 **아닙니다**. | env 변수가 실행 중인 프로세스에 적용되었는지 확인하세요(예: `kubectl exec` → `echo -n "$GITHUB_WEBHOOK_SECRET" \| wc -c`). 재배포하세요. |
 | `503 github webhooks not configured` | 프로세스에서 `GITHUB_WEBHOOK_SECRET`이 비어 있습니다. | env 변수를 설정하고 API를 재시작하세요. |
 
+### PR 행에 CI 상태가 표시되지 않음
+
+GitHub에서는 CI가 분명히 실행됐는데도 모든 PR 행이 **체크가 아직 보고되지 않았습니다**로 표시되는 경우입니다. App이 `pull_request`는 받고 있지만 `check_suite`는 받지 못하고 있다는 뜻입니다 — 연결과 merge → Done은 동작하고 CI 상태만 계속 비어 있습니다.
+
+App이 실제로 무엇을 구독하고 있는지 확인하세요(이 엔드포인트는 공개되어 있어 인증이 필요 없습니다).
+
+```bash
+curl -s https://api.github.com/apps/<your-app-slug> | jq '{events, permissions}'
+```
+
+`events`에 `check_suite`, `permissions`에 `"checks": "read"`가 있어야 합니다. 둘 중 하나라도 없다면:
+
+1. App 편집 → **Permissions → Repository → Checks** → **Read-only**
+2. App 편집 → **Subscribe to events** → **Check suite** 체크
+3. **Save changes** 클릭
+
+<Callout type="warning">
+**기존 설치는 새 권한을 승인해야 합니다.** `checks` 권한 추가는 소급 적용되지 않습니다 — GitHub은 이 App을 설치한 각 계정에 메일을 보내고, 누군가 승인할 때까지 변경을 보류합니다. 그때까지 해당 설치는 `check_suite`를 전혀 전달하지 않습니다. **Settings → Applications → Installed GitHub Apps → 해당 App → Review request**에서 승인하세요(조직 설치는 조직 owner가 해야 합니다). 승인 후 발생하는 `new_permissions_accepted` 이벤트는 Multica가 자동으로 처리하므로 재배포는 필요 없습니다.
+</Callout>
+
+CI 상태는 이후 이벤트에만 반영됩니다 — Multica는 수신한 suite를 기록할 뿐 과거 이력을 채우지 않습니다. 바로 확인하려면 열린 PR에 커밋을 푸시하거나 체크를 re-run 하세요.
+
+### CI 상태로 알 수 있는 것과 없는 것
+
+Multica는 **Checks: Read-only**만 요청하며, 이 상한선은 의도적입니다. 다만 사이드바 행에 의존하기 전에 알아야 할 결과가 따릅니다.
+
+GitHub의 [webhook 계약](https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_suite)은 `check_suite` 전달을 권한 수준으로 나눕니다.
+
+| 이벤트 action | `checks: read`로 수신 | `checks: write`로 수신 |
+|---|---|---|
+| `completed` | ✅ | ✅ |
+| `requested` / `rerequested` | ❌ | ✅ |
+
+따라서 권장되는 read-only 구성에서 Multica는 suite가 **끝났다**는 것만 알 수 있고 **시작했다**는 것은 결코 알 수 없습니다. 여기서 두 가지가 따라옵니다.
+
+- **실행 중인 CI는 어떤 권한 수준에서도 표시되지 않습니다.** 검사가 실행 중인 PR은 "체크가 아직 보고되지 않았습니다"로 표시되어 CI가 아예 없는 PR과 구분되지 않습니다. 진행 중 표시가 없습니다.
+- **초록색 행은 "보고된 것은 통과했다"이지 "전부 통과했다"가 아닙니다.** 저장소에 보고 앱이 둘(예: GitHub Actions와 Vercel) 있고 하나만 끝난 상태라면, 행은 그 하나의 suite를 근거로 **검사 통과**를 표시합니다. 문구가 "모든 검사 통과"가 아니라 "검사 통과"인 이유가 이것입니다. 이 행은 하한값으로 보고, 머지 전에는 GitHub에서 확인하세요.
+
+<Callout type="info">
+**권한을 올리면 해결되지 않나요?** 안 됩니다 — `checks: write`는 "더 넓은 읽기"가 아닙니다. GitHub이 `requested` / `rerequested`를 보내는 의미는 "**이 커밋에 대해 GitHub이 당신의 App용 check suite를 만들었으니 check run을 추가하라**"이지 "다른 CI 제공자가 실행을 시작했다"가 아닙니다. Multica는 관찰자이며 check run을 만들지 않으므로 이 이벤트들은 GitHub Actions나 Vercel에 대한 정보를 전혀 담고 있지 않습니다. webhook 핸들러가 `completed` 외의 모든 action을 무시하는 이유가 이것입니다. 실제 실행 중 상태에는 다른 메커니즘 — checks API 폴링 또는 `check_run` 기반 모델 — 이 필요하며 권한 상향으로는 해결되지 않습니다.
+</Callout>
+
 ## 제한 사항
 
 현재 알아 둬야 할 몇 가지 거친 부분이 있습니다.
 
 - **아직 수동 연결 UI가 없습니다** — PR을 연결하는 유일한 방법은 브랜치, 제목, 본문에 식별자를 두는 것입니다.
-- **CI / 체크 상태가 없습니다** — PR 자체만 미러링됩니다. 빌드 상태, 리뷰 댓글, 리뷰어는 Multica에 표시되지 않습니다.
+- **CI 상태는 job 단위가 아니라 check suite 단위입니다** — 각 보고 앱(GitHub Actions, Vercel 등)을 성공 / 실패 하나로 묶습니다. 개별 job 이름과 로그는 GitHub에만 남습니다. 리뷰 댓글과 리뷰어는 표시되지 않습니다.
+- **실행 중인 CI는 보이지 않으며 초록색 행은 하한값입니다** — Multica는 `completed` suite만 기록하므로 실행 중인 검사는 보이지 않고, 다른 보고 앱이 아직 실행 중인데도 행이 "검사 통과"로 표시될 수 있습니다. 자세한 내용은 [CI 상태로 알 수 있는 것과 없는 것](#ci-상태로-알-수-있는-것과-없는-것)에 있습니다.
+- **CI 상태에는 `check_suite` 구독이 필요합니다** — 이 이벤트가 문서화되기 전에 만든 App은 모든 PR에서 "체크가 아직 보고되지 않았습니다"가 계속 표시됩니다. [PR 행에 CI 상태가 표시되지 않음](#pr-행에-ci-상태가-표시되지-않음)을 참고하세요.
 - 머지 → 완료 규칙에 대한 **워크스페이스 수준 설정이 없습니다** — 고정된 기본값입니다(`cancelled`가 아닌 한 `merged → done`). 워크스페이스에서 커스터마이즈할 수 있는 매핑은 향후 추가될 예정입니다.
 - **하나의 이슈에 여러 PR이 연결된 경우 머지가 보수적입니다** — 두 PR이 모두 `MUL-123`을 참조하고 첫 번째가 머지되면, 이슈는 즉시 `Done`으로 이동합니다. 진행하기 전에 연결된 모든 PR이 해결되기를 기다리는 후속 변경이 진행 중입니다.
 

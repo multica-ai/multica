@@ -1,13 +1,33 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { ALL_STATUSES } from "@multica/core/issues/config";
 import { BoardColumn } from "./board-column";
 import { ListView } from "./list-view";
+import type { IssueStatusPagination } from "../surface/use-issue-status-branches";
 
 const openModal = vi.hoisted(() => vi.fn());
 const hideStatus = vi.hoisted(() => vi.fn());
 const showStatus = vi.hoisted(() => vi.fn());
 const select = vi.hoisted(() => vi.fn());
 const deselect = vi.hoisted(() => vi.fn());
+
+function emptyStatusPagination(): IssueStatusPagination {
+  return Object.fromEntries(
+    ALL_STATUSES.map((status) => [
+      status,
+      {
+        total: 0,
+        loaded: 0,
+        hasMore: false,
+        isLoading: false,
+        isFetching: false,
+        isError: false,
+        loadMore: vi.fn(),
+        retry: vi.fn(),
+      },
+    ]),
+  ) as unknown as IssueStatusPagination;
+}
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -134,6 +154,7 @@ describe("issue renderer create entrypoints", () => {
       <ListView
         issues={[]}
         visibleStatuses={["todo"]}
+        statusPagination={emptyStatusPagination()}
         projectId="project-1"
         onCreateIssue={onCreateIssue}
       />,

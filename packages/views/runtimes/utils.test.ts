@@ -461,6 +461,60 @@ describe("estimateCost", () => {
     ).toBe(0);
   });
 
+  it("prices grok-4.5 at xAI's short-context $2.00 / $6.00 tier", () => {
+    // 1M input × $2.00 + 1M output × $6.00 + 1M cached-read × $0.30.
+    // Short context on purpose: the long-context (≥200K prompt) tier is 2x,
+    // but aggregated rows carry no per-request prompt sizes.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "xai",
+        model: "grok-4.5",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(8.3, 5);
+  });
+
+  it("prices the rest of the published Grok catalog", () => {
+    // grok-4.3 and the 4.20 snapshots share one $1.25 / $2.50 tier;
+    // grok-build-0.1 is its own $1.00 / $2.00 row.
+    for (const model of [
+      "grok-4.3",
+      "grok-4.20-multi-agent-0309",
+      "grok-4.20-0309-reasoning",
+      "grok-4.20-0309-non-reasoning",
+    ]) {
+      expect(
+        estimateCost({
+          ...zeroUsage,
+          provider: "xai",
+          model,
+          input_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+        }),
+      ).toBeCloseTo(3.75, 5);
+    }
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "xai",
+        model: "grok-build-0.1",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(3, 5);
+  });
+
+  it("leaves Grok SKUs that xAI does not publish a price for unmapped", () => {
+    // No startsWith fallback: `grok-composer-2.5-fast` is in the Grok Build
+    // catalog but absent from docs.x.ai/developers/pricing, so it must NOT
+    // inherit grok-4.5's rate — it surfaces in the unmapped diagnostic
+    // instead, where the user can supply their own rate.
+    expect(isModelPriced("grok-composer-2.5-fast", "xai")).toBe(false);
+  });
+
   it("recognises the provider-prefixed forms emitted by OpenRouter-style runtimes", () => {
     // opencode + OpenRouter route IDs through as `<provider>/<model>`.
     // canonicalCandidates strips the prefix; without this the rows above

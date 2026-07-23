@@ -1046,6 +1046,35 @@ func (q *Queries) LockChatSessionForDelete(ctx context.Context, id pgtype.UUID) 
 	return id_2, err
 }
 
+const lockChatSessionForRuntimeBind = `-- name: LockChatSessionForRuntimeBind :one
+SELECT id FROM chat_session
+WHERE id = $1
+FOR UPDATE
+`
+
+// Acquires an exclusive (FOR UPDATE) row lock on chat_session(id), serialising
+// "which runtime does this session execute on" against "enqueue the next task".
+//
+// Both SendDirectChatMessage and the agent-builder runtime switch take this lock
+// for their whole transaction. Without it the two are a read-then-write race: a
+// send reads the carrier agent's runtime_id, the switch then passes its
+// pending-task check and rebinds the carrier, and the send finally inserts a task
+// still stamped with the pre-switch runtime — so the user is told the switch
+// succeeded while their message runs on the old runtime (MUL-5163).
+//
+// The lock alone is not sufficient: the send path must also re-read the agent
+// INSIDE the locked transaction, because a send blocked at INSERT would otherwise
+// resume and write the runtime_id it read before blocking.
+//
+// Same row and same lock mode as LockChatSessionForDelete, and both take it as
+// their first statement, so the delete path and this one cannot deadlock.
+func (q *Queries) LockChatSessionForRuntimeBind(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockChatSessionForRuntimeBind, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const lockChatSessionForTask = `-- name: LockChatSessionForTask :one
 
 SELECT cs.id

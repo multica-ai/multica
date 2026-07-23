@@ -6,15 +6,32 @@ import { cn } from "@multica/ui/lib/utils";
 const OTHER_INPUT_MAX_LENGTH = 80;
 
 /**
- * Card-grid option used by the per-question questionnaire steps
- * (Source / Role / Use case). One row = icon + label. Clicking the
- * card selects it; the parent step decides when to advance (an
- * explicit Continue button gates the transition so users can change
- * their mind before committing). The `Other` variant swaps its
- * label area for a free-text input when selected.
+ * One option in a questionnaire card grid. `slug` is the persisted
+ * enum value; `icon` is a React node (lucide icon, brand SVG, or emoji
+ * span); `label` is the localized string already resolved by the
+ * caller. `isOther` flips this card into a free-text input row.
+ *
+ * Shared by the About-you onboarding step and the workspace
+ * source-backfill prompt, which both render their options through the
+ * cards below.
+ */
+export interface QuestionOption {
+  slug: string;
+  icon: ReactNode;
+  label: string;
+  isOther?: boolean;
+}
+
+/**
+ * Card-grid option used by the questionnaire surfaces (the About-you
+ * onboarding step, the source-backfill prompt). One row = icon +
+ * label. Clicking the card selects it; the parent decides when to
+ * advance (an explicit Continue button gates the transition so users
+ * can change their mind before committing). The `Other` variant swaps
+ * its label area for a free-text input when selected.
  *
  * `mode` controls ARIA role: `"radio"` for single-select questions
- * (role), `"checkbox"` for multi-select (source, use case). Visual
+ * (role, source), `"checkbox"` for multi-select (use case). Visual
  * style is identical — the border/shadow treatment already conveys
  * "selected"; multi-select cards just additionally don't deselect
  * other cards when clicked, which is the parent's responsibility.

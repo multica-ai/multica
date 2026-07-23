@@ -14,11 +14,11 @@ import { Callout } from "fumadocs-ui/components/callout";
 | 場所 | 動作 |
 |---|---|
 | **設定 → GitHub** | ワークスペースの admin には、マスタートグル、**Connect GitHub** ボタン、機能スイッチ（PR サイドバー、Co-authored-by、自動紐づけ）を備えた GitHub タブが表示されます。インストール後は GitHub タブに戻ります。 |
-| **イシューサイドバー → Pull requests** | このイシューに自動で紐づいたすべての PR が、タイトル、リポジトリ、状態（`Open` / `Draft` / `Merged` / `Closed`）、作成者とともに表示されます。行をクリックすると GitHub の該当 PR に移動します。 |
+| **イシューサイドバー → Pull requests** | このイシューに自動で紐づいたすべての PR が、タイトル、リポジトリ、状態（`Open` / `Draft` / `Merged` / `Closed`）、作成者、diff 統計、CI ステータスとともに表示されます。行をクリックすると GitHub の該当 PR に移動します。 |
 | **Webhook（バックグラウンド）** | すべての `pull_request` イベントで、Multica は PR 行を upsert し、PR からイシュー識別子をスキャンして、紐づけ行を（再）構築します。冪等性があり、同じ delivery を再送しても変化はありません。 |
 | **マージ時のステータス自動変更** | PR が `merged` に遷移すると、まだ `Done` でも `Cancelled` でもない、紐づいたすべてのイシューが `Done` に移動します。ステータス変更は source `github_pr_merged` でタイムラインに記録されます。 |
 
-ミラーリングされるのは PR 自体のみです。コミット、オープンな PR のないブランチ ref、CI チェックの状態はモデル化され**ません**。この連携は意図的に狭く設計されています。
+ミラーリングされるのは PR 自体のみです。コミットとオープンな PR のないブランチ ref はモデル化され**ません**。この連携は意図的に狭く設計されています。
 
 ## 識別子のマッチング方法
 
@@ -94,8 +94,9 @@ Multica Cloud で Multica を実行している場合、連携はすでに構成
 | **Webhook URL** | `https://<api-host>/api/webhooks/github`。 |
 | **Webhook secret** | 長いランダム文字列を生成してください（例: `openssl rand -hex 32`）。手順 2 で同じ値を Multica の env に貼り付けます。 |
 | **Permissions → Repository → Pull requests** | **Read-only**。 |
+| **Permissions → Repository → Checks** | **Read-only**。PR サイドバーの CI ステータスに必須です — この権限がないと GitHub は `check_suite` を配信しません。read-only では Multica は**完了した** suite しか見えません。[CI ステータスで分かること・分からないこと](#ci-ステータスで分かること分からないこと)を参照してください。 |
 | **Permissions → Repository → Metadata** | Read-only（必須）。 |
-| **Subscribe to events** | **Pull request** をチェックしてください。 |
+| **Subscribe to events** | **Pull request** と **Check suite** をチェックしてください。 |
 | **Where can this GitHub App be installed?** | お好みで。単一組織のセットアップなら `Only on this account` で十分です。 |
 
 **Create GitHub App** の後、App の詳細ページから 2 つのことを控えておいてください。
@@ -174,12 +175,56 @@ curl -i -X POST https://<api-host>/api/webhooks/github \
 | `401 invalid signature` | サーバーがロードした secret が思っている値で**ありません**。 | env 変数が実行中のプロセスに反映されたか確認してください（例: `kubectl exec` → `echo -n "$GITHUB_WEBHOOK_SECRET" \| wc -c`）。再デプロイしてください。 |
 | `503 github webhooks not configured` | プロセスで `GITHUB_WEBHOOK_SECRET` が空です。 | env 変数を設定し、API を再起動してください。 |
 
+### PR 行に CI ステータスが表示されない
+
+GitHub 上では CI が実行されているのに、すべての PR 行が **チェックはまだ報告されていません** と表示される場合です。App が `pull_request` は受け取れているが `check_suite` を受け取れていないことを意味します — リンクと merge → Done は動作し、CI ステータスだけが空のままになります。
+
+App が実際に何を購読しているかを確認します（このエンドポイントは公開されており、認証は不要です）。
+
+```bash
+curl -s https://api.github.com/apps/<your-app-slug> | jq '{events, permissions}'
+```
+
+`events` に `check_suite`、`permissions` に `"checks": "read"` が必要です。どちらかが欠けている場合：
+
+1. App を編集 → **Permissions → Repository → Checks** → **Read-only**
+2. App を編集 → **Subscribe to events** → **Check suite** をチェック
+3. **Save changes** をクリック
+
+<Callout type="warning">
+**既存のインストールは新しい権限を承認する必要があります。** `checks` 権限の追加は遡って適用されません — GitHub はこの App をインストールした各アカウントにメールを送り、誰かが承認するまで変更を保留します。それまでそのインストールは `check_suite` を一切配信しません。**Settings → Applications → Installed GitHub Apps → 対象の App → Review request** で承認してください（Organization へのインストールは organization owner が行う必要があります）。承認後の `new_permissions_accepted` イベントは Multica が自動的に処理するため、再デプロイは不要です。
+</Callout>
+
+CI ステータスは以降のイベントにのみ反映されます — Multica は受信した suite を記録するだけで、過去の履歴は埋めません。すぐに確認したい場合は、オープンな PR にコミットをプッシュするか、チェックを re-run してください。
+
+### CI ステータスで分かること・分からないこと
+
+Multica が要求するのは **Checks: Read-only** のみで、この上限は意図的なものです。ただし、サイドバーの行に依存する前に理解しておくべき結果が伴います。
+
+GitHub の [webhook 契約](https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_suite)は、`check_suite` の配信を権限レベルで分けています。
+
+| イベント action | `checks: read` で受信 | `checks: write` で受信 |
+|---|---|---|
+| `completed` | ✅ | ✅ |
+| `requested` / `rerequested` | ❌ | ✅ |
+
+したがって推奨の read-only 構成では、Multica は suite が**完了した**ことしか知らず、**開始した**ことは決して分かりません。ここから 2 つの帰結があります。
+
+- **実行中の CI は、どの権限レベルでも表示されません。** チェックが実行中の PR は「チェックはまだ報告されていません」と表示され、CI がまったくない PR と区別がつきません。実行中を示す表示はありません。
+- **緑の行は「報告されたものは成功した」であり、「すべて成功した」ではありません。** リポジトリに 2 つのレポート元（GitHub Actions と Vercel など）があり、片方だけが完了している場合、行はその 1 つの suite に基づいて**チェックに成功しました**と表示します。文言が「すべてのチェックに成功しました」ではなく「チェックに成功しました」である理由がこれです。この行は下限値として扱い、マージ前には GitHub 側で確認してください。
+
+<Callout type="info">
+**権限を上げれば解決するのでは？** しません — `checks: write` は「より広い読み取り」ではありません。GitHub が `requested` / `rerequested` を送る意味は「**この commit に対して GitHub があなたの App 用の check suite を作成しました。check run を追加してください**」であり、「他の CI プロバイダーが実行を開始した」ではありません。Multica は観測側であり check run を作成しないため、これらのイベントは GitHub Actions や Vercel について何の情報も持ちません。webhook ハンドラーが `completed` 以外のすべての action を無視するのはこのためです。実際の実行中ステータスには別の仕組み — checks API のポーリング、または `check_run` ベースのモデル — が必要で、権限の引き上げでは解決しません。
+</Callout>
+
 ## 制限事項
 
 現時点で知っておくべき、いくつかの粗い部分があります。
 
 - **まだ手動の紐づけ UI はありません** — PR を紐づける唯一の方法は、ブランチ、タイトル、本文に識別子を置くことです。
-- **CI / チェック状態はありません** — PR 自体のみがミラーリングされます。ビルド状態、レビューコメント、レビュアーは Multica には表示されません。
+- **CI ステータスは check suite 単位で、ジョブ単位ではありません** — 各レポート元（GitHub Actions、Vercel など）を成功 / 失敗のいずれか 1 つに丸めます。個々のジョブ名とログは GitHub 側にのみ残ります。レビューコメントとレビュアーは表示されません。
+- **実行中の CI は見えず、緑の行は下限値です** — Multica は `completed` の suite しか記録しないため、実行中のチェックは見えず、別のレポート元がまだ実行中でも行が「チェックに成功しました」と表示されることがあります。詳細は [CI ステータスで分かること・分からないこと](#ci-ステータスで分かること分からないこと)にあります。
+- **CI ステータスには `check_suite` の購読が必要です** — このイベントが文書化される前に作成された App では、すべての PR で「チェックはまだ報告されていません」と表示され続けます。[PR 行に CI ステータスが表示されない](#pr-行に-ci-ステータスが表示されない)を参照してください。
 - マージ → Done ルールに対する**ワークスペースレベルの設定はありません** — 固定のデフォルトです（`cancelled` でない限り `merged → done`）。ワークスペースでカスタマイズできるマッピングは将来の追加予定です。
 - **1 つのイシューに複数の PR が紐づく場合、マージは保守的です** — 2 つの PR がどちらも `MUL-123` を参照していて最初の 1 つがマージされると、イシューはただちに `Done` に移動します。進める前に紐づいたすべての PR が解決されるのを待つ後続の変更が進行中です。
 

@@ -14,7 +14,7 @@ import (
 const archiveAgent = `-- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 type ArchiveAgentParams struct {
@@ -52,6 +52,8 @@ func (q *Queries) ArchiveAgent(ctx context.Context, arg ArchiveAgentParams) (Age
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
@@ -60,7 +62,7 @@ const archiveAgentsByIDs = `-- name: ArchiveAgentsByIDs :many
 UPDATE agent
 SET archived_at = now(), archived_by = $1, updated_at = now()
 WHERE id = ANY($2::uuid[]) AND archived_at IS NULL
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 type ArchiveAgentsByIDsParams struct {
@@ -112,6 +114,8 @@ func (q *Queries) ArchiveAgentsByIDs(ctx context.Context, arg ArchiveAgentsByIDs
 			&i.PermissionMode,
 			&i.Kind,
 			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
 		); err != nil {
 			return nil, err
 		}
@@ -127,7 +131,7 @@ const archiveAgentsByRuntime = `-- name: ArchiveAgentsByRuntime :many
 UPDATE agent
 SET archived_at = now(), archived_by = $1, updated_at = now()
 WHERE runtime_id = ANY($2::uuid[]) AND archived_at IS NULL
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 type ArchiveAgentsByRuntimeParams struct {
@@ -175,6 +179,8 @@ func (q *Queries) ArchiveAgentsByRuntime(ctx context.Context, arg ArchiveAgentsB
 			&i.PermissionMode,
 			&i.Kind,
 			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
 		); err != nil {
 			return nil, err
 		}
@@ -1033,7 +1039,7 @@ func (q *Queries) ClaimChatFinalizeDeferred(ctx context.Context, id pgtype.UUID)
 const clearAgentComposioToolkitAllowlist = `-- name: ClearAgentComposioToolkitAllowlist :one
 UPDATE agent SET composio_toolkit_allowlist = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 // Explicit NULL-clear for composio_toolkit_allowlist. The COALESCE-based
@@ -1072,6 +1078,8 @@ func (q *Queries) ClearAgentComposioToolkitAllowlist(ctx context.Context, id pgt
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
@@ -1079,7 +1087,7 @@ func (q *Queries) ClearAgentComposioToolkitAllowlist(ctx context.Context, id pgt
 const clearAgentMcpConfig = `-- name: ClearAgentMcpConfig :one
 UPDATE agent SET mcp_config = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -1112,6 +1120,52 @@ func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agen
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
+	)
+	return i, err
+}
+
+const clearAgentServiceTier = `-- name: ClearAgentServiceTier :one
+UPDATE agent SET service_tier = NULL, updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
+`
+
+// Explicit NULL-clear for service_tier. COALESCE-based UpdateAgent cannot
+// set the column back to NULL, so the API routes "Runtime default" here.
+func (q *Queries) ClearAgentServiceTier(ctx context.Context, id pgtype.UUID) (Agent, error) {
+	row := q.db.QueryRow(ctx, clearAgentServiceTier, id)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.ComposioToolkitAllowlist,
+		&i.PermissionMode,
+		&i.Kind,
+		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
@@ -1119,7 +1173,7 @@ func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agen
 const clearAgentThinkingLevel = `-- name: ClearAgentThinkingLevel :one
 UPDATE agent SET thinking_level = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 // Explicit NULL-clear for thinking_level. COALESCE-based UpdateAgent cannot
@@ -1155,6 +1209,8 @@ func (q *Queries) ClearAgentThinkingLevel(ctx context.Context, id pgtype.UUID) (
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
@@ -1250,15 +1306,17 @@ INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
+    service_tier,
     composio_toolkit_allowlist, permission_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
-    $17::text[],
-    COALESCE($18, 'private')
+    $17,
+    $18::text[],
+    COALESCE($19, 'private')
 )
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 type CreateAgentParams struct {
@@ -1278,6 +1336,7 @@ type CreateAgentParams struct {
 	McpConfig                []byte      `json:"mcp_config"`
 	Model                    pgtype.Text `json:"model"`
 	ThinkingLevel            pgtype.Text `json:"thinking_level"`
+	ServiceTier              pgtype.Text `json:"service_tier"`
 	ComposioToolkitAllowlist []string    `json:"composio_toolkit_allowlist"`
 	PermissionMode           interface{} `json:"permission_mode"`
 }
@@ -1300,6 +1359,7 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		arg.McpConfig,
 		arg.Model,
 		arg.ThinkingLevel,
+		arg.ServiceTier,
 		arg.ComposioToolkitAllowlist,
 		arg.PermissionMode,
 	)
@@ -1331,6 +1391,8 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
@@ -1345,7 +1407,7 @@ INSERT INTO agent (
     'private', 'private', 1, $5, $6,
     '{}'::jsonb, '[]'::jsonb, $7, 'system', $8
 )
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 type CreateAgentBuilderParams struct {
@@ -1402,6 +1464,8 @@ func (q *Queries) CreateAgentBuilder(ctx context.Context, arg CreateAgentBuilder
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
@@ -2366,7 +2430,7 @@ func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) 
 }
 
 const getAgent = `-- name: GetAgent :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier FROM agent
 WHERE id = $1
 `
 
@@ -2400,12 +2464,14 @@ func (q *Queries) GetAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
 
 const getAgentForClaimUpdate = `-- name: GetAgentForClaimUpdate :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier FROM agent
 WHERE id = $1
 FOR UPDATE
 `
@@ -2440,12 +2506,58 @@ func (q *Queries) GetAgentForClaimUpdate(ctx context.Context, id pgtype.UUID) (A
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
+	)
+	return i, err
+}
+
+const getAgentForUpdate = `-- name: GetAgentForUpdate :one
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier FROM agent
+WHERE id = $1
+FOR UPDATE
+`
+
+// Serializes read-modify-write updates to disabled_runtime_skills so two
+// concurrent per-skill toggles cannot overwrite each other.
+func (q *Queries) GetAgentForUpdate(ctx context.Context, id pgtype.UUID) (Agent, error) {
+	row := q.db.QueryRow(ctx, getAgentForUpdate, id)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.ComposioToolkitAllowlist,
+		&i.PermissionMode,
+		&i.Kind,
+		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
 
 const getAgentInWorkspace = `-- name: GetAgentInWorkspace :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier FROM agent
 WHERE id = $1 AND workspace_id = $2 AND kind = 'user'
 `
 
@@ -2484,6 +2596,8 @@ func (q *Queries) GetAgentInWorkspace(ctx context.Context, arg GetAgentInWorkspa
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
@@ -2994,7 +3108,7 @@ func (q *Queries) LinkTaskToIssue(ctx context.Context, arg LinkTaskToIssueParams
 }
 
 const listActiveAgentsByRuntime = `-- name: ListActiveAgentsByRuntime :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier FROM agent
 WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'user'
 ORDER BY name ASC
 `
@@ -3041,6 +3155,8 @@ func (q *Queries) ListActiveAgentsByRuntime(ctx context.Context, runtimeID pgtyp
 			&i.PermissionMode,
 			&i.Kind,
 			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
 		); err != nil {
 			return nil, err
 		}
@@ -3053,7 +3169,7 @@ func (q *Queries) ListActiveAgentsByRuntime(ctx context.Context, runtimeID pgtyp
 }
 
 const listActiveAgentsByRuntimeForUpdate = `-- name: ListActiveAgentsByRuntimeForUpdate :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier FROM agent
 WHERE runtime_id = $1 AND archived_at IS NULL AND kind = 'user'
 ORDER BY name ASC
 FOR UPDATE
@@ -3103,6 +3219,8 @@ func (q *Queries) ListActiveAgentsByRuntimeForUpdate(ctx context.Context, runtim
 			&i.PermissionMode,
 			&i.Kind,
 			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
 		); err != nil {
 			return nil, err
 		}
@@ -3268,7 +3386,7 @@ func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]Ag
 }
 
 const listAgents = `-- name: ListAgents :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier FROM agent
 WHERE workspace_id = $1 AND archived_at IS NULL AND kind = 'user'
 ORDER BY created_at ASC
 `
@@ -3309,6 +3427,8 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 			&i.PermissionMode,
 			&i.Kind,
 			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
 		); err != nil {
 			return nil, err
 		}
@@ -3321,7 +3441,7 @@ func (q *Queries) ListAgents(ctx context.Context, workspaceID pgtype.UUID) ([]Ag
 }
 
 const listAllAgents = `-- name: ListAllAgents :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier FROM agent
 WHERE workspace_id = $1 AND kind = 'user'
 ORDER BY created_at ASC
 `
@@ -3362,6 +3482,8 @@ func (q *Queries) ListAllAgents(ctx context.Context, workspaceID pgtype.UUID) ([
 			&i.PermissionMode,
 			&i.Kind,
 			&i.SystemKey,
+			&i.DisabledRuntimeSkills,
+			&i.ServiceTier,
 		); err != nil {
 			return nil, err
 		}
@@ -3875,6 +3997,167 @@ func (q *Queries) ListWorkspaceAgentTaskSnapshot(ctx context.Context, workspaceI
 	return items, nil
 }
 
+const listWorkspaceWorkingAgents = `-- name: ListWorkspaceWorkingAgents :many
+SELECT
+  a.id,
+  a.name,
+  a.avatar_url,
+  COUNT(*)::int AS running_task_count,
+  COALESCE(
+    ARRAY_AGG(DISTINCT atq.issue_id ORDER BY atq.issue_id)
+      FILTER (WHERE atq.issue_id IS NOT NULL),
+    ARRAY[]::uuid[]
+  )::uuid[] AS issue_ids
+FROM agent a
+JOIN agent_task_queue atq ON atq.agent_id = a.id
+WHERE a.workspace_id = $1
+  AND a.kind = 'user'
+  AND a.archived_at IS NULL
+  AND atq.status = 'running'
+  AND (
+    $2::text = ''
+    OR ($2::text = 'chat' AND atq.chat_session_id IS NOT NULL)
+    OR (
+      $2::text = 'autopilot'
+      AND atq.chat_session_id IS NULL
+      AND atq.autopilot_run_id IS NOT NULL
+    )
+    OR (
+      $2::text = 'issue'
+      AND atq.chat_session_id IS NULL
+      AND atq.autopilot_run_id IS NULL
+      AND atq.issue_id IS NOT NULL
+    )
+  )
+  AND (
+    $3::text = ''
+    OR EXISTS (
+      SELECT 1
+      FROM issue i
+      WHERE i.id = atq.issue_id
+        AND i.workspace_id = a.workspace_id
+        AND (
+          (
+            $3::text IN ('assigned', 'any')
+            AND i.assignee_type = 'member'
+            AND i.assignee_id = $4::uuid
+          )
+          OR (
+            $3::text IN ('created', 'any')
+            AND i.creator_type = 'member'
+            AND i.creator_id = $4::uuid
+          )
+          OR (
+            $3::text IN ('involved', 'any')
+            AND (
+              (
+                i.assignee_type = 'agent'
+                AND EXISTS (
+                  SELECT 1
+                  FROM agent owned_agent
+                  WHERE owned_agent.id = i.assignee_id
+                    AND owned_agent.workspace_id = a.workspace_id
+                    AND owned_agent.owner_id = $4::uuid
+                )
+              )
+              OR (
+                i.assignee_type = 'squad'
+                AND EXISTS (
+                  SELECT 1
+                  FROM squad s
+                  WHERE s.id = i.assignee_id
+                    AND s.workspace_id = a.workspace_id
+                    AND (
+                      EXISTS (
+                        SELECT 1
+                        FROM squad_member sm
+                        WHERE sm.squad_id = s.id
+                          AND sm.member_type = 'member'
+                          AND sm.member_id = $4::uuid
+                      )
+                      OR EXISTS (
+                        SELECT 1
+                        FROM agent leader
+                        WHERE leader.id = s.leader_id
+                          AND leader.workspace_id = a.workspace_id
+                          AND leader.owner_id = $4::uuid
+                      )
+                      OR EXISTS (
+                        SELECT 1
+                        FROM squad_member sm
+                        JOIN agent owned_member ON owned_member.id = sm.member_id
+                        WHERE sm.squad_id = s.id
+                          AND sm.member_type = 'agent'
+                          AND owned_member.workspace_id = a.workspace_id
+                          AND owned_member.owner_id = $4::uuid
+                      )
+                    )
+                )
+              )
+            )
+          )
+        )
+    )
+  )
+GROUP BY a.id, a.name, a.avatar_url, a.created_at
+ORDER BY a.created_at ASC
+`
+
+type ListWorkspaceWorkingAgentsParams struct {
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	WorkType     string      `json:"work_type"`
+	MineRelation string      `json:"mine_relation"`
+	MemberID     pgtype.UUID `json:"member_id"`
+}
+
+type ListWorkspaceWorkingAgentsRow struct {
+	ID               pgtype.UUID   `json:"id"`
+	Name             string        `json:"name"`
+	AvatarUrl        pgtype.Text   `json:"avatar_url"`
+	RunningTaskCount int32         `json:"running_task_count"`
+	IssueIds         []pgtype.UUID `json:"issue_ids"`
+}
+
+// Workspace-level source for consumers that show currently working agents.
+// One row per visible, user-authored agent with at least one task that has
+// actually started running. work_type is optional (empty = every source);
+// source-specific reads use the same precedence as computeTaskKind:
+// chat > autopilot > issue. "issue" intentionally groups direct and
+// comment-triggered issue work. Quick-create work is present only in the
+// unfiltered projection because it has no source FK yet. mine_relation is
+// optional (empty = workspace); when set it narrows issue work to the
+// authenticated member's My Issues relation.
+func (q *Queries) ListWorkspaceWorkingAgents(ctx context.Context, arg ListWorkspaceWorkingAgentsParams) ([]ListWorkspaceWorkingAgentsRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceWorkingAgents,
+		arg.WorkspaceID,
+		arg.WorkType,
+		arg.MineRelation,
+		arg.MemberID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWorkspaceWorkingAgentsRow{}
+	for rows.Next() {
+		var i ListWorkspaceWorkingAgentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RunningTaskCount,
+			&i.IssueIds,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markAgentTaskWaitingLocalDirectory = `-- name: MarkAgentTaskWaitingLocalDirectory :one
 UPDATE agent_task_queue
 SET status = 'waiting_local_directory',
@@ -4295,6 +4578,80 @@ func (q *Queries) PromoteDueDeferredTasksForRuntimes(ctx context.Context, runtim
 	return items, nil
 }
 
+const rebindAgentBuilderRuntime = `-- name: RebindAgentBuilderRuntime :one
+UPDATE agent
+SET runtime_id = $1,
+    runtime_mode = $2,
+    model = $3,
+    updated_at = now()
+WHERE id = $4 AND kind = 'system' AND system_key LIKE 'agent_builder:%'
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
+`
+
+type RebindAgentBuilderRuntimeParams struct {
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
+	RuntimeMode string      `json:"runtime_mode"`
+	Model       pgtype.Text `json:"model"`
+	ID          pgtype.UUID `json:"id"`
+}
+
+// Re-points a builder carrier at another runtime mid-conversation. The carrier
+// is what SendDirectChatMessage reads to stamp a chat task's runtime_id, so this
+// UPDATE is the only thing that actually moves subsequent replies; the live-draft
+// picker alone never did. model is reset wholesale because model ids are
+// per-runtime — the new runtime resolves its own default instead of inheriting an
+// id it may not serve. The kind/system_key guard mirrors DeleteSystemAgentByID so
+// this path can never touch a user-authored agent.
+//
+// Callers MUST hold LockChatSessionForRuntimeBind on the owning chat_session for
+// the whole transaction, otherwise a concurrent send can stamp a task with the
+// pre-switch runtime after the pending-task check has already passed (MUL-5163).
+//
+// chat_session.runtime_id is deliberately left untouched: the daemon only resumes
+// a stored provider session when chat_session.runtime_id matches the claiming
+// task's runtime (see the chat claim path), so leaving the old pointer in place is
+// exactly what makes the new runtime start a fresh provider session.
+func (q *Queries) RebindAgentBuilderRuntime(ctx context.Context, arg RebindAgentBuilderRuntimeParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, rebindAgentBuilderRuntime,
+		arg.RuntimeID,
+		arg.RuntimeMode,
+		arg.Model,
+		arg.ID,
+	)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.ComposioToolkitAllowlist,
+		&i.PermissionMode,
+		&i.Kind,
+		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
+	)
+	return i, err
+}
+
 const reclaimStaleDispatchedTaskForRuntime = `-- name: ReclaimStaleDispatchedTaskForRuntime :one
 UPDATE agent_task_queue
 SET dispatched_at = now(),
@@ -4578,7 +4935,7 @@ SET status = CASE WHEN EXISTS (
 ) THEN 'working' ELSE 'idle' END,
     updated_at = now()
 WHERE a.id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -4611,6 +4968,8 @@ func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUI
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
@@ -4698,7 +5057,7 @@ func (q *Queries) RequeueAgentTaskAfterClaimFailure(ctx context.Context, arg Req
 const restoreAgent = `-- name: RestoreAgent :one
 UPDATE agent SET archived_at = NULL, archived_by = NULL, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, error) {
@@ -4731,6 +5090,8 @@ func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, erro
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
@@ -4871,10 +5232,11 @@ UPDATE agent SET
     mcp_config = COALESCE($15, mcp_config),
     model = COALESCE($16, model),
     thinking_level = COALESCE($17, thinking_level),
-    composio_toolkit_allowlist = COALESCE($18::text[], composio_toolkit_allowlist),
+    service_tier = COALESCE($18, service_tier),
+    composio_toolkit_allowlist = COALESCE($19::text[], composio_toolkit_allowlist),
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 type UpdateAgentParams struct {
@@ -4895,6 +5257,7 @@ type UpdateAgentParams struct {
 	McpConfig                []byte      `json:"mcp_config"`
 	Model                    pgtype.Text `json:"model"`
 	ThinkingLevel            pgtype.Text `json:"thinking_level"`
+	ServiceTier              pgtype.Text `json:"service_tier"`
 	ComposioToolkitAllowlist []string    `json:"composio_toolkit_allowlist"`
 }
 
@@ -4923,6 +5286,7 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		arg.McpConfig,
 		arg.Model,
 		arg.ThinkingLevel,
+		arg.ServiceTier,
 		arg.ComposioToolkitAllowlist,
 	)
 	var i Agent
@@ -4953,6 +5317,8 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
@@ -4961,7 +5327,7 @@ const updateAgentCustomEnv = `-- name: UpdateAgentCustomEnv :one
 UPDATE agent
 SET custom_env = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 type UpdateAgentCustomEnvParams struct {
@@ -5004,6 +5370,56 @@ func (q *Queries) UpdateAgentCustomEnv(ctx context.Context, arg UpdateAgentCusto
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
+	)
+	return i, err
+}
+
+const updateAgentDisabledRuntimeSkills = `-- name: UpdateAgentDisabledRuntimeSkills :one
+UPDATE agent
+SET disabled_runtime_skills = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
+`
+
+type UpdateAgentDisabledRuntimeSkillsParams struct {
+	ID                    pgtype.UUID `json:"id"`
+	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
+}
+
+func (q *Queries) UpdateAgentDisabledRuntimeSkills(ctx context.Context, arg UpdateAgentDisabledRuntimeSkillsParams) (Agent, error) {
+	row := q.db.QueryRow(ctx, updateAgentDisabledRuntimeSkills, arg.ID, arg.DisabledRuntimeSkills)
+	var i Agent
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.AvatarUrl,
+		&i.RuntimeMode,
+		&i.RuntimeConfig,
+		&i.Visibility,
+		&i.Status,
+		&i.MaxConcurrentTasks,
+		&i.OwnerID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Description,
+		&i.RuntimeID,
+		&i.Instructions,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.CustomEnv,
+		&i.CustomArgs,
+		&i.McpConfig,
+		&i.Model,
+		&i.ThinkingLevel,
+		&i.ComposioToolkitAllowlist,
+		&i.PermissionMode,
+		&i.Kind,
+		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }
@@ -5011,7 +5427,7 @@ func (q *Queries) UpdateAgentCustomEnv(ctx context.Context, arg UpdateAgentCusto
 const updateAgentStatus = `-- name: UpdateAgentStatus :one
 UPDATE agent SET status = $2, updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
 `
 
 type UpdateAgentStatusParams struct {
@@ -5049,6 +5465,8 @@ func (q *Queries) UpdateAgentStatus(ctx context.Context, arg UpdateAgentStatusPa
 		&i.PermissionMode,
 		&i.Kind,
 		&i.SystemKey,
+		&i.DisabledRuntimeSkills,
+		&i.ServiceTier,
 	)
 	return i, err
 }

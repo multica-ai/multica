@@ -42,6 +42,7 @@ vi.mock("@multica/core/paths", () => ({
 
 vi.mock("../navigation", () => ({
   useNavigation: () => ({ push: vi.fn(), openInNewTab: vi.fn() }),
+  useAppOrigin: () => null,
 }));
 
 vi.mock("../issues/components/issue-mention-card", () => ({
@@ -142,6 +143,34 @@ describe("ReadonlyContent line breaks", () => {
   it("renders a blank-line gap as separate paragraphs", () => {
     const { container } = render(<ReadonlyContent content={"para one\n\npara two"} />);
     expect(container.querySelectorAll("p").length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("ReadonlyContent autolink policy", () => {
+  it("keeps historical bare filenames and domains as plain text", () => {
+    const { container } = render(
+      <ReadonlyContent content="plan.md 4399.com ai.md" />,
+    );
+
+    expect(container.textContent).toContain("plan.md 4399.com ai.md");
+    expect(container.querySelector("a")).toBeNull();
+  });
+
+  it("still links explicit web URLs, www URLs, and email addresses", () => {
+    const { container } = render(
+      <ReadonlyContent
+        content="https://4399.com www.4399.com contact@example.com"
+      />,
+    );
+
+    const hrefs = Array.from(container.querySelectorAll("a"), (anchor) =>
+      anchor.getAttribute("href"),
+    );
+    expect(hrefs).toEqual([
+      "https://4399.com",
+      "https://www.4399.com",
+      "mailto:contact@example.com",
+    ]);
   });
 });
 
