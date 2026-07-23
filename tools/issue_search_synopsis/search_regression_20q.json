@@ -1,0 +1,103 @@
+[
+  {
+    "query": "control room child_count in_review blocked consolidation",
+    "expected": "SYN-100",
+    "case": "parent control-room aggregation"
+  },
+  {
+    "query": "latest final signal accepted route all domains",
+    "expected": "SYN-100",
+    "case": "latest final/consolidation signal"
+  },
+  {
+    "query": "child status aggregation active children in progress",
+    "expected": "SYN-100",
+    "case": "child status aggregation"
+  },
+  {
+    "query": "banking context window synthetic validation leakage",
+    "expected": "SYN-100",
+    "case": "parent intent despite child-heavy terms"
+  },
+  {
+    "query": "banking generator canary rerun",
+    "expected": "SYN-110",
+    "case": "specific active child intent"
+  },
+  {
+    "query": "retail strict gate failure analysis",
+    "expected": "SYN-120",
+    "case": "specific child failure analysis"
+  },
+  {
+    "query": "airline verifier boundary failure",
+    "expected": "SYN-130",
+    "case": "specific child failure analysis"
+  },
+  {
+    "query": "telecom runtime unblock rerun canary",
+    "expected": "SYN-140",
+    "case": "specific child unblock"
+  },
+  {
+    "query": "telecom visible reconstruction accepted 74 rejected 0",
+    "expected": "SYN-150",
+    "case": "accepted/rejected counts"
+  },
+  {
+    "query": "old telecom package accepted 72 rejected 2 superseded",
+    "expected": "SYN-151",
+    "case": "superseded lifecycle flag"
+  },
+  {
+    "query": "canonical telecom schema supersedes old package",
+    "expected": "SYN-150",
+    "case": "prefer current canonical route"
+  },
+  {
+    "query": "trace pipeline fixed json extraction rewards card",
+    "expected": "SYN-160",
+    "case": "child intent with parent key-like chatter"
+  },
+  {
+    "query": "daily governance in_review route_next needs_user_decision",
+    "expected": "SYN-200",
+    "case": "workflow semantics"
+  },
+  {
+    "query": "true_blocked semantics blocked missing permission resource",
+    "expected": "SYN-200",
+    "case": "blocked semantics"
+  },
+  {
+    "query": "open child issue threshold long running artifact ownership",
+    "expected": "SYN-200",
+    "case": "workflow hygiene"
+  },
+  {
+    "query": "meta discussion chatter should not outrank final result",
+    "expected": "SYN-210",
+    "case": "chatter downrank"
+  },
+  {
+    "query": "stale cancelled branch should be downranked",
+    "expected": "SYN-211",
+    "case": "cancelled route retrieval"
+  },
+  {
+    "query": "ready for analysis result path synthetic artifacts",
+    "expected": "SYN-170",
+    "case": "artifact/result path signal"
+  },
+  {
+    "query": "sidecar index baseline not primary index",
+    "expected": "SYN-220",
+    "case": "sidecar baseline positioning"
+  },
+  {
+    "query": "canonical issue synopsis rerank lifecycle flag",
+    "expected": "SYN-220",
+    "case": "proposal summary"
+  }
+]
+
