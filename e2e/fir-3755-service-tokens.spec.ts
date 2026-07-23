@@ -54,8 +54,12 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
         exact: true,
       }),
     });
+    // The settings shell performs a fresh authenticated bootstrap after the
+    // direct route load. CI can take more than Playwright's default five
+    // seconds to hydrate the workspace feature flags, so wait for the actual
+    // gated surface before asserting that it is unique.
+    await expect(serviceTokensSection).toBeVisible({ timeout: 15_000 });
     await expect(serviceTokensSection).toHaveCount(1);
-    await expect(serviceTokensSection).toBeVisible();
 
     for (const scope of ["skills:read", "agents:read", "issues:read"]) {
       await expect(
