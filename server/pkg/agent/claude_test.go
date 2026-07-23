@@ -93,34 +93,65 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 func TestClaudeHandleUserToolResult(t *testing.T) {
 	t.Parallel()
 
-	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
-	ch := make(chan Message, 10)
-
-	msg := claudeSDKMessage{
-		Type: "user",
-		Message: mustMarshal(t, claudeMessageContent{
-			Role: "user",
-			Content: []claudeContentBlock{
-				{
-					Type:      "tool_result",
-					ToolUseID: "call-1",
-					Content:   mustMarshal(t, "file contents here"),
-				},
-			},
-		}),
+	// A JSON-string payload is decoded exactly one level, so escaped newlines
+	// and quotes render as real characters instead of leaking "...\n..." with
+	// outer quotes into the Execution Log (MUL-5122). A JSON object payload
+	// stays as its raw JSON text (never unwrapped).
+	cases := []struct {
+		name    string
+		content json.RawMessage
+		want    string
+	}{
+		{
+			name:    "json string payload decoded to readable output",
+			content: mustMarshal(t, "line1\nline2 \"quoted\""),
+			want:    "line1\nline2 \"quoted\"",
+		},
+		{
+			name:    "json object payload stays raw",
+			content: mustMarshal(t, map[string]any{"a": 1}),
+			want:    `{"a":1}`,
+		},
 	}
 
-	if b.handleUser(msg, ch) {
-		t.Fatal("did not expect async launch in ordinary tool result")
-	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	select {
-	case m := <-ch:
-		if m.Type != MessageToolResult || m.CallID != "call-1" {
-			t.Fatalf("unexpected message: %+v", m)
-		}
-	default:
-		t.Fatal("expected message on channel")
+			b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
+			ch := make(chan Message, 10)
+
+			msg := claudeSDKMessage{
+				Type: "user",
+				Message: mustMarshal(t, claudeMessageContent{
+					Role: "user",
+					Content: []claudeContentBlock{
+						{
+							Type:      "tool_result",
+							ToolUseID: "call-1",
+							Content:   tc.content,
+						},
+					},
+				}),
+			}
+
+			if b.handleUser(msg, ch) {
+				t.Fatal("did not expect async launch in ordinary tool result")
+			}
+
+			select {
+			case m := <-ch:
+				if m.Type != MessageToolResult || m.CallID != "call-1" {
+					t.Fatalf("unexpected message: %+v", m)
+				}
+				if m.Output != tc.want {
+					t.Fatalf("output = %q, want %q", m.Output, tc.want)
+				}
+			default:
+				t.Fatal("expected message on channel")
+			}
+		})
 	}
 }
 

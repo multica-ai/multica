@@ -317,7 +317,7 @@ func handleQwenUser(raw json.RawMessage, ch chan<- Message) {
 	}
 	for _, block := range message.Content {
 		if block.Type == "tool_result" {
-			trySend(ch, Message{Type: MessageToolResult, CallID: block.ToolUseID, Output: qwenToolResultOutput(block.Content)})
+			trySend(ch, Message{Type: MessageToolResult, CallID: block.ToolUseID, Output: normalizeToolResultOutput(block.Content)})
 		}
 	}
 }
@@ -331,14 +331,6 @@ func qwenResultUsage(usage *qwenUsage, model string) map[string]TokenUsage {
 		return nil
 	}
 	return map[string]TokenUsage{model: qwenTokenUsage(usage)}
-}
-
-func qwenToolResultOutput(raw json.RawMessage) string {
-	var text string
-	if json.Unmarshal(raw, &text) == nil {
-		return text
-	}
-	return string(raw)
 }
 
 func qwenErrorText(event qwenStreamEvent) string {

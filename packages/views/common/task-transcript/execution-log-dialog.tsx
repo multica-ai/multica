@@ -47,6 +47,7 @@ import { redactSecrets } from "./redact";
 import {
   TRACE_RESULT_PREVIEW_LINES,
   TRACE_TEXT_PREVIEW_LINES,
+  decodeToolResultOutput,
   traceEventHasDetail,
   traceEventKind,
   traceEventLabel,
@@ -713,13 +714,15 @@ function ExecutionLogRowBody({
     }
 
     case "tool_result": {
-      const rawOutput = message.output ?? "";
+      // Decode defensively once: historical records may be double-JSON-encoded,
+      // so render the decoded text (real newlines / pretty JSON), not the blob.
+      const { text: decoded } = decodeToolResultOutput(message.output ?? "");
       const fullOutput =
-        rawOutput.length > OUTPUT_DETAIL_CAP
-          ? redactSecrets(rawOutput.slice(0, OUTPUT_DETAIL_CAP)) + "\n... (truncated)"
-          : redactSecrets(rawOutput);
+        decoded.length > OUTPUT_DETAIL_CAP
+          ? redactSecrets(decoded.slice(0, OUTPUT_DETAIL_CAP)) + "\n... (truncated)"
+          : redactSecrets(decoded);
       const preview = redactSecrets(
-        firstLines(rawOutput, TRACE_RESULT_PREVIEW_LINES).slice(0, RESULT_PREVIEW_CHARS),
+        firstLines(decoded, TRACE_RESULT_PREVIEW_LINES).slice(0, RESULT_PREVIEW_CHARS),
       );
       return (
         <div className="space-y-1">

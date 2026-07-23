@@ -55,6 +55,10 @@ const EVENTS: Ev[] = [
   { type: "tool_result", tool: "exec_command", output: "Test Files  6 passed (6)\n     Tests  51 passed (51)" },
   { type: "thinking", content: "Pagination plus virtualization fixes the freeze; the presenter needs to drive the reading hierarchy so agent text is the primary layer." },
   { type: "text", content: LONG_AGENT },
+  // Historical double-JSON-encoded tool result (Claude/CodeBuddy) exactly like the
+  // reported screenshot: the stored output is a JSON string literal with outer
+  // quotes, escaped \n and \". The frontend must decode ONE level → readable text.
+  { type: "tool_result", tool: "Bash", output: '"Comment added to issue PRE-3.\\n{\\n  \\"attachments\\": [],\\n  \\"status\\": \\"in_review\\"\\n}"' },
 ];
 
 let api: TestApiClient;
@@ -197,4 +201,25 @@ test("expand: single row and bulk expand of loaded items", async ({ page }) => {
   // Collapse all returns to previews.
   await page.getByTestId("execution-log-collapse-all").click();
   await expect(page.getByTestId("execution-log-expand-all")).toBeVisible();
+});
+
+test("compat: a double-encoded tool result renders as readable decoded text", async ({ page }) => {
+  const dialog = await openLog(page);
+
+  // The stored output is a JSON-encoded string (outer quotes, escaped \n and \").
+  // It must render decoded — real newlines/quotes — not the escaped blob from the
+  // reported screenshot. The collapsed preview already shows the decoded first line.
+  const row = page
+    .getByTestId("execution-log-row")
+    .filter({ hasText: "Comment added to issue PRE-3" })
+    .first();
+  await row.scrollIntoViewIfNeeded();
+  await expect(row).toBeVisible();
+  await row.getByRole("button").first().click();
+
+  // Decoded: the fields read as real text, and no escaped `\n` literal survives.
+  await expect(row).toContainText('"status": "in_review"');
+  await expect(row).not.toContainText("\\n");
+  await page.waitForTimeout(300);
+  await dialog.screenshot({ path: `${SHOTS_DIR}/05-decoded-tool-result.png` });
 });

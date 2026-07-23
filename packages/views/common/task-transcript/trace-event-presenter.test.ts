@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  decodeToolResultOutput,
   traceEventDefaultCollapsed,
   traceEventEmphasis,
   traceEventFilterKey,
@@ -59,13 +60,18 @@ describe("traceToolArgSummary — most informative one-liner", () => {
 });
 
 describe("traceEventSummary", () => {
-  it("text → first non-empty line; error → content; result → output preview", () => {
+  it("text → first non-empty line; error → content; result → decoded first line", () => {
     expect(traceEventSummary(ev({ type: "text", content: "\n\nhello\nworld" }))).toBe("hello");
     expect(traceEventSummary(ev({ type: "error", content: "boom" }))).toBe("boom");
-    expect(traceEventSummary(ev({ type: "tool_result", output: "line1\nline2" }))).toBe("line1\nline2");
+    expect(traceEventSummary(ev({ type: "tool_result", output: "line1\nline2" }))).toBe("line1");
     expect(traceEventSummary(ev({ type: "tool_use", tool: "exec_command", input: { command: "go build" } }))).toBe(
       "go build",
     );
+  });
+
+  it("tool_result summary decodes a double-encoded output to its real first line", () => {
+    // A JSON-encoded string literal: outer quotes + escaped newline in storage.
+    expect(traceEventSummary(ev({ type: "tool_result", output: '"line1\\nline2"' }))).toBe("line1");
   });
 
   it("a generic event still yields a summary from content/output/input", () => {
@@ -121,5 +127,46 @@ describe("shortenTracePath", () => {
   it("keeps short paths and abbreviates deep ones", () => {
     expect(shortenTracePath("a/b")).toBe("a/b");
     expect(shortenTracePath("/w/x/y/z.ts")).toBe(".../y/z.ts");
+  });
+});
+
+describe("decodeToolResultOutput — conservative one-level unwrap (MUL-5122)", () => {
+  it("unwraps a double-encoded JSON string to real newlines and quotes", () => {
+    // Storage held a JSON-encoded string: outer quotes, escaped \n and \".
+    const stored = '"line1\\nline2 \\"q\\""';
+    expect(decodeToolResultOutput(stored)).toEqual({
+      text: 'line1\nline2 "q"',
+      json: false,
+    });
+  });
+
+  it("pretty-prints a JSON object string", () => {
+    const result = decodeToolResultOutput('{"status":"ok","n":2}');
+    expect(result.json).toBe(true);
+    expect(result.text).toBe('{\n  "status": "ok",\n  "n": 2\n}');
+    expect(result.text.split("\n").length).toBeGreaterThan(1);
+  });
+
+  it("pretty-prints a JSON array string", () => {
+    const result = decodeToolResultOutput("[1,2,3]");
+    expect(result.json).toBe(true);
+    expect(result.text).toBe("[\n  1,\n  2,\n  3\n]");
+  });
+
+  it("leaves plain multi-line logs untouched (real newline, not JSON)", () => {
+    expect(decodeToolResultOutput("PASS\nok")).toEqual({ text: "PASS\nok", json: false });
+  });
+
+  it("leaves a real backslash path verbatim — never a global \\n-replace", () => {
+    // Real backslashes; the string does not start with " { or [, so it is not parsed.
+    expect(decodeToolResultOutput("C:\\Users\\x")).toEqual({ text: "C:\\Users\\x", json: false });
+  });
+
+  it("returns malformed JSON-looking text unchanged", () => {
+    expect(decodeToolResultOutput("{oops")).toEqual({ text: "{oops", json: false });
+  });
+
+  it("returns an empty string unchanged", () => {
+    expect(decodeToolResultOutput("")).toEqual({ text: "", json: false });
   });
 });

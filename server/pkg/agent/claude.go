@@ -362,7 +362,7 @@ func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool
 		if block.Type == "tool_result" {
 			resultStr := ""
 			if block.Content != nil {
-				resultStr = string(block.Content)
+				resultStr = normalizeToolResultOutput(block.Content)
 				if claudeToolResultHasAsyncLaunch(block.Content) {
 					sawAsyncLaunch = true
 				}

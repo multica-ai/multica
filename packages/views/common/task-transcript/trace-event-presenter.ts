@@ -126,6 +126,41 @@ function firstLine(content: string | undefined): string {
 }
 
 /**
+ * Defensively decode a persisted `tool_result` output for display (MUL-5122).
+ *
+ * Some historical records (Claude/CodeBuddy history) were stored
+ * double-JSON-encoded, so a shell log came back as `"...\n..."` — a JSON string
+ * literal with outer quotes and escaped newlines rather than the raw text. This
+ * unwraps exactly ONE level when the whole output is itself valid JSON, and
+ * pretty-prints a JSON object/array, while leaving plain logs — and real
+ * backslash paths like `C:\Users\x` — verbatim.
+ *
+ * Conservative by construction: only an output whose first non-space char is
+ * `"`, `{`, or `[` is parsed at all, and a parse failure or a non-container
+ * primitive returns the original text untouched. It never does a global
+ * `\n`-replace, which would corrupt legitimate backslash sequences.
+ */
+export function decodeToolResultOutput(output: string): { text: string; json: boolean } {
+  const head = output.trimStart()[0];
+  if (head !== '"' && head !== "{" && head !== "[") {
+    return { text: output, json: false };
+  }
+  try {
+    const parsed: unknown = JSON.parse(output.trim());
+    if (typeof parsed === "string") {
+      // Historical double-encoding: unwrap one level to real newlines/quotes.
+      return { text: parsed, json: false };
+    }
+    if (parsed !== null && typeof parsed === "object") {
+      return { text: JSON.stringify(parsed, null, 2), json: true };
+    }
+    return { text: output, json: false };
+  } catch {
+    return { text: output, json: false };
+  }
+}
+
+/**
  * Compact one-line summary shown before any expansion. Tool calls surface their
  * argument; results and text surface a leading preview; errors surface their
  * content so failures are readable at a glance.
@@ -139,7 +174,9 @@ export function traceEventSummary(event: TraceEvent): string {
     case "tool_use":
       return traceToolArgSummary(event.input);
     case "tool_result":
-      return event.output?.slice(0, 200) ?? "";
+      // Summarize from the DECODED output so the collapsed line and copy read
+      // real text, not an escaped `"...\n..."` blob from double-encoded history.
+      return firstLine(decodeToolResultOutput(event.output ?? "").text);
     case "error":
       return event.content ?? "";
     default:

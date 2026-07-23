@@ -372,7 +372,7 @@ func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message
 		if block.Type == "tool_result" {
 			resultStr := ""
 			if block.Content != nil {
-				resultStr = string(block.Content)
+				resultStr = normalizeToolResultOutput(block.Content)
 			}
 			trySend(ch, Message{
 				Type:   MessageToolResult,

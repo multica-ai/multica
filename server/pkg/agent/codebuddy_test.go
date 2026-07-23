@@ -446,31 +446,61 @@ func TestIsKnownThinkingValue_Codebuddy(t *testing.T) {
 func TestCodebuddyHandleUserToolResult(t *testing.T) {
 	t.Parallel()
 
-	b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
-	ch := make(chan Message, 10)
-
-	msg := codebuddySDKMessage{
-		Type: "user",
-		Message: mustMarshal(t, codebuddyMessageContent{
-			Role: "user",
-			Content: []codebuddyContentBlock{
-				{
-					Type:      "tool_result",
-					ToolUseID: "call-cb-1",
-					Content:   mustMarshal(t, "tool output here"),
-				},
-			},
-		}),
+	// A JSON-string payload is decoded exactly one level so escaped newlines
+	// and quotes render as real characters (MUL-5122); an object payload stays
+	// as its raw JSON text.
+	cases := []struct {
+		name    string
+		content json.RawMessage
+		want    string
+	}{
+		{
+			name:    "json string payload decoded to readable output",
+			content: mustMarshal(t, "line1\nline2 \"quoted\""),
+			want:    "line1\nline2 \"quoted\"",
+		},
+		{
+			name:    "json object payload stays raw",
+			content: mustMarshal(t, map[string]any{"a": 1}),
+			want:    `{"a":1}`,
+		},
 	}
 
-	b.handleUser(msg, ch)
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	select {
-	case m := <-ch:
-		if m.Type != MessageToolResult || m.CallID != "call-cb-1" {
-			t.Fatalf("unexpected message: %+v", m)
-		}
-	default:
-		t.Fatal("expected message on channel")
+			b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
+			ch := make(chan Message, 10)
+
+			msg := codebuddySDKMessage{
+				Type: "user",
+				Message: mustMarshal(t, codebuddyMessageContent{
+					Role: "user",
+					Content: []codebuddyContentBlock{
+						{
+							Type:      "tool_result",
+							ToolUseID: "call-cb-1",
+							Content:   tc.content,
+						},
+					},
+				}),
+			}
+
+			b.handleUser(msg, ch)
+
+			select {
+			case m := <-ch:
+				if m.Type != MessageToolResult || m.CallID != "call-cb-1" {
+					t.Fatalf("unexpected message: %+v", m)
+				}
+				if m.Output != tc.want {
+					t.Fatalf("output = %q, want %q", m.Output, tc.want)
+				}
+			default:
+				t.Fatal("expected message on channel")
+			}
+		})
 	}
 }
