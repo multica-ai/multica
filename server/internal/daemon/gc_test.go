@@ -292,8 +292,11 @@ func TestCleanTaskDir_ActiveAfterDecisionPreservesDirectory(t *testing.T) {
 	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionClean {
 		t.Fatalf("expected initial gcActionClean, got %d", action)
 	}
-	d.markActiveEnvRoot(taskDir)
-	defer d.unmarkActiveEnvRoot(taskDir)
+	releaseActive, ok := d.markActiveEnvRoot(context.Background(), taskDir)
+	if !ok {
+		t.Fatal("failed to mark active env root")
+	}
+	defer releaseActive()
 	if d.cleanTaskDir(taskDir) {
 		t.Fatal("cleanup succeeded for active env root")
 	}
@@ -337,8 +340,11 @@ func TestGcWorkspace_ActiveAtFinalGateOnlyIncrementsSkipped(t *testing.T) {
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-active-final-gate", "task", &execenv.GCMeta{
 		IssueID: issueID, WorkspaceID: "ws-active-final-gate",
 	})
-	d.markActiveEnvRoot(taskDir)
-	defer d.unmarkActiveEnvRoot(taskDir)
+	releaseActive, ok := d.markActiveEnvRoot(context.Background(), taskDir)
+	if !ok {
+		t.Fatal("failed to mark active env root")
+	}
+	defer releaseActive()
 	stats := &gcStats{byPattern: map[string]int{}}
 	d.gcWorkspace(context.Background(), wsDir, stats)
 	if stats.skipped != 1 || stats.cleaned != 0 || stats.orphaned != 0 || stats.bytesReclaimed != 0 {
@@ -730,8 +736,11 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsArtifactCleanup(t *testing.T) {
 		CompletedAt: time.Now().Add(-24 * time.Hour),
 	})
 
-	d.markActiveEnvRoot(taskDir)
-	defer d.unmarkActiveEnvRoot(taskDir)
+	releaseActive, ok := d.markActiveEnvRoot(context.Background(), taskDir)
+	if !ok {
+		t.Fatal("failed to mark active env root")
+	}
+	defer releaseActive()
 
 	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip while task is active, got %d", action)
@@ -763,8 +772,11 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsFullCleanup(t *testing.T) {
 		CompletedAt: time.Now().Add(-30 * 24 * time.Hour),
 	})
 
-	d.markActiveEnvRoot(taskDir)
-	defer d.unmarkActiveEnvRoot(taskDir)
+	releaseActive, ok := d.markActiveEnvRoot(context.Background(), taskDir)
+	if !ok {
+		t.Fatal("failed to mark active env root")
+	}
+	defer releaseActive()
 
 	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip on active env root with done+stale issue, got %d", action)
@@ -789,8 +801,11 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsOrphan404(t *testing.T) {
 		CompletedAt: time.Now(),
 	})
 
-	d.markActiveEnvRoot(taskDir)
-	defer d.unmarkActiveEnvRoot(taskDir)
+	releaseActive, ok := d.markActiveEnvRoot(context.Background(), taskDir)
+	if !ok {
+		t.Fatal("failed to mark active env root")
+	}
+	defer releaseActive()
 
 	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip on active env root with 404 issue, got %d", action)
@@ -804,8 +819,11 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsNoMetaOrphan(t *testing.T) {
 	d.cfg.GCOrphanTTL = 0
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "active-no-meta", nil)
 
-	d.markActiveEnvRoot(taskDir)
-	defer d.unmarkActiveEnvRoot(taskDir)
+	releaseActive, ok := d.markActiveEnvRoot(context.Background(), taskDir)
+	if !ok {
+		t.Fatal("failed to mark active env root")
+	}
+	defer releaseActive()
 
 	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip on active env root with no-meta orphan, got %d", action)
@@ -1067,16 +1085,22 @@ func TestActiveEnvRootRefcount(t *testing.T) {
 	if d.isActiveEnvRoot(root) {
 		t.Fatal("expected inactive before mark")
 	}
-	d.markActiveEnvRoot(root)
-	d.markActiveEnvRoot(root) // second mark from reuse path
+	releaseFirst, ok := d.markActiveEnvRoot(context.Background(), root)
+	if !ok {
+		t.Fatal("first mark failed")
+	}
+	releaseSecond, ok := d.markActiveEnvRoot(context.Background(), root)
+	if !ok {
+		t.Fatal("second mark failed")
+	}
 	if !d.isActiveEnvRoot(root) {
 		t.Fatal("expected active after mark")
 	}
-	d.unmarkActiveEnvRoot(root)
+	releaseFirst()
 	if !d.isActiveEnvRoot(root) {
 		t.Fatal("expected still active after one unmark")
 	}
-	d.unmarkActiveEnvRoot(root)
+	releaseSecond()
 	if d.isActiveEnvRoot(root) {
 		t.Fatal("expected inactive after both unmarks")
 	}
@@ -1088,11 +1112,14 @@ func TestReserveEnvRootForGCIsExclusive(t *testing.T) {
 	d := newGCTestDaemon(t, http.NewServeMux())
 	root := "/tmp/fake/gc-reservation"
 
-	d.markActiveEnvRoot(root)
+	releaseActive, ok := d.markActiveEnvRoot(context.Background(), root)
+	if !ok {
+		t.Fatal("mark failed")
+	}
 	if _, ok := d.reserveEnvRootForGC(root); ok {
 		t.Fatal("GC reservation must fail while a task is active")
 	}
-	d.unmarkActiveEnvRoot(root)
+	releaseActive()
 
 	release, ok := d.reserveEnvRootForGC(root)
 	if !ok {
@@ -1127,8 +1154,13 @@ func TestEnvRootGCReservationBlocksConcurrentClaim(t *testing.T) {
 		reachedOnce.Do(func() { close(reachedGate) })
 	}
 	marked := make(chan struct{})
+	releaseClaim := make(chan func(), 1)
 	go func() {
-		d.markActiveEnvRoot(root)
+		releaseActive, markedOK := d.markActiveEnvRoot(context.Background(), root)
+		if !markedOK {
+			return
+		}
+		releaseClaim <- releaseActive
 		close(marked)
 	}()
 	select {
@@ -1147,7 +1179,7 @@ func TestEnvRootGCReservationBlocksConcurrentClaim(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("concurrent claim did not resume after reservation release")
 	}
-	d.unmarkActiveEnvRoot(root)
+	(<-releaseClaim)()
 }
 
 func TestEnvRootGCReservationBlocksSymlinkAliasClaim(t *testing.T) {
@@ -1177,14 +1209,15 @@ func TestEnvRootGCReservationBlocksSymlinkAliasClaim(t *testing.T) {
 		<-reachedGate
 		cancel()
 	}()
-	if d.markActiveEnvRootContext(ctx, aliasTaskDir) {
+	if _, marked := d.markActiveEnvRoot(ctx, aliasTaskDir); marked {
 		t.Fatal("symlink alias bypassed reservation")
 	}
 	release()
-	if !d.markActiveEnvRootContext(context.Background(), aliasTaskDir) {
+	releaseAlias, marked := d.markActiveEnvRoot(context.Background(), aliasTaskDir)
+	if !marked {
 		t.Fatal("claim did not succeed after reservation release")
 	}
-	d.unmarkActiveEnvRoot(taskDir)
+	releaseAlias()
 }
 
 func TestEnvRootGCReservationWaitIsCancellable(t *testing.T) {
@@ -1198,8 +1231,162 @@ func TestEnvRootGCReservationWaitIsCancellable(t *testing.T) {
 	defer release()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if d.markActiveEnvRootContext(ctx, root) {
+	if _, marked := d.markActiveEnvRoot(ctx, root); marked {
 		t.Fatal("cancelled claimant entered reserved root")
+	}
+}
+
+func TestActiveEnvRootLeaseSurvivesSymlinkRetarget(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	realOne := filepath.Join(t.TempDir(), "one")
+	realTwo := filepath.Join(t.TempDir(), "two")
+	if err := os.MkdirAll(realOne, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(realTwo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(realOne, alias); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	releaseTwo, ok := d.markActiveEnvRoot(context.Background(), realTwo)
+	if !ok {
+		t.Fatal("failed to mark second root")
+	}
+	defer releaseTwo()
+	releaseAlias, ok := d.markActiveEnvRoot(context.Background(), alias)
+	if !ok {
+		t.Fatal("failed to mark alias")
+	}
+	if err := os.Remove(alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(realTwo, alias); err != nil {
+		t.Fatal(err)
+	}
+	releaseAlias()
+	if d.isActiveEnvRoot(realOne) {
+		t.Fatal("lease left originally acquired canonical key active")
+	}
+	if !d.isActiveEnvRoot(realTwo) {
+		t.Fatal("lease released retargeted root instead of acquired key")
+	}
+}
+
+func TestApplyGCAction_ManagedArtifactCleanupActiveAfterDecisionOnlyIncrementsSkipped(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-managed-active", "task", nil)
+	artifactDir := filepath.Join(taskDir, "codex-home", ".sandbox-bin")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	releaseActive, ok := d.markActiveEnvRoot(context.Background(), taskDir)
+	if !ok {
+		t.Fatal("failed to mark task root")
+	}
+	defer releaseActive()
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.applyGCAction(taskDir, gcActionCleanManagedArtifacts, stats)
+	if stats.skipped != 1 || stats.artifactDirs != 0 || stats.artifactRemoved != 0 || stats.bytesReclaimed != 0 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	if _, err := os.Stat(artifactDir); err != nil {
+		t.Fatalf("managed artifact removed after active claim: %v", err)
+	}
+}
+
+func TestApplyGCAction_ManagedArtifactCleanupBlocksConcurrentClaim(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-managed-wait", "task", nil)
+	artifactDir := filepath.Join(taskDir, "codex-home", ".sandbox-bin")
+	payload := filepath.Join(artifactDir, "tool")
+	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(payload, []byte("managed"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	inCleanup := make(chan struct{})
+	releaseCleanup := make(chan struct{})
+	d.artifactCleanupHook = func(string) {
+		close(inCleanup)
+		<-releaseCleanup
+	}
+	reachedGate := make(chan struct{})
+	var once sync.Once
+	d.activeEnvRootWaitHook = func(string) { once.Do(func() { close(reachedGate) }) }
+	stats := &gcStats{byPattern: map[string]int{}}
+	cleanupDone := make(chan struct{})
+	go func() {
+		d.applyGCAction(taskDir, gcActionCleanManagedArtifacts, stats)
+		close(cleanupDone)
+	}()
+	<-inCleanup
+	claimed := make(chan struct{})
+	releaseClaim := make(chan func(), 1)
+	go func() {
+		releaseActive, ok := d.markActiveEnvRoot(context.Background(), taskDir)
+		if !ok {
+			return
+		}
+		releaseClaim <- releaseActive
+		close(claimed)
+	}()
+	<-reachedGate
+	select {
+	case <-claimed:
+		t.Fatal("claim passed while managed cleanup held reservation")
+	default:
+	}
+	close(releaseCleanup)
+	<-cleanupDone
+	<-claimed
+	(<-releaseClaim)()
+	if stats.skipped != 1 || stats.artifactDirs != 1 || stats.artifactRemoved != 1 ||
+		stats.bytesReclaimed != int64(len("managed")) ||
+		stats.byPattern["managed:codex-home/.sandbox-bin"] != 1 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	if _, err := os.Stat(artifactDir); !os.IsNotExist(err) {
+		t.Fatalf("managed artifact should be removed before claim resumes: %v", err)
+	}
+}
+
+func TestCleanTaskDir_WorkspacesRootAncestorSwapCannotEscape(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-root-swap", "task", nil)
+	originalRoot := d.cfg.WorkspacesRoot
+	movedRoot := originalRoot + "-moved"
+	externalRoot := t.TempDir()
+	externalTask := filepath.Join(externalRoot, "ws-root-swap", "task")
+	if err := os.MkdirAll(externalTask, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(externalTask, "keep")
+	if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d.envRootQuarantineHook = func(string) {
+		if err := os.Rename(originalRoot, movedRoot); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(externalRoot, originalRoot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if !d.cleanTaskDir(taskDir) {
+		t.Fatal("fd-relative cleanup failed after root pathname swap")
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("whole-root cleanup escaped stable WorkspacesRoot: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(movedRoot, "ws-root-swap", "task")); !os.IsNotExist(err) {
+		t.Fatalf("original task root was not quarantined: %v", err)
 	}
 }
 
@@ -1245,8 +1432,11 @@ func TestApplyGCAction_ArtifactCleanupActiveAfterDecisionOnlyIncrementsSkipped(t
 	if err := os.MkdirAll(artifactDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	d.markActiveEnvRoot(taskDir)
-	defer d.unmarkActiveEnvRoot(taskDir)
+	releaseActive, ok := d.markActiveEnvRoot(context.Background(), taskDir)
+	if !ok {
+		t.Fatal("failed to mark active env root")
+	}
+	defer releaseActive()
 	stats := &gcStats{byPattern: map[string]int{}}
 	d.applyGCAction(taskDir, gcActionCleanArtifacts, stats)
 	if stats.skipped != 1 || stats.artifactDirs != 0 || stats.artifactRemoved != 0 || stats.bytesReclaimed != 0 {
@@ -1282,8 +1472,13 @@ func TestApplyGCAction_ArtifactCleanupBlocksConcurrentClaim(t *testing.T) {
 	}()
 	<-inCleanup
 	claimed := make(chan struct{})
+	releaseClaim := make(chan func(), 1)
 	go func() {
-		d.markActiveEnvRoot(taskDir)
+		releaseActive, marked := d.markActiveEnvRoot(context.Background(), taskDir)
+		if !marked {
+			return
+		}
+		releaseClaim <- releaseActive
 		close(claimed)
 	}()
 	select {
@@ -1307,7 +1502,7 @@ func TestApplyGCAction_ArtifactCleanupBlocksConcurrentClaim(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("claim did not resume after cleanup")
 	}
-	d.unmarkActiveEnvRoot(taskDir)
+	(<-releaseClaim)()
 	if stats.artifactRemoved != 1 || stats.skipped != 1 {
 		t.Fatalf("unexpected stats: %+v", stats)
 	}

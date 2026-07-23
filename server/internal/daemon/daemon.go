@@ -328,6 +328,7 @@ type Daemon struct {
 	activeEnvRootWaitHook func(string)
 	renameEnvRootHook     func(string, string) error
 	removeEnvRootHook     func(string) error
+	envRootQuarantineHook func(string) // test-only: runs after WorkspacesRoot is opened, before rename
 	artifactCleanupHook   func(string) // test-only: runs while the artifact-cleanup reservation is held
 	artifactRemoveHook    func(string) // test-only: runs after artifact inspection, before fd-relative removal
 
@@ -3264,17 +3265,19 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// correctly nested within these.
 	predictedEnvRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
 	if predictedEnvRoot != "" {
-		if !d.markActiveEnvRootContext(ctx, predictedEnvRoot) {
+		release, ok := d.markActiveEnvRoot(ctx, predictedEnvRoot)
+		if !ok {
 			return
 		}
-		defer d.unmarkActiveEnvRoot(predictedEnvRoot)
+		defer release()
 	}
 	if task.PriorWorkDir != "" {
 		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != predictedEnvRoot {
-			if !d.markActiveEnvRootContext(ctx, priorRoot) {
+			release, ok := d.markActiveEnvRoot(ctx, priorRoot)
+			if !ok {
 				return
 			}
-			defer d.unmarkActiveEnvRoot(priorRoot)
+			defer release()
 		}
 	}
 
@@ -4178,17 +4181,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// predicted root for a fresh Prepare and the prior root for Reuse — they
 	// usually differ (Reuse keeps the original task's directory).
 	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
-	if !d.markActiveEnvRootContext(ctx, predictedRoot) {
+	releasePredicted, ok := d.markActiveEnvRoot(ctx, predictedRoot)
+	if !ok {
 		return TaskResult{}, ctx.Err()
 	}
-	defer d.unmarkActiveEnvRoot(predictedRoot)
+	defer releasePredicted()
 	if task.PriorWorkDir != "" {
 		priorRoot := filepath.Dir(task.PriorWorkDir)
 		if priorRoot != predictedRoot {
-			if !d.markActiveEnvRootContext(ctx, priorRoot) {
+			releasePrior, ok := d.markActiveEnvRoot(ctx, priorRoot)
+			if !ok {
 				return TaskResult{}, ctx.Err()
 			}
-			defer d.unmarkActiveEnvRoot(priorRoot)
+			defer releasePrior()
 		}
 	}
 
@@ -4358,10 +4363,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
 	// future changes diverge from PredictRootDir.
 	if env.RootDir != predictedRoot && env.RootDir != "" {
-		if !d.markActiveEnvRootContext(ctx, env.RootDir) {
+		releaseActual, ok := d.markActiveEnvRoot(ctx, env.RootDir)
+		if !ok {
 			return TaskResult{}, ctx.Err()
 		}
-		defer d.unmarkActiveEnvRoot(env.RootDir)
+		defer releaseActual()
 	}
 	taskTempDir, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
 	if err != nil {
@@ -5475,17 +5481,15 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 // markActiveEnvRoot records that a task is currently using the given env root,
 // so the GC loop won't reclaim its artifacts mid-execution. Calls are
 // reference-counted so a reuse path marked twice (predicted + prior) only
-// becomes inactive after both unmark calls.
-func (d *Daemon) markActiveEnvRoot(envRoot string) {
-	d.markActiveEnvRootContext(context.Background(), envRoot)
-}
-
-// markActiveEnvRootContext waits for an in-flight mutation without making task
+// becomes inactive after both leases are released.
+// markActiveEnvRoot waits for an in-flight mutation without making task
 // cancellation depend on filesystem progress. It returns false when ctx is
-// cancelled before the root can be claimed.
-func (d *Daemon) markActiveEnvRootContext(ctx context.Context, envRoot string) bool {
+// cancelled before the root can be claimed. The returned lease closes over the
+// exact canonical key acquired here, so pathname retargeting cannot release a
+// different root.
+func (d *Daemon) markActiveEnvRoot(ctx context.Context, envRoot string) (release func(), ok bool) {
 	if envRoot == "" {
-		return true
+		return func() {}, true
 	}
 	key := canonicalPathIdentity(envRoot)
 	d.activeEnvRootsMu.Lock()
@@ -5498,29 +5502,25 @@ func (d *Daemon) markActiveEnvRootContext(ctx context.Context, envRoot string) b
 		d.activeEnvRootsMu.Unlock()
 		select {
 		case <-ctx.Done():
-			return false
+			return nil, false
 		case <-changed:
 		}
 		d.activeEnvRootsMu.Lock()
 	}
 	d.activeEnvRoots[key]++
 	d.activeEnvRootsMu.Unlock()
-	return true
-}
-
-func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
-	if envRoot == "" {
-		return
-	}
-	key := canonicalPathIdentity(envRoot)
-	d.activeEnvRootsMu.Lock()
-	defer d.activeEnvRootsMu.Unlock()
-	d.ensureActiveEnvRootStateLocked()
-	if d.activeEnvRoots[key] <= 1 {
-		delete(d.activeEnvRoots, key)
-		return
-	}
-	d.activeEnvRoots[key]--
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			d.activeEnvRootsMu.Lock()
+			defer d.activeEnvRootsMu.Unlock()
+			if d.activeEnvRoots[key] <= 1 {
+				delete(d.activeEnvRoots, key)
+				return
+			}
+			d.activeEnvRoots[key]--
+		})
+	}, true
 }
 
 func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
