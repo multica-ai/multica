@@ -303,3 +303,6 @@ jobs:
 
       - name: Validate cloud runtime local Go modules
         run: bash scripts/cerebro/test-runtime-dockerfile-local-modules.sh
+
+      - name: Validate cloud runtime agent CLI pins
+        run: bash scripts/cerebro/test-runtime-dockerfile-agents.sh
