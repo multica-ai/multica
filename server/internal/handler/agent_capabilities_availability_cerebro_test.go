@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 )
 
 // fakeEvidence is a ledger stand-in keyed by canonical capability ID. Only the
@@ -24,7 +25,7 @@ func (f fakeEvidence) Lookup(capabilityID string, rt availabilityevidence.Runtim
 }
 
 func builtinTool(key string) AgentCapabilityTool {
-	return AgentCapabilityTool{Key: key, Source: capSourceBuiltin, Permission: "allow"}
+	return AgentCapabilityTool{Key: key, Source: capSourceBuiltin, Permission: "allow", Allowed: true, Available: true, Enforced: true}
 }
 
 // The requirement this whole step exists for: a tool a probe PROVED is the only
@@ -82,6 +83,19 @@ func TestAvailabilityMarksUnprobedToolNotProven(t *testing.T) {
 	if tools[0].Permission != "deny" {
 		t.Errorf("permission = %q, want deny when the access engine rejects missing runtime evidence", tools[0].Permission)
 	}
+	if tools[0].Allowed || tools[0].Callable {
+		t.Errorf("effective truth = %+v, want denied and not callable", tools[0])
+	}
+}
+
+func TestAvailabilityUsesPlatformCatalogRowsAsCanonicalCapabilities(t *testing.T) {
+	tools, _ := applyAgentCapabilityAvailability(
+		[]AgentCapabilityTool{{Key: "create_workflow_hook", Source: platformcatalog.Source, Permission: "allow", Allowed: true, Available: true, Enforced: true}},
+		availabilityevidence.RuntimeFirtalGateway, fakeEvidence{})
+
+	if tools[0].Permission != "deny" || tools[0].Allowed || tools[0].Callable {
+		t.Fatalf("platform catalog row escaped missing-evidence gate: %+v", tools[0])
+	}
 }
 
 // discovered means the capability was found but the gate was never proved. Found
@@ -105,6 +119,32 @@ func TestAvailabilityMarksDiscoveredToolNotProven(t *testing.T) {
 	}
 	if tools[0].Permission != "allow" {
 		t.Errorf("permission = %q, want allow because discovered is present on the live surface", tools[0].Permission)
+	}
+}
+
+func TestAvailabilityRecomputesCallabilityAndClearsStaleBlockExplanation(t *testing.T) {
+	evidence := fakeEvidence{
+		"platform:get_agent_capabilities": {
+			CapabilityID: "platform:get_agent_capabilities",
+			RuntimeType:  availabilityevidence.RuntimeLocal,
+			Level:        availabilityevidence.LevelDiscovered,
+			Reason:       "found on runtime",
+		},
+	}
+	tool := builtinTool("get_agent_capabilities")
+	tool.Allowed = true
+	tool.Enforced = true
+	tool.BlockedReason = "The action is not available on this runtime"
+	tool.HowToFix = "stale"
+
+	tools, _ := applyAgentCapabilityAvailability(
+		[]AgentCapabilityTool{tool}, availabilityevidence.RuntimeLocal, evidence)
+
+	if !tools[0].Available || !tools[0].Callable {
+		t.Fatalf("effective truth = %+v, want available and callable", tools[0])
+	}
+	if tools[0].BlockedReason != "" || tools[0].HowToFix != "" {
+		t.Fatalf("callable tool retained stale block explanation: %+v", tools[0])
 	}
 }
 

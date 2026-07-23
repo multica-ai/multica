@@ -628,7 +628,7 @@ func TestCerebroViewerOwnsAgentWithCapability_OwnerWithoutCapability(t *testing.
 
 // CEREBRO-PATCH(delegated-override-grant): FIR-2351 DB-backed integration
 // coverage for the two adversarial-review fixes (Tine, 2026-07-03):
-//   - finding 1: the two capabilities are opt-in (ResolveOptIn) — a plain
+//   - finding 1: the two capabilities use the shared opt-in contract — a plain
 //     member with NO authored Allow row must be denied, not allowed by a
 //     Base=Allow default.
 //   - finding 2: workspace-scope must resolve to a real member of THIS

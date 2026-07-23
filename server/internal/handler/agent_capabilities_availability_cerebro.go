@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/accessdecision"
 	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
 	"github.com/multica-ai/multica/server/internal/cerebro/capabilitycatalog"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 )
 
 // capSourceBuiltin is the tool-policy source stamped on platform built-in tools
@@ -84,6 +85,11 @@ func applyAgentCapabilityAvailability(
 	for i, tool := range tools {
 		availability := toolAvailability(tool, rt, lookup)
 		tools[i].Availability = availability
+		tools[i].Verified = availability.Proven
+		if tool.Source != platformcatalog.Source {
+			level := availabilityevidence.Level(availability.Level)
+			tools[i].Available = level == availabilityevidence.LevelDiscovered || level == availabilityevidence.LevelVerified
+		}
 		if tool.Permission == string(accessdecision.PolicyAllow) {
 			capabilityID, canonical := canonicalCapabilityID(tool)
 			if canonical {
@@ -98,11 +104,18 @@ func applyAgentCapabilityAvailability(
 				}
 			}
 		}
+		// Permission may have been tightened above when the runtime cannot
+		// support a canonical action. Keep the explicit truth model in lockstep
+		// with that effective verdict; otherwise the JSON could say permission
+		// "deny" while allowed/callable still said true.
+		tools[i].Allowed = tools[i].Permission == string(accessdecision.PolicyAllow)
 		if availability.Proven {
 			summary.Verified++
 		} else {
 			summary.Unproven++
 		}
+		tools[i].Callable = tools[i].Allowed && tools[i].Available && tools[i].Enforced
+		setCapabilityBlockExplanation(&tools[i])
 	}
 	return tools, summary
 }
@@ -140,7 +153,7 @@ func toolAvailability(
 // capabilitycatalog rather than string-concatenating "platform:" here is what
 // keeps the two steps from drifting apart on naming.
 func canonicalCapabilityID(tool AgentCapabilityTool) (string, bool) {
-	if tool.Source != capSourceBuiltin || tool.Key == "" {
+	if (tool.Source != capSourceBuiltin && tool.Source != platformcatalog.Source) || tool.Key == "" {
 		return "", false
 	}
 	return capabilitycatalog.PlatformTool(tool.Key).ID, true

@@ -1,0 +1,38 @@
+---
+title: Service tokens
+description: Create expiring, read-only API access for an external system or agent.
+---
+
+**Service tokens** give an external system or agent limited access to one workspace. They are separate from personal access tokens and are managed by workspace owners and admins.
+
+## Create a service token
+
+1. Open **Settings**.
+2. Open **API Tokens**.
+3. In **Service tokens**, enter a descriptive name.
+4. Select an expiry between 1 and 365 days.
+5. Select only the read scopes the integration needs: `skills:read`, `agents:read`, or `issues:read`.
+6. Select **Create**.
+7. Copy the secret immediately. Multica shows it only once.
+
+Store the secret in the external system's secret manager. Do not paste it into an issue, document, source file, or chat message.
+
+## What a service token can do
+
+Service tokens are read-only. They cannot create, update, or delete workspace data. A token can only read the areas selected when it was created, and it stops working when it expires or is revoked.
+
+Multica records when a service token is issued, used, or revoked. The **Service tokens** list shows the token prefix, scopes, creation date, last use, expiry, and revocation state without showing the secret.
+
+## Revoke a service token
+
+1. Open **Settings** → **API Tokens**.
+2. Find the token under **Service tokens**.
+3. Select **Revoke token**.
+4. Confirm **Revoke**.
+
+Revocation takes effect immediately and cannot be undone. Create a new token if the integration needs access again.
+
+## If Service tokens is unavailable
+
+Only workspace owners and admins can manage service tokens. A workspace administrator can also disable service-token access for the entire workspace. When it is disabled, existing service tokens are rejected.
+

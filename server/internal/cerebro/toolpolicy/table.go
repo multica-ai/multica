@@ -24,6 +24,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	"github.com/multica-ai/multica/server/internal/cerebro/webfetchpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -128,6 +129,13 @@ type TableQuery struct {
 	// checks the cerebro_platform_capabilities flag) so prod sees nothing new
 	// until an admin turns the flag on (FIR-2594).
 	IncludePlatform bool
+	// PlatformActorOwner is trusted caller context for owner-only platform
+	// capabilities. Agent cards leave it false; member-facing callers set it
+	// only after membership/ownership has been verified.
+	PlatformActorOwner bool
+	// PlatformActorAdmin is true only for a verified workspace owner/admin in a
+	// human context. Agent views never inherit their owner's admin shortcut.
+	PlatformActorAdmin bool
 	// IncludeAgentStart appends ONLY the surfaced platform capabilities
 	// (platformcatalog.SurfacedKeys — the "start someone else's agent" family) to
 	// the listing, without the rest of the catalog. Gated by the caller (the
@@ -179,6 +187,11 @@ func tableRowMode(mode Mode, toolKey string) Mode {
 // Effective verdict. Tools with no stored settings resolve to Base (Allow by
 // default), so an unconfigured workspace still lists every tool as allowed.
 func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
+	if !in.AgentID.Valid && in.UserID.Valid {
+		role := s.workspaceActorRole(ctx, in.WorkspaceID, in.UserID)
+		in.PlatformActorOwner = role == "owner"
+		in.PlatformActorAdmin = role == "owner" || role == "admin"
+	}
 	// Decide the resolution mode for the whole listing once: the Effective
 	// column must agree with what the gates enforce, so it follows the same
 	// workspace-level cerebro_member_override flag the gateway and local-runtime
@@ -379,7 +392,10 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		if len(a.groups) > 0 {
 			a.row.Layers[LayerGroup] = CombineGroups(a.groups...)
 		}
-		a.row.Effective = ResolveWithMode(tableRowMode(in.mode, a.row.ToolKey), Input{Settings: a.row.Layers, Base: in.Base})
+		a.row.Effective, err = s.resolveTablePermission(ctx, in, a.row.ToolKey, a.row.Layers)
+		if err != nil {
+			return nil, fmt.Errorf("toolpolicy: resolve table permission %q: %w", a.row.ToolKey, err)
+		}
 		drivingByIndex = append(drivingByIndex, drivingGroupIDs(a.row.Effective, a.row.Layers[LayerGroup], a.groupSubjects, allGroupIDs))
 		out = append(out, a.row)
 	}
@@ -443,6 +459,32 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 		}
 	}
 	return out, nil
+}
+
+func (s *Store) resolveTablePermission(ctx context.Context, in TableQuery, key string, layers map[Layer]Setting) (Effective, error) {
+	if _, special := platformaccess.ForKey(key); !special {
+		return ResolveWithMode(tableRowMode(in.mode, key), Input{Settings: layers, Base: in.Base}), nil
+	}
+	return s.ResolvePermission(ctx, Query{
+		WorkspaceID:  in.WorkspaceID,
+		ToolKey:      key,
+		RuntimeID:    in.RuntimeID,
+		AgentID:      in.AgentID,
+		UserID:       in.UserID,
+		GroupIDs:     in.GroupIDs,
+		OnBehalfOfID: in.OnBehalfOfID,
+		SystemID:     in.SystemID,
+		Base:         in.Base,
+	}, tablePermissionActor(in))
+}
+
+func tablePermissionActor(in TableQuery) platformaccess.Actor {
+	return platformaccess.Actor{
+		Authenticated: in.AgentID.Valid || in.UserID.Valid,
+		Agent:         in.AgentID.Valid,
+		Owner:         in.PlatformActorOwner,
+		Admin:         in.PlatformActorAdmin,
+	}
 }
 
 // uuidParam is a small helper for callers assembling a TableQuery from request

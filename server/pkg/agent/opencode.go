@@ -17,10 +17,11 @@ import (
 // opencodeBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var opencodeBlockedArgs = map[string]blockedArgMode{
-	"--format":  blockedWithValue,  // json output format for daemon communication
-	"--dir":     blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
-	"--variant": blockedWithValue,  // owned by agent.thinking_level
-	"--auto":    blockedStandalone, // CEREBRO-PATCH(opencode-auto-flag): daemon manages non-interactive permission prompts using the installed CLI contract.
+	"--format":                       blockedWithValue,  // json output format for daemon communication
+	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
+	"--variant":                      blockedWithValue,  // owned by agent.thinking_level
+	"--dangerously-skip-permissions": blockedStandalone, // CEREBRO-PATCH(opencode-permission-flag): daemon manages non-interactive permission prompts using the installed CLI contract.
+	"--auto":                         blockedStandalone, // CEREBRO-PATCH(opencode-permission-flag): reject the unsupported legacy flag from custom_args.
 }
 
 // opencodeBackend implements Backend by spawning `opencode run --format json`
@@ -49,7 +50,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	args := []string{"run", "--format", "json", "--auto"} // CEREBRO-PATCH(opencode-auto-flag): the installed runtime removed --dangerously-skip-permissions.
+	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"} // CEREBRO-PATCH(opencode-permission-flag): use the installed runtime's real non-interactive flag.
 	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
 	// project config scan) at the task workdir. Without this, OpenCode falls
 	// back to PWD (inherited from the daemon process) or process.cwd(), which

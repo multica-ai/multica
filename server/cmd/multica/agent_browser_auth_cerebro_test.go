@@ -101,7 +101,7 @@ func TestVerifyInternalAgentBrowserPrintsOnlySanitizedResult(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(internalBrowserVerifyResponse{
 			App: "registry", InternalHost: "firtal-data-registry-private.internal:3000",
 			FinalURL: "http://firtal-data-registry-private.internal:3000/", Markers: []string{"Dashboard"},
-			Errors: []string{}, ScreenshotPNG: screenshot,
+			Errors: []string{}, ScreenshotPNG: screenshot, VersionCommit: "abcdef0123456789",
 		})
 	}))
 	defer server.Close()
@@ -114,6 +114,9 @@ func TestVerifyInternalAgentBrowserPrintsOnlySanitizedResult(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte(`"app":"registry"`)) {
 		t.Fatalf("missing sanitized result: %s", out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte(`"version_commit":"abcdef0123456789"`)) {
+		t.Fatalf("missing safe version commit: %s", out.String())
 	}
 	if bytes.Contains(out.Bytes(), []byte("password")) || bytes.Contains(out.Bytes(), []byte("username")) {
 		t.Fatalf("credential field leaked to output: %s", out.String())

@@ -21,6 +21,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -239,29 +240,44 @@ func (s *Store) MemberOverrideEnabled(ctx context.Context, workspaceID pgtype.UU
 	return true
 }
 
-// ResolveOptIn loads the explicit settings for the query's (workspace, user,
-// groups, tool) context and decides an OFF-by-default capability gate: false
-// unless an explicit Allow has been granted at the user or group layer. Unlike
-// Resolve (tighten-only, default Allow), this cannot be expressed by the chain
-// — see ResolveOptIn for why a Deny base can never be lifted by a grant. in.Base
-// is ignored; the gate is opt-in by definition.
-func (s *Store) ResolveOptIn(ctx context.Context, in Query) (bool, error) {
+// ResolvePermission applies the one declared contract for in.ToolKey. Read
+// surfaces and enforcement points call this method instead of choosing a
+// resolver themselves. Static authenticated/owner/admin contracts do not need
+// policy rows; opt-in contracts load and condition-filter the same authored
+// layers as the ordinary chain.
+func (s *Store) ResolvePermission(ctx context.Context, in Query, actor platformaccess.Actor) (Effective, error) {
+	contract, special := platformaccess.ForKey(in.ToolKey)
+	if !special {
+		return s.Resolve(ctx, in)
+	}
+	if contract.Enforcement == platformaccess.EnforcementAuthenticatedRead ||
+		contract.Enforcement == platformaccess.EnforcementOwnerOnly ||
+		(contract.Enforcement == platformaccess.EnforcementHumanOptInOrAdmin && (actor.Admin || actor.Owner)) {
+		return ResolvePermission(Input{}, in.ToolKey, actor), nil
+	}
 	input, err := s.loadInput(ctx, in)
 	if err != nil {
-		return false, err
+		return Effective{}, err
 	}
-	return ResolveOptIn(input), nil
+	return ResolvePermission(input, in.ToolKey, actor), nil
 }
 
-// ResolveActorOptIn is the database-backed form of ResolveActorOptIn. It is
-// used by opt-in capabilities that may be granted directly to one agent while
-// preserving every tighter human/runtime/system ceiling.
-func (s *Store) ResolveActorOptIn(ctx context.Context, in Query, agentActor bool) (bool, error) {
-	input, err := s.loadInput(ctx, in)
-	if err != nil {
-		return false, err
+func (s *Store) workspaceActorIsOwner(ctx context.Context, workspaceID, userID pgtype.UUID) bool {
+	return s.workspaceActorRole(ctx, workspaceID, userID) == "owner"
+}
+
+func (s *Store) workspaceActorRole(ctx context.Context, workspaceID, userID pgtype.UUID) string {
+	if s == nil || s.pool == nil || !workspaceID.Valid || !userID.Valid {
+		return ""
 	}
-	return ResolveActorOptIn(input, agentActor), nil
+	var role string
+	if err := s.pool.QueryRow(ctx, `
+		SELECT role FROM member
+		WHERE workspace_id = $1 AND user_id = $2
+	`, workspaceID, userID).Scan(&role); err != nil {
+		return ""
+	}
+	return role
 }
 
 // loadInput fetches the rows for the query and assembles a chain Input. Several

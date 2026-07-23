@@ -7,8 +7,8 @@ package handler
 // tool-policy chain (guardToolCallViaPolicy). Local CLIs run on a Mac and never
 // pass through that executor, so an Ask/Deny row in the permission table never
 // reaches them. This file is the daemon-side seam that closes that gap: a local
-// runtime's PreToolUse hook (Claude) or native approval channel (Codex) calls
-// ResolveDaemonToolPolicy, which resolves the SAME toolpolicy.Store chain and,
+// runtime's provider-native before-call hook calls ResolveDaemonToolPolicy,
+// which resolves the SAME toolpolicy.Store chain and,
 // on Ask, raises an approval in the SAME inbox the gateway gate uses — one
 // model, not a parallel one.
 //
@@ -27,7 +27,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
-	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
@@ -103,7 +102,9 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// CEREBRO-PATCH(daemon-tool-policy-mandate-key): FIR-3403 — the mandate snapshots
 	// canonical capability keys (built-ins as "tools:<Name>"); match under the same
 	// PolicyToolKey the policy-chain resolve below uses, not the bare hook tool name.
-	if err := taskmandate.NewStoreDB(h.DB).Authorize(r.Context(), taskID, wsUUID, agentID, claudehook.PolicyToolKey(req.ToolName)); err != nil {
+	toolKey, resourcePattern := localtoolpolicy.ProviderToolCallForAgent(r.Context(), h.DB, wsUUID, agentID, req.ToolName, req.ResourcePattern, req.Args) // CEREBRO-PATCH(cursor-tool-policy-key): FIR-3729 normalize Cursor hook names/resources to its runtime inventory.
+	req.ResourcePattern = resourcePattern
+	if err := taskmandate.NewStoreDB(h.DB).Authorize(r.Context(), taskID, wsUUID, agentID, toolKey); err != nil {
 		writeJSON(w, http.StatusOK, map[string]any{
 			"allowed": false, "decision": string(localtoolpolicy.KindDeny),
 			"mode": mode, "enforced": true, "would_block": true,
@@ -139,7 +140,6 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// .PolicyToolKey); a bare-name lookup never matched it, so a Deny on Bash/
 	// WebFetch/Edit silently let the tool through on local runtimes.
 	store := toolpolicy.NewStoreDB(h.DB, h.CerebroQueries)
-	toolKey := claudehook.PolicyToolKey(req.ToolName)
 	// Capability-wide row (resource_pattern "") — the shape an "All tools" Deny is
 	// written under, and the same shape the gateway gate resolves. A concrete
 	// resource (a Bash binary, a WebFetch URL) additionally resolves its exact

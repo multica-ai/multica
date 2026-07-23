@@ -3359,6 +3359,27 @@ export class ApiClient {
     await this.fetch(`/api/tokens/${id}`, { method: "DELETE" });
   }
 
+  // CEREBRO-PATCH(cerebro-service-tokens-client): FIR-3608 scoped, non-personal
+  // service-token management (`msv_`). Bodies are `unknown` so the
+  // cerebro-service-tokens package owns the schema via parseWithFallback
+  // (the API Response Compatibility rule in CLAUDE.md).
+  async listServiceTokens<T = unknown>(): Promise<T> {
+    return this.fetch<T>("/api/service-tokens");
+  }
+  async createServiceToken<T = unknown>(body: {
+    name: string;
+    scopes: string[];
+    expires_in_days?: number;
+  }): Promise<T> {
+    return this.fetch<T>("/api/service-tokens", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+  async revokeServiceToken(id: string): Promise<void> {
+    await this.fetch(`/api/service-tokens/${id}`, { method: "DELETE" });
+  }
+
   // Runtime setup tokens — bootstraps a new daemon via one-line installer.
   async createRuntimeSetupToken(
     data: CreateRuntimeSetupTokenRequest = {},

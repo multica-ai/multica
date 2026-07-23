@@ -63,6 +63,7 @@ type internalBrowserVerifyResponse struct {
 	Markers       []string `json:"markers"`
 	Errors        []string `json:"errors"`
 	ScreenshotPNG []byte   `json:"screenshot_png"`
+	VersionCommit string   `json:"version_commit"`
 	FailureStage  string   `json:"failure_stage"`
 	FailureCause  string   `json:"failure_cause"`
 	FailureDetail string   `json:"failure_detail"`
@@ -192,6 +193,7 @@ func verifyInternalAgentBrowser(ctx context.Context, client *cli.APIClient, out 
 	return json.NewEncoder(out).Encode(map[string]any{
 		"app": response.App, "internal_host": response.InternalHost, "final_url": response.FinalURL,
 		"markers": response.Markers, "errors": response.Errors, "screenshot": absPath,
+		"version_commit": response.VersionCommit,
 	})
 }
 

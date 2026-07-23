@@ -431,7 +431,10 @@ export type CerebroFlagKey =
   // issue). ON injects the Workpad protocol into every agent's runtime brief so
   // agents create and keep the checklist updated. Default OFF until QA'd on
   // staging; enforcement (the status-change gate) is a separate hook policy.
-  | "cerebro_workpad";
+  | "cerebro_workpad"
+  // FIR-3608: scoped, non-personal, workspace-bound service tokens (`msv_`)
+  // managed from Settings → Tokens.
+  | "cerebro_service_tokens";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -848,6 +851,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_embedded_chat: false,
   // FIR-3659: default OFF. Enabling injects the Workpad protocol into agent briefs.
   cerebro_workpad: false,
+  cerebro_service_tokens: true,
 };
 
 /**
@@ -932,6 +936,13 @@ export interface CerebroFlagDefinition {
  * the user within each group (see CEREBRO_FLAG_GROUPS for group order).
  */
 export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
+  {
+    key: "cerebro_service_tokens",
+    label: "Service tokens",
+    group: "permissions",
+    description:
+      "Add a Service tokens section to Settings → Tokens: owners and admins mint workspace-bound, read-only, expiring and revocable API keys (msv_) for external systems and agents. Off disables management and every existing token immediately.",
+  },
   {
     key: "cerebro_embedded_chat",
     label: "Embedded Chat API",

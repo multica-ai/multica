@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -16,41 +17,24 @@ func NewToolPolicyHookAuthorizer(store *toolpolicy.Store) *ToolPolicyHookAuthori
 }
 
 func (a *ToolPolicyHookAuthorizer) Can(ctx context.Context, workspaceID string, actor HookPermissionActor, permission HookPermission) bool {
-	baseline := HookPermissionEvaluator{}
-	if permission == HookPermissionRead || permission == HookPermissionManageManaged {
-		return baseline.Can(actor, permission)
-	}
-	if actor.Type == "agent" && permission == HookPermissionEnforce {
+	_, ok := platformaccess.ForKey(string(permission))
+	if !ok {
 		return false
+	}
+	platformActor := platformaccess.Actor{
+		Authenticated: actor.Type == "agent" || actor.Type == "member",
+		Agent:         actor.Type == "agent",
+		Owner:         actor.Type == "member" && actor.IsOwner,
 	}
 	if a == nil || a.store == nil {
+		return toolpolicy.ResolvePermission(toolpolicy.Input{}, string(permission), platformActor).Setting == toolpolicy.SettingAllow
+	}
+	query, ok := hookActorQuery(workspaceID, actor, string(permission))
+	if !ok {
 		return false
 	}
-	wsID, err := util.ParseUUID(workspaceID)
-	if err != nil {
-		return false
-	}
-	query := toolpolicy.Query{WorkspaceID: wsID, ToolKey: string(permission)}
-	if actor.Type == "agent" {
-		agentID, err := util.ParseUUID(actor.ID)
-		if err != nil {
-			return false
-		}
-		query.AgentID = agentID
-		if actor.OwnerUserID != "" {
-			if ownerID, err := util.ParseUUID(actor.OwnerUserID); err == nil {
-				query.UserID = ownerID
-			}
-		}
-	} else {
-		userID, err := util.ParseUUID(actor.ID)
-		if err != nil {
-			return false
-		}
-		query.UserID = userID
-	}
-	allowed, err := a.store.ResolveActorOptIn(ctx, query, actor.Type == "agent")
-	return err == nil && allowed
+	effective, err := a.store.ResolvePermission(ctx, query, platformActor)
+	return err == nil && effective.Setting == toolpolicy.SettingAllow
 }
 
 func (a *ToolPolicyHookAuthorizer) CanAction(ctx context.Context, workspaceID string, actor HookPermissionActor, capability string) bool {

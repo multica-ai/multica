@@ -13,7 +13,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
-	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess" // CEREBRO-PATCH(cf-access-auth): Cloudflare Access stamp verification
+	"github.com/multica-ai/multica/server/internal/cerebro/cfaccess"     // CEREBRO-PATCH(cf-access-auth): Cloudflare Access stamp verification
+	"github.com/multica-ai/multica/server/internal/cerebro/servicetoken" // CEREBRO-PATCH(service-token-auth): scoped service-token resolution (FIR-3608)
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -161,6 +162,12 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// level action.
 				r.Header.Set("X-Actor-Source", "cloud_pat")
 				next.ServeHTTP(w, r)
+				return
+			}
+
+			// CEREBRO-PATCH(service-token-auth): resolve msv_ scoped service tokens (FIR-3608).
+			if strings.HasPrefix(tokenString, servicetoken.Prefix) {
+				servicetoken.AuthBranch(w, r, next, tokenString)
 				return
 			}
 

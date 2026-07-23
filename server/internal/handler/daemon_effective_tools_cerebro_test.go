@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -61,6 +62,37 @@ func TestCerebroEffectiveToolsForBriefMapsAndFilters(t *testing.T) {
 	}
 	if e := byName["customer-service / draft_reply"]; e.Verdict != "ask" {
 		t.Errorf("expected ask verdict carried through, got %q", e.Verdict)
+	}
+}
+
+func TestRuntimeToolDecisionParityAcrossInventoryCapabilitiesMandateAndCall(t *testing.T) {
+	row := exposedToolView("customer-service.lookup_order", "mcp", "customer-service", "Look up order", "ask", true)
+	h := &Handler{runtimeToolAccess: fakeRuntimeToolAccess{rows: []RuntimeToolEffectiveAccessView{row}}}
+	tools, mandate, err := h.cerebroEffectiveToolsForClaim(context.Background(), db.AgentRuntime{}, &TaskAgentData{ID: "11111111-1111-1111-1111-111111111111"}, "agent", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 1 || tools[0].Verdict != "ask" {
+		t.Fatalf("inventory tools = %+v, want one Ask tool", tools)
+	}
+	if len(mandate) != 1 || mandate[0] != "mcp__customer-service__lookup_order" {
+		t.Fatalf("mandate = %v, want canonical callable MCP name", mandate)
+	}
+
+	// The Capabilities card is a projection of this same effective row.
+	capability := AgentCapabilityTool{
+		Key:        row.Descriptor.ToolKey,
+		Source:     row.Descriptor.Source,
+		Permission: row.Policy.Effective,
+	}
+	if capability.Permission != tools[0].Verdict {
+		t.Fatalf("Capabilities permission = %q, inventory verdict = %q", capability.Permission, tools[0].Verdict)
+	}
+
+	// The local hook's call-time lookup must hit the exact key in the issued
+	// mandate; otherwise inventory, UI and execution would disagree.
+	if callKey := claudehook.PolicyToolKey("mcp__customer-service__lookup_order"); callKey != mandate[0] {
+		t.Fatalf("call key = %q, mandate key = %q", callKey, mandate[0])
 	}
 }
 

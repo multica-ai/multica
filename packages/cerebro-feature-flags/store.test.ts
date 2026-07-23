@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveFlag } from "./store";
+import { resolveFlag, resolveWorkspaceFlag } from "./store";
 import { CEREBRO_FLAG_DEFAULTS } from "./registry";
 
 // cerebro_workflows defaults to OFF in the registry - a good probe for the
@@ -29,5 +29,21 @@ describe("resolveFlag precedence (FIR-2505 workspace overrides)", () => {
     expect(resolveFlag(KEY, { [KEY]: false }, { [KEY]: true }, {})).toBe(false);
     // No personal override → the unlocked workspace default applies.
     expect(resolveFlag(KEY, {}, { [KEY]: true }, {})).toBe(true);
+  });
+});
+
+describe("resolveWorkspaceFlag security boundary", () => {
+  const SERVICE_TOKENS = "cerebro_service_tokens" as const;
+
+  it("uses the registry default ON when no workspace override exists", () => {
+    expect(resolveWorkspaceFlag(SERVICE_TOKENS, {})).toBe(true);
+  });
+
+  it("honors an explicit workspace OFF", () => {
+    expect(resolveWorkspaceFlag(SERVICE_TOKENS, { [SERVICE_TOKENS]: false })).toBe(false);
+  });
+
+  it("honors an explicit workspace ON", () => {
+    expect(resolveWorkspaceFlag(SERVICE_TOKENS, { [SERVICE_TOKENS]: true })).toBe(true);
   });
 });

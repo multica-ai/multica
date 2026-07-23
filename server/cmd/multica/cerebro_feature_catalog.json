@@ -43,6 +43,13 @@
   ],
   "flags": [
     {
+      "key": "cerebro_service_tokens",
+      "label": "Service tokens",
+      "description": "Add a Service tokens section to Settings → Tokens: owners and admins mint workspace-bound, read-only, expiring and revocable API keys (msv_) for external systems and agents. Off disables management and every existing token immediately.",
+      "group": "permissions",
+      "default": true
+    },
+    {
       "key": "cerebro_embedded_chat",
       "label": "Embedded Chat API",
       "description": "Allow configured applications to create API conversations on behalf of a verified workspace member. API conversations stay out of Inbox by default but remain searchable.",

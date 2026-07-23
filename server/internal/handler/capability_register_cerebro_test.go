@@ -29,3 +29,32 @@ func TestCapabilityItemsFromSnapshot(t *testing.T) {
 		}
 	}
 }
+
+func TestDirectMCPToolParts(t *testing.T) {
+	serverName, toolName, ok := directMCPToolParts("mcp__customer-service__lookup_order")
+	if !ok || serverName != "customer-service" || toolName != "lookup_order" {
+		t.Fatalf("directMCPToolParts() = %q, %q, %v", serverName, toolName, ok)
+	}
+	for _, invalid := range []string{"Read", "mcp____lookup_order", "mcp__customer-service__"} {
+		if _, _, ok := directMCPToolParts(invalid); ok {
+			t.Fatalf("directMCPToolParts(%q) unexpectedly succeeded", invalid)
+		}
+	}
+}
+
+func TestRuntimeCapabilityReportKeepsDirectMCPCallableName(t *testing.T) {
+	reporter := CapabilitySubject{Type: "runtime", ID: "runtime-id"}
+	got := runtimeCapabilityReport(capabilityReportItem{
+		Name: "mcp__customer-service__lookup_order",
+		Kind: "tools",
+		Metadata: map[string]any{
+			"snapshot_key": "tools",
+		},
+	}, reporter)
+	if got.Key != "mcp__customer-service__lookup_order" || got.Title != "lookup_order" || got.Category != "customer-service" {
+		t.Fatalf("runtimeCapabilityReport() = %+v", got)
+	}
+	if got.Metadata["server_name"] != "customer-service" || got.Source != "runtime_report" {
+		t.Fatalf("runtimeCapabilityReport() metadata/source = %+v", got)
+	}
+}

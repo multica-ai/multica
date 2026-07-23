@@ -9,6 +9,8 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/capabilityregistry"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
@@ -31,6 +33,10 @@ type CapabilityLister interface {
 
 type PolicyResolver interface {
 	Resolve(ctx context.Context, in toolpolicy.Query) (toolpolicy.Effective, error)
+}
+
+type permissionPolicyResolver interface {
+	ResolvePermission(ctx context.Context, in toolpolicy.Query, actor platformaccess.Actor) (toolpolicy.Effective, error)
 }
 
 type Service struct {
@@ -125,7 +131,7 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 	out := make([]EffectiveTool, 0, len(tools))
 	for _, t := range tools {
 		desc := DescriptorForCapability(t)
-		policy, err := s.policy.Resolve(ctx, toolpolicy.Query{
+		policyQuery := toolpolicy.Query{
 			WorkspaceID:  q.WorkspaceID,
 			ToolKey:      desc.ToolKey,
 			RuntimeID:    q.RuntimeID,
@@ -133,7 +139,8 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 			UserID:       q.UserID,
 			OnBehalfOfID: q.OnBehalfOfID,
 			Base:         toolpolicy.SettingAllow,
-		})
+		}
+		policy, err := s.resolvePolicy(ctx, policyQuery, q.AgentID.Valid)
 		if err != nil {
 			return nil, fmt.Errorf("resolve policy for %s: %w", desc.ToolKey, err)
 		}
@@ -156,10 +163,30 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 	return out, nil
 }
 
+func (s *Service) resolvePolicy(ctx context.Context, query toolpolicy.Query, agentActor bool) (toolpolicy.Effective, error) {
+	permissionKey := query.ToolKey
+	capability, bound := platformcatalog.ByToolBinding(query.ToolKey)
+	if bound {
+		permissionKey = capability.Key
+	}
+	if _, special := platformaccess.ForKey(permissionKey); !special {
+		return s.policy.Resolve(ctx, query)
+	}
+	resolver, ok := s.policy.(permissionPolicyResolver)
+	if !ok {
+		return toolpolicy.Effective{}, fmt.Errorf("permission resolver not configured for %s", permissionKey)
+	}
+	query.ToolKey = permissionKey
+	return resolver.ResolvePermission(ctx, query, platformaccess.Actor{
+		Authenticated: true,
+		Agent:         agentActor,
+	})
+}
+
 func DescriptorForCapability(t capabilityregistry.View) Descriptor {
 	protocols := []string{"native_tool_loop", "mcp_stdio", "mcp_http_sse", "managed_http_tool_loop"}
 	source := "platform"
-	if t.Source == "scan" {
+	if t.Source == "scan" || strings.HasPrefix(t.Key, "mcp__") {
 		source = "mcp"
 		protocols = []string{"mcp_stdio", "mcp_http_sse"}
 	}
@@ -279,9 +306,6 @@ func exposureEffective(enabled bool, policy toolpolicy.Effective, protocol Proto
 	}
 	if credential.Effective == CredentialRequired {
 		return ExposureEffective{Effective: false, Reason: credential.Reason}
-	}
-	if policy.Setting == toolpolicy.SettingAsk && !protocol.SupportsAsk {
-		return ExposureEffective{Effective: false, Reason: "policy requires Ask, but runtime does not support approval waiting"}
 	}
 	if policy.Setting == toolpolicy.SettingAsk {
 		return ExposureEffective{Effective: true, Reason: policy.Reason}

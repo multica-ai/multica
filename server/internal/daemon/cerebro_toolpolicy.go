@@ -6,14 +6,14 @@ package daemon
 // chain (handler.ResolveDaemonToolPolicy). This file couples every supported
 // local CLI to that endpoint before dispatch.
 //
-// Shape (mirrors the repo-checkout IPC in health.go): Claude Code runs a
-// PreToolUse hook — the `multica cerebro-tool-policy-hook` subcommand — which
+// Shape (mirrors the repo-checkout IPC in health.go): each supported provider
+// runs a native before-call hook — the `multica cerebro-tool-policy-hook`
+// subcommand — which
 // POSTs the tool call to the daemon's loopback health server (already reachable
 // from inside the agent sandbox). The daemon proxies it to the server with its
 // OWN credential, so no token ever enters the agent process environment. The
 // daemon long-polls a pending approval and answers allow/deny. Transport errors
-// fail closed. The hook exits 0
-// (allow) or 2 (block the tool) per Claude's hook protocol.
+// fail closed. The hook exits 0 (allow) or 2 (block the tool).
 //
 // prepareToolPolicySpawn installs the mandatory provider adapter for Claude,
 // Codex, Cursor and Gemini.
@@ -27,6 +27,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 )
 
 const (
@@ -159,9 +161,13 @@ type toolPolicySpawn struct {
 // cerebro-tool-policy-hook subcommand, so there is no separate binary to build
 // or deploy — wherever the daemon runs, the hook runs. Workspace/agent identity
 // and the daemon port come from the MULTICA_* env already injected at spawn.
-func (d *Daemon) prepareToolPolicySpawn(provider, workdir string, fastMode bool) (*toolPolicySpawn, error) {
-	if provider != "claude" && provider != "codex" && provider != "cursor" && provider != "gemini" {
+func (d *Daemon) prepareToolPolicySpawn(provider, workdir, providerHome string, fastMode bool) (*toolPolicySpawn, error) {
+	if provider == "firtal-gateway" {
+		// Managed HTTP providers do not dispatch local CLI tools.
 		return nil, nil
+	}
+	if _, ok := localtoolpolicy.ProviderAdapterFor(provider); !ok {
+		return nil, fmt.Errorf("local provider %q does not support mandatory tool-policy enforcement", provider)
 	}
 
 	exe, err := os.Executable()
@@ -169,7 +175,7 @@ func (d *Daemon) prepareToolPolicySpawn(provider, workdir string, fastMode bool)
 		return nil, fmt.Errorf("resolve multica executable for tool-policy hook: %w", err)
 	}
 
-	settingsPath, err := writeToolPolicySettingsJSON(provider, workdir, exe, fastMode)
+	settingsPath, err := writeToolPolicySettingsJSON(provider, workdir, providerHome, exe, fastMode)
 	if err != nil {
 		return nil, fmt.Errorf("write %s tool-policy settings: %w", provider, err)
 	}
@@ -179,37 +185,40 @@ func (d *Daemon) prepareToolPolicySpawn(provider, workdir string, fastMode bool)
 	}, nil
 }
 
-// writeToolPolicySettingsJSON drops a settings file into <workdir>/.claude/ that
-// wires the cerebro-tool-policy-hook for every PreToolUse event. Claude Code
-// reads it via --settings (the daemon passes the absolute path at spawn). The
-// filename is distinct from the persona hook's settings.json so both hooks can
-// coexist when both are enabled.
-func writeToolPolicySettingsJSON(provider, workdir, exe string, fastMode bool) (string, error) {
+// writeToolPolicySettingsJSON installs the provider-native configuration that
+// wires cerebro-tool-policy-hook for every tool event. Claude, Gemini and
+// Cursor read a task-local file; Codex reads hooks.json from its managed home.
+func writeToolPolicySettingsJSON(provider, workdir, providerHome, exe string, fastMode bool) (string, error) {
 	var dir, filename string
 	var settings map[string]any
 	command := fmt.Sprintf("%q cerebro-tool-policy-hook", exe)
+	adapter, ok := localtoolpolicy.ProviderAdapterFor(provider)
+	if !ok {
+		return "", fmt.Errorf("local provider %q does not support mandatory tool-policy enforcement", provider)
+	}
 	switch provider {
 	case "claude":
 		dir, filename = filepath.Join(workdir, ".claude"), "cerebro-tool-policy-settings.json"
-		settings = claudeStyleToolPolicySettings("PreToolUse", command)
+		settings = claudeStyleToolPolicySettings(adapter.HookEvent, command)
 	case "gemini":
 		dir, filename = filepath.Join(workdir, ".gemini"), "settings.json"
-		settings = claudeStyleToolPolicySettings("BeforeTool", command)
+		settings = claudeStyleToolPolicySettings(adapter.HookEvent, command)
 	case "cursor":
 		dir, filename = filepath.Join(workdir, ".cursor"), "hooks.json"
 		settings = map[string]any{
 			"version": 1,
 			"hooks": map[string]any{
-				"preToolUse": []map[string]any{{
+				adapter.HookEvent: []map[string]any{{
 					"type": "command", "command": command, "failClosed": true, "timeout": 300,
 				}},
 			},
 		}
 	case "codex":
-		// Codex app-server is gated through its native approval requests.
-		return "", nil
-	default:
-		return "", nil
+		if providerHome == "" {
+			return "", fmt.Errorf("codex home is required for tool-policy hooks")
+		}
+		dir, filename = providerHome, "hooks.json"
+		settings = claudeStyleToolPolicySettings(adapter.HookEvent, command)
 	}
 	if provider == "claude" && fastMode {
 		settings["fastMode"] = true
