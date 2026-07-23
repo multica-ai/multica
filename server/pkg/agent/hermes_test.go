@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1583,6 +1584,41 @@ func TestHermesClientExtractPromptResultMetaUsage(t *testing.T) {
 	// buckets the whole run under "unknown", which prices at $0.
 	if got.modelID != "grok-4.5" {
 		t.Errorf("modelID: got %q, want %q", got.modelID, "grok-4.5")
+	}
+	// xAI's own price for the turn, in ticks of 1e-10 USD. This is the only
+	// figure that carries request-level pricing rules (the ≥200K prompt
+	// surcharge); dropping it forces a rate-table guess downstream.
+	if got.usage.CostUSDTicks != 75360000 {
+		t.Errorf("costUsdTicks: got %d, want 75360000", got.usage.CostUSDTicks)
+	}
+	if usd := float64(got.usage.CostUSDTicks) / CostUSDTicksPerUSD; math.Abs(usd-0.007536) > 1e-12 {
+		t.Errorf("cost in USD: got %v, want 0.007536", usd)
+	}
+}
+
+// TestParseACPTokenUsageCostIsOptional guards the common case: almost no agent
+// reports a cost, and a zero must stay zero so the reader knows to estimate
+// rather than recording a real $0 spend.
+func TestParseACPTokenUsageCostIsOptional(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want int64
+	}{
+		{name: "camelCase", raw: `{"inputTokens":10,"costUsdTicks":4200}`, want: 4200},
+		{name: "snake_case", raw: `{"input_tokens":10,"cost_usd_ticks":4200}`, want: 4200},
+		{name: "absent", raw: `{"inputTokens":10,"outputTokens":2}`, want: 0},
+		{name: "null", raw: `{"inputTokens":10,"costUsdTicks":null}`, want: 0},
+		{name: "string number", raw: `{"inputTokens":10,"costUsdTicks":"4200"}`, want: 4200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := parseACPTokenUsage(json.RawMessage(tc.raw)).CostUSDTicks; got != tc.want {
+				t.Errorf("CostUSDTicks: got %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
 

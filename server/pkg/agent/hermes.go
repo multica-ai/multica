@@ -1666,6 +1666,9 @@ func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 	if usage.CacheWriteTokens > c.usage.CacheWriteTokens {
 		c.usage.CacheWriteTokens = usage.CacheWriteTokens
 	}
+	if usage.CostUSDTicks > c.usage.CostUSDTicks {
+		c.usage.CostUSDTicks = usage.CostUSDTicks
+	}
 	c.usageMu.Unlock()
 }
 
@@ -1693,6 +1696,10 @@ func parseACPTokenUsage(data json.RawMessage) TokenUsage {
 			"cache_write_tokens",
 			"cache_creation_input_tokens",
 		),
+		// The provider's own price for this turn, already inclusive of
+		// request-level pricing rules we cannot reconstruct from token
+		// counts (see TokenUsage.CostUSDTicks).
+		CostUSDTicks: acpUsageInt64(fields, "costUsdTicks", "cost_usd_ticks"),
 	}
 	return excludeACPCachedInput(usage, acpUsageInt64(fields, "totalTokens", "total_tokens"))
 }

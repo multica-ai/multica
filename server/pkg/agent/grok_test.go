@@ -109,7 +109,7 @@ while IFS= read -r line; do
       if [ -n "$GROK_USAGE" ]; then
         # Match live Grok Build ACP (0.2.x): metering lives under result._meta,
         # not a top-level usage field or sessionUpdate=usage_update.
-        printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","_meta":{"sessionId":"ses_new","modelId":"grok-4.5","inputTokens":120,"outputTokens":30,"cachedReadTokens":20,"usage":{"inputTokens":120,"outputTokens":30,"totalTokens":150,"cachedReadTokens":20,"modelCalls":1}}}}\n' "$id"
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","_meta":{"sessionId":"ses_new","modelId":"grok-4.5","inputTokens":120,"outputTokens":30,"cachedReadTokens":20,"usage":{"inputTokens":120,"outputTokens":30,"totalTokens":150,"cachedReadTokens":20,"modelCalls":1,"costUsdTicks":98765}}}}\n' "$id"
       else
         printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
       fi
@@ -615,6 +615,12 @@ func TestGrokPropagatesMCPAndUsage(t *testing.T) {
 	// uncached remainder 120 - 20 = 100.
 	if usage.InputTokens != 100 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 {
 		t.Fatalf("unexpected usage: %+v", usage)
+	}
+	// xAI's own price for the turn has to survive the whole backend, not just
+	// the parser: it is the only figure carrying the ≥200K prompt surcharge,
+	// and everything downstream falls back to a rate-table guess without it.
+	if usage.CostUSDTicks != 98765 {
+		t.Fatalf("cost ticks = %d, want 98765", usage.CostUSDTicks)
 	}
 }
 

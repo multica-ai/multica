@@ -4779,6 +4779,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
+			CostUSDTicks:     u.CostUSDTicks,
 		})
 	}
 
@@ -5454,6 +5455,7 @@ func mergeUsage(a, b map[string]agent.TokenUsage) map[string]agent.TokenUsage {
 		existing.OutputTokens += u.OutputTokens
 		existing.CacheReadTokens += u.CacheReadTokens
 		existing.CacheWriteTokens += u.CacheWriteTokens
+		existing.CostUSDTicks += u.CostUSDTicks
 		merged[model] = existing
 	}
 	return merged

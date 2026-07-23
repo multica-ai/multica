@@ -140,7 +140,22 @@ type TokenUsage struct {
 	OutputTokens     int64
 	CacheReadTokens  int64
 	CacheWriteTokens int64
+	// CostUSDTicks is the provider's own statement of what this usage cost,
+	// in ticks of 1e-10 USD. Zero means "not reported" — only a few agents
+	// return it (xAI Grok Build does, via `_meta.usage.costUsdTicks`).
+	//
+	// It matters because a token-times-rate estimate cannot reproduce
+	// request-level pricing rules. xAI bills a request at 2x once its prompt
+	// reaches 200K tokens, and a usage record aggregates every model call in
+	// a turn — so the stored token counts cannot say which tier any single
+	// request hit. The provider's own figure already has that priced in.
+	CostUSDTicks int64
 }
+
+// CostUSDTicksPerUSD is the scale of the provider-reported cost unit: xAI
+// reports whole ticks of 1e-10 USD, which keeps sub-cent turn costs exact in
+// int64 all the way to the database instead of drifting through float64.
+const CostUSDTicksPerUSD = 10_000_000_000
 
 // Result is the final outcome after an agent session completes.
 type Result struct {

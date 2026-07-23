@@ -938,6 +938,8 @@ type TaskUsage struct {
 	CacheWriteTokens int64              `json:"cache_write_tokens"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	// Provider-reported cost in 1e-10 USD. NULL when the provider reports none; those rows are priced client-side from the static rate table.
+	CostUsdTicks pgtype.Int8 `json:"cost_usd_ticks"`
 }
 
 type TaskUsageHourly struct {
@@ -955,6 +957,13 @@ type TaskUsageHourly struct {
 	TaskCount        int64              `json:"task_count"`
 	EventCount       int64              `json:"event_count"`
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	// Sum of provider-reported cost (1e-10 USD) over the rows in this bucket that had one; 0 when none did.
+	CostUsdTicks int64 `json:"cost_usd_ticks"`
+	// Input tokens from rows with no provider-reported cost — the portion still priced from the static rate table.
+	UncostedInputTokens      int64 `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64 `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64 `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64 `json:"uncosted_cache_write_tokens"`
 }
 
 type TaskUsageHourlyDirty struct {

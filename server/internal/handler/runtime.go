@@ -90,6 +90,16 @@ type RuntimeUsageResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	// Cost split: `CostUSDTicks` is what the provider itself charged for the
+	// rows behind this aggregate (1e-10 USD), and the `Uncosted*` token
+	// counts are the tokens from rows the provider did NOT price. The client
+	// reports authoritative + estimate(uncosted), so a window mixing both
+	// kinds of row stays whole. See migration 213.
+	CostUSDTicks             int64 `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64 `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64 `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64 `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64 `json:"uncosted_cache_write_tokens"`
 }
 
 // GetRuntimeUsage returns daily token usage for a runtime, aggregated from
@@ -141,14 +151,19 @@ func (h *Handler) listRuntimeUsage(ctx context.Context, runtimeID pgtype.UUID, t
 	resp := make([]RuntimeUsageResponse, len(rows))
 	for i, row := range rows {
 		resp[i] = RuntimeUsageResponse{
-			RuntimeID:        resolvedRuntimeID,
-			Date:             row.Date.Time.Format("2006-01-02"),
-			Provider:         row.Provider,
-			Model:            row.Model,
-			InputTokens:      row.InputTokens,
-			OutputTokens:     row.OutputTokens,
-			CacheReadTokens:  row.CacheReadTokens,
-			CacheWriteTokens: row.CacheWriteTokens,
+			RuntimeID:                resolvedRuntimeID,
+			Date:                     row.Date.Time.Format("2006-01-02"),
+			Provider:                 row.Provider,
+			Model:                    row.Model,
+			InputTokens:              row.InputTokens,
+			OutputTokens:             row.OutputTokens,
+			CacheReadTokens:          row.CacheReadTokens,
+			CacheWriteTokens:         row.CacheWriteTokens,
+			CostUSDTicks:             row.CostUsdTicks,
+			UncostedInputTokens:      row.UncostedInputTokens,
+			UncostedOutputTokens:     row.UncostedOutputTokens,
+			UncostedCacheReadTokens:  row.UncostedCacheReadTokens,
+			UncostedCacheWriteTokens: row.UncostedCacheWriteTokens,
 		}
 	}
 	return resp, nil
@@ -208,7 +223,17 @@ type RuntimeUsageByAgentResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	// Cost split: `CostUSDTicks` is what the provider itself charged for the
+	// rows behind this aggregate (1e-10 USD), and the `Uncosted*` token
+	// counts are the tokens from rows the provider did NOT price. The client
+	// reports authoritative + estimate(uncosted), so a window mixing both
+	// kinds of row stays whole. See migration 213.
+	CostUSDTicks             int64 `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64 `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64 `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64 `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64 `json:"uncosted_cache_write_tokens"`
+	TaskCount                int32 `json:"task_count"`
 }
 
 // GetRuntimeUsageByAgent returns per-agent token aggregates for a runtime
@@ -247,14 +272,19 @@ func (h *Handler) GetRuntimeUsageByAgent(w http.ResponseWriter, r *http.Request)
 	resp := make([]RuntimeUsageByAgentResponse, len(rows))
 	for i, row := range rows {
 		resp[i] = RuntimeUsageByAgentResponse{
-			AgentID:          uuidToString(row.AgentID),
-			Provider:         row.Provider,
-			Model:            row.Model,
-			InputTokens:      row.InputTokens,
-			OutputTokens:     row.OutputTokens,
-			CacheReadTokens:  row.CacheReadTokens,
-			CacheWriteTokens: row.CacheWriteTokens,
-			TaskCount:        row.TaskCount,
+			AgentID:                  uuidToString(row.AgentID),
+			Provider:                 row.Provider,
+			Model:                    row.Model,
+			InputTokens:              row.InputTokens,
+			OutputTokens:             row.OutputTokens,
+			CacheReadTokens:          row.CacheReadTokens,
+			CacheWriteTokens:         row.CacheWriteTokens,
+			CostUSDTicks:             row.CostUsdTicks,
+			UncostedInputTokens:      row.UncostedInputTokens,
+			UncostedOutputTokens:     row.UncostedOutputTokens,
+			UncostedCacheReadTokens:  row.UncostedCacheReadTokens,
+			UncostedCacheWriteTokens: row.UncostedCacheWriteTokens,
+			TaskCount:                row.TaskCount,
 		}
 	}
 
@@ -271,7 +301,17 @@ type RuntimeUsageByHourResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	// Cost split: `CostUSDTicks` is what the provider itself charged for the
+	// rows behind this aggregate (1e-10 USD), and the `Uncosted*` token
+	// counts are the tokens from rows the provider did NOT price. The client
+	// reports authoritative + estimate(uncosted), so a window mixing both
+	// kinds of row stays whole. See migration 213.
+	CostUSDTicks             int64 `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64 `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64 `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64 `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64 `json:"uncosted_cache_write_tokens"`
+	TaskCount                int32 `json:"task_count"`
 }
 
 // GetRuntimeUsageByHour returns hourly (0..23) token aggregates for a
@@ -313,13 +353,18 @@ func (h *Handler) GetRuntimeUsageByHour(w http.ResponseWriter, r *http.Request) 
 	resp := make([]RuntimeUsageByHourResponse, len(rows))
 	for i, row := range rows {
 		resp[i] = RuntimeUsageByHourResponse{
-			Hour:             int(row.Hour),
-			Model:            row.Model,
-			InputTokens:      row.InputTokens,
-			OutputTokens:     row.OutputTokens,
-			CacheReadTokens:  row.CacheReadTokens,
-			CacheWriteTokens: row.CacheWriteTokens,
-			TaskCount:        row.TaskCount,
+			Hour:                     int(row.Hour),
+			Model:                    row.Model,
+			InputTokens:              row.InputTokens,
+			OutputTokens:             row.OutputTokens,
+			CacheReadTokens:          row.CacheReadTokens,
+			CacheWriteTokens:         row.CacheWriteTokens,
+			CostUSDTicks:             row.CostUsdTicks,
+			UncostedInputTokens:      row.UncostedInputTokens,
+			UncostedOutputTokens:     row.UncostedOutputTokens,
+			UncostedCacheReadTokens:  row.UncostedCacheReadTokens,
+			UncostedCacheWriteTokens: row.UncostedCacheWriteTokens,
+			TaskCount:                row.TaskCount,
 		}
 	}
 
