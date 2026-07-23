@@ -216,6 +216,12 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 		"only to work owned by the current run",
 		"GitHub Actions after a successful push",
 		"Do not wait for them by default",
+		// MUL-5223 pins: named tool-shape bans, merge requirements
+		// denied as acceptance criteria, replacement hand-off phrasing.
+		"do NOT run `gh pr checks --watch`",
+		"any sleep / retry loop that polls check status",
+		"NOT your delivery acceptance criteria",
+		"CI running: <PR link>",
 		"running in the background so you can keep working",
 		"standing by",
 	} {
@@ -223,7 +229,9 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 			t.Errorf("slim Background Task Safety missing hardened pin %q\n---\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "gh run watch") {
+	// `gh run watch` may only appear as a banned command, never as the
+	// section's example of how to wait properly.
+	if strings.Contains(out, "e.g. `gh run watch`") {
 		t.Errorf("slim Background Task Safety should not suggest waiting for external GitHub CI\n---\n%s", out)
 	}
 }

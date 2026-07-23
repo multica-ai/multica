@@ -49,11 +49,26 @@ func writeHeader(b *strings.Builder) {
 // notification/reminder", "run the work synchronously instead", the
 // no-background-and-yield rule, the external-work boundary, and the
 // no-"standing by" sign-off rule.
+//
+// MUL-5223: the external-work boundary alone did not stop agents from
+// blocking on CI. Two holes are closed here. First, the boundary was
+// stated as a concept while the section's only concrete "how to wait"
+// example was a blocking foreground call — and `gh pr checks --watch` is
+// exactly that shape, so watching CI read as compliant. Named tool-shape
+// bans replace the inference. Second, the "unless acceptance criteria
+// require it" escape was being satisfied by the repo's own merge
+// requirements ("CI must pass before merge"), so the section now says
+// branch protection is not the agent's acceptance criterion, and gives
+// the replacement hand-off phrasing so the urge to prove quality lands
+// on local test output plus a PR link instead of on a wait.
 func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("## Background Task Safety\n\n")
 	b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any process, tool call, or subagent owned by this run that is still active is orphaned, its result lost, and the final comment you meant to post after it never sends. There is no background-completion wakeup here.\n\n")
 	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running. Never background-and-yield: never end a turn expecting a future notification or wakeup to resume — it will not arrive.\n")
-	b.WriteString("- This rule applies only to work owned by the current run. External systems triggered by a completed action — for example GitHub Actions after a successful push — are not agent-owned background tasks. Do not wait for them by default; report them as pending and finish the handoff unless the user or acceptance criteria explicitly requires their result.\n")
+	b.WriteString("- This rule applies only to work owned by the current run. External systems triggered by a completed action — for example GitHub Actions after a successful push — are not agent-owned background tasks. Do not wait for them by default; report them as pending and finish the handoff.\n")
+	b.WriteString("- Concretely, after a push or a PR create: do NOT run `gh pr checks --watch`, `gh run watch`, `gh pr merge --auto` waits, or any sleep / retry loop that polls check status. Blocking on external CI is never part of your deliverable. At most take ONE non-blocking status snapshot (`gh pr checks <pr>` once, or `multica issue pull-requests <issue-id>`), report whatever it says at that instant, and finish.\n")
+	b.WriteString("- A repo's merge requirements — \"CI must be green before merge\", required reviews, branch protection — are enforced by GitHub against the merge, not by you inside this run. They are NOT your delivery acceptance criteria and do not license a wait. Wait for a CI result only when the trigger comment or the issue's acceptance criteria explicitly ask you for it.\n")
+	b.WriteString("- Deliver the evidence you already have instead of buying it with a wait: \"Local tests pass (`go test ./...` / `pnpm test`); CI running: <PR link>\". A PR whose CI is still in flight is a complete hand-off — say so plainly and end the turn.\n")
 	b.WriteString("- When a required result from run-owned work must be collected, wait synchronously inside one foreground tool call that blocks to completion (e.g. a blocking test or build command); never split \"start the wait\" and \"collect the result\" across turns.\n")
 	b.WriteString("- If a tool response says to wait for a future notification/reminder, or that it is running in the background so you can keep working, do not rely on that in Multica-managed runs — block on the appropriate wait / output / collect operation before exiting.\n")
 	b.WriteString("- If you can't observe a background task's result, run the work synchronously instead.\n")
