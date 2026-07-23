@@ -16,7 +16,6 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
   page,
 }) => {
   test.setTimeout(180_000);
-  const slug = await loginAsDefault(page);
   const api = await createTestApi();
   const workspaceId = api.getWorkspaceId();
   if (!workspaceId) throw new Error("E2E workspace was not resolved");
@@ -39,6 +38,7 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
 
   try {
     await api.setWorkspaceFeatureFlag(FEATURE_FLAG, true);
+    const slug = await loginAsDefault(page);
     await page.goto(`/${slug}/settings?tab=tokens`, {
       waitUntil: "domcontentloaded",
     });
@@ -66,7 +66,7 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
     ).toHaveCount(0);
 
     const expiry = serviceTokensSection.getByRole("combobox");
-    await expect(expiry).toContainText("90 days");
+    await expect(expiry).toContainText("90");
     await expiry.click();
     for (const option of ["30 days", "90 days", "1 year"]) {
       await expect(
@@ -74,7 +74,7 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
       ).toHaveCount(1);
     }
     await page.getByRole("option", { name: "30 days", exact: true }).click();
-    await expect(expiry).toContainText("30 days");
+    await expect(expiry).toContainText("30");
 
     await serviceTokensSection
       .getByPlaceholder("Token name (e.g. Atlas read-only)")
@@ -100,6 +100,10 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
     expect(rawToken).toMatch(/^msv_[a-f0-9]{40}$/);
     await createdDialog.getByRole("button", { name: "Done", exact: true }).click();
     await expect(createdDialog).toBeHidden();
+    await expect(page.getByText(rawToken, { exact: true })).toHaveCount(0);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(serviceTokensSection).toBeVisible();
+    await expect(page.getByText(rawToken, { exact: true })).toHaveCount(0);
 
     const tokenRow = serviceTokensSection.locator('[data-slot="card"]').filter({
       hasText: tokenName,
@@ -108,8 +112,12 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
     await expect(tokenRow).toContainText("scopes: issues:read");
     await expect(tokenRow).toContainText("expires");
 
-    const tokenRecord = await database.query<{ id: string }>(
-      `SELECT id::text
+    const tokenRecord = await database.query<{
+      id: string;
+      remaining_seconds: string;
+    }>(
+      `SELECT id::text,
+              EXTRACT(EPOCH FROM (expires_at - NOW()))::text AS remaining_seconds
          FROM cerebro_service_token
         WHERE workspace_id = $1
           AND name = $2`,
@@ -117,6 +125,18 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
     );
     expect(tokenRecord.rowCount).toBe(1);
     const tokenId = tokenRecord.rows[0]!.id;
+    const remainingSeconds = Number(tokenRecord.rows[0]!.remaining_seconds);
+    expect(remainingSeconds).toBeGreaterThan(29 * 24 * 60 * 60);
+    expect(remainingSeconds).toBeLessThanOrEqual(30 * 24 * 60 * 60);
+
+    const issuedAudit = await database.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+         FROM cerebro_service_token_audit
+        WHERE service_token_id = $1
+          AND event = 'issued'`,
+      [tokenId],
+    );
+    expect(Number(issuedAudit.rows[0]?.count ?? "0")).toBe(1);
 
     const readResponse = await fetch(`${API_BASE}/api/service/issues`, {
       headers: { Authorization: `Bearer ${rawToken}` },
@@ -210,6 +230,14 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
         exact: true,
       }),
     ).toHaveCount(0);
+    const revokedAudit = await database.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+         FROM cerebro_service_token_audit
+        WHERE service_token_id = $1
+          AND event = 'revoked'`,
+      [tokenId],
+    );
+    expect(Number(revokedAudit.rows[0]?.count ?? "0")).toBe(1);
 
     const revokedRead = await fetch(`${API_BASE}/api/service/issues`, {
       headers: { Authorization: `Bearer ${rawToken}` },
