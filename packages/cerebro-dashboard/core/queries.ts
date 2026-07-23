@@ -10,6 +10,8 @@ import {
   fetchAIImpactFunctions,
   fetchAIImpactOverview,
   fetchAIImpactQualityRisk,
+  fetchAIImpactPeople,
+  type PeopleImpactPeriod,
 } from "./ai-impact-api";
 import type { ActorScope } from "./types";
 
@@ -20,6 +22,8 @@ export const dashboardKeys = {
   aiImpactFunctions: (wsId: string) => [...dashboardKeys.aiImpact(wsId), "functions"] as const,
   aiImpactQualityRisk: (wsId: string) =>
     [...dashboardKeys.aiImpact(wsId), "quality-risk"] as const,
+  aiImpactPeople: (wsId: string, period: PeopleImpactPeriod) =>
+    [...dashboardKeys.aiImpact(wsId), "people", period] as const,
   overview: (wsId: string, range: TimeRange, scope: ActorScope, actorId: string | null) =>
     [...dashboardKeys.all(wsId), "overview", range, scope, actorId] as const,
   actorMessages: (wsId: string, actorId: string, range: TimeRange) =>
@@ -36,6 +40,15 @@ export function aiImpactOverviewOptions(wsId: string) {
   return queryOptions({
     queryKey: dashboardKeys.aiImpactOverview(wsId),
     queryFn: fetchAIImpactOverview,
+    enabled: !!wsId,
+    staleTime: AI_IMPACT_STALE_TIME,
+  });
+}
+
+export function aiImpactPeopleOptions(wsId: string, period: PeopleImpactPeriod) {
+  return queryOptions({
+    queryKey: dashboardKeys.aiImpactPeople(wsId, period),
+    queryFn: () => fetchAIImpactPeople(period),
     enabled: !!wsId,
     staleTime: AI_IMPACT_STALE_TIME,
   });

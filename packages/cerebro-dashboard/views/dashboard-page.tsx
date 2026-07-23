@@ -11,10 +11,12 @@ import {
   aiImpactFunctionsOptions,
   aiImpactOverviewOptions,
   aiImpactQualityRiskOptions,
+  aiImpactPeopleOptions,
   dashboardOverviewOptions,
 } from "../core/queries";
 import { AnalyticsDashboard } from "./components/analytics-dashboard";
 import { AIImpactControlRoom } from "./components/ai-impact-control-room";
+import { PeopleControlRoom, type PeopleImpactPeriod } from "./components/people-control-room";
 import { MessagesControlRoom } from "./components/messages-control-room";
 import { OverviewControlRoom } from "./components/overview-control-room";
 import { RunsControlRoom } from "./components/runs-control-room";
@@ -23,6 +25,7 @@ import { filtersFromSearchParams, type AnalyticsFilter } from "../core/analytics
 // One Dashboard shell and filter state for the three FIR-2996 control rooms.
 export function DashboardPage() {
   const enabled = useFeatureFlag("cerebro_dashboard");
+  const aiImpactEnabled = useFeatureFlag("cerebro_ai_impact");
   const workspace = useCurrentWorkspace();
   const range = useDashboardStore((s) => s.range);
   const scope = useDashboardStore((s) => s.scope);
@@ -31,15 +34,17 @@ export function DashboardPage() {
   const tab = useDashboardStore((s) => s.tab);
   const setActor = useDashboardStore((s) => s.setActor);
   const [visualBuilderOpen, setVisualBuilderOpen] = useState(false);
+  const [peoplePeriod, setPeoplePeriod] = useState<PeopleImpactPeriod>("day");
   const [analyticsFilters, setAnalyticsFilters] = useState<AnalyticsFilter[]>(() =>
     typeof window === "undefined" ? [] : filtersFromSearchParams(new URLSearchParams(window.location.search)),
   );
   const wsId = workspace?.id ?? "";
   const overview = useQuery(dashboardOverviewOptions(wsId, range, scope, actorId));
-  const aiImpactWsId = tab === "ai-impact" ? wsId : "";
+  const aiImpactWsId = tab === "ai-impact" && aiImpactEnabled ? wsId : "";
   const aiImpactOverview = useQuery(aiImpactOverviewOptions(aiImpactWsId));
   const aiImpactFunctions = useQuery(aiImpactFunctionsOptions(aiImpactWsId));
   const aiImpactQualityRisk = useQuery(aiImpactQualityRiskOptions(aiImpactWsId));
+  const people = useQuery(aiImpactPeopleOptions(tab === "people" ? wsId : "", peoplePeriod));
 
   if (!enabled) return null;
 
@@ -78,7 +83,7 @@ export function DashboardPage() {
               {actorName ?? "Actor"} x
             </button>
           )}
-          <DashboardTabBar showAIImpact />
+          <DashboardTabBar showAIImpact={aiImpactEnabled} />
         </div>
       </PageHeader>
 
@@ -120,7 +125,7 @@ export function DashboardPage() {
 
           {tab === "messages" && <MessagesControlRoom workspaceId={workspace.id} workspaceSlug={workspace.slug} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={(id, name) => setActor(id, name)} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
 
-          {tab === "ai-impact" && (
+          {tab === "ai-impact" && aiImpactEnabled && (
             <AIImpactControlRoom
               overview={aiImpactOverview.data}
               functions={aiImpactFunctions.data}
@@ -131,6 +136,12 @@ export function DashboardPage() {
                 qualityRisk: aiImpactQualityRisk.isLoading,
               }}
             />
+          )}
+          {tab === "people" && (
+            <>
+              {people.isError && <p className="mx-6 mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">Failed to load People.</p>}
+              <PeopleControlRoom people={people.data?.people ?? []} period={peoplePeriod} onPeriodChange={setPeoplePeriod} loading={people.isLoading} />
+            </>
           )}
         </div>
       </div>

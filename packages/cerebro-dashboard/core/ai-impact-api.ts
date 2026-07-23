@@ -101,6 +101,37 @@ export type AIImpactOverviewResponse = z.infer<typeof OverviewResponseSchema>;
 export type AIImpactFunctionsResponse = z.infer<typeof FunctionResponseSchema>;
 export type AIImpactQualityRiskResponse = z.infer<typeof QualityRiskResponseSchema>;
 
+export const PeopleImpactPeriodSchema = z.enum(["hour", "day", "week", "month"]);
+export type PeopleImpactPeriod = z.infer<typeof PeopleImpactPeriodSchema>;
+
+const PeopleResponseSchema = z.object({
+  period: PeopleImpactPeriodSchema.catch("day"),
+  people: z.array(z.object({
+    id: z.string(),
+    type: z.enum(["member", "agent"]),
+    name: z.string(),
+    activity: z.array(z.object({ bucket: z.string(), count: z.number() })).default([]),
+    usage: z.object({
+      runs: z.number().nullable().default(null),
+      issues: z.number().nullable().default(null),
+      projects: z.number().nullable().default(null),
+      chats: z.number().nullable().default(null),
+      channels: z.number().nullable().default(null),
+    }),
+    outcomes: z.object({
+      needs_solved: z.object({ solved: z.number(), measurable: z.number() }).nullable().default(null),
+      solution_quality: z.number().nullable().default(null),
+      frustration_free: z.number().nullable().default(null),
+      prompt_effectiveness: z.number().nullable().default(null),
+      skill_activity: z.number().nullable().default(null),
+      cost_cents: z.number().nullable().default(null),
+    }),
+    confidence: z.number().nullable().default(null),
+    sample_size: z.number().default(0),
+  })).default([]),
+}).loose();
+export type AIImpactPeopleResponse = z.infer<typeof PeopleResponseSchema>;
+
 const EMPTY_OVERVIEW: AIImpactOverviewResponse = { families: [] };
 const EMPTY_FUNCTIONS: AIImpactFunctionsResponse = { functions: [] };
 const EMPTY_QUALITY_RISK: AIImpactQualityRiskResponse = { decisions: [] };
@@ -127,4 +158,11 @@ export function fetchAIImpactFunctions(): Promise<AIImpactFunctionsResponse> {
 export function fetchAIImpactQualityRisk(): Promise<AIImpactQualityRiskResponse> {
   const path = "/api/cerebro/ai-impact/quality-risk/decisions";
   return fetchAIImpactReadModel(path, QualityRiskResponseSchema, EMPTY_QUALITY_RISK);
+}
+
+export async function fetchAIImpactPeople(
+  period: PeopleImpactPeriod,
+): Promise<AIImpactPeopleResponse> {
+  const path = `/api/cerebro/ai-impact/people?period=${period}`;
+  return fetchAIImpactReadModel(path, PeopleResponseSchema, { period, people: [] });
 }

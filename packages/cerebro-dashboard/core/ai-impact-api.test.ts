@@ -12,6 +12,7 @@ vi.mock("@multica/core/api", async (importOriginal) => ({
 import {
   fetchAIImpactFunctions,
   fetchAIImpactOverview,
+  fetchAIImpactPeople,
   fetchAIImpactQualityRisk,
 } from "./index";
 
@@ -88,5 +89,44 @@ describe("AI Impact dashboard client", () => {
     await expect(fetchAIImpactOverview()).resolves.toEqual({ families: [] });
     await expect(fetchAIImpactFunctions()).resolves.toEqual({ functions: [] });
     await expect(fetchAIImpactQualityRisk()).resolves.toEqual({ decisions: [] });
+  });
+
+  it("loads privacy-protected People results for the selected activity period", async () => {
+    cerebroRequest.mockResolvedValue({
+      period: "month",
+      people: [
+        {
+          id: "member-1",
+          type: "member",
+          name: "Maya",
+          activity: [{ bucket: "2026-07", count: 4 }],
+          usage: { runs: 2, issues: 3, projects: 1, chats: 5, channels: 2 },
+          outcomes: {
+            needs_solved: { solved: 8, measurable: 10 },
+            solution_quality: 0.91,
+            frustration_free: 0.84,
+            prompt_effectiveness: 0.79,
+            skill_activity: 3,
+            cost_cents: 42,
+          },
+          confidence: 0.76,
+          sample_size: 12,
+        },
+      ],
+    });
+
+    await expect(fetchAIImpactPeople("month")).resolves.toMatchObject({
+      period: "month",
+      people: [{ id: "member-1", name: "Maya" }],
+    });
+    expect(cerebroRequest).toHaveBeenCalledWith(
+      "/api/cerebro/ai-impact/people?period=month",
+    );
+
+    cerebroRequest.mockResolvedValue({ period: "month", people: null });
+    await expect(fetchAIImpactPeople("month")).resolves.toEqual({
+      period: "month",
+      people: [],
+    });
   });
 });

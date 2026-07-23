@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ControlRoomEmpty,
@@ -9,7 +9,8 @@ import {
   formatDollars,
 } from "./control-room-primitives";
 
-export type PeopleImpactPeriod = "hour" | "day" | "week" | "month";
+import type { PeopleImpactPeriod } from "../../core/ai-impact-api";
+export type { PeopleImpactPeriod } from "../../core/ai-impact-api";
 
 export interface PeopleImpact {
   id: string;
@@ -17,21 +18,21 @@ export interface PeopleImpact {
   name: string;
   activity: { bucket: string; count: number }[];
   usage: {
-    runs: number;
-    issues: number;
-    projects: number;
-    chats: number;
-    channels: number;
+    runs: number | null;
+    issues: number | null;
+    projects: number | null;
+    chats: number | null;
+    channels: number | null;
   };
   outcomes: {
-    needs_solved: number;
-    solution_quality: number;
-    frustration_free: number;
-    prompt_effectiveness: number;
-    skill_activity: number;
-    cost_cents: number;
+    needs_solved: { solved: number; measurable: number } | null;
+    solution_quality: number | null;
+    frustration_free: number | null;
+    prompt_effectiveness: number | null;
+    skill_activity: number | null;
+    cost_cents: number | null;
   };
-  confidence: number;
+  confidence: number | null;
   sample_size: number;
 }
 
@@ -57,6 +58,9 @@ export function PeopleControlRoom({
 }) {
   const [selectedId, setSelectedId] = useState(people[0]?.id ?? null);
   const selected = people.find((person) => person.id === selectedId) ?? people[0];
+  useEffect(() => {
+    if (!people.some((person) => person.id === selectedId)) setSelectedId(people[0]?.id ?? null);
+  }, [people, selectedId]);
 
   return (
     <div className="min-w-0 space-y-3 p-6">
@@ -120,7 +124,10 @@ export function PeopleControlRoom({
 
         <ControlRoomPanel
           title={selected?.name ?? "Person results"}
-          meta={selected ? `${selected.sample_size} sampled conversations · ${formatPercent(selected.confidence)} confidence` : undefined}
+          meta={selected ? selected.sample_size > 0 && selected.confidence !== null
+            ? `${selected.sample_size} sampled conversations · ${formatPercent(selected.confidence)} confidence`
+            : "Direct usage only · coaching assessment not available"
+            : undefined}
         >
           {loading ? (
             <ControlRoomLoading rows={6} />
@@ -131,7 +138,9 @@ export function PeopleControlRoom({
               <section aria-label="Primary outcome" className="rounded-lg border bg-background p-4">
                 <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Needs solved</p>
                 <p className="mt-1 font-mono text-3xl font-semibold tabular-nums text-foreground">
-                  {selected.outcomes.needs_solved}
+                  {selected.outcomes.needs_solved && selected.outcomes.needs_solved.measurable > 0
+                    ? formatPercent(selected.outcomes.needs_solved.solved / selected.outcomes.needs_solved.measurable)
+                    : "Missing"}
                 </p>
                 <p className="mt-1 text-[10px] text-muted-foreground">Sampled outcomes, not an employee score</p>
               </section>
@@ -142,18 +151,27 @@ export function PeopleControlRoom({
                   return (
                     <div key={label} className="px-3 py-3">
                       <p className="text-[10px] text-muted-foreground">{label}</p>
-                      <p className="mt-1 font-mono text-lg font-semibold tabular-nums">{selected.usage[key]}</p>
+                      <p className="mt-1 font-mono text-lg font-semibold tabular-nums">{selected.usage[key] ?? "—"}</p>
                     </div>
                   );
                 })}
               </section>
 
               <section aria-label="Supporting outcomes" className="grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
-                <Outcome label="Solution quality" value={formatPercent(selected.outcomes.solution_quality)} />
-                <Outcome label="Frustration-free" value={formatPercent(selected.outcomes.frustration_free)} />
-                <Outcome label="Prompt effectiveness" value={formatPercent(selected.outcomes.prompt_effectiveness)} />
-                <Outcome label="Skill activity" value={String(selected.outcomes.skill_activity)} />
-                <Outcome label="Cost" value={formatDollars(selected.outcomes.cost_cents)} />
+                <Outcome label="Solution quality" value={formatOptionalPercent(selected.outcomes.solution_quality)} />
+                <Outcome label="Frustration-free" value={formatOptionalPercent(selected.outcomes.frustration_free)} />
+                <Outcome label="Prompt effectiveness" value={formatOptionalPercent(selected.outcomes.prompt_effectiveness)} />
+                <Outcome label="Skill activity" value={selected.outcomes.skill_activity?.toLocaleString("en-US") ?? "—"} />
+                <Outcome label="Cost" value={selected.outcomes.cost_cents === null ? "—" : formatDollars(selected.outcomes.cost_cents)} />
+              </section>
+              <section aria-label="Activity" className="rounded-lg border bg-background p-3">
+                <p className="mb-2 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Activity</p>
+                <div className="flex min-h-8 items-end gap-1 overflow-hidden">
+                  {selected.activity.length === 0 ? <span className="text-xs text-muted-foreground">No activity in this period.</span> : selected.activity.map((item) => (
+                    <span key={item.bucket} title={`${item.bucket}: ${item.count}`} aria-label={`${item.bucket}: ${item.count} activities`}
+                      className="min-w-2 flex-1 rounded-sm bg-primary/20" style={{ height: `${Math.max(8, Math.min(32, item.count * 4))}px` }} />
+                  ))}
+                </div>
               </section>
             </div>
           )}
@@ -161,6 +179,10 @@ export function PeopleControlRoom({
       </div>
     </div>
   );
+}
+
+function formatOptionalPercent(value: number | null): string {
+  return value === null ? "—" : formatPercent(value);
 }
 
 function Outcome({ label, value }: { label: string; value: string }) {

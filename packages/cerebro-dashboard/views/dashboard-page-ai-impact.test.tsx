@@ -11,7 +11,8 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "workspace-1", slug: "firtal" }),
 }));
-vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag: () => true }));
+const { useFeatureFlag } = vi.hoisted(() => ({ useFeatureFlag: vi.fn(() => true) }));
+vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag }));
 vi.mock("@multica/views/layout/page-header", () => ({
   PageHeader: ({ children }: { children: React.ReactNode }) => <header>{children}</header>,
 }));
@@ -36,6 +37,9 @@ vi.mock("./components/ai-impact-control-room", () => ({
     </div>
   ),
 }));
+vi.mock("./components/people-control-room", () => ({
+  PeopleControlRoom: ({ people }: { people: unknown[] }) => <div>People read model: {people.length}</div>,
+}));
 
 import { useDashboardStore } from "../core/store";
 import { DashboardPage } from "./dashboard-page";
@@ -44,6 +48,7 @@ afterEach(cleanup);
 
 describe("DashboardPage AI Impact integration", () => {
   beforeEach(() => {
+    useFeatureFlag.mockImplementation(() => true);
     useDashboardStore.setState({ tab: "ai-impact" });
     useQuery.mockImplementation(({ queryKey }: { queryKey: readonly string[] }) => {
       const view = queryKey.at(-1);
@@ -55,6 +60,9 @@ describe("DashboardPage AI Impact integration", () => {
       }
       if (view === "quality-risk") {
         return { data: { decisions: [{ operating_loop_id: "loop-1" }] }, isLoading: false };
+      }
+      if (queryKey.includes("people")) {
+        return { data: { period: "month", people: [{ id: "member-1" }] }, isLoading: false, isError: false };
       }
       return {
         data: { period_start: "2026-07-01T00:00:00Z", period_end: "2026-07-22T00:00:00Z" },
@@ -68,5 +76,17 @@ describe("DashboardPage AI Impact integration", () => {
     render(<DashboardPage />);
 
     expect(screen.getByText("AI Impact read models: 1/1/1")).toBeTruthy();
+  });
+
+  it("gates AI Impact on both workspace flags and renders People from real data", () => {
+    useFeatureFlag.mockImplementation((key: string) => key !== "cerebro_ai_impact");
+    render(<DashboardPage />);
+    expect(screen.queryByText(/AI Impact read models/)).toBeNull();
+
+    cleanup();
+    useDashboardStore.setState({ tab: "people" });
+    useFeatureFlag.mockImplementation(() => true);
+    render(<DashboardPage />);
+    expect(screen.getByText("People read model: 1")).toBeTruthy();
   });
 });
