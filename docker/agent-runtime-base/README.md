@@ -278,6 +278,38 @@ proxy is a default, not a hard requirement — none of the CLIs fail closed
 if the proxy is unreachable, they just hit the configured URL and surface
 the error.
 
+## Toolchain gotchas for agent tasks
+
+Two tool-install paths that look obvious don't work in this image, plus one
+that was considered and deliberately left out:
+
+- **No `pip`/`venv`.** `python3` is present (whatever apt pulled in
+  transitively — it isn't a first-class citizen of this image's documented
+  tool list), but it's the Debian minimal split package: no `pip`, no
+  `pip3`, no `ensurepip` (`python3 -m venv` fails with "ensurepip is not
+  available... apt install python3.11-venv"). **Use `uv tool install
+  <pkg>` or `uvx <pkg>`** for any Python-based CLI — both are baked in and
+  write to an agent-owned dir (`~/.local/share/uv`), no permission issues.
+  A skill that assumes `pip install` works (e.g. one written against a
+  normal devbox) will not work here without switching to `uv`.
+- **`npm install -g <pkg>` fails for the non-root `agent` user.** The
+  bundled npm CLIs (`claude`/`codex`/`opencode`/`pi`) are installed as
+  root *before* `USER agent`, so the global prefix
+  (`/usr/lib/node_modules`) stays root-owned — `agent` gets `EACCES` on
+  any `-g` install. **Use `npx <pkg>` instead** — it doesn't write into
+  the global prefix, so it works unmodified for the non-root user. If a
+  task genuinely needs a persistent global install, that's a signal the
+  package belongs in this Dockerfile (see "Bump procedure" above), not in
+  a per-task `npm install -g`.
+- **No `mise`.** Some downstream consumers (e.g. `sem_agent_squad`)
+  optionally shell out to `mise` for local-dev env hydration, with a
+  fallback that skips silently when it's absent — that fallback is what
+  keeps things working here. `mise` is intentionally not baked into this
+  image: it exists to support local/dev-machine runs of those tools, not
+  containerized agent tasks, and is semi-deprecated for that use case.
+  `uv`/`uvx` is the supported way to get a Python tool running in this
+  image; don't add `mise` to work around a gap `uv` already covers.
+
 ## Open questions / follow-ups
 
 - **Hermes versioning.** ~~The project ships from git only. If/when they cut
