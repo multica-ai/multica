@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { X, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
@@ -21,6 +22,10 @@ import { useModalStore } from "@multica/core/modals";
 import { StatusPicker, PriorityPicker, AssigneePicker } from "./pickers";
 import { useT } from "../../i18n";
 import { cn } from "@multica/ui/lib/utils";
+import {
+  UI_EASE_OUT,
+  UI_MOTION_DURATION,
+} from "@multica/ui/lib/motion";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 
@@ -47,6 +52,7 @@ export function BatchActionToolbar({
   const selection = useIssueSurfaceSelection();
   const selectedIds = selection.selectedIds;
   const clear = selection.clear;
+  const shouldReduceMotion = useReducedMotion() ?? false;
 
   // The authoritative selection is selectedIds ∩ the visible universe. Acting
   // on raw selectedIds while other consumers (Export selected, common fields)
@@ -77,10 +83,15 @@ export function BatchActionToolbar({
   const openModal = useModalStore((s) => s.open);
   const loading =
     surfaceActions?.isPending ?? (batchUpdate.isPending || batchDelete.isPending);
-
-  if (count === 0) return null;
-
   const ids = selectedIssues.map((issue) => issue.id);
+
+  useEffect(() => {
+    if (count > 0) return;
+    setStatusOpen(false);
+    setPriorityOpen(false);
+    setAssigneeOpen(false);
+    setDeleteOpen(false);
+  }, [count]);
 
   const handleBatchUpdate = async (updates: Partial<UpdateIssueRequest>) => {
     try {
@@ -156,14 +167,46 @@ export function BatchActionToolbar({
 
   return (
     <>
-      <div
-        className={cn(
-          "z-50 flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg",
-          placement === "fixed-bottom"
-            ? "fixed bottom-6 left-1/2 -translate-x-1/2"
-            : "mb-2 w-fit",
-        )}
-      >
+      <AnimatePresence initial={false}>
+        {count > 0 && (
+          <div
+            key="issue-batch-toolbar"
+            className={cn(
+              "z-50",
+              placement === "fixed-bottom"
+                ? "fixed bottom-6 left-1/2 -translate-x-1/2"
+                : "mb-2 w-fit",
+            )}
+          >
+            <motion.div
+              className="flex items-center gap-1 rounded-lg border bg-background px-2 py-1.5 shadow-lg"
+              initial={{
+                opacity: 0,
+                transform: shouldReduceMotion
+                  ? "translateY(0)"
+                  : "translateY(8px)",
+              }}
+              animate={{
+                opacity: 1,
+                transform: "translateY(0)",
+                transition: {
+                  duration: UI_MOTION_DURATION.fast,
+                  ease: UI_EASE_OUT,
+                },
+              }}
+              exit={{
+                opacity: 0,
+                transform: shouldReduceMotion
+                  ? "translateY(0)"
+                  : "translateY(8px)",
+                transition: {
+                  duration: shouldReduceMotion
+                    ? UI_MOTION_DURATION.fast
+                    : UI_MOTION_DURATION.micro,
+                  ease: UI_EASE_OUT,
+                },
+              }}
+            >
         <div className="flex items-center gap-1.5 pl-1 pr-2 border-r mr-1">
           <span className="text-sm font-medium">{t(($) => $.batch.selected, { count })}</span>
           <button
@@ -221,9 +264,12 @@ export function BatchActionToolbar({
           <Trash2 className="size-3.5 mr-1" />
           {t(($) => $.batch.delete)}
         </Button>
-      </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      {count > 0 && <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -246,7 +292,7 @@ export function BatchActionToolbar({
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
-      </AlertDialog>
+      </AlertDialog>}
     </>
   );
 }

@@ -217,6 +217,82 @@ SELECT cron.unschedule('rollup_task_usage_hourly')
 
 完全なリファレンス（運用ノートと Kubernetes デプロイ形態を含む）は、リポジトリの [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup) にあります。
 
+## アップグレード
+
+Docker Compose 構成のアップグレード方法は2通りあります。既存の構成では**同じ結果**になります — `Makefile` の `selfhost` ターゲットは同じ `docker compose pull` + `up -d` を実行し、加えて `.env` が無ければ生成し、`/health` を待ってからステータスの要約を表示します。好きな方を使ってください。
+
+```bash
+cd multica
+git pull
+make selfhost
+```
+
+```bash
+cd multica
+git pull
+docker compose -f docker-compose.selfhost.yml pull
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+### `git pull` が実際に更新するもの
+
+`git pull` が更新するのは **`docker-compose.selfhost.yml` そのもの**です — 新しい環境変数、新しいサービス、変更された healthcheck。新しい Multica のバージョンを取得する仕組み**ではありません**。
+
+実際に動くバージョンを決めるのは `docker compose pull` で、そのタグが今どのイメージを指しているかを GHCR に問い合わせます。したがって数か月更新していない checkout でも今日の `latest` イメージを取得できますし、逆に `git pull` だけではイメージを取得してコンテナを作り直すまで何も変わりません。
+
+<Callout type="warning">
+**`MULTICA_IMAGE_TAG` を固定している場合、どちらのコマンドでもアップグレードされません。** 両方のイメージが `${MULTICA_IMAGE_TAG:-latest}` として解決され（`docker-compose.selfhost.yml:42`、`:125`）、`.env.example` は `MULTICA_IMAGE_TAG=latest` を同梱しています。`.env` で特定のリリースに固定していると、`pull` は同じタグを取り直すだけで、古いバージョンのままです — エラーも警告も出ません。アップグレード前に確認してください。
+
+```bash
+grep MULTICA_IMAGE_TAG .env
+# MULTICA_IMAGE_TAG=v0.4.5   ← 固定されている: 先に latest（または希望のリリース）へ変更する
+```
+</Callout>
+
+### `.env` は上書きされません
+
+`make selfhost` が `.env` を生成するのは、ファイルが**存在しない**ときだけです。既存の構成で再実行しても、`JWT_SECRET`、Postgres のパスワード、メール設定、`FRONTEND_ORIGIN` はそのまま残ります。
+
+### 先に Postgres をバックアップする
+
+migration は前方向のみで巻き戻せないため、大事な環境をアップグレードする前にダンプを取ってください。
+
+```bash
+docker compose -f docker-compose.selfhost.yml exec -T postgres \
+  pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
+```
+
+<Callout type="warning">
+**`pg_dump` を直接 `gzip` にパイプしないでください。** シェルはパイプラインの**最後**のコマンドの終了ステータスを返すため、`pg_dump … | gzip > backup.sql.gz` はダンプが失敗しても `0` で終了し、形式としては完全に正当な、中身が空の20バイトのアーカイブが残ります。先にファイルへリダイレクトすれば `pg_dump` 自身の終了ステータスが効くようになり、`&&` は実際に成功したダンプだけを圧縮します。
+</Callout>
+
+`POSTGRES_USER` / `POSTGRES_DB` を `multica` のデフォルトから変更している場合は、`.env` の値に置き換えてください。データは `multica_pgdata` という名前付きボリュームにあり、`docker compose down` では消えませんが、`down -v` では消えます。
+
+### migration は自動で実行されます
+
+[ステップ1](#1-プロジェクトを取得してバックエンドを起動する)と同じく、バックエンドコンテナはトラフィックを受け付ける前に起動時に `./migrate up` を実行します（`docker/entrypoint.sh`）。個別のアップグレードコマンドはありません — 新しいイメージを立ち上げること自体が migration のステップです。様子を見るには:
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs -f backend
+```
+
+### `/health` ではなく `/readyz` で検証する
+
+`/health` は **liveness** プローブで、プロセスが生きている限り `{"status":"ok"}` を返します — migration が失敗していても同じです。`/readyz`（`server/cmd/server/router.go:680`、`/healthz` はそのエイリアス）はデータベースと適用済み migration の集合をチェックするため、失敗したアップグレードを捕捉できるのはこちらです。
+
+```bash
+curl -s localhost:8080/readyz
+# {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+HTTP 200 かつ両方のチェックが `ok` でない場合、新しいバージョンは migration を完了していません。トラフィックを流す前にバックエンドのログを確認してください。
+
+### Kubernetes
+
+Helm には独自のアップグレード経路があります。values ファイルで `images.backend.tag` / `images.frontend.tag` に目的のリリースを設定し、`helm upgrade` を実行してください。タグを変えると Pod スペックが変わるため、Kubernetes が新しいイメージを取得して Deployment をロールします — これが確実な経路です。
+
+`kubectl -n multica rollout restart` はそれ単体ではアップグレードになりません。チャートは `pullPolicy: IfNotPresent` を同梱しているため（`deploy/helm/multica/values.yaml`）、そのタグをすでにキャッシュしているノードでは古いイメージが再利用され、restart しても何も変わりません — `MULTICA_IMAGE_TAG` の固定と同種の落とし穴です。浮動タグでこの方法を使いたい場合は、先に `images.backend.pullPolicy` / `images.frontend.pullPolicy` を `Always` に設定してください。下記の [Kubernetes デプロイ（代替手段）](#kubernetes-デプロイ代替手段)を参照してください。
+
 ## Kubernetes デプロイ（代替手段）
 
 すでに Kubernetes クラスターを運用している場合、リポジトリには `deploy/helm/multica/` に Helm チャートも同梱されています。k8s 用の `make selfhost` に相当します — 同じバックエンドイメージ、フロントエンドイメージ、`pgvector/pgvector:pg17` の Postgres を Deployment / Service / Ingress としてパッケージングし、`values.yaml` からレンダリングされた1つの `ConfigMap` を併せて提供します。k3s + Traefik + `local-path` を基準に作成されており、Ingress コントローラーとデフォルトの `ReadWriteOnce` StorageClass があるあらゆるクラスターで動作するはずです。
@@ -260,7 +336,7 @@ multica setup self-host \
   --app-url http://multica.dev.lan
 ```
 
-チャートを変更せずに最新のイメージだけを取得するには、`kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend` を実行してください。特定の Multica リリースに固定するには、values ファイルで `images.backend.tag` / `images.frontend.tag` を設定して `helm upgrade` を実行してください。`helm -n multica uninstall multica` はワークロードを削除しますが、PVC と Secret は保持します。`kubectl delete namespace multica` はすべてを消去します。
+特定の Multica リリースに移行するには、values ファイルで `images.backend.tag` / `images.frontend.tag` を設定して `helm upgrade` を実行してください — タグが変わることで再取得とロールアウトが強制されるため、アップグレードもこの経路を使います。`kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend` が浮動タグを取り直すのは、`images.backend.pullPolicy` / `images.frontend.pullPolicy` を `Always` に設定している場合だけです。チャートのデフォルトは `IfNotPresent` で、ノードがすでにキャッシュしているイメージを再利用します。`helm -n multica uninstall multica` はワークロードを削除しますが、PVC と Secret は保持します。`kubectl delete namespace multica` はすべてを消去します。
 
 完全なリファレンス — 3つのログインモード、web イメージにビルド時に焼き込まれた `REMOTE_API_URL` に対する `backend` ExternalName の回避策、リソース制限、TLS — は、リポジトリの [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative) にあります。
 

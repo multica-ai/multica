@@ -78,11 +78,25 @@ vi.mock("@multica/core/auth", () => ({
   ),
 }));
 
+const navigationMocks = vi.hoisted(() => ({
+  push: vi.fn(),
+  openInNewTab: vi.fn(),
+  getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
+}));
+const navigationState = vi.hoisted(() => ({ hasOpenInNewTab: true }));
+
 vi.mock("../../navigation", () => ({
   AppLink: ({ children, ...props }: React.ComponentProps<"a">) => (
     <a {...props}>{children}</a>
   ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/" }),
+  useNavigation: () => ({
+    push: navigationMocks.push,
+    openInNewTab: navigationState.hasOpenInNewTab
+      ? navigationMocks.openInNewTab
+      : undefined,
+    getShareableUrl: navigationMocks.getShareableUrl,
+    pathname: "/",
+  }),
 }));
 
 vi.mock("@multica/core/paths", async () => {
@@ -184,6 +198,13 @@ describe("TableView cell editors under data refresh", () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
+    navigationMocks.push.mockReset();
+    navigationMocks.openInNewTab.mockReset();
+    navigationMocks.getShareableUrl.mockReset();
+    navigationMocks.getShareableUrl.mockImplementation(
+      (path: string) => `https://app.example${path}`,
+    );
+    navigationState.hasOpenInNewTab = true;
     vi.stubGlobal("IntersectionObserver", ObserverStub);
     vi.stubGlobal("ResizeObserver", ObserverStub);
     queryClient = new QueryClient({
@@ -321,6 +342,68 @@ describe("TableView cell editors under data refresh", () => {
       parent_issue_identifier: "MUL-a",
       project_id: "project-1",
     });
+  });
+
+  it("opens title and row clicks in a foreground Desktop tab", async () => {
+    const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
+    serverIssues = [makeIssue("a", "Alpha task", "todo")];
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness
+          childProgressMap={new Map()}
+          surfaceKey={`test-new-tab-${Math.floor(Math.random() * 1e9)}`}
+        />
+      </QueryClientProvider>,
+    );
+
+    const row = (await screen.findByText("MUL-a")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Alpha task" }));
+    expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
+      "/test/issues/a",
+      "MUL-a",
+      { activate: true },
+    );
+    expect(navigationMocks.push).not.toHaveBeenCalled();
+
+    navigationMocks.openInNewTab.mockClear();
+    await user.click(row);
+    expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
+      "/test/issues/a",
+      "MUL-a",
+      { activate: true },
+    );
+    expect(navigationMocks.push).not.toHaveBeenCalled();
+  });
+
+  it("opens a real browser tab when the platform has no tab adapter", async () => {
+    const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
+    const windowOpen = vi.fn();
+    vi.stubGlobal("open", windowOpen);
+    navigationState.hasOpenInNewTab = false;
+    serverIssues = [makeIssue("a", "Alpha task", "todo")];
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness
+          childProgressMap={new Map()}
+          surfaceKey={`test-browser-tab-${Math.floor(Math.random() * 1e9)}`}
+        />
+      </QueryClientProvider>,
+    );
+
+    const row = (await screen.findByText("MUL-a")).closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: "Alpha task" }));
+
+    expect(navigationMocks.getShareableUrl).toHaveBeenCalledWith(
+      "/test/issues/a",
+    );
+    expect(windowOpen).toHaveBeenCalledWith(
+      "https://app.example/test/issues/a",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(navigationMocks.push).not.toHaveBeenCalled();
   });
 });
 

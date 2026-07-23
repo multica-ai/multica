@@ -929,13 +929,18 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				// no follow-up wakeup. These pins forbid that shape.
 				"Never background-and-yield",
 				"foreground tool call that blocks",
-				"gh run watch",
+				"only to work owned by the current run",
+				"GitHub Actions after a successful push",
+				"Do not wait for them by default",
 				"running in the background so you can keep working",
 				"standing by",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing background task safety text %q\n---\n%s", tc.file, want, s)
 				}
+			}
+			if strings.Contains(s, "gh run watch") {
+				t.Errorf("%s should not suggest waiting for external GitHub CI\n---\n%s", tc.file, s)
 			}
 		})
 	}

@@ -323,10 +323,10 @@ export function DataTable<TData>({
                             tabIndex={0}
                             className={cn(
                               "absolute top-0 right-0 h-full w-2 cursor-col-resize touch-none select-none outline-none",
-                              "after:absolute after:top-1/2 after:right-0 after:h-4 after:w-px after:-translate-y-1/2 after:bg-border after:opacity-0 after:transition-opacity",
-                              "hover:after:opacity-100 focus-visible:after:opacity-100",
+                              "after:absolute after:top-1/2 after:right-0 after:h-4 after:w-px after:-translate-y-1/2 after:bg-transparent after:transition-colors after:duration-100",
+                              "hover:after:bg-foreground/20 focus-visible:after:bg-foreground/20",
                               resizingColumnId === header.column.id &&
-                                "after:bg-primary after:opacity-100",
+                                "after:bg-foreground/40 after:transition-none",
                             )}
                             onPointerDown={(event) =>
                               beginColumnResize(header, event)

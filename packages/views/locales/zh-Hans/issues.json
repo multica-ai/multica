@@ -123,8 +123,6 @@
     "empty": "当前视图没有匹配的 issue。",
     "search_placeholder": "搜索标题或 issue 编号…",
     "search_clear": "清除搜索",
-    "loaded_count": "已载入 {{count}} / {{total}}",
-    "structure_paused": "分组和层级已暂停——{{total}} 个 issue 超过 {{limit}} 个上限，收窄筛选后自动恢复。",
     "load_failed": "加载 issue 失败。",
     "load_failed_retry": "重试",
     "load_more_failed_retry": "加载更多失败——重试",

@@ -523,6 +523,13 @@ export interface AgentBuilderSession {
   runtime_id: string;
 }
 
+/** Result of rebinding a live builder conversation to another runtime.
+ *  `runtime_id` is the runtime the server actually bound — the caller must
+ *  wait for it before showing the new runtime as selected. */
+export interface AgentBuilderRuntimeSwitch {
+  runtime_id: string;
+}
+
 /** Agent template summary — fields needed by the picker grid. Does NOT
  *  include `instructions` to keep the list payload small; the detail
  *  endpoint or the create flow returns the full template body. */
