@@ -151,6 +151,67 @@ describe("PullRequestList sidebar rows", () => {
     expect(screen.queryByText("Checks passed")).not.toBeInTheDocument();
   });
 
+  // MUL-5180: CI outcome used to render as plain muted text, visually
+  // indistinguishable from the diff stats next to it. The actionable kinds
+  // must carry their own color + icon; terminal/unknown kinds must not.
+  it("gives failing checks a colored status treatment", async () => {
+    mockPRs = [makePR({ checks_failed: 1, checks_passed: 5 })];
+    renderList();
+    await waitForRender();
+    const status = screen.getByTestId("pull-request-status");
+    expect(status).toHaveAttribute("data-status-kind", "checks_failed");
+    expect(status).toHaveClass("text-rose-600");
+    expect(status).toHaveTextContent("Some checks failed");
+  });
+
+  it("gives pending and passing checks their own status treatment", async () => {
+    mockPRs = [makePR({ checks_pending: 2 })];
+    const { unmount } = renderList();
+    await waitForRender();
+    expect(screen.getByTestId("pull-request-status")).toHaveClass("text-amber-600");
+    unmount();
+
+    mockPRs = [makePR({ checks_passed: 2 })];
+    renderList();
+    await waitForRender();
+    expect(screen.getByTestId("pull-request-status")).toHaveClass("text-emerald-600");
+  });
+
+  it("gives merge conflicts a colored status treatment", async () => {
+    mockPRs = [makePR({ mergeable_state: "dirty" })];
+    renderList();
+    await waitForRender();
+    const status = screen.getByTestId("pull-request-status");
+    expect(status).toHaveAttribute("data-status-kind", "conflicts");
+    expect(status).toHaveClass("text-rose-600");
+  });
+
+  it("leaves terminal and unknown status kinds muted", async () => {
+    mockPRs = [makePR({ state: "merged", checks_failed: 3 })];
+    const { unmount } = renderList();
+    await waitForRender();
+    expect(screen.queryByTestId("pull-request-status")).not.toBeInTheDocument();
+    expect(screen.getByText("Merged")).toBeInTheDocument();
+    unmount();
+
+    // No suite observed and no mergeable verdict — the state the card sits in
+    // when the GitHub App is not subscribed to `check_suite`.
+    mockPRs = [makePR()];
+    renderList();
+    await waitForRender();
+    expect(screen.queryByTestId("pull-request-status")).not.toBeInTheDocument();
+    expect(screen.getByText("Checks haven't reported yet")).toBeInTheDocument();
+  });
+
+  it("keeps the draft prefix wrapped in the colored status treatment", async () => {
+    mockPRs = [makePR({ state: "draft", checks_failed: 1 })];
+    renderList();
+    await waitForRender();
+    const status = screen.getByTestId("pull-request-status");
+    expect(status).toHaveClass("text-rose-600");
+    expect(status).toHaveTextContent("Draft · Some checks failed");
+  });
+
   it("hides stats row when all stats are 0 (legacy backend)", async () => {
     mockPRs = [makePR()];
     renderList();
