@@ -238,9 +238,19 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
     });
     await expect(tokenRow).toBeVisible();
 
-    await tokenRow
-      .getByRole("button", { name: `Revoke ${tokenName}`, exact: true })
-      .click();
+    const revokeButton = tokenRow.getByRole("button", {
+      name: `Revoke ${tokenName}`,
+      exact: true,
+    });
+    await expect(revokeButton).toBeVisible({
+      timeout: FLAG_HYDRATION_TIMEOUT_MS,
+    });
+    // The icon button is wrapped by Base UI's tooltip trigger. In headless
+    // Chromium the synthetic pointer action can remain in tooltip
+    // actionability even though the button is visible. Activate the same
+    // accessible button through its keyboard contract so the test still
+    // drives the real confirmation and revoke flow.
+    await revokeButton.press("Enter");
     const revokeDialog = page.getByRole("alertdialog").filter({
       has: page.getByRole("heading", {
         name: "Revoke service token?",
