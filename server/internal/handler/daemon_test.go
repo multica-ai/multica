@@ -31,16 +31,34 @@ import (
 // the heartbeat — the bound context must cut it short — while the ack-safe
 // PopPending path is never reached because HasPending returns an error, not
 // true.
-type slowProbeLocalSkillListStore struct{ LocalSkillListStore }
+type slowProbeLocalSkillListStore struct {
+	LocalSkillListStore
+	deadlineObserved chan time.Duration
+}
 
 func (s slowProbeLocalSkillListStore) HasPending(ctx context.Context, _ string) (bool, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		s.deadlineObserved <- -1
+		return false, errors.New("slow probe received an unbounded context")
+	}
+	s.deadlineObserved <- time.Until(deadline)
 	<-ctx.Done()
 	return false, ctx.Err()
 }
 
-type slowProbeLocalSkillImportStore struct{ LocalSkillImportStore }
+type slowProbeLocalSkillImportStore struct {
+	LocalSkillImportStore
+	deadlineObserved chan time.Duration
+}
 
 func (s slowProbeLocalSkillImportStore) HasPending(ctx context.Context, _ string) (bool, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		s.deadlineObserved <- -1
+		return false, errors.New("slow probe received an unbounded context")
+	}
+	s.deadlineObserved <- time.Until(deadline)
 	<-ctx.Done()
 	return false, ctx.Err()
 }
@@ -663,8 +681,16 @@ func TestDaemonHeartbeat_SlowProbeDoesNotWedge(t *testing.T) {
 
 	origList := testHandler.LocalSkillListStore
 	origImport := testHandler.LocalSkillImportStore
-	testHandler.LocalSkillListStore = slowProbeLocalSkillListStore{origList}
-	testHandler.LocalSkillImportStore = slowProbeLocalSkillImportStore{origImport}
+	listDeadline := make(chan time.Duration, 1)
+	importDeadline := make(chan time.Duration, 1)
+	testHandler.LocalSkillListStore = slowProbeLocalSkillListStore{
+		LocalSkillListStore: origList,
+		deadlineObserved:    listDeadline,
+	}
+	testHandler.LocalSkillImportStore = slowProbeLocalSkillImportStore{
+		LocalSkillImportStore: origImport,
+		deadlineObserved:      importDeadline,
+	}
 	t.Cleanup(func() {
 		testHandler.LocalSkillListStore = origList
 		testHandler.LocalSkillImportStore = origImport
@@ -675,16 +701,21 @@ func TestDaemonHeartbeat_SlowProbeDoesNotWedge(t *testing.T) {
 		"runtime_id": runtimeID,
 	}, testWorkspaceID, "runtime-local-skills-daemon")
 
-	start := time.Now()
 	testHandler.DaemonHeartbeat(w, req)
-	elapsed := time.Since(start)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("DaemonHeartbeat with slow probes: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	// Two bounded probes at 1s each + a small fixed slack.
-	if elapsed > 3*time.Second {
-		t.Fatalf("DaemonHeartbeat took %s; expected fast return despite slow probes", elapsed)
+	// Assert the contract at the probe seam instead of timing the whole handler:
+	// unrelated DB setup can be delayed when the complete suite saturates CI,
+	// while these captured deadlines prove both slow stores were actually bounded.
+	for name, observed := range map[string]time.Duration{
+		"local skill list":   <-listDeadline,
+		"local skill import": <-importDeadline,
+	} {
+		if observed <= 0 || observed > heartbeatHasPendingTimeout+100*time.Millisecond {
+			t.Errorf("%s probe deadline = %s, want a positive duration no greater than %s", name, observed, heartbeatHasPendingTimeout)
+		}
 	}
 }
 

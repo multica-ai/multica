@@ -2769,6 +2769,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
+	// CEREBRO-PATCH(issue-status-gate): FIR-3659 — agent status changes may be blocked by before.issue.status_change hook policies; see cerebro_issue_status_gate.go.
+	if code, msg := h.cerebroGateIssueStatusChange(r, prevIssue, req.Status, actorType, actorID); code != 0 {
+		writeError(w, code, msg)
+		return
+	}
+
 	// CEREBRO-PATCH(issue-update-transaction): keep issue updates atomic with side effects below.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {

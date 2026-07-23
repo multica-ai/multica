@@ -111,7 +111,15 @@ func (h *Handler) RuntimeAsset(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadGateway, "app runtime is unavailable")
 		return
 	}
-	for _, name := range []string{"Cache-Control", "Content-Security-Policy", "Content-Type"} {
+	for _, name := range []string{
+		"Cache-Control",
+		"Content-Security-Policy",
+		"Content-Type",
+		"Access-Control-Allow-Origin",
+		"Access-Control-Allow-Credentials",
+		"Access-Control-Allow-Methods",
+		"Access-Control-Allow-Headers",
+	} {
 		if value := asset.Headers.Get(name); value != "" {
 			w.Header().Set(name, value)
 		}

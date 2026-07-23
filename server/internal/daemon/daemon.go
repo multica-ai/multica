@@ -3612,6 +3612,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		InitiatorEmail:                   task.InitiatorEmail,
 		WorkspaceContext:                 task.WorkspaceContext,
 		EffectiveTools:                   effectiveToolsForEnv(task.EffectiveTools), // CEREBRO-PATCH(daemon-task-effective-tools-ctx): FIR-2312 carry resolved non-CLI tools into the brief
+		WorkpadBriefEnabled:              task.WorkpadBriefEnabled,                  // CEREBRO-PATCH(daemon-task-workpad-brief): FIR-3659 carry the cerebro_workpad verdict into the brief
 	}
 	taskCtx.WorkspaceBriefMode, taskCtx.ToolsBriefMode = briefLayerModesForTask(task) // CEREBRO-PATCH(brief-layer-modes): FIR-3212 nil-agent safe.
 
@@ -3658,30 +3659,62 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
+	// Resolve the selected Hermes profile before preparing the per-task home.
+	// The parsed selection is stripped from launch args because every Hermes
+	// task receives an overlay seeded from that selected profile.
+	var hermesSourceHome string
+	var hermesSourceMustExist bool
+	var hermesEnv map[string]string
+	if provider == "hermes" {
+		var customEnv map[string]string
+		var customArgs []string
+		if task.Agent != nil {
+			customEnv = task.Agent.CustomEnv
+			customArgs = task.Agent.CustomArgs
+		}
+		sel := agent.ParseHermesProfileArgs(customArgs)
+		res := execenv.ResolveHermesProfile(customEnv["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
+		if res.Err != nil {
+			return TaskResult{}, fmt.Errorf("resolve hermes profile: %w", res.Err)
+		}
+		hermesSourceHome = res.SourceHome
+		hermesSourceMustExist = res.MustExist
+		hermesEnv = sanitizeAgentEnv(customEnv)
+		if hermesEnv == nil {
+			hermesEnv = map[string]string{}
+		}
+		hermesEnv["HERMES_HOME"] = res.SourceHome
+	}
 	if task.PriorWorkDir != "" && localAssignment == nil {
 		env = execenv.Reuse(execenv.ReuseParams{
-			WorkDir:         task.PriorWorkDir,
-			Provider:        provider,
-			CodexVersion:    codexVersion,
-			OpenclawBin:     openclawBin,
-			McpConfig:       agentMcpConfig,
-			OpenclawGateway: openclawGateway,
-			Task:            taskCtx,
+			WorkDir:               task.PriorWorkDir,
+			Provider:              provider,
+			CodexVersion:          codexVersion,
+			OpenclawBin:           openclawBin,
+			McpConfig:             agentMcpConfig,
+			OpenclawGateway:       openclawGateway,
+			HermesSourceHome:      hermesSourceHome,
+			HermesSourceMustExist: hermesSourceMustExist,
+			HermesEnv:             hermesEnv,
+			Task:                  taskCtx,
 		}, d.logger)
 	}
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
-			WorkspacesRoot:  d.cfg.WorkspacesRoot,
-			WorkspaceID:     task.WorkspaceID,
-			TaskID:          task.ID,
-			AgentName:       agentName,
-			Provider:        provider,
-			CodexVersion:    codexVersion,
-			OpenclawBin:     openclawBin,
-			McpConfig:       agentMcpConfig,
-			OpenclawGateway: openclawGateway,
-			Task:            taskCtx,
+			WorkspacesRoot:        d.cfg.WorkspacesRoot,
+			WorkspaceID:           task.WorkspaceID,
+			TaskID:                task.ID,
+			AgentName:             agentName,
+			Provider:              provider,
+			CodexVersion:          codexVersion,
+			OpenclawBin:           openclawBin,
+			McpConfig:             agentMcpConfig,
+			OpenclawGateway:       openclawGateway,
+			HermesSourceHome:      hermesSourceHome,
+			HermesSourceMustExist: hermesSourceMustExist,
+			HermesEnv:             hermesEnv,
+			Task:                  taskCtx,
 		}
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
@@ -3840,15 +3873,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Bedrock). These are set per-agent via the agent settings UI.
 	// Critical internal variables are blocklisted to prevent accidental or
 	// malicious override of daemon-set values.
+	var agentCustomEnv map[string]string
 	if task.Agent != nil {
-		for k, v := range task.Agent.CustomEnv {
-			if isBlockedEnvKey(k) {
-				d.logger.Warn("custom_env: blocked key skipped", "key", k)
-				continue
-			}
-			agentEnv[k] = v
-		}
+		agentCustomEnv = task.Agent.CustomEnv
 	}
+	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
 	// CEREBRO-PATCH(daemon-tool-policy-ipc): FIR-3401 — wire every supported
 	// local provider to the mandatory tool-policy resolve IPC. Claude's combined
 	// settings document must retain the task's fast-mode choice.
@@ -3902,6 +3931,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
+	}
+	if provider == "hermes" {
+		customArgs = hermesLaunchArgs(customArgs, env != nil && env.HermesHome != "")
 	}
 	// CEREBRO-PATCH(daemon-pi-harness): FIR-3272 lock Pi to the Firtal Connections + policy extension.
 	customArgs, err = preparePiHarness(task.PiHarnessEnabled, provider, env.WorkDir, "enforce", customArgs, mcpConfig, agentEnv) // CEREBRO-PATCH(daemon-policy-switch-retirement): FIR-3403 policy enforcement is mandatory.
@@ -4817,6 +4849,66 @@ func composeOpenclawIncludeRoots(addRoot, userValue string) (string, bool) {
 		parts = append(parts, p)
 	}
 	return strings.Join(parts, string(os.PathListSeparator)), true
+}
+
+// sanitizeAgentEnv returns the agent custom_env after applying the same
+// daemon blocklist used for the child process. Hermes uses this effective view
+// when expanding external skill directories in its per-task config.
+func sanitizeAgentEnv(customEnv map[string]string) map[string]string {
+	if len(customEnv) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(customEnv))
+	for k, v := range customEnv {
+		if isBlockedEnvKey(k) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// hermesLaunchArgs strips exactly the profile selection already resolved into
+// an active per-task overlay. Without an overlay, args pass through unchanged.
+func hermesLaunchArgs(customArgs []string, overlayActive bool) []string {
+	if !overlayActive {
+		return customArgs
+	}
+	sel := agent.ParseHermesProfileArgs(customArgs)
+	return agent.StripHermesProfileArgs(customArgs, sel)
+}
+
+// layerCustomEnvAndHermesHome applies user custom_env first, then pins an
+// active Hermes overlay so a user-set HERMES_HOME cannot bypass task isolation.
+// Windows treats environment keys case-insensitively, so any spelling of
+// HERMES_HOME must be removed before the pinned overlay value is written.
+func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayHome string, logger *slog.Logger) {
+	if overlayHome != "" {
+		deleteEnvKeyFold(agentEnv, "HERMES_HOME")
+	}
+	for k, v := range customEnv {
+		if isBlockedEnvKey(k) {
+			if logger != nil {
+				logger.Warn("custom_env: blocked key skipped", "key", k)
+			}
+			continue
+		}
+		if overlayHome != "" && strings.EqualFold(k, "HERMES_HOME") {
+			continue
+		}
+		agentEnv[k] = v
+	}
+	if overlayHome != "" {
+		agentEnv["HERMES_HOME"] = overlayHome
+	}
+}
+
+func deleteEnvKeyFold(env map[string]string, key string) {
+	for k := range env {
+		if strings.EqualFold(k, key) {
+			delete(env, k)
+		}
+	}
 }
 
 // isBlockedEnvKey returns true if the key must not be overridden by user-

@@ -1763,9 +1763,42 @@ Approved by Jesper Hvejsel on FIR-3539 ("Fix det" + "find en måde hvor det ikke
 |---|---|---|
 | `handoff-brief-flags-verbatim` | `server/cmd/multica/cerebro_sessions.go`; skill docs in `server/internal/service/builtin_skills/multica-working-on-issues/` | `--done` / `--remaining` on `issue session handoff` were pflag `StringSlice`, which splits its value on every comma — so one prose sentence became several bullets cut mid-sentence. Switched to `StringArray` (value taken verbatim; repeat the flag for more bullets). Tests: `server/cmd/multica/cerebro_sessions_test.go`. |
 
+## FIR-3482 — Hermes task isolation
+
+| Patch | Location | Reason |
+|---|---|---|
+| `hermes-all-task-isolation` | `server/internal/daemon/execenv/execenv.go` | Build and refresh the per-task Hermes home for every Hermes task, including agents with no bound skills, so memory and SQLite state cannot fall back to the shared host home. Approved through FIR-3482 review on 2026-07-22. |
+
 ## FIR-2996 — Dashboard branch make-check hygiene
 
 | Patch | Location | Reason |
 |---|---|---|
 | `attachment-ocr-hermetic-test` | `server/internal/handler/file_test.go`, `server/internal/handler/attachment_ocr_runner_cerebro_test.go` | `TestGetAttachmentContent_PDFWithoutTextAndNoOCRBinary` relied on the host actually lacking `pdftoppm`/`tesseract`, so it passed in CI (no OCR binaries) but false-failed on dev machines with OCR installed. The upstream test now contains only the three-line runner injection; the Cerebro-owned sibling defines the runner that reports OCR tools as absent. Test-only; matches the existing `DefaultRunner` injection used by the sibling OCR tests. Ideally upstreamed at `multica-ai/multica`. |
 | `agent-task-issue-title` (extension) | `server/internal/handler/daemon.go` | FIR-3708 — the FIR-2763 M1 patch added `IssueTitle` / `ParentIssueTitle` response fields on the claim payload, but no assignment was ever written, so the daemon's trace-upload sidecar sent empty titles and every `ai_proxy_logs` row in the registry landed with a NULL issue title (the trace explorer fell back to raw UUIDs). 4 marked lines in the claim response builder populate both fields from the already-loaded issue row (parent title via one extra `GetIssue` when the issue has a parent). |
+
+## FIR-3659 — Workpad: description checklist convention + status-change gate
+
+Fork-owned implementation lives in `server/internal/cerebro/evals/workpad.go` (issue-target
+eval running the deterministic workpad check), `server/internal/cerebro/workflows/issue_status_gate.go`
+(dispatch of the previously-unfired `before.issue.status_change` hook event),
+`server/internal/cerebro/workflows/hook_eval_condition.go` (`eval_failed` deferred condition
+operator, fresh-run semantics), `server/internal/handler/cerebro_issue_status_gate.go`
+(handler-side seam) and `server/internal/daemon/execenv/cerebro_workpad_brief.go`
+(the Workpad protocol brief section). The brief is gated by the `cerebro_workpad`
+workspace feature flag (`packages/cerebro-feature-flags/registry.ts`, default OFF),
+resolved server-side at claim in `server/internal/handler/daemon_workpad_brief_cerebro.go`
+and carried to the daemon brief via `TaskContextForEnv.WorkpadBriefEnabled`.
+The gate only ever applies to agent actors; members are never blocked. Enforcement
+stays dark until `CEREBRO_WORKFLOW_HOOKS_ENABLED` is on AND a workspace hook policy
+listening on `before.issue.status_change` exists.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `issue-status-gate` | `server/internal/handler/issue.go` | 5-line call into `cerebroGateIssueStatusChange` before the UpdateIssue transaction so a hook policy can 422 an agent's status change (workpad start-gate). |
+| `handler-issue-status-gate` | `server/internal/handler/handler.go` | `IssueStatusGate` seam field on Handler (interface satisfied by `*cerebroworkflows.IssueStatusGate`). |
+| `issue-status-gate-wire` | `server/cmd/server/router.go` | Wire `workflowHooksFeature.StatusGate` into the handler seam. |
+| `cerebro-workpad-brief` | `server/internal/daemon/execenv/runtime_config.go` | One `b.WriteString(cerebroWorkpadBrief(ctx.WorkpadBriefEnabled))` callsite adding the `cerebro_workpad`-gated Workpad protocol section to the runtime brief. |
+| `execenv-workpad-brief` | `server/internal/daemon/execenv/execenv.go` | `WorkpadBriefEnabled bool` field on `TaskContextForEnv` carrying the resolved flag verdict into the brief builder. |
+| `daemon-task-workpad-brief` | `server/internal/daemon/types.go`, `server/internal/daemon/daemon.go` | `WorkpadBriefEnabled` on the daemon `Task` (JSON from the claim response) and its copy into `TaskContextForEnv`. |
+| `agent-task-workpad-brief` | `server/internal/handler/agent.go` | `WorkpadBriefEnabled` field on `AgentTaskResponse` so the claim response ships the workspace verdict to the daemon. |
+| `daemon-workpad-brief` | `server/internal/handler/daemon.go` | One-line `h.applyWorkpadBrief(...)` call at claim (resolver lives in the cerebro-prefixed `daemon_workpad_brief_cerebro.go`). |
