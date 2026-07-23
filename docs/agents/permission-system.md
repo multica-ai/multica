@@ -274,6 +274,14 @@ runtime resolver then re-checks the acting member: API endpoints use
 Only `Allow` dispatches; `Ask`, `Deny`, lookup errors, undeclared MCP tools, and
 transport errors fail closed. Stored Connection credentials remain server-side.
 
+Saved-connection verification follows the same credential boundary. The
+Connections edit screen receives only masked secret fields and includes the
+connection ID when it runs **Test connection**. The backend resolves that ID
+inside the current workspace and replaces masked or empty credential fields
+with the stored values before probing; an explicitly entered replacement still
+wins. The raw credential is never returned to the browser or included in the
+probe result.
+
 ### Apps Collection access
 
 App catalog listing and app open/use are deny-by-default outside the app owner
