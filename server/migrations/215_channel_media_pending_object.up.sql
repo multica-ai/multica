@@ -11,8 +11,13 @@
 -- The reconciler checks for a durable attachment reference only AFTER winning
 -- the claim — at that point a bind can no longer succeed on the key, so the
 -- check cannot race a late COMMIT.
+-- storage_key is the logical primary key, attached in migration 217 via a
+-- CONCURRENTLY-built unique index (216) per the repo convention that every
+-- migration index — including a new table's unique index — is created
+-- concurrently in its own single-statement migration (see 207-209 for the
+-- same three-step pattern on client_usage_daily).
 CREATE TABLE channel_media_pending_object (
-    storage_key      TEXT PRIMARY KEY,
+    storage_key      TEXT NOT NULL,
     workspace_id     UUID NOT NULL,
     chat_message_id  UUID NOT NULL,
     storage_url      TEXT NOT NULL,
