@@ -260,7 +260,7 @@
     "pull_request_card_status_conflicts": "병합 충돌 있음",
     "pull_request_card_status_checks_failed": "일부 검사 실패",
     "pull_request_card_status_checks_pending": "일부 검사가 아직 끝나지 않았습니다",
-    "pull_request_card_status_checks_passed": "모든 검사 통과",
+    "pull_request_card_status_checks_passed": "검사 통과",
     "pull_request_card_status_ready": "병합 가능",
     "pull_request_card_status_unknown": "아직 검사 결과가 없습니다",
     "pull_request_card_draft_prefix": "초안 · {{status}}",

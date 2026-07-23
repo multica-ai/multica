@@ -54,6 +54,27 @@ const CHECKS_ICON: Record<
   pending: { icon: CircleDashed, className: "text-amber-600 dark:text-amber-400" },
 };
 
+// Status line treatment per status kind. Only the *actionable* kinds get an
+// icon and a color: CI outcome and merge conflicts are the signals a reader
+// scans this row for, and rendering them in plain muted text made them
+// indistinguishable from the neighbouring diff stats (MUL-5180).
+//
+// Terminal kinds (closed / merged) and `unknown` stay muted on purpose — the
+// state icon at the head of the row already carries that meaning, so a second
+// colored glyph would be noise.
+const STATUS_KIND_STYLE: Partial<
+  Record<
+    PullRequestStatusKind,
+    { icon: React.ComponentType<{ className?: string }>; className: string }
+  >
+> = {
+  checks_failed: { icon: XCircle, className: "text-rose-600 dark:text-rose-400" },
+  checks_pending: { icon: CircleDashed, className: "text-amber-600 dark:text-amber-400" },
+  checks_passed: { icon: CheckCircle2, className: "text-emerald-600 dark:text-emerald-400" },
+  conflicts: { icon: TriangleAlert, className: "text-rose-600 dark:text-rose-400" },
+  ready: { icon: CheckCircle2, className: "text-emerald-600 dark:text-emerald-400" },
+};
+
 export function PullRequestList({ issueId }: { issueId: string }) {
   const { t } = useT("issues");
   const [expanded, setExpanded] = useState(false);
@@ -196,10 +217,32 @@ function PullRequestRowDetails({
     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
       {showStats ? <PullRequestStats pr={pr} /> : null}
       <PullRequestProgressStrip segments={segments} />
-      <span className="truncate">{statusText}</span>
+      <PullRequestStatusText kind={statusKind} text={statusText} />
       {showChecksBadge ? <PullRequestBadge badge={checksBadge} /> : null}
       {showConflictsBadge ? <PullRequestBadge badge={conflictsBadge} /> : null}
     </div>
+  );
+}
+
+function PullRequestStatusText({
+  kind,
+  text,
+}: {
+  kind: PullRequestStatusKind;
+  text: string;
+}) {
+  const style = STATUS_KIND_STYLE[kind];
+  if (!style) return <span className="truncate">{text}</span>;
+  const Icon = style.icon;
+  return (
+    <span
+      data-testid="pull-request-status"
+      data-status-kind={kind}
+      className={cn("inline-flex min-w-0 items-center gap-1 font-medium", style.className)}
+    >
+      <Icon className="h-3 w-3 shrink-0" />
+      <span className="truncate">{text}</span>
+    </span>
   );
 }
 

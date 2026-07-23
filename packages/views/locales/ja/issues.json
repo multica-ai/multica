@@ -260,7 +260,7 @@
     "pull_request_card_status_conflicts": "マージコンフリクトあり",
     "pull_request_card_status_checks_failed": "一部のチェックが失敗しました",
     "pull_request_card_status_checks_pending": "一部のチェックがまだ完了していません",
-    "pull_request_card_status_checks_passed": "すべてのチェックに成功しました",
+    "pull_request_card_status_checks_passed": "チェックに成功しました",
     "pull_request_card_status_ready": "マージ可能",
     "pull_request_card_status_unknown": "まだチェック結果がありません",
     "pull_request_card_draft_prefix": "ドラフト · {{status}}",
