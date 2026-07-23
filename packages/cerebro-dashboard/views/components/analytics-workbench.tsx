@@ -129,16 +129,23 @@ function LineVisual({ visual, rows }: { visual: AnalyticsVisual; rows: Record<st
   const metric = visual.metrics[0];
   const values = rows.map((row) => numeric(metric ? row[metric] : 0));
   const max = Math.max(1, ...values);
-  const points = values.map((value, index) => {
+  const pointData = values.map((value, index) => {
     const x = values.length <= 1 ? 50 : (index / (values.length - 1)) * 100;
     const y = 38 - (value / max) * 34;
-    return `${x},${y}`;
-  }).join(" ");
+    return { value, x, y };
+  });
+  const points = pointData.map(({ x, y }) => `${x},${y}`).join(" ");
   return (
     <figure className="p-4" aria-label={`${visual.title} chart`} role="img">
       <svg viewBox="0 0 100 42" className="h-40 w-full overflow-visible text-primary" preserveAspectRatio="none">
         <path d="M0 39H100" className="stroke-border" strokeWidth="0.4" />
         <polyline points={points} fill="none" stroke="currentColor" strokeWidth="1.4" vectorEffect="non-scaling-stroke" />
+        {pointData.map(({ value, x, y }, index) => (
+          <g key={index} aria-label={`${visual.title} point ${formatValue(value)}`}>
+            <circle cx={x} cy={y} r="1.4" fill="currentColor" />
+            <text x={x} y={Math.max(3, y - 2.5)} textAnchor="middle" fill="currentColor" fontSize="3.2">{formatValue(value)}</text>
+          </g>
+        ))}
       </svg>
     </figure>
   );

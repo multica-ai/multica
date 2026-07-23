@@ -654,12 +654,12 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// spendCents sums task_usage.cost_cents for the workspace in [start, end),
+// spendCents prices runtime usage for the workspace in [start, end),
 // optionally restricted to a single actor scope (agent-id or member-id).
 // The query honors the upper bound, so the prior period reports its real
 // total instead of being silently zeroed out.
 func (h *Handler) spendCents(ctx context.Context, wsID pgtype.UUID, start, end time.Time, actorType pgtype.Text, actorID pgtype.UUID) int {
-	cents, err := h.Cerebro.DashboardSpendCentsInPeriod(ctx, cerebrodb.DashboardSpendCentsInPeriodParams{
+	rows, err := h.Cerebro.DashboardUsageCostRowsInPeriod(ctx, cerebrodb.DashboardUsageCostRowsInPeriodParams{
 		WorkspaceID: wsID,
 		CreatedAt:   ts(start),
 		CreatedAt2:  ts(end),
@@ -668,6 +668,21 @@ func (h *Handler) spendCents(ctx context.Context, wsID pgtype.UUID, start, end t
 	})
 	if err != nil {
 		return 0
+	}
+	return sumDashboardUsageCost(rows)
+}
+
+func sumDashboardUsageCost(rows []cerebrodb.DashboardUsageCostRowsInPeriodRow) int {
+	var cents int64
+	for _, row := range rows {
+		if row.CostCents > 0 {
+			cents += row.CostCents
+			continue
+		}
+		cents += int64(pricing.ComputeCents(row.Model, pricing.Usage{
+			InputTokens: row.InputTokens, OutputTokens: row.OutputTokens,
+			CacheReadTokens: row.CacheReadTokens, CacheWriteTokens: row.CacheWriteTokens,
+		}))
 	}
 	return int(cents)
 }

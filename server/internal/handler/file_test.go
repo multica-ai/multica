@@ -45,6 +45,15 @@ func (handlerAttachmentRunner) Run(_ context.Context, dir, name string, args ...
 	return nil, nil
 }
 
+// missingOCRRunner simulates a host with no pdftoppm/tesseract installed so the
+// no-OCR-binary path is exercised deterministically, independent of the machine
+// running the test.
+type missingOCRRunner struct{} // CEREBRO-PATCH(attachment-ocr-hermetic-test): force absent OCR tools so the no-OCR case is host-independent.
+
+func (missingOCRRunner) Run(_ context.Context, _, name string, _ ...string) ([]byte, error) {
+	return nil, fmt.Errorf("%s: executable file not found in $PATH", name)
+}
+
 // createHandlerTestChatSession seeds a chat_session row owned by testUserID
 // targeting the given agent and returns the session UUID. Cleanup runs after
 // the test. Used by attachment / chat tests that need an existing session.
@@ -844,6 +853,10 @@ func TestGetAttachmentContent_PDFText(t *testing.T) { // CEREBRO-PATCH(pdf-attac
 }
 
 func TestGetAttachmentContent_PDFWithoutTextAndNoOCRBinary(t *testing.T) {
+	origRunner := attachmenttext.DefaultRunner // CEREBRO-PATCH(attachment-ocr-hermetic-test): pin runner to a no-OCR host regardless of what is installed locally.
+	attachmenttext.DefaultRunner = missingOCRRunner{}
+	defer func() { attachmenttext.DefaultRunner = origRunner }()
+
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
 	testHandler.Storage = store

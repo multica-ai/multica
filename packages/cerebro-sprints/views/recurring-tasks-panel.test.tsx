@@ -98,7 +98,7 @@ describe("RecurringTasksPanel", () => {
     expect(screen.getByText("Day 3 is Wednesday.")).toBeTruthy();
 
     await user.click(screen.getByLabelText("Assignee"));
-    await user.click(screen.getByRole("option", { name: "Anna" }));
+    await user.click(await screen.findByRole("option", { name: "Anna" }));
     expect(screen.getByLabelText("Assignee").textContent).toContain("Anna");
     expect(screen.getByLabelText("Assignee").textContent).not.toContain("member:member-1");
     await user.click(screen.getByRole("button", { name: "Add" }));

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
@@ -24,12 +24,29 @@ export function DashboardPage() {
   const actorName = useDashboardStore((s) => s.actorName);
   const tab = useDashboardStore((s) => s.tab);
   const setActor = useDashboardStore((s) => s.setActor);
+  const setScope = useDashboardStore((s) => s.setScope);
   const [visualBuilderOpen, setVisualBuilderOpen] = useState(false);
   const [analyticsFilters, setAnalyticsFilters] = useState<AnalyticsFilter[]>(() =>
     typeof window === "undefined" ? [] : filtersFromSearchParams(new URLSearchParams(window.location.search)),
   );
   const wsId = workspace?.id ?? "";
   const overview = useQuery(dashboardOverviewOptions(wsId, range, scope, actorId));
+
+  const selectActor = (id: string, name: string, type: "member" | "agent") => {
+    setScope(type === "agent" ? "agents" : "members");
+    setActor(id, name);
+    setAnalyticsFilters((current) => [
+      ...current.filter((filter) => filter.dimension !== "person" && filter.dimension !== "agent"),
+      { dimension: type === "agent" ? "agent" : "person", operator: "in", values: [name] },
+    ]);
+  };
+
+  useEffect(() => {
+    const hasActorFilter = analyticsFilters.some((filter) =>
+      (filter.dimension === "person" || filter.dimension === "agent") && filter.values.length > 0,
+    );
+    if (actorId && !hasActorFilter) setActor(null);
+  }, [actorId, analyticsFilters, setActor]);
 
   if (!enabled) return null;
 
@@ -58,18 +75,7 @@ export function DashboardPage() {
             </p>
           </div>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {actorId && (
-            <button
-              type="button"
-              onClick={() => setActor(null)}
-              className="rounded-md border px-2 py-1 text-xs text-muted-foreground hover:text-foreground"
-            >
-              {actorName ?? "Actor"} x
-            </button>
-          )}
-          <DashboardTabBar />
-        </div>
+        <DashboardTabBar />
       </PageHeader>
 
       <div className="flex-1 min-h-0 overflow-y-auto">
@@ -81,7 +87,7 @@ export function DashboardPage() {
             </p>
           )}
 
-          {tab === "overview" && <OverviewControlRoom workspaceId={workspace.id} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={(id, name) => setActor(id, name)} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
+          {tab === "overview" && <OverviewControlRoom workspaceId={workspace.id} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={selectActor} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
 
           {tab === "runs" && (
             <>
@@ -108,7 +114,7 @@ export function DashboardPage() {
             </>
           )}
 
-          {tab === "messages" && <MessagesControlRoom workspaceId={workspace.id} workspaceSlug={workspace.slug} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={(id, name) => setActor(id, name)} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
+          {tab === "messages" && <MessagesControlRoom workspaceId={workspace.id} workspaceSlug={workspace.slug} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={selectActor} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
         </div>
       </div>
     </div>

@@ -42,11 +42,12 @@ export function VisualBuilderDrawer({
   const catalogGrains = catalog?.grains.filter((grain) => grain !== "none") ?? [];
   const grains = catalogGrains.length ? catalogGrains : FALLBACK_GRAINS;
   const [presentation, setPresentation] = useState<AnalyticsVisualPresentation>(initial?.presentation ?? "line");
-  const [metric, setMetric] = useState<AnalyticsMetric>(initial?.metrics[0] ?? preferred(metrics, "runs"));
+  const [selectedMetrics, setSelectedMetrics] = useState<AnalyticsMetric[]>(initial?.metrics.length ? initial.metrics : [preferred(metrics, "runs")]);
   const [dimension, setDimension] = useState<AnalyticsDimension>(initial?.dimensions[0] ?? preferred(dimensions, "project"));
   const [breakdown, setBreakdown] = useState<AnalyticsDimension>(initial?.dimensions[1] ?? preferred(dimensions, "person"));
   const [grain, setGrain] = useState<AnalyticsGrain>(initial?.grain === "none" ? preferred(grains, "day") : initial?.grain ?? preferred(grains, "day"));
-  const title = `${titleCase(dimension)} ${label(metric)} by ${label(breakdown)}`;
+  const visualMetrics = presentation === "table" ? selectedMetrics : selectedMetrics.slice(0, 1);
+  const title = `${titleCase(dimension)} ${visualMetrics.map(label).join(" + ")} by ${label(breakdown)}`;
 
   return (
     <aside aria-label={initial ? "Configure visual" : "New visual"} className="flex h-full w-[350px] shrink-0 flex-col overflow-y-auto border-l bg-card">
@@ -69,7 +70,7 @@ export function VisualBuilderDrawer({
             title,
             kind: presentationToVisualKind(presentation),
             presentation,
-            metrics: [metric],
+            metrics: visualMetrics,
             dimensions: dimension === breakdown ? [dimension] : [dimension, breakdown],
             grain,
             limit: initial?.limit ?? 12,
@@ -94,7 +95,20 @@ export function VisualBuilderDrawer({
 
         <BuilderSection title="2. Data">
           <div className="space-y-2">
-            <BuilderSelect label="Metric" value={metric} values={metrics} onChange={(value) => setMetric(value as AnalyticsMetric)} />
+            {visualMetrics.map((metric, index) => (
+              <BuilderSelect
+                key={index}
+                label={presentation === "table" ? `Metric ${index + 1}` : "Metric"}
+                value={metric}
+                values={metrics}
+                onChange={(value) => setSelectedMetrics((current) => current.map((item, itemIndex) => itemIndex === index ? value as AnalyticsMetric : item))}
+              />
+            ))}
+            {presentation === "table" && selectedMetrics.length < metrics.length && (
+              <button type="button" onClick={() => setSelectedMetrics((current) => [...current, metrics.find((metric) => !current.includes(metric)) ?? metrics[0]!])} className="w-full rounded-md border px-3 py-2 text-xs font-medium hover:bg-muted">
+                Add metric
+              </button>
+            )}
             <BuilderSelect label="Dimension" value={dimension} values={dimensions} onChange={(value) => setDimension(value as AnalyticsDimension)} />
             <BuilderSelect label="Breakdown" value={breakdown} values={dimensions} onChange={(value) => setBreakdown(value as AnalyticsDimension)} />
             <BuilderSelect label="Grain" value={grain} values={grains} onChange={(value) => setGrain(value as AnalyticsGrain)} />
@@ -102,11 +116,9 @@ export function VisualBuilderDrawer({
         </BuilderSection>
 
         <BuilderSection title="3. Preview">
-          <div className="grid min-h-24 place-items-center rounded-md border border-dashed border-primary/30 px-4 text-center">
-            <div>
-              <p className="text-xs text-muted-foreground">{title}</p>
-              <p className="mt-3 text-[10px] text-muted-foreground">Preview updates as fields change</p>
-            </div>
+          <div role="region" aria-label="Visual preview" className="min-h-28 rounded-md border border-primary/30 p-3">
+            <p className="mb-3 truncate text-[10px] font-semibold text-muted-foreground">{title}</p>
+            <VisualPreview presentation={presentation} metrics={visualMetrics} dimension={dimension} breakdown={breakdown} />
           </div>
         </BuilderSection>
 
@@ -115,6 +127,32 @@ export function VisualBuilderDrawer({
         </button>
       </form>
     </aside>
+  );
+}
+
+function VisualPreview({ presentation, metrics, dimension, breakdown }: { presentation: AnalyticsVisualPresentation; metrics: AnalyticsMetric[]; dimension: AnalyticsDimension; breakdown: AnalyticsDimension }) {
+  if (presentation === "metric") {
+    return <div><p className="text-[10px] uppercase text-muted-foreground">{titleCase(metrics[0] ?? "metric")}</p><p className="font-mono text-2xl font-semibold">128</p></div>;
+  }
+  if (presentation === "table") {
+    return (
+      <table className="w-full text-[10px]">
+        <thead><tr className="border-b text-left text-muted-foreground"><th className="pb-1 font-medium">{titleCase(dimension)}</th>{metrics.map((metric) => <th key={metric} className="pb-1 text-right font-medium">{titleCase(metric)}</th>)}</tr></thead>
+        <tbody>{["A", "B", "C"].map((row, index) => <tr key={row}><td className="py-1">{titleCase(breakdown)} {row}</td>{metrics.map((metric, metricIndex) => <td key={metric} className="py-1 text-right font-mono">{(index + 1) * (metricIndex + 2) * 8}</td>)}</tr>)}</tbody>
+      </table>
+    );
+  }
+  if (presentation === "activity") {
+    return <div className="grid grid-cols-8 gap-1">{Array.from({ length: 24 }, (_, index) => <span key={index} className={`h-3 rounded-sm ${index % 4 === 0 ? "bg-primary" : index % 3 === 0 ? "bg-primary/60" : "bg-primary/20"}`} />)}</div>;
+  }
+  if (presentation === "stacked") {
+    return <div className="space-y-2">{[80, 55, 70].map((width) => <div key={width} className="flex h-3 overflow-hidden rounded bg-muted"><span className="bg-primary" style={{ width: `${width * 0.65}%` }} /><span className="bg-primary/45" style={{ width: `${width * 0.35}%` }} /></div>)}</div>;
+  }
+  return (
+    <svg viewBox="0 0 100 34" className="h-20 w-full overflow-visible text-primary" aria-label={`${titleCase(metrics[0] ?? "metric")} preview chart`}>
+      <polyline points="0,29 25,18 50,23 75,7 100,12" fill="none" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+      {[29, 18, 23, 7, 12].map((y, index) => <circle key={index} cx={index * 25} cy={y} r="1.8" fill="currentColor" />)}
+    </svg>
   );
 }
 

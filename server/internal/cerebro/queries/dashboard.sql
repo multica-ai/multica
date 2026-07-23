@@ -518,8 +518,10 @@ WHERE cs.workspace_id = $1
   AND cs.id = $2
 GROUP BY tu.model;
 
--- name: DashboardSpendCentsInPeriod :one
--- Sum of task_usage.cost_cents for tasks billed in the dashboard period,
+-- name: DashboardUsageCostRowsInPeriod :many
+-- Usage rows for tasks billed in the dashboard period. The handler preserves
+-- exact gateway charges and calculates a price from tokens when a runtime did
+-- not persist a charge.
 -- restricted to the workspace and optionally the actor scope. Replaces the
 -- previous GetWorkspaceUsageSummary path which (a) ignored the actor scope
 -- entirely, (b) had no upper time bound, and (c) returned 0 for the prior
@@ -530,7 +532,8 @@ GROUP BY tu.model;
 --   - 'agent'            → spend attributed to the agent that ran the task
 --   - 'member'           → spend attributed to the human that originated the
 --                          task via agent_task_queue.original_user_id
-SELECT COALESCE(SUM(tu.cost_cents), 0)::bigint AS cents
+SELECT tu.model, tu.input_tokens, tu.output_tokens, tu.cache_read_tokens,
+       tu.cache_write_tokens, tu.cost_cents
 FROM model_usage_task_rollup tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
 JOIN agent a ON a.id = atq.agent_id

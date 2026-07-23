@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { AnalyticsDimension, AnalyticsOperator } from "@multica/cerebro-usage";
 import { useAuthStore } from "@multica/core/auth";
@@ -44,7 +44,7 @@ export function MessagesControlRoom({
   filters: AnalyticsFilter[];
   onFiltersChange: Dispatch<SetStateAction<AnalyticsFilter[]>>;
   onNewVisual: () => void;
-  onSelectActor: (actorId: string, actorName: string) => void;
+  onSelectActor: (actorId: string, actorName: string, actorType: "member" | "agent") => void;
   builderOpen?: boolean;
   onBuilderOpenChange?: (open: boolean) => void;
 }) {
@@ -56,6 +56,7 @@ export function MessagesControlRoom({
   const messagesQuery = useQuery(allMessagesOptions(workspaceId, range, scope, actorId));
   const [compactLayout, setCompactLayout] = useState(false);
   const [search, setSearch] = useState("");
+  const [messagePage, setMessagePage] = useState(0);
   const [selectedMessage, setSelectedMessage] = useState<ActorMessage | null>(null);
   const timeline = data?.timeline ?? [];
   const messageFlow = data?.message_flow ?? [];
@@ -72,6 +73,14 @@ export function MessagesControlRoom({
         .some((value) => value!.toLowerCase().includes(normalized)),
     );
   }, [messagesQuery.data?.messages, search]);
+  const messagePageSize = 10;
+  const messagePageCount = Math.max(1, Math.ceil(messages.length / messagePageSize));
+  const visibleMessages = messages.slice(messagePage * messagePageSize, (messagePage + 1) * messagePageSize);
+
+  useEffect(() => setMessagePage(0), [search, actorId, range, scope]);
+  useEffect(() => {
+    if (messagePage >= messagePageCount) setMessagePage(messagePageCount - 1);
+  }, [messagePage, messagePageCount]);
 
   const addFilter = (dimension: AnalyticsDimension, value: string, operator: "in" | "not_in" | "contains" | "not_contains") => {
     onFiltersChange((current) => addAnalyticsFilterValue(current, dimension, value, operator));
@@ -79,12 +88,8 @@ export function MessagesControlRoom({
   const removeFilter = (dimension: AnalyticsDimension, value: string, operator: AnalyticsOperator) => {
     onFiltersChange((current) => removeAnalyticsFilterValue(current, dimension, value, operator));
   };
-  const selectActor = (id: string, name: string) => {
-    onSelectActor(id, name);
-    onFiltersChange((current) => {
-      const withoutPeople = current.filter((filter) => filter.dimension !== "person");
-      return [...withoutPeople, { dimension: "person", operator: "in", values: [name] }];
-    });
+  const selectActor = (id: string, name: string, actorType: "member" | "agent" = "member") => {
+    onSelectActor(id, name, actorType);
   };
   const filterDay = (day: string) => {
     const start = new Date(`${day}T00:00:00.000Z`);
@@ -116,7 +121,7 @@ export function MessagesControlRoom({
       <section aria-label="Message operations" className="grid grid-cols-2 divide-x divide-y overflow-hidden rounded-lg border bg-card sm:grid-cols-4 sm:divide-y-0">
         <ControlRoomKpi label="Direct messages" value={formatCompact(data?.chat_messages.value ?? 0)} note="member and agent conversations" />
         <ControlRoomKpi label="Channel messages" value={formatCompact(data?.channel_messages.value ?? 0)} note="workspace collaboration" />
-        <ControlRoomKpi label="Message cost" value={formatDollars(data?.spend_cents.value ?? 0)} note="measured gateway spend" />
+        <ControlRoomKpi label="Message cost" value={formatDollars(data?.spend_cents.value ?? 0)} note="exact charges plus token estimates" />
         <ControlRoomKpi label="Visible messages" value={formatCompact(messages.length)} note="matching current selection" />
       </section>
 
@@ -154,10 +159,10 @@ export function MessagesControlRoom({
 
       <div className="grid gap-3 lg:grid-cols-2">
         <ControlRoomPanel title="Top senders" meta="Click a sender to filter every Messages panel">
-          <ActorRows prefix="sender" rows={topMessageSenders} loading={isLoading} onSelect={selectActor} />
+          <ActorRows prefix="sender" rows={topMessageSenders} loading={isLoading} actorType="member" onSelect={selectActor} />
         </ControlRoomPanel>
         <ControlRoomPanel title="Top recipients" meta="Click a recipient to filter every Messages panel">
-          <ActorRows prefix="recipient" rows={topMessageRecipients} loading={isLoading} onSelect={selectActor} />
+          <ActorRows prefix="recipient" rows={topMessageRecipients} loading={isLoading} actorType="agent" onSelect={selectActor} />
         </ControlRoomPanel>
       </div>
 
@@ -170,18 +175,31 @@ export function MessagesControlRoom({
             <table className="w-full text-xs">
               <thead><tr className="border-b text-left text-[10px] uppercase tracking-wide text-muted-foreground"><th className="px-3 py-2 font-medium">Time</th><th className="px-3 py-2 font-medium">From</th><th className="px-3 py-2 font-medium">To</th><th className="px-3 py-2 font-medium">Issue</th><th className="px-3 py-2 font-medium">Message</th></tr></thead>
               <tbody>
-                {messages.map((message) => (
-                  <tr key={message.id} onClick={() => setSelectedMessage(message)} className="cursor-pointer border-b transition-colors last:border-0 hover:bg-muted/60">
+                {visibleMessages.map((message) => (
+                  <tr key={message.id} className="border-b transition-colors last:border-0 hover:bg-muted/60">
                     <td className="whitespace-nowrap px-3 py-2 font-mono text-[10px] text-muted-foreground">{formatTime(message.created_at)}</td>
                     <td className="px-3 py-2"><button type="button" onClick={(event) => { event.stopPropagation(); if (message.sender_id && message.sender_name) selectActor(message.sender_id, message.sender_name); }} className="font-medium hover:underline">{message.sender_name ?? "Unknown"}</button></td>
                     <td className="whitespace-nowrap px-3 py-2 text-muted-foreground">{message.agent_name}</td>
                     <td className="max-w-44 truncate px-3 py-2 text-muted-foreground">{message.issue_title ? `#${message.issue_number} ${message.issue_title}` : "—"}</td>
-                    <td className="max-w-md px-3 py-2"><p className="line-clamp-2">{message.content}</p></td>
+                    <td className="max-w-md px-3 py-2">
+                      <button type="button" aria-label={`Open conversation with ${message.agent_name}`} onClick={() => setSelectedMessage(message)} className="w-full rounded-sm text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        <span className="line-clamp-2">{message.content}</span>
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+        )}
+        {messages.length > 0 && (
+          <footer className="flex items-center justify-between border-t px-3 py-2">
+            <span className="text-[11px] text-muted-foreground">Page {messagePage + 1} of {messagePageCount}</span>
+            <div className="flex gap-1">
+              <button type="button" aria-label="Previous messages page" disabled={messagePage === 0} onClick={() => setMessagePage((page) => Math.max(0, page - 1))} className="rounded border px-2 py-1 text-xs disabled:opacity-40">Previous</button>
+              <button type="button" aria-label="Next messages page" disabled={messagePage + 1 >= messagePageCount} onClick={() => setMessagePage((page) => Math.min(messagePageCount - 1, page + 1))} className="rounded border px-2 py-1 text-xs disabled:opacity-40">Next</button>
+            </div>
+          </footer>
         )}
       </ControlRoomPanel>
 
@@ -191,14 +209,14 @@ export function MessagesControlRoom({
   );
 }
 
-function ActorRows({ prefix, rows, loading, onSelect }: { prefix: "sender" | "recipient"; rows: TopActor[]; loading: boolean; onSelect: (id: string, name: string) => void }) {
+function ActorRows({ prefix, rows, loading, actorType, onSelect }: { prefix: "sender" | "recipient"; rows: TopActor[]; loading: boolean; actorType: "member" | "agent"; onSelect: (id: string, name: string, actorType: "member" | "agent") => void }) {
   if (loading) return <ControlRoomLoading />;
   if (rows.length === 0) return <ControlRoomEmpty>No people activity in the selected range.</ControlRoomEmpty>;
   const maximum = Math.max(...rows.map((row) => row.count), 1);
   return (
     <div className="space-y-1 p-3">
       {rows.map((row) => (
-        <button key={row.id} type="button" onClick={() => onSelect(row.id, row.name)} className="grid w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Filter Dashboard by ${prefix} ${row.name}`}>
+        <button key={row.id} type="button" onClick={() => onSelect(row.id, row.name, actorType)} className="grid w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Filter Dashboard by ${prefix} ${row.name}`}>
           <span className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">{row.name.slice(0, 1).toUpperCase()}</span>
           <span className="min-w-0"><span className="mb-1 block truncate text-xs font-medium">{row.name}</span><MetricBar value={row.count} maximum={maximum} /></span>
           <span className="font-mono text-xs tabular-nums">{formatCompact(row.count)}</span>
