@@ -80,13 +80,21 @@ export type ModeValidation = Partial<
 export function validateModeConfig(config: ModeConfig): ModeValidation {
   const errors: ModeValidation = {};
   if (!config.instruction.trim()) errors.instruction = "Add instructions before saving.";
-  if (!Number.isInteger(config.timeout_minutes) || config.timeout_minutes < 1 || config.timeout_minutes > 1440) {
-    errors.timeout_minutes = "Use between 1 and 1,440 minutes.";
+  if (!Number.isInteger(config.timeout_minutes) || config.timeout_minutes < 0) {
+    errors.timeout_minutes = "Use 0 or a positive whole number.";
   }
-  if (!Number.isInteger(config.max_turns) || config.max_turns < 1 || config.max_turns > 200) {
-    errors.max_turns = "Use between 1 and 200 turns.";
+  if (!Number.isInteger(config.max_turns) || config.max_turns < 0) {
+    errors.max_turns = "Use 0 or a positive whole number.";
   }
   return errors;
+}
+
+function numberInputValue(value: number): number | "" {
+  return Number.isNaN(value) ? "" : value;
+}
+
+function parseNumberInput(value: string): number {
+  return value === "" ? Number.NaN : Number(value);
 }
 
 function toggle(values: string[], value: string): string[] {
@@ -347,7 +355,7 @@ export function ModeConfigEditor({
     .sort((left, right) => Number(config.eval_skill_ids.includes(right.id)) - Number(config.eval_skill_ids.includes(left.id)) || left.name.localeCompare(right.name));
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       {!canManage && (
         <div role="note" className="flex items-start gap-2 rounded-lg border border-dashed bg-muted/40 p-3 text-sm text-muted-foreground">
           <ShieldCheck className="mt-0.5 size-4 shrink-0" />
@@ -355,89 +363,107 @@ export function ModeConfigEditor({
         </div>
       )}
 
-      <div className="space-y-2">
-        <Label htmlFor="mode-instructions">Instructions</Label>
-        <Textarea id="mode-instructions" rows={8} value={config.instruction} disabled={disabled} aria-invalid={Boolean(validation.instruction)} onChange={(event) => patch("instruction", event.target.value)} />
-        <p className="text-xs text-muted-foreground">Tell the agent what good work looks like in this Mode.</p>
-        {validation.instruction && <p className="text-xs text-destructive" role="alert">{validation.instruction}</p>}
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-2">
-          {modelChoices.length > 0 ? <SearchableSingleChoice label="Model" value={config.model} choices={modelChoices} disabled={disabled} onChange={(value) => patch("model", value)} /> : <>
-            <Label htmlFor="mode-model">Model</Label>
-            <Input id="mode-model" value={config.model} placeholder="Use the Agent default" disabled={disabled} onChange={(event) => patch("model", event.target.value)} />
-            <p className="text-xs text-muted-foreground">The model catalog is unavailable; your custom value is kept.</p>
-          </>}
+      <section aria-labelledby="mode-core-behavior" className="space-y-5">
+        <div>
+          <h3 id="mode-core-behavior" className="font-medium">Core behavior</h3>
+          <p className="text-xs text-muted-foreground">Set how the agent should work and the limits for this Mode.</p>
         </div>
         <div className="space-y-2">
-          <Label>Thinking level</Label>
-          <Select value={config.thinking_level} disabled={disabled} onValueChange={(value) => patch("thinking_level", value as ThinkingLevel)}>
-            <SelectTrigger className="w-full"><SelectValue>{thinking?.name ?? "Choose a level"}</SelectValue></SelectTrigger>
-            <SelectContent>{THINKING_LEVELS.map((level) => <SelectItem key={level.value} value={level.value}><span><span className="block font-medium">{level.name}</span><span className="block text-xs text-muted-foreground">{level.description}</span></span></SelectItem>)}</SelectContent>
+          <Label htmlFor="mode-instructions">Instructions</Label>
+          <Textarea id="mode-instructions" rows={8} value={config.instruction} disabled={disabled} aria-invalid={Boolean(validation.instruction)} onChange={(event) => patch("instruction", event.target.value)} />
+          <p className="text-xs text-muted-foreground">Tell the agent what good work looks like in this Mode.</p>
+          {validation.instruction && <p className="text-xs text-destructive" role="alert">{validation.instruction}</p>}
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <div className="space-y-2">
+            {modelChoices.length > 0 ? <SearchableSingleChoice label="Model" value={config.model} choices={modelChoices} disabled={disabled} onChange={(value) => patch("model", value)} /> : <>
+              <Label htmlFor="mode-model">Model</Label>
+              <Input id="mode-model" value={config.model} placeholder="Use the Agent default" disabled={disabled} onChange={(event) => patch("model", event.target.value)} />
+              <p className="text-xs text-muted-foreground">The model catalog is unavailable; your custom value is kept.</p>
+            </>}
+          </div>
+          <div className="space-y-2">
+            <Label>Thinking level</Label>
+            <Select value={config.thinking_level} disabled={disabled} onValueChange={(value) => patch("thinking_level", value as ThinkingLevel)}>
+              <SelectTrigger className="w-full"><SelectValue>{thinking?.name ?? "Choose a level"}</SelectValue></SelectTrigger>
+              <SelectContent>{THINKING_LEVELS.map((level) => <SelectItem key={level.value} value={level.value}><span><span className="block font-medium">{level.name}</span><span className="block text-xs text-muted-foreground">{level.description}</span></span></SelectItem>)}</SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="mode-timeout">Timeout (minutes)</Label>
+            <Input id="mode-timeout" type="number" min={0} value={numberInputValue(config.timeout_minutes)} disabled={disabled} aria-invalid={Boolean(validation.timeout_minutes)} onChange={(event) => patch("timeout_minutes", parseNumberInput(event.target.value))} />
+            <p className="text-xs text-muted-foreground">Set 0 for no time limit.</p>
+            {validation.timeout_minutes && <p className="text-xs text-destructive" role="alert">{validation.timeout_minutes}</p>}
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="mode-turns">Maximum turns</Label>
+            <Input id="mode-turns" type="number" min={0} value={numberInputValue(config.max_turns)} disabled={disabled} aria-invalid={Boolean(validation.max_turns)} onChange={(event) => patch("max_turns", parseNumberInput(event.target.value))} />
+            <p className="text-xs text-muted-foreground">A turn is one agent response. Set 0 for no turn limit.</p>
+            {validation.max_turns && <p className="text-xs text-destructive" role="alert">{validation.max_turns}</p>}
+          </div>
+        </div>
+      </section>
+
+      <section aria-labelledby="mode-access-and-approvals" className="space-y-5 border-t pt-6">
+        <div>
+          <h3 id="mode-access-and-approvals" className="font-medium">Access and approvals</h3>
+          <p className="text-xs text-muted-foreground">Control which actions and connected sources this Mode can use.</p>
+        </div>
+        <div className="flex items-center justify-between rounded-lg border p-3">
+          <div><Label htmlFor="mode-write">Allow writes</Label><p className="text-xs text-muted-foreground">Allow changes to code or connected data when permissions permit.</p></div>
+          <Switch id="mode-write" checked={config.allows_write} disabled={disabled} onCheckedChange={(value) => patch("allows_write", value)} />
+        </div>
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <SearchableMultiChoice label="Allowed tools" values={config.allowed_tools} choices={toolChoices} emptyLabel="All tools allowed" helper="Leave empty to allow every tool permitted by workspace policy." onChange={(values) => patch("allowed_tools", values)} disabled={disabled} />
+          <SearchableMultiChoice label="Data sources" values={config.data_sources} choices={dataSourceChoices} emptyLabel="All data sources allowed" helper="Leave empty to allow every connected source permitted by workspace policy." onChange={(values) => patch("data_sources", values)} disabled={disabled} />
+        </div>
+
+        <div className="space-y-2">
+          <Label>Approval policy</Label>
+          <Select value={config.approval_policy} disabled={disabled} onValueChange={(value) => patch("approval_policy", value as ModeConfig["approval_policy"]) }>
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inherit">Inherit workspace permissions</SelectItem>
+              <SelectItem value="require">Ask before changes</SelectItem>
+              <SelectItem value="deny_external">Block external changes</SelectItem>
+            </SelectContent>
           </Select>
+          <p className="text-xs text-muted-foreground">This adds a safety check; it does not grant permissions.</p>
+        </div>
+      </section>
+
+      <section aria-labelledby="mode-workflow-and-quality" className="space-y-5 border-t pt-6">
+        <div>
+          <h3 id="mode-workflow-and-quality" className="font-medium">Workflow and quality</h3>
+          <p className="text-xs text-muted-foreground">Choose the workflow and checks that apply before the Mode is used.</p>
         </div>
         <div className="space-y-2">
-          <Label htmlFor="mode-timeout">Timeout (minutes)</Label>
-          <Input id="mode-timeout" type="number" min={1} max={1440} value={config.timeout_minutes || ""} disabled={disabled} aria-invalid={Boolean(validation.timeout_minutes)} onChange={(event) => patch("timeout_minutes", Number(event.target.value))} />
-          <p className="text-xs text-muted-foreground">Typical: 30–120 minutes.</p>
-          {validation.timeout_minutes && <p className="text-xs text-destructive" role="alert">{validation.timeout_minutes}</p>}
+          <Label>Workflow</Label>
+          <Select value={config.workflow_id || "__none__"} disabled={disabled} onValueChange={(value) => { const next = value ?? "__none__"; patch("workflow_id", next === "__none__" ? "" : next); }}>
+            <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__none__">No workflow</SelectItem>
+              {workflows.map((workflow) => <SelectItem key={workflow.id} value={workflow.id}>{workflow.name}</SelectItem>)}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">Choose the shared Workflow recipe to use when this Mode starts work.</p>
         </div>
+
         <div className="space-y-2">
-          <Label htmlFor="mode-turns">Maximum turns</Label>
-          <Input id="mode-turns" type="number" min={1} max={200} value={config.max_turns || ""} disabled={disabled} aria-invalid={Boolean(validation.max_turns)} onChange={(event) => patch("max_turns", Number(event.target.value))} />
-          <p className="text-xs text-muted-foreground">Typical: 20–80 turns.</p>
-          {validation.max_turns && <p className="text-xs text-destructive" role="alert">{validation.max_turns}</p>}
+          <div className="flex items-end justify-between gap-2"><div><Label>Required evaluations</Label><p className="text-xs text-muted-foreground">Choose checks that must pass before this Mode is used.</p></div><span className="text-xs text-muted-foreground">{config.eval_skill_ids.length} selected</span></div>
+          <div className="relative"><Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label="Search required evaluations" value={evaluationSearch} onChange={(event) => setEvaluationSearch(event.target.value)} placeholder="Search evaluations" className="h-8 pl-8" disabled={disabled} /></div>
+          <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border p-2">
+            {skills.length === 0 ? <p className="p-2 text-xs text-muted-foreground">No workspace evaluations available.</p> : filteredSkills.length === 0 ? <p className="p-2 text-xs text-muted-foreground">No evaluations match your search.</p> : filteredSkills.map((skill) => (
+              <label key={skill.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50">
+                <input type="checkbox" checked={config.eval_skill_ids.includes(skill.id)} disabled={disabled} onChange={() => patch("eval_skill_ids", toggle(config.eval_skill_ids, skill.id))} />
+                <span className="min-w-0 truncate">{skill.name}</span>
+              </label>
+            ))}
+          </div>
         </div>
-      </div>
-
-      <div className="flex items-center justify-between rounded-lg border p-3">
-        <div><Label htmlFor="mode-write">Allow writes</Label><p className="text-xs text-muted-foreground">Allow changes to code or connected data when permissions permit.</p></div>
-        <Switch id="mode-write" checked={config.allows_write} disabled={disabled} onCheckedChange={(value) => patch("allows_write", value)} />
-      </div>
-
-      <div className="grid gap-4 sm:grid-cols-2">
-        <SearchableMultiChoice label="Allowed tools" values={config.allowed_tools} choices={toolChoices} emptyLabel="All tools allowed" helper="Leave empty to allow every tool permitted by workspace policy." onChange={(values) => patch("allowed_tools", values)} disabled={disabled} />
-        <SearchableMultiChoice label="Data sources" values={config.data_sources} choices={dataSourceChoices} emptyLabel="All data sources allowed" helper="Leave empty to allow every connected source permitted by workspace policy." onChange={(values) => patch("data_sources", values)} disabled={disabled} />
-      </div>
-
-      <div className="space-y-2">
-        <Label>Approval policy</Label>
-        <Select value={config.approval_policy} disabled={disabled} onValueChange={(value) => patch("approval_policy", value as ModeConfig["approval_policy"]) }>
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="inherit">Inherit workspace permissions</SelectItem>
-            <SelectItem value="require">Ask before changes</SelectItem>
-            <SelectItem value="deny_external">Block external changes</SelectItem>
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground">This adds a safety check; it does not grant permissions.</p>
-      </div>
-
-      <div className="space-y-2">
-        <Label>Workflow</Label>
-        <Select value={config.workflow_id || "__none__"} disabled={disabled} onValueChange={(value) => { const next = value ?? "__none__"; patch("workflow_id", next === "__none__" ? "" : next); }}>
-          <SelectTrigger className="w-full"><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="__none__">No workflow</SelectItem>
-            {workflows.map((workflow) => <SelectItem key={workflow.id} value={workflow.id}>{workflow.name}</SelectItem>)}
-          </SelectContent>
-        </Select>
-        <p className="text-xs text-muted-foreground">Choose the shared Workflow recipe to use when this Mode starts work.</p>
-      </div>
-
-      <div className="space-y-2">
-        <div className="flex items-end justify-between gap-2"><div><Label>Required evaluations</Label><p className="text-xs text-muted-foreground">Choose checks that must pass before this Mode is used.</p></div><span className="text-xs text-muted-foreground">{config.eval_skill_ids.length} selected</span></div>
-        <div className="relative"><Search className="pointer-events-none absolute top-1/2 left-2 size-4 -translate-y-1/2 text-muted-foreground" /><Input aria-label="Search required evaluations" value={evaluationSearch} onChange={(event) => setEvaluationSearch(event.target.value)} placeholder="Search evaluations" className="h-8 pl-8" disabled={disabled} /></div>
-        <div className="max-h-56 space-y-1 overflow-y-auto rounded-lg border p-2">
-          {skills.length === 0 ? <p className="p-2 text-xs text-muted-foreground">No workspace evaluations available.</p> : filteredSkills.length === 0 ? <p className="p-2 text-xs text-muted-foreground">No evaluations match your search.</p> : filteredSkills.map((skill) => (
-            <label key={skill.id} className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm hover:bg-muted/50">
-              <input type="checkbox" checked={config.eval_skill_ids.includes(skill.id)} disabled={disabled} onChange={() => patch("eval_skill_ids", toggle(config.eval_skill_ids, skill.id))} />
-              <span className="min-w-0 truncate">{skill.name}</span>
-            </label>
-          ))}
-        </div>
-      </div>
+      </section>
 
       <div className="sticky bottom-0 z-10 -mx-4 border-t bg-card/95 px-4 py-3 backdrop-blur-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
@@ -643,12 +669,13 @@ export function ModeSettingsTab() {
     <div className="space-y-5">
       <div><h2 className="text-lg font-medium">Modes</h2><p className="text-sm text-muted-foreground">Choose how Issue and Chat sessions work: instructions, safety checks, tools, and required evaluations.</p></div>
       {!canManage && <div role="note" className="flex items-start gap-2 rounded-lg border border-dashed bg-muted/40 p-3 text-sm text-muted-foreground"><ShieldCheck className="mt-0.5 size-4 shrink-0" /><span>You are viewing these settings. Only workspace owners and admins can save or publish changes.</span></div>}
-      <div className="lg:hidden sticky top-2 z-20 rounded-lg border bg-card/95 p-2 shadow-sm backdrop-blur-sm">
+      <div className="xl:hidden sticky top-2 z-20 rounded-lg border bg-card/95 p-2 shadow-sm backdrop-blur-sm">
         <Label className="sr-only">Active Mode</Label>
         <Select value={selected} onValueChange={(value) => requestModeSwitch(value as SessionMode)}><SelectTrigger aria-label="Active Mode" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{MODES.map((mode) => <SelectItem key={mode.value} value={mode.value}>{mode.label}</SelectItem>)}</SelectContent></Select>
+        <p className="px-1 pt-2 text-xs text-muted-foreground">{MODES.find((mode) => mode.value === selected)?.description}</p>
       </div>
-      <div className="grid gap-4 lg:grid-cols-[220px_minmax(0,1fr)]">
-        <div className="hidden space-y-2 lg:block">{MODES.map((mode) => {
+      <div className="grid gap-4 xl:grid-cols-[220px_minmax(0,1fr)]">
+        <div className="hidden space-y-2 xl:block">{MODES.map((mode) => {
           const modeRecord = modesQuery.data?.modes.find((item) => item.mode === mode.value);
           return <button key={mode.value} type="button" aria-current={selected === mode.value ? "page" : undefined} onClick={() => requestModeSwitch(mode.value)} className={`w-full rounded-lg border p-3 text-left transition-colors ${selected === mode.value ? "border-primary bg-primary/5" : "hover:bg-muted/50"}`}>
             <div className="flex items-center justify-between gap-2"><span className="font-medium">{mode.label}</span><span className="flex gap-1">{selected === mode.value && <Badge>Active</Badge>}{modeRecord?.draft && <Badge variant="secondary">Draft</Badge>}</span></div>
