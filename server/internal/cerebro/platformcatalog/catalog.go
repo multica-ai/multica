@@ -1369,6 +1369,13 @@ var excluded = map[string]string{
 	"DELETE /api/cerebro/apps/{id}/storage/{key}":            "member app-use action — app-owned storage only",
 	"POST /api/cerebro/apps/{id}/views/{viewId}/submissions": "member app-use action — request-bound submission records the viewing human",
 
+	// service tokens — the human management surface is owner/admin-only, while
+	// the machine write surface enforces the token's issues:write scope itself.
+	// Neither route is an agent tool governed by the platform capability table.
+	"POST /api/service-tokens/":       "admin_only — human owner/admin creates a scoped service credential; RequireWorkspaceRole enforces management access",
+	"DELETE /api/service-tokens/{id}": "admin_only — human owner/admin revokes a scoped service credential; RequireWorkspaceRole enforces management access",
+	"POST /api/service/issues":        "service-token-scope — RequireScope(issues:write) is the route's authorization boundary",
+
 	// pre-auth — establishes or clears identity, or a signed external webhook;
 	// there is no authenticated actor yet to gate on.
 	"POST /auth/google":                                       "pre-auth — establishes identity",
@@ -1377,7 +1384,7 @@ var excluded = map[string]string{
 	"POST /auth/logout":                                       "pre-auth — clears identity",
 	"POST /api/webhooks/github":                               "pre-auth signed webhook — GitHub HMAC authorises delivery",
 	"POST /api/webhooks/stripe":                               "pre-auth signed webhook — Stripe HMAC authorises delivery",
-	"POST /api/webhooks/ios-share/{token}":                   "pre-auth signed webhook — sit_ bearer token in path authorises iOS share intake (FIR-3545)",
+	"POST /api/webhooks/ios-share/{token}":                    "pre-auth signed webhook — sit_ bearer token in path authorises iOS share intake (FIR-3545)",
 	"POST /api/cerebro/github/pull-requests":                  "pre-auth service-to-service — CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push (FIR-2568)",
 	"POST /api/cerebro/exchange-rates":                        "pre-auth service-to-service — CEREBRO_EXCHANGE_INGEST_KEY bearer token authorises the multica-hatchet-worker's daily FX snapshot push (FIR-43)",
 	"POST /api/cerebro/apps-internal/{id}/{version}/callback": "pre-auth service-to-service — signed Mini Apps runtime callback advances one deployment state (FIR-3172)",
