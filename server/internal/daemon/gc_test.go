@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -1111,6 +1112,10 @@ func TestReserveEnvRootForGCIsExclusive(t *testing.T) {
 
 	d := newGCTestDaemon(t, http.NewServeMux())
 	root := "/tmp/fake/gc-reservation"
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(root) })
 
 	releaseActive, ok := d.markActiveEnvRoot(context.Background(), root)
 	if !ok {
@@ -1141,6 +1146,9 @@ func TestEnvRootGCReservationBlocksConcurrentClaim(t *testing.T) {
 	t.Parallel()
 	d := newGCTestDaemon(t, http.NewServeMux())
 	root := filepath.Join(t.TempDir(), "reserved-env")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	release, ok := d.reserveEnvRootForGC(root)
 	if !ok {
 		t.Fatal("expected inactive env root GC reservation")
@@ -1220,10 +1228,42 @@ func TestEnvRootGCReservationBlocksSymlinkAliasClaim(t *testing.T) {
 	releaseAlias()
 }
 
+func TestEnvRootGCReservationBlocksCaseAliasClaim(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	parent := t.TempDir()
+	root := filepath.Join(parent, "CaseSensitiveProbe")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(parent, "casesensitiveprobe")
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	aliasInfo, err := os.Stat(alias)
+	if err != nil || !os.SameFile(rootInfo, aliasInfo) {
+		t.Skip("filesystem is case-sensitive")
+	}
+	release, ok := d.reserveEnvRootForGC(root)
+	if !ok {
+		t.Fatal("expected reservation")
+	}
+	defer release()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, marked := d.markActiveEnvRoot(ctx, alias); marked {
+		t.Fatal("case alias bypassed reservation")
+	}
+}
+
 func TestEnvRootGCReservationWaitIsCancellable(t *testing.T) {
 	t.Parallel()
 	d := newGCTestDaemon(t, http.NewServeMux())
 	root := filepath.Join(t.TempDir(), "task")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	release, ok := d.reserveEnvRootForGC(root)
 	if !ok {
 		t.Fatal("expected reservation")
@@ -1233,6 +1273,48 @@ func TestEnvRootGCReservationWaitIsCancellable(t *testing.T) {
 	cancel()
 	if _, marked := d.markActiveEnvRoot(ctx, root); marked {
 		t.Fatal("cancelled claimant entered reserved root")
+	}
+}
+
+func TestHandleTaskCancellationAbortsReservedRootWait(t *testing.T) {
+	t.Parallel()
+	taskID := "task-cancelled-at-root-gate"
+	workspaceID := "ws-cancelled-at-root-gate"
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/tasks/%s/status", taskID), func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "cancelled"})
+	})
+	d := newGCTestDaemon(t, mux)
+	d.cancelPollInterval = time.Millisecond
+	d.runtimeIndex["rt-1"] = Runtime{Provider: "claude"}
+	predicted := execenv.PredictRootDir(d.cfg.WorkspacesRoot, workspaceID, taskID)
+	if err := os.MkdirAll(predicted, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	releaseGC, ok := d.reserveEnvRootForGC(predicted)
+	if !ok {
+		t.Fatal("expected GC reservation")
+	}
+	defer releaseGC()
+	var runnerEntered atomic.Bool
+	d.runner = taskRunnerFunc(func(context.Context, Task, string, int, *slog.Logger) (TaskResult, error) {
+		runnerEntered.Store(true)
+		return TaskResult{}, nil
+	})
+	done := make(chan struct{})
+	go func() {
+		d.handleTask(context.Background(), Task{
+			ID: taskID, WorkspaceID: workspaceID, RuntimeID: "rt-1",
+		}, 0)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("handleTask did not exit after server-side cancellation")
+	}
+	if runnerEntered.Load() {
+		t.Fatal("runner entered reserved root after cancellation")
 	}
 }
 
@@ -1387,6 +1469,87 @@ func TestCleanTaskDir_WorkspacesRootAncestorSwapCannotEscape(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(movedRoot, "ws-root-swap", "task")); !os.IsNotExist(err) {
 		t.Fatalf("original task root was not quarantined: %v", err)
+	}
+}
+
+func TestApplyGCAction_PreOpenRetargetFailsClosed(t *testing.T) {
+	for _, action := range []gcAction{gcActionCleanArtifacts, gcActionCleanManagedArtifacts} {
+		action := action
+		t.Run(fmt.Sprintf("action-%d", action), func(t *testing.T) {
+			d := newGCTestDaemon(t, http.NewServeMux())
+			originalRoot := d.cfg.WorkspacesRoot
+			movedRoot := originalRoot + "-moved"
+			taskDir := createTaskDir(t, originalRoot, "ws-preopen", "task", nil)
+			normal := filepath.Join(taskDir, "node_modules")
+			managed := filepath.Join(taskDir, "codex-home", ".sandbox-bin")
+			if err := os.MkdirAll(normal, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(managed, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			externalRoot := t.TempDir()
+			externalTask := filepath.Join(externalRoot, "ws-preopen", "task")
+			externalNormal := filepath.Join(externalTask, "node_modules")
+			externalManaged := filepath.Join(externalTask, "codex-home", ".sandbox-bin")
+			if err := os.MkdirAll(externalNormal, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.MkdirAll(externalManaged, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			marker := filepath.Join(externalTask, "keep")
+			if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			d.envRootPreOpenHook = func(string) {
+				d.envRootPreOpenHook = nil
+				if err := os.Rename(originalRoot, movedRoot); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(externalRoot, originalRoot); err != nil {
+					t.Fatal(err)
+				}
+			}
+			stats := &gcStats{byPattern: map[string]int{}}
+			d.applyGCAction(taskDir, action, stats)
+			if stats.artifactRemoved != 0 || stats.bytesReclaimed != 0 || stats.skipped != 1 {
+				t.Fatalf("unexpected fail-closed stats: %+v", stats)
+			}
+			if _, err := os.Stat(marker); err != nil {
+				t.Fatalf("pre-open retarget escaped reservation identity: %v", err)
+			}
+		})
+	}
+}
+
+func TestRunGC_QuarantineRetryUsesPinnedRoot(t *testing.T) {
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.GCOrphanTTL = 0
+	originalRoot := d.cfg.WorkspacesRoot
+	movedRoot := originalRoot + "-moved"
+	createTaskDir(t, originalRoot, "ws-cycle-swap", "task", nil)
+	externalRoot := t.TempDir()
+	externalTrash := filepath.Join(externalRoot, gcTrashDirName)
+	if err := os.MkdirAll(externalTrash, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(externalTrash, "keep")
+	if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d.envRootPreOpenHook = func(string) {
+		d.envRootPreOpenHook = nil
+		if err := os.Rename(originalRoot, movedRoot); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(externalRoot, originalRoot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.runGC(context.Background())
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("full-cycle quarantine retry escaped pinned root: %v", err)
 	}
 }
 

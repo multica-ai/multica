@@ -66,7 +66,15 @@ type gcStats struct {
 // runGC performs a single GC scan across all workspace directories.
 func (d *Daemon) runGC(ctx context.Context) {
 	root := d.cfg.WorkspacesRoot
-	entries, err := os.ReadDir(root)
+	rootHandle, err := os.OpenRoot(root)
+	if err != nil {
+		if !os.IsNotExist(err) {
+			d.logger.Warn("gc: open workspaces root failed", "error", err)
+		}
+		return
+	}
+	defer rootHandle.Close()
+	entries, err := fs.ReadDir(rootHandle.FS(), ".")
 	if err != nil {
 		if os.IsNotExist(err) {
 			return
@@ -85,7 +93,9 @@ func (d *Daemon) runGC(ctx context.Context) {
 	}
 	// Retry quarantines left by a prior partial/failed removal. They are never
 	// reusable task roots, so retrying cannot race with task startup.
-	_ = os.RemoveAll(filepath.Join(root, gcTrashDirName))
+	if err := rootHandle.RemoveAll(gcTrashDirName); err != nil && !os.IsNotExist(err) {
+		d.logger.Warn("gc: quarantine retry failed", "error", err)
+	}
 
 	// Prune stale worktree references from all bare repo caches.
 	d.pruneRepoWorktrees(root)
@@ -223,13 +233,15 @@ func (d *Daemon) gcWorkspaceIssues(ctx context.Context, workspaceID string, cand
 // atomically reserves the env root because a task can start while the server
 // reconciliation request is in flight.
 func (d *Daemon) applyGCAction(taskDir string, action gcAction, stats *gcStats) int {
+	var lease envRootGCLease
 	if action == gcActionCleanArtifacts || action == gcActionCleanManagedArtifacts {
-		release, ok := d.reserveEnvRootForGC(taskDir)
+		var ok bool
+		lease, ok = d.reserveEnvRootForGCIdentity(taskDir)
 		if !ok {
 			stats.skipped++
 			return 0
 		}
-		defer release()
+		defer lease.release()
 	}
 	switch action {
 	case gcActionClean:
@@ -252,14 +264,14 @@ func (d *Daemon) applyGCAction(taskDir string, action gcAction, stats *gcStats) 
 		if d.artifactCleanupHook != nil {
 			d.artifactCleanupHook(taskDir)
 		}
-		removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, d.cfg.GCArtifactPatterns)
+		removed, bytes, perPattern := d.cleanTaskArtifactsPinned(taskDir, d.cfg.GCArtifactPatterns, lease.expected)
 		recordArtifactCleanup(stats, removed, bytes, perPattern)
 		stats.skipped++ // task dir itself preserved
 	case gcActionCleanManagedArtifacts:
 		if d.artifactCleanupHook != nil {
 			d.artifactCleanupHook(taskDir)
 		}
-		removed, bytes, perPattern := d.cleanManagedTaskArtifacts(taskDir)
+		removed, bytes, perPattern := d.cleanManagedTaskArtifactsPinned(taskDir, lease.expected)
 		recordArtifactCleanup(stats, removed, bytes, perPattern)
 		stats.skipped++ // task dir itself preserved
 	default:
@@ -631,14 +643,17 @@ func isAgentTaskTerminal(status string) bool {
 // cleanTaskDir reserves and atomically quarantines a task root before removal.
 // A partial removal can therefore never leave a damaged reusable PriorWorkDir.
 func (d *Daemon) cleanTaskDir(taskDir string) bool {
-	release, ok := d.reserveEnvRootForGC(taskDir)
+	lease, ok := d.reserveEnvRootForGCIdentity(taskDir)
 	if !ok {
 		d.logger.Info("gc: skip removal; env root became active", "dir", taskDir)
 		return false
 	}
-	defer release()
+	defer lease.release()
+	if d.envRootPreOpenHook != nil {
+		d.envRootPreOpenHook(taskDir)
+	}
 
-	root, quarantineDir, quarantineRel, err := d.quarantineTaskDir(taskDir)
+	root, quarantineDir, quarantineRel, err := d.quarantineTaskDir(taskDir, lease.expected)
 	if err != nil {
 		d.logger.Warn("gc: quarantine task dir failed", "dir", taskDir, "error", err)
 		return false
@@ -652,7 +667,7 @@ func (d *Daemon) cleanTaskDir(taskDir string) bool {
 	return true
 }
 
-func (d *Daemon) quarantineTaskDir(taskDir string) (*os.Root, string, string, error) {
+func (d *Daemon) quarantineTaskDir(taskDir string, expected os.FileInfo) (*os.Root, string, string, error) {
 	quarantineDir, err := gcQuarantinePath(d.cfg.WorkspacesRoot, taskDir)
 	if err != nil {
 		return nil, "", "", err
@@ -675,6 +690,10 @@ func (d *Daemon) quarantineTaskDir(taskDir string) (*os.Root, string, string, er
 	}
 	if err := ensureGCTrashRootAt(root); err != nil {
 		return fail(err)
+	}
+	openedTask, err := root.Stat(taskRel)
+	if err != nil || !os.SameFile(expected, openedTask) {
+		return fail(fmt.Errorf("task dir identity changed before quarantine"))
 	}
 	if _, err := root.Lstat(quarantineRel); err == nil {
 		return fail(fmt.Errorf("quarantine destination already exists"))
@@ -749,11 +768,23 @@ func (d *Daemon) cleanTaskArtifacts(taskDir string, patterns []string) (removed 
 	return d.cleanTaskArtifactsMatching(taskDir, newArtifactMatcher(patterns, execenv.ManagedReclaimableArtifactSubpaths()))
 }
 
+func (d *Daemon) cleanTaskArtifactsPinned(taskDir string, patterns []string, expected os.FileInfo) (removed int, bytes int64, perPattern map[string]int) {
+	return d.cleanTaskArtifactsMatchingPinned(taskDir, newArtifactMatcher(patterns, execenv.ManagedReclaimableArtifactSubpaths()), expected)
+}
+
 func (d *Daemon) cleanManagedTaskArtifacts(taskDir string) (removed int, bytes int64, perPattern map[string]int) {
 	return d.cleanTaskArtifactsMatching(taskDir, newArtifactMatcher(nil, execenv.ManagedReclaimableArtifactSubpaths()))
 }
 
+func (d *Daemon) cleanManagedTaskArtifactsPinned(taskDir string, expected os.FileInfo) (removed int, bytes int64, perPattern map[string]int) {
+	return d.cleanTaskArtifactsMatchingPinned(taskDir, newArtifactMatcher(nil, execenv.ManagedReclaimableArtifactSubpaths()), expected)
+}
+
 func (d *Daemon) cleanTaskArtifactsMatching(taskDir string, matcher artifactMatcher) (removed int, bytes int64, perPattern map[string]int) {
+	return d.cleanTaskArtifactsMatchingPinned(taskDir, matcher, nil)
+}
+
+func (d *Daemon) cleanTaskArtifactsMatchingPinned(taskDir string, matcher artifactMatcher, expected os.FileInfo) (removed int, bytes int64, perPattern map[string]int) {
 	perPattern = map[string]int{}
 	if taskDir == "" || (len(matcher.basenames) == 0 && len(matcher.exactPaths) == 0) {
 		return
@@ -763,11 +794,21 @@ func (d *Daemon) cleanTaskArtifactsMatching(taskDir string, matcher artifactMatc
 	if err != nil {
 		return
 	}
+	if expected != nil && d.envRootPreOpenHook != nil {
+		d.envRootPreOpenHook(taskDir)
+	}
 	root, err := os.OpenRoot(absRoot)
 	if err != nil {
 		return
 	}
 	defer root.Close()
+	if expected != nil {
+		opened, statErr := root.Stat(".")
+		if statErr != nil || !os.SameFile(expected, opened) {
+			d.logger.Warn("gc: artifact root identity changed; skipping", "dir", taskDir)
+			return
+		}
+	}
 
 	walkErr := fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
