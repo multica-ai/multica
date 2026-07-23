@@ -1480,6 +1480,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
+			resp.IssueTitle = issue.Title // CEREBRO-PATCH(agent-task-issue-title): FIR-3708 — the M1 fields existed but were never assigned, so every trace row landed with a NULL issue title
+			if parent, perr := h.Queries.GetIssue(r.Context(), issue.ParentIssueID); issue.ParentIssueID.Valid && perr == nil { // CEREBRO-PATCH(agent-task-issue-title)
+				resp.ParentIssueTitle = parent.Title // CEREBRO-PATCH(agent-task-issue-title)
+			} // CEREBRO-PATCH(agent-task-issue-title)
 
 			// Squad-leader briefing injection: keyed off the task being a
 			// leader-task (is_leader_task) carrying a squad_id — NOT off the
