@@ -606,6 +606,7 @@ export function useIssueSurfaceController({
     priorityFilters,
     assigneeFilters: effectiveAssigneeFilters,
     includeNoAssignee: effectiveIncludeNoAssignee,
+    assigneeFilterActive: agentRunningFilter,
     creatorFilters,
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,

@@ -118,6 +118,7 @@ export function useIssueSurfaceData({
   priorityFilters,
   assigneeFilters,
   includeNoAssignee,
+  assigneeFilterActive,
   creatorFilters,
   projectFilters,
   includeNoProject,
@@ -143,6 +144,9 @@ export function useIssueSurfaceData({
   priorityFilters: IssueFilterState["priorityFilters"];
   assigneeFilters: IssueFilterState["assigneeFilters"];
   includeNoAssignee: boolean;
+  /** True when the working-agent quick filter owns the assignee predicate,
+   *  including when its API-derived intersection is explicitly empty. */
+  assigneeFilterActive: boolean;
   creatorFilters: IssueFilterState["creatorFilters"];
   projectFilters: string[];
   includeNoProject: boolean;
@@ -240,6 +244,7 @@ export function useIssueSurfaceData({
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,
+      assigneeFilterActive,
       creatorFilters,
       projectFilters,
       includeNoProject,
@@ -250,6 +255,7 @@ export function useIssueSurfaceData({
     }),
     [
       assigneeFilters,
+      assigneeFilterActive,
       creatorFilters,
       includeNoAssignee,
       includeNoProject,
@@ -318,6 +324,7 @@ export function useIssueSurfaceData({
       ...baseFilterState,
       assigneeFilters: workingAssigneeFilters,
       includeNoAssignee: false,
+      assigneeFilterActive: true,
       workingOnly: false,
     }),
     [baseFilterState, workingAssigneeFilters],
@@ -469,6 +476,7 @@ export function useIssueSurfaceData({
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,
+      assigneeFilterActive,
       creatorFilters,
       projectFilters,
       includeNoProject,
@@ -478,6 +486,7 @@ export function useIssueSurfaceData({
     }),
     [
       assigneeFilters,
+      assigneeFilterActive,
       creatorFilters,
       includeNoAssignee,
       includeNoProject,

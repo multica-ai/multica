@@ -1887,6 +1887,47 @@ describe("SwimLaneView", () => {
     });
   });
 
+  it("hides batch-fetched children for an explicitly empty working-assignee predicate", async () => {
+    mockViewState.swimlaneGrouping = "parent";
+    const parent = mockIssues[0]!;
+    const batchOnlyChild: Issue = {
+      ...mockIssues[1]!,
+      id: "working-empty-child",
+      identifier: "PROJ-34",
+      title: "Working Empty Child",
+      parent_issue_id: parent.id,
+    };
+    mockListChildrenByParents.mockResolvedValueOnce({
+      issues: [batchOnlyChild],
+    });
+
+    renderWithI18n(
+      <SwimLaneView
+        issues={[parent]}
+        activeFilters={{
+          priorityFilters: [],
+          assigneeFilters: [],
+          includeNoAssignee: false,
+          assigneeFilterActive: true,
+          creatorFilters: [],
+          projectFilters: [],
+          includeNoProject: false,
+          labelFilters: [],
+        }}
+        childProgressMap={
+          new Map([[parent.id, { done: 0, total: 1 }]])
+        }
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mockListChildrenByParents).toHaveBeenCalled();
+    });
+    await act(async () => {});
+    expect(screen.queryByText("Working Empty Child")).toBeNull();
+  });
+
   it("hides batch-fetched children when 'Show sub-issues' is off", async () => {
     mockViewState.swimlaneGrouping = "parent";
 

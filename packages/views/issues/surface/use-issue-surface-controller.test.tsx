@@ -1446,6 +1446,58 @@ describe("useIssueSurfaceController", () => {
     expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
   });
 
+  it.each([
+    {
+      name: "the working-agent API returns no agents",
+      workingAgents: [] as WorkspaceWorkingAgent[],
+      selectedAssigneeId: null,
+    },
+    {
+      name: "the selected assignee has no working-agent intersection",
+      workingAgents: [makeWorkingAgent("agent-1")],
+      selectedAssigneeId: "agent-2",
+    },
+  ])("keeps Gantt empty when $name", async ({
+    workingAgents,
+    selectedAssigneeId,
+  }) => {
+    mockGanttIssues(ganttFixture);
+    getWorkspaceWorkingAgents.mockResolvedValue(workingAgents);
+
+    const store = getIssueSurfaceViewStore("project:p1");
+    act(() => {
+      store.getState().setViewMode("gantt");
+      if (selectedAssigneeId) {
+        store.getState().toggleAssigneeFilter({
+          type: "agent",
+          id: selectedAssigneeId,
+        });
+      }
+      store.getState().toggleAgentRunningFilter();
+    });
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["board", "list", "swimlane", "gantt"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() => expect(result.current.ganttIssues).toHaveLength(3));
+    await waitFor(() =>
+      expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith(
+        "issue",
+        undefined,
+      ),
+    );
+
+    expect(result.current.tableQuerySpec.filters.assignees).toEqual([]);
+    expect(result.current.filteredGanttIssues).toEqual([]);
+    expect(result.current.workingScopeIssues).toEqual([]);
+  });
+
   it("widens the gantt working scope when show-completed is turned on", async () => {
     mockGanttIssues(ganttFixture);
     getWorkspaceWorkingAgents.mockResolvedValue([

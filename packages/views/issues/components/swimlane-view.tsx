@@ -666,6 +666,7 @@ function SwimLaneViewImpl({
     // assignee list, so extra children use the same membership as Table.
     assigneeFilters: activeFiltersProp?.assigneeFilters ?? [],
     includeNoAssignee: activeFiltersProp?.includeNoAssignee ?? false,
+    assigneeFilterActive: activeFiltersProp?.assigneeFilterActive ?? false,
     creatorFilters: activeFiltersProp?.creatorFilters ?? [],
     projectFilters: activeFiltersProp?.projectFilters ?? [],
     includeNoProject: activeFiltersProp?.includeNoProject ?? false,

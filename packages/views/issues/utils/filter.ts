@@ -7,6 +7,10 @@ export interface IssueFilters {
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
+  /** Keeps an explicitly active assignee predicate distinct from the normal
+   *  empty-array = no-filter state. When true with no selected assignees and
+   *  includeNoAssignee=false, the predicate intentionally matches nothing. */
+  assigneeFilterActive?: boolean;
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
@@ -32,6 +36,8 @@ export interface IssueFilterState {
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
+  /** See IssueFilters.assigneeFilterActive. */
+  assigneeFilterActive?: boolean;
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
@@ -97,7 +103,10 @@ export function applyIssueFilters(
   context: IssueFilterContext = {},
 ): Issue[] {
   const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, workingOnly } = filters;
-  const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
+  const hasAssigneeFilter =
+    filters.assigneeFilterActive === true ||
+    assigneeFilters.length > 0 ||
+    includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
   // filter is on but the set is missing/empty, hide everything — the
@@ -174,6 +183,7 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       priorityFilters: filters.priorityFilters,
       assigneeFilters: filters.assigneeFilters,
       includeNoAssignee: filters.includeNoAssignee,
+      assigneeFilterActive: filters.assigneeFilterActive,
       creatorFilters: filters.creatorFilters,
       projectFilters: filters.projectFilters,
       includeNoProject: filters.includeNoProject,
