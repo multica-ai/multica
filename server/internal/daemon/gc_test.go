@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -274,6 +275,119 @@ func TestCleanTaskDir_RemovesDirectory(t *testing.T) {
 
 	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
 		t.Fatal("task dir should be removed after cleanup")
+	}
+}
+
+func TestCleanTaskDir_ActiveAfterDecisionPreservesDirectory(t *testing.T) {
+	t.Parallel()
+	issueID := "77777777-7777-7777-7777-777777777777"
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "done", "updated_at": time.Now().Add(-30 * 24 * time.Hour)})
+	})
+	d := newGCTestDaemon(t, mux)
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "reused-follow-up", &execenv.GCMeta{
+		IssueID: issueID, WorkspaceID: "ws1", CompletedAt: time.Now().Add(-30 * 24 * time.Hour),
+	})
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionClean {
+		t.Fatalf("expected initial gcActionClean, got %d", action)
+	}
+	d.markActiveEnvRoot(taskDir)
+	defer d.unmarkActiveEnvRoot(taskDir)
+	if d.cleanTaskDir(taskDir) {
+		t.Fatal("cleanup succeeded for active env root")
+	}
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Fatalf("active env root removed after stale GC decision: %v", err)
+	}
+}
+
+func TestCleanTaskDir_TrashSymlinkFailsClosed(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "symlink-trash", nil)
+	outside := t.TempDir()
+	marker := filepath.Join(outside, "keep")
+	if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(d.cfg.WorkspacesRoot, gcTrashDirName)); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	if d.cleanTaskDir(taskDir) {
+		t.Fatal("cleanup succeeded through symlinked trash root")
+	}
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Fatalf("task dir changed after fail-closed quarantine: %v", err)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("symlink target changed: %v", err)
+	}
+}
+
+func TestGcWorkspace_ActiveAtFinalGateOnlyIncrementsSkipped(t *testing.T) {
+	t.Parallel()
+	issueID := "77777777-7777-7777-7777-777777777778"
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "done", "updated_at": time.Now().Add(-30 * 24 * time.Hour)})
+	})
+	d := newGCTestDaemon(t, mux)
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-active-final-gate")
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-active-final-gate", "task", &execenv.GCMeta{
+		IssueID: issueID, WorkspaceID: "ws-active-final-gate",
+	})
+	d.markActiveEnvRoot(taskDir)
+	defer d.unmarkActiveEnvRoot(taskDir)
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+	if stats.skipped != 1 || stats.cleaned != 0 || stats.orphaned != 0 || stats.bytesReclaimed != 0 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Fatalf("active task dir removed: %v", err)
+	}
+}
+
+func TestGcWorkspace_PartialRemovalFailureQuarantinesAndOnlyIncrementsSkipped(t *testing.T) {
+	t.Parallel()
+	issueID := "77777777-7777-7777-7777-777777777779"
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "done", "updated_at": time.Now().Add(-30 * 24 * time.Hour)})
+	})
+	d := newGCTestDaemon(t, mux)
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-remove-error")
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-remove-error", "task", &execenv.GCMeta{
+		IssueID: issueID, WorkspaceID: "ws-remove-error",
+	})
+	priorWorkDir := filepath.Join(taskDir, "workdir")
+	if err := os.MkdirAll(priorWorkDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d.removeEnvRootHook = func(path string) error {
+		if err := os.Remove(filepath.Join(path, ".gc_meta.json")); err != nil {
+			t.Fatalf("simulate partial removal: %v", err)
+		}
+		return errors.New("injected partial removal failure")
+	}
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+	if stats.skipped != 1 || stats.cleaned != 0 || stats.orphaned != 0 || stats.bytesReclaimed != 0 {
+		t.Fatalf("unexpected stats: %+v", stats)
+	}
+	if _, err := os.Stat(priorWorkDir); !os.IsNotExist(err) {
+		t.Fatalf("prior workdir remains reusable after partial removal: %v", err)
+	}
+	if env := execenv.Reuse(execenv.ReuseParams{WorkDir: priorWorkDir}, slog.Default()); env != nil {
+		t.Fatal("Reuse accepted quarantined prior workdir after partial removal")
+	}
+	quarantineDir, err := gcQuarantinePath(d.cfg.WorkspacesRoot, taskDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(quarantineDir); err != nil {
+		t.Fatalf("failed quarantine missing: %v", err)
 	}
 }
 
@@ -1034,6 +1148,93 @@ func TestEnvRootGCReservationBlocksConcurrentClaim(t *testing.T) {
 		t.Fatal("concurrent claim did not resume after reservation release")
 	}
 	d.unmarkActiveEnvRoot(root)
+}
+
+func TestEnvRootGCReservationBlocksSymlinkAliasClaim(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	realRoot := filepath.Join(t.TempDir(), "real")
+	taskDir := filepath.Join(realRoot, "ws", "task")
+	if err := os.MkdirAll(taskDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	aliasRoot := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(realRoot, aliasRoot); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	aliasTaskDir := filepath.Join(aliasRoot, "ws", "task")
+
+	release, ok := d.reserveEnvRootForGC(taskDir)
+	if !ok {
+		t.Fatal("expected reservation through real path")
+	}
+	reachedGate := make(chan struct{})
+	var once sync.Once
+	d.activeEnvRootWaitHook = func(string) { once.Do(func() { close(reachedGate) }) }
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		<-reachedGate
+		cancel()
+	}()
+	if d.markActiveEnvRootContext(ctx, aliasTaskDir) {
+		t.Fatal("symlink alias bypassed reservation")
+	}
+	release()
+	if !d.markActiveEnvRootContext(context.Background(), aliasTaskDir) {
+		t.Fatal("claim did not succeed after reservation release")
+	}
+	d.unmarkActiveEnvRoot(taskDir)
+}
+
+func TestEnvRootGCReservationWaitIsCancellable(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	root := filepath.Join(t.TempDir(), "task")
+	release, ok := d.reserveEnvRootForGC(root)
+	if !ok {
+		t.Fatal("expected reservation")
+	}
+	defer release()
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if d.markActiveEnvRootContext(ctx, root) {
+		t.Fatal("cancelled claimant entered reserved root")
+	}
+}
+
+func TestCleanTaskArtifacts_AncestorSymlinkSwapCannotEscapeRoot(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-artifact-swap", "task", nil)
+	parent := filepath.Join(taskDir, "nested")
+	artifact := filepath.Join(parent, "node_modules")
+	if err := os.MkdirAll(artifact, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	outside := t.TempDir()
+	outsideArtifact := filepath.Join(outside, "node_modules")
+	if err := os.MkdirAll(outsideArtifact, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(outsideArtifact, "keep")
+	if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d.artifactRemoveHook = func(string) {
+		moved := parent + "-moved"
+		if err := os.Rename(parent, moved); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, parent); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	d.cleanTaskArtifacts(taskDir, []string{"node_modules"})
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("fd-relative cleanup escaped task root: %v", err)
+	}
 }
 
 func TestApplyGCAction_ArtifactCleanupActiveAfterDecisionOnlyIncrementsSkipped(t *testing.T) {

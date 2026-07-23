@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io/fs"
 	"net/http"
 	"os"
 	"os/exec"
@@ -735,12 +736,17 @@ func (d *Daemon) cleanTaskArtifactsMatching(taskDir string, matcher artifactMatc
 	if err != nil {
 		return
 	}
+	root, err := os.OpenRoot(absRoot)
+	if err != nil {
+		return
+	}
+	defer root.Close()
 
-	walkErr := filepath.WalkDir(absRoot, func(path string, entry os.DirEntry, err error) error {
+	walkErr := fs.WalkDir(root.FS(), ".", func(path string, entry fs.DirEntry, err error) error {
 		if err != nil {
 			return nil // best-effort — keep walking
 		}
-		if path == absRoot {
+		if path == "." {
 			return nil
 		}
 		if !entry.IsDir() {
@@ -753,19 +759,22 @@ func (d *Daemon) cleanTaskArtifactsMatching(taskDir string, matcher artifactMatc
 		}
 		// Refuse to follow symlinked directories. WalkDir reports them as type
 		// Dir on some platforms; lstat to be sure.
-		info, statErr := os.Lstat(path)
+		info, statErr := root.Lstat(path)
 		if statErr != nil {
 			return nil
 		}
 		if info.Mode()&os.ModeSymlink != 0 {
 			return filepath.SkipDir
 		}
-		pattern, ok := matcher.matchDirectory(absRoot, path, entry)
+		pattern, ok := matcher.matchDirectory(absRoot, filepath.Join(absRoot, filepath.FromSlash(path)), entry)
 		if !ok {
 			return nil
 		}
-		size := dirSize(path)
-		if rmErr := os.RemoveAll(path); rmErr != nil {
+		size := rootDirSize(root, path)
+		if d.artifactRemoveHook != nil {
+			d.artifactRemoveHook(path)
+		}
+		if rmErr := root.RemoveAll(path); rmErr != nil {
 			d.logger.Warn("gc: artifact remove failed", "path", path, "error", rmErr)
 			return filepath.SkipDir
 		}
@@ -780,6 +789,21 @@ func (d *Daemon) cleanTaskArtifactsMatching(taskDir string, matcher artifactMatc
 		d.logger.Warn("gc: artifact walk failed", "dir", taskDir, "error", walkErr)
 	}
 	return
+}
+
+func rootDirSize(root *os.Root, path string) int64 {
+	var total int64
+	_ = fs.WalkDir(root.FS(), path, func(_ string, entry fs.DirEntry, err error) error {
+		if err != nil || entry.IsDir() {
+			return nil
+		}
+		info, statErr := entry.Info()
+		if statErr == nil && info.Mode().IsRegular() {
+			total += info.Size()
+		}
+		return nil
+	})
+	return total
 }
 
 // dirSize returns the total size of all regular files under root, in bytes.
