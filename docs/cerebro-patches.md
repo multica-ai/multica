@@ -1793,8 +1793,39 @@ The gate only ever applies to agent actors; members are never blocked. Enforceme
 stays dark until `CEREBRO_WORKFLOW_HOOKS_ENABLED` is on AND a workspace hook policy
 listening on `before.issue.status_change` exists.
 
+## daemon-graceful-drain — restart does not interrupt in-flight runs (FIR-3758)
+
+- Logic lives in the cerebro side-file `server/internal/daemon/cerebro_graceful_drain.go`.
+  Upstream-zone touch points are three tiny marked seams in `daemon.go` (a
+  `cerebroDrainState` struct field, a `taskParentCtx(ctx)` call at the poller launch
+  site, and a `drainInFlightTasks(&taskWG)` call replacing the fixed 30s wait in the
+  `pollLoop` `ctx.Done` branch) plus two in `config.go` (a `GracefulDrain` config field
+  and a `loadGracefulDrainConfig()` call in `LoadConfig`).
+- **Why:** on SIGTERM (deploy / container restart) `notifyShutdownContext` cancels the
+  root ctx. Because `handleTask` derives the agent subprocess ctx from that same root
+  ctx, every in-flight agent is killed the instant SIGTERM lands, its task is failed,
+  and orphan-recovery (upstream MUL-1128) re-runs it — the "byge af failed runs" a
+  restart produces. `pollLoop`'s old 30s wait never protected a running agent: the
+  agent was already dead before the wait began.
+- **What it does (when enabled):** (1) `taskParentCtx` gives `handleTask` a context
+  rooted at `context.Background()` instead of the SIGTERM-cancelled root ctx, so a
+  restart no longer reaches in-flight agents; (2) `drainInFlightTasks` stops new claims
+  and lets in-flight tasks finish within a bounded window, cancelling only stragglers
+  that outlive the window (they fall back to Spor B recovery on the next boot).
+- **Feature flag (default OFF):** `MULTICA_DAEMON_GRACEFUL_DRAIN=true` enables it;
+  `MULTICA_DAEMON_GRACEFUL_DRAIN_WINDOW` (Go duration, default 25s) sets the window.
+  With the flag off, behaviour is the exact legacy 30s wait against already-cancelled
+  tasks.
+- **Container coordination (required before enabling in prod):** the window must be
+  ≤ the container stop-grace period. The orchestrator (Docker `--stop-timeout` /
+  Sliplane "termination grace period") sends SIGKILL after that grace regardless of
+  what the process is doing, so a window longer than the grace cannot save a task.
+  Set the Sliplane termination grace and `MULTICA_DAEMON_GRACEFUL_DRAIN_WINDOW`
+  together (window a few seconds below the grace).
+
 | Patch | Location | Reason |
 |---|---|---|
+| `daemon-graceful-drain` | `server/internal/daemon/daemon.go`, `server/internal/daemon/config.go` | Feature-flagged bounded graceful drain on SIGTERM/restart so in-flight runs are not interrupted within a window. Logic lives in `cerebro_graceful_drain.go`; upstream seams are the task-ctx decoupling and the drain call replacing the fixed 30s wait. |
 | `issue-status-gate` | `server/internal/handler/issue.go` | 5-line call into `cerebroGateIssueStatusChange` before the UpdateIssue transaction so a hook policy can 422 an agent's status change (workpad start-gate). |
 | `handler-issue-status-gate` | `server/internal/handler/handler.go` | `IssueStatusGate` seam field on Handler (interface satisfied by `*cerebroworkflows.IssueStatusGate`). |
 | `issue-status-gate-wire` | `server/cmd/server/router.go` | Wire `workflowHooksFeature.StatusGate` into the handler seam. |
