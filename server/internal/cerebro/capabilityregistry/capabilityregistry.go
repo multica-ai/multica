@@ -100,7 +100,7 @@ func (s *Service) Report(ctx context.Context, workspaceID pgtype.UUID, reporter 
 	if err := validateSubject(reporter); err != nil {
 		return nil, err
 	}
-	if len(caps) == 0 {
+	if len(caps) == 0 && reporter.Type != "runtime" {
 		return nil, ErrInvalidReport
 	}
 	for _, c := range caps {
@@ -122,6 +122,43 @@ func (s *Service) Report(ctx context.Context, workspaceID pgtype.UUID, reporter 
 	defer tx.Rollback(ctx)
 
 	keys := make([]string, 0, len(caps))
+	// Runtime reports are authoritative snapshots. Remove the reporter
+	// relationship for tools absent from the latest report before upserting the
+	// present set. Policy rows remain for audit/reappearance, but inventory,
+	// Capabilities and new task mandates can no longer treat stale tools as live.
+	if reporter.Type == "runtime" {
+		reporterID, parseErr := util.ParseUUID(reporter.ID)
+		if parseErr != nil {
+			return nil, ErrInvalidSubject
+		}
+		sources := []string{}
+		seenSources := map[string]bool{}
+		for _, cap := range caps {
+			source := cap.Source
+			if source == "" {
+				source = "report"
+			}
+			if !seenSources[source] {
+				seenSources[source] = true
+				sources = append(sources, source)
+			}
+		}
+		if len(sources) == 0 {
+			sources = []string{"runtime_report"}
+		}
+		if _, err := tx.Exec(ctx, `
+			DELETE FROM cerebro_capability_subject s
+			USING cerebro_capability c
+			WHERE s.capability_id = c.id
+			  AND s.workspace_id = $1
+			  AND s.subject_type = 'runtime'
+			  AND s.subject_id = $2
+			  AND s.relation IN ('reporter','owner','user')
+			  AND c.source = ANY($3)
+		`, workspaceID, reporterID, sources); err != nil {
+			return nil, fmt.Errorf("replace runtime capability snapshot: %w", err)
+		}
+	}
 	for _, c := range caps {
 		source := c.Source
 		if source == "" {
@@ -162,7 +199,10 @@ func (s *Service) Report(ctx context.Context, workspaceID pgtype.UUID, reporter 
 		keys = append(keys, c.Key)
 	}
 
-	views, err := loadViews(ctx, tx, workspaceID, nil, keys)
+	views := []View{}
+	if len(keys) > 0 {
+		views, err = loadViews(ctx, tx, workspaceID, nil, keys)
+	}
 	if err != nil {
 		return nil, err
 	}

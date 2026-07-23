@@ -17,6 +17,21 @@ import (
 	"strings"
 )
 
+// CanonicalToolName normalizes the two spellings used for local MCP tools.
+// Runtime discovery stores <server>.<tool>, while Claude-family hooks emit
+// mcp__<server>__<tool>. All mandate and call-time comparisons use the latter.
+func CanonicalToolName(toolName string) string {
+	name := strings.TrimSpace(toolName)
+	if strings.HasPrefix(name, "mcp__") || strings.Contains(name, ":") {
+		return name
+	}
+	server, tool, ok := strings.Cut(name, ".")
+	if ok && server != "" && tool != "" && !strings.Contains(tool, ".") {
+		return "mcp__" + server + "__" + tool
+	}
+	return name
+}
+
 // maxInputBytes caps the stdin payload Claude Code sends so a malformed or
 // hostile hook input cannot exhaust memory. 1 MiB is far above any real
 // tool_input.
@@ -96,6 +111,7 @@ func Gated(tool string) bool {
 // connection chain is keyed separately. An already-namespaced key (one that
 // contains ':', e.g. a platform capability or a pre-mapped key) is left as-is.
 func PolicyToolKey(toolName string) string {
+	toolName = strings.TrimSpace(toolName)
 	if toolName == "" {
 		return ""
 	}

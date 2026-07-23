@@ -21,18 +21,20 @@ func TestPrepareToolPolicySpawn_AllLocalProvidersEnforce(t *testing.T) {
 	d := &Daemon{}
 	for _, provider := range []string{"claude", "codex", "cursor", "gemini"} {
 		t.Run(provider, func(t *testing.T) {
-			got, err := d.prepareToolPolicySpawn(provider, t.TempDir(), false)
+			workdir := t.TempDir()
+			providerHome := ""
+			if provider == "codex" {
+				providerHome = filepath.Join(workdir, "codex-home")
+			}
+			got, err := d.prepareToolPolicySpawn(provider, workdir, providerHome, false)
 			if err != nil {
 				t.Fatalf("prepare: %v", err)
 			}
 			if got == nil {
 				t.Fatalf("spawn = %+v, want mandatory enforce", got)
 			}
-			if provider == "codex" && got.SettingsPath != "" {
-				t.Fatalf("codex must use app-server approval seam, got settings %q", got.SettingsPath)
-			}
-			if provider != "codex" && got.SettingsPath == "" {
-				t.Fatal("hook-based provider has no settings path")
+			if got.SettingsPath == "" {
+				t.Fatal("provider has no call-time policy hook")
 			}
 		})
 	}
@@ -47,14 +49,21 @@ func TestWriteToolPolicySettingsJSON_ProviderContracts(t *testing.T) {
 		{"claude", filepath.Join(".claude", "cerebro-tool-policy-settings.json"), "PreToolUse"},
 		{"gemini", filepath.Join(".gemini", "settings.json"), "BeforeTool"},
 		{"cursor", filepath.Join(".cursor", "hooks.json"), "preToolUse"},
+		{"codex", "hooks.json", "PreToolUse"},
 	} {
 		t.Run(tc.provider, func(t *testing.T) {
 			workdir := t.TempDir()
-			path, err := writeToolPolicySettingsJSON(tc.provider, workdir, "/opt/multica/multica", false)
+			providerHome := ""
+			base := workdir
+			if tc.provider == "codex" {
+				providerHome = filepath.Join(workdir, "codex-home")
+				base = providerHome
+			}
+			path, err := writeToolPolicySettingsJSON(tc.provider, workdir, providerHome, "/opt/multica/multica", false)
 			if err != nil {
 				t.Fatalf("write: %v", err)
 			}
-			if path != filepath.Join(workdir, tc.path) {
+			if path != filepath.Join(base, tc.path) {
 				t.Fatalf("path = %q", path)
 			}
 			raw, err := os.ReadFile(path)
@@ -76,7 +85,7 @@ func TestWriteToolPolicySettingsJSON_ProviderContracts(t *testing.T) {
 }
 
 func TestPrepareToolPolicySpawn_NonTargetProviderUnaffected(t *testing.T) {
-	got, err := (&Daemon{}).prepareToolPolicySpawn("firtal-gateway", t.TempDir(), false)
+	got, err := (&Daemon{}).prepareToolPolicySpawn("firtal-gateway", t.TempDir(), "", false)
 	if err != nil || got != nil {
 		t.Fatalf("non-target provider = %+v, %v", got, err)
 	}
@@ -100,7 +109,7 @@ func TestLocalToolPolicyRolloutFlagsCannotReturn(t *testing.T) {
 }
 
 func TestWriteToolPolicySettingsJSON_MergesFastMode(t *testing.T) {
-	path, err := writeToolPolicySettingsJSON("claude", t.TempDir(), "/opt/multica/multica", true)
+	path, err := writeToolPolicySettingsJSON("claude", t.TempDir(), "", "/opt/multica/multica", true)
 	if err != nil {
 		t.Fatalf("write: %v", err)
 	}

@@ -71,6 +71,20 @@ func TestPolicyToolKey(t *testing.T) {
 	}
 }
 
+func TestCanonicalToolNameNormalizesLocalMCPOnce(t *testing.T) {
+	cases := map[string]string{
+		"customer-service.lookup_order":       "mcp__customer-service__lookup_order",
+		"mcp__customer-service__lookup_order": "mcp__customer-service__lookup_order",
+		"Read":                                "Read",
+		"tools:Read":                          "tools:Read",
+	}
+	for in, want := range cases {
+		if got := CanonicalToolName(in); got != want {
+			t.Errorf("CanonicalToolName(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestResourcePattern(t *testing.T) {
 	cases := []struct {
 		tool string
