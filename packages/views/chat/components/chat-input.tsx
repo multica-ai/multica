@@ -492,7 +492,15 @@ export function ChatInput({
   return (
     <div
       className={cn(
-        "px-5 pb-3 pt-0",
+        // The composer grows with the draft up to half the surface it sits on
+        // — a fixed 160px cap made long drafts unreadable in a five-line
+        // porthole (MUL-5196). `max-h-[50%]` resolves against the chat
+        // surface (floating window, chat tab, agent builder), all of which
+        // give this wrapper a definite height, so the cap scales when the
+        // user resizes or expands the window. The wrapper must be a flex
+        // column for the card below to shrink into that cap instead of
+        // spilling out of it.
+        "flex max-h-[50%] min-h-0 flex-col px-5 pb-3 pt-0",
         // Outer wrapper carries the disabled cursor. Inner card sets
         // pointer-events-none, which suppresses hover (and therefore
         // any cursor of its own) — splitting the two layers lets hover
@@ -503,7 +511,12 @@ export function ChatInput({
       <div
         {...(uploadEnabled ? dropZoneProps : {})}
         className={cn(
-          "relative mx-auto flex min-h-16 max-h-40 w-full max-w-4xl flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
+          // max-h-96 is the absolute ceiling on top of the wrapper's 50%: on a
+          // tall surface half the height is more composer than anyone reads at
+          // once, and it keeps the cap finite if a future host ever mounts the
+          // composer without a definite height (percentage max-height would
+          // then resolve to none).
+          "relative mx-auto flex min-h-16 max-h-96 w-full max-w-4xl flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
           // Visual + interaction lock when there's no agent. We don't
           // toggle ContentEditor's editable mode (Tiptap can't switch
           // cleanly post-mount, and the prop has been removed); instead
