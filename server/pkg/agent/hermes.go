@@ -1649,7 +1649,7 @@ func parseACPTokenUsage(data json.RawMessage) TokenUsage {
 	if err := json.Unmarshal(data, &fields); err != nil {
 		return TokenUsage{}
 	}
-	return TokenUsage{
+	usage := TokenUsage{
 		InputTokens:  acpUsageInt64(fields, "inputTokens", "input_tokens"),
 		OutputTokens: acpUsageInt64(fields, "outputTokens", "output_tokens"),
 		CacheReadTokens: acpUsageInt64(fields,
@@ -1666,6 +1666,37 @@ func parseACPTokenUsage(data json.RawMessage) TokenUsage {
 			"cache_creation_input_tokens",
 		),
 	}
+	return excludeACPCachedInput(usage, acpUsageInt64(fields, "totalTokens", "total_tokens"))
+}
+
+// excludeACPCachedInput re-buckets a usage record whose `inputTokens` already
+// contains `cachedReadTokens`, so the persisted buckets stay mutually
+// exclusive and dashboard cost math does not charge the cached prefix twice
+// (same normalization codex.go applies via codexUncachedInputTokens).
+//
+// ACP does not specify whether cached reads are counted inside inputTokens.
+// Grok Build counts them inside: a real `grok 0.2.106` turn reports
+// inputTokens=12929, cachedReadTokens=10880, outputTokens=29,
+// totalTokens=12958 — i.e. total == input + output, so the cached prefix is
+// counted once, within input. The same payload's costUsdTicks=75360000
+// ($0.007536) matches exactly (12929-10880) uncached input + 10880 cached
+// read + 29 output at xAI's published grok-4.5 rates, confirming how xAI
+// bills it. Kept raw, that turn is priced as if 12929 tokens were uncached —
+// ~4x the real spend on a cache-heavy turn.
+//
+// `totalTokens` is the only self-describing signal available, so the
+// re-bucketing only happens when it is present and equals input + output.
+// Agents that report exclusive buckets (total == input + cached + output) or
+// omit totalTokens keep their counters untouched.
+func excludeACPCachedInput(usage TokenUsage, totalTokens int64) TokenUsage {
+	if totalTokens <= 0 || usage.CacheReadTokens <= 0 || usage.CacheReadTokens > usage.InputTokens {
+		return usage
+	}
+	if totalTokens != usage.InputTokens+usage.OutputTokens {
+		return usage
+	}
+	usage.InputTokens -= usage.CacheReadTokens
+	return usage
 }
 
 func acpUsageInt64(fields map[string]json.RawMessage, names ...string) int64 {

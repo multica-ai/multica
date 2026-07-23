@@ -610,7 +610,10 @@ func TestGrokPropagatesMCPAndUsage(t *testing.T) {
 	if !ok {
 		t.Fatalf("usage missing grok-4.5 key: %+v", result.Usage)
 	}
-	if usage.InputTokens != 120 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 {
+	// The fixture's totalTokens (150) equals input + output, so its 20 cached
+	// reads sit inside inputTokens and are billed once: input is stored as the
+	// uncached remainder 120 - 20 = 100.
+	if usage.InputTokens != 100 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 {
 		t.Fatalf("unexpected usage: %+v", usage)
 	}
 }
