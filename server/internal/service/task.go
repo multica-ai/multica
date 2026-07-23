@@ -2882,7 +2882,11 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 		// The task was already terminal when this call arrived. If this is a
 		// retry of a callback that committed the cancel but crashed before
 		// reconciling, re-enter reconciliation so the deferred comment survives.
-		if opts.UserInitiated {
+		// Guard on status: CancelAgentTask returns ErrNoRows for ANY non-active
+		// task (completed and failed included), so only reconcile when the task
+		// really was cancelled — not when a stale cancel races a concurrent
+		// complete/fail that already ran its own reconcileTerminal.
+		if opts.UserInitiated && existing.Status == "cancelled" {
 			s.reconcileTerminal(ctx, &existing)
 		}
 		return &CancelTaskResult{Task: existing}, nil
