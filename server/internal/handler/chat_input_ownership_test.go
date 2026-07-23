@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -135,6 +136,244 @@ func TestDirectChat_RunningTaskDoesNotAbsorbNewMessage(t *testing.T) {
 	}
 	if len(owned2) != 1 || owned2[0].Content != "second" {
 		t.Fatalf("T2 must own the mid-run message; got %+v", msgContents(owned2))
+	}
+}
+
+// TestChannelChat_QueuedSuccessorKeepsMessageAcrossPredecessorReply reproduces
+// the Feishu race where U2 is persisted and T2 queued while T1 runs, then T1
+// writes an assistant row before T2 is claimed. Channel enqueue must seal U2
+// onto T2 before that reply changes the legacy trailing-message cursor.
+func TestChannelChat_QueuedSuccessorKeepsMessageAcrossPredecessorReply(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	_, sessionID, runtimeID, daemonID := setupDirectChatSession(t, ctx, "channel ownership chat")
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	appendUser := func(content string) pgtype.UUID {
+		t.Helper()
+		message, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ChatSessionID: session.ID,
+			Role:          "user",
+			Content:       content,
+		})
+		if err != nil {
+			t.Fatalf("append channel user message: %v", err)
+		}
+		return message.ID
+	}
+
+	firstMessage := appendUser("今天北京天气如何?")
+	first, err := testHandler.TaskService.EnqueueChannelChatTask(ctx, session, parseUUID(testUserID), false, []pgtype.UUID{firstMessage})
+	if err != nil {
+		t.Fatalf("enqueue first channel task: %v", err)
+	}
+	claimed := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if claimed.ChatMessage != "今天北京天气如何?" {
+		t.Fatalf("first claim input = %q", claimed.ChatMessage)
+	}
+	markTaskRunning(t, ctx, uuidToString(first.ID))
+
+	secondMessage := appendUser("今天上海天气怎么样")
+	second, err := testHandler.TaskService.EnqueueChannelChatTask(ctx, session, parseUUID(testUserID), false, []pgtype.UUID{secondMessage})
+	if err != nil {
+		t.Fatalf("enqueue second channel task: %v", err)
+	}
+	if _, err := testHandler.TaskService.CompleteTask(ctx, first.ID, completeResult(t, "北京天气回复"), "", ""); err != nil {
+		t.Fatalf("complete first channel task: %v", err)
+	}
+
+	claimed2 := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if claimed2.ChatMessage != "今天上海天气怎么样" {
+		t.Fatalf("second claim lost its owned input; got %q", claimed2.ChatMessage)
+	}
+	assertTaskInputOwner(t, ctx, uuidToString(second.ID), uuidToString(second.ID))
+}
+
+func TestChannelChat_DuplicateMessageIDsAreClaimedOnce(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	_, sessionID, _, _ := setupDirectChatSession(t, ctx, "channel duplicate input")
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	message, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ChatSessionID: session.ID,
+		Role:          "user",
+		Content:       "only once",
+	})
+	if err != nil {
+		t.Fatalf("append channel user message: %v", err)
+	}
+
+	task, err := testHandler.TaskService.EnqueueChannelChatTask(
+		ctx, session, parseUUID(testUserID), false, []pgtype.UUID{message.ID, message.ID},
+	)
+	if err != nil {
+		t.Fatalf("enqueue duplicate channel input: %v", err)
+	}
+	owned, err := testHandler.Queries.ListChatInputMessages(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list owned channel input: %v", err)
+	}
+	if len(owned) != 1 || owned[0].ID != message.ID {
+		t.Fatalf("owned input = %+v, want the message exactly once", owned)
+	}
+}
+
+func TestChannelChat_RecoversUnownedInputAfterRouterRestart(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	_, sessionID, _, _ := setupDirectChatSession(t, ctx, "channel restart recovery")
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	appendUser := func(content string) pgtype.UUID {
+		t.Helper()
+		message, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ChatSessionID: session.ID,
+			Role:          "user",
+			Content:       content,
+		})
+		if err != nil {
+			t.Fatalf("append channel input: %v", err)
+		}
+		return message.ID
+	}
+
+	appendUser("U1 before restart")
+	u2 := appendUser("U2 after restart")
+	task, err := testHandler.TaskService.EnqueueChannelChatTask(
+		ctx, session, parseUUID(testUserID), false, []pgtype.UUID{u2},
+	)
+	if err != nil {
+		t.Fatalf("enqueue post-restart channel task: %v", err)
+	}
+	owned, err := testHandler.Queries.ListChatInputMessages(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list recovered input: %v", err)
+	}
+	if got := msgContents(owned); len(got) != 2 || got[0] != "U1 before restart" || got[1] != "U2 after restart" {
+		t.Fatalf("recovered input = %v, want U1 then U2", got)
+	}
+}
+
+func TestChannelChat_RecoverySkipsAnsweredLegacyHistory(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, runtimeID, _ := setupDirectChatSession(t, ctx, "channel rolling upgrade recovery")
+	legacyUser, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ChatSessionID: parseUUID(sessionID),
+		Role:          "user",
+		Content:       "answered before upgrade",
+	})
+	if err != nil {
+		t.Fatalf("create legacy input: %v", err)
+	}
+	legacyTask := insertChannelChatTask(t, ctx, agentID, runtimeID, sessionID)
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(legacyTask), completeResult(t, "legacy answer"), "", ""); err != nil {
+		t.Fatalf("complete legacy channel task: %v", err)
+	}
+	var legacyOwner pgtype.UUID
+	if err := testPool.QueryRow(ctx, `SELECT task_id FROM chat_message WHERE id = $1`, legacyUser).Scan(&legacyOwner); err == nil && legacyOwner.Valid {
+		t.Fatalf("legacy channel input unexpectedly owned by %s", uuidToString(legacyOwner))
+	}
+
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	recovered, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ChatSessionID: session.ID,
+		Role:          "user",
+		Content:       "unflushed after upgrade",
+	})
+	if err != nil {
+		t.Fatalf("create recoverable input: %v", err)
+	}
+	current, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ChatSessionID: session.ID,
+		Role:          "user",
+		Content:       "current after restart",
+	})
+	if err != nil {
+		t.Fatalf("create current input: %v", err)
+	}
+	task, err := testHandler.TaskService.EnqueueChannelChatTask(ctx, session, parseUUID(testUserID), false, []pgtype.UUID{current.ID})
+	if err != nil {
+		t.Fatalf("enqueue post-upgrade channel task: %v", err)
+	}
+	owned, err := testHandler.Queries.ListChatInputMessages(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list recovered input: %v", err)
+	}
+	if got := msgContents(owned); len(got) != 2 || got[0] != "unflushed after upgrade" || got[1] != "current after restart" {
+		t.Fatalf("recovered input = %v, want only post-assistant U1 then U2", got)
+	}
+	var recoveredOwner string
+	if err := testPool.QueryRow(ctx, `SELECT task_id FROM chat_message WHERE id = $1`, recovered.ID).Scan(&recoveredOwner); err != nil {
+		t.Fatalf("read recovered owner: %v", err)
+	}
+	if recoveredOwner != uuidToString(task.ID) {
+		t.Fatalf("recovered input owner = %s, want %s", recoveredOwner, uuidToString(task.ID))
+	}
+}
+
+func TestChannelChat_RecoversRolledBackBatchAfterRouterRestart(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	_, sessionID, _, _ := setupDirectChatSession(t, ctx, "channel failed flush recovery")
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	appendUser := func(content string) pgtype.UUID {
+		t.Helper()
+		message, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+			ChatSessionID: session.ID,
+			Role:          "user",
+			Content:       content,
+		})
+		if err != nil {
+			t.Fatalf("append channel input: %v", err)
+		}
+		return message.ID
+	}
+
+	u1 := appendUser("failed U1")
+	missing := parseUUID("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")
+	if _, err := testHandler.TaskService.EnqueueChannelChatTask(
+		ctx, session, parseUUID(testUserID), false, []pgtype.UUID{u1, missing},
+	); err == nil {
+		t.Fatal("enqueue with a missing explicit message must roll back")
+	}
+
+	u2 := appendUser("later U2")
+	task, err := testHandler.TaskService.EnqueueChannelChatTask(
+		ctx, session, parseUUID(testUserID), false, []pgtype.UUID{u2},
+	)
+	if err != nil {
+		t.Fatalf("enqueue after simulated restart: %v", err)
+	}
+	owned, err := testHandler.Queries.ListChatInputMessages(ctx, task.ID)
+	if err != nil {
+		t.Fatalf("list recovered failed batch: %v", err)
+	}
+	if got := msgContents(owned); len(got) != 2 || got[0] != "failed U1" || got[1] != "later U2" {
+		t.Fatalf("recovered failed input = %v, want U1 then U2", got)
 	}
 }
 
@@ -382,5 +621,47 @@ func TestCompleteTask_ChannelEmptyOutputWritesNoRow(t *testing.T) {
 	}
 	if rows[0].MessageKind != protocol.ChatMessageKindMessage || rows[0].Content != "channel reply" {
 		t.Fatalf("channel message = kind %q content %q, want message/'channel reply'", rows[0].MessageKind, rows[0].Content)
+	}
+
+	// A task-owned channel batch must keep the same silent-empty semantics.
+	var installationID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO channel_installation (workspace_id, agent_id, channel_type, config, installer_user_id)
+		VALUES ($1, $2, 'feishu', '{}', $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&installationID); err != nil {
+		t.Fatalf("create channel installation: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO channel_chat_session_binding
+			(chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
+		VALUES ($1, $2, 'feishu', $3, 'p2p')
+	`, sessionID, installationID, "owned-channel-"+sessionID); err != nil {
+		t.Fatalf("create channel binding: %v", err)
+	}
+	message, err := testHandler.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ChatSessionID: parseUUID(sessionID),
+		Role:          "user",
+		Content:       "tool-only channel turn",
+	})
+	if err != nil {
+		t.Fatalf("create owned channel input: %v", err)
+	}
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load channel session: %v", err)
+	}
+	owned, err := testHandler.TaskService.EnqueueChannelChatTask(
+		ctx, session, parseUUID(testUserID), false, []pgtype.UUID{message.ID},
+	)
+	if err != nil {
+		t.Fatalf("enqueue owned channel task: %v", err)
+	}
+	markTaskRunning(t, ctx, uuidToString(owned.ID))
+	if _, err := testHandler.TaskService.CompleteTask(ctx, owned.ID, completeResult(t, "   "), "", ""); err != nil {
+		t.Fatalf("complete owned channel task: %v", err)
+	}
+	if rows := assistantRows(t, ctx, sessionID); len(rows) != 1 {
+		t.Fatalf("owned channel empty completion must not add an assistant row, got %d total", len(rows))
 	}
 }

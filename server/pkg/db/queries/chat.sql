@@ -132,6 +132,14 @@ SELECT id FROM chat_session
 WHERE id = $1
 FOR UPDATE;
 
+-- name: LockChatSessionForChannelInput :one
+-- Serializes channel flushes for one session. The lock also fences concurrent
+-- chat_message inserts through their FK key-share lock, so the recovery claim
+-- below has a stable upper boundary and cannot absorb a newer inbound message.
+SELECT id FROM chat_session
+WHERE id = $1
+FOR UPDATE;
+
 -- name: DeleteChatSession :exec
 -- Hard delete. chat_message rows cascade via FK ON DELETE CASCADE; the
 -- chat_session_id on agent_task_queue is set NULL by FK so completed/failed
@@ -229,6 +237,45 @@ UPDATE agent_task_queue
 SET chat_input_task_id = id
 WHERE id = $1
 RETURNING *;
+
+-- name: ClaimChannelChatInputMessages :many
+-- Seals the explicit debounce batch plus older unowned channel user messages.
+-- The newest explicit row is the recovery boundary: this rediscovers durable
+-- messages whose in-memory trigger was lost across a process restart without
+-- absorbing messages appended after this flush began. The lower bound is the
+-- last assistant reply so a rolling deploy cannot replay already-answered
+-- legacy channel history whose user rows still have task_id NULL.
+WITH boundary AS (
+    SELECT created_at, id
+    FROM chat_message
+    WHERE chat_session_id = sqlc.arg(chat_session_id)
+      AND id = ANY(sqlc.arg(message_ids)::uuid[])
+      AND role = 'user'
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+), last_assistant AS (
+    SELECT created_at, id
+    FROM chat_message
+    WHERE chat_session_id = sqlc.arg(chat_session_id)
+      AND role = 'assistant'
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+)
+UPDATE chat_message m
+SET task_id = sqlc.arg(task_id)
+FROM boundary b
+LEFT JOIN last_assistant a ON TRUE
+WHERE m.chat_session_id = sqlc.arg(chat_session_id)
+  AND m.role = 'user'
+  AND m.task_id IS NULL
+  AND (m.created_at, m.id) <= (b.created_at, b.id)
+  AND (a.id IS NULL OR (m.created_at, m.id) > (a.created_at, a.id))
+RETURNING m.id;
+
+-- name: IsChannelChatSession :one
+SELECT EXISTS (
+    SELECT 1 FROM channel_chat_session_binding WHERE chat_session_id = $1
+);
 
 -- name: GetLastChatTaskSession :one
 -- Returns the most recent task in this chat session that managed to record a

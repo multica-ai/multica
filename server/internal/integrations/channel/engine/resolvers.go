@@ -99,6 +99,8 @@ type AppendParams struct {
 
 // AppendResult reports what AppendMessage decided.
 type AppendResult struct {
+	// MessageID is the persisted chat_message row for this inbound message.
+	MessageID pgtype.UUID
 	// IssueCommand is non-nil when the message was an /issue command.
 	IssueCommand *IssueCommand
 	// DedupMarked is true when AppendMessage finalized the dedup claim in its
@@ -215,7 +217,7 @@ type IssueCreator interface {
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to
 // trigger a chat run. Shared across platforms.
 type TaskEnqueuer interface {
-	EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error)
+	EnqueueChannelChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, messageIDs []pgtype.UUID) (db.AgentTaskQueue, error)
 }
 
 // SessionReader reads the rows the debounced flush + /issue identifier need.

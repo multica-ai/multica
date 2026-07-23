@@ -157,20 +157,46 @@ type fakeTasks struct {
 	mu         sync.Mutex
 	called     bool
 	forceFresh bool
+	freshArgs  []bool
 	initiator  pgtype.UUID
+	messageIDs [][]pgtype.UUID
 	err        error
+	gate       chan struct{}
+	entered    chan struct{}
 }
 
-func (f *fakeTasks) EnqueueChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool) (db.AgentTaskQueue, error) {
+func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool, messageIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	if f.entered != nil {
+		f.entered <- struct{}{}
+	}
+	if f.gate != nil {
+		<-f.gate
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.called = true
 	f.forceFresh = forceFresh
+	f.freshArgs = append(f.freshArgs, forceFresh)
 	f.initiator = initiator
+	f.messageIDs = append(f.messageIDs, append([]pgtype.UUID(nil), messageIDs...))
 	return db.AgentTaskQueue{}, f.err
 }
 func (f *fakeTasks) wasCalled() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.called }
 func (f *fakeTasks) freshArg() bool  { f.mu.Lock(); defer f.mu.Unlock(); return f.forceFresh }
+func (f *fakeTasks) freshCalls() []bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]bool(nil), f.freshArgs...)
+}
+func (f *fakeTasks) inputCalls() [][]pgtype.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	calls := make([][]pgtype.UUID, len(f.messageIDs))
+	for i := range f.messageIDs {
+		calls[i] = append([]pgtype.UUID(nil), f.messageIDs[i]...)
+	}
+	return calls
+}
 
 type fakeReader struct {
 	session db.ChatSession
@@ -495,6 +521,104 @@ func TestRouter_FlushSuccess_DoesNotClearTyping(t *testing.T) {
 	// handler on chat-done / task-failed, NOT by the flush.
 	if h.typing.settledCalls() != 0 {
 		t.Fatalf("successful flush must not clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
+	}
+}
+
+func TestRouter_FlushFailureRestoresInputForNextFlush(t *testing.T) {
+	h := newHarness(t)
+	h.tasks.err = errors.New("transient enqueue failure")
+	firstID := uuidFromString(t, "66666666-6666-6666-6666-666666666666")
+	h.binder.appendResult.MessageID = firstID
+	first := p2pMessage(t)
+	first.ForceFresh = true
+	if err := h.router.Handle(context.Background(), first); err != nil {
+		t.Fatalf("first handle: %v", err)
+	}
+
+	h.tasks.err = nil
+	secondID := uuidFromString(t, "77777777-7777-7777-7777-777777777777")
+	second := p2pMessage(t)
+	second.EventID = "evt-2"
+	second.MessageID = "om-2"
+	h.binder.appendResult.MessageID = secondID
+	if err := h.router.Handle(context.Background(), second); err != nil {
+		t.Fatalf("second handle: %v", err)
+	}
+
+	calls := h.tasks.inputCalls()
+	if len(calls) != 2 {
+		t.Fatalf("enqueue calls = %d, want 2", len(calls))
+	}
+	if len(calls[1]) != 2 || calls[1][0] != firstID || calls[1][1] != secondID {
+		t.Fatalf("retry input = %v, want failed batch followed by new input", calls[1])
+	}
+	freshCalls := h.tasks.freshCalls()
+	if len(freshCalls) != 2 || !freshCalls[0] || !freshCalls[1] {
+		t.Fatalf("forceFresh calls = %v, want failed and retried batches to stay fresh", freshCalls)
+	}
+}
+
+func TestRouter_FlushFailureRearmsRetryWithoutAnotherMessage(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	h.tasks.err = errors.New("transient enqueue failure")
+	messageID := uuidFromString(t, "66666666-6666-6666-6666-666666666666")
+	h.binder.appendResult.MessageID = messageID
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("handle: %v", err)
+	}
+
+	timers.fireArmed()
+	if got := h.router.batcher.pendingCount(); got != 1 {
+		t.Fatalf("failed flush must rearm one retry timer, pending=%d", got)
+	}
+	h.tasks.mu.Lock()
+	h.tasks.err = nil
+	h.tasks.mu.Unlock()
+	timers.fireArmed()
+
+	calls := h.tasks.inputCalls()
+	if len(calls) != 2 {
+		t.Fatalf("enqueue calls = %d, want failed attempt plus timer retry", len(calls))
+	}
+	if len(calls[1]) != 1 || calls[1][0] != messageID {
+		t.Fatalf("retry input = %v, want original failed batch", calls[1])
+	}
+}
+
+func TestRouter_FlushesSameSessionSerially(t *testing.T) {
+	h := newHarness(t)
+	h.tasks.gate = make(chan struct{})
+	h.tasks.entered = make(chan struct{}, 1)
+	firstID := uuidFromString(t, "66666666-6666-6666-6666-666666666666")
+	secondID := uuidFromString(t, "77777777-7777-7777-7777-777777777777")
+
+	firstDone := make(chan struct{})
+	go func() {
+		h.router.flushChatRun(ResolverSet{}, h.inst.inst, p2pMessage(t), h.binder.ensureID, h.ident.id.UserID, false, []pgtype.UUID{firstID})
+		close(firstDone)
+	}()
+	<-h.tasks.entered
+
+	secondDone := make(chan struct{})
+	go func() {
+		h.router.flushChatRun(ResolverSet{}, h.inst.inst, p2pMessage(t), h.binder.ensureID, h.ident.id.UserID, false, []pgtype.UUID{secondID})
+		close(secondDone)
+	}()
+
+	select {
+	case <-h.tasks.entered:
+		t.Fatal("second same-session flush reached enqueue before the first completed")
+	case <-time.After(50 * time.Millisecond):
+	}
+
+	close(h.tasks.gate)
+	<-firstDone
+	<-secondDone
+	calls := h.tasks.inputCalls()
+	if len(calls) != 2 || len(calls[0]) != 1 || calls[0][0] != firstID || len(calls[1]) != 1 || calls[1][0] != secondID {
+		t.Fatalf("flush input calls = %v, want first then second", calls)
 	}
 }
 

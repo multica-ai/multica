@@ -138,6 +138,29 @@ func TestPendingBatcher_StaleTimerFireIsNoop(t *testing.T) {
 	}
 }
 
+func TestPendingBatcher_ScheduleIfAbsentPreservesNewerFlush(t *testing.T) {
+	f := &fakeTimerFactory{}
+	b := newTestBatcher(f)
+	var calls []string
+
+	b.Schedule("s", func() { calls = append(calls, "inbound") })
+	if b.ScheduleIfAbsent("s", func() { calls = append(calls, "retry") }) {
+		t.Fatal("retry must not replace an already armed inbound flush")
+	}
+	f.fireArmed()
+	if len(calls) != 1 || calls[0] != "inbound" {
+		t.Fatalf("flush calls = %v, want only the newer inbound closure", calls)
+	}
+
+	if !b.ScheduleIfAbsent("s", func() { calls = append(calls, "retry") }) {
+		t.Fatal("retry must arm when the session has no pending flush")
+	}
+	f.fireArmed()
+	if len(calls) != 2 || calls[1] != "retry" {
+		t.Fatalf("flush calls = %v, want retry after inbound", calls)
+	}
+}
+
 func TestPendingBatcher_FlushAllDrainsPending(t *testing.T) {
 	f := &fakeTimerFactory{}
 	b := newTestBatcher(f)

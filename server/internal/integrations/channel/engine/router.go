@@ -43,8 +43,16 @@ type Router struct {
 
 	logger *slog.Logger
 
-	pendingFreshMu sync.Mutex
+	flushMu        sync.Mutex
+	flushLocks     map[string]*flushLock
+	pendingInputMu sync.Mutex
+	pendingInput   map[string][]pgtype.UUID
 	pendingFresh   map[string]bool
+}
+
+type flushLock struct {
+	mu       sync.Mutex
+	refCount int
 }
 
 // Config tunes the Router. Zero values default.
@@ -74,7 +82,9 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		reader:       reader,
 		replyTimeout: cfg.ReplyTimeout,
 		logger:       cfg.Logger,
+		flushLocks:   make(map[string]*flushLock),
 		pendingFresh: make(map[string]bool),
+		pendingInput: make(map[string][]pgtype.UUID),
 	}
 }
 
@@ -311,24 +321,30 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    THIS message's sender (the task initiator), deliberately not the
 	//    session creator (group sessions are creator=installer). Latest sender
 	//    in a window wins (MUL-2645).
-	r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
+	r.scheduleRun(set, inst, msg, sessionID, identity.UserID, appendRes.MessageID)
 	return res, postAppendFinalize, nil
 }
 
 // scheduleRun hands the per-session run trigger to the debouncer (or fires it
 // inline when batching is disabled).
-func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID) {
+func (r *Router) scheduleRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID, messageID pgtype.UUID) {
 	key := keyForSession(sessionID)
 	fresh := msg.ForceFresh
-	if r.batcher == nil {
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, fresh)
-		return
-	}
+	r.appendPendingInput(key, messageID)
 	if fresh {
 		r.markPendingFresh(key)
 	}
+	if r.batcher == nil {
+		messageIDs, forceFresh := r.takePendingBatch(key, fresh)
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, forceFresh, messageIDs)
+		return
+	}
 	flush := func() {
-		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, r.takePendingFresh(key, fresh))
+		messageIDs, forceFresh := r.takePendingBatch(key, fresh)
+		if len(messageIDs) == 0 {
+			return
+		}
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, forceFresh, messageIDs)
 	}
 	r.batcher.Schedule(key, flush)
 }
@@ -340,18 +356,22 @@ const chatRunFlushTimeout = 10 * time.Second
 // flushChatRun is the debounced run-trigger: reload session, enqueue exactly
 // one chat task for the window, and emit the offline/archived notice (only
 // known here now) via the replier. Errors are logged, not returned.
-func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, forceFresh bool) {
+func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, forceFresh bool, messageIDs []pgtype.UUID) {
+	unlock := r.lockFlush(keyForSession(sessionID))
+	defer unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), chatRunFlushTimeout)
 	defer cancel()
 
 	session, err := r.reader.GetChatSession(ctx, sessionID)
 	if err != nil {
+		r.restoreAndScheduleRun(set, inst, msg, sessionID, initiatorUserID, messageIDs, forceFresh)
 		r.logger.Error("channel router: flush reload chat session failed",
 			"chat_session_id", uuidString(sessionID), "err", err.Error())
 		r.clearTyping(ctx, set, sessionID)
 		return
 	}
-	if _, err := r.tasks.EnqueueChatTask(ctx, session, initiatorUserID, forceFresh); err != nil {
+	if _, err := r.tasks.EnqueueChannelChatTask(ctx, session, initiatorUserID, forceFresh, messageIDs); err != nil {
 		// No task was enqueued, so no task lifecycle event will ever publish and
 		// the platform's bus-driven typing clear can never fire. Clear the
 		// indicator here (before any notice) so the "processing" reaction does
@@ -363,9 +383,64 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 		case errors.Is(err, service.ErrChatTaskAgentArchived):
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, OutcomeAgentArchived)
 		default:
+			r.restoreAndScheduleRun(set, inst, msg, sessionID, initiatorUserID, messageIDs, forceFresh)
 			r.logger.Error("channel router: flush enqueue chat task failed",
 				"chat_session_id", uuidString(sessionID), "err", err.Error())
 		}
+	}
+}
+
+func (r *Router) lockFlush(key string) func() {
+	r.flushMu.Lock()
+	lock := r.flushLocks[key]
+	if lock == nil {
+		lock = &flushLock{}
+		r.flushLocks[key] = lock
+	}
+	lock.refCount++
+	r.flushMu.Unlock()
+
+	lock.mu.Lock()
+	return func() {
+		lock.mu.Unlock()
+		r.flushMu.Lock()
+		lock.refCount--
+		if lock.refCount == 0 {
+			delete(r.flushLocks, key)
+		}
+		r.flushMu.Unlock()
+	}
+}
+
+func (r *Router) restoreAndScheduleRun(set ResolverSet, inst ResolvedInstallation, msg channel.InboundMessage, sessionID, initiatorUserID pgtype.UUID, ids []pgtype.UUID, forceFresh bool) {
+	key := keyForSession(sessionID)
+	r.restorePendingBatch(key, ids, forceFresh)
+	if r.batcher == nil {
+		return
+	}
+	r.batcher.ScheduleIfAbsent(key, func() {
+		messageIDs, retryFresh := r.takePendingBatch(key, forceFresh)
+		if len(messageIDs) == 0 {
+			return
+		}
+		r.flushChatRun(set, inst, msg, sessionID, initiatorUserID, retryFresh, messageIDs)
+	})
+}
+
+func (r *Router) appendPendingInput(key string, id pgtype.UUID) {
+	r.pendingInputMu.Lock()
+	defer r.pendingInputMu.Unlock()
+	r.pendingInput[key] = append(r.pendingInput[key], id)
+}
+
+func (r *Router) restorePendingBatch(key string, ids []pgtype.UUID, forceFresh bool) {
+	r.pendingInputMu.Lock()
+	defer r.pendingInputMu.Unlock()
+	// Preserve arrival order when messages enter a new debounce window while
+	// the previous batch is being flushed.
+	r.pendingInput[key] = append(append([]pgtype.UUID(nil), ids...), r.pendingInput[key]...)
+	if forceFresh {
+		r.pendingFresh[key] = true
 	}
 }
 
@@ -379,17 +454,19 @@ func (r *Router) clearTyping(ctx context.Context, set ResolverSet, sessionID pgt
 }
 
 func (r *Router) markPendingFresh(key string) {
-	r.pendingFreshMu.Lock()
-	defer r.pendingFreshMu.Unlock()
+	r.pendingInputMu.Lock()
+	defer r.pendingInputMu.Unlock()
 	r.pendingFresh[key] = true
 }
 
-func (r *Router) takePendingFresh(key string, fallback bool) bool {
-	r.pendingFreshMu.Lock()
-	defer r.pendingFreshMu.Unlock()
-	fresh := fallback || r.pendingFresh[key]
+func (r *Router) takePendingBatch(key string, fallbackFresh bool) ([]pgtype.UUID, bool) {
+	r.pendingInputMu.Lock()
+	defer r.pendingInputMu.Unlock()
+	ids := r.pendingInput[key]
+	delete(r.pendingInput, key)
+	fresh := fallbackFresh || r.pendingFresh[key]
 	delete(r.pendingFresh, key)
-	return fresh
+	return ids, fresh
 }
 
 // emitFlushReply delivers an offline/archived notice for a flushed run.

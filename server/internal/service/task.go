@@ -1480,6 +1480,112 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	return task, nil
 }
 
+// EnqueueChannelChatTask creates a channel task and atomically seals the
+// currently pending channel messages as its immutable input batch. Unlike the
+// legacy claim-time trailing-message scan, this ownership survives a predecessor
+// writing its assistant reply before the queued successor is claimed.
+func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, messageIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	messageIDs = uniqueUUIDs(messageIDs)
+	if len(messageIDs) == 0 {
+		return db.AgentTaskQueue{}, errors.New("channel chat task: empty input batch")
+	}
+	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+	}
+	if agent.ArchivedAt.Valid {
+		return db.AgentTaskQueue{}, ErrChatTaskAgentArchived
+	}
+	if !agent.RuntimeID.Valid {
+		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
+	}
+
+	overlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
+	attr := attribution.DirectHumanRun(initiatorUserID, attribution.EvidenceChat, chatSession.ID)
+	attr, err = s.applyAttributionFallback(ctx, attr, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
+
+	var task db.AgentTaskQueue
+	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		if _, err := qtx.LockChatSessionForChannelInput(ctx, chatSession.ID); err != nil {
+			return fmt.Errorf("lock channel chat input: %w", err)
+		}
+		task, err = qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
+			AgentID:              chatSession.AgentID,
+			RuntimeID:            agent.RuntimeID,
+			Priority:             2,
+			ChatSessionID:        chatSession.ID,
+			InitiatorUserID:      initiatorUserID,
+			OriginatorUserID:     initiatorUserID,
+			AccountableUserID:    attr.AccountableUserID,
+			ForceFreshSession:    pgtype.Bool{Bool: forceFreshSession, Valid: true},
+			RuntimeMcpOverlay:    overlay.Overlay,
+			RuntimeConnectedApps: overlay.ConnectedApps,
+			OriginatorSource:     attrSource,
+			TriggerEvidenceKind:  attrEvidenceKind,
+			TriggerEvidenceRefID: attrEvidenceRef,
+		})
+		if err != nil {
+			return fmt.Errorf("create channel chat task: %w", err)
+		}
+		task, err = qtx.SetChatTaskInputOwnerSelf(ctx, task.ID)
+		if err != nil {
+			return fmt.Errorf("stamp channel chat input owner: %w", err)
+		}
+		claimed, err := qtx.ClaimChannelChatInputMessages(ctx, db.ClaimChannelChatInputMessagesParams{
+			ChatSessionID: chatSession.ID,
+			TaskID:        task.ID,
+			MessageIds:    messageIDs,
+		})
+		if err != nil {
+			return fmt.Errorf("claim channel chat input: %w", err)
+		}
+		if !containsAllUUIDs(claimed, messageIDs) {
+			return fmt.Errorf("claim channel chat input: one or more explicit messages were unavailable")
+		}
+		return nil
+	}); err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+
+	slog.Info("channel chat task enqueued",
+		"task_id", util.UUIDToString(task.ID),
+		"chat_session_id", util.UUIDToString(chatSession.ID),
+		"agent_id", util.UUIDToString(chatSession.AgentID))
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.NotifyTaskEnqueued(ctx, task)
+	return task, nil
+}
+
+func uniqueUUIDs(ids []pgtype.UUID) []pgtype.UUID {
+	unique := make([]pgtype.UUID, 0, len(ids))
+	seen := make(map[pgtype.UUID]struct{}, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		unique = append(unique, id)
+	}
+	return unique
+}
+
+func containsAllUUIDs(haystack, needles []pgtype.UUID) bool {
+	found := make(map[pgtype.UUID]struct{}, len(haystack))
+	for _, id := range haystack {
+		found[id] = struct{}{}
+	}
+	for _, id := range needles {
+		if _, ok := found[id]; !ok {
+			return false
+		}
+	}
+	return true
+}
+
 // DirectChatSendResult carries the rows a transactional direct-chat send
 // persisted, so the handler can broadcast the user message and shape its
 // response without re-reading them.
@@ -2805,8 +2911,14 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	// row, only an empty chat:done for typing/lifecycle. Keeps the Slack/Lark
 	// silent-drop path. Attachments still force a row — the agent produced a
 	// deliverable the user must see.
-	if isEmpty && pendingAttachments == 0 && !task.ChatInputTaskID.Valid {
-		return nil, nil
+	if isEmpty && pendingAttachments == 0 {
+		isChannel, err := qtx.IsChannelChatSession(ctx, task.ChatSessionID)
+		if err != nil {
+			return nil, fmt.Errorf("detect channel chat session: %w", err)
+		}
+		if isChannel || !task.ChatInputTaskID.Valid {
+			return nil, nil
+		}
 	}
 
 	params := db.CreateChatMessageParams{

@@ -31,6 +31,67 @@ func (q *Queries) ChatSessionHasUserMessage(ctx context.Context, chatSessionID p
 	return has_user_message, err
 }
 
+const claimChannelChatInputMessages = `-- name: ClaimChannelChatInputMessages :many
+WITH boundary AS (
+    SELECT created_at, id
+    FROM chat_message
+    WHERE chat_session_id = $2
+      AND id = ANY($3::uuid[])
+      AND role = 'user'
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+), last_assistant AS (
+    SELECT created_at, id
+    FROM chat_message
+    WHERE chat_session_id = $2
+      AND role = 'assistant'
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+)
+UPDATE chat_message m
+SET task_id = $1
+FROM boundary b
+LEFT JOIN last_assistant a ON TRUE
+WHERE m.chat_session_id = $2
+  AND m.role = 'user'
+  AND m.task_id IS NULL
+  AND (m.created_at, m.id) <= (b.created_at, b.id)
+  AND (a.id IS NULL OR (m.created_at, m.id) > (a.created_at, a.id))
+RETURNING m.id
+`
+
+type ClaimChannelChatInputMessagesParams struct {
+	TaskID        pgtype.UUID   `json:"task_id"`
+	ChatSessionID pgtype.UUID   `json:"chat_session_id"`
+	MessageIds    []pgtype.UUID `json:"message_ids"`
+}
+
+// Seals the explicit debounce batch plus older unowned channel user messages.
+// The newest explicit row is the recovery boundary: this rediscovers durable
+// messages whose in-memory trigger was lost across a process restart without
+// absorbing messages appended after this flush began. The lower bound is the
+// last assistant reply so a rolling deploy cannot replay already-answered
+// legacy channel history whose user rows still have task_id NULL.
+func (q *Queries) ClaimChannelChatInputMessages(ctx context.Context, arg ClaimChannelChatInputMessagesParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, claimChannelChatInputMessages, arg.TaskID, arg.ChatSessionID, arg.MessageIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createChatDraftRestore = `-- name: CreateChatDraftRestore :one
 INSERT INTO chat_draft_restore (id, chat_session_id, task_id, content, attachment_ids)
 VALUES ($1, $2, $3, $4, $5)
@@ -586,6 +647,19 @@ func (q *Queries) HasPendingChatTasksByCreator(ctx context.Context, arg HasPendi
 	return has_pending, err
 }
 
+const isChannelChatSession = `-- name: IsChannelChatSession :one
+SELECT EXISTS (
+    SELECT 1 FROM channel_chat_session_binding WHERE chat_session_id = $1
+)
+`
+
+func (q *Queries) IsChannelChatSession(ctx context.Context, chatSessionID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, isChannelChatSession, chatSessionID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const linkChatMessageToTask = `-- name: LinkChatMessageToTask :exec
 UPDATE chat_message
 SET task_id = $2
@@ -1024,6 +1098,22 @@ func (q *Queries) ListPendingChatTasksByCreator(ctx context.Context, arg ListPen
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockChatSessionForChannelInput = `-- name: LockChatSessionForChannelInput :one
+SELECT id FROM chat_session
+WHERE id = $1
+FOR UPDATE
+`
+
+// Serializes channel flushes for one session. The lock also fences concurrent
+// chat_message inserts through their FK key-share lock, so the recovery claim
+// below has a stable upper boundary and cannot absorb a newer inbound message.
+func (q *Queries) LockChatSessionForChannelInput(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockChatSessionForChannelInput, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const lockChatSessionForDelete = `-- name: LockChatSessionForDelete :one
