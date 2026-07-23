@@ -61,13 +61,20 @@ func writeHeader(b *strings.Builder) {
 // branch protection is not the agent's acceptance criterion, and gives
 // the replacement hand-off phrasing so the urge to prove quality lands
 // on local test output plus a PR link instead of on a wait.
+//
+// The ban is scoped, not absolute: an explicitly requested CI result is
+// still reachable, and it names the one executable way to collect it
+// (a single foreground blocking watch inside the same turn). Enabling
+// auto-merge is not a wait and stays allowed — only waiting for it to
+// land is banned.
 func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("## Background Task Safety\n\n")
 	b.WriteString("Multica marks the task terminal the moment your top-level turn exits — any process, tool call, or subagent owned by this run that is still active is orphaned, its result lost, and the final comment you meant to post after it never sends. There is no background-completion wakeup here.\n\n")
 	b.WriteString("- Do NOT end your turn while background tasks, async subagents, background shell commands, or detached tool calls are still running. Never background-and-yield: never end a turn expecting a future notification or wakeup to resume — it will not arrive.\n")
 	b.WriteString("- This rule applies only to work owned by the current run. External systems triggered by a completed action — for example GitHub Actions after a successful push — are not agent-owned background tasks. Do not wait for them by default; report them as pending and finish the handoff.\n")
-	b.WriteString("- Concretely, after a push or a PR create: do NOT run `gh pr checks --watch`, `gh run watch`, `gh pr merge --auto` waits, or any sleep / retry loop that polls check status. Blocking on external CI is never part of your deliverable. At most take ONE non-blocking status snapshot (`gh pr checks <pr>` once, or `multica issue pull-requests <issue-id>`), report whatever it says at that instant, and finish.\n")
-	b.WriteString("- A repo's merge requirements — \"CI must be green before merge\", required reviews, branch protection — are enforced by GitHub against the merge, not by you inside this run. They are NOT your delivery acceptance criteria and do not license a wait. Wait for a CI result only when the trigger comment or the issue's acceptance criteria explicitly ask you for it.\n")
+	b.WriteString("- Concretely, after a push or a PR create, and unless the explicit exception below applies: do NOT run `gh pr checks --watch`, `gh run watch`, or any sleep / retry loop that polls check status. Enabling auto-merge (`gh pr merge --auto`) is fine — it returns immediately; waiting for it to land is not. Take at most ONE non-blocking status snapshot (`gh pr checks <pr>` once, or `multica issue pull-requests <issue-id>`), report whatever it says at that instant, and finish.\n")
+	b.WriteString("- A repo's merge requirements — \"CI must be green before merge\", required reviews, branch protection — are enforced by GitHub against the merge, not by you inside this run. They are NOT your delivery acceptance criteria and do not license a wait.\n")
+	b.WriteString("- The one exception: when the trigger comment or the issue's acceptance criteria explicitly ask you for the CI result, that result IS the deliverable — then wait for it as ONE foreground blocking call (`gh pr checks <pr> --watch`) inside this same turn and report the outcome. Nothing else re-opens this door.\n")
 	b.WriteString("- Deliver the evidence you already have instead of buying it with a wait: \"Local tests pass (`go test ./...` / `pnpm test`); CI running: <PR link>\". A PR whose CI is still in flight is a complete hand-off — say so plainly and end the turn.\n")
 	b.WriteString("- When a required result from run-owned work must be collected, wait synchronously inside one foreground tool call that blocks to completion (e.g. a blocking test or build command); never split \"start the wait\" and \"collect the result\" across turns.\n")
 	b.WriteString("- If a tool response says to wait for a future notification/reminder, or that it is running in the background so you can keep working, do not rely on that in Multica-managed runs — block on the appropriate wait / output / collect operation before exiting.\n")

@@ -942,6 +942,14 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				"any sleep / retry loop that polls check status",
 				"NOT your delivery acceptance criteria",
 				"CI running: <PR link>",
+				// The ban must stay scoped: an explicitly requested CI
+				// result is still reachable, and the section must name
+				// the one executable way to collect it. Without these
+				// pins the ban could be re-absolutised and the exception
+				// would become unfollowable.
+				"unless the explicit exception below applies",
+				"The one exception",
+				"ONE foreground blocking call (`gh pr checks <pr> --watch`)",
 				"running in the background so you can keep working",
 				"standing by",
 			} {

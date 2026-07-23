@@ -217,11 +217,16 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 		"GitHub Actions after a successful push",
 		"Do not wait for them by default",
 		// MUL-5223 pins: named tool-shape bans, merge requirements
-		// denied as acceptance criteria, replacement hand-off phrasing.
+		// denied as acceptance criteria, replacement hand-off phrasing,
+		// and the scoped escape hatch that keeps an explicitly requested
+		// CI result both permitted and executable.
 		"do NOT run `gh pr checks --watch`",
 		"any sleep / retry loop that polls check status",
 		"NOT your delivery acceptance criteria",
 		"CI running: <PR link>",
+		"unless the explicit exception below applies",
+		"The one exception",
+		"ONE foreground blocking call (`gh pr checks <pr> --watch`)",
 		"running in the background so you can keep working",
 		"standing by",
 	} {
