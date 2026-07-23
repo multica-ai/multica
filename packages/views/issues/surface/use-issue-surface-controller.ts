@@ -270,7 +270,7 @@ export function useIssueSurfaceController({
 
   const activity = useIssueSurfaceActivity();
   const { data: workspaceWorkingAgents = [] } = useQuery(
-    workspaceWorkingAgentsOptions(wsId),
+    workspaceWorkingAgentsOptions(wsId, "issue"),
   );
   const tableAssigneeFilters = useMemo(() => {
     if (!agentRunningFilter) return assigneeFilters;

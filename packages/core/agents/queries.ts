@@ -1,5 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
+import type { WorkspaceWorkingAgentType } from "../types";
 
 export const agentTaskSnapshotKeys = {
   all: (wsId: string) => ["workspaces", wsId, "agent-task-snapshot"] as const,
@@ -8,7 +9,8 @@ export const agentTaskSnapshotKeys = {
 
 export const workspaceWorkingAgentsKeys = {
   all: (wsId: string) => ["workspaces", wsId, "working-agents"] as const,
-  list: (wsId: string) => [...workspaceWorkingAgentsKeys.all(wsId), "list"] as const,
+  list: (wsId: string, type?: WorkspaceWorkingAgentType) =>
+    [...workspaceWorkingAgentsKeys.all(wsId), "list", type ?? "all"] as const,
 };
 
 export const agentActivityKeys = {
@@ -43,10 +45,13 @@ export function agentTaskSnapshotOptions(wsId: string) {
 // Workspace-level working-agent summaries. Task lifecycle WebSocket events
 // invalidate this cache immediately; the short stale time is the reconnect /
 // missed-event safety net.
-export function workspaceWorkingAgentsOptions(wsId: string) {
+export function workspaceWorkingAgentsOptions(
+  wsId: string,
+  type?: WorkspaceWorkingAgentType,
+) {
   return queryOptions({
-    queryKey: workspaceWorkingAgentsKeys.list(wsId),
-    queryFn: () => api.getWorkspaceWorkingAgents(),
+    queryKey: workspaceWorkingAgentsKeys.list(wsId, type),
+    queryFn: () => api.getWorkspaceWorkingAgents(type),
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,

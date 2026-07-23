@@ -14,6 +14,7 @@ export type {
   AgentActivityBucket,
   AgentRunCount,
   WorkspaceWorkingAgent,
+  WorkspaceWorkingAgentType,
   TaskFailureReason,
   AgentRuntime,
   RuntimeDevice,

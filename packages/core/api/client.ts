@@ -33,6 +33,7 @@ import type {
   AgentActivityBucket,
   AgentRunCount,
   WorkspaceWorkingAgent,
+  WorkspaceWorkingAgentType,
   AgentRuntime,
   RuntimeProfile,
   CreateRuntimeProfileRequest,
@@ -1676,11 +1677,16 @@ export class ApiClient {
     return this.fetch(`/api/agent-task-snapshot`);
   }
 
-  // Independent workspace-level projection for the issues header. Unlike the
-  // task snapshot, this already deduplicates running agents and returns the
-  // display fields the chip/hover need.
-  async getWorkspaceWorkingAgents(): Promise<WorkspaceWorkingAgent[]> {
-    return this.fetch(`/api/working-agents`);
+  // Independent workspace-level projection. Unlike the task snapshot, this
+  // already deduplicates running agents and returns only the display fields
+  // consumers need. Callers may narrow the projection by task source.
+  async getWorkspaceWorkingAgents(
+    type?: WorkspaceWorkingAgentType,
+  ): Promise<WorkspaceWorkingAgent[]> {
+    const search = new URLSearchParams();
+    if (type) search.set("type", type);
+    const query = search.toString();
+    return this.fetch(`/api/working-agents${query ? `?${query}` : ""}`);
   }
 
   // Per-agent daily activity for the last 30 days, anchored on

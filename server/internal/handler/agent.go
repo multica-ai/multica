@@ -2043,11 +2043,12 @@ type WorkspaceWorkingAgent struct {
 	RunningTaskCount int32   `json:"running_task_count"`
 }
 
-// ListWorkspaceWorkingAgents returns every currently working user-authored
-// agent in the workspace, independent of issue filters or Table pagination.
-// Access filtering mirrors the other workspace-wide agent aggregations so a
-// private/non-allow-listed agent is never exposed by its name, avatar, count,
-// or even presence.
+// ListWorkspaceWorkingAgents returns currently working user-authored agents in
+// the workspace, independent of issue filters or Table pagination. The
+// optional type query selects issue, autopilot, or chat work; omitting it keeps
+// the all-sources projection. Access filtering mirrors the other workspace-wide
+// agent aggregations so a private/non-allow-listed agent is never exposed by
+// its name, avatar, count, or even presence.
 func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	member, ok := h.workspaceMember(w, r, workspaceID)
@@ -2055,7 +2056,21 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	rows, err := h.Queries.ListWorkspaceWorkingAgents(r.Context(), parseUUID(workspaceID))
+	workType := strings.TrimSpace(r.URL.Query().Get("type"))
+	switch workType {
+	case "", "issue", "autopilot", "chat":
+	default:
+		writeError(w, http.StatusBadRequest, "invalid type: must be issue, autopilot, or chat")
+		return
+	}
+
+	rows, err := h.Queries.ListWorkspaceWorkingAgents(
+		r.Context(),
+		db.ListWorkspaceWorkingAgentsParams{
+			WorkspaceID: parseUUID(workspaceID),
+			WorkType:    workType,
+		},
+	)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list workspace working agents")
 		return

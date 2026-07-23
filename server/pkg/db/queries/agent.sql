@@ -1223,11 +1223,13 @@ SELECT t.* FROM (
 ) t;
 
 -- name: ListWorkspaceWorkingAgents :many
--- Workspace-level source for the issues-header "agents working" chip.
+-- Workspace-level source for consumers that show currently working agents.
 -- One row per visible, user-authored agent with at least one task that has
--- actually started running. Chat/autopilot tasks count too: the chip reports
--- who is working in the workspace, not only work linked to the current issue
--- surface. Hidden system agents and archived agents never appear.
+-- actually started running. work_type is optional (empty = every source);
+-- source-specific reads use the same precedence as computeTaskKind:
+-- chat > autopilot > issue. "issue" intentionally groups direct and
+-- comment-triggered issue work. Quick-create work is present only in the
+-- unfiltered projection because it has no source FK yet.
 SELECT
   a.id,
   a.name,
@@ -1239,6 +1241,21 @@ WHERE a.workspace_id = $1
   AND a.kind = 'user'
   AND a.archived_at IS NULL
   AND atq.status = 'running'
+  AND (
+    @work_type::text = ''
+    OR (@work_type::text = 'chat' AND atq.chat_session_id IS NOT NULL)
+    OR (
+      @work_type::text = 'autopilot'
+      AND atq.chat_session_id IS NULL
+      AND atq.autopilot_run_id IS NOT NULL
+    )
+    OR (
+      @work_type::text = 'issue'
+      AND atq.chat_session_id IS NULL
+      AND atq.autopilot_run_id IS NULL
+      AND atq.issue_id IS NOT NULL
+    )
+  )
 GROUP BY a.id, a.name, a.avatar_url, a.created_at
 ORDER BY a.created_at ASC;
 

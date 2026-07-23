@@ -230,7 +230,7 @@ describe("ApiClient server Table query", () => {
 });
 
 describe("ApiClient workspace working agents", () => {
-  it("reads the independent workspace-level projection", async () => {
+  it("supports an optional source-type filter", async () => {
     const payload = [
       {
         id: "agent-1",
@@ -239,20 +239,25 @@ describe("ApiClient workspace working agents", () => {
         running_task_count: 2,
       },
     ];
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify(payload), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await expect(client.getWorkspaceWorkingAgents()).resolves.toEqual(payload);
-    expect(fetchMock).toHaveBeenCalledWith(
-      "https://api.example.test/api/working-agents",
-      expect.any(Object),
+    await expect(client.getWorkspaceWorkingAgents("issue")).resolves.toEqual(
+      payload,
     );
+    await expect(client.getWorkspaceWorkingAgents()).resolves.toEqual(payload);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.example.test/api/working-agents?type=issue",
+      "https://api.example.test/api/working-agents",
+    ]);
   });
 });
 

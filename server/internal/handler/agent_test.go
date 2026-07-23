@@ -153,21 +153,70 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	workingAgentID := createHandlerTestAgent(t, "working-agents-running", []byte(`{}`))
 	queuedAgentID := createHandlerTestAgent(t, "working-agents-queued", []byte(`{}`))
 
-	insertedTaskIDs := make([]string, 0, 3)
+	// Insert the source issue directly: this test is about the working-agent
+	// projection, so it must not inherit unrelated CreateIssue validation or
+	// side effects.
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, number, title, status, priority,
+			creator_type, creator_id
+		)
+		SELECT $1, COALESCE(MIN(number), 0) - 1, $2, 'todo', 'none',
+		       'member', $3
+		FROM issue
+		WHERE workspace_id = $1
+		RETURNING id
+	`, testWorkspaceID, "working-agent-source-filter", testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("insert source issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+	chatSessionID := createHandlerTestChatSession(t, workingAgentID)
+	autopilotID := insertListTestAutopilot(t, workingAgentID, "working-agent-source-filter")
+	var autopilotRunID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, source, status)
+		VALUES ($1, 'manual', 'running')
+		RETURNING id
+	`, autopilotID).Scan(&autopilotRunID); err != nil {
+		t.Fatalf("insert autopilot run: %v", err)
+	}
+
+	// Four running tasks on one agent: issue, chat, autopilot, and
+	// quick-create (no source FK). The autopilot task also carries issue_id to
+	// prove source precedence keeps it out of type=issue.
+	insertedTaskIDs := make([]string, 0, 5)
 	for _, fixture := range []struct {
-		agentID string
-		status  string
+		agentID        string
+		status         string
+		issueID        any
+		chatSessionID  any
+		autopilotRunID any
 	}{
-		{workingAgentID, "running"},
-		{workingAgentID, "running"},
-		{queuedAgentID, "queued"},
+		{workingAgentID, "running", issueID, nil, nil},
+		{workingAgentID, "running", nil, chatSessionID, nil},
+		{workingAgentID, "running", issueID, nil, autopilotRunID},
+		{workingAgentID, "running", nil, nil, nil},
+		{queuedAgentID, "queued", nil, nil, nil},
 	} {
 		var taskID string
 		if err := testPool.QueryRow(ctx, `
-			INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
-			VALUES ($1, $2, $3, 0)
+			INSERT INTO agent_task_queue (
+				agent_id, runtime_id, status, priority, issue_id,
+				chat_session_id, autopilot_run_id, started_at
+			)
+			VALUES ($1, $2, $3, 0, $4, $5, $6, now())
 			RETURNING id
-		`, fixture.agentID, testRuntimeID, fixture.status).Scan(&taskID); err != nil {
+		`,
+			fixture.agentID,
+			testRuntimeID,
+			fixture.status,
+			fixture.issueID,
+			fixture.chatSessionID,
+			fixture.autopilotRunID,
+		).Scan(&taskID); err != nil {
 			t.Fatalf("insert %s task: %v", fixture.status, err)
 		}
 		insertedTaskIDs = append(insertedTaskIDs, taskID)
@@ -178,37 +227,65 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		}
 	})
 
+	for _, tc := range []struct {
+		name      string
+		query     string
+		wantCount int32
+	}{
+		{name: "all sources", wantCount: 4},
+		{name: "issue", query: "?type=issue", wantCount: 1},
+		{name: "autopilot", query: "?type=autopilot", wantCount: 1},
+		{name: "chat", query: "?type=chat", wantCount: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			testHandler.ListWorkspaceWorkingAgents(
+				w,
+				newRequest(http.MethodGet, "/api/working-agents"+tc.query, nil),
+			)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var agents []WorkspaceWorkingAgent
+			if err := json.NewDecoder(w.Body).Decode(&agents); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+
+			var working *WorkspaceWorkingAgent
+			for i := range agents {
+				switch agents[i].ID {
+				case workingAgentID:
+					working = &agents[i]
+				case queuedAgentID:
+					t.Errorf("queued-only agent must not be returned")
+				}
+			}
+			if working == nil {
+				t.Fatalf("running agent %s was not returned", workingAgentID)
+			}
+			if working.Name != "working-agents-running" {
+				t.Errorf("name = %q, want %q", working.Name, "working-agents-running")
+			}
+			if working.RunningTaskCount != tc.wantCount {
+				t.Errorf("running_task_count = %d, want %d", working.RunningTaskCount, tc.wantCount)
+			}
+		})
+	}
+}
+
+func TestListWorkspaceWorkingAgentsRejectsInvalidType(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
 	w := httptest.NewRecorder()
 	testHandler.ListWorkspaceWorkingAgents(
 		w,
-		newRequest(http.MethodGet, "/api/working-agents", nil),
+		newRequest(http.MethodGet, "/api/working-agents?type=quick_create", nil),
 	)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ListWorkspaceWorkingAgents: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-
-	var agents []WorkspaceWorkingAgent
-	if err := json.NewDecoder(w.Body).Decode(&agents); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-
-	var working *WorkspaceWorkingAgent
-	for i := range agents {
-		switch agents[i].ID {
-		case workingAgentID:
-			working = &agents[i]
-		case queuedAgentID:
-			t.Errorf("queued-only agent must not be returned")
-		}
-	}
-	if working == nil {
-		t.Fatalf("running agent %s was not returned", workingAgentID)
-	}
-	if working.Name != "working-agents-running" {
-		t.Errorf("name = %q, want %q", working.Name, "working-agents-running")
-	}
-	if working.RunningTaskCount != 2 {
-		t.Errorf("running_task_count = %d, want 2", working.RunningTaskCount)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 }
 

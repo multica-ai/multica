@@ -3945,9 +3945,29 @@ WHERE a.workspace_id = $1
   AND a.kind = 'user'
   AND a.archived_at IS NULL
   AND atq.status = 'running'
+  AND (
+    $2::text = ''
+    OR ($2::text = 'chat' AND atq.chat_session_id IS NOT NULL)
+    OR (
+      $2::text = 'autopilot'
+      AND atq.chat_session_id IS NULL
+      AND atq.autopilot_run_id IS NOT NULL
+    )
+    OR (
+      $2::text = 'issue'
+      AND atq.chat_session_id IS NULL
+      AND atq.autopilot_run_id IS NULL
+      AND atq.issue_id IS NOT NULL
+    )
+  )
 GROUP BY a.id, a.name, a.avatar_url, a.created_at
 ORDER BY a.created_at ASC
 `
+
+type ListWorkspaceWorkingAgentsParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	WorkType    string      `json:"work_type"`
+}
 
 type ListWorkspaceWorkingAgentsRow struct {
 	ID               pgtype.UUID `json:"id"`
@@ -3956,13 +3976,15 @@ type ListWorkspaceWorkingAgentsRow struct {
 	RunningTaskCount int32       `json:"running_task_count"`
 }
 
-// Workspace-level source for the issues-header "agents working" chip.
+// Workspace-level source for consumers that show currently working agents.
 // One row per visible, user-authored agent with at least one task that has
-// actually started running. Chat/autopilot tasks count too: the chip reports
-// who is working in the workspace, not only work linked to the current issue
-// surface. Hidden system agents and archived agents never appear.
-func (q *Queries) ListWorkspaceWorkingAgents(ctx context.Context, workspaceID pgtype.UUID) ([]ListWorkspaceWorkingAgentsRow, error) {
-	rows, err := q.db.Query(ctx, listWorkspaceWorkingAgents, workspaceID)
+// actually started running. work_type is optional (empty = every source);
+// source-specific reads use the same precedence as computeTaskKind:
+// chat > autopilot > issue. "issue" intentionally groups direct and
+// comment-triggered issue work. Quick-create work is present only in the
+// unfiltered projection because it has no source FK yet.
+func (q *Queries) ListWorkspaceWorkingAgents(ctx context.Context, arg ListWorkspaceWorkingAgentsParams) ([]ListWorkspaceWorkingAgentsRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceWorkingAgents, arg.WorkspaceID, arg.WorkType)
 	if err != nil {
 		return nil, err
 	}

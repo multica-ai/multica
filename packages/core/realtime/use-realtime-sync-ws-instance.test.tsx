@@ -228,7 +228,7 @@ describe("useRealtimeSync — Table server membership invalidation", () => {
       queryKey: issueKeys.tableAll("ws-1"),
     });
     expect(invalidate).toHaveBeenCalledWith({
-      queryKey: workspaceWorkingAgentsKeys.list("ws-1"),
+      queryKey: workspaceWorkingAgentsKeys.all("ws-1"),
     });
   });
 

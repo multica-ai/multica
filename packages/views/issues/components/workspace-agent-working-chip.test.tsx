@@ -7,6 +7,7 @@ import { renderWithI18n } from "../../test/i18n";
 
 const mockState = vi.hoisted(() => ({
   agents: [] as WorkspaceWorkingAgent[],
+  requestedType: undefined as string | undefined,
   avatarAgentIds: undefined as readonly string[] | undefined,
   buttonVariant: undefined as string | undefined,
 }));
@@ -16,9 +17,12 @@ vi.mock("@multica/core/hooks", () => ({
 }));
 
 vi.mock("@multica/core/agents", () => ({
-  workspaceWorkingAgentsOptions: (wsId: string) => ({
-    queryKey: ["workspaces", wsId, "working-agents", "list"],
-  }),
+  workspaceWorkingAgentsOptions: (wsId: string, type?: string) => {
+    mockState.requestedType = type;
+    return {
+      queryKey: ["workspaces", wsId, "working-agents", "list", type ?? "all"],
+    };
+  },
 }));
 
 vi.mock("../../agents/components/agent-avatar-stack", () => ({
@@ -74,6 +78,7 @@ beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
   mockState.agents = [];
+  mockState.requestedType = undefined;
   mockState.avatarAgentIds = undefined;
   mockState.buttonVariant = undefined;
 });
@@ -98,6 +103,7 @@ describe("WorkspaceAgentWorkingChip", () => {
       "agent-2",
       "agent-3",
     ]);
+    expect(mockState.requestedType).toBe("issue");
     expect(mockState.buttonVariant).toBe("brandSubtle");
   });
 

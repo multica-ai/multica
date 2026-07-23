@@ -661,6 +661,22 @@ describe("useIssueSurfaceController", () => {
     store.getState().setViewMode("table");
     store.getState().toggleAgentRunningFilter();
     listIssues.mockResolvedValue({ issues: [], total: 0 });
+    const getWorkspaceWorkingAgents = vi.fn(() =>
+      Promise.resolve([
+        {
+          id: "agent-1",
+          name: "Agent 1",
+          avatar_url: null,
+          running_task_count: 1,
+        },
+        {
+          id: "agent-2",
+          name: "Agent 2",
+          avatar_url: null,
+          running_task_count: 2,
+        },
+      ] satisfies WorkspaceWorkingAgent[]),
+    );
     setApiInstance({
       listIssues,
       listGroupedIssues: vi.fn(() => never()),
@@ -670,22 +686,7 @@ describe("useIssueSurfaceController", () => {
           { id: "task-1", issue_id: "issue-running", status: "running" },
         ] as unknown as AgentTask[]),
       ),
-      getWorkspaceWorkingAgents: vi.fn(() =>
-        Promise.resolve([
-          {
-            id: "agent-1",
-            name: "Agent 1",
-            avatar_url: null,
-            running_task_count: 1,
-          },
-          {
-            id: "agent-2",
-            name: "Agent 2",
-            avatar_url: null,
-            running_task_count: 2,
-          },
-        ] satisfies WorkspaceWorkingAgent[]),
-      ),
+      getWorkspaceWorkingAgents,
       getChildIssueProgress: vi.fn(() => never()),
     } as unknown as ApiClient);
 
@@ -705,6 +706,7 @@ describe("useIssueSurfaceController", () => {
       ]),
     );
     expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
+    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue");
     expect(listIssues).not.toHaveBeenCalled();
   });
 

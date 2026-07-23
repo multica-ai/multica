@@ -94,7 +94,9 @@ export function WorkspaceAgentWorkingChip({
 }: WorkspaceAgentWorkingChipProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const { data: agents = [] } = useQuery(workspaceWorkingAgentsOptions(wsId));
+  const { data: agents = [] } = useQuery(
+    workspaceWorkingAgentsOptions(wsId, "issue"),
+  );
   const agentIds = agents.map((agent) => agent.id);
   const agentCount = agents.length;
   const hasAgents = agentCount > 0;

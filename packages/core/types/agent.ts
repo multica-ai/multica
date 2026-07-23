@@ -208,6 +208,8 @@ export interface WorkspaceWorkingAgent {
   running_task_count: number;
 }
 
+export type WorkspaceWorkingAgentType = "issue" | "autopilot" | "chat";
+
 /**
  * A departed-member-safe user ref resolved from the global user table. `name` /
  * `email` / `avatar_url` are absent until the server hydrates them (present on
