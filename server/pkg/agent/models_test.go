@@ -761,7 +761,7 @@ claude-sonnet claude-sonnet-4-6
 			t.Errorf("section header leaked into result: %+v", m)
 		}
 	}
-	if models[0].ID != "deepseek-v4" || models[1].ID != "claude-sonnet-4-6" {
+	if models[0].ID != "deepseek-v4" || models[1].ID != "claude-sonnet" {
 		t.Errorf("unexpected agents: %+v", models)
 	}
 }
@@ -793,18 +793,12 @@ func TestParseOpenclawAgentsJSONWrapped(t *testing.T) {
 	if !ok {
 		t.Fatal("expected parseOpenclawAgentsJSON to accept wrapped object")
 	}
-	// KAV-14: when only name+model are present, ID is the model id.
-	if len(models) != 1 || models[0].ID != "bar" {
+	if len(models) != 1 || models[0].ID != "foo" || models[0].ModelID != "bar" {
 		t.Errorf("unexpected: %+v", models)
 	}
 }
 
 func TestOpenclawEntriesToModelsUsesIDOverName(t *testing.T) {
-	// KAV-14: when id, name and model are all present, Model.ID should
-	// use the model field because openclaw agent's per-run flag
-	// `--model <provider/model-or-id>` expects the bound model id.
-	// The agent id still surfaces in the label so users can tell
-	// registered agents apart when several share a model.
 	input := []byte(`[{"id": "sub2api", "name": "Sub2API OPS", "model": "gpt-4o"}]`)
 	models, ok := parseOpenclawAgentsJSON(input)
 	if !ok {
@@ -813,11 +807,11 @@ func TestOpenclawEntriesToModelsUsesIDOverName(t *testing.T) {
 	if len(models) != 1 {
 		t.Fatalf("got %d models, want 1", len(models))
 	}
-	if models[0].ID != "gpt-4o" {
-		t.Errorf("Model.ID = %q, want %q (should use model, then id, then name)", models[0].ID, "gpt-4o")
+	if models[0].ID != "sub2api" || models[0].ModelID != "gpt-4o" {
+		t.Errorf("entry = %+v, want agent ID sub2api and model gpt-4o", models[0])
 	}
-	if models[0].Label != "Sub2API OPS (gpt-4o)" {
-		t.Errorf("Model.Label = %q, want %q (should surface id in label)", models[0].Label, "Sub2API OPS (gpt-4o)")
+	if models[0].Label != "Sub2API OPS (sub2api)" {
+		t.Errorf("Model.Label = %q, want %q", models[0].Label, "Sub2API OPS (sub2api)")
 	}
 }
 

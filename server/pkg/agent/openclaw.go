@@ -41,9 +41,9 @@ var openclawBlockedArgs = map[string]blockedArgMode{
 	"--json":          blockedStandalone, // JSON output for daemon communication
 	"--session-id":    blockedWithValue,  // managed by daemon for session resumption
 	"--message":       blockedWithValue,  // prompt is set by daemon
-	"--agent":         blockedWithValue,  // KAV-14: --agent is the legacy routing flag; daemon now forwards --model from the dropdown
 	"--system-prompt": blockedWithValue,  // openclaw agent does not accept --system-prompt; instructions are injected into --message
 }
+
 // Note: --model is intentionally NOT blocked — openclaw agent supports
 // `--model <provider/model-or-id>` as a per-run override (see
 // `openclaw agent --help`). The daemon emits it from opts.Model, which
@@ -208,6 +208,9 @@ func buildOpenclawArgs(prompt, sessionID string, opts ExecOptions, logger *slog.
 	// user hasn't already set --model via custom_args — custom_args wins
 	// for backward compatibility with existing configs.
 	customArgs := filterCustomArgs(opts.CustomArgs, openclawBlockedArgs, logger)
+	if opts.AgentID != "" && !customArgsContains(customArgs, "--agent") {
+		args = append(args, "--agent", opts.AgentID)
+	}
 	if opts.Model != "" && !customArgsContains(customArgs, "--model") {
 		args = append(args, "--model", opts.Model)
 	}

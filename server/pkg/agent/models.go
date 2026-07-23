@@ -31,6 +31,7 @@ type Model struct {
 	ID       string `json:"id"`
 	Label    string `json:"label"`
 	Provider string `json:"provider,omitempty"`
+	ModelID  string `json:"model,omitempty"`
 	Default  bool   `json:"default,omitempty"`
 	// Thinking advertises the runtime's reasoning/effort catalog for this
 	// model. nil means the runtime/model has no thinking-level control
@@ -1420,9 +1421,10 @@ func discoverOpenclawAgents(ctx context.Context, executablePath string) ([]Model
 // Older openclaw versions may emit only `name` or `id`; we fall
 // back through them as the routing key for backward compatibility.
 type openclawAgentEntry struct {
-	Name  string `json:"name"`
-	ID    string `json:"id"`
-	Model string `json:"model"`
+	Name         string `json:"name"`
+	IdentityName string `json:"identityName"`
+	ID           string `json:"id"`
+	Model        string `json:"model"`
 }
 
 // parseOpenclawAgentsJSON accepts `openclaw agents list --json`-style
@@ -1462,18 +1464,21 @@ func openclawEntriesToModels(entries []openclawAgentEntry) []Model {
 		// agent id as the routing key. The display name still comes
 		// from `name` (or `id`) so the label keeps distinguishing
 		// agents when several share the same model.
-		id := e.Model
-		if id == "" {
-			id = e.ID
-		}
+		id := e.ID
 		if id == "" {
 			id = e.Name
+		}
+		if id == "" {
+			id = e.IdentityName
 		}
 		if id == "" || seen[id] {
 			continue
 		}
 		seen[id] = true
 		displayName := e.Name
+		if displayName == "" {
+			displayName = e.IdentityName
+		}
 		if displayName == "" {
 			displayName = e.ID
 		}
@@ -1487,9 +1492,30 @@ func openclawEntriesToModels(entries []openclawAgentEntry) []Model {
 		// agent id happened to match the model id) so the label
 		// format stays predictable.
 		label := displayName + " (" + id + ")"
-		models = append(models, Model{ID: id, Label: label, Provider: "openclaw"})
+		models = append(models, Model{ID: id, Label: label, Provider: "openclaw", ModelID: e.Model})
 	}
 	return models
+}
+
+// ResolveOpenclawSelection preserves compatibility with persisted agent.model
+// values. Agent IDs take precedence over model IDs so an old selection keeps
+// its identity routing; a model-only selection remains a per-run override.
+func ResolveOpenclawSelection(value string, catalog []Model) (agentID, model string, err error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", "", nil
+	}
+	for _, candidate := range catalog {
+		if candidate.ID == value {
+			return candidate.ID, candidate.ModelID, nil
+		}
+	}
+	for _, candidate := range catalog {
+		if candidate.ModelID == value {
+			return "", value, nil
+		}
+	}
+	return "", "", fmt.Errorf("value %q is neither a known agent id nor a known model id - re-select from the dropdown", value)
 }
 
 // parseOpenclawAgents extracts agent names from the text output of
@@ -1525,10 +1551,7 @@ func parseOpenclawAgents(output string) []Model {
 		// plain-text listing anyway. Dedup by id only — the name is
 		// purely display, and double-marking (first by name, then by
 		// id) would skip the first valid row whenever name == model.
-		id := model
-		if id == "" {
-			id = name
-		}
+		id := name
 		if seen[id] {
 			continue
 		}
@@ -1537,6 +1560,7 @@ func parseOpenclawAgents(output string) []Model {
 			ID:       id,
 			Label:    name + " (" + id + ")",
 			Provider: "openclaw",
+			ModelID:  model,
 		})
 	}
 	return models

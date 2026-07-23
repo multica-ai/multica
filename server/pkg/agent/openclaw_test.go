@@ -955,6 +955,7 @@ func TestBuildOpenclawArgsForwardsModelToFlag(t *testing.T) {
 	// dropdown-selected model id via `--model`. `--system-prompt` is still
 	// rejected by OpenClaw and must not be emitted.
 	args := buildOpenclawArgs("task", "ses-2", ExecOptions{
+		AgentID:      "main",
 		Model:        "deepseek/deepseek-v4-flash",
 		SystemPrompt: "You are a helpful agent.",
 	}, slog.Default())
@@ -973,10 +974,8 @@ func TestBuildOpenclawArgsForwardsModelToFlag(t *testing.T) {
 		t.Errorf("--model value = %q, want %q", got, "deepseek/deepseek-v4-flash")
 	}
 
-	// --agent must not be auto-emitted by the daemon — routing via
-	// agent id is the user's responsibility through custom_args.
-	if idx := indexOf(args, "--agent"); idx != -1 {
-		t.Errorf("daemon must not auto-emit --agent, got args: %v", args)
+	if idx := indexOf(args, "--agent"); idx == -1 || args[idx+1] != "main" {
+		t.Errorf("daemon must emit --agent main, got args: %v", args)
 	}
 }
 
@@ -1057,11 +1056,7 @@ func TestBuildOpenclawArgsTimeout(t *testing.T) {
 func TestBuildOpenclawArgsFiltersBlockedCustomArgs(t *testing.T) {
 	t.Parallel()
 
-	// KAV-14: --agent is now blocked (legacy routing flag), --model is
-	// NOT blocked (OpenClaw accepts it as a per-run override and the
-	// daemon forwards it from the dropdown). Users must not be able to
-	// re-introduce the banned flags via custom_args — they would crash
-	// `openclaw agent` just like the direct forward did.
+	// --agent and --model are both user-configurable routing controls.
 	args := buildOpenclawArgs("task", "ses-6", ExecOptions{
 		CustomArgs: []string{
 			"--agent", "research-bot",
@@ -1072,9 +1067,8 @@ func TestBuildOpenclawArgsFiltersBlockedCustomArgs(t *testing.T) {
 		},
 	}, slog.Default())
 
-	// --agent is now blocked; user-supplied value must be stripped.
-	if idx := indexOf(args, "--agent"); idx != -1 {
-		t.Errorf("--agent should be filtered from custom_args: %v", args)
+	if idx := indexOf(args, "--agent"); idx == -1 || args[idx+1] != "research-bot" {
+		t.Errorf("--agent should survive custom_args: %v", args)
 	}
 	// --model is no longer blocked — user-supplied value survives.
 	if idx := indexOf(args, "--model"); idx == -1 || idx+1 >= len(args) || args[idx+1] != "gpt-4o" {
@@ -1574,5 +1568,111 @@ func TestOpenclawExecuteAllowsCurrentVersion(t *testing.T) {
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+func resolvedAgentModel(agentModel string, knownAgents, knownModels []string) (agentID, model string, err error) {
+	catalog := make([]Model, 0, len(knownAgents)+len(knownModels))
+	for _, id := range knownAgents {
+		catalog = append(catalog, Model{ID: id})
+	}
+	for _, id := range knownModels {
+		catalog = append(catalog, Model{ModelID: id})
+	}
+	return ResolveOpenclawSelection(agentModel, catalog)
+}
+
+// TestKAV14MigrationCases validates the v2 migration compatibility layer.
+//
+// KAV-14 v2 adds an AgentID field alongside Model. The persisted `agent.model`
+// value must be resolved to either an agent id (for --agent routing) or a
+// model id (for --model per-run override). Resolution order:
+//  1. Try as agent id — match against known agent list
+//  2. Try as model id — match against known model catalog
+//  3. Fail — fatal error, cannot silently mismatch
+//
+// These cases are the contract for the v2 migration. Once resolvedAgentModel
+// is implemented by Codex, run these tests to validate.
+//
+// design note: PowerShell 5.1 cannot use `it`-blocks; this Go test uses
+// standard table-driven (hash-map) pattern.
+func TestKAV14MigrationCases(t *testing.T) {
+	t.Parallel()
+
+	type migrationCase struct {
+		name        string   // case label
+		agentModel  string   // persisted `agent.model` value
+		knownAgents []string // registered agent IDs (from `openclaw agents list`)
+		knownModels []string // recognized model IDs (from model catalog)
+		wantAgentID string   // expected resolved AgentID (empty = should not set)
+		wantModel   string   // expected resolved Model (empty = should not set)
+		wantErr     bool     // expect a fatal error?
+	}
+
+	tests := []migrationCase{
+		{
+			name:        "persisted_agent_id_resolves_to_agent",
+			agentModel:  "main",
+			knownAgents: []string{"main", "research-bot", "sub2api"},
+			knownModels: []string{"deepseek/deepseek-v4-flash", "gpt-4o"},
+			wantAgentID: "main",
+			wantModel:   "",
+			wantErr:     false,
+		},
+		{
+			name:        "persisted_model_id_resolves_to_model",
+			agentModel:  "deepseek/deepseek-v4-flash",
+			knownAgents: []string{"main", "research-bot"},
+			knownModels: []string{"deepseek/deepseek-v4-flash", "gpt-4o"},
+			wantAgentID: "",
+			wantModel:   "deepseek/deepseek-v4-flash",
+			wantErr:     false,
+		},
+		{
+			name: "stale_agent_id_no_longer_registered",
+			// agent.model = "main" but the agent was re-registered as "main-v2"
+			// after an upgrade. Resolution: agent id miss -> model id miss -> fatal.
+			agentModel:  "main",
+			knownAgents: []string{"main-v2", "research-bot"},
+			knownModels: []string{"deepseek/deepseek-v4-flash"},
+			wantAgentID: "",
+			wantModel:   "",
+			wantErr:     true,
+		},
+		{
+			name:        "garbage_value_fatal",
+			agentModel:  "random-garbage",
+			knownAgents: []string{"main", "research-bot"},
+			knownModels: []string{"deepseek/deepseek-v4-flash"},
+			wantAgentID: "",
+			wantModel:   "",
+			wantErr:     true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			gotAgentID, gotModel, err := resolvedAgentModel(
+				tc.agentModel,
+				tc.knownAgents,
+				tc.knownModels,
+			)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error for agentModel=%q, got agentID=%q model=%q",
+						tc.agentModel, gotAgentID, gotModel)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error for agentModel=%q: %v", tc.agentModel, err)
+			}
+			if gotAgentID != tc.wantAgentID {
+				t.Errorf("agentID = %q, want %q", gotAgentID, tc.wantAgentID)
+			}
+			if gotModel != tc.wantModel {
+				t.Errorf("model = %q, want %q", gotModel, tc.wantModel)
+			}
+		})
 	}
 }

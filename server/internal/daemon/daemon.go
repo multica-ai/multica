@@ -2416,6 +2416,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		ID       string             `json:"id"`
 		Label    string             `json:"label"`
 		Provider string             `json:"provider,omitempty"`
+		ModelID  string             `json:"model,omitempty"`
 		Default  bool               `json:"default,omitempty"`
 		Thinking *modelThinkingWire `json:"thinking,omitempty"`
 	}
@@ -2425,6 +2426,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 			ID:       m.ID,
 			Label:    m.Label,
 			Provider: m.Provider,
+			ModelID:  m.ModelID,
 			Default:  m.Default,
 		}
 		if m.Thinking != nil {
@@ -4516,6 +4518,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if model == "" {
 		model = entry.Model
 	}
+	openclawAgentID := ""
+	if provider == "openclaw" && task.Agent != nil && strings.TrimSpace(task.Agent.Model) != "" {
+		// agent.model historically stored the OpenClaw agent id. Newer
+		// callers may persist a bound model id instead, so resolve both
+		// forms against the live discovery result before launching.
+		configured := strings.TrimSpace(task.Agent.Model)
+		catalog, discoverErr := agent.ListModels(ctx, provider, entry.Path)
+		if discoverErr != nil {
+			return TaskResult{}, fmt.Errorf("resolve openclaw routing value %q: %w", configured, discoverErr)
+		}
+		var resolveErr error
+		openclawAgentID, model, resolveErr = agent.ResolveOpenclawSelection(configured, catalog)
+		if resolveErr != nil {
+			return TaskResult{}, fmt.Errorf("resolve openclaw routing value %q: %w", configured, resolveErr)
+		}
+	}
 	thinkingLevel := ""
 	if task.Agent != nil {
 		thinkingLevel = task.Agent.ThinkingLevel
@@ -4556,6 +4574,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	execOpts := agent.ExecOptions{
 		Cwd:                       env.WorkDir,
 		Model:                     model,
+		AgentID:                   openclawAgentID,
 		ThreadName:                deriveTaskThreadName(task),
 		Timeout:                   d.cfg.AgentTimeout,
 		SemanticInactivityTimeout: d.cfg.CodexSemanticInactivityTimeout,
