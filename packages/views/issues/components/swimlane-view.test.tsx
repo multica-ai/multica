@@ -726,7 +726,13 @@ describe("SwimLaneView", () => {
 
     expect(mockOnMoveIssue).toHaveBeenCalledWith(
       "orphan-1",
-      { parent_issue_id: null, status: "in_progress", position: 300 },
+      {
+        parent_issue_id: null,
+        status: "in_progress",
+        position: 300,
+        before_id: null,
+        after_id: null,
+      },
       expect.any(Function),
     );
   });

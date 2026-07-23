@@ -39,8 +39,9 @@ import { useRecentIssuesStore } from "./stores";
 import type { GroupedIssuesResponse, InboxItem, Issue, IssueAssigneeGroup, IssueReaction, IssueStatus } from "../types";
 import type {
   CreateIssueRequest,
-  UpdateIssueRequest,
   ListIssuesCache,
+  MoveIssueRequest,
+  UpdateIssueRequest,
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
@@ -60,6 +61,15 @@ export type ToggleIssueReactionVars = {
   emoji: string;
   existing: IssueReaction | undefined;
 };
+
+export type UpdateIssueMutationInput = {
+  id: string;
+  /**
+   * Present only for drag/drop. `position` remains in the optimistic patch,
+   * while the request sent to the server contains relative anchors instead.
+   */
+  move_intent?: Pick<MoveIssueRequest, "before_id" | "after_id">;
+} & UpdateIssueRequest;
 
 // ---------------------------------------------------------------------------
 // Per-status pagination
@@ -222,9 +232,12 @@ export function useUpdateIssue() {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
-    mutationFn: ({ id, ...data }: { id: string } & UpdateIssueRequest) =>
-      api.updateIssue(id, data),
-    onMutate: ({ id, ...data }) => {
+    mutationFn: ({ id, move_intent: moveIntent, ...data }: UpdateIssueMutationInput) => {
+      if (!moveIntent) return api.updateIssue(id, data);
+      const { position: _optimisticPosition, ...target } = data;
+      return api.moveIssue(id, { ...target, ...moveIntent });
+    },
+    onMutate: ({ id, move_intent: _moveIntent, ...data }) => {
       // suppress_run / handoff_note are write-time control fields, not Issue
       // columns — they steer enqueue/injection on the server and must never be
       // written into the query cache (MUL-3375). Strip them from the patch; the
@@ -322,7 +335,13 @@ export function useUpdateIssue() {
       // optimistically; against the post-write entity the changed dims come
       // out false unless the server coerced a different value, so this pass
       // is the plain surgical patch it always was.
-      const { suppress_run: _suppressRun, handoff_note: _handoffNote, id: _id, ...intent } = vars;
+      const {
+        suppress_run: _suppressRun,
+        handoff_note: _handoffNote,
+        move_intent: _moveIntent,
+        id: _id,
+        ...intent
+      } = vars;
       // Drop `properties` from the reconcile payload: the bag is owned by the
       // property mutation pipeline (single-key atomic writes + its own
       // optimistic state). An UpdateIssue snapshot taken before a concurrent

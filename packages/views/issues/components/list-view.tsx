@@ -31,6 +31,7 @@ import {
   buildColumns,
   computePosition,
   findColumn,
+  getMoveAnchors,
   insertIdByPosition,
   issueMatchesGroup,
   getMoveUpdates,
@@ -269,17 +270,24 @@ function ListViewImpl({
         // jumped across when the mutation settled — the same "snaps back, then
         // moves" glitch the board view had. Placement mirrors the cache
         // (insertIdByPosition) so the settle rebuild is a visual no-op.
+        const targetIds = insertIdByPosition(
+          (cols[finalCol] ?? []).filter((id) => id !== activeId),
+          activeId,
+          currentIssue.position,
+          map,
+        );
         setColumns((prev) => {
           const fromIds = (prev[activeCol] ?? []).filter((cid) => cid !== activeId);
-          const toIds = insertIdByPosition(
-            prev[finalCol] ?? [],
-            activeId,
-            currentIssue.position,
-            map,
-          );
-          return { ...prev, [activeCol]: fromIds, [finalCol]: toIds };
+          return { ...prev, [activeCol]: fromIds, [finalCol]: targetIds };
         });
-        onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position), beginSettle());
+        onMoveIssue(
+          activeId,
+          {
+            ...getMoveUpdates(finalGroup, currentIssue.position),
+            ...getMoveAnchors(targetIds, activeId),
+          },
+          beginSettle(),
+        );
         return;
       }
 
@@ -298,7 +306,14 @@ function ListViewImpl({
       // beginSettle() also bumps settleVersion on settle (board-view did, this
       // branch did not) so a failed position move reverts instead of stranding
       // the row at the drop target.
-      onMoveIssue(activeId, getMoveUpdates(finalGroup, newPosition), beginSettle());
+      onMoveIssue(
+        activeId,
+        {
+          ...getMoveUpdates(finalGroup, newPosition),
+          ...getMoveAnchors(finalIds, activeId),
+        },
+        beginSettle(),
+      );
     },
     [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef],
   );

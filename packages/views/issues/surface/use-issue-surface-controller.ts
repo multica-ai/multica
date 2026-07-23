@@ -10,6 +10,7 @@ import type {
   IssueStatus,
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
+  IssueTableGroupsRequest,
   IssueTableQuerySpec,
   Project,
 } from "@multica/core/types";
@@ -51,6 +52,10 @@ import {
   useIssueStatusBranches,
   type IssueStatusPagination,
 } from "./use-issue-status-branches";
+import {
+  useIssueGroupBranches,
+  type IssueGroupBranches,
+} from "./use-issue-group-branches";
 
 interface UseIssueSurfaceControllerInput {
   scope: IssueScope;
@@ -86,6 +91,9 @@ export interface IssueSurfaceController {
   hiddenStatuses: IssueStatus[];
   /** Exact server counts plus cursor controls for List/status Board. */
   statusPagination?: IssueStatusPagination;
+  /** Exact group catalog plus independent row cursors for Assignee/Property
+   * Board and compound Swimlane cells. */
+  groupBranches?: IssueGroupBranches;
   activeFilters: Omit<IssueFilters, "statusFilters" | "runningIssueIds">;
   activity: IssueSurfaceActivity;
   actions: IssueSurfaceActions;
@@ -263,15 +271,26 @@ export function useIssueSurfaceController({
     };
   }, [dateParams, effectivePropertyFilters, propertySortId, rawPropertySortId, sortBy, sortDirection]);
 
+  const groupingPropertyId = propertyIdFromViewKey(grouping);
+  const activeGroupingProperty = groupingPropertyId
+    ? workspaceProperties.find(
+        (property) =>
+          property.id === groupingPropertyId && property.type === "select",
+      ) ?? null
+    : null;
+  const effectiveGrouping =
+    groupingPropertyId && catalogSettled && !activeGroupingProperty
+      ? "status"
+      : grouping;
   const usesAssigneeBoard =
-    effectiveViewMode === "board" && grouping === "assignee";
+    effectiveViewMode === "board" && effectiveGrouping === "assignee";
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
   const usesTable = effectiveViewMode === "table";
   const activeSearch = usesTable ? tableSearch : search;
   const debouncedActiveSearch = useDebouncedTableSearch(activeSearch);
   const usesServerStatusSurface =
     effectiveViewMode === "list" ||
-    (effectiveViewMode === "board" && grouping === "status");
+    (effectiveViewMode === "board" && effectiveGrouping === "status");
   const serverStatuses = useMemo<IssueStatus[]>(
     () => {
       const visible =
@@ -441,6 +460,43 @@ export function useIssueSurfaceController({
     facetsFetching: tableFacetsQuery.isFetching,
     enabled: usesServerStatusSurface,
   });
+  const serverGroupSpec = useMemo<IssueTableGroupsRequest["group"]>(() => {
+    if (effectiveViewMode === "swimlane") {
+      return {
+        kind: "compound",
+        primary: swimlaneGrouping,
+        secondary: "status",
+      };
+    }
+    const propertyId = propertyIdFromViewKey(effectiveGrouping);
+    if (propertyId) {
+      return {
+        kind: "property",
+        property_id: propertyId,
+        include_empty: true,
+      };
+    }
+    return { kind: "assignee" };
+  }, [effectiveGrouping, effectiveViewMode, swimlaneGrouping]);
+  const usesServerGroupSurface =
+    (effectiveViewMode === "board" && effectiveGrouping !== "status") ||
+    effectiveViewMode === "swimlane";
+  const serverGroupQuery = useMemo<IssueTableQuerySpec>(() => {
+    if (effectiveViewMode !== "swimlane") return tableQuerySpec;
+    const { statuses: _statuses, ...filters } = tableQuerySpec.filters;
+    return { ...tableQuerySpec, filters };
+  }, [effectiveViewMode, tableQuerySpec]);
+  const serverGroupBranches = useIssueGroupBranches({
+    wsId,
+    query: serverGroupQuery,
+    group: serverGroupSpec,
+    secondaryValues:
+      effectiveViewMode === "swimlane" ? serverStatuses : undefined,
+    observeEmptyBranches:
+      effectiveViewMode === "swimlane" ||
+      (effectiveViewMode === "board" && activeGroupingProperty !== null),
+    enabled: usesServerGroupSurface,
+  });
 
   // Selection is only meaningful within the current membership window: batch
   // actions act on selected ids while export/common-field consumers intersect
@@ -496,6 +552,7 @@ export function useIssueSurfaceController({
     usesGantt,
     usesTable,
     serverStatusBranches,
+    serverGroupBranches,
     ganttShowCompleted,
     sort,
     activity,
@@ -578,6 +635,9 @@ export function useIssueSurfaceController({
     ...data,
     statusPagination: usesServerStatusSurface
       ? data.statusPagination
+      : undefined,
+    groupBranches: usesServerGroupSurface
+      ? serverGroupBranches
       : undefined,
     // Keep TableView mounted for an empty search result so its local search
     // control remains available to refine or clear the query. Include the

@@ -227,6 +227,107 @@ describe("ApiClient server Table query", () => {
       ],
     });
   });
+
+  it("parses compound lane descriptors and posts the additive union", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          query_fingerprint: "sha256:compound",
+          total: 2,
+          groups: [
+            {
+              key: "parent:parent-1",
+              value: {
+                kind: "parent",
+                parent_id: "parent-1",
+                parent: {
+                  id: "parent-1",
+                  number: 10,
+                  identifier: "MUL-10",
+                  title: "Parent",
+                  status: "todo",
+                },
+                value_state: "value",
+              },
+              count: 2,
+              secondary_groups: [
+                {
+                  key: "compound:opaque:status:todo",
+                  value: { kind: "status", status: "todo" },
+                  count: 2,
+                },
+              ],
+            },
+          ],
+          next_cursor: null,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const query = {
+      scope: { kind: "workspace" as const },
+      filters: {},
+      sort: { field: "position" as const, direction: "asc" as const },
+    };
+
+    await expect(
+      client.listIssueTableGroups({
+        query,
+        group: {
+          kind: "compound",
+          primary: "parent",
+          secondary: "status",
+        },
+      }),
+    ).resolves.toMatchObject({
+      groups: [
+        {
+          value: { kind: "parent", parent: { title: "Parent" } },
+          secondary_groups: [
+            { value: { kind: "status", status: "todo" }, count: 2 },
+          ],
+        },
+      ],
+    });
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      body: expect.stringContaining(
+        '"kind":"compound","primary":"parent","secondary":"status"',
+      ),
+    });
+  });
+});
+
+describe("ApiClient issue move intent", () => {
+  it("posts relative anchors without a client-authored position", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "issue-1", position: 15 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await client.moveIssue("issue-1", {
+      status: "in_progress",
+      before_id: "issue-0",
+      after_id: "issue-2",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/issues/issue-1/move",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          status: "in_progress",
+          before_id: "issue-0",
+          after_id: "issue-2",
+        }),
+      }),
+    );
+  });
 });
 
 describe("ApiClient label response schemas", () => {

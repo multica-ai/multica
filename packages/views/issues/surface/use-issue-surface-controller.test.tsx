@@ -392,7 +392,7 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.selection.selectedIds).toEqual(new Set());
   });
 
-  it("delegates movement through useUpdateIssue without rewriting the mutation path", () => {
+  it("delegates drag movement as a server-owned relative intent", () => {
     const { result } = renderHook(
       () =>
         useIssueSurfaceController({
@@ -406,13 +406,28 @@ describe("useIssueSurfaceController", () => {
     act(() => {
       result.current.moveIssue(
         "issue-1",
-        { status: "in_progress", position: 42, project_id: "p2" },
+        {
+          status: "in_progress",
+          position: 42,
+          project_id: "p2",
+          before_id: "issue-0",
+          after_id: "issue-2",
+        },
         onSettled,
       );
     });
 
     expect(updateIssueMutate).toHaveBeenCalledWith(
-      { id: "issue-1", status: "in_progress", position: 42, project_id: "p2" },
+      {
+        id: "issue-1",
+        status: "in_progress",
+        position: 42,
+        project_id: "p2",
+        move_intent: {
+          before_id: "issue-0",
+          after_id: "issue-2",
+        },
+      },
       expect.objectContaining({
         onError: expect.any(Function),
         onSettled: expect.any(Function),
@@ -1278,10 +1293,7 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.workingScopeIssues).toEqual([]);
   });
 
-  it("scopes swimlane to the cards it draws, not its statusless lane source", async () => {
-    // SwimLaneView draws cards from `issues` (status filter applied) and uses
-    // the statusless `swimlaneIssues` only for LANE DISCOVERY. Scoping the
-    // chip to the statusless set counted rows the canvas never draws.
+  it("keeps swimlane chrome bounded while descriptors retain hidden-status counts", async () => {
     mockListByStatus({
       todo: [makeIssue({ id: "todo-1", status: "todo" })],
       in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
@@ -1307,20 +1319,19 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    await waitFor(() =>
-      expect(result.current.workingScopeIssues?.length).toBe(1),
-    );
-
-    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
-      "todo-1",
-    ]);
-    expect(result.current.issues.map((i) => i.id)).toEqual(["todo-1"]);
-    // The statusless lane source still carries both — so a regression back to
-    // it would make the assertion above fail rather than pass by accident.
-    expect(result.current.swimlaneIssues.map((i) => i.id).sort()).toEqual([
-      "prog-1",
-      "todo-1",
-    ]);
+    // Like Table/List, the migrated Swimlane owns cursor branches and does
+    // not materialize another complete working-only window for the chip.
+    expect(result.current.workingScopeIssues).toBeUndefined();
+    // Controller-only tests do not mount lane cells, so no row branch should
+    // activate merely because its descriptor exists.
+    expect(result.current.issues).toEqual([]);
+    expect(result.current.swimlaneIssues).toEqual([]);
+    expect(
+      result.current.groupBranches?.descriptors
+        .flatMap((lane) => lane.secondary_groups ?? [])
+        .map((cell) => cell.value.kind === "status" ? cell.value.status : "")
+        .sort(),
+    ).toEqual(["in_progress", "todo"]);
   });
 
   // --- gantt canvas scope ------------------------------------------------

@@ -33,6 +33,7 @@ import type {
   IssueStatusBranches,
   IssueStatusPagination,
 } from "./use-issue-status-branches";
+import type { IssueGroupBranches } from "./use-issue-group-branches";
 
 const EMPTY_ISSUES: Issue[] = [];
 const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
@@ -109,6 +110,7 @@ export function useIssueSurfaceData({
   usesGantt,
   usesTable,
   serverStatusBranches,
+  serverGroupBranches,
   ganttShowCompleted,
   sort,
   activity,
@@ -132,6 +134,7 @@ export function useIssueSurfaceData({
   usesGantt: boolean;
   usesTable: boolean;
   serverStatusBranches: IssueStatusBranches;
+  serverGroupBranches: IssueGroupBranches;
   /** Gantt's "show completed" display toggle. The canvas hides done/cancelled
    *  rows without it, so the working scope has to honour it too. */
   ganttShowCompleted: boolean;
@@ -195,11 +198,12 @@ export function useIssueSurfaceData({
       !usesAssigneeBoard &&
       !usesGantt &&
       !usesTable &&
-      !serverStatusBranches.enabled,
+      !serverStatusBranches.enabled &&
+      !serverGroupBranches.enabled,
   });
   const assigneeGroupsQuery = useQuery({
     ...activeAssigneeGroupsOptions,
-    enabled: usesAssigneeBoard,
+    enabled: usesAssigneeBoard && !serverGroupBranches.enabled,
   });
   const ganttIssuesQuery = useQuery({
     ...issueSurfaceGanttOptions(wsId, projectId ?? ""),
@@ -209,6 +213,8 @@ export function useIssueSurfaceData({
   const bucketedIssues = useMemo(() => {
     return serverStatusBranches.enabled
       ? serverStatusBranches.issues
+      : serverGroupBranches.enabled
+      ? serverGroupBranches.issues
       : usesAssigneeBoard
       ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
       : (statusIssuesQuery.data ?? EMPTY_ISSUES);
@@ -216,6 +222,8 @@ export function useIssueSurfaceData({
     assigneeGroupsQuery.data?.groups,
     serverStatusBranches.enabled,
     serverStatusBranches.issues,
+    serverGroupBranches.enabled,
+    serverGroupBranches.issues,
     statusIssuesQuery.data,
     usesAssigneeBoard,
   ]);
@@ -357,7 +365,7 @@ export function useIssueSurfaceData({
         ganttShowCompleted,
       );
     }
-    if (usesAssigneeBoard) {
+    if (usesAssigneeBoard && !serverGroupBranches.enabled) {
       return (
         filterAssigneeGroups(assigneeGroupsQuery.data?.groups, {
           showSubIssues,
@@ -367,7 +375,7 @@ export function useIssueSurfaceData({
         }) ?? []
       ).flatMap((group) => group.issues);
     }
-    if (usesTable || serverStatusBranches.enabled) {
+    if (usesTable || serverStatusBranches.enabled || serverGroupBranches.enabled) {
       // Table membership is server-owned and cursor paged. Do not rebuild a
       // second complete issue window merely to decorate the activity chip:
       // that was the final hidden auto-materialization loop behind the old
@@ -397,6 +405,7 @@ export function useIssueSurfaceData({
     usesGantt,
     usesTable,
     serverStatusBranches.enabled,
+    serverGroupBranches.enabled,
   ]);
 
   const {
@@ -493,28 +502,32 @@ export function useIssueSurfaceData({
     ],
   );
 
-  const isLoading = usesAssigneeBoard
-    ? assigneeGroupsQuery.isLoading
-    : usesGantt
+  const isLoading = serverGroupBranches.enabled
+    ? serverGroupBranches.isLoading
+    : usesAssigneeBoard
+      ? assigneeGroupsQuery.isLoading
+      : usesGantt
       ? ganttIssuesQuery.isLoading
       : usesTable
         ? false
         : serverStatusBranches.enabled
           ? serverStatusBranches.isLoading
-        : statusIssuesQuery.isLoading;
+          : statusIssuesQuery.isLoading;
 
   // Placeholder-backed revalidation of the ACTIVE query only. First loads are
   // isLoading (no previous data to place-hold); gantt has no placeholder
   // phase (its key carries no sort/filter).
-  const isRefreshing = usesAssigneeBoard
-    ? assigneeGroupsQuery.isPlaceholderData
-    : usesGantt
+  const isRefreshing = serverGroupBranches.enabled
+    ? serverGroupBranches.isRefreshing
+    : usesAssigneeBoard
+      ? assigneeGroupsQuery.isPlaceholderData
+      : usesGantt
       ? false
       : usesTable
         ? false
         : serverStatusBranches.enabled
           ? serverStatusBranches.isRefreshing
-        : statusIssuesQuery.isPlaceholderData;
+          : statusIssuesQuery.isPlaceholderData;
 
   return {
     surfaceIssues,
@@ -557,6 +570,9 @@ export function useIssueSurfaceData({
       (serverStatusBranches.enabled
         ? serverStatusBranches.isTotalKnown &&
           serverStatusBranches.total === 0
+        : serverGroupBranches.enabled
+          ? !serverGroupBranches.isError &&
+            serverGroupBranches.total === 0
         : surfaceIssues.length === 0),
   };
 }

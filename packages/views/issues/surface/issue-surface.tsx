@@ -265,6 +265,7 @@ function IssueSurfaceContent({
                 projectId={controller.projectId}
                 onCreateIssue={openCreateIssue}
                 statusPagination={controller.statusPagination}
+                groupBranches={controller.groupBranches}
               />
             )}
             {controller.viewMode === "list" && (
@@ -310,6 +311,7 @@ function IssueSurfaceContent({
                 projectId={controller.projectId}
                 activityByIssueId={controller.activity.activityByIssueId}
                 onCreateIssue={openCreateIssue}
+                groupBranches={controller.groupBranches}
               />
             )}
           </div>

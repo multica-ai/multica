@@ -24,7 +24,10 @@ export type MoveIssueUpdates = Pick<
   | "position"
   | "parent_issue_id"
   | "project_id"
->;
+> & {
+  before_id: string | null;
+  after_id: string | null;
+};
 
 export interface IssueSurfaceActionController {
   actions: IssueSurfaceActions;
@@ -78,12 +81,26 @@ export function useIssueSurfaceActions({
       updates: MoveIssueUpdates,
       onSettled?: () => void,
     ) => {
-      updateIssue(issueId, updates, {
-        errorMessage: t(($) => $.detail.toast_move_issue_failed),
-        onSettled,
-      });
+      const { before_id, after_id, ...optimisticUpdates } = updates;
+      updateIssueMutation.mutate(
+        {
+          id: issueId,
+          ...optimisticUpdates,
+          move_intent: { before_id, after_id },
+        },
+        {
+          onError: (err) => {
+            toast.error(
+              err instanceof Error && err.message
+                ? err.message
+                : t(($) => $.detail.toast_move_issue_failed),
+            );
+          },
+          onSettled,
+        },
+      );
     },
-    [t, updateIssue],
+    [t, updateIssueMutation],
   );
 
   const openCreateIssue = useCallback(

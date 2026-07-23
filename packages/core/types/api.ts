@@ -50,6 +50,24 @@ export interface UpdateIssueRequest {
   handoff_note?: string;
 }
 
+/**
+ * Server-owned drag intent. The client may use a provisional position for its
+ * optimistic animation, but the canonical position is derived from these
+ * workspace-scoped neighbors by `POST /api/issues/:id/move`.
+ */
+export interface MoveIssueRequest
+  extends Pick<
+    UpdateIssueRequest,
+    | "status"
+    | "assignee_type"
+    | "assignee_id"
+    | "parent_issue_id"
+    | "project_id"
+  > {
+  before_id: string | null;
+  after_id: string | null;
+}
+
 /** Inputs to `POST /api/issues/preview-trigger`. A nil prospective field means
  *  "leave unchanged"; `isCreate` previews a not-yet-persisted issue. */
 export interface IssueTriggerPreviewParams {
@@ -273,7 +291,14 @@ export type IssueTableGroupSpec =
   | { kind: "none" }
   | { kind: "status" }
   | { kind: "assignee" }
-  | { kind: "property"; property_id: string };
+  | { kind: "project" }
+  | { kind: "parent" }
+  | {
+      kind: "compound";
+      primary: "assignee" | "project" | "parent";
+      secondary: "status";
+    }
+  | { kind: "property"; property_id: string; include_empty?: boolean };
 
 /** Response-side actor reference. Kept open for forward compatibility: an
  * installed desktop client may receive a new actor kind from a newer server. */
@@ -282,9 +307,24 @@ export interface IssueTableActorRef {
   id: string;
 }
 
+export interface IssueTableParentRef {
+  id: string;
+  number: number;
+  identifier: string;
+  title: string;
+  status: string;
+}
+
 export type IssueTableGroupValue =
   | { kind: "status"; status: string }
   | { kind: "assignee"; actor: IssueTableActorRef | null }
+  | { kind: "project"; project_id: string | null }
+  | {
+      kind: "parent";
+      parent_id: string | null;
+      parent: IssueTableParentRef | null;
+      value_state: "value" | "unavailable" | "unset";
+    }
   | {
       kind: "property";
       property_id: string;
@@ -296,6 +336,9 @@ export interface IssueTableGroupDescriptor {
   key: string;
   value: IssueTableGroupValue;
   count: number;
+  /** Present for compound groups. These opaque keys can be passed straight
+   * back to `/table/rows`; clients must not reconstruct them. */
+  secondary_groups?: IssueTableGroupDescriptor[];
 }
 
 export interface IssueTablePageRequest {
