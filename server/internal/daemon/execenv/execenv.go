@@ -140,6 +140,10 @@ type TaskContextForEnv struct {
 	// CEREBRO-PATCH(brief-layer-modes): FIR-3212 per-agent brief-layer config from runtime_config — see cerebro_brief_layers.go. Empty = full brief, exactly as today.
 	WorkspaceBriefMode string // CEREBRO-PATCH(brief-layer-modes): "off" keeps identity layers only
 	ToolsBriefMode     string // CEREBRO-PATCH(brief-layer-modes): "summary" folds connection tool lists
+	// CEREBRO-PATCH(execenv-workpad-brief): FIR-3659 — true when the workspace's
+	// cerebro_workpad flag is on (resolved server-side at claim), so the runtime
+	// brief includes the Workpad protocol section.
+	WorkpadBriefEnabled bool
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.

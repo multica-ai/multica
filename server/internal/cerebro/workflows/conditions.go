@@ -34,6 +34,15 @@ type Condition struct {
 // splitHookConditions routes it to the DB-backed resolveHookConditions instead.
 const OpEvalPassed = "eval_passed"
 
+// OpEvalFailed is the gate-shaped sibling of OpEvalPassed (FIR-3659): it is
+// true iff the referenced eval currently FAILS for the event's issue. Unlike
+// eval_passed it fails closed toward the gate — a missing resolver, a missing
+// run, or a resolver error all count as "failed", so a policy that blocks on
+// eval_failed keeps blocking until a real pass is recorded. When the resolver
+// can run the eval fresh (issue-target evals are token-free), the verdict is
+// re-computed at evaluation time so the latest issue state decides.
+const OpEvalFailed = "eval_failed"
+
 func parseConditions(raw []byte) ([]Condition, error) {
 	if len(raw) == 0 {
 		return nil, nil

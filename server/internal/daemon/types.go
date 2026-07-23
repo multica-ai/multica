@@ -172,6 +172,8 @@ type Task struct {
 	GraphifyNudge string `json:"graphify_nudge,omitempty"`
 	// CEREBRO-PATCH(daemon-memory-autorecall): FIR-1794 layer 3 — automatically recalled memories shipped at claim time when cerebro_memory is on.
 	MemoryContext string `json:"memory_context,omitempty"`
+	// CEREBRO-PATCH(daemon-task-workpad-brief): FIR-3659 — true when the workspace's cerebro_workpad flag is on, so the brief includes the Workpad protocol section.
+	WorkpadBriefEnabled bool `json:"workpad_brief_enabled,omitempty"`
 	// CEREBRO-PATCH(rounds-answer-snapshots): FIR-3179 — no Round-only daemon task flag; Round replies use the standard task shape.
 	// CEREBRO-PATCH(daemon-task-presentation-mode): receive runtime
 	// presentation_mode from claim response. "interactive" tells the daemon

@@ -87,7 +87,7 @@ func (e *HookEngine) Evaluate(ctx context.Context, event HookEvent) (HookResult,
 			continue
 		}
 		pure, deferred := splitHookConditions(policy.Conditions)
-		if !evaluate(pure, hookConditionContext(event)) || !resolveHookConditions(ctx, e.resolver, deferred, event) {
+		if !evaluate(pure, hookConditionContext(event)) || !resolveHookConditions(ctx, e.resolver, policy, deferred, event) {
 			continue
 		}
 		binding, ok := mostSpecificBinding(policy.Bindings, event)

@@ -3612,6 +3612,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		InitiatorEmail:                   task.InitiatorEmail,
 		WorkspaceContext:                 task.WorkspaceContext,
 		EffectiveTools:                   effectiveToolsForEnv(task.EffectiveTools), // CEREBRO-PATCH(daemon-task-effective-tools-ctx): FIR-2312 carry resolved non-CLI tools into the brief
+		WorkpadBriefEnabled:              task.WorkpadBriefEnabled,                  // CEREBRO-PATCH(daemon-task-workpad-brief): FIR-3659 carry the cerebro_workpad verdict into the brief
 	}
 	taskCtx.WorkspaceBriefMode, taskCtx.ToolsBriefMode = briefLayerModesForTask(task) // CEREBRO-PATCH(brief-layer-modes): FIR-3212 nil-agent safe.
 
