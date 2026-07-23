@@ -165,17 +165,45 @@ func (h *Handler) persistRuntimeCapabilitySnapshotCtx(ctx context.Context, rtID,
 	reporter := CapabilitySubject{Type: "runtime", ID: uuidToString(rtID)}
 	reports := make([]CapabilityReportInput, 0, len(items))
 	for _, item := range items {
-		reports = append(reports, CapabilityReportInput{
-			Key:      item.Kind + ":" + item.Name,
-			Title:    item.Name,
-			Category: item.Kind,
-			Source:   "runtime_report",
-			Metadata: item.Metadata,
-			Owners:   []CapabilitySubject{reporter},
-			Users:    []CapabilitySubject{reporter},
-		})
+		reports = append(reports, runtimeCapabilityReport(item, reporter))
 	}
 	_, _ = h.capabilityRegister.Report(ctx, workspaceID, reporter, reports)
+}
+
+func runtimeCapabilityReport(item capabilityReportItem, reporter CapabilitySubject) CapabilityReportInput {
+	key := item.Kind + ":" + item.Name
+	title := item.Name
+	category := item.Kind
+	metadata := item.Metadata
+	if item.Kind == "tools" && strings.HasPrefix(item.Name, "mcp__") {
+		if serverName, toolName, ok := directMCPToolParts(item.Name); ok {
+			// Direct MCP tools are already callable by this exact name.
+			// Keep that key end to end so inventory, Capabilities, the task
+			// mandate and the before-call hook resolve the same row.
+			key = item.Name
+			title = toolName
+			category = serverName
+			metadata = map[string]any{"snapshot_key": item.Kind, "server_name": serverName}
+		}
+	}
+	return CapabilityReportInput{
+		Key:      key,
+		Title:    title,
+		Category: category,
+		Source:   "runtime_report",
+		Metadata: metadata,
+		Owners:   []CapabilitySubject{reporter},
+		Users:    []CapabilitySubject{reporter},
+	}
+}
+
+func directMCPToolParts(name string) (string, string, bool) {
+	rest := strings.TrimPrefix(strings.TrimSpace(name), "mcp__")
+	serverName, toolName, ok := strings.Cut(rest, "__")
+	if !ok || serverName == "" || toolName == "" {
+		return "", "", false
+	}
+	return serverName, toolName, true
 }
 
 // CEREBRO-PATCH(capability-register-heartbeat-mirror): FIR-2284 — load each

@@ -79,7 +79,9 @@ type codexBackend struct {
 }
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
-	args := []string{"app-server", "--listen", "stdio://"}
+	// CEREBRO-PATCH(codex-mandatory-tool-policy-hooks): FIR-3753 — CODEX_HOME
+	// is daemon-managed and contains the vetted wildcard PreToolUse hook.
+	args := []string{"--dangerously-bypass-hook-trust", "app-server", "--listen", "stdio://"}
 	extra := filterCustomArgs(opts.ExtraArgs, codexBlockedArgs, logger)
 	custom := filterCustomArgs(opts.CustomArgs, codexBlockedArgs, logger)
 	// Only claim ownership of the `mcp_servers` namespace when the agent
@@ -95,6 +97,9 @@ func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	}
 	args = append(args, extra...)
 	args = append(args, custom...)
+	// Keep this last: Codex resolves repeated feature flags last-wins, so an
+	// agent's custom_args cannot disable the mandatory before-call gate.
+	args = append(args, "--enable", "hooks")
 	return args
 }
 

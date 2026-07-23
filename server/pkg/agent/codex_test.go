@@ -1736,6 +1736,31 @@ func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(codex-mandatory-tool-policy-hooks): FIR-3753 regression coverage.
+func TestBuildCodexArgsForcesMandatoryToolPolicyHooks(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgs(ExecOptions{
+		CustomArgs: []string{"--disable", "hooks"},
+	}, slog.Default())
+	if len(args) < 7 || args[0] != "--dangerously-bypass-hook-trust" {
+		t.Fatalf("managed hook trust bypass must be a global Codex flag: %v", args)
+	}
+	if got := args[len(args)-2:]; !reflect.DeepEqual(got, []string{"--enable", "hooks"}) {
+		t.Fatalf("mandatory hooks must be the final last-wins setting: %v", args)
+	}
+	appServer := -1
+	for i, arg := range args {
+		if arg == "app-server" {
+			appServer = i
+			break
+		}
+	}
+	if appServer < 1 {
+		t.Fatalf("app-server subcommand missing after global hook flag: %v", args)
+	}
+}
+
 func TestBuildCodexArgsDoesNotLeakMcpToArgv(t *testing.T) {
 	t.Parallel()
 
