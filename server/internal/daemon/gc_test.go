@@ -1523,107 +1523,80 @@ func TestApplyGCAction_PreOpenRetargetFailsClosed(t *testing.T) {
 	}
 }
 
-func TestRunGC_QuarantineRetryUsesPinnedRoot(t *testing.T) {
+func TestRunGC_FailClosedPreservesWorkspaceStorage(t *testing.T) {
 	d := newGCTestDaemon(t, http.NewServeMux())
 	d.cfg.GCOrphanTTL = 0
-	originalRoot := d.cfg.WorkspacesRoot
-	movedRoot := originalRoot + "-moved"
-	createTaskDir(t, originalRoot, "ws-cycle-swap", "task", nil)
-	externalRoot := t.TempDir()
-	externalTrash := filepath.Join(externalRoot, gcTrashDirName)
-	if err := os.MkdirAll(externalTrash, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	marker := filepath.Join(externalTrash, "keep")
-	if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	d.envRootPreOpenHook = func(string) {
-		d.envRootPreOpenHook = nil
-		if err := os.Rename(originalRoot, movedRoot); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(externalRoot, originalRoot); err != nil {
-			t.Fatal(err)
-		}
-	}
-	d.runGC(context.Background())
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatalf("full-cycle quarantine retry escaped pinned root: %v", err)
-	}
-}
+	root := d.cfg.WorkspacesRoot
 
-func TestRunGC_PreReservationRetargetUsesPinnedCycleIdentity(t *testing.T) {
-	d := newGCTestDaemon(t, http.NewServeMux())
-	d.cfg.GCOrphanTTL = 0
-	originalRoot := d.cfg.WorkspacesRoot
-	movedRoot := originalRoot + "-moved"
-	createTaskDir(t, originalRoot, "ws-cycle-pre-reservation", "task", nil)
-	externalRoot := t.TempDir()
-	externalTask := filepath.Join(externalRoot, "ws-cycle-pre-reservation", "task")
-	if err := os.MkdirAll(externalTask, 0o755); err != nil {
+	staleRoot := createTaskDir(t, root, "ws-stale", "task", nil)
+	staleMarker := filepath.Join(staleRoot, "keep")
+	if err := os.WriteFile(staleMarker, []byte("stale"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	marker := filepath.Join(externalTask, "keep")
-	if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	d.gcBeforeApplyHook = func(string) {
-		d.gcBeforeApplyHook = nil
-		if err := os.Rename(originalRoot, movedRoot); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(externalRoot, originalRoot); err != nil {
-			t.Fatal(err)
-		}
-	}
-	d.runGC(context.Background())
-	if _, err := os.Stat(marker); err != nil {
-		t.Fatalf("pre-reservation full-cycle retarget mutated external root: %v", err)
-	}
-	if _, err := os.Stat(filepath.Join(movedRoot, "ws-cycle-pre-reservation", "task")); err != nil {
-		t.Fatalf("pinned cycle unexpectedly removed original task: %v", err)
-	}
-}
 
-func TestRunGC_CycleIdentityKeyBlocksABARetargetWithActiveClaimant(t *testing.T) {
-	d := newGCTestDaemon(t, http.NewServeMux())
-	d.cfg.GCOrphanTTL = 0
-	originalRoot := d.cfg.WorkspacesRoot
-	movedRoot := originalRoot + "-moved"
-	taskDir := createTaskDir(t, originalRoot, "ws-cycle-aba", "task", nil)
-	externalRoot := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(externalRoot, "ws-cycle-aba", "task"), 0o755); err != nil {
+	predictedRoot := execenv.PredictRootDir(root, "ws-predicted", "task-predicted")
+	releasePredicted, ok := d.markActiveEnvRoot(context.Background(), predictedRoot)
+	if !ok {
+		t.Fatal("failed to claim absent predicted root")
+	}
+	defer releasePredicted()
+	if err := os.MkdirAll(predictedRoot, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	var releaseClaim func()
-	d.gcAfterExpectedHook = func(string) {
-		d.gcAfterExpectedHook = nil
-		if err := os.Rename(originalRoot, movedRoot); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Symlink(externalRoot, originalRoot); err != nil {
-			t.Fatal(err)
-		}
-		var ok bool
-		releaseClaim, ok = d.markActiveEnvRoot(context.Background(), filepath.Join(movedRoot, "ws-cycle-aba", "task"))
-		if !ok {
-			t.Fatal("active claimant could not acquire pinned A task")
-		}
-		if err := os.Remove(originalRoot); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.Rename(movedRoot, originalRoot); err != nil {
-			t.Fatal(err)
-		}
+	predictedMarker := filepath.Join(predictedRoot, "keep")
+	if err := os.WriteFile(predictedMarker, []byte("predicted"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	managedArtifact := filepath.Join(staleRoot, "codex-home", ".sandbox-bin")
+	if err := os.MkdirAll(managedArtifact, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	artifactMarker := filepath.Join(managedArtifact, "keep")
+	if err := os.WriteFile(artifactMarker, []byte("artifact"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	repoRef := filepath.Join(root, ".repos", "repo.git", "refs", "heads", "main")
+	if err := os.MkdirAll(filepath.Dir(repoRef), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(repoRef, []byte("deadbeef"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	trashMarker := filepath.Join(root, gcTrashDirName, "quarantine", "keep")
+	if err := os.MkdirAll(filepath.Dir(trashMarker), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(trashMarker, []byte("trash"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var downstreamCalled atomic.Bool
+	d.gcBeforeApplyHook = func(string) { downstreamCalled.Store(true) }
+	d.envRootPreOpenHook = func(string) { downstreamCalled.Store(true) }
+	d.artifactCleanupHook = func(string) { downstreamCalled.Store(true) }
+
+	before, err := os.Stat(staleRoot)
+	if err != nil {
+		t.Fatal(err)
 	}
 	d.runGC(context.Background())
-	if releaseClaim == nil {
-		t.Fatal("A→B→A hook did not run")
+	after, err := os.Stat(staleRoot)
+	if err != nil {
+		t.Fatal(err)
 	}
-	defer releaseClaim()
-	if _, err := os.Stat(taskDir); err != nil {
-		t.Fatalf("active claimant A was mutated after A→B→A retarget: %v", err)
+	if !os.SameFile(before, after) {
+		t.Fatal("inactive stale root identity changed")
+	}
+	for _, marker := range []string{staleMarker, predictedMarker, artifactMarker, repoRef, trashMarker} {
+		if _, err := os.Stat(marker); err != nil {
+			t.Fatalf("runGC mutated %s: %v", marker, err)
+		}
+	}
+	if downstreamCalled.Load() {
+		t.Fatal("runGC invoked downstream discovery or mutation helper")
 	}
 }
 
