@@ -29,7 +29,6 @@ import type {
   UpdateIssueRequest,
 } from "@multica/core/types";
 import { useViewStore, useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { filterIssues, type IssueFilters } from "../utils/filter";
 import { getMoveAnchors } from "../utils/drag-utils";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
@@ -62,7 +61,6 @@ import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
-import type { IssueActivityState } from "../surface/activity";
 import type { IssueCreateDefaults } from "../surface/types";
 import type {
   IssueGroupBranches,
@@ -614,7 +612,6 @@ function SwimLaneViewImpl({
   myIssuesFilter,
   sort,
   projectId,
-  activityByIssueId,
   onCreateIssue,
   groupBranches,
 }: {
@@ -628,7 +625,10 @@ function SwimLaneViewImpl({
    * a parent in a hidden status still surfaces its label correctly.
    */
   unfilteredIssues?: Issue[];
-  activeFilters?: Omit<IssueFilters, "statusFilters" | "runningIssueIds">;
+  activeFilters?: Omit<
+    IssueFilters,
+    "statusFilters" | "agentRunningFilter" | "runningIssueIds"
+  >;
   visibleStatuses?: IssueStatus[];
   hiddenStatuses?: IssueStatus[];
   onMoveIssue: (
@@ -644,7 +644,6 @@ function SwimLaneViewImpl({
   sort?: IssueSortParam;
   /** Pre-fills `project_id` on the create form for the in-cell "+" button. */
   projectId?: string;
-  activityByIssueId?: ReadonlyMap<string, IssueActivityState>;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   groupBranches?: IssueGroupBranches;
 }) {
@@ -659,42 +658,23 @@ function SwimLaneViewImpl({
 
   const wsId = useWorkspaceId();
 
-  const { data: snapshot = [] } = useQuery({
-    ...agentTaskSnapshotOptions(wsId),
-    enabled: !activityByIssueId,
-  });
-  const runningIssueIds = useMemo(() => {
-    if (activityByIssueId) {
-      const ids = new Set<string>();
-      for (const [issueId, activity] of activityByIssueId) {
-        if (activity.isWorking) ids.add(issueId);
-      }
-      return ids;
-    }
-    const ids = new Set<string>();
-    for (const t of snapshot) {
-      if (t.status === "running" && t.issue_id) ids.add(t.issue_id);
-    }
-    return ids;
-  }, [activityByIssueId, snapshot]);
-
   const activeFilters = useMemo(() => ({
     // Status is enforced by visible-column rendering, not by filterIssues
     statusFilters: [],
     priorityFilters: activeFiltersProp?.priorityFilters ?? [],
+    // The controller has already projected `/api/working-agents` into this
+    // assignee list, so extra children use the same membership as Table.
     assigneeFilters: activeFiltersProp?.assigneeFilters ?? [],
     includeNoAssignee: activeFiltersProp?.includeNoAssignee ?? false,
     creatorFilters: activeFiltersProp?.creatorFilters ?? [],
     projectFilters: activeFiltersProp?.projectFilters ?? [],
     includeNoProject: activeFiltersProp?.includeNoProject ?? false,
     labelFilters: activeFiltersProp?.labelFilters ?? [],
-    agentRunningFilter: activeFiltersProp?.agentRunningFilter ?? false,
-    runningIssueIds,
     // Carry the "Show sub-issues" toggle through to the extra-children merge
     // path (see `filterIssues(extra, activeFilters)` below); otherwise batch /
     // per-parent loaded sub-issues get re-added even when the toggle is off.
     showSubIssues: activeFiltersProp?.showSubIssues ?? true,
-  }), [activeFiltersProp, runningIssueIds]);
+  }), [activeFiltersProp]);
   const projects = useMemo(
     () =>
       swimlaneGrouping === "project" && projectMap

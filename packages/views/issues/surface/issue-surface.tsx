@@ -308,7 +308,6 @@ function IssueSurfaceContent({
                 myIssuesFilter={controller.loadMoreFilter}
                 sort={controller.sort}
                 projectId={controller.projectId}
-                activityByIssueId={controller.activity.activityByIssueId}
                 onCreateIssue={openCreateIssue}
                 groupBranches={controller.groupBranches}
               />

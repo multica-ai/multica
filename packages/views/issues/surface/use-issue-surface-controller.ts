@@ -37,7 +37,6 @@ import type { IssueFilters } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
 import { IssueTableExportIntegrityError } from "../components/table-view-model";
 import type { IssueSurfaceMode } from "./types";
-import { useIssueSurfaceActivity, type IssueSurfaceActivity } from "./activity";
 import type { IssueSurfaceActions } from "./actions-context";
 import {
   type IssueSurfaceSelection,
@@ -95,8 +94,10 @@ export interface IssueSurfaceController {
   /** Exact group catalog plus independent row cursors for Assignee/Property
    * Board and compound Swimlane cells. */
   groupBranches?: IssueGroupBranches;
-  activeFilters: Omit<IssueFilters, "statusFilters" | "runningIssueIds">;
-  activity: IssueSurfaceActivity;
+  activeFilters: Omit<
+    IssueFilters,
+    "statusFilters" | "agentRunningFilter" | "runningIssueIds"
+  >;
   actions: IssueSurfaceActions;
   selection: IssueSurfaceSelection;
   childProgressMap: Map<string, ChildProgress>;
@@ -320,7 +321,6 @@ export function useIssueSurfaceController({
   const { projectFilters: viewProjectFilters, includeNoProject: viewIncludeNoProject } =
     projectFilterState;
 
-  const activity = useIssueSurfaceActivity();
   const workingAgentMineRelation =
     scope.type === "my"
       ? scope.relation === "all"
@@ -330,9 +330,7 @@ export function useIssueSurfaceController({
   const { data: workspaceWorkingAgents = [] } = useQuery(
     workspaceWorkingAgentsOptions(wsId, "issue", workingAgentMineRelation),
   );
-  const tableAssigneeFilters = useMemo(() => {
-    if (!agentRunningFilter) return assigneeFilters;
-
+  const workingAssigneeFilters = useMemo(() => {
     const workingAgentIds = new Set(
       workspaceWorkingAgents.map((agent) => agent.id),
     );
@@ -349,7 +347,13 @@ export function useIssueSurfaceController({
       (assignee) =>
         assignee.type === "agent" && workingAgentIds.has(assignee.id),
     );
-  }, [agentRunningFilter, assigneeFilters, workspaceWorkingAgents]);
+  }, [assigneeFilters, workspaceWorkingAgents]);
+  const effectiveAssigneeFilters = agentRunningFilter
+    ? workingAssigneeFilters
+    : assigneeFilters;
+  const effectiveIncludeNoAssignee = agentRunningFilter
+    ? false
+    : includeNoAssignee;
 
   const tableQuerySpec = useMemo<IssueTableQuerySpec>(() => {
     let queryScope: IssueTableQuerySpec["scope"];
@@ -397,11 +401,11 @@ export function useIssueSurfaceController({
         ...(statusFilters.length > 0 ? { statuses: statusFilters } : {}),
         ...(priorityFilters.length > 0 ? { priorities: priorityFilters } : {}),
         ...(agentRunningFilter
-          ? { assignees: tableAssigneeFilters }
+          ? { assignees: effectiveAssigneeFilters }
           : assigneeFilters.length > 0
             ? { assignees: assigneeFilters }
             : {}),
-        ...(!agentRunningFilter && includeNoAssignee
+        ...(effectiveIncludeNoAssignee
           ? { include_no_assignee: true }
           : {}),
         ...(creatorFilters.length > 0 ? { creators: creatorFilters } : {}),
@@ -428,8 +432,9 @@ export function useIssueSurfaceController({
     creatorFilters,
     dateParams,
     debouncedActiveSearch,
+    effectiveAssigneeFilters,
+    effectiveIncludeNoAssignee,
     effectivePropertyFilters,
-    includeNoAssignee,
     labelFilters,
     priorityFilters,
     scope,
@@ -437,7 +442,6 @@ export function useIssueSurfaceController({
     sort.sort_by,
     sort.sort_direction,
     statusFilters,
-    tableAssigneeFilters,
     viewIncludeNoProject,
     viewProjectFilters,
   ]);
@@ -598,17 +602,16 @@ export function useIssueSurfaceController({
     serverGroupBranches,
     ganttShowCompleted,
     sort,
-    activity,
     statusFilters,
     priorityFilters,
-    assigneeFilters,
-    includeNoAssignee,
+    assigneeFilters: effectiveAssigneeFilters,
+    includeNoAssignee: effectiveIncludeNoAssignee,
     creatorFilters,
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,
     labelFilters,
     propertyFilters: effectivePropertyFilters,
-    agentRunningFilter,
+    workingAssigneeFilters,
     showSubIssues,
     loadProjects:
       cardProperties.project ||

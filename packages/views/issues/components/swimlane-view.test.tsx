@@ -1775,7 +1775,6 @@ describe("SwimLaneView", () => {
           projectFilters: [],
           includeNoProject: false,
           labelFilters: [],
-          agentRunningFilter: false,
         }}
         childProgressMap={childProgressMap}
         onMoveIssue={vi.fn()}
@@ -1792,7 +1791,7 @@ describe("SwimLaneView", () => {
     });
   });
 
-  it("filters batch-fetched children using working filter", async () => {
+  it("filters batch-fetched children using API-derived working assignees", async () => {
     mockViewState.swimlaneGrouping = "parent";
 
     const grandparent: Issue = {
@@ -1835,6 +1834,8 @@ describe("SwimLaneView", () => {
       identifier: "PROJ-32",
       title: "Running Child",
       status: "in_progress",
+      assignee_type: "agent",
+      assignee_id: "working-agent",
       parent_issue_id: "p-3",
       position: 12,
     };
@@ -1845,13 +1846,11 @@ describe("SwimLaneView", () => {
       identifier: "PROJ-33",
       title: "Non-running Child",
       status: "in_progress",
+      assignee_type: "agent",
+      assignee_id: "idle-agent",
       parent_issue_id: "p-3",
       position: 13,
     };
-
-    mockGetAgentTaskSnapshot.mockResolvedValueOnce([
-      { id: "task-1", status: "running", issue_id: "gc-running" },
-    ]);
 
     mockListChildrenByParents.mockResolvedValueOnce({
       issues: [runningGrandchild, nonRunningGrandchild],
@@ -1866,13 +1865,12 @@ describe("SwimLaneView", () => {
         issues={[grandparent, parent]}
         activeFilters={{
           priorityFilters: [],
-          assigneeFilters: [],
+          assigneeFilters: [{ type: "agent", id: "working-agent" }],
           includeNoAssignee: false,
           creatorFilters: [],
           projectFilters: [],
           includeNoProject: false,
           labelFilters: [],
-          agentRunningFilter: true,
         }}
         childProgressMap={childProgressMap}
         onMoveIssue={vi.fn()}
@@ -1955,7 +1953,6 @@ describe("SwimLaneView", () => {
           projectFilters: [],
           includeNoProject: false,
           labelFilters: [],
-          agentRunningFilter: false,
           showSubIssues: false,
         }}
         childProgressMap={childProgressMap}
