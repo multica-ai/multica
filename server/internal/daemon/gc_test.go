@@ -1590,9 +1590,19 @@ func TestRunGC_FailClosedPreservesWorkspaceStorage(t *testing.T) {
 	if !os.SameFile(before, after) {
 		t.Fatal("inactive stale root identity changed")
 	}
-	for _, marker := range []string{staleMarker, predictedMarker, artifactMarker, repoRef, trashMarker} {
-		if _, err := os.Stat(marker); err != nil {
+	for marker, want := range map[string]string{
+		staleMarker:     "stale",
+		predictedMarker: "predicted",
+		artifactMarker:  "artifact",
+		repoRef:         "deadbeef",
+		trashMarker:     "trash",
+	} {
+		got, err := os.ReadFile(marker)
+		if err != nil {
 			t.Fatalf("runGC mutated %s: %v", marker, err)
+		}
+		if string(got) != want {
+			t.Fatalf("runGC changed %s: got %q, want %q", marker, got, want)
 		}
 	}
 	if downstreamCalled.Load() {
