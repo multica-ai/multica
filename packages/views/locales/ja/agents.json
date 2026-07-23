@@ -793,6 +793,7 @@
     "create_and_add": "作成してスクワッドに追加",
     "creating": "エージェントを作成中…",
     "create_failed": "エージェントを作成できませんでした。",
+    "name_conflict": "同じ名前のエージェントがすでに存在します。",
     "created": "{{name}} を作成しました"
   },
   "actions": {

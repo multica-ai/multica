@@ -793,6 +793,7 @@
     "create_and_add": "만들고 스쿼드에 추가",
     "creating": "에이전트 만드는 중…",
     "create_failed": "에이전트를 만들지 못했습니다.",
+    "name_conflict": "같은 이름의 에이전트가 이미 있습니다.",
     "created": "{{name}}을(를) 만들었습니다"
   },
   "actions": {

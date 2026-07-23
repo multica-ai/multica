@@ -356,6 +356,7 @@
     "create_and_add": "创建并加入小队",
     "creating": "正在创建…",
     "create_failed": "无法创建智能体。",
+    "name_conflict": "工作区中已存在同名智能体。",
     "created": "已创建 {{name}}"
   },
   "create_dialog": {

@@ -126,11 +126,12 @@ export interface AgentCreateErrors {
 export function classifyAgentCreateError(
   error: unknown,
   fallbackMessage: string,
+  conflictMessage: string,
 ): AgentCreateErrors {
   const message =
     error instanceof Error && error.message ? error.message : fallbackMessage;
   return error instanceof ApiError && error.status === 409
-    ? { nameError: message, formError: null }
+    ? { nameError: conflictMessage, formError: null }
     : { nameError: null, formError: message };
 }
 
@@ -741,6 +742,7 @@ export function AgentCreationStudio() {
       const nextErrors = classifyAgentCreateError(
         error,
         t(($) => $.creation_studio.create_failed),
+        t(($) => $.creation_studio.name_conflict),
       );
       setNameError(nextErrors.nameError);
       setFormError(nextErrors.formError);
@@ -780,6 +782,11 @@ export function AgentCreationStudio() {
         ease: UI_EASE_OUT,
       },
     }),
+  };
+
+  const updateAgentName = (name: string) => {
+    setNameError(null);
+    setDraft((current) => ({ ...current, name }));
   };
 
   return (
@@ -865,7 +872,7 @@ export function AgentCreationStudio() {
               members={members}
               currentUserId={currentUser?.id ?? null}
               nameError={nameError}
-              onNameEdited={() => setNameError(null)}
+              onNameChange={updateAgentName}
             />
           </div>
           <StudioFooter
@@ -933,7 +940,7 @@ export function AgentCreationStudio() {
                 members={members}
                 currentUserId={currentUser?.id ?? null}
                 nameError={nameError}
-                onNameEdited={() => setNameError(null)}
+                onNameChange={updateAgentName}
                 onRuntimeSelect={(runtimeId) => {
                   void switchBuilderRuntime(runtimeId);
                 }}
@@ -1132,7 +1139,7 @@ function ConfigurationPanel({
   members,
   currentUserId,
   nameError,
-  onNameEdited,
+  onNameChange,
   compact = false,
   onRuntimeSelect,
   runtimeSwitchPending = false,
@@ -1145,7 +1152,7 @@ function ConfigurationPanel({
   members: MemberWithUser[];
   currentUserId: string | null;
   nameError: string | null;
-  onNameEdited: () => void;
+  onNameChange: (name: string) => void;
   compact?: boolean;
   /** Builder sessions rebind the server-side carrier instead of only editing
    *  the draft. Absent for the plain create flows, where the draft is the only
@@ -1198,10 +1205,7 @@ function ConfigurationPanel({
             compact={compact}
             name={draft.name}
             error={nameError}
-            onChange={(name) => {
-              onNameEdited();
-              set("name", name);
-            }}
+            onChange={onNameChange}
           />
           <DraftFieldRow
             compact={compact}
@@ -1398,7 +1402,9 @@ export function AgentNameField({
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    if (error) inputRef.current?.focus();
+    if (!error) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
   }, [error]);
 
   return (
@@ -1421,7 +1427,7 @@ export function AgentNameField({
           placeholder={t(($) => $.create_dialog.name_placeholder)}
         />
         {error ? (
-          <p id={errorId} role="alert" className="text-xs text-destructive">
+          <p id={errorId} className="text-xs text-destructive">
             {error}
           </p>
         ) : null}

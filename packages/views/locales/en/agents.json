@@ -365,6 +365,7 @@
     "create_and_add": "Create & add to squad",
     "creating": "Creating agent…",
     "create_failed": "Could not create the agent.",
+    "name_conflict": "An agent with this name already exists.",
     "created": "{{name}} was created"
   },
   "create_dialog": {

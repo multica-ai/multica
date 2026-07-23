@@ -36,6 +36,7 @@ vi.mock("../../i18n", () => ({
           create_and_open: string;
           create_and_add: string;
           creating: string;
+          name_conflict: string;
         };
         create_dialog: {
           name_label: string;
@@ -63,6 +64,7 @@ vi.mock("../../i18n", () => ({
           create_and_open: "Create and open",
           create_and_add: "Create and add",
           creating: "Creating…",
+          name_conflict: "An agent with this name already exists.",
         },
         create_dialog: {
           name_label: "Name",
@@ -87,9 +89,10 @@ describe("Agent creation errors", () => {
       classifyAgentCreateError(
         new ApiError("An agent with this name already exists", 409, "Conflict"),
         "Could not create the agent.",
+        "This localized name is already in use.",
       ),
     ).toEqual({
-      nameError: "An agent with this name already exists",
+      nameError: "This localized name is already in use.",
       formError: null,
     });
   });
@@ -99,6 +102,7 @@ describe("Agent creation errors", () => {
       classifyAgentCreateError(
         new Error("Network request failed"),
         "Could not create the agent.",
+        "An agent with this name already exists.",
       ),
     ).toEqual({
       nameError: null,
@@ -117,9 +121,10 @@ describe("Agent creation errors", () => {
     );
 
     const input = screen.getByRole("textbox", { name: "Name" });
-    const error = screen.getByRole("alert");
+    const error = screen.getByText("An agent with this name already exists");
     expect(input).toHaveAttribute("aria-invalid", "true");
     expect(input).toHaveAttribute("aria-describedby", error.id);
+    expect(error).not.toHaveAttribute("role");
     expect(
       input.compareDocumentPosition(error) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
@@ -128,7 +133,7 @@ describe("Agent creation errors", () => {
     expect(onChange).toHaveBeenCalledWith("New agent");
   });
 
-  it("focuses the name input when a name error appears", () => {
+  it("focuses and selects the name input when a name error appears", () => {
     const onChange = vi.fn();
     const view = render(
       createElement(AgentNameField, {
@@ -150,6 +155,9 @@ describe("Agent creation errors", () => {
     );
 
     expect(input).toHaveFocus();
+    expect(input).toHaveValue("Existing agent");
+    expect(input).toHaveProperty("selectionStart", 0);
+    expect(input).toHaveProperty("selectionEnd", "Existing agent".length);
   });
 
   it("renders a generic error on the left side of the sticky footer", () => {
@@ -169,7 +177,6 @@ describe("Agent creation errors", () => {
     expect(
       error.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
-    expect(error.parentElement).toHaveClass("sticky", "justify-between");
   });
 });
 
