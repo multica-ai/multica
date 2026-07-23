@@ -427,6 +427,23 @@ describe("ChatInput project context", () => {
     expect(onProjectChange).toHaveBeenCalledWith(null);
   });
 
+  it("allows removing project context while the agent is running", () => {
+    const onProjectChange = vi.fn();
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange,
+      isRunning: true,
+    });
+
+    const projectControl = screen.getByRole("button", {
+      name: "Change project context",
+    });
+    expect(projectControl).not.toBeDisabled();
+    fireEvent.click(projectControl);
+    expect(onProjectChange).toHaveBeenCalledWith(null);
+  });
+
   it("locks the project control while a send is in flight so a mid-send switch cannot retarget the session", async () => {
     // A brand-new chat creates its session row lazily during send, bound to
     // the project selected at click time. If the user could switch project

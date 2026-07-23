@@ -168,6 +168,83 @@ func TestCreateChatSession_ProjectContext(t *testing.T) {
 	})
 }
 
+func TestUpdateChatSession_UpdatesProjectContext(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	projectID := createChatProjectTestProject(t, testWorkspaceID, "Removable chat project", "")
+	replacementProjectID := createChatProjectTestProject(t, testWorkspaceID, "Replacement chat project", "")
+	agentID := createHandlerTestAgent(t, "RemoveChatProjectAgent", []byte("[]"))
+	sessionID := createChatSessionWithProjectForTest(t, agentID, projectID)
+
+	updateProject := func(projectID any) *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := withURLParam(
+			withChatTestWorkspaceCtx(t, newRequest(http.MethodPatch, "/api/chat/sessions/"+sessionID, map[string]any{
+				"project_id": projectID,
+			})),
+			"sessionId",
+			sessionID,
+		)
+		testHandler.UpdateChatSession(w, req)
+		return w
+	}
+
+	w := updateProject(replacementProjectID)
+	if w.Code != http.StatusOK {
+		t.Fatalf("replace project: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response ChatSessionResponse
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.ID != sessionID {
+		t.Fatalf("session id = %q, want %q", response.ID, sessionID)
+	}
+	if response.ProjectID == nil || *response.ProjectID != replacementProjectID {
+		t.Fatalf("response project_id = %v, want %s", response.ProjectID, replacementProjectID)
+	}
+
+	var foreignWorkspaceID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO workspace (name, slug) VALUES ('Foreign chat update', $1) RETURNING id
+	`, "chat-update-"+uuid.NewString()).Scan(&foreignWorkspaceID); err != nil {
+		t.Fatalf("create foreign workspace: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID)
+	})
+	foreignProjectID := createChatProjectTestProject(t, foreignWorkspaceID, "Foreign replacement", "")
+	foreignW := updateProject(foreignProjectID)
+	if foreignW.Code != http.StatusNotFound {
+		t.Fatalf("foreign project: expected 404, got %d: %s", foreignW.Code, foreignW.Body.String())
+	}
+
+	w = updateProject(nil)
+	if w.Code != http.StatusOK {
+		t.Fatalf("remove project: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	response = ChatSessionResponse{}
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode remove response: %v", err)
+	}
+	if response.ProjectID != nil {
+		t.Fatalf("response project_id = %v, want null", response.ProjectID)
+	}
+
+	var storedProjectID *string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT project_id::text FROM chat_session WHERE id = $1
+	`, sessionID).Scan(&storedProjectID); err != nil {
+		t.Fatalf("load updated chat session: %v", err)
+	}
+	if storedProjectID != nil {
+		t.Fatalf("stored project_id = %v, want null", storedProjectID)
+	}
+}
+
 func TestDeleteProject_ClearsChatSessionContext(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

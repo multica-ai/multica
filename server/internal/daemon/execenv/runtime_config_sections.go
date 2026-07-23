@@ -257,18 +257,20 @@ func writeRepositories(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("\n")
 }
 
-// writeProjectContext emits the Project Context section when the issue
-// belongs to a project.
+// writeProjectContext emits the Project Context section when the task carries
+// an active project. Project context is independent of the task surface: an
+// issue inherits it from its project, while a chat receives it from the
+// project selected on the chat session.
 func writeProjectContext(b *strings.Builder, ctx TaskContextForEnv) {
 	if ctx.ProjectID == "" && len(ctx.ProjectResources) == 0 {
 		return
 	}
 	b.WriteString("## Project Context\n\n")
 	if ctx.ProjectTitle != "" {
-		fmt.Fprintf(b, "This issue belongs to **%s**.\n\n", ctx.ProjectTitle)
+		fmt.Fprintf(b, "The active project for this task is **%s**.\n\n", ctx.ProjectTitle)
 	}
 	if desc := strings.TrimSpace(ctx.ProjectDescription); desc != "" {
-		b.WriteString("Project description — durable context the project owner set for every task in this project:\n\n")
+		b.WriteString("Project description — durable context the project owner set for work in this project:\n\n")
 		b.WriteString(desc)
 		b.WriteString("\n\n")
 	}
@@ -595,7 +597,7 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Available Commands    |   full  |  full  |   full    |   minimal    | full
 //	Comment Formatting    |    ✓    |   ✓    |     —     |      —       |  —
 //	Repositories          |    △    |   △    |     △     |      —       |  △
-//	Project Context       |    △    |   △    |     —     |      —       |  —
+//	Project Context       |    △    |   △    |     △     |      △       |  △
 //	Issue Metadata        |    ✓    |   ✓    |     —     |      —       |  —
 //	Instruction Precedence|    —    |   ✓    |     —     |      —       |  —
 //	Sub-issue Creation    |    ✓    |   ✓    |     —     |      —       |  —
@@ -635,8 +637,9 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 		writeRepositories(&b, ctx)
 	}
 
+	writeProjectContext(&b, ctx)
+
 	if kind.hasIssueContext() {
-		writeProjectContext(&b, ctx)
 		writeIssueMetadata(&b)
 	}
 

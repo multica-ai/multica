@@ -250,6 +250,65 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	}
 }
 
+func TestChatProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
+	t.Parallel()
+
+	ctx := TaskContextForEnv{
+		ChatSessionID:      "chat-project-context",
+		ProjectID:          "22222222-3333-4444-5555-666666666666",
+		ProjectTitle:       "Project Beta",
+		ProjectDescription: "Use the beta repository and follow the beta rollout plan.",
+		ProjectResources: []ProjectResourceForEnv{
+			{
+				ID:           "33333333-4444-5555-6666-777777777777",
+				ResourceType: "github_repo",
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/org/beta"}`),
+			},
+		},
+	}
+
+	for _, tc := range []struct {
+		provider string
+		filename string
+	}{
+		{provider: "claude", filename: "CLAUDE.md"},
+		{provider: "codex", filename: "AGENTS.md"},
+	} {
+		tc := tc
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if _, err := InjectRuntimeConfig(dir, tc.provider, ctx); err != nil {
+				t.Fatalf("InjectRuntimeConfig: %v", err)
+			}
+			content, err := os.ReadFile(filepath.Join(dir, tc.filename))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.filename, err)
+			}
+			s := string(content)
+			for _, want := range []string{
+				"## Project Context",
+				"Project Beta",
+				"Use the beta repository and follow the beta rollout plan.",
+				"https://github.com/org/beta",
+			} {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s missing chat project context %q", tc.filename, want)
+				}
+			}
+			for _, banned := range []string{
+				"This issue belongs to",
+				"## Issue Metadata",
+				"## Sub-issue Creation",
+			} {
+				if strings.Contains(s, banned) {
+					t.Errorf("%s chat brief contains issue-only text %q", tc.filename, banned)
+				}
+			}
+		})
+	}
+}
+
 // When the issue's project has its own github_repo resources, those should be
 // the only repos rendered in the meta-skill — workspace-level repos must not
 // leak into the agent prompt to avoid confusing it about which repo to use.

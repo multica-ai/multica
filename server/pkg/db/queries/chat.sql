@@ -80,6 +80,14 @@ UPDATE chat_session SET title = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateChatSessionProject :one
+-- Project context is user-editable session metadata. Do not touch updated_at:
+-- changing context is not conversation activity and must not reorder history.
+UPDATE chat_session
+SET project_id = sqlc.narg('project_id')
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
+
 -- name: UpdateChatSessionTitleIfCurrent :one
 -- Compare-and-swap the title: only overwrite it when it still equals the
 -- value the caller observed (@expected_title). This is the idempotency /

@@ -6,6 +6,7 @@ import { useQuery } from "@tanstack/react-query";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
 import type { UpdateIssueRequest } from "@multica/core/types";
+import { cn } from "@multica/ui/lib/utils";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -52,7 +53,14 @@ export function ProjectPicker({
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <div className="group/project relative inline-flex min-w-0">
         <DropdownMenuTrigger
-          className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+          className={
+            triggerRender
+              ? undefined
+              : cn(
+                  "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden",
+                  current && "pr-5",
+                )
+          }
           render={triggerRender}
         >
           {current ? (
@@ -71,9 +79,9 @@ export function ProjectPicker({
               event.stopPropagation();
               onUpdate({ project_id: null });
             }}
-            className="pointer-events-none absolute inset-y-0 right-0 flex w-7 items-center justify-center rounded-r-full bg-background/95 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/project:pointer-events-auto group-hover/project:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+            className="pointer-events-none absolute right-1 top-1/2 flex size-3.5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-[background-color,color,opacity] hover:bg-muted-foreground/20 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none group-hover/project:pointer-events-auto group-hover/project:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
           >
-            <X className="size-3" />
+            <X className="size-2.5" />
           </button>
         )}
       </div>

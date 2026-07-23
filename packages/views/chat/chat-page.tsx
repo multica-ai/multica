@@ -152,10 +152,10 @@ export function ChatPage() {
   const changeProjectContext = (projectId: string | null) => {
     if (projectId === c.activeProjectId) return;
     c.handleProjectChange(projectId);
-    // Project is part of session identity, so changing it lands on a fresh
-    // composer. Mobile needs this explicit flag to stay in the conversation
-    // pane after activeSessionId is cleared.
-    setComposingNew(true);
+    // Removing a project stays in the current conversation. Choosing a
+    // project for an existing conversation starts a clean session, and mobile
+    // must remain in the compose pane after activeSessionId is cleared.
+    if (!c.currentSession || projectId !== null) setComposingNew(true);
   };
 
   // URL → new chat: `?agent=<id>` is the deep link used by "DM" entry points
@@ -271,6 +271,7 @@ export function ChatPage() {
         projects={c.projects}
         projectId={c.activeProjectId}
         onProjectChange={changeProjectContext}
+        isProjectUpdating={c.isProjectUpdating}
         focusRequest={c.focusInputRequest}
       />
     </div>

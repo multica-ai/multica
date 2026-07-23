@@ -302,15 +302,15 @@ func (h *Handler) GetChatSession(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateChatSessionRequest struct {
-	Title *string `json:"title"`
+	Title     *string         `json:"title"`
+	ProjectID json.RawMessage `json:"project_id"`
 }
 
-// UpdateChatSession updates user-editable fields on a chat session — today
-// just `title`, surfaced by the inline rename affordance in the session
-// dropdown. Title is the only field accepted here: `status` has its own
-// archive/unarchive endpoint (SetChatSessionArchived), `pinned` its own pin
-// endpoint, agent/creator/workspace are immutable, the resume pointers
-// (session_id / work_dir / runtime_id) are daemon-owned.
+// UpdateChatSession updates one user-editable field on a chat session. Title
+// is surfaced by inline rename; project_id controls the project context used
+// by subsequent turns. Status and pinned keep their dedicated endpoints,
+// agent/creator/workspace are immutable, and the resume pointers
+// (session_id / work_dir / runtime_id) remain daemon-owned.
 func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -324,17 +324,10 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if req.Title == nil {
-		writeError(w, http.StatusBadRequest, "title is required")
-		return
-	}
-	title := strings.TrimSpace(*req.Title)
-	if title == "" {
-		writeError(w, http.StatusBadRequest, "title is required")
-		return
-	}
-	if len([]rune(title)) > chatSessionTitleMaxLen {
-		writeError(w, http.StatusBadRequest, "title is too long")
+	hasTitle := req.Title != nil
+	hasProjectID := req.ProjectID != nil
+	if hasTitle == hasProjectID {
+		writeError(w, http.StatusBadRequest, "exactly one of title or project_id is required")
 		return
 	}
 
@@ -343,21 +336,92 @@ func (h *Handler) UpdateChatSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := h.Queries.UpdateChatSessionTitle(r.Context(), db.UpdateChatSessionTitleParams{
-		ID:    session.ID,
-		Title: title,
-	})
+	var (
+		updated db.ChatSession
+		err     error
+	)
+	var projectIDChanged bool
+	if hasTitle {
+		title := strings.TrimSpace(*req.Title)
+		if title == "" {
+			writeError(w, http.StatusBadRequest, "title is required")
+			return
+		}
+		if len([]rune(title)) > chatSessionTitleMaxLen {
+			writeError(w, http.StatusBadRequest, "title is too long")
+			return
+		}
+		updated, err = h.Queries.UpdateChatSessionTitle(r.Context(), db.UpdateChatSessionTitleParams{
+			ID:    session.ID,
+			Title: title,
+		})
+	} else {
+		projectID := pgtype.UUID{Valid: false}
+		if string(req.ProjectID) != "null" {
+			var rawProjectID string
+			if err := json.Unmarshal(req.ProjectID, &rawProjectID); err != nil {
+				writeError(w, http.StatusBadRequest, "project_id must be a UUID or null")
+				return
+			}
+			rawProjectID = strings.TrimSpace(rawProjectID)
+			if rawProjectID == "" {
+				writeError(w, http.StatusBadRequest, "project_id must be a UUID or null")
+				return
+			}
+			projectID, ok = parseUUIDOrBadRequest(w, rawProjectID, "project_id")
+			if !ok {
+				return
+			}
+		}
+
+		tx, txErr := h.TxStarter.Begin(r.Context())
+		if txErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to start transaction")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		qtx := h.Queries.WithTx(tx)
+
+		if projectID.Valid {
+			if _, lockErr := qtx.LockProjectForChatSessionCreate(r.Context(), db.LockProjectForChatSessionCreateParams{
+				ID:          projectID,
+				WorkspaceID: session.WorkspaceID,
+			}); lockErr != nil {
+				if errors.Is(lockErr, pgx.ErrNoRows) {
+					writeError(w, http.StatusNotFound, "project not found")
+					return
+				}
+				writeError(w, http.StatusInternalServerError, "failed to lock project")
+				return
+			}
+		}
+
+		updated, err = qtx.UpdateChatSessionProject(r.Context(), db.UpdateChatSessionProjectParams{
+			ID:          session.ID,
+			WorkspaceID: session.WorkspaceID,
+			ProjectID:   projectID,
+		})
+		if err == nil {
+			err = tx.Commit(r.Context())
+		}
+		projectIDChanged = true
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update chat session")
 		return
 	}
 
 	resolvedSessionID := uuidToString(updated.ID)
-	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, protocol.ChatSessionUpdatedPayload{
+	payload := protocol.ChatSessionUpdatedPayload{
 		ChatSessionID: resolvedSessionID,
 		Title:         updated.Title,
 		UpdatedAt:     timestampToString(updated.UpdatedAt),
-	})
+	}
+	if projectIDChanged {
+		projectID := uuidToPtr(updated.ProjectID)
+		payload.ProjectID = &projectID
+	}
+	h.publishChat(protocol.EventChatSessionUpdated, workspaceID, "member", userID, resolvedSessionID, payload)
 
 	writeJSON(w, http.StatusOK, chatSessionToResponse(updated))
 }

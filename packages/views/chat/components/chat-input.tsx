@@ -96,11 +96,11 @@ interface ChatInputProps {
   leftAdornment?: ReactNode;
   /** Chat @ suggestions: current/recent issue/project entries. */
   contextItems?: MentionItem[];
-  /** Project context is session identity: changing it starts a fresh chat in
-   *  the owner while preserving the selected agent. */
+  /** Optional project context for the draft or current chat session. */
   projects?: Project[];
   projectId?: string | null;
   onProjectChange?: (projectId: string | null) => void;
+  isProjectUpdating?: boolean;
   /** Monotonic nonce bumped by the owner whenever the compose box should grab
    *  keyboard focus — currently on "new chat" so the user can type right away.
    *  0 (the initial value) is inert, so a plain deep-link open never steals
@@ -131,6 +131,7 @@ export function ChatInput({
   projects = [],
   projectId,
   onProjectChange,
+  isProjectUpdating,
   focusRequest,
   draftKeyOverride,
   editorKeyOverride,
@@ -497,15 +498,15 @@ export function ChatInput({
         : t(($) => $.input.placeholder_default);
 
   const uploadEnabled = !!onUploadFile && !disabled && !noAgent;
-  // Also lock the project control while a send is in flight (`isSubmitting`),
-  // not just once the agent is running (`isRunning`). On a brand-new chat the
-  // session row is created lazily during send with the project selected at
-  // click time; letting the user switch project mid-send would create the
-  // session against the old project while the UI already shows the new one,
-  // so the agent receives a project/repo context the user no longer intends
-  // (and the editor clears as if the send landed on the current selection).
+  // Lock only while the send request itself is creating/resolving the target
+  // session. Once accepted, its project can still be detached while agent work
+  // continues: changing session metadata does not cancel or move that task.
   const projectSelectionEnabled =
-    !!onProjectChange && !disabled && !noAgent && !isRunning && !isSubmitting;
+    !!onProjectChange &&
+    !disabled &&
+    !noAgent &&
+    !isSubmitting &&
+    !isProjectUpdating;
   const selectedProject = projects.find((project) => project.id === projectId);
 
   return (

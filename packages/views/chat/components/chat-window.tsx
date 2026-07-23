@@ -45,6 +45,7 @@ import {
   useCreateChatSession,
   useMarkChatSessionRead,
   useSetChatSessionArchived,
+  useSetChatSessionProject,
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
@@ -236,6 +237,7 @@ export function ChatWindow() {
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
+  const setSessionProject = useSetChatSessionProject();
 
   const currentMember = members.find((m) => m.user_id === user?.id);
   const memberRole = currentMember?.role;
@@ -671,7 +673,10 @@ export function ChatWindow() {
         previousSessionId: activeSessionId,
       });
       setSelectedAgentId(agent.id);
-      setSelectedProjectId(activeProjectId);
+      // Preserve an explicitly chosen project while composing an unsent chat,
+      // but never inherit project context from the historical session being
+      // left behind.
+      setSelectedProjectId(currentSession ? null : activeProjectId);
       // Reset session when switching agent
       setActiveSession(null);
       requestInputFocus();
@@ -681,6 +686,7 @@ export function ChatWindow() {
       selectedAgentId,
       activeSessionId,
       activeProjectId,
+      currentSession,
       setSelectedAgentId,
       setSelectedProjectId,
       setActiveSession,
@@ -693,13 +699,12 @@ export function ChatWindow() {
       previousSessionId: activeSessionId,
       previousPendingTask: pendingTaskId,
     });
-    setSelectedProjectId(activeProjectId);
+    setSelectedProjectId(null);
     setActiveSession(null);
     requestInputFocus();
   }, [
     activeSessionId,
     pendingTaskId,
-    activeProjectId,
     setSelectedProjectId,
     setActiveSession,
     requestInputFocus,
@@ -717,10 +722,9 @@ export function ChatWindow() {
         });
         setSelectedAgentId(session.agent_id);
       }
-      setSelectedProjectId(session.project_id ?? null);
       setActiveSession(session.id);
     },
-    [activeAgent, setSelectedAgentId, setSelectedProjectId, setActiveSession],
+    [activeAgent, setSelectedAgentId, setActiveSession],
   );
 
   const handleProjectChange = useCallback(
@@ -731,12 +735,32 @@ export function ChatWindow() {
         to: projectId,
         previousSessionId: activeSessionId,
       });
+      if (activeSessionId) {
+        // A persisted selection can resolve before its sessions query. Do not
+        // misfile a project change into the new-chat draft during that window.
+        if (!currentSession) return;
+        if (projectId === null) {
+          // Removing context affects future turns without moving the current
+          // conversation. A different project gets a fresh session so the old
+          // provider memory/workdir is never mixed into the new project.
+          setSessionProject.mutate({
+            sessionId: currentSession.id,
+            projectId: null,
+          });
+        } else {
+          setSelectedProjectId(projectId);
+          setActiveSession(null);
+        }
+        requestInputFocus();
+        return;
+      }
       setSelectedProjectId(projectId);
-      setActiveSession(null);
       requestInputFocus();
     }, [
       activeProjectId,
       activeSessionId,
+      currentSession,
+      setSessionProject,
       setSelectedProjectId,
       setActiveSession,
       requestInputFocus,
@@ -909,6 +933,9 @@ export function ChatWindow() {
         projects={projects}
         projectId={activeProjectId}
         onProjectChange={handleProjectChange}
+        isProjectUpdating={
+          setSessionProject.isPending || (!!activeSessionId && !currentSession)
+        }
         leftAdornment={
           <AgentDropdown
             agents={availableAgents}

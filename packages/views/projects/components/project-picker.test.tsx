@@ -58,6 +58,11 @@ describe("ProjectPicker", () => {
       .find((button) => button.className.includes("group-hover/project:opacity-100"));
     expect(clear).toBeDefined();
     expect(clear!.className).toContain("group-hover/project:opacity-100");
+    expect(clear!.className).toContain("size-3.5");
+    expect(clear!.className).toContain("hover:bg-muted-foreground/20");
+    expect(clear!.className).not.toContain("bg-background/95");
+    expect(clear!.className).not.toContain("inset-y-0");
+    expect(clear!.className).not.toContain("w-7");
 
     await user.click(clear!);
     expect(onUpdate).toHaveBeenCalledWith({ project_id: null });

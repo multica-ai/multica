@@ -29,6 +29,7 @@ import {
 import {
   useCreateChatSession,
   useMarkChatSessionRead,
+  useSetChatSessionProject,
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
@@ -283,6 +284,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const qc = useQueryClient();
   const createSession = useCreateChatSession();
   const markRead = useMarkChatSessionRead();
+  const setSessionProject = useSetChatSessionProject();
   const setArchived = useSetChatSessionArchived();
 
   const currentMember = members.find((m) => m.user_id === user?.id);
@@ -658,13 +660,15 @@ export function useChatController(opts?: { isActive?: boolean }) {
       previousSessionId: activeSessionId,
       previousPendingTask: pendingTaskId,
     });
-    setSelectedProjectId(activeProjectId);
+    // A fresh chat has no project unless the user explicitly chooses one.
+    // The open session's project is server-owned history, not a default for
+    // the next session.
+    setSelectedProjectId(null);
     setActiveSession(null);
     requestInputFocus();
   }, [
     activeSessionId,
     pendingTaskId,
-    activeProjectId,
     setSelectedProjectId,
     setActiveSession,
     requestInputFocus,
@@ -681,13 +685,12 @@ export function useChatController(opts?: { isActive?: boolean }) {
         previousSessionId: activeSessionId,
       });
       setSelectedAgentId(agent.id);
-      setSelectedProjectId(activeProjectId);
+      setSelectedProjectId(null);
       setActiveSession(null);
       requestInputFocus();
     },
     [
       activeSessionId,
-      activeProjectId,
       setSelectedAgentId,
       setSelectedProjectId,
       setActiveSession,
@@ -707,10 +710,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
         });
         setSelectedAgentId(session.agent_id);
       }
-      setSelectedProjectId(session.project_id ?? null);
       setActiveSession(session.id);
     },
-    [activeAgent, setSelectedAgentId, setSelectedProjectId, setActiveSession],
+    [activeAgent, setSelectedAgentId, setActiveSession],
   );
 
   const handleProjectChange = useCallback(
@@ -721,12 +723,33 @@ export function useChatController(opts?: { isActive?: boolean }) {
         to: projectId,
         previousSessionId: activeSessionId,
       });
+      if (activeSessionId) {
+        // A persisted selection can resolve before its sessions query. Do not
+        // misfile a project change into the new-chat draft during that window.
+        if (!currentSession) return;
+        if (projectId === null) {
+          // Detaching context is safe in place: it only changes what future
+          // turns receive. Switching to another project starts a fresh chat so
+          // provider memory and the reused workdir from the old project cannot
+          // bleed into the new one.
+          setSessionProject.mutate({
+            sessionId: currentSession.id,
+            projectId: null,
+          });
+        } else {
+          setSelectedProjectId(projectId);
+          setActiveSession(null);
+        }
+        requestInputFocus();
+        return;
+      }
       setSelectedProjectId(projectId);
-      setActiveSession(null);
       requestInputFocus();
     }, [
       activeProjectId,
       activeSessionId,
+      currentSession,
+      setSessionProject,
       setSelectedProjectId,
       setActiveSession,
       requestInputFocus,
@@ -774,6 +797,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
     activeSessionId,
     selectedAgentId,
     activeProjectId,
+    isProjectUpdating:
+      setSessionProject.isPending || (!!activeSessionId && !currentSession),
     currentSession,
     isSessionArchived,
     isAgentArchived,
