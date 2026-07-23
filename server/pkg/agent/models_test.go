@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
@@ -1021,7 +1022,7 @@ func TestParseAntigravityModels(t *testing.T) {
 		t.Fatalf("parseAntigravityModels len = %d, want %d (%+v)", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("model[%d] = %+v, want %+v", i, got[i], want[i])
 		}
 	}

@@ -1125,6 +1125,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// MUL-2339 — Trump's constraint that the three injection points
 		// must not drift independently).
 		applyCodexReasoningEffort(turnParams, opts.ThinkingLevel)
+		applyCodexServiceTier(turnParams, opts.ServiceTier)
 		waitingForTurn := true
 		var timeoutDiagnostic codexTimeoutDiagnostic
 		var processExitErr error
@@ -1394,6 +1395,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		// agent's thinking_level since. See MUL-2339 — Elon flagged that
 		// resume must honour the live config, not the stored one.
 		applyCodexReasoningEffort(resumeParams, opts.ThinkingLevel)
+		applyCodexServiceTier(resumeParams, opts.ServiceTier)
 		resumeResult, err := c.request(ctx, "thread/resume", resumeParams)
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
@@ -1425,6 +1427,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"persistExtendedHistory": true,
 	}
 	applyCodexReasoningEffort(startParams, opts.ThinkingLevel)
+	applyCodexServiceTier(startParams, opts.ServiceTier)
 	startResult, err := c.request(ctx, "thread/start", startParams)
 	if err != nil {
 		return "", false, fmt.Errorf("codex thread/start failed: %w", err)
@@ -1487,6 +1490,16 @@ func applyCodexReasoningEffort(params map[string]any, level string) {
 	}
 	cfg["model_reasoning_effort"] = level
 	params["config"] = cfg
+}
+
+// applyCodexServiceTier writes the catalog-owned service tier to the
+// app-server's top-level serviceTier field. All three execution requests
+// accept the same shape. Empty is a no-op so config.toml remains authoritative.
+func applyCodexServiceTier(params map[string]any, tier string) {
+	if params == nil || tier == "" {
+		return
+	}
+	params["serviceTier"] = tier
 }
 
 func resetTimer(timer *time.Timer, d time.Duration) {

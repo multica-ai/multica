@@ -443,6 +443,12 @@ export interface Agent {
    * (MUL-2339).
    */
   thinking_level?: string;
+  /**
+   * Runtime-native Codex service tier (for example `priority`, displayed as
+   * Fast). Empty/undefined means no override: local Codex configuration and
+   * account defaults remain authoritative.
+   */
+  service_tier?: string;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
@@ -510,6 +516,8 @@ export interface CreateAgentRequest {
   model?: string;
   /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
   thinking_level?: string;
+  /** Optional Codex service-tier catalog ID. See `Agent.service_tier`. */
+  service_tier?: string;
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
@@ -671,6 +679,11 @@ export interface UpdateAgentRequest {
    *     runtime's provider enum, rejected with 400 if not recognised
    */
   thinking_level?: string;
+  /**
+   * Codex service-tier override. Omitted preserves the saved value, `""`
+   * clears it, and a non-empty value stores a runtime-catalog ID.
+   */
+  service_tier?: string;
 }
 
 /**
@@ -888,6 +901,17 @@ export interface RuntimeModel {
    * picker for this model". See MUL-2339.
    */
   thinking?: RuntimeModelThinking;
+  /** Runtime-native execution tiers advertised for this exact model. */
+  service_tiers?: RuntimeModelServiceTier[];
+}
+
+export interface RuntimeModelServiceTier {
+  /** Catalog ID sent to the provider protocol unchanged. */
+  id: string;
+  /** Provider-owned display name, for example `Fast`. */
+  name: string;
+  /** Optional provider-owned helper copy. */
+  description?: string;
 }
 
 export interface RuntimeModelThinking {

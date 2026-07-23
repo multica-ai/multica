@@ -65,6 +65,10 @@ type ExecOptions struct {
 	// the field rather than fail (so MUL-2339 can grow runtime support
 	// incrementally without breaking unrelated agents).
 	ThinkingLevel string
+	// ServiceTier is a runtime-native Codex execution tier (for example
+	// "priority", displayed as Fast). Empty means inherit local Codex config.
+	// Other providers ignore this field.
+	ServiceTier string
 	// OpenclawMode chooses between local (embedded) and gateway routing for
 	// the openclaw backend. "" or "local" keeps the historical behaviour —
 	// the daemon spawns `openclaw agent --local …` and the agent loop runs

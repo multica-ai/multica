@@ -153,7 +153,7 @@
     "section_profile": "프로필",
     "section_profile_hint": "워크스페이스에서 이 에이전트가 표시되는 방식을 관리합니다.",
     "section_execution": "실행 설정",
-    "section_execution_hint": "런타임, 모델, 추론 수준과 병렬 작업 한도를 설정합니다.",
+    "section_execution_hint": "런타임, 모델, 추론 수준, 속도와 병렬 작업 한도를 설정합니다.",
     "section_access": "접근 권한",
     "section_access_hint": "이 에이전트와 연결된 기능을 사용할 수 있는 대상을 관리합니다.",
     "section_properties": "속성",
@@ -164,6 +164,7 @@
     "prop_runtime": "런타임",
     "prop_model": "모델",
     "prop_thinking": "추론",
+    "prop_speed": "속도",
     "prop_visibility": "공개 범위",
     "prop_concurrency": "동시 실행",
     "prop_owner": "소유자",
@@ -222,7 +223,11 @@
     "thinking_default": "CLI 설정 따르기",
     "thinking_tooltip": "추론 · {{value}}",
     "thinking_clear": "CLI 설정 따르기",
-    "thinking_clear_title": "재정의를 지우고 추론 수준을 로컬 CLI 설정(claude/codex)에 맡깁니다"
+    "thinking_clear_title": "재정의를 지우고 추론 수준을 로컬 CLI 설정(claude/codex)에 맡깁니다",
+    "service_tier_default": "런타임 기본값",
+    "service_tier_tooltip": "속도 · {{value}}",
+    "service_tier_clear": "런타임 기본값",
+    "service_tier_clear_title": "속도 재정의를 지우고 로컬 Codex 설정에 맡깁니다"
   },
   "model_dropdown": {
     "label": "모델",

@@ -176,6 +176,7 @@ type AgentData struct {
 	McpConfig             json.RawMessage            `json:"mcp_config,omitempty"`
 	Model                 string                     `json:"model,omitempty"`
 	ThinkingLevel         string                     `json:"thinking_level,omitempty"`
+	ServiceTier           string                     `json:"service_tier,omitempty"`
 	DisabledRuntimeSkills []DisabledRuntimeSkillData `json:"disabled_runtime_skills,omitempty"`
 	// RuntimeConfig is the per-provider runtime_config JSON as stored on
 	// the agent record, forwarded verbatim by the claim endpoint. The
