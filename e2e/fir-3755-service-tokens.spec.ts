@@ -11,6 +11,7 @@ const DATABASE_URL =
   "postgres://multica:multica@localhost:5432/multica?sslmode=disable";
 const FEATURE_FLAG = "cerebro_service_tokens";
 const WORKSPACE_FLAG_USER = "00000000-0000-0000-0000-000000000000";
+const FLAG_HYDRATION_TIMEOUT_MS = 15_000;
 
 test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and revoke", async ({
   page,
@@ -54,7 +55,9 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
     // direct route load. CI can take more than Playwright's default five
     // seconds to hydrate the workspace feature flags, so wait for the actual
     // gated surface before asserting that it is unique.
-    await expect(serviceTokensSection).toBeVisible({ timeout: 15_000 });
+    await expect(serviceTokensSection).toBeVisible({
+      timeout: FLAG_HYDRATION_TIMEOUT_MS,
+    });
     await expect(serviceTokensSection).toHaveCount(1);
 
     for (const scope of ["skills:read", "agents:read", "issues:read"]) {
@@ -211,7 +214,9 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
 
     await api.setWorkspaceFeatureFlag(FEATURE_FLAG, true);
     await page.reload({ waitUntil: "domcontentloaded" });
-    await expect(serviceTokensSection).toBeVisible();
+    await expect(serviceTokensSection).toBeVisible({
+      timeout: FLAG_HYDRATION_TIMEOUT_MS,
+    });
     await expect(tokenRow).toBeVisible();
 
     await tokenRow
