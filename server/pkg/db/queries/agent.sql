@@ -851,6 +851,68 @@ WHERE t.id = v.id
   AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision)
 RETURNING t.*;
 
+-- name: LockRecoverableQueuedExpiredCreateIssueTasks :many
+-- Locks at most one bounded batch of original create_issue tasks for a runtime
+-- heartbeat. Holding both issue and parent rows through CreateRetryTask makes the
+-- parent_task_id existence check an idempotency gate across concurrent HTTP and
+-- WebSocket heartbeats. Any later work on the issue suppresses recovery.
+SELECT t.*
+FROM agent_task_queue t
+JOIN issue i ON i.id = t.issue_id
+JOIN autopilot a ON a.id = i.origin_id
+WHERE t.runtime_id = sqlc.arg('runtime_id')
+  AND t.status = 'failed'
+  AND t.failure_reason = 'queued_expired'
+  AND t.parent_task_id IS NULL
+  AND t.trigger_comment_id IS NULL
+  AND t.autopilot_run_id IS NULL
+  AND t.attempt < t.max_attempts
+  AND i.origin_type = 'autopilot'
+  AND i.status = 'blocked'
+  AND i.metadata ->> 'pipeline_status' = 'queued_expired'
+  AND a.execution_mode = 'create_issue'
+  AND EXISTS (
+    SELECT 1 FROM autopilot_run ar
+    -- HandleFailedTasks emits task:failed after surfacing the issue, and the
+    -- autopilot status listener then changes issue_created -> failed. The
+    -- durable queued_expired marker proves this is that same recovery flow.
+    WHERE ar.issue_id = i.id AND ar.status IN ('issue_created', 'running', 'failed')
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_task_queue other
+    WHERE other.issue_id = t.issue_id AND other.id <> t.id
+  )
+ORDER BY t.created_at ASC
+LIMIT sqlc.arg('max_per_reconnect')::int
+FOR UPDATE OF i, t SKIP LOCKED;
+
+-- name: GetQueuedExpiredCreateIssueForSurface :one
+-- Called only after LockIssueForTaskEnqueue in the same READ COMMITTED
+-- transaction. Keeping the lock and eligibility read as separate statements
+-- gives this predicate a fresh snapshot after any prior enqueue lock-holder
+-- commits its task.
+SELECT i.*
+FROM issue i
+JOIN autopilot a ON a.id = i.origin_id
+JOIN agent_task_queue t ON t.issue_id = i.id
+WHERE t.id = sqlc.arg('task_id')
+  AND t.status = 'failed'
+  AND t.failure_reason = 'queued_expired'
+  AND t.parent_task_id IS NULL
+  AND t.trigger_comment_id IS NULL
+  AND t.autopilot_run_id IS NULL
+  AND i.origin_type = 'autopilot'
+  AND i.status IN ('todo', 'in_progress')
+  AND a.execution_mode = 'create_issue'
+  AND EXISTS (
+    SELECT 1 FROM autopilot_run ar
+    WHERE ar.issue_id = i.id AND ar.status IN ('issue_created', 'running')
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_task_queue other
+    WHERE other.issue_id = i.id AND other.id <> t.id
+  );
+
 -- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL

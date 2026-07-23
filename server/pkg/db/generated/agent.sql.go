@@ -2801,6 +2801,68 @@ func (q *Queries) GetLatestTaskRoleForIssueAndAgent(ctx context.Context, arg Get
 	return i, err
 }
 
+const getQueuedExpiredCreateIssueForSurface = `-- name: GetQueuedExpiredCreateIssueForSurface :one
+SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties
+FROM issue i
+JOIN autopilot a ON a.id = i.origin_id
+JOIN agent_task_queue t ON t.issue_id = i.id
+WHERE t.id = $1
+  AND t.status = 'failed'
+  AND t.failure_reason = 'queued_expired'
+  AND t.parent_task_id IS NULL
+  AND t.trigger_comment_id IS NULL
+  AND t.autopilot_run_id IS NULL
+  AND i.origin_type = 'autopilot'
+  AND i.status IN ('todo', 'in_progress')
+  AND a.execution_mode = 'create_issue'
+  AND EXISTS (
+    SELECT 1 FROM autopilot_run ar
+    WHERE ar.issue_id = i.id AND ar.status IN ('issue_created', 'running')
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_task_queue other
+    WHERE other.issue_id = i.id AND other.id <> t.id
+  )
+`
+
+// Called only after LockIssueForTaskEnqueue in the same READ COMMITTED
+// transaction. Keeping the lock and eligibility read as separate statements
+// gives this predicate a fresh snapshot after any prior enqueue lock-holder
+// commits its task.
+func (q *Queries) GetQueuedExpiredCreateIssueForSurface(ctx context.Context, taskID pgtype.UUID) (Issue, error) {
+	row := q.db.QueryRow(ctx, getQueuedExpiredCreateIssueForSurface, taskID)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+	)
+	return i, err
+}
+
 const getWorkspaceAgentActivity30d = `-- name: GetWorkspaceAgentActivity30d :many
 SELECT
     atq.agent_id,
@@ -3867,6 +3929,115 @@ SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.st
 // no workspace_id column.
 func (q *Queries) ListWorkspaceAgentTaskSnapshot(ctx context.Context, workspaceID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, listWorkspaceAgentTaskSnapshot, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockRecoverableQueuedExpiredCreateIssueTasks = `-- name: LockRecoverableQueuedExpiredCreateIssueTasks :many
+SELECT t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id
+FROM agent_task_queue t
+JOIN issue i ON i.id = t.issue_id
+JOIN autopilot a ON a.id = i.origin_id
+WHERE t.runtime_id = $1
+  AND t.status = 'failed'
+  AND t.failure_reason = 'queued_expired'
+  AND t.parent_task_id IS NULL
+  AND t.trigger_comment_id IS NULL
+  AND t.autopilot_run_id IS NULL
+  AND t.attempt < t.max_attempts
+  AND i.origin_type = 'autopilot'
+  AND i.status = 'blocked'
+  AND i.metadata ->> 'pipeline_status' = 'queued_expired'
+  AND a.execution_mode = 'create_issue'
+  AND EXISTS (
+    SELECT 1 FROM autopilot_run ar
+    -- HandleFailedTasks emits task:failed after surfacing the issue, and the
+    -- autopilot status listener then changes issue_created -> failed. The
+    -- durable queued_expired marker proves this is that same recovery flow.
+    WHERE ar.issue_id = i.id AND ar.status IN ('issue_created', 'running', 'failed')
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM agent_task_queue other
+    WHERE other.issue_id = t.issue_id AND other.id <> t.id
+  )
+ORDER BY t.created_at ASC
+LIMIT $2::int
+FOR UPDATE OF i, t SKIP LOCKED
+`
+
+type LockRecoverableQueuedExpiredCreateIssueTasksParams struct {
+	RuntimeID       pgtype.UUID `json:"runtime_id"`
+	MaxPerReconnect int32       `json:"max_per_reconnect"`
+}
+
+// Locks at most one bounded batch of original create_issue tasks for a runtime
+// heartbeat. Holding both issue and parent rows through CreateRetryTask makes the
+// parent_task_id existence check an idempotency gate across concurrent HTTP and
+// WebSocket heartbeats. Any later work on the issue suppresses recovery.
+func (q *Queries) LockRecoverableQueuedExpiredCreateIssueTasks(ctx context.Context, arg LockRecoverableQueuedExpiredCreateIssueTasksParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, lockRecoverableQueuedExpiredCreateIssueTasks, arg.RuntimeID, arg.MaxPerReconnect)
 	if err != nil {
 		return nil, err
 	}

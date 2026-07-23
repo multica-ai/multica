@@ -1216,6 +1216,20 @@ func (q *Queries) LockIssueDuplicateKey(ctx context.Context, dollar_1 string) er
 	return err
 }
 
+const lockIssueForTaskEnqueue = `-- name: LockIssueForTaskEnqueue :one
+SELECT id FROM issue WHERE id = $1 FOR UPDATE
+`
+
+// All issue-linked enqueue decisions take this row lock. Recovery takes the
+// same lock in LockRecoverableQueuedExpiredCreateIssueTasks, eliminating the
+// NOT EXISTS snapshot race with ordinary/manual/mention task creation.
+func (q *Queries) LockIssueForTaskEnqueue(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockIssueForTaskEnqueue, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const markIssueFirstExecuted = `-- name: MarkIssueFirstExecuted :one
 UPDATE issue
 SET first_executed_at = now()
@@ -1246,6 +1260,26 @@ func (q *Queries) MarkIssueFirstExecuted(ctx context.Context, id pgtype.UUID) (M
 		&i.FirstExecutedAt,
 	)
 	return i, err
+}
+
+const markQueuedExpiredIssueManualRerun = `-- name: MarkQueuedExpiredIssueManualRerun :exec
+UPDATE issue
+SET status = 'todo',
+    metadata = jsonb_set(
+        jsonb_set(metadata, '{pipeline_status}', '"manual_rerun"'::jsonb, true),
+        '{waiting_on}', '"runtime_execution"'::jsonb, true
+    ),
+    updated_at = now()
+WHERE id = $1
+  AND metadata ->> 'pipeline_status' = 'queued_expired'
+`
+
+// Claims the recovery decision before a manual rerun starts cancelling tasks.
+// A concurrent reconnect locks the same issue row; whichever transition wins
+// makes the other path observe a non-queued_expired pipeline state.
+func (q *Queries) MarkQueuedExpiredIssueManualRerun(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, markQueuedExpiredIssueManualRerun, id)
+	return err
 }
 
 const setIssueMetadataKey = `-- name: SetIssueMetadataKey :one
@@ -1305,6 +1339,26 @@ func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataK
 		&i.Properties,
 	)
 	return i, err
+}
+
+const supersedeQueuedExpiredIssueWithNewWork = `-- name: SupersedeQueuedExpiredIssueWithNewWork :exec
+UPDATE issue
+SET status = 'todo',
+    metadata = jsonb_set(
+        jsonb_set(metadata, '{pipeline_status}', '"new_work_queued"'::jsonb, true),
+        '{waiting_on}', '"runtime_execution"'::jsonb, true
+    ),
+    updated_at = now()
+WHERE id = $1
+  AND metadata ->> 'pipeline_status' = 'queued_expired'
+`
+
+// Ordinary/mention work queued after durable expiry supersedes reconnect
+// recovery. This runs under LockIssueForTaskEnqueue and shares the task insert
+// transaction, so insert failure rolls the issue state back too.
+func (q *Queries) SupersedeQueuedExpiredIssueWithNewWork(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, supersedeQueuedExpiredIssueWithNewWork, id)
+	return err
 }
 
 const updateIssue = `-- name: UpdateIssue :one
