@@ -2786,6 +2786,15 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	}
 	isEmpty := strings.TrimSpace(body) == ""
 
+	// Quick actions only accompany a visible reply. With no visible text they
+	// would produce an assistant row with empty content that older Desktop /
+	// mobile clients — which ignore the quick_actions field — render as an empty
+	// bubble, breaking the no_response fallback contract (MUL-4351). Drop them so
+	// an actions-only turn falls through to the visible no_response outcome below.
+	if isEmpty {
+		quickActions = nil
+	}
+
 	// MUL-4899 completion-boundary observation. Measures whether the delivery
 	// contract in the runtime brief is actually landing on the chat surface.
 	// Strictly non-blocking: the reply is written either way.
@@ -2831,7 +2840,7 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 		params.QuickActions = encoded
 	}
 	switch {
-	case !isEmpty || len(quickActions) > 0:
+	case !isEmpty:
 		params.Content = redact.Text(body)
 		// message_kind left NULL → COALESCE defaults to 'message'.
 	case pendingAttachments > 0:

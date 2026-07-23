@@ -230,8 +230,10 @@ func TestCompleteTask_ChatQuickActions(t *testing.T) {
 		t.Fatalf("persisted quick actions = %+v", actions)
 	}
 
-	// A useful actions-only turn is still an ordinary message, not the
-	// no_response fallback: the chips themselves are the assistant outcome.
+	// An actions-only turn (quick-actions footer with no visible text) must NOT
+	// become an empty-content message: older Desktop / mobile clients ignore
+	// quick_actions and would render an empty bubble. It falls through to the
+	// visible no_response fallback instead, and the chips are dropped (MUL-4351).
 	actionsOnlyTask := sendDirectChat(t, ctx, agentID, sessionID, "give me options only")
 	markTaskRunning(t, ctx, actionsOnlyTask)
 	actionsOnly := "```quick-actions\n[{\"label\":\"Continue\",\"prompt\":\"Continue the plan\"}]\n```"
@@ -239,8 +241,18 @@ func TestCompleteTask_ChatQuickActions(t *testing.T) {
 		t.Fatalf("complete actions-only task: %v", err)
 	}
 	rows = assistantRows(t, ctx, sessionID)
-	if len(rows) != 2 || rows[1].Content != "" || rows[1].MessageKind != protocol.ChatMessageKindMessage {
+	if len(rows) != 2 || rows[1].MessageKind != protocol.ChatMessageKindNoResponse {
 		t.Fatalf("actions-only outcome = %+v", rows)
+	}
+	if rows[1].Content == "" {
+		t.Fatal("actions-only no_response row must carry a non-empty fallback body for old clients")
+	}
+	var droppedActions []protocol.ChatQuickAction
+	if err := json.Unmarshal(rows[1].QuickActions, &droppedActions); err != nil {
+		t.Fatalf("decode quick actions: %v", err)
+	}
+	if len(droppedActions) != 0 {
+		t.Fatalf("actions-only no_response row must not carry quick actions, got %+v", droppedActions)
 	}
 }
 
