@@ -3239,6 +3239,48 @@ func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
 	}
 }
 
+func TestBuildCodexArgsExplicitFastOverridesLowerPriorityDisable(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgs(ExecOptions{
+		ServiceTier: codexFastServiceTier,
+		ExtraArgs: []string{
+			"--disable", codexFastModeFeature,
+			"--disable", "memory_tool",
+			"-c", "features.fast_mode=false",
+		},
+		CustomArgs: []string{
+			"'--disable=fast_mode'",
+			"--enable", "multi_agent",
+		},
+	}, slog.Default())
+
+	want := []string{
+		"app-server", "--listen", "stdio://",
+		"--disable", "memory_tool",
+		"-c", "features.fast_mode=false",
+		"--enable", "multi_agent",
+		"--enable", codexFastModeFeature,
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("buildCodexArgs explicit Fast = %v, want %v", args, want)
+	}
+}
+
+func TestBuildCodexArgsFutureServiceTierDoesNotForceFastMode(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgs(ExecOptions{
+		ServiceTier: "future-tier",
+		CustomArgs:  []string{"--disable", codexFastModeFeature},
+	}, slog.Default())
+
+	want := []string{"app-server", "--listen", "stdio://", "--disable", codexFastModeFeature}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("buildCodexArgs future tier = %v, want %v", args, want)
+	}
+}
+
 func TestBuildCodexArgsDoesNotLeakMcpToArgv(t *testing.T) {
 	t.Parallel()
 

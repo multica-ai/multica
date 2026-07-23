@@ -31,6 +31,11 @@ var codexBlockedArgs = map[string]blockedArgMode{
 	"--listen": blockedWithValue, // stdio:// transport for daemon communication
 }
 
+const (
+	codexFastServiceTier = "priority"
+	codexFastModeFeature = "fast_mode"
+)
+
 // codexStderrTailBytes bounds the stderr tail captured for inclusion in
 // error messages when codex exits before the JSON-RPC handshake (e.g. the
 // user supplied a custom_args flag that the `app-server` subcommand
@@ -129,15 +134,21 @@ type codexBackend struct {
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
-	return append(args, NormalizeCodexLaunchArgs(opts.ExtraArgs, opts.CustomArgs, opts.McpConfig, logger)...)
+	launchArgs := NormalizeCodexLaunchArgs(opts.ExtraArgs, opts.CustomArgs, opts.McpConfig, logger)
+	if opts.ServiceTier == codexFastServiceTier {
+		launchArgs = enforceCodexFastMode(launchArgs, logger)
+	}
+	return append(args, launchArgs...)
 }
 
 // NormalizeCodexLaunchArgs returns the user-supplied Codex args (extra then
-// custom) exactly as buildCodexArgs hands them to the launched process: shell
-// quoting stripped, protocol-critical flags removed, and — when a managed
+// custom) after lower-priority normalization: shell quoting stripped,
+// protocol-critical flags removed, and — when a managed
 // mcp_config owns the mcp_servers namespace — stray `-c mcp_servers.*`
-// overrides dropped. buildCodexArgs only prepends the fixed
-// `app-server --listen stdio://` transport flags to this result.
+// overrides dropped. buildCodexArgs prepends the fixed
+// `app-server --listen stdio://` transport flags and may append an
+// agent-owned runtime override (currently `--enable fast_mode`) after this
+// result.
 //
 // It is exported so the daemon can reconstruct the *effective* launch args when
 // deciding the Windows sandbox mode. A `-c windows.sandbox=…` opt-in may arrive
@@ -164,6 +175,48 @@ func NormalizeCodexLaunchArgs(extraArgs, customArgs []string, mcpConfig json.Raw
 	out = append(out, extra...)
 	out = append(out, custom...)
 	return out
+}
+
+// enforceCodexFastMode makes the explicit agent service-tier selection
+// authoritative over daemon ExtraArgs, per-agent CustomArgs, and inherited
+// config.toml. Codex's `--disable fast_mode` wins over `--enable fast_mode`
+// regardless of argv order, so conflicting lower-priority disable flags must
+// be removed before the managed enable is appended. Config-file and `-c
+// features.fast_mode=false` values do respect the CLI enable and can remain.
+//
+// Other disabled features are preserved, and this helper is used only for the
+// catalog-owned `priority` tier. Future service tiers must not accidentally
+// inherit Fast mode semantics.
+func enforceCodexFastMode(args []string, logger *slog.Logger) []string {
+	filtered := make([]string, 0, len(args)+2)
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		flag := arg
+		value := ""
+		hasInlineValue := false
+		if idx := strings.Index(arg, "="); idx > 0 {
+			flag = arg[:idx]
+			value = arg[idx+1:]
+			hasInlineValue = true
+		}
+		if flag == "--disable" {
+			if !hasInlineValue && i+1 < len(args) {
+				value = args[i+1]
+			}
+			if value == codexFastModeFeature {
+				if logger != nil {
+					logger.Warn("codex: ignored lower-priority feature disable",
+						"feature", codexFastModeFeature)
+				}
+				if !hasInlineValue {
+					i++
+				}
+				continue
+			}
+		}
+		filtered = append(filtered, arg)
+	}
+	return append(filtered, "--enable", codexFastModeFeature)
 }
 
 // hasManagedCodexMcpConfig reports whether the agent's mcp_config field is
