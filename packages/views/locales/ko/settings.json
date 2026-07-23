@@ -463,7 +463,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "업데이트"
+      "updates": "업데이트",
+      "servers": "서버"
     },
     "updates": {
       "title": "업데이트",
@@ -478,6 +479,36 @@
       "downloading": "v{{version}}을(를) 백그라운드에서 다운로드 중입니다. 설치 준비가 끝나면 알림을 드립니다.",
       "check_now": "지금 확인",
       "checking": "확인 중..."
+    },
+    "servers": {
+      "title": "서버",
+      "description": "Multica Desktop을 Multica Cloud 또는 자체 호스팅 백엔드에 연결합니다. 서버별로 세션을 유지하므로 전환할 때마다 자격 증명을 다시 입력할 필요가 없습니다. Cloud가 아닌 서버는 워크스페이스 전환기 아래와 창 제목에 이름이 표시됩니다.",
+      "switch_menu": "Multica 서버",
+      "current_server_aria": "현재 서버: {{name}}",
+      "loading": "서버 불러오는 중…",
+      "active": "사용 중",
+      "switch": "전환",
+      "edit": "서버 편집",
+      "edit_title": "서버 편집",
+      "edit_active_hint": "사용 중인 서버의 API URL을 변경하면 앱이 다시 로드되며, 호스트가 바뀌면 다시 로그인해야 할 수 있습니다.",
+      "remove": "서버 제거",
+      "added": "서버가 추가되었습니다",
+      "updated": "서버가 업데이트되었습니다",
+      "updated_reloading": "서버가 업데이트되었습니다 — 다시 로드 중…",
+      "removed": "서버가 제거되었습니다",
+      "cannot_remove_last": "서버를 최소 하나 이상 유지해야 합니다",
+      "api_url_required": "API URL은 필수입니다",
+      "dev_mode_hint": "개발 빌드는 VITE_API_URL을 사용하므로 UI에서 서버를 전환할 수 없습니다. 패키지된 Desktop에서는 여러 백엔드를 관리할 수 있습니다.",
+      "add_title": "서버 추가",
+      "add_description": "다른 Multica Cloud 또는 자체 호스팅 API를 저장합니다.",
+      "add": "서버 추가",
+      "name_label": "표시 이름",
+      "name_placeholder": "개인 / 회사 / Cloud",
+      "api_url_label": "API URL",
+      "app_url_label": "웹 앱 URL (선택)",
+      "app_url_placeholder": "비워 두면 API URL에서 파생",
+      "cancel": "취소",
+      "save": "저장"
     }
   },
   "members": {

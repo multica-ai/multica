@@ -1,6 +1,7 @@
 import { LoginPage } from "@multica/views/auth";
 import { DragStrip } from "@multica/views/platform";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
+import { DesktopServerSwitcher } from "../components/server-switcher";
 
 function requireRuntimeAppUrl(): string {
   const runtimeConfig = window.desktopAPI.runtimeConfig;
@@ -25,14 +26,21 @@ export function DesktopLoginPage() {
   return (
     <div className="flex h-screen flex-col">
       <DragStrip />
-      <LoginPage
-        logo={<MulticaIcon bordered size="lg" />}
-        onSuccess={() => {
-          // Auth store update triggers AppContent re-render → shows DesktopShell.
-          // Initial workspace navigation happens in routes.tsx via IndexRedirect.
-        }}
-        onGoogleLogin={handleGoogleLogin}
-      />
+      <div className="flex flex-1 flex-col">
+        <div className="flex justify-center pt-6">
+          <DesktopServerSwitcher />
+        </div>
+        <div className="flex flex-1 flex-col">
+          <LoginPage
+            logo={<MulticaIcon bordered size="lg" />}
+            onSuccess={() => {
+              // Auth store update triggers AppContent re-render → shows DesktopShell.
+              // Initial workspace navigation happens in routes.tsx via IndexRedirect.
+            }}
+            onGoogleLogin={handleGoogleLogin}
+          />
+        </div>
+      </div>
     </div>
   );
 }

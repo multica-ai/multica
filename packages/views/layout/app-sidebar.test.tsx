@@ -234,6 +234,30 @@ describe("PinRow", () => {
   });
 });
 
+describe("environmentHint under workspace switcher", () => {
+  it("renders a muted subtitle when Desktop passes a non-Cloud hint", () => {
+    render(
+      <AppSidebar
+        environmentHint="Personal"
+        environmentHintTitle="http://127.0.0.1:28443"
+      />,
+    );
+    // Hint appears under the workspace name and again in the account dropdown.
+    const hints = screen.getAllByTitle("http://127.0.0.1:28443");
+    expect(hints.length).toBeGreaterThanOrEqual(1);
+    expect(hints[0]).toHaveTextContent("Personal");
+    // Workspace name still present above the hint.
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+  });
+
+  it("omits the subtitle when no environment hint is provided (Cloud / web)", () => {
+    render(<AppSidebar />);
+    expect(screen.getByText("Acme")).toBeInTheDocument();
+    // Without a hint prop there should be no secondary environment line.
+    expect(screen.queryByTitle("http://127.0.0.1:28443")).toBeNull();
+  });
+});
+
 describe("workspace-switcher unread dot", () => {
   beforeEach(() => {
     summary.current = [];

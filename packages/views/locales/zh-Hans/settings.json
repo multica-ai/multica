@@ -618,7 +618,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "更新"
+      "updates": "更新",
+      "servers": "服务器"
     },
     "updates": {
       "title": "更新",
@@ -633,6 +634,36 @@
       "downloading": "v{{version}} 正在后台下载——准备好安装时会通知你。",
       "check_now": "立即检查",
       "checking": "检查中..."
+    },
+    "servers": {
+      "title": "服务器",
+      "description": "将 Multica Desktop 连接到官方 Cloud 或任意自部署后端。每个服务器单独保存登录会话，切换时无需每次重新输入凭证。非 Cloud 服务器会在工作区切换器下方和窗口标题中显示名称。",
+      "switch_menu": "Multica 服务器",
+      "current_server_aria": "当前服务器：{{name}}",
+      "loading": "正在加载服务器…",
+      "active": "当前",
+      "switch": "切换",
+      "edit": "编辑服务器",
+      "edit_title": "编辑服务器",
+      "edit_active_hint": "修改当前服务器的 API URL 会重载应用；若主机变化，可能需要重新登录。",
+      "remove": "移除服务器",
+      "added": "已添加服务器",
+      "updated": "已更新服务器",
+      "updated_reloading": "已更新服务器，正在重载…",
+      "removed": "已移除服务器",
+      "cannot_remove_last": "至少保留一个服务器",
+      "api_url_required": "API URL 为必填",
+      "dev_mode_hint": "开发构建使用 VITE_API_URL，无法在 UI 中切换服务器。打包后的 Desktop 可在此管理多个后端。",
+      "add_title": "添加服务器",
+      "add_description": "保存另一个 Multica Cloud 或自部署 API 地址。",
+      "add": "添加服务器",
+      "name_label": "显示名称",
+      "name_placeholder": "个人 / 公司 / Cloud",
+      "api_url_label": "API URL",
+      "app_url_label": "Web 应用 URL（可选）",
+      "app_url_placeholder": "留空则从 API URL 推导",
+      "cancel": "取消",
+      "save": "保存"
     }
   },
   "members": {

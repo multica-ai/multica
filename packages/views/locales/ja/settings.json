@@ -611,7 +611,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "アップデート"
+      "updates": "アップデート",
+      "servers": "サーバー"
     },
     "updates": {
       "title": "アップデート",
@@ -626,6 +627,36 @@
       "downloading": "v{{version}} をバックグラウンドでダウンロード中です。インストールの準備が整うとお知らせします。",
       "check_now": "今すぐ確認",
       "checking": "確認中…"
+    },
+    "servers": {
+      "title": "サーバー",
+      "description": "Multica Desktop を Multica Cloud またはセルフホストのバックエンドに接続します。サーバーごとにセッションを保持するため、切り替えのたびに資格情報を入力し直す必要はありません。Cloud 以外のサーバーはワークスペース切替の下とウィンドウタイトルに名前が表示されます。",
+      "switch_menu": "Multica サーバー",
+      "current_server_aria": "現在のサーバー: {{name}}",
+      "loading": "サーバーを読み込み中…",
+      "active": "使用中",
+      "switch": "切り替え",
+      "edit": "サーバーを編集",
+      "edit_title": "サーバーを編集",
+      "edit_active_hint": "使用中サーバーの API URL を変更するとアプリが再読み込みされ、ホストが変わった場合は再ログインが必要になることがあります。",
+      "remove": "サーバーを削除",
+      "added": "サーバーを追加しました",
+      "updated": "サーバーを更新しました",
+      "updated_reloading": "サーバーを更新しました — 再読み込み中…",
+      "removed": "サーバーを削除しました",
+      "cannot_remove_last": "サーバーは少なくとも 1 つ必要です",
+      "api_url_required": "API URL は必須です",
+      "dev_mode_hint": "開発ビルドは VITE_API_URL を使用するため UI からサーバーを切り替えられません。パッケージ版 Desktop では複数のバックエンドを管理できます。",
+      "add_title": "サーバーを追加",
+      "add_description": "別の Multica Cloud またはセルフホスト API を保存します。",
+      "add": "サーバーを追加",
+      "name_label": "表示名",
+      "name_placeholder": "個人 / 会社 / Cloud",
+      "api_url_label": "API URL",
+      "app_url_label": "Web アプリ URL（任意）",
+      "app_url_placeholder": "空欄の場合は API URL から導出",
+      "cancel": "キャンセル",
+      "save": "保存"
     }
   },
   "members": {
