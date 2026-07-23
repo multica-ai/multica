@@ -22,20 +22,25 @@ describe("ModeConfigEditor", () => {
     expect(screen.getByLabelText("Model")).toHaveValue("gpt-5.4");
     expect(screen.getByText("Required evaluations")).toBeInTheDocument();
     expect(screen.getByText("Workflow")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Core behavior" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Access and approvals" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Workflow and quality" })).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText("Instructions"), { target: { value: "Use the new Plan contract" } });
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ instruction: "Use the new Plan contract" }));
     fireEvent.click(screen.getByRole("button", { name: "Publish version" }));
     expect(onPublish).toHaveBeenCalledOnce();
   });
 
-  it("describes invalid runtime limits and blocks publishing until fixed", () => {
+  it("allows unlimited or large runtime limits and blocks negative values", () => {
     const onPublish = vi.fn();
-    const invalidConfig = { ...config, timeout_minutes: 0, max_turns: 201 };
+    const invalidConfig = { ...config, timeout_minutes: -1, max_turns: -1 };
 
     expect(validateModeConfig(invalidConfig)).toEqual({
-      timeout_minutes: "Use between 1 and 1,440 minutes.",
-      max_turns: "Use between 1 and 200 turns.",
+      timeout_minutes: "Use 0 or a positive whole number.",
+      max_turns: "Use 0 or a positive whole number.",
     });
+    expect(validateModeConfig({ ...config, timeout_minutes: 0, max_turns: 0 })).toEqual({});
+    expect(validateModeConfig({ ...config, timeout_minutes: 100_000, max_turns: 100_000 })).toEqual({});
 
     render(
       <ModeConfigEditor
@@ -47,11 +52,45 @@ describe("ModeConfigEditor", () => {
       />,
     );
 
-    expect(screen.getByText("Use between 1 and 1,440 minutes.")).toBeInTheDocument();
-    expect(screen.getByText("Use between 1 and 200 turns.")).toBeInTheDocument();
+    expect(screen.getAllByText("Use 0 or a positive whole number.")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Publish version" })).toBeDisabled();
     fireEvent.click(screen.getByRole("button", { name: "Publish version" }));
     expect(onPublish).not.toHaveBeenCalled();
+  });
+
+  it("shows zero as unlimited without an artificial upper limit", () => {
+    render(
+      <ModeConfigEditor
+        config={{ ...config, timeout_minutes: 0, max_turns: 0 }}
+        onChange={() => undefined}
+        onSave={() => undefined}
+        onPublish={() => undefined}
+        canManage
+      />,
+    );
+
+    expect(screen.getByLabelText("Timeout (minutes)")).toHaveValue(0);
+    expect(screen.getByLabelText("Maximum turns")).toHaveValue(0);
+    expect(screen.getByLabelText("Timeout (minutes)")).not.toHaveAttribute("max");
+    expect(screen.getByLabelText("Maximum turns")).not.toHaveAttribute("max");
+    expect(screen.getByText("Set 0 for no time limit.")).toBeInTheDocument();
+    expect(screen.getByText("A turn is one agent response. Set 0 for no turn limit.")).toBeInTheDocument();
+  });
+
+  it("requires an explicit zero for an unlimited limit", () => {
+    const onChange = vi.fn();
+    render(
+      <ModeConfigEditor
+        config={config}
+        onChange={onChange}
+        onSave={() => undefined}
+        onPublish={() => undefined}
+        canManage
+      />,
+    );
+
+    fireEvent.change(screen.getByLabelText("Timeout (minutes)"), { target: { value: "" } });
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ timeout_minutes: Number.NaN }));
   });
 
   it("uses human labels for thinking and catalog choices", () => {

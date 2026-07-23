@@ -102,11 +102,11 @@ func ValidateConfig(config Config) error {
 	default:
 		return fmt.Errorf("invalid thinking level %q", config.ThinkingLevel)
 	}
-	if config.TimeoutMinutes < 1 || config.TimeoutMinutes > 1440 {
-		return fmt.Errorf("timeout_minutes must be between 1 and 1440")
+	if config.TimeoutMinutes < 0 {
+		return fmt.Errorf("timeout_minutes must be zero or positive")
 	}
-	if config.MaxTurns < 1 || config.MaxTurns > 200 {
-		return fmt.Errorf("max_turns must be between 1 and 200")
+	if config.MaxTurns < 0 {
+		return fmt.Errorf("max_turns must be zero or positive")
 	}
 	switch config.ApprovalPolicy {
 	case "inherit", "require", "deny_external":

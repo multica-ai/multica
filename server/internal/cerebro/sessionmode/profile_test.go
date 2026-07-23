@@ -59,4 +59,7 @@ func TestEffectiveTimeoutUsesShorterPositiveLimit(t *testing.T) {
 	if got := EffectiveTimeout(2*time.Hour, 0); got != 2*time.Hour {
 		t.Fatalf("got %s, want 2h", got)
 	}
+	if got := EffectiveTimeout(0, 0); got != 0 {
+		t.Fatalf("got %s, want no mode timeout", got)
+	}
 }
