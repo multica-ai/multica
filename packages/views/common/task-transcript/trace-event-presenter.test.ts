@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   decodeToolResultOutput,
+  traceEventCopyText,
   traceEventDefaultCollapsed,
   traceEventEmphasis,
   traceEventFilterKey,
@@ -10,6 +11,7 @@ import {
   traceEventLabel,
   traceEventSummary,
   traceToolArgSummary,
+  traceToolResultSummary,
   shortenTracePath,
   type TraceEvent,
 } from "./trace-event-presenter";
@@ -78,6 +80,69 @@ describe("traceEventSummary", () => {
     expect(traceEventSummary(ev({ type: "weird", content: "c" }))).toBe("c");
     expect(traceEventSummary(ev({ type: "weird", output: "o" }))).toBe("o");
     expect(traceEventSummary(ev({ type: "weird", input: { a: 1 } }))).toContain("a");
+  });
+});
+
+describe("traceToolResultSummary — key fields, not a bare brace", () => {
+  it("summarizes a JSON object by its identifying fields, not `{`", () => {
+    const out = JSON.stringify({ identifier: "PRE-3", title: "Fix login", status: "in_review" });
+    const summary = traceToolResultSummary(out);
+    expect(summary).toContain("identifier: PRE-3");
+    expect(summary).toContain("status: in_review");
+    expect(summary.startsWith("{")).toBe(false);
+  });
+
+  it("prioritizes identifier/title/status over other keys and caps at three", () => {
+    const out = JSON.stringify({
+      extra: "z",
+      status: "done",
+      title: "T",
+      identifier: "ID",
+      other: "o",
+    });
+    const summary = traceToolResultSummary(out);
+    // priority order: identifier, title, status (id/key absent) — 3 parts, no `extra`.
+    expect(summary).toBe("identifier: ID · title: T · status: done");
+  });
+
+  it("summarizes a JSON array as its count plus the first element's fields", () => {
+    const out = JSON.stringify([{ identifier: "A-1", status: "open" }, { identifier: "A-2" }]);
+    const summary = traceToolResultSummary(out);
+    expect(summary.startsWith("[2]")).toBe(true);
+    expect(summary).toContain("identifier: A-1");
+  });
+
+  it("summarizes an array of primitives by its head values", () => {
+    expect(traceToolResultSummary(JSON.stringify(["a", "b", "c", "d"]))).toBe("[4] a, b, c");
+  });
+
+  it("falls back to the first non-empty line for plain-text and double-encoded output", () => {
+    expect(traceToolResultSummary("line1\nline2")).toBe("line1");
+    expect(traceToolResultSummary('"decoded\\nsecond"')).toBe("decoded");
+  });
+
+  it("names the keys when an object has no primitive field", () => {
+    const summary = traceToolResultSummary(JSON.stringify({ nested: { a: 1 }, list: [1] }));
+    expect(summary).toContain("nested");
+    expect(summary).toContain("list");
+  });
+});
+
+describe("traceEventCopyText — the single-row copy payload", () => {
+  it("copies decoded tool_result text, tool input JSON, and event content", () => {
+    expect(traceEventCopyText(ev({ type: "tool_result", output: '"a\\nb"' }))).toBe("a\nb");
+    expect(traceEventCopyText(ev({ type: "tool_use", input: { command: "ls" } }))).toBe(
+      JSON.stringify({ command: "ls" }, null, 2),
+    );
+    expect(traceEventCopyText(ev({ type: "text", content: "hello" }))).toBe("hello");
+    expect(traceEventCopyText(ev({ type: "error", content: "boom" }))).toBe("boom");
+  });
+
+  it("pretty-prints a JSON object tool_result so the copy is the full formatted body", () => {
+    const out = JSON.stringify({ identifier: "PRE-3", status: "in_review" });
+    expect(traceEventCopyText(ev({ type: "tool_result", output: out }))).toBe(
+      JSON.stringify({ identifier: "PRE-3", status: "in_review" }, null, 2),
+    );
   });
 });
 

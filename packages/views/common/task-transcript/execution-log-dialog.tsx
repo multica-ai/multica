@@ -68,11 +68,13 @@ import {
   TRACE_RESULT_PREVIEW_LINES,
   TRACE_TEXT_PREVIEW_LINES,
   decodeToolResultOutput,
+  traceEventCopyText,
   traceEventHasDetail,
   traceEventKind,
   traceEventLabel,
   traceEventSummary,
   traceToolArgSummary,
+  traceToolResultSummary,
 } from "./trace-event-presenter";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
 import { useT } from "../../i18n";
@@ -646,7 +648,7 @@ export function ExecutionLogDialog({
                   aria-label={
                     allExpanded
                       ? t(($) => $.execution_log.collapse_all)
-                      : t(($) => $.execution_log.expand_loaded)
+                      : t(($) => $.execution_log.expand_all)
                   }
                   className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                 >
@@ -656,7 +658,7 @@ export function ExecutionLogDialog({
                   <span className="hidden sm:inline">
                     {allExpanded
                       ? t(($) => $.execution_log.collapse_all)
-                      : t(($) => $.execution_log.expand_loaded)}
+                      : t(($) => $.execution_log.expand_all)}
                   </span>
                 </button>
               )}
@@ -1081,6 +1083,16 @@ function ExecutionLogRow({
   onToggle: () => void;
   highlighted?: boolean;
 }) {
+  const { t } = useT("issues");
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    },
+    [],
+  );
+
   const time = message.created_at
     ? new Date(message.created_at).toLocaleTimeString(undefined, {
         hour: "2-digit",
@@ -1088,18 +1100,55 @@ function ExecutionLogRow({
       })
     : null;
 
+  // Copy this single event's readable body (decoded result / input JSON / text),
+  // redacted the same way it renders. Empty bodies get no copy affordance.
+  const copyBody = useMemo(() => redactSecrets(traceEventCopyText(message)), [message]);
+  const handleCopyRow = useCallback(() => {
+    if (!copyBody) return;
+    void copyText(copyBody).then((ok) => {
+      if (!ok) return;
+      setCopied(true);
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      copyTimerRef.current = setTimeout(() => setCopied(false), 1500);
+    });
+  }, [copyBody]);
+
   return (
     <div
       data-testid="execution-log-row"
-      className={cn("border-b px-4 py-2.5 transition-colors", highlighted && "bg-accent/60")}
+      className={cn(
+        "group/exec-row border-b px-4 py-2.5 transition-colors",
+        highlighted && "bg-accent/60",
+      )}
     >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <ExecutionLogRowBody message={message} open={open} onToggle={onToggle} />
         </div>
-        <div className="flex shrink-0 flex-col items-end gap-0.5 pt-0.5 text-[10px] tabular-nums text-muted-foreground/50">
-          <span>#{message.seq}</span>
-          {time && <span>{time}</span>}
+        <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5">
+          <div className="flex items-center gap-1.5 text-[10px] tabular-nums text-muted-foreground/50">
+            {copyBody.length > 0 && (
+              <button
+                type="button"
+                data-testid="execution-log-row-copy"
+                onClick={handleCopyRow}
+                aria-label={
+                  copied ? t(($) => $.execution_log.copied) : t(($) => $.execution_log.copy)
+                }
+                title={copied ? t(($) => $.execution_log.copied) : t(($) => $.execution_log.copy)}
+                className={cn(
+                  "rounded p-0.5 opacity-0 transition-all hover:bg-accent hover:text-foreground",
+                  "focus-visible:opacity-100 group-hover/exec-row:opacity-100 [@media(hover:none)]:opacity-100",
+                )}
+              >
+                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+              </button>
+            )}
+            <span>#{message.seq}</span>
+          </div>
+          {time && (
+            <span className="text-[10px] tabular-nums text-muted-foreground/50">{time}</span>
+          )}
         </div>
       </div>
     </div>
@@ -1229,13 +1278,18 @@ function ExecutionLogRowBody({
     case "tool_result": {
       // Decode defensively once: historical records may be double-JSON-encoded,
       // so render the decoded text (real newlines / pretty JSON), not the blob.
-      const { text: decoded } = decodeToolResultOutput(message.output ?? "");
+      const { text: decoded, json } = decodeToolResultOutput(message.output ?? "");
       const fullOutput =
         decoded.length > OUTPUT_DETAIL_CAP
           ? redactSecrets(decoded.slice(0, OUTPUT_DETAIL_CAP)) + "\n... (truncated)"
           : redactSecrets(decoded);
+      // For a JSON object/array result the collapsed preview shows its key fields
+      // (identifier / title / status …) — a pretty-JSON first line would just be
+      // a useless `{` / `[`. Plain-text results keep their leading lines.
       const preview = redactSecrets(
-        firstLines(decoded, TRACE_RESULT_PREVIEW_LINES).slice(0, RESULT_PREVIEW_CHARS),
+        json
+          ? traceToolResultSummary(message.output ?? "")
+          : firstLines(decoded, TRACE_RESULT_PREVIEW_LINES).slice(0, RESULT_PREVIEW_CHARS),
       );
       return (
         <div className="space-y-1">

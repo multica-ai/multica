@@ -59,6 +59,27 @@ const EVENTS: Ev[] = [
   // reported screenshot: the stored output is a JSON string literal with outer
   // quotes, escaped \n and \". The frontend must decode ONE level → readable text.
   { type: "tool_result", tool: "Bash", output: '"Comment added to issue PRE-3.\\n{\\n  \\"attachments\\": [],\\n  \\"status\\": \\"in_review\\"\\n}"' },
+  // A raw JSON OBJECT tool result: the collapsed summary must read its key fields
+  // (identifier/title/status), never a bare `{`; expand shows the pretty JSON.
+  {
+    type: "tool_result",
+    tool: "create_issue",
+    output: JSON.stringify({
+      identifier: "MUL-9001",
+      title: "Paged Execution Log window",
+      status: "in_review",
+      url: "https://multica.test/MUL-9001",
+    }),
+  },
+  // A raw JSON ARRAY tool result: summarized as its count + first element fields.
+  {
+    type: "tool_result",
+    tool: "list_issues",
+    output: JSON.stringify([
+      { identifier: "MUL-9001", status: "in_review" },
+      { identifier: "MUL-9002", status: "todo" },
+    ]),
+  },
 ];
 
 let api: TestApiClient;
@@ -180,6 +201,11 @@ test("sort preference: toggling newest-first reverses the on-screen order", asyn
 test("expand: single row and bulk expand of loaded items", async ({ page }) => {
   const dialog = await openLog(page);
 
+  // Chronological opens anchored at the newest event; scroll to the top so the
+  // early tool_result row (seq 4) is mounted before we locate it.
+  await page.getByTestId("execution-log-scroll").evaluate((el) => (el.scrollTop = 0));
+  await page.waitForTimeout(300);
+
   // Single expand: click a tool_result row → its full monospace <pre> appears.
   const resultRow = page.getByTestId("execution-log-row").filter({ hasText: "match 0" }).first();
   await resultRow.scrollIntoViewIfNeeded();
@@ -189,10 +215,16 @@ test("expand: single row and bulk expand of loaded items", async ({ page }) => {
   await page.waitForTimeout(300);
   await dialog.screenshot({ path: `${SHOTS_DIR}/03-single-expanded.png` });
 
-  // Bulk expand loaded: every expandable loaded row opens.
+  // Bulk expand loaded: every expandable loaded row opens. The main label is the
+  // fixed "Expand all / Collapse all" (scope lives in the tooltip), not "Expand
+  // loaded" — the ambiguity the product owner flagged.
+  const expandBtn = page.getByTestId("execution-log-expand-all");
+  await expect(expandBtn).toContainText("Expand all");
+  await expect(expandBtn).not.toContainText("Expand loaded");
   const preCountBefore = await page.locator('[data-testid="execution-log-row"] pre').count();
-  await page.getByTestId("execution-log-expand-all").click();
+  await expandBtn.click();
   await expect(page.getByTestId("execution-log-collapse-all")).toBeVisible();
+  await expect(page.getByTestId("execution-log-collapse-all")).toContainText("Collapse all");
   await page.waitForTimeout(400);
   const preCountAfter = await page.locator('[data-testid="execution-log-row"] pre').count();
   expect(preCountAfter).toBeGreaterThan(preCountBefore);
@@ -306,4 +338,55 @@ test("timeline: clicking a color segment locates that event in the list", async 
   await expect(firstEvent).toBeVisible({ timeout: 5000 });
   await page.waitForTimeout(300);
   await dialog.screenshot({ path: `${SHOTS_DIR}/09-timeline-locate.png` });
+});
+
+test("json result: key-field summary, formatted expansion, and single-row copy", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  const dialog = await openLog(page);
+
+  // "Paged Execution Log window" (the object's title field) is unique to the
+  // JSON-object result row — the array row has no title.
+  const jsonRow = page
+    .getByTestId("execution-log-row")
+    .filter({ hasText: "Paged Execution Log window" })
+    .first();
+  await jsonRow.scrollIntoViewIfNeeded();
+
+  // Collapsed: the summary reads the object's key fields — a bare-`{` first line
+  // could never surface "status: in_review".
+  await expect(jsonRow).toContainText("identifier: MUL-9001");
+  await expect(jsonRow).toContainText("status: in_review");
+  await jsonRow.hover(); // reveal the per-row copy affordance for the screenshot
+  await page.waitForTimeout(200);
+  await dialog.screenshot({ path: `${SHOTS_DIR}/10-json-summary-collapsed.png` });
+
+  // Expand (the label toggle is the row's first button): the body is the
+  // pretty-printed JSON with quoted keys on their own indented lines.
+  await jsonRow.getByRole("button").first().click();
+  const pre = jsonRow.locator("pre");
+  await expect(pre).toContainText('"identifier": "MUL-9001"');
+  await expect(pre).toContainText('"status": "in_review"');
+  await page.waitForTimeout(200);
+  await dialog.screenshot({ path: `${SHOTS_DIR}/11-json-expanded.png` });
+
+  // Single-row copy: the per-row button puts the decoded/pretty body on the
+  // clipboard (revealed on hover, then read back through the Clipboard API).
+  await jsonRow.hover();
+  await jsonRow.getByTestId("execution-log-row-copy").click();
+  await expect(jsonRow.getByTestId("execution-log-row-copy")).toBeVisible();
+  const clip = await page.evaluate(() => navigator.clipboard.readText());
+  expect(clip).toContain('"identifier": "MUL-9001"');
+  expect(clip).toContain('"status": "in_review"');
+
+  // A JSON ARRAY result summarizes as its count + first element's fields.
+  const arrayRow = page
+    .getByTestId("execution-log-row")
+    .filter({ hasText: "[2]" })
+    .filter({ hasText: "MUL-9001" })
+    .first();
+  await arrayRow.scrollIntoViewIfNeeded();
+  await expect(arrayRow).toContainText("[2]");
 });

@@ -160,6 +160,115 @@ export function decodeToolResultOutput(output: string): { text: string; json: bo
   }
 }
 
+/** Priority keys a JSON tool-result summary surfaces first, so an object result
+ *  reads as its identity (identifier / title / status …) rather than a bare `{`. */
+const RESULT_SUMMARY_KEYS = [
+  "identifier",
+  "id",
+  "key",
+  "title",
+  "name",
+  "status",
+  "state",
+  "message",
+  "error",
+  "summary",
+  "url",
+];
+
+/** A primitive field rendered as a scannable string, or null for objects/arrays. */
+function primitiveField(value: unknown): string | null {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  return null;
+}
+
+/** `key: value · key: value` from up to three of an object's most identifying
+ *  primitive fields (priority keys first, then any remaining primitives). Falls
+ *  back to the brace-wrapped key names when the object has no primitive field. */
+function objectFieldSummary(obj: Record<string, unknown>): string {
+  const parts: string[] = [];
+  const used = new Set<string>();
+  const push = (k: string): void => {
+    const p = primitiveField(obj[k]);
+    if (p !== null && p.trim().length > 0) {
+      parts.push(`${k}: ${clip(p.trim(), 60)}`);
+      used.add(k);
+    }
+  };
+  for (const k of RESULT_SUMMARY_KEYS) {
+    if (parts.length >= 3) break;
+    if (k in obj) push(k);
+  }
+  for (const k of Object.keys(obj)) {
+    if (parts.length >= 3) break;
+    if (!used.has(k)) push(k);
+  }
+  if (parts.length > 0) return parts.join(" · ");
+  const keys = Object.keys(obj);
+  if (keys.length === 0) return "{}";
+  return `{ ${keys.slice(0, 4).join(", ")}${keys.length > 4 ? ", …" : ""} }`;
+}
+
+/**
+ * Compact one-line summary of a `tool_result` for the collapsed row and copy.
+ * A JSON object/array result is summarized by its most identifying fields
+ * (identifier / title / status …) rather than `firstLine` of the pretty JSON,
+ * which for a pure object/array would be a useless `{` or `[` (MUL-5122).
+ * Plain-text and historically double-encoded-string results fall back to their
+ * first non-empty line.
+ */
+export function traceToolResultSummary(output: string): string {
+  const decoded = decodeToolResultOutput(output);
+  if (!decoded.json) return firstLine(decoded.text);
+  try {
+    const parsed: unknown = JSON.parse(output.trim());
+    if (Array.isArray(parsed)) {
+      const count = parsed.length;
+      const first = parsed[0];
+      let head = "";
+      if (first !== null && typeof first === "object" && !Array.isArray(first)) {
+        head = objectFieldSummary(first as Record<string, unknown>);
+      } else if (count > 0) {
+        head = parsed
+          .slice(0, 3)
+          .map(primitiveField)
+          .filter((v): v is string => v !== null && v.trim().length > 0)
+          .map((v) => clip(v.trim(), 40))
+          .join(", ");
+      }
+      return head ? `[${count}] ${head}` : `[${count}]`;
+    }
+    if (parsed !== null && typeof parsed === "object") {
+      return objectFieldSummary(parsed as Record<string, unknown>);
+    }
+  } catch {
+    // fall through to the decoded first line
+  }
+  return firstLine(decoded.text);
+}
+
+/** The readable text a single row's copy action places on the clipboard: the
+ *  decoded tool result, the tool input JSON, or the event's own content. */
+export function traceEventCopyText(event: TraceEvent): string {
+  switch (event.type) {
+    case "tool_result":
+      return decodeToolResultOutput(event.output ?? "").text;
+    case "tool_use":
+      return event.input ? JSON.stringify(event.input, null, 2) : "";
+    case "text":
+    case "thinking":
+    case "error":
+      return event.content ?? "";
+    default:
+      return (
+        event.content ??
+        event.output ??
+        (event.input ? JSON.stringify(event.input, null, 2) : "")
+      );
+  }
+}
+
 /**
  * Compact one-line summary shown before any expansion. Tool calls surface their
  * argument; results and text surface a leading preview; errors surface their
@@ -175,8 +284,9 @@ export function traceEventSummary(event: TraceEvent): string {
       return traceToolArgSummary(event.input);
     case "tool_result":
       // Summarize from the DECODED output so the collapsed line and copy read
-      // real text, not an escaped `"...\n..."` blob from double-encoded history.
-      return firstLine(decodeToolResultOutput(event.output ?? "").text);
+      // real text (double-encoded history) and JSON object/array results read as
+      // their key fields, not a bare `{` / `[`.
+      return traceToolResultSummary(event.output ?? "");
     case "error":
       return event.content ?? "";
     default:
