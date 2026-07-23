@@ -558,6 +558,7 @@ export function ChatInput({
               <ProjectPicker
                 projectId={selectedProject.id}
                 onUpdate={(updates) => onProjectChange?.(updates.project_id ?? null)}
+                disabled={!projectSelectionEnabled}
                 triggerRender={
                   <button
                     type="button"

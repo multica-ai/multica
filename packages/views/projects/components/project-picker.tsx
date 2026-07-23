@@ -25,6 +25,7 @@ export function ProjectPicker({
   defaultOpen = false,
   open: controlledOpen,
   onOpenChange,
+  disabled = false,
 }: {
   projectId: string | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
@@ -35,6 +36,13 @@ export function ProjectPicker({
   defaultOpen?: boolean;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
+  /** Read-only lock. When true the trigger, the menu, and the inline clear
+   *  button are all disabled and out of the tab order, so no project-context
+   *  mutation can fire — pointer OR keyboard. Callers that must freeze the
+   *  selection during a transient window (an in-flight chat send) pass this;
+   *  every other caller keeps the default hover/keyboard clear behavior since
+   *  it defaults to false. */
+  disabled?: boolean;
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
@@ -46,13 +54,15 @@ export function ProjectPicker({
   // callers wiring `open={cond ? true : undefined}` (create-issue dialog)
   // would leave the popup stuck open after selecting a project.
   const [internalOpen, setInternalOpen] = useState(defaultOpen);
-  const open = controlledOpen ?? internalOpen;
-  const setOpen = onOpenChange ?? setInternalOpen;
+  // A disabled picker can never be open, and no interaction may reopen it.
+  const open = disabled ? false : controlledOpen ?? internalOpen;
+  const setOpen = disabled ? () => {} : onOpenChange ?? setInternalOpen;
 
   return (
     <DropdownMenu open={open} onOpenChange={setOpen}>
       <div className="group/project relative inline-flex min-w-0">
         <DropdownMenuTrigger
+          disabled={disabled}
           className={
             triggerRender
               ? undefined
@@ -73,13 +83,14 @@ export function ProjectPicker({
         {current && (
           <button
             type="button"
+            disabled={disabled}
             aria-label={t(($) => $.picker.remove)}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
               onUpdate({ project_id: null });
             }}
-            className="pointer-events-none absolute right-1 top-1/2 flex size-3.5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-[background-color,color,opacity] hover:bg-muted-foreground/20 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none group-hover/project:pointer-events-auto group-hover/project:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100"
+            className="pointer-events-none absolute right-1 top-1/2 flex size-3.5 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground opacity-0 transition-[background-color,color,opacity] hover:bg-muted-foreground/20 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none group-hover/project:pointer-events-auto group-hover/project:opacity-100 focus-visible:pointer-events-auto focus-visible:opacity-100 disabled:pointer-events-none disabled:opacity-0 disabled:group-hover/project:opacity-0"
           >
             <X className="size-2.5" />
           </button>

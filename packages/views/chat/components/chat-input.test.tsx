@@ -149,17 +149,25 @@ vi.mock("../../projects/components/project-picker", () => ({
     projectId,
     onUpdate,
     triggerRender,
+    disabled,
   }: {
     projectId: string;
     onUpdate: (updates: { project_id: string | null }) => void;
     triggerRender: React.ReactElement<{
       onClick?: () => void;
       children?: React.ReactNode;
+      "data-project-picker-disabled"?: string;
     }>;
+    disabled?: boolean;
   }) =>
+    // Surface the `disabled` prop ChatInput passes so a test can assert the
+    // shared picker (and thus its keyboard clear control) is locked mid-send.
+    // The real keyboard-inertness of that control is covered against the real
+    // ProjectPicker in project-picker.test.tsx.
     cloneElement(triggerRender, {
       onClick: () => onUpdate({ project_id: null }),
       children: projectId,
+      "data-project-picker-disabled": disabled ? "true" : "false",
     }),
 }));
 
@@ -487,6 +495,14 @@ describe("ChatInput project context", () => {
         screen.getByRole("button", { name: "Change project context" }),
       ).toBeDisabled(),
     );
+    // ChatInput also propagates the lock to the shared ProjectPicker so its
+    // internal clear button (a keyboard-reachable path the wrapper's
+    // pointer-events-none does not cover) is disabled too. The clear control's
+    // keyboard-inertness itself is covered against the real ProjectPicker in
+    // project-picker.test.tsx.
+    expect(
+      screen.getByRole("button", { name: "Change project context" }),
+    ).toHaveAttribute("data-project-picker-disabled", "true");
     fireEvent.click(screen.getByRole("button", { name: "Change project context" }));
     expect(onProjectChange).not.toHaveBeenCalled();
 
