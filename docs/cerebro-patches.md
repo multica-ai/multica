@@ -1696,7 +1696,7 @@ The runtime-image, entrypoint, fallback-provider helpers, canary, and cloud runb
 | Patch | Location | Reason |
 |---|---|---|
 | `main-access-decision-shadow` | `server/cmd/server/main.go` | Wire the Cerebro-owned canonical policy/evidence observer and append-only Decision Ledger into the existing Gateway executor. The shadow is observational only and cannot change a live access result. |
-| `opencode-permission-flag` | `server/pkg/agent/opencode.go` | Keep OpenCode daemon runs non-interactive with the installed CLI's real `--dangerously-skip-permissions` flag. The removed `--auto` assumption caused an immediate usage exit on OpenCode 1.14.31; existing explicit question/plan denies remain in force. The real-binary contract test pins every emitted flag to `opencode run --help`. |
+| `opencode-permission-flag` | `server/pkg/agent/opencode.go`<br>`server/pkg/agent/opencode_test.go` | Keep OpenCode daemon runs non-interactive with the installed CLI's real `--dangerously-skip-permissions` flag. The removed `--auto` assumption caused an immediate usage exit on OpenCode 1.14.31; existing explicit question/plan denies remain in force. The shared test verifies that the retired flag is removed from custom arguments, while the real-binary contract test pins every emitted flag to `opencode run --help`. |
 
 ## FIR-3386 — Subscribers and sidebar
 
