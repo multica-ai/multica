@@ -34,6 +34,45 @@ netcat-openbsd, the agentfarm bootstrap, agent templates, and opencode config.
 | `OPENCODE_HOST`        | `0.0.0.0`                       | Bind address for `opencode serve`.                                         |
 | `OPENCODE_PORT`        | `4096`                          | Port for `opencode serve`.                                                 |
 | `OPENCODE_EXTRA_ARGS`  | (empty)                         | Appended verbatim to `opencode serve`, e.g. `--cors https://...`.          |
+| `EXTRA_UV_TOOLS`       | (empty)                         | Space-separated `uv tool install` targets, **always version-pinned** (e.g. `EXTRA_UV_TOOLS="snowflake-cli==3.23.0"`), installed once at pod boot. A one-off/custom-need opt-in for a single workspace without changing the shared image — see "One-off tool needs" below. Best-effort: a failed install warns and does not block boot. |
+
+## One-off tool needs
+
+Most tools belong in `agent-runtime-base` (every workspace gets them, one
+build). Some tools are needed by exactly one workspace today (e.g. `snow`,
+the Snowflake CLI, for a workspace doing Snowflake-backed reporting) — baking
+those into the shared base image by default isn't worth the extra image
+weight and attack surface for every other workspace that will never call
+them.
+
+`EXTRA_UV_TOOLS` is the current answer for that case: set it as an SSM param
+under the workspace's slug
+(`/agentfarm/development/agentrunner/<slug>/EXTRA_UV_TOOLS`), and
+`entrypoint.sh` runs `uv tool install` for each space-separated entry once at
+pod boot — using `uv`, already baked into `agent-runtime-base`, so there's no
+system-Python fighting (see `agent-runtime-base`'s README for why `pip`
+isn't an option here). No image rebuild, no per-workspace Dockerfile fork.
+
+**Always pin an exact version**, e.g. `EXTRA_UV_TOOLS="snowflake-cli==3.23.0"`
+rather than bare `snowflake-cli`. `uv tool install` accepts PEP 508
+requirement specifiers, so the operator is `==` (double equals) — a single
+`=` is rejected outright:
+
+```
+$ uv tool install "snowflake-cli=3.23.0"
+error: Failed to parse: `snowflake-cli=3.23.0`
+  Caused by: no such comparison operator "=", must be one of ~= == != <= >= < > ===
+```
+
+Pinning matters more here than for the base image, precisely because this
+path is best-effort and untested by CI: an unpinned entry can resolve to a
+different (possibly breaking) release the next time a pod boots, with no
+build or review to catch it.
+
+This is scoped to `uv`-installable Python packages for now. A tool that isn't
+on PyPI (or needs OS packages) still needs a base-image change or a
+workspace-specific downstream image layer — this hook doesn't attempt to
+solve that case.
 
 ## Smoke test
 

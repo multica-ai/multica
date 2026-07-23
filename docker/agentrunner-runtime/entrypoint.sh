@@ -44,6 +44,27 @@ fi
 chmod 600 "${SSH_KEY}" 2>/dev/null || true
 chmod 644 "${SSH_KEY}.pub" 2>/dev/null || true
 
+# ── Optional one-off tool installs ─────────────────────────────────────────────
+# EXTRA_UV_TOOLS lets a single workspace opt into extra CLIs (e.g. `snow`, the
+# Snowflake CLI) without baking them into agent-runtime-base for every
+# workspace. Space-separated list of `uv tool install` targets, always
+# version-pinned (e.g. "snowflake-cli==3.23.0" — uv uses PEP 508 `==`, a bare
+# `=` is rejected) since this path is best-effort and untested by CI, so an
+# unpinned entry can silently resolve to a different release on the next pod
+# boot. Land it as an SSM param under this workspace's slug
+# (/agentfarm/development/agentrunner/<slug>/EXTRA_UV_TOOLS) and it arrives
+# here as a normal env var via the existing ExternalSecret sweep — no image
+# change, no per-workspace Dockerfile. Best-effort: a failed install logs a
+# warning and does not block pod boot, since this is a convenience, not a
+# dependency anything else here relies on. See ROIPPC-2 for the fuller
+# discussion of one-off/custom tooling needs.
+if [ -n "${EXTRA_UV_TOOLS:-}" ]; then
+  echo "entrypoint: installing extra uv tools: ${EXTRA_UV_TOOLS}"
+  for tool in ${EXTRA_UV_TOOLS}; do
+    uv tool install "${tool}" || echo "entrypoint: WARNING failed to install extra uv tool '${tool}' (continuing)" >&2
+  done
+fi
+
 # ── Write multica config ───────────────────────────────────────────────────────
 # Defaults to the tools/prod server; override via env (e.g. the dev runner
 # pipeline points this at the development agentfarm server).
