@@ -297,6 +297,10 @@ export type IssueTableGroupSpec =
       kind: "compound";
       primary: "assignee" | "project" | "parent";
       secondary: "status";
+      /** Optional visible secondary buckets. When present, the server pages
+       * only primary groups that contain at least one matching card and
+       * returns `total` for that complete visible result set. */
+      secondary_values?: IssueStatus[];
     }
   | { kind: "property"; property_id: string; include_empty?: boolean };
 

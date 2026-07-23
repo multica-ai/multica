@@ -471,6 +471,7 @@ function buildAssigneeLanes(
 function buildServerLanes(
   descriptors: readonly IssueTableGroupDescriptor[],
   grouping: SwimlaneGrouping,
+  visibleStatuses: readonly IssueStatus[],
   projects: ReadonlyMap<string, Project> | undefined,
   getActorName: (type: string, id: string) => string,
   storedOrder: string[],
@@ -481,7 +482,18 @@ function buildServerLanes(
     noAssignee: string;
   },
 ): LaneGroup[] {
+  const visibleStatusSet = new Set(visibleStatuses);
   const lanes = descriptors.flatMap((descriptor): LaneGroup[] => {
+    if (
+      (descriptor.secondary_groups ?? []).every(
+        (secondary) =>
+          secondary.value.kind !== "status" ||
+          !visibleStatusSet.has(secondary.value.status as IssueStatus) ||
+          secondary.count === 0,
+      )
+    ) {
+      return [];
+    }
     const serverCellKeys = Object.fromEntries(
       (descriptor.secondary_groups ?? []).flatMap((secondary) =>
         secondary.value.kind === "status"
@@ -823,6 +835,7 @@ function SwimLaneViewImpl({
       return buildServerLanes(
         groupBranches.descriptors,
         swimlaneGrouping,
+        sortedStatuses,
         projectMap,
         getActorName,
         swimlaneOrder,
@@ -850,6 +863,7 @@ function SwimLaneViewImpl({
     laneLabels,
     groupBranches,
     projectMap,
+    sortedStatuses,
   ]);
 
   // For parent grouping: issues that are themselves lane headers should not
@@ -857,7 +871,7 @@ function SwimLaneViewImpl({
   // never collide this way (lanes are projects/actors, not issues), so the
   // set is empty there.
   const headerIssueIds = useMemo(() => {
-    if (groupBranches?.enabled || swimlaneGrouping !== "parent") {
+    if (swimlaneGrouping !== "parent") {
       return EMPTY_HEADER_IDS;
     }
     return new Set(
@@ -865,7 +879,7 @@ function SwimLaneViewImpl({
         .filter((g) => g.parentIssue !== null)
         .map((g) => g.parentIssue!.id),
     );
-  }, [groupBranches?.enabled, laneGroups, swimlaneGrouping]);
+  }, [laneGroups, swimlaneGrouping]);
 
   // Map of issue id → owning lane key. Used by orphan detection for parent
   // grouping (a child whose canonical parent isn't a lane header here lands

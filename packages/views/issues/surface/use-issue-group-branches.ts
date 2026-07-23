@@ -470,22 +470,10 @@ export function useIssueGroupBranches({
     descriptors,
     issues,
     pagination,
-    total:
-      secondaryValues && group.kind === "compound"
-        ? descriptors.reduce(
-            (total, descriptor) =>
-              total +
-              (descriptor.secondary_groups ?? []).reduce(
-                (laneTotal, secondary) =>
-                  secondary.value.kind === "status" &&
-                  secondaryValues.includes(secondary.value.status)
-                    ? laneTotal + secondary.count
-                    : laneTotal,
-                0,
-              ),
-            0,
-          )
-        : (groupsQuery.data?.pages[0]?.total ?? issues.length),
+    // `/groups` owns the exact query-wide visible total. Deriving it from
+    // loaded descriptors made a hidden-only first group page look globally
+    // empty even when a later page contained visible cards.
+    total: groupsQuery.data?.pages[0]?.total ?? issues.length,
     isLoading: enabled && groupsQuery.isPending,
     isRefreshing:
       enabled &&

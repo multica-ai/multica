@@ -852,6 +852,126 @@ func TestIssueTableCompoundParentGroupsReturnExactStatusCells(t *testing.T) {
 	if noParent.Count != 2 || noParent.Value.ValueState != "unset" {
 		t.Fatalf("unexpected no-parent lane: %#v", noParent)
 	}
+
+	// A second parent has only a hidden-status child. Under a visible-status
+	// compound query it must stay a No-parent card instead of creating an
+	// empty lane. The first parent does have a visible child, so it is promoted
+	// to a lane header and must disappear from the No-parent rows and counts.
+	var hiddenParentNumber int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = issue_counter + 2
+		WHERE id = $1
+		RETURNING issue_counter
+	`, testWorkspaceID).Scan(&hiddenParentNumber); err != nil {
+		t.Fatalf("reserve hidden-parent issue numbers: %v", err)
+	}
+	var hiddenParentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			position, number, project_id
+		)
+		VALUES ($1, 'Visible parent card', 'todo', 'none', 'member', $2, 5, $3, $4)
+		RETURNING id
+	`, testWorkspaceID, testUserID, hiddenParentNumber-1, projectID).Scan(&hiddenParentID); err != nil {
+		t.Fatalf("create hidden-only parent: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			parent_issue_id, position, number, project_id
+		)
+		VALUES ($1, 'Hidden child', 'done', 'none', 'member', $2, $3, 6, $4, $5)
+	`, testWorkspaceID, testUserID, hiddenParentID, hiddenParentNumber, projectID); err != nil {
+		t.Fatalf("create hidden child: %v", err)
+	}
+
+	filteredGroup := issueTableGroupSpec{
+		Kind:            "compound",
+		Primary:         "parent",
+		Secondary:       "status",
+		SecondaryValues: []string{"todo"},
+	}
+	filteredRecorder := httptest.NewRecorder()
+	testHandler.ListIssueTableGroups(filteredRecorder, newRequest("POST", "/api/issues/table/groups", issueTableGroupsRequest{
+		Query: issueTableQuerySpec{
+			Scope: issueTableScope{Kind: "project", ProjectID: projectID},
+			Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+		},
+		Group: filteredGroup,
+		Page:  issueTablePageRequest{Limit: 10},
+	}))
+	if filteredRecorder.Code != http.StatusOK {
+		t.Fatalf("filtered compound groups status = %d: %s", filteredRecorder.Code, filteredRecorder.Body.String())
+	}
+	var filtered issueTableGroupsResponse
+	if err := json.NewDecoder(filteredRecorder.Body).Decode(&filtered); err != nil {
+		t.Fatalf("decode filtered compound groups: %v", err)
+	}
+	if filtered.Total != 3 || len(filtered.Groups) != 2 {
+		t.Fatalf("unexpected visible compound groups: %#v", filtered)
+	}
+	filteredByKey := make(map[string]issueTableGroupDescriptorResponse, len(filtered.Groups))
+	for _, descriptor := range filtered.Groups {
+		filteredByKey[descriptor.Key] = descriptor
+	}
+	if _, exists := filteredByKey["parent:"+hiddenParentID]; exists {
+		t.Fatalf("hidden-only parent lane was returned: %#v", filtered.Groups)
+	}
+	filteredParent := filteredByKey["parent:"+parentID]
+	filteredNoParent := filteredByKey["parent:none"]
+	if filteredParent.Count != 2 || filteredNoParent.Count != 2 {
+		t.Fatalf("parent header was not removed from aligned counts: parent=%#v no-parent=%#v", filteredParent, filteredNoParent)
+	}
+
+	cellKey := func(descriptor issueTableGroupDescriptorResponse, status string) string {
+		t.Helper()
+		for _, cell := range descriptor.SecondaryGroups {
+			if cell.Value.Status == status {
+				return cell.Key
+			}
+		}
+		t.Fatalf("missing %s cell in %#v", status, descriptor)
+		return ""
+	}
+	listCell := func(key string) issueTableRowsResponse {
+		t.Helper()
+		rowsRecorder := httptest.NewRecorder()
+		testHandler.ListIssueTableRows(rowsRecorder, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
+			Query: issueTableQuerySpec{
+				Scope: issueTableScope{Kind: "project", ProjectID: projectID},
+				Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+			},
+			Group:     filteredGroup,
+			GroupKey:  &key,
+			Hierarchy: issueTableHierarchyRequest{Enabled: false},
+			Page:      issueTablePageRequest{Limit: 10},
+		}))
+		if rowsRecorder.Code != http.StatusOK {
+			t.Fatalf("filtered compound rows status = %d: %s", rowsRecorder.Code, rowsRecorder.Body.String())
+		}
+		var result issueTableRowsResponse
+		if err := json.NewDecoder(rowsRecorder.Body).Decode(&result); err != nil {
+			t.Fatalf("decode filtered compound rows: %v", err)
+		}
+		return result
+	}
+	noParentTodo := listCell(cellKey(filteredNoParent, "todo"))
+	if len(noParentTodo.Rows) != 2 {
+		t.Fatalf("unexpected visible no-parent rows: %#v", noParentTodo.Rows)
+	}
+	noParentIDs := map[string]bool{}
+	for _, row := range noParentTodo.Rows {
+		noParentIDs[row.Issue.ID] = true
+	}
+	if noParentIDs[parentID] || !noParentIDs[hiddenParentID] {
+		t.Fatalf("parent header/card semantics diverged: %#v", noParentIDs)
+	}
+	noParentDone := listCell(cellKey(filteredNoParent, "done"))
+	if len(noParentDone.Rows) != 0 {
+		t.Fatalf("promoted parent remained in No-parent rows: %#v", noParentDone.Rows)
+	}
 }
 
 func TestIssueTableHierarchyDoesNotCrossGroups(t *testing.T) {

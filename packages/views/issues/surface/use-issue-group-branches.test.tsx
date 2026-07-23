@@ -120,7 +120,7 @@ describe("useIssueGroupBranches", () => {
     const second = makeIssue("child-2", "todo");
     const listIssueTableGroups = vi.fn(async () => ({
       query_fingerprint: "test",
-      total: 3,
+      total: 2,
       groups: [
         {
           key: "parent:parent-1",
@@ -187,6 +187,7 @@ describe("useIssueGroupBranches", () => {
             kind: "compound",
             primary: "parent",
             secondary: "status",
+            secondary_values: ["todo"],
           },
           secondaryValues: ["todo"],
           enabled: true,
@@ -215,6 +216,66 @@ describe("useIssueGroupBranches", () => {
     act(() => result.current.pagination[todoKey]?.loadMore());
     await waitFor(() => expect(result.current.issues).toHaveLength(2));
     expect(listIssueTableRows).toHaveBeenCalledTimes(2);
+
+    queryClient.clear();
+  });
+
+  it("uses the query-wide compound total before all group pages are loaded", async () => {
+    const listIssueTableGroups = vi.fn(async () => ({
+      query_fingerprint: "test",
+      // A later group page owns the visible card. The loaded descriptor is
+      // intentionally hidden-only to catch regressions that reduce `total`
+      // from the currently loaded page instead of trusting the server.
+      total: 1,
+      groups: [
+        {
+          key: "parent:hidden",
+          value: {
+            kind: "parent" as const,
+            parent_id: "hidden",
+            parent: null,
+            value_state: "unavailable" as const,
+          },
+          count: 1,
+          secondary_groups: [
+            {
+              key: "compound:aGlkZGVu:status:done",
+              value: { kind: "status" as const, status: "done" },
+              count: 1,
+            },
+          ],
+        },
+      ],
+      next_cursor: "groups-next",
+    }));
+    setApiInstance({
+      listIssueTableGroups,
+      listIssueTableRows: vi.fn(),
+    } as unknown as ApiClient);
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    const { result } = renderHook(
+      () =>
+        useIssueGroupBranches({
+          wsId: "ws-1",
+          query,
+          group: {
+            kind: "compound",
+            primary: "parent",
+            secondary: "status",
+            secondary_values: ["todo"],
+          },
+          secondaryValues: ["todo"],
+          enabled: true,
+        }),
+      { wrapper: wrapper(queryClient) },
+    );
+
+    await waitFor(() => expect(result.current.descriptors).toHaveLength(1));
+    expect(result.current.total).toBe(1);
+    expect(result.current.hasMoreGroups).toBe(true);
 
     queryClient.clear();
   });

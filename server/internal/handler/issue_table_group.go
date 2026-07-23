@@ -65,6 +65,8 @@ type resolvedIssueTableGroup struct {
 	activeOptionOrder []string
 	activeOptions     map[string]struct{}
 	primary           *resolvedIssueTableGroup
+	secondaryValues   []string
+	secondaryFiltered bool
 }
 
 func issueTableGroupIdentity(group issueTableGroupSpec) string {
@@ -72,12 +74,20 @@ func issueTableGroupIdentity(group issueTableGroupSpec) string {
 		return "group:property:" + group.PropertyID + ":empty=" + strconv.FormatBool(group.IncludeEmpty)
 	}
 	if group.Kind == "compound" {
-		return "group:compound:" + group.Primary + ":" + group.Secondary
+		identity := "group:compound:" + group.Primary + ":" + group.Secondary
+		if group.SecondaryValues != nil {
+			identity += ":visible=" + strings.Join(group.SecondaryValues, ",")
+		}
+		return identity
 	}
 	return "group:" + group.Kind
 }
 
 func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request, workspaceID pgtype.UUID, group issueTableGroupSpec, allowNone bool) (resolvedIssueTableGroup, bool) {
+	if group.Kind != "compound" && group.SecondaryValues != nil {
+		writeError(w, http.StatusBadRequest, "group.secondary_values requires group.kind=compound")
+		return resolvedIssueTableGroup{}, false
+	}
 	switch group.Kind {
 	case "none":
 		if !allowNone {
@@ -127,11 +137,28 @@ END, ''))`,
 			writeIssueTableUnsupportedGroup(w, "primary_group_unsupported", "This primary group is not supported.")
 			return resolvedIssueTableGroup{}, false
 		}
+		seenSecondaryValues := make(map[string]struct{}, len(group.SecondaryValues))
+		for _, value := range group.SecondaryValues {
+			if !issueTableContainsString(validIssueStatuses, value) {
+				writeError(w, http.StatusBadRequest, "invalid group.secondary_values")
+				return resolvedIssueTableGroup{}, false
+			}
+			if _, exists := seenSecondaryValues[value]; exists {
+				writeError(w, http.StatusBadRequest, "duplicate group.secondary_values")
+				return resolvedIssueTableGroup{}, false
+			}
+			seenSecondaryValues[value] = struct{}{}
+		}
 		primary, ok := h.resolveIssueTableGroup(w, r, workspaceID, issueTableGroupSpec{Kind: group.Primary}, false)
 		if !ok {
 			return resolvedIssueTableGroup{}, false
 		}
-		return resolvedIssueTableGroup{kind: "compound", primary: &primary}, true
+		return resolvedIssueTableGroup{
+			kind:              "compound",
+			primary:           &primary,
+			secondaryValues:   append([]string(nil), group.SecondaryValues...),
+			secondaryFiltered: group.SecondaryValues != nil,
+		}, true
 	case "property":
 		propertyUUID, err := util.ParseUUID(group.PropertyID)
 		if err != nil {
@@ -598,7 +625,8 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	limitRef := addArg(limit + 1)
 	groupedCTE := fmt.Sprintf(`grouped AS (
-  SELECT %s AS group_value, COUNT(*)::bigint AS issue_count, '{}'::jsonb AS secondary_counts
+  SELECT %s AS group_value, COUNT(*)::bigint AS issue_count,
+         COUNT(*)::bigint AS visible_count, '{}'::jsonb AS secondary_counts
   FROM issue i
   WHERE %s
   GROUP BY 1
@@ -620,11 +648,13 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
   SELECT unnest(%s::text[]) AS group_value
 ), grouped AS (
   SELECT e.group_value, COALESCE(a.issue_count, 0)::bigint AS issue_count,
+         COALESCE(a.issue_count, 0)::bigint AS visible_count,
          '{}'::jsonb AS secondary_counts
   FROM expected e
   LEFT JOIN actual a USING (group_value)
   UNION ALL
-  SELECT a.group_value, a.issue_count, '{}'::jsonb AS secondary_counts
+  SELECT a.group_value, a.issue_count, a.issue_count AS visible_count,
+         '{}'::jsonb AS secondary_counts
   FROM actual a
   WHERE NOT (a.group_value = ANY(%s::text[]))
 )`, groupExpr, compiled.where, expectedRef, expectedRef)
@@ -638,18 +668,60 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
 ), grouped AS (
   SELECT group_value,
          SUM(cell_count)::bigint AS issue_count,
+         SUM(cell_count)::bigint AS visible_count,
          jsonb_object_agg(secondary_value, cell_count)::jsonb AS secondary_counts
   FROM cells
   GROUP BY group_value
 )`, groupExpr, compiled.where)
+		if group.secondaryFiltered {
+			visibleRef := addArg(group.secondaryValues)
+			headerPredicate := "TRUE"
+			promotedParentsCTE := ""
+			if group.primary != nil && group.primary.kind == "parent" {
+				headerPredicate = `NOT (
+    i.parent_issue_id IS NULL AND
+    EXISTS (SELECT 1 FROM promoted_parents p WHERE p.id = i.id)
+  )`
+				promotedParentsCTE = fmt.Sprintf(`, promoted_parents AS (
+  SELECT DISTINCT child.parent_issue_id AS id
+  FROM membership child
+  WHERE child.parent_issue_id IS NOT NULL
+    AND child.status = ANY(%s::text[])
+)`, visibleRef)
+			}
+			groupedCTE = fmt.Sprintf(`membership AS NOT MATERIALIZED (
+  SELECT i.*
+  FROM issue i
+  WHERE %s
+)%s, cells AS (
+  SELECT %s AS group_value, i.status AS secondary_value,
+         COUNT(*) FILTER (WHERE %s)::bigint AS cell_count
+  FROM membership i
+  GROUP BY 1, 2
+), grouped AS (
+  SELECT group_value,
+         SUM(cell_count)::bigint AS issue_count,
+         COALESCE(
+           SUM(cell_count) FILTER (WHERE secondary_value = ANY(%s::text[])),
+           0
+         )::bigint AS visible_count,
+         jsonb_object_agg(secondary_value, cell_count)::jsonb AS secondary_counts
+  FROM cells
+  GROUP BY group_value
+  HAVING COALESCE(
+    SUM(cell_count) FILTER (WHERE secondary_value = ANY(%s::text[])),
+    0
+  ) > 0
+)`, compiled.where, promotedParentsCTE, groupExpr, headerPredicate, visibleRef, visibleRef)
+		}
 	}
 	query := fmt.Sprintf(`WITH %s, sorted AS (
-	  SELECT group_value, issue_count, secondary_counts, (%s)::text AS group_sort,
+	  SELECT group_value, issue_count, visible_count, secondary_counts, (%s)::text AS group_sort,
 	         (%s)::jsonb AS group_context
 	  FROM grouped
 	), ranked AS (
-	  SELECT group_value, issue_count, secondary_counts, group_sort, group_context, (%s)::int AS group_order,
-	         SUM(issue_count) OVER ()::bigint AS total
+	  SELECT group_value, issue_count, visible_count, secondary_counts, group_sort, group_context, (%s)::int AS group_order,
+	         SUM(visible_count) OVER ()::bigint AS total
 	  FROM sorted
 	)
 	SELECT group_value, issue_count, secondary_counts, group_sort, group_context, group_order, total

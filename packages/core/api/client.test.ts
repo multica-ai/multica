@@ -279,6 +279,7 @@ describe("ApiClient server Table query", () => {
           kind: "compound",
           primary: "parent",
           secondary: "status",
+          secondary_values: ["todo"],
         },
       }),
     ).resolves.toMatchObject({
@@ -293,7 +294,7 @@ describe("ApiClient server Table query", () => {
     });
     expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
       body: expect.stringContaining(
-        '"kind":"compound","primary":"parent","secondary":"status"',
+        '"kind":"compound","primary":"parent","secondary":"status","secondary_values":["todo"]',
       ),
     });
   });

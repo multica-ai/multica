@@ -466,6 +466,7 @@ export function useIssueSurfaceController({
         kind: "compound",
         primary: swimlaneGrouping,
         secondary: "status",
+        secondary_values: serverStatuses,
       };
     }
     const propertyId = propertyIdFromViewKey(effectiveGrouping);
@@ -477,7 +478,12 @@ export function useIssueSurfaceController({
       };
     }
     return { kind: "assignee" };
-  }, [effectiveGrouping, effectiveViewMode, swimlaneGrouping]);
+  }, [
+    effectiveGrouping,
+    effectiveViewMode,
+    serverStatuses,
+    swimlaneGrouping,
+  ]);
   const usesServerGroupSurface =
     (effectiveViewMode === "board" && effectiveGrouping !== "status") ||
     effectiveViewMode === "swimlane";
