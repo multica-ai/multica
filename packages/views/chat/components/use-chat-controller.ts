@@ -88,6 +88,51 @@ export function isStillOnComposeTarget(
   return liveActiveSessionId === sentFromSessionId;
 }
 
+/**
+ * Decide what a project-context change should do, given the open session.
+ *
+ *  - `awaitSession`: an active session id is set but its row has not loaded
+ *    yet. Bail so a persisted selection resolving before its sessions query
+ *    cannot misfile a project change into the new-chat draft.
+ *  - `detachCurrent`: removing context from the open session — safe in place,
+ *    it only changes what future turns receive.
+ *  - `startFreshChat`: switching to a DIFFERENT project. A fresh chat is
+ *    started so the old project's provider memory / reused workdir cannot
+ *    bleed in. It must stay bound to the agent whose session we are leaving
+ *    (`agentId`): clearing the active session otherwise drops selection back
+ *    to the stored `selectedAgentId`, which can be a stale preference for a
+ *    different agent, sending the lazily-created session to the wrong agent.
+ *  - `setDraftProject`: no open session, so this only adjusts the new-chat
+ *    draft's project.
+ *
+ * Shared by both send chains — the chat tab's controller and the floating
+ * ChatWindow — so the stale-agent rule cannot drift between the two surfaces.
+ */
+export type ProjectContextChange =
+  | { kind: "awaitSession" }
+  | { kind: "detachCurrent"; sessionId: string }
+  | { kind: "startFreshChat"; agentId: string; projectId: string }
+  | { kind: "setDraftProject"; projectId: string | null };
+
+export function planProjectContextChange(input: {
+  targetProjectId: string | null;
+  activeSessionId: string | null;
+  currentSession: { id: string; agent_id: string } | null;
+}): ProjectContextChange {
+  if (input.activeSessionId) {
+    if (!input.currentSession) return { kind: "awaitSession" };
+    if (input.targetProjectId === null) {
+      return { kind: "detachCurrent", sessionId: input.currentSession.id };
+    }
+    return {
+      kind: "startFreshChat",
+      agentId: input.currentSession.agent_id,
+      projectId: input.targetProjectId,
+    };
+  }
+  return { kind: "setDraftProject", projectId: input.targetProjectId };
+}
+
 // True when a session has an in-flight optimistic write — an `optimistic-`
 // message or a pending task in the cache. That is the signal of a just-created
 // (or actively-sending) session still awaiting server confirmation, before the
@@ -723,33 +768,33 @@ export function useChatController(opts?: { isActive?: boolean }) {
         to: projectId,
         previousSessionId: activeSessionId,
       });
-      if (activeSessionId) {
-        // A persisted selection can resolve before its sessions query. Do not
-        // misfile a project change into the new-chat draft during that window.
-        if (!currentSession) return;
-        if (projectId === null) {
-          // Detaching context is safe in place: it only changes what future
-          // turns receive. Switching to another project starts a fresh chat so
-          // provider memory and the reused workdir from the old project cannot
-          // bleed into the new one.
-          setSessionProject.mutate({
-            sessionId: currentSession.id,
-            projectId: null,
-          });
-        } else {
-          setSelectedProjectId(projectId);
+      const plan = planProjectContextChange({
+        targetProjectId: projectId,
+        activeSessionId,
+        currentSession: currentSession ?? null,
+      });
+      switch (plan.kind) {
+        case "awaitSession":
+          return;
+        case "detachCurrent":
+          setSessionProject.mutate({ sessionId: plan.sessionId, projectId: null });
+          break;
+        case "startFreshChat":
+          setSelectedAgentId(plan.agentId);
+          setSelectedProjectId(plan.projectId);
           setActiveSession(null);
-        }
-        requestInputFocus();
-        return;
+          break;
+        case "setDraftProject":
+          setSelectedProjectId(plan.projectId);
+          break;
       }
-      setSelectedProjectId(projectId);
       requestInputFocus();
     }, [
       activeProjectId,
       activeSessionId,
       currentSession,
       setSessionProject,
+      setSelectedAgentId,
       setSelectedProjectId,
       setActiveSession,
       requestInputFocus,

@@ -56,7 +56,11 @@ import { ChatInput } from "./chat-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
-import { hasOptimisticInFlight, isStillOnComposeTarget } from "./use-chat-controller";
+import {
+  hasOptimisticInFlight,
+  isStillOnComposeTarget,
+  planProjectContextChange,
+} from "./use-chat-controller";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, Attachment, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useT } from "../../i18n";
@@ -735,32 +739,33 @@ export function ChatWindow() {
         to: projectId,
         previousSessionId: activeSessionId,
       });
-      if (activeSessionId) {
-        // A persisted selection can resolve before its sessions query. Do not
-        // misfile a project change into the new-chat draft during that window.
-        if (!currentSession) return;
-        if (projectId === null) {
-          // Removing context affects future turns without moving the current
-          // conversation. A different project gets a fresh session so the old
-          // provider memory/workdir is never mixed into the new project.
-          setSessionProject.mutate({
-            sessionId: currentSession.id,
-            projectId: null,
-          });
-        } else {
-          setSelectedProjectId(projectId);
+      const plan = planProjectContextChange({
+        targetProjectId: projectId,
+        activeSessionId,
+        currentSession: currentSession ?? null,
+      });
+      switch (plan.kind) {
+        case "awaitSession":
+          return;
+        case "detachCurrent":
+          setSessionProject.mutate({ sessionId: plan.sessionId, projectId: null });
+          break;
+        case "startFreshChat":
+          setSelectedAgentId(plan.agentId);
+          setSelectedProjectId(plan.projectId);
           setActiveSession(null);
-        }
-        requestInputFocus();
-        return;
+          break;
+        case "setDraftProject":
+          setSelectedProjectId(plan.projectId);
+          break;
       }
-      setSelectedProjectId(projectId);
       requestInputFocus();
     }, [
       activeProjectId,
       activeSessionId,
       currentSession,
       setSessionProject,
+      setSelectedAgentId,
       setSelectedProjectId,
       setActiveSession,
       requestInputFocus,

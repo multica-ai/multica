@@ -280,6 +280,36 @@ describe("useChatController project context", () => {
     expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
   });
 
+  it("pins the fresh chat to the open session's agent when selectedAgentId is stale", () => {
+    // The open session belongs to agent B, but the persisted preference is
+    // still agent A. Switching to another project clears the active session,
+    // which would otherwise drop selection back to the stale agent A and send
+    // the lazily-created chat to the wrong agent (MUL-5150 regression). The
+    // switch must first sync selectedAgentId to the open session's agent.
+    const projectSession = makeSession({
+      id: "project-session",
+      agent_id: agentB.id,
+      project_id: project.id,
+    });
+    h.store.activeSessionId = projectSession.id;
+    h.store.selectedAgentId = agentA.id; // stale preference for a different agent
+    h.store.selectedProjectId = project.id;
+    h.sessions = [projectSession];
+    h.agents = [agentA, agentB];
+    h.projects = [project, otherProject];
+
+    const { result } = renderHook(() => useChatController());
+    h.store.setActiveSession.mockClear();
+    h.store.setSelectedAgentId.mockClear();
+    h.store.setSelectedProjectId.mockClear();
+
+    act(() => result.current.handleProjectChange(otherProject.id));
+
+    expect(h.store.setSelectedAgentId).toHaveBeenCalledWith(agentB.id);
+    expect(h.store.setSelectedProjectId).toHaveBeenCalledWith(otherProject.id);
+    expect(h.store.setActiveSession).toHaveBeenCalledWith(null);
+  });
+
   it("does not write project changes into the new-chat draft while an active session resolves", () => {
     h.store.activeSessionId = "loading-session";
     h.store.selectedProjectId = project.id;
