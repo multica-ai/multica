@@ -257,7 +257,7 @@
     "pull_request_card_status_conflicts": "Has merge conflicts",
     "pull_request_card_status_checks_failed": "Some checks failed",
     "pull_request_card_status_checks_pending": "Some checks haven't completed yet",
-    "pull_request_card_status_checks_passed": "All checks passed",
+    "pull_request_card_status_checks_passed": "Checks passed",
     "pull_request_card_status_ready": "Ready to merge",
     "pull_request_card_status_unknown": "Checks haven't reported yet",
     "pull_request_card_draft_prefix": "Draft · {{status}}",

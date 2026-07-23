@@ -94,7 +94,7 @@ Multica Cloud で Multica を実行している場合、連携はすでに構成
 | **Webhook URL** | `https://<api-host>/api/webhooks/github`。 |
 | **Webhook secret** | 長いランダム文字列を生成してください（例: `openssl rand -hex 32`）。手順 2 で同じ値を Multica の env に貼り付けます。 |
 | **Permissions → Repository → Pull requests** | **Read-only**。 |
-| **Permissions → Repository → Checks** | **Read-only**。PR サイドバーの CI ステータスに必須です — この権限がないと GitHub は `check_suite` を配信しません。 |
+| **Permissions → Repository → Checks** | **Read-only**。PR サイドバーの CI ステータスに必須です — この権限がないと GitHub は `check_suite` を配信しません。read-only では Multica は**完了した** suite しか見えません。[CI ステータスで分かること・分からないこと](#ci-ステータスで分かること分からないこと)を参照してください。 |
 | **Permissions → Repository → Metadata** | Read-only（必須）。 |
 | **Subscribe to events** | **Pull request** と **Check suite** をチェックしてください。 |
 | **Where can this GitHub App be installed?** | お好みで。単一組織のセットアップなら `Only on this account` で十分です。 |
@@ -197,12 +197,33 @@ curl -s https://api.github.com/apps/<your-app-slug> | jq '{events, permissions}'
 
 CI ステータスは以降のイベントにのみ反映されます — Multica は受信した suite を記録するだけで、過去の履歴は埋めません。すぐに確認したい場合は、オープンな PR にコミットをプッシュするか、チェックを re-run してください。
 
+### CI ステータスで分かること・分からないこと
+
+Multica が要求するのは **Checks: Read-only** のみで、この上限は意図的なものです。ただし、サイドバーの行に依存する前に理解しておくべき結果が伴います。
+
+GitHub の [webhook 契約](https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_suite)は、`check_suite` の配信を権限レベルで分けています。
+
+| イベント action | `checks: read` で受信 | `checks: write` で受信 |
+|---|---|---|
+| `completed` | ✅ | ✅ |
+| `requested` / `rerequested` | ❌ | ✅ |
+
+したがって推奨の read-only 構成では、Multica は suite が**完了した**ことしか知らず、**開始した**ことは決して分かりません。ここから 2 つの帰結があります。
+
+- **実行中の CI は表示されません。** チェックが実行中の PR は「チェックはまだ報告されていません」と表示され、CI がまったくない PR と区別がつきません。実行中を示す表示はありません。
+- **緑の行は「報告されたものは成功した」であり、「すべて成功した」ではありません。** リポジトリに 2 つのレポート元（GitHub Actions と Vercel など）があり、片方だけが完了している場合、行はその 1 つの suite に基づいて**チェックに成功しました**と表示します。文言が「すべてのチェックに成功しました」ではなく「チェックに成功しました」である理由がこれです。この行は下限値として扱い、マージ前には GitHub 側で確認してください。
+
+<Callout type="info">
+**なぜ `checks: write` を要求しないのか？** Checks の write レベルアクセスは、アプリが**あなたのリポジトリ上で check run を作成・更新する**ことを許可します — これは読み取り範囲の拡大ではなく、リポジトリへの書き込み権限です。Multica は読み取り専用のミラーであり GitHub に書き込むことはないため、実行中スピナーを表示するためだけに write スコープを要求するという判断を、こちらで勝手に行うことはしません。実行中ステータスが必要で、このスコープを受け入れられる場合は、ご自身の App の **Checks** を **Read and write** に設定してください。サーバー側はすでに `requested` / `rerequested` を pending として記録するため、コード変更なしでサイドバーに「チェックがまだ完了していません」が表示されるようになります。
+</Callout>
+
 ## 制限事項
 
 現時点で知っておくべき、いくつかの粗い部分があります。
 
 - **まだ手動の紐づけ UI はありません** — PR を紐づける唯一の方法は、ブランチ、タイトル、本文に識別子を置くことです。
-- **CI ステータスは check suite 単位で、ジョブ単位ではありません** — 各レポート元（GitHub Actions、Vercel など）を成功 / 失敗 / 実行中のいずれか 1 つに丸めます。個々のジョブ名とログは GitHub 側にのみ残ります。レビューコメントとレビュアーは表示されません。
+- **CI ステータスは check suite 単位で、ジョブ単位ではありません** — 各レポート元（GitHub Actions、Vercel など）を成功 / 失敗のいずれか 1 つに丸めます。個々のジョブ名とログは GitHub 側にのみ残ります。レビューコメントとレビュアーは表示されません。
+- **実行中の CI は見えず、緑の行は下限値です** — read レベルの Checks 権限では `completed` の suite しか受信できないため、実行中のチェックは見えず、別のレポート元がまだ実行中でも行が「チェックに成功しました」と表示されることがあります。詳細と任意の対処は [CI ステータスで分かること・分からないこと](#ci-ステータスで分かること分からないこと)にあります。
 - **CI ステータスには `check_suite` の購読が必要です** — このイベントが文書化される前に作成された App では、すべての PR で「チェックはまだ報告されていません」と表示され続けます。[PR 行に CI ステータスが表示されない](#pr-行に-ci-ステータスが表示されない)を参照してください。
 - マージ → Done ルールに対する**ワークスペースレベルの設定はありません** — 固定のデフォルトです（`cancelled` でない限り `merged → done`）。ワークスペースでカスタマイズできるマッピングは将来の追加予定です。
 - **1 つのイシューに複数の PR が紐づく場合、マージは保守的です** — 2 つの PR がどちらも `MUL-123` を参照していて最初の 1 つがマージされると、イシューはただちに `Done` に移動します。進める前に紐づいたすべての PR が解決されるのを待つ後続の変更が進行中です。

@@ -16,6 +16,18 @@ import type { GitHubPullRequest } from "../types";
 //   7. no suite + mergeable=clean → status_ready
 //   8. otherwise                  → status_unknown
 //
+// Completeness caveat (MUL-5180): these counts only ever cover check suites
+// Multica has actually observed, which is NOT the same as "every suite that
+// will run". GitHub delivers `check_suite.requested` / `.rerequested` only to
+// Apps holding Checks *write*; the Multica App deliberately stays read-only,
+// so in practice only `completed` suites arrive. A PR with two reporting apps
+// therefore passes through a window where the first has completed and the
+// second has not yet been seen at all.
+//
+// That is why rule 6 renders as "Checks passed" and not "All checks passed" —
+// we can report what reported, never that everything did. Do not reintroduce
+// completeness wording here without also fixing the underlying signal.
+//
 // Note: this table is the single source of truth for the sidebar PR row. The
 // older row-with-badges implementation used a separate "hide status row for
 // terminal PRs" branch — the current row renders

@@ -80,11 +80,21 @@ describe("PullRequestList sidebar rows", () => {
     expect(row).not.toHaveClass("rounded-lg", "border", "bg-card");
   });
 
-  it("renders All-checks-passed status when only passed counts are non-zero", async () => {
+  it("renders checks-passed status when only passed counts are non-zero", async () => {
     mockPRs = [makePR({ checks_passed: 3 })];
     renderList();
     await waitForRender();
-    expect(screen.getByText("All checks passed")).toBeInTheDocument();
+    expect(screen.getByText("Checks passed")).toBeInTheDocument();
+  });
+
+  // MUL-5180: the App holds Checks read-only, so GitHub delivers `completed`
+  // suites only — we can never know whether every suite has reported. The
+  // copy must therefore not claim completeness.
+  it("never claims that ALL checks passed", async () => {
+    mockPRs = [makePR({ checks_passed: 1 })];
+    renderList();
+    await waitForRender();
+    expect(screen.queryByText(/all checks passed/i)).not.toBeInTheDocument();
   });
 
   it("renders Some-checks-failed when any failed count is non-zero", async () => {

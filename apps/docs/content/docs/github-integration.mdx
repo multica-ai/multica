@@ -16,7 +16,7 @@ There is no per-issue setup. The whole flow is identifier-driven.
 | **Settings → GitHub** | Workspace admins see the GitHub tab with a master toggle, **Connect GitHub** button, and feature switches (PR sidebar, Co-authored-by, auto-link). After install you bounce back to the GitHub tab. |
 | **Issue sidebar → Pull requests** | Every PR auto-linked to this issue, with title, repo, state (`Open` / `Draft` / `Merged` / `Closed`), author, diff stats, and CI status. Click a row to jump to the PR on GitHub. |
 | **Webhook (background)** | On every `pull_request` event, Multica upserts the PR row, scans the PR for issue identifiers, and (re)builds the link rows. Idempotent — replaying a delivery is a no-op. |
-| **CI status** | On every `check_suite` event, Multica records the suite against the PR's current head commit and rolls the results up into the sidebar row: **All checks passed**, **Some checks failed**, or **Some checks haven't completed yet**, with a segmented bar showing the pass/fail/pending split. Requires the `check_suite` event subscription — see [setup](#1-create-the-github-app). |
+| **CI status** | On every `check_suite` event, Multica records the suite against the PR's current head commit and rolls the results up into the sidebar row: **Checks passed** or **Some checks failed**, with a segmented bar showing the split. Requires the `check_suite` event subscription — see [setup](#1-create-the-github-app). Multica sees **completed** suites only; read [what CI status can and cannot tell you](#what-ci-status-can-and-cannot-tell-you) before relying on it. |
 | **Auto-status on merge** | When a PR transitions to `merged`, every linked issue not already `Done` or `Cancelled` is moved to `Done`. The status change is timeline-logged with source `github_pr_merged`. |
 
 Only the PR itself is mirrored. Commits and branch refs without an open PR are **not** modeled. The integration is intentionally narrow.
@@ -108,7 +108,7 @@ Fill in:
 | **Webhook URL** | `https://<api-host>/api/webhooks/github`. |
 | **Webhook secret** | Generate a long random string (e.g. `openssl rand -hex 32`). You'll paste the same value into Multica's env in step 2. |
 | **Permissions → Repository → Pull requests** | **Read-only**. |
-| **Permissions → Repository → Checks** | **Read-only**. Required for CI status on the PR sidebar row — GitHub will not deliver `check_suite` without it. |
+| **Permissions → Repository → Checks** | **Read-only**. Required for CI status on the PR sidebar row — GitHub will not deliver `check_suite` without it. Read-only means Multica sees completed suites only; see [what CI status can and cannot tell you](#what-ci-status-can-and-cannot-tell-you). |
 | **Permissions → Repository → Metadata** | Read-only (mandatory). |
 | **Subscribe to events** | Tick **Pull request** and **Check suite**. |
 | **Where can this GitHub App be installed?** | Your choice. `Only on this account` is fine for single-org setups. |
@@ -206,18 +206,39 @@ You want `check_suite` in `events` and `"checks": "read"` in `permissions`. If e
 3. **Save changes.**
 
 <Callout type="warning">
-**Existing installations must accept the new permission.** Adding the `checks` permission does not apply retroactively — GitHub emails each account that installed the App and holds the change until someone approves it. Until then that installation still delivers no `check_suite` events. Approve it at **Settings → Applications → Installed GitHub Apps → <your App> → Review request** (organization installs need an org owner). Multica handles the resulting `new_permissions_accepted` event automatically; no redeploy is needed.
+**Existing installations must accept the new permission.** Adding the `checks` permission does not apply retroactively — GitHub emails each account that installed the App and holds the change until someone approves it. Until then that installation still delivers no `check_suite` events. Approve it at **Settings → Applications → Installed GitHub Apps → your App → Review request** (organization installs need an org owner). Multica handles the resulting `new_permissions_accepted` event automatically; no redeploy is needed.
 </Callout>
 
 CI status only populates going forward — Multica records suites as they arrive and does not backfill history. Push a commit to an open PR (or re-run its checks) to see the first rows appear.
+
+### What CI status can and cannot tell you
+
+Multica requests **Checks: Read-only**, and that ceiling is deliberate. It also has a consequence worth understanding before you rely on the sidebar row.
+
+GitHub's [webhook contract](https://docs.github.com/en/webhooks/webhook-events-and-payloads#check_suite) splits `check_suite` delivery by permission level:
+
+| Event action | Delivered with `checks: read` | Delivered with `checks: write` |
+|---|---|---|
+| `completed` | ✅ | ✅ |
+| `requested` / `rerequested` | ❌ | ✅ |
+
+So under the recommended read-only setup Multica learns that a suite **finished**, never that one **started**. Two things follow:
+
+- **In-flight CI is not surfaced.** A PR whose checks are still running shows *Checks haven't reported yet*, the same as a PR with no CI at all. There is no running/pending indicator.
+- **A green row means "what reported, passed" — not "everything passed."** If a repo has two reporting apps (say GitHub Actions and Vercel) and only one has finished, the row reads **Checks passed** based on that one suite. This is why the copy is *Checks passed* and not *All checks passed*. Treat the row as a lower bound and open the PR on GitHub before merging on its say-so.
+
+<Callout type="info">
+**Why not just request `checks: write`?** Write-level access to Checks lets an app **create and update check runs on your repositories** — it is a repo-write capability, not a broader read. Multica is a read-only mirror and never writes to GitHub, so requesting a write scope purely to render an in-progress spinner is a trade we don't make on your behalf. If your team wants in-flight status and accepts that scope, set **Checks** to **Read and write** on your own App: the server already records `requested` / `rerequested` as pending and the sidebar will start showing *Some checks haven't completed yet* with no code change.
+</Callout>
 
 ## Limitations
 
 A few rough edges to be aware of today:
 
 - **No manual link UI yet** — the only way to link a PR is to have the identifier in its branch, title, or body.
-- **CI status is per check suite, not per job** — Multica rolls each reporting app (GitHub Actions, Vercel, …) up to one pass/fail/pending result. Individual job names and logs stay on GitHub. Review comments and reviewers are not surfaced.
+- **CI status is per check suite, not per job** — Multica rolls each reporting app (GitHub Actions, Vercel, …) up to one pass/fail result. Individual job names and logs stay on GitHub. Review comments and reviewers are not surfaced.
 - **CI status needs the `check_suite` subscription** — an App created before this event was documented will show *Checks haven't reported yet* on every PR forever. See [PR rows show no CI status](#pr-rows-show-no-ci-status).
+- **No in-flight CI, and a green row is a lower bound** — read-level Checks access only receives `completed` suites, so running checks are invisible and a row can read *Checks passed* while another provider is still going. Details and the opt-in fix in [what CI status can and cannot tell you](#what-ci-status-can-and-cannot-tell-you).
 - **No workspace-level config** for the merge → Done rule — it's a fixed default (`merged → done`, unless `cancelled`). Workspace-customizable mappings are a future addition.
 - **Multi-PR-to-one-issue is conservative on merge** — if two PRs both reference `MUL-123` and the first one merges, the issue is moved to `Done` immediately. A follow-up change to wait for all linked PRs to resolve before advancing is in progress.
 
