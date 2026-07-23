@@ -13,9 +13,9 @@ import {
 import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
+import { useSearchStore } from "@multica/core/search";
 import { isImeComposing } from "@multica/core/utils";
 import { useNavigation } from "../navigation";
-import { useSearchStore } from "../search/search-store";
 
 const GLOBAL_ACTIONS: readonly ShortcutActionId[] = [
   "openSearch",

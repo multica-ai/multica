@@ -2,10 +2,8 @@
 
 import { Search } from "lucide-react";
 import { SidebarMenuButton } from "@multica/ui/components/ui/sidebar";
-import {
-  useShortcut,
-} from "@multica/core/shortcuts";
-import { useSearchStore } from "./search-store";
+import { useShortcut } from "@multica/core/shortcuts";
+import { useSearchStore } from "@multica/core/search";
 import { useT } from "../i18n";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 

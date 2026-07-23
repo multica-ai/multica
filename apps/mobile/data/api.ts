@@ -99,6 +99,8 @@ import {
   EMPTY_USER,
   EMPTY_WORKSPACE_LIST,
   InboxListSchema,
+  IssueLabelsResponseSchema,
+  LabelSchema,
   NotificationPreferenceResponseSchema,
   ListLabelsResponseSchema,
   ListProjectResourcesResponseSchema,
@@ -106,6 +108,7 @@ import {
   MemberListSchema,
   PinListSchema,
   PinnedItemSchema,
+  ProjectResourceSchema,
   ProjectSchema,
   RuntimeListSchema,
   SearchIssuesResponseSchema,
@@ -359,6 +362,30 @@ class ApiClient {
     return parseWithFallback(raw, schema, fallback, {
       endpoint: opts?.endpoint ?? `${init.method ?? "GET"} ${path}`,
     });
+  }
+
+  /** Strict write-side validation for responses that immediately seed UI
+   *  caches. A malformed 2xx response must behave like a failed mutation so
+   *  optimistic updates roll back instead of persisting bad cache data. */
+  private async fetchStrictWith<T>(
+    path: string,
+    schema: ZodType,
+    init: RequestInit,
+    opts: { endpoint: string; message: string; signal?: AbortSignal },
+  ): Promise<T> {
+    const raw = await this.fetch<unknown>(path, {
+      ...init,
+      signal: opts.signal ?? init.signal ?? undefined,
+    });
+    const parsed = schema.safeParse(raw);
+    if (!parsed.success) {
+      console.error(`[api] ← shape mismatch ${opts.endpoint}`, {
+        issues: parsed.error.issues,
+        received: raw,
+      });
+      throw new ApiError(opts.message, 0, raw);
+    }
+    return parsed.data as T;
   }
 
   // --- Auth ---
@@ -615,10 +642,18 @@ class ApiClient {
   // CreateIssue). Mobile sends only the fields the form fills in; backend
   // applies its own defaults for anything omitted.
   async createIssue(body: CreateIssueRequest): Promise<Issue> {
-    return this.fetch<Issue>("/api/issues", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.fetchStrictWith(
+      "/api/issues",
+      IssueSchema,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      {
+        endpoint: "POST /api/issues",
+        message: "Create issue response invalid",
+      },
+    );
   }
 
   // Timeline returns the full ASC entry list in one shot — server-side
@@ -804,10 +839,18 @@ class ApiClient {
   // Method is PUT to match backend router (server/cmd/server/router.go:327)
   // and web client (packages/core/api/client.ts:465).
   async updateIssue(id: string, body: UpdateIssueRequest): Promise<Issue> {
-    return this.fetch<Issue>(`/api/issues/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+    return this.fetchStrictWith(
+      `/api/issues/${id}`,
+      IssueSchema,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      },
+      {
+        endpoint: "PUT /api/issues/:id",
+        message: "Update issue response invalid",
+      },
+    );
   }
 
   // Backend returns 204 No Content on success
@@ -837,21 +880,34 @@ class ApiClient {
   // used — same convention as createProject (cache rollback on failure is
   // preferable to a parseWithFallback fallback that would mask server errors).
   async createLabel(body: CreateLabelRequest): Promise<Label> {
-    return this.fetch<Label>("/api/labels", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.fetchStrictWith(
+      "/api/labels",
+      LabelSchema,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      {
+        endpoint: "POST /api/labels",
+        message: "Create label response invalid",
+      },
+    );
   }
 
   async attachLabel(
     issueId: string,
     labelId: string,
   ): Promise<IssueLabelsResponse> {
-    return this.fetch<IssueLabelsResponse>(
+    return this.fetchStrictWith(
       `/api/issues/${issueId}/labels`,
+      IssueLabelsResponseSchema,
       {
         method: "POST",
         body: JSON.stringify({ label_id: labelId }),
+      },
+      {
+        endpoint: "POST /api/issues/:id/labels",
+        message: "Attach label response invalid",
       },
     );
   }
@@ -860,9 +916,14 @@ class ApiClient {
     issueId: string,
     labelId: string,
   ): Promise<IssueLabelsResponse> {
-    return this.fetch<IssueLabelsResponse>(
+    return this.fetchStrictWith(
       `/api/issues/${issueId}/labels/${labelId}`,
+      IssueLabelsResponseSchema,
       { method: "DELETE" },
+      {
+        endpoint: "DELETE /api/issues/:id/labels/:labelId",
+        message: "Detach label response invalid",
+      },
     );
   }
 
@@ -924,20 +985,36 @@ class ApiClient {
   // patch rolls back; pretending the write succeeded with empty data
   // would silently desync caches.
   async createProject(body: CreateProjectRequest): Promise<Project> {
-    return this.fetch<Project>("/api/projects", {
-      method: "POST",
-      body: JSON.stringify(body),
-    });
+    return this.fetchStrictWith(
+      "/api/projects",
+      ProjectSchema,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+      {
+        endpoint: "POST /api/projects",
+        message: "Create project response invalid",
+      },
+    );
   }
 
   async updateProject(
     id: string,
     body: UpdateProjectRequest,
   ): Promise<Project> {
-    return this.fetch<Project>(`/api/projects/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(body),
-    });
+    return this.fetchStrictWith(
+      `/api/projects/${id}`,
+      ProjectSchema,
+      {
+        method: "PUT",
+        body: JSON.stringify(body),
+      },
+      {
+        endpoint: "PUT /api/projects/:id",
+        message: "Update project response invalid",
+      },
+    );
   }
 
   async deleteProject(id: string): Promise<void> {
@@ -965,11 +1042,16 @@ class ApiClient {
     projectId: string,
     body: CreateProjectResourceRequest,
   ): Promise<ProjectResource> {
-    return this.fetch<ProjectResource>(
+    return this.fetchStrictWith(
       `/api/projects/${projectId}/resources`,
+      ProjectResourceSchema,
       {
         method: "POST",
         body: JSON.stringify(body),
+      },
+      {
+        endpoint: "POST /api/projects/:id/resources",
+        message: "Create project resource response invalid",
       },
     );
   }
