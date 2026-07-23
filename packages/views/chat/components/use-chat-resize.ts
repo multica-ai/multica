@@ -118,20 +118,15 @@ export function useChatResize(
         setIsDragging(false);
         document.removeEventListener("pointermove", onPointerMove);
         document.removeEventListener("pointerup", onPointerUp);
-        document.body.style.cursor = "";
-        document.body.style.userSelect = "";
+        document.documentElement.removeAttribute("data-chat-resizing");
       };
 
       document.addEventListener("pointermove", onPointerMove);
       document.addEventListener("pointerup", onPointerUp);
 
-      const cursorMap: Record<DragDir, string> = {
-        left: "col-resize",
-        top: "row-resize",
-        corner: "nw-resize",
-      };
-      document.body.style.cursor = cursorMap[dir];
-      document.body.style.userSelect = "none";
+      // Lock the resize cursor globally so it survives the pointer leaving the
+      // narrow handle; per-direction rules live in packages/ui/styles/base.css.
+      document.documentElement.setAttribute("data-chat-resizing", dir);
     },
     [renderWidth, renderHeight, setChatSize],
   );

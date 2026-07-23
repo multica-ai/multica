@@ -246,6 +246,30 @@ html:has(
   user-select: none !important;
 }
 
+html[data-table-resizing="true"],
+html[data-table-resizing="true"] * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+html[data-chat-resizing="left"],
+html[data-chat-resizing="left"] * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+html[data-chat-resizing="top"],
+html[data-chat-resizing="top"] * {
+  cursor: row-resize !important;
+  user-select: none !important;
+}
+
+html[data-chat-resizing="corner"],
+html[data-chat-resizing="corner"] * {
+  cursor: nw-resize !important;
+  user-select: none !important;
+}
+
 [data-sidebar-resizing="true"] [data-slot="sidebar-gap"],
 [data-sidebar-resizing="true"] [data-slot="sidebar-container"] {
   transition: none !important;
