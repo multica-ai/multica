@@ -250,11 +250,15 @@ describe("ApiClient workspace working agents", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await expect(client.getWorkspaceWorkingAgents("issue")).resolves.toEqual(
-      payload,
-    );
+    await expect(
+      client.getWorkspaceWorkingAgents("issue", "assigned"),
+    ).resolves.toEqual(payload);
+    await expect(
+      client.getWorkspaceWorkingAgents("issue"),
+    ).resolves.toEqual(payload);
     await expect(client.getWorkspaceWorkingAgents()).resolves.toEqual(payload);
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.example.test/api/working-agents?type=issue&scope=mine&relation=assigned",
       "https://api.example.test/api/working-agents?type=issue",
       "https://api.example.test/api/working-agents",
     ]);

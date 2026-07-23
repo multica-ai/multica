@@ -8,6 +8,7 @@ import { renderWithI18n } from "../../test/i18n";
 const mockState = vi.hoisted(() => ({
   agents: [] as WorkspaceWorkingAgent[],
   requestedType: undefined as string | undefined,
+  requestedMineRelation: undefined as string | undefined,
   avatarAgentIds: undefined as readonly string[] | undefined,
   buttonVariant: undefined as string | undefined,
 }));
@@ -17,10 +18,22 @@ vi.mock("@multica/core/hooks", () => ({
 }));
 
 vi.mock("@multica/core/agents", () => ({
-  workspaceWorkingAgentsOptions: (wsId: string, type?: string) => {
+  workspaceWorkingAgentsOptions: (
+    wsId: string,
+    type?: string,
+    mineRelation?: string,
+  ) => {
     mockState.requestedType = type;
+    mockState.requestedMineRelation = mineRelation;
     return {
-      queryKey: ["workspaces", wsId, "working-agents", "list", type ?? "all"],
+      queryKey: [
+        "workspaces",
+        wsId,
+        "working-agents",
+        "list",
+        type ?? "all",
+        mineRelation ? `mine:${mineRelation}` : "workspace",
+      ],
     };
   },
 }));
@@ -79,6 +92,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockState.agents = [];
   mockState.requestedType = undefined;
+  mockState.requestedMineRelation = undefined;
   mockState.avatarAgentIds = undefined;
   mockState.buttonVariant = undefined;
 });
@@ -104,7 +118,21 @@ describe("WorkspaceAgentWorkingChip", () => {
       "agent-3",
     ]);
     expect(mockState.requestedType).toBe("issue");
+    expect(mockState.requestedMineRelation).toBeUndefined();
     expect(mockState.buttonVariant).toBe("brandSubtle");
+  });
+
+  it("requests the selected My Issues relation when the header is scoped", () => {
+    renderWithI18n(
+      <WorkspaceAgentWorkingChip
+        value={false}
+        onToggle={() => {}}
+        mineRelation="involved"
+      />,
+    );
+
+    expect(mockState.requestedType).toBe("issue");
+    expect(mockState.requestedMineRelation).toBe("involved");
   });
 
   it("shows a known zero instead of an indeterminate Table value", () => {

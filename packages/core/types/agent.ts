@@ -210,6 +210,12 @@ export interface WorkspaceWorkingAgent {
 
 export type WorkspaceWorkingAgentType = "issue" | "autopilot" | "chat";
 
+export type WorkspaceWorkingAgentMineRelation =
+  | "assigned"
+  | "created"
+  | "involved"
+  | "any";
+
 /**
  * A departed-member-safe user ref resolved from the global user table. `name` /
  * `email` / `avatar_url` are absent until the server hydrates them (present on

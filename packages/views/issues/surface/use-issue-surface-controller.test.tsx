@@ -706,8 +706,41 @@ describe("useIssueSurfaceController", () => {
       ]),
     );
     expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
-    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue");
+    expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined);
     expect(listIssues).not.toHaveBeenCalled();
+  });
+
+  it("uses the active My Issues relation for the Table working-agent filter", async () => {
+    const store = getIssueSurfaceViewStore("my:user-1:assigned");
+    store.getState().setViewMode("table");
+    store.getState().toggleAgentRunningFilter();
+    const getWorkspaceWorkingAgents = vi.fn(() =>
+      Promise.resolve([] satisfies WorkspaceWorkingAgent[]),
+    );
+    setApiInstance({
+      listIssues,
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+      getWorkspaceWorkingAgents,
+      getChildIssueProgress: vi.fn(() => never()),
+    } as unknown as ApiClient);
+
+    renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "my", relation: "assigned", userId: "user-1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "my:user-1:assigned") },
+    );
+
+    await waitFor(() =>
+      expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith(
+        "issue",
+        "assigned",
+      ),
+    );
   });
 
   it("keeps the table working-chip scope unknown without materializing a second issue window", async () => {

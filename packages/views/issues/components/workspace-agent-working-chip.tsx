@@ -10,13 +10,17 @@ import {
 } from "@multica/ui/components/ui/hover-card";
 import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
-import type { WorkspaceWorkingAgent } from "@multica/core/types";
+import type {
+  WorkspaceWorkingAgent,
+  WorkspaceWorkingAgentMineRelation,
+} from "@multica/core/types";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
 import { useT } from "../../i18n";
 
 interface WorkspaceAgentWorkingChipProps {
   value: boolean;
   onToggle: () => void;
+  mineRelation?: WorkspaceWorkingAgentMineRelation;
 }
 
 /**
@@ -83,19 +87,21 @@ function WorkingAgentsHoverContent({
  * Workspace-wide agents-working filter chip.
  *
  * Its data comes from the independent GET /api/working-agents projection, so
- * Table pagination, the current issue scope, and locally loaded rows can
- * never turn a known workspace count into an indeterminate "—". Clicking the
- * control only toggles view state; the Table controller translates these
+ * Table pagination and locally loaded rows can never turn a known count into
+ * an indeterminate "—". Issues uses the workspace issue projection; My Issues
+ * passes its authenticated relation so the server scopes the count. Clicking
+ * the control only toggles view state; the Table controller translates these
  * same returned ids into assignee filters.
  */
 export function WorkspaceAgentWorkingChip({
   value,
   onToggle,
+  mineRelation,
 }: WorkspaceAgentWorkingChipProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const { data: agents = [] } = useQuery(
-    workspaceWorkingAgentsOptions(wsId, "issue"),
+    workspaceWorkingAgentsOptions(wsId, "issue", mineRelation),
   );
   const agentIds = agents.map((agent) => agent.id);
   const agentCount = agents.length;

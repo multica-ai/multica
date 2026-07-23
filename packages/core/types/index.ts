@@ -15,6 +15,7 @@ export type {
   AgentRunCount,
   WorkspaceWorkingAgent,
   WorkspaceWorkingAgentType,
+  WorkspaceWorkingAgentMineRelation,
   TaskFailureReason,
   AgentRuntime,
   RuntimeDevice,

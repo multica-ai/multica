@@ -33,6 +33,7 @@ import type {
   AgentActivityBucket,
   AgentRunCount,
   WorkspaceWorkingAgent,
+  WorkspaceWorkingAgentMineRelation,
   WorkspaceWorkingAgentType,
   AgentRuntime,
   RuntimeProfile,
@@ -1679,12 +1680,18 @@ export class ApiClient {
 
   // Independent workspace-level projection. Unlike the task snapshot, this
   // already deduplicates running agents and returns only the display fields
-  // consumers need. Callers may narrow the projection by task source.
+  // consumers need. Callers may narrow the projection by task source and, for
+  // issue work, the authenticated member's My Issues relation.
   async getWorkspaceWorkingAgents(
     type?: WorkspaceWorkingAgentType,
+    mineRelation?: WorkspaceWorkingAgentMineRelation,
   ): Promise<WorkspaceWorkingAgent[]> {
     const search = new URLSearchParams();
     if (type) search.set("type", type);
+    if (mineRelation) {
+      search.set("scope", "mine");
+      search.set("relation", mineRelation);
+    }
     const query = search.toString();
     return this.fetch(`/api/working-agents${query ? `?${query}` : ""}`);
   }

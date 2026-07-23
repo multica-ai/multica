@@ -269,8 +269,14 @@ export function useIssueSurfaceController({
     projectFilterState;
 
   const activity = useIssueSurfaceActivity();
+  const workingAgentMineRelation =
+    scope.type === "my"
+      ? scope.relation === "all"
+        ? "any"
+        : scope.relation
+      : undefined;
   const { data: workspaceWorkingAgents = [] } = useQuery(
-    workspaceWorkingAgentsOptions(wsId, "issue"),
+    workspaceWorkingAgentsOptions(wsId, "issue", workingAgentMineRelation),
   );
   const tableAssigneeFilters = useMemo(() => {
     if (!agentRunningFilter) return assigneeFilters;

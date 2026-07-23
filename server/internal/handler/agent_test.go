@@ -153,25 +153,65 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	workingAgentID := createHandlerTestAgent(t, "working-agents-running", []byte(`{}`))
 	queuedAgentID := createHandlerTestAgent(t, "working-agents-queued", []byte(`{}`))
 
-	// Insert the source issue directly: this test is about the working-agent
+	// Insert source issues directly: this test is about the working-agent
 	// projection, so it must not inherit unrelated CreateIssue validation or
-	// side effects.
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (
-			workspace_id, number, title, status, priority,
-			creator_type, creator_id
-		)
-		SELECT $1, COALESCE(MIN(number), 0) - 1, $2, 'todo', 'none',
-		       'member', $3
-		FROM issue
-		WHERE workspace_id = $1
-		RETURNING id
-	`, testWorkspaceID, "working-agent-source-filter", testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("insert source issue: %v", err)
+	// side effects. The three fixtures cover assigned-to-me, assigned to an
+	// owned agent, and outside My Issues.
+	insertedIssueIDs := make([]string, 0, 3)
+	insertIssue := func(
+		title, creatorType, creatorID string,
+		assigneeType, assigneeID any,
+	) string {
+		t.Helper()
+		var issueID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (
+				workspace_id, number, title, status, priority,
+				assignee_type, assignee_id, creator_type, creator_id
+			)
+			SELECT $1, COALESCE(MIN(number), 0) - 1, $2, 'todo', 'none',
+			       $3, $4, $5, $6
+			FROM issue
+			WHERE workspace_id = $1
+			RETURNING id
+		`,
+			testWorkspaceID,
+			title,
+			assigneeType,
+			assigneeID,
+			creatorType,
+			creatorID,
+		).Scan(&issueID); err != nil {
+			t.Fatalf("insert source issue %q: %v", title, err)
+		}
+		insertedIssueIDs = append(insertedIssueIDs, issueID)
+		return issueID
 	}
+	assignedIssueID := insertIssue(
+		"working-agent-assigned-to-me",
+		"member",
+		testUserID,
+		"member",
+		testUserID,
+	)
+	ownedAgentIssueID := insertIssue(
+		"working-agent-owned-agent",
+		"agent",
+		workingAgentID,
+		"agent",
+		workingAgentID,
+	)
+	outsideIssueID := insertIssue(
+		"working-agent-outside-mine",
+		"agent",
+		workingAgentID,
+		nil,
+		nil,
+	)
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		for _, issueID := range insertedIssueIDs {
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
 	})
 	chatSessionID := createHandlerTestChatSession(t, workingAgentID)
 	autopilotID := insertListTestAutopilot(t, workingAgentID, "working-agent-source-filter")
@@ -184,10 +224,10 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		t.Fatalf("insert autopilot run: %v", err)
 	}
 
-	// Four running tasks on one agent: issue, chat, autopilot, and
-	// quick-create (no source FK). The autopilot task also carries issue_id to
-	// prove source precedence keeps it out of type=issue.
-	insertedTaskIDs := make([]string, 0, 5)
+	// Six running tasks on one agent: three issue relations, chat, autopilot,
+	// and quick-create (no source FK). The autopilot task also carries issue_id
+	// to prove source precedence keeps it out of type=issue.
+	insertedTaskIDs := make([]string, 0, 7)
 	for _, fixture := range []struct {
 		agentID        string
 		status         string
@@ -195,9 +235,11 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		chatSessionID  any
 		autopilotRunID any
 	}{
-		{workingAgentID, "running", issueID, nil, nil},
+		{workingAgentID, "running", assignedIssueID, nil, nil},
+		{workingAgentID, "running", ownedAgentIssueID, nil, nil},
+		{workingAgentID, "running", outsideIssueID, nil, nil},
 		{workingAgentID, "running", nil, chatSessionID, nil},
-		{workingAgentID, "running", issueID, nil, autopilotRunID},
+		{workingAgentID, "running", assignedIssueID, nil, autopilotRunID},
 		{workingAgentID, "running", nil, nil, nil},
 		{queuedAgentID, "queued", nil, nil, nil},
 	} {
@@ -232,10 +274,15 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		query     string
 		wantCount int32
 	}{
-		{name: "all sources", wantCount: 4},
-		{name: "issue", query: "?type=issue", wantCount: 1},
+		{name: "all sources", wantCount: 6},
+		{name: "issue", query: "?type=issue", wantCount: 3},
 		{name: "autopilot", query: "?type=autopilot", wantCount: 1},
 		{name: "chat", query: "?type=chat", wantCount: 1},
+		{name: "mine defaults to any", query: "?type=issue&scope=mine", wantCount: 2},
+		{name: "mine any", query: "?type=issue&scope=mine&relation=any", wantCount: 2},
+		{name: "mine assigned", query: "?type=issue&scope=mine&relation=assigned", wantCount: 1},
+		{name: "mine created", query: "?type=issue&scope=mine&relation=created", wantCount: 1},
+		{name: "mine involved", query: "?type=issue&scope=mine&relation=involved", wantCount: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -274,18 +321,29 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	}
 }
 
-func TestListWorkspaceWorkingAgentsRejectsInvalidType(t *testing.T) {
+func TestListWorkspaceWorkingAgentsRejectsInvalidFilters(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 
-	w := httptest.NewRecorder()
-	testHandler.ListWorkspaceWorkingAgents(
-		w,
-		newRequest(http.MethodGet, "/api/working-agents?type=quick_create", nil),
-	)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	for _, path := range []string{
+		"/api/working-agents?type=quick_create",
+		"/api/working-agents?scope=mine",
+		"/api/working-agents?type=chat&scope=mine",
+		"/api/working-agents?type=issue&scope=workspace",
+		"/api/working-agents?type=issue&relation=assigned",
+		"/api/working-agents?type=issue&scope=mine&relation=watching",
+	} {
+		t.Run(path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			testHandler.ListWorkspaceWorkingAgents(
+				w,
+				newRequest(http.MethodGet, path, nil),
+			)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+		})
 	}
 }
 
