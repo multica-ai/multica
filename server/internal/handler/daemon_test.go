@@ -370,6 +370,82 @@ func TestClaimTaskByRuntime_PopulatesWorkspaceContext(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(issue-title-tracing): TestClaimTaskByRuntime_PopulatesIssueTitles verifies every issue-bound local
+// runtime claim carries the current issue and parent titles. The trace-upload
+// sidecar copies these fields into Registry; if either assignment disappears,
+// new Sessions and Traces regress to raw UUIDs.
+func TestClaimTaskByRuntime_PopulatesIssueTitles(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Issue title claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Current issue title")
+
+	var parentIssueID string
+	const parentTitle = "Parent issue title"
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type,
+			number, position
+		)
+		VALUES (
+			$1, $2, 'in_progress', 'none', $3, 'member',
+			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1),
+			0
+		)
+		RETURNING id
+	`, testWorkspaceID, parentTitle, testUserID).Scan(&parentIssueID); err != nil {
+		t.Fatalf("setup: create parent issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parentIssueID) })
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue SET parent_issue_id = $1 WHERE id = $2
+	`, parentIssueID, issueID); err != nil {
+		t.Fatalf("setup: attach parent issue: %v", err)
+	}
+
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest(
+		"POST",
+		"/api/daemon/runtimes/"+runtimeID+"/tasks/claim",
+		nil,
+		testWorkspaceID,
+		"issue-title-claim",
+	)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID               string `json:"id"`
+			IssueTitle       string `json:"issue_title"`
+			ParentIssueTitle string `json:"parent_issue_title"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatalf("expected dispatched task %s to be claimed, got nil: %s", taskID, w.Body.String())
+	}
+	if resp.Task.ID != taskID {
+		t.Fatalf("claimed task id = %s, want %s", resp.Task.ID, taskID)
+	}
+	if resp.Task.IssueTitle != "Current issue title issue" {
+		t.Errorf("issue_title = %q, want %q", resp.Task.IssueTitle, "Current issue title issue")
+	}
+	if resp.Task.ParentIssueTitle != parentTitle {
+		t.Errorf("parent_issue_title = %q, want %q", resp.Task.ParentIssueTitle, parentTitle)
+	}
+}
+
 // TestClaimTaskByRuntime_WorkspaceContextEmptyWhenUnset verifies the field
 // is omitted (empty string after JSON decode) when the workspace owner has
 // not set a context. Important because the daemon's brief skips the heading
