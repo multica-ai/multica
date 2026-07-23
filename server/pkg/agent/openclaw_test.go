@@ -893,6 +893,70 @@ func TestOpenclawProcessOutputMultilineJSONWithLeadingLogs(t *testing.T) {
 	close(ch)
 }
 
+func TestOpenclawProcessOutputWrappedRunResult(t *testing.T) {
+	t.Parallel()
+
+	b := &openclawBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 256)
+
+	wrapped := openclawRunResult{
+		Result: &openclawResult{
+			Payloads: []openclawPayload{{Text: "Clean visible reply"}},
+			Meta: openclawMeta{
+				DurationMs: 15705,
+				AgentMeta: map[string]any{
+					"sessionId": "multica-1778407314447248422",
+					"model":     "gpt-5.5",
+					"usage": map[string]any{
+						"input":     float64(17264),
+						"output":    float64(457),
+						"cacheRead": float64(37376),
+					},
+					"systemPromptReport": map[string]any{
+						"finalPromptText": "diagnostic prompt text must not leak",
+					},
+				},
+			},
+		},
+	}
+	data, _ := json.MarshalIndent(map[string]any{
+		"runId":   "ab49855c-be6b-4f32-89d9-374ccea812f1",
+		"status":  "ok",
+		"summary": "completed",
+		"result":  wrapped.Result,
+	}, "", "  ")
+
+	res := b.processOutput(strings.NewReader(string(data)), ch)
+
+	if res.status != "completed" {
+		t.Errorf("status: got %q, want %q", res.status, "completed")
+	}
+	if res.output != "Clean visible reply" {
+		t.Errorf("output: got %q, want %q", res.output, "Clean visible reply")
+	}
+	if strings.Contains(res.output, "systemPromptReport") || strings.Contains(res.output, "finalPromptText") {
+		t.Fatalf("diagnostic wrapper leaked into output: %q", res.output)
+	}
+	if res.sessionID != "multica-1778407314447248422" {
+		t.Errorf("sessionID: got %q", res.sessionID)
+	}
+	if res.model != "gpt-5.5" {
+		t.Errorf("model: got %q", res.model)
+	}
+	if res.usage.InputTokens != 17264 || res.usage.OutputTokens != 457 || res.usage.CacheReadTokens != 37376 {
+		t.Errorf("usage: got %+v", res.usage)
+	}
+
+	close(ch)
+	var msgs []Message
+	for m := range ch {
+		msgs = append(msgs, m)
+	}
+	if len(msgs) != 1 || msgs[0].Content != "Clean visible reply" {
+		t.Errorf("expected one clean text message, got %+v", msgs)
+	}
+}
+
 // ── openclawInt64 tests ──
 
 func TestOpenclawInt64Float(t *testing.T) {
