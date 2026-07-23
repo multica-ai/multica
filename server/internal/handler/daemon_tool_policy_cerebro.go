@@ -7,8 +7,8 @@ package handler
 // tool-policy chain (guardToolCallViaPolicy). Local CLIs run on a Mac and never
 // pass through that executor, so an Ask/Deny row in the permission table never
 // reaches them. This file is the daemon-side seam that closes that gap: a local
-// runtime's PreToolUse hook (Claude) or native approval channel (Codex) calls
-// ResolveDaemonToolPolicy, which resolves the SAME toolpolicy.Store chain and,
+// runtime's provider-native before-call hook calls ResolveDaemonToolPolicy,
+// which resolves the SAME toolpolicy.Store chain and,
 // on Ask, raises an approval in the SAME inbox the gateway gate uses — one
 // model, not a parallel one.
 //

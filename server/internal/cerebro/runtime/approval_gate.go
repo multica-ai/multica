@@ -278,6 +278,10 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 
 	entry := e.decideAccess(ctx, agentID, workspaceID, toolName, reg, meta, gatewayPolicyRequestContext(toolName, args))
 	decision = "policy_decision_service"
+	if entry.PolicyDecision == accessdecision.PolicyAsk {
+		decision = "policy_decision_service+ask"
+		return e.guardCanonicalAsk(ctx, agentID, workspaceID, toolName, args, meta, entry.Reason)
+	}
 	if entry.ShadowDecision != accessdecision.DecisionAllow {
 		return false, entry.Reason
 	}
@@ -304,6 +308,47 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool", toolName, "connection", connName)
 		decision = "deny_ask_inbox_inactive"
 		return false, fmt.Sprintf("tool %q requires human approval, which is not available for this run", toolName)
+	}
+	return true, ""
+}
+
+func (e *FirtalGatewayExecutor) guardCanonicalAsk(
+	ctx context.Context,
+	agentID, workspaceID pgtype.UUID,
+	toolName string,
+	args map[string]any,
+	meta GatewayRequestMeta,
+	reason string,
+) (bool, string) {
+	if e.gate == nil || meta.TriggerUserID == "" {
+		return false, "tool requires human approval, which is not available for this run"
+	}
+	res, err := e.gate.GuardDecision(ctx, permgate.Request{
+		Permission: permissions.Request{
+			WorkspaceID: workspaceID,
+			Actor:       permissions.Actor{Type: "agent", ID: agentID},
+			Agent:       agentID,
+			Capability:  toolName,
+		},
+		RequesterType: approvals.RequesterAgent,
+		RequesterID:   agentID,
+		Surface:       approvals.SurfaceSystem,
+		Context: map[string]any{
+			"tool_name": toolName,
+			"task_id":   meta.TaskID,
+			"issue_id":  meta.IssueID,
+			"args":      args,
+			"reason":    reason,
+		},
+	}, permissions.Decision{Kind: permissions.DecisionNeedsApproval, Reason: reason})
+	if err != nil {
+		return false, fmt.Sprintf("permission gate error: %v", err)
+	}
+	if res.Outcome.Stops() {
+		if res.Reason != "" {
+			return false, res.Reason
+		}
+		return false, reason
 	}
 	return true, ""
 }

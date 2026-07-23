@@ -307,9 +307,6 @@ func exposureEffective(enabled bool, policy toolpolicy.Effective, protocol Proto
 	if credential.Effective == CredentialRequired {
 		return ExposureEffective{Effective: false, Reason: credential.Reason}
 	}
-	if policy.Setting == toolpolicy.SettingAsk && !protocol.SupportsAsk {
-		return ExposureEffective{Effective: false, Reason: "policy requires Ask, but runtime does not support approval waiting"}
-	}
 	if policy.Setting == toolpolicy.SettingAsk {
 		return ExposureEffective{Effective: true, Reason: policy.Reason}
 	}
