@@ -132,12 +132,13 @@ export function formatTokens(n: number): string {
 //   DeepSeek:  https://api-docs.deepseek.com/quick_start/pricing
 //   Moonshot:  https://www.kimi.com/resources/kimi-k2-6-pricing
 //   Zhipu:     https://docs.z.ai/guides/overview/pricing
+//   xAI:       https://docs.x.ai/developers/pricing
 //
 // Anthropic's cacheWrite reflects the 5-minute cache TTL (1.25× input); the
 // daemon reports cache_creation_input_tokens without TTL metadata, so 5m is
 // the safest / cheapest assumption (matches the API default). DeepSeek,
-// Moonshot and Zhipu do not bill cache writes separately (cached input is
-// just discounted on subsequent reads), so cacheWrite mirrors input there.
+// Moonshot, Zhipu and xAI do not bill cache writes separately (cached input
+// is just discounted on subsequent reads), so cacheWrite mirrors input there.
 // OpenAI historically did the same, but its GPT-5.6+ generation bills cache
 // writes at 1.25× input (cache reads still get the 90% cached-input
 // discount), so those rows carry a distinct cacheWrite. Codex usage doesn't
@@ -152,7 +153,8 @@ export function formatTokens(n: number): string {
 // `server/pkg/agent/models.go` so the catalog and pricing stay in sync.
 //
 // Provider-qualified keys: a model id that is NOT vendor-prefixed
-// (`claude-*`, `gpt-*`, `o3*`/`o4*`, `glm-*`, `deepseek-*`, `kimi-*`) and is
+// (`claude-*`, `gpt-*`, `o3*`/`o4*`, `glm-*`, `deepseek-*`, `kimi-*`,
+// `grok-*`) and is
 // not the provider name itself can collide across providers — more than one
 // provider may report the same generic id like `auto`. Such generic ids MUST be keyed as
 // `${provider}/${model}` (e.g. `cursor/auto`). `resolvePricing` tries the
@@ -252,6 +254,26 @@ const MODEL_PRICING: Record<
   "glm-4.5-air":        { input: 0.2,  output: 1.1,  cacheRead: 0.03,   cacheWrite: 0.2 },
   "glm-4.5-airx":       { input: 1.1,  output: 4.5,  cacheRead: 0.22,   cacheWrite: 1.1 },
   "glm-4.5-flash":      { input: 0,    output: 0,    cacheRead: 0,      cacheWrite: 0 },
+
+  // -- xAI Grok (docs.x.ai/developers/pricing). Rates below are the
+  //    short-context tier. xAI bills a request at 2x ("long context") once
+  //    its prompt reaches 200K tokens, but aggregated usage rows carry no
+  //    per-request prompt sizes, so we price at the standard tier — the same
+  //    trade-off the Anthropic `[1m]` context tag takes (see `resolvePricing`).
+  //    `cacheRead` is xAI's published "Cached" input rate; there is no
+  //    separate cache-write rate on the page (writes bill as normal input),
+  //    so cacheWrite mirrors input per the header note. Grok ids are
+  //    vendor-prefixed, so these keys stay unqualified even though the
+  //    daemon tags the rows with provider `xai`.
+  //    `grok-composer-*` ships in the Grok Build catalog
+  //    (server/pkg/agent/models.go) but is absent from the price sheet; it
+  //    deliberately stays unmapped rather than inheriting a guessed rate. --
+  "grok-4.5":                     { input: 2,    output: 6,    cacheRead: 0.30, cacheWrite: 2 },
+  "grok-4.3":                     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
+  "grok-build-0.1":               { input: 1,    output: 2,    cacheRead: 0.20, cacheWrite: 1 },
+  "grok-4.20-multi-agent-0309":   { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
+  "grok-4.20-0309-reasoning":     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
+  "grok-4.20-0309-non-reasoning": { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
 
   // -- Cursor Composer / Auto (cursor.com/docs/models-and-pricing,
   //    cursor.com/docs/models/cursor-composer-2,
