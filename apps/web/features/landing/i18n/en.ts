@@ -308,7 +308,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Grouping and filters now behave the same across List, Board, and Swimlane views.",
           "The chat box now grows with the window so you can see more of a long draft.",
           "Getting started now takes fewer steps.",
-          "Grok usage now uses xAI's published rates and no longer double-charges cached input, and your saved custom prices stay editable.",
+          "Grok cost now comes from what xAI actually charged for each turn, including long-context requests, and your saved custom prices stay editable.",
           "Animations across the app are now smoother.",
         ],
         fixes: [
