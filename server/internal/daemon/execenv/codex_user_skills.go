@@ -79,6 +79,32 @@ func seedUserCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv,
 			logger.Warn("execenv: codex user-skill copy failed", "name", name, "error", err)
 			continue
 		}
+		if err := normalizeCopiedCodexUserSkill(dst, name); err != nil {
+			_ = os.RemoveAll(dst)
+			logger.Warn("execenv: codex user-skill frontmatter normalization failed", "name", name, "error", err)
+			continue
+		}
+	}
+	return nil
+}
+
+// normalizeCopiedCodexUserSkill is the cold-start guard for user-installed
+// Codex skills. Unlike workspace skills, user skills arrive from ~/.codex/skills
+// and used to be copied byte-for-byte into the per-task CODEX_HOME. A missing
+// or malformed frontmatter block makes Codex reject that SKILL.md during startup,
+// which can stall unrelated task prompts before they produce a fallback answer.
+func normalizeCopiedCodexUserSkill(skillDir, name string) error {
+	path := filepath.Join(skillDir, "SKILL.md")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("read SKILL.md: %w", err)
+	}
+	normalized := ensureSkillFrontmatter(string(data), sanitizeSkillName(name), "")
+	if normalized == string(data) {
+		return nil
+	}
+	if err := os.WriteFile(path, []byte(normalized), 0o644); err != nil {
+		return fmt.Errorf("write SKILL.md: %w", err)
 	}
 	return nil
 }

@@ -3723,8 +3723,15 @@ func TestPrepareCodexSeedsUserSkills(t *testing.T) {
 
 	if data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "summarize", "SKILL.md")); err != nil {
 		t.Fatalf("user skill SKILL.md not seeded: %v", err)
-	} else if string(data) != "summarize" {
-		t.Errorf("summarize SKILL.md = %q, want %q", data, "summarize")
+	} else {
+		got := string(data)
+		fm := parseFrontmatter(t, got)
+		if name, _ := fm["name"].(string); name != "summarize" {
+			t.Errorf("frontmatter name = %#v, want %q", fm["name"], "summarize")
+		}
+		if !strings.Contains(got, "summarize") {
+			t.Errorf("summarize body was dropped:\n%s", got)
+		}
 	}
 	if data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "summarize", "examples", "ex.md")); err != nil {
 		t.Fatalf("user skill support file not seeded: %v", err)
@@ -3733,11 +3740,65 @@ func TestPrepareCodexSeedsUserSkills(t *testing.T) {
 	}
 	if data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", "translate", "SKILL.md")); err != nil {
 		t.Fatalf("second user skill not seeded: %v", err)
-	} else if string(data) != "translate" {
-		t.Errorf("translate SKILL.md = %q, want %q", data, "translate")
+	} else {
+		fm := parseFrontmatter(t, string(data))
+		if name, _ := fm["name"].(string); name != "translate" {
+			t.Errorf("frontmatter name = %#v, want %q", fm["name"], "translate")
+		}
 	}
 	if _, err := os.Stat(filepath.Join(env.CodexHome, "skills", ".DS_Store")); !os.IsNotExist(err) {
 		t.Errorf("ignored dotfile leaked into codex-home/skills: err=%v", err)
+	}
+}
+
+// TestPrepareCodexNormalizesUserSkillFrontmatter covers the WS-1494 failure
+// mode: user-installed Codex skills are copied into the per-task CODEX_HOME.
+// If their SKILL.md lacks YAML frontmatter, Codex logs "missing YAML
+// frontmatter delimited by ---" while loading skills and the task can stall
+// before the daily-report prompt produces any fallback text.
+func TestPrepareCodexNormalizesUserSkillFrontmatter(t *testing.T) {
+	// Cannot use t.Parallel() with t.Setenv.
+
+	sharedHome := t.TempDir()
+	t.Setenv("CODEX_HOME", sharedHome)
+
+	for _, name := range []string{"koc-publish-registration", "koc-sample-registration"} {
+		dir := filepath.Join(sharedHome, "skills", name)
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			t.Fatalf("seed user skill dir: %v", err)
+		}
+		body := "# " + name + "\n\nPlain-text guidance without frontmatter.\n"
+		if err := os.WriteFile(filepath.Join(dir, "SKILL.md"), []byte(body), 0o644); err != nil {
+			t.Fatalf("seed user SKILL.md: %v", err)
+		}
+	}
+
+	env, err := Prepare(PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-koc-user-skills",
+		TaskID:         "0f1e2d3c-4b5a-6978-90ab-cdef12345678",
+		AgentName:      "Codex Agent",
+		Provider:       "codex",
+		Task:           TaskContextForEnv{IssueID: "koc-frontmatter-test"},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare failed: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	for _, name := range []string{"koc-publish-registration", "koc-sample-registration"} {
+		data, err := os.ReadFile(filepath.Join(env.CodexHome, "skills", name, "SKILL.md"))
+		if err != nil {
+			t.Fatalf("seeded %s missing: %v", name, err)
+		}
+		got := string(data)
+		fm := parseFrontmatter(t, got)
+		if fmName, _ := fm["name"].(string); fmName != name {
+			t.Errorf("%s frontmatter name = %#v, want %q", name, fm["name"], name)
+		}
+		if !strings.Contains(got, "Plain-text guidance without frontmatter.") {
+			t.Errorf("%s body was dropped during normalization:\n%s", name, got)
+		}
 	}
 }
 
@@ -3874,8 +3935,13 @@ func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seeded SKILL.md missing: %v", err)
 	}
-	if string(data) != "lark" {
-		t.Errorf("seeded SKILL.md = %q, want %q", data, "lark")
+	got := string(data)
+	fm := parseFrontmatter(t, got)
+	if name, _ := fm["name"].(string); name != "lark-mail" {
+		t.Errorf("frontmatter name = %#v, want %q", fm["name"], "lark-mail")
+	}
+	if !strings.Contains(got, "lark") {
+		t.Errorf("seeded SKILL.md body was dropped:\n%s", got)
 	}
 }
 
@@ -3923,8 +3989,13 @@ func TestReuseSeedsUserSkillUpdates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("user skill not refreshed on reuse: %v", err)
 	}
-	if string(data) != "v2" {
-		t.Errorf("after Reuse, user skill content = %q, want %q", data, "v2")
+	got := string(data)
+	fm := parseFrontmatter(t, got)
+	if name, _ := fm["name"].(string); name != "summarize" {
+		t.Errorf("frontmatter name = %#v, want %q", fm["name"], "summarize")
+	}
+	if !strings.Contains(got, "v2") {
+		t.Errorf("after Reuse, user skill body was not refreshed:\n%s", got)
 	}
 }
 
