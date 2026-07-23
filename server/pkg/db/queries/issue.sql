@@ -171,7 +171,7 @@ LIMIT 1;
 -- but a future loader bypass or a new caller skipping the loader would be
 -- silently catastrophic without this guard. See incident #1661.
 --
--- issue_vcs_pull_request (migration 206) has no FK to issue, so the link rows
+-- issue_vcs_pull_request (migration 213) has no FK to issue, so the link rows
 -- are not cascaded away. Sweep them here so they go atomically with the issue.
 -- The mirrored PR rows themselves belong to the connection, not the issue, so
 -- they persist (matching the GitHub link behaviour).

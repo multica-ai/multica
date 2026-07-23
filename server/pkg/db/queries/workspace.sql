@@ -159,7 +159,7 @@ cleared_issue_properties AS (
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 ),
--- VCS tables (migration 206) carry no FK to workspace, so they are not cascaded
+-- VCS tables (migration 213) carry no FK to workspace, so they are not cascaded
 -- away by the DELETE below. Sweep the workspace's connections, mirrored PRs,
 -- their issue links, and CI statuses here. issue_vcs_pull_request has no
 -- workspace_id, so reach it through the workspace's PRs; vcs_commit_status has
@@ -183,5 +183,8 @@ cleared_vcs_prs AS (
 ),
 cleared_vcs_connections AS (
     DELETE FROM vcs_connection WHERE workspace_id = $1
+),
+cleared_client_usage_workspace AS (
+    UPDATE client_usage_daily SET workspace_id = NULL WHERE workspace_id = $1
 )
 DELETE FROM workspace WHERE workspace.id = $1;

@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -1200,39 +1201,98 @@ func (d *Daemon) customProfileLaunchForRuntime(runtimeID string) (profileLaunchS
 	return spec, true
 }
 
-func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
-	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
-	var runtimes []map[string]string
-	var failedProfiles []map[string]string
+// runtimeVersionProbeConcurrency bounds how many `<cli> --version` probes run
+// at once during registration. Version detection is process-spawn bound rather
+// than CPU bound, and each probe already carries its own timeout, so a modest
+// fan-out is safe even when a host has many agent CLIs installed.
+const runtimeVersionProbeConcurrency = 8
+
+// detectBuiltinRuntimes version-detects every configured built-in agent CLI and
+// returns a registration entry for each one that resolves and clears the
+// minimum-version gate. Probes run concurrently, bounded by
+// runtimeVersionProbeConcurrency.
+//
+// The previous implementation probed serially, so total latency was the SUM of
+// every CLI's `--version` call. On an onboarding host with several coding tools
+// installed that stacked into many seconds of dead time before the daemon could
+// register — long enough that the desktop runtime step timed out into its empty
+// "no runtime found" state while the probes were still running (MUL-5119).
+// Fanning the probes out makes total latency track the SLOWEST single probe
+// instead of their sum, so a freshly-created workspace lights up its runtimes
+// well inside the UI's scanning window.
+//
+// Each probe still self-heals a vanished pinned path (MUL-4486) and re-detects
+// the live version — no result is cached across registrations, so an in-place
+// CLI upgrade is still reported with its current version. A probe that fails to
+// detect a version or is below the minimum supported version is logged and
+// skipped, exactly as the serial loop did.
+func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string {
+	type detected struct {
+		name    string
+		version string
+	}
+	var (
+		mu      sync.Mutex
+		results []detected
+		g       errgroup.Group
+	)
+	g.SetLimit(runtimeVersionProbeConcurrency)
 	for name, entry := range d.cfg.Agents {
-		// Self-heal a pinned executable path an in-place upgrade deleted
-		// (MUL-4486) so version detection — and thus staying registered/online
-		// — recovers without a daemon restart. resolveAgentEntry already
-		// version-gates the healed binary; the detect + min-version check below
-		// still runs to produce the version string this registration reports.
-		entry, _ = d.resolveAgentEntry(ctx, name, entry)
-		version, err := detectAgentVersion(ctx, entry.Path)
-		if err != nil {
-			d.logger.Warn("skip registering runtime", "name", name, "error", err)
-			continue
-		}
-		if err := checkAgentMinVersion(name, version); err != nil {
-			d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
-			continue
-		}
-		d.setAgentVersion(name, version)
-		d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
-		displayName := providerDisplayName(name)
+		name, entry := name, entry
+		g.Go(func() error {
+			// Self-heal a pinned executable path an in-place upgrade deleted
+			// (MUL-4486) so version detection — and thus staying
+			// registered/online — recovers without a daemon restart.
+			// resolveAgentEntry already version-gates the healed binary; the
+			// detect + min-version check below still runs to produce the
+			// version string this registration reports.
+			entry, _ = d.resolveAgentEntry(ctx, name, entry)
+			version, err := detectAgentVersion(ctx, entry.Path)
+			if err != nil {
+				d.logger.Warn("skip registering runtime", "name", name, "error", err)
+				return nil
+			}
+			if err := checkAgentMinVersion(name, version); err != nil {
+				d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
+				return nil
+			}
+			d.setAgentVersion(name, version)
+			d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
+			mu.Lock()
+			results = append(results, detected{name: name, version: version})
+			mu.Unlock()
+			return nil
+		})
+	}
+	// No probe returns a non-nil error — failures are logged and skipped above —
+	// so Wait only blocks for the in-flight probes to finish.
+	_ = g.Wait()
+
+	// Source iteration (a map) and parallel completion order are both
+	// nondeterministic; sort by provider so the registration payload is stable
+	// across runs and order-sensitive tests stay deterministic.
+	sort.Slice(results, func(i, j int) bool { return results[i].name < results[j].name })
+
+	runtimes := make([]map[string]string, 0, len(results))
+	for _, r := range results {
+		displayName := providerDisplayName(r.name)
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
 		runtimes = append(runtimes, map[string]string{
 			"name":    displayName,
-			"type":    name,
-			"version": version,
+			"type":    r.name,
+			"version": r.version,
 			"status":  "online",
 		})
 	}
+	return runtimes
+}
+
+func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
+	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
+	runtimes := d.detectBuiltinRuntimes(ctx)
+	var failedProfiles []map[string]string
 
 	// Append any workspace custom runtime profiles whose command resolves on
 	// this host (MUL-3284). This is best-effort: a fetch error (e.g. an older
@@ -2412,12 +2472,18 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		SupportedLevels []thinkingLevelWire `json:"supported_levels"`
 		DefaultLevel    string              `json:"default_level,omitempty"`
 	}
+	type modelServiceTierWire struct {
+		ID          string `json:"id"`
+		Name        string `json:"name"`
+		Description string `json:"description,omitempty"`
+	}
 	type modelWire struct {
-		ID       string             `json:"id"`
-		Label    string             `json:"label"`
-		Provider string             `json:"provider,omitempty"`
-		Default  bool               `json:"default,omitempty"`
-		Thinking *modelThinkingWire `json:"thinking,omitempty"`
+		ID           string                 `json:"id"`
+		Label        string                 `json:"label"`
+		Provider     string                 `json:"provider,omitempty"`
+		Default      bool                   `json:"default,omitempty"`
+		Thinking     *modelThinkingWire     `json:"thinking,omitempty"`
+		ServiceTiers []modelServiceTierWire `json:"service_tiers,omitempty"`
 	}
 	wire := make([]modelWire, 0, len(models))
 	for _, m := range models {
@@ -2440,6 +2506,13 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 				SupportedLevels: levels,
 				DefaultLevel:    m.Thinking.DefaultLevel,
 			}
+		}
+		for _, tier := range m.ServiceTiers {
+			entry.ServiceTiers = append(entry.ServiceTiers, modelServiceTierWire{
+				ID:          tier.ID,
+				Name:        tier.Name,
+				Description: tier.Description,
+			})
 		}
 		wire = append(wire, entry)
 	}
@@ -4076,6 +4149,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		AgentName:                        agentName,
 		AgentInstructions:                instructions,
 		AgentSkills:                      convertSkillsForEnv(skills),
+		DisabledRuntimeSkills:            convertDisabledRuntimeSkillsForEnv(task.Agent, task.RuntimeID, provider),
 		Repos:                            convertReposForEnv(task.Repos),
 		ProjectID:                        task.ProjectID,
 		ProjectTitle:                     task.ProjectTitle,
@@ -4533,8 +4607,33 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		model = entry.Model
 	}
 	thinkingLevel := ""
+	serviceTier := ""
 	if task.Agent != nil {
 		thinkingLevel = task.Agent.ThinkingLevel
+		serviceTier = task.Agent.ServiceTier
+	}
+	// service_tier is catalog-owned and currently Codex-only. As with
+	// thinking_level, stale or incompatible persisted values degrade to the
+	// runtime default instead of failing the task. Catalog lookup errors pass
+	// through so a transient discovery failure does not silently disable a
+	// previously valid user choice.
+	if serviceTier != "" {
+		ok, err := agent.ValidateServiceTier(ctx, provider, entry.Path, model, serviceTier)
+		if err != nil {
+			taskLog.Warn("service_tier: catalog lookup failed; passing through",
+				"provider", provider,
+				"model", model,
+				"service_tier", serviceTier,
+				"error", err,
+			)
+		} else if !ok {
+			taskLog.Warn("service_tier: not valid for this (provider, model); skipping injection",
+				"provider", provider,
+				"model", model,
+				"service_tier", serviceTier,
+			)
+			serviceTier = ""
+		}
 	}
 	// Per-model guard: the server validates the literal token against the
 	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
@@ -4583,12 +4682,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// survived to here, the backend must disclose to the user when the live
 		// resume still fails — even across the fresh-session retry below, which
 		// clears ResumeSessionID but not this (MUL-4424).
-		ResumeExpected: task.PriorSessionID != "",
-		ExtraArgs:      extraArgs,
-		CustomArgs:     customArgs,
-		McpConfig:      mcpConfig,
-		ThinkingLevel:  thinkingLevel,
-		OpenclawMode:   openclawMode,
+		ResumeExpected:     task.PriorSessionID != "",
+		ExtraArgs:          extraArgs,
+		CustomArgs:         customArgs,
+		McpConfig:          mcpConfig,
+		ThinkingLevel:      thinkingLevel,
+		ServiceTier:        serviceTier,
+		OpenclawMode:       openclawMode,
+		ClaudeSettingsPath: env.ClaudeSettingsPath,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:
@@ -5557,6 +5658,25 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 				Content: f.Content,
 			})
 		}
+	}
+	return result
+}
+
+func convertDisabledRuntimeSkillsForEnv(agentData *AgentData, runtimeID, provider string) []execenv.RuntimeSkillRefForEnv {
+	if agentData == nil || len(agentData.DisabledRuntimeSkills) == 0 {
+		return nil
+	}
+	result := make([]execenv.RuntimeSkillRefForEnv, 0, len(agentData.DisabledRuntimeSkills))
+	for _, skill := range agentData.DisabledRuntimeSkills {
+		if skill.RuntimeID != runtimeID || skill.Provider != provider {
+			continue
+		}
+		result = append(result, execenv.RuntimeSkillRefForEnv{
+			Root:   skill.Root,
+			Key:    skill.Key,
+			Name:   skill.Name,
+			Plugin: skill.Plugin,
+		})
 	}
 	return result
 }

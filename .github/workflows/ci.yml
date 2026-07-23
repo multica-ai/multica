@@ -169,8 +169,11 @@ jobs:
       - name: Run migrations
         run: cd server && go run ./cmd/migrate up
 
+      - name: Verify Go test wrapper
+        run: bash scripts/test-go.test.sh
+
       - name: Test
-        run: cd server && go test -race ./...
+        run: bash scripts/test-go.sh --race
 
   windows-execenv:
     # The environment-preparation deadline owns a process tree, not just a Go
@@ -208,6 +211,13 @@ jobs:
         # -v so a silent skip (no PowerShell host resolved, or a -run pattern
         # that stops matching) is visible in the log instead of passing as "ok".
         run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
+
+      - name: Test bounded Codex cleanup with inherited stdout descendant
+        working-directory: server
+        # Windows cannot prove whole-tree termination without a Job Object,
+        # but a descendant holding inherited stdout must never keep Result
+        # blocked forever. -v makes RUN/PASS evidence explicit in CI logs.
+        run: go test ./pkg/agent -v -run '^TestCodexWindowsInheritedStdoutDescendantCleanupIsBounded$' -count=1 -timeout=5m
 
       - name: Build Windows CLI helper entrypoint
         working-directory: server

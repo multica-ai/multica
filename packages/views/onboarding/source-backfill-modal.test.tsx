@@ -1,16 +1,23 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../locales/en/common.json";
 import enOnboarding from "../locales/en/onboarding.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, onboarding: enOnboarding } };
 
-const { mockUser, mockSaveQuestionnaire } = vi.hoisted(() => ({
-  mockUser: { value: null as null | Record<string, unknown> },
-  mockSaveQuestionnaire: vi.fn(),
-}));
+const { mockUser, mockSaveQuestionnaire, mockWorkspace, mockAgentDoneTotal, mockListIssues } =
+  vi.hoisted(() => ({
+    mockUser: { value: null as null | Record<string, unknown> },
+    mockSaveQuestionnaire: vi.fn(),
+    mockWorkspace: {
+      value: { id: "ws-1", slug: "ws-1" } as null | { id: string; slug: string },
+    },
+    mockAgentDoneTotal: { value: 3 },
+    mockListIssues: vi.fn(),
+  }));
 
 vi.mock("@multica/core/auth", async () => {
   const actual =
@@ -31,6 +38,28 @@ vi.mock("@multica/core/onboarding", async () => {
       "@multica/core/onboarding",
     );
   return { ...actual, saveQuestionnaire: mockSaveQuestionnaire };
+});
+
+vi.mock("@multica/core/paths", async () => {
+  const actual =
+    await vi.importActual<typeof import("@multica/core/paths")>(
+      "@multica/core/paths",
+    );
+  return { ...actual, useCurrentWorkspace: () => mockWorkspace.value };
+});
+
+vi.mock("@multica/core/api", async () => {
+  const actual =
+    await vi.importActual<typeof import("@multica/core/api")>(
+      "@multica/core/api",
+    );
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      listIssues: mockListIssues,
+    },
+  };
 });
 
 import { SourceBackfillModal } from "./source-backfill-modal";
@@ -75,6 +104,16 @@ function mockPrefersReducedMotion(matches: boolean) {
 beforeEach(() => {
   mockSaveQuestionnaire.mockReset();
   mockSaveQuestionnaire.mockResolvedValue(undefined);
+  mockListIssues.mockReset();
+  // Default: agents have already completed enough issues that the
+  // workspace-level gate passes — tests about the user-level gate and
+  // submit/skip semantics shouldn't have to care about it.
+  mockAgentDoneTotal.value = 3;
+  mockListIssues.mockImplementation(async () => ({
+    issues: [],
+    total: mockAgentDoneTotal.value,
+  }));
+  mockWorkspace.value = { id: "ws-1", slug: "ws-1" };
   setUser(null);
   wipeDismissCounters();
   mockPrefersReducedMotion(true);
@@ -85,10 +124,15 @@ afterEach(() => {
 });
 
 function renderModal() {
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
   return render(
-    <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <SourceBackfillModal />
-    </I18nProvider>,
+    <QueryClientProvider client={qc}>
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <SourceBackfillModal />
+      </I18nProvider>
+    </QueryClientProvider>,
   );
 }
 
@@ -110,9 +154,11 @@ describe("SourceBackfillModal", () => {
     expect(
       screen.queryByText(/How did you hear about Multica/i),
     ).not.toBeInTheDocument();
+    // A settled user must not even pay for the count query.
+    expect(mockListIssues).not.toHaveBeenCalled();
   });
 
-  it("opens for an onboarded user with empty source", async () => {
+  it("opens for an onboarded user with empty source once agents completed enough issues", async () => {
     setUser({
       id: "u1",
       onboarded_at: "2026-01-01T00:00:00Z",
@@ -123,6 +169,54 @@ describe("SourceBackfillModal", () => {
       expect(
         screen.getByText(/How did you hear about Multica/i),
       ).toBeInTheDocument();
+    });
+  });
+
+  it("stays closed while agents have completed fewer issues than the threshold", async () => {
+    mockAgentDoneTotal.value = 2;
+    setUser({
+      id: "u1",
+      onboarded_at: "2026-01-01T00:00:00Z",
+      onboarding_questionnaire: { source: [] },
+    });
+    renderModal();
+    // Let the count query settle before asserting the negative.
+    await waitFor(() => {
+      expect(mockListIssues).toHaveBeenCalled();
+    });
+    expect(
+      screen.queryByText(/How did you hear about Multica/i),
+    ).not.toBeInTheDocument();
+  });
+
+  it("stays closed outside a workspace context", async () => {
+    mockWorkspace.value = null;
+    setUser({
+      id: "u1",
+      onboarded_at: "2026-01-01T00:00:00Z",
+      onboarding_questionnaire: { source: [] },
+    });
+    renderModal();
+    expect(
+      screen.queryByText(/How did you hear about Multica/i),
+    ).not.toBeInTheDocument();
+    expect(mockListIssues).not.toHaveBeenCalled();
+  });
+
+  it("counts done issues assigned to agents or squads in the current workspace", async () => {
+    setUser({
+      id: "u1",
+      onboarded_at: "2026-01-01T00:00:00Z",
+      onboarding_questionnaire: { source: [] },
+    });
+    renderModal();
+    await waitFor(() => {
+      expect(mockListIssues).toHaveBeenCalledWith({
+        workspace_id: "ws-1",
+        statuses: ["done"],
+        assignee_types: ["agent", "squad"],
+        limit: 1,
+      });
     });
   });
 
@@ -193,20 +287,10 @@ describe("SourceBackfillModal", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders the GitHub channel rebased from origin/main", async () => {
-    setUser({
-      id: "u1",
-      onboarded_at: "2026-01-01T00:00:00Z",
-      onboarding_questionnaire: { source: [] },
-    });
-    renderModal();
-    expect(await screen.findByText("GitHub")).toBeInTheDocument();
-  });
-
   it("picking a second option replaces the first (single-select primary source)", async () => {
-    // The modal is now a single-select radio. Industry default for
-    // HDYHAU is to capture the primary acquisition source, so picking
-    // a second option must replace the first — never accumulate.
+    // The modal is a single-select radio. Industry default for HDYHAU
+    // is to capture the primary acquisition source, so picking a
+    // second option must replace the first — never accumulate.
     setUser({
       id: "u1",
       onboarded_at: "2026-01-01T00:00:00Z",
@@ -242,6 +326,10 @@ describe("SourceBackfillModal", () => {
 
   it("defers the entrance by ~700ms when the user has not opted into reduced motion", async () => {
     mockPrefersReducedMotion(false);
+    // Fake timers from the very start so the 700ms entrance timer is
+    // scheduled on the fake clock. The count query itself is
+    // promise-based; advanceTimersByTimeAsync flushes the microtasks
+    // that deliver its data and let the gate open.
     vi.useFakeTimers();
     try {
       setUser({
@@ -250,8 +338,10 @@ describe("SourceBackfillModal", () => {
         onboarding_questionnaire: { source: [] },
       });
       renderModal();
-      // Immediately after mount: still hidden — the workspace gets a
-      // beat to render before the modal floats in.
+      // Flush the count query → gate passes → timer scheduled (t=0).
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
       expect(
         screen.queryByText(/How did you hear about Multica/i),
       ).not.toBeInTheDocument();
@@ -265,7 +355,7 @@ describe("SourceBackfillModal", () => {
         await vi.advanceTimersByTimeAsync(50);
       });
       expect(
-        screen.queryByText(/How did you hear about Multica/i),
+        screen.getByText(/How did you hear about Multica/i),
       ).toBeInTheDocument();
     } finally {
       vi.useRealTimers();
@@ -283,5 +373,6 @@ describe("SourceBackfillModal", () => {
     expect(
       screen.queryByText(/How did you hear about Multica/i),
     ).not.toBeInTheDocument();
+    expect(mockListIssues).not.toHaveBeenCalled();
   });
 });

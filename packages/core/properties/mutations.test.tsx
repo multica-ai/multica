@@ -46,8 +46,81 @@ function wrapper(qc: QueryClient) {
   };
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+}
+
 describe("useSetIssueProperty", () => {
   afterEach(() => vi.restoreAllMocks());
+
+  it("keeps an optimistic children-cache patch when an older fetch resolves late", async () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const parentId = "parent-1";
+    const childKey = issueKeys.children("ws-1", parentId);
+    const child = {
+      ...issue,
+      parent_issue_id: parentId,
+      properties: { estimate: 1, environment: "staging" },
+    };
+    qc.setQueryData<Issue[]>(childKey, [child]);
+
+    const staleChildren = deferred<Issue[]>();
+    const staleFetch = qc
+      .fetchQuery({
+        queryKey: childKey,
+        queryFn: () => staleChildren.promise,
+      })
+      .catch(() => undefined);
+    await waitFor(() =>
+      expect(qc.getQueryState(childKey)?.fetchStatus).toBe("fetching"),
+    );
+
+    const write = deferred<IssuePropertiesResponse>();
+    setApiInstance({
+      setIssueProperty: vi.fn(() => write.promise),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(() => useSetIssueProperty(), {
+      wrapper: wrapper(qc),
+    });
+    act(() => {
+      result.current.mutate({
+        issueId: issue.id,
+        propertyId: "estimate",
+        value: 2,
+      });
+    });
+
+    await waitFor(() =>
+      expect(qc.getQueryData<Issue[]>(childKey)?.[0]?.properties).toEqual({
+        estimate: 2,
+        environment: "staging",
+      }),
+    );
+
+    // Resolve the response captured before the mutation. cancelQueries must
+    // keep it from restoring estimate=1 while the write is still pending.
+    staleChildren.resolve([child]);
+    await staleFetch;
+    expect(qc.getQueryData<Issue[]>(childKey)?.[0]?.properties).toEqual({
+      estimate: 2,
+      environment: "staging",
+    });
+
+    await act(async () => {
+      write.resolve({
+        properties: { estimate: 2, environment: "staging" },
+      });
+    });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    qc.clear();
+  });
 
   it("does not refetch a property window before the mutation commits", async () => {
     const qc = new QueryClient({

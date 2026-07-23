@@ -22,6 +22,7 @@ import type {
   ListIssuesResponse,
 } from "@multica/core/types";
 import { IssueSurface } from "./issue-surface";
+import { statusTableMethodsFromLegacy } from "./status-table-test-api";
 
 // Mutable so tests can simulate a workspace switch — the workspace layout
 // does not remount its children on switch, so the surface must handle the
@@ -158,6 +159,7 @@ describe("IssueSurface — scope switch loading semantics", () => {
     });
     setApiInstance({
       listIssues,
+      ...statusTableMethodsFromLegacy(listIssues),
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
@@ -244,6 +246,7 @@ describe("IssueSurface — scope switch loading semantics", () => {
     });
     setApiInstance({
       listIssues,
+      ...statusTableMethodsFromLegacy(listIssues),
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
@@ -332,6 +335,17 @@ describe("IssueSurface — table pagination ownership", () => {
           })) as unknown as AgentTask[],
         ),
       ),
+      getWorkspaceWorkingAgents: vi.fn(() =>
+        Promise.resolve(
+          runningIssues.map((issue, index) => ({
+            id: `agent-${index}`,
+            name: `Agent ${index}`,
+            avatar_url: null,
+            running_task_count: 1,
+            issue_ids: [issue.id],
+          })),
+        ),
+      ),
       getChildIssueProgress: vi.fn(() => never()),
       listProperties: vi.fn(() => never()),
       listMembers: vi.fn(() => never()),
@@ -351,21 +365,27 @@ describe("IssueSurface — table pagination ownership", () => {
       </QueryClientProvider>,
     );
 
-    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalledTimes(1));
-    expect(listIssueTableRows).toHaveBeenCalledWith(
+    // The first render has not received the independent working-agents query
+    // yet and therefore requests the explicit match-none form. Once that
+    // query resolves, the Table owns a new query key containing the agent id
+    // list and starts the real branch.
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalledTimes(2));
+    expect(listIssueTableRows).toHaveBeenLastCalledWith(
       expect.objectContaining({
         group: { kind: "none" },
         group_key: null,
         parent_id: null,
         query: expect.objectContaining({
-          filters: expect.objectContaining({ working_only: true }),
+          filters: expect.objectContaining({
+            working_issue_ids: runningIssues.map((issue) => issue.id),
+          }),
         }),
       }),
     );
     expect(listIssues).not.toHaveBeenCalled();
   });
 
-  it("keeps the root total when a continuation page reports zero", async () => {
+  it("keeps loaded rows when a continuation page reports zero", async () => {
     const { getIssueSurfaceViewStore } = await import(
       "@multica/core/issues/stores/surface-view-store"
     );
@@ -432,10 +452,7 @@ describe("IssueSurface — table pagination ownership", () => {
     expect(listIssueTableRows).toHaveBeenCalledWith(
       expect.objectContaining({ page: { limit: 50, cursor: "cursor-2" } }),
     );
-    expect(mockTranslate).toHaveBeenCalledWith(expect.any(Function), {
-      count: 2,
-      total: 2,
-    });
+    expect(screen.getByText("First cursor row")).toBeInTheDocument();
   });
 
   it("feeds loaded Table rows to the shared batch toolbar", async () => {

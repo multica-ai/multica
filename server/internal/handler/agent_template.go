@@ -455,10 +455,7 @@ func (h *Handler) CreateAgentFromTemplate(w http.ResponseWriter, r *http.Request
 	if req.Instructions != nil {
 		instructions = *req.Instructions
 	}
-	avatarURL := pgtype.Text{}
-	if req.AvatarURL != nil && *req.AvatarURL != "" {
-		avatarURL = pgtype.Text{String: *req.AvatarURL, Valid: true}
-	}
+	avatarURL := newAgentAvatar(req.AvatarURL)
 
 	agent, err := qtx.CreateAgent(r.Context(), db.CreateAgentParams{
 		WorkspaceID:        wsUUID,

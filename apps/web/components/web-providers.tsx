@@ -11,6 +11,7 @@ import {
   setLoggedInCookie,
   clearLoggedInCookie,
 } from "@/features/auth/auth-cookie";
+import { detectWebOS } from "@/platform/client-os";
 
 // Legacy token in localStorage → keep this session in token mode so users who
 // logged in before the cookie-auth migration stay authed. They migrate to
@@ -56,7 +57,7 @@ export function WebProviders({
   // Stable identity reference so downstream effects keyed on it don't see a
   // new object on every parent render.
   const identity = useMemo(
-    () => ({ platform: "web", version: WEB_VERSION }),
+    () => ({ platform: "web", version: WEB_VERSION, os: detectWebOS() }),
     [],
   );
   const localeAdapter = useMemo(() => createBrowserCookieLocaleAdapter(), []);

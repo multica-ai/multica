@@ -135,6 +135,9 @@ cleared_vcs_prs AS (
 ),
 cleared_vcs_connections AS (
     DELETE FROM vcs_connection WHERE workspace_id = $1
+),
+cleared_client_usage_workspace AS (
+    UPDATE client_usage_daily SET workspace_id = NULL WHERE workspace_id = $1
 )
 DELETE FROM workspace WHERE workspace.id = $1
 `
@@ -144,7 +147,7 @@ DELETE FROM workspace WHERE workspace.id = $1
 // tables the DELETE below sweeps — they are not cleaned up implicitly. Remove
 // their workspace-owned rows here so they commit or roll back atomically with
 // the workspace row.
-// VCS tables (migration 206) carry no FK to workspace, so they are not cascaded
+// VCS tables (migration 213) carry no FK to workspace, so they are not cascaded
 // away by the DELETE below. Sweep the workspace's connections, mirrored PRs,
 // their issue links, and CI statuses here. issue_vcs_pull_request has no
 // workspace_id, so reach it through the workspace's PRs; vcs_commit_status has

@@ -37,7 +37,7 @@ type DeleteVCSConnectionParams struct {
 }
 
 // These tables carry no FKs, so the cascade that once removed the connection's
-// mirrored PRs, their issue links, and CI statuses is gone (migration 206). Do
+// mirrored PRs, their issue links, and CI statuses is gone (migration 213). Do
 // that cleanup explicitly here, in one statement so it commits or rolls back
 // atomically with the connection row. The target CTE also scopes every child
 // delete to a connection that actually belongs to the workspace, so a wrong

@@ -929,13 +929,38 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				// no follow-up wakeup. These pins forbid that shape.
 				"Never background-and-yield",
 				"foreground tool call that blocks",
-				"gh run watch",
+				"only to work owned by the current run",
+				"GitHub Actions after a successful push",
+				"Do not wait for them by default",
+				// MUL-5223: the conceptual boundary above was read as
+				// compatible with `gh pr checks --watch` (a blocking
+				// foreground call) whenever the repo required green CI to
+				// merge. These pins name the banned tool shapes, deny
+				// merge requirements as acceptance criteria, and supply
+				// the replacement hand-off phrasing.
+				"do NOT run `gh pr checks --watch`",
+				"any sleep / retry loop that polls check status",
+				"NOT your delivery acceptance criteria",
+				"CI running: <PR link>",
+				// The ban must stay scoped: an explicitly requested CI
+				// result is still reachable, and the section must name
+				// the one executable way to collect it. Without these
+				// pins the ban could be re-absolutised and the exception
+				// would become unfollowable.
+				"unless the explicit exception below applies",
+				"The one exception",
+				"ONE foreground blocking call (`gh pr checks <pr> --watch`)",
 				"running in the background so you can keep working",
 				"standing by",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing background task safety text %q\n---\n%s", tc.file, want, s)
 				}
+			}
+			// `gh run watch` may only appear as a banned command, never as
+			// the section's example of how to wait properly.
+			if strings.Contains(s, "e.g. `gh run watch`") {
+				t.Errorf("%s should not suggest waiting for external GitHub CI\n---\n%s", tc.file, s)
 			}
 		})
 	}

@@ -28,10 +28,11 @@ import (
 // default, which is always closer to what the user's account /
 // environment actually supports than a static guess here.
 type Model struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Provider string `json:"provider,omitempty"`
-	Default  bool   `json:"default,omitempty"`
+	ID           string             `json:"id"`
+	Label        string             `json:"label"`
+	Provider     string             `json:"provider,omitempty"`
+	Default      bool               `json:"default,omitempty"`
+	ServiceTiers []ModelServiceTier `json:"service_tiers,omitempty"`
 	// Thinking advertises the runtime's reasoning/effort catalog for this
 	// model. nil means the runtime/model has no thinking-level control
 	// (or the daemon couldn't discover one); the UI hides its picker. The
@@ -39,6 +40,15 @@ type Model struct {
 	// per-model and Claude's `--effort` superset has known per-model gaps
 	// (`xhigh` is Opus-only, `max` is session-only). See MUL-2339.
 	Thinking *ModelThinking `json:"thinking,omitempty"`
+}
+
+// ModelServiceTier is one runtime-native execution tier advertised for a
+// model. ID is sent back to the provider protocol unchanged; Name and
+// Description are display copy owned by the runtime catalog.
+type ModelServiceTier struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // ModelThinking carries the per-model reasoning/effort catalog
@@ -320,7 +330,9 @@ func claudeStaticModels() []Model {
 // sync with the visible entries in the newest locally verified bundled
 // catalog, plus still-common models from older Codex releases. Each entry
 // carries its own reasoning catalog so old/offline CLIs retain the same model
-// + thinking picker contract as dynamic discovery.
+// + thinking picker contract as dynamic discovery. Service tiers are
+// intentionally NOT guessed here: they are runtime/version/account-sensitive,
+// so a discovery failure hides the speed picker and fails the override closed.
 func codexStaticModels() []Model {
 	// `Default` here is NOT a user-facing "default model" badge — the picker
 	// stopped rendering that (Multica follows the CLI config when the model is

@@ -3,6 +3,7 @@ import type {
   Agent,
   AgentTemplate,
   AgentTemplateSummary,
+  AgentBuilderRuntimeSwitch,
   AgentBuilderSession,
   Attachment,
   AutopilotRun,
@@ -25,6 +26,7 @@ import type {
   IssueProperty,
   ListPropertiesResponse,
   IssuePropertiesResponse,
+  IssueTableGroupDescriptor,
   IssueTableFacetsResponse,
   IssueTableGroupsResponse,
   IssueTableRowsResponse,
@@ -575,6 +577,14 @@ const IssueTableActorRefSchema = z.object({
   id: z.string(),
 }).loose();
 
+const IssueTableParentRefSchema = z.object({
+  id: z.string(),
+  number: z.number(),
+  identifier: z.string(),
+  title: z.string(),
+  status: z.string(),
+}).loose();
+
 const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("status"),
@@ -585,6 +595,16 @@ const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
     actor: IssueTableActorRefSchema.nullable(),
   }).loose(),
   z.object({
+    kind: z.literal("project"),
+    project_id: z.string().nullable().optional().default(null),
+  }).loose(),
+  z.object({
+    kind: z.literal("parent"),
+    parent_id: z.string().nullable().optional().default(null),
+    parent: IssueTableParentRefSchema.nullable().optional().default(null),
+    value_state: z.enum(["value", "unavailable", "unset"]),
+  }).loose(),
+  z.object({
     kind: z.literal("property"),
     property_id: z.string(),
     value: z.union([z.string(), z.boolean(), z.null()]).optional(),
@@ -592,11 +612,12 @@ const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
   }).loose(),
 ]);
 
-const IssueTableGroupDescriptorSchema = z.object({
+const IssueTableGroupDescriptorSchema: z.ZodType<IssueTableGroupDescriptor> = z.lazy(() => z.object({
   key: z.string(),
   value: IssueTableGroupValueSchema,
   count: z.number(),
-}).loose();
+  secondary_groups: z.array(IssueTableGroupDescriptorSchema).optional(),
+}).loose());
 
 export const IssueTableGroupsResponseSchema = z.object({
   query_fingerprint: z.string(),
@@ -1077,6 +1098,20 @@ export const EMPTY_AGENT_BUILDER_SESSION: AgentBuilderSession = {
   builder_agent_id: "",
   runtime_id: "",
 };
+
+export const AgentBuilderRuntimeSwitchSchema = z.object({
+  runtime_id: z.string(),
+}).loose();
+
+// This endpoint returns 2xx only after the carrier has been bound to the
+// runtime the caller asked for; anything else is a thrown error and no commit.
+// So the safe fallback for an unparseable SUCCESS body is the requested id, not
+// an empty one: the rebind did happen, and reporting "unknown" would leave the
+// picker showing a runtime that is no longer executing — the exact split this
+// endpoint exists to close.
+export const agentBuilderRuntimeSwitchFallback = (
+  requestedRuntimeID: string,
+): AgentBuilderRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
 
 // Squad list responses carry lightweight membership previews used by hover
 // cards. The preview fields are additive API fields, so older backends default

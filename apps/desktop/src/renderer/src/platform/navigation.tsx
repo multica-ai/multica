@@ -96,6 +96,30 @@ function tryRouteToOtherWorkspace(path: string): boolean {
 }
 
 /**
+ * Open a path that a link inside content resolved to (the `multica:navigate`
+ * event fired by the shared editor/markdown link handler) in a foreground tab.
+ *
+ * A content link is a jump to another subject, so it gets its own tab rather
+ * than replacing what the user was reading. It can also address another
+ * workspace — a pasted app URL, an agent quoting a cross-workspace issue — and
+ * opening that inside the active workspace's tab group would mount it under the
+ * wrong group, so the slug check routes it through switchWorkspace exactly like
+ * an adapter push does.
+ */
+export function routeContentLinkPath(path: string): void {
+  const store = useTabStore.getState();
+  const slug = extractWorkspaceSlug(path);
+  if (slug && slug !== store.activeWorkspaceSlug) {
+    store.switchWorkspace(slug, path);
+    return;
+  }
+  // Empty seed title — the tab bar derives the real title from the URL and
+  // cache; a raw path would flash before that resolves.
+  const tabId = store.openTab(path, "");
+  store.setActiveTab(tabId);
+}
+
+/**
  * Intercept pushes originating in a pinned tab and force them into a new
  * tab. Returns `true` if the navigation was redirected (caller should NOT
  * proceed). Pathname-only changes (search / hash / same-page state) are

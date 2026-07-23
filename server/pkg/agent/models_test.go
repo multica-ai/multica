@@ -3,34 +3,37 @@ package agent
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 )
 
-func TestListModelsStaticProviders(t *testing.T) {
-	ctx := context.Background()
-	for _, provider := range []string{"claude", "codex", "cursor"} {
-		got, err := ListModels(ctx, provider, "")
-		if err != nil {
-			t.Fatalf("ListModels(%q) error: %v", provider, err)
+func TestStaticModelCatalogsHaveValidEntries(t *testing.T) {
+	t.Parallel()
+	catalogs := map[string][]Model{
+		"claude": claudeStaticModels(),
+		"codex":  codexStaticModels(),
+		"cursor": cursorStaticModels(),
+	}
+	for provider, models := range catalogs {
+		if len(models) == 0 {
+			t.Errorf("%s static catalog returned no models", provider)
 		}
-		if len(got) == 0 {
-			t.Errorf("ListModels(%q) returned no models", provider)
-		}
-		for i, m := range got {
-			if m.ID == "" {
-				t.Errorf("ListModels(%q)[%d] has empty ID", provider, i)
+		for i, model := range models {
+			if model.ID == "" {
+				t.Errorf("%s static catalog[%d] has empty ID", provider, i)
 			}
-			if m.Label == "" {
-				t.Errorf("ListModels(%q)[%d] has empty Label", provider, i)
+			if model.Label == "" {
+				t.Errorf("%s static catalog[%d] has empty Label", provider, i)
 			}
 		}
 	}
 }
 
 func TestListModelsQwenUsesRuntimeDefaultAndManualEntry(t *testing.T) {
+	// Qwen returns its manual-entry catalog without resolving or executing a CLI.
 	got, err := ListModels(context.Background(), "qwen", "")
 	if err != nil {
 		t.Fatalf("ListModels(qwen) error: %v", err)
@@ -51,7 +54,7 @@ func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	delete(modelCache, "copilot")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "copilot", "/nonexistent/copilot-cli")
+	got, err := ListModels(ctx, "copilot", missingAgentExecutable(t, "copilot"))
 	if err != nil {
 		t.Fatalf("ListModels(copilot) error: %v", err)
 	}
@@ -321,7 +324,7 @@ func TestListModelsHermesWithoutBinary(t *testing.T) {
 	delete(modelCache, "hermes")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "hermes", "/nonexistent/hermes")
+	got, err := ListModels(ctx, "hermes", missingAgentExecutable(t, "hermes"))
 	if err != nil {
 		t.Fatalf("ListModels(hermes) error: %v", err)
 	}
@@ -336,7 +339,7 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	delete(modelCache, "kiro")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "kiro", "/nonexistent/kiro-cli")
+	got, err := ListModels(ctx, "kiro", missingAgentExecutable(t, "kiro-cli"))
 	if err != nil {
 		t.Fatalf("ListModels(kiro) error: %v", err)
 	}
@@ -351,7 +354,7 @@ func TestListModelsQoderWithoutBinary(t *testing.T) {
 	delete(modelCache, "qoder")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "qoder", "/nonexistent/qodercli")
+	got, err := ListModels(ctx, "qoder", missingAgentExecutable(t, "qodercli"))
 	if err != nil {
 		t.Fatalf("ListModels(qoder) error: %v", err)
 	}
@@ -1019,7 +1022,7 @@ func TestParseAntigravityModels(t *testing.T) {
 		t.Fatalf("parseAntigravityModels len = %d, want %d (%+v)", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("model[%d] = %+v, want %+v", i, got[i], want[i])
 		}
 	}
