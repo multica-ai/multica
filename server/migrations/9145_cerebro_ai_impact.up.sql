@@ -61,6 +61,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS enforce_ai_impact_project_workspace_trigger
+    ON cerebro_ai_impact_project_binding;
 CREATE TRIGGER enforce_ai_impact_project_workspace_trigger
 BEFORE INSERT OR UPDATE ON cerebro_ai_impact_project_binding
 FOR EACH ROW EXECUTE FUNCTION enforce_ai_impact_project_workspace();
@@ -163,6 +165,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+DROP TRIGGER IF EXISTS prevent_ai_impact_observation_mutation_trigger
+    ON cerebro_ai_impact_observation;
 CREATE TRIGGER prevent_ai_impact_observation_mutation_trigger
 BEFORE UPDATE OR DELETE ON cerebro_ai_impact_observation
 FOR EACH ROW EXECUTE FUNCTION prevent_ai_impact_observation_mutation();
