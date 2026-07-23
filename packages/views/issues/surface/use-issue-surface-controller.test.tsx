@@ -598,6 +598,98 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.tableFacetCounts).toBeUndefined();
   });
 
+  it.each([
+    {
+      name: "Assignee Board",
+      configure: (store: ReturnType<typeof getIssueSurfaceViewStore>) => {
+        store.getState().setViewMode("board");
+        store.getState().setGrouping("assignee");
+      },
+      properties: [],
+    },
+    {
+      name: "Property Board",
+      configure: (store: ReturnType<typeof getIssueSurfaceViewStore>) => {
+        store.getState().setViewMode("board");
+        store.getState().setGrouping("property:severity");
+      },
+      properties: [
+        {
+          id: "severity",
+          workspace_id: "ws-1",
+          name: "Severity",
+          type: "select",
+          config: { options: [] },
+          position: 0,
+          archived: false,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    },
+    {
+      name: "Swimlane",
+      configure: (store: ReturnType<typeof getIssueSurfaceViewStore>) => {
+        store.getState().setViewMode("swimlane");
+      },
+      properties: [],
+    },
+  ])(
+    "loads exact filter facets on demand for the server-paged $name",
+    async ({ configure, properties }) => {
+      const store = getIssueSurfaceViewStore("project:p1");
+      configure(store);
+      const listIssueTableFacets = vi.fn().mockResolvedValue({
+        query_fingerprint: "sha256:group-facets",
+        total: 0,
+        facets: [{ kind: "priority", values: [{ key: "high", count: 37 }] }],
+      });
+      const tableMethods = statusTableMethodsFromLegacy(listIssues);
+      setApiInstance({
+        listIssues,
+        ...tableMethods,
+        listIssueTableFacets,
+        listGroupedIssues: vi.fn(() => never()),
+        listProjects: vi.fn(() => never()),
+        listProperties: vi.fn(() =>
+          Promise.resolve({ properties, total: properties.length }),
+        ),
+        getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+        getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+      } as unknown as ApiClient);
+
+      const { result } = renderHook(
+        () =>
+          useIssueSurfaceController({
+            scope: { type: "project", projectId: "p1" },
+            modes: ["board", "list", "swimlane"],
+          }),
+        { wrapper: makeWrapper(qc, "project:p1") },
+      );
+
+      expect(result.current.facetCountsExact).toBe(false);
+      expect(listIssueTableFacets).not.toHaveBeenCalled();
+
+      act(() => result.current.setActiveTableFacet({ kind: "priority" }));
+
+      await waitFor(() => expect(listIssueTableFacets).toHaveBeenCalledTimes(1));
+      expect(listIssueTableFacets).toHaveBeenCalledWith(
+        expect.objectContaining({
+          facets: [{ kind: "priority" }],
+          include_total: false,
+        }),
+      );
+      await waitFor(() =>
+        expect(result.current.tableFacetCounts?.facets).toEqual([
+          { kind: "priority", values: [{ key: "high", count: 37 }] },
+        ]),
+      );
+
+      act(() => result.current.setActiveTableFacet(null));
+      expect(result.current.tableFacetCounts).toBeUndefined();
+    },
+  );
+
   it("fails Table export closed when schema fallback would truncate the CSV", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");

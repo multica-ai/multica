@@ -110,11 +110,11 @@ export interface IssueSurfaceController {
   tableSearch: string;
   /** Canonical server-owned Table membership. */
   tableQuerySpec: IssueTableQuerySpec;
-  /** Exact disjunctive counts for the active Table filter submenu. */
+  /** Exact disjunctive counts for the active server-backed filter submenu. */
   tableFacetCounts?: IssueTableFacetsResponse;
   /** Whether scopedIssues is a complete client window for local count use. */
   facetCountsExact: boolean;
-  /** Load one Table facet when its filter submenu is opened. */
+  /** Load one server facet when its filter submenu is opened. */
   setActiveTableFacet: (facet: IssueTableFacetSpec | null) => void;
   setTableSearch: (query: string) => void;
   exportTableIssues: () => Promise<Issue[]>;
@@ -291,6 +291,11 @@ export function useIssueSurfaceController({
   const usesServerStatusSurface =
     effectiveViewMode === "list" ||
     (effectiveViewMode === "board" && effectiveGrouping === "status");
+  const usesServerGroupSurface =
+    (effectiveViewMode === "board" && effectiveGrouping !== "status") ||
+    effectiveViewMode === "swimlane";
+  const usesServerFacets =
+    usesTable || usesServerStatusSurface || usesServerGroupSurface;
   const serverStatuses = useMemo<IssueStatus[]>(
     () => {
       const visible =
@@ -438,18 +443,17 @@ export function useIssueSurfaceController({
     // every custom-property facet made a Table mount issue up to 47 SQL
     // statements and repeatedly scan the issue table after invalidation.
     enabled:
-      usesServerStatusSurface || (usesTable && activeTableFacet !== null),
+      usesServerStatusSurface ||
+      ((usesTable || usesServerGroupSurface) && activeTableFacet !== null),
   });
   useEffect(() => {
-    if (!usesTable && !usesServerStatusSurface) setActiveTableFacet(null);
-  }, [usesServerStatusSurface, usesTable]);
+    if (!usesServerFacets) setActiveTableFacet(null);
+  }, [usesServerFacets]);
   const requestActiveTableFacet = useCallback(
     (facet: IssueTableFacetSpec | null) => {
-      setActiveTableFacet(
-        usesTable || usesServerStatusSurface ? facet : null,
-      );
+      setActiveTableFacet(usesServerFacets ? facet : null);
     },
-    [usesServerStatusSurface, usesTable],
+    [usesServerFacets],
   );
   const serverStatusBranches = useIssueStatusBranches({
     wsId,
@@ -484,9 +488,6 @@ export function useIssueSurfaceController({
     serverStatuses,
     swimlaneGrouping,
   ]);
-  const usesServerGroupSurface =
-    (effectiveViewMode === "board" && effectiveGrouping !== "status") ||
-    effectiveViewMode === "swimlane";
   const serverGroupQuery = useMemo<IssueTableQuerySpec>(() => {
     if (effectiveViewMode !== "swimlane") return tableQuerySpec;
     const { statuses: _statuses, ...filters } = tableQuerySpec.filters;
@@ -660,10 +661,11 @@ export function useIssueSurfaceController({
     tableQuerySpec,
     tableFacetCounts:
       usesServerStatusSurface ||
-      (usesTable && activeTableFacet !== null)
+      ((usesTable || usesServerGroupSurface) && activeTableFacet !== null)
         ? tableFacetsQuery.data
         : undefined,
-    facetCountsExact: !usesTable && !usesServerStatusSurface,
+    facetCountsExact:
+      !usesTable && !usesServerStatusSurface && !usesServerGroupSurface,
     setActiveTableFacet: requestActiveTableFacet,
     setTableSearch,
     openCreateIssue,
