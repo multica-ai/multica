@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -122,6 +123,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		stepUsage := make(map[string]TokenUsage)
 		resultUsage := make(map[string]TokenUsage)
 		hasResultUsage := false
+		var thinking cursorThinkingStream
 
 		scanner := bufio.NewScanner(stdout)
 		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
@@ -161,6 +163,37 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			case "assistant":
 				assistantEventCount++
 				b.handleCursorAssistant(&evt, msgCh, &output)
+
+			case "thinking":
+				// Reasoning is a top-level event streamed as deltas, not a
+				// content block inside assistant messages. Forward each delta
+				// as it lands so the daemon's 500ms flush shows reasoning while
+				// the task is still running.
+				if content := thinking.consume(evt.Subtype, evt.Text); content != "" {
+					trySend(msgCh, Message{Type: MessageThinking, Content: content})
+				}
+
+			case "tool_call":
+				call := parseCursorToolCall(&evt)
+				if evt.Subtype == "started" {
+					toolUseCount++
+					trySend(msgCh, Message{
+						Type:   MessageToolUse,
+						Tool:   call.Name,
+						CallID: call.CallID,
+						Input:  call.Input,
+					})
+					break
+				}
+				// Every non-started subtype terminates the call. Emitting a
+				// result for each keeps the daemon's in-flight tool count
+				// balanced, so its watchdog cannot fire on a completed call.
+				trySend(msgCh, Message{
+					Type:   MessageToolResult,
+					Tool:   call.Name,
+					CallID: call.CallID,
+					Output: call.Result,
+				})
 
 			case "tool_use":
 				toolUseCount++
@@ -420,6 +453,135 @@ func (b *cursorBackend) handleCursorAssistant(evt *cursorStreamEvent, ch chan<- 
 	}
 }
 
+// cursorThinkingStream turns the CLI's `thinking` event sequence into the
+// content we forward as MessageThinking. Cursor streams a reasoning block as
+// `subtype:"delta"` events carrying a text fragment each, terminated by a
+// `subtype:"completed"` event that carries no text of its own.
+//
+// Deltas are forwarded immediately (the daemon concatenates and flushes them on
+// a ticker, so reasoning shows up while the task runs) and blocks are separated
+// by a blank line, because consecutive blocks would otherwise be glued together
+// into one paragraph by that same concatenation.
+type cursorThinkingStream struct {
+	blockOpen bool
+	anySent   bool
+}
+
+// consume returns the content to forward for one thinking event, or "" when
+// there is nothing to send.
+func (t *cursorThinkingStream) consume(subtype, text string) string {
+	if subtype != "completed" {
+		return t.emit(text)
+	}
+	// A block that streamed deltas has already been forwarded. Only take the
+	// terminal text when it is the block's sole carrier, so a CLI that repeats
+	// the whole block here cannot duplicate the reasoning.
+	if t.blockOpen {
+		t.blockOpen = false
+		return ""
+	}
+	content := t.emit(text)
+	t.blockOpen = false
+	return content
+}
+
+func (t *cursorThinkingStream) emit(text string) string {
+	if text == "" {
+		return ""
+	}
+	if !t.blockOpen && t.anySent {
+		text = "\n\n" + text
+	}
+	t.blockOpen = true
+	t.anySent = true
+	return text
+}
+
+// cursorToolCall is a top-level `tool_call` event projected onto the fields the
+// daemon transcript needs.
+type cursorToolCall struct {
+	Name   string
+	CallID string
+	Input  map[string]any
+	Result string
+}
+
+// cursorToolCallKeySuffix is how Cursor names the per-tool payload: the tool is
+// the key of a nested object rather than a `name` field, so `readToolCall`
+// identifies a read and holds that call's `args` and (once completed) `result`.
+const cursorToolCallKeySuffix = "ToolCall"
+
+// parseCursorToolCall extracts tool identity, arguments and result from a
+// `tool_call` event:
+//
+//	{"type":"tool_call","subtype":"started","call_id":"call-…",
+//	 "tool_call":{"readToolCall":{"args":{"path":"/x/a.txt"}},"toolCallId":"call-…"}}
+//
+// A payload we cannot decode still yields the call ID, so started/completed
+// events stay paired and the transcript keeps a row for the call.
+func parseCursorToolCall(evt *cursorStreamEvent) cursorToolCall {
+	call := cursorToolCall{CallID: cursorCallID(evt.CallID)}
+
+	var envelope map[string]json.RawMessage
+	if len(evt.ToolCall) == 0 || json.Unmarshal(evt.ToolCall, &envelope) != nil {
+		return call
+	}
+	if call.CallID == "" {
+		var nestedID string
+		if err := json.Unmarshal(envelope["toolCallId"], &nestedID); err == nil {
+			call.CallID = cursorCallID(nestedID)
+		}
+	}
+
+	key := cursorToolPayloadKey(envelope)
+	if key == "" {
+		return call
+	}
+	call.Name = strings.TrimSuffix(key, cursorToolCallKeySuffix)
+
+	var payload struct {
+		Args   map[string]any  `json:"args"`
+		Result json.RawMessage `json:"result"`
+	}
+	if err := json.Unmarshal(envelope[key], &payload); err != nil {
+		return call
+	}
+	call.Input = payload.Args
+	if len(payload.Result) > 0 {
+		call.Result = string(payload.Result)
+	}
+	return call
+}
+
+// cursorToolPayloadKey picks the `<name>ToolCall` key of a tool_call envelope.
+// Observed payloads carry exactly one; the sort keeps the choice deterministic
+// if a future CLI ever emits more than one.
+func cursorToolPayloadKey(envelope map[string]json.RawMessage) string {
+	var keys []string
+	for key := range envelope {
+		if len(key) > len(cursorToolCallKeySuffix) && strings.HasSuffix(key, cursorToolCallKeySuffix) {
+			keys = append(keys, key)
+		}
+	}
+	if len(keys) == 0 {
+		return ""
+	}
+	sort.Strings(keys)
+	return keys[0]
+}
+
+// cursorCallID normalizes the CLI's call identifier. Cursor packs two ids into
+// one newline-separated string ("call-…\nfc_…"); the first line alone is
+// unique, and keeping IDs single-line stops the embedded newline from breaking
+// up daemon log lines.
+func cursorCallID(raw string) string {
+	id := strings.TrimSpace(raw)
+	if idx := strings.IndexByte(id, '\n'); idx >= 0 {
+		id = id[:idx]
+	}
+	return strings.TrimSpace(id)
+}
+
 func cursorUsageModel(evtModel, configuredModel string) string {
 	if model := strings.TrimSpace(evtModel); model != "" {
 		return model
@@ -465,6 +627,13 @@ type cursorStreamEvent struct {
 
 	// assistant fields
 	Message json.RawMessage `json:"message,omitempty"`
+
+	// thinking fields
+	Text string `json:"text,omitempty"`
+
+	// tool_call fields (current CLI): the tool is a nested key under tool_call
+	ToolCall json.RawMessage `json:"tool_call,omitempty"`
+	CallID   string          `json:"call_id,omitempty"`
 
 	// tool_use fields
 	ToolName   string          `json:"tool_name,omitempty"`
