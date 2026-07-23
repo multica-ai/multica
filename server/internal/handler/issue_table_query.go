@@ -108,8 +108,12 @@ type issueTableQuerySpec struct {
 }
 
 type issueTableGroupSpec struct {
-	Kind       string `json:"kind"`
-	PropertyID string `json:"property_id,omitempty"`
+	Kind            string   `json:"kind"`
+	PropertyID      string   `json:"property_id,omitempty"`
+	IncludeEmpty    bool     `json:"include_empty,omitempty"`
+	Primary         string   `json:"primary,omitempty"`
+	Secondary       string   `json:"secondary,omitempty"`
+	SecondaryValues []string `json:"secondary_values,omitempty"`
 }
 
 type issueTablePageRequest struct {

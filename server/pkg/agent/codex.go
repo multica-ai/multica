@@ -31,6 +31,11 @@ var codexBlockedArgs = map[string]blockedArgMode{
 	"--listen": blockedWithValue, // stdio:// transport for daemon communication
 }
 
+const (
+	codexFastServiceTier = "priority"
+	codexFastModeFeature = "fast_mode"
+)
+
 // codexStderrTailBytes bounds the stderr tail captured for inclusion in
 // error messages when codex exits before the JSON-RPC handshake (e.g. the
 // user supplied a custom_args flag that the `app-server` subcommand
@@ -59,6 +64,7 @@ const (
 // instead of burning two full grace windows per cleanup phase. Mirrors
 // the opencodeTerminateGraceNanos hook.
 var codexGracefulShutdownTimeoutNanos atomic.Int64
+var codexProcessWaitDelayNanos atomic.Int64
 var activeCodexLaunches atomic.Int64
 var maxActiveCodexLaunchesObserved atomic.Int64
 var codexCleanupConfirmationOverride atomic.Int32
@@ -81,6 +87,39 @@ func codexGracefulShutdown() time.Duration {
 	return codexGracefulShutdownTimeout
 }
 
+func codexProcessWaitDelay() time.Duration {
+	if n := codexProcessWaitDelayNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return 10 * time.Second
+}
+
+type codexStderrClassification struct {
+	modelRefreshTimeout int
+	mcpInitTransport    int
+	bareTimeout         int
+}
+
+// classifyCodexStartupStderr emits bounded counters only. It deliberately does
+// not make retry decisions: stderr is sibling diagnostic evidence, not proof
+// that thread/start did or did not create a provider-side thread.
+func classifyCodexStartupStderr(stderr string, timedOut bool) codexStderrClassification {
+	lower := strings.ToLower(sanitizeCodexDiagnostic(stderr))
+	classification := codexStderrClassification{
+		modelRefreshTimeout: strings.Count(lower, codexModelCatalogRefreshTimeoutSignal),
+	}
+	for _, line := range strings.Split(lower, "\n") {
+		if strings.Contains(line, "mcp") && strings.Contains(line, "transport") &&
+			(strings.Contains(line, "error") || strings.Contains(line, "failed") || strings.Contains(line, "closed")) {
+			classification.mcpInitTransport++
+		}
+	}
+	if timedOut && classification.modelRefreshTimeout == 0 && classification.mcpInitTransport == 0 {
+		classification.bareTimeout = 1
+	}
+	return classification
+}
+
 // CodexSemanticInactivityMarker prefixes timeout errors emitted when Codex
 // stops making semantic progress while the process is still alive.
 const CodexSemanticInactivityMarker = "codex semantic inactivity timeout"
@@ -100,6 +139,7 @@ const CodexHandshakeTimeoutMarker = "codex app-server handshake timeout"
 // prefix rather than one variant: they are all the same startup-blocking
 // failure from the daemon's point of view.
 const codexModelCatalogRefreshFailureSignal = "failed to refresh available models"
+const codexModelCatalogRefreshTimeoutSignal = "failed to refresh available models: timeout waiting for child process to exit"
 
 var errCodexProcessExited = errors.New("codex process exited")
 
@@ -129,15 +169,21 @@ type codexBackend struct {
 
 func buildCodexArgs(opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{"app-server", "--listen", "stdio://"}
-	return append(args, NormalizeCodexLaunchArgs(opts.ExtraArgs, opts.CustomArgs, opts.McpConfig, logger)...)
+	launchArgs := NormalizeCodexLaunchArgs(opts.ExtraArgs, opts.CustomArgs, opts.McpConfig, logger)
+	if opts.ServiceTier == codexFastServiceTier {
+		launchArgs = enforceCodexFastMode(launchArgs, logger)
+	}
+	return append(args, launchArgs...)
 }
 
 // NormalizeCodexLaunchArgs returns the user-supplied Codex args (extra then
-// custom) exactly as buildCodexArgs hands them to the launched process: shell
-// quoting stripped, protocol-critical flags removed, and — when a managed
+// custom) after lower-priority normalization: shell quoting stripped,
+// protocol-critical flags removed, and — when a managed
 // mcp_config owns the mcp_servers namespace — stray `-c mcp_servers.*`
-// overrides dropped. buildCodexArgs only prepends the fixed
-// `app-server --listen stdio://` transport flags to this result.
+// overrides dropped. buildCodexArgs prepends the fixed
+// `app-server --listen stdio://` transport flags and may append an
+// agent-owned runtime override (currently `--enable fast_mode`) after this
+// result.
 //
 // It is exported so the daemon can reconstruct the *effective* launch args when
 // deciding the Windows sandbox mode. A `-c windows.sandbox=…` opt-in may arrive
@@ -166,6 +212,56 @@ func NormalizeCodexLaunchArgs(extraArgs, customArgs []string, mcpConfig json.Raw
 	return out
 }
 
+// enforceCodexFastMode makes the explicit agent service-tier selection
+// authoritative over daemon ExtraArgs, per-agent CustomArgs, and inherited
+// config.toml. Codex's `--disable fast_mode` wins over `--enable fast_mode`
+// regardless of argv order, so conflicting lower-priority disable flags must
+// be removed before the managed enable is appended. Conflicting `-c` /
+// `--config features.fast_mode=...` overrides are removed for the same
+// precedence reason, even though current Codex versions let `--enable` win:
+// the final argv should encode one unambiguous owner for this setting.
+//
+// Other disabled features are preserved, and this helper is used only for the
+// catalog-owned `priority` tier. Future service tiers must not accidentally
+// inherit Fast mode semantics.
+func enforceCodexFastMode(args []string, logger *slog.Logger) []string {
+	args = filterCodexConfigOverrides(
+		args,
+		codexManagedFastModeConfigKeyRe,
+		"features.fast_mode",
+		logger,
+	)
+	filtered := make([]string, 0, len(args)+2)
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		flag := arg
+		value := ""
+		hasInlineValue := false
+		if idx := strings.Index(arg, "="); idx > 0 {
+			flag = arg[:idx]
+			value = arg[idx+1:]
+			hasInlineValue = true
+		}
+		if flag == "--disable" {
+			if !hasInlineValue && i+1 < len(args) {
+				value = args[i+1]
+			}
+			if value == codexFastModeFeature {
+				if logger != nil {
+					logger.Warn("codex: ignored lower-priority feature disable",
+						"feature", codexFastModeFeature)
+				}
+				if !hasInlineValue {
+					i++
+				}
+				continue
+			}
+		}
+		filtered = append(filtered, arg)
+	}
+	return append(filtered, "--enable", codexFastModeFeature)
+}
+
 // hasManagedCodexMcpConfig reports whether the agent's mcp_config field is
 // "present" in the API three-state sense: a non-null JSON value. Both
 // `{}` and `{"mcpServers":{}}` count as present (the admin saved an empty
@@ -181,6 +277,9 @@ func hasManagedCodexMcpConfig(raw json.RawMessage) bool {
 // overrides that would otherwise shadow what the MCP Tab writes into
 // `$CODEX_HOME/config.toml`.
 var codexManagedMcpConfigKeyRe = regexp.MustCompile(`^\s*mcp_servers(?:\s*\.|\s*=|\s*$)`)
+
+var codexManagedFastModeConfigKeyRe = regexp.MustCompile(
+	`^\s*features\s*\.\s*fast_mode\s*(?:=|$)`)
 
 // A daemon-managed shell_environment_policy must also win over profile and
 // custom-arg overrides. Match root and profile policy keys without catching an
@@ -808,7 +907,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 	// Bound the wait after the context is cancelled so a stuck child (or an
 	// open pipe held by a grandchild) can't hang cmd.Wait() forever. Matches
 	// the other long-lived backends (claude, copilot, cursor, …).
-	cmd.WaitDelay = 10 * time.Second
+	cmd.WaitDelay = codexProcessWaitDelay()
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", codexArgs)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -868,6 +967,9 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		pending:              make(map[int]*pendingRPC),
 		processDone:          make(chan struct{}),
 		handshakeTimeout:     handshakeTimeout,
+		pid:                  cmd.Process.Pid,
+		attempt:              attempt,
+		activeLaunches:       activeLaunches,
 		notificationProtocol: "unknown",
 		acceptNotification:   turnNotificationGate.accept,
 		onDiscardedNotification: func(string, map[string]any) {
@@ -973,6 +1075,16 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			stdin.Close()
 
 			grace := codexGracefulShutdown()
+			waitCh := make(chan struct{})
+			var startWait sync.Once
+			startProcessWait := func() {
+				startWait.Do(func() {
+					go func() {
+						cleanupWaitErr = cmd.Wait()
+						close(waitCh)
+					}()
+				})
+			}
 
 			// Phase 1: let the reader finish before invoking cmd.Wait().
 			select {
@@ -990,17 +1102,26 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 					"grace", grace.String(),
 				)
 				cancel()
-				<-readerDone
+				// On Windows, Cancel terminates only the direct child. A
+				// descendant may keep inherited stdout open indefinitely. Start
+				// Wait now so os/exec's WaitDelay closes the pipe after its
+				// bounded deadline and lets the reader finish.
+				startProcessWait()
+				<-waitCh
+				select {
+				case <-readerDone:
+				case <-time.After(grace):
+					b.cfg.Logger.Warn("codex stdout reader remained open after bounded process wait",
+						"pid", cmd.Process.Pid,
+						"grace", grace.String(),
+					)
+				}
 			}
 
 			// Phase 2: bound cmd.Wait() in case the process is still alive
 			// (scanner-overflow case: reader exited early on its own while
 			// codex stayed blocked writing into a full stdout pipe).
-			waitCh := make(chan struct{})
-			go func() {
-				cleanupWaitErr = cmd.Wait()
-				close(waitCh)
-			}()
+			startProcessWait()
 			select {
 			case <-waitCh:
 				waitReturned = true
@@ -1021,7 +1142,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 			// Wait returning with a ProcessState is the os/exec reap boundary.
 			// On Unix, ProcessState.Exited reports false for a process terminated
 			// by SIGKILL even though Wait successfully reaped it.
-			cleanupConfirmed = waitReturned && cmd.ProcessState != nil
+			cleanupConfirmed = waitReturned && cmd.ProcessState != nil && waitProcessGroupGone(cmd.Process, grace)
 			if codexCleanupConfirmationOverride.Load() < 0 {
 				cleanupConfirmed = false
 			}
@@ -1038,7 +1159,6 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				"wait_error", cleanupWaitErr,
 				"stderr_bytes", stderrBuf.TotalBytes(),
 				"stderr_truncated", stderrBuf.TotalBytes() > codexStderrTailBytes,
-				"stderr_tail", sanitizeCodexDiagnostic(stderrBuf.Tail()),
 			)
 		})
 	}
@@ -1073,14 +1193,31 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		})
 		if err != nil {
 			initializeLatency := time.Since(initializeStarted)
+			var handshakeErr *codexHandshakeTimeoutError
+			timedOut := errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize"
+			if timedOut {
+				// A timed-out initialize may still complete after the host gives up.
+				// Kill the whole process group before waiting so a leader that exits
+				// on stdin EOF cannot leave detached-stdio descendants behind.
+				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+			}
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = withAgentStderr(fmt.Sprintf("codex initialize failed: %v", err), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
-			var handshakeErr *codexHandshakeTimeoutError
-			retrySafe := errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize" && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
-			if errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize" && !cleanupConfirmed {
+			finalError = fmt.Sprintf("codex initialize failed: %v", err)
+			contextEnded := errors.Is(err, context.DeadlineExceeded) || errors.Is(err, context.Canceled)
+			if !timedOut && !contextEnded {
+				// Timeout stderr is untrusted provider output and may echo opaque
+				// Config.Env/auth values that pattern sanitization cannot identify.
+				// The same applies when the parent task deadline/cancellation wins
+				// the race against the per-RPC handshake timeout.
+				// Keep it out of persisted/user-visible Results; cleanup lifecycle
+				// still records bounded byte/truncation metadata.
+				finalError = withAgentStderr(finalError, "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
+			}
+			retrySafe := timedOut && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
+			if timedOut && !cleanupConfirmed {
 				finalError += "; retry suppressed: process cleanup/reap not confirmed"
-			} else if errors.As(err, &handshakeErr) && handshakeErr.Method == "initialize" && cleanupConfirmed && !codexInitializeRetrySupported() {
+			} else if timedOut && cleanupConfirmed && !codexInitializeRetrySupported() {
 				finalError += "; retry suppressed: process-tree cleanup cannot be confirmed on this platform"
 			}
 			b.cfg.Logger.Warn("codex lifecycle", "phase", "initialize_failure", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "attempt", attempt, "latency", initializeLatency.Round(time.Millisecond).String(), "semantic_activity", semanticObserved.Load(), "cleanup_confirmed", cleanupConfirmed, "retry_safe", retrySafe)
@@ -1095,9 +1232,39 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// back to a fresh thread so the task still makes progress.
 		threadID, resumed, err := c.startOrResumeThread(runCtx, opts, b.cfg.Logger)
 		if err != nil {
+			var handshakeErr *codexHandshakeTimeoutError
+			timedOut := errors.As(err, &handshakeErr) && handshakeErr.Method == "thread/start"
+			if timedOut {
+				// A timed-out thread/start has an uncertain provider outcome. Kill
+				// the whole process group before waiting so a leader that exits on
+				// EOF cannot leave detached-stdio descendants behind.
+				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+			}
 			drainAndWait() // flush os/exec stderr goroutine before sampling Tail
 			finalStatus = "failed"
-			finalError = withAgentStderr(err.Error(), "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
+			stderrTail := sanitizeCodexDiagnostic(stderrBuf.Tail())
+			finalError = err.Error()
+			if c.threadStartSent {
+				classification := classifyCodexStartupStderr(stderrTail, timedOut)
+				b.cfg.Logger.Warn("codex lifecycle",
+					"phase", "thread_start_failure",
+					"task_id", b.cfg.TaskID,
+					"runtime_id", b.cfg.RuntimeID,
+					"pid", cmd.Process.Pid,
+					"attempt", attempt,
+					"active_launches", activeLaunches,
+					"method", "thread/start",
+					"latency", time.Since(c.threadStartStarted).Round(time.Millisecond).String(),
+					"latency_ms", time.Since(c.threadStartStarted).Milliseconds(),
+					"cleanup_confirmed", cleanupConfirmed,
+					"reaped", cleanupConfirmed,
+					"retry_safe", false,
+					"retry_attempted", false,
+					"stderr_model_refresh_timeout_count", classification.modelRefreshTimeout,
+					"stderr_mcp_init_transport_count", classification.mcpInitTransport,
+					"stderr_bare_timeout_count", classification.bareTimeout,
+				)
+			}
 			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 			return
 		}
@@ -1125,6 +1292,7 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 		// MUL-2339 — Trump's constraint that the three injection points
 		// must not drift independently).
 		applyCodexReasoningEffort(turnParams, opts.ThinkingLevel)
+		applyCodexServiceTier(turnParams, opts.ServiceTier)
 		waitingForTurn := true
 		var timeoutDiagnostic codexTimeoutDiagnostic
 		var processExitErr error
@@ -1394,6 +1562,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		// agent's thinking_level since. See MUL-2339 — Elon flagged that
 		// resume must honour the live config, not the stored one.
 		applyCodexReasoningEffort(resumeParams, opts.ThinkingLevel)
+		applyCodexServiceTier(resumeParams, opts.ServiceTier)
 		resumeResult, err := c.request(ctx, "thread/resume", resumeParams)
 		if err == nil {
 			if threadID := extractThreadID(resumeResult); threadID != "" {
@@ -1425,6 +1594,18 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"persistExtendedHistory": true,
 	}
 	applyCodexReasoningEffort(startParams, opts.ThinkingLevel)
+	applyCodexServiceTier(startParams, opts.ServiceTier)
+	c.threadStartSent = true
+	c.threadStartStarted = time.Now()
+	logger.Info("codex lifecycle",
+		"phase", "thread_start_sent",
+		"task_id", c.cfg.TaskID,
+		"runtime_id", c.cfg.RuntimeID,
+		"pid", c.pid,
+		"attempt", c.attempt,
+		"active_launches", c.activeLaunches,
+		"method", "thread/start",
+	)
 	startResult, err := c.request(ctx, "thread/start", startParams)
 	if err != nil {
 		return "", false, fmt.Errorf("codex thread/start failed: %w", err)
@@ -1433,6 +1614,17 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	if threadID == "" {
 		return "", false, fmt.Errorf("codex thread/start returned no thread ID")
 	}
+	logger.Info("codex lifecycle",
+		"phase", "thread_start_response",
+		"task_id", c.cfg.TaskID,
+		"runtime_id", c.cfg.RuntimeID,
+		"pid", c.pid,
+		"attempt", c.attempt,
+		"active_launches", c.activeLaunches,
+		"method", "thread/start",
+		"latency", time.Since(c.threadStartStarted).Round(time.Millisecond).String(),
+		"latency_ms", time.Since(c.threadStartStarted).Milliseconds(),
+	)
 	c.trySetThreadName(ctx, threadID, opts.ThreadName, logger)
 	return threadID, false, nil
 }
@@ -1487,6 +1679,16 @@ func applyCodexReasoningEffort(params map[string]any, level string) {
 	}
 	cfg["model_reasoning_effort"] = level
 	params["config"] = cfg
+}
+
+// applyCodexServiceTier writes the catalog-owned service tier to the
+// app-server's top-level serviceTier field. All three execution requests
+// accept the same shape. Empty is a no-op so config.toml remains authoritative.
+func applyCodexServiceTier(params map[string]any, tier string) {
+	if params == nil || tier == "" {
+		return
+	}
+	params["serviceTier"] = tier
 }
 
 func resetTimer(timer *time.Timer, d time.Duration) {
@@ -1650,6 +1852,11 @@ type codexClient struct {
 	processDone        chan struct{}
 	processErr         error
 	handshakeTimeout   time.Duration
+	pid                int
+	attempt            int
+	activeLaunches     int64
+	threadStartSent    bool
+	threadStartStarted time.Time
 	threadID           string
 	turnID             string
 	onMessage          func(Message)

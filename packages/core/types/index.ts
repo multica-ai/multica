@@ -53,6 +53,7 @@ export type {
   RuntimeUpdate,
   RuntimeUpdateStatus,
   RuntimeModel,
+  RuntimeModelServiceTier,
   RuntimeModelThinking,
   RuntimeModelThinkingLevel,
   RuntimeModelListRequest,

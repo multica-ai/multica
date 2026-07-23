@@ -1,9 +1,13 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useStore } from "zustand";
 import { ListTodo, Search } from "lucide-react";
-import type { Issue } from "@multica/core/types";
+import type {
+  Issue,
+  IssueTableFacetSpec,
+  IssueTableFacetsResponse,
+} from "@multica/core/types";
 import {
   actorIssuesViewStore,
   type ActorIssuesScope,
@@ -16,23 +20,11 @@ import {
   ViewRefreshIndicator,
 } from "../issues/components/issues-header";
 import { IssueSurface } from "../issues/surface/issue-surface";
-import { matchesPinyin } from "../editor/extensions/pinyin-match";
 import { useT } from "../i18n";
 
 export type TaskActorType = "member" | "agent";
 
 const SCOPE_VALUES: ActorIssuesScope[] = ["assigned", "created"];
-
-function issueMatchesSearch(issue: Issue, rawQuery: string) {
-  const query = rawQuery.trim().toLowerCase();
-  if (!query) return true;
-  const title = issue.title ?? "";
-  return (
-    title.toLowerCase().includes(query) ||
-    issue.identifier.toLowerCase().includes(query) ||
-    matchesPinyin(title, query)
-  );
-}
 
 function ActorIssuesHeader({
   issues,
@@ -41,6 +33,9 @@ function ActorIssuesHeader({
   scope,
   onScopeChange,
   isRefreshing = false,
+  facetCountsExact,
+  tableFacetCounts,
+  onTableFacetChange,
 }: {
   issues: Issue[];
   search: string;
@@ -48,6 +43,9 @@ function ActorIssuesHeader({
   scope: ActorIssuesScope;
   onScopeChange: (scope: ActorIssuesScope) => void;
   isRefreshing?: boolean;
+  facetCountsExact: boolean;
+  tableFacetCounts?: IssueTableFacetsResponse;
+  onTableFacetChange: (facet: IssueTableFacetSpec | null) => void;
 }) {
   const { t } = useT("issues");
 
@@ -90,7 +88,13 @@ function ActorIssuesHeader({
         </div>
       </div>
       <div className="flex items-center">
-        <IssueDisplayControls scopedIssues={issues} hideViewToggle />
+        <IssueDisplayControls
+          scopedIssues={issues}
+          hideViewToggle
+          facetCountsExact={facetCountsExact}
+          tableFacetCounts={tableFacetCounts}
+          onTableFacetChange={onTableFacetChange}
+        />
         <ViewRefreshIndicator active={isRefreshing} />
       </div>
     </div>
@@ -108,10 +112,6 @@ export function ActorIssuesPanel({
   const scope = useStore(actorIssuesViewStore, (s) => s.scope);
   const setScope = useStore(actorIssuesViewStore, (s) => s.setScope);
   const [search, setSearch] = useState("");
-  const clientFilter = useCallback(
-    (issue: Issue) => issueMatchesSearch(issue, search),
-    [search],
-  );
   const surfaceScope = useMemo(
     () =>
       ({
@@ -129,8 +129,7 @@ export function ActorIssuesPanel({
       modes={["list"]}
       batchToolbar="always"
       contentClassName="p-1"
-      clientFilter={clientFilter}
-      showClientEmpty={() => search.trim() !== ""}
+      search={search}
       renderHeader={({ controller }) => (
         <ActorIssuesHeader
           issues={controller.surfaceIssues}
@@ -139,10 +138,13 @@ export function ActorIssuesPanel({
           scope={scope}
           onScopeChange={setScope}
           isRefreshing={controller.isRefreshing}
+          facetCountsExact={controller.facetCountsExact}
+          tableFacetCounts={controller.tableFacetCounts}
+          onTableFacetChange={controller.setActiveTableFacet}
         />
       )}
-      renderEmpty={({ controller }) =>
-        controller.surfaceIssues.length === 0 ? (
+      renderEmpty={() =>
+        search.trim() === "" ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <ListTodo className="h-10 w-10 text-muted-foreground/40" />
             <p className="text-sm">

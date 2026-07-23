@@ -3,7 +3,6 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
 import { cn } from "@multica/ui/lib/utils";
 import { useTabHistory } from "@/hooks/use-tab-history";
-import { useTabStore } from "@/stores/tab-store";
 import {
   SidebarProvider,
   SidebarTrigger,
@@ -17,7 +16,10 @@ import { WorkspaceSlugProvider, paths, useCurrentWorkspace } from "@multica/core
 import { useNavigation } from "@multica/views/navigation";
 import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
 import { useDesktopUnreadBadge } from "@multica/views/platform";
-import { DesktopNavigationProvider } from "@/platform/navigation";
+import {
+  DesktopNavigationProvider,
+  routeContentLinkPath,
+} from "@/platform/navigation";
 import { TabBar } from "./tab-bar";
 import { TabContent } from "./tab-content";
 import { WindowOverlay } from "./window-overlay";
@@ -152,11 +154,7 @@ function useInternalLinkHandler() {
     const handler = (e: Event) => {
       const path = (e as CustomEvent).detail?.path;
       if (!path) return;
-      const store = useTabStore.getState();
-      // Empty seed title — the tab bar derives the real title from the URL and
-      // cache; a raw path would flash before that resolves.
-      const tabId = store.openTab(path, "");
-      store.setActiveTab(tabId);
+      routeContentLinkPath(path);
     };
     window.addEventListener("multica:navigate", handler);
     return () => window.removeEventListener("multica:navigate", handler);

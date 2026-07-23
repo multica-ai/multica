@@ -45,7 +45,7 @@ export function MyIssuesPage() {
               scope={scope}
               onScopeChange={setScope}
               isRefreshing={controller.isRefreshing}
-              facetCountsExact={controller.viewMode !== "table"}
+              facetCountsExact={controller.facetCountsExact}
               tableFacetCounts={controller.tableFacetCounts}
               onTableFacetChange={controller.setActiveTableFacet}
             />

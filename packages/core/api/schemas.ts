@@ -26,6 +26,7 @@ import type {
   IssueProperty,
   ListPropertiesResponse,
   IssuePropertiesResponse,
+  IssueTableGroupDescriptor,
   IssueTableFacetsResponse,
   IssueTableGroupsResponse,
   IssueTableRowsResponse,
@@ -576,6 +577,14 @@ const IssueTableActorRefSchema = z.object({
   id: z.string(),
 }).loose();
 
+const IssueTableParentRefSchema = z.object({
+  id: z.string(),
+  number: z.number(),
+  identifier: z.string(),
+  title: z.string(),
+  status: z.string(),
+}).loose();
+
 const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
   z.object({
     kind: z.literal("status"),
@@ -586,6 +595,16 @@ const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
     actor: IssueTableActorRefSchema.nullable(),
   }).loose(),
   z.object({
+    kind: z.literal("project"),
+    project_id: z.string().nullable().optional().default(null),
+  }).loose(),
+  z.object({
+    kind: z.literal("parent"),
+    parent_id: z.string().nullable().optional().default(null),
+    parent: IssueTableParentRefSchema.nullable().optional().default(null),
+    value_state: z.enum(["value", "unavailable", "unset"]),
+  }).loose(),
+  z.object({
     kind: z.literal("property"),
     property_id: z.string(),
     value: z.union([z.string(), z.boolean(), z.null()]).optional(),
@@ -593,11 +612,12 @@ const IssueTableGroupValueSchema = z.discriminatedUnion("kind", [
   }).loose(),
 ]);
 
-const IssueTableGroupDescriptorSchema = z.object({
+const IssueTableGroupDescriptorSchema: z.ZodType<IssueTableGroupDescriptor> = z.lazy(() => z.object({
   key: z.string(),
   value: IssueTableGroupValueSchema,
   count: z.number(),
-}).loose();
+  secondary_groups: z.array(IssueTableGroupDescriptorSchema).optional(),
+}).loose());
 
 export const IssueTableGroupsResponseSchema = z.object({
   query_fingerprint: z.string(),

@@ -65,7 +65,7 @@ export function IssuesPage() {
             issues={controller.surfaceIssues}
             workingIssues={workingIssues}
             isRefreshing={controller.isRefreshing}
-            facetCountsExact={controller.viewMode !== "table"}
+            facetCountsExact={controller.facetCountsExact}
             tableFacetCounts={controller.tableFacetCounts}
             onTableFacetChange={controller.setActiveTableFacet}
           />

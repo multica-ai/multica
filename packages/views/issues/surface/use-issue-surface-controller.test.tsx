@@ -8,7 +8,6 @@ import type { ReactNode } from "react";
 import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import { issueKeys } from "@multica/core/issues/queries";
 import {
   getIssueSurfaceViewStore,
   pruneIssueSurfaceViewStates,
@@ -23,6 +22,7 @@ import type {
 } from "@multica/core/types";
 import { useIssueSurfaceController } from "./use-issue-surface-controller";
 import { IssueTableExportIntegrityError } from "../components/table-view-model";
+import { statusTableMethodsFromLegacy } from "./status-table-test-api";
 
 function makeIssue(
   overrides: Partial<Issue> & Pick<Issue, "id" | "status">,
@@ -123,13 +123,21 @@ describe("useIssueSurfaceController", () => {
   let getAgentTaskSnapshot: ReturnType<
     typeof vi.fn<() => Promise<AgentTask[]>>
   >;
+  let listIssueTableRows: ReturnType<typeof vi.fn>;
+  let listIssueTableFacets: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     listIssues = vi.fn(() => never<ListIssuesResponse>());
     getAgentTaskSnapshot = vi.fn(() => never<AgentTask[]>());
+    const tableMethods = statusTableMethodsFromLegacy(listIssues);
+    listIssueTableRows = vi.fn(tableMethods.listIssueTableRows);
+    listIssueTableFacets = vi.fn(tableMethods.listIssueTableFacets);
     setApiInstance({
       listIssues,
+      ...tableMethods,
+      listIssueTableRows,
+      listIssueTableFacets,
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot,
@@ -149,7 +157,7 @@ describe("useIssueSurfaceController", () => {
     vi.restoreAllMocks();
   });
 
-  it("derives the project scope key, API filter, and sorted myList cache key", async () => {
+  it("derives the project scope and canonical server query", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setSortBy("priority");
     store.getState().setSortDirection("desc");
@@ -163,7 +171,7 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    await waitFor(() => expect(listIssues).toHaveBeenCalled());
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
 
     const expectedSort = { sort_by: "priority", sort_direction: "desc" } as const;
     const expectedFilter = { project_id: "p1" };
@@ -171,27 +179,23 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.scopeKey).toBe("project:p1");
     expect(result.current.filter).toEqual(expectedFilter);
     expect(result.current.sort).toEqual(expectedSort);
-    expect(
-      qc.getQueryCache().find({
-        queryKey: issueKeys.myListSorted(
-          "ws-1",
-          "project:p1",
-          expectedFilter,
-          expectedSort,
-        ),
-        exact: true,
-      }),
-    ).toBeDefined();
-    expect(listIssues).toHaveBeenCalledWith(
+    expect(result.current.tableQuerySpec).toEqual(
       expect.objectContaining({
-        project_id: "p1",
-        sort_by: "priority",
-        sort_direction: "desc",
+        scope: { kind: "project", project_id: "p1" },
+        sort: { field: "priority", direction: "desc" },
+      }),
+    );
+    expect(listIssueTableRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: expect.objectContaining({
+          scope: { kind: "project", project_id: "p1" },
+        }),
+        group: { kind: "status" },
       }),
     );
   });
 
-  it("uses the workspace issue list query for workspace scope", async () => {
+  it("uses the unified workspace query for workspace scope", async () => {
     const { result } = renderHook(
       () =>
         useIssueSurfaceController({
@@ -201,27 +205,65 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "workspace:all") },
     );
 
-    await waitFor(() => expect(listIssues).toHaveBeenCalled());
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
 
     expect(result.current.scopeKey).toBe("workspace:all");
     expect(result.current.filter).toEqual({});
     expect(result.current.loadMoreScope).toBeUndefined();
     expect(result.current.loadMoreFilter).toBeUndefined();
-    expect(
-      qc.getQueryCache().find({
-        queryKey: issueKeys.listSorted("ws-1", {
-          sort_by: "position",
-          sort_direction: undefined,
-        }),
-        exact: true,
+    expect(result.current.tableQuerySpec.scope).toEqual({
+      kind: "workspace",
+    });
+    expect(listIssueTableRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        group_key: "status:backlog",
+        page: { limit: 50, cursor: null },
       }),
-    ).toBeDefined();
-    expect(listIssues).toHaveBeenCalledWith(
-      expect.objectContaining({ status: "backlog", limit: 50, offset: 0 }),
     );
   });
 
-  it("maps my assigned scope to the existing personal issue query contract", async () => {
+  it("does not subscribe List to the legacy issue endpoint", async () => {
+    const legacyListIssues = vi.fn(() => never<ListIssuesResponse>());
+    const tableRows = vi.fn(async (request: any) => ({
+      query_fingerprint: "test",
+      group_key: request.group_key,
+      parent_id: null,
+      total: 0,
+      rows: [],
+      branch_total: 0,
+      next_cursor: null,
+    }));
+    const tableFacets = vi.fn(async () => ({
+      query_fingerprint: "test",
+      total: 0,
+      facets: [{ kind: "status" as const, values: [] }],
+    }));
+    setApiInstance({
+      listIssues: legacyListIssues,
+      listIssueTableRows: tableRows,
+      listIssueTableFacets: tableFacets,
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      getAgentTaskSnapshot,
+      getChildIssueProgress: vi.fn(() => never()),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "workspace", actorKind: "all" },
+          modes: ["list"],
+        }),
+      { wrapper: makeWrapper(qc, "workspace:all") },
+    );
+
+    await waitFor(() => expect(result.current.isLoading).toBe(false));
+    expect(tableRows).toHaveBeenCalled();
+    expect(tableFacets).toHaveBeenCalled();
+    expect(legacyListIssues).not.toHaveBeenCalled();
+  });
+
+  it("maps my assigned scope to the unified personal query contract", async () => {
     const { result } = renderHook(
       () =>
         useIssueSurfaceController({
@@ -231,30 +273,20 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "my:user-1:assigned") },
     );
 
-    await waitFor(() => expect(listIssues).toHaveBeenCalled());
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
 
     const expectedFilter = { assignee_id: "user-1" };
     expect(result.current.scopeKey).toBe("my:user-1:assigned");
     expect(result.current.filter).toEqual(expectedFilter);
     expect(result.current.loadMoreScope).toBe("assigned");
     expect(result.current.loadMoreFilter).toEqual(expectedFilter);
-    expect(
-      qc.getQueryCache().find({
-        queryKey: issueKeys.myListSorted(
-          "ws-1",
-          "assigned",
-          expectedFilter,
-          { sort_by: "position", sort_direction: undefined },
-        ),
-        exact: true,
-      }),
-    ).toBeDefined();
-    expect(listIssues).toHaveBeenCalledWith(
-      expect.objectContaining({ assignee_id: "user-1" }),
-    );
+    expect(result.current.tableQuerySpec.scope).toEqual({
+      kind: "my",
+      relation: "assigned",
+    });
   });
 
-  it("keeps actor scopes keyed by actor while using the shared list query shape", async () => {
+  it("keeps actor scopes keyed by actor in the unified query shape", async () => {
     const { result } = renderHook(
       () =>
         useIssueSurfaceController({
@@ -269,27 +301,17 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "actor:agent:agent-1:assigned") },
     );
 
-    await waitFor(() => expect(listIssues).toHaveBeenCalled());
+    await waitFor(() => expect(listIssueTableRows).toHaveBeenCalled());
 
     const expectedFilter = { assignee_id: "agent-1" };
     expect(result.current.scopeKey).toBe("actor:agent:agent-1:assigned");
     expect(result.current.filter).toEqual(expectedFilter);
     expect(result.current.loadMoreScope).toBe("actor:agent:agent-1:assigned");
     expect(result.current.loadMoreFilter).toEqual(expectedFilter);
-    expect(
-      qc.getQueryCache().find({
-        queryKey: issueKeys.myListSorted(
-          "ws-1",
-          "actor:agent:agent-1:assigned",
-          expectedFilter,
-          { sort_by: "position", sort_direction: undefined },
-        ),
-        exact: true,
-      }),
-    ).toBeDefined();
-    expect(listIssues).toHaveBeenCalledWith(
-      expect.objectContaining({ assignee_id: "agent-1" }),
-    );
+    expect(result.current.tableQuerySpec.scope).toEqual({
+      kind: "assignee",
+      actor: { type: "agent", id: "agent-1" },
+    });
   });
 
   it.each([
@@ -370,7 +392,7 @@ describe("useIssueSurfaceController", () => {
     expect(result.current.selection.selectedIds).toEqual(new Set());
   });
 
-  it("delegates movement through useUpdateIssue without rewriting the mutation path", () => {
+  it("delegates drag movement as a server-owned relative intent", () => {
     const { result } = renderHook(
       () =>
         useIssueSurfaceController({
@@ -384,13 +406,28 @@ describe("useIssueSurfaceController", () => {
     act(() => {
       result.current.moveIssue(
         "issue-1",
-        { status: "in_progress", position: 42, project_id: "p2" },
+        {
+          status: "in_progress",
+          position: 42,
+          project_id: "p2",
+          before_id: "issue-0",
+          after_id: "issue-2",
+        },
         onSettled,
       );
     });
 
     expect(updateIssueMutate).toHaveBeenCalledWith(
-      { id: "issue-1", status: "in_progress", position: 42, project_id: "p2" },
+      {
+        id: "issue-1",
+        status: "in_progress",
+        position: 42,
+        project_id: "p2",
+        move_intent: {
+          before_id: "issue-0",
+          after_id: "issue-2",
+        },
+      },
       expect.objectContaining({
         onError: expect.any(Function),
         onSettled: expect.any(Function),
@@ -560,6 +597,98 @@ describe("useIssueSurfaceController", () => {
     act(() => result.current.setActiveTableFacet(null));
     expect(result.current.tableFacetCounts).toBeUndefined();
   });
+
+  it.each([
+    {
+      name: "Assignee Board",
+      configure: (store: ReturnType<typeof getIssueSurfaceViewStore>) => {
+        store.getState().setViewMode("board");
+        store.getState().setGrouping("assignee");
+      },
+      properties: [],
+    },
+    {
+      name: "Property Board",
+      configure: (store: ReturnType<typeof getIssueSurfaceViewStore>) => {
+        store.getState().setViewMode("board");
+        store.getState().setGrouping("property:severity");
+      },
+      properties: [
+        {
+          id: "severity",
+          workspace_id: "ws-1",
+          name: "Severity",
+          type: "select",
+          config: { options: [] },
+          position: 0,
+          archived: false,
+          created_at: "2026-01-01T00:00:00Z",
+          updated_at: "2026-01-01T00:00:00Z",
+        },
+      ],
+    },
+    {
+      name: "Swimlane",
+      configure: (store: ReturnType<typeof getIssueSurfaceViewStore>) => {
+        store.getState().setViewMode("swimlane");
+      },
+      properties: [],
+    },
+  ])(
+    "loads exact filter facets on demand for the server-paged $name",
+    async ({ configure, properties }) => {
+      const store = getIssueSurfaceViewStore("project:p1");
+      configure(store);
+      const listIssueTableFacets = vi.fn().mockResolvedValue({
+        query_fingerprint: "sha256:group-facets",
+        total: 0,
+        facets: [{ kind: "priority", values: [{ key: "high", count: 37 }] }],
+      });
+      const tableMethods = statusTableMethodsFromLegacy(listIssues);
+      setApiInstance({
+        listIssues,
+        ...tableMethods,
+        listIssueTableFacets,
+        listGroupedIssues: vi.fn(() => never()),
+        listProjects: vi.fn(() => never()),
+        listProperties: vi.fn(() =>
+          Promise.resolve({ properties, total: properties.length }),
+        ),
+        getAgentTaskSnapshot: vi.fn(() => Promise.resolve([])),
+        getChildIssueProgress: vi.fn(() => Promise.resolve([])),
+      } as unknown as ApiClient);
+
+      const { result } = renderHook(
+        () =>
+          useIssueSurfaceController({
+            scope: { type: "project", projectId: "p1" },
+            modes: ["board", "list", "swimlane"],
+          }),
+        { wrapper: makeWrapper(qc, "project:p1") },
+      );
+
+      expect(result.current.facetCountsExact).toBe(false);
+      expect(listIssueTableFacets).not.toHaveBeenCalled();
+
+      act(() => result.current.setActiveTableFacet({ kind: "priority" }));
+
+      await waitFor(() => expect(listIssueTableFacets).toHaveBeenCalledTimes(1));
+      expect(listIssueTableFacets).toHaveBeenCalledWith(
+        expect.objectContaining({
+          facets: [{ kind: "priority" }],
+          include_total: false,
+        }),
+      );
+      await waitFor(() =>
+        expect(result.current.tableFacetCounts?.facets).toEqual([
+          { kind: "priority", values: [{ key: "high", count: 37 }] },
+        ]),
+      );
+
+      act(() => result.current.setActiveTableFacet(null));
+      expect(result.current.tableFacetCounts).toBeUndefined();
+    },
+  );
 
   it("fails Table export closed when schema fallback would truncate the CSV", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
@@ -1108,7 +1237,7 @@ describe("useIssueSurfaceController", () => {
   // snapshot against the PRE-filter issue set, so any active filter made the
   // chip disagree with the list it was filtering.
 
-  it("keeps the working scope identical to the rendered rows when the filter is on", async () => {
+  it("sends the working filter to the server without reconstructing a local scope", async () => {
     mockListByStatus({
       todo: [
         makeIssue({ id: "todo-1", status: "todo" }),
@@ -1135,23 +1264,13 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    await waitFor(() =>
-      expect(result.current.workingScopeIssues?.length).toBe(2),
-    );
-
-    // The scope the chip counts agents within must be the rendered list
-    // itself — that identity is what keeps the chip in step with the filter
-    // (the chip's own number counts agents, not these rows).
-    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual(
-      result.current.issues.map((i) => i.id),
-    );
-    expect(result.current.issues.map((i) => i.id).sort()).toEqual([
-      "prog-1",
-      "todo-1",
-    ]);
+    expect(result.current.tableQuerySpec.filters.working_only).toBe(true);
+    // Membership is cursor-paged and server-owned. A partial page cannot
+    // produce the exact activity-chip scope, so it stays explicitly unknown.
+    expect(result.current.workingScopeIssues).toBeUndefined();
   });
 
-  it("predicts the post-click rows while the filter is still off", async () => {
+  it("keeps the activity-chip scope unknown before the server filter is enabled", async () => {
     mockListByStatus({
       todo: [
         makeIssue({ id: "todo-1", status: "todo" }),
@@ -1172,19 +1291,14 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    await waitFor(() =>
-      expect(result.current.workingScopeIssues?.length).toBe(1),
-    );
 
-    // Filter off: the list still shows both rows, but the chip already
-    // reports the one row a click would leave.
+    // Filter off: the list still shows both loaded rows, while the exact
+    // post-click membership remains unknown until the backend predicate runs.
     expect(result.current.issues).toHaveLength(2);
-    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
-      "todo-1",
-    ]);
+    expect(result.current.workingScopeIssues).toBeUndefined();
   });
 
-  it("narrows the working scope with the status filter, exactly like the list", async () => {
+  it("combines the status and working predicates in the canonical server query", async () => {
     mockListByStatus({
       todo: [makeIssue({ id: "todo-1", status: "todo" })],
       in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
@@ -1197,7 +1311,10 @@ describe("useIssueSurfaceController", () => {
 
     // ...but the user is only looking at `todo`.
     const store = getIssueSurfaceViewStore("project:p1");
-    act(() => store.getState().toggleStatusFilter("todo"));
+    act(() => {
+      store.getState().toggleStatusFilter("todo");
+      store.getState().toggleAgentRunningFilter();
+    });
 
     const { result } = renderHook(
       () =>
@@ -1209,18 +1326,13 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    await waitFor(() =>
-      expect(result.current.workingScopeIssues?.length).toBe(1),
-    );
 
-    // The regression: the chip used to say 2 here (both issues have running
-    // agents) while clicking it produced a single row.
-    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
-      "todo-1",
-    ]);
+    expect(result.current.tableQuerySpec.filters.statuses).toEqual(["todo"]);
+    expect(result.current.tableQuerySpec.filters.working_only).toBe(true);
+    expect(result.current.workingScopeIssues).toBeUndefined();
   });
 
-  it("hides sub-issues from the working scope when the list hides them", async () => {
+  it("sends the sub-issue display rule to the same server query", async () => {
     mockListByStatus({
       todo: [
         makeIssue({ id: "parent-1", status: "todo" }),
@@ -1245,9 +1357,8 @@ describe("useIssueSurfaceController", () => {
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
-    // The only running work sits on a sub-issue the display toggle hides, so
-    // clicking the filter would leave zero rows — the chip must say 0, not 1.
-    expect(result.current.workingScopeIssues).toEqual([]);
+    expect(result.current.tableQuerySpec.filters.include_sub_issues).toBe(false);
+    expect(result.current.workingScopeIssues).toBeUndefined();
   });
 
   it("keeps issue-less chat/autopilot tasks out of the working scope", async () => {
@@ -1257,7 +1368,6 @@ describe("useIssueSurfaceController", () => {
     // issue_id "" is how the API models a chat/autopilot task — it must not
     // become a phantom row (it used to inflate the count by exactly 1).
     getAgentTaskSnapshot.mockResolvedValue([
-      makeRunningTask("t-1", "agent-1", "todo-1"),
       makeRunningTask("t-2", "agent-2", ""),
       makeRunningTask("t-3", "agent-3", ""),
     ]);
@@ -1272,19 +1382,10 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    await waitFor(() =>
-      expect(result.current.workingScopeIssues?.length).toBe(1),
-    );
-
-    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
-      "todo-1",
-    ]);
+    expect(result.current.workingScopeIssues).toEqual([]);
   });
 
-  it("scopes swimlane to the cards it draws, not its statusless lane source", async () => {
-    // SwimLaneView draws cards from `issues` (status filter applied) and uses
-    // the statusless `swimlaneIssues` only for LANE DISCOVERY. Scoping the
-    // chip to the statusless set counted rows the canvas never draws.
+  it("keeps swimlane chrome bounded while descriptors retain hidden-status counts", async () => {
     mockListByStatus({
       todo: [makeIssue({ id: "todo-1", status: "todo" })],
       in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
@@ -1310,20 +1411,19 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    await waitFor(() =>
-      expect(result.current.workingScopeIssues?.length).toBe(1),
-    );
-
-    expect(result.current.workingScopeIssues?.map((i) => i.id)).toEqual([
-      "todo-1",
-    ]);
-    expect(result.current.issues.map((i) => i.id)).toEqual(["todo-1"]);
-    // The statusless lane source still carries both — so a regression back to
-    // it would make the assertion above fail rather than pass by accident.
-    expect(result.current.swimlaneIssues.map((i) => i.id).sort()).toEqual([
-      "prog-1",
-      "todo-1",
-    ]);
+    // Like Table/List, the migrated Swimlane owns cursor branches and does
+    // not materialize another complete working-only window for the chip.
+    expect(result.current.workingScopeIssues).toBeUndefined();
+    // Controller-only tests do not mount lane cells, so no row branch should
+    // activate merely because its descriptor exists.
+    expect(result.current.issues).toEqual([]);
+    expect(result.current.swimlaneIssues).toEqual([]);
+    expect(
+      result.current.groupBranches?.descriptors
+        .flatMap((lane) => lane.secondary_groups ?? [])
+        .map((cell) => cell.value.kind === "status" ? cell.value.status : "")
+        .sort(),
+    ).toEqual(["in_progress", "todo"]);
   });
 
   // --- gantt canvas scope ------------------------------------------------

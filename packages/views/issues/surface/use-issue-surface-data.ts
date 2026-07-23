@@ -29,6 +29,11 @@ import {
 } from "../utils/filter";
 import type { ChildProgress } from "../components/list-row";
 import type { IssueSurfaceActivity } from "./activity";
+import type {
+  IssueStatusBranches,
+  IssueStatusPagination,
+} from "./use-issue-status-branches";
+import type { IssueGroupBranches } from "./use-issue-group-branches";
 
 const EMPTY_ISSUES: Issue[] = [];
 const EMPTY_CHILD_PROGRESS = new Map<string, ChildProgress>();
@@ -76,6 +81,7 @@ export interface IssueSurfaceData {
   ganttIssues: Issue[];
   visibleStatuses: IssueStatus[];
   hiddenStatuses: IssueStatus[];
+  statusPagination: IssueStatusPagination;
   activeFilters: Omit<IssueFilters, "statusFilters" | "runningIssueIds">;
   activity: IssueSurfaceActivity;
   childProgressMap: Map<string, ChildProgress>;
@@ -103,6 +109,8 @@ export function useIssueSurfaceData({
   usesAssigneeBoard,
   usesGantt,
   usesTable,
+  serverStatusBranches,
+  serverGroupBranches,
   ganttShowCompleted,
   sort,
   activity,
@@ -125,6 +133,8 @@ export function useIssueSurfaceData({
   usesAssigneeBoard: boolean;
   usesGantt: boolean;
   usesTable: boolean;
+  serverStatusBranches: IssueStatusBranches;
+  serverGroupBranches: IssueGroupBranches;
   /** Gantt's "show completed" display toggle. The canvas hides done/cancelled
    *  rows without it, so the working scope has to honour it too. */
   ganttShowCompleted: boolean;
@@ -184,11 +194,16 @@ export function useIssueSurfaceData({
 
   const statusIssuesQuery = useQuery({
     ...issueSurfaceListOptions(wsId, queryPlan, sort),
-    enabled: !usesAssigneeBoard && !usesGantt && !usesTable,
+    enabled:
+      !usesAssigneeBoard &&
+      !usesGantt &&
+      !usesTable &&
+      !serverStatusBranches.enabled &&
+      !serverGroupBranches.enabled,
   });
   const assigneeGroupsQuery = useQuery({
     ...activeAssigneeGroupsOptions,
-    enabled: usesAssigneeBoard,
+    enabled: usesAssigneeBoard && !serverGroupBranches.enabled,
   });
   const ganttIssuesQuery = useQuery({
     ...issueSurfaceGanttOptions(wsId, projectId ?? ""),
@@ -196,10 +211,22 @@ export function useIssueSurfaceData({
   });
   const hasRunningIssues = activity.runningIssueIds.size > 0;
   const bucketedIssues = useMemo(() => {
-    return usesAssigneeBoard
+    return serverStatusBranches.enabled
+      ? serverStatusBranches.issues
+      : serverGroupBranches.enabled
+      ? serverGroupBranches.issues
+      : usesAssigneeBoard
       ? (assigneeGroupsQuery.data?.groups.flatMap((group) => group.issues) ?? [])
       : (statusIssuesQuery.data ?? EMPTY_ISSUES);
-  }, [assigneeGroupsQuery.data?.groups, statusIssuesQuery.data, usesAssigneeBoard]);
+  }, [
+    assigneeGroupsQuery.data?.groups,
+    serverStatusBranches.enabled,
+    serverStatusBranches.issues,
+    serverGroupBranches.enabled,
+    serverGroupBranches.issues,
+    statusIssuesQuery.data,
+    usesAssigneeBoard,
+  ]);
 
   // `cancelled` is a first-class default status (MUL-4290): it is fetched into
   // the cache like every other status and flows straight through to list /
@@ -243,8 +270,16 @@ export function useIssueSurfaceData({
   );
 
   const issues = useMemo(
-    () => applyIssueFilters(surfaceIssues, baseFilterState, filterContext),
-    [baseFilterState, filterContext, surfaceIssues],
+    () =>
+      serverStatusBranches.enabled
+        ? surfaceIssues
+        : applyIssueFilters(surfaceIssues, baseFilterState, filterContext),
+    [
+      baseFilterState,
+      filterContext,
+      serverStatusBranches.enabled,
+      surfaceIssues,
+    ],
   );
 
   const statuslessFilterState = useMemo<IssueFilterState>(
@@ -330,7 +365,7 @@ export function useIssueSurfaceData({
         ganttShowCompleted,
       );
     }
-    if (usesAssigneeBoard) {
+    if (usesAssigneeBoard && !serverGroupBranches.enabled) {
       return (
         filterAssigneeGroups(assigneeGroupsQuery.data?.groups, {
           showSubIssues,
@@ -340,7 +375,7 @@ export function useIssueSurfaceData({
         }) ?? []
       ).flatMap((group) => group.issues);
     }
-    if (usesTable) {
+    if (usesTable || serverStatusBranches.enabled || serverGroupBranches.enabled) {
       // Table membership is server-owned and cursor paged. Do not rebuild a
       // second complete issue window merely to decorate the activity chip:
       // that was the final hidden auto-materialization loop behind the old
@@ -369,6 +404,8 @@ export function useIssueSurfaceData({
     usesAssigneeBoard,
     usesGantt,
     usesTable,
+    serverStatusBranches.enabled,
+    serverGroupBranches.enabled,
   ]);
 
   const {
@@ -465,24 +502,32 @@ export function useIssueSurfaceData({
     ],
   );
 
-  const isLoading = usesAssigneeBoard
-    ? assigneeGroupsQuery.isLoading
-    : usesGantt
+  const isLoading = serverGroupBranches.enabled
+    ? serverGroupBranches.isLoading
+    : usesAssigneeBoard
+      ? assigneeGroupsQuery.isLoading
+      : usesGantt
       ? ganttIssuesQuery.isLoading
       : usesTable
         ? false
-        : statusIssuesQuery.isLoading;
+        : serverStatusBranches.enabled
+          ? serverStatusBranches.isLoading
+          : statusIssuesQuery.isLoading;
 
   // Placeholder-backed revalidation of the ACTIVE query only. First loads are
   // isLoading (no previous data to place-hold); gantt has no placeholder
   // phase (its key carries no sort/filter).
-  const isRefreshing = usesAssigneeBoard
-    ? assigneeGroupsQuery.isPlaceholderData
-    : usesGantt
+  const isRefreshing = serverGroupBranches.enabled
+    ? serverGroupBranches.isRefreshing
+    : usesAssigneeBoard
+      ? assigneeGroupsQuery.isPlaceholderData
+      : usesGantt
       ? false
       : usesTable
         ? false
-        : statusIssuesQuery.isPlaceholderData;
+        : serverStatusBranches.enabled
+          ? serverStatusBranches.isRefreshing
+          : statusIssuesQuery.isPlaceholderData;
 
   return {
     surfaceIssues,
@@ -502,6 +547,7 @@ export function useIssueSurfaceData({
     ganttIssues,
     visibleStatuses,
     hiddenStatuses,
+    statusPagination: serverStatusBranches.pagination,
     activeFilters,
     activity,
     childProgressMap,
@@ -521,6 +567,12 @@ export function useIssueSurfaceData({
       !isLoading &&
       !usesGantt &&
       !usesTable &&
-      surfaceIssues.length === 0,
+      (serverStatusBranches.enabled
+        ? serverStatusBranches.isTotalKnown &&
+          serverStatusBranches.total === 0
+        : serverGroupBranches.enabled
+          ? !serverGroupBranches.isError &&
+            serverGroupBranches.total === 0
+        : surfaceIssues.length === 0),
   };
 }

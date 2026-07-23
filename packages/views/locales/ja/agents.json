@@ -145,7 +145,7 @@
     "section_profile": "プロフィール",
     "section_profile_hint": "ワークスペース内でのエージェントの表示を管理します。",
     "section_execution": "実行設定",
-    "section_execution_hint": "ランタイム、モデル、思考レベル、同時タスク数を設定します。",
+    "section_execution_hint": "ランタイム、モデル、思考レベル、速度、同時タスク数を設定します。",
     "section_access": "アクセス",
     "section_access_hint": "このエージェントと接続済み機能を利用できる相手を管理します。",
     "section_properties": "プロパティ",
@@ -156,6 +156,7 @@
     "prop_runtime": "ランタイム",
     "prop_model": "モデル",
     "prop_thinking": "思考",
+    "prop_speed": "速度",
     "prop_visibility": "公開範囲",
     "prop_concurrency": "同時実行数",
     "prop_owner": "オーナー",
@@ -214,7 +215,11 @@
     "thinking_default": "CLI 設定に従う",
     "thinking_tooltip": "思考 · {{value}}",
     "thinking_clear": "CLI 設定に従う",
-    "thinking_clear_title": "上書きをクリアし、推論レベルをローカルの CLI 設定（claude/codex）に任せます"
+    "thinking_clear_title": "上書きをクリアし、推論レベルをローカルの CLI 設定（claude/codex）に任せます",
+    "service_tier_default": "ランタイムのデフォルト",
+    "service_tier_tooltip": "速度 · {{value}}",
+    "service_tier_clear": "ランタイムのデフォルト",
+    "service_tier_clear_title": "速度の上書きをクリアし、ローカルの Codex 設定に任せます"
   },
   "model_dropdown": {
     "label": "モデル",

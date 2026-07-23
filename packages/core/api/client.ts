@@ -2,6 +2,7 @@ import type {
   Issue,
   IssuePriority,
   CreateIssueRequest,
+  MoveIssueRequest,
   UpdateIssueRequest,
   GroupedIssuesResponse,
   ListIssuesResponse,
@@ -827,6 +828,13 @@ export class ApiClient {
   async updateIssue(id: string, data: UpdateIssueRequest): Promise<Issue> {
     return this.fetch(`/api/issues/${id}`, {
       method: "PUT",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async moveIssue(id: string, data: MoveIssueRequest): Promise<Issue> {
+    return this.fetch(`/api/issues/${id}/move`, {
+      method: "POST",
       body: JSON.stringify(data),
     });
   }

@@ -24,8 +24,8 @@ multica agent env get <agent-id> --output json  # plaintext env (owner/admin onl
 ```
 
 `agent get` returns the persisted agent including `runtime_id`, `model`,
-`thinking_level`, `custom_args`, `has_custom_env`, `custom_env_key_count`, and
-`skills`. It never returns plaintext `custom_env`.
+`thinking_level`, `service_tier`, `custom_args`, `has_custom_env`,
+`custom_env_key_count`, and `skills`. It never returns plaintext `custom_env`.
 
 ## Core model
 
@@ -58,12 +58,12 @@ multica agent create --name <name> --runtime-id <runtime-id> \
 `runAgentCreate` builds a JSON body and posts it to `/api/agents`. It only
 adds a key when its flag was provided — `description`/`instructions` on a
 non-empty value, the rest (`runtime-config`, `custom-args`, `model`,
-`thinking-level`, `visibility`, …) on the flag being `Changed` — so omitted
+`thinking-level`, `service-tier`, `visibility`, …) on the flag being `Changed` — so omitted
 flags fall through to server defaults rather than sending empty strings.
 
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 `instructions`, `avatar_url`, `runtime_id`, `runtime_config`, `custom_env`,
-`custom_args`, `model`, `thinking_level`, `visibility`,
+`custom_args`, `model`, `thinking_level`, `service_tier`, `visibility`,
 `max_concurrent_tasks`, `mcp_config`.
 
 ## Field contracts
@@ -77,6 +77,7 @@ The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 | `runtime_id` | `agent.runtime_id` | required (400) + must resolve to a runtime in this workspace | selects runtime/provider |
 | `model` | `agent.model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |
 | `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum; unknown literal → 400 | daemon; empty = runtime default |
+| `service_tier` | `agent.service_tier` (nullable) | Codex-only safe token; other providers reject; exact model/tier pair checked by daemon | daemon → Codex app-server; empty = local Codex config |
 | `custom_args` | `agent.custom_args` (JSON array) | JSON shape checked CLI-side; server stores as-is | daemon (extra CLI switches); defaults to `[]` |
 | `runtime_config` | `agent.runtime_config` (JSON) | JSON shape checked CLI-side; server stores as-is | runtime-specific config; defaults to `{}` |
 | `custom_env` | `agent.custom_env` (JSON object) | — | daemon (process env); see Env & secrets |
@@ -107,6 +108,14 @@ model catalog). It forwards the token, the server applies the provider's
 fixed-enum or safe-token gate, and the daemon performs the exact model/level
 check. A runtime whose provider has no thinking concept rejects any non-empty
 value with a 400.
+
+`service_tier` is the matching first-class Codex speed control. Set it with
+`--service-tier <catalog-id>` on create/update; use `--service-tier ""` on
+update to clear it. The runtime model catalog owns both availability and
+display copy (currently `priority`, shown as Fast). The server accepts safe
+future Codex catalog IDs, while the daemon verifies the exact model/tier pair
+before execution and omits a stale incompatible override. Agents without an
+explicit model fail closed because the effective config.toml model is unknown.
 
 ### model vs custom_args
 
