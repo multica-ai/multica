@@ -1805,3 +1805,23 @@ listening on `before.issue.status_change` exists.
 | `daemon-workpad-brief` | `server/internal/handler/daemon.go` | One-line `h.applyWorkpadBrief(...)` call at claim (resolver lives in the cerebro-prefixed `daemon_workpad_brief_cerebro.go`). |
 | `issue-workpad-panel` | `packages/views/issues/components/issue-detail.tsx` | Import + one-line `<WorkpadPanel issueId={issue.id} />` render directly above the bottom composer, showing the issue's plan (a `kind:"plan"` artifact) as a checklist. Logic lives in `packages/cerebro-artifacts`. |
 | `one-plan-per-issue` | `server/internal/handler/artifact.go` | One-line `h.rejectSecondIssuePlan(...)` call in CreateArtifact so an issue can hold at most one `plan` artifact (the Workpad's source). Logic lives in `artifact_one_plan_per_issue_cerebro.go`. |
+
+## FIR-3729 — Cursor tool-policy key normalization
+
+| Patch | Location | Reason |
+|---|---|---|
+| `cursor-tool-policy-key` | `server/internal/handler/daemon_tool_policy_cerebro.go` | Normalize Cursor `preToolUse` names to the canonical Cursor runtime inventory before task-mandate and permission checks, so allowed Cursor tools are not denied because the provider uses different names. |
+
+Approved by Jesper Hvejsel via FIR-3729 takeover request, 2026-07-23.
+
+## MUL-5156 — Squad leaders own parent issue status (backport)
+
+Backport of upstream `fcb370edfd23624c83cc7db4ac111ca73e20fa30` (MUL-5156, #5758) — ported fork-native because the runtime-brief and child-done paths have diverged from upstream. **Delete on the next upstream sync** — this aligns the fork with upstream's own change, not fork-only behaviour. Squad leaders now open an assigned parent to `in_progress` on first dispatch, keep it there while members work, and move it to `in_review` only when a later re-trigger confirms the overall goal is met; `done` stays human/integration owned. Guest leaders (an `@squad` mention on an issue owned by someone else, or a quick-create turn) receive an explicit "do NOT change this issue's status" instead of the grant.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `squad-parent-status` | `server/internal/daemon/execenv/runtime_config.go` (2 marked call sites; helpers in the net-new cerebro sibling `runtime_config_squad_status_cerebro.go`) | The fork inlines the comment/assignment workflows into `buildMetaSkillContent` rather than upstream's `writeWorkflowComment`/`writeWorkflowAssignment` helpers, so the `IsSquadLeader` carve-outs (step 9 comment guardrail exception; step 8 assignment "leave parent in_progress after dispatch") live in the sibling and are called via one marked `WriteString` each. |
+| `squad-parent-status` | `server/internal/handler/squad_briefing.go` | Split `squadOperatingProtocol` into `squadOperatingProtocolHeader` + `squadOperatingProtocolHardRules`, add `squadParentStatusOwned`/`squadParentStatusNotOwned` (responsibility 6) and `squadOperatingProtocolFor(ownsIssueStatus)`, and thread `ownsIssueStatus` through `buildSquadLeaderBriefing`. |
+| `squad-parent-status` | `server/internal/handler/daemon.go` | Compute `ownsIssueStatus` (issue `assignee_type == "squad"` && `assignee_id == squad.id`) at the issue-bound leader-briefing call site; quick-create passes `false` (no issue exists yet). |
+
+**Deliberately NOT ported** (documented, not silent): upstream's `issue_child_done.go` nudge (all-sub-issues-complete / stage-advance system comment gains a `multica issue status <parent> in_review` instruction). The fork's `notifyParentOfChildDone` diverged — it posts a per-child backlog-promotion notice and has no all-complete or stage-advance branch (stage/verify orchestration lives in the fork-owned `orchestration_cerebro.go`), so there is no matching code path. The standing "Own the parent issue status" grant already authorizes the owning leader to wrap up without an explicit ask, so the contract holds without it.
