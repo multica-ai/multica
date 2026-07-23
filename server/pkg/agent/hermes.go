@@ -682,6 +682,11 @@ func waitForHermesPipeDrain(readerDone, stderrDone <-chan struct{}, timeout time
 type hermesPromptResult struct {
 	stopReason string
 	usage      TokenUsage
+	// modelID is the model the agent actually billed this turn against, as
+	// reported on `result._meta.modelId`. Empty for agents that don't report
+	// it. Backends use it to attribute usage when the session handshake
+	// didn't surface a model id (see grok.go).
+	modelID string
 }
 
 type hermesClient struct {
@@ -1115,6 +1120,7 @@ func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 
 	pr := hermesPromptResult{
 		stopReason: resp.StopReason,
+		modelID:    parseACPModelIDFromMeta(resp.Meta),
 	}
 	if len(resp.Usage) > 0 && string(resp.Usage) != "null" {
 		pr.usage = parseACPTokenUsage(resp.Usage)
@@ -1162,6 +1168,28 @@ func parseACPTokenUsageFromMeta(meta json.RawMessage) TokenUsage {
 		}
 	}
 	return parseACPTokenUsage(meta)
+}
+
+// parseACPModelIDFromMeta pulls the model id off an ACP result `_meta`
+// object. Grok Build stamps every turn with `_meta.modelId`, which is the
+// only authoritative statement of what the turn was billed against — the
+// session handshake reports a model id on `session/new` but NOT on
+// `session/load`, so a resumed session has no other source.
+func parseACPModelIDFromMeta(meta json.RawMessage) string {
+	if len(meta) == 0 || string(meta) == "null" {
+		return ""
+	}
+	var r struct {
+		ModelID      string `json:"modelId"`
+		ModelIDSnake string `json:"model_id"`
+	}
+	if err := json.Unmarshal(meta, &r); err != nil {
+		return ""
+	}
+	if id := strings.TrimSpace(r.ModelID); id != "" {
+		return id
+	}
+	return strings.TrimSpace(r.ModelIDSnake)
 }
 
 func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {

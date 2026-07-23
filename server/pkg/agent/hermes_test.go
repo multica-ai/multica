@@ -1578,6 +1578,42 @@ func TestHermesClientExtractPromptResultMetaUsage(t *testing.T) {
 	if got.usage.CacheReadTokens != 10880 {
 		t.Errorf("cacheReadTokens: got %d, want 10880", got.usage.CacheReadTokens)
 	}
+	// The turn stamps the model it billed against. A resumed session has no
+	// other source for this (session/load reports no model id), so losing it
+	// buckets the whole run under "unknown", which prices at $0.
+	if got.modelID != "grok-4.5" {
+		t.Errorf("modelID: got %q, want %q", got.modelID, "grok-4.5")
+	}
+}
+
+// TestParseACPModelIDFromMeta covers the shapes the `_meta` model id can
+// arrive in, and confirms a missing one degrades to empty rather than
+// inventing an attribution.
+func TestParseACPModelIDFromMeta(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "camelCase", raw: `{"modelId":"grok-4.5"}`, want: "grok-4.5"},
+		{name: "snake_case", raw: `{"model_id":"grok-4.3"}`, want: "grok-4.3"},
+		{name: "camelCase wins over snake_case", raw: `{"modelId":"grok-4.5","model_id":"grok-4.3"}`, want: "grok-4.5"},
+		{name: "whitespace trimmed", raw: `{"modelId":"  grok-4.5  "}`, want: "grok-4.5"},
+		{name: "absent", raw: `{"sessionId":"ses_1"}`, want: ""},
+		{name: "empty string", raw: `{"modelId":""}`, want: ""},
+		{name: "null meta", raw: `null`, want: ""},
+		{name: "malformed", raw: `{"modelId":`, want: ""},
+		{name: "wrong type degrades to empty", raw: `{"modelId":42}`, want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := parseACPModelIDFromMeta(json.RawMessage(tc.raw)); got != tc.want {
+				t.Errorf("parseACPModelIDFromMeta(%s): got %q, want %q", tc.raw, got, tc.want)
+			}
+		})
+	}
 }
 
 // TestHermesClientExtractPromptResultMetaFlatOnly covers agents that put

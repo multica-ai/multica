@@ -618,6 +618,54 @@ func TestGrokPropagatesMCPAndUsage(t *testing.T) {
 	}
 }
 
+// TestGrokAttributesUsageOnResumeWithoutConfiguredModel pins the model
+// attribution on the resume path. `session/load` reports no model id (only
+// `session/new` does), so when neither the agent nor the runtime pins a model
+// the turn's own `_meta.modelId` is the only source left. Without it the whole
+// run buckets under "unknown", which matches no pricing row and reports $0
+// spend for the task.
+func TestGrokAttributesUsageOnResumeWithoutConfiguredModel(t *testing.T) {
+	t.Parallel()
+	tempDir := t.TempDir()
+	fakePath := filepath.Join(tempDir, "grok")
+	writeTestExecutable(t, fakePath, []byte(fakeGrokACPScript()))
+	backend, err := New("grok", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"GROK_USAGE": "1"},
+	})
+	if err != nil {
+		t.Fatalf("new grok backend: %v", err)
+	}
+	// No Model: the daemon leaves it empty whenever neither the agent nor
+	// MULTICA_GROK_MODEL pins one (see daemon.go resolveModel).
+	session, err := backend.Execute(context.Background(), "continue", ExecOptions{
+		ResumeSessionID: "ses_existing",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if _, unknown := result.Usage["unknown"]; unknown {
+		t.Fatalf("resumed usage fell back to the unpriced \"unknown\" bucket: %+v", result.Usage)
+	}
+	usage, ok := result.Usage["grok-4.5"]
+	if !ok {
+		t.Fatalf("usage missing grok-4.5 key: %+v", result.Usage)
+	}
+	if usage.InputTokens != 100 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 {
+		t.Fatalf("unexpected usage: %+v", usage)
+	}
+}
+
 func TestGrokTimeoutAndCancellation(t *testing.T) {
 	for _, tc := range []struct {
 		name       string
