@@ -1761,3 +1761,23 @@ Approved by Jesper Hvejsel on FIR-3539 ("Fix det" + "find en måde hvor det ikke
 |---|---|---|
 | `attachment-ocr-hermetic-test` | `server/internal/handler/file_test.go`, `server/internal/handler/attachment_ocr_runner_cerebro_test.go` | `TestGetAttachmentContent_PDFWithoutTextAndNoOCRBinary` relied on the host actually lacking `pdftoppm`/`tesseract`, so it passed in CI (no OCR binaries) but false-failed on dev machines with OCR installed. The upstream test now contains only the three-line runner injection; the Cerebro-owned sibling defines the runner that reports OCR tools as absent. Test-only; matches the existing `DefaultRunner` injection used by the sibling OCR tests. Ideally upstreamed at `multica-ai/multica`. |
 | `agent-task-issue-title` (extension) | `server/internal/handler/daemon.go` | FIR-3708 — the FIR-2763 M1 patch added `IssueTitle` / `ParentIssueTitle` response fields on the claim payload, but no assignment was ever written, so the daemon's trace-upload sidecar sent empty titles and every `ai_proxy_logs` row in the registry landed with a NULL issue title (the trace explorer fell back to raw UUIDs). 4 marked lines in the claim response builder populate both fields from the already-loaded issue row (parent title via one extra `GetIssue` when the issue has a parent). |
+
+## FIR-3659 — Workpad: description checklist convention + status-change gate
+
+Fork-owned implementation lives in `server/internal/cerebro/evals/workpad.go` (issue-target
+eval running the deterministic workpad check), `server/internal/cerebro/workflows/issue_status_gate.go`
+(dispatch of the previously-unfired `before.issue.status_change` hook event),
+`server/internal/cerebro/workflows/hook_eval_condition.go` (`eval_failed` deferred condition
+operator, fresh-run semantics), `server/internal/handler/cerebro_issue_status_gate.go`
+(handler-side seam) and `server/internal/daemon/execenv/cerebro_workpad_brief.go`
+(flag-gated Workpad protocol brief section, `CEREBRO_WORKPAD_BRIEF_ENABLED`).
+The gate only ever applies to agent actors; members are never blocked. Everything is
+dark until `CEREBRO_WORKFLOW_HOOKS_ENABLED` is on AND a workspace hook policy listening
+on `before.issue.status_change` exists.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `issue-status-gate` | `server/internal/handler/issue.go` | 5-line call into `cerebroGateIssueStatusChange` before the UpdateIssue transaction so a hook policy can 422 an agent's status change (workpad start-gate). |
+| `handler-issue-status-gate` | `server/internal/handler/handler.go` | `IssueStatusGate` seam field on Handler (interface satisfied by `*cerebroworkflows.IssueStatusGate`). |
+| `issue-status-gate-wire` | `server/cmd/server/router.go` | Wire `workflowHooksFeature.StatusGate` into the handler seam. |
+| `cerebro-workpad-brief` | `server/internal/daemon/execenv/runtime_config.go` | One `b.WriteString(cerebroWorkpadBrief())` callsite adding the flag-gated Workpad protocol section to the runtime brief. |

@@ -17,6 +17,9 @@ const (
 	TargetAgent    = "agent"
 	TargetSkill    = "skill"
 	TargetWorkflow = "workflow"
+	// TargetIssue runs a deterministic, token-free check against the run's
+	// issue row (FIR-3659); see workpad.go. Ref selects the check ("workpad").
+	TargetIssue = "issue"
 )
 
 // TargetSpec is the typed `target` object. Kind selects the adapter; Ref is the
