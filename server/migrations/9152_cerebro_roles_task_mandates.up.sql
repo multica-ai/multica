@@ -29,6 +29,34 @@ CREATE TABLE IF NOT EXISTS cerebro_task_mandate (
 CREATE INDEX IF NOT EXISTS idx_cerebro_task_mandate_agent_expiry
     ON cerebro_task_mandate (agent_id, expires_at);
 
+-- Translate every retired key through the capability dictionary instead of
+-- copying an observed alias into the enforcing policy table. Unknown and
+-- semantic-variant keys return NULL and remain visible in the archive below.
+CREATE OR REPLACE FUNCTION cerebro_canonical_policy_tool_key(legacy_key TEXT)
+RETURNS TEXT
+LANGUAGE SQL
+STABLE
+AS $$
+    WITH identity AS (
+        SELECT capability_id
+        FROM cerebro_capability_alias
+        WHERE key_value = legacy_key
+          AND relation IN ('canonical', 'alias')
+        ORDER BY CASE surface
+            WHEN 'policy' THEN 0 WHEN 'gateway' THEN 1 WHEN 'bridge' THEN 2
+            WHEN 'mcp' THEN 3 WHEN 'api-endpoint' THEN 4 ELSE 5 END
+        LIMIT 1
+    )
+    SELECT alias.key_value
+    FROM cerebro_capability_alias alias
+    JOIN identity ON identity.capability_id = alias.capability_id
+    WHERE alias.relation = 'canonical'
+    ORDER BY CASE alias.surface
+        WHEN 'policy' THEN 0 WHEN 'gateway' THEN 1 WHEN 'bridge' THEN 2
+        WHEN 'mcp' THEN 3 WHEN 'api-endpoint' THEN 4 ELSE 5 END
+    LIMIT 1
+$$;
+
 -- Keep an inert, auditable copy of the complete legacy payload before the
 -- enforcing table is retired. Generic allow/deny choices migrate into the
 -- canonical policy below; tool-specific config that has no canonical mapping
@@ -57,7 +85,7 @@ ON CONFLICT (workspace_id, agent_id, tool_name) DO NOTHING;
 INSERT INTO cerebro_tool_policy (
     workspace_id, tool_key, layer, subject_id, setting, resource_pattern, conditions
 )
-SELECT ag.workspace_id, atg.tool_name, 'agent', atg.agent_id,
+SELECT ag.workspace_id, cerebro_canonical_policy_tool_key(atg.tool_name), 'agent', atg.agent_id,
        CASE
            WHEN atg.tool_name = 'firtal_registry' AND NOT atg.enabled THEN 'deny'
            WHEN atg.tool_name = 'firtal_registry'
@@ -90,6 +118,7 @@ SELECT ag.workspace_id, atg.tool_name, 'agent', atg.agent_id,
        END
 FROM agent_tool_grant atg
 JOIN agent ag ON ag.id = atg.agent_id
+WHERE cerebro_canonical_policy_tool_key(atg.tool_name) IS NOT NULL
 ON CONFLICT (workspace_id, tool_key, layer, subject_id, resource_pattern) DO NOTHING;
 
 -- Preserve the two Registry config booleans as explicit, deny-by-default
@@ -97,25 +126,27 @@ ON CONFLICT (workspace_id, tool_key, layer, subject_id, resource_pattern) DO NOT
 INSERT INTO cerebro_tool_policy (
     workspace_id, tool_key, layer, subject_id, setting, resource_pattern, conditions
 )
-SELECT ag.workspace_id, 'firtal_registry', 'agent', atg.agent_id,
+SELECT ag.workspace_id, cerebro_canonical_policy_tool_key(atg.tool_name), 'agent', atg.agent_id,
        CASE WHEN COALESCE((atg.config_json ->> 'allowed_apps')::boolean, false)
             THEN 'allow' ELSE 'deny' END,
        'action:list_apps', NULL
 FROM agent_tool_grant atg
 JOIN agent ag ON ag.id=atg.agent_id
 WHERE atg.tool_name='firtal_registry' AND atg.enabled=true
+  AND cerebro_canonical_policy_tool_key(atg.tool_name) IS NOT NULL
 ON CONFLICT (workspace_id, tool_key, layer, subject_id, resource_pattern) DO NOTHING;
 
 INSERT INTO cerebro_tool_policy (
     workspace_id, tool_key, layer, subject_id, setting, resource_pattern, conditions
 )
-SELECT ag.workspace_id, 'firtal_registry', 'agent', atg.agent_id,
+SELECT ag.workspace_id, cerebro_canonical_policy_tool_key(atg.tool_name), 'agent', atg.agent_id,
        CASE WHEN COALESCE((atg.config_json ->> 'allow_write')::boolean, false)
             THEN 'allow' ELSE 'deny' END,
        'action:update_app', NULL
 FROM agent_tool_grant atg
 JOIN agent ag ON ag.id=atg.agent_id
 WHERE atg.tool_name='firtal_registry' AND atg.enabled=true
+  AND cerebro_canonical_policy_tool_key(atg.tool_name) IS NOT NULL
 ON CONFLICT (workspace_id, tool_key, layer, subject_id, resource_pattern) DO NOTHING;
 
 -- Preserve current agent-layer choices as versioned, permanent role bindings.

@@ -475,13 +475,39 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 	`); err != nil {
 		t.Fatalf("recreate agent_tool_grant: %v", err)
 	}
+	if _, err := tx.Exec(ctx, `
+		INSERT INTO cerebro_canonical_capability (canonical_id, family, source_reference)
+		VALUES ('platform:legacy.allowed_tool', 'platform', 'migration-test'),
+		       ('platform:legacy.denied_tool', 'platform', 'migration-test'),
+		       ('platform:legacy.configured_tool', 'platform', 'migration-test'),
+		       ('gateway:firtal_registry', 'gateway', 'migration-test')
+		ON CONFLICT (canonical_id) DO NOTHING;
+
+		INSERT INTO cerebro_capability_alias (
+			capability_id, surface, provider, key_value, resource_pattern,
+			key_source, relation, source_reference
+		)
+		VALUES
+			('platform:legacy.allowed_tool', 'policy', '', 'legacy.allowed_tool', '', 'platform', 'canonical', 'migration-test'),
+			('platform:legacy.allowed_tool', 'runtime', 'claude', 'legacy.allowed_alias', '', '', 'alias', 'migration-test'),
+			('platform:legacy.denied_tool', 'policy', '', 'legacy.denied_tool', '', 'platform', 'canonical', 'migration-test'),
+			('platform:legacy.configured_tool', 'policy', '', 'legacy.configured_tool', '', 'platform', 'canonical', 'migration-test'),
+			('gateway:firtal_registry', 'gateway', '', 'firtal_registry', '', '', 'canonical', 'migration-test')
+		ON CONFLICT (surface, provider, key_value, resource_pattern, key_source) DO NOTHING;
+	`); err != nil {
+		t.Fatalf("seed capability aliases: %v", err)
+	}
 
 	agent := uuidByte(171)
+	agentAll := uuidByte(172)
+	agentDisabled := uuidByte(173)
 	const tool = "replay.role_tool"
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO agent (id, workspace_id, name, runtime_mode)
-		VALUES ($1, $2, 'Migration replay agent', 'local')
-	`, agent, tpTestWorkspaceID); err != nil {
+		VALUES ($1, $4, 'Migration replay agent', 'local'),
+		       ($2, $4, 'Migration replay all-sources agent', 'local'),
+		       ($3, $4, 'Migration replay disabled agent', 'local')
+	`, agent, agentAll, agentDisabled, tpTestWorkspaceID); err != nil {
 		t.Fatalf("create migration replay agent: %v", err)
 	}
 	if _, err := tx.Exec(ctx, `
@@ -501,11 +527,13 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 	}
 	if _, err := tx.Exec(ctx, `
 		INSERT INTO agent_tool_grant (agent_id, tool_name, enabled, config_json)
-		VALUES ($1, 'legacy.allowed_tool', true, NULL),
+		VALUES ($1, 'legacy.allowed_alias', true, NULL),
 		       ($1, 'legacy.denied_tool', false, NULL),
 		       ($1, 'legacy.configured_tool', true, '{"mode":"restricted","scope":["one"]}'::jsonb),
-		       ($1, 'firtal_registry', true, '{"allowed_data_sources":["source-b","source-a"],"allowed_apps":true,"allow_write":false}'::jsonb)
-	`, agent); err != nil {
+		       ($1, 'firtal_registry', true, '{"allowed_data_sources":["source-b","source-a"],"allowed_apps":true,"allow_write":false}'::jsonb),
+		       ($2, 'firtal_registry', true, '{"allowed_data_sources_all":true,"allowed_data_sources":[],"allowed_apps":false,"allow_write":true}'::jsonb),
+		       ($3, 'firtal_registry', false, '{"allowed_data_sources_all":true,"allowed_apps":true,"allow_write":true}'::jsonb)
+	`, agent, agentAll, agentDisabled); err != nil {
 		t.Fatalf("seed legacy direct grants: %v", err)
 	}
 	// Two agent-layer rows for the SAME tool that differ on resource_pattern —
@@ -565,6 +593,18 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 		}
 	}
 
+	var archivedAlias string
+	if err := tx.QueryRow(ctx, `
+		SELECT tool_name
+		FROM cerebro_legacy_agent_tool_grant_archive
+		WHERE workspace_id = $1 AND agent_id = $2 AND tool_name = 'legacy.allowed_alias'
+	`, tpTestWorkspaceID, agent).Scan(&archivedAlias); err != nil {
+		t.Fatalf("read archived alias: %v", err)
+	}
+	if archivedAlias != "legacy.allowed_alias" {
+		t.Fatalf("archive lost observed alias: %q", archivedAlias)
+	}
+
 	var registryRaw []byte
 	if err := tx.QueryRow(ctx, `
 		SELECT permissions -> 'firtal_registry' FROM cerebro_role
@@ -590,6 +630,36 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 	if registryDataSourceCondition == nil || len(registryDataSourceCondition.ArgAllowlist) != 1 {
 		t.Fatalf("Registry data-source condition = %+v, want one data_source_id allowlist", registryDataSourceCondition)
 	}
+
+	assertRegistryCapability := func(subject pgtype.UUID, wantSetting string, wantConditions bool) {
+		t.Helper()
+		var raw []byte
+		if err := tx.QueryRow(ctx, `
+			SELECT permissions -> 'firtal_registry'
+			FROM cerebro_role
+			WHERE workspace_id = $1 AND name = 'Migrated agent ' || $2::text
+		`, tpTestWorkspaceID, util.UUIDToString(subject)).Scan(&raw); err != nil {
+			t.Fatalf("read Registry role for %s: %v", util.UUIDToString(subject), err)
+		}
+		rules, err := decodeRolePermission(bytes.TrimSpace(raw))
+		if err != nil {
+			t.Fatalf("decode Registry role for %s: %v", util.UUIDToString(subject), err)
+		}
+		for _, rule := range rules {
+			if rule.ResourcePattern == "" {
+				if rule.Setting != wantSetting {
+					t.Fatalf("Registry setting for %s = %s, want %s", util.UUIDToString(subject), rule.Setting, wantSetting)
+				}
+				if (rule.Conditions != nil) != wantConditions {
+					t.Fatalf("Registry conditions for %s = %+v, want present=%v", util.UUIDToString(subject), rule.Conditions, wantConditions)
+				}
+				return
+			}
+		}
+		t.Fatalf("Registry capability-wide rule missing for %s: %+v", util.UUIDToString(subject), rules)
+	}
+	assertRegistryCapability(agentAll, "allow", false)
+	assertRegistryCapability(agentDisabled, "deny", false)
 	argAllow := registryDataSourceCondition.ArgAllowlist[0]
 	if argAllow.Arg != "data_source_id" || !reflect.DeepEqual(argAllow.Values, []string{"source-b", "source-a"}) {
 		t.Fatalf("Registry data-source allowlist = %+v, want the exact legacy source restriction", argAllow)

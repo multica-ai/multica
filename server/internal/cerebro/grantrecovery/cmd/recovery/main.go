@@ -84,8 +84,15 @@ func run(ctx context.Context, args []string) error {
 		return fmt.Errorf("open target: %w", err)
 	}
 	defer target.Close()
+	if err := requireSeparateDatabases(ctx, source, target); err != nil {
+		return err
+	}
 
 	grants, err := loadLegacyGrants(ctx, source, opts.workspaceID)
+	if err != nil {
+		return err
+	}
+	grants, err = canonicalizeLegacyGrants(ctx, target, grants)
 	if err != nil {
 		return err
 	}
@@ -147,8 +154,60 @@ func loadLegacyGrants(ctx context.Context, source *pgxpool.Pool, workspaceID str
 	return grants, nil
 }
 
+func canonicalizeLegacyGrants(ctx context.Context, target identityQuerier, grants []grantrecovery.LegacyGrant) ([]grantrecovery.LegacyGrant, error) {
+	canonical := make([]grantrecovery.LegacyGrant, len(grants))
+	copy(canonical, grants)
+	for index := range canonical {
+		var toolName *string
+		err := target.QueryRow(ctx, `SELECT cerebro_canonical_policy_tool_key($1)`, canonical[index].ToolName).Scan(&toolName)
+		if err != nil {
+			return nil, fmt.Errorf("resolve canonical capability for %q: %w", canonical[index].ToolName, err)
+		}
+		if toolName == nil || strings.TrimSpace(*toolName) == "" {
+			canonical[index].ToolName = ""
+			continue
+		}
+		canonical[index].ToolName = *toolName
+	}
+	return canonical, nil
+}
+
 type targetQuerier interface {
 	Query(context.Context, string, ...any) (pgx.Rows, error)
+}
+
+type identityQuerier interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
+func requireSeparateDatabases(ctx context.Context, source, target identityQuerier) error {
+	sourceIdentity, err := databaseIdentity(ctx, source)
+	if err != nil {
+		return fmt.Errorf("identify source database: %w", err)
+	}
+	targetIdentity, err := databaseIdentity(ctx, target)
+	if err != nil {
+		return fmt.Errorf("identify target database: %w", err)
+	}
+	if sourceIdentity == targetIdentity {
+		return errors.New("source and target connections resolve to the same physical database")
+	}
+	return nil
+}
+
+func databaseIdentity(ctx context.Context, queryer identityQuerier) (string, error) {
+	var serverAddress, serverPort, databaseID string
+	err := queryer.QueryRow(ctx, `
+		SELECT COALESCE(inet_server_addr()::text, 'local-socket'),
+		       inet_server_port()::text,
+		       oid::text
+		FROM pg_database
+		WHERE datname = current_database()
+	`).Scan(&serverAddress, &serverPort, &databaseID)
+	if err != nil {
+		return "", err
+	}
+	return serverAddress + ":" + serverPort + ":" + databaseID, nil
 }
 
 func loadTargetState(ctx context.Context, target targetQuerier, workspaceID string) ([]grantrecovery.Rule, map[string]bool, error) {
