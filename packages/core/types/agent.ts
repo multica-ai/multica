@@ -791,9 +791,27 @@ export interface IssueUsageSummary {
   total_output_tokens: number;
   total_cache_read_tokens: number;
   total_cache_write_tokens: number;
+  // Optional unlike the usage-row types: `getIssueUsage` returns this shape
+  // unvalidated (no zod schema), so nothing guarantees the field is present
+  // when the backend is older than the cost split.
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
   task_count: number;
 }
 
+// `cost_usd_ticks` + `uncosted_*`: the cost split every usage row carries.
+// All five are optional: a backend older than the split sends none of them,
+// and `undefined` has to stay distinguishable from a real 0 (see below).
+// The provider priced the rows behind `cost_usd_ticks` itself (1e-10 USD);
+// `uncosted_*` are the tokens it did not price, and are the only ones that
+// should go through the client's rate table. The `uncosted_*` fields are
+// optional because a backend older than the split omits them — `undefined`
+// there means "estimate from the full token counts", which is not the same as
+// a real 0 ("nothing left to estimate"). See estimateCost in
+// packages/views/runtimes/utils.ts.
 export interface RuntimeUsage {
   runtime_id: string;
   date: string;
@@ -803,6 +821,11 @@ export interface RuntimeUsage {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
 }
 
 export interface RuntimeHourlyActivity {
@@ -823,6 +846,11 @@ export interface RuntimeUsageByAgent {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
   task_count: number;
 }
 
@@ -836,6 +864,11 @@ export interface RuntimeUsageByHour {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
   task_count: number;
 }
 
@@ -853,6 +886,11 @@ export interface DashboardUsageDaily {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
   task_count: number;
 }
 
@@ -867,6 +905,11 @@ export interface DashboardUsageByAgent {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
   task_count: number;
 }
 

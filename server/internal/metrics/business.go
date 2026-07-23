@@ -250,7 +250,11 @@ func (m *BusinessMetrics) RecordTaskLeaseExpired(source string) {
 	m.taskLeaseExpired.WithLabelValues(NormalizeTaskSource(source)).Inc()
 }
 
-func (m *BusinessMetrics) RecordLLMUsage(source, runtimeMode, rawProvider, modelAlias string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) {
+// costUSDTicks is the provider's own price for this usage in 1e-10 USD, or 0
+// when it reported none. When present it wins over the rate table: the table
+// cannot express request-level rules such as xAI's 2x surcharge above a 200K
+// prompt, so for those providers the local estimate is structurally low.
+func (m *BusinessMetrics) RecordLLMUsage(source, runtimeMode, rawProvider, modelAlias string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUSDTicks int64) {
 	if m == nil {
 		return
 	}
@@ -268,11 +272,44 @@ func (m *BusinessMetrics) RecordLLMUsage(source, runtimeMode, rawProvider, model
 		return
 	}
 
-	m.recordPricedTokens(price.Provider, price.Model, "input", runtimeMode, source, inputTokens, tokenCostUSD(inputTokens, price.InputPerM))
-	m.recordPricedTokens(price.Provider, price.Model, "output", runtimeMode, source, outputTokens, tokenCostUSD(outputTokens, price.OutputPerM))
-	m.recordPricedTokens(price.Provider, price.Model, "cache_read", runtimeMode, source, cacheReadTokens, tokenCostUSD(cacheReadTokens, price.CacheReadPerM))
-	m.recordPricedTokens(price.Provider, price.Model, "cache_write", runtimeMode, source, cacheWriteTokens, tokenCostUSD(cacheWriteTokens, price.CacheWritePerM))
+	costs := [4]float64{
+		tokenCostUSD(inputTokens, price.InputPerM),
+		tokenCostUSD(outputTokens, price.OutputPerM),
+		tokenCostUSD(cacheReadTokens, price.CacheReadPerM),
+		tokenCostUSD(cacheWriteTokens, price.CacheWritePerM),
+	}
+	if costUSDTicks > 0 {
+		costs = distributeAuthoritativeCost(float64(costUSDTicks)/CostUSDTicksPerUSD, costs)
+	}
+
+	m.recordPricedTokens(price.Provider, price.Model, "input", runtimeMode, source, inputTokens, costs[0])
+	m.recordPricedTokens(price.Provider, price.Model, "output", runtimeMode, source, outputTokens, costs[1])
+	m.recordPricedTokens(price.Provider, price.Model, "cache_read", runtimeMode, source, cacheReadTokens, costs[2])
+	m.recordPricedTokens(price.Provider, price.Model, "cache_write", runtimeMode, source, cacheWriteTokens, costs[3])
 	m.llmRequests.WithLabelValues(price.Provider, price.Model, runtimeMode).Inc()
+}
+
+// distributeAuthoritativeCost rescales the per-token-type estimates so they
+// sum to the provider's actual charge. `llm_cost_usd` is broken down by
+// token_type and the provider reports one number for the whole turn, so the
+// split has to come from somewhere; the rate table's own proportions are the
+// best available guess and keep the total exact. Only the total is
+// authoritative — the per-type split remains an estimate, which is why this
+// scales rather than inventing a new label value.
+//
+// A zero estimate (unknown rates, or a turn recorded with no tokens) has no
+// proportions to scale, so the charge lands on `input` to avoid dropping real
+// spend from the total.
+func distributeAuthoritativeCost(actual float64, estimated [4]float64) [4]float64 {
+	total := estimated[0] + estimated[1] + estimated[2] + estimated[3]
+	if total <= 0 {
+		return [4]float64{actual, 0, 0, 0}
+	}
+	scale := actual / total
+	for i := range estimated {
+		estimated[i] *= scale
+	}
+	return estimated
 }
 
 func (m *BusinessMetrics) recordPricedTokens(provider, model, tokenType, runtimeMode, source string, tokens int64, cost float64) {

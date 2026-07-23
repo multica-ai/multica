@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+// CostUSDTicksPerUSD is the scale of provider-reported costs: xAI reports
+// whole ticks of 1e-10 USD. Declared here rather than imported from pkg/agent
+// (which owns the wire-format parsing) so this package keeps no dependency on
+// the agent runtime for a physical unit; the two must stay equal.
+const CostUSDTicksPerUSD = 10_000_000_000
+
 type ModelPrice struct {
 	Provider       string
 	Model          string
