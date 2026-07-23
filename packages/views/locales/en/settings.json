@@ -69,6 +69,7 @@
       "openSearch": { "label": "Open search", "description": "Search and run commands from anywhere." },
       "createIssue": { "label": "Create issue", "description": "Open your preferred issue creation flow." },
       "toggleSidebar": { "label": "Toggle sidebar", "description": "Show or hide the main sidebar." },
+      "toggleChat": { "label": "Toggle chat", "description": "Show or hide the floating chat window." },
       "findInIssue": { "label": "Find in issue", "description": "Search within the open issue detail." },
       "send": { "label": "Send", "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog." },
       "goInbox": { "label": "Go to Inbox", "description": "Open the workspace inbox." },
