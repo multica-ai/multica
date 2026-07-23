@@ -25,6 +25,8 @@ const DIMENSION_LABELS: Record<AnalyticsDimension, string> = {
   reference_label: "Context",
   debug_link: "Debug link",
   trace: "Trace",
+  function: "Function",
+  operating_loop: "Operating Loop",
 };
 
 // What an empty value means, per dimension. Empty is a real, filterable state

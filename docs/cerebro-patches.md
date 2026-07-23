@@ -1703,6 +1703,14 @@ The runtime-image, entrypoint, fallback-provider helpers, canary, and cloud runb
 - `issue-sidebar-subscribers-single` in `packages/views/issues/components/issue-detail.tsx` removes the former Activity-header subscriber popover so regular issues have one subscriber surface.
 - Approved by Jesper Hvejsel on FIR-3386, 2026-07-16.
 
+## FIR-3411 — AI Impact Observation routes
+
+| Patch | Location | Reason |
+|---|---|---|
+| `ai-impact-routes` | `server/cmd/server/router.go` | Mount the fork-owned AI Impact Observation API inside the existing workspace-member router. The handler, service and store remain in `server/internal/cerebro/aiimpact`. |
+
+Approved through FIR-3411 Gate 0 and plan artifact `019f6fac-0134-7e34-b485-0cdfa59fbb27`.
+
 ## FIR-3212 — Agent configuration full scope: brief-layer modes
 
 | Patch | Location | Reason |

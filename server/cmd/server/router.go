@@ -36,6 +36,8 @@ import (
 	// CEREBRO-PATCH(cerebro-presence-typing-routes): TECH-3422 inbox Slack-block presence + typing handler imports.
 	cerebropresence "github.com/multica-ai/multica/server/internal/cerebro/presence"
 	cerebrotyping "github.com/multica-ai/multica/server/internal/cerebro/typing"
+	// CEREBRO-PATCH(ai-impact-routes): FIR-3411 Observation API module.
+	cerebroaiimpact "github.com/multica-ai/multica/server/internal/cerebro/aiimpact"
 	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry handler import
 	cerebrocredentials "github.com/multica-ai/multica/server/internal/cerebro/credentials"
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
@@ -608,6 +610,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.ChatStream = cerebrochatstream.NewBroker(bus)
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler instance
 	cerebroDashboardHandler := cerebrodashboard.New(cerebroQueries, queries)
+	cerebroAIImpactHandler := cerebroaiimpact.NewHandler(cerebroaiimpact.NewService(cerebroaiimpact.NewStore(pool))) // CEREBRO-PATCH(ai-impact-routes): FIR-3411 Observation API handler.
 	// CEREBRO-PATCH(cerebro-mini-apps-routes): FIR-3172 isolated app catalog service.
 	cerebroAppsHandler := cerebroapps.NewHandler(pool)
 	// CEREBRO-PATCH(cerebro-pricing-route): FIR-2471 pricing endpoint handler instance (service key from CEREBRO_PRICING_KEY).
@@ -2157,6 +2160,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard overview endpoint
 			r.Get("/api/cerebro/dashboard", cerebroDashboardHandler.Overview)
+			cerebroAIImpactHandler.Mount(r) // CEREBRO-PATCH(ai-impact-routes): FIR-3411 workspace-member Observation routes.
 			// CEREBRO-PATCH(cerebro-dashboard-actor-messages-route): TECH-3093 actor message history
 			r.Get("/api/cerebro/dashboard/actor-messages", cerebroDashboardHandler.ActorMessages)
 			// CEREBRO-PATCH(cerebro-dashboard-all-messages-route): TECH-3093 all messages table
