@@ -1,9 +1,12 @@
 package agent
 
 import (
+	"context"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 )
 
 // FIR-3212. The existing opencode tests drive fakeOpencodeScript(), a stub that
@@ -23,11 +26,24 @@ func lookupOpencodeHelp(t *testing.T) string {
 		t.Skip("opencode not installed on this host; skipping real-binary flag contract test")
 	}
 	// `run --help` exits 0 and prints the flag table for the run subcommand.
-	out, err := exec.Command(path, "run", "--help").CombinedOutput()
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, "run", "--pure", "--help")
+	cmd.Env = opencodeContractEnv()
+	cmd.Dir = t.TempDir()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("opencode run --help failed: %v\n%s", err, out)
 	}
 	return string(out)
+}
+
+func opencodeContractEnv() []string {
+	return append(os.Environ(),
+		"OPENCODE_DISABLE_AUTOUPDATE=true",
+		"OPENCODE_DISABLE_DEFAULT_PLUGINS=true",
+		"OPENCODE_DISABLE_MODELS_FETCH=true",
+	)
 }
 
 // The premise of the daemon-side fix: --prompt is not a real OpenCode flag.
@@ -45,8 +61,11 @@ func TestInstalledOpencodeRejectsPromptFlag(t *testing.T) {
 	if err != nil {
 		t.Skip("opencode not installed")
 	}
-	out, err := exec.Command(path, "run", "--format", "json",
-		"--auto", "--prompt", "you are a bot", "say hi").CombinedOutput()
+	cmd := exec.Command(path, "run", "--pure", "--format", "json",
+		"--auto", "--prompt", "you are a bot", "say hi")
+	cmd.Env = opencodeContractEnv()
+	cmd.Dir = t.TempDir()
+	out, err := cmd.CombinedOutput()
 	if err == nil {
 		t.Fatalf("expected opencode to reject --prompt, but it exited 0:\n%s", out)
 	}

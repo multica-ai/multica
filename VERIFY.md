@@ -1,16 +1,39 @@
-# FIR-3388 local verification
+# VERIFY — firtal-cerebro
 
-This flow verifies the user-visible capability result without production data.
+All commands use the isolated worktree database and localhost. The Playwright
+fixture creates its own test login, runtime, agent, allow/deny policies, and
+removes them in `finally`.
 
-1. Run `make setup-worktree` and `make start-worktree`.
-2. Sign in to the local web app with a local owner account.
-3. Open an existing local agent, then open the `Capabilities` tab.
-4. Confirm the page loads the same effective tool decisions returned by:
-   `multica agent capabilities <agent-id> --output json`.
-5. For one allowed tool and one denied tool, open the permission detail and
-   confirm the displayed result and explanation match the CLI response.
-6. Change one local-only policy, refresh the page, and confirm both the
-   `Capabilities` tab and CLI reflect the same effective result.
-7. Restore the local policy fixture after the check.
+## 1. Boot
 
-Do not connect this flow to production or use a production database copy.
+```bash
+make setup-worktree
+make start-worktree
+```
+
+## 2. Seed test user
+
+No manual credential is required. `loginAsDefault` creates the localhost-only
+`e2e@multica.ai` login through the local API and reads its one-time code from
+the isolated local database.
+
+## 3. Verify
+
+```bash
+pnpm exec playwright test e2e/fir-3388-capabilities.spec.ts --project chromium
+```
+
+The test drives the real `Capabilities` tab, proves an allowed and denied
+policy from the database fixture, reloads, and proves both results persist.
+The required CI check is `e2e` in `Cerebro E2E (agent configuration)`.
+
+## 4. Teardown
+
+The test removes its policy, agent, runtime, feature flag, and login fixture.
+Stop the local app after the suite:
+
+```bash
+make stop
+```
+
+Never point these commands at production or a production database copy.
