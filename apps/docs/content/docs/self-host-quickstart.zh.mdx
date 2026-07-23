@@ -217,6 +217,76 @@ SELECT cron.unschedule('rollup_task_usage_hourly')
 
 完整参考（含运维注意事项和 Kubernetes 部署形态）见仓库的 [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup)。
 
+## 升级
+
+Docker Compose 部署有两种升级写法，两者**完全等价**——`make selfhost` 就是下面这两条命令的封装（`Makefile:79-107`），用哪个都行：
+
+```bash
+cd multica
+git pull
+make selfhost
+```
+
+```bash
+cd multica
+git pull
+docker compose -f docker-compose.selfhost.yml pull
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+### `git pull` 到底更新了什么
+
+`git pull` 更新的是 **`docker-compose.selfhost.yml` 本身**——新增的环境变量、新增的服务、改过的 healthcheck。它**不是**拉新版本 Multica 的机制。
+
+真正决定你跑哪个版本的是 `docker compose pull`：它去 GHCR 查这个 tag 当前指向哪个镜像。所以一个几个月没更新的 checkout 照样能拉到今天的 `latest` 镜像；反过来，只跑 `git pull` 而不拉镜像、不重建容器，什么都不会变。
+
+<Callout type="warning">
+**如果你在 `.env` 里钉死了 `MULTICA_IMAGE_TAG`，两种写法都升不上去。** 两个镜像都写成 `${MULTICA_IMAGE_TAG:-latest}`（`docker-compose.selfhost.yml:42`、`:125`），而 `.env.example` 里默认是 `MULTICA_IMAGE_TAG=latest`。一旦你把它改成了具体版本，`pull` 只是把同一个 tag 重拉一遍，版本原地不动——不报错，也没有任何警告。升级前先确认：
+
+```bash
+grep MULTICA_IMAGE_TAG .env
+# MULTICA_IMAGE_TAG=v0.4.5   ← 钉死了：先改成 latest（或你想要的版本）
+```
+</Callout>
+
+### `.env` 不会被覆盖
+
+`make selfhost` 只在 `.env` **不存在**的时候才生成它（`Makefile:80-95`）。在已有部署上重复跑，你的 `JWT_SECRET`、Postgres 密码、邮件配置、`FRONTEND_ORIGIN` 都原样保留。
+
+### 升级前先备份 Postgres
+
+migration 只往前走、不回滚，所以正式环境升级前先导一份：
+
+```bash
+docker compose -f docker-compose.selfhost.yml exec -T postgres \
+  pg_dump -U multica multica | gzip > multica-backup.sql.gz
+```
+
+如果你改过 `POSTGRES_USER` / `POSTGRES_DB`，把 `multica` 换成 `.env` 里的实际值。数据存在名为 `multica_pgdata` 的 volume 里，`docker compose down` 不会删它——但 `down -v` 会。
+
+### migration 自动执行
+
+和[第 1 步](#1-拉取项目--一键启动后端)一样，backend 容器启动时会在对外提供服务之前先跑 `./migrate up`（`docker/entrypoint.sh`）。没有单独的升级命令——把新镜像起起来，本身就是升级这一步。想看过程：
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs -f backend
+```
+
+### 用 `/readyz` 验证，不要用 `/health`
+
+`/health` 是 **liveness** 探针，只要进程还活着就返回 `{"status":"ok"}`，migration 失败了它照样是 ok。`/readyz`（`server/cmd/server/router.go:680`，`/healthz` 是它的别名）会真正检查数据库和已应用的 migration 集合，升级出问题能被它拦下来：
+
+```bash
+curl -s localhost:8080/readyz
+# {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+只要不是 HTTP 200 且两项都是 `ok`，就说明新版本没把 migration 跑完，先去看 backend 日志，别急着放流量进来。
+
+### Kubernetes
+
+Helm 有自己的升级路径——在 values 文件里钉 `images.backend.tag` / `images.frontend.tag` 然后 `helm upgrade`，或者用 `kubectl -n multica rollout restart` 重新拉一个浮动 tag。见下面的 [Kubernetes 部署（替代方案）](#kubernetes-部署替代方案)。
+
 ## Kubernetes 部署（替代方案）
 
 如果你已经在跑 Kubernetes 集群，仓库里也带了一个 Helm chart，路径 `deploy/helm/multica/`。它就是 k8s 版的 `make selfhost`——一样的 backend 镜像、frontend 镜像、`pgvector/pgvector:pg17` Postgres，封装成 Deployment / Service / Ingress，再加上一个由 `values.yaml` 渲染出来的 `ConfigMap`。这套 chart 是按照 k3s + Traefik + `local-path` 写的，集群里只要有 Ingress controller 和默认的 `ReadWriteOnce` StorageClass 就能跑，其他类型的集群稍微改一改也能用。

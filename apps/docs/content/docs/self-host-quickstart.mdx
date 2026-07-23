@@ -216,6 +216,76 @@ SELECT cron.unschedule('rollup_task_usage_hourly')
 
 Full reference — including operations notes and the Kubernetes deployment shape — lives in the repo's [`SELF_HOSTING_ADVANCED.md → Usage Dashboard Rollup`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING_ADVANCED.md#usage-dashboard-rollup).
 
+## Upgrading
+
+Two ways to upgrade a Docker Compose install. They are **equivalent** — `make selfhost` is a wrapper around exactly these commands (`Makefile:79-107`), so pick whichever you prefer:
+
+```bash
+cd multica
+git pull
+make selfhost
+```
+
+```bash
+cd multica
+git pull
+docker compose -f docker-compose.selfhost.yml pull
+docker compose -f docker-compose.selfhost.yml up -d
+```
+
+### What `git pull` actually does
+
+`git pull` updates **`docker-compose.selfhost.yml` itself** — new environment variables, new services, changed healthchecks. It is **not** how you get a new Multica version.
+
+The version you end up running is resolved by `docker compose pull`, which asks GHCR what the tag points at right now. A checkout that is months out of date will still pull today's `latest` images; conversely, `git pull` alone changes nothing until you pull images and recreate the containers.
+
+<Callout type="warning">
+**If you pinned `MULTICA_IMAGE_TAG`, neither command upgrades anything.** Both images resolve as `${MULTICA_IMAGE_TAG:-latest}` (`docker-compose.selfhost.yml:42`, `:125`), and `.env.example` ships `MULTICA_IMAGE_TAG=latest`. If your `.env` pins an exact release, `pull` just re-fetches that same tag and you stay on the old version — no error, no warning. Check before you upgrade:
+
+```bash
+grep MULTICA_IMAGE_TAG .env
+# MULTICA_IMAGE_TAG=v0.4.5   ← pinned: edit to `latest` (or the release you want) first
+```
+</Callout>
+
+### Your `.env` is not overwritten
+
+`make selfhost` only generates `.env` when the file is **missing** (`Makefile:80-95`). Re-running it on an existing install leaves your `JWT_SECRET`, Postgres password, email settings, and `FRONTEND_ORIGIN` exactly as they were.
+
+### Back up Postgres first
+
+Migrations are forward-only, so take a dump before upgrading a deployment you care about:
+
+```bash
+docker compose -f docker-compose.selfhost.yml exec -T postgres \
+  pg_dump -U multica multica | gzip > multica-backup.sql.gz
+```
+
+Use your own `POSTGRES_USER` / `POSTGRES_DB` from `.env` if you changed them from the `multica` defaults. Data lives in the named volume `multica_pgdata`, which survives `docker compose down` — but not `down -v`.
+
+### Migrations run themselves
+
+As in [Step 1](#1-pull-the-project-and-start-the-backend), the backend container runs `./migrate up` on startup (`docker/entrypoint.sh`) before serving traffic. There is no separate upgrade command — bringing up the new image *is* the migration step. Watch it happen:
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs -f backend
+```
+
+### Verify with `/readyz`, not `/health`
+
+`/health` is a **liveness** probe — it returns `{"status":"ok"}` as long as the process is up, including when migrations failed. `/readyz` (`server/cmd/server/router.go:680`; `/healthz` is an alias) checks the database and the applied migration set, so it is the one that catches a bad upgrade:
+
+```bash
+curl -s localhost:8080/readyz
+# {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
+```
+
+Anything other than HTTP 200 with both checks `ok` means the new version did not finish migrating — check the backend logs before sending traffic at it.
+
+### Kubernetes
+
+Helm has its own upgrade path — `helm upgrade` with `images.backend.tag` / `images.frontend.tag` pinned in your values file, or `kubectl -n multica rollout restart` to re-pull a floating tag. See [Kubernetes deployment](#kubernetes-deployment-alternative) below.
+
 ## Kubernetes deployment (alternative)
 
 If you already run a Kubernetes cluster, the repo also ships a Helm chart at `deploy/helm/multica/`. It's the equivalent of `make selfhost` for k8s — same backend image, frontend image, and `pgvector/pgvector:pg17` Postgres, packaged as Deployments / Services / Ingresses with one `ConfigMap` rendered from `values.yaml`. Authored against k3s + Traefik + `local-path` and should work on any cluster with an Ingress controller and a default `ReadWriteOnce` StorageClass.
