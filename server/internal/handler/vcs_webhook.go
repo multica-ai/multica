@@ -177,6 +177,21 @@ func (h *Handler) mirrorVCSPullRequest(ctx context.Context, conn db.VcsConnectio
 		return
 	}
 
+	// Out-of-order guard for the link metadata. UpsertVCSPullRequest keeps the
+	// newer persisted row on a stale redelivery, so `pr` may reflect a newer
+	// event than this `ev`. Everything the link write derives below —
+	// close_intent, reference_only, preserveCloseIntent — comes from `ev`, so
+	// rewriting the link from a stale event would corrupt what the newer event
+	// already set (e.g. a redelivered older "opened" event flipping a merged
+	// PR's link back to reference_only, blocking auto-advance). If the persisted
+	// row is strictly newer than this event, the newer event already linked and
+	// published — stop here. (An event with no usable timestamp falls back to
+	// now(), which is never strictly after the stored value, so it proceeds.)
+	evUpdatedAt := parseGHTimeRequired(ev.UpdatedAt)
+	if pr.PrUpdatedAt.Valid && evUpdatedAt.Valid && pr.PrUpdatedAt.Time.After(evUpdatedAt.Time) {
+		return
+	}
+
 	workspaceID := uuidToString(conn.WorkspaceID)
 	resp := vcsPullRequestToResponse(pr)
 

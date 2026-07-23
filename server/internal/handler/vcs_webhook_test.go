@@ -279,6 +279,119 @@ func TestCombinedCloseAggregateSpansProviders(t *testing.T) {
 	}
 }
 
+// DeleteIssue's VCS-link cleanup must honour the same workspace guard as the
+// issue delete: passing a foreign issue_id with a mismatched workspace_id must
+// be a complete no-op, not silently drop the victim tenant's link rows (#1661).
+func TestDeleteIssue_VCSLinkCleanupIsWorkspaceScoped(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
+	issue := newVCSIssue(t, "Tenant-scoped delete")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	raw, _ := json.Marshal(map[string]any{
+		"action": "opened",
+		"pull_request": map[string]any{
+			"number": 7, "html_url": "https://forgejo.test/acme/widget/pulls/7",
+			"title": "Fix " + issue.Identifier, "state": "open", "merged": false,
+			"created_at": "2026-05-01T00:00:00Z", "updated_at": "2026-05-01T00:00:00Z",
+			"head": map[string]any{"ref": "fix", "sha": "abc"},
+			"user": map[string]any{"username": "octo"},
+		},
+		"repository": map[string]any{"name": "widget", "owner": map[string]any{"username": "acme"}},
+	})
+	w := httptest.NewRecorder()
+	testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+		"X-Gitea-Event": "pull_request", "X-Gitea-Signature": giteaSig(raw),
+	}, raw))
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("seed PR: %d %s", w.Code, w.Body.String())
+	}
+
+	linkCount := func() int {
+		var n int
+		testPool.QueryRow(ctx, `SELECT count(*) FROM issue_vcs_pull_request WHERE issue_id = $1`, issue.ID).Scan(&n)
+		return n
+	}
+	if linkCount() != 1 {
+		t.Fatalf("expected 1 link after seed, got %d", linkCount())
+	}
+
+	// Mismatched workspace_id → complete no-op: issue and link both survive.
+	wrongWS := parseUUID("11111111-1111-1111-1111-111111111111")
+	if err := testHandler.Queries.DeleteIssue(ctx, db.DeleteIssueParams{ID: parseUUID(issue.ID), WorkspaceID: wrongWS}); err != nil {
+		t.Fatalf("DeleteIssue(wrong ws): %v", err)
+	}
+	if _, err := testHandler.Queries.GetIssue(ctx, parseUUID(issue.ID)); err != nil {
+		t.Errorf("issue must survive a mismatched-workspace delete: %v", err)
+	}
+	if linkCount() != 1 {
+		t.Errorf("link rows must survive a mismatched-workspace delete, got %d", linkCount())
+	}
+
+	// Correct workspace_id → issue and its links both removed.
+	if err := testHandler.Queries.DeleteIssue(ctx, db.DeleteIssueParams{ID: parseUUID(issue.ID), WorkspaceID: parseUUID(testWorkspaceID)}); err != nil {
+		t.Fatalf("DeleteIssue(correct ws): %v", err)
+	}
+	if linkCount() != 0 {
+		t.Errorf("link rows should be gone after correct delete, got %d", linkCount())
+	}
+}
+
+// A redelivered older event must not rewrite the link metadata that a newer
+// event already set. The PR-upsert monotonic guard protects the PR row; this
+// covers the link (close_intent / reference_only).
+func TestVCSWebhook_StaleEventDoesNotRewriteLink(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
+	issue := newVCSIssue(t, "Out-of-order link guard")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	fire := func(action, state string, merged bool, title, body, updatedAt string) {
+		raw, _ := json.Marshal(map[string]any{
+			"action": action,
+			"pull_request": map[string]any{
+				"number": 7, "html_url": "https://forgejo.test/acme/widget/pulls/7",
+				"title": title, "body": body, "state": state, "merged": merged,
+				"created_at": "2026-05-01T00:00:00Z", "updated_at": updatedAt,
+				"merged_at": "2026-05-02T00:00:00Z",
+				"head":      map[string]any{"ref": "wip", "sha": "abc"},
+				"user":      map[string]any{"username": "octo"},
+			},
+			"repository": map[string]any{"name": "widget", "owner": map[string]any{"username": "acme"}},
+		})
+		w := httptest.NewRecorder()
+		testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+			"X-Gitea-Event": "pull_request", "X-Gitea-Signature": giteaSig(raw),
+		}, raw))
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("%s event: %d %s", action, w.Code, w.Body.String())
+		}
+	}
+
+	// Newer terminal event: merged with a qualifying Closes → close_intent, not reference_only.
+	fire("closed", "closed", true, "Fix "+issue.Identifier, "Closes "+issue.Identifier, "2026-05-02T00:00:00Z")
+	// Older redelivered "opened" event: bare body mention, generic title/branch.
+	// Without the guard this rewrites the link to close_intent=false, reference_only=true.
+	fire("opened", "open", false, "WIP", "touches "+issue.Identifier, "2026-05-01T00:00:00Z")
+
+	var closeIntent, referenceOnly bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT close_intent, reference_only FROM issue_vcs_pull_request WHERE issue_id = $1`,
+		issue.ID).Scan(&closeIntent, &referenceOnly); err != nil {
+		t.Fatalf("select link: %v", err)
+	}
+	if !closeIntent || referenceOnly {
+		t.Errorf("stale event rewrote link: close_intent=%v reference_only=%v, want true/false", closeIntent, referenceOnly)
+	}
+	// The PR row also stayed at the newer merged state.
+	rows, _ := testHandler.Queries.ListVCSPullRequestsByIssue(ctx, parseUUID(issue.ID))
+	if len(rows) != 1 || rows[0].State != "merged" {
+		t.Errorf("PR row regressed: %+v", rows)
+	}
+}
+
 func TestVCSWebhook_GitlabMergeRequest(t *testing.T) {
 	ctx := context.Background()
 	box := withVCSBox(t)
