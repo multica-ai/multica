@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/util"
@@ -283,5 +284,56 @@ func TestChannelMediaReconciler_NilStorageSkipsSweepWithoutClaiming(t *testing.T
 	state, attempt, exists := f.rowState(t, "ws/lark/nil-storage")
 	if !exists || state != "pending" || attempt != 0 {
 		t.Fatalf("row = (%q, attempt=%d, %v), want untouched 'pending' when storage is missing", state, attempt, exists)
+	}
+}
+
+// Tenancy is enforced on every settle operation, not derived from the key
+// string: release and delete with the right lease but the wrong workspace
+// must touch nothing.
+func TestChannelMediaReconciler_WrongWorkspaceCannotReleaseOrDelete(t *testing.T) {
+	pool := newCancelFinalizePool(t)
+	f := seedReconcilerFixture(t, pool)
+	q := db.New(pool)
+
+	key := "ws/lark/tenancy"
+	f.seedLedgerRow(t, key, "https://cdn.test/tenancy", "pending", ChannelMediaReconcileSettleDelay+time.Minute)
+	lease := util.MustParseUUID("88888888-8888-4888-8888-888888888888")
+	if _, err := pool.Exec(context.Background(), `
+		UPDATE channel_media_pending_object SET state = 'deleting', lease_token = $2 WHERE storage_key = $1
+	`, key, lease); err != nil {
+		t.Fatalf("claim row: %v", err)
+	}
+	otherWorkspace := util.MustParseUUID("77777777-7777-4777-8777-777777777777")
+
+	if err := q.ReleaseChannelMediaPendingObject(context.Background(), db.ReleaseChannelMediaPendingObjectParams{
+		StorageKey:    key,
+		WorkspaceID:   otherWorkspace,
+		LeaseToken:    lease,
+		NextAttemptAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+		LastError:     pgtype.Text{String: "cross-tenant", Valid: true},
+	}); err != nil {
+		t.Fatalf("release: %v", err)
+	}
+	n, err := q.DeleteChannelMediaPendingObject(context.Background(), db.DeleteChannelMediaPendingObjectParams{
+		StorageKey:  key,
+		WorkspaceID: otherWorkspace,
+		LeaseToken:  lease,
+	})
+	if err != nil {
+		t.Fatalf("delete: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("cross-workspace delete removed %d rows, want 0", n)
+	}
+
+	var state string
+	var leaseStillHeld bool
+	if err := pool.QueryRow(context.Background(), `
+		SELECT state, lease_token IS NOT NULL FROM channel_media_pending_object WHERE storage_key = $1
+	`, key).Scan(&state, &leaseStillHeld); err != nil {
+		t.Fatalf("load row: %v", err)
+	}
+	if state != "deleting" || !leaseStillHeld {
+		t.Fatalf("row = (state=%q, lease_held=%v), want untouched ('deleting', true)", state, leaseStillHeld)
 	}
 }

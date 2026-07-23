@@ -601,19 +601,22 @@ func (q *Queries) DeleteChannelInstallationsByArchivedRuntimeAgents(ctx context.
 
 const deleteChannelMediaPendingObject = `-- name: DeleteChannelMediaPendingObject :execrows
 DELETE FROM channel_media_pending_object
-WHERE storage_key = $1 AND lease_token = $2
+WHERE storage_key = $1
+  AND workspace_id = $2
+  AND lease_token = $3
 `
 
 type DeleteChannelMediaPendingObjectParams struct {
-	StorageKey string      `json:"storage_key"`
-	LeaseToken pgtype.UUID `json:"lease_token"`
+	StorageKey  string      `json:"storage_key"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	LeaseToken  pgtype.UUID `json:"lease_token"`
 }
 
 // Settles a claimed row (object deleted, or a durable attachment reference
 // was found). Lease-token guarded so an expired-lease reclaim by another
-// replica cannot be clobbered.
+// replica cannot be clobbered; workspace_id explicit per the tenancy rule.
 func (q *Queries) DeleteChannelMediaPendingObject(ctx context.Context, arg DeleteChannelMediaPendingObjectParams) (int64, error) {
-	result, err := q.db.Exec(ctx, deleteChannelMediaPendingObject, arg.StorageKey, arg.LeaseToken)
+	result, err := q.db.Exec(ctx, deleteChannelMediaPendingObject, arg.StorageKey, arg.WorkspaceID, arg.LeaseToken)
 	if err != nil {
 		return 0, err
 	}
@@ -1403,10 +1406,10 @@ INSERT INTO channel_media_pending_object (
 VALUES ($1, $2, $3, $4, $5)
 ON CONFLICT (storage_key) DO UPDATE
 SET created_at = now(), next_attempt_at = now(),
-    workspace_id = EXCLUDED.workspace_id,
     chat_message_id = EXCLUDED.chat_message_id,
     storage_url = EXCLUDED.storage_url
 WHERE channel_media_pending_object.state = 'pending'
+  AND channel_media_pending_object.workspace_id = EXCLUDED.workspace_id
 RETURNING storage_key
 `
 
@@ -1423,8 +1426,10 @@ type RecordChannelMediaPendingObjectParams struct {
 // =====================
 // Records upload intent BEFORE the PUT. A redelivered attempt refreshes the
 // settle window, but only while the row is still 'pending' — a key the
-// reconciler owns ('deleting') must never be resurrected, so the caller gets
-// no row back (pgx.ErrNoRows) and must skip the upload entirely.
+// reconciler owns ('deleting') must never be resurrected — and only within
+// the SAME workspace: a cross-workspace key collision (impossible via the
+// derived key, but tenancy must never trust the key string) updates nothing
+// and returns no row, so the caller skips the upload entirely.
 func (q *Queries) RecordChannelMediaPendingObject(ctx context.Context, arg RecordChannelMediaPendingObjectParams) (string, error) {
 	row := q.db.QueryRow(ctx, recordChannelMediaPendingObject,
 		arg.StorageKey,
@@ -1469,23 +1474,30 @@ SET lease_token = NULL,
     lease_expires_at = NULL,
     next_attempt_at = $1,
     last_error = $2
-WHERE storage_key = $3 AND lease_token = $4
+WHERE storage_key = $3
+  AND workspace_id = $4
+  AND lease_token = $5
 `
 
 type ReleaseChannelMediaPendingObjectParams struct {
 	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
 	LastError     pgtype.Text        `json:"last_error"`
 	StorageKey    string             `json:"storage_key"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	LeaseToken    pgtype.UUID        `json:"lease_token"`
 }
 
 // Object-storage DELETE failed: keep the row in 'deleting' (bind must still
 // never attach it), release the lease, and back off the next attempt.
+// workspace_id is redundant with the storage_key PK but explicit per the
+// tenancy rule: every query constrains the workspace column, never trusting
+// the key string.
 func (q *Queries) ReleaseChannelMediaPendingObject(ctx context.Context, arg ReleaseChannelMediaPendingObjectParams) error {
 	_, err := q.db.Exec(ctx, releaseChannelMediaPendingObject,
 		arg.NextAttemptAt,
 		arg.LastError,
 		arg.StorageKey,
+		arg.WorkspaceID,
 		arg.LeaseToken,
 	)
 	return err

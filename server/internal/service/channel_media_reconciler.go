@@ -194,6 +194,7 @@ func (r *ChannelMediaReconciler) release(ctx context.Context, row db.ChannelMedi
 		"error", cause)
 	if err := r.Queries.ReleaseChannelMediaPendingObject(ctx, db.ReleaseChannelMediaPendingObjectParams{
 		StorageKey:    row.StorageKey,
+		WorkspaceID:   row.WorkspaceID,
 		LeaseToken:    leaseToken,
 		NextAttemptAt: pgtype.Timestamptz{Time: r.clock().Add(backoff), Valid: true},
 		LastError:     pgtype.Text{String: cause.Error(), Valid: true},
@@ -205,8 +206,9 @@ func (r *ChannelMediaReconciler) release(ctx context.Context, row db.ChannelMedi
 
 func (r *ChannelMediaReconciler) clearRow(ctx context.Context, row db.ChannelMediaPendingObject, leaseToken pgtype.UUID) bool {
 	n, err := r.Queries.DeleteChannelMediaPendingObject(ctx, db.DeleteChannelMediaPendingObjectParams{
-		StorageKey: row.StorageKey,
-		LeaseToken: leaseToken,
+		StorageKey:  row.StorageKey,
+		WorkspaceID: row.WorkspaceID,
+		LeaseToken:  leaseToken,
 	})
 	if err != nil {
 		r.logger().Warn("channel media reconciler: clear row failed", "storage_key", row.StorageKey, "error", err)

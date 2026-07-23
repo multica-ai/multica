@@ -441,3 +441,53 @@ func TestBindMediaRefs_ReconcilerOwnedKeySkipsAttach(t *testing.T) {
 		t.Fatalf("media marker must still clear when attach is skipped, got %v", mediaPendingUntil.Time)
 	}
 }
+
+// Tenancy must never trust the key string: a cross-workspace collision on the
+// same storage_key (impossible via the derived key, exactly why it must be
+// enforced in the query) must neither steal the row's ownership nor let the
+// caller believe it holds an intent — RecordPendingMediaObject reports
+// ok=false and the caller skips the upload.
+func TestDBMediaIntentLedger_CrossWorkspaceKeyCannotBeStolen(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	ledger := NewDBMediaIntentLedger(db.New(pool))
+
+	key := "workspaces/ws/lark/cross-tenant"
+	ok, err := ledger.RecordPendingMediaObject(context.Background(), RecordPendingMediaObjectParams{
+		StorageKey:    key,
+		WorkspaceID:   fixture.workspaceID,
+		ChatMessageID: fixture.sessionID, // any UUID; no FK on the ledger
+		StorageURL:    "https://cdn.example.test/cross-a",
+	})
+	if err != nil || !ok {
+		t.Fatalf("first record: ok=%v err=%v", ok, err)
+	}
+
+	var otherWorkspace pgtype.UUID
+	if err := pool.QueryRow(context.Background(), `SELECT gen_random_uuid()`).Scan(&otherWorkspace); err != nil {
+		t.Fatalf("gen other workspace: %v", err)
+	}
+	ok, err = ledger.RecordPendingMediaObject(context.Background(), RecordPendingMediaObjectParams{
+		StorageKey:    key,
+		WorkspaceID:   otherWorkspace,
+		ChatMessageID: fixture.sessionID,
+		StorageURL:    "https://cdn.example.test/cross-b",
+	})
+	if err != nil {
+		t.Fatalf("cross-workspace record: %v", err)
+	}
+	if ok {
+		t.Fatal("cross-workspace upsert must not claim the key")
+	}
+
+	var gotWorkspace pgtype.UUID
+	var gotURL string
+	if err := pool.QueryRow(context.Background(), `
+		SELECT workspace_id, storage_url FROM channel_media_pending_object WHERE storage_key = $1
+	`, key).Scan(&gotWorkspace, &gotURL); err != nil {
+		t.Fatalf("load row: %v", err)
+	}
+	if gotWorkspace != fixture.workspaceID || gotURL != "https://cdn.example.test/cross-a" {
+		t.Fatalf("row ownership changed: workspace=%v url=%q", gotWorkspace, gotURL)
+	}
+}

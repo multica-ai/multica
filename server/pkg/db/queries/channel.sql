@@ -640,18 +640,20 @@ WHERE installation_id = $1;
 -- name: RecordChannelMediaPendingObject :one
 -- Records upload intent BEFORE the PUT. A redelivered attempt refreshes the
 -- settle window, but only while the row is still 'pending' — a key the
--- reconciler owns ('deleting') must never be resurrected, so the caller gets
--- no row back (pgx.ErrNoRows) and must skip the upload entirely.
+-- reconciler owns ('deleting') must never be resurrected — and only within
+-- the SAME workspace: a cross-workspace key collision (impossible via the
+-- derived key, but tenancy must never trust the key string) updates nothing
+-- and returns no row, so the caller skips the upload entirely.
 INSERT INTO channel_media_pending_object (
     storage_key, workspace_id, chat_message_id, storage_url, installation_id
 )
 VALUES ($1, $2, $3, $4, sqlc.narg(installation_id))
 ON CONFLICT (storage_key) DO UPDATE
 SET created_at = now(), next_attempt_at = now(),
-    workspace_id = EXCLUDED.workspace_id,
     chat_message_id = EXCLUDED.chat_message_id,
     storage_url = EXCLUDED.storage_url
 WHERE channel_media_pending_object.state = 'pending'
+  AND channel_media_pending_object.workspace_id = EXCLUDED.workspace_id
 RETURNING storage_key;
 
 -- name: ClaimChannelMediaPendingObjectsForBind :many
@@ -696,19 +698,26 @@ RETURNING obj.*;
 -- name: ReleaseChannelMediaPendingObject :exec
 -- Object-storage DELETE failed: keep the row in 'deleting' (bind must still
 -- never attach it), release the lease, and back off the next attempt.
+-- workspace_id is redundant with the storage_key PK but explicit per the
+-- tenancy rule: every query constrains the workspace column, never trusting
+-- the key string.
 UPDATE channel_media_pending_object
 SET lease_token = NULL,
     lease_expires_at = NULL,
     next_attempt_at = @next_attempt_at,
     last_error = @last_error
-WHERE storage_key = @storage_key AND lease_token = @lease_token;
+WHERE storage_key = @storage_key
+  AND workspace_id = @workspace_id
+  AND lease_token = @lease_token;
 
 -- name: DeleteChannelMediaPendingObject :execrows
 -- Settles a claimed row (object deleted, or a durable attachment reference
 -- was found). Lease-token guarded so an expired-lease reclaim by another
--- replica cannot be clobbered.
+-- replica cannot be clobbered; workspace_id explicit per the tenancy rule.
 DELETE FROM channel_media_pending_object
-WHERE storage_key = $1 AND lease_token = $2;
+WHERE storage_key = @storage_key
+  AND workspace_id = @workspace_id
+  AND lease_token = @lease_token;
 
 -- name: ChannelMediaObjectIsReferenced :one
 -- The post-claim reference check: an attachment row carrying this object's
