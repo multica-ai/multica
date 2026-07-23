@@ -1480,7 +1480,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
-			resp.IssueTitle = issue.Title // CEREBRO-PATCH(agent-task-issue-title): FIR-3708 — the M1 fields existed but were never assigned, so every trace row landed with a NULL issue title
+			resp.IssueTitle = issue.Title                                                                                       // CEREBRO-PATCH(agent-task-issue-title): FIR-3708 — the M1 fields existed but were never assigned, so every trace row landed with a NULL issue title
 			if parent, perr := h.Queries.GetIssue(r.Context(), issue.ParentIssueID); issue.ParentIssueID.Valid && perr == nil { // CEREBRO-PATCH(agent-task-issue-title)
 				resp.ParentIssueTitle = parent.Title // CEREBRO-PATCH(agent-task-issue-title)
 			} // CEREBRO-PATCH(agent-task-issue-title)
@@ -1526,7 +1526,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					ID:          task.SquadID,
 					WorkspaceID: issue.WorkspaceID,
 				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+					// CEREBRO-PATCH(squad-parent-status): MUL-5156 — parent-status
+					// authority is narrower than briefing injection. Injection fires
+					// on the MUL-3724 path too (issue owned by a plain agent, squad
+					// only @mentioned for help); granting status ownership there would
+					// let a guest squad push someone else's in-flight issue to
+					// in_review. Gate it on the issue actually being assigned to this
+					// squad.
+					ownsIssueStatus := issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && uuidToString(issue.AssigneeID) == uuidToString(squad.ID) // CEREBRO-PATCH(squad-parent-status)
+					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus)                                                            // CEREBRO-PATCH(squad-parent-status): MUL-5156
 					if strings.TrimSpace(resp.Agent.Instructions) == "" {
 						resp.Agent.Instructions = briefing
 					} else {
@@ -1536,6 +1544,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						"squad_id", uuidToString(squad.ID),
 						"squad_name", squad.Name,
 						"leader_agent_id", resp.Agent.ID,
+						"owns_issue_status", ownsIssueStatus,
 					)
 				}
 			}
@@ -1989,7 +1998,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						ID:          squadUUID,
 						WorkspaceID: wsUUID,
 					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+						// CEREBRO-PATCH(squad-parent-status): MUL-5156 — quick-create has
+						// no issue yet, so there is no parent status to own on this turn.
+						// Ownership is granted later by the issue-bound path once the
+						// leader opens the issue with the squad as assignee.
+						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, false) // CEREBRO-PATCH(squad-parent-status): MUL-5156
 						if strings.TrimSpace(resp.Agent.Instructions) == "" {
 							resp.Agent.Instructions = briefing
 						} else {

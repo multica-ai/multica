@@ -193,6 +193,11 @@ func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		issueID = issue.ID
+
+		// CEREBRO-PATCH(one-plan-per-issue): FIR-3659 — reject a 2nd plan on an issue.
+		if h.rejectSecondIssuePlan(w, r, workspaceID, req.Kind, issueID) {
+			return
+		}
 	}
 	if req.FolderID != nil {
 		folder, err := h.Queries.GetArtifactFolder(r.Context(), db.GetArtifactFolderParams{

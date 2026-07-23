@@ -88,17 +88,22 @@ func (s *Store) executeIssueEval(ctx context.Context, definition Eval, spec Targ
 		return RunExecution{}, fmt.Errorf("issue-target eval: unknown check %q", check)
 	}
 	startedAt := time.Now()
-	var description *string
-	err := s.pool.QueryRow(ctx, `SELECT description FROM issue WHERE id=$1 AND workspace_id=$2`,
-		*issueID, definition.WorkspaceID).Scan(&description)
+	// The Workpad is the issue's plan: a `kind='plan'` artifact coupled to the
+	// issue. The check passes when that plan exists — not by parsing the issue
+	// description (the legacy convention, still available via HasWorkpad for
+	// callers that inspect description text).
+	var hasPlan bool
+	err := s.pool.QueryRow(ctx,
+		`SELECT EXISTS(SELECT 1 FROM artifact WHERE issue_id=$1 AND workspace_id=$2 AND kind='plan')`,
+		*issueID, definition.WorkspaceID).Scan(&hasPlan)
 	if err != nil {
-		return RunExecution{}, fmt.Errorf("issue-target eval: load issue: %w", err)
+		return RunExecution{}, fmt.Errorf("issue-target eval: load plan: %w", err)
 	}
-	desc := ""
-	if description != nil {
-		desc = *description
+	passed := hasPlan
+	reason := "issue has a plan"
+	if !hasPlan {
+		reason = "issue has no plan note — create one with `multica artifact create --kind plan --issue <id>`"
 	}
-	passed, reason := HasWorkpad(desc)
 	status := RunStatusFailed
 	if passed {
 		status = RunStatusPassed

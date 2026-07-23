@@ -20,6 +20,7 @@ export type CerebroFlagKey =
   | "cerebro_web_push"
   | "cerebro_browser_push_prompt"
   | "cerebro_dashboard"
+  | "cerebro_ai_impact"
   | "cerebro_inbox_row_actions"
   | "cerebro_channel_row_actions"
   // FIR-407: in-conversation message search for channels + DMs.
@@ -452,6 +453,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_web_push: true,
   cerebro_browser_push_prompt: true,
   cerebro_dashboard: true,
+  cerebro_ai_impact: false,
   cerebro_inbox_row_actions: true,
   cerebro_channel_row_actions: true,
   cerebro_channel_message_search: true,
@@ -1101,6 +1103,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Enable the cerebro workspace operations dashboard at /:workspace/dashboard (agent strip, KPI cards, recent tasks).",
+  },
+  {
+    key: "cerebro_ai_impact",
+    label: "AI Impact",
+    group: "workspace",
+    description:
+      "Enable the evidence-backed AI Impact control room inside Dashboard.",
   },
   {
     key: "cerebro_inbox_row_actions",

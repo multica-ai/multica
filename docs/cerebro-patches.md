@@ -1704,6 +1704,14 @@ The runtime-image, entrypoint, fallback-provider helpers, canary, and cloud runb
 - `issue-sidebar-subscribers-single` in `packages/views/issues/components/issue-detail.tsx` removes the former Activity-header subscriber popover so regular issues have one subscriber surface.
 - Approved by Jesper Hvejsel on FIR-3386, 2026-07-16.
 
+## FIR-3411 — AI Impact Observation routes
+
+| Patch | Location | Reason |
+|---|---|---|
+| `ai-impact-routes` | `server/cmd/server/router.go` | Mount the fork-owned AI Impact Observation API inside the existing workspace-member router. The handler, service and store remain in `server/internal/cerebro/aiimpact`. |
+
+Approved through FIR-3411 Gate 0 and plan artifact `019f6fac-0134-7e34-b485-0cdfa59fbb27`.
+
 ## FIR-3212 — Agent configuration full scope: brief-layer modes
 
 | Patch | Location | Reason |
@@ -1757,6 +1765,12 @@ Approved by Jesper Hvejsel on FIR-3539 ("Fix det" + "find en måde hvor det ikke
 |---|---|---|
 | `handoff-brief-flags-verbatim` | `server/cmd/multica/cerebro_sessions.go`; skill docs in `server/internal/service/builtin_skills/multica-working-on-issues/` | `--done` / `--remaining` on `issue session handoff` were pflag `StringSlice`, which splits its value on every comma — so one prose sentence became several bullets cut mid-sentence. Switched to `StringArray` (value taken verbatim; repeat the flag for more bullets). Tests: `server/cmd/multica/cerebro_sessions_test.go`. |
 
+## FIR-3482 — Hermes task isolation
+
+| Patch | Location | Reason |
+|---|---|---|
+| `hermes-all-task-isolation` | `server/internal/daemon/execenv/execenv.go` | Build and refresh the per-task Hermes home for every Hermes task, including agents with no bound skills, so memory and SQLite state cannot fall back to the shared host home. Approved through FIR-3482 review on 2026-07-22. |
+
 ## FIR-2996 — Dashboard branch make-check hygiene
 
 | Patch | Location | Reason |
@@ -1790,6 +1804,8 @@ listening on `before.issue.status_change` exists.
 | `daemon-task-workpad-brief` | `server/internal/daemon/types.go`, `server/internal/daemon/daemon.go` | `WorkpadBriefEnabled` on the daemon `Task` (JSON from the claim response) and its copy into `TaskContextForEnv`. |
 | `agent-task-workpad-brief` | `server/internal/handler/agent.go` | `WorkpadBriefEnabled` field on `AgentTaskResponse` so the claim response ships the workspace verdict to the daemon. |
 | `daemon-workpad-brief` | `server/internal/handler/daemon.go` | One-line `h.applyWorkpadBrief(...)` call at claim (resolver lives in the cerebro-prefixed `daemon_workpad_brief_cerebro.go`). |
+| `issue-workpad-panel` | `packages/views/issues/components/issue-detail.tsx` | Import + one-line `<WorkpadPanel issueId={issue.id} />` render directly above the bottom composer, showing the issue's plan (a `kind:"plan"` artifact) as a checklist. Logic lives in `packages/cerebro-artifacts`. |
+| `one-plan-per-issue` | `server/internal/handler/artifact.go` | One-line `h.rejectSecondIssuePlan(...)` call in CreateArtifact so an issue can hold at most one `plan` artifact (the Workpad's source). Logic lives in `artifact_one_plan_per_issue_cerebro.go`. |
 
 ## FIR-3729 — Cursor tool-policy key normalization
 
@@ -1813,3 +1829,23 @@ Approved by Jesper Hvejsel via FIR-3729 takeover request, 2026-07-23.
 |---|---|---|
 | `daemon-capability-probe` | `server/internal/daemon/capabilities.go`, `server/internal/daemon/daemon.go` | Keep the upstream hook thin while the Cerebro-owned probe implementation lives in `server/internal/daemon/cerebro_capabilities.go`; include the configured provider binary when reporting effective runtime capabilities. |
 | `codex-tool-policy-home` | `server/internal/daemon/daemon.go` | Pass the task-scoped Codex home into the mandatory policy preparation seam so direct Codex calls use the generated policy configuration. |
+
+## MUL-5156 — Squad leaders own parent issue status (backport)
+
+Backport of upstream `fcb370edfd23624c83cc7db4ac111ca73e20fa30` (MUL-5156, #5758) — ported fork-native because the runtime-brief and child-done paths have diverged from upstream. **Delete on the next upstream sync** — this aligns the fork with upstream's own change, not fork-only behaviour. Squad leaders now open an assigned parent to `in_progress` on first dispatch, keep it there while members work, and move it to `in_review` only when a later re-trigger confirms the overall goal is met; `done` stays human/integration owned. Guest leaders (an `@squad` mention on an issue owned by someone else, or a quick-create turn) receive an explicit "do NOT change this issue's status" instead of the grant.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `squad-parent-status` | `server/internal/daemon/execenv/runtime_config.go` (2 marked call sites; helpers in the net-new cerebro sibling `runtime_config_squad_status_cerebro.go`) | The fork inlines the comment/assignment workflows into `buildMetaSkillContent` rather than upstream's `writeWorkflowComment`/`writeWorkflowAssignment` helpers, so the `IsSquadLeader` carve-outs (step 9 comment guardrail exception; step 8 assignment "leave parent in_progress after dispatch") live in the sibling and are called via one marked `WriteString` each. |
+| `squad-parent-status` | `server/internal/handler/squad_briefing.go` | Split `squadOperatingProtocol` into `squadOperatingProtocolHeader` + `squadOperatingProtocolHardRules`, add `squadParentStatusOwned`/`squadParentStatusNotOwned` (responsibility 6) and `squadOperatingProtocolFor(ownsIssueStatus)`, and thread `ownsIssueStatus` through `buildSquadLeaderBriefing`. |
+| `squad-parent-status` | `server/internal/handler/daemon.go` | Compute `ownsIssueStatus` (issue `assignee_type == "squad"` && `assignee_id == squad.id`) at the issue-bound leader-briefing call site; quick-create passes `false` (no issue exists yet). |
+
+**Deliberately NOT ported** (documented, not silent): upstream's `issue_child_done.go` nudge (all-sub-issues-complete / stage-advance system comment gains a `multica issue status <parent> in_review` instruction). The fork's `notifyParentOfChildDone` diverged — it posts a per-child backlog-promotion notice and has no all-complete or stage-advance branch (stage/verify orchestration lives in the fork-owned `orchestration_cerebro.go`), so there is no matching code path. The standing "Own the parent issue status" grant already authorizes the owning leader to wrap up without an explicit ask, so the contract holds without it.
+
+## FIR-3724 / MUL-4923 — Bounded daemon task preparation time (backport)
+
+Backport of upstream `ed57707bb` (MUL-4923, #5584) — ported as a targeted patch because the fork is 918 commits behind upstream and a full sync is out of scope (FIR-3724). **Delete on the next upstream sync** — this is a backport, not fork-only behaviour.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `mul-4923-prepare-timeout` | `server/internal/daemon/execenv/isolation.go`, `isolation_unix.go`, `isolation_windows.go` (net-new, verbatim upstream copies + 1 marker line each)<br>`server/internal/daemon/execenv/isolation_test.go`, `isolation_unix_test.go`, `isolation_windows_test.go` (net-new; `isolation_test.go` adapted: fork `ReuseParams` has no `WorkspacesRoot`)<br>`server/cmd/multica/main.go` (helper-mode dispatch)<br>`server/internal/daemon/daemon.go` (timeout const/var, struct fields, `New` wiring, `taskRunFailureReason`, `prepareExecutionEnvironment`/`reuseExecutionEnvironment`/`effectiveTaskPrepareTimeout`, `runTask` prepareCtx + killable Prepare/Reuse) | Bounds everything between claim and `StartTask` (runtime resolution, skill bundles, execenv setup, StartTask) with a hard 5-minute deadline, and runs execution-environment `Prepare`/`Reuse` in a killable helper subprocess (`multica __multica_execenv_prepare`) so a timed-out attempt cannot keep writing after the task is retried. On timeout, `runTask` collapses the failure into `errTaskPrepareTimeout`, which `handleTask` maps to the retryable `timeout` failure reason. **Fork adaptations:** (a) `defaultExecutionEnvironmentCommand` resolves the self binary via `os.Executable()` (fork idiom) instead of upstream's `selfexec.Resolve`; (b) the fork's diverged `Reuse`/`ReuseParams` (no error return, no `WorkspacesRoot`) are wrapped rather than replaced. **Deliberately NOT ported** (documented, not silent): the upstream Windows-runner CI job in `.github/workflows/ci.yml` (fork ships Linux/macOS only; `isolation_windows.go` still ships, build-tagged, so a future full sync converges), the modify/delete `workdir_race_test.go` (fork deleted it), and the `issue_child_done_test.go` additions (would collide with the fork's `child-done-notify-flag` patch). |

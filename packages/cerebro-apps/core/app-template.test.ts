@@ -13,6 +13,9 @@ describe("createAppTemplate", () => {
     ]);
     const manifest = JSON.parse(files[0]?.content ?? "{}") as Record<string, unknown>;
     expect(manifest).toMatchObject({ manifest: { schema_version: "1", name: "Returns helper", version: "0.1.0" } });
+    expect(files.find((file) => file.path === "frontend/index.html")?.content).toContain('crossorigin="use-credentials"');
+    expect(files.find((file) => file.path === "frontend/app.js")?.content).toContain("createMulticaApp");
+    expect(files.find((file) => file.path === "frontend/app.js")?.content).toContain("window.location.pathname");
     expect(JSON.stringify(files)).not.toMatch(/multica\.firtal\.com|registry\.firtal\.com|api[_-]?key|secret/i);
   });
 });

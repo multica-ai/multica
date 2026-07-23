@@ -7,7 +7,7 @@ import { DEFAULT_FILTER, type ActorScope, type TimeRange } from "./types";
 // state (current tab, selected actor, time-range) lives in Zustand, not in
 // the URL or query cache. Server data is fetched via TanStack Query keyed
 // on these values.
-export type DashboardTab = "overview" | "runs" | "messages";
+export type DashboardTab = "overview" | "runs" | "messages" | "ai-impact" | "people";
 
 interface DashboardState {
   scope: ActorScope;

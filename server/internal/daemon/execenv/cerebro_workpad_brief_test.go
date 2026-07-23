@@ -15,7 +15,7 @@ func TestCerebroWorkpadBrief(t *testing.T) {
 	if got == "" {
 		t.Fatal("flag on: want a non-empty Workpad brief, got empty")
 	}
-	for _, want := range []string{"## Workpad", "in_progress", "- [ ]", "- [x]"} {
+	for _, want := range []string{"## Workpad", "plan", "--kind plan", "- [ ]", "- [x]"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("flag on: brief missing %q\nbrief:\n%s", want, got)
 		}

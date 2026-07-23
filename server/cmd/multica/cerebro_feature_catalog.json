@@ -211,6 +211,13 @@
       "default": true
     },
     {
+      "key": "cerebro_ai_impact",
+      "label": "AI Impact",
+      "description": "Enable the evidence-backed AI Impact control room inside Dashboard.",
+      "group": "workspace",
+      "default": false
+    },
+    {
       "key": "cerebro_inbox_row_actions",
       "label": "Inbox row actions",
       "description": "Show the cerebro inbox row-actions surface: mute, mark-unread, hover menu, mobile swipe gestures, long-press menu, and the `e` keyboard shortcut.",
