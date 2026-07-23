@@ -294,6 +294,32 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.9",
+        date: "2026-07-23",
+        title: "Richer sub-issues, Codex Fast mode, and a smoother UI",
+        changes: [],
+        features: [
+          "Codex agents can now run in a faster mode.",
+          "Sub-issues now show priority, labels, progress, and due dates at a glance.",
+          "You can now choose which details show on each sub-issue.",
+          "Your Inbox now shows which agents are working, right in the list.",
+        ],
+        improvements: [
+          "Grouping and filters now behave the same across List, Board, and Swimlane views.",
+          "The chat box now grows with the window so you can see more of a long draft.",
+          "Getting started now takes fewer steps.",
+          "Grok usage now shows accurate cost, and your saved custom prices stay editable.",
+          "Animations across the app are now smoother.",
+        ],
+        fixes: [
+          "In the desktop app, app links now open in a tab instead of a browser window.",
+          "Your options on a new-issue draft are no longer lost.",
+          "Switching runtime while building an agent now takes effect right away.",
+          "Setup no longer flashes 'no runtime found' while it is still checking.",
+          "Codex agents now recover cleanly when a session fails to start.",
+        ],
+      },
+      {
         version: "0.4.8",
         date: "2026-07-22",
         title: "Per-agent skill controls, sharper desktop tabs, and steadier tasks",
