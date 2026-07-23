@@ -1,6 +1,18 @@
 {
   "http": [
     {
+      "id": "POST /api/service-tokens/",
+      "gate": "workspace_admin — service-token mint, owner/admin only (FIR-3608)"
+    },
+    {
+      "id": "DELETE /api/service-tokens/{id}",
+      "gate": "workspace_admin — service-token revoke, owner/admin only (FIR-3608)"
+    },
+    {
+      "id": "POST /api/service/issues",
+      "gate": "service_token scope:issues:write — RequireScope on the machine surface; non-service callers 403 (FIR-3608)"
+    },
+    {
       "id": "POST /api/cerebro/workflow-hooks/",
       "gate": "tool_policy:hooks:write"
     },

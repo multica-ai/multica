@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 )
 
@@ -51,10 +52,78 @@ func TestTable_PlatformRowsGatedByIncludeFlag(t *testing.T) {
 		if row.ManagedExternally != c.ManagedExternally {
 			t.Errorf("%q managed_externally = %v, want %v", c.Key, row.ManagedExternally, c.ManagedExternally)
 		}
-		// With no stored settings the row resolves to the Base default (Allow).
-		if row.Effective.Setting != SettingAllow {
-			t.Errorf("%q effective = %q, want allow (unset → base)", c.Key, row.Effective.Setting)
+		// Ordinary policy capabilities inherit the Base. Capabilities with a
+		// code-owned actor contract fail closed when this workspace-only query
+		// supplies no authenticated actor context.
+		want := SettingAllow
+		if _, special := platformaccess.ForKey(c.Key); special {
+			want = SettingDeny
 		}
+		if row.Effective.Setting != want {
+			t.Errorf("%q effective = %q, want %q", c.Key, row.Effective.Setting, want)
+		}
+	}
+}
+
+func TestTable_WorkflowHookRowsMatchAgentEnforcement(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+	agent, user := uuidByte(2), tpTestUserID
+
+	rows, err := s.Table(ctx, TableQuery{
+		WorkspaceID:     tpTestWorkspaceID,
+		AgentID:         agent,
+		UserID:          user,
+		Base:            SettingAllow,
+		IncludePlatform: true,
+	})
+	if err != nil {
+		t.Fatalf("Table without hook grant: %v", err)
+	}
+	wantWithoutGrant := map[string]Setting{
+		"hooks:read":           SettingAllow,
+		"hooks:write":          SettingDeny,
+		"hooks:enforce":        SettingDeny,
+		"hooks:manage_managed": SettingDeny,
+	}
+	for key, want := range wantWithoutGrant {
+		row, ok := findRow(rows, key)
+		if !ok {
+			t.Fatalf("%s row missing", key)
+		}
+		if row.Effective.Setting != want {
+			t.Errorf("%s effective = %q, want %q", key, row.Effective.Setting, want)
+		}
+	}
+
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     "hooks:write",
+		Layer:       LayerAgent,
+		SubjectID:   agent,
+		Setting:     SettingAllow,
+		UpdatedBy:   user,
+	}); err != nil {
+		t.Fatalf("grant hooks:write: %v", err)
+	}
+	rows, err = s.Table(ctx, TableQuery{
+		WorkspaceID:     tpTestWorkspaceID,
+		AgentID:         agent,
+		UserID:          user,
+		Base:            SettingAllow,
+		IncludePlatform: true,
+	})
+	if err != nil {
+		t.Fatalf("Table with hook grant: %v", err)
+	}
+	write, ok := findRow(rows, "hooks:write")
+	if !ok {
+		t.Fatal("hooks:write row missing after grant")
+	}
+	if write.Effective.Setting != SettingAllow || write.Effective.DecidedBy != LayerAgent {
+		t.Fatalf("hooks:write effective = %+v, want agent Allow", write.Effective)
 	}
 }
 

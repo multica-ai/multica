@@ -37,11 +37,17 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useT } from "../../i18n";
+// CEREBRO-PATCH(tokens-tab-service-tokens): FIR-3608 — reuse Settings → Tokens
+// for scoped, non-personal service tokens (msv_), gated by its own flag.
+import { ServiceTokensSection } from "@multica/cerebro-service-tokens/views";
+import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 
 const EXPIRY_KEYS = ["30", "90", "365", "never"] as const;
 
 export function TokensTab() {
   const { t } = useT("settings");
+  // CEREBRO-PATCH(tokens-tab-service-tokens): FIR-3608 gate the service-token section.
+  const serviceTokensEnabled = useFeatureFlag("cerebro_service_tokens");
   const [tokens, setTokens] = useState<PersonalAccessToken[]>([]);
   const [tokenName, setTokenName] = useState("");
   const [tokenExpiry, setTokenExpiry] = useState("90");
@@ -195,6 +201,9 @@ export function TokensTab() {
           </div>
         )}
       </section>
+
+      {/* CEREBRO-PATCH(tokens-tab-service-tokens): FIR-3608 scoped service-token section */}
+      {serviceTokensEnabled && <ServiceTokensSection />}
 
       <AlertDialog open={!!revokeConfirmId} onOpenChange={(v) => { if (!v) setRevokeConfirmId(null); }}>
         <AlertDialogContent>

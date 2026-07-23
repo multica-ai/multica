@@ -179,7 +179,10 @@ func (s *Store) appendPlatformRows(ctx context.Context, in TableQuery, groupIDs 
 				row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 			}
 		}
-		row.Effective = Resolve(Input{Settings: row.Layers, Base: in.Base})
+		row.Effective, err = s.resolveTablePermission(ctx, in, c.Key, row.Layers)
+		if err != nil {
+			return nil, fmt.Errorf("toolpolicy: resolve platform permission %q: %w", c.Key, err)
+		}
 		out = append(out, row)
 	}
 	return out, nil

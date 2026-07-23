@@ -22,6 +22,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -177,6 +178,9 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 			continue
 		}
 		callableName := strings.TrimSpace(v.Inventory.ToolName)
+		if strings.EqualFold(v.Descriptor.Source, "mcp") {
+			callableName = claudehook.CanonicalToolName(callableName)
+		}
 		if callableName == "" {
 			callableName = name
 		}

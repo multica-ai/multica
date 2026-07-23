@@ -156,7 +156,7 @@ func TestAuthorizePersonalBrowser_RequiresFeatureAndPermission(t *testing.T) {
 	`, testWorkspaceID, ownerID, personalBrowserFeatureFlag); err != nil {
 		t.Fatalf("enable browser feature: %v", err)
 	}
-	if result := authorize("finance.firtal.com"); result["allowed"] != false || result["reason"] != "tools:personal-browser is not granted for this agent" {
+	if result := authorize("finance.firtal.com"); result["allowed"] != false || result["reason"] != "Explicit agent grant required" {
 		t.Fatalf("feature on + no permission: got allowed=%v reason=%v, want the missing-permission error", result["allowed"], result["reason"])
 	}
 

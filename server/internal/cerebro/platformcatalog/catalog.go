@@ -102,6 +102,10 @@ type Capability struct {
 	// ManagedExternally is true when the tool-policy gate is NOT this action's
 	// enforcement point (see package doc). Shown for visibility; phase 2 skips it.
 	ManagedExternally bool
+	// ToolBindings names runtime tools that invoke this platform capability.
+	// Registration remains separate from permission, but the binding makes the
+	// relationship complete and mechanically testable.
+	ToolBindings []string
 	// Surfaced marks a capability that appears in the Permissions table behind the
 	// light agent-start gate (cerebro_agent_trigger_permissions), NOT only behind
 	// the full-catalog flag (cerebro_platform_capabilities). It is set on the
@@ -1098,6 +1102,7 @@ var catalog = []Capability{
 		Description:   "Read visible Workflow hook policies, effective bindings, and run history.",
 		DescriptionZh: "读取可见的工作流钩子策略、有效绑定和运行历史。",
 		Evidence:      []string{"server/internal/cerebro/workflows/hook_permissions.go:27"},
+		ToolBindings:  []string{"get_effective_workflow_hooks", "get_workflow_hook", "list_workflow_hook_runs", "list_workflow_hooks"},
 	},
 	{
 		Key:           "hooks:write",
@@ -1112,6 +1117,7 @@ var catalog = []Capability{
 			"POST /api/cerebro/workflow-hooks/{id}/disable",
 			"DELETE /api/cerebro/workflow-hooks/{id}",
 		},
+		ToolBindings: []string{"create_workflow_hook", "test_workflow_hook", "update_workflow_hook"},
 	},
 	{
 		Key:           "hooks:enforce",
@@ -1120,6 +1126,7 @@ var catalog = []Capability{
 		Description:   "Publish a tested Workflow hook so that it can enforce decisions. Human-only.",
 		DescriptionZh: "发布已测试的工作流钩子，使其能够强制执行决策。仅限人员。",
 		Ops:           []string{"POST /api/cerebro/workflow-hooks/{id}/publish"},
+		ToolBindings:  []string{"publish_workflow_hook"},
 	},
 	{
 		Key:           "hooks:manage_managed",
@@ -1456,6 +1463,21 @@ func ByKey(key string) (Capability, bool) {
 	for _, c := range catalog {
 		if c.Key == key {
 			return c, true
+		}
+	}
+	return Capability{}, false
+}
+
+// ByToolBinding resolves a concrete runtime tool to the platform capability
+// whose call-time contract governs it. Tool registration remains independent;
+// this lookup only prevents read surfaces from treating registration as an
+// implicit permission.
+func ByToolBinding(tool string) (Capability, bool) {
+	for _, capability := range catalog {
+		for _, binding := range capability.ToolBindings {
+			if binding == tool {
+				return capability, true
+			}
 		}
 	}
 	return Capability{}, false

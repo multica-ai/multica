@@ -308,7 +308,26 @@ function toolTitle(t: AgentCapabilityTool): string {
       ? "proved on runtime"
       : `not proved on runtime: ${t.availability.reason}`,
   );
+  if (hasEffectiveTruth(t)) {
+    parts.push(`allowed: ${yesNo(t.allowed)}`);
+    parts.push(`available: ${yesNo(t.available)}`);
+    parts.push(`enforced: ${yesNo(t.enforced)}`);
+    parts.push(`callable: ${yesNo(t.callable)}`);
+    parts.push(`verified: ${yesNo(t.verified)}`);
+    if (t.blocked_reason) parts.push(`blocked: ${t.blocked_reason}`);
+    if (t.how_to_fix) parts.push(`how to fix: ${t.how_to_fix}`);
+  }
   return parts.join(" · ");
+}
+
+function hasEffectiveTruth(t: AgentCapabilityTool): boolean {
+  return [t.allowed, t.available, t.enforced, t.callable, t.verified].some(
+    (value) => typeof value === "boolean",
+  );
+}
+
+function yesNo(value: boolean | undefined): string {
+  return typeof value === "boolean" ? (value ? "yes" : "no") : "unknown";
 }
 
 // ToolsAvailabilitySummary is the FIR-3398 headline for the Tools section: of the
@@ -350,13 +369,27 @@ function ToolPill({ tool }: { tool: AgentCapabilityTool }) {
   // FIR-3398: an unproved tool (policy allows it but the runtime has not shown it
   // exists) renders with a dashed border, so "granted" and "actually there" read
   // differently at a glance. The permission colour is unchanged.
-  const availabilityCue = tool.availability.proven ? "" : "border-dashed";
+  const truthPresent = hasEffectiveTruth(tool);
+  const verified = tool.verified ?? tool.availability.proven;
+  const availabilityCue = verified ? "" : "border-dashed";
+  const verdictClass = truthPresent
+    ? tool.callable
+      ? permissionPill("allow")
+      : tool.allowed === false
+        ? permissionPill("deny")
+        : permissionPill("ask")
+    : permissionPill(tool.permission);
   return (
     <Pill
-      className={`${permissionPill(tool.permission)} ${availabilityCue}`}
+      className={`${verdictClass} ${availabilityCue}`}
       title={toolTitle(tool)}
     >
       {tool.title || tool.key}
+      {truthPresent && (
+        <span className="text-muted-foreground">
+          · {tool.callable ? "callable" : "blocked"}
+        </span>
+      )}
     </Pill>
   );
 }
@@ -368,13 +401,7 @@ function RepoRow({ repo }: { repo: AgentCapabilityRepo }) {
         {shortRepo(repo.url)}
       </span>
       {repo.permissions.map((p) => (
-        <Pill
-          key={p.key}
-          className={permissionPill(p.permission)}
-          title={toolTitle(p)}
-        >
-          {p.title || p.key}
-        </Pill>
+        <ToolPill key={p.key} tool={p} />
       ))}
     </div>
   );
@@ -407,10 +434,15 @@ function ConnectionRow({
           {connection.tools.map((t) => (
             <Pill
               key={t.name}
-              className={permissionPill(t.permission)}
-              title={`${t.permission || "no policy"}${t.description ? " · " + t.description : ""}`}
+              className={capabilityTruthPill(t.callable, t.permission)}
+              title={connectionActionTitle(t)}
             >
               {t.name}
+              {t.callable !== undefined && (
+                <span className="text-muted-foreground">
+                  · {t.callable ? "callable" : "blocked"}
+                </span>
+              )}
             </Pill>
           ))}
         </PillRow>
@@ -418,17 +450,59 @@ function ConnectionRow({
       {connection.endpoints.length > 0 && (
         <PillRow>
           {connection.endpoints.map((ep) => (
-            <Pill key={ep.path} mono title={ep.methods.join(", ")}>
+            <Pill
+              key={`${ep.methods.join("/")}:${ep.path}`}
+              mono
+              className={capabilityTruthPill(ep.callable, ep.permission)}
+              title={connectionActionTitle(ep)}
+            >
               <span className="text-muted-foreground">
                 {ep.methods.join("/")}
               </span>
               {ep.path}
+              {ep.callable !== undefined && (
+                <span className="text-muted-foreground">
+                  · {ep.callable ? "callable" : "blocked"}
+                </span>
+              )}
             </Pill>
           ))}
         </PillRow>
       )}
     </div>
   );
+}
+
+function capabilityTruthPill(callable: boolean | undefined, permission: string): string {
+  if (callable === undefined) return permissionPill(permission);
+  if (callable) return permissionPill("allow");
+  return permission === "deny" ? permissionPill("deny") : permissionPill("ask");
+}
+
+function connectionActionTitle(action: {
+  permission: string;
+  allowed?: boolean;
+  available?: boolean;
+  enforced?: boolean;
+  callable?: boolean;
+  verified?: boolean;
+  blocked_reason?: string;
+  how_to_fix?: string;
+  description?: string;
+  summary?: string;
+}): string {
+  const lines = [
+    `Permission: ${action.permission || "unknown"}`,
+    `Allowed: ${yesNo(action.allowed)}`,
+    `Available: ${yesNo(action.available)}`,
+    `Enforced: ${yesNo(action.enforced)}`,
+    `Callable: ${yesNo(action.callable)}`,
+    `Verified: ${yesNo(action.verified)}`,
+  ];
+  if (action.description || action.summary) lines.push(action.description || action.summary || "");
+  if (action.blocked_reason) lines.push(`Blocked: ${action.blocked_reason}`);
+  if (action.how_to_fix) lines.push(`How to fix: ${action.how_to_fix}`);
+  return lines.join("\n");
 }
 
 function Section({

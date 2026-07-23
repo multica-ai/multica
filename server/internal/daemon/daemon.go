@@ -2028,7 +2028,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 	if rt := d.findRuntime(rid); rt != nil {
 		if v := d.agentVersion(rt.Provider); v != "" {
 			opts.CLIVersion = v
-			opts.Capabilities = providerCapabilities(rt.Provider)
+			opts.Capabilities = providerCapabilities(rt.Provider, d.cfg.Agents[rt.Provider].Path)
 		}
 	}
 	resp, err := d.client.SendHeartbeat(ctx, rid, opts)
@@ -3854,7 +3854,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// local provider to the mandatory tool-policy resolve IPC. Claude's combined
 	// settings document must retain the task's fast-mode choice.
 	speedMode := speedModeForTask(task)
-	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(provider, env.WorkDir, provider == "claude" && speedMode == "fast")
+	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(provider, env.WorkDir, env.CodexHome, provider == "claude" && speedMode == "fast")
 	if tperr != nil {
 		return TaskResult{}, fmt.Errorf("tool-policy prep: %w", tperr)
 	}
