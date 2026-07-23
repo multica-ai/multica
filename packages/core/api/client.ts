@@ -214,6 +214,8 @@ import {
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   AppConfigSchema,
+  OIDCLoginResponseSchema,
+  OIDCStartResponseSchema,
   type AppConfigResponse,
   GroupedIssuesResponseSchema,
   IssueTableFacetsResponseSchema,
@@ -317,6 +319,10 @@ export interface ClientUsageRequest {
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+export interface OIDCLoginResponse extends LoginResponse {
+  app_state?: string;
 }
 
 export class ApiError extends Error {
@@ -524,6 +530,40 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ code, redirect_uri: redirectUri }),
     });
+  }
+
+  async startOIDCLogin(appState: string): Promise<{ authorization_url: string }> {
+    const raw = await this.fetch<unknown>("/auth/oidc/start", {
+      method: "POST",
+      body: JSON.stringify({ app_state: appState }),
+    });
+    const response = parseWithFallback(
+      raw,
+      OIDCStartResponseSchema,
+      { authorization_url: "" },
+      { endpoint: "POST /auth/oidc/start" },
+    );
+    if (!response.authorization_url) {
+      throw new Error("Invalid OIDC authorization response");
+    }
+    return response;
+  }
+
+  async oidcLogin(code: string, state: string): Promise<OIDCLoginResponse> {
+    const raw = await this.fetch<unknown>("/auth/oidc", {
+      method: "POST",
+      body: JSON.stringify({ code, state }),
+    });
+    const response = parseWithFallback(
+      raw,
+      OIDCLoginResponseSchema,
+      { token: "", user: EMPTY_USER, app_state: "" },
+      { endpoint: "POST /auth/oidc" },
+    );
+    if (!response.token || !response.user.id) {
+      throw new Error("Invalid OIDC login response");
+    }
+    return response;
   }
 
   async logout(): Promise<void> {

@@ -7,6 +7,7 @@ import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
+import type { User } from "@multica/core/types";
 import { validateCliCallback, redirectToCliCallback } from "@multica/views/auth";
 import {
   Card,
@@ -23,68 +24,144 @@ function CallbackContent() {
   const searchParams = useSearchParams();
   const qc = useQueryClient();
   const loginWithGoogle = useAuthStore((s) => s.loginWithGoogle);
+  const loginWithOIDC = useAuthStore((s) => s.loginWithOIDC);
   const [error, setError] = useState("");
-  const [desktopToken, setDesktopToken] = useState<string | null>(null);
+  const [handoffToken, setHandoffToken] = useState<string | null>(null);
 
   useEffect(() => {
-    const code = searchParams.get("code");
-    if (!code) {
-      setError("Missing authorization code");
-      return;
-    }
-
     const errorParam = searchParams.get("error");
     if (errorParam) {
       setError(errorParam === "access_denied" ? "Access denied" : errorParam);
       return;
     }
 
+    const code = searchParams.get("code");
+    if (!code) {
+      setError("Missing authorization code");
+      return;
+    }
+
     const state = searchParams.get("state") || "";
-    const stateParts = state.split(",");
-    const isDesktop = stateParts.includes("platform:desktop");
-    const nextPart = stateParts.find((p) => p.startsWith("next:"));
-    // Strip "next:" prefix, then drop anything that isn't a safe relative path
-    // so an attacker-controlled `state=next:https://evil` cannot redirect here.
-    const nextUrl = sanitizeNextUrl(nextPart ? nextPart.slice(5) : null);
-
-    // CLI callback params — carried across the Google OAuth round-trip so
-    // headless/WSL2 `multica login` can receive the JWT after browser-based
-    // Google auth completes.
-    const cliCallbackPart = stateParts.find((p) => p.startsWith("cli_callback:"));
-    const cliStatePart = stateParts.find((p) => p.startsWith("cli_state:"));
-    const cliCallbackRaw = cliCallbackPart
-      ? decodeURIComponent(cliCallbackPart.slice("cli_callback:".length))
-      : null;
-    const cliState = cliStatePart
-      ? decodeURIComponent(cliStatePart.slice("cli_state:".length))
-      : "";
-
     const redirectUri = `${window.location.origin}/auth/callback`;
 
-    // Validate the CLI callback URL before redirecting — the state parameter
-    // passes through Google OAuth and must be treated as attacker-controlled.
-    const cliCallback =
-      cliCallbackRaw && validateCliCallback(cliCallbackRaw)
-        ? cliCallbackRaw
-        : null;
+    const parseAppState = (appState: string) => {
+      const stateParts = appState.split(",");
+      const nextPart = stateParts.find((part) => part.startsWith("next:"));
+      const cliCallbackPart = stateParts.find((part) =>
+        part.startsWith("cli_callback:"),
+      );
+      const cliStatePart = stateParts.find((part) =>
+        part.startsWith("cli_state:"),
+      );
+      // `next` is encodeURIComponent'd by the login page (same as the cli_*
+      // parts) so a comma in the URL survives the comma-joined app_state.
+      // Guard the decode independently: a malformed `next` must not void the
+      // CLI redirect, and vice versa.
+      let nextRaw: string | null = null;
+      try {
+        nextRaw = nextPart ? decodeURIComponent(nextPart.slice(5)) : null;
+      } catch {
+        nextRaw = null;
+      }
+      let cliCallbackRaw: string | null = null;
+      let cliState = "";
+      try {
+        cliCallbackRaw = cliCallbackPart
+          ? decodeURIComponent(cliCallbackPart.slice("cli_callback:".length))
+          : null;
+        cliState = cliStatePart
+          ? decodeURIComponent(cliStatePart.slice("cli_state:".length))
+          : "";
+      } catch {
+        cliCallbackRaw = null;
+      }
+      return {
+        isAppHandoff:
+          stateParts.includes("platform:desktop") ||
+          stateParts.includes("platform:mobile"),
+        nextUrl: sanitizeNextUrl(nextRaw),
+        cliCallback:
+          cliCallbackRaw && validateCliCallback(cliCallbackRaw)
+            ? cliCallbackRaw
+            : null,
+        cliState,
+      };
+    };
 
-    if (cliCallback) {
+    const completeWebLogin = async (loggedInUser: User, nextUrl: string | null) => {
+      const wsList = await api.listWorkspaces();
+      qc.setQueryData(workspaceKeys.list(), wsList);
+      const onboarded = loggedInUser.onboarded_at != null;
+
+      if (nextUrl) {
+        router.push(nextUrl);
+        return;
+      }
+
+      if (!onboarded) {
+        try {
+          const invites = await api.listMyInvitations();
+          if (invites.length > 0) {
+            qc.setQueryData(workspaceKeys.myInvitations(), invites);
+            router.push(paths.invitations());
+            return;
+          }
+        } catch {
+          // A failed invitation lookup must not trap the user on the callback page.
+        }
+      }
+
+      router.push(resolvePostAuthDestination(wsList, onboarded));
+    };
+
+    if (state.startsWith("oidc.")) {
+      loginWithOIDC(code, state)
+        .then(({ user, token, appState }) => {
+          const destination = parseAppState(appState);
+          if (destination.cliCallback) {
+            redirectToCliCallback(
+              destination.cliCallback,
+              token,
+              destination.cliState,
+            );
+            return;
+          }
+          if (destination.isAppHandoff) {
+            setHandoffToken(token);
+            window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
+            return;
+          }
+          return completeWebLogin(user, destination.nextUrl);
+        })
+        .catch((err) => {
+          setError(err instanceof Error ? err.message : "Login failed");
+        });
+      return;
+    }
+
+    const destination = parseAppState(state);
+
+    if (destination.cliCallback) {
       // CLI login flow: exchange the Google code for a JWT, then redirect the
       // token back to the CLI's local HTTP listener (e.g. WSL2 host).
       api
         .googleLogin(code, redirectUri)
         .then(({ token }) => {
-          redirectToCliCallback(cliCallback, token, cliState);
+          redirectToCliCallback(
+            destination.cliCallback!,
+            token,
+            destination.cliState,
+          );
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");
         });
-    } else if (isDesktop) {
-      // Desktop flow: exchange code for token, then redirect via deep link
+    } else if (destination.isAppHandoff) {
+      // Native app flow: exchange code for token, then redirect via deep link.
       api
         .googleLogin(code, redirectUri)
         .then(({ token }) => {
-          setDesktopToken(token);
+          setHandoffToken(token);
           window.location.href = `multica://auth/callback?token=${encodeURIComponent(token)}`;
         })
         .catch((err) => {
@@ -93,75 +170,34 @@ function CallbackContent() {
     } else {
       // Normal web flow
       loginWithGoogle(code, redirectUri)
-        .then(async (loggedInUser) => {
-          const wsList = await api.listWorkspaces();
-          qc.setQueryData(workspaceKeys.list(), wsList);
-          const onboarded = loggedInUser.onboarded_at != null;
-
-          // 1. nextUrl wins: a `next=/invite/<id>` always survives the OAuth
-          //    round-trip — the user clicked a specific link and we should
-          //    honor exactly that destination.
-          if (nextUrl) {
-            router.push(nextUrl);
-            return;
-          }
-
-          // 2. Un-onboarded users may have pending invitations on their
-          //    email even when no `next=` was carried (came from a fresh
-          //    login on multica.ai instead of clicking the email link,
-          //    or `state` was lost across the round-trip). Look them up by
-          //    email and route to the batch /invitations page if any.
-          //    Already-onboarded users skip this lookup — their new invites
-          //    surface in the sidebar dropdown, not as a forced wall.
-          if (!onboarded) {
-            try {
-              const invites = await api.listMyInvitations();
-              if (invites.length > 0) {
-                qc.setQueryData(workspaceKeys.myInvitations(), invites);
-                router.push(paths.invitations());
-                return;
-              }
-            } catch {
-              // Network blip on the invite lookup is non-fatal — fall through
-              // to the normal post-auth destination so the user isn't stuck
-              // on a blank callback screen. Worst case they land on
-              // /onboarding and the sidebar will surface invites later.
-            }
-          }
-
-          // 3. Default: hand off to the resolver (onboarding for first-timers,
-          //    first workspace for returning users, /workspaces/new for
-          //    onboarded users with zero workspaces). Source-attribution
-          //    backfill for onboarded users with no recorded source is
-          //    handled by `<SourceBackfillModal />` inside the dashboard
-          //    shell — not a route detour, so we route straight to dest.
-          router.push(resolvePostAuthDestination(wsList, onboarded));
-        })
+        .then((loggedInUser) =>
+          completeWebLogin(loggedInUser, destination.nextUrl),
+        )
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");
         });
     }
-  }, [searchParams, loginWithGoogle, router, qc]);
+  }, [searchParams, loginWithGoogle, loginWithOIDC, router, qc]);
 
-  if (desktopToken) {
+  if (handoffToken) {
     return (
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl">Opening Multica</CardTitle>
             <CardDescription>
-              You should see a prompt to open the Multica desktop app. If
-              nothing happens, click the button below.
+              You should see a prompt to open the Multica app. If nothing
+              happens, click the button below.
             </CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
             <Button
               variant="outline"
               onClick={() => {
-                window.location.href = `multica://auth/callback?token=${encodeURIComponent(desktopToken)}`;
+                window.location.href = `multica://auth/callback?token=${encodeURIComponent(handoffToken)}`;
               }}
             >
-              Open Multica Desktop
+              Open Multica
             </Button>
           </CardContent>
         </Card>

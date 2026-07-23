@@ -57,6 +57,11 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 
 	t.Setenv("ALLOW_SIGNUP", "false")
 	t.Setenv("GOOGLE_CLIENT_ID", "google-client-id")
+	t.Setenv("OIDC_ISSUER_URL", "https://auth.example.com/application/o/multica")
+	t.Setenv("OIDC_CLIENT_ID", "oidc-client-id")
+	t.Setenv("OIDC_CLIENT_SECRET", "oidc-client-secret")
+	t.Setenv("OIDC_REDIRECT_URI", "https://app.example.com/auth/callback")
+	t.Setenv("OIDC_PROVIDER_NAME", "Company SSO")
 	t.Setenv("POSTHOG_API_KEY", "phc_test")
 	t.Setenv("POSTHOG_HOST", "https://eu.i.posthog.com")
 	t.Setenv("MULTICA_PUBLIC_URL", "https://api.example.com/")
@@ -83,6 +88,9 @@ func TestGetConfigIncludesRuntimeAuthConfig(t *testing.T) {
 	}
 	if cfg.GoogleClientID != "google-client-id" {
 		t.Fatalf("google_client_id: want google-client-id, got %q", cfg.GoogleClientID)
+	}
+	if cfg.OIDCProviderName != "Company SSO" {
+		t.Fatalf("oidc_provider_name: want Company SSO, got %q", cfg.OIDCProviderName)
 	}
 	if cfg.PosthogKey != "phc_test" {
 		t.Fatalf("posthog_key: want phc_test, got %q", cfg.PosthogKey)

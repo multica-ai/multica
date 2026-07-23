@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
+  OIDCLoginResponseSchema,
+  OIDCStartResponseSchema,
   AgentTaskListSchema,
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
@@ -690,6 +692,37 @@ describe("AppConfigSchema cdn_signed drift", () => {
   it("parses server_version and leaves it undefined when the server omits it", () => {
     expect(AppConfigSchema.parse({ server_version: "1.2.3" }).server_version).toBe("1.2.3");
     expect(AppConfigSchema.parse({}).server_version).toBeUndefined();
+  });
+
+  it("parses generic OIDC provider branding", () => {
+    expect(
+      AppConfigSchema.parse({ oidc_provider_name: "Company SSO" })
+        .oidc_provider_name,
+    ).toBe("Company SSO");
+    expect(AppConfigSchema.parse({}).oidc_provider_name).toBeUndefined();
+  });
+});
+
+describe("OIDC response schemas", () => {
+  it("parses authorization and login responses while keeping app state optional", () => {
+    expect(
+      OIDCStartResponseSchema.parse({ authorization_url: "https://idp.example/authorize" }),
+    ).toEqual({ authorization_url: "https://idp.example/authorize" });
+    const login = OIDCLoginResponseSchema.parse({
+      token: "jwt",
+      user: {
+        id: "user-1",
+        name: "Test",
+        email: "test@example.com",
+      },
+    });
+    expect(login.app_state).toBe("");
+    expect(login.user.id).toBe("user-1");
+  });
+
+  it("rejects malformed OIDC responses", () => {
+    expect(OIDCStartResponseSchema.safeParse({ authorization_url: 42 }).success).toBe(false);
+    expect(OIDCLoginResponseSchema.safeParse({ token: "jwt" }).success).toBe(false);
   });
 });
 

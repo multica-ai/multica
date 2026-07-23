@@ -6,6 +6,7 @@ const {
   mockPush,
   mockSearchParams,
   mockLoginWithGoogle,
+  mockLoginWithOIDC,
   mockListWorkspaces,
   mockListMyInvitations,
   mockSetQueryData,
@@ -13,6 +14,7 @@ const {
   mockPush: vi.fn(),
   mockSearchParams: new URLSearchParams(),
   mockLoginWithGoogle: vi.fn(),
+  mockLoginWithOIDC: vi.fn(),
   mockListWorkspaces: vi.fn(),
   mockListMyInvitations: vi.fn(),
   mockSetQueryData: vi.fn(),
@@ -54,7 +56,10 @@ vi.mock("@multica/core/auth", async () => {
   return {
     ...actual,
     useAuthStore: (selector: (s: unknown) => unknown) =>
-      selector({ loginWithGoogle: mockLoginWithGoogle }),
+      selector({
+        loginWithGoogle: mockLoginWithGoogle,
+        loginWithOIDC: mockLoginWithOIDC,
+      }),
   };
 });
 
@@ -94,6 +99,11 @@ describe("CallbackPage", () => {
     );
     mockSearchParams.set("code", "test-code");
     mockLoginWithGoogle.mockResolvedValue(makeUser());
+    mockLoginWithOIDC.mockResolvedValue({
+      user: makeUser(),
+      token: "oidc-token",
+      appState: "",
+    });
     mockListWorkspaces.mockResolvedValue([]);
     mockListMyInvitations.mockResolvedValue([]);
   });
@@ -115,6 +125,76 @@ describe("CallbackPage", () => {
       expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
     });
     expect(mockListMyInvitations).toHaveBeenCalled();
+  });
+
+  it("completes generic OIDC login using the protected app state", async () => {
+    mockSearchParams.set("state", "oidc.server-generated-state");
+    mockLoginWithOIDC.mockResolvedValue({
+      user: makeUser(),
+      token: "oidc-token",
+      appState: "next:/invite/oidc-invite",
+    });
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockLoginWithOIDC).toHaveBeenCalledWith(
+        "test-code",
+        "oidc.server-generated-state",
+      );
+      expect(mockPush).toHaveBeenCalledWith("/invite/oidc-invite");
+    });
+    expect(mockLoginWithGoogle).not.toHaveBeenCalled();
+  });
+
+  it("decodes a comma-bearing next= from the OIDC app state", async () => {
+    mockSearchParams.set("state", "oidc.server-generated-state");
+    mockLoginWithOIDC.mockResolvedValue({
+      user: makeUser(),
+      token: "oidc-token",
+      // The login page encodeURIComponent's `next` before comma-joining the
+      // app_state; without a matching decode here a raw comma in the URL
+      // would split the redirect target and drop everything after it.
+      appState: `next:${encodeURIComponent("/board?filter=a,b")}`,
+    });
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(mockPush).toHaveBeenCalledWith("/board?filter=a,b");
+    });
+  });
+
+  it("hands an OIDC token back to the mobile app", async () => {
+    mockSearchParams.set("state", "oidc.server-generated-state");
+    mockLoginWithOIDC.mockResolvedValue({
+      user: makeUser(),
+      token: "mobile-oidc-token",
+      appState: "platform:mobile",
+    });
+
+    const hrefSetter = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, set href(value: string) { hrefSetter(value); } },
+    });
+
+    try {
+      render(<CallbackPage />);
+
+      await waitFor(() => {
+        expect(hrefSetter).toHaveBeenCalledWith(
+          "multica://auth/callback?token=mobile-oidc-token",
+        );
+      });
+      expect(mockPush).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
   });
 
   it("unonboarded user with pending invitations lands on /invitations", async () => {

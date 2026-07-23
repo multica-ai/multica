@@ -19,6 +19,14 @@ data:
   DISABLE_WORKSPACE_CREATION: {{ .Values.backend.config.disableWorkspaceCreation | quote }}
   GOOGLE_CLIENT_ID: {{ .Values.backend.config.googleClientId | quote }}
   GOOGLE_REDIRECT_URI: {{ .Values.backend.config.googleRedirectUri | quote }}
+  OIDC_ISSUER_URL: {{ .Values.backend.config.oidcIssuerUrl | quote }}
+  OIDC_CLIENT_ID: {{ .Values.backend.config.oidcClientId | quote }}
+  OIDC_REDIRECT_URI: {{ .Values.backend.config.oidcRedirectUri | quote }}
+  OIDC_PROVIDER_NAME: {{ .Values.backend.config.oidcProviderName | quote }}
+  OIDC_SCOPES: {{ .Values.backend.config.oidcScopes | quote }}
+  OIDC_ALLOWED_GROUPS: {{ .Values.backend.config.oidcAllowedGroups | quote }}
+  OIDC_GROUPS_CLAIM: {{ .Values.backend.config.oidcGroupsClaim | quote }}
+  OIDC_REQUIRE_VERIFIED_EMAIL: {{ .Values.backend.config.oidcRequireVerifiedEmail | quote }}
   S3_BUCKET: {{ .Values.backend.config.s3Bucket | quote }}
   S3_REGION: {{ .Values.backend.config.s3Region | quote }}
   CLOUDFRONT_DOMAIN: {{ .Values.backend.config.cloudfrontDomain | quote }}
