@@ -34,6 +34,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
 	"github.com/multica-ai/multica/server/internal/cerebro/browsertester"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -239,7 +240,7 @@ func (h *Handler) AuthorizePersonalBrowser(w http.ResponseWriter, r *http.Reques
 		// condition (a plain Allow/Deny) ignore the host and resolve as before.
 		RequestContext: toolpolicy.RequestContext{Host: host},
 	}
-	allowed, err := store.ResolveActorOptIn(r.Context(), query, true)
+	effective, err := store.ResolvePermission(r.Context(), query, platformaccess.Actor{Authenticated: true, Agent: true})
 	if err != nil {
 		slog.Error("personal-browser authorize: resolve failed",
 			"workspace_id", util.UUIDToString(wsID), "agent_id", util.UUIDToString(agentID), "host", host, "error", err)
@@ -250,36 +251,25 @@ func (h *Handler) AuthorizePersonalBrowser(w http.ResponseWriter, r *http.Reques
 
 	decision := "deny"
 	reason := "tools:personal-browser is not granted for this agent"
-	if allowed {
+	if effective.Setting == toolpolicy.SettingAllow {
 		decision = "allow"
-		reason = "Allowed by agent"
+		reason = effective.Reason
 	} else {
-		// Resolve the authored ceilings against an Allow baseline only to preserve
-		// the distinct Ask/Deny explanation. It does not grant access: the opt-in
-		// verdict above remains authoritative, so no stored row still stays denied.
-		eff, resolveErr := store.Resolve(r.Context(), query)
-		if resolveErr != nil {
-			slog.Error("personal-browser authorize: explanation resolve failed",
-				"workspace_id", util.UUIDToString(wsID), "agent_id", util.UUIDToString(agentID), "host", host, "error", resolveErr)
-			h.auditPersonalBrowser(wsID, agentID, host, req.Action, "deny", "resolve failed")
-			writeError(w, http.StatusInternalServerError, "permission check failed")
-			return
-		}
-		switch eff.Setting {
+		switch effective.Setting {
 		case toolpolicy.SettingAsk:
 			// Ask means a human must approve. There is no inbox round-trip on this
 			// surface yet, so an unresolved ask does NOT proceed — it acts inside the
 			// user's real session. Surfaced distinctly so the desktop can say why.
 			decision = "ask"
-			reason = eff.Reason
+			reason = effective.Reason
 		case toolpolicy.SettingDeny, toolpolicy.SettingDisable:
-			reason = eff.Reason
+			reason = effective.Reason
 		}
 	}
 
 	h.auditPersonalBrowser(wsID, agentID, host, req.Action, decision, reason)
 	writeJSON(w, http.StatusOK, map[string]any{
-		"allowed":  allowed,
+		"allowed":  effective.Setting == toolpolicy.SettingAllow,
 		"decision": decision,
 		"reason":   reason,
 	})

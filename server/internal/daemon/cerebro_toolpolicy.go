@@ -160,8 +160,16 @@ type toolPolicySpawn struct {
 // or deploy — wherever the daemon runs, the hook runs. Workspace/agent identity
 // and the daemon port come from the MULTICA_* env already injected at spawn.
 func (d *Daemon) prepareToolPolicySpawn(provider, workdir string, fastMode bool) (*toolPolicySpawn, error) {
-	if provider != "claude" && provider != "codex" && provider != "cursor" && provider != "gemini" {
+	switch provider {
+	case "copilot", "opencode", "openclaw", "hermes", "pi", "kimi", "kiro", "antigravity":
+		return nil, fmt.Errorf("local provider %q does not support mandatory tool-policy enforcement", provider)
+	case "claude", "codex", "cursor", "gemini":
+		// Enforced below through a provider-specific adapter.
+	case "firtal-gateway":
+		// Managed HTTP providers do not dispatch local CLI tools.
 		return nil, nil
+	default:
+		return nil, fmt.Errorf("local provider %q does not support mandatory tool-policy enforcement", provider)
 	}
 
 	exe, err := os.Executable()

@@ -38,8 +38,8 @@ func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
 	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
 	tool := FirtalGetAgentCapabilitiesTool{
 		provider: capabilitiesCardProvider{card: handler.AgentCapabilities{Tools: []handler.AgentCapabilityTool{
-			{Key: "allowed_tool", Permission: "allow"},
-			{Key: "rejected_tool", Permission: "allow"},
+			{Key: "allowed_tool", Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true},
+			{Key: "rejected_tool", Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true},
 		}}},
 		tctx: ToolContext{
 			AgentID:      id,
@@ -65,5 +65,8 @@ func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
 	}
 	if card.Tools[1].Reason == "" {
 		t.Error("rejected task mandate must explain the denial")
+	}
+	if card.Tools[1].Allowed || card.Tools[1].Callable || card.Tools[1].BlockedReason == "" || card.Tools[1].HowToFix == "" {
+		t.Fatalf("rejected task mandate left a positive or unexplained truth verdict: %+v", card.Tools[1])
 	}
 }

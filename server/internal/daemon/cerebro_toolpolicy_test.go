@@ -38,6 +38,21 @@ func TestPrepareToolPolicySpawn_AllLocalProvidersEnforce(t *testing.T) {
 	}
 }
 
+func TestPrepareToolPolicySpawn_RejectsLocalProvidersWithoutEnforcementAdapter(t *testing.T) {
+	d := &Daemon{}
+	for _, provider := range []string{"copilot", "opencode", "openclaw", "hermes", "pi", "kimi", "kiro", "antigravity"} {
+		t.Run(provider, func(t *testing.T) {
+			got, err := d.prepareToolPolicySpawn(provider, t.TempDir(), false)
+			if err == nil {
+				t.Fatalf("spawn = %+v, want provider rejected until it has a mandatory tool-policy adapter", got)
+			}
+			if !strings.Contains(err.Error(), "does not support mandatory tool-policy enforcement") {
+				t.Fatalf("error = %q, want explicit tool-policy rejection", err)
+			}
+		})
+	}
+}
+
 func TestWriteToolPolicySettingsJSON_ProviderContracts(t *testing.T) {
 	for _, tc := range []struct {
 		provider string
@@ -79,6 +94,16 @@ func TestPrepareToolPolicySpawn_NonTargetProviderUnaffected(t *testing.T) {
 	got, err := (&Daemon{}).prepareToolPolicySpawn("firtal-gateway", t.TempDir(), false)
 	if err != nil || got != nil {
 		t.Fatalf("non-target provider = %+v, %v", got, err)
+	}
+}
+
+func TestPrepareToolPolicySpawn_RejectsUnknownLocalProviderByDefault(t *testing.T) {
+	got, err := (&Daemon{}).prepareToolPolicySpawn("new-local-cli", t.TempDir(), false)
+	if err == nil || got != nil {
+		t.Fatalf("unknown provider = %+v, %v; want fail-closed rejection", got, err)
+	}
+	if !strings.Contains(err.Error(), "does not support mandatory tool-policy enforcement") {
+		t.Fatalf("error = %q, want explicit tool-policy rejection", err)
 	}
 }
 

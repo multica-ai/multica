@@ -335,6 +335,84 @@ describe("CerebroCapabilitiesTab", () => {
     ).toBeInTheDocument();
   });
 
+  it("shows why a declared capability cannot actually be called", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      agent_id: "agent-1",
+      name: "Tine",
+      model: "claude",
+      tools: [
+        {
+          key: "hooks:write",
+          title: "Create workflow hooks",
+          permission: "deny",
+          allowed: false,
+          available: true,
+          enforced: true,
+          callable: false,
+          verified: false,
+          blocked_reason: "An explicit agent grant is required",
+          how_to_fix: "Ask a workspace owner or admin to grant hooks:write.",
+        },
+      ],
+    });
+
+    renderTab();
+
+    const pill = await screen.findByText("Create workflow hooks");
+    expect(pill).toHaveTextContent("blocked");
+    expect(pill.closest("span")).toHaveAttribute(
+      "title",
+      expect.stringContaining("callable: no"),
+    );
+    expect(pill.closest("span")).toHaveAttribute(
+      "title",
+      expect.stringContaining("An explicit agent grant is required"),
+    );
+    expect(pill.closest("span")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Ask a workspace owner or admin to grant hooks:write."),
+    );
+  });
+
+  it("shows a registered but disabled connection action as blocked", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      agent_id: "agent-1",
+      name: "Tine",
+      model: "claude",
+      connections: [{
+        name: "registry",
+        type: "api",
+        enabled: false,
+        tools: [],
+        endpoints: [{
+          path: "/datasets",
+          methods: ["GET"],
+          permission: "allow",
+          allowed: true,
+          available: false,
+          enforced: true,
+          callable: false,
+          verified: false,
+          blocked_reason: "The connection is disabled",
+          how_to_fix: "Enable and test the connection before relying on this action.",
+        }],
+      }],
+    });
+
+    renderTab();
+
+    const path = await screen.findByText("/datasets");
+    expect(path.closest("span")).toHaveTextContent("blocked");
+    expect(path.closest("span")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Available: no"),
+    );
+    expect(path.closest("span")).toHaveAttribute(
+      "title",
+      expect.stringContaining("The connection is disabled"),
+    );
+  });
+
   it("survives a malformed response without throwing (fallback to empty)", async () => {
     // Missing fields, wrong types, null arrays — every defense at once.
     mockCerebroRequest.mockResolvedValue({

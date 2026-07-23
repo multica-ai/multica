@@ -38,7 +38,7 @@ keys.
 | Behavior | File:line |
 |---|---|
 | Endpoint `POST /api/cerebro/personal-browser/authorize` (agent `mat_` token) | `server/cmd/server/router.go` (marked `CEREBRO-PATCH(personal-browser-authorize-route)`) |
-| Resolves an explicit Agent opt-in with `ResolveActorOptIn` + `RequestContext{Host}` so no grant stays denied and a host-allowlist condition bites | `server/internal/handler/personal_browser_authorize_cerebro.go` (`AuthorizePersonalBrowser`) |
+| Resolves the declared `agent_opt_in` contract through `ResolvePermission` + `RequestContext{Host}` so Explain and enforcement use the same verdict, no grant stays denied, and a host-allowlist condition bites | `server/internal/cerebro/platformaccess/model.go`; `server/internal/handler/personal_browser_authorize_cerebro.go` (`AuthorizePersonalBrowser`) |
 | Agent identity from server-set `X-Agent-ID` / `X-Workspace-ID` (auth middleware, `X-Actor-Source: task_token`) | `server/internal/middleware/auth.go`; `personal_browser_authorize_cerebro.go` |
 | Central audit (which agent, which host, decision) | `server/internal/handler/personal_browser_authorize_cerebro.go` (`auditPersonalBrowser`) |
 | Desktop control server authorizes every action against the endpoint (fails closed) | `apps/desktop/src/main/cerebro-browser-control-server.ts` (`authorize`, `Route.hostFor`) |

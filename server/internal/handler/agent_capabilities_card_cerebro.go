@@ -30,6 +30,7 @@ import (
 	cerebrocapabilities "github.com/multica-ai/multica/server/internal/cerebro/capabilities"
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -113,6 +114,15 @@ type AgentCapabilityTool struct {
 	Reason            string   `json:"reason,omitempty"`
 	ManagedExternally bool     `json:"managed_externally"`
 	CappedByGroups    []string `json:"capped_by_groups,omitempty"`
+	// The effective truth model keeps the distinct questions separate: policy,
+	// runtime presence, live enforcement, callability, and observed proof.
+	Allowed       bool   `json:"allowed"`
+	Available     bool   `json:"available"`
+	Enforced      bool   `json:"enforced"`
+	Callable      bool   `json:"callable"`
+	Verified      bool   `json:"verified"`
+	BlockedReason string `json:"blocked_reason,omitempty"`
+	HowToFix      string `json:"how_to_fix,omitempty"`
 	// CEREBRO-PATCH(agent-capabilities-tool-availability): FIR-3398 — what has
 	// been PROVED about this tool on the agent's runtime. Permission above is
 	// what policy allows; this is whether the capability is really there.
@@ -133,15 +143,30 @@ type AgentCapabilityConnEndpoint struct {
 	// Summary is the endpoint's one-line label captured from the API's OpenAPI
 	// spec at discovery time (e.g. "Execute data source: Orders"); empty when
 	// the spec declared none.
-	Summary string `json:"summary,omitempty"`
+	Summary       string `json:"summary,omitempty"`
+	Permission    string `json:"permission"`
+	Allowed       bool   `json:"allowed"`
+	Available     bool   `json:"available"`
+	Enforced      bool   `json:"enforced"`
+	Callable      bool   `json:"callable"`
+	Verified      bool   `json:"verified"`
+	BlockedReason string `json:"blocked_reason,omitempty"`
+	HowToFix      string `json:"how_to_fix,omitempty"`
 }
 
 // AgentCapabilityConnTool is one MCP tool a connection exposes, with this agent's
 // effective permission on it (empty when the tool-policy table has no row).
 type AgentCapabilityConnTool struct {
-	Name        string `json:"name"`
-	Description string `json:"description,omitempty"`
-	Permission  string `json:"permission,omitempty"`
+	Name          string `json:"name"`
+	Description   string `json:"description,omitempty"`
+	Permission    string `json:"permission"`
+	Allowed       bool   `json:"allowed"`
+	Available     bool   `json:"available"`
+	Enforced      bool   `json:"enforced"`
+	Callable      bool   `json:"callable"`
+	Verified      bool   `json:"verified"`
+	BlockedReason string `json:"blocked_reason,omitempty"`
+	HowToFix      string `json:"how_to_fix,omitempty"`
 }
 
 // AgentCapabilityConnection is one external system the agent reaches, with the
@@ -367,6 +392,10 @@ func ApplyTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, 
 		if err := mandates.Authorize(ctx, taskID, workspaceID, agentID, card.Tools[i].Key); err != nil {
 			card.Tools[i].Permission = "deny"
 			card.Tools[i].Reason = fmt.Sprintf("task mandate denied the capability: %v", err)
+			card.Tools[i].Allowed = false
+			card.Tools[i].Callable = false
+			card.Tools[i].BlockedReason = card.Tools[i].Reason
+			card.Tools[i].HowToFix = "Start a new task whose issued mandate includes this capability."
 		}
 	}
 }
@@ -593,12 +622,12 @@ func (h *Handler) agentCapabilityRows(r *http.Request, workspaceID, agentID pgty
 func classifyCapabilityRows(rows []cerebrotoolpolicy.TableRow, connectionNames map[string]bool) (
 	tools []AgentCapabilityTool,
 	repos []AgentCapabilityRepo,
-	connPerms map[string]map[string]string,
+	connPerms map[string]map[string]AgentCapabilityTool,
 	connTools map[string][]AgentCapabilityTool,
 ) {
 	tools = []AgentCapabilityTool{}
 	repos = []AgentCapabilityRepo{}
-	connPerms = map[string]map[string]string{}
+	connPerms = map[string]map[string]AgentCapabilityTool{}
 	connTools = map[string][]AgentCapabilityTool{}
 
 	repoIndex := map[string]int{} // repo URL -> index into repos (preserves order)
@@ -614,13 +643,13 @@ func classifyCapabilityRows(rows []cerebrotoolpolicy.TableRow, connectionNames m
 				repos = append(repos, AgentCapabilityRepo{URL: url})
 			}
 			repos[idx].Permissions = append(repos[idx].Permissions, capabilityToolFromRow(row))
-		case capSourceConnectionTool:
+		case capSourceConnectionTool, capSourceConnectionEndpnt:
 			conn := strings.TrimPrefix(row.ToolKey, capConnectionToolKeyPrefix)
 			if connPerms[conn] == nil {
-				connPerms[conn] = map[string]string{}
+				connPerms[conn] = map[string]AgentCapabilityTool{}
 			}
-			connPerms[conn][row.ResourcePattern] = string(row.Effective.Setting)
-		case capSourceConnection, capSourceConnectionEndpnt:
+			connPerms[conn][row.ResourcePattern] = capabilityToolFromRow(row)
+		case capSourceConnection:
 			// Rendered structurally from the connections store; skip here.
 		default:
 			// CEREBRO-PATCH(agent-capabilities-card-connection-nesting): TECH-3642
@@ -645,7 +674,15 @@ func capabilityToolFromRow(row cerebrotoolpolicy.TableRow) AgentCapabilityTool {
 		DecidedBy:         string(row.Effective.DecidedBy),
 		Reason:            row.Effective.Reason,
 		ManagedExternally: row.ManagedExternally,
+		Allowed:           row.Effective.Setting == cerebrotoolpolicy.SettingAllow,
+		Enforced:          true,
 	}
+	if row.Source == platformcatalog.Source {
+		t.Available = true
+		t.Enforced = platformcatalog.Enforced(row.ToolKey)
+	}
+	t.Callable = t.Allowed && t.Available && t.Enforced
+	setCapabilityBlockExplanation(&t)
 	for _, g := range row.CappedByGroups {
 		label := g.Name
 		if g.Owner != "" {
@@ -654,6 +691,40 @@ func capabilityToolFromRow(row cerebrotoolpolicy.TableRow) AgentCapabilityTool {
 		t.CappedByGroups = append(t.CappedByGroups, label)
 	}
 	return t
+}
+
+func setCapabilityBlockExplanation(tool *AgentCapabilityTool) {
+	if tool == nil {
+		return
+	}
+	tool.BlockedReason = ""
+	tool.HowToFix = ""
+	if tool.Callable {
+		return
+	}
+	switch {
+	case !tool.Allowed:
+		tool.BlockedReason = tool.Reason
+		if tool.BlockedReason == "" {
+			tool.BlockedReason = "Policy does not allow this action"
+		}
+		switch {
+		case strings.Contains(strings.ToLower(tool.BlockedReason), "human-only"):
+			tool.HowToFix = "Use a human member with the required explicit grant."
+		case strings.Contains(strings.ToLower(tool.BlockedReason), "owner only") || strings.Contains(strings.ToLower(tool.BlockedReason), "owner-only"):
+			tool.HowToFix = "Use the workspace owner."
+		case strings.Contains(strings.ToLower(tool.BlockedReason), "explicit grant"):
+			tool.HowToFix = "Ask a workspace owner or admin to grant " + tool.Key + "."
+		default:
+			tool.HowToFix = "Change the effective permission at the deciding layer."
+		}
+	case !tool.Enforced:
+		tool.BlockedReason = "This capability is not wired to a live enforcement point"
+		tool.HowToFix = "Wire the capability to its call-time authorizer before relying on it."
+	case !tool.Available:
+		tool.BlockedReason = "The action is not available on this runtime"
+		tool.HowToFix = "Run capability discovery or use a runtime that provides the action."
+	}
 }
 
 // listCapabilityConnections returns ALL workspace connections (enabled and
@@ -690,7 +761,7 @@ func connectionNameSet(conns []cerebroconnections.Connection) map[string]bool {
 // back to the connection's persisted tools/list — which only a manual "Test
 // connection" populates — when no scanned rows exist. Auth secrets are never
 // read here. Returns an empty slice (never nil) so the card renders.
-func buildAgentCapabilityConnections(conns []cerebroconnections.Connection, connPerms map[string]map[string]string, connTools map[string][]AgentCapabilityTool) []AgentCapabilityConnection {
+func buildAgentCapabilityConnections(conns []cerebroconnections.Connection, connPerms map[string]map[string]AgentCapabilityTool, connTools map[string][]AgentCapabilityTool) []AgentCapabilityConnection {
 	out := []AgentCapabilityConnection{}
 	for _, c := range conns {
 		entry := AgentCapabilityConnection{
@@ -707,30 +778,76 @@ func buildAgentCapabilityConnections(conns []cerebroconnections.Connection, conn
 				if name == "" {
 					name = t.Key
 				}
-				perm := t.Permission
-				if p, ok := connPerms[c.Name][name]; ok && p != "" {
-					perm = p
+				policy, ok := connPerms[c.Name][name]
+				if !ok {
+					policy = t
 				}
-				entry.Tools = append(entry.Tools, AgentCapabilityConnTool{
-					Name:       name,
-					Permission: perm,
-				})
+				entry.Tools = append(entry.Tools, connectionCapabilityTool(c, name, "", policy))
 			}
 		} else {
 			for _, t := range c.Tools {
-				entry.Tools = append(entry.Tools, AgentCapabilityConnTool{
-					Name:        t.Name,
-					Description: t.Description,
-					Permission:  connPerms[c.Name][t.Name],
-				})
+				entry.Tools = append(entry.Tools, connectionCapabilityTool(c, t.Name, t.Description, connPerms[c.Name][t.Name]))
 			}
 		}
 		for _, ep := range c.EndpointPermissions {
-			entry.Endpoints = append(entry.Endpoints, AgentCapabilityConnEndpoint{Path: ep.Path, Methods: ep.Methods, Summary: ep.Summary})
+			for _, method := range ep.Methods {
+				pattern := method + " " + ep.Path
+				entry.Endpoints = append(entry.Endpoints, connectionCapabilityEndpoint(c, ep.Path, method, ep.Summary, connPerms[c.Name][pattern]))
+			}
 		}
 		out = append(out, entry)
 	}
 	return out
+}
+
+func connectionCapabilityTool(c cerebroconnections.Connection, name, description string, policy AgentCapabilityTool) AgentCapabilityConnTool {
+	permission, allowed, blockedReason, howToFix := connectionCapabilityTruth(c, policy)
+	return AgentCapabilityConnTool{
+		Name: name, Description: description, Permission: permission,
+		Allowed: allowed, Available: c.Enabled, Enforced: true,
+		Callable: allowed && c.Enabled, Verified: false,
+		BlockedReason: blockedReason, HowToFix: howToFix,
+	}
+}
+
+func connectionCapabilityEndpoint(c cerebroconnections.Connection, path, method, summary string, policy AgentCapabilityTool) AgentCapabilityConnEndpoint {
+	permission, allowed, blockedReason, howToFix := connectionCapabilityTruth(c, policy)
+	return AgentCapabilityConnEndpoint{
+		Path: path, Methods: []string{method}, Summary: summary, Permission: permission,
+		Allowed: allowed, Available: c.Enabled, Enforced: true,
+		Callable: allowed && c.Enabled, Verified: false,
+		BlockedReason: blockedReason, HowToFix: howToFix,
+	}
+}
+
+func connectionCapabilityTruth(c cerebroconnections.Connection, policy AgentCapabilityTool) (permission string, allowed bool, blockedReason, howToFix string) {
+	permission = policy.Permission
+	if permission == "" {
+		if c.Type == cerebroconnections.TypeAPI {
+			permission = c.DefaultAccess
+			if permission == "" {
+				permission = cerebroconnections.DefaultAccessDeny
+			}
+		} else {
+			permission = string(cerebrotoolpolicy.SettingAllow)
+		}
+	}
+	allowed = permission == string(cerebrotoolpolicy.SettingAllow)
+	if !allowed {
+		blockedReason = policy.Reason
+		if blockedReason == "" {
+			if permission == string(cerebrotoolpolicy.SettingAsk) {
+				blockedReason = "This action requires human approval"
+			} else {
+				blockedReason = "Policy does not allow this action"
+			}
+		}
+		howToFix = "Change the effective permission at the deciding layer."
+	} else if !c.Enabled {
+		blockedReason = "The connection is disabled"
+		howToFix = "Enable and test the connection before relying on this action."
+	}
+	return permission, allowed, blockedReason, howToFix
 }
 
 // buildAgentCapabilityLimits extracts the agent's boundaries from its opaque
