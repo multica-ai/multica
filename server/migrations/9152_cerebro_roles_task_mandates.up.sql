@@ -52,14 +52,42 @@ JOIN agent ag ON ag.id = atg.agent_id
 ON CONFLICT (workspace_id, agent_id, tool_name) DO NOTHING;
 
 -- Preserve every legacy direct tool choice before the config-bearing table is
--- retired. Existing explicit policy wins on conflict; otherwise enabled maps
--- to Allow and disabled maps to Deny at the agent layer.
+-- retired. Existing explicit policy wins on conflict. Registry grants retain
+-- their per-data-source restriction; an empty Registry allowlist stays denied.
 INSERT INTO cerebro_tool_policy (
     workspace_id, tool_key, layer, subject_id, setting, resource_pattern, conditions
 )
 SELECT ag.workspace_id, atg.tool_name, 'agent', atg.agent_id,
-       CASE WHEN atg.enabled THEN 'allow' ELSE 'deny' END,
-       '', NULL
+       CASE
+           WHEN atg.tool_name = 'firtal_registry' AND NOT atg.enabled THEN 'deny'
+           WHEN atg.tool_name = 'firtal_registry'
+                AND COALESCE((atg.config_json ->> 'allowed_data_sources_all')::boolean, false)
+               THEN 'allow'
+           WHEN atg.tool_name = 'firtal_registry'
+                AND atg.config_json -> 'allowed_data_sources' IS NOT NULL
+                AND jsonb_array_length(atg.config_json -> 'allowed_data_sources') > 0
+               THEN 'allow'
+           WHEN atg.tool_name = 'firtal_registry' THEN 'deny'
+           WHEN atg.enabled THEN 'allow'
+           ELSE 'deny'
+       END,
+       '',
+       CASE
+           WHEN atg.tool_name = 'firtal_registry'
+                AND atg.enabled
+                AND NOT COALESCE((atg.config_json ->> 'allowed_data_sources_all')::boolean, false)
+                AND atg.config_json -> 'allowed_data_sources' IS NOT NULL
+                AND jsonb_array_length(atg.config_json -> 'allowed_data_sources') > 0
+               THEN jsonb_build_object(
+                   'arg_allowlist', jsonb_build_array(
+                       jsonb_build_object(
+                           'arg', 'data_source_id',
+                           'values', atg.config_json -> 'allowed_data_sources'
+                       )
+                   )
+               )
+           ELSE NULL
+       END
 FROM agent_tool_grant atg
 JOIN agent ag ON ag.id = atg.agent_id
 ON CONFLICT (workspace_id, tool_key, layer, subject_id, resource_pattern) DO NOTHING;

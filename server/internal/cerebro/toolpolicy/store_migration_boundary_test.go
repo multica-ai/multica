@@ -504,7 +504,7 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 		VALUES ($1, 'legacy.allowed_tool', true, NULL),
 		       ($1, 'legacy.denied_tool', false, NULL),
 		       ($1, 'legacy.configured_tool', true, '{"mode":"restricted","scope":["one"]}'::jsonb),
-		       ($1, 'firtal_registry', true, '{"allowed_apps": true, "allow_write": false}'::jsonb)
+		       ($1, 'firtal_registry', true, '{"allowed_data_sources":["source-b","source-a"],"allowed_apps":true,"allow_write":false}'::jsonb)
 	`, agent); err != nil {
 		t.Fatalf("seed legacy direct grants: %v", err)
 	}
@@ -577,11 +577,22 @@ func TestMigration9152PackagesRolesAsRuleLists(t *testing.T) {
 		t.Fatalf("decode Registry rules: %v", err)
 	}
 	registryByPattern := map[string]string{}
+	var registryDataSourceCondition *Condition
 	for _, rule := range registryRules {
 		registryByPattern[rule.ResourcePattern] = rule.Setting
+		if rule.ResourcePattern == "" {
+			registryDataSourceCondition = rule.Conditions
+		}
 	}
 	if registryByPattern[""] != "allow" || registryByPattern["action:list_apps"] != "allow" || registryByPattern["action:update_app"] != "deny" {
 		t.Fatalf("Registry rules = %v, want generic allow + preserved action allow/deny", registryByPattern)
+	}
+	if registryDataSourceCondition == nil || len(registryDataSourceCondition.ArgAllowlist) != 1 {
+		t.Fatalf("Registry data-source condition = %+v, want one data_source_id allowlist", registryDataSourceCondition)
+	}
+	argAllow := registryDataSourceCondition.ArgAllowlist[0]
+	if argAllow.Arg != "data_source_id" || !reflect.DeepEqual(argAllow.Values, []string{"source-b", "source-a"}) {
+		t.Fatalf("Registry data-source allowlist = %+v, want the exact legacy source restriction", argAllow)
 	}
 
 	var archivedConfig []byte
