@@ -65,64 +65,16 @@ type gcStats struct {
 
 // runGC performs a single GC scan across all workspace directories.
 func (d *Daemon) runGC(ctx context.Context) {
-	root := d.cfg.WorkspacesRoot
-	rootHandle, err := os.OpenRoot(root)
-	if err != nil {
-		if !os.IsNotExist(err) {
-			d.logger.Warn("gc: open workspaces root failed", "error", err)
-		}
-		return
-	}
-	defer rootHandle.Close()
-	d.gcCycleRoot = rootHandle
-	defer func() { d.gcCycleRoot = nil }()
-	entries, err := fs.ReadDir(rootHandle.FS(), ".")
-	if err != nil {
-		if os.IsNotExist(err) {
-			return
-		}
-		d.logger.Warn("gc: read workspaces root failed", "error", err)
-		return
-	}
-
-	stats := &gcStats{byPattern: map[string]int{}}
-	for _, wsEntry := range entries {
-		if !wsEntry.IsDir() || wsEntry.Name() == ".repos" || wsEntry.Name() == gcTrashDirName {
-			continue
-		}
-		wsDir := filepath.Join(root, wsEntry.Name())
-		d.gcWorkspace(ctx, wsDir, stats)
-	}
-	// Retry quarantines left by a prior partial/failed removal. They are never
-	// reusable task roots, so retrying cannot race with task startup.
-	if err := rootHandle.RemoveAll(gcTrashDirName); err != nil && !os.IsNotExist(err) {
-		d.logger.Warn("gc: quarantine retry failed", "error", err)
-	}
-
-	// Repo pruning invokes git with pathname arguments. Skip it while this
-	// cycle is identity-pinned; reopening the configured root would reintroduce
-	// the retarget window this handle closes.
-
-	// Reclaim per-issue Codex session stores idle past their TTL. These live
-	// under the shared ~/.codex home (outside WorkspacesRoot) so resume survives
-	// the task GC, which means they need their own bounded lifecycle (MUL-4424).
-	if storesRemoved, storeBytes := execenv.PruneCodexSessionStores(d.cfg.Profile, d.cfg.GCCodexSessionTTL, time.Now(), d.reserveCodexStoreForDeletion, d.logger); storesRemoved > 0 {
-		stats.storesReclaimed += storesRemoved
-		stats.bytesReclaimed += storeBytes
-	}
-
-	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 {
-		d.logger.Info("gc: cycle complete",
-			"cleaned", stats.cleaned,
-			"orphaned", stats.orphaned,
-			"skipped", stats.skipped,
-			"artifact_dirs", stats.artifactDirs,
-			"artifact_removed", stats.artifactRemoved,
-			"codex_session_stores_reclaimed", stats.storesReclaimed,
-			"bytes_reclaimed", stats.bytesReclaimed,
-			"by_pattern", stats.byPattern,
-		)
-	}
+	// Fail closed until task leases and GC mutations share one portable,
+	// object-bound filesystem identity contract. In particular, do not even
+	// discover WorkspacesRoot here: pathname discovery followed by a later
+	// mutation can target a different object after a symlink/rename retarget.
+	//
+	// This intentionally disables task/workspace deletion, artifact cleanup,
+	// repository pruning, .gc-trash retry, and Codex-store pruning. Disk/cache
+	// growth is the accepted short-term operational cost (tracked separately)
+	// for guaranteeing that daemon GC cannot delete active or external data.
+	d.logger.Warn("gc: filesystem mutation disabled; object-bound root lease unavailable")
 }
 
 // gcWorkspace scans task directories inside a single workspace directory.
