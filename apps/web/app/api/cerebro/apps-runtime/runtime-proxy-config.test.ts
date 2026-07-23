@@ -12,5 +12,7 @@ describe("Apps runtime proxy configuration", () => {
     expect(appDirectory).toContain("/apps/web");
     expect(nextConfig).not.toContain('source: "/api/cerebro/apps-runtime/:path*"');
     expect(route).toContain("process.env.CEREBRO_APPS_RUNTIME_URL");
+    expect(route).toContain('"access-control-allow-origin"');
+    expect(route).toContain('"access-control-allow-credentials"');
   });
 });

@@ -8,7 +8,15 @@ async function proxy(request: NextRequest, context: { params: Promise<{ path: st
   const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.arrayBuffer();
   const response = await fetch(target, { method: request.method, headers: { "content-type": request.headers.get("content-type") ?? "application/octet-stream" }, body, cache: "no-store" });
   const headers = new Headers();
-  for (const name of ["cache-control", "content-type", "content-security-policy"]) {
+  for (const name of [
+    "cache-control",
+    "content-type",
+    "content-security-policy",
+    "access-control-allow-origin",
+    "access-control-allow-credentials",
+    "access-control-allow-methods",
+    "access-control-allow-headers",
+  ]) {
     const value = response.headers.get(name);
     if (value) headers.set(name, value);
   }
