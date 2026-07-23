@@ -84,9 +84,7 @@ export function useChatResize(
   const startDrag = useCallback(
     (e: React.PointerEvent, dir: DragDir) => {
       e.preventDefault();
-      const captureEl = e.currentTarget as HTMLElement;
-      const { pointerId } = e;
-      captureEl.setPointerCapture(pointerId);
+      (e.target as HTMLElement).setPointerCapture(e.pointerId);
 
       dragRef.current = {
         startX: e.clientX,
@@ -97,38 +95,9 @@ export function useChatResize(
       };
       setIsDragging(true);
 
-      // Lock the resize cursor globally so it survives the pointer leaving the
-      // narrow handle; per-direction rules live in packages/ui/styles/base.css.
-      document.documentElement.setAttribute("data-chat-resizing", dir);
-
-      // One idempotent cleanup wired to every way a pointer-capture drag can
-      // end. A drag started with setPointerCapture may terminate via
-      // pointercancel / lostpointercapture / window blur without a pointerup;
-      // missing any of those would strand data-chat-resizing and freeze the
-      // whole page in the resize cursor with text selection disabled.
-      let finished = false;
-      const finishDrag = () => {
-        if (finished) return;
-        finished = true;
-
-        document.removeEventListener("pointermove", onPointerMove);
-        document.removeEventListener("pointerup", onPointerUp);
-        document.removeEventListener("pointercancel", onPointerCancel);
-        captureEl.removeEventListener("lostpointercapture", onLostPointerCapture);
-        window.removeEventListener("blur", finishDrag);
-
-        dragRef.current = null;
-        setIsDragging(false);
-        document.documentElement.removeAttribute("data-chat-resizing");
-
-        if (captureEl.hasPointerCapture?.(pointerId)) {
-          captureEl.releasePointerCapture?.(pointerId);
-        }
-      };
-
       const onPointerMove = (ev: PointerEvent) => {
         const d = dragRef.current;
-        if (!d || ev.pointerId !== pointerId) return;
+        if (!d) return;
 
         const { maxW: mw, maxH: mh } = boundsRef.current;
 
@@ -143,21 +112,26 @@ export function useChatResize(
 
         setChatSize(clamp(rawW, CHAT_MIN_W, mw), clamp(rawH, CHAT_MIN_H, mh));
       };
-      const onPointerUp = (ev: PointerEvent) => {
-        if (ev.pointerId === pointerId) finishDrag();
-      };
-      const onPointerCancel = (ev: PointerEvent) => {
-        if (ev.pointerId === pointerId) finishDrag();
-      };
-      const onLostPointerCapture = (ev: PointerEvent) => {
-        if (ev.pointerId === pointerId) finishDrag();
+
+      const onPointerUp = () => {
+        dragRef.current = null;
+        setIsDragging(false);
+        document.removeEventListener("pointermove", onPointerMove);
+        document.removeEventListener("pointerup", onPointerUp);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
       };
 
       document.addEventListener("pointermove", onPointerMove);
       document.addEventListener("pointerup", onPointerUp);
-      document.addEventListener("pointercancel", onPointerCancel);
-      captureEl.addEventListener("lostpointercapture", onLostPointerCapture);
-      window.addEventListener("blur", finishDrag);
+
+      const cursorMap: Record<DragDir, string> = {
+        left: "col-resize",
+        top: "row-resize",
+        corner: "nw-resize",
+      };
+      document.body.style.cursor = cursorMap[dir];
+      document.body.style.userSelect = "none";
     },
     [renderWidth, renderHeight, setChatSize],
   );
