@@ -123,8 +123,6 @@
     "empty": "この表示に一致するイシューはありません。",
     "search_placeholder": "タイトルまたは Issue ID を検索…",
     "search_clear": "検索をクリア",
-    "loaded_count": "{{total}} 件中 {{count}} 件を読み込み済み",
-    "structure_paused": "グループと階層は一時停止中です — {{total}} 件が上限 {{limit}} 件を超えています。フィルターで絞り込むと再び有効になります。",
     "load_failed": "イシューを読み込めませんでした。",
     "load_failed_retry": "再試行",
     "load_more_failed_retry": "続きの読み込みに失敗しました — 再試行",

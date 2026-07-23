@@ -145,6 +145,9 @@ type Overrides struct {
 	RuntimeName                    string
 	Profile                        string // profile name (empty = default)
 	HealthPort                     int    // health check port (0 = use default)
+	// AllowNoAgents is reserved for read-only local configuration probes. Daemon
+	// startup keeps the default false and still refuses to run with no agent CLI.
+	AllowNoAgents bool
 	// DisableAutoUpdate, when true, forces the auto-update poller off. There
 	// is no symmetric "force on" override because the env/default already
 	// resolves to enabled; the flag exists so users can opt out from the CLI.
@@ -345,7 +348,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if e, ok := probe("MULTICA_QWEN_PATH", "qwen", "MULTICA_QWEN_MODEL"); ok {
 		agents["qwen"] = e
 	}
-	if len(agents) == 0 {
+	if len(agents) == 0 && !overrides.AllowNoAgents {
 		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, qodercli, traecli, grok, or qwen and ensure it is on PATH")
 	}
 

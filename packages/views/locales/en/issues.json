@@ -125,8 +125,6 @@
     "empty": "No issues match this view.",
     "search_placeholder": "Search title or issue ID…",
     "search_clear": "Clear search",
-    "loaded_count": "Loaded {{count}} of {{total}}",
-    "structure_paused": "Grouping and hierarchy are paused — {{total}} issues exceed the {{limit}}-issue limit. Narrow filters to re-enable.",
     "load_failed": "Failed to load issues.",
     "load_failed_retry": "Retry",
     "load_more_failed_retry": "Loading more failed — Retry",

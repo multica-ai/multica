@@ -336,3 +336,66 @@ func TestListChildrenByParents_OrdersByNumberAscWithinParent(t *testing.T) {
 
 	assertNumberAscending(t, decodeIssueBatch(t, w), children)
 }
+
+// TestListChildIssues_IncludesLabels verifies both child listings bulk-load
+// labels, so the sub-issues panel (and swimlane-hydrated caches) can render
+// label chips without per-child fetches. Every child carries an explicit
+// labels field — empty for unlabeled children, populated for labeled ones.
+func TestListChildIssues_IncludesLabels(t *testing.T) {
+	fx := newChildrenBatchFixture(t)
+	labelID := createTestIssueLabel(t, "children-labels-"+uuid.NewString()[:8])
+
+	labeled := fx.childrenA[0]
+	w := httptest.NewRecorder()
+	req := withURLParam(
+		newRequest("POST", "/api/issues/"+labeled.ID+"/labels", map[string]any{
+			"label_id": labelID,
+		}),
+		"id", labeled.ID,
+	)
+	testHandler.AttachLabel(w, req)
+	if w.Code != http.StatusOK && w.Code != http.StatusCreated && w.Code != http.StatusNoContent {
+		t.Fatalf("attach label: unexpected status %d: %s", w.Code, w.Body.String())
+	}
+
+	assertChildLabels := func(t *testing.T, got []IssueResponse) {
+		t.Helper()
+		for _, child := range got {
+			if child.Labels == nil {
+				t.Fatalf("child %s missing labels field", child.ID)
+			}
+			want := 0
+			if child.ID == labeled.ID {
+				want = 1
+			}
+			if len(*child.Labels) != want {
+				t.Errorf("child %s: want %d labels, got %d", child.ID, want, len(*child.Labels))
+			}
+			if child.ID == labeled.ID && len(*child.Labels) == 1 && (*child.Labels)[0].ID != labelID {
+				t.Errorf("child %s: want label %s, got %s", child.ID, labelID, (*child.Labels)[0].ID)
+			}
+		}
+	}
+
+	// Single-parent listing.
+	w = httptest.NewRecorder()
+	req = withURLParam(
+		newRequest("GET", "/api/issues/"+fx.parentA.ID+"/children", nil),
+		"id", fx.parentA.ID,
+	)
+	testHandler.ListChildIssues(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListChildIssues: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	assertChildLabels(t, decodeIssueBatch(t, w))
+
+	// Batched listing.
+	w = httptest.NewRecorder()
+	req = newRequest("GET", "/api/issues/children?workspace_id="+testWorkspaceID+
+		"&parent_ids="+fx.parentA.ID, nil)
+	testHandler.ListChildrenByParents(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListChildrenByParents: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	assertChildLabels(t, decodeIssueBatch(t, w))
+}

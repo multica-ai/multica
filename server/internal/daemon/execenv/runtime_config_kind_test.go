@@ -213,12 +213,17 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 		"run the work synchronously instead",
 		"Never background-and-yield",
 		"foreground tool call that blocks",
-		"gh run watch",
+		"only to work owned by the current run",
+		"GitHub Actions after a successful push",
+		"Do not wait for them by default",
 		"running in the background so you can keep working",
 		"standing by",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("slim Background Task Safety missing hardened pin %q\n---\n%s", want, out)
 		}
+	}
+	if strings.Contains(out, "gh run watch") {
+		t.Errorf("slim Background Task Safety should not suggest waiting for external GitHub CI\n---\n%s", out)
 	}
 }

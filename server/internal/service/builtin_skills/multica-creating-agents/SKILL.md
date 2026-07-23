@@ -62,8 +62,9 @@ non-empty value, the rest (`runtime-config`, `custom-args`, `model`,
 flags fall through to server defaults rather than sending empty strings.
 
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
-`instructions`, `runtime_id`, `runtime_config`, `custom_env`, `custom_args`,
-`model`, `thinking_level`, `visibility`, `max_concurrent_tasks`, `mcp_config`.
+`instructions`, `avatar_url`, `runtime_id`, `runtime_config`, `custom_env`,
+`custom_args`, `model`, `thinking_level`, `visibility`,
+`max_concurrent_tasks`, `mcp_config`.
 
 ## Field contracts
 
@@ -72,6 +73,7 @@ The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 | `name` | `agent.name` | required, 400 if empty | listings, runtime payload |
 | `description` | `agent.description` | 400 if > 255 code points | catalog/listing only — NOT the runtime prompt |
 | `instructions` | `agent.instructions` | none | daemon → provider at claim time |
+| `avatar_url` | `agent.avatar_url` | none; an explicit non-empty value is preserved, while omitted/empty creates a random `emoji:<glyph>` avatar | catalog/listing UI only — NOT the runtime prompt |
 | `runtime_id` | `agent.runtime_id` | required (400) + must resolve to a runtime in this workspace | selects runtime/provider |
 | `model` | `agent.model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |
 | `thinking_level` | `agent.thinking_level` (nullable) | provider-level enum; unknown literal → 400 | daemon; empty = runtime default |
@@ -83,7 +85,8 @@ The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 | `max_concurrent_tasks` | `agent.max_concurrent_tasks` | — | scheduler task cap; defaults to `6` |
 
 Defaults when omitted: `runtime_config` → `{}`, `custom_env` → `{}`,
-`custom_args` → `[]`, `visibility` → `private`, `max_concurrent_tasks` → `6`
+`custom_args` → `[]`, `avatar_url` → a random `emoji:<glyph>`, `visibility` →
+`private`, `max_concurrent_tasks` → `6`
 (all materialized server-side before the insert). `custom_args`/`runtime_config`
 are typed `[]string`/`any` and marshaled as-is — the JSON-shape rejection
 happens in the CLI, not the create handler.

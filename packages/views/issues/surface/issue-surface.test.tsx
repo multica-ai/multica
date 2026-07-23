@@ -365,7 +365,7 @@ describe("IssueSurface — table pagination ownership", () => {
     expect(listIssues).not.toHaveBeenCalled();
   });
 
-  it("keeps the root total when a continuation page reports zero", async () => {
+  it("keeps loaded rows when a continuation page reports zero", async () => {
     const { getIssueSurfaceViewStore } = await import(
       "@multica/core/issues/stores/surface-view-store"
     );
@@ -432,10 +432,7 @@ describe("IssueSurface — table pagination ownership", () => {
     expect(listIssueTableRows).toHaveBeenCalledWith(
       expect.objectContaining({ page: { limit: 50, cursor: "cursor-2" } }),
     );
-    expect(mockTranslate).toHaveBeenCalledWith(expect.any(Function), {
-      count: 2,
-      total: 2,
-    });
+    expect(screen.getByText("First cursor row")).toBeInTheDocument();
   });
 
   it("feeds loaded Table rows to the shared batch toolbar", async () => {

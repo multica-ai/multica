@@ -63,3 +63,10 @@ export {
   pruneIssueSurfaceViewStates,
   getIssueSurfaceViewStateRegistrySnapshot,
 } from "./surface-view-store";
+export {
+  useSubIssueDisplayStore,
+  SUB_ISSUE_ROW_PROPERTY_KEYS,
+  DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
+  type SubIssueRowProperties,
+  type SubIssueRowPropertyKey,
+} from "./sub-issue-display-store";

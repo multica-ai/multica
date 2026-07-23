@@ -45,12 +45,15 @@
   },
   "source_backfill": {
     "eyebrow": "顺便问一句",
-    "lede": "我们注意到你之前没有勾选这一项——花一秒补一下，能帮我们更了解像你一样的用户。完成后立刻回到你正在做的事。",
+    "lede": "一个小问题——能帮我们更了解像你一样的用户。答完立刻回到你正在做的事。",
     "submit": "提交",
     "hint_ready": "看起来不错，准备好就点提交。"
   },
   "questions": {
     "eyebrow_about_you": "关于你",
+    "about_you": {
+      "question": "简单介绍一下你自己。"
+    },
     "source": {
       "question": "你是从哪里了解到 Multica 的？",
       "friends_colleagues": "朋友或同事",
@@ -133,59 +136,6 @@
     "on_list": "已在候补名单",
     "success_toast": "已加入候补名单。云运行时上线时会通过邮件通知你。",
     "failed_toast": "加入候补名单失败"
-  },
-  "first_issue": {
-    "error_title": "出错了",
-    "retry": "重试",
-    "retry_failed": "重试失败",
-    "finishing": "即将完成",
-    "opening": "马上就好 —— 正在打开你的工作区。"
-  },
-  "step_agent": {
-    "eyebrow": "你的第一个智能体",
-    "headline": "和你的第一位队友打个招呼。",
-    "lede_prefix": "根据你的回答，推荐的是 ",
-    "lede_suffix": "。从这四个模板里挑一个最贴你的——每个模板都开箱即用，可以立刻接 issue。之后可以在智能体设置页里再调整指令。",
-    "footer_hint": "一个智能体足够上手了。之后可以从侧边栏添加更多。",
-    "create_action": "创建 {{name}}",
-    "create_failed": "创建智能体失败",
-    "recommended_badge": "推荐",
-    "templates": {
-      "coding": {
-        "label": "编码智能体",
-        "blurb": "写代码、重构、发版。会读你的仓库。",
-        "instructions": "你是产品团队里的编码智能体。负责接编码相关的 issue —— 实现功能、修 bug、写测试、提 PR。开工前先读一下仓库，遵循已有的代码规范，保持 diff 聚焦。验收标准模糊时主动问清楚。"
-      },
-      "planning": {
-        "label": "规划智能体",
-        "blurb": "拆解工作、写规格、维护看板。",
-        "instructions": "你是规划智能体。把零散的想法和 open issue 转化成范围清晰、可立即执行的工作：拆成子任务、写验收标准、提出负责人和先后顺序。清晰优先于速度。缺少上下文时提一个具体问题，不要猜。"
-      },
-      "writing": {
-        "label": "写作智能体",
-        "blurb": "起草、摘要、调研。擅长长文。",
-        "instructions": "你是写作智能体。负责起草文档、总结长文，必要时上网调研主题。输出要做成读者可以直接用的成文 —— 不是大纲。引用资料时注明来源。语气和 issue 中用户的语气保持一致。"
-      },
-      "assistant": {
-        "label": "通用助手",
-        "blurb": "通用型。任务不明确时的默认选择。",
-        "instructions": "你是一名通用型队友。处理各种任务 —— 轻度编码、写作、调研、规划 —— 对范围保持务实。任务模糊时先问一个澄清性问题再开工。默认输出简短有用，而不是详尽冗长。"
-      }
-    },
-    "about_eyebrow": "什么是智能体",
-    "about_headline": "住在你工作区里的 AI 队友。",
-    "about_body": "智能体会出现在每个负责人选择器里，就像任何同事一样 —— 区别是它们可以 24/7 在你指定的运行时上工作。",
-    "ways_eyebrow": "和智能体协作的方式",
-    "way_assign_title": "分配 issue",
-    "way_assign_body": "它会接下任务，并在评论里反馈进展。",
-    "way_mention_title": "在评论中 @提及",
-    "way_mention_body": "把它拉进对话，给个快速反馈。",
-    "way_chat_title": "一对一聊天",
-    "way_chat_body": "无需创建 issue，直接问快速问题。",
-    "way_autopilot_title": "交给自动化",
-    "way_autopilot_body": "按周期跑：每日整理、每周摘要、每月审计。",
-    "add_more_hint": "随时添加更多智能体。一支专长各异的小团队胜过一个万能选手。",
-    "docs_link": "创建第一个智能体 →"
   },
   "welcome_after_onboarding": {
     "loading_helper": "正在为你准备 Helper……",

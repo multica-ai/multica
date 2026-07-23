@@ -46,16 +46,19 @@ import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar"
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
 import { PropertyIcon } from "../../common/property-icon";
-import type { Attachment, Issue, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import type { Attachment, Issue, IssueProperty, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
-import { formatDateOnly } from "@multica/core/issues/date";
+import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
-import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
-import { IssueActionsDropdown, useIssueActions } from "../actions";
+import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
+import { Switch } from "@multica/ui/components/ui/switch";
+import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
+import { LabelChip } from "../../labels/label-chip";
+import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
@@ -73,7 +76,7 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueUsageOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
@@ -84,6 +87,10 @@ import {
   useCommentComposerStore,
   useRecentIssuesStore,
   useResolvedExpandStore,
+  useSubIssueDisplayStore,
+  SUB_ISSUE_ROW_PROPERTY_KEYS,
+  type SubIssueRowProperties,
+  type SubIssueRowPropertyKey,
 } from "@multica/core/issues/stores";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
 import { BatchActionToolbar } from "./batch-action-toolbar";
@@ -582,13 +589,30 @@ function ActivityBlock({
 // SubIssueRow — sub-issue list item with inline status & assignee editing
 // ---------------------------------------------------------------------------
 
-function SubIssueRow({ child }: { child: Issue }) {
+function SubIssueRow({
+  child,
+  childProgress,
+  rowProps,
+  customProperties,
+}: {
+  child: Issue;
+  /** The sub-issue's OWN children progress (it can itself be a parent). */
+  childProgress?: { done: number; total: number };
+  /** User-level display preference: which built-in fields the row shows. */
+  rowProps: SubIssueRowProperties;
+  /** Workspace custom properties the user opted into showing on rows. */
+  customProperties: IssueProperty[];
+}) {
   const { t } = useT("issues");
   const paths = useWorkspacePaths();
   const updateIssue = useUpdateIssue();
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(child.id));
   const toggleSelected = useIssueSelectionStore((s) => s.toggle);
   const isDone = child.status === "done" || child.status === "cancelled";
+  const labels = rowProps.labels ? (child.labels ?? []) : [];
+  const customPropsWithValue = customProperties.filter(
+    (p) => child.properties?.[p.id] !== undefined,
+  );
 
   const handleUpdate = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
@@ -610,80 +634,250 @@ function SubIssueRow({ child }: { child: Issue }) {
   // AppLink wraps only the title/identifier area. Pickers and checkbox are
   // siblings, so their clicks never navigate — no stopPropagation acrobatics
   // and no risk of the native checkbox / picker triggers being blocked.
+  // Right-click anywhere on the row opens the shared issue actions menu
+  // (priority, labels, dates, delete, …) — the same menu as list rows.
   return (
-    <div
-      className={cn(
-        "flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
-        selected && "bg-accent/30",
-      )}
-    >
+    <IssueActionsContextMenu issue={child}>
       <div
         className={cn(
-          "flex h-4 w-4 shrink-0 items-center justify-center transition-opacity",
-          selected
-            ? "opacity-100"
-            : "opacity-0 group-hover/row:opacity-100 focus-within:opacity-100",
+          "flex items-center gap-2.5 px-3 py-2 hover:bg-accent/50 transition-colors group/row",
+          selected && "bg-accent/30",
         )}
       >
-        <input
-          type="checkbox"
-          checked={selected}
-          onChange={() => toggleSelected(child.id)}
-          aria-label={`Select ${child.identifier}`}
-          className="cursor-pointer accent-primary"
-        />
-      </div>
-      <StatusPicker
-        status={child.status}
-        onUpdate={handleUpdate}
-        align="start"
-        trigger={
-          <StatusIcon
-            status={child.status}
-            className="h-[15px] w-[15px] shrink-0"
-          />
-        }
-      />
-      <AppLink
-        href={paths.issueDetail(child.id)}
-        className="flex min-w-0 flex-1 items-center gap-2.5"
-      >
-        <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
-          {child.identifier}
-        </span>
-        <span
-          className={cn(
-            "text-sm truncate flex-1",
-            isDone
-              ? "text-muted-foreground"
-              : "group-hover/row:text-foreground",
+        {/* Priority ⇄ checkbox slot, mirroring the main list rows: the
+            priority icon yields to the selection checkbox on hover/focus.
+            Opacity (not display) swap keeps the checkbox keyboard-tabbable. */}
+        <div className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+          {rowProps.priority && (
+            <PriorityIcon
+              priority={child.priority}
+              className={cn(
+                "transition-opacity",
+                selected
+                  ? "opacity-0"
+                  : "group-hover/row:opacity-0 group-focus-within/row:opacity-0",
+              )}
+            />
           )}
+          <input
+            type="checkbox"
+            checked={selected}
+            onChange={() => toggleSelected(child.id)}
+            aria-label={`Select ${child.identifier}`}
+            className={cn(
+              "absolute inset-0 cursor-pointer accent-primary transition-opacity",
+              selected
+                ? "opacity-100"
+                : "opacity-0 group-hover/row:opacity-100 focus-visible:opacity-100",
+            )}
+          />
+        </div>
+        <StatusPicker
+          status={child.status}
+          onUpdate={handleUpdate}
+          align="start"
+          trigger={
+            <StatusIcon
+              status={child.status}
+              className="h-[15px] w-[15px] shrink-0"
+            />
+          }
+        />
+        <AppLink
+          href={paths.issueDetail(child.id)}
+          className="flex min-w-0 flex-1 items-center gap-2.5"
         >
-          {child.title}
-        </span>
-      </AppLink>
-      <AssigneePicker
-        assigneeType={child.assignee_type}
-        assigneeId={child.assignee_id}
-        onUpdate={handleUpdate}
-        align="end"
-        trigger={
-          child.assignee_type && child.assignee_id ? (
-            <ActorAvatar
-              actorType={child.assignee_type}
-              actorId={child.assignee_id}
-              size="sm"
-              className="shrink-0"
-            />
-          ) : (
+          <span className="text-[11px] text-muted-foreground tabular-nums font-medium shrink-0">
+            {child.identifier}
+          </span>
+          <IssueAgentActivityIndicator issueId={child.id} />
+          <span className="flex min-w-0 flex-1 items-center gap-1.5">
             <span
-              aria-hidden
-              className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
+              className={cn(
+                "text-sm truncate",
+                isDone
+                  ? "text-muted-foreground"
+                  : "group-hover/row:text-foreground",
+              )}
+            >
+              {child.title}
+            </span>
+            {labels.length > 0 && (
+              <span className="hidden max-w-[200px] shrink-0 items-center gap-1 overflow-hidden md:inline-flex">
+                {labels.slice(0, 2).map((label) => (
+                  <LabelChip key={label.id} label={label} />
+                ))}
+                {labels.length > 2 && (
+                  <span className="text-[11px] text-muted-foreground">
+                    +{labels.length - 2}
+                  </span>
+                )}
+              </span>
+            )}
+            {customPropsWithValue.length > 0 && (
+              <span className="hidden max-w-[260px] shrink-0 items-center gap-1 overflow-hidden md:inline-flex">
+                {customPropsWithValue.slice(0, 3).map((property) => (
+                  <span
+                    key={property.id}
+                    className="inline-flex max-w-[120px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                  >
+                    <PropertyIcon property={property} className="size-3 text-[11px]" />
+                    <CustomPropertyValueDisplay
+                      property={property}
+                      value={child.properties?.[property.id]}
+                    />
+                  </span>
+                ))}
+              </span>
+            )}
+            {rowProps.childProgress && childProgress && childProgress.total > 0 && (
+              <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
+                <ProgressRing
+                  done={childProgress.done}
+                  total={childProgress.total}
+                  size={11}
+                />
+                <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                  {childProgress.done}/{childProgress.total}
+                </span>
+              </span>
+            )}
+          </span>
+        </AppLink>
+        {rowProps.dueDate && child.due_date && (
+          <DueDatePicker
+            dueDate={child.due_date}
+            onUpdate={handleUpdate}
+            align="end"
+            trigger={
+              <span
+                className={cn(
+                  "flex shrink-0 items-center gap-1 text-xs tabular-nums",
+                  !isDone && isPastDateOnly(child.due_date)
+                    ? "text-destructive"
+                    : "text-muted-foreground",
+                )}
+              >
+                <CalendarDays className="size-3" />
+                {shortDate(child.due_date)}
+              </span>
+            }
+          />
+        )}
+        {rowProps.assignee && (
+          <AssigneePicker
+            assigneeType={child.assignee_type}
+            assigneeId={child.assignee_id}
+            onUpdate={handleUpdate}
+            align="end"
+            trigger={
+              child.assignee_type && child.assignee_id ? (
+                <ActorAvatar
+                  actorType={child.assignee_type}
+                  actorId={child.assignee_id}
+                  size="sm"
+                  className="shrink-0"
+                />
+              ) : (
+                <span
+                  aria-hidden
+                  className="h-5 w-5 rounded-full border border-dashed border-muted-foreground/30 shrink-0"
+                />
+              )
+            }
+          />
+        )}
+      </div>
+    </IssueActionsContextMenu>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SubIssueDisplayPopover — per-user "which properties do rows show" control
+// ---------------------------------------------------------------------------
+
+// Reuses the main Display panel's `card_*` labels — the property names are
+// identical, so the sub-issues control needs no locale keys of its own.
+const SUB_ISSUE_ROW_PROPERTY_LABEL_KEY: Record<
+  SubIssueRowPropertyKey,
+  "card_priority" | "card_labels" | "card_child_progress" | "card_due_date" | "card_assignee"
+> = {
+  priority: "card_priority",
+  labels: "card_labels",
+  childProgress: "card_child_progress",
+  dueDate: "card_due_date",
+  assignee: "card_assignee",
+};
+
+function SubIssueDisplayPopover({
+  workspaceProperties,
+}: {
+  workspaceProperties: IssueProperty[];
+}) {
+  const { t } = useT("issues");
+  const rowProperties = useSubIssueDisplayStore((s) => s.rowProperties);
+  const rowPropertyIds = useSubIssueDisplayStore((s) => s.rowPropertyIds);
+  const toggleRowProperty = useSubIssueDisplayStore((s) => s.toggleRowProperty);
+  const toggleRowPropertyId = useSubIssueDisplayStore((s) => s.toggleRowPropertyId);
+
+  return (
+    <Popover>
+      <Tooltip>
+        <PopoverTrigger
+          render={
+            <TooltipTrigger
+              render={
+                <button
+                  type="button"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                  aria-label={t(($) => $.display.tooltip)}
+                >
+                  <SlidersHorizontal className="h-3.5 w-3.5" />
+                </button>
+              }
             />
-          )
-        }
-      />
-    </div>
+          }
+        />
+        <TooltipContent side="bottom">{t(($) => $.display.tooltip)}</TooltipContent>
+      </Tooltip>
+      <PopoverContent align="end" className="w-56 p-0">
+        <div className="px-3 py-2.5">
+          <div className="space-y-2">
+            {SUB_ISSUE_ROW_PROPERTY_KEYS.map((key) => (
+              <label
+                key={key}
+                className="flex cursor-pointer items-center justify-between"
+              >
+                <span className="text-sm">
+                  {t(($) => $.display[SUB_ISSUE_ROW_PROPERTY_LABEL_KEY[key]])}
+                </span>
+                <Switch
+                  size="sm"
+                  checked={rowProperties[key]}
+                  onCheckedChange={() => toggleRowProperty(key)}
+                />
+              </label>
+            ))}
+            {workspaceProperties.map((property) => (
+              <label
+                key={property.id}
+                className="flex cursor-pointer items-center justify-between gap-3"
+              >
+                <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
+                  <PropertyIcon property={property} className="size-3.5 text-xs" />
+                  <span className="truncate">{property.name}</span>
+                </span>
+                <Switch
+                  size="sm"
+                  checked={rowPropertyIds.includes(property.id)}
+                  onCheckedChange={() => toggleRowPropertyId(property.id)}
+                />
+              </label>
+            ))}
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
 
@@ -1201,6 +1395,19 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     ...childIssuesOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
   });
+  // Workspace-wide parent→(done/total) map; lets each sub-issue row show its
+  // OWN nested progress ring without opening it. Same query the list
+  // surfaces use, so it's usually already cached.
+  const { data: subIssueProgress } = useQuery({
+    ...childIssueProgressOptions(wsId),
+    enabled: childIssues.length > 0,
+  });
+  // User-level display preference for sub-issue rows (built-in field toggles
+  // + opted-in workspace custom properties). `subIssueCustomProps` resolves
+  // the persisted ids against this workspace's live, non-archived property
+  // definitions — ids from other workspaces or archived properties drop out.
+  const subIssueRowProps = useSubIssueDisplayStore((s) => s.rowProperties);
+  const subIssueRowPropertyIds = useSubIssueDisplayStore((s) => s.rowPropertyIds);
   const [subIssuesCollapsed, setSubIssuesCollapsed] = useState(false);
 
   // Selection store is global (workspace-scoped); clear it whenever this
@@ -1370,6 +1577,20 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // still carry a value written before the archive, and that row must stay
   // renderable (read-only) until someone clears it.
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId, true));
+
+  // Sub-issue rows only surface live definitions: the display picker offers
+  // non-archived properties, and chips render only ids that resolve here.
+  const activeWorkspaceProperties = useMemo(
+    () => workspaceProperties.filter((p) => p.archived !== true),
+    [workspaceProperties],
+  );
+  const subIssueCustomProps = useMemo(
+    () =>
+      subIssueRowPropertyIds
+        .map((pid) => activeWorkspaceProperties.find((p) => p.id === pid))
+        .filter((p): p is IssueProperty => !!p),
+    [subIssueRowPropertyIds, activeWorkspaceProperties],
+  );
 
   // Seed the visible-optional-props set:
   //   - on issue switch, reset to whichever fields are currently set
@@ -2227,6 +2448,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {childIssues.length > 0 && (() => {
             const doneCount = childIssues.filter((c) => c.status === "done").length;
             return (
+              // Provider hosts the shared right-click actions menu the rows
+              // delegate to (one singleton menu, not one per row).
+              <IssueContextMenuProvider>
               <div className="mt-10 group/sub-issues">
                 {/* Header */}
                 <div className="flex items-center gap-2 mb-2">
@@ -2264,21 +2488,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                         : "opacity-0 group-hover/sub-issues:opacity-100 focus-visible:opacity-100",
                     )}
                   />
-                  <Tooltip>
-                    <TooltipTrigger
-                      render={
-                        <button
-                          type="button"
-                          className="ml-auto inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
-                          onClick={() => actions.openCreateSubIssue()}
-                          aria-label={t(($) => $.detail.add_sub_issue_aria)}
-                        >
-                          <Plus className="h-4 w-4" />
-                        </button>
-                      }
-                    />
-                    <TooltipContent side="bottom">{t(($) => $.detail.add_sub_issue_tooltip)}</TooltipContent>
-                  </Tooltip>
+                  <div className="ml-auto flex items-center gap-0.5">
+                    <SubIssueDisplayPopover workspaceProperties={activeWorkspaceProperties} />
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={
+                          <button
+                            type="button"
+                            className="inline-flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+                            onClick={() => actions.openCreateSubIssue()}
+                            aria-label={t(($) => $.detail.add_sub_issue_aria)}
+                          >
+                            <Plus className="h-4 w-4" />
+                          </button>
+                        }
+                      />
+                      <TooltipContent side="bottom">{t(($) => $.detail.add_sub_issue_tooltip)}</TooltipContent>
+                    </Tooltip>
+                  </div>
                 </div>
 
                 {/* Inline batch toolbar — appears next to the rows when
@@ -2301,7 +2528,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             </div>
                           )}
                           {items.map((child) => (
-                            <SubIssueRow key={child.id} child={child} />
+                            <SubIssueRow
+                              key={child.id}
+                              child={child}
+                              childProgress={subIssueProgress?.get(child.id)}
+                              rowProps={subIssueRowProps}
+                              customProperties={subIssueCustomProps}
+                            />
                           ))}
                         </Fragment>
                       ))}
@@ -2309,6 +2542,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   );
                 })()}
               </div>
+              </IssueContextMenuProvider>
             );
           })()}
 

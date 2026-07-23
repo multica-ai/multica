@@ -850,7 +850,7 @@ type TableViewMeta = {
   editingCellKey: string | null;
   setEditingCellKey: (key: string | null) => void;
   updateIssue: (issueId: string, updates: Partial<UpdateIssueRequest>) => void;
-  openIssue: (issueId: string) => void;
+  openIssue: (issue: Issue) => void;
   createSubIssue: (issue: Issue) => void;
   toggleTableParentCollapsed: (issueId: string) => void;
   handleIssueSelection: (issueId: string, shiftKey: boolean) => void;
@@ -1042,7 +1042,7 @@ function IssueTableBodyCell({
           editing={editorOpen}
           onEditingChange={setEditorOpen}
           onUpdate={onUpdate}
-          onOpen={() => meta.openIssue(issue.id)}
+          onOpen={() => meta.openIssue(issue)}
           onCreateSubIssue={() => meta.createSubIssue(issue)}
           onToggleParent={() => meta.toggleTableParentCollapsed(issue.id)}
           toggleLabel={t(($) => $.table.toggle_sub_issues)}
@@ -1312,9 +1312,6 @@ export function TableView({
     () => serverGroupsData?.pages.flatMap((page) => page.groups) ?? [],
     [serverGroupsData?.pages],
   );
-  const latestServerGroupPage =
-    serverGroupsData?.pages[serverGroupsData.pages.length - 1];
-  const groupedServerTotal = latestServerGroupPage?.total ?? 0;
   const serverIdentity = useMemo(
     () => JSON.stringify([serverQuery, serverGroupSpec, tableHierarchy]),
     [serverGroupSpec, serverQuery, tableHierarchy],
@@ -1827,11 +1824,6 @@ export function TableView({
     usesServerGrouping,
   ]);
 
-  const ungroupedRootData = serverBranchData[serverBranchKey(null, null)];
-  const serverTotal = usesServerGrouping
-    ? groupedServerTotal
-    : (ungroupedRootData?.total ?? 0);
-
   const tableMembershipIdentity = useMemo(
     () =>
       JSON.stringify([
@@ -1976,7 +1968,19 @@ export function TableView({
   );
 
   const openIssue = useCallback(
-    (issueId: string) => navigation.push(paths.issueDetail(issueId)),
+    (issue: Issue) => {
+      const path = paths.issueDetail(issue.id);
+      if (navigation.openInNewTab) {
+        navigation.openInNewTab(path, issue.identifier, { activate: true });
+        return;
+      }
+
+      window.open(
+        navigation.getShareableUrl(path),
+        "_blank",
+        "noopener,noreferrer",
+      );
+    },
     [navigation, paths],
   );
 
@@ -2221,9 +2225,6 @@ export function TableView({
     }
   };
 
-  const displayedTotal = serverTotal;
-  const displayedLoaded = loadedIssues.length;
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 border-b px-3 py-1.5">
@@ -2233,12 +2234,7 @@ export function TableView({
           placeholder={t(($) => $.table.search_placeholder)}
           clearLabel={t(($) => $.table.search_clear)}
         />
-        <span className="mr-auto min-w-0 truncate text-xs text-muted-foreground">
-          {t(($) => $.table.loaded_count, {
-            count: displayedLoaded,
-            total: displayedTotal,
-          })}
-        </span>
+        <span className="mr-auto" />
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -2290,7 +2286,7 @@ export function TableView({
             emptyMessage={t(($) => $.table.empty)}
             onRowClick={(row) => {
               if (row.original.kind === "issue") {
-                openIssue(row.original.issue.id);
+                openIssue(row.original.issue);
               }
             }}
             renderRow={(row) => {
