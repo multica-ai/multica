@@ -3,7 +3,6 @@ package engine
 import (
 	"context"
 	"errors"
-	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -170,15 +169,7 @@ type fakeMedia struct {
 	started       chan struct{}
 	release       <-chan struct{}
 	resolve       func(context.Context, channel.InboundMessage) channel.InboundMessage
-	discardedRefs []channel.MediaRef
-	discardCalls  int
-	discardCtxErr error
-}
-
-func (f *fakeMedia) lastDiscardCtxErr() error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return f.discardCtxErr
+	lastMessageID pgtype.UUID
 }
 
 func (f *fakeMedia) HasMedia(_ channel.InboundMessage) bool {
@@ -187,23 +178,16 @@ func (f *fakeMedia) HasMedia(_ channel.InboundMessage) bool {
 	return !f.noMedia
 }
 
-func (f *fakeMedia) DiscardMedia(ctx context.Context, refs []channel.MediaRef) {
+func (f *fakeMedia) resolvedMessageID() pgtype.UUID {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.discardCalls++
-	f.discardCtxErr = ctx.Err()
-	f.discardedRefs = append(f.discardedRefs, refs...)
+	return f.lastMessageID
 }
 
-func (f *fakeMedia) discarded() []channel.MediaRef {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]channel.MediaRef(nil), f.discardedRefs...)
-}
-
-func (f *fakeMedia) ResolveMedia(ctx context.Context, _ ResolvedInstallation, _ ResolvedIdentity, _ pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
+func (f *fakeMedia) ResolveMedia(ctx context.Context, _ ResolvedInstallation, _ ResolvedIdentity, _ pgtype.UUID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
 	f.mu.Lock()
 	f.count++
+	f.lastMessageID = chatMessageID
 	waitForCancel := f.waitForCancel
 	started := f.started
 	release := f.release
@@ -620,43 +604,19 @@ func TestRouter_MediaBindFailureStillChecksPlaceholderPromotion(t *testing.T) {
 	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 1 }) {
 		t.Fatal("binding failure did not check whether the cleared placeholder task could be promoted")
 	}
-	// Bind failure means the uploaded objects have no attachment row and no
-	// other reclaim path — they must be discarded.
-	if !waitFor(time.Second, func() bool { return len(h.media.discarded()) == 1 }) {
-		t.Fatalf("bind failure discarded refs = %+v, want the one uploaded ref", h.media.discarded())
-	}
-	if refs := h.media.discarded(); refs[0].StorageKey != "workspaces/ws/lark/image" {
-		t.Fatalf("bind failure discarded refs = %+v, want the one uploaded ref", refs)
-	}
-	// A bind that failed because the finalize budget expired must not hand
-	// the storage deletes that same dead context.
-	if err := h.media.lastDiscardCtxErr(); err != nil {
-		t.Fatalf("discard ran on a dead context: %v", err)
-	}
+	// No inline deletion on bind failure: the attachments may or may not
+	// have landed (ambiguous commit), and the intent ledger — cleared inside
+	// the same transaction — already reflects whichever outcome is durable.
+	// The reconciler settles the objects.
 }
 
-func TestRouter_MediaBindUnknownOutcomeKeepsUploads(t *testing.T) {
-	h := newHarness(t)
-	h.binder.bindErr = fmt.Errorf("commit media: %w", ErrMediaBindResultUnknown)
-
-	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
-		t.Fatalf("Handle: %v", err)
-	}
-	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 1 }) {
-		t.Fatal("unknown bind outcome must still check placeholder promotion")
-	}
-	// The commit may have durably landed despite the error report; deleting
-	// could destroy objects that persisted attachment rows reference.
-	if refs := h.media.discarded(); len(refs) != 0 {
-		t.Fatalf("unknown bind outcome must keep the uploads, discarded %+v", refs)
-	}
-}
-
-func TestRouter_MediaDeadlineDiscardsUploadedRefs(t *testing.T) {
+func TestRouter_MediaDeadlineDropsRefsWithoutBinding(t *testing.T) {
 	h := newHarness(t)
 	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{MediaTimeout: 10 * time.Millisecond, Logger: discardLogger()})
 	// A rich post where an early upload succeeded before the deadline killed
-	// the rest of the resolution: the resolver returns the partial refs.
+	// the rest of the resolution: the resolver returns the partial refs. The
+	// router must not bind them — and must not delete anything inline: the
+	// intent-ledger rows written before the uploads are the reclaim path.
 	h.media.resolve = func(ctx context.Context, msg channel.InboundMessage) channel.InboundMessage {
 		msg.MediaRefs = append(msg.MediaRefs, channel.MediaRef{
 			Type:       channel.MsgTypeImage,
@@ -680,11 +640,8 @@ func TestRouter_MediaDeadlineDiscardsUploadedRefs(t *testing.T) {
 	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
 		t.Fatalf("Handle: %v", err)
 	}
-	if !waitFor(time.Second, func() bool { return len(h.media.discarded()) == 1 }) {
-		t.Fatalf("deadline expiry did not discard the uploaded ref: %+v", h.media.discarded())
-	}
-	if got := h.media.discarded()[0].StorageKey; got != "workspaces/ws/lark/uploaded-before-deadline" {
-		t.Fatalf("discarded key = %q", got)
+	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 1 }) {
+		t.Fatal("deadline expiry must still clear the marker and check promotion")
 	}
 	if refs := h.binder.boundMedia().MediaRefs; len(refs) != 0 {
 		t.Fatalf("timed-out refs must not bind: %+v", refs)

@@ -318,6 +318,21 @@ type ChannelInstallation struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type ChannelMediaPendingObject struct {
+	StorageKey     string             `json:"storage_key"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
+	StorageUrl     string             `json:"storage_url"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	State          string             `json:"state"`
+	LeaseToken     pgtype.UUID        `json:"lease_token"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	Attempt        int32              `json:"attempt"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError      pgtype.Text        `json:"last_error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type ChannelOutboundCardMessage struct {
 	ID                   pgtype.UUID        `json:"id"`
 	ChatSessionID        pgtype.UUID        `json:"chat_session_id"`

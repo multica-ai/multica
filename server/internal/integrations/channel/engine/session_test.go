@@ -35,20 +35,20 @@ func (fakeTxStarter) Begin(context.Context) (pgx.Tx, error) { return fakeTx{}, n
 
 // fakeSessionQueries is an in-memory SessionQueries for unit tests.
 type fakeSessionQueries struct {
-	bindings         map[string]pgtype.UUID
-	nextSession      byte
-	createdSessions  int
-	messages         []string
-	messageID        pgtype.UUID
-	lastCreate       db.CreateChatMessageParams
-	touched          int
-	replyTargets     int
-	lockedWorkspace  int    // count of LockWorkspaceForChatSessionCreate calls
-	lastConfig       []byte // config of the most recent CreateChannelChatSessionBinding
-	attachments      []db.CreateAttachmentParams
-	linked           db.LinkAttachmentsToChatMessageParams
-	mediaCleared     int
-	boundAttachments []db.Attachment
+	bindings            map[string]pgtype.UUID
+	nextSession         byte
+	createdSessions     int
+	messages            []string
+	messageID           pgtype.UUID
+	lastCreate          db.CreateChatMessageParams
+	touched             int
+	replyTargets        int
+	lockedWorkspace     int    // count of LockWorkspaceForChatSessionCreate calls
+	lastConfig          []byte // config of the most recent CreateChannelChatSessionBinding
+	attachments         []db.CreateAttachmentParams
+	linked              db.LinkAttachmentsToChatMessageParams
+	mediaCleared        int
+	reconcilerOwnedKeys map[string]bool
 
 	prevMessage      *string // GetMostRecentUserChatMessage result; nil → ErrNoRows
 	markRows         int64   // MarkChannelInboundDedupProcessed result
@@ -114,8 +114,17 @@ func (f *fakeSessionQueries) LinkAttachmentsToChatMessage(_ context.Context, arg
 	return append([]pgtype.UUID(nil), arg.AttachmentIds...), nil
 }
 
-func (f *fakeSessionQueries) ListAttachmentsByChatMessage(context.Context, db.ListAttachmentsByChatMessageParams) ([]db.Attachment, error) {
-	return f.boundAttachments, nil
+func (f *fakeSessionQueries) ClaimChannelMediaPendingObjectsForBind(_ context.Context, arg db.ClaimChannelMediaPendingObjectsForBindParams) ([]string, error) {
+	if f.reconcilerOwnedKeys == nil {
+		return append([]string(nil), arg.StorageKeys...), nil
+	}
+	var claimed []string
+	for _, k := range arg.StorageKeys {
+		if !f.reconcilerOwnedKeys[k] {
+			claimed = append(claimed, k)
+		}
+	}
+	return claimed, nil
 }
 
 func (f *fakeSessionQueries) TouchChatSession(context.Context, pgtype.UUID) error {

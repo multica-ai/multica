@@ -338,6 +338,7 @@ func main() {
 	var httpMetrics *obsmetrics.HTTPMetrics
 	var businessMetrics *obsmetrics.BusinessMetrics
 	var samplerPool *pgxpool.Pool
+	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
 	if metricsConfig.Enabled() {
 		// Build a dedicated tiny pool for the BusinessSamplerCollector
 		// so a stalled scrape can never starve business traffic. If the
@@ -365,6 +366,7 @@ func main() {
 		})
 		httpMetrics = metricsRegistry.HTTP
 		businessMetrics = metricsRegistry.Business
+		channelMediaMetrics = metricsRegistry.ChannelMedia
 		// Forward inbound daemon WS frames into the per-kind counter so
 		// dashboards can split heartbeat / unknown / invalid traffic.
 		if daemonHub != nil {
@@ -438,6 +440,14 @@ func main() {
 	// drained.
 	if h.ChannelSupervisor != nil {
 		go h.ChannelSupervisor.Run(sweepCtx)
+	}
+
+	// Media intent-ledger reconciler (PR #5580): settles uploaded-but-unbound
+	// channel media objects. An independent worker so object-storage latency
+	// spikes cannot starve any other sweeper's cadence.
+	if h.ChannelMediaReconciler != nil {
+		h.ChannelMediaReconciler.Metrics = channelMediaMetrics
+		go h.ChannelMediaReconciler.Run(sweepCtx)
 	}
 
 	// MUL-2957: DB-backed execution scheduler. The scheduler turns the

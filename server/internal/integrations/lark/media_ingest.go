@@ -11,7 +11,6 @@ import (
 	"mime"
 	"path"
 	"strings"
-	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -21,20 +20,15 @@ import (
 
 type mediaStorage interface {
 	Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error)
+	// ObjectURL is the URL a successful upload of key returns — a pure
+	// function of configuration, so the intent ledger can persist it BEFORE
+	// the PUT.
+	ObjectURL(key string) string
 }
 
 type mediaStreamStorage interface {
 	UploadStream(ctx context.Context, key string, data io.Reader, sizeBytes int64, contentType string, filename string) (string, error)
 }
-
-type mediaDeleteStorage interface {
-	Delete(ctx context.Context, key string)
-}
-
-// mediaUploadDiscardTimeout bounds the immediate idempotent delete after a
-// result-uncertain upload error. Fresh budget: the failing case includes the
-// resolve context itself having expired mid-write.
-const mediaUploadDiscardTimeout = 5 * time.Second
 
 type messageResourceStreamer interface {
 	DownloadMessageResourceStream(ctx context.Context, creds InstallationCredentials, p DownloadResourceParams) (DownloadedResourceStream, error)
@@ -44,35 +38,15 @@ type feishuMediaResolver struct {
 	api     APIClient
 	creds   CredentialsResolver
 	storage mediaStorage
+	ledger  engine.MediaIntentLedger
 	logger  *slog.Logger
 }
 
-func NewFeishuMediaResolver(api APIClient, creds CredentialsResolver, storage mediaStorage, logger *slog.Logger) engine.MediaResolver {
+func NewFeishuMediaResolver(api APIClient, creds CredentialsResolver, storage mediaStorage, ledger engine.MediaIntentLedger, logger *slog.Logger) engine.MediaResolver {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &feishuMediaResolver{api: api, creds: creds, storage: storage, logger: logger}
-}
-
-// DiscardMedia deletes uploaded objects that will never gain an attachment
-// row (resolution deadline expired, attachment binding failed). Deletion is
-// keyed by StorageKey and best-effort: the storage backends log their own
-// failures, and a leaked object here has no other reclaim path.
-func (r *feishuMediaResolver) DiscardMedia(ctx context.Context, refs []channel.MediaRef) {
-	if len(refs) == 0 {
-		return
-	}
-	deleter, ok := r.storage.(mediaDeleteStorage)
-	if !ok {
-		r.logMediaWarn("lark media discard skipped: storage cannot delete", InboundMessage{}, nil)
-		return
-	}
-	for _, ref := range refs {
-		if ref.StorageKey == "" {
-			continue
-		}
-		deleter.Delete(ctx, ref.StorageKey)
-	}
+	return &feishuMediaResolver{api: api, creds: creds, storage: storage, ledger: ledger, logger: logger}
 }
 
 // HasMedia reports whether the message carries downloadable Feishu resources
@@ -89,7 +63,7 @@ func (r *feishuMediaResolver) HasMedia(msg channel.InboundMessage) bool {
 	return len(mediaResourcesFromMessage(lm)) > 0
 }
 
-func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.ResolvedInstallation, _ engine.ResolvedIdentity, _ pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
+func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.ResolvedInstallation, _ engine.ResolvedIdentity, _ pgtype.UUID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
 	if len(msg.MediaRefs) > 0 {
 		return msg
 	}
@@ -102,7 +76,7 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 	if len(resources) == 0 {
 		return msg
 	}
-	if r.api == nil || r.creds == nil || r.storage == nil {
+	if r.api == nil || r.creds == nil || r.storage == nil || r.ledger == nil {
 		r.logMediaWarn("lark media ingest skipped: missing dependency", lm, nil)
 		return msg
 	}
@@ -117,6 +91,29 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 		return msg
 	}
 	for _, res := range resources {
+		key := mediaObjectKey(inst, res)
+		link := r.storage.ObjectURL(key)
+		// Persist the upload intent BEFORE any write can happen. Every
+		// failure from here on — download error, upload error (even one the
+		// store may still be processing), resolve deadline, crash — simply
+		// leaves this row for the reconciler; nothing is ever deleted inline.
+		ok, err := r.ledger.RecordPendingMediaObject(ctx, engine.RecordPendingMediaObjectParams{
+			StorageKey:     key,
+			WorkspaceID:    inst.WorkspaceID,
+			ChatMessageID:  chatMessageID,
+			StorageURL:     link,
+			InstallationID: inst.ID,
+		})
+		if err != nil {
+			// No durable intent, no upload — fail-safe direction.
+			r.logMediaWarn("lark media ingest skipped: intent record failed", lm, err)
+			continue
+		}
+		if !ok {
+			// The reconciler owns this key ('deleting'); never resurrect it.
+			r.logMediaWarn("lark media ingest skipped: key owned by reconciler", lm, nil)
+			continue
+		}
 		got, err := r.downloadResource(ctx, creds, DownloadResourceParams{
 			MessageID: res.messageID,
 			FileKey:   res.key,
@@ -134,18 +131,12 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 			contentType = "application/octet-stream"
 		}
 		filename := mediaFilename(lm, res, got, contentType)
-		key := mediaObjectKey(inst, res)
-		link, uploadedBytes, err := r.uploadResource(ctx, key, got.Body, got.SizeBytes, contentType, filename)
+		uploadedBytes, err := r.uploadResource(ctx, key, got.Body, got.SizeBytes, contentType, filename)
 		if err != nil {
+			// The store may still be processing the PUT — deleting here
+			// could reorder with it. The intent row (written above) covers
+			// the object either way; the reconciler settles it.
 			r.logMediaWarn("lark media upload failed", lm, err)
-			// The object may have landed server-side even though the client
-			// saw an error (lost response, deadline firing mid-write) — and
-			// with the key never reaching the router, DiscardMedia would
-			// never learn about it. The key is deterministic and already
-			// computed, so delete it idempotently on a fresh budget.
-			discardCtx, discardCancel := context.WithTimeout(context.Background(), mediaUploadDiscardTimeout)
-			r.DiscardMedia(discardCtx, []channel.MediaRef{{StorageKey: key}})
-			discardCancel()
 			continue
 		}
 		sizeBytes := got.SizeBytes
@@ -191,22 +182,22 @@ func (r *feishuMediaResolver) downloadResource(ctx context.Context, creds Instal
 	}, nil
 }
 
-func (r *feishuMediaResolver) uploadResource(ctx context.Context, key string, body io.ReadCloser, sizeBytes int64, contentType string, filename string) (string, int64, error) {
+func (r *feishuMediaResolver) uploadResource(ctx context.Context, key string, body io.ReadCloser, sizeBytes int64, contentType string, filename string) (int64, error) {
 	defer body.Close()
 	counter := &countingReader{r: body}
 	if streamStorage, ok := r.storage.(mediaStreamStorage); ok && sizeBytes > 0 {
-		link, err := streamStorage.UploadStream(ctx, key, counter, sizeBytes, contentType, filename)
-		return link, counter.n, err
+		_, err := streamStorage.UploadStream(ctx, key, counter, sizeBytes, contentType, filename)
+		return counter.n, err
 	}
 	// Unknown-length HTTP bodies cannot be sent through S3 PutObject as a
 	// non-seekable stream. The transport already enforces the 100 MiB resource
 	// cap, so buffer this uncommon fallback and use the seekable Upload path.
 	data, err := io.ReadAll(counter)
 	if err != nil {
-		return "", counter.n, err
+		return counter.n, err
 	}
-	link, err := r.storage.Upload(ctx, key, data, contentType, filename)
-	return link, int64(len(data)), err
+	_, err = r.storage.Upload(ctx, key, data, contentType, filename)
+	return int64(len(data)), err
 }
 
 type countingReader struct {

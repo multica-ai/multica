@@ -86,7 +86,7 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		cfg.ReplyTimeout = 2500 * time.Millisecond
 	}
 	if cfg.MediaTimeout == 0 {
-		cfg.MediaTimeout = 45 * time.Second
+		cfg.MediaTimeout = DefaultMediaTimeout
 	}
 	if cfg.MediaConcurrency == 0 {
 		cfg.MediaConcurrency = 8
@@ -110,6 +110,11 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		mediaQueues:  make(map[string]*mediaQueueEntry),
 	}
 }
+
+// DefaultMediaTimeout is the default RouterConfig.MediaTimeout. Exported so
+// the channel-media settle invariant test can assert the reconciler's settle
+// delay dwarfs every pipeline budget.
+const DefaultMediaTimeout = 45 * time.Second
 
 type mediaQueueEntry struct {
 	tail chan struct{}
@@ -435,17 +440,14 @@ func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation,
 	ctx, cancel := context.WithDeadline(r.mediaCtx, deadline)
 	defer cancel()
 
-	resolved := set.Media.ResolveMedia(ctx, inst, identity, sessionID, msg)
+	resolved := set.Media.ResolveMedia(ctx, inst, identity, sessionID, chatMessageID, msg)
 	finalizeCtx, finalizeCancel := context.WithTimeout(context.Background(), mediaFinalizeTimeout)
 	defer finalizeCancel()
-	var discardRefs []channel.MediaRef
 	if err := ctx.Err(); err != nil {
 		// Refs resolved before the deadline already sit in object storage but
-		// will never gain an attachment row — and the dedup mark committed
-		// with the message, so a redelivery is dropped and never re-resolves
-		// these keys. Collected for deletion below, after the user-facing
-		// marker clear and promotion.
-		discardRefs = resolved.MediaRefs
+		// will not gain an attachment row. Nothing is deleted here — their
+		// intent-ledger rows were written before the uploads, and the
+		// reconciler reclaims unreferenced objects after the settle delay.
 		resolved.MediaRefs = nil
 		r.logger.Warn("channel router: media resolution incomplete; using placeholder",
 			"channel_type", string(msg.Source.ChannelType),
@@ -460,25 +462,15 @@ func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation,
 		Sender:      identity.UserID,
 		MediaRefs:   resolved.MediaRefs,
 	}); err != nil {
-		if errors.Is(err, ErrMediaBindResultUnknown) {
-			// The commit outcome could not be verified; deleting now could
-			// destroy objects that durably-committed attachment rows
-			// reference. Keep them — a rare orphan beats a broken attachment.
-			r.logger.Warn("channel router: media bind outcome unknown; keeping uploads",
-				"channel_type", string(msg.Source.ChannelType),
-				"event_id", msg.EventID,
-				"message_id", msg.MessageID,
-				"err", err)
-		} else {
-			// Known-failed bind: the uploads are unreachable through the
-			// attachment table — reclaim them.
-			discardRefs = append(discardRefs, resolved.MediaRefs...)
-			r.logger.Warn("channel router: media attachment binding failed",
-				"channel_type", string(msg.Source.ChannelType),
-				"event_id", msg.EventID,
-				"message_id", msg.MessageID,
-				"err", err)
-		}
+		// Never delete inline: the attachments may or may not have landed
+		// (an ambiguous commit), but the intent rows are deleted in the SAME
+		// transaction, so the ledger already reflects whichever outcome is
+		// durable and the reconciler settles the objects.
+		r.logger.Warn("channel router: media attachment binding failed",
+			"channel_type", string(msg.Source.ChannelType),
+			"event_id", msg.EventID,
+			"message_id", msg.MessageID,
+			"err", err)
 	}
 	if err := r.tasks.PromoteChannelChatTasksIfMediaReady(finalizeCtx, sessionID); err != nil {
 		r.logger.Warn("channel router: media-ready task promotion failed",
@@ -486,15 +478,6 @@ func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation,
 			"event_id", msg.EventID,
 			"message_id", msg.MessageID,
 			"err", err)
-	}
-	if len(discardRefs) > 0 {
-		// A fresh budget, not finalizeCtx: a bind that failed BECAUSE the
-		// finalize deadline expired must not hand the storage deletes an
-		// already-dead context, and running last keeps S3 round-trips from
-		// starving the marker clear / promotion above.
-		discardCtx, discardCancel := context.WithTimeout(context.Background(), mediaFinalizeTimeout)
-		defer discardCancel()
-		set.Media.DiscardMedia(discardCtx, discardRefs)
 	}
 }
 

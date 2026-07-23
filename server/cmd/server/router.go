@@ -267,6 +267,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// into one agent run instead of one per message (MUL-2968).
 	channelRouter.EnableRunBatching(engine.DefaultChatRunBatchWindow)
 	h.ChannelRouter = channelRouter
+	// Media intent-ledger reconciler: settles uploaded-but-unbound objects.
+	// Needs the storage backend; started from main.go as its own worker.
+	h.ChannelMediaReconciler = &service.ChannelMediaReconciler{
+		Queries: queries,
+		Storage: store,
+		Logger:  slog.Default(),
+	}
 	h.ChannelSupervisor = engine.NewSupervisor(
 		lark.NewChannelInstallationStore(queries),
 		channelRegistry,
@@ -391,7 +398,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Credentials: installSvc,
 					Logger:      slog.Default(),
 				})
-				mediaResolver := lark.NewFeishuMediaResolver(larkClient, installSvc, store, slog.Default())
+				mediaResolver := lark.NewFeishuMediaResolver(larkClient, installSvc, store, engine.NewDBMediaIntentLedger(queries), slog.Default())
 				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
 					cs, feishuSession, auditLogger, resolverReplier, typingIndicator, mediaResolver,
 				))

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -185,7 +186,10 @@ type SessionBinder interface {
 // are durable. The Router runs it off the connector ACK path and binds any
 // returned MediaRefs; the independently scheduled task remains deferred until
 // binding finishes or the persisted deadline expires. Implementations are
-// best-effort: failures leave the stored placeholder text intact.
+// best-effort: failures leave the stored placeholder text intact and NEVER
+// delete anything inline — every uploaded object is covered by an intent-
+// ledger row written before the PUT (see MediaIntentLedger), and the
+// asynchronous reconciler settles whatever binding did not claim.
 type MediaResolver interface {
 	// HasMedia reports whether msg references platform media that
 	// ResolveMedia would fetch. The Router calls it synchronously on the
@@ -194,19 +198,61 @@ type MediaResolver interface {
 	// in-memory checks (no I/O). A false result keeps the message on the
 	// plain ingest path: no marker, no deferred run, no semaphore slot.
 	HasMedia(msg channel.InboundMessage) bool
-	ResolveMedia(ctx context.Context, inst ResolvedInstallation, sender ResolvedIdentity, sessionID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage
-	// DiscardMedia best-effort deletes objects that ResolveMedia uploaded but
-	// that will never gain an attachment row (deadline expiry, known-failed
-	// BindMedia). Without it those uploads are unreachable orphans: the dedup
-	// mark commits with the message before media runs, so a redelivered event
-	// is dropped as a duplicate and never re-resolves (and thus never
-	// overwrites) these keys, and workspace/session deletion only enumerates
-	// the attachment table. Implementations also self-invoke it for a
-	// result-uncertain upload (client error after a possible server-side
-	// write), whose key never reaches the Router. The Router skips it on
-	// ErrMediaBindResultUnknown — an unverifiable commit may have persisted
-	// rows that reference the objects.
-	DiscardMedia(ctx context.Context, refs []channel.MediaRef)
+	// ResolveMedia downloads the platform media and uploads it to object
+	// storage. chatMessageID is the durable chat_message the refs will bind
+	// to; the intent ledger keys the reconciler's reference check on it.
+	ResolveMedia(ctx context.Context, inst ResolvedInstallation, sender ResolvedIdentity, sessionID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage
+}
+
+// MediaIntentLedger persists upload intent BEFORE the object is written. The
+// row is the only artifact any failure path leaves behind: upload error,
+// resolve deadline, bind failure, ambiguous commit, or a crash all simply
+// leave it for the reconciler, which settles it long after any in-flight PUT
+// or COMMIT can still land. This is what makes "did my side effect happen?"
+// a question nobody has to answer inline.
+type MediaIntentLedger interface {
+	// RecordPendingMediaObject upserts the intent row. ok=false means the
+	// key has left 'pending' (the reconciler owns it) — the caller must skip
+	// the upload entirely rather than resurrect the row.
+	RecordPendingMediaObject(ctx context.Context, p RecordPendingMediaObjectParams) (ok bool, err error)
+}
+
+// RecordPendingMediaObjectParams identifies one intended object. StorageURL
+// is the URL the attachment row will carry (pure function of the key), so
+// the reconciler can check for a durable reference. InstallationID is an
+// ops-diagnostic only.
+type RecordPendingMediaObjectParams struct {
+	StorageKey     string
+	WorkspaceID    pgtype.UUID
+	ChatMessageID  pgtype.UUID
+	StorageURL     string
+	InstallationID pgtype.UUID
+}
+
+// NewDBMediaIntentLedger adapts *db.Queries to MediaIntentLedger.
+func NewDBMediaIntentLedger(q *db.Queries) MediaIntentLedger {
+	return dbMediaIntentLedger{q: q}
+}
+
+type dbMediaIntentLedger struct{ q *db.Queries }
+
+func (l dbMediaIntentLedger) RecordPendingMediaObject(ctx context.Context, p RecordPendingMediaObjectParams) (bool, error) {
+	_, err := l.q.RecordChannelMediaPendingObject(ctx, db.RecordChannelMediaPendingObjectParams{
+		StorageKey:     p.StorageKey,
+		WorkspaceID:    p.WorkspaceID,
+		ChatMessageID:  p.ChatMessageID,
+		StorageUrl:     p.StorageURL,
+		InstallationID: p.InstallationID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The state-guarded upsert matched a 'deleting' row: the reconciler
+		// owns this key and it must not be resurrected.
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 // Auditor records a dropped inbound event (no message body — drop-audit

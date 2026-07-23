@@ -61,6 +61,7 @@ func seedSessionPersistenceFixture(t *testing.T, pool *pgxpool.Pool) sessionPers
 	t.Cleanup(func() {
 		cleanupCtx := context.Background()
 		if f.workspaceID.Valid {
+			_, _ = pool.Exec(cleanupCtx, `DELETE FROM channel_media_pending_object WHERE workspace_id = $1`, f.workspaceID)
 			_, _ = pool.Exec(cleanupCtx, `DELETE FROM workspace WHERE id = $1`, f.workspaceID)
 		}
 		if f.userID.Valid {
@@ -110,6 +111,7 @@ func TestBindMediaRefs_PersistsAndLinksAttachmentToDurableMessage(t *testing.T) 
 	if err != nil {
 		t.Fatalf("AppendUserMessage: %v", err)
 	}
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, "workspaces/ws/lark/image", "https://cdn.example.test/image", "pending")
 	err = session.BindMediaRefs(context.Background(), BindMediaInput{
 		MessageID:   appendRes.MessageID,
 		SessionID:   fixture.sessionID,
@@ -126,6 +128,9 @@ func TestBindMediaRefs_PersistsAndLinksAttachmentToDurableMessage(t *testing.T) 
 	})
 	if err != nil {
 		t.Fatalf("BindMediaRefs: %v", err)
+	}
+	if _, exists := pendingMediaObjectState(t, pool, "workspaces/ws/lark/image"); exists {
+		t.Fatal("happy-path bind must clear the intent row in the same transaction")
 	}
 
 	var content, filename, url, contentType string
@@ -178,6 +183,7 @@ func TestBindMediaRefs_LinkFailureKeepsMessageAndRollsBackAttachment(t *testing.
 	if err != nil {
 		t.Fatalf("AppendUserMessage: %v", err)
 	}
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, "workspaces/ws/lark/rollback", "https://cdn.example.test/rollback.png", "pending")
 	err = session.BindMediaRefs(context.Background(), BindMediaInput{
 		MessageID:   appendRes.MessageID,
 		SessionID:   fixture.sessionID,
@@ -185,6 +191,7 @@ func TestBindMediaRefs_LinkFailureKeepsMessageAndRollsBackAttachment(t *testing.
 		Sender:      fixture.userID,
 		MediaRefs: []channel.MediaRef{{
 			Type:       channel.MsgTypeImage,
+			StorageKey: "workspaces/ws/lark/rollback",
 			StorageURL: "https://cdn.example.test/rollback.png",
 			Filename:   "rollback.png",
 			MimeType:   "image/png",
@@ -193,6 +200,9 @@ func TestBindMediaRefs_LinkFailureKeepsMessageAndRollsBackAttachment(t *testing.
 	})
 	if err == nil || !strings.Contains(err.Error(), "injected attachment link failure") {
 		t.Fatalf("BindMediaRefs error = %v", err)
+	}
+	if state, exists := pendingMediaObjectState(t, pool, "workspaces/ws/lark/rollback"); !exists || state != "pending" {
+		t.Fatalf("intent row = (%q, %v), want preserved 'pending' after the rollback", state, exists)
 	}
 
 	var messageCount, attachmentCount int
@@ -213,6 +223,34 @@ func TestBindMediaRefs_LinkFailureKeepsMessageAndRollsBackAttachment(t *testing.
 	if mediaPendingUntil.Valid {
 		t.Fatalf("failed attachment kept media pending until %v", mediaPendingUntil.Time)
 	}
+}
+
+// seedPendingMediaObject writes the intent-ledger row the resolver would have
+// written before the upload. state defaults to 'pending'.
+func seedPendingMediaObject(t *testing.T, pool *pgxpool.Pool, fixture sessionPersistenceFixture, messageID pgtype.UUID, key, url, state string) {
+	t.Helper()
+	if _, err := pool.Exec(context.Background(), `
+		INSERT INTO channel_media_pending_object (storage_key, workspace_id, chat_message_id, storage_url, state)
+		VALUES ($1, $2, $3, $4, $5)
+		ON CONFLICT (storage_key) DO UPDATE SET state = EXCLUDED.state, chat_message_id = EXCLUDED.chat_message_id, storage_url = EXCLUDED.storage_url
+	`, key, fixture.workspaceID, messageID, url, state); err != nil {
+		t.Fatalf("seed pending media object: %v", err)
+	}
+}
+
+func pendingMediaObjectState(t *testing.T, pool *pgxpool.Pool, key string) (string, bool) {
+	t.Helper()
+	var state string
+	err := pool.QueryRow(context.Background(), `
+		SELECT state FROM channel_media_pending_object WHERE storage_key = $1
+	`, key).Scan(&state)
+	if err != nil {
+		if strings.Contains(err.Error(), "no rows") {
+			return "", false
+		}
+		t.Fatalf("load pending media object: %v", err)
+	}
+	return state, true
 }
 
 // lostAckTxStarter simulates a lost commit ack: the transaction durably
@@ -256,9 +294,11 @@ func (t *rolledBackCommitTx) Commit(ctx context.Context) error {
 	return errors.New("injected commit failure")
 }
 
-// bindOneMediaRef appends the user message through a healthy session, then
-// binds one ref through bindSession — the seam tests inject commit faults into.
-func bindOneMediaRef(t *testing.T, pool *pgxpool.Pool, bindSession *ChatSession, fixture sessionPersistenceFixture, url string) error {
+// bindOneMediaRef appends the user message through a healthy session, seeds
+// the intent-ledger row the resolver would have written before the upload,
+// then binds one ref through bindSession — the seam tests inject commit
+// faults into. Returns the bind error and the storage key used.
+func bindOneMediaRef(t *testing.T, pool *pgxpool.Pool, bindSession *ChatSession, fixture sessionPersistenceFixture, key, url string) error {
 	t.Helper()
 	appendSession := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
 	appendRes, err := appendSession.AppendUserMessage(context.Background(), AppendInput{
@@ -270,6 +310,7 @@ func bindOneMediaRef(t *testing.T, pool *pgxpool.Pool, bindSession *ChatSession,
 	if err != nil {
 		t.Fatalf("AppendUserMessage: %v", err)
 	}
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, key, url, "pending")
 	return bindSession.BindMediaRefs(context.Background(), BindMediaInput{
 		MessageID:   appendRes.MessageID,
 		SessionID:   fixture.sessionID,
@@ -277,7 +318,7 @@ func bindOneMediaRef(t *testing.T, pool *pgxpool.Pool, bindSession *ChatSession,
 		Sender:      fixture.userID,
 		MediaRefs: []channel.MediaRef{{
 			Type:       channel.MsgTypeImage,
-			StorageKey: "workspaces/ws/lark/ack",
+			StorageKey: key,
 			StorageURL: url,
 			Filename:   "ack.png",
 			MimeType:   "image/png",
@@ -286,17 +327,20 @@ func bindOneMediaRef(t *testing.T, pool *pgxpool.Pool, bindSession *ChatSession,
 	})
 }
 
-// A Commit error is not a rollback guarantee. When the rows durably landed
-// despite the error report, BindMediaRefs must verify and report SUCCESS —
-// returning an error would make the router delete objects that persisted
-// attachment rows reference.
-func TestBindMediaRefs_LostCommitAckVerifiesAndKeepsBoundAttachment(t *testing.T) {
+// A Commit error is not a rollback guarantee — and with the intent rows
+// cleared inside the SAME transaction, nobody has to adjudicate it: when the
+// commit durably landed despite the error report, the attachment exists AND
+// the ledger row is gone, so the reconciler has nothing to delete. The bind
+// still reports the error; the router only logs it.
+func TestBindMediaRefs_LostCommitAckClearsIntentWithAttachment(t *testing.T) {
 	pool := sessionPersistenceTestDB(t)
 	fixture := seedSessionPersistenceFixture(t, pool)
 	session := newChatSessionWith(dbSessionQueries{q: db.New(pool)}, &lostAckTxStarter{pool: pool}, channel.TypeFeishu, SessionTitles{})
 
-	if err := bindOneMediaRef(t, pool, session, fixture, "https://cdn.example.test/lost-ack.png"); err != nil {
-		t.Fatalf("lost-ack bind must verify the durable commit and succeed, got %v", err)
+	key := "workspaces/ws/lark/lost-ack"
+	err := bindOneMediaRef(t, pool, session, fixture, key, "https://cdn.example.test/lost-ack.png")
+	if err == nil || !strings.Contains(err.Error(), "injected lost commit ack") {
+		t.Fatalf("lost-ack bind error = %v", err)
 	}
 	var attachments int
 	if err := pool.QueryRow(context.Background(), `
@@ -307,22 +351,23 @@ func TestBindMediaRefs_LostCommitAckVerifiesAndKeepsBoundAttachment(t *testing.T
 	if attachments != 1 {
 		t.Fatalf("attachments = %d, want the durably committed row", attachments)
 	}
+	if _, exists := pendingMediaObjectState(t, pool, key); exists {
+		t.Fatal("intent row must be gone when the commit landed — atomic with the attachment")
+	}
 }
 
-// The mirror case: a commit failure whose transaction definitely rolled back
-// must stay an error — and NOT the result-unknown sentinel — so the router
-// reclaims the uploads.
-func TestBindMediaRefs_RolledBackCommitStaysDiscardableError(t *testing.T) {
+// The mirror case: a commit failure whose transaction rolled back leaves the
+// intent row in place (also atomically), so the reconciler reclaims the
+// object after the settle delay. No attachment exists.
+func TestBindMediaRefs_RolledBackCommitKeepsIntentRow(t *testing.T) {
 	pool := sessionPersistenceTestDB(t)
 	fixture := seedSessionPersistenceFixture(t, pool)
 	session := newChatSessionWith(dbSessionQueries{q: db.New(pool)}, &rolledBackCommitTxStarter{pool: pool}, channel.TypeFeishu, SessionTitles{})
 
-	err := bindOneMediaRef(t, pool, session, fixture, "https://cdn.example.test/rolled-back.png")
+	key := "workspaces/ws/lark/rolled-back"
+	err := bindOneMediaRef(t, pool, session, fixture, key, "https://cdn.example.test/rolled-back.png")
 	if err == nil || !strings.Contains(err.Error(), "injected commit failure") {
 		t.Fatalf("rolled-back commit error = %v", err)
-	}
-	if errors.Is(err, ErrMediaBindResultUnknown) {
-		t.Fatalf("verified rollback must not be reported as result-unknown: %v", err)
 	}
 	var attachments int
 	if err := pool.QueryRow(context.Background(), `
@@ -332,5 +377,67 @@ func TestBindMediaRefs_RolledBackCommitStaysDiscardableError(t *testing.T) {
 	}
 	if attachments != 0 {
 		t.Fatalf("attachments = %d, want none after rollback", attachments)
+	}
+	if state, exists := pendingMediaObjectState(t, pool, key); !exists || state != "pending" {
+		t.Fatalf("intent row = (%q, %v), want it preserved in 'pending' for the reconciler", state, exists)
+	}
+}
+
+// Reconciler-wins interleaving: a key already claimed to 'deleting' must not
+// be attached — the object is being deleted, the placeholder stays — and the
+// bind still succeeds for the rest of the batch (here: empty) and clears the
+// media marker.
+func TestBindMediaRefs_ReconcilerOwnedKeySkipsAttach(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
+
+	appendRes, err := session.AppendUserMessage(context.Background(), AppendInput{
+		SessionID:         fixture.sessionID,
+		Sender:            fixture.userID,
+		Body:              "[Image]",
+		MediaPendingUntil: pgtype.Timestamptz{Time: time.Now().Add(time.Minute), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	key := "workspaces/ws/lark/reconciler-owned"
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, key, "https://cdn.example.test/owned.png", "deleting")
+
+	if err := session.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID:   appendRes.MessageID,
+		SessionID:   fixture.sessionID,
+		WorkspaceID: fixture.workspaceID,
+		Sender:      fixture.userID,
+		MediaRefs: []channel.MediaRef{{
+			Type:       channel.MsgTypeImage,
+			StorageKey: key,
+			StorageURL: "https://cdn.example.test/owned.png",
+			Filename:   "owned.png",
+			MimeType:   "image/png",
+			SizeBytes:  1,
+		}},
+	}); err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+
+	var attachments int
+	if err := pool.QueryRow(context.Background(), `
+		SELECT count(*) FROM attachment WHERE chat_session_id = $1
+	`, fixture.sessionID).Scan(&attachments); err != nil {
+		t.Fatalf("count attachments: %v", err)
+	}
+	if attachments != 0 {
+		t.Fatalf("attachments = %d, want none for a reconciler-owned key", attachments)
+	}
+	if state, exists := pendingMediaObjectState(t, pool, key); !exists || state != "deleting" {
+		t.Fatalf("intent row = (%q, %v), want untouched 'deleting'", state, exists)
+	}
+	var mediaPendingUntil pgtype.Timestamptz
+	if err := pool.QueryRow(context.Background(), `SELECT channel_media_pending_until FROM chat_message WHERE id = $1`, appendRes.MessageID).Scan(&mediaPendingUntil); err != nil {
+		t.Fatalf("load marker: %v", err)
+	}
+	if mediaPendingUntil.Valid {
+		t.Fatalf("media marker must still clear when attach is skipped, got %v", mediaPendingUntil.Time)
 	}
 }

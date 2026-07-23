@@ -240,16 +240,29 @@ func (s *S3Storage) PresignGetWithContentDisposition(ctx context.Context, key st
 
 // Delete removes an object from S3. Errors are logged but not fatal.
 func (s *S3Storage) Delete(ctx context.Context, key string) {
+	if err := s.DeleteObject(ctx, key); err != nil {
+		slog.Error("s3 DeleteObject failed", "key", key, "error", err)
+	}
+}
+
+// DeleteObject is Delete with the error surfaced — the media reconciler needs
+// it to keep the ledger row and schedule a retry instead of assuming success.
+func (s *S3Storage) DeleteObject(ctx context.Context, key string) error {
 	if key == "" {
-		return
+		return nil
 	}
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 	})
-	if err != nil {
-		slog.Error("s3 DeleteObject failed", "key", key, "error", err)
-	}
+	return err
+}
+
+// ObjectURL returns the URL a successful Upload/UploadStream of key would
+// return. It is a pure function of configuration, so the media intent ledger
+// can persist the URL BEFORE the upload for the durable reference check.
+func (s *S3Storage) ObjectURL(key string) string {
+	return s.uploadedURL(key)
 }
 
 // DeleteKeys removes multiple objects from S3. Best-effort, errors are logged.

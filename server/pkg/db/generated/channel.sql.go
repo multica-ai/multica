@@ -73,6 +73,32 @@ func (q *Queries) BackfillChannelInstallationRegionToFeishuLark(ctx context.Cont
 	return result.RowsAffected(), nil
 }
 
+const channelMediaObjectIsReferenced = `-- name: ChannelMediaObjectIsReferenced :one
+SELECT EXISTS (
+    SELECT 1 FROM attachment
+    WHERE chat_message_id = $1
+      AND workspace_id = $2
+      AND url = $3
+) AS referenced
+`
+
+type ChannelMediaObjectIsReferencedParams struct {
+	ChatMessageID pgtype.UUID `json:"chat_message_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	StorageUrl    string      `json:"storage_url"`
+}
+
+// The post-claim reference check: an attachment row carrying this object's
+// URL on the intended message. Only meaningful AFTER the claim flipped the
+// row to 'deleting' — from that point a bind can no longer succeed on the
+// key, so a negative answer is terminal, not a snapshot race.
+func (q *Queries) ChannelMediaObjectIsReferenced(ctx context.Context, arg ChannelMediaObjectIsReferencedParams) (bool, error) {
+	row := q.db.QueryRow(ctx, channelMediaObjectIsReferenced, arg.ChatMessageID, arg.WorkspaceID, arg.StorageUrl)
+	var referenced bool
+	err := row.Scan(&referenced)
+	return referenced, err
+}
+
 const claimChannelInboundDedup = `-- name: ClaimChannelInboundDedup :one
 
 INSERT INTO channel_inbound_message_dedup (installation_id, message_id, claim_token)
@@ -112,6 +138,117 @@ func (q *Queries) ClaimChannelInboundDedup(ctx context.Context, arg ClaimChannel
 	return i, err
 }
 
+const claimChannelMediaPendingObjectsForBind = `-- name: ClaimChannelMediaPendingObjectsForBind :many
+DELETE FROM channel_media_pending_object
+WHERE storage_key = ANY($1::text[])
+  AND workspace_id = $2
+  AND state = 'pending'
+RETURNING storage_key
+`
+
+type ClaimChannelMediaPendingObjectsForBindParams struct {
+	StorageKeys []string    `json:"storage_keys"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Runs inside the attachment-insert transaction: commit landed ⇔ the intents
+// are gone, atomically, so an ambiguous COMMIT never needs adjudication. Only
+// 'pending' rows can be claimed — a key the reconciler moved to 'deleting'
+// is NOT returned, and the caller must skip attaching that object (the
+// placeholder stays; the reconciler will delete the object).
+func (q *Queries) ClaimChannelMediaPendingObjectsForBind(ctx context.Context, arg ClaimChannelMediaPendingObjectsForBindParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, claimChannelMediaPendingObjectsForBind, arg.StorageKeys, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var storage_key string
+		if err := rows.Scan(&storage_key); err != nil {
+			return nil, err
+		}
+		items = append(items, storage_key)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const claimChannelMediaPendingObjectsForReconcile = `-- name: ClaimChannelMediaPendingObjectsForReconcile :many
+UPDATE channel_media_pending_object AS obj
+SET state = 'deleting',
+    lease_token = $1,
+    lease_expires_at = $2,
+    attempt = obj.attempt + 1
+FROM (
+    SELECT cand.storage_key FROM channel_media_pending_object AS cand
+    WHERE cand.next_attempt_at <= now()
+      AND (
+          (cand.state = 'pending' AND cand.created_at <= $3)
+          OR (cand.state = 'deleting' AND (cand.lease_expires_at IS NULL OR cand.lease_expires_at <= now()))
+      )
+    ORDER BY cand.next_attempt_at
+    LIMIT $4
+    FOR UPDATE SKIP LOCKED
+) AS due
+WHERE obj.storage_key = due.storage_key
+RETURNING obj.storage_key, obj.workspace_id, obj.chat_message_id, obj.storage_url, obj.installation_id, obj.state, obj.lease_token, obj.lease_expires_at, obj.attempt, obj.next_attempt_at, obj.last_error, obj.created_at
+`
+
+type ClaimChannelMediaPendingObjectsForReconcileParams struct {
+	LeaseToken           pgtype.UUID        `json:"lease_token"`
+	LeaseExpiresAt       pgtype.Timestamptz `json:"lease_expires_at"`
+	PendingSettledBefore pgtype.Timestamptz `json:"pending_settled_before"`
+	BatchLimit           int32              `json:"batch_limit"`
+}
+
+// Short-transaction claim: flips due rows to 'deleting' under a fresh lease.
+// Due means (a) 'pending' rows older than the settle delay — an operational
+// buffer only; correctness comes from the state flip, after which a bind can
+// never succeed on the key — or (b) 'deleting' rows whose lease expired (a
+// crashed or failed worker). FOR UPDATE SKIP LOCKED keeps replicas from
+// claiming the same rows; the object-storage DELETE happens outside any
+// transaction, gated by the lease token.
+func (q *Queries) ClaimChannelMediaPendingObjectsForReconcile(ctx context.Context, arg ClaimChannelMediaPendingObjectsForReconcileParams) ([]ChannelMediaPendingObject, error) {
+	rows, err := q.db.Query(ctx, claimChannelMediaPendingObjectsForReconcile,
+		arg.LeaseToken,
+		arg.LeaseExpiresAt,
+		arg.PendingSettledBefore,
+		arg.BatchLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChannelMediaPendingObject{}
+	for rows.Next() {
+		var i ChannelMediaPendingObject
+		if err := rows.Scan(
+			&i.StorageKey,
+			&i.WorkspaceID,
+			&i.ChatMessageID,
+			&i.StorageUrl,
+			&i.InstallationID,
+			&i.State,
+			&i.LeaseToken,
+			&i.LeaseExpiresAt,
+			&i.Attempt,
+			&i.NextAttemptAt,
+			&i.LastError,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const consumeChannelBindingToken = `-- name: ConsumeChannelBindingToken :one
 UPDATE channel_binding_token
 SET consumed_at = now()
@@ -137,6 +274,18 @@ func (q *Queries) ConsumeChannelBindingToken(ctx context.Context, tokenHash stri
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const countChannelMediaPendingObjects = `-- name: CountChannelMediaPendingObjects :one
+SELECT count(*) FROM channel_media_pending_object
+`
+
+// Ledger backlog gauge for the reconciler's observability.
+func (q *Queries) CountChannelMediaPendingObjects(ctx context.Context) (int64, error) {
+	row := q.db.QueryRow(ctx, countChannelMediaPendingObjects)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createChannelBindingToken = `-- name: CreateChannelBindingToken :one
@@ -448,6 +597,27 @@ DELETE FROM channel_installation WHERE id IN (SELECT id FROM doomed)
 func (q *Queries) DeleteChannelInstallationsByArchivedRuntimeAgents(ctx context.Context, runtimeID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteChannelInstallationsByArchivedRuntimeAgents, runtimeID)
 	return err
+}
+
+const deleteChannelMediaPendingObject = `-- name: DeleteChannelMediaPendingObject :execrows
+DELETE FROM channel_media_pending_object
+WHERE storage_key = $1 AND lease_token = $2
+`
+
+type DeleteChannelMediaPendingObjectParams struct {
+	StorageKey string      `json:"storage_key"`
+	LeaseToken pgtype.UUID `json:"lease_token"`
+}
+
+// Settles a claimed row (object deleted, or a durable attachment reference
+// was found). Lease-token guarded so an expired-lease reclaim by another
+// replica cannot be clobbered.
+func (q *Queries) DeleteChannelMediaPendingObject(ctx context.Context, arg DeleteChannelMediaPendingObjectParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteChannelMediaPendingObject, arg.StorageKey, arg.LeaseToken)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteChannelOutboundCardMessagesBySession = `-- name: DeleteChannelOutboundCardMessagesBySession :exec
@@ -1225,6 +1395,49 @@ func (q *Queries) RecordChannelInboundDrop(ctx context.Context, arg RecordChanne
 	return err
 }
 
+const recordChannelMediaPendingObject = `-- name: RecordChannelMediaPendingObject :one
+
+INSERT INTO channel_media_pending_object (
+    storage_key, workspace_id, chat_message_id, storage_url, installation_id
+)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (storage_key) DO UPDATE
+SET created_at = now(), next_attempt_at = now(),
+    workspace_id = EXCLUDED.workspace_id,
+    chat_message_id = EXCLUDED.chat_message_id,
+    storage_url = EXCLUDED.storage_url
+WHERE channel_media_pending_object.state = 'pending'
+RETURNING storage_key
+`
+
+type RecordChannelMediaPendingObjectParams struct {
+	StorageKey     string      `json:"storage_key"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	ChatMessageID  pgtype.UUID `json:"chat_message_id"`
+	StorageUrl     string      `json:"storage_url"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+}
+
+// =====================
+// channel_media_pending_object (media intent ledger)
+// =====================
+// Records upload intent BEFORE the PUT. A redelivered attempt refreshes the
+// settle window, but only while the row is still 'pending' — a key the
+// reconciler owns ('deleting') must never be resurrected, so the caller gets
+// no row back (pgx.ErrNoRows) and must skip the upload entirely.
+func (q *Queries) RecordChannelMediaPendingObject(ctx context.Context, arg RecordChannelMediaPendingObjectParams) (string, error) {
+	row := q.db.QueryRow(ctx, recordChannelMediaPendingObject,
+		arg.StorageKey,
+		arg.WorkspaceID,
+		arg.ChatMessageID,
+		arg.StorageUrl,
+		arg.InstallationID,
+	)
+	var storage_key string
+	err := row.Scan(&storage_key)
+	return storage_key, err
+}
+
 const releaseChannelInboundDedup = `-- name: ReleaseChannelInboundDedup :execrows
 DELETE FROM channel_inbound_message_dedup
 WHERE installation_id = $1
@@ -1248,6 +1461,34 @@ func (q *Queries) ReleaseChannelInboundDedup(ctx context.Context, arg ReleaseCha
 		return 0, err
 	}
 	return result.RowsAffected(), nil
+}
+
+const releaseChannelMediaPendingObject = `-- name: ReleaseChannelMediaPendingObject :exec
+UPDATE channel_media_pending_object
+SET lease_token = NULL,
+    lease_expires_at = NULL,
+    next_attempt_at = $1,
+    last_error = $2
+WHERE storage_key = $3 AND lease_token = $4
+`
+
+type ReleaseChannelMediaPendingObjectParams struct {
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	LastError     pgtype.Text        `json:"last_error"`
+	StorageKey    string             `json:"storage_key"`
+	LeaseToken    pgtype.UUID        `json:"lease_token"`
+}
+
+// Object-storage DELETE failed: keep the row in 'deleting' (bind must still
+// never attach it), release the lease, and back off the next attempt.
+func (q *Queries) ReleaseChannelMediaPendingObject(ctx context.Context, arg ReleaseChannelMediaPendingObjectParams) error {
+	_, err := q.db.Exec(ctx, releaseChannelMediaPendingObject,
+		arg.NextAttemptAt,
+		arg.LastError,
+		arg.StorageKey,
+		arg.LeaseToken,
+	)
+	return err
 }
 
 const releaseChannelWSLease = `-- name: ReleaseChannelWSLease :exec

@@ -632,3 +632,96 @@ WHERE expires_at < $1;
 -- installation — a link that never actually reaches the live bot.
 DELETE FROM channel_binding_token
 WHERE installation_id = $1;
+
+-- =====================
+-- channel_media_pending_object (media intent ledger)
+-- =====================
+
+-- name: RecordChannelMediaPendingObject :one
+-- Records upload intent BEFORE the PUT. A redelivered attempt refreshes the
+-- settle window, but only while the row is still 'pending' — a key the
+-- reconciler owns ('deleting') must never be resurrected, so the caller gets
+-- no row back (pgx.ErrNoRows) and must skip the upload entirely.
+INSERT INTO channel_media_pending_object (
+    storage_key, workspace_id, chat_message_id, storage_url, installation_id
+)
+VALUES ($1, $2, $3, $4, sqlc.narg(installation_id))
+ON CONFLICT (storage_key) DO UPDATE
+SET created_at = now(), next_attempt_at = now(),
+    workspace_id = EXCLUDED.workspace_id,
+    chat_message_id = EXCLUDED.chat_message_id,
+    storage_url = EXCLUDED.storage_url
+WHERE channel_media_pending_object.state = 'pending'
+RETURNING storage_key;
+
+-- name: ClaimChannelMediaPendingObjectsForBind :many
+-- Runs inside the attachment-insert transaction: commit landed ⇔ the intents
+-- are gone, atomically, so an ambiguous COMMIT never needs adjudication. Only
+-- 'pending' rows can be claimed — a key the reconciler moved to 'deleting'
+-- is NOT returned, and the caller must skip attaching that object (the
+-- placeholder stays; the reconciler will delete the object).
+DELETE FROM channel_media_pending_object
+WHERE storage_key = ANY(@storage_keys::text[])
+  AND workspace_id = @workspace_id
+  AND state = 'pending'
+RETURNING storage_key;
+
+-- name: ClaimChannelMediaPendingObjectsForReconcile :many
+-- Short-transaction claim: flips due rows to 'deleting' under a fresh lease.
+-- Due means (a) 'pending' rows older than the settle delay — an operational
+-- buffer only; correctness comes from the state flip, after which a bind can
+-- never succeed on the key — or (b) 'deleting' rows whose lease expired (a
+-- crashed or failed worker). FOR UPDATE SKIP LOCKED keeps replicas from
+-- claiming the same rows; the object-storage DELETE happens outside any
+-- transaction, gated by the lease token.
+UPDATE channel_media_pending_object AS obj
+SET state = 'deleting',
+    lease_token = @lease_token,
+    lease_expires_at = @lease_expires_at,
+    attempt = obj.attempt + 1
+FROM (
+    SELECT cand.storage_key FROM channel_media_pending_object AS cand
+    WHERE cand.next_attempt_at <= now()
+      AND (
+          (cand.state = 'pending' AND cand.created_at <= @pending_settled_before)
+          OR (cand.state = 'deleting' AND (cand.lease_expires_at IS NULL OR cand.lease_expires_at <= now()))
+      )
+    ORDER BY cand.next_attempt_at
+    LIMIT @batch_limit
+    FOR UPDATE SKIP LOCKED
+) AS due
+WHERE obj.storage_key = due.storage_key
+RETURNING obj.*;
+
+-- name: ReleaseChannelMediaPendingObject :exec
+-- Object-storage DELETE failed: keep the row in 'deleting' (bind must still
+-- never attach it), release the lease, and back off the next attempt.
+UPDATE channel_media_pending_object
+SET lease_token = NULL,
+    lease_expires_at = NULL,
+    next_attempt_at = @next_attempt_at,
+    last_error = @last_error
+WHERE storage_key = @storage_key AND lease_token = @lease_token;
+
+-- name: DeleteChannelMediaPendingObject :execrows
+-- Settles a claimed row (object deleted, or a durable attachment reference
+-- was found). Lease-token guarded so an expired-lease reclaim by another
+-- replica cannot be clobbered.
+DELETE FROM channel_media_pending_object
+WHERE storage_key = $1 AND lease_token = $2;
+
+-- name: ChannelMediaObjectIsReferenced :one
+-- The post-claim reference check: an attachment row carrying this object's
+-- URL on the intended message. Only meaningful AFTER the claim flipped the
+-- row to 'deleting' — from that point a bind can no longer succeed on the
+-- key, so a negative answer is terminal, not a snapshot race.
+SELECT EXISTS (
+    SELECT 1 FROM attachment
+    WHERE chat_message_id = @chat_message_id
+      AND workspace_id = @workspace_id
+      AND url = @storage_url
+) AS referenced;
+
+-- name: CountChannelMediaPendingObjects :one
+-- Ledger backlog gauge for the reconciler's observability.
+SELECT count(*) FROM channel_media_pending_object;

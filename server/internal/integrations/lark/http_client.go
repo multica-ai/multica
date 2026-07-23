@@ -34,6 +34,11 @@ import (
 // honoring Lark's `expire` field minus a safety margin so callers
 // never present a token that's about to lapse mid-flight.
 
+// DefaultResourceDownloadTimeout is the default cap on one message-resource
+// download. Exported so the channel-media settle invariant test can assert
+// the reconciler's settle delay dwarfs every pipeline budget.
+const DefaultResourceDownloadTimeout = 45 * time.Second
+
 const (
 	// defaultLarkBaseURL is the mainland 飞书 open-platform host. It is the
 	// fallback host for an installation whose region is feishu (or unset);
@@ -59,7 +64,7 @@ const (
 	// RPCs. Keep it below the inbound dedup stale-claim window (60s), so a
 	// slow download does not invite a second replica to reclaim the same
 	// message before this one can append and mark it processed.
-	defaultResourceDownloadTimeout = 45 * time.Second
+	defaultResourceDownloadTimeout = DefaultResourceDownloadTimeout
 
 	// Feishu caps message resources at 100 MiB. Keep the local transport guard
 	// aligned with that contract; detached media processing keeps large
