@@ -331,6 +331,8 @@ type Daemon struct {
 	removeEnvRootHook     func(string) error
 	envRootQuarantineHook func(string) // test-only: runs after WorkspacesRoot is opened, before rename
 	envRootPreOpenHook    func(string) // test-only: runs after reservation, before a filesystem root is opened
+	gcBeforeApplyHook     func(string) // test-only: runs after decision, before reservation
+	gcCycleRoot           *os.Root     // pinned for the synchronous runGC cycle
 	artifactCleanupHook   func(string) // test-only: runs while the artifact-cleanup reservation is held
 	artifactRemoveHook    func(string) // test-only: runs after artifact inspection, before fd-relative removal
 
@@ -4195,8 +4197,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, ctx.Err()
 	}
 	defer releasePredicted()
+	var priorRootIdentity os.FileInfo
 	if task.PriorWorkDir != "" {
 		priorRoot := filepath.Dir(task.PriorWorkDir)
+		priorRootIdentity, _ = os.Stat(priorRoot)
 		if priorRoot != predictedRoot {
 			releasePrior, ok := d.markActiveEnvRoot(ctx, priorRoot)
 			if !ok {
@@ -4321,7 +4325,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.PriorWorkDir != "" && d.envRootPreOpenHook != nil {
 		d.envRootPreOpenHook(filepath.Dir(task.PriorWorkDir))
 	}
-	if canonicalPathIdentity(d.cfg.WorkspacesRoot) == d.workspacesRootIdentity &&
+	priorIdentityMatches := false
+	if priorRootIdentity != nil {
+		currentPrior, statErr := os.Stat(filepath.Dir(task.PriorWorkDir))
+		priorIdentityMatches = statErr == nil && os.SameFile(priorRootIdentity, currentPrior)
+	}
+	if priorIdentityMatches &&
+		canonicalPathIdentity(d.cfg.WorkspacesRoot) == d.workspacesRootIdentity &&
 		shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
 		var err error
 		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
@@ -5612,7 +5622,17 @@ func (d *Daemon) reserveEnvRootForGCIdentity(envRoot string) (envRootGCLease, bo
 	if envRoot == "" {
 		return envRootGCLease{}, false
 	}
-	expected, err := os.Stat(envRoot)
+	var expected os.FileInfo
+	var err error
+	if d.gcCycleRoot != nil {
+		rel, relErr := filepath.Rel(d.cfg.WorkspacesRoot, envRoot)
+		if relErr != nil || !isContainedRelativePath(rel) {
+			return envRootGCLease{}, false
+		}
+		expected, err = d.gcCycleRoot.Stat(rel)
+	} else {
+		expected, err = os.Stat(envRoot)
+	}
 	if err != nil || !expected.IsDir() {
 		return envRootGCLease{}, false
 	}

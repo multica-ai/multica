@@ -1553,6 +1553,39 @@ func TestRunGC_QuarantineRetryUsesPinnedRoot(t *testing.T) {
 	}
 }
 
+func TestRunGC_PreReservationRetargetUsesPinnedCycleIdentity(t *testing.T) {
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.GCOrphanTTL = 0
+	originalRoot := d.cfg.WorkspacesRoot
+	movedRoot := originalRoot + "-moved"
+	createTaskDir(t, originalRoot, "ws-cycle-pre-reservation", "task", nil)
+	externalRoot := t.TempDir()
+	externalTask := filepath.Join(externalRoot, "ws-cycle-pre-reservation", "task")
+	if err := os.MkdirAll(externalTask, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	marker := filepath.Join(externalTask, "keep")
+	if err := os.WriteFile(marker, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d.gcBeforeApplyHook = func(string) {
+		d.gcBeforeApplyHook = nil
+		if err := os.Rename(originalRoot, movedRoot); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(externalRoot, originalRoot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.runGC(context.Background())
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("pre-reservation full-cycle retarget mutated external root: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(movedRoot, "ws-cycle-pre-reservation", "task")); err != nil {
+		t.Fatalf("pinned cycle unexpectedly removed original task: %v", err)
+	}
+}
+
 func TestCleanTaskArtifacts_AncestorSymlinkSwapCannotEscapeRoot(t *testing.T) {
 	t.Parallel()
 	d := newGCTestDaemon(t, http.NewServeMux())

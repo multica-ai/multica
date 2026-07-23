@@ -74,6 +74,8 @@ func (d *Daemon) runGC(ctx context.Context) {
 		return
 	}
 	defer rootHandle.Close()
+	d.gcCycleRoot = rootHandle
+	defer func() { d.gcCycleRoot = nil }()
 	entries, err := fs.ReadDir(rootHandle.FS(), ".")
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -97,8 +99,9 @@ func (d *Daemon) runGC(ctx context.Context) {
 		d.logger.Warn("gc: quarantine retry failed", "error", err)
 	}
 
-	// Prune stale worktree references from all bare repo caches.
-	d.pruneRepoWorktrees(root)
+	// Repo pruning invokes git with pathname arguments. Skip it while this
+	// cycle is identity-pinned; reopening the configured root would reintroduce
+	// the retarget window this handle closes.
 
 	// Reclaim per-issue Codex session stores idle past their TTL. These live
 	// under the shared ~/.codex home (outside WorkspacesRoot) so resume survives
@@ -233,6 +236,9 @@ func (d *Daemon) gcWorkspaceIssues(ctx context.Context, workspaceID string, cand
 // atomically reserves the env root because a task can start while the server
 // reconciliation request is in flight.
 func (d *Daemon) applyGCAction(taskDir string, action gcAction, stats *gcStats) int {
+	if d.gcBeforeApplyHook != nil {
+		d.gcBeforeApplyHook(taskDir)
+	}
 	var lease envRootGCLease
 	if action == gcActionCleanArtifacts || action == gcActionCleanManagedArtifacts {
 		var ok bool
