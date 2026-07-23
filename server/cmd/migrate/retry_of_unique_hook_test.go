@@ -73,7 +73,7 @@ func newRetryOfHookSandbox(t *testing.T) (*pgxpool.Pool, string) {
 func retryOfMigrationOpts(t *testing.T, schema string) runOptions {
 	t.Helper()
 	dir := t.TempDir()
-	path := filepath.Join(dir, "212_agent_task_retry_of_unique.up.sql")
+	path := filepath.Join(dir, "221_agent_task_retry_of_unique.up.sql")
 	body := "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS " + retryOfUniqueIndexName + "\n" +
 		"    ON agent_task_queue (retry_of_task_id)\n" +
 		"    WHERE retry_of_task_id IS NOT NULL;\n"
@@ -110,7 +110,7 @@ func retryOfAppliedCount(t *testing.T, pool *pgxpool.Pool, table string) int {
 	var n int
 	if err := pool.QueryRow(context.Background(),
 		fmt.Sprintf(`SELECT count(*) FROM %s WHERE version = $1`, table),
-		"212_agent_task_retry_of_unique").Scan(&n); err != nil {
+		"221_agent_task_retry_of_unique").Scan(&n); err != nil {
 		t.Fatalf("count applied versions: %v", err)
 	}
 	return n

@@ -427,7 +427,9 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 			}
 			parsed = append(parsed, u)
 		}
-		where = append(where, fmt.Sprintf("i.status_id = ANY(%s::uuid[])", addArg(parsed)))
+		// Same NULL-status_id compat arm as the list path: a workspace that has not
+		// been backfilled still matches its legacy rows by token (MUL-4809).
+		where = append(where, statusCatalogMatchSQL("i", addArg(parsed)))
 	}
 	for _, priority := range spec.Filters.Priorities {
 		if !issueTableContainsString(validIssuePriorities, priority) {

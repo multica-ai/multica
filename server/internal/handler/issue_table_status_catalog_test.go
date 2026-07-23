@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -129,4 +130,108 @@ func TestTableRowsCarryStatusDetail(t *testing.T) {
 	if got.StatusDetail == nil || got.StatusDetail.Name != "Table Detail" {
 		t.Fatalf("row status_detail = %v, want the custom status (Table rows rendered the legacy token before)", got.StatusDetail)
 	}
+}
+
+// Two custom statuses sharing a Category must be SEPARATE columns when grouping
+// by status — the whole point of keying groups on the catalog id (MUL-4809).
+// Grouping used to key on i.status, which merged them into one in_progress column.
+func TestTableGroupsByCatalogStatus(t *testing.T) {
+	ensureTestWorkspaceStatuses(t)
+	alpha, code, body := createStatus(t, map[string]any{
+		"name": "Group Alpha", "category": "in_progress", "icon": "in_progress", "color": "warning",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create alpha: %d %s", code, body)
+	}
+	t.Cleanup(func() { deleteStatus(t, alpha.ID, "") })
+	beta, code, body := createStatus(t, map[string]any{
+		"name": "Group Beta", "category": "in_progress", "icon": "in_review", "color": "info",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create beta: %d %s", code, body)
+	}
+	t.Cleanup(func() { deleteStatus(t, beta.ID, "") })
+
+	inAlpha, _, _ := createIssueWithStatusFields(t, map[string]any{"title": "group alpha row", "status_id": alpha.ID})
+	inBeta, _, _ := createIssueWithStatusFields(t, map[string]any{"title": "group beta row", "status_id": beta.ID})
+	t.Cleanup(func() { deleteTestIssue(t, inAlpha.ID); deleteTestIssue(t, inBeta.ID) })
+
+	resp, code, body := tableGroupsByStatusIDs(t, []string{alpha.ID, beta.ID})
+	if code != http.StatusOK {
+		t.Fatalf("groups: %d %s", code, body)
+	}
+	byID := map[string]issueTableGroupDescriptorResponse{}
+	for _, g := range resp.Groups {
+		byID[g.Value.StatusID] = g
+	}
+	ga, okA := byID[alpha.ID]
+	gb, okB := byID[beta.ID]
+	if !okA || !okB {
+		t.Fatalf("expected a separate column per custom status; got %+v", resp.Groups)
+	}
+	if ga.Count != 1 || gb.Count != 1 {
+		t.Fatalf("counts alpha=%d beta=%d, want 1/1 (they must not merge)", ga.Count, gb.Count)
+	}
+	if ga.Key != "status:"+alpha.ID {
+		t.Fatalf("group key = %q, want status:%s", ga.Key, alpha.ID)
+	}
+	// The column still names itself for older clients and for display.
+	if ga.Value.Status != "in_progress" {
+		t.Fatalf("legacy token = %q, want in_progress", ga.Value.Status)
+	}
+	if ga.Value.StatusName != "Group Alpha" {
+		t.Fatalf("status_name = %q, want Group Alpha", ga.Value.StatusName)
+	}
+}
+
+// P0 compat: a workspace that upgraded before any backfill has issues with
+// status_id IS NULL. Filtering by a built-in catalog id must still return them
+// (matched by legacy token), and they must group into that built-in's column —
+// otherwise every pre-existing issue disappears the moment a filter is used.
+func TestLegacyNullStatusIDStillFiltersAndGroups(t *testing.T) {
+	ensureTestWorkspaceStatuses(t)
+	catalog := getStatusCatalog(t, false)
+	todoID := catalog.CategoryDefaults["todo"]
+	if todoID == "" {
+		t.Fatal("todo category default missing")
+	}
+
+	id := createTestIssue(t, "legacy null status_id row", "todo", "none")
+	t.Cleanup(func() { deleteTestIssue(t, id) })
+	// Simulate a pre-catalog row: legacy token only, no status_id.
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE issue SET status_id = NULL WHERE id = $1`, id); err != nil {
+		t.Fatalf("null out status_id: %v", err)
+	}
+
+	resp, code, body := tableGroupsByStatusIDs(t, []string{todoID})
+	if code != http.StatusOK {
+		t.Fatalf("filter by built-in id: %d %s", code, body)
+	}
+	if resp.Total < 1 {
+		t.Fatalf("legacy status_id=NULL issue vanished under a catalog filter (total=%d)", resp.Total)
+	}
+	var found bool
+	for _, g := range resp.Groups {
+		if g.Value.StatusID == todoID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("legacy row did not fold into the Todo column; groups=%+v", resp.Groups)
+	}
+}
+
+// statusIDForSystemKey resolves the catalog id of the built-in that owns a legacy
+// token, for tests that assert catalog-keyed group keys (MUL-4809).
+func statusIDForSystemKey(t *testing.T, systemKey string) string {
+	t.Helper()
+	ensureTestWorkspaceStatuses(t)
+	var id string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id::text FROM issue_status WHERE workspace_id = $1 AND system_key = $2`,
+		testWorkspaceID, systemKey).Scan(&id); err != nil {
+		t.Fatalf("resolve status id for %q: %v", systemKey, err)
+	}
+	return id
 }

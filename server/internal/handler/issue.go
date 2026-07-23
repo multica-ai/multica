@@ -311,22 +311,55 @@ func parseStatusCatalogFilters(w http.ResponseWriter, r *http.Request) (statusCa
 	return f, true
 }
 
+// statusCatalogMatchSQL builds "issue is in one of these catalog statuses",
+// including the compat arm for rows the catalog has not reached (MUL-4809).
+//
+// An issue whose status_id IS NULL still matches when a SELECTED BUILT-IN owns
+// its legacy token (system_key is 1:1 with the 7 tokens). Without this arm a
+// workspace that upgraded before any backfill loses every pre-existing issue the
+// moment a user picks a status filter, because the new UI sends catalog ids and
+// every old row has a NULL status_id.
+//
+// Only built-ins claim legacy rows — deliberately NOT every status projecting to
+// the same Category. A legacy `in_progress` row belongs to In Progress, not to
+// each custom in_progress status that happens to share the Category; matching on
+// the Category would make one old issue show up under every such filter. Same
+// exact-system_key rule the picker uses to check a single row.
+func statusCatalogMatchSQL(alias, idsArg string) string {
+	return fmt.Sprintf(
+		"(%[1]s.status_id = ANY(%[2]s::uuid[]) OR (%[1]s.status_id IS NULL AND %[1]s.status = ANY("+
+			"SELECT ist.system_key FROM issue_status ist "+
+			"WHERE ist.id = ANY(%[2]s::uuid[]) AND ist.workspace_id = %[1]s.workspace_id "+
+			"AND ist.system_key IS NOT NULL)))",
+		alias, idsArg)
+}
+
+// statusCategoryMatchSQL is the Category equivalent, with the same NULL-status_id
+// compat arm: a legacy row is classified by projecting its token to a Category
+// (in_review / blocked are in_progress; everything else is its own Category).
+func statusCategoryMatchSQL(alias, catArg string) string {
+	return fmt.Sprintf(
+		"(EXISTS (SELECT 1 FROM issue_status ist WHERE ist.id = %[1]s.status_id "+
+			"AND ist.workspace_id = %[1]s.workspace_id AND ist.category = %[2]s) "+
+			"OR (%[1]s.status_id IS NULL AND CASE WHEN %[1]s.status IN ('in_review','blocked') "+
+			"THEN 'in_progress' ELSE %[1]s.status END = %[2]s))",
+		alias, catArg)
+}
+
 // appendStatusCatalogFilters adds the status_id / status_category predicates to a
 // dynamic issue-list WHERE builder (MUL-4809). status_category joins the catalog
 // via an EXISTS subquery scoped to the same workspace (no FK). alias is the issue
 // table alias in the surrounding query (e.g. "i").
 func appendStatusCatalogFilters(where []string, alias string, f statusCatalogFilters, addArg func(any) string) []string {
 	if f.StatusID.Valid {
-		where = append(where, fmt.Sprintf("%s.status_id = %s", alias, addArg(f.StatusID)))
+		where = append(where, statusCatalogMatchSQL(alias, addArg([]pgtype.UUID{f.StatusID})))
 	}
 	if len(f.StatusIDs) > 0 {
-		where = append(where, fmt.Sprintf("%s.status_id = ANY(%s::uuid[])", alias, addArg(f.StatusIDs)))
+		where = append(where, statusCatalogMatchSQL(alias, addArg(f.StatusIDs)))
 	}
 	category := f.Category
 	if category != "" {
-		where = append(where, fmt.Sprintf(
-			"EXISTS (SELECT 1 FROM issue_status ist WHERE ist.id = %s.status_id AND ist.workspace_id = %s.workspace_id AND ist.category = %s)",
-			alias, alias, addArg(category)))
+		where = append(where, statusCategoryMatchSQL(alias, addArg(category)))
 	}
 	return where
 }

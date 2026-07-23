@@ -51,7 +51,7 @@ type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 var preMigrationHooks = map[string]preMigrationHook{
 	"103_drop_legacy_daily_rollups":                         runTaskUsageHourlyHook,
 	"198_agent_task_attribution_strict_constraint_validate": runAttributionStrictHook,
-	"212_agent_task_retry_of_unique":                        runRetryOfUniqueIndexHook,
+	"221_agent_task_retry_of_unique":                        runRetryOfUniqueIndexHook,
 }
 
 // retryOfUniqueIndexName is the unique index migration 212 builds; CreateRetryTask's

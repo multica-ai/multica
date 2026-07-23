@@ -76,6 +76,22 @@ export function StatusPicker({
     });
   }, [catalog, mode]);
 
+  // Which row a not-yet-migrated issue (status_id IS NULL, so no statusDetail)
+  // should check. Resolved once, to exactly ONE id: matching every status that
+  // shares the Category would check In Progress, In Review, Blocked and every
+  // custom in_progress status all at once for a legacy `in_progress` row
+  // (MUL-4809). An exact system_key wins; only a token that names no built-in
+  // (i.e. a bare Category) falls back to that Category's default.
+  const legacySelectedId = useMemo(() => {
+    if (statusDetail || status == null || options.length === 0) return null;
+    const exact = options.find((s) => s.system_key === status);
+    if (exact) return exact.id;
+    const inCategory = options.filter((s) => s.category === status);
+    return (
+      inCategory.find((s) => s.is_default)?.id ?? inCategory[0]?.id ?? null
+    );
+  }, [options, status, statusDetail]);
+
   const triggerContent =
     customTrigger ??
     (status != null ? (
@@ -100,11 +116,11 @@ export function StatusPicker({
     >
       {options.length > 0
         ? options.map((s) => {
-            // Match on the catalog id when the issue has one; otherwise fall back
-            // to the legacy token so a not-yet-migrated issue still shows a check.
+            // Match on the catalog id when the issue has one; otherwise the single
+            // id resolved from the legacy token above, so exactly one row checks.
             const selected = statusDetail
               ? s.id === statusDetail.id
-              : status != null && (s.system_key === status || s.category === status);
+              : s.id === legacySelectedId;
             return (
               <PickerItem
                 key={s.id}

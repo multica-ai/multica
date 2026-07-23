@@ -323,7 +323,10 @@ func TestIssueTableStatusGroupingOverOneThousandRows(t *testing.T) {
 	for _, group := range groups.Groups {
 		counts[group.Key] = group.Count
 	}
-	if counts["status:todo"] != 501 || counts["status:done"] != 500 {
+	// Status groups are keyed by catalog id (MUL-4809), not the legacy token.
+	todoKey := "status:" + statusIDForSystemKey(t, "todo")
+	doneKey := "status:" + statusIDForSystemKey(t, "done")
+	if counts[todoKey] != 501 || counts[doneKey] != 500 {
 		t.Fatalf("unexpected group counts: %#v", counts)
 	}
 	firstGroupPageRecorder := httptest.NewRecorder()
@@ -793,11 +796,11 @@ func TestIssueTableHierarchyDoesNotCrossGroups(t *testing.T) {
 		return response
 	}
 
-	doneRows := listGroup("status:done")
+	doneRows := listGroup("status:" + statusIDForSystemKey(t, "done"))
 	if len(doneRows.Rows) != 1 || doneRows.Rows[0].Issue.ID != childID {
 		t.Fatalf("done child must become a root in its own group: %#v", doneRows.Rows)
 	}
-	todoRows := listGroup("status:todo")
+	todoRows := listGroup("status:" + statusIDForSystemKey(t, "todo"))
 	if len(todoRows.Rows) != 1 || todoRows.Rows[0].Issue.ID != parentID {
 		t.Fatalf("todo group root mismatch: %#v", todoRows.Rows)
 	}

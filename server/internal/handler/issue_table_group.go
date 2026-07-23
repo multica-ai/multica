@@ -12,14 +12,36 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// effectiveIssueStatusIDExpr resolves the catalog status an issue belongs to for
+// grouping (MUL-4809). A backfilled row uses status_id directly; a row the
+// catalog has not reached (status_id IS NULL) folds into the status its legacy
+// token names — an exact system_key first, else a custom status projecting to
+// that Category — so an un-migrated workspace still groups into the expected
+// columns instead of an "unknown" bucket. Grouping on the id (not i.status) is
+// what keeps two custom statuses sharing a Category in separate columns.
+const legacyStatusGroupPrefix = "legacy:"
+
+const effectiveIssueStatusIDExpr = `COALESCE(i.status_id::text, (` +
+	`SELECT ist2.id::text FROM issue_status ist2 ` +
+	`WHERE ist2.workspace_id = i.workspace_id ` +
+	`AND COALESCE(ist2.system_key, ist2.category) = i.status ` +
+	`ORDER BY (ist2.system_key IS NULL), ist2.position LIMIT 1), ` +
+	`'` + legacyStatusGroupPrefix + `' || i.status)`
+
 type issueTableGroupValueResponse struct {
-	Kind       string              `json:"kind"`
-	Status     string              `json:"status,omitempty"`
+	Kind string `json:"kind"`
+	// Status is the legacy token this group projects to, kept so a client that
+	// predates the catalog still renders a column heading.
+	Status string `json:"status,omitempty"`
+	// StatusID is the authoritative catalog status for a status group.
+	StatusID   string              `json:"status_id,omitempty"`
+	StatusName string              `json:"status_name,omitempty"`
 	Actor      *issueTableActorRef `json:"actor"`
 	PropertyID string              `json:"property_id,omitempty"`
 	Value      any                 `json:"value,omitempty"`
@@ -65,7 +87,7 @@ func (h *Handler) resolveIssueTableGroup(w http.ResponseWriter, r *http.Request,
 		}
 		return resolvedIssueTableGroup{kind: "none"}, true
 	case "status":
-		return resolvedIssueTableGroup{kind: "status", groupExpr: "i.status"}, true
+		return resolvedIssueTableGroup{kind: "status", groupExpr: effectiveIssueStatusIDExpr}, true
 	case "assignee":
 		return resolvedIssueTableGroup{
 			kind:      "assignee",
@@ -170,7 +192,9 @@ func (group resolvedIssueTableGroup) sortExpression() string {
 func (group resolvedIssueTableGroup) orderExpression(addArg func(any) string) string {
 	switch group.kind {
 	case "status":
-		return "CASE group_value WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+		// Catalog order: Category rank, then the status's own position, so a
+		// custom status sits next to the built-ins sharing its semantics.
+		return "COALESCE((SELECT (CASE ist.category WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'done' THEN 3 WHEN 'cancelled' THEN 4 ELSE 5 END) * 100000 + ist.position FROM issue_status ist WHERE ist.id::text = group_value), CASE group_value WHEN 'legacy:backlog' THEN 0 WHEN 'legacy:todo' THEN 100000 WHEN 'legacy:in_progress' THEN 200000 WHEN 'legacy:in_review' THEN 200001 WHEN 'legacy:blocked' THEN 200002 WHEN 'legacy:done' THEN 300000 WHEN 'legacy:cancelled' THEN 400000 END, 999999999)"
 	case "assignee":
 		return "CASE WHEN group_value = '__unassigned__' THEN 1 ELSE 0 END"
 	case "property":
@@ -188,11 +212,22 @@ func (group resolvedIssueTableGroup) descriptor(raw string, count int64) (issueT
 	descriptor := issueTableGroupDescriptorResponse{Count: count}
 	switch group.kind {
 	case "status":
-		if !issueTableContainsString(validIssueStatuses, raw) {
+		// A workspace whose catalog is not seeded yet resolves to the legacy token
+		// instead of an id; keep the pre-catalog key/value shape for those.
+		if token, ok := strings.CutPrefix(raw, legacyStatusGroupPrefix); ok {
+			if !issueTableContainsString(validIssueStatuses, token) {
+				return descriptor, fmt.Errorf("unexpected status group value %q", raw)
+			}
+			descriptor.Key = "status:" + token
+			descriptor.Value = issueTableGroupValueResponse{Kind: "status", Status: token}
+			return descriptor, nil
+		}
+		if _, err := util.ParseUUID(raw); err != nil {
 			return descriptor, fmt.Errorf("unexpected status group value %q", raw)
 		}
 		descriptor.Key = "status:" + raw
-		descriptor.Value = issueTableGroupValueResponse{Kind: "status", Status: raw}
+		// Status / StatusName are filled from the catalog after the scan loop.
+		descriptor.Value = issueTableGroupValueResponse{Kind: "status", StatusID: raw}
 	case "assignee":
 		descriptor.Value.Kind = "assignee"
 		if raw == "__unassigned__" {
@@ -254,11 +289,29 @@ func (group resolvedIssueTableGroup) predicate(w http.ResponseWriter, key string
 		return "TRUE", true
 	case "status":
 		const prefix = "status:"
-		if !strings.HasPrefix(key, prefix) || !issueTableContainsString(validIssueStatuses, strings.TrimPrefix(key, prefix)) {
+		if !strings.HasPrefix(key, prefix) {
 			writeError(w, http.StatusBadRequest, "invalid group_key")
 			return "", false
 		}
-		return fmt.Sprintf("i.status = %s::text", addArg(strings.TrimPrefix(key, prefix))), true
+		raw := strings.TrimPrefix(key, prefix)
+		if _, err := util.ParseUUID(raw); err != nil {
+			// Pre-catalog key: a bare legacy token.
+			if !issueTableContainsString(validIssueStatuses, raw) {
+				writeError(w, http.StatusBadRequest, "invalid group_key")
+				return "", false
+			}
+			// A legacy token key must keep working AFTER the catalog is seeded:
+			// resolve it to the built-in that owns the token, and still accept the
+			// unseeded form. Group keys are refetched per request, but an in-flight
+			// client should not silently get an empty column.
+			tokenArg := addArg(raw)
+			return fmt.Sprintf(
+				"%[1]s IN (COALESCE((SELECT ist.id::text FROM issue_status ist "+
+					"WHERE ist.workspace_id = i.workspace_id AND ist.system_key = %[2]s), ''), "+
+					"'%[3]s' || %[2]s)",
+				effectiveIssueStatusIDExpr, tokenArg, legacyStatusGroupPrefix), true
+		}
+		return fmt.Sprintf("%s = %s::text", effectiveIssueStatusIDExpr, addArg(raw)), true
 	case "assignee":
 		const prefix = "assignee:"
 		if !strings.HasPrefix(key, prefix) {
@@ -456,6 +509,7 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	rows.Close()
+	h.fillIssueTableStatusGroupLabels(r, compiled.workspaceID, group, groups)
 
 	var nextCursor *string
 	if len(groups) > limit {
@@ -485,4 +539,35 @@ func (h *Handler) ListIssueTableGroups(w http.ResponseWriter, r *http.Request) {
 	}
 	committed = true
 	writeJSON(w, http.StatusOK, response)
+}
+
+// fillIssueTableStatusGroupLabels resolves each status group's catalog row into
+// the legacy token and display name (MUL-4809). Grouping keys on the status id,
+// so the SQL alone cannot name the column; one catalog read per request fills it.
+// Archived statuses are included — an issue may still point at one. Best-effort:
+// a lookup failure leaves the ids in place rather than failing the whole request.
+func (h *Handler) fillIssueTableStatusGroupLabels(r *http.Request, workspaceID pgtype.UUID, group resolvedIssueTableGroup, groups []issueTableGroupDescriptorResponse) {
+	if group.kind != "status" || len(groups) == 0 {
+		return
+	}
+	statuses, err := h.Queries.ListWorkspaceIssueStatuses(r.Context(), db.ListWorkspaceIssueStatusesParams{
+		WorkspaceID:     workspaceID,
+		IncludeArchived: true,
+	})
+	if err != nil {
+		slog.Warn("fill table status group labels", append(logger.RequestAttrs(r), "error", err)...)
+		return
+	}
+	byID := make(map[string]db.IssueStatus, len(statuses))
+	for _, s := range statuses {
+		byID[util.UUIDToString(s.ID)] = s
+	}
+	for i := range groups {
+		s, ok := byID[groups[i].Value.StatusID]
+		if !ok {
+			continue
+		}
+		groups[i].Value.Status = issuestatus.LegacyStatusToken(s)
+		groups[i].Value.StatusName = s.Name
+	}
 }

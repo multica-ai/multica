@@ -320,7 +320,15 @@ export interface IssueTableActorRef {
 }
 
 export type IssueTableGroupValue =
-  | { kind: "status"; status: string }
+  | {
+      kind: "status";
+      /** Legacy token this column projects to (compat for older clients). */
+      status: string;
+      /** Authoritative catalog status (MUL-4809). Two custom statuses sharing a
+       *  Category are distinct columns, so key rendering off this, not `status`. */
+      status_id?: string;
+      status_name?: string;
+    }
   | { kind: "assignee"; actor: IssueTableActorRef | null }
   | {
       kind: "property";
