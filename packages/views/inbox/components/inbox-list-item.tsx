@@ -114,8 +114,16 @@ export function InboxListItem({
             <InboxDetailLabel item={item} />
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
+            {/* Badge only, no hover card (MUL-5189). "An agent is on this"
+                is worth showing while triaging; the card behind it adds only
+                elapsed time, which does not change whether you open the row.
+                The row already carries the ActorAvatar hover card on the
+                left, so a second popup here was mostly noise. */}
             {item.issue_id && (
-              <IssueAgentActivityIndicator issueId={item.issue_id} />
+              <IssueAgentActivityIndicator
+                issueId={item.issue_id}
+                hoverCard={false}
+              />
             )}
             <span className={`text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
               {timeAgo(item.created_at)}

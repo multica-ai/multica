@@ -5,8 +5,18 @@ import { InboxListItem } from "./inbox-list-item";
 
 vi.mock("../../issues/components", () => ({ StatusIcon: () => null }));
 vi.mock("../../issues/components/issue-agent-activity-indicator", () => ({
-  IssueAgentActivityIndicator: ({ issueId }: { issueId: string }) => (
-    <span data-testid="issue-agent-activity" data-issue-id={issueId} />
+  IssueAgentActivityIndicator: ({
+    issueId,
+    hoverCard,
+  }: {
+    issueId: string;
+    hoverCard?: boolean;
+  }) => (
+    <span
+      data-testid="issue-agent-activity"
+      data-issue-id={issueId}
+      data-hover-card={hoverCard === false ? "false" : "true"}
+    />
   ),
 }));
 vi.mock("../../common/actor-avatar", () => ({
@@ -105,6 +115,17 @@ describe("InboxListItem issue activity", () => {
     expect(
       getByTestId("issue-agent-activity").getAttribute("data-issue-id"),
     ).toBe("issue-1");
+  });
+
+  it("shows the activity badge without its hover card", () => {
+    // Triage rows only need "an agent is on this". The card behind the badge
+    // adds elapsed time, which does not change whether you open the row, and
+    // the row already carries the actor hover card on the left.
+    const { getByTestId } = renderRow({ item: item(), view: "inbox" });
+
+    expect(
+      getByTestId("issue-agent-activity").getAttribute("data-hover-card"),
+    ).toBe("false");
   });
 
   it("omits issue activity for a notification without an issue", () => {
