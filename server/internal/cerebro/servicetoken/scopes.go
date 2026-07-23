@@ -5,7 +5,7 @@
 // A service token is the machine analogue of a Personal Access Token: it
 // authenticates API calls, but it is bound to a WORKSPACE (never a user), it
 // carries an explicit least-privilege scope set, it expires, it can be
-// revoked, and its issuance/revocation are audited. It reuses the proven
+// revoked, and its issuance, use, and revocation are audited. It reuses the proven
 // machine-token pattern of the existing mat_/mdt_ credentials.
 //
 // Scopes are "host:action" strings deliberately aligned with the tool-policy
@@ -40,29 +40,21 @@ const ServicePathPrefix = "/api/service/"
 // actor that human-only guards reject.
 const ActorSource = "service_token"
 
-// Known scopes. host:action, aligned with the tool-policy vocabulary. Reads
-// are the immediate use case (an external system reading skills/agents/
-// issues); writes are defined so the enforcement gate is real and the
-// taxonomy is complete, and are granted only to tokens that explicitly need
-// them.
+// Known scopes. Service tokens are deliberately read-only: a machine
+// credential can inspect only the areas selected when it is minted and can
+// never mutate workspace state.
 const (
-	ScopeSkillsRead  = "skills:read"
-	ScopeSkillsWrite = "skills:write"
-	ScopeAgentsRead  = "agents:read"
-	ScopeAgentsWrite = "agents:write"
-	ScopeIssuesRead  = "issues:read"
-	ScopeIssuesWrite = "issues:write"
+	ScopeSkillsRead = "skills:read"
+	ScopeAgentsRead = "agents:read"
+	ScopeIssuesRead = "issues:read"
 )
 
 // knownScopes is the closed set a token may be granted. An unknown scope is
 // rejected at mint time so a typo can never silently widen or narrow access.
 var knownScopes = map[string]struct{}{
-	ScopeSkillsRead:  {},
-	ScopeSkillsWrite: {},
-	ScopeAgentsRead:  {},
-	ScopeAgentsWrite: {},
-	ScopeIssuesRead:  {},
-	ScopeIssuesWrite: {},
+	ScopeSkillsRead: {},
+	ScopeAgentsRead: {},
+	ScopeIssuesRead: {},
 }
 
 // KnownScopes returns the sorted list of grantable scopes (for the UI /

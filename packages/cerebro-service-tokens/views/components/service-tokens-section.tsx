@@ -52,7 +52,6 @@ const EXPIRY_OPTIONS: { value: string; label: string }[] = [
   { value: "30", label: "30 days" },
   { value: "90", label: "90 days" },
   { value: "365", label: "1 year" },
-  { value: "never", label: "No expiry" },
 ];
 
 /**
@@ -113,11 +112,10 @@ export function ServiceTokensSection() {
   const handleCreateToken = async () => {
     setTokenCreating(true);
     try {
-      const expiresInDays = tokenExpiry === "never" ? undefined : Number(tokenExpiry);
       const raw = await api.createServiceToken({
         name: tokenName.trim(),
         scopes: selectedScopes,
-        expires_in_days: expiresInDays,
+        expires_in_days: Number(tokenExpiry),
       });
       const result = parseWithFallback<CreateServiceTokenResponse | null>(
         raw,
@@ -241,7 +239,7 @@ export function ServiceTokensSection() {
             </Card>
           ))}
         </div>
-      ) : tokens.length > 0 && (
+      ) : tokens.length > 0 ? (
         <div className="space-y-2">
           {tokens.map((token) => (
             <Card key={token.id}>
@@ -286,6 +284,12 @@ export function ServiceTokensSection() {
             </Card>
           ))}
         </div>
+      ) : (
+        <Card>
+          <CardContent className="text-xs text-muted-foreground">
+            No service tokens yet.
+          </CardContent>
+        </Card>
       ))}
 
       <AlertDialog open={!!revokeConfirmId} onOpenChange={(v) => { if (!v) setRevokeConfirmId(null); }}>

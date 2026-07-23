@@ -39,12 +39,29 @@ func (q *Queries) AppendCerebroServiceTokenAudit(ctx context.Context, arg Append
 }
 
 const createCerebroServiceToken = `-- name: CreateCerebroServiceToken :one
-INSERT INTO cerebro_service_token (
-    workspace_id, name, token_hash, token_prefix, scopes, expires_at, created_by
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+WITH inserted AS (
+    INSERT INTO cerebro_service_token (
+        workspace_id, name, token_hash, token_prefix, scopes, expires_at, created_by
+    ) VALUES (
+        $1, $2, $3,
+        $4, $5, $6,
+        $7
+    )
+    RETURNING id, workspace_id, name, token_hash, token_prefix, scopes,
+              expires_at, last_used_at, revoked, created_by, created_at
+),
+audited AS (
+    INSERT INTO cerebro_service_token_audit (
+        service_token_id, workspace_id, event, actor_user_id, detail
+    )
+    SELECT id, workspace_id, 'issued', created_by, $8
+    FROM inserted
+    RETURNING service_token_id
 )
-RETURNING id, workspace_id, name, token_hash, token_prefix, scopes, expires_at, last_used_at, revoked, created_by, created_at
+SELECT i.id, i.workspace_id, i.name, i.token_hash, i.token_prefix, i.scopes,
+       i.expires_at, i.last_used_at, i.revoked, i.created_by, i.created_at
+FROM inserted i
+JOIN audited a ON a.service_token_id = i.id
 `
 
 type CreateCerebroServiceTokenParams struct {
@@ -55,9 +72,24 @@ type CreateCerebroServiceTokenParams struct {
 	Scopes      []byte             `json:"scopes"`
 	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 	CreatedBy   pgtype.UUID        `json:"created_by"`
+	AuditDetail []byte             `json:"audit_detail"`
 }
 
-func (q *Queries) CreateCerebroServiceToken(ctx context.Context, arg CreateCerebroServiceTokenParams) (CerebroServiceToken, error) {
+type CreateCerebroServiceTokenRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	TokenHash   string             `json:"token_hash"`
+	TokenPrefix string             `json:"token_prefix"`
+	Scopes      []byte             `json:"scopes"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	Revoked     bool               `json:"revoked"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) CreateCerebroServiceToken(ctx context.Context, arg CreateCerebroServiceTokenParams) (CreateCerebroServiceTokenRow, error) {
 	row := q.db.QueryRow(ctx, createCerebroServiceToken,
 		arg.WorkspaceID,
 		arg.Name,
@@ -66,8 +98,9 @@ func (q *Queries) CreateCerebroServiceToken(ctx context.Context, arg CreateCereb
 		arg.Scopes,
 		arg.ExpiresAt,
 		arg.CreatedBy,
+		arg.AuditDetail,
 	)
-	var i CerebroServiceToken
+	var i CreateCerebroServiceTokenRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -89,7 +122,7 @@ SELECT id, workspace_id, name, token_hash, token_prefix, scopes, expires_at, las
 FROM cerebro_service_token
 WHERE token_hash = $1
   AND revoked = FALSE
-  AND (expires_at IS NULL OR expires_at > now())
+  AND expires_at > now()
 `
 
 // Auth path: only a live token resolves. A revoked or expired token returns
@@ -194,23 +227,54 @@ func (q *Queries) ListCerebroServiceTokensByWorkspace(ctx context.Context, works
 }
 
 const revokeCerebroServiceToken = `-- name: RevokeCerebroServiceToken :one
-UPDATE cerebro_service_token
-SET revoked = TRUE
-WHERE id = $1 AND workspace_id = $2
-RETURNING id, workspace_id, name, token_hash, token_prefix, scopes, expires_at, last_used_at, revoked, created_by, created_at
+WITH updated AS (
+    UPDATE cerebro_service_token
+    SET revoked = TRUE
+    WHERE cerebro_service_token.id = $1
+      AND cerebro_service_token.workspace_id = $2
+    RETURNING id, workspace_id, name, token_hash, token_prefix, scopes,
+              expires_at, last_used_at, revoked, created_by, created_at
+),
+audited AS (
+    INSERT INTO cerebro_service_token_audit (
+        service_token_id, workspace_id, event, actor_user_id, detail
+    )
+    SELECT id, workspace_id, 'revoked', $3, NULL
+    FROM updated
+    RETURNING service_token_id
+)
+SELECT u.id, u.workspace_id, u.name, u.token_hash, u.token_prefix, u.scopes,
+       u.expires_at, u.last_used_at, u.revoked, u.created_by, u.created_at
+FROM updated u
+JOIN audited a ON a.service_token_id = u.id
 `
 
 type RevokeCerebroServiceTokenParams struct {
-	ID          pgtype.UUID `json:"id"`
+	TokenID     pgtype.UUID `json:"token_id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	ActorUserID pgtype.UUID `json:"actor_user_id"`
+}
+
+type RevokeCerebroServiceTokenRow struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	TokenHash   string             `json:"token_hash"`
+	TokenPrefix string             `json:"token_prefix"`
+	Scopes      []byte             `json:"scopes"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	Revoked     bool               `json:"revoked"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 // Idempotent revoke scoped to the workspace so one workspace's admin can
-// never revoke another workspace's token. Returns the row so the caller can
-// audit and drop any cache entry.
-func (q *Queries) RevokeCerebroServiceToken(ctx context.Context, arg RevokeCerebroServiceTokenParams) (CerebroServiceToken, error) {
-	row := q.db.QueryRow(ctx, revokeCerebroServiceToken, arg.ID, arg.WorkspaceID)
-	var i CerebroServiceToken
+// never revoke another workspace's token. Revocation and its audit event are
+// one database statement: either both persist or neither does.
+func (q *Queries) RevokeCerebroServiceToken(ctx context.Context, arg RevokeCerebroServiceTokenParams) (RevokeCerebroServiceTokenRow, error) {
+	row := q.db.QueryRow(ctx, revokeCerebroServiceToken, arg.TokenID, arg.WorkspaceID, arg.ActorUserID)
+	var i RevokeCerebroServiceTokenRow
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,

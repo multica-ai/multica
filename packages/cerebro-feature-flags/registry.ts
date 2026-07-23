@@ -940,7 +940,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Service tokens",
     group: "permissions",
     description:
-      "Add a Service tokens section to Settings → Tokens: owners and admins mint workspace-bound, scoped, revocable API keys (msv_) for external systems and agents. Off hides the section; existing tokens keep working.",
+      "Add a Service tokens section to Settings → Tokens: owners and admins mint workspace-bound, read-only, expiring and revocable API keys (msv_) for external systems and agents. Off disables management and every existing token immediately.",
   },
   {
     key: "cerebro_embedded_chat",
