@@ -3716,8 +3716,9 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 
 // gateResumeToReusedWorkdir clears the task's prior session unless the caller
 // has object-bound proof that the environment was reused and it runs in the
-// exact workdir the session was recorded against. CLI backends key their session stores to
-// the cwd (Claude Code looks sessions up under ~/.claude/projects/<encoded-cwd>/),
+// exact workdir the session was recorded against. CLI backends key their
+// session stores to the cwd (Claude Code looks sessions up under
+// ~/.claude/projects/<encoded-cwd>/),
 // so a session id from a different workdir can never resolve: the CLI exits
 // within a second and the run fails before doing any work — permanently,
 // because the failed run records no session and the next claim serves the
