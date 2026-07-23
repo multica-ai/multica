@@ -24,6 +24,7 @@ import { ResourceLabelPicker } from "../../labels/resource-label-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
+import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
 
 interface InspectorProps {
   agent: Agent;
@@ -220,12 +221,16 @@ export function AgentDetailInspector({
               members={members}
               currentUserId={currentUserId}
               canEdit={canEdit}
-              // Model and thinking level are per-runtime/per-model; clear both
-              // so the new runtime resolves its own defaults instead of keeping
-              // values it may not support (a stale thinking level would linger
-              // as an orphan token otherwise).
+              // Model, thinking level, and service tier are runtime/model
+              // native. Clear them together so the new runtime resolves its
+              // own defaults instead of inheriting incompatible tokens.
               onChange={(id) =>
-                update({ runtime_id: id, model: "", thinking_level: "" })
+                update({
+                  runtime_id: id,
+                  model: "",
+                  thinking_level: "",
+                  service_tier: "",
+                })
               }
             />
           </SettingsRow>
@@ -254,6 +259,15 @@ export function AgentDetailInspector({
             onChange={(thinkingLevel) =>
               update({ thinking_level: thinkingLevel })
             }
+          />
+          <ServiceTierSettingField
+            label={t(($) => $.inspector.prop_speed)}
+            runtimeId={agent.runtime_id}
+            runtimeOnline={!!isOnline}
+            model={agent.model ?? ""}
+            value={agent.service_tier ?? ""}
+            canEdit={canEdit}
+            onChange={(serviceTier) => update({ service_tier: serviceTier })}
           />
           <SettingsRow
             label={t(($) => $.inspector.prop_concurrency)}

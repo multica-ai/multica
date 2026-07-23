@@ -218,14 +218,31 @@
   color: var(--sidebar-accent-foreground);
 }
 
-/* Sidebar resizing follows the same cursor contract as
- * react-resizable-panels: the resize cursor survives leaving the narrow rail
- * and wins over descendants with their own cursor declarations. Live width is
- * written directly to the two layout shells, so their toggle transitions must
- * stay disabled until the gesture finishes. */
+/* Keep the active resize cursor stable after the pointer leaves a narrow
+ * handle. Width and persistence remain owned by each existing implementation. */
 html[data-sidebar-resizing="true"],
 html[data-sidebar-resizing="true"] * {
-  cursor: ew-resize !important;
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+html:has(
+    [data-slot="resizable-handle"][data-separator="active"][aria-orientation="vertical"]
+  ),
+html:has(
+    [data-slot="resizable-handle"][data-separator="active"][aria-orientation="vertical"]
+  ) * {
+  cursor: col-resize !important;
+  user-select: none !important;
+}
+
+html:has(
+    [data-slot="resizable-handle"][data-separator="active"][aria-orientation="horizontal"]
+  ),
+html:has(
+    [data-slot="resizable-handle"][data-separator="active"][aria-orientation="horizontal"]
+  ) * {
+  cursor: row-resize !important;
   user-select: none !important;
 }
 
@@ -235,7 +252,7 @@ html[data-sidebar-resizing="true"] * {
 }
 
 [data-sidebar-resizing="true"] [data-sidebar="rail"]::after {
-  background-color: var(--sidebar-border);
+  background-color: color-mix(in oklab, var(--foreground) 40%, transparent);
 }
 
 /* Right detail sidebars use react-resizable-panels, which sizes panels by

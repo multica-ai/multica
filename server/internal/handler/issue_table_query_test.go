@@ -208,6 +208,47 @@ func TestIssueTablePositionCursorIncludesIndexableLowerBound(t *testing.T) {
 	}
 }
 
+func TestIssueTableGroupIdentityBindsIncludeEmpty(t *testing.T) {
+	withoutEmpty := issueTableGroupIdentity(issueTableGroupSpec{
+		Kind:       "property",
+		PropertyID: "00000000-0000-4000-8000-000000000001",
+	})
+	withEmpty := issueTableGroupIdentity(issueTableGroupSpec{
+		Kind:         "property",
+		PropertyID:   "00000000-0000-4000-8000-000000000001",
+		IncludeEmpty: true,
+	})
+	if withoutEmpty == withEmpty {
+		t.Fatalf("include-empty property cursors share an identity: %q", withEmpty)
+	}
+}
+
+func TestIssueTableCompoundCellKeyResolvesPrimaryAndStatus(t *testing.T) {
+	primary := resolvedIssueTableGroup{kind: "parent"}
+	compound := resolvedIssueTableGroup{kind: "compound", primary: &primary}
+	key := compoundCellGroupKey(
+		"parent:00000000-0000-4000-8000-000000000001",
+		"todo",
+	)
+	args := make([]any, 0, 2)
+	predicate, ok := compound.predicate(
+		httptest.NewRecorder(),
+		key,
+		func(value any) string {
+			args = append(args, value)
+			return fmt.Sprintf("$%d", len(args))
+		},
+	)
+	if !ok {
+		t.Fatal("valid compound cell key was rejected")
+	}
+	if !strings.Contains(predicate, "i.parent_issue_id = $1::uuid") ||
+		!strings.Contains(predicate, "i.status = $2::text") ||
+		len(args) != 2 || args[1] != "todo" {
+		t.Fatalf("compound cell predicate lost a dimension: %s args=%#v", predicate, args)
+	}
+}
+
 func TestIssueTableRowsCommitsBeforeBestEffortEnrichment(t *testing.T) {
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()
@@ -743,10 +784,231 @@ func TestIssueTableAssigneeNamesResolveAfterGrouping(t *testing.T) {
 	if counts["assignee:member:"+testUserID] != 1 || counts["assignee:unassigned"] != 1 {
 		t.Fatalf("unexpected assignee groups: %#v", counts)
 	}
+	if response.Groups[0].Key != "assignee:member:"+testUserID ||
+		response.Groups[len(response.Groups)-1].Key != "assignee:unassigned" {
+		t.Fatalf("assignee groups are not actor-priority ordered: %#v", response.Groups)
+	}
 	sortedAt := strings.Index(groupQuerySQL, "), sorted AS (")
 	nameLookupAt := strings.Index(groupQuerySQL, `SELECT u.name FROM "user" u`)
 	if sortedAt < 0 || nameLookupAt < sortedAt {
 		t.Fatalf("assignee names must resolve after actor aggregation:\n%s", groupQuerySQL)
+	}
+}
+
+func TestIssueTableCompoundParentGroupsReturnExactStatusCells(t *testing.T) {
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("Compound parent grouping %d", suffix)).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE project_id = $1`, projectID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+	})
+
+	var finalNumber int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = GREATEST(
+			issue_counter,
+			(SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)
+		) + 4
+		WHERE id = $1
+		RETURNING issue_counter
+	`, testWorkspaceID).Scan(&finalNumber); err != nil {
+		t.Fatalf("reserve issue numbers: %v", err)
+	}
+	var parentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			position, number, project_id
+		)
+		VALUES ($1, 'Parent context', 'done', 'none', 'member', $2, 1, $3, $4)
+		RETURNING id
+	`, testWorkspaceID, testUserID, finalNumber-3, projectID).Scan(&parentID); err != nil {
+		t.Fatalf("create parent: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			parent_issue_id, position, number, project_id
+		)
+		VALUES
+			($1, 'Child todo', 'todo', 'none', 'member', $2, $3, 2, $4, $5),
+			($1, 'Child review', 'in_review', 'none', 'member', $2, $3, 3, $4 + 1, $5),
+			($1, 'No parent', 'todo', 'none', 'member', $2, NULL, 4, $4 + 2, $5)
+	`, testWorkspaceID, testUserID, parentID, finalNumber-2, projectID); err != nil {
+		t.Fatalf("seed grouped issues: %v", err)
+	}
+
+	recorder := httptest.NewRecorder()
+	testHandler.ListIssueTableGroups(recorder, newRequest("POST", "/api/issues/table/groups", issueTableGroupsRequest{
+		Query: issueTableQuerySpec{
+			Scope: issueTableScope{Kind: "project", ProjectID: projectID},
+			Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+		},
+		Group: issueTableGroupSpec{Kind: "compound", Primary: "parent", Secondary: "status"},
+		Page:  issueTablePageRequest{Limit: 10},
+	}))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("compound groups status = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	var response issueTableGroupsResponse
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode compound groups: %v", err)
+	}
+	if response.Total != 4 || len(response.Groups) != 2 {
+		t.Fatalf("unexpected compound group totals: %#v", response)
+	}
+	byKey := make(map[string]issueTableGroupDescriptorResponse, len(response.Groups))
+	for _, group := range response.Groups {
+		byKey[group.Key] = group
+	}
+	parent := byKey["parent:"+parentID]
+	if parent.Count != 2 || parent.Value.Parent == nil ||
+		parent.Value.Parent.Title != "Parent context" ||
+		parent.Value.ValueState != "value" {
+		t.Fatalf("parent descriptor lost context: %#v", parent)
+	}
+	parentCells := make(map[string]int64, len(parent.SecondaryGroups))
+	for _, cell := range parent.SecondaryGroups {
+		parentCells[cell.Value.Status] = cell.Count
+		if !strings.HasPrefix(cell.Key, "compound:") {
+			t.Fatalf("cell key is not opaque compound key: %q", cell.Key)
+		}
+	}
+	if parentCells["todo"] != 1 || parentCells["in_review"] != 1 {
+		t.Fatalf("unexpected parent status cells: %#v", parentCells)
+	}
+	noParent := byKey["parent:none"]
+	if noParent.Count != 2 || noParent.Value.ValueState != "unset" {
+		t.Fatalf("unexpected no-parent lane: %#v", noParent)
+	}
+
+	// A second parent has only a hidden-status child. Under a visible-status
+	// compound query it must stay a No-parent card instead of creating an
+	// empty lane. The first parent does have a visible child, so it is promoted
+	// to a lane header and must disappear from the No-parent rows and counts.
+	var hiddenParentNumber int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = issue_counter + 2
+		WHERE id = $1
+		RETURNING issue_counter
+	`, testWorkspaceID).Scan(&hiddenParentNumber); err != nil {
+		t.Fatalf("reserve hidden-parent issue numbers: %v", err)
+	}
+	var hiddenParentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			position, number, project_id
+		)
+		VALUES ($1, 'Visible parent card', 'todo', 'none', 'member', $2, 5, $3, $4)
+		RETURNING id
+	`, testWorkspaceID, testUserID, hiddenParentNumber-1, projectID).Scan(&hiddenParentID); err != nil {
+		t.Fatalf("create hidden-only parent: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			parent_issue_id, position, number, project_id
+		)
+		VALUES ($1, 'Hidden child', 'done', 'none', 'member', $2, $3, 6, $4, $5)
+	`, testWorkspaceID, testUserID, hiddenParentID, hiddenParentNumber, projectID); err != nil {
+		t.Fatalf("create hidden child: %v", err)
+	}
+
+	filteredGroup := issueTableGroupSpec{
+		Kind:            "compound",
+		Primary:         "parent",
+		Secondary:       "status",
+		SecondaryValues: []string{"todo"},
+	}
+	filteredRecorder := httptest.NewRecorder()
+	testHandler.ListIssueTableGroups(filteredRecorder, newRequest("POST", "/api/issues/table/groups", issueTableGroupsRequest{
+		Query: issueTableQuerySpec{
+			Scope: issueTableScope{Kind: "project", ProjectID: projectID},
+			Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+		},
+		Group: filteredGroup,
+		Page:  issueTablePageRequest{Limit: 10},
+	}))
+	if filteredRecorder.Code != http.StatusOK {
+		t.Fatalf("filtered compound groups status = %d: %s", filteredRecorder.Code, filteredRecorder.Body.String())
+	}
+	var filtered issueTableGroupsResponse
+	if err := json.NewDecoder(filteredRecorder.Body).Decode(&filtered); err != nil {
+		t.Fatalf("decode filtered compound groups: %v", err)
+	}
+	if filtered.Total != 3 || len(filtered.Groups) != 2 {
+		t.Fatalf("unexpected visible compound groups: %#v", filtered)
+	}
+	filteredByKey := make(map[string]issueTableGroupDescriptorResponse, len(filtered.Groups))
+	for _, descriptor := range filtered.Groups {
+		filteredByKey[descriptor.Key] = descriptor
+	}
+	if _, exists := filteredByKey["parent:"+hiddenParentID]; exists {
+		t.Fatalf("hidden-only parent lane was returned: %#v", filtered.Groups)
+	}
+	filteredParent := filteredByKey["parent:"+parentID]
+	filteredNoParent := filteredByKey["parent:none"]
+	if filteredParent.Count != 2 || filteredNoParent.Count != 2 {
+		t.Fatalf("parent header was not removed from aligned counts: parent=%#v no-parent=%#v", filteredParent, filteredNoParent)
+	}
+
+	cellKey := func(descriptor issueTableGroupDescriptorResponse, status string) string {
+		t.Helper()
+		for _, cell := range descriptor.SecondaryGroups {
+			if cell.Value.Status == status {
+				return cell.Key
+			}
+		}
+		t.Fatalf("missing %s cell in %#v", status, descriptor)
+		return ""
+	}
+	listCell := func(key string) issueTableRowsResponse {
+		t.Helper()
+		rowsRecorder := httptest.NewRecorder()
+		testHandler.ListIssueTableRows(rowsRecorder, newRequest("POST", "/api/issues/table/rows", issueTableRowsRequest{
+			Query: issueTableQuerySpec{
+				Scope: issueTableScope{Kind: "project", ProjectID: projectID},
+				Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+			},
+			Group:     filteredGroup,
+			GroupKey:  &key,
+			Hierarchy: issueTableHierarchyRequest{Enabled: false},
+			Page:      issueTablePageRequest{Limit: 10},
+		}))
+		if rowsRecorder.Code != http.StatusOK {
+			t.Fatalf("filtered compound rows status = %d: %s", rowsRecorder.Code, rowsRecorder.Body.String())
+		}
+		var result issueTableRowsResponse
+		if err := json.NewDecoder(rowsRecorder.Body).Decode(&result); err != nil {
+			t.Fatalf("decode filtered compound rows: %v", err)
+		}
+		return result
+	}
+	noParentTodo := listCell(cellKey(filteredNoParent, "todo"))
+	if len(noParentTodo.Rows) != 2 {
+		t.Fatalf("unexpected visible no-parent rows: %#v", noParentTodo.Rows)
+	}
+	noParentIDs := map[string]bool{}
+	for _, row := range noParentTodo.Rows {
+		noParentIDs[row.Issue.ID] = true
+	}
+	if noParentIDs[parentID] || !noParentIDs[hiddenParentID] {
+		t.Fatalf("parent header/card semantics diverged: %#v", noParentIDs)
+	}
+	noParentDone := listCell(cellKey(filteredNoParent, "done"))
+	if len(noParentDone.Rows) != 0 {
+		t.Fatalf("promoted parent remained in No-parent rows: %#v", noParentDone.Rows)
 	}
 }
 

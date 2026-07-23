@@ -2149,6 +2149,255 @@ func TestCodexExecuteStartupRPCsHaveBoundedHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestCodexExecuteThreadStartTimeoutLifecycleIsFailClosed(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`echo 1 > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`echo 'ERROR mcp_manager_init: transport error: channel closed' >&2`+"\n"+
+		`sleep 5`+"\n"+
+		// This response is deliberately later than the host timeout. Killing
+		// the process tree must prevent it from reaching turn/start.
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-late"}}}'`+"\n"+
+		`read line && echo "$line" > "$DIR/turn-start"`+"\n")
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	backend, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Logger:         logger,
+		TaskID:         "task-thread-start-timeout",
+		RuntimeID:      "runtime-thread-start-timeout",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "secret prompt must not be logged", ExecOptions{
+		Timeout:                   5 * time.Second,
+		HandshakeTimeout:          3 * time.Second,
+		SemanticInactivityTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" || !strings.Contains(result.Error, "thread/start") {
+		t.Fatalf("expected thread/start timeout failure, got %+v", result)
+	}
+	assertCodexAttemptCount(t, fakePath, "1")
+	if _, err := os.Stat(filepath.Join(filepath.Dir(fakePath), "turn-start")); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("late response reached turn/start; stat err=%v", err)
+	}
+
+	entries := parseJSONLogEntries(t, logs.String())
+	sent := findCodexLifecyclePhase(t, entries, "thread_start_sent")
+	failure := findCodexLifecyclePhase(t, entries, "thread_start_failure")
+	for key, want := range map[string]any{
+		"task_id":         "task-thread-start-timeout",
+		"runtime_id":      "runtime-thread-start-timeout",
+		"attempt":         float64(1),
+		"active_launches": float64(1),
+		"method":          "thread/start",
+	} {
+		if got := sent[key]; got != want {
+			t.Fatalf("sent[%s]=%v, want %v; entry=%v", key, got, want, sent)
+		}
+	}
+	if failure["cleanup_confirmed"] != true || failure["reaped"] != true {
+		t.Fatalf("failure lacks confirmed cleanup/reap: %v", failure)
+	}
+	if failure["retry_safe"] != false || failure["retry_attempted"] != false {
+		t.Fatalf("thread/start timeout must remain fail-closed: %v", failure)
+	}
+	if failure["stderr_model_refresh_timeout_count"] != float64(1) ||
+		failure["stderr_mcp_init_transport_count"] != float64(1) ||
+		failure["stderr_bare_timeout_count"] != float64(0) {
+		t.Fatalf("unexpected stderr classification: %v", failure)
+	}
+	if _, ok := failure["latency_ms"]; !ok {
+		t.Fatalf("failure lacks monotonic latency: %v", failure)
+	}
+	if strings.Contains(logs.String(), "secret prompt must not be logged") {
+		t.Fatalf("prompt leaked into lifecycle logs: %s", logs.String())
+	}
+}
+
+func TestCodexExecuteThreadStartResponseRequiresThreadID(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{}}}'`+"\n")
+
+	var logs bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&logs, nil))
+	backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: logger})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" || !strings.Contains(result.Error, "returned no thread ID") {
+		t.Fatalf("expected missing thread ID failure, got %+v", result)
+	}
+
+	phaseCounts := map[string]int{}
+	for _, entry := range parseJSONLogEntries(t, logs.String()) {
+		if phase, ok := entry["phase"].(string); ok {
+			phaseCounts[phase]++
+		}
+	}
+	if phaseCounts["thread_start_sent"] != 1 || phaseCounts["thread_start_failure"] != 1 {
+		t.Fatalf("expected one sent and one failure phase, got %v", phaseCounts)
+	}
+	if phaseCounts["thread_start_response"] != 0 {
+		t.Fatalf("invalid thread/start response emitted success phase: %v", phaseCounts)
+	}
+}
+
+func TestCodexThreadStartTimeoutDoesNotPersistSensitiveInputs(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	const envSecret = "opaque-env-sentinel-9382"
+	const systemSecret = "opaque-system-sentinel-4721"
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`echo "$OPAQUE_AUTH_VALUE" >&2`+"\n"+
+		`echo "$line" >&2`+"\n"+
+		`sleep 5`+"\n")
+
+	var logs bytes.Buffer
+	backend, err := New("codex", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.New(slog.NewJSONHandler(&logs, nil)),
+		Env:            map[string]string{"OPAQUE_AUTH_VALUE": envSecret},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+		Timeout:          5 * time.Second,
+		HandshakeTimeout: time.Second,
+		SystemPrompt:     systemSecret,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	combined := result.Error + "\n" + logs.String()
+	for _, secret := range []string{envSecret, systemSecret} {
+		if strings.Contains(combined, secret) {
+			t.Fatalf("sensitive input persisted in timeout diagnostics")
+		}
+	}
+}
+
+func TestCodexExecuteConcurrentThreadStartTimeoutsRemainUnserialized(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`sleep 5`+"\n")
+
+	maxActiveCodexLaunchesObserved.Store(0)
+	results := make(chan Result, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			backend, err := New("codex", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+			if err != nil {
+				results <- Result{Status: "failed", Error: err.Error()}
+				return
+			}
+			session, err := backend.Execute(context.Background(), "prompt", ExecOptions{
+				Timeout:          5 * time.Second,
+				HandshakeTimeout: 3 * time.Second,
+			})
+			if err != nil {
+				results <- Result{Status: "failed", Error: err.Error()}
+				return
+			}
+			go func() {
+				for range session.Messages {
+				}
+			}()
+			results <- <-session.Result
+		}()
+	}
+	for i := 0; i < 2; i++ {
+		result := <-results
+		if result.Status != "failed" || !strings.Contains(result.Error, "thread/start") {
+			t.Fatalf("concurrent timeout result=%+v", result)
+		}
+	}
+	if got := maxActiveCodexLaunchesObserved.Load(); got < 2 {
+		t.Fatalf("thread/start timeout handling serialized launches: max active=%d", got)
+	}
+}
+
+func parseJSONLogEntries(t *testing.T, raw string) []map[string]any {
+	t.Helper()
+	var entries []map[string]any
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		if line == "" {
+			continue
+		}
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("parse log entry: %v: %q", err, line)
+		}
+		entries = append(entries, entry)
+	}
+	return entries
+}
+
+func findCodexLifecyclePhase(t *testing.T, entries []map[string]any, phase string) map[string]any {
+	t.Helper()
+	for _, entry := range entries {
+		if entry["msg"] == "codex lifecycle" && entry["phase"] == phase {
+			return entry
+		}
+	}
+	t.Fatalf("missing codex lifecycle phase %q in %v", phase, entries)
+	return nil
+}
+
 func TestCodexExecuteRetriesInitializeTimeoutOnceAfterCleanup(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
@@ -2169,8 +2418,11 @@ func TestCodexExecuteRetriesInitializeTimeoutOnceAfterCleanup(t *testing.T) {
 		`echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-retried","turn":{"id":"turn-1","status":"completed"}}}'`+"\n")
 
 	result := executeFakeCodex(t, fakePath, ExecOptions{
-		Timeout:                   10 * time.Second,
-		HandshakeTimeout:          100 * time.Millisecond,
+		Timeout: 10 * time.Second,
+		// Forked shell startup regularly exceeds 100ms on loaded CI runners.
+		// Keep the first attempt's 5s hang above this bound while giving the
+		// successful second initialize enough scheduling headroom.
+		HandshakeTimeout:          2 * time.Second,
 		SemanticInactivityTimeout: time.Second,
 	})
 	if result.Status != "completed" {
@@ -2196,8 +2448,8 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 			`count=0; test -f `+countPath+` && count=$(cat `+countPath+`)`+"\n"+
 			`count=$((count + 1)); echo "$count" > `+countPath+"\n"+
 			`read line`+"\n"+
-			`sleep 1`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+			`sleep 3.2`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second})
 		if result.Status != "failed" || !strings.Contains(result.Error, CodexHandshakeTimeoutMarker) {
 			t.Fatalf("expected final initialize timeout, got status=%q error=%q", result.Status, result.Error)
 		}
@@ -2213,8 +2465,8 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 			`echo x >> `+countPath+"\n"+
 			`read line`+"\n"+
 			`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"unexpected","item":{"type":"commandExecution","id":"cmd-1","command":"true"}}}'`+"\n"+
-			`sleep 1`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+			`sleep 3.2`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second})
 		if result.Status != "failed" {
 			t.Fatalf("expected failed, got %q", result.Status)
 		}
@@ -2231,8 +2483,8 @@ func TestCodexExecuteInitializeRetrySafetyGates(t *testing.T) {
 		fakePath := writeFakeCodexAppServer(t, ""+
 			`echo x >> `+countPath+"\n"+
 			`read line`+"\n"+
-			`sleep 1`+"\n")
-		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 5 * time.Second, HandshakeTimeout: 50 * time.Millisecond})
+			`sleep 3.2`+"\n")
+		result := executeFakeCodex(t, fakePath, ExecOptions{Timeout: 8 * time.Second, HandshakeTimeout: 3 * time.Second})
 		if !strings.Contains(result.Error, "retry suppressed: process cleanup/reap not confirmed") {
 			t.Fatalf("expected cleanup reason, got %q", result.Error)
 		}
@@ -2293,6 +2545,41 @@ func TestSanitizeCodexDiagnosticRedactsSecrets(t *testing.T) {
 		if strings.Contains(got, secret) {
 			t.Fatalf("sanitized diagnostic leaked %q: %q", secret, got)
 		}
+	}
+}
+
+func TestClassifyCodexStartupStderr(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		want   codexStderrClassification
+	}{
+		{
+			name:   "model refresh timeout",
+			stderr: "failed to refresh available models: timeout waiting for child process to exit",
+			want:   codexStderrClassification{modelRefreshTimeout: 1},
+		},
+		{
+			name:   "mcp init transport",
+			stderr: "mcp_manager_init transport error: channel closed",
+			want:   codexStderrClassification{mcpInitTransport: 1},
+		},
+		{
+			name: "bare timeout",
+			want: codexStderrClassification{bareTimeout: 1},
+		},
+		{
+			name: "non-timeout error is not bare timeout",
+			want: codexStderrClassification{},
+		},
+	}
+	for i, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			timedOut := i != len(tests)-1
+			if got := classifyCodexStartupStderr(tc.stderr, timedOut); got != tc.want {
+				t.Fatalf("classification=%+v, want %+v", got, tc.want)
+			}
+		})
 	}
 }
 
@@ -3236,6 +3523,50 @@ func TestBuildCodexArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
 	}
 	if extraIdx == -1 || customIdx == -1 || extraIdx > customIdx {
 		t.Fatalf("expected extra args before custom args, got %v", args)
+	}
+}
+
+func TestBuildCodexArgsExplicitFastOverridesLowerPriorityDisable(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgs(ExecOptions{
+		ServiceTier: codexFastServiceTier,
+		ExtraArgs: []string{
+			"--disable", codexFastModeFeature,
+			"--disable", "memory_tool",
+			"-c", "features.fast_mode=false",
+			"-c", "features.memory_tool=false",
+		},
+		CustomArgs: []string{
+			"'--disable=fast_mode'",
+			`--config=features.fast_mode="false"`,
+			"--enable", "multi_agent",
+		},
+	}, slog.Default())
+
+	want := []string{
+		"app-server", "--listen", "stdio://",
+		"--disable", "memory_tool",
+		"-c", "features.memory_tool=false",
+		"--enable", "multi_agent",
+		"--enable", codexFastModeFeature,
+	}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("buildCodexArgs explicit Fast = %v, want %v", args, want)
+	}
+}
+
+func TestBuildCodexArgsFutureServiceTierDoesNotForceFastMode(t *testing.T) {
+	t.Parallel()
+
+	args := buildCodexArgs(ExecOptions{
+		ServiceTier: "future-tier",
+		CustomArgs:  []string{"--disable", codexFastModeFeature},
+	}, slog.Default())
+
+	want := []string{"app-server", "--listen", "stdio://", "--disable", codexFastModeFeature}
+	if !reflect.DeepEqual(args, want) {
+		t.Fatalf("buildCodexArgs future tier = %v, want %v", args, want)
 	}
 }
 

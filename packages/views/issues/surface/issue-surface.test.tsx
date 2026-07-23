@@ -22,6 +22,7 @@ import type {
   ListIssuesResponse,
 } from "@multica/core/types";
 import { IssueSurface } from "./issue-surface";
+import { statusTableMethodsFromLegacy } from "./status-table-test-api";
 
 // Mutable so tests can simulate a workspace switch — the workspace layout
 // does not remount its children on switch, so the surface must handle the
@@ -158,6 +159,7 @@ describe("IssueSurface — scope switch loading semantics", () => {
     });
     setApiInstance({
       listIssues,
+      ...statusTableMethodsFromLegacy(listIssues),
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),
@@ -244,6 +246,7 @@ describe("IssueSurface — scope switch loading semantics", () => {
     });
     setApiInstance({
       listIssues,
+      ...statusTableMethodsFromLegacy(listIssues),
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() => never<AgentTask[]>()),

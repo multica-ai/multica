@@ -934,8 +934,9 @@ export function IssueDisplayControls({
   allowGantt?: boolean;
   /**
    * Whether `scopedIssues` covers the surface's full window. Table does not
-   * pass loaded branch rows here; it supplies `tableFacetCounts` from the
-   * backend instead, so badges remain exact without downloading all issues.
+   * use loaded rows for counts; server-paged List, Board, and Swimlane follow
+   * the same rule. They supply `tableFacetCounts` from the backend instead,
+   * so badges remain exact without downloading all issues.
    */
   facetCountsExact?: boolean;
   tableFacetCounts?: IssueTableFacetsResponse;
