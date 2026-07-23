@@ -59,13 +59,13 @@ export function ChatFab() {
         onClick={handleClick}
         aria-label={tooltip}
         className={cn(
-          "absolute bottom-2 right-2 z-50 flex size-10 touch-manipulation items-center justify-center rounded-full bg-surface-raised text-muted-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border transition-[background-color,color,box-shadow] hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-page-canvas active:bg-surface-hover",
+          "absolute bottom-2 right-2 z-50 flex size-10 touch-manipulation items-center justify-center rounded-full bg-surface-raised text-muted-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border transition-all duration-200 ease-out hover:bg-surface-hover hover:text-foreground hover:scale-105 hover:shadow-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-page-canvas active:scale-95 active:bg-surface-hover",
           // Impulse the button itself while a chat task is running — no
           // outer ring to keep things calm.
           isRunning && "animate-chat-impulse",
         )}
       >
-        <MessageCircle className="size-5" />
+        <MessageCircle className="size-5 transition-transform duration-200" />
       </TooltipTrigger>
       <TooltipContent side="top" sideOffset={10}>{tooltip}</TooltipContent>
     </Tooltip>
