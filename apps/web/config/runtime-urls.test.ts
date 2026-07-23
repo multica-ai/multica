@@ -1,6 +1,30 @@
 import { describe, expect, it } from "vitest";
 
-import { resolveRemoteApiUrl } from "./runtime-urls";
+import { resolveDocsUrl, resolveRemoteApiUrl } from "./runtime-urls";
+
+describe("resolveDocsUrl", () => {
+  it("prefers DOCS_URL when explicitly configured", () => {
+    expect(
+      resolveDocsUrl({
+        DOCS_URL: "https://docs.example.com",
+        NODE_ENV: "production",
+      }),
+    ).toBe("https://docs.example.com");
+  });
+
+  it("uses the public docs site for production builds", () => {
+    expect(resolveDocsUrl({ NODE_ENV: "production" })).toBe(
+      "https://multica.ai",
+    );
+  });
+
+  it("keeps the local docs dev server default outside production", () => {
+    expect(resolveDocsUrl({ NODE_ENV: "development" })).toBe(
+      "http://localhost:4000",
+    );
+    expect(resolveDocsUrl({})).toBe("http://localhost:4000");
+  });
+});
 
 describe("resolveRemoteApiUrl", () => {
   it("prefers REMOTE_API_URL when explicitly configured", () => {
