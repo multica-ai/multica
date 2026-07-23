@@ -445,10 +445,30 @@ export interface Agent {
   thinking_level?: string;
   owner_id: string | null;
   skills: AgentSkillSummary[];
+  /** Runtime-local skills this agent must not inherit. Older servers omit it. */
+  disabled_runtime_skills?: DisabledRuntimeSkill[];
   created_at: string;
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
+}
+
+export interface DisabledRuntimeSkill {
+  runtime_id: string;
+  provider: string;
+  root: "provider" | "universal" | "plugin";
+  key: string;
+  name?: string;
+  plugin?: string;
+}
+
+export interface SetAgentRuntimeSkillEnabledRequest {
+  runtime_id: string;
+  root: "provider" | "universal" | "plugin";
+  key: string;
+  name: string;
+  plugin?: string;
+  enabled: boolean;
 }
 
 /**
@@ -500,6 +520,13 @@ export interface CreateAgentRequest {
 export interface AgentBuilderSession {
   session_id: string;
   builder_agent_id: string;
+  runtime_id: string;
+}
+
+/** Result of rebinding a live builder conversation to another runtime.
+ *  `runtime_id` is the runtime the server actually bound — the caller must
+ *  wait for it before showing the new runtime as selected. */
+export interface AgentBuilderRuntimeSwitch {
   runtime_id: string;
 }
 
@@ -942,6 +969,8 @@ export interface RuntimeLocalSkillSummary {
   root?: "provider" | "universal" | "plugin";
   /** Enabled runtime plugin that contributed this skill, when applicable. */
   plugin?: string;
+  /** New daemons set this only when they can enforce per-agent disablement. */
+  can_disable?: boolean;
   file_count: number;
 }
 

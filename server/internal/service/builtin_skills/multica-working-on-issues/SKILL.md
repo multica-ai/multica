@@ -180,6 +180,13 @@ on it. These are the contracts, not advice:
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
   the assigned agent then.
+- **`in_progress` / `in_review` on assignment runs** are agent-managed CLI
+  mutations, not `StartTask` / `CompleteTask` side effects. The assignment
+  runtime brief asks ordinary agents for `todo`/`backlog` → `in_progress` then
+  `in_review` when they have delivered. Squad leaders share the opening
+  `in_progress` step on the first assignment turn, keep the parent there while
+  members work, and only move to `in_review` when a later re-trigger confirms
+  the overall goal is met.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
 - **`done`** on a child issue posts a system comment on its parent. If a PR
@@ -189,6 +196,9 @@ on it. These are the contracts, not advice:
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going (MUL-4465). To stop a running task,
   cancel the task itself.
+- **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
+  `todo` when no active task / retry remains — that is the main server-owned
+  status write on the agent-run path.
 
 ## Sub-issues: `todo` starts work now, `backlog` parks it
 

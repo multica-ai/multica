@@ -12,6 +12,13 @@ ORDER BY created_at ASC;
 SELECT * FROM agent
 WHERE id = $1;
 
+-- name: GetAgentForUpdate :one
+-- Serializes read-modify-write updates to disabled_runtime_skills so two
+-- concurrent per-skill toggles cannot overwrite each other.
+SELECT * FROM agent
+WHERE id = $1
+FOR UPDATE;
+
 -- name: GetAgentInWorkspace :one
 SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
@@ -53,6 +60,31 @@ RETURNING *;
 -- path from ever deleting a user-authored agent.
 DELETE FROM agent
 WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%';
+
+-- name: RebindAgentBuilderRuntime :one
+-- Re-points a builder carrier at another runtime mid-conversation. The carrier
+-- is what SendDirectChatMessage reads to stamp a chat task's runtime_id, so this
+-- UPDATE is the only thing that actually moves subsequent replies; the live-draft
+-- picker alone never did. model is reset wholesale because model ids are
+-- per-runtime — the new runtime resolves its own default instead of inheriting an
+-- id it may not serve. The kind/system_key guard mirrors DeleteSystemAgentByID so
+-- this path can never touch a user-authored agent.
+--
+-- Callers MUST hold LockChatSessionForRuntimeBind on the owning chat_session for
+-- the whole transaction, otherwise a concurrent send can stamp a task with the
+-- pre-switch runtime after the pending-task check has already passed (MUL-5163).
+--
+-- chat_session.runtime_id is deliberately left untouched: the daemon only resumes
+-- a stored provider session when chat_session.runtime_id matches the claiming
+-- task's runtime (see the chat claim path), so leaving the old pointer in place is
+-- exactly what makes the new runtime start a fresh provider session.
+UPDATE agent
+SET runtime_id = @runtime_id,
+    runtime_mode = @runtime_mode,
+    model = sqlc.narg('model'),
+    updated_at = now()
+WHERE id = @id AND kind = 'system' AND system_key LIKE 'agent_builder:%'
+RETURNING *;
 
 -- name: UpdateAgent :one
 -- composio_toolkit_allowlist is set wholesale: the API layer is responsible
@@ -115,6 +147,12 @@ RETURNING *;
 -- handler's audit-log + **** sentinel guard.
 UPDATE agent
 SET custom_env = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateAgentDisabledRuntimeSkills :one
+UPDATE agent
+SET disabled_runtime_skills = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 

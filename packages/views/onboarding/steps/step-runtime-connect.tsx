@@ -36,6 +36,7 @@ export function StepRuntimeConnect({
   onNext,
   onBack,
   onRefresh,
+  runtimesPending,
 }: {
   wsId: string;
   onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
@@ -44,6 +45,13 @@ export function StepRuntimeConnect({
    *  bundled daemon so a freshly-installed CLI shows up — otherwise the
    *  daemon's PATH probe runs once at boot and never re-probes. */
   onRefresh?: () => void | Promise<void>;
+  /** Desktop-only signal: the local daemon is still booting or is known to
+   *  have agent CLIs on this host that haven't finished registering yet.
+   *  While true, the step keeps showing the scanning skeleton past the normal
+   *  timeout instead of flashing the "no runtime found" empty state — that
+   *  empty state is a false negative when the daemon is mid-probe (MUL-5119).
+   *  Web omits it and keeps the plain wall-clock timeout. */
+  runtimesPending?: boolean;
 }) {
   const { runtimes, selected, selectedId, setSelectedId } =
     useRuntimePicker(wsId);
@@ -58,6 +66,7 @@ export function StepRuntimeConnect({
       onNext={onNext}
       onBack={onBack}
       onRefresh={onRefresh}
+      runtimesPending={runtimesPending}
     />
   );
 }
@@ -68,8 +77,14 @@ export function StepRuntimeConnect({
 
 type Phase = "scanning" | "found" | "empty";
 
-/** Input ms before an empty list flips from "scanning" to "empty". */
+/** Idle ms before an empty list flips from "scanning" to "empty" — unless the
+ *  platform reports runtimes are still pending (see `runtimesPending`). */
 const EMPTY_TIMEOUT_MS = 5000;
+
+/** Absolute ceiling: even while the platform still reports runtimes pending,
+ *  fall back to the empty exits after this so a wedged version probe can never
+ *  hang the step on the scanning skeleton forever. */
+const EMPTY_HARD_TIMEOUT_MS = 20000;
 
 function FancyView({
   wsId,
@@ -80,6 +95,7 @@ function FancyView({
   onNext,
   onBack,
   onRefresh,
+  runtimesPending,
 }: {
   wsId: string;
   runtimes: AgentRuntime[];
@@ -89,30 +105,52 @@ function FancyView({
   onNext: (runtime: AgentRuntime | null) => void | Promise<void>;
   onBack?: () => void;
   onRefresh?: () => void | Promise<void>;
+  runtimesPending?: boolean;
 }) {
   const { t } = useT("onboarding");
   const qc = useQueryClient();
   const mainRef = useRef<HTMLElement>(null);
   const fadeStyle = useScrollFade(mainRef);
 
-  // Flip to "empty" only after we've waited long enough for the daemon
-  // to report. The 5s budget covers the bundled daemon's typical 1–3s
-  // boot; anything past that is a genuine "no runtime" situation and we
-  // switch from scanning skeletons to the skip / refresh exits.
-  // `scanEpoch` resets the timer when the user hits Refresh, so a
-  // freshly-installed CLI gets another scanning window before falling
-  // back to the empty state.
+  // Decide when an empty runtime list stops being "still scanning" and becomes
+  // the genuine "no runtime" exits. Two timers run while the list is empty:
+  //
+  //   - soft (EMPTY_TIMEOUT_MS): the normal budget. Once it fires we flip to
+  //     empty UNLESS `runtimesPending` says the platform (desktop daemon) is
+  //     still booting or mid-probe — registration on a host with several CLIs
+  //     can outlast the soft budget, and flashing "no runtime found" while the
+  //     daemon is still working is a false negative (MUL-5119).
+  //   - hard (EMPTY_HARD_TIMEOUT_MS): an absolute ceiling so a wedged probe
+  //     that never resolves `runtimesPending` back to false can't pin the step
+  //     on the scanning skeleton forever.
+  //
+  // `scanEpoch` resets both timers when the user hits Refresh, so a
+  // freshly-installed CLI gets another scanning window before falling back to
+  // the empty state.
   const [scanEpoch, setScanEpoch] = useState(0);
-  const [hasTimedOut, setHasTimedOut] = useState(false);
+  const [softTimedOut, setSoftTimedOut] = useState(false);
+  const [hardTimedOut, setHardTimedOut] = useState(false);
   useEffect(() => {
     if (runtimes.length > 0) return;
-    setHasTimedOut(false);
-    const id = window.setTimeout(() => setHasTimedOut(true), EMPTY_TIMEOUT_MS);
-    return () => window.clearTimeout(id);
+    setSoftTimedOut(false);
+    setHardTimedOut(false);
+    const soft = window.setTimeout(() => setSoftTimedOut(true), EMPTY_TIMEOUT_MS);
+    const hard = window.setTimeout(
+      () => setHardTimedOut(true),
+      EMPTY_HARD_TIMEOUT_MS,
+    );
+    return () => {
+      window.clearTimeout(soft);
+      window.clearTimeout(hard);
+    };
   }, [runtimes.length, scanEpoch]);
 
   const phase: Phase =
-    runtimes.length > 0 ? "found" : hasTimedOut ? "empty" : "scanning";
+    runtimes.length > 0
+      ? "found"
+      : hardTimedOut || (softTimedOut && runtimesPending !== true)
+        ? "empty"
+        : "scanning";
 
   const onlineCount = runtimes.filter((r) => r.status === "online").length;
 
@@ -229,12 +267,20 @@ function FancyView({
             )}
             {phase === "empty" && (
               <EmptyView
-                onSkip={() => onNext(null)}
+                onSkip={handleSkip}
                 onRefresh={handleRefresh}
                 refreshing={refreshing}
               />
             )}
 
+            {/* Footer action bar. The controls are phase-scoped so no dead or
+                duplicated affordance ever shows:
+                  - Skip: shown while scanning / found. The empty phase owns its
+                    own prominent Skip card, so the footer Skip is dropped there
+                    to avoid two "Skip for now" buttons on one screen.
+                  - Start exploring: only actionable once a runtime is picked, so
+                    it renders only in the found phase instead of sitting
+                    permanently disabled through scanning / empty. */}
             <div className="mt-8 flex flex-wrap items-center justify-end gap-x-4 gap-y-2">
               <span
                 aria-live="polite"
@@ -242,25 +288,31 @@ function FancyView({
               >
                 {footerHint}
               </span>
-              <div className="flex items-center gap-2">
-                <Button
-                  size="lg"
-                  variant="secondary"
-                  disabled={submitting}
-                  onClick={handleSkip}
-                >
-                  {t(($) => $.step_runtime.skip)}
-                </Button>
-                <Button
-                  size="lg"
-                  disabled={!canContinue || submitting}
-                  onClick={handleContinue}
-                >
-                  {submitting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  {t(($) => $.step_runtime.start_exploring)}
-                  <ArrowRight className="h-4 w-4" />
-                </Button>
-              </div>
+              {phase !== "empty" && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    size="lg"
+                    variant="secondary"
+                    disabled={submitting}
+                    onClick={handleSkip}
+                  >
+                    {t(($) => $.step_runtime.skip)}
+                  </Button>
+                  {phase === "found" && (
+                    <Button
+                      size="lg"
+                      disabled={!canContinue || submitting}
+                      onClick={handleContinue}
+                    >
+                      {submitting && (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      )}
+                      {t(($) => $.step_runtime.start_exploring)}
+                      <ArrowRight className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </main>

@@ -13,6 +13,7 @@ import {
   FolderKanban,
   FolderMinus,
   List,
+  Rows3,
   SignalHigh,
   SlidersHorizontal,
   X,
@@ -61,7 +62,12 @@ import { projectListOptions } from "@multica/core/projects/queries";
 import { labelListOptions } from "@multica/core/labels/queries";
 import { propertyListOptions } from "@multica/core/properties";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
-import type { IssueProperty } from "@multica/core/types";
+import type {
+  Issue,
+  IssueProperty,
+  IssueTableFacetSpec,
+  IssueTableFacetsResponse,
+} from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
@@ -71,7 +77,6 @@ import {
   GROUPING_OPTIONS,
   SWIMLANE_GROUPINGS,
   CARD_PROPERTY_OPTIONS,
-  TABLE_SYSTEM_COLUMNS,
   type ActorFilterValue,
   type IssueDateField,
   type IssueDateFilter,
@@ -88,11 +93,11 @@ import {
   type IssuesScope,
 } from "@multica/core/issues/stores/issues-scope-store";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import type { Issue } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
+import { TableColumnPicker } from "./table-view";
 
 type LocalDateRange = {
   from: Date | undefined;
@@ -146,7 +151,10 @@ const DATE_FIELD_LABEL_KEY: Record<IssueDateField, "date_field_created" | "date_
  *  render at count > 0) without touching the option lists themselves. */
 const NO_COUNT_ISSUES: Issue[] = [];
 
-function useIssueCounts(allIssues: Issue[]) {
+function useIssueCounts(
+  allIssues: Issue[],
+  serverFacets?: IssueTableFacetsResponse,
+) {
   return useMemo(() => {
     const status = new Map<string, number>();
     const priority = new Map<string, number>();
@@ -159,6 +167,42 @@ function useIssueCounts(allIssues: Issue[]) {
     const property = new Map<string, Map<string, number>>();
     let noAssignee = 0;
     let noProject = 0;
+
+    if (serverFacets) {
+      for (const facet of serverFacets.facets) {
+        const target =
+          facet.kind === "status"
+            ? status
+            : facet.kind === "priority"
+              ? priority
+              : facet.kind === "assignee"
+                ? assignee
+                : facet.kind === "creator"
+                  ? creator
+                  : facet.kind === "project"
+                    ? project
+                    : facet.kind === "label"
+                      ? label
+                      : null;
+        if (facet.kind === "property" && facet.property_id) {
+          property.set(
+            facet.property_id,
+            new Map(facet.values.map((value) => [value.key, value.count])),
+          );
+          continue;
+        }
+        for (const value of facet.values) {
+          if (facet.kind === "assignee" && value.key === "__none__") {
+            noAssignee = value.count;
+          } else if (facet.kind === "project" && value.key === "__none__") {
+            noProject = value.count;
+          } else {
+            target?.set(value.key, value.count);
+          }
+        }
+      }
+      return { status, priority, assignee, creator, noAssignee, project, noProject, label, property };
+    }
 
     for (const issue of allIssues) {
       status.set(issue.status, (status.get(issue.status) ?? 0) + 1);
@@ -208,7 +252,7 @@ function useIssueCounts(allIssues: Issue[]) {
     }
 
     return { status, priority, assignee, creator, noAssignee, project, noProject, label, property };
-  }, [allIssues]);
+  }, [allIssues, serverFacets]);
 }
 
 // ---------------------------------------------------------------------------
@@ -758,6 +802,8 @@ export function IssuesHeader({
   onDateFilterChange,
   isRefreshing = false,
   facetCountsExact = true,
+  tableFacetCounts,
+  onTableFacetChange,
 }: {
   scopedIssues: Issue[];
   /** The rows the agents-working filter would leave on screen — undefined
@@ -770,6 +816,8 @@ export function IssuesHeader({
   isRefreshing?: boolean;
   /** See IssueDisplayControls.facetCountsExact. */
   facetCountsExact?: boolean;
+  tableFacetCounts?: IssueTableFacetsResponse;
+  onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
 }) {
   const { t } = useT("issues");
   const scope = useIssuesScopeStore((s) => s.scope);
@@ -864,6 +912,8 @@ export function IssuesHeader({
             dateFilter={dateFilter}
             onDateFilterChange={onDateFilterChange}
             facetCountsExact={facetCountsExact}
+            tableFacetCounts={tableFacetCounts}
+            onTableFacetChange={onTableFacetChange}
           />
           <ViewRefreshIndicator active={isRefreshing} />
         </div>
@@ -879,6 +929,8 @@ export function IssueDisplayControls({
   dateFilter = null,
   onDateFilterChange,
   facetCountsExact = true,
+  tableFacetCounts,
+  onTableFacetChange,
 }: {
   scopedIssues: Issue[];
   hideViewToggle?: boolean;
@@ -889,16 +941,17 @@ export function IssueDisplayControls({
   // fall back to List if the option were exposed there. Keep Gantt opt-in.
   allowGantt?: boolean;
   /**
-   * Whether `scopedIssues` covers the surface's full window. The table's
-   * offset pagination hands us only the loaded pages — presenting counts
-   * derived from a partial window as per-option totals under-reports
-   * (round-2 review P2#3), so the badges are suppressed until the window is
-   * complete. Filter OPTIONS are unaffected; they come from the
-   * member/agent/project/label directories.
+   * Whether `scopedIssues` covers the surface's full window. Table does not
+   * pass loaded branch rows here; it supplies `tableFacetCounts` from the
+   * backend instead, so badges remain exact without downloading all issues.
    */
   facetCountsExact?: boolean;
+  tableFacetCounts?: IssueTableFacetsResponse;
+  onTableFacetChange?: (facet: IssueTableFacetSpec | null) => void;
 }) {
   const { t } = useT("issues");
+  const [tableGroupMenuOpen, setTableGroupMenuOpen] = useState(false);
+  const [viewMenuOpen, setViewMenuOpen] = useState(false);
   const displayWsId = useWorkspaceId();
   const { data: statusCatalog = [] } = useQuery(issueStatusListOptions(displayWsId));
   // Active statuses in Category order — the same ordering the picker uses, so a
@@ -930,7 +983,6 @@ export function IssueDisplayControls({
   const grouping = useViewStore((s) => s.grouping);
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const cardProperties = useViewStore((s) => s.cardProperties);
-  const tableColumns = useViewStore((s) => s.tableColumns);
   const tableGrouping = useViewStore((s) => s.tableGrouping ?? "none");
   const tableHierarchy = useViewStore((s) => s.tableHierarchy ?? true);
   const showSubIssues = useViewStore((s) => s.showSubIssues);
@@ -961,17 +1013,14 @@ export function IssueDisplayControls({
   const tableGroupableProperties = useMemo(
     () =>
       workspaceProperties.filter((p) =>
-        ["select", "multi_select", "checkbox"].includes(p.type),
+        ["select", "checkbox"].includes(p.type),
       ),
     [workspaceProperties],
-  );
-  const visibleTableColumns = useMemo(
-    () => new Set(tableColumns.map((column) => column.key)),
-    [tableColumns],
   );
 
   const counts = useIssueCounts(
     facetCountsExact ? scopedIssues : NO_COUNT_ISSUES,
+    tableFacetCounts,
   );
   const showDateFilter = !!onDateFilterChange;
 
@@ -1065,7 +1114,11 @@ export function IssueDisplayControls({
   return (
     <div className="flex shrink-0 items-center gap-1">
         {/* Filter */}
-        <DropdownMenu>
+        <DropdownMenu
+          onOpenChange={(open) => {
+            if (!open) onTableFacetChange?.(null);
+          }}
+        >
           <Tooltip>
             <DropdownMenuTrigger
               render={
@@ -1089,22 +1142,6 @@ export function IssueDisplayControls({
                       {hasActiveFilters && (
                         <span className="tabular-nums md:hidden">{activeFilterCount}</span>
                       )}
-                      {hasActiveFilters && (
-                        <span
-                          role="button"
-                          tabIndex={-1}
-                          className="-mr-1 ml-0.5 hidden rounded-sm p-0.5 hover:bg-white/20 md:inline-flex"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            act.clearFilters();
-                            onDateFilterChange?.(null);
-                          }}
-                          onPointerDown={(e) => e.stopPropagation()}
-                        >
-                          <X className="size-3" />
-                        </span>
-                      )}
                     </Button>
                   }
                 />
@@ -1114,7 +1151,11 @@ export function IssueDisplayControls({
           </Tooltip>
           <DropdownMenuContent align="end" className="w-auto">
             {/* Status */}
-            <DropdownMenuSub>
+            <DropdownMenuSub
+              onOpenChange={(open) =>
+                onTableFacetChange?.(open ? { kind: "status" } : null)
+              }
+            >
               <DropdownMenuSubTrigger>
                 <CircleDot className="size-3.5" />
                 <span className="flex-1">{t(($) => $.filters.section_status)}</span>
@@ -1192,7 +1233,11 @@ export function IssueDisplayControls({
             </DropdownMenuSub>
 
             {/* Priority */}
-            <DropdownMenuSub>
+            <DropdownMenuSub
+              onOpenChange={(open) =>
+                onTableFacetChange?.(open ? { kind: "priority" } : null)
+              }
+            >
               <DropdownMenuSubTrigger>
                 <SignalHigh className="size-3.5" />
                 <span className="flex-1">{t(($) => $.filters.section_priority)}</span>
@@ -1248,7 +1293,11 @@ export function IssueDisplayControls({
             )}
 
             {/* Assignee */}
-            <DropdownMenuSub>
+            <DropdownMenuSub
+              onOpenChange={(open) =>
+                onTableFacetChange?.(open ? { kind: "assignee" } : null)
+              }
+            >
               <DropdownMenuSubTrigger>
                 <User className="size-3.5" />
                 <span className="flex-1">{t(($) => $.filters.section_assignee)}</span>
@@ -1272,7 +1321,11 @@ export function IssueDisplayControls({
             </DropdownMenuSub>
 
             {/* Creator */}
-            <DropdownMenuSub>
+            <DropdownMenuSub
+              onOpenChange={(open) =>
+                onTableFacetChange?.(open ? { kind: "creator" } : null)
+              }
+            >
               <DropdownMenuSubTrigger>
                 <UserPen className="size-3.5" />
                 <span className="flex-1">{t(($) => $.filters.section_creator)}</span>
@@ -1293,7 +1346,11 @@ export function IssueDisplayControls({
             </DropdownMenuSub>
 
             {/* Project */}
-            <DropdownMenuSub>
+            <DropdownMenuSub
+              onOpenChange={(open) =>
+                onTableFacetChange?.(open ? { kind: "project" } : null)
+              }
+            >
               <DropdownMenuSubTrigger>
                 <FolderKanban className="size-3.5" />
                 <span className="flex-1">{t(($) => $.filters.section_project)}</span>
@@ -1316,7 +1373,11 @@ export function IssueDisplayControls({
             </DropdownMenuSub>
 
             {/* Label */}
-            <DropdownMenuSub>
+            <DropdownMenuSub
+              onOpenChange={(open) =>
+                onTableFacetChange?.(open ? { kind: "label" } : null)
+              }
+            >
               <DropdownMenuSubTrigger>
                 <Tag className="size-3.5" />
                 <span className="flex-1">{t(($) => $.filters.section_label)}</span>
@@ -1340,7 +1401,16 @@ export function IssueDisplayControls({
             {filterableProperties.map((property) => {
               const selected = propertyFilters[property.id] ?? [];
               return (
-                <DropdownMenuSub key={property.id}>
+                <DropdownMenuSub
+                  key={property.id}
+                  onOpenChange={(open) =>
+                    onTableFacetChange?.(
+                      open
+                        ? { kind: "property", property_id: property.id }
+                        : null,
+                    )
+                  }
+                >
                   <DropdownMenuSubTrigger>
                     {property.icon ? (
                       <PropertyIcon property={property} className="size-3.5 text-xs" />
@@ -1382,6 +1452,108 @@ export function IssueDisplayControls({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        {hasActiveFilters && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t(($) => $.filters.reset)}
+                  onClick={() => {
+                    act.clearFilters();
+                    onDateFilterChange?.(null);
+                  }}
+                  className="hidden text-muted-foreground md:inline-flex"
+                >
+                  <X className="size-3.5" />
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">
+              {t(($) => $.filters.reset)}
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        {viewMode === "table" && (
+          <DropdownMenu
+            open={tableGroupMenuOpen}
+            onOpenChange={setTableGroupMenuOpen}
+          >
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className={controlButtonClass}
+                >
+                  <Rows3 className="size-3.5" />
+                  <span className="hidden md:inline">
+                    {effectiveTableGrouping === "none"
+                      ? t(($) => $.table.group_label)
+                      : t(($) => $.table.group_active, {
+                          group: tableGroupingLabel,
+                        })}
+                  </span>
+                  <ChevronDown className="size-3 text-muted-foreground" />
+                </Button>
+              }
+            />
+            <DropdownMenuContent align="end" className="w-auto min-w-48">
+              <DropdownMenuRadioGroup
+                value={effectiveTableGrouping}
+                onValueChange={(value) => {
+                  act.setTableGrouping(value as TableGrouping);
+                  setTableGroupMenuOpen(false);
+                }}
+              >
+                <DropdownMenuRadioItem value="none">
+                  {t(($) => $.table.group_none)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="status">
+                  {t(($) => $.table.columns.status)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="assignee">
+                  {t(($) => $.table.columns.assignee)}
+                </DropdownMenuRadioItem>
+                {tableGroupableProperties.map((property) => (
+                  <DropdownMenuRadioItem
+                    key={property.id}
+                    value={`property:${property.id}`}
+                  >
+                    <PropertyIcon
+                      property={property}
+                      className="size-3.5 text-xs"
+                    />
+                    <span>{property.name}</span>
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
+
+        {viewMode === "table" && (
+          <TableColumnPicker
+            properties={workspaceProperties}
+            trigger={
+              <Button
+                variant="outline"
+                size="sm"
+                className={controlButtonClass}
+              >
+                <Columns3 className="size-3.5" />
+                <span className="hidden md:inline">
+                  {t(($) => $.table.columns.section)}
+                </span>
+                <ChevronDown className="size-3 text-muted-foreground" />
+              </Button>
+            }
+          />
+        )}
 
         {/* Display settings */}
         <Popover>
@@ -1492,55 +1664,6 @@ export function IssueDisplayControls({
                     onCheckedChange={() => act.toggleTableHierarchy()}
                   />
                 </label>
-                <div className="mt-3">
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {t(($) => $.table.group_label)}
-                  </span>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger
-                      render={
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="mt-1.5 w-full justify-between text-xs"
-                        >
-                          {tableGroupingLabel}
-                          <ChevronDown className="size-3 text-muted-foreground" />
-                        </Button>
-                      }
-                    />
-                    <DropdownMenuContent align="start" className="w-auto min-w-48">
-                      <DropdownMenuRadioGroup
-                        value={effectiveTableGrouping}
-                        onValueChange={(value) =>
-                          act.setTableGrouping(value as TableGrouping)
-                        }
-                      >
-                        <DropdownMenuRadioItem value="none">
-                          {t(($) => $.table.group_none)}
-                        </DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="status">
-                          {t(($) => $.table.columns.status)}
-                        </DropdownMenuRadioItem>
-                        <DropdownMenuRadioItem value="assignee">
-                          {t(($) => $.table.columns.assignee)}
-                        </DropdownMenuRadioItem>
-                        {tableGroupableProperties.map((property) => (
-                          <DropdownMenuRadioItem
-                            key={property.id}
-                            value={`property:${property.id}`}
-                          >
-                            <PropertyIcon
-                              property={property}
-                              className="size-3.5 text-xs"
-                            />
-                            <span>{property.name}</span>
-                          </DropdownMenuRadioItem>
-                        ))}
-                      </DropdownMenuRadioGroup>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
               </div>
             )}
 
@@ -1606,71 +1729,7 @@ export function IssueDisplayControls({
               />
             </label>
 
-            {viewMode === "table" ? (
-              <div className="max-h-80 overflow-y-auto px-3 py-2.5">
-                <span className="text-xs font-medium text-muted-foreground">
-                  {t(($) => $.table.columns.section)}
-                </span>
-                <p className="mt-2 text-xs text-muted-foreground">
-                  {t(($) => $.table.columns.system_section)}
-                </p>
-                <div className="mt-1.5 space-y-2">
-                  {TABLE_SYSTEM_COLUMNS.map((key) => (
-                    <label
-                      key={key}
-                      className={
-                        key === "title"
-                          ? "flex items-center justify-between"
-                          : "flex cursor-pointer items-center justify-between"
-                      }
-                    >
-                      <span className="text-sm">
-                        {t(($) => $.table.columns[key])}
-                      </span>
-                      <Switch
-                        size="sm"
-                        checked={visibleTableColumns.has(key)}
-                        disabled={key === "title"}
-                        onCheckedChange={() => act.toggleTableColumn(key)}
-                      />
-                    </label>
-                  ))}
-                </div>
-                {workspaceProperties.length > 0 && (
-                  <>
-                    <p className="mt-3 text-xs text-muted-foreground">
-                      {t(($) => $.table.columns.property_section)}
-                    </p>
-                    <div className="mt-1.5 space-y-2">
-                      {workspaceProperties.map((property) => {
-                        const key = `property:${property.id}` as const;
-                        return (
-                          <label
-                            key={property.id}
-                            className="flex cursor-pointer items-center justify-between gap-3"
-                          >
-                            <span className="flex min-w-0 items-center gap-1.5 truncate text-sm">
-                              <PropertyIcon
-                                property={property}
-                                className="size-3.5 text-xs"
-                              />
-                              <span className="truncate">{property.name}</span>
-                            </span>
-                            <Switch
-                              size="sm"
-                              checked={visibleTableColumns.has(key)}
-                              onCheckedChange={() =>
-                                act.toggleTableColumn(key)
-                              }
-                            />
-                          </label>
-                        );
-                      })}
-                    </div>
-                  </>
-                )}
-              </div>
-            ) : (
+            {viewMode !== "table" && (
               <div className="px-3 py-2.5">
                 <span className="text-xs font-medium text-muted-foreground">
                   {t(($) => $.display.card_properties_section)}
@@ -1718,7 +1777,7 @@ export function IssueDisplayControls({
             this surface doesn't render Gantt, fall back to "list" so the
             trigger icon matches what's actually on screen. */}
         {!hideViewToggle && (
-          <DropdownMenu>
+          <DropdownMenu open={viewMenuOpen} onOpenChange={setViewMenuOpen}>
             <Tooltip>
               <DropdownMenuTrigger
                 render={
@@ -1768,7 +1827,13 @@ export function IssueDisplayControls({
               <DropdownMenuGroup>
                 <DropdownMenuLabel>{t(($) => $.view.section)}</DropdownMenuLabel>
               </DropdownMenuGroup>
-              <DropdownMenuRadioGroup value={viewMode} onValueChange={(v) => act.setViewMode(v as ViewMode)}>
+              <DropdownMenuRadioGroup
+                value={viewMode}
+                onValueChange={(v) => {
+                  act.setViewMode(v as ViewMode);
+                  setViewMenuOpen(false);
+                }}
+              >
                 <DropdownMenuRadioItem value="board">
                   <Columns3 />
                   {t(($) => $.view.board)}

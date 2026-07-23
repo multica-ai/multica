@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
 import { ListTodo, Plus } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -33,7 +33,7 @@ export interface IssueSurfaceRenderContext {
   /** The rows the agents-working filter would leave on screen, with this
    *  surface's `clientFilter` applied — headers feed it to the working chip
    *  so the chip's count is the post-click row count (MUL-4884). Undefined
-   *  means the set is UNKNOWN (table window resolving / failed / too large);
+   *  means the set is UNKNOWN (not materialized by the server-backed Table);
    *  the chip renders an indeterminate state instead of a number. */
   workingIssues: Issue[] | undefined;
 }
@@ -76,7 +76,6 @@ export function IssueSurface({
   const contentKey = `${wsId}:${issueScopeKey(scope)}`;
   useEffect(() => {
     if (process.env.NODE_ENV !== "production") {
-      // eslint-disable-next-line no-console
       console.warn(`[issue-surface] mount ${contentKey}`);
     }
   }, [contentKey]);
@@ -124,12 +123,23 @@ function IssueSurfaceContent({
   contentClassName,
 }: Omit<IssueSurfaceComponentProps, "surfaceKey">) {
   const { t } = useT("projects");
-  const { t: tIssues } = useT("issues");
   const controller = useIssueSurfaceController({
     scope,
     modes,
     createDefaults,
   });
+  const [tableLoadedIssues, setTableLoadedIssues] = useState<Issue[]>([]);
+  const handleTableLoadedIssuesChange = useCallback((next: Issue[]) => {
+    setTableLoadedIssues((current) =>
+      current.length === next.length &&
+      current.every((issue, index) => issue === next[index])
+        ? current
+        : next,
+    );
+  }, []);
+  useEffect(() => {
+    if (controller.viewMode !== "table") setTableLoadedIssues([]);
+  }, [controller.viewMode]);
   const issues = useMemo(
     () =>
       clientFilter
@@ -201,8 +211,10 @@ function IssueSurfaceContent({
             allowGantt={controller.allowGantt}
             isRefreshing={controller.isRefreshing}
             facetCountsExact={
-              !(controller.viewMode === "table" && controller.hasNextFlatPage)
+              controller.viewMode !== "table"
             }
+            tableFacetCounts={controller.tableFacetCounts}
+            onTableFacetChange={controller.setActiveTableFacet}
           />
         )}
         {controller.isLoading ? (
@@ -211,21 +223,6 @@ function IssueSurfaceContent({
           ) : (
             <IssueSurfaceSkeleton mode={controller.viewMode} />
           )
-        ) : controller.viewMode === "table" && controller.flatWindowColdError ? (
-          // A cold-load failure is NOT an empty workspace: rendering the
-          // create-issue empty state here misreports a 5xx/offline as "no
-          // issues" and leaves no recovery path, since TableView (and its
-          // load-more Retry) never mounts without data (round-5 review P2).
-          <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
-            <p className="text-sm">{tIssues(($) => $.table.load_failed)}</p>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => void controller.refetchFlatWindow()}
-            >
-              {tIssues(($) => $.table.load_failed_retry)}
-            </Button>
-          </div>
         ) : controller.isEmpty || shouldShowClientEmpty ? (
           renderEmpty ? (
             renderEmpty(renderContext)
@@ -281,15 +278,11 @@ function IssueSurfaceContent({
             )}
             {controller.viewMode === "table" && (
               <TableView
-                issues={issues}
+                serverQuery={controller.tableQuerySpec}
                 childProgressMap={controller.childProgressMap}
-                fetchNextPage={controller.fetchNextFlatPage}
-                hasNextPage={controller.hasNextFlatPage}
-                isFetchingNextPage={controller.isFetchingNextFlatPage}
-                windowError={controller.flatWindowError}
-                total={controller.flatTotal}
                 search={controller.tableSearch}
                 onSearchChange={controller.setTableSearch}
+                onLoadedIssuesChange={handleTableLoadedIssuesChange}
                 onCreateIssue={openCreateIssue}
                 exportIssues={controller.exportTableIssues}
                 resolveExportLookups={controller.resolveTableExportLookups}
@@ -318,7 +311,13 @@ function IssueSurfaceContent({
             )}
           </div>
         )}
-        {shouldShowBatchToolbar && <BatchActionToolbar issues={issues} />}
+        {shouldShowBatchToolbar && (
+          <BatchActionToolbar
+            issues={
+              controller.viewMode === "table" ? tableLoadedIssues : issues
+            }
+          />
+        )}
       </IssueSurfaceSelectionProvider>
       </IssueContextMenuProvider>
     </IssueSurfaceActionsProvider>

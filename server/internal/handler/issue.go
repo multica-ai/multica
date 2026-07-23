@@ -2104,9 +2104,19 @@ func (h *Handler) ListChildIssues(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
+	ids := make([]pgtype.UUID, len(children))
+	for i, child := range children {
+		ids[i] = child.ID
+	}
+	labelsMap := h.labelsByIssue(r.Context(), issue.WorkspaceID, ids)
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
+		labels := labelsMap[resp[i].ID]
+		if labels == nil {
+			labels = []LabelResponse{}
+		}
+		resp[i].Labels = &labels
 	}
 	h.hydrateStatusDetails(r.Context(), issue.WorkspaceID, resp)
 	writeJSON(w, http.StatusOK, map[string]any{
@@ -2174,9 +2184,19 @@ func (h *Handler) ListChildrenByParents(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	prefix := h.getIssuePrefix(r.Context(), wsUUID)
+	ids := make([]pgtype.UUID, len(children))
+	for i, child := range children {
+		ids[i] = child.ID
+	}
+	labelsMap := h.labelsByIssue(r.Context(), wsUUID, ids)
 	resp := make([]IssueResponse, len(children))
 	for i, child := range children {
 		resp[i] = issueToResponse(child, prefix)
+		labels := labelsMap[resp[i].ID]
+		if labels == nil {
+			labels = []LabelResponse{}
+		}
+		resp[i].Labels = &labels
 	}
 	h.hydrateStatusDetails(r.Context(), wsUUID, resp)
 	writeJSON(w, http.StatusOK, map[string]any{

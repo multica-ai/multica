@@ -95,6 +95,9 @@ func TestListRuntimeLocalSkills_Claude(t *testing.T) {
 	if skill.SourcePath != "~/.claude/skills/review-helper" {
 		t.Fatalf("source_path = %q", skill.SourcePath)
 	}
+	if !skill.CanDisable {
+		t.Fatal("claude runtime skill should be controllable")
+	}
 }
 
 // TestListRuntimeLocalSkills_Codebuddy is the regression guard for a bug
@@ -137,6 +140,9 @@ func TestListRuntimeLocalSkills_Codebuddy(t *testing.T) {
 	}
 	if skill.SourcePath != "~/.codebuddy/skills/review-helper" {
 		t.Fatalf("source_path = %q, want ~/.codebuddy/skills/review-helper", skill.SourcePath)
+	}
+	if skill.CanDisable {
+		t.Fatal("codebuddy runtime skill controls are not supported yet")
 	}
 }
 

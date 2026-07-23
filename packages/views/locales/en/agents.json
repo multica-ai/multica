@@ -337,6 +337,9 @@
       "start_failed": "Could not start Agent Builder.",
       "send_failed": "Could not send your message.",
       "stop_failed": "Could not stop the current generation.",
+      "switch_runtime_failed": "Could not switch runtime. The conversation is still running on the previous one.",
+      "switch_runtime_pending": "Stop the current reply to switch runtime.",
+      "switch_runtime_success": "Runtime switched. Your draft is kept and the conversation continues on the new runtime with a fresh model session.",
       "chat_title": "Agent Builder",
       "chat_hint": "Shape the requirements through conversation and refine the configuration beside it.",
       "runtime_online": "Runtime online",
@@ -582,7 +585,7 @@
       "save_failed_toast": "Failed to save routing config"
     },
     "skills": {
-      "intro": "This is the agent's effective skill set. Workspace skills are managed here; local runtime skills are discovered automatically and inherited read-only.",
+      "intro": "This is the agent's effective skill set. Workspace skills are managed here; inherited Codex and Claude Code skills can also be turned off per agent.",
       "assigned_title": "Assigned to agent",
       "assigned_hint": "Workspace skills travel with the agent. Turn one off temporarily without removing it.",
       "runtime_title": "Inherited from runtime",
@@ -594,6 +597,8 @@
       "toggle_aria": "Toggle {{name}}",
       "remove_aria": "Remove {{name}}",
       "toggle_failed_toast": "Failed to change skill status",
+      "runtime_toggle_aria": "Toggle inherited {{name}}",
+      "runtime_toggle_failed_toast": "Failed to change inherited skill status",
       "runtime_missing": "Assign a local runtime to discover inherited skills.",
       "runtime_offline": "The local runtime is offline. Reconnect it to refresh inherited skills.",
       "runtime_discovering": "Discovering skills from the local runtime…",

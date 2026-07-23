@@ -1283,3 +1283,21 @@ func TestBuildClaudeArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
 		t.Fatalf("expected extra args before custom args, got %v", args)
 	}
 }
+
+func TestBuildClaudeArgsManagedSkillSettingsWins(t *testing.T) {
+	args := buildClaudeArgs(ExecOptions{
+		ClaudeSettingsPath: "/tmp/multica-claude-settings.json",
+		ExtraArgs:          []string{"--settings", "/tmp/default.json"},
+		CustomArgs:         []string{"--settings=/tmp/agent.json", "--max-turns", "7"},
+	}, slog.Default())
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "default.json") || strings.Contains(joined, "agent.json") {
+		t.Fatalf("competing settings args were not filtered: %v", args)
+	}
+	if !strings.Contains(joined, "--settings /tmp/multica-claude-settings.json") {
+		t.Fatalf("managed settings missing: %v", args)
+	}
+	if !strings.Contains(joined, "--max-turns 7") {
+		t.Fatalf("unrelated custom arg was dropped: %v", args)
+	}
+}

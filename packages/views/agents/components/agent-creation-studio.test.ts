@@ -7,6 +7,7 @@ import {
   decodeBuilderInput,
   deriveDuplicateAccess,
   encodeBuilderInput,
+  getAgentCreationScreenKey,
   mergeBuilderDraft,
   parseBuilderDraft,
   pickBuilderRestore,
@@ -52,6 +53,15 @@ vi.mock("../../i18n", () => ({
       }),
   }),
 }));
+
+describe("Agent creation studio screen keys", () => {
+  it("groups configuration modes and separates the AI setup and builder", () => {
+    expect(getAgentCreationScreenKey("blank", "")).toBe("configure");
+    expect(getAgentCreationScreenKey("template", "")).toBe("configure");
+    expect(getAgentCreationScreenKey("ai", "")).toBe("ai-setup");
+    expect(getAgentCreationScreenKey("ai", "session-1")).toBe("ai-builder");
+  });
+});
 
 const draft = (): AgentDraft => ({
   name: "Old name",
