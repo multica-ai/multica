@@ -33,6 +33,14 @@ func freshAgentEnvSetCmd() *cobra.Command {
 	return c
 }
 
+func TestCleanStringValuesPreservesFallbackPriority(t *testing.T) {
+	got := cleanStringValues([]string{" runtime-b ", "", "runtime-c"})
+	want := []string{"runtime-b", "runtime-c"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("cleanStringValues() = %#v, want %#v", got, want)
+	}
+}
+
 func chdirWithDaemonTaskMarker(t *testing.T) {
 	t.Helper()
 

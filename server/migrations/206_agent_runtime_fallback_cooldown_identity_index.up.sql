@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY idx_agent_runtime_fallback_cooldown_identity ON agent_runtime_fallback_cooldown(agent_id, runtime_id);

@@ -5,6 +5,7 @@ import { Globe, Lock, Users } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
+import { FallbackRuntimesInput } from "./fallback-runtime-picker";
 import { InstructionsEditor } from "./instructions-editor";
 import { SkillMultiSelect } from "./skill-multi-select";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
@@ -161,6 +162,9 @@ export function CreateAgentDialog({
     }
     return "";
   });
+  const [fallbackRuntimeIds, setFallbackRuntimeIds] = useState<string[]>(
+    template?.fallback_runtime_ids ?? [],
+  );
 
   const selectedRuntime = runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
   // Defense-in-depth: even if a locked runtime somehow ends up selected
@@ -224,6 +228,9 @@ export function CreateAgentDialog({
         name: name.trim(),
         description: description.trim(),
         runtime_id: selectedRuntime.id,
+        fallback_runtime_ids: fallbackRuntimeIds.filter(
+          (id, index, ids) => id !== selectedRuntime.id && ids.indexOf(id) === index,
+        ),
         model: model.trim() || undefined,
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
@@ -428,6 +435,15 @@ export function CreateAgentDialog({
                 if (id !== selectedRuntimeId) setModel("");
                 setSelectedRuntimeId(id);
               }}
+            />
+            <FallbackRuntimesInput
+              runtimes={runtimes}
+              members={members}
+              currentUserId={currentUserId}
+              primaryRuntimeId={selectedRuntimeId}
+              value={fallbackRuntimeIds}
+              onChange={setFallbackRuntimeIds}
+              disabled={runtimesLoading}
             />
 
             <ModelDropdown

@@ -785,6 +785,14 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to clean up chat draft restores")
 		return
 	}
+	if err := qtx.DeleteFallbackCooldownsForRuntimeTeardown(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up fallback cooldowns")
+		return
+	}
+	if err := qtx.DeleteFallbackRuntimesForRuntimeTeardown(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up fallback runtimes")
+		return
+	}
 	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up archived agents")
 		return
@@ -1056,6 +1064,14 @@ func (h *Handler) ArchiveAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.R
 	// chat_draft_restore has no FK to follow them (#5219). Prune first.
 	if err := pruneRuntimeAgentChatDraftRestores(r.Context(), qtx, rt.ID, true); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to clean up chat draft restores")
+		return
+	}
+	if err := qtx.DeleteFallbackCooldownsForRuntimeTeardown(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up fallback cooldowns")
+		return
+	}
+	if err := qtx.DeleteFallbackRuntimesForRuntimeTeardown(r.Context(), rt.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to clean up fallback runtimes")
 		return
 	}
 	if err := qtx.DeleteArchivedAgentsByRuntime(r.Context(), rt.ID); err != nil {

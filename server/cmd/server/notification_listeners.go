@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"log/slog"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -18,7 +21,6 @@ type mention struct {
 	Type string // "member", "agent", "issue", or "all"
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
-
 
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
@@ -78,19 +80,19 @@ var parentBubbleNotifTypes = map[string]bool{
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
-	"issue_assigned":  "assignments",
-	"unassigned":      "assignments",
-	"assignee_changed": "assignments",
-	"status_changed":  "status_changes",
-	"new_comment":     "comments",
-	"mentioned":       "comments",
-	"priority_changed": "updates",
+	"issue_assigned":     "assignments",
+	"unassigned":         "assignments",
+	"assignee_changed":   "assignments",
+	"status_changed":     "status_changes",
+	"new_comment":        "comments",
+	"mentioned":          "comments",
+	"priority_changed":   "updates",
 	"start_date_changed": "updates",
-	"due_date_changed": "updates",
-	"task_completed":  "agent_activity",
-	"task_failed":     "agent_activity",
-	"agent_blocked":   "agent_activity",
-	"agent_completed": "agent_activity",
+	"due_date_changed":   "updates",
+	"task_completed":     "agent_activity",
+	"task_failed":        "agent_activity",
+	"agent_blocked":      "agent_activity",
+	"agent_completed":    "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -267,6 +269,24 @@ func notifySubscribers(
 		notifType, severity, title, body, details)
 }
 
+func createNotificationInboxItem(ctx context.Context, queries *db.Queries, params db.CreateInboxItemParams) (db.InboxItem, bool, error) {
+	if params.Type != "task_failed" && params.Type != "task_fallback" {
+		item, err := queries.CreateInboxItem(ctx, params)
+		return item, err == nil, err
+	}
+
+	item, err := queries.CreateTaskInboxItemOnce(ctx, db.CreateTaskInboxItemOnceParams{
+		WorkspaceID: params.WorkspaceID, RecipientType: params.RecipientType,
+		RecipientID: params.RecipientID, Type: params.Type, Severity: params.Severity,
+		IssueID: params.IssueID, Title: params.Title, Body: params.Body,
+		ActorType: params.ActorType, ActorID: params.ActorID, Details: params.Details,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return db.InboxItem{}, false, nil
+	}
+	return item, err == nil, err
+}
+
 // notifyIssueSubscribers sends inbox notifications to subscribers of
 // subscriberIssueID, but creates inbox items pointing to targetIssueID.
 // This allows querying subscribers from a parent issue while the notification
@@ -329,7 +349,7 @@ func notifyIssueSubscribers(
 			continue
 		}
 
-		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		item, created, err := createNotificationInboxItem(ctx, queries, db.CreateInboxItemParams{
 			WorkspaceID:   parseUUID(workspaceID),
 			RecipientType: "member",
 			RecipientID:   sub.UserID,
@@ -349,6 +369,9 @@ func notifyIssueSubscribers(
 		}
 
 		notified[subID] = true
+		if !created {
+			continue
+		}
 		resp := inboxItemToResponse(item)
 		resp["issue_status"] = issueStatus
 		bus.Publish(events.Event{
@@ -394,7 +417,7 @@ func notifyDirect(
 		}
 	}
 
-	item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+	item, created, err := createNotificationInboxItem(ctx, queries, db.CreateInboxItemParams{
 		WorkspaceID:   parseUUID(workspaceID),
 		RecipientType: recipientType,
 		RecipientID:   parseUUID(recipientID),
@@ -410,6 +433,9 @@ func notifyDirect(
 	if err != nil {
 		slog.Error("direct notification creation failed",
 			"recipient_id", recipientID, "type", notifType, "error", err)
+		return
+	}
+	if !created {
 		return
 	}
 
@@ -907,6 +933,21 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 			exclude[agentID] = true
 		}
 
+		details, _ := json.Marshal(payload)
+		body := ""
+		severity := "action_required"
+		if destinationID, _ := payload["destination_runtime_id"].(string); destinationID != "" {
+			severity = "info"
+			reason, _ := payload["failure_reason"].(string)
+			source, _ := payload["source_runtime_name"].(string)
+			destination, _ := payload["destination_runtime_name"].(string)
+			body = fmt.Sprintf("%s failed with %s; continuing on %s", source, reason, destination)
+		} else if exhausted, _ := payload["fallback_exhausted"].(bool); exhausted {
+			reason, _ := payload["failure_reason"].(string)
+			source, _ := payload["source_runtime_name"].(string)
+			body = fmt.Sprintf("%s failed with %s; no eligible fallback runtime remains", source, reason)
+		}
+
 		notifySubscribers(ctx, queries, bus, issueID, issue.Status, e.WorkspaceID,
 			events.Event{
 				Type:        e.Type,
@@ -914,9 +955,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				ActorType:   "agent",
 				ActorID:     agentID,
 			},
-			exclude, "task_failed", "action_required",
-			issue.Title, "",
-			emptyDetails)
+			exclude, "task_failed", severity,
+			issue.Title, body,
+			details)
 	})
 }
 

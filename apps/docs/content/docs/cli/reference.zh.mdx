@@ -260,6 +260,28 @@ CTX
 
 可编辑字段：`--name`、`--description` / `--description-stdin`、`--context` / `--context-stdin`、`--issue-prefix`。`slug` 创建后只读，不暴露在 CLI。`--description` 与 `--description-stdin`（以及 `context` 同名对）互斥。未传任何字段 flag 时命令拒绝执行，避免空 PATCH 触发无意义的 workspace 更新事件。`--issue-prefix ""` 也会被拒绝：当前后端在 prefix 为空时静默跳过该字段，CLI 在本地拦下避免“看似成功的 no-op”。
 
+## Agents
+
+### Create an Agent with Fallback Runtimes
+
+```bash
+multica agent create \
+  --name "Lambda" \
+  --runtime-id <primary-runtime-id> \
+  --fallback-runtime-ids <fallback-1>,<fallback-2>
+```
+
+`--fallback-runtime-ids` accepts an optional prioritized comma-separated list and can also be repeated. Multica skips offline entries and uses the first eligible online runtime.
+
+### Update or Clear Fallback Runtimes
+
+```bash
+multica agent update <agent-id> --fallback-runtime-ids <fallback-1>,<fallback-2>
+multica agent update <agent-id> --fallback-runtime-ids ''
+```
+
+Pass an empty value to clear the fallback chain. A fallback runtime must belong to the same workspace, cannot equal the primary runtime, and cannot appear twice.
+
 ## Issues
 
 ### List Issues

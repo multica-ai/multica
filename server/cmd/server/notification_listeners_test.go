@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/events"
@@ -728,6 +730,68 @@ func TestNotification_TaskFailed(t *testing.T) {
 	}
 }
 
+func TestNotification_TaskFallbackIncludesTransition(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+	addTestSubscriber(t, issueID, "member", testUserID, "creator")
+	var inboxEvents []events.Event
+	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+		inboxEvents = append(inboxEvents, e)
+	})
+
+	payload := map[string]any{
+		"task_id": "00000000-0000-0000-0000-bbbbbbbbbbbb", "agent_id": "00000000-0000-0000-0000-aaaaaaaaaaaa",
+		"issue_id": issueID, "status": "failed",
+		"failure_reason":           "agent_error.provider_quota_limit",
+		"source_runtime_id":        "00000000-0000-0000-0000-111111111111",
+		"source_runtime_name":      "Codex primary",
+		"destination_runtime_id":   "00000000-0000-0000-0000-222222222222",
+		"destination_runtime_name": "Claude fallback",
+		"fallback_task_id":         "00000000-0000-0000-0000-cccccccccccc",
+	}
+	event := events.Event{
+		Type: protocol.EventTaskFailed, WorkspaceID: testWorkspaceID,
+		ActorType: "system", Payload: payload,
+	}
+	bus.Publish(event)
+	bus.Publish(event)
+
+	items := inboxItemsForRecipient(t, queries, testUserID)
+	var fallbackItem *db.ListInboxItemsRow
+	matchingRows := 0
+	for i := range items {
+		if items[i].Type == "task_failed" && util.UUIDToString(items[i].IssueID) == issueID {
+			matchingRows++
+			fallbackItem = &items[i]
+		}
+	}
+	if fallbackItem == nil {
+		t.Fatalf("expected fallback inbox item for issue %s, got %#v", issueID, items)
+	}
+	if matchingRows != 1 || len(inboxEvents) != 1 {
+		t.Fatalf("fallback replay created rows/events = %d/%d, want 1/1", matchingRows, len(inboxEvents))
+	}
+	if fallbackItem.Severity != "info" || !fallbackItem.Body.Valid ||
+		!strings.Contains(fallbackItem.Body.String, "Codex primary") ||
+		!strings.Contains(fallbackItem.Body.String, "Claude fallback") ||
+		!strings.Contains(fallbackItem.Body.String, "provider_quota_limit") {
+		t.Fatalf("fallback inbox item = %#v", fallbackItem)
+	}
+	var details map[string]any
+	if err := json.Unmarshal(fallbackItem.Details, &details); err != nil {
+		t.Fatalf("decode fallback details: %v", err)
+	}
+	if details["source_runtime_id"] != payload["source_runtime_id"] ||
+		details["destination_runtime_id"] != payload["destination_runtime_id"] {
+		t.Fatalf("fallback details = %#v", details)
+	}
+}
+
 // TestNotification_PriorityChanged verifies that all subscribers except the actor
 // receive a "priority_changed" notification when an issue priority changes.
 func TestNotification_PriorityChanged(t *testing.T) {
@@ -1155,14 +1219,17 @@ func TestNotification_StatusChange_ArchivesStaleTaskFailed(t *testing.T) {
 
 	agentID := "00000000-0000-0000-0000-aaaaaaaaaaaa"
 
-	// Two failed runs land before the status flip.
-	for i := 0; i < 2; i++ {
+	// Two distinct failed runs land before the status flip.
+	for _, taskID := range []string{
+		"00000000-0000-0000-0000-bbbbbbbbbbb1",
+		"00000000-0000-0000-0000-bbbbbbbbbbb2",
+	} {
 		bus.Publish(events.Event{
 			Type:        protocol.EventTaskFailed,
 			WorkspaceID: testWorkspaceID,
 			ActorType:   "system",
 			Payload: map[string]any{
-				"task_id":  "00000000-0000-0000-0000-bbbbbbbbbbbb",
+				"task_id":  taskID,
 				"agent_id": agentID,
 				"issue_id": issueID,
 			},

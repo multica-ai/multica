@@ -55,6 +55,18 @@ INSERT INTO inbox_item (
 ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 RETURNING *;
 
+-- name: CreateTaskInboxItemOnce :one
+-- The partial unique index from migration 202 keys task_failed/task_fallback
+-- rows by task, recipient, and type. RETURNING no row means the at-least-once
+-- event was already delivered and callers must not publish inbox:new again.
+INSERT INTO inbox_item (
+    workspace_id, recipient_type, recipient_id,
+    type, severity, issue_id, title, body,
+    actor_type, actor_id, details
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+ON CONFLICT DO NOTHING
+RETURNING *;
+
 -- name: MarkInboxRead :one
 UPDATE inbox_item SET read = true
 WHERE id = $1

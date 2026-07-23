@@ -326,6 +326,7 @@
     "description_updated": "説明を更新しました",
     "task_completed_other": "タスクを完了しました（{{count}} 回）",
     "task_failed_other": "タスクが失敗しました（{{count}} 回）",
+    "task_fallback": "{{reason}} のため、タスクを {{source}} から {{destination}} に移動しました",
     "squad_leader_evaluated": "スクワッドのトリガーを評価しました",
     "squad_leader_action": "評価してアクションを実行しました",
     "squad_leader_action_reason": "評価してアクションを実行しました: {{reason}}",

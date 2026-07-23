@@ -23,6 +23,7 @@ import { CharCounter } from "./char-counter";
 import { ResourceLabelPicker } from "../../labels/resource-label-picker";
 import { ModelPicker } from "./inspector/model-picker";
 import { RuntimePicker } from "./inspector/runtime-picker";
+import { FallbackRuntimesInput } from "./fallback-runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 
 interface InspectorProps {
@@ -229,6 +230,17 @@ export function AgentDetailInspector({
               }
             />
           </SettingsRow>
+          <div className="px-4 py-3">
+            <FallbackRuntimesInput
+              runtimes={runtimes}
+              members={members}
+              currentUserId={currentUserId}
+              primaryRuntimeId={agent.runtime_id}
+              value={agent.fallback_runtime_ids ?? []}
+              onChange={(fallback_runtime_ids) => void update({ fallback_runtime_ids })}
+              disabled={!canEdit}
+            />
+          </div>
           <SettingsRow
             label={t(($) => $.inspector.prop_model)}
             size="select-wide"

@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY idx_agent_runtime_fallback_cooldown_expiry ON agent_runtime_fallback_cooldown(cooldown_until);

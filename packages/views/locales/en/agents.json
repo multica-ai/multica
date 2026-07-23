@@ -61,6 +61,13 @@
     "agent_count_other": "{{count}} agents",
     "empty": "No machines yet"
   },
+  "fallback_runtime_picker": {
+    "label": "Fallback runtimes",
+    "mine": "My runtimes",
+    "all": "All runtimes",
+    "add": "Add fallback runtime",
+    "empty": "No runtimes available."
+  },
   "columns": {
     "agent": "Agent",
     "status": "Status",

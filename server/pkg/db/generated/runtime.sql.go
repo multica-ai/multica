@@ -151,6 +151,34 @@ func (q *Queries) DeleteArchivedAgentsByRuntime(ctx context.Context, runtimeID p
 	return err
 }
 
+const deleteFallbackCooldownsForRuntimeTeardown = `-- name: DeleteFallbackCooldownsForRuntimeTeardown :exec
+DELETE FROM agent_runtime_fallback_cooldown
+WHERE agent_runtime_fallback_cooldown.runtime_id = $1
+   OR agent_runtime_fallback_cooldown.agent_id IN (
+       SELECT agent.id FROM agent
+       WHERE agent.runtime_id = $1 AND (agent.archived_at IS NOT NULL OR agent.kind = 'system')
+   )
+`
+
+func (q *Queries) DeleteFallbackCooldownsForRuntimeTeardown(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteFallbackCooldownsForRuntimeTeardown, runtimeID)
+	return err
+}
+
+const deleteFallbackRuntimesForRuntimeTeardown = `-- name: DeleteFallbackRuntimesForRuntimeTeardown :exec
+DELETE FROM agent_fallback_runtime
+WHERE agent_fallback_runtime.runtime_id = $1
+   OR agent_fallback_runtime.agent_id IN (
+       SELECT agent.id FROM agent
+       WHERE agent.runtime_id = $1 AND (agent.archived_at IS NOT NULL OR agent.kind = 'system')
+   )
+`
+
+func (q *Queries) DeleteFallbackRuntimesForRuntimeTeardown(ctx context.Context, runtimeID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteFallbackRuntimesForRuntimeTeardown, runtimeID)
+	return err
+}
+
 const deleteSquadsByArchivedAgentsOnRuntime = `-- name: DeleteSquadsByArchivedAgentsOnRuntime :exec
 DELETE FROM squad
 WHERE leader_id IN (
@@ -222,7 +250,7 @@ UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
     failure_reason = 'runtime_offline',
     wait_reason = NULL
-WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
+WHERE status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )

@@ -45,6 +45,7 @@
     "review_requested": "Review requested",
     "task_completed": "Task completed",
     "task_failed": "Task failed",
+    "task_fallback": "Task moved to fallback runtime",
     "agent_blocked": "Agent blocked",
     "agent_completed": "Agent completed",
     "reaction_added": "Reacted",

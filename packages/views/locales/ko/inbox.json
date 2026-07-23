@@ -45,6 +45,7 @@
     "review_requested": "리뷰 요청됨",
     "task_completed": "작업 완료됨",
     "task_failed": "작업 실패함",
+    "task_fallback": "작업이 대체 런타임으로 이동됨",
     "agent_blocked": "에이전트 막힘",
     "agent_completed": "에이전트 완료됨",
     "reaction_added": "반응 추가됨",

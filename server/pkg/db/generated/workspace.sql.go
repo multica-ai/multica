@@ -62,6 +62,12 @@ ws_agents AS (
 ws_skills AS (
     SELECT id FROM skill WHERE workspace_id = $1
 ),
+cleared_fallback_cooldowns AS (
+    DELETE FROM agent_runtime_fallback_cooldown WHERE agent_id IN (SELECT id FROM ws_agents)
+),
+cleared_fallback_runtimes AS (
+    DELETE FROM agent_fallback_runtime WHERE agent_id IN (SELECT id FROM ws_agents)
+),
 cleared_agent_label_assignments AS (
     DELETE FROM agent_to_label WHERE agent_id IN (SELECT id FROM ws_agents)
 ),

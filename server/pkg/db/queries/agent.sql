@@ -23,6 +23,80 @@ FOR UPDATE;
 SELECT * FROM agent
 WHERE id = $1 AND workspace_id = $2 AND kind = 'user';
 
+-- name: ListAgentFallbackRuntimeIDs :many
+SELECT runtime_id FROM agent_fallback_runtime
+WHERE agent_id = $1
+ORDER BY priority ASC;
+
+-- name: DeleteAgentFallbackRuntimes :exec
+DELETE FROM agent_fallback_runtime WHERE agent_id = $1;
+
+-- name: AddAgentFallbackRuntime :exec
+INSERT INTO agent_fallback_runtime (agent_id, runtime_id, priority)
+SELECT sqlc.arg(agent_id), sqlc.arg(runtime_id), sqlc.arg(priority)
+FROM agent a
+JOIN agent_runtime ar ON ar.id = sqlc.arg(runtime_id) AND ar.workspace_id = a.workspace_id
+WHERE a.id = sqlc.arg(agent_id);
+
+-- name: GetNextFallbackRuntime :one
+SELECT afr.runtime_id
+FROM agent_fallback_runtime afr
+JOIN agent_runtime ar ON ar.id = afr.runtime_id
+LEFT JOIN agent_runtime_fallback_cooldown cooldown
+  ON cooldown.agent_id = afr.agent_id
+ AND cooldown.runtime_id = afr.runtime_id
+ AND cooldown.cooldown_until > now()
+WHERE afr.agent_id = sqlc.arg(agent_id)
+  AND afr.runtime_id <> sqlc.arg(current_runtime_id)
+  AND ar.status = 'online'
+  AND cooldown.agent_id IS NULL
+  AND afr.priority > COALESCE((
+    SELECT current.priority FROM agent_fallback_runtime current
+    WHERE current.agent_id = sqlc.arg(agent_id)
+      AND current.runtime_id = sqlc.arg(current_runtime_id)
+  ), -1)
+ORDER BY afr.priority ASC
+LIMIT 1;
+
+-- name: CountAgentFallbackRuntimes :one
+SELECT count(*) FROM agent_fallback_runtime
+WHERE agent_id = $1;
+
+-- name: IsAgentRuntimeFallbackCoolingDown :one
+SELECT EXISTS (
+  SELECT 1 FROM agent_runtime_fallback_cooldown
+  WHERE agent_id = sqlc.arg(agent_id)
+    AND runtime_id = sqlc.arg(runtime_id)
+    AND cooldown_until > now()
+);
+
+-- name: UpsertAgentRuntimeFallbackCooldown :one
+INSERT INTO agent_runtime_fallback_cooldown (
+    agent_id, runtime_id, cooldown_until, failure_reason, source_task_id
+) VALUES (
+    sqlc.arg(agent_id), sqlc.arg(runtime_id), sqlc.arg(cooldown_until),
+    sqlc.arg(failure_reason), sqlc.arg(source_task_id)
+)
+ON CONFLICT (agent_id, runtime_id) DO UPDATE SET
+    cooldown_until = GREATEST(agent_runtime_fallback_cooldown.cooldown_until, EXCLUDED.cooldown_until),
+    failure_reason = EXCLUDED.failure_reason,
+    source_task_id = EXCLUDED.source_task_id,
+    updated_at = now()
+RETURNING *;
+
+-- name: ClearAgentRuntimeFallbackCooldown :exec
+DELETE FROM agent_runtime_fallback_cooldown
+WHERE agent_id = sqlc.arg(agent_id)
+  AND runtime_id = sqlc.arg(runtime_id)
+  AND (
+    cooldown_until <= now()
+    OR updated_at <= sqlc.arg(successful_task_started_at)
+  );
+
+-- name: GetAgentRuntimeFallbackCooldown :one
+SELECT * FROM agent_runtime_fallback_cooldown
+WHERE agent_id = sqlc.arg(agent_id) AND runtime_id = sqlc.arg(runtime_id);
+
 -- name: CreateAgent :one
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
@@ -58,8 +132,19 @@ RETURNING *;
 -- Builder sessions own their hidden execution agent. Deleting the session
 -- removes that carrier and its task rows; the kind guard prevents this cleanup
 -- path from ever deleting a user-authored agent.
-DELETE FROM agent
-WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%';
+WITH target AS (
+    SELECT agent.id FROM agent
+    WHERE agent.id = $1 AND agent.kind = 'system' AND agent.system_key LIKE 'agent_builder:%'
+),
+cleared_fallback_cooldowns AS (
+    DELETE FROM agent_runtime_fallback_cooldown
+    WHERE agent_runtime_fallback_cooldown.agent_id IN (SELECT target.id FROM target)
+),
+cleared_fallback_runtimes AS (
+    DELETE FROM agent_fallback_runtime
+    WHERE agent_fallback_runtime.agent_id IN (SELECT target.id FROM target)
+)
+DELETE FROM agent WHERE agent.id IN (SELECT target.id FROM target);
 
 -- name: UpdateAgent :one
 -- composio_toolkit_allowlist is set wholesale: the API layer is responsible
@@ -353,6 +438,46 @@ WHERE id = $1 AND issue_id IS NULL;
 -- attempt=3, max_attempts=3 rather than leaking attempt=3, max_attempts=2 to the
 -- task API (MUL-4910). The Go retryAttemptCeiling already refuses to raise a
 -- disabled (max_attempts<=1) task, so this only ever widens, never revives.
+WITH RECURSIVE retry_ancestry AS (
+    SELECT task.id, task.parent_task_id, task.runtime_id, 1 AS depth, ARRAY[task.id] AS path
+    FROM agent_task_queue task
+    WHERE task.id = sqlc.arg(id)
+    UNION ALL
+    SELECT parent.id, parent.parent_task_id, parent.runtime_id, ancestry.depth + 1,
+           ancestry.path || parent.id
+    FROM agent_task_queue parent
+    JOIN retry_ancestry ancestry ON parent.id = ancestry.parent_task_id
+    WHERE ancestry.depth < 8 AND NOT parent.id = ANY(ancestry.path)
+),
+next_runtime AS (
+    SELECT afr.runtime_id
+    FROM agent_task_queue parent
+    JOIN agent_fallback_runtime afr ON afr.agent_id = parent.agent_id
+    JOIN agent_runtime runtime ON runtime.id = afr.runtime_id AND runtime.status = 'online'
+    -- Retry children inherit parent.work_dir. Only another provider runtime on
+    -- the same registered daemon can truthfully access that host-local path.
+    JOIN agent_runtime parent_runtime ON parent_runtime.id = parent.runtime_id
+    LEFT JOIN agent_runtime_fallback_cooldown cooldown
+      ON cooldown.agent_id = afr.agent_id
+     AND cooldown.runtime_id = afr.runtime_id
+     AND cooldown.cooldown_until > now()
+    WHERE parent.id = sqlc.arg(id)
+      AND runtime.daemon_id IS NOT NULL
+      AND runtime.daemon_id = parent_runtime.daemon_id
+      AND cooldown.agent_id IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM retry_ancestry attempted
+          WHERE attempted.runtime_id = afr.runtime_id
+      )
+    ORDER BY afr.priority ASC
+    LIMIT 1
+),
+retry_source AS (
+    SELECT parent.*, next_runtime.runtime_id AS next_runtime_id
+    FROM agent_task_queue parent
+    LEFT JOIN next_runtime ON true
+    WHERE parent.id = sqlc.arg(id)
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, coalesced_comment_ids, trigger_summary, context,
@@ -364,7 +489,9 @@ INSERT INTO agent_task_queue (
     chat_input_task_id, fire_at
 )
 SELECT
-    p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    p.agent_id,
+    COALESCE(p.next_runtime_id, p.runtime_id),
+    p.issue_id, p.chat_session_id, p.autopilot_run_id,
     CASE WHEN sqlc.narg(fire_at)::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
@@ -381,9 +508,16 @@ SELECT
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, sqlc.narg(fire_at)
-FROM agent_task_queue p
-WHERE p.id = $1
+FROM retry_source p
+WHERE NOT sqlc.arg(require_runtime_change)::boolean OR p.next_runtime_id IS NOT NULL
 RETURNING *;
+
+-- name: HasActiveRetryTask :one
+SELECT EXISTS (
+  SELECT 1 FROM agent_task_queue
+  WHERE parent_task_id = $1
+    AND status IN ('deferred', 'queued', 'dispatched', 'running', 'waiting_local_directory')
+);
 
 -- name: CancelAgentTasksByIssue :many
 -- Cancels every active task on the issue and returns the affected rows so the

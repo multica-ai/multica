@@ -605,7 +605,7 @@ function FailureBubble({
   // An unknown reason (a future enum value this build doesn't ship yet) falls
   // back to a generic friendly line. The raw error stays tucked under the
   // collapsible below for anyone who wants the technical detail.
-  const chatFailureCopy: Record<TaskFailureReason, string> = {
+  const chatFailureCopy: Partial<Record<TaskFailureReason, string>> = {
     agent_error: t(($) => $.message_list.failure.agent_error),
     timeout: t(($) => $.message_list.failure.timeout),
     codex_semantic_inactivity: t(($) => $.message_list.failure.codex_semantic_inactivity),

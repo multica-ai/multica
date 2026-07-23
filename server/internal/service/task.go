@@ -902,6 +902,41 @@ func taskErrorType(reason string) string {
 	}
 }
 
+func (s *TaskService) runtimeForNewTask(ctx context.Context, agent db.Agent) (pgtype.UUID, error) {
+	runtime, err := s.Queries.GetAgentRuntime(ctx, agent.RuntimeID)
+	if err != nil {
+		return agent.RuntimeID, fmt.Errorf("load primary runtime: %w", err)
+	}
+	coolingDown, err := s.Queries.IsAgentRuntimeFallbackCoolingDown(ctx, db.IsAgentRuntimeFallbackCoolingDownParams{
+		AgentID: agent.ID, RuntimeID: agent.RuntimeID,
+	})
+	if err != nil {
+		return agent.RuntimeID, fmt.Errorf("check primary runtime cooldown: %w", err)
+	}
+	if runtime.Status == "online" && !coolingDown {
+		return agent.RuntimeID, nil
+	}
+	fallbackID, err := s.Queries.GetNextFallbackRuntime(ctx, db.GetNextFallbackRuntimeParams{
+		AgentID: agent.ID, CurrentRuntimeID: agent.RuntimeID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		if coolingDown {
+			return pgtype.UUID{}, fmt.Errorf("all configured runtimes are cooling down or unavailable")
+		}
+		return agent.RuntimeID, nil
+	}
+	if err != nil {
+		return agent.RuntimeID, fmt.Errorf("select fallback runtime: %w", err)
+	}
+	slog.Info("using fallback runtime for new task",
+		"agent_id", util.UUIDToString(agent.ID),
+		"primary_runtime_id", util.UUIDToString(agent.RuntimeID),
+		"fallback_runtime_id", util.UUIDToString(fallbackID),
+		"primary_cooling_down", coolingDown,
+	)
+	return fallbackID, nil
+}
+
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
 // No context snapshot is stored — the agent fetches all data it needs at
 // runtime via the multica CLI.
@@ -991,6 +1026,10 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "agent has no runtime")
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	runtimeID, err := s.runtimeForNewTask(ctx, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	// The issue assignee reacting to an agent-authored comment is a
 	// comment_source attribution (a special case of delegation); a member
@@ -1010,7 +1049,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:              issue.AssigneeID,
-		RuntimeID:            agent.RuntimeID,
+		RuntimeID:            runtimeID,
 		IssueID:              issue.ID,
 		Priority:             priorityToInt(issue.Priority),
 		TriggerCommentID:     triggerCommentID,
@@ -1109,6 +1148,10 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	runtimeID, err := s.runtimeForNewTask(ctx, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	// An explicit mention / thread-parent / squad-leader hop from an
 	// agent-authored comment is a delegation (the parent task's human is
@@ -1127,7 +1170,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	task, err := s.Queries.CreateAgentTask(ctx, db.CreateAgentTaskParams{
 		AgentID:              agentID,
-		RuntimeID:            agent.RuntimeID,
+		RuntimeID:            runtimeID,
 		IssueID:              issue.ID,
 		Priority:             priorityToInt(issue.Priority),
 		TriggerCommentID:     triggerCommentID,
@@ -1179,6 +1222,10 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 		slog.Error("deferred fallback enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	runtimeID, err := s.runtimeForNewTask(ctx, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	// The fallback assignee is reacting to the same trigger comment as the primary
 	// routed task, so resolve attribution from that comment (member author →
@@ -1199,7 +1246,7 @@ func (s *TaskService) EnqueueDeferredAssigneeFallback(ctx context.Context, issue
 	isLeader := squadID.Valid
 	task, err := s.Queries.CreateDeferredAgentTask(ctx, db.CreateDeferredAgentTaskParams{
 		AgentID:              agentID,
-		RuntimeID:            agent.RuntimeID,
+		RuntimeID:            runtimeID,
 		IssueID:              issue.ID,
 		Priority:             priorityToInt(issue.Priority),
 		TriggerCommentID:     triggerCommentID,
@@ -1297,6 +1344,10 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
+	runtimeID, err := s.runtimeForNewTask(ctx, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	payload := QuickCreateContext{
 		Type:        QuickCreateContextType,
@@ -1347,7 +1398,7 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, requesterID, agent)
 	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
 		AgentID:              agentID,
-		RuntimeID:            agent.RuntimeID,
+		RuntimeID:            runtimeID,
 		Priority:             priorityToInt("high"),
 		Context:              contextJSON,
 		OriginatorUserID:     requesterID,
@@ -1433,6 +1484,10 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	if !agent.RuntimeID.Valid {
 		return db.AgentTaskQueue{}, ErrChatTaskAgentNoRuntime
 	}
+	runtimeID, err := s.runtimeForNewTask(ctx, agent)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
 
 	// The chat sender (initiator) is the direct_human originator and accountable.
 	// Evidence uses the uniform pair (kind=chat, ref=chat_session_id) so the
@@ -1452,7 +1507,7 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
 	task, err := s.Queries.CreateChatTask(ctx, db.CreateChatTaskParams{
 		AgentID:           chatSession.AgentID,
-		RuntimeID:         agent.RuntimeID,
+		RuntimeID:         runtimeID,
 		Priority:          2, // medium priority for chat
 		ChatSessionID:     chatSession.ID,
 		InitiatorUserID:   initiatorUserID,
@@ -1504,6 +1559,10 @@ func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.Chat
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
 	overlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
+	runtimeID, err := s.runtimeForNewTask(ctx, agent)
+	if err != nil {
+		return nil, err
+	}
 
 	// Full attribution for the chat sender, resolved before the tx (the policy read
 	// + fallback must not run with a transaction open) — the same direct_human stamp
@@ -1511,7 +1570,7 @@ func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.Chat
 	// originator_user_id but left accountable_user_id / source / evidence NULL,
 	// violating the one-way invariant and dropping the audit source (MUL-4302 §2).
 	attr := attribution.DirectHumanRun(initiatorUserID, attribution.EvidenceChat, session.ID)
-	attr, err := s.applyAttributionFallback(ctx, attr, agent)
+	attr, err = s.applyAttributionFallback(ctx, attr, agent)
 	if err != nil {
 		return nil, err
 	}
@@ -1521,7 +1580,7 @@ func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.Chat
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
 			AgentID:              session.AgentID,
-			RuntimeID:            agent.RuntimeID,
+			RuntimeID:            runtimeID,
 			Priority:             2, // medium priority for chat; matches EnqueueChatTask
 			ChatSessionID:        session.ID,
 			InitiatorUserID:      initiatorUserID,
@@ -2663,6 +2722,16 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	slog.Info("task completed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID))
 	s.captureTaskCompleted(ctx, task)
+	if err := s.Queries.ClearAgentRuntimeFallbackCooldown(ctx, db.ClearAgentRuntimeFallbackCooldownParams{
+		AgentID: task.AgentID, RuntimeID: task.RuntimeID,
+		SuccessfulTaskStartedAt: task.StartedAt,
+	}); err != nil {
+		slog.Warn("task completion: failed to clear runtime fallback cooldown",
+			"task_id", util.UUIDToString(task.ID),
+			"runtime_id", util.UUIDToString(task.RuntimeID),
+			"error", err,
+		)
+	}
 
 	// Invariant: every completed issue task must have at least one agent
 	// comment on the issue, so the user always sees something when a run
@@ -2897,9 +2966,9 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 // pointer on both the task row and the chat_session — otherwise the next
 // chat turn would silently start a brand-new session and lose memory.
 //
-// failureReason is a coarse classifier consumed by the auto-retry path.
-// Pass "" when unknown — the server runs the raw error text through
-// taskfailure.Classify so the persisted failure_reason still lands in
+// failureReason is the canonical classifier consumed by the retry and
+// observability paths. Pass "" when unknown — the server runs the raw error
+// text through taskfailure.Classify so the persisted failure_reason still lands in
 // the canonical refined taxonomy rather than the legacy "agent_error"
 // coarse bucket. Daemon callers that already produced a refined reason
 // (via classifyPoisonedError, the timeout / runtime classifier, etc.)
@@ -2924,35 +2993,46 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// here — before the transaction — and only for retryable failures, so the
 	// common agent_error path skips this work entirely.
 	var (
-		wantRetry        bool
-		retryOverlay     runtimeMCPOverlayData
-		retryFireAt      pgtype.Timestamptz
-		retryMaxAttempts pgtype.Int4
+		wantRetry            bool
+		retryOverlay         runtimeMCPOverlayData
+		retryFireAt          pgtype.Timestamptz
+		retryMaxAttempts     pgtype.Int4
+		requireRuntimeChange bool
+		cooldownUntil        pgtype.Timestamptz
 	)
 	if retryableReasons[failureReason] {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
-			wantRetry = true
-			// Persist the reason-aware effective budget into the child so the
-			// retry chain self-describes (e.g. provider_network → max_attempts=3),
-			// rather than leaking a contradictory attempt=N/max_attempts=2 row.
-			retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
-			// Defer this attempt when the reason's schedule calls for a backoff
-			// (provider_network's final attempt waits ~5s); a zero delay leaves
-			// fire_at NULL so the child is created immediately-claimable.
-			if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
-				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+		} else {
+			retryCeiling := s.retryAttemptCeilingForTask(ctx, failureReason, parent)
+			requireRuntimeChange = providerExhaustionFallbackReason(failureReason)
+			if requireRuntimeChange {
+				cooldownUntil = pgtype.Timestamptz{
+					Time: time.Now().Add(providerFallbackCooldown(failureReason)), Valid: true,
+				}
 			}
-			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
-				// Best-effort: a missing overlay is not retry-fatal — the child
-				// simply runs without the Composio overlay.
-				slog.Warn("fail task auto-retry: load agent for overlay failed",
-					"task_id", util.UUIDToString(taskID),
-					"agent_id", util.UUIDToString(parent.AgentID), "error", aerr)
-			} else {
-				retryOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
+			if retryEligibleAtCeiling(failureReason, parent, retryCeiling) {
+				wantRetry = true
+				// Persist the reason-aware effective budget into the child so the
+				// retry chain self-describes (e.g. provider_network → max_attempts=3),
+				// rather than leaking a contradictory attempt=N/max_attempts=2 row.
+				retryMaxAttempts = pgtype.Int4{Int32: retryCeiling, Valid: true}
+				// Defer this attempt when the reason's schedule calls for a backoff
+				// (provider_network's final attempt waits ~5s); a zero delay leaves
+				// fire_at NULL so the child is created immediately-claimable.
+				if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
+					retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
+				}
+				if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
+					// Best-effort: a missing overlay is not retry-fatal — the child
+					// simply runs without the Composio overlay.
+					slog.Warn("fail task auto-retry: load agent for overlay failed",
+						"task_id", util.UUIDToString(taskID),
+						"agent_id", util.UUIDToString(parent.AgentID), "error", aerr)
+				} else {
+					retryOverlay = s.buildRuntimeMCPOverlay(ctx, parent.OriginatorUserID, agent)
+				}
 			}
 		}
 	}
@@ -2971,6 +3051,14 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			return err
 		}
 		task = t
+		if cooldownUntil.Valid {
+			if _, err := qtx.UpsertAgentRuntimeFallbackCooldown(ctx, db.UpsertAgentRuntimeFallbackCooldownParams{
+				AgentID: t.AgentID, RuntimeID: t.RuntimeID,
+				CooldownUntil: cooldownUntil, FailureReason: failureReason, SourceTaskID: t.ID,
+			}); err != nil {
+				return fmt.Errorf("persist runtime fallback cooldown: %w", err)
+			}
+		}
 
 		// Keep resume-unsafe sessions on the task row for observability, but
 		// do not promote them to the chat-level resume pointer.
@@ -3003,7 +3091,12 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				MaxAttempts:          retryMaxAttempts,
 				RuntimeMcpOverlay:    retryOverlay.Overlay,
 				RuntimeConnectedApps: retryOverlay.ConnectedApps,
+				RequireRuntimeChange: requireRuntimeChange,
 			})
+			if errors.Is(cerr, pgx.ErrNoRows) && requireRuntimeChange {
+				wantRetry = false
+				return nil
+			}
 			if cerr != nil {
 				return fmt.Errorf("create retry task: %w", cerr)
 			}
@@ -3102,8 +3195,12 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// Reconcile agent status
 	s.ReconcileAgentStatus(ctx, task.AgentID)
 
-	// Broadcast
-	s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
+	// Broadcast the failure with enough transition metadata for timeline and
+	// Inbox consumers to explain an automatic cross-runtime continuation.
+	failurePayload := s.broadcastTaskFailureEvent(ctx, task, retried, cooldownUntil)
+	if !task.IssueID.Valid && (retried != nil || providerExhaustionFallbackReason(failureReason)) {
+		s.notifyTaskFallbackInbox(ctx, task, retried, failurePayload)
+	}
 
 	return &task, nil
 }
@@ -3113,20 +3210,18 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 // etc.) are intentionally excluded — those are real problems that the user
 // should see, not infrastructure flakiness.
 //
-// The one agent_error.* exception is provider_network: a mid-stream provider
-// disconnect (e.g. Claude Code's "API Error: Connection closed mid-response")
-// is transient infrastructure flakiness, not an agent decision. Unattended
-// issue runs otherwise terminate on it, while interactive chat only survives
-// because the CLI's own in-process retry happens to recover first — so we make
-// the platform retry it directly (MUL-4910). It is resume-safe (not in
-// resumeUnsafeFailureReason), so the retry child inherits the session and
-// continues the truncated conversation rather than restarting from scratch.
+// The agent_error.* exceptions are narrowly provider-shaped. Network failures
+// use the existing resume-safe retry schedule. Quota and terminal capacity/rate
+// failures require a different configured runtime, cool the failed runtime,
+// and never turn a generic agent failure into a retry.
 var retryableReasons = map[string]bool{
 	"runtime_offline":           true,
 	"runtime_recovery":          true,
 	"timeout":                   true,
 	"codex_semantic_inactivity": true,
-	string(taskfailure.ReasonAgentProviderNetwork): true,
+	string(taskfailure.ReasonAgentProviderNetwork):             true,
+	string(taskfailure.ReasonAgentProviderQuotaLimit):          true,
+	string(taskfailure.ReasonAgentProviderCapacityOrRateLimit): true,
 }
 
 // Transient provider stream cuts (provider_network) get a bespoke three-tier
@@ -3137,7 +3232,43 @@ var retryableReasons = map[string]bool{
 const (
 	providerNetworkMaxAttempts    = 3
 	providerNetworkFinalRetryWait = 5 * time.Second
+	providerQuotaCooldown         = 15 * time.Minute
+	providerCapacityCooldown      = 2 * time.Minute
+	maxFallbackChainAttempts      = 8
 )
+
+func providerExhaustionFallbackReason(reason string) bool {
+	return reason == string(taskfailure.ReasonAgentProviderQuotaLimit) ||
+		reason == string(taskfailure.ReasonAgentProviderCapacityOrRateLimit)
+}
+
+func providerFallbackCooldown(reason string) time.Duration {
+	if reason == string(taskfailure.ReasonAgentProviderQuotaLimit) {
+		return providerQuotaCooldown
+	}
+	return providerCapacityCooldown
+}
+
+func (s *TaskService) retryAttemptCeilingForTask(ctx context.Context, reason string, task db.AgentTaskQueue) int32 {
+	ceiling := retryAttemptCeiling(reason, task.MaxAttempts)
+	if !providerExhaustionFallbackReason(reason) || task.MaxAttempts <= 1 {
+		return ceiling
+	}
+	count, err := s.Queries.CountAgentFallbackRuntimes(ctx, task.AgentID)
+	if err != nil {
+		slog.Warn("task auto-retry: count fallback runtimes failed",
+			"task_id", util.UUIDToString(task.ID), "error", err)
+		return ceiling
+	}
+	chainCeiling := int32(count + 1)
+	if chainCeiling > maxFallbackChainAttempts {
+		chainCeiling = maxFallbackChainAttempts
+	}
+	if chainCeiling > ceiling {
+		return chainCeiling
+	}
+	return ceiling
+}
 
 // retryAttemptCeiling reports how many attempts the auto-retry path allows for
 // a failure reason. It only ever WIDENS the task's generic max_attempts, and
@@ -3211,14 +3342,17 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 
 // retryEligible reports whether a failed task qualifies for an automatic retry
 // attempt: an infrastructure-shaped failure_reason, remaining attempt budget,
-// not an autopilot run, and linked to an issue or chat session. Shared by
-// FailTask's in-transaction retry and the orphan sweeper's MaybeRetryFailedTask
-// so both agree on which failures re-run.
+// and a linked issue, chat session, or autopilot run. Shared by FailTask's
+// in-transaction retry and the orphan sweeper's MaybeRetryFailedTask so both
+// agree on which failures re-run.
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
+	return retryEligibleAtCeiling(failureReason, t, retryAttemptCeiling(failureReason, t.MaxAttempts))
+}
+
+func retryEligibleAtCeiling(failureReason string, t db.AgentTaskQueue, ceiling int32) bool {
 	return retryableReasons[failureReason] &&
-		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
-		!t.AutopilotRunID.Valid &&
-		(t.IssueID.Valid || t.ChatSessionID.Valid)
+		t.Attempt < ceiling &&
+		(t.IssueID.Valid || t.ChatSessionID.Valid || t.AutopilotRunID.Valid)
 }
 
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
@@ -3229,8 +3363,8 @@ func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 // the agent can resume the conversation when the backend supports it. Returns
 // the new task, or nil when no retry was created.
 //
-// Autopilot tasks are NOT auto-retried here; the autopilot scheduler owns
-// its own re-run cadence and we don't want to double-fire it.
+// Autopilot tasks use this same bounded retry path. SyncRunFromTask defers run
+// reconciliation while the retry child is active, preventing a double-fire.
 func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentTaskQueue) (*db.AgentTaskQueue, error) {
 	if parent.Status != "failed" {
 		return nil, nil
@@ -3247,19 +3381,19 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// allowed its deferred 3rd attempt (retryAttemptCeiling raises the ceiling
 	// to 3). Kept in sync with retryEligible below, which applies the same
 	// ceiling to the primary FailTask path.
-	if parent.Attempt >= retryAttemptCeiling(reason, parent.MaxAttempts) {
+	retryCeiling := s.retryAttemptCeilingForTask(ctx, reason, parent)
+	if parent.Attempt >= retryCeiling {
 		slog.Info("task auto-retry skipped: budget exhausted",
 			"task_id", util.UUIDToString(parent.ID),
 			"attempt", parent.Attempt,
 			"max_attempts", parent.MaxAttempts,
-			"ceiling", retryAttemptCeiling(reason, parent.MaxAttempts),
+			"ceiling", retryCeiling,
 		)
 		return nil, nil
 	}
-	// Autopilot has its own retry semantics (don't double-trigger) and a task
-	// with no issue/chat link has nowhere to report its retry — retryEligible
-	// covers both, keeping this sweeper path in sync with FailTask's in-tx retry.
-	if !retryEligible(reason, parent) {
+	// Tasks without an issue, chat, or autopilot link have nowhere to report
+	// their retry. Keep this sweeper path in sync with FailTask's in-tx retry.
+	if !retryEligibleAtCeiling(reason, parent, retryCeiling) {
 		return nil, nil
 	}
 
@@ -3288,10 +3422,14 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	child, err := s.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 		ID:                   parent.ID,
 		FireAt:               retryFireAt,
-		MaxAttempts:          pgtype.Int4{Int32: retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
+		MaxAttempts:          pgtype.Int4{Int32: retryCeiling, Valid: true},
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
+		RequireRuntimeChange: providerExhaustionFallbackReason(reason),
 	})
+	if errors.Is(err, pgx.ErrNoRows) && providerExhaustionFallbackReason(reason) {
+		return nil, nil
+	}
 	if err != nil {
 		slog.Warn("task auto-retry failed",
 			"parent_task_id", util.UUIDToString(parent.ID),
@@ -4013,6 +4151,99 @@ func (s *TaskService) broadcastTaskEvent(ctx context.Context, eventType string, 
 		ActorID:     "",
 		Payload:     payload,
 	})
+}
+
+func (s *TaskService) broadcastTaskFailureEvent(ctx context.Context, task db.AgentTaskQueue, retried *db.AgentTaskQueue, cooldownUntil pgtype.Timestamptz) map[string]any {
+	payload := map[string]any{
+		"task_id":           util.UUIDToString(task.ID),
+		"agent_id":          util.UUIDToString(task.AgentID),
+		"issue_id":          util.UUIDToString(task.IssueID),
+		"status":            task.Status,
+		"failure_reason":    taskFailureReason(task),
+		"source_runtime_id": util.UUIDToString(task.RuntimeID),
+		"attempt":           task.Attempt,
+		"max_attempts":      task.MaxAttempts,
+	}
+	if task.ChatSessionID.Valid {
+		payload["chat_session_id"] = util.UUIDToString(task.ChatSessionID)
+	}
+	if runtime, err := s.Queries.GetAgentRuntime(ctx, task.RuntimeID); err == nil {
+		payload["source_runtime_name"] = runtime.Name
+		payload["source_runtime_provider"] = runtime.Provider
+	}
+	if cooldownUntil.Valid {
+		payload["cooldown_until"] = cooldownUntil.Time.UTC().Format(time.RFC3339)
+	}
+	if retried != nil {
+		payload["fallback_task_id"] = util.UUIDToString(retried.ID)
+		payload["fallback_attempt"] = retried.Attempt
+		payload["destination_runtime_id"] = util.UUIDToString(retried.RuntimeID)
+		if runtime, err := s.Queries.GetAgentRuntime(ctx, retried.RuntimeID); err == nil {
+			payload["destination_runtime_name"] = runtime.Name
+			payload["destination_runtime_provider"] = runtime.Provider
+		}
+	} else if providerExhaustionFallbackReason(taskFailureReason(task)) {
+		payload["fallback_exhausted"] = true
+	}
+
+	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
+	if workspaceID != "" {
+		s.Bus.Publish(events.Event{
+			Type: protocol.EventTaskFailed, WorkspaceID: workspaceID,
+			ActorType: "system", Payload: payload,
+		})
+	}
+	return payload
+}
+
+func (s *TaskService) notifyTaskFallbackInbox(ctx context.Context, task db.AgentTaskQueue, retried *db.AgentTaskQueue, payload map[string]any) {
+	recipientID := task.AccountableUserID
+	if !recipientID.Valid {
+		recipientID = task.OriginatorUserID
+	}
+	agent, err := s.Queries.GetAgent(ctx, task.AgentID)
+	if err != nil {
+		return
+	}
+	if !recipientID.Valid {
+		recipientID = agent.OwnerID
+	}
+	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
+	if workspaceID == "" || !recipientID.Valid {
+		return
+	}
+	workspaceUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return
+	}
+
+	reason := taskFailureReason(task)
+	title := agent.Name + " exhausted a provider runtime"
+	body := reason
+	severity := "action_required"
+	if retried != nil {
+		title = agent.Name + " switched to a fallback runtime"
+		severity = "info"
+		source, _ := payload["source_runtime_name"].(string)
+		destination, _ := payload["destination_runtime_name"].(string)
+		body = fmt.Sprintf("%s failed with %s; continuing on %s", source, reason, destination)
+	}
+	details, _ := json.Marshal(payload)
+	item, err := s.Queries.CreateTaskInboxItemOnce(ctx, db.CreateTaskInboxItemOnceParams{
+		WorkspaceID: workspaceUUID, RecipientType: "member", RecipientID: recipientID,
+		Type: "task_fallback", Severity: severity, IssueID: task.IssueID,
+		Title: title, Body: pgtype.Text{String: body, Valid: body != ""},
+		ActorType: pgtype.Text{String: "agent", Valid: true}, ActorID: task.AgentID,
+		Details: details,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return
+	}
+	if err != nil {
+		slog.Warn("task fallback inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	s.publishQuickCreateInbox(item, workspaceID, util.UUIDToString(task.AgentID), "")
 }
 
 // ResolveTaskWorkspaceID determines the workspace ID for a task.

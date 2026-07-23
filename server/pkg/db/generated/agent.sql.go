@@ -11,6 +11,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const addAgentFallbackRuntime = `-- name: AddAgentFallbackRuntime :exec
+INSERT INTO agent_fallback_runtime (agent_id, runtime_id, priority)
+SELECT $1, $2, $3
+FROM agent a
+JOIN agent_runtime ar ON ar.id = $2 AND ar.workspace_id = a.workspace_id
+WHERE a.id = $1
+`
+
+type AddAgentFallbackRuntimeParams struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+	Priority  int32       `json:"priority"`
+}
+
+func (q *Queries) AddAgentFallbackRuntime(ctx context.Context, arg AddAgentFallbackRuntimeParams) error {
+	_, err := q.db.Exec(ctx, addAgentFallbackRuntime, arg.AgentID, arg.RuntimeID, arg.Priority)
+	return err
+}
+
 const archiveAgent = `-- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
@@ -1121,6 +1140,27 @@ func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agen
 	return i, err
 }
 
+const clearAgentRuntimeFallbackCooldown = `-- name: ClearAgentRuntimeFallbackCooldown :exec
+DELETE FROM agent_runtime_fallback_cooldown
+WHERE agent_id = $1
+  AND runtime_id = $2
+  AND (
+    cooldown_until <= now()
+    OR updated_at <= $3
+  )
+`
+
+type ClearAgentRuntimeFallbackCooldownParams struct {
+	AgentID                 pgtype.UUID        `json:"agent_id"`
+	RuntimeID               pgtype.UUID        `json:"runtime_id"`
+	SuccessfulTaskStartedAt pgtype.Timestamptz `json:"successful_task_started_at"`
+}
+
+func (q *Queries) ClearAgentRuntimeFallbackCooldown(ctx context.Context, arg ClearAgentRuntimeFallbackCooldownParams) error {
+	_, err := q.db.Exec(ctx, clearAgentRuntimeFallbackCooldown, arg.AgentID, arg.RuntimeID, arg.SuccessfulTaskStartedAt)
+	return err
+}
+
 const clearAgentThinkingLevel = `-- name: ClearAgentThinkingLevel :one
 UPDATE agent SET thinking_level = NULL, updated_at = now()
 WHERE id = $1
@@ -1237,6 +1277,18 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 		&i.AccountableUserID,
 	)
 	return i, err
+}
+
+const countAgentFallbackRuntimes = `-- name: CountAgentFallbackRuntimes :one
+SELECT count(*) FROM agent_fallback_runtime
+WHERE agent_id = $1
+`
+
+func (q *Queries) CountAgentFallbackRuntimes(ctx context.Context, agentID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countAgentFallbackRuntimes, agentID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countRunningTasks = `-- name: CountRunningTasks :one
@@ -1788,6 +1840,46 @@ func (q *Queries) CreateQuickCreateTask(ctx context.Context, arg CreateQuickCrea
 }
 
 const createRetryTask = `-- name: CreateRetryTask :one
+WITH RECURSIVE retry_ancestry AS (
+    SELECT task.id, task.parent_task_id, task.runtime_id, 1 AS depth, ARRAY[task.id] AS path
+    FROM agent_task_queue task
+    WHERE task.id = $6
+    UNION ALL
+    SELECT parent.id, parent.parent_task_id, parent.runtime_id, ancestry.depth + 1,
+           ancestry.path || parent.id
+    FROM agent_task_queue parent
+    JOIN retry_ancestry ancestry ON parent.id = ancestry.parent_task_id
+    WHERE ancestry.depth < 8 AND NOT parent.id = ANY(ancestry.path)
+),
+next_runtime AS (
+    SELECT afr.runtime_id
+    FROM agent_task_queue parent
+    JOIN agent_fallback_runtime afr ON afr.agent_id = parent.agent_id
+    JOIN agent_runtime runtime ON runtime.id = afr.runtime_id AND runtime.status = 'online'
+    -- Retry children inherit parent.work_dir. Only another provider runtime on
+    -- the same registered daemon can truthfully access that host-local path.
+    JOIN agent_runtime parent_runtime ON parent_runtime.id = parent.runtime_id
+    LEFT JOIN agent_runtime_fallback_cooldown cooldown
+      ON cooldown.agent_id = afr.agent_id
+     AND cooldown.runtime_id = afr.runtime_id
+     AND cooldown.cooldown_until > now()
+    WHERE parent.id = $6
+      AND runtime.daemon_id IS NOT NULL
+      AND runtime.daemon_id = parent_runtime.daemon_id
+      AND cooldown.agent_id IS NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM retry_ancestry attempted
+          WHERE attempted.runtime_id = afr.runtime_id
+      )
+    ORDER BY afr.priority ASC
+    LIMIT 1
+),
+retry_source AS (
+    SELECT parent.id, parent.agent_id, parent.issue_id, parent.status, parent.priority, parent.dispatched_at, parent.started_at, parent.completed_at, parent.result, parent.error, parent.created_at, parent.context, parent.runtime_id, parent.session_id, parent.work_dir, parent.trigger_comment_id, parent.chat_session_id, parent.autopilot_run_id, parent.attempt, parent.max_attempts, parent.parent_task_id, parent.failure_reason, parent.trigger_summary, parent.force_fresh_session, parent.is_leader_task, parent.wait_reason, parent.initiator_user_id, parent.handoff_note, parent.prepare_lease_expires_at, parent.squad_id, parent.runtime_mcp_overlay, parent.escalation_for_task_id, parent.fire_at, parent.originator_user_id, parent.runtime_connected_apps, parent.coalesced_comment_ids, parent.delivered_comment_ids, parent.chat_input_task_id, parent.chat_finalize_deferred_at, parent.originator_source, parent.delegated_from_task_id, parent.retry_of_task_id, parent.rerun_of_task_id, parent.rule_version_id, parent.trigger_evidence_kind, parent.trigger_evidence_ref_id, parent.accountable_user_id, next_runtime.runtime_id AS next_runtime_id
+    FROM agent_task_queue parent
+    LEFT JOIN next_runtime ON true
+    WHERE parent.id = $6
+)
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id, autopilot_run_id,
     status, priority, trigger_comment_id, coalesced_comment_ids, trigger_summary, context,
@@ -1799,34 +1891,37 @@ INSERT INTO agent_task_queue (
     chat_input_task_id, fire_at
 )
 SELECT
-    p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
-    CASE WHEN $2::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
+    p.agent_id,
+    COALESCE(p.next_runtime_id, p.runtime_id),
+    p.issue_id, p.chat_session_id, p.autopilot_run_id,
+    CASE WHEN $1::timestamptz IS NOT NULL THEN 'deferred' ELSE 'queued' END,
     CASE WHEN p.chat_session_id IS NOT NULL THEN GREATEST(p.priority, 3) ELSE p.priority END,
     p.trigger_comment_id, p.coalesced_comment_ids, p.trigger_summary, p.context,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.session_id END,
     CASE WHEN p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity' THEN NULL ELSE p.work_dir END,
-    p.attempt + 1, COALESCE($3::int, p.max_attempts), p.id,
+    p.attempt + 1, COALESCE($2::int, p.max_attempts), p.id,
     p.failure_reason IS NOT DISTINCT FROM 'codex_semantic_inactivity',
     p.is_leader_task,
     p.squad_id,
     p.originator_user_id,
     p.accountable_user_id,
+    $3,
     $4,
-    $5,
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
-    p.chat_input_task_id, $2
-FROM agent_task_queue p
-WHERE p.id = $1
+    p.chat_input_task_id, $1
+FROM retry_source p
+WHERE NOT $5::boolean OR p.next_runtime_id IS NOT NULL
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id
 `
 
 type CreateRetryTaskParams struct {
-	ID                   pgtype.UUID        `json:"id"`
 	FireAt               pgtype.Timestamptz `json:"fire_at"`
 	MaxAttempts          pgtype.Int4        `json:"max_attempts"`
 	RuntimeMcpOverlay    []byte             `json:"runtime_mcp_overlay"`
 	RuntimeConnectedApps []byte             `json:"runtime_connected_apps"`
+	RequireRuntimeChange bool               `json:"require_runtime_change"`
+	ID                   pgtype.UUID        `json:"id"`
 }
 
 // Clones a parent task into a fresh queued attempt. Carries forward the
@@ -1883,11 +1978,12 @@ type CreateRetryTaskParams struct {
 // disabled (max_attempts<=1) task, so this only ever widens, never revives.
 func (q *Queries) CreateRetryTask(ctx context.Context, arg CreateRetryTaskParams) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, createRetryTask,
-		arg.ID,
 		arg.FireAt,
 		arg.MaxAttempts,
 		arg.RuntimeMcpOverlay,
 		arg.RuntimeConnectedApps,
+		arg.RequireRuntimeChange,
+		arg.ID,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -1942,9 +2038,29 @@ func (q *Queries) CreateRetryTask(ctx context.Context, arg CreateRetryTaskParams
 	return i, err
 }
 
+const deleteAgentFallbackRuntimes = `-- name: DeleteAgentFallbackRuntimes :exec
+DELETE FROM agent_fallback_runtime WHERE agent_id = $1
+`
+
+func (q *Queries) DeleteAgentFallbackRuntimes(ctx context.Context, agentID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAgentFallbackRuntimes, agentID)
+	return err
+}
+
 const deleteSystemAgentByID = `-- name: DeleteSystemAgentByID :exec
-DELETE FROM agent
-WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%'
+WITH target AS (
+    SELECT agent.id FROM agent
+    WHERE agent.id = $1 AND agent.kind = 'system' AND agent.system_key LIKE 'agent_builder:%'
+),
+cleared_fallback_cooldowns AS (
+    DELETE FROM agent_runtime_fallback_cooldown
+    WHERE agent_runtime_fallback_cooldown.agent_id IN (SELECT target.id FROM target)
+),
+cleared_fallback_runtimes AS (
+    DELETE FROM agent_fallback_runtime
+    WHERE agent_fallback_runtime.agent_id IN (SELECT target.id FROM target)
+)
+DELETE FROM agent WHERE agent.id IN (SELECT target.id FROM target)
 `
 
 // Builder sessions own their hidden execution agent. Deleting the session
@@ -2542,6 +2658,31 @@ func (q *Queries) GetAgentInWorkspace(ctx context.Context, arg GetAgentInWorkspa
 	return i, err
 }
 
+const getAgentRuntimeFallbackCooldown = `-- name: GetAgentRuntimeFallbackCooldown :one
+SELECT agent_id, runtime_id, cooldown_until, failure_reason, source_task_id, created_at, updated_at FROM agent_runtime_fallback_cooldown
+WHERE agent_id = $1 AND runtime_id = $2
+`
+
+type GetAgentRuntimeFallbackCooldownParams struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+func (q *Queries) GetAgentRuntimeFallbackCooldown(ctx context.Context, arg GetAgentRuntimeFallbackCooldownParams) (AgentRuntimeFallbackCooldown, error) {
+	row := q.db.QueryRow(ctx, getAgentRuntimeFallbackCooldown, arg.AgentID, arg.RuntimeID)
+	var i AgentRuntimeFallbackCooldown
+	err := row.Scan(
+		&i.AgentID,
+		&i.RuntimeID,
+		&i.CooldownUntil,
+		&i.FailureReason,
+		&i.SourceTaskID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAgentTask = `-- name: GetAgentTask :one
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id FROM agent_task_queue
 WHERE id = $1
@@ -2801,6 +2942,39 @@ func (q *Queries) GetLatestTaskRoleForIssueAndAgent(ctx context.Context, arg Get
 	return i, err
 }
 
+const getNextFallbackRuntime = `-- name: GetNextFallbackRuntime :one
+SELECT afr.runtime_id
+FROM agent_fallback_runtime afr
+JOIN agent_runtime ar ON ar.id = afr.runtime_id
+LEFT JOIN agent_runtime_fallback_cooldown cooldown
+  ON cooldown.agent_id = afr.agent_id
+ AND cooldown.runtime_id = afr.runtime_id
+ AND cooldown.cooldown_until > now()
+WHERE afr.agent_id = $1
+  AND afr.runtime_id <> $2
+  AND ar.status = 'online'
+  AND cooldown.agent_id IS NULL
+  AND afr.priority > COALESCE((
+    SELECT current.priority FROM agent_fallback_runtime current
+    WHERE current.agent_id = $1
+      AND current.runtime_id = $2
+  ), -1)
+ORDER BY afr.priority ASC
+LIMIT 1
+`
+
+type GetNextFallbackRuntimeParams struct {
+	AgentID          pgtype.UUID `json:"agent_id"`
+	CurrentRuntimeID pgtype.UUID `json:"current_runtime_id"`
+}
+
+func (q *Queries) GetNextFallbackRuntime(ctx context.Context, arg GetNextFallbackRuntimeParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getNextFallbackRuntime, arg.AgentID, arg.CurrentRuntimeID)
+	var runtime_id pgtype.UUID
+	err := row.Scan(&runtime_id)
+	return runtime_id, err
+}
+
 const getWorkspaceAgentActivity30d = `-- name: GetWorkspaceAgentActivity30d :many
 SELECT
     atq.agent_id,
@@ -2900,6 +3074,21 @@ func (q *Queries) GetWorkspaceAgentRunCounts(ctx context.Context, workspaceID pg
 		return nil, err
 	}
 	return items, nil
+}
+
+const hasActiveRetryTask = `-- name: HasActiveRetryTask :one
+SELECT EXISTS (
+  SELECT 1 FROM agent_task_queue
+  WHERE parent_task_id = $1
+    AND status IN ('deferred', 'queued', 'dispatched', 'running', 'waiting_local_directory')
+)
+`
+
+func (q *Queries) HasActiveRetryTask(ctx context.Context, parentTaskID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveRetryTask, parentTaskID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const hasActiveTaskForIssue = `-- name: HasActiveTaskForIssue :one
@@ -3024,6 +3213,27 @@ func (q *Queries) HasPendingTaskForIssueAndAgentExcludingTriggerComment(ctx cont
 	var has_pending bool
 	err := row.Scan(&has_pending)
 	return has_pending, err
+}
+
+const isAgentRuntimeFallbackCoolingDown = `-- name: IsAgentRuntimeFallbackCoolingDown :one
+SELECT EXISTS (
+  SELECT 1 FROM agent_runtime_fallback_cooldown
+  WHERE agent_id = $1
+    AND runtime_id = $2
+    AND cooldown_until > now()
+)
+`
+
+type IsAgentRuntimeFallbackCoolingDownParams struct {
+	AgentID   pgtype.UUID `json:"agent_id"`
+	RuntimeID pgtype.UUID `json:"runtime_id"`
+}
+
+func (q *Queries) IsAgentRuntimeFallbackCoolingDown(ctx context.Context, arg IsAgentRuntimeFallbackCoolingDownParams) (bool, error) {
+	row := q.db.QueryRow(ctx, isAgentRuntimeFallbackCoolingDown, arg.AgentID, arg.RuntimeID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
@@ -3242,6 +3452,32 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentFallbackRuntimeIDs = `-- name: ListAgentFallbackRuntimeIDs :many
+SELECT runtime_id FROM agent_fallback_runtime
+WHERE agent_id = $1
+ORDER BY priority ASC
+`
+
+func (q *Queries) ListAgentFallbackRuntimeIDs(ctx context.Context, agentID pgtype.UUID) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAgentFallbackRuntimeIDs, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var runtime_id pgtype.UUID
+		if err := rows.Scan(&runtime_id); err != nil {
+			return nil, err
+		}
+		items = append(items, runtime_id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -5183,4 +5419,48 @@ type UpdateAgentTaskSessionParams struct {
 func (q *Queries) UpdateAgentTaskSession(ctx context.Context, arg UpdateAgentTaskSessionParams) error {
 	_, err := q.db.Exec(ctx, updateAgentTaskSession, arg.ID, arg.SessionID, arg.WorkDir)
 	return err
+}
+
+const upsertAgentRuntimeFallbackCooldown = `-- name: UpsertAgentRuntimeFallbackCooldown :one
+INSERT INTO agent_runtime_fallback_cooldown (
+    agent_id, runtime_id, cooldown_until, failure_reason, source_task_id
+) VALUES (
+    $1, $2, $3,
+    $4, $5
+)
+ON CONFLICT (agent_id, runtime_id) DO UPDATE SET
+    cooldown_until = GREATEST(agent_runtime_fallback_cooldown.cooldown_until, EXCLUDED.cooldown_until),
+    failure_reason = EXCLUDED.failure_reason,
+    source_task_id = EXCLUDED.source_task_id,
+    updated_at = now()
+RETURNING agent_id, runtime_id, cooldown_until, failure_reason, source_task_id, created_at, updated_at
+`
+
+type UpsertAgentRuntimeFallbackCooldownParams struct {
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	RuntimeID     pgtype.UUID        `json:"runtime_id"`
+	CooldownUntil pgtype.Timestamptz `json:"cooldown_until"`
+	FailureReason string             `json:"failure_reason"`
+	SourceTaskID  pgtype.UUID        `json:"source_task_id"`
+}
+
+func (q *Queries) UpsertAgentRuntimeFallbackCooldown(ctx context.Context, arg UpsertAgentRuntimeFallbackCooldownParams) (AgentRuntimeFallbackCooldown, error) {
+	row := q.db.QueryRow(ctx, upsertAgentRuntimeFallbackCooldown,
+		arg.AgentID,
+		arg.RuntimeID,
+		arg.CooldownUntil,
+		arg.FailureReason,
+		arg.SourceTaskID,
+	)
+	var i AgentRuntimeFallbackCooldown
+	err := row.Scan(
+		&i.AgentID,
+		&i.RuntimeID,
+		&i.CooldownUntil,
+		&i.FailureReason,
+		&i.SourceTaskID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }

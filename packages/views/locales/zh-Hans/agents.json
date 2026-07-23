@@ -60,6 +60,13 @@
     "agent_count_other": "{{count}} 个智能体",
     "empty": "还没有机器"
   },
+  "fallback_runtime_picker": {
+    "label": "备用运行时",
+    "mine": "我的运行时",
+    "all": "全部运行时",
+    "add": "添加备用运行时",
+    "empty": "没有可用的运行时。"
+  },
   "columns": {
     "agent": "智能体",
     "status": "状态",

@@ -72,6 +72,7 @@ func TestClassifyRules(t *testing.T) {
 		{"hit your limit curly", "you\u2019ve hit your limit", ReasonAgentProviderQuotaLimit},
 		{"credits", "Your account has 0 credits remaining", ReasonAgentProviderQuotaLimit},
 		{"quota", "quota exceeded for project foo", ReasonAgentProviderQuotaLimit},
+		{"credits exhausted", "provider credits exhausted", ReasonAgentProviderQuotaLimit},
 
 		// 5. Capacity / rate limit.
 		{"429", "API Error: 429 Too Many Requests", ReasonAgentProviderCapacityOrRateLimit},
@@ -161,6 +162,20 @@ func TestClassifyRules(t *testing.T) {
 				t.Fatalf("Classify(%q) = %q, want %q", c.in, got, c.want)
 			}
 		})
+	}
+}
+
+func TestClassifyDoesNotTreatOrdinaryQuotaWordsAsProviderExhaustion(t *testing.T) {
+	t.Parallel()
+
+	for _, in := range []string{
+		"The issue asks us to document the quota policy",
+		"Please compare credits across provider plans",
+		"Added a quota field to the settings form",
+	} {
+		if got := Classify(in); got == ReasonAgentProviderQuotaLimit {
+			t.Errorf("Classify(%q) = provider quota limit", in)
+		}
 	}
 }
 

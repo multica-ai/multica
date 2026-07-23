@@ -1106,6 +1106,32 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
+  it("renders cross-runtime fallback transitions in issue history", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-runtime-fallback",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        action: "task_failed",
+        details: {
+          failure_reason: "agent_error.provider_quota_limit",
+          source_runtime_name: "Codex primary",
+          destination_runtime_name: "Claude fallback",
+        },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText(
+        "moved the task from Codex primary to Claude fallback after agent_error.provider_quota_limit",
+      )).toBeInTheDocument();
+    });
+  });
+
   it("truncates the trailing activity block to the most recent 8 entries with a show-more toggle", async () => {
     // 10 activities, all in the trailing block (no comment after them, so it's
     // the trailing block by definition). Alternating action types so the

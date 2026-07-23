@@ -53,6 +53,13 @@ type Agent struct {
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 }
 
+type AgentFallbackRuntime struct {
+	AgentID   pgtype.UUID        `json:"agent_id"`
+	RuntimeID pgtype.UUID        `json:"runtime_id"`
+	Priority  int32              `json:"priority"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 // Allow-list of who may invoke a public_to agent (MUL-3963). One row per (agent, target_type, target); targets stack and canInvokeAgent OR-matches. workspace rows store the agent workspace_id in target_id; member rows store the user id; team rows are reserved and inert in V1. Rows only matter when agent.permission_mode = public_to. No DB foreign keys: agent_id / created_by / member target_id relationships are maintained in the application layer (see migration comment).
 type AgentInvocationTarget struct {
 	ID         pgtype.UUID        `json:"id"`
@@ -81,6 +88,16 @@ type AgentRuntime struct {
 	Visibility     string             `json:"visibility"`
 	ProfileID      pgtype.UUID        `json:"profile_id"`
 	CustomName     pgtype.Text        `json:"custom_name"`
+}
+
+type AgentRuntimeFallbackCooldown struct {
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	RuntimeID     pgtype.UUID        `json:"runtime_id"`
+	CooldownUntil pgtype.Timestamptz `json:"cooldown_until"`
+	FailureReason string             `json:"failure_reason"`
+	SourceTaskID  pgtype.UUID        `json:"source_task_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
 type AgentSkill struct {

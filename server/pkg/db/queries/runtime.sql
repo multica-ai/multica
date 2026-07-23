@@ -234,7 +234,7 @@ UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
     failure_reason = 'runtime_offline',
     wait_reason = NULL
-WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
+WHERE status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
   AND runtime_id IN (
     SELECT id FROM agent_runtime WHERE status = 'offline'
   )
@@ -280,6 +280,22 @@ RETURNING *;
 
 -- name: DeleteAgentRuntime :exec
 DELETE FROM agent_runtime WHERE id = $1;
+
+-- name: DeleteFallbackCooldownsForRuntimeTeardown :exec
+DELETE FROM agent_runtime_fallback_cooldown
+WHERE agent_runtime_fallback_cooldown.runtime_id = $1
+   OR agent_runtime_fallback_cooldown.agent_id IN (
+       SELECT agent.id FROM agent
+       WHERE agent.runtime_id = $1 AND (agent.archived_at IS NOT NULL OR agent.kind = 'system')
+   );
+
+-- name: DeleteFallbackRuntimesForRuntimeTeardown :exec
+DELETE FROM agent_fallback_runtime
+WHERE agent_fallback_runtime.runtime_id = $1
+   OR agent_fallback_runtime.agent_id IN (
+       SELECT agent.id FROM agent
+       WHERE agent.runtime_id = $1 AND (agent.archived_at IS NOT NULL OR agent.kind = 'system')
+   );
 
 -- name: DeleteSystemAgentsByRuntime :exec
 -- System agents are invisible execution infrastructure (for example the Agent

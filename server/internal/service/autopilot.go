@@ -1003,6 +1003,17 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 	if !task.AutopilotRunID.Valid {
 		return
 	}
+	if task.Status == "failed" {
+		hasRetry, err := s.Queries.HasActiveRetryTask(ctx, task.ID)
+		if err != nil {
+			slog.Warn("failed to check active autopilot retry",
+				"task_id", util.UUIDToString(task.ID), "error", err)
+			return
+		}
+		if hasRetry {
+			return
+		}
+	}
 
 	run, err := s.Queries.GetAutopilotRun(ctx, task.AutopilotRunID)
 	if err != nil {

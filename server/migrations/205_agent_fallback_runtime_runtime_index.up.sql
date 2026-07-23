@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY idx_agent_fallback_runtime_runtime ON agent_fallback_runtime(runtime_id);

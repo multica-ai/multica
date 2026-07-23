@@ -35,17 +35,18 @@ import (
 const maxAgentDescriptionLength = 255
 
 type AgentResponse struct {
-	ID            string          `json:"id"`
-	WorkspaceID   string          `json:"workspace_id"`
-	RuntimeID     string          `json:"runtime_id"`
-	Name          string          `json:"name"`
-	Description   string          `json:"description"`
-	Instructions  string          `json:"instructions"`
-	AvatarURL     *string         `json:"avatar_url"`
-	RuntimeMode   string          `json:"runtime_mode"`
-	RuntimeConfig any             `json:"runtime_config"`
-	CustomArgs    []string        `json:"custom_args"`
-	McpConfig     json.RawMessage `json:"mcp_config"`
+	ID                 string          `json:"id"`
+	WorkspaceID        string          `json:"workspace_id"`
+	RuntimeID          string          `json:"runtime_id"`
+	FallbackRuntimeIDs []string        `json:"fallback_runtime_ids"`
+	Name               string          `json:"name"`
+	Description        string          `json:"description"`
+	Instructions       string          `json:"instructions"`
+	AvatarURL          *string         `json:"avatar_url"`
+	RuntimeMode        string          `json:"runtime_mode"`
+	RuntimeConfig      any             `json:"runtime_config"`
+	CustomArgs         []string        `json:"custom_args"`
+	McpConfig          json.RawMessage `json:"mcp_config"`
 	// custom_env is intentionally NOT serialized on agent resources. The
 	// agent_list/get/create/update/archive/restore responses and WS events
 	// only expose coarse metadata (has_custom_env, custom_env_key_count) so
@@ -184,6 +185,65 @@ func agentToResponse(a db.Agent) AgentResponse {
 	}
 }
 
+func (h *Handler) enrichAgentResponseWithFallbacks(ctx context.Context, resp *AgentResponse, agentID pgtype.UUID) error {
+	runtimeIDs, err := h.Queries.ListAgentFallbackRuntimeIDs(ctx, agentID)
+	if err != nil {
+		return err
+	}
+	resp.FallbackRuntimeIDs = make([]string, 0, len(runtimeIDs))
+	for _, runtimeID := range runtimeIDs {
+		resp.FallbackRuntimeIDs = append(resp.FallbackRuntimeIDs, uuidToString(runtimeID))
+	}
+	return nil
+}
+
+var errFallbackRuntimeForbidden = errors.New("fallback runtime is private")
+
+func (h *Handler) validateFallbackRuntimes(ctx context.Context, member db.Member, workspaceID, primaryRuntimeID pgtype.UUID, runtimeIDs []string) error {
+	seen := make(map[string]struct{}, len(runtimeIDs))
+	for _, id := range runtimeIDs {
+		var runtimeID pgtype.UUID
+		if err := runtimeID.Scan(id); err != nil || !runtimeID.Valid {
+			return fmt.Errorf("invalid fallback runtime id %q", id)
+		}
+		if id == uuidToString(primaryRuntimeID) {
+			return errors.New("fallback runtime cannot match primary runtime")
+		}
+		if _, exists := seen[id]; exists {
+			return fmt.Errorf("duplicate fallback runtime %q", id)
+		}
+		seen[id] = struct{}{}
+		runtime, err := h.Queries.GetAgentRuntimeForWorkspace(ctx, db.GetAgentRuntimeForWorkspaceParams{
+			ID: runtimeID, WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			return fmt.Errorf("fallback runtime %q is not in this workspace", id)
+		}
+		if !canUseRuntimeForAgent(member, runtime) {
+			return fmt.Errorf("%w: %q can only be used by its owner or a workspace admin", errFallbackRuntimeForbidden, id)
+		}
+	}
+	return nil
+}
+
+func (h *Handler) replaceAgentFallbackRuntimes(ctx context.Context, agentID pgtype.UUID, runtimeIDs []string) error {
+	return replaceAgentFallbackRuntimesWithQueries(ctx, h.Queries, agentID, runtimeIDs)
+}
+
+func replaceAgentFallbackRuntimesWithQueries(ctx context.Context, queries *db.Queries, agentID pgtype.UUID, runtimeIDs []string) error {
+	if err := queries.DeleteAgentFallbackRuntimes(ctx, agentID); err != nil {
+		return err
+	}
+	for priority, id := range runtimeIDs {
+		if err := queries.AddAgentFallbackRuntime(ctx, db.AddAgentFallbackRuntimeParams{
+			AgentID: agentID, RuntimeID: parseUUID(id), Priority: int32(priority),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // maskGatewayToken replaces runtime_config.gateway.token with the public
 // mask sentinel when a non-empty value is present. No-op for any other
 // shape so non-openclaw / non-gateway agents pass through untouched.
@@ -266,6 +326,16 @@ type ProjectResourceData struct {
 // while sharing the canonical JSON shape with the runtime app metadata package.
 type ConnectedAppData = runtimeapps.ConnectedApp
 
+// FallbackTranscriptData is a provider-neutral transcript from the failed
+// parent task. It is sent only when an automatic retry moves to a different
+// runtime owned by the same user; the daemon materialises it as a file and
+// injects only the file pointer, never the transcript contents, into the brief.
+type FallbackTranscriptData struct {
+	SourceTaskID string                        `json:"source_task_id"`
+	Messages     []protocol.TaskMessagePayload `json:"messages"`
+	Truncated    bool                          `json:"truncated,omitempty"`
+}
+
 type AgentTaskResponse struct {
 	ID          string `json:"id"`
 	AgentID     string `json:"agent_id"`
@@ -277,31 +347,32 @@ type AgentTaskResponse struct {
 	// as `## Workspace Context` so every agent running in this workspace —
 	// regardless of issue / chat / autopilot / quick-create — sees the same
 	// shared context. Empty when the workspace owner hasn't set it.
-	WorkspaceContext   string                `json:"workspace_context,omitempty"`
-	ThreadName         string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
-	Status             string                `json:"status"`
-	Priority           int32                 `json:"priority"`
-	DispatchedAt       *string               `json:"dispatched_at"`
-	StartedAt          *string               `json:"started_at"`
-	CompletedAt        *string               `json:"completed_at"`
-	Result             any                   `json:"result"`
-	Error              *string               `json:"error"`
-	FailureReason      string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt            int32                 `json:"attempt"`
-	MaxAttempts        int32                 `json:"max_attempts"`
-	ParentTaskID       *string               `json:"parent_task_id,omitempty"`
-	IsLeaderTask       bool                  `json:"is_leader_task,omitempty"`
-	Agent              *TaskAgentData        `json:"agent,omitempty"`
-	ConnectedApps      []ConnectedAppData    `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
-	Repos              []RepoData            `json:"repos,omitempty"`
-	ProjectID          string                `json:"project_id,omitempty"`          // issue's project, when present
-	ProjectTitle       string                `json:"project_title,omitempty"`       // for surfacing in agent context
-	ProjectDescription string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
-	ProjectResources   []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
-	CreatedAt          string                `json:"created_at"`
-	PriorSessionID     string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
-	PriorWorkDir       string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
-	WorkDir            string                `json:"work_dir,omitempty"`         // local working directory pinned for this task; populated once the daemon reports it
+	WorkspaceContext   string                  `json:"workspace_context,omitempty"`
+	ThreadName         string                  `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	Status             string                  `json:"status"`
+	Priority           int32                   `json:"priority"`
+	DispatchedAt       *string                 `json:"dispatched_at"`
+	StartedAt          *string                 `json:"started_at"`
+	CompletedAt        *string                 `json:"completed_at"`
+	Result             any                     `json:"result"`
+	Error              *string                 `json:"error"`
+	FailureReason      string                  `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt            int32                   `json:"attempt"`
+	MaxAttempts        int32                   `json:"max_attempts"`
+	ParentTaskID       *string                 `json:"parent_task_id,omitempty"`
+	IsLeaderTask       bool                    `json:"is_leader_task,omitempty"`
+	Agent              *TaskAgentData          `json:"agent,omitempty"`
+	ConnectedApps      []ConnectedAppData      `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
+	Repos              []RepoData              `json:"repos,omitempty"`
+	ProjectID          string                  `json:"project_id,omitempty"`          // issue's project, when present
+	ProjectTitle       string                  `json:"project_title,omitempty"`       // for surfacing in agent context
+	ProjectDescription string                  `json:"project_description,omitempty"` // durable project-level context injected into the brief
+	ProjectResources   []ProjectResourceData   `json:"project_resources,omitempty"`   // resources attached to the project
+	CreatedAt          string                  `json:"created_at"`
+	PriorSessionID     string                  `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
+	PriorWorkDir       string                  `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	FallbackTranscript *FallbackTranscriptData `json:"fallback_transcript,omitempty"`
+	WorkDir            string                  `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
 	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for
 	// the UI. For standard tasks it strips the daemon's workspaces root so
 	// the user sees `<wsUUID>/<taskShort>/workdir`; for local_directory
@@ -829,6 +900,10 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		resp := agentToResponse(a)
+		if err := h.enrichAgentResponseWithFallbacks(r.Context(), &resp, a.ID); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load agent fallback runtimes")
+			return
+		}
 		applyInvocationTargetsToResponse(&resp, targets)
 		if skills, ok := skillMap[resp.ID]; ok {
 			resp.Skills = skills
@@ -878,6 +953,10 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := agentToResponse(agent)
+	if err := h.enrichAgentResponseWithFallbacks(r.Context(), &resp, agent.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent fallback runtimes")
+		return
+	}
 	if !h.enrichAgentResponseWithTargetsHTTP(w, r, &resp, agent.ID) {
 		return
 	}
@@ -920,16 +999,17 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
-	Name          string            `json:"name"`
-	Description   string            `json:"description"`
-	Instructions  string            `json:"instructions"`
-	AvatarURL     *string           `json:"avatar_url"`
-	RuntimeID     string            `json:"runtime_id"`
-	RuntimeConfig any               `json:"runtime_config"`
-	CustomEnv     map[string]string `json:"custom_env"`
-	CustomArgs    []string          `json:"custom_args"`
-	McpConfig     json.RawMessage   `json:"mcp_config"`
-	Visibility    string            `json:"visibility"`
+	Name               string            `json:"name"`
+	Description        string            `json:"description"`
+	Instructions       string            `json:"instructions"`
+	AvatarURL          *string           `json:"avatar_url"`
+	RuntimeID          string            `json:"runtime_id"`
+	FallbackRuntimeIDs []string          `json:"fallback_runtime_ids"`
+	RuntimeConfig      any               `json:"runtime_config"`
+	CustomEnv          map[string]string `json:"custom_env"`
+	CustomArgs         []string          `json:"custom_args"`
+	McpConfig          json.RawMessage   `json:"mcp_config"`
+	Visibility         string            `json:"visibility"`
 	// PermissionMode + InvocationTargets are the new invocation-permission
 	// inputs (MUL-3963). When permission_mode is present it is authoritative
 	// and Visibility is ignored; when absent, legacy Visibility is mapped
@@ -1050,6 +1130,14 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
 		return
 	}
+	if err := h.validateFallbackRuntimes(r.Context(), member, wsUUID, runtime.ID, req.FallbackRuntimeIDs); err != nil {
+		status := http.StatusBadRequest
+		if errors.Is(err, errFallbackRuntimeForbidden) {
+			status = http.StatusForbidden
+		}
+		writeError(w, status, err.Error())
+		return
+	}
 
 	// thinking_level validation: fixed-enum providers reject unknown literals;
 	// dynamic-catalog providers (Codex/OpenCode) reject malformed tokens here.
@@ -1163,6 +1251,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to save agent access")
 		return
 	}
+	if err := replaceAgentFallbackRuntimesWithQueries(r.Context(), qtx, created.ID, req.FallbackRuntimeIDs); err != nil {
+		slog.Warn("create agent: persist fallback runtimes failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+		writeError(w, http.StatusInternalServerError, "failed to persist fallback runtimes")
+		return
+	}
 	for _, skillID := range skillUUIDs {
 		if err := qtx.AddAgentSkill(r.Context(), db.AddAgentSkillParams{
 			AgentID: created.ID,
@@ -1186,6 +1279,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	resp := agentToResponse(created)
 	if err := h.attachAgentSkills(r.Context(), &resp, created.ID); err != nil {
 		slog.Warn("create agent: load skills for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
+	}
+	if err := h.enrichAgentResponseWithFallbacks(r.Context(), &resp, created.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent fallback runtimes")
+		return
 	}
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, created.ID); err != nil {
 		slog.Warn("create agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(created.ID))...)
@@ -1264,12 +1361,13 @@ func (h *Handler) sendAgentWelcomeChat(ctx context.Context, agent db.Agent, crea
 }
 
 type UpdateAgentRequest struct {
-	Name          *string `json:"name"`
-	Description   *string `json:"description"`
-	Instructions  *string `json:"instructions"`
-	AvatarURL     *string `json:"avatar_url"`
-	RuntimeID     *string `json:"runtime_id"`
-	RuntimeConfig any     `json:"runtime_config"`
+	Name               *string   `json:"name"`
+	Description        *string   `json:"description"`
+	Instructions       *string   `json:"instructions"`
+	AvatarURL          *string   `json:"avatar_url"`
+	RuntimeID          *string   `json:"runtime_id"`
+	FallbackRuntimeIDs *[]string `json:"fallback_runtime_ids"`
+	RuntimeConfig      any       `json:"runtime_config"`
 	// custom_env is intentionally NOT updatable through this endpoint.
 	// Use `PUT /api/agents/{id}/env` for env changes — that path is
 	// owner/admin-only, denies agent actors, and writes a persisted
@@ -1557,6 +1655,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// runtime to validate a thinking_level change. Resolve once and reuse.
 	targetRuntimeID := existing.RuntimeID
 	targetProvider := ""
+	var runtimeMember db.Member
+	if req.RuntimeID != nil || req.FallbackRuntimeIDs != nil {
+		var ok bool
+		runtimeMember, ok = h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
+		if !ok {
+			return
+		}
+	}
 	if req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
@@ -1573,11 +1679,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		// Same gate as CreateAgent — prevents UpdateAgent from being used to
 		// re-bind an agent onto someone else's private runtime, which would
 		// otherwise be a quiet end-run around the CreateAgent check.
-		member, ok := h.workspaceMember(w, r, uuidToString(existing.WorkspaceID))
-		if !ok {
-			return
-		}
-		if !canUseRuntimeForAgent(member, runtime) {
+		if !canUseRuntimeForAgent(runtimeMember, runtime) {
 			writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can move agents onto it")
 			return
 		}
@@ -1585,6 +1687,16 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
+	}
+	if req.FallbackRuntimeIDs != nil {
+		if err := h.validateFallbackRuntimes(r.Context(), runtimeMember, existing.WorkspaceID, targetRuntimeID, *req.FallbackRuntimeIDs); err != nil {
+			status := http.StatusBadRequest
+			if errors.Is(err, errFallbackRuntimeForbidden) {
+				status = http.StatusForbidden
+			}
+			writeError(w, status, err.Error())
+			return
+		}
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides
@@ -1750,6 +1862,12 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update agent: "+err.Error())
 		return
 	}
+	if req.FallbackRuntimeIDs != nil {
+		if err := h.replaceAgentFallbackRuntimes(r.Context(), updated.ID, *req.FallbackRuntimeIDs); err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to update fallback runtimes")
+			return
+		}
+	}
 
 	// mcp_config / thinking_level: null/empty in the request means explicitly
 	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL,
@@ -1791,6 +1909,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := agentToResponse(updated)
+	if err := h.enrichAgentResponseWithFallbacks(r.Context(), &resp, updated.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load agent fallback runtimes")
+		return
+	}
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, updated.ID); err != nil {
 		slog.Warn("update agent: load invocation targets for response failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to load agent invocation targets")

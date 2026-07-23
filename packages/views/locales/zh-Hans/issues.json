@@ -326,6 +326,7 @@
     "description_updated": "更新了描述",
     "task_completed_other": "完成了 task（{{count}} 次）",
     "task_failed_other": "task 失败（{{count}} 次）",
+    "task_fallback": "因 {{reason}}，已将 task 从 {{source}} 转移到 {{destination}}",
     "squad_leader_evaluated": "评估了小队触发",
     "squad_leader_action": "已评估并采取了操作",
     "squad_leader_action_reason": "已评估并采取了操作：{{reason}}",
