@@ -1789,6 +1789,140 @@ func TestWebhook_CheckSuite_NonCompletedActionsIgnored(t *testing.T) {
 	}
 }
 
+// TestCheckSuite_LegacyNonCompletedRowsExcludedFromAggregate covers the
+// upgrade path for a deployment that ran BEFORE the action gate existed
+// (MUL-5180).
+//
+// An installation holding Checks write received `check_suite.requested` for
+// suites GitHub had opened for Multica itself. The old handler stored them as
+// `queued`, and nothing will ever complete them. If the aggregate still
+// counted those rows, `checks_pending` would outrank `checks_passed` and the
+// PR would stay pinned to "checks running" after the upgrade — for as long as
+// the head SHA stands, which for a merged-but-open PR can be forever.
+//
+// The row is inserted directly because the fixed handler can no longer
+// produce one; that is exactly the point of the test.
+func TestCheckSuite_LegacyNonCompletedRowsExcludedFromAggregate(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const secret = "ci-legacy-agg-secret"
+	created, installationID := setupPRTestIssue(t, ctx, secret)
+
+	head := "legacy1234567"
+	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-legacy", 88, "opened", head, "")
+	// A real external suite completes green.
+	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-legacy", []int32{88}, 9001, 9501, head, "completed", "completed", "success", "2026-05-01T00:05:00Z")
+
+	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 PR row, got %d", len(rows))
+	}
+
+	// Simulate the pre-upgrade leftovers: a stuck `queued` suite from a
+	// different app, and a newer stuck `in_progress` suite from the SAME app
+	// as the green one (which would shadow it without the filter).
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO github_pull_request_check_suite
+		     (pr_id, suite_id, head_sha, app_id, conclusion, status, updated_at)
+		 VALUES ($1, 9101, $2, 9601, NULL, 'queued', '2026-05-01T00:00:00Z'),
+		        ($1, 9102, $2, 9501, NULL, 'in_progress', '2026-05-01T00:09:00Z')`,
+		rows[0].ID, head); err != nil {
+		t.Fatalf("insert legacy rows: %v", err)
+	}
+
+	rows, err = testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if rows[0].ChecksPending != 0 || rows[0].ChecksPassed != 1 || rows[0].ChecksTotal != 1 {
+		t.Fatalf("legacy non-completed rows must not reach the aggregate, got pending=%d passed=%d total=%d",
+			rows[0].ChecksPending, rows[0].ChecksPassed, rows[0].ChecksTotal)
+	}
+	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
+	if got == nil || *got != "passed" {
+		t.Errorf("expected the card to recover to passed, got %v", got)
+	}
+}
+
+// TestCheckSuite_LegacyStashRowNotReplayed covers the second pre-upgrade
+// leftover (MUL-5180): a non-completed row sitting in the
+// `github_pending_check_suite` stash.
+//
+// replayPendingCheckSuitesForPR is a write path into the live suite table
+// that does NOT go through handleCheckSuiteEvent, so without its own gate the
+// next `pull_request` webhook would re-inject a permanently-`queued` suite
+// after the fix had shipped.
+func TestCheckSuite_LegacyStashRowNotReplayed(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const secret = "ci-legacy-stash-secret"
+	created, installationID := setupPRTestIssue(t, ctx, secret)
+
+	head := "legacystash12"
+	// Pre-upgrade stash content: the PR row did not exist yet when a
+	// `requested` suite arrived, so the old handler parked it here. The
+	// owner MUST match what firePullRequestWebhookWithHead sends ("acme") —
+	// DrainPendingCheckSuitesForPR keys on
+	// (workspace_id, repo_owner, repo_name, pr_number), so a mismatched owner
+	// silently drains nothing and makes this test vacuous.
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO github_pending_check_suite
+		     (workspace_id, installation_id, repo_owner, repo_name, pr_number,
+		      suite_id, head_sha, app_id, conclusion, status, suite_updated_at)
+		 VALUES ($1, $2, 'acme', 'ci-repo-legacy-stash', 99,
+		         9201, $3, 9701, NULL, 'queued', '2026-05-01T00:00:00Z')`,
+		testWorkspaceID, installationID, head); err != nil {
+		t.Fatalf("insert legacy stash row: %v", err)
+	}
+
+	// Sanity-check the fixture actually addresses this PR, so a future
+	// rename cannot turn the assertions below into a no-op.
+	var stashed int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM github_pending_check_suite
+		 WHERE workspace_id = $1 AND repo_owner = 'acme'
+		   AND repo_name = 'ci-repo-legacy-stash' AND pr_number = 99`,
+		testWorkspaceID).Scan(&stashed); err != nil {
+		t.Fatalf("count stash: %v", err)
+	}
+	if stashed != 1 {
+		t.Fatalf("fixture did not land in the stash, got %d rows", stashed)
+	}
+
+	// The PR webhook arrives and drains the stash.
+	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-legacy-stash", 99, "opened", head, "")
+
+	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 PR row, got %d", len(rows))
+	}
+	if rows[0].ChecksTotal != 0 || rows[0].ChecksPending != 0 {
+		t.Fatalf("legacy stash row must not be replayed, got total=%d pending=%d",
+			rows[0].ChecksTotal, rows[0].ChecksPending)
+	}
+
+	// It must be gone from the live table too, not merely uncounted.
+	var live int
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM github_pull_request_check_suite WHERE pr_id = $1`,
+		rows[0].ID).Scan(&live); err != nil {
+		t.Fatalf("count live suites: %v", err)
+	}
+	if live != 0 {
+		t.Errorf("expected the skipped stash row not to be written, got %d live rows", live)
+	}
+}
+
 // TestWebhook_CheckSuite_OutOfOrderReplaysOnPRUpsert covers the out-of-order
 // path: a `check_suite` event arrives before the matching `pull_request`
 // row has been mirrored locally (e.g. webhook reordering, or the PR was

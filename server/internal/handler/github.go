@@ -183,9 +183,15 @@ func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow) GitHubPullRe
 // aggregateChecksConclusion collapses the per-PR check_suite counts into a
 // single status surfaced to the UI:
 //   - any failed-class suite wins ("failed");
-//   - any not-yet-completed suite makes the PR "pending";
-//   - all completed and in the passed-class is "passed";
+//   - any indeterminate suite makes the PR "pending";
+//   - the rest of the passed-class is "passed";
 //   - no observed suite at all is nil (rendered as "no checks" / hidden).
+//
+// "pending" is close to unreachable by design (MUL-5180): only `completed`
+// suites are recorded and only `completed` suites are aggregated, so the
+// pending bucket now catches just the degenerate case of a completed suite
+// carrying a null conclusion. It is deliberately NOT an "CI is running"
+// signal — that is not observable from this event at read-level access.
 func aggregateChecksConclusion(failed, passed, pending, total int64) *string {
 	if total == 0 {
 		return nil
@@ -1192,6 +1198,16 @@ func (h *Handler) replayPendingCheckSuitesForPR(ctx context.Context, pr db.Githu
 		return
 	}
 	for _, row := range pending {
+		// Second gate, deliberately duplicated from handleCheckSuiteEvent.
+		// This is the other write path into github_pull_request_check_suite,
+		// and it does not pass through the webhook handler — a stash row
+		// written before that gate existed would otherwise be re-injected
+		// here on the next `pull_request` event, reintroducing exactly the
+		// permanently-`queued` suite the gate was added to prevent. The
+		// drain is a DELETE ... RETURNING, so skipping simply discards it.
+		if row.Status != "completed" {
+			continue
+		}
 		if err := h.Queries.UpsertPullRequestCheckSuite(ctx, db.UpsertPullRequestCheckSuiteParams{
 			PrID:       pr.ID,
 			SuiteID:    row.SuiteID,

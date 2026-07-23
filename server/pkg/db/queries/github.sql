@@ -147,12 +147,26 @@ WITH issue_prs AS (
     JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
     WHERE ipr.issue_id = sqlc.arg('issue_id') AND NOT ipr.reference_only
 ),
+-- Only `completed` suites are eligible. The webhook handler already refuses
+-- to record anything else (MUL-5180), but this filter is what makes the card
+-- correct for rows that predate that gate: an installation holding Checks
+-- write accumulated `queued` suites GitHub had opened for Multica itself,
+-- and nothing will ever move them to `completed`. Counting them keeps the PR
+-- pinned to "checks running" — `checks_pending` outranks `checks_passed` in
+-- derivePullRequestStatusKind — for as long as the head SHA stands.
+--
+-- Filtering here rather than deleting the rows makes the recovery automatic
+-- and source-agnostic: it holds for legacy rows, for stash rows replayed by
+-- replayPendingCheckSuitesForPR, and for any future writer that forgets the
+-- gate. The DISTINCT ON runs after the filter, so an app whose newest suite
+-- is a stuck `queued` still reports its most recent completed verdict.
 per_app_latest AS (
     SELECT DISTINCT ON (cs.pr_id, cs.app_id)
         cs.pr_id, cs.app_id, cs.conclusion, cs.status
     FROM github_pull_request_check_suite cs
     JOIN issue_prs ip ON ip.id = cs.pr_id
     WHERE cs.head_sha = ip.head_sha AND ip.head_sha <> ''
+      AND cs.status = 'completed'
     ORDER BY cs.pr_id, cs.app_id, cs.updated_at DESC
 ),
 checks AS (
