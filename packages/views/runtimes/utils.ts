@@ -257,14 +257,21 @@ const MODEL_PRICING: Record<
 
   // -- xAI Grok (docs.x.ai/developers/pricing). Rates below are the
   //    short-context tier. xAI bills a request at 2x ("long context") once
-  //    its prompt reaches 200K tokens, but aggregated usage rows carry no
-  //    per-request prompt sizes, so we price at the standard tier — the same
-  //    trade-off the Anthropic `[1m]` context tag takes (see `resolvePricing`).
+  //    its prompt reaches 200K tokens, but a usage row aggregates every model
+  //    call in a turn and so cannot say which tier any individual request
+  //    hit — thresholding on the aggregate would over-estimate a turn made of
+  //    many short requests by 100%, which is worse than under-estimating a
+  //    genuinely long-context turn by at most 50%. Pricing the standard tier
+  //    is the same trade-off the Anthropic `[1m]` context tag takes (see
+  //    `resolvePricing`). Getting this exactly right needs Grok's own
+  //    per-turn `_meta.usage.costUsdTicks` carried through to the usage
+  //    record, which has no column to land in today.
   //    `cacheRead` is xAI's published "Cached" input rate; there is no
   //    separate cache-write rate on the page (writes bill as normal input),
   //    so cacheWrite mirrors input per the header note. Grok ids are
-  //    vendor-prefixed, so these keys stay unqualified even though the
-  //    daemon tags the rows with provider `xai`.
+  //    vendor-prefixed, so these keys stay unqualified — which is what makes
+  //    them resolve at all, since the daemon tags the rows with the runtime
+  //    provider `grok`, not `xai`.
   //    `grok-composer-*` ships in the Grok Build catalog
   //    (server/pkg/agent/models.go) but is absent from the price sheet; it
   //    deliberately stays unmapped rather than inheriting a guessed rate. --
