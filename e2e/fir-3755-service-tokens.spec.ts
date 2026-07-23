@@ -39,6 +39,10 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
   try {
     await api.setWorkspaceFeatureFlag(FEATURE_FLAG, true);
     const slug = await loginAsDefault(page);
+    // This spec deliberately flips the flag directly in PostgreSQL to prove
+    // both sides of the kill switch. Bypass the browser HTTP cache so each
+    // reload observes the authoritative workspace value.
+    await page.setExtraHTTPHeaders({ "Cache-Control": "no-cache" });
     await page.goto(`/${slug}/settings?tab=tokens`, {
       waitUntil: "domcontentloaded",
     });
