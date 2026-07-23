@@ -134,10 +134,13 @@ export function DataTable<TData>({
         setColumnWidth(header, startWidth + pointerEvent.clientX - startX);
       };
 
+      // stopResize is idempotent; wire it to every drag-end path (including a
+      // window blur mid-drag) so the global resize-cursor lock can never strand.
       const stopResize = () => {
         window.removeEventListener("pointermove", handlePointerMove);
         window.removeEventListener("pointerup", stopResize);
         window.removeEventListener("pointercancel", stopResize);
+        window.removeEventListener("blur", stopResize);
         document.documentElement.removeAttribute("data-table-resizing");
         setResizingColumnId(null);
       };
@@ -145,6 +148,7 @@ export function DataTable<TData>({
       window.addEventListener("pointermove", handlePointerMove);
       window.addEventListener("pointerup", stopResize);
       window.addEventListener("pointercancel", stopResize);
+      window.addEventListener("blur", stopResize);
     },
     [setColumnWidth],
   );
