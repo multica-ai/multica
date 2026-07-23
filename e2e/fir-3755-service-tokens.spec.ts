@@ -11,7 +11,7 @@ const DATABASE_URL =
   "postgres://multica:multica@localhost:5432/multica?sslmode=disable";
 const FEATURE_FLAG = "cerebro_service_tokens";
 const WORKSPACE_FLAG_USER = "00000000-0000-0000-0000-000000000000";
-const FLAG_HYDRATION_TIMEOUT_MS = 15_000;
+const FLAG_HYDRATION_TIMEOUT_MS = 30_000;
 
 test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and revoke", async ({
   page,
@@ -213,7 +213,26 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
     ).toHaveCount(0);
 
     await api.setWorkspaceFeatureFlag(FEATURE_FLAG, true);
+    const enabledFlagsResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        response.url().includes(`/workspaces/${workspaceId}/feature-flags`) &&
+        response.status() === 200,
+      { timeout: FLAG_HYDRATION_TIMEOUT_MS },
+    );
+    const enabledTokensResponse = page.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname === "/api/service-tokens" &&
+        response.status() === 200,
+      { timeout: FLAG_HYDRATION_TIMEOUT_MS },
+    );
     await page.reload({ waitUntil: "domcontentloaded" });
+    const flagsPayload = (await (await enabledFlagsResponse).json()) as {
+      workspace_overrides?: Record<string, boolean>;
+    };
+    expect(flagsPayload.workspace_overrides?.[FEATURE_FLAG]).toBe(true);
+    await enabledTokensResponse;
     await expect(serviceTokensSection).toBeVisible({
       timeout: FLAG_HYDRATION_TIMEOUT_MS,
     });
