@@ -99,6 +99,15 @@ func (r *ChannelMediaReconciler) Run(ctx context.Context) {
 // are per-row and non-fatal: a row that cannot be settled now backs off and
 // is retried on a later sweep (or by another replica after lease expiry).
 func (r *ChannelMediaReconciler) RunOnce(ctx context.Context) {
+	if r.Storage == nil {
+		// The wiring only builds a reconciler when a storage backend exists,
+		// but a panic here would take down the whole process from a bare
+		// goroutine — keep the invariant local. Claiming without a deleter
+		// would strand rows in 'deleting' until their lease expires, so do
+		// not claim at all.
+		r.logger().Error("channel media reconciler: no storage backend; skipping sweep")
+		return
+	}
 	leaseToken := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 	now := r.clock()
 	rows, err := r.Queries.ClaimChannelMediaPendingObjectsForReconcile(ctx, db.ClaimChannelMediaPendingObjectsForReconcileParams{

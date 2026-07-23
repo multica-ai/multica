@@ -267,3 +267,21 @@ func TestChannelMediaReconciler_SettleInvariantDwarfsPipelineBudgets(t *testing.
 		t.Fatalf("lease %v must be positive and well under settle %v", channelMediaReconcileLease, ChannelMediaReconcileSettleDelay)
 	}
 }
+
+// Storage initialization can fail at boot (no S3, unwritable local dir) while
+// ledger rows pre-exist from an earlier boot where storage worked. A nil
+// deleter must never panic the worker — and must not claim rows either, or
+// they would sit stranded in 'deleting' until lease expiry.
+func TestChannelMediaReconciler_NilStorageSkipsSweepWithoutClaiming(t *testing.T) {
+	pool := newCancelFinalizePool(t)
+	f := seedReconcilerFixture(t, pool)
+	rec := &ChannelMediaReconciler{Queries: db.New(pool), Storage: nil}
+
+	f.seedLedgerRow(t, "ws/lark/nil-storage", "https://cdn.test/nil-storage", "pending", ChannelMediaReconcileSettleDelay+time.Minute)
+	rec.RunOnce(context.Background())
+
+	state, attempt, exists := f.rowState(t, "ws/lark/nil-storage")
+	if !exists || state != "pending" || attempt != 0 {
+		t.Fatalf("row = (%q, attempt=%d, %v), want untouched 'pending' when storage is missing", state, attempt, exists)
+	}
+}
