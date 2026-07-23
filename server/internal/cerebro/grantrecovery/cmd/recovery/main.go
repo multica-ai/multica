@@ -268,6 +268,9 @@ func apply(ctx context.Context, target *pgxpool.Pool, opts options, grants []gra
 	if !diff.SafeToApply() {
 		return fmt.Errorf("target changed: %d conflicting and %d unmapped rows", len(diff.Conflicting), len(diff.Unmapped))
 	}
+	if len(diff.Mapped) == 0 {
+		return nil
+	}
 	approvedBy, err := consumeRecoveryApproval(ctx, tx, opts, diff.SourceFingerprint)
 	if err != nil {
 		return err
