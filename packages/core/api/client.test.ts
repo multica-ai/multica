@@ -339,6 +339,7 @@ describe("ApiClient workspace working agents", () => {
         name: "Agent 1",
         avatar_url: null,
         running_task_count: 2,
+        issue_ids: ["issue-1"],
       },
     ];
     const fetchMock = vi.fn().mockImplementation(() =>

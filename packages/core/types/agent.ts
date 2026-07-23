@@ -206,6 +206,9 @@ export interface WorkspaceWorkingAgent {
   name: string;
   avatar_url: string | null;
   running_task_count: number;
+  /** Distinct issues referenced by this agent's currently running tasks after
+   *  applying the endpoint's type/scope/relation filters. */
+  issue_ids: string[];
 }
 
 export type WorkspaceWorkingAgentType = "issue" | "autopilot" | "chat";

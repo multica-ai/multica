@@ -94,10 +94,7 @@ export interface IssueSurfaceController {
   /** Exact group catalog plus independent row cursors for Assignee/Property
    * Board and compound Swimlane cells. */
   groupBranches?: IssueGroupBranches;
-  activeFilters: Omit<
-    IssueFilters,
-    "statusFilters" | "agentRunningFilter" | "runningIssueIds"
-  >;
+  activeFilters: Omit<IssueFilters, "statusFilters">;
   actions: IssueSurfaceActions;
   selection: IssueSurfaceSelection;
   childProgressMap: Map<string, ChildProgress>;
@@ -330,30 +327,13 @@ export function useIssueSurfaceController({
   const { data: workspaceWorkingAgents = [] } = useQuery(
     workspaceWorkingAgentsOptions(wsId, "issue", workingAgentMineRelation),
   );
-  const workingAssigneeFilters = useMemo(() => {
-    const workingAgentIds = new Set(
-      workspaceWorkingAgents.map((agent) => agent.id),
-    );
-    if (assigneeFilters.length === 0) {
-      return workspaceWorkingAgents.map((agent) => ({
-        type: "agent" as const,
-        id: agent.id,
-      }));
+  const workingIssueIDs = useMemo(() => {
+    const issueIDs = new Set<string>();
+    for (const agent of workspaceWorkingAgents) {
+      for (const issueID of agent.issue_ids) issueIDs.add(issueID);
     }
-
-    // The quick filter and the regular assignee picker are both predicates
-    // on the same field, so compose them with intersection (AND semantics).
-    return assigneeFilters.filter(
-      (assignee) =>
-        assignee.type === "agent" && workingAgentIds.has(assignee.id),
-    );
-  }, [assigneeFilters, workspaceWorkingAgents]);
-  const effectiveAssigneeFilters = agentRunningFilter
-    ? workingAssigneeFilters
-    : assigneeFilters;
-  const effectiveIncludeNoAssignee = agentRunningFilter
-    ? false
-    : includeNoAssignee;
+    return issueIDs;
+  }, [workspaceWorkingAgents]);
 
   const tableQuerySpec = useMemo<IssueTableQuerySpec>(() => {
     let queryScope: IssueTableQuerySpec["scope"];
@@ -400,14 +380,8 @@ export function useIssueSurfaceController({
       filters: {
         ...(statusFilters.length > 0 ? { statuses: statusFilters } : {}),
         ...(priorityFilters.length > 0 ? { priorities: priorityFilters } : {}),
-        ...(agentRunningFilter
-          ? { assignees: effectiveAssigneeFilters }
-          : assigneeFilters.length > 0
-            ? { assignees: assigneeFilters }
-            : {}),
-        ...(effectiveIncludeNoAssignee
-          ? { include_no_assignee: true }
-          : {}),
+        ...(assigneeFilters.length > 0 ? { assignees: assigneeFilters } : {}),
+        ...(includeNoAssignee ? { include_no_assignee: true } : {}),
         ...(creatorFilters.length > 0 ? { creators: creatorFilters } : {}),
         ...(viewProjectFilters.length > 0
           ? { project_ids: viewProjectFilters }
@@ -418,6 +392,9 @@ export function useIssueSurfaceController({
           ? { properties: effectivePropertyFilters }
           : {}),
         ...(date ? { date } : {}),
+        ...(agentRunningFilter
+          ? { working_issue_ids: [...workingIssueIDs] }
+          : {}),
         include_sub_issues: showSubIssues,
       },
       ...(debouncedActiveSearch ? { search: debouncedActiveSearch } : {}),
@@ -432,9 +409,8 @@ export function useIssueSurfaceController({
     creatorFilters,
     dateParams,
     debouncedActiveSearch,
-    effectiveAssigneeFilters,
-    effectiveIncludeNoAssignee,
     effectivePropertyFilters,
+    includeNoAssignee,
     labelFilters,
     priorityFilters,
     scope,
@@ -444,6 +420,7 @@ export function useIssueSurfaceController({
     statusFilters,
     viewIncludeNoProject,
     viewProjectFilters,
+    workingIssueIDs,
   ]);
 
   const [activeTableFacet, setActiveTableFacet] =
@@ -604,15 +581,15 @@ export function useIssueSurfaceController({
     sort,
     statusFilters,
     priorityFilters,
-    assigneeFilters: effectiveAssigneeFilters,
-    includeNoAssignee: effectiveIncludeNoAssignee,
-    assigneeFilterActive: agentRunningFilter,
+    assigneeFilters,
+    includeNoAssignee,
+    agentRunningFilter,
     creatorFilters,
     projectFilters: viewProjectFilters,
     includeNoProject: viewIncludeNoProject,
     labelFilters,
     propertyFilters: effectivePropertyFilters,
-    workingAssigneeFilters,
+    workingIssueIDs,
     showSubIssues,
     loadProjects:
       cardProperties.project ||

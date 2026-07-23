@@ -168,6 +168,215 @@ func TestIssueTableExplicitEmptyAssigneesMatchesNone(t *testing.T) {
 	}
 }
 
+func TestIssueTableWorkingIssueIDsAreExplicitAndAssigneeIndependent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	base := issueTableQuerySpec{
+		Scope: issueTableScope{Kind: "workspace"},
+		Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+	}
+	withEmpty := base
+	withEmpty.Filters.WorkingIssueIDs = []string{}
+
+	unfilteredFingerprint, err := canonicalIssueTableFingerprint(testWorkspaceID, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyFingerprint, err := canonicalIssueTableFingerprint(testWorkspaceID, withEmpty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unfilteredFingerprint == emptyFingerprint {
+		t.Fatal("explicit empty working_issue_ids must not share the unfiltered cursor fingerprint")
+	}
+
+	w := httptest.NewRecorder()
+	compiled, ok := testHandler.compileIssueTableQuery(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		withEmpty,
+	)
+	if !ok {
+		t.Fatalf("compile empty filter: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(compiled.where, "FALSE") {
+		t.Fatalf("explicit empty working_issue_ids predicate = %q, want FALSE", compiled.where)
+	}
+
+	withIssue := base
+	withIssue.Filters.WorkingIssueIDs = []string{
+		"00000000-0000-4000-8000-000000000001",
+	}
+	w = httptest.NewRecorder()
+	compiled, ok = testHandler.compileIssueTableQuery(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		withIssue,
+	)
+	if !ok {
+		t.Fatalf("compile issue filter: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(compiled.where, "i.id = ANY(") {
+		t.Errorf("working-issue predicate = %q, want issue-id membership", compiled.where)
+	}
+	if strings.Contains(compiled.where, "i.assignee_id") {
+		t.Fatalf("working-issue predicate must not filter issue assignees: %q", compiled.where)
+	}
+}
+
+func TestIssueTableWorkingIssueProjectionMatchesTaskIssuesNotAssignees(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	workingAgentID := createHandlerTestAgent(t, "table-working-task-agent", []byte(`{}`))
+	otherAgentID := createHandlerTestAgent(t, "table-other-working-agent", []byte(`{}`))
+
+	var finalNumber int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = GREATEST(
+			issue_counter,
+			(SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)
+		) + 3
+		WHERE id = $1
+		RETURNING issue_counter
+	`, testWorkspaceID).Scan(&finalNumber); err != nil {
+		t.Fatalf("reserve issue numbers: %v", err)
+	}
+
+	insertIssue := func(title string, number int, assigneeType string, assigneeID any) string {
+		t.Helper()
+		var issueID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (
+				workspace_id, title, status, priority, creator_type, creator_id,
+				assignee_type, assignee_id, position, number
+			)
+			VALUES ($1, $2, 'todo', 'none', 'member', $3, $4, $5, $6, $7)
+			RETURNING id
+		`,
+			testWorkspaceID,
+			title,
+			testUserID,
+			assigneeType,
+			assigneeID,
+			number,
+			number,
+		).Scan(&issueID); err != nil {
+			t.Fatalf("insert issue %q: %v", title, err)
+		}
+		t.Cleanup(func() {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+		})
+		return issueID
+	}
+
+	assignedOnlyIssueID := insertIssue(
+		"assigned to working agent but not being edited",
+		finalNumber-2,
+		"agent",
+		workingAgentID,
+	)
+	editedIssueID := insertIssue(
+		"being edited by working agent but assigned to member",
+		finalNumber-1,
+		"member",
+		testUserID,
+	)
+	otherAgentIssueID := insertIssue(
+		"being edited by another agent",
+		finalNumber,
+		"agent",
+		workingAgentID,
+	)
+	createHandlerTestTaskForAgentOnIssue(t, workingAgentID, editedIssueID)
+	createHandlerTestTaskForAgentOnIssue(t, otherAgentID, otherAgentIssueID)
+
+	workingRecorder := httptest.NewRecorder()
+	testHandler.ListWorkspaceWorkingAgents(
+		workingRecorder,
+		newRequest(http.MethodGet, "/api/working-agents?type=issue", nil),
+	)
+	if workingRecorder.Code != http.StatusOK {
+		t.Fatalf(
+			"list working agents status = %d: %s",
+			workingRecorder.Code,
+			workingRecorder.Body.String(),
+		)
+	}
+	var workingAgents []WorkspaceWorkingAgent
+	if err := json.NewDecoder(workingRecorder.Body).Decode(&workingAgents); err != nil {
+		t.Fatalf("decode working agents: %v", err)
+	}
+	workingIssueIDs := make([]string, 0, 2)
+	for _, agent := range workingAgents {
+		if agent.ID == workingAgentID || agent.ID == otherAgentID {
+			workingIssueIDs = append(workingIssueIDs, agent.IssueIDs...)
+		}
+	}
+
+	listRows := func(issueIDs []string) issueTableRowsResponse {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		testHandler.ListIssueTableRows(
+			recorder,
+			newRequest(http.MethodPost, "/api/issues/table/rows", map[string]any{
+				"query": map[string]any{
+					"scope": map[string]any{"kind": "workspace"},
+					"filters": map[string]any{
+						// A map intentionally preserves [] in JSON. Marshaling
+						// issueTableFiltersRequest directly would apply its
+						// omitempty tag and turn the match-none case into no filter.
+						"working_issue_ids": issueIDs,
+					},
+					"sort": map[string]any{
+						"field":     "position",
+						"direction": "asc",
+					},
+				},
+				"group":     map[string]any{"kind": "none"},
+				"hierarchy": map[string]any{"enabled": false},
+				"page":      map[string]any{"limit": 10},
+			}),
+		)
+		if recorder.Code != http.StatusOK {
+			t.Fatalf("list rows status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		var response issueTableRowsResponse
+		if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+			t.Fatalf("decode rows: %v", err)
+		}
+		return response
+	}
+
+	response := listRows(workingIssueIDs)
+	if response.Total != 2 || len(response.Rows) != 2 {
+		t.Fatalf("working rows total=%d rows=%d, want two", response.Total, len(response.Rows))
+	}
+	gotIssueIDs := make(map[string]struct{}, len(response.Rows))
+	for _, row := range response.Rows {
+		gotIssueIDs[row.Issue.ID] = struct{}{}
+	}
+	if _, ok := gotIssueIDs[editedIssueID]; !ok {
+		t.Errorf("missing issue edited by selected working agent: %s", editedIssueID)
+	}
+	if _, ok := gotIssueIDs[otherAgentIssueID]; !ok {
+		t.Errorf("missing issue edited by other working agent: %s", otherAgentIssueID)
+	}
+	if _, ok := gotIssueIDs[assignedOnlyIssueID]; ok {
+		t.Errorf("included assigned-only issue without a running task: %s", assignedOnlyIssueID)
+	}
+
+	empty := listRows([]string{})
+	if empty.Total != 0 || len(empty.Rows) != 0 {
+		t.Fatalf("explicit empty working-issue filter returned total=%d rows=%d", empty.Total, len(empty.Rows))
+	}
+}
+
 func TestIssueTableCursorRejectsAnotherQuery(t *testing.T) {
 	groupKey := "status:todo"
 	cursor := issueTableCursor{

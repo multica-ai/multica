@@ -263,6 +263,9 @@ export interface IssueTableFilters {
     end: string;
   };
   working_only?: boolean;
+  /** Match the running-task issue projection returned by
+   *  `/api/working-agents`. An explicit empty list matches nothing. */
+  working_issue_ids?: string[];
   include_sub_issues?: boolean;
 }
 

@@ -117,6 +117,7 @@ function makeRunningTask(id: string, agentId: string, issueId: string): AgentTas
 
 function makeWorkingAgent(
   id: string,
+  issueIDs: string[] = [],
   runningTaskCount = 1,
 ): WorkspaceWorkingAgent {
   return {
@@ -124,6 +125,7 @@ function makeWorkingAgent(
     name: id,
     avatar_url: null,
     running_task_count: runningTaskCount,
+    issue_ids: issueIDs,
   };
 }
 
@@ -803,7 +805,7 @@ describe("useIssueSurfaceController", () => {
     );
   });
 
-  it("sends workspace working-agent ids through the Table assignee filter", async () => {
+  it("sends workspace running-task issue ids through the Table filter", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     store.getState().toggleAgentRunningFilter();
@@ -815,12 +817,14 @@ describe("useIssueSurfaceController", () => {
           name: "Agent 1",
           avatar_url: null,
           running_task_count: 1,
+          issue_ids: ["issue-running"],
         },
         {
           id: "agent-2",
           name: "Agent 2",
           avatar_url: null,
           running_task_count: 2,
+          issue_ids: ["issue-running-2"],
         },
       ] satisfies WorkspaceWorkingAgent[]),
     );
@@ -847,11 +851,12 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() =>
-      expect(result.current.tableQuerySpec.filters.assignees).toEqual([
-        { type: "agent", id: "agent-1" },
-        { type: "agent", id: "agent-2" },
+      expect(result.current.tableQuerySpec.filters.working_issue_ids).toEqual([
+        "issue-running",
+        "issue-running-2",
       ]),
     );
+    expect(result.current.tableQuerySpec.filters.assignees).toBeUndefined();
     expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
     expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined);
     expect(listIssues).not.toHaveBeenCalled();
@@ -888,17 +893,17 @@ describe("useIssueSurfaceController", () => {
         "assigned",
       ),
     );
-    expect(result.current.tableQuerySpec.filters.assignees).toEqual([]);
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toEqual([]);
   });
 
   it.each(["board", "list", "swimlane"] as const)(
-    "uses working-agent assignees for the %s server query without reading the task snapshot",
+    "uses running tasks for the %s server query without reading the task snapshot",
     async (viewMode) => {
       const store = getIssueSurfaceViewStore("project:p1");
       store.getState().setViewMode(viewMode);
       store.getState().toggleAgentRunningFilter();
       getWorkspaceWorkingAgents.mockResolvedValue([
-        makeWorkingAgent("agent-from-working-api"),
+        makeWorkingAgent("agent-from-working-api", ["issue-from-working-api"]),
       ]);
       // Deliberately contradictory legacy data. It must neither be fetched nor
       // influence membership after the quick filter moved to working-agents.
@@ -916,17 +921,18 @@ describe("useIssueSurfaceController", () => {
       );
 
       await waitFor(() =>
-        expect(result.current.tableQuerySpec.filters.assignees).toEqual([
-          { type: "agent", id: "agent-from-working-api" },
-        ]),
+        expect(
+          result.current.tableQuerySpec.filters.working_issue_ids,
+        ).toEqual(["issue-from-working-api"]),
       );
+      expect(result.current.tableQuerySpec.filters.assignees).toBeUndefined();
       expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
       expect(getWorkspaceWorkingAgents).toHaveBeenCalledWith("issue", undefined);
       expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
     },
   );
 
-  it("intersects regular assignees with working agents and excludes unassigned rows", async () => {
+  it("combines regular assignees with the independent running-task predicate", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("list");
     store.getState().toggleAssigneeFilter({ type: "agent", id: "agent-1" });
@@ -935,8 +941,8 @@ describe("useIssueSurfaceController", () => {
     store.getState().toggleNoAssignee();
     store.getState().toggleAgentRunningFilter();
     getWorkspaceWorkingAgents.mockResolvedValue([
-      makeWorkingAgent("agent-2"),
-      makeWorkingAgent("agent-3"),
+      makeWorkingAgent("agent-2", ["member-assigned-running-issue"]),
+      makeWorkingAgent("agent-3", ["unassigned-running-issue"]),
     ]);
 
     const { result } = renderHook(
@@ -948,14 +954,18 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    await waitFor(() =>
+    await waitFor(() => {
       expect(result.current.tableQuerySpec.filters.assignees).toEqual([
+        { type: "agent", id: "agent-1" },
         { type: "agent", id: "agent-2" },
-      ]),
-    );
-    expect(
-      result.current.tableQuerySpec.filters.include_no_assignee,
-    ).toBeUndefined();
+        { type: "member", id: "member-1" },
+      ]);
+      expect(result.current.tableQuerySpec.filters.working_issue_ids).toEqual([
+        "member-assigned-running-issue",
+        "unassigned-running-issue",
+      ]);
+    });
+    expect(result.current.tableQuerySpec.filters.include_no_assignee).toBe(true);
   });
 
   it("does not subscribe Table to the legacy offset window", async () => {
@@ -1175,10 +1185,10 @@ describe("useIssueSurfaceController", () => {
 
   // --- working-chip scope (MUL-4884) ------------------------------------
   // The header chip promises "N issues in progress" where N is the number of
-  // rows clicking it leaves. The working-agents endpoint is projected into
-  // the same assignee predicate used by every view's canonical query.
+  // rows clicking it leaves. The working-agents endpoint identifies both the
+  // running agents and the issues referenced by those agents' running tasks.
 
-  it("sends working-agent assignees to the server without reconstructing a local scope", async () => {
+  it("sends working issue ids to the server without reconstructing a local scope", async () => {
     mockListByStatus({
       todo: [
         makeIssue({ id: "todo-1", status: "todo" }),
@@ -1187,8 +1197,8 @@ describe("useIssueSurfaceController", () => {
       in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
     });
     getWorkspaceWorkingAgents.mockResolvedValue([
-      makeWorkingAgent("agent-1"),
-      makeWorkingAgent("agent-2"),
+      makeWorkingAgent("agent-1", ["todo-1"]),
+      makeWorkingAgent("agent-2", ["prog-1"]),
     ]);
 
     const store = getIssueSurfaceViewStore("project:p1");
@@ -1204,10 +1214,11 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() => expect(result.current.isLoading).toBe(false));
-    expect(result.current.tableQuerySpec.filters.assignees).toEqual([
-      { type: "agent", id: "agent-1" },
-      { type: "agent", id: "agent-2" },
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toEqual([
+      "todo-1",
+      "prog-1",
     ]);
+    expect(result.current.tableQuerySpec.filters.assignees).toBeUndefined();
     expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
     expect(getAgentTaskSnapshot).not.toHaveBeenCalled();
     // Membership is cursor-paged and server-owned. A partial page cannot
@@ -1222,7 +1233,9 @@ describe("useIssueSurfaceController", () => {
         makeIssue({ id: "todo-2", status: "todo" }),
       ],
     });
-    getWorkspaceWorkingAgents.mockResolvedValue([makeWorkingAgent("agent-1")]);
+    getWorkspaceWorkingAgents.mockResolvedValue([
+      makeWorkingAgent("agent-1", ["todo-1"]),
+    ]);
 
     const { result } = renderHook(
       () =>
@@ -1247,8 +1260,8 @@ describe("useIssueSurfaceController", () => {
       in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
     });
     getWorkspaceWorkingAgents.mockResolvedValue([
-      makeWorkingAgent("agent-1"),
-      makeWorkingAgent("agent-2"),
+      makeWorkingAgent("agent-1", ["todo-1"]),
+      makeWorkingAgent("agent-2", ["prog-1"]),
     ]);
 
     // ...but the user is only looking at `todo`.
@@ -1270,10 +1283,11 @@ describe("useIssueSurfaceController", () => {
     await waitFor(() => expect(result.current.isLoading).toBe(false));
 
     expect(result.current.tableQuerySpec.filters.statuses).toEqual(["todo"]);
-    expect(result.current.tableQuerySpec.filters.assignees).toEqual([
-      { type: "agent", id: "agent-1" },
-      { type: "agent", id: "agent-2" },
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toEqual([
+      "todo-1",
+      "prog-1",
     ]);
+    expect(result.current.tableQuerySpec.filters.assignees).toBeUndefined();
     expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
     expect(result.current.workingScopeIssues).toBeUndefined();
   });
@@ -1285,7 +1299,9 @@ describe("useIssueSurfaceController", () => {
         makeIssue({ id: "child-1", status: "todo", parent_issue_id: "parent-1" }),
       ],
     });
-    getWorkspaceWorkingAgents.mockResolvedValue([makeWorkingAgent("agent-1")]);
+    getWorkspaceWorkingAgents.mockResolvedValue([
+      makeWorkingAgent("agent-1", ["parent-1"]),
+    ]);
 
     const store = getIssueSurfaceViewStore("project:p1");
     act(() => store.getState().toggleShowSubIssues());
@@ -1330,8 +1346,8 @@ describe("useIssueSurfaceController", () => {
       in_progress: [makeIssue({ id: "prog-1", status: "in_progress" })],
     });
     getWorkspaceWorkingAgents.mockResolvedValue([
-      makeWorkingAgent("agent-1"),
-      makeWorkingAgent("agent-2"),
+      makeWorkingAgent("agent-1", ["todo-1"]),
+      makeWorkingAgent("agent-2", ["prog-1"]),
     ]);
 
     const store = getIssueSurfaceViewStore("project:p1");
@@ -1407,9 +1423,12 @@ describe("useIssueSurfaceController", () => {
     }),
   ];
 
-  it("filters Gantt by working-agent assignees without reading the task snapshot", async () => {
+  it("filters Gantt by running-task issue ids rather than issue assignees", async () => {
     mockGanttIssues(ganttFixture);
-    getWorkspaceWorkingAgents.mockResolvedValue([makeWorkingAgent("agent-1")]);
+    getWorkspaceWorkingAgents.mockResolvedValue([
+      // The editing agent deliberately differs from the issue assignee.
+      makeWorkingAgent("agent-editor", ["gantt-open"]),
+    ]);
     // Contradictory legacy membership must not affect the canvas.
     getAgentTaskSnapshot.mockResolvedValue([
       makeRunningTask("t-2", "agent-2", "gantt-done"),
@@ -1453,8 +1472,8 @@ describe("useIssueSurfaceController", () => {
       selectedAssigneeId: null,
     },
     {
-      name: "the selected assignee has no working-agent intersection",
-      workingAgents: [makeWorkingAgent("agent-1")],
+      name: "the selected assignee excludes all running-task issues",
+      workingAgents: [makeWorkingAgent("agent-1", ["gantt-open"])],
       selectedAssigneeId: "agent-2",
     },
   ])("keeps Gantt empty when $name", async ({
@@ -1493,7 +1512,14 @@ describe("useIssueSurfaceController", () => {
       ),
     );
 
-    expect(result.current.tableQuerySpec.filters.assignees).toEqual([]);
+    expect(result.current.tableQuerySpec.filters.working_issue_ids).toEqual(
+      workingAgents.flatMap((agent) => agent.issue_ids),
+    );
+    expect(result.current.tableQuerySpec.filters.assignees).toEqual(
+      selectedAssigneeId
+        ? [{ type: "agent", id: selectedAssigneeId }]
+        : undefined,
+    );
     expect(result.current.filteredGanttIssues).toEqual([]);
     expect(result.current.workingScopeIssues).toEqual([]);
   });
@@ -1501,8 +1527,7 @@ describe("useIssueSurfaceController", () => {
   it("widens the gantt working scope when show-completed is turned on", async () => {
     mockGanttIssues(ganttFixture);
     getWorkspaceWorkingAgents.mockResolvedValue([
-      makeWorkingAgent("agent-1"),
-      makeWorkingAgent("agent-2"),
+      makeWorkingAgent("agent-editor", ["gantt-open", "gantt-done"]),
     ]);
 
     const store = getIssueSurfaceViewStore("project:p1");

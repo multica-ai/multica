@@ -19,9 +19,8 @@ export interface IssueFilters {
    *  a definition, AND across definitions; checkbox uses "true"/"false"). */
   propertyFilters?: Record<string, string[]>;
   // When `agentRunningFilter` is true, only keep issues whose id is in
-  // `runningIssueIds`. The set is derived by the caller from
-  // `agentTaskSnapshot` (one pass over running tasks) so filter.ts stays
-  // free of any data-fetching dependency.
+  // `runningIssueIds`. The surface derives this set from the independent
+  // `/api/working-agents` projection so filter.ts stays free of fetching.
   agentRunningFilter?: boolean;
   runningIssueIds?: ReadonlySet<string>;
   // "Show sub-issues" display toggle. When explicitly `false`, hide issues

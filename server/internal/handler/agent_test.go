@@ -381,19 +381,90 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	})
 
 	for _, tc := range []struct {
-		name      string
-		query     string
-		wantCount int32
+		name         string
+		query        string
+		wantCount    int32
+		wantIssueIDs []string
 	}{
-		{name: "all sources", wantCount: 9},
-		{name: "issue", query: "?type=issue", wantCount: 6},
-		{name: "autopilot", query: "?type=autopilot", wantCount: 1},
-		{name: "chat", query: "?type=chat", wantCount: 1},
-		{name: "mine defaults to any", query: "?type=issue&scope=mine", wantCount: 5},
-		{name: "mine any", query: "?type=issue&scope=mine&relation=any", wantCount: 5},
-		{name: "mine assigned", query: "?type=issue&scope=mine&relation=assigned", wantCount: 1},
-		{name: "mine created", query: "?type=issue&scope=mine&relation=created", wantCount: 1},
-		{name: "mine involved", query: "?type=issue&scope=mine&relation=involved", wantCount: 4},
+		{
+			name:      "all sources",
+			wantCount: 9,
+			wantIssueIDs: []string{
+				assignedIssueID,
+				ownedAgentIssueID,
+				outsideIssueID,
+				directMemberSquadIssueID,
+				ownedLeaderSquadIssueID,
+				ownedMemberSquadIssueID,
+			},
+		},
+		{
+			name:      "issue",
+			query:     "?type=issue",
+			wantCount: 6,
+			wantIssueIDs: []string{
+				assignedIssueID,
+				ownedAgentIssueID,
+				outsideIssueID,
+				directMemberSquadIssueID,
+				ownedLeaderSquadIssueID,
+				ownedMemberSquadIssueID,
+			},
+		},
+		{
+			name:         "autopilot",
+			query:        "?type=autopilot",
+			wantCount:    1,
+			wantIssueIDs: []string{assignedIssueID},
+		},
+		{name: "chat", query: "?type=chat", wantCount: 1, wantIssueIDs: []string{}},
+		{
+			name:      "mine defaults to any",
+			query:     "?type=issue&scope=mine",
+			wantCount: 5,
+			wantIssueIDs: []string{
+				assignedIssueID,
+				ownedAgentIssueID,
+				directMemberSquadIssueID,
+				ownedLeaderSquadIssueID,
+				ownedMemberSquadIssueID,
+			},
+		},
+		{
+			name:      "mine any",
+			query:     "?type=issue&scope=mine&relation=any",
+			wantCount: 5,
+			wantIssueIDs: []string{
+				assignedIssueID,
+				ownedAgentIssueID,
+				directMemberSquadIssueID,
+				ownedLeaderSquadIssueID,
+				ownedMemberSquadIssueID,
+			},
+		},
+		{
+			name:         "mine assigned",
+			query:        "?type=issue&scope=mine&relation=assigned",
+			wantCount:    1,
+			wantIssueIDs: []string{assignedIssueID},
+		},
+		{
+			name:         "mine created",
+			query:        "?type=issue&scope=mine&relation=created",
+			wantCount:    1,
+			wantIssueIDs: []string{assignedIssueID},
+		},
+		{
+			name:      "mine involved",
+			query:     "?type=issue&scope=mine&relation=involved",
+			wantCount: 4,
+			wantIssueIDs: []string{
+				ownedAgentIssueID,
+				directMemberSquadIssueID,
+				ownedLeaderSquadIssueID,
+				ownedMemberSquadIssueID,
+			},
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
@@ -427,6 +498,18 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 			}
 			if working.RunningTaskCount != tc.wantCount {
 				t.Errorf("running_task_count = %d, want %d", working.RunningTaskCount, tc.wantCount)
+			}
+			if len(working.IssueIDs) != len(tc.wantIssueIDs) {
+				t.Fatalf("issue_ids = %v, want %v", working.IssueIDs, tc.wantIssueIDs)
+			}
+			wantIssueIDs := make(map[string]struct{}, len(tc.wantIssueIDs))
+			for _, issueID := range tc.wantIssueIDs {
+				wantIssueIDs[issueID] = struct{}{}
+			}
+			for _, issueID := range working.IssueIDs {
+				if _, ok := wantIssueIDs[issueID]; !ok {
+					t.Errorf("unexpected issue_id %s; want %v", issueID, tc.wantIssueIDs)
+				}
 			}
 		})
 	}

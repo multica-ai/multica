@@ -1246,7 +1246,12 @@ SELECT
   a.id,
   a.name,
   a.avatar_url,
-  COUNT(*)::int AS running_task_count
+  COUNT(*)::int AS running_task_count,
+  COALESCE(
+    ARRAY_AGG(DISTINCT atq.issue_id ORDER BY atq.issue_id)
+      FILTER (WHERE atq.issue_id IS NOT NULL),
+    ARRAY[]::uuid[]
+  )::uuid[] AS issue_ids
 FROM agent a
 JOIN agent_task_queue atq ON atq.agent_id = a.id
 WHERE a.workspace_id = $1

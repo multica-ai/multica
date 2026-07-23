@@ -92,6 +92,7 @@ type issueTableFiltersRequest struct {
 	Properties        map[string][]string          `json:"properties,omitempty"`
 	Date              *issueTableDateFilterRequest `json:"date,omitempty"`
 	WorkingOnly       bool                         `json:"working_only,omitempty"`
+	WorkingIssueIDs   []string                     `json:"working_issue_ids,omitempty"`
 	IncludeSubIssues  *bool                        `json:"include_sub_issues,omitempty"`
 }
 
@@ -245,6 +246,8 @@ func equalOptionalString(a, b *string) bool {
 func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec) (string, error) {
 	explicitEmptyAssignees :=
 		spec.Filters.Assignees != nil && len(spec.Filters.Assignees) == 0
+	explicitEmptyWorkingIssues :=
+		spec.Filters.WorkingIssueIDs != nil && len(spec.Filters.WorkingIssueIDs) == 0
 	normalized := spec
 	normalized.Search = strings.TrimSpace(normalized.Search)
 	normalized.Scope.AssigneeTypes = sortedUniqueStrings(normalized.Scope.AssigneeTypes)
@@ -253,18 +256,21 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 	normalized.Filters.ProjectIDs = sortedUniqueStrings(normalized.Filters.ProjectIDs)
 	normalized.Filters.LabelIDs = sortedUniqueStrings(normalized.Filters.LabelIDs)
 	normalized.Filters.Assignees = sortedUniqueActors(normalized.Filters.Assignees)
+	normalized.Filters.WorkingIssueIDs = sortedUniqueStrings(normalized.Filters.WorkingIssueIDs)
 	normalized.Filters.Creators = sortedUniqueActors(normalized.Filters.Creators)
 	for key, values := range normalized.Filters.Properties {
 		normalized.Filters.Properties[key] = sortedUniqueStrings(values)
 	}
 	encoded, err := json.Marshal(struct {
-		WorkspaceID            string              `json:"workspace_id"`
-		Query                  issueTableQuerySpec `json:"query"`
-		ExplicitEmptyAssignees bool                `json:"explicit_empty_assignees,omitempty"`
+		WorkspaceID                string              `json:"workspace_id"`
+		Query                      issueTableQuerySpec `json:"query"`
+		ExplicitEmptyAssignees     bool                `json:"explicit_empty_assignees,omitempty"`
+		ExplicitEmptyWorkingIssues bool                `json:"explicit_empty_working_issues,omitempty"`
 	}{
-		WorkspaceID:            workspaceID,
-		Query:                  normalized,
-		ExplicitEmptyAssignees: explicitEmptyAssignees,
+		WorkspaceID:                workspaceID,
+		Query:                      normalized,
+		ExplicitEmptyAssignees:     explicitEmptyAssignees,
+		ExplicitEmptyWorkingIssues: explicitEmptyWorkingIssues,
 	})
 	if err != nil {
 		return "", err
@@ -513,10 +519,8 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		}
 		if len(ors) == 0 {
 			// Omitted assignees means "no assignee filter"; an explicitly
-			// empty list means "match none". The workspace working-agent
-			// quick filter relies on this distinction when the final agent
-			// finishes (or when an explicit assignee selection intersects the
-			// working set to empty).
+			// empty list means "match none", so API callers can preserve an
+			// intentionally active empty predicate.
 			where = append(where, "FALSE")
 		} else {
 			where = append(where, "("+strings.Join(ors, " OR ")+")")
@@ -593,6 +597,20 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 
 	if spec.Filters.WorkingOnly {
 		where = append(where, "EXISTS (SELECT 1 FROM agent_task_queue atq WHERE atq.issue_id = i.id AND atq.status = 'running')")
+	}
+	workingIssueIDs, ok := parseIssueTableUUIDList(w, spec.Filters.WorkingIssueIDs, "filters.working_issue_ids")
+	if !ok {
+		return issueTableSQL{}, false
+	}
+	if spec.Filters.WorkingIssueIDs != nil {
+		if len(workingIssueIDs) == 0 {
+			where = append(where, "FALSE")
+		} else {
+			where = append(where, fmt.Sprintf(
+				"i.id = ANY(%s::uuid[])",
+				addArg(workingIssueIDs),
+			))
+		}
 	}
 	if spec.Filters.IncludeSubIssues != nil && !*spec.Filters.IncludeSubIssues {
 		where = append(where, "i.parent_issue_id IS NULL")

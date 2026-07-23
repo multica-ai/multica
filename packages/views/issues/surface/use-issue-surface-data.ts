@@ -81,10 +81,7 @@ export interface IssueSurfaceData {
   visibleStatuses: IssueStatus[];
   hiddenStatuses: IssueStatus[];
   statusPagination: IssueStatusPagination;
-  activeFilters: Omit<
-    IssueFilters,
-    "statusFilters" | "agentRunningFilter" | "runningIssueIds"
-  >;
+  activeFilters: Omit<IssueFilters, "statusFilters">;
   childProgressMap: Map<string, ChildProgress>;
   projectMap: Map<string, Project>;
   resolveTableExportLookups: (needs: {
@@ -118,13 +115,13 @@ export function useIssueSurfaceData({
   priorityFilters,
   assigneeFilters,
   includeNoAssignee,
-  assigneeFilterActive,
+  agentRunningFilter,
   creatorFilters,
   projectFilters,
   includeNoProject,
   labelFilters,
   propertyFilters,
-  workingAssigneeFilters,
+  workingIssueIDs,
   showSubIssues,
   loadProjects,
 }: {
@@ -144,17 +141,14 @@ export function useIssueSurfaceData({
   priorityFilters: IssueFilterState["priorityFilters"];
   assigneeFilters: IssueFilterState["assigneeFilters"];
   includeNoAssignee: boolean;
-  /** True when the working-agent quick filter owns the assignee predicate,
-   *  including when its API-derived intersection is explicitly empty. */
-  assigneeFilterActive: boolean;
+  agentRunningFilter: boolean;
   creatorFilters: IssueFilterState["creatorFilters"];
   projectFilters: string[];
   includeNoProject: boolean;
   labelFilters: string[];
   propertyFilters: Record<string, string[]>;
-  /** The working-agent API projected into the same typed assignee predicate
-   *  used by the canonical Table query. */
-  workingAssigneeFilters: IssueFilterState["assigneeFilters"];
+  /** Distinct running-task issue ids projected by `/api/working-agents`. */
+  workingIssueIDs: ReadonlySet<string>;
   showSubIssues: boolean;
   loadProjects: boolean;
 }): IssueSurfaceData {
@@ -207,7 +201,11 @@ export function useIssueSurfaceData({
     ...issueSurfaceGanttOptions(wsId, projectId ?? ""),
     enabled: usesGantt,
   });
-  const hasWorkingAssignees = workingAssigneeFilters.length > 0;
+  const hasWorkingIssues = workingIssueIDs.size > 0;
+  const workingFilterContext = useMemo(
+    () => ({ runningIssueIds: workingIssueIDs }),
+    [workingIssueIDs],
+  );
   const bucketedIssues = useMemo(() => {
     return serverStatusBranches.enabled
       ? serverStatusBranches.issues
@@ -244,18 +242,17 @@ export function useIssueSurfaceData({
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,
-      assigneeFilterActive,
       creatorFilters,
       projectFilters,
       includeNoProject,
       labelFilters,
       propertyFilters,
-      workingOnly: false,
+      workingOnly: agentRunningFilter,
       showSubIssues,
     }),
     [
       assigneeFilters,
-      assigneeFilterActive,
+      agentRunningFilter,
       creatorFilters,
       includeNoAssignee,
       includeNoProject,
@@ -272,11 +269,16 @@ export function useIssueSurfaceData({
     () =>
       serverStatusBranches.enabled
         ? surfaceIssues
-        : applyIssueFilters(surfaceIssues, baseFilterState),
+        : applyIssueFilters(
+            surfaceIssues,
+            baseFilterState,
+            workingFilterContext,
+          ),
     [
       baseFilterState,
       serverStatusBranches.enabled,
       surfaceIssues,
+      workingFilterContext,
     ],
   );
 
@@ -289,54 +291,65 @@ export function useIssueSurfaceData({
   );
 
   const swimlaneIssues = useMemo(
-    () => applyIssueFilters(surfaceIssues, statuslessFilterState),
-    [statuslessFilterState, surfaceIssues],
+    () =>
+      applyIssueFilters(
+        surfaceIssues,
+        statuslessFilterState,
+        workingFilterContext,
+      ),
+    [statuslessFilterState, surfaceIssues, workingFilterContext],
   );
 
   const filteredGanttIssues = useMemo(
     () =>
       ganttCanvasRows(
-        applyIssueFilters(ganttIssues, baseFilterState),
+        applyIssueFilters(ganttIssues, baseFilterState, workingFilterContext),
         ganttShowCompleted,
       ),
-    [baseFilterState, ganttIssues, ganttShowCompleted],
+    [
+      baseFilterState,
+      ganttIssues,
+      ganttShowCompleted,
+      workingFilterContext,
+    ],
   );
 
   // The assignee-grouped board renders straight from `groups`, bypassing the
   // flat applyIssueFilters output — re-apply the remaining client-only
-  // display filters per group. Working-agent membership is already encoded
-  // in the assignee predicate sent to the server.
+  // display filters per group. Server-owned group paths encode running-task
+  // membership in the canonical query; this fallback uses the same issue ids.
   const filteredAssigneeGroups = useMemo(
     () =>
       filterAssigneeGroups(assigneeGroupsQuery.data?.groups, {
+        agentRunningFilter,
+        runningIssueIds: workingIssueIDs,
         showSubIssues,
         propertyFilters,
       }),
     [
       assigneeGroupsQuery.data?.groups,
+      agentRunningFilter,
       propertyFilters,
       showSubIssues,
+      workingIssueIDs,
     ],
   );
 
   const workingFilterState = useMemo<IssueFilterState>(
     () => ({
       ...baseFilterState,
-      assigneeFilters: workingAssigneeFilters,
-      includeNoAssignee: false,
-      assigneeFilterActive: true,
-      workingOnly: false,
+      workingOnly: true,
     }),
-    [baseFilterState, workingAssigneeFilters],
+    [baseFilterState],
   );
 
   // The rows the agents-working filter leaves on screen — i.e. exactly what
   // you get when you click the header chip.
   //
   // This is deliberately a projection of the render pipeline. The controller
-  // translates `/api/working-agents` into a typed assignee predicate once;
-  // both the canonical server query and client-only Gantt/extra-child paths
-  // reuse that predicate, so there is no task-snapshot membership fallback.
+  // translates `/api/working-agents` into running issue ids once; both the
+  // canonical server query and client-only Gantt/extra-child paths reuse that
+  // returned issue-id set.
   //
   // The chip counts AGENTS, not this list's length, so these are not equal
   // (one agent can hold two of these rows). What this set does decide is
@@ -364,6 +377,7 @@ export function useIssueSurfaceData({
         applyIssueFilters(
           ganttIssues,
           workingFilterState,
+          workingFilterContext,
         ),
         ganttShowCompleted,
       );
@@ -371,28 +385,38 @@ export function useIssueSurfaceData({
     if (usesAssigneeBoard && !serverGroupBranches.enabled) {
       const groupedIssues = (
         filterAssigneeGroups(assigneeGroupsQuery.data?.groups, {
+          agentRunningFilter: true,
+          runningIssueIds: workingIssueIDs,
           showSubIssues,
           propertyFilters,
         }) ?? []
       ).flatMap((group) => group.issues);
-      return applyIssueFilters(groupedIssues, workingFilterState);
+      return applyIssueFilters(
+        groupedIssues,
+        workingFilterState,
+        workingFilterContext,
+      );
     }
     if (usesTable || serverStatusBranches.enabled || serverGroupBranches.enabled) {
       // Table membership is server-owned and cursor paged. Do not rebuild a
       // second complete issue window merely to decorate the activity chip:
       // that was the final hidden auto-materialization loop behind the old
-      // 1,000-row ceiling. An empty working-assignee intersection is trivially
+      // 1,000-row ceiling. An empty running-issue set is trivially
       // known; otherwise keep the chip indeterminate until a bounded server
       // facet supplies the matching task/issue projection.
-      if (!hasWorkingAssignees) return EMPTY_ISSUES;
+      if (!hasWorkingIssues) return EMPTY_ISSUES;
       return undefined;
     }
-    return applyIssueFilters(surfaceIssues, workingFilterState);
+    return applyIssueFilters(
+      surfaceIssues,
+      workingFilterState,
+      workingFilterContext,
+    );
   }, [
     assigneeGroupsQuery.data?.groups,
     ganttIssues,
     ganttShowCompleted,
-    hasWorkingAssignees,
+    hasWorkingIssues,
     propertyFilters,
     showSubIssues,
     surfaceIssues,
@@ -402,6 +426,8 @@ export function useIssueSurfaceData({
     serverStatusBranches.enabled,
     serverGroupBranches.enabled,
     workingFilterState,
+    workingFilterContext,
+    workingIssueIDs,
   ]);
 
   const {
@@ -476,7 +502,8 @@ export function useIssueSurfaceData({
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,
-      assigneeFilterActive,
+      agentRunningFilter,
+      runningIssueIds: workingIssueIDs,
       creatorFilters,
       projectFilters,
       includeNoProject,
@@ -486,7 +513,7 @@ export function useIssueSurfaceData({
     }),
     [
       assigneeFilters,
-      assigneeFilterActive,
+      agentRunningFilter,
       creatorFilters,
       includeNoAssignee,
       includeNoProject,
@@ -495,6 +522,7 @@ export function useIssueSurfaceData({
       priorityFilters,
       projectFilters,
       showSubIssues,
+      workingIssueIDs,
     ],
   );
 

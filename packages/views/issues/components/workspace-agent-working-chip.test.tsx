@@ -84,6 +84,7 @@ function makeAgent(
     name: `Agent ${id}`,
     avatar_url: null,
     running_task_count: runningTaskCount,
+    issue_ids: [],
   };
 }
 

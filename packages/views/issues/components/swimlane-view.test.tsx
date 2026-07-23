@@ -1791,7 +1791,7 @@ describe("SwimLaneView", () => {
     });
   });
 
-  it("filters batch-fetched children using API-derived working assignees", async () => {
+  it("filters batch-fetched children using API-derived running issue ids", async () => {
     mockViewState.swimlaneGrouping = "parent";
 
     const grandparent: Issue = {
@@ -1835,7 +1835,7 @@ describe("SwimLaneView", () => {
       title: "Running Child",
       status: "in_progress",
       assignee_type: "agent",
-      assignee_id: "working-agent",
+      assignee_id: "idle-agent",
       parent_issue_id: "p-3",
       position: 12,
     };
@@ -1847,7 +1847,7 @@ describe("SwimLaneView", () => {
       title: "Non-running Child",
       status: "in_progress",
       assignee_type: "agent",
-      assignee_id: "idle-agent",
+      assignee_id: "working-agent",
       parent_issue_id: "p-3",
       position: 13,
     };
@@ -1865,8 +1865,10 @@ describe("SwimLaneView", () => {
         issues={[grandparent, parent]}
         activeFilters={{
           priorityFilters: [],
-          assigneeFilters: [{ type: "agent", id: "working-agent" }],
+          assigneeFilters: [],
           includeNoAssignee: false,
+          agentRunningFilter: true,
+          runningIssueIds: new Set(["gc-running"]),
           creatorFilters: [],
           projectFilters: [],
           includeNoProject: false,
@@ -1887,7 +1889,7 @@ describe("SwimLaneView", () => {
     });
   });
 
-  it("hides batch-fetched children for an explicitly empty working-assignee predicate", async () => {
+  it("hides batch-fetched children when the running issue set is empty", async () => {
     mockViewState.swimlaneGrouping = "parent";
     const parent = mockIssues[0]!;
     const batchOnlyChild: Issue = {
@@ -1908,7 +1910,8 @@ describe("SwimLaneView", () => {
           priorityFilters: [],
           assigneeFilters: [],
           includeNoAssignee: false,
-          assigneeFilterActive: true,
+          agentRunningFilter: true,
+          runningIssueIds: new Set(),
           creatorFilters: [],
           projectFilters: [],
           includeNoProject: false,

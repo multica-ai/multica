@@ -4002,7 +4002,12 @@ SELECT
   a.id,
   a.name,
   a.avatar_url,
-  COUNT(*)::int AS running_task_count
+  COUNT(*)::int AS running_task_count,
+  COALESCE(
+    ARRAY_AGG(DISTINCT atq.issue_id ORDER BY atq.issue_id)
+      FILTER (WHERE atq.issue_id IS NOT NULL),
+    ARRAY[]::uuid[]
+  )::uuid[] AS issue_ids
 FROM agent a
 JOIN agent_task_queue atq ON atq.agent_id = a.id
 WHERE a.workspace_id = $1
@@ -4106,10 +4111,11 @@ type ListWorkspaceWorkingAgentsParams struct {
 }
 
 type ListWorkspaceWorkingAgentsRow struct {
-	ID               pgtype.UUID `json:"id"`
-	Name             string      `json:"name"`
-	AvatarUrl        pgtype.Text `json:"avatar_url"`
-	RunningTaskCount int32       `json:"running_task_count"`
+	ID               pgtype.UUID   `json:"id"`
+	Name             string        `json:"name"`
+	AvatarUrl        pgtype.Text   `json:"avatar_url"`
+	RunningTaskCount int32         `json:"running_task_count"`
+	IssueIds         []pgtype.UUID `json:"issue_ids"`
 }
 
 // Workspace-level source for consumers that show currently working agents.
@@ -4140,6 +4146,7 @@ func (q *Queries) ListWorkspaceWorkingAgents(ctx context.Context, arg ListWorksp
 			&i.Name,
 			&i.AvatarUrl,
 			&i.RunningTaskCount,
+			&i.IssueIds,
 		); err != nil {
 			return nil, err
 		}

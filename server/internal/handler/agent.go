@@ -2096,13 +2096,15 @@ type AgentRunCount struct {
 
 // WorkspaceWorkingAgent is the privacy-safe agent summary returned by the
 // workspace working-agents endpoint. It deliberately carries only display
-// information plus the current running-task count; full AgentResponse fields
-// include runtime and integration configuration that this chip does not need.
+// information plus the current running-task count and referenced issue ids;
+// full AgentResponse fields include runtime and integration configuration that
+// this chip does not need.
 type WorkspaceWorkingAgent struct {
-	ID               string  `json:"id"`
-	Name             string  `json:"name"`
-	AvatarURL        *string `json:"avatar_url"`
-	RunningTaskCount int32   `json:"running_task_count"`
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	AvatarURL        *string  `json:"avatar_url"`
+	RunningTaskCount int32    `json:"running_task_count"`
+	IssueIDs         []string `json:"issue_ids"`
 }
 
 // ListWorkspaceWorkingAgents returns currently working user-authored agents in
@@ -2197,6 +2199,7 @@ func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Requ
 			Name:             row.Name,
 			AvatarURL:        textToPtr(row.AvatarUrl),
 			RunningTaskCount: row.RunningTaskCount,
+			IssueIDs:         uuidStringsOrEmpty(row.IssueIds),
 		})
 	}
 

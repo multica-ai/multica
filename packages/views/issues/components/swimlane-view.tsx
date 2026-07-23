@@ -625,10 +625,7 @@ function SwimLaneViewImpl({
    * a parent in a hidden status still surfaces its label correctly.
    */
   unfilteredIssues?: Issue[];
-  activeFilters?: Omit<
-    IssueFilters,
-    "statusFilters" | "agentRunningFilter" | "runningIssueIds"
-  >;
+  activeFilters?: Omit<IssueFilters, "statusFilters">;
   visibleStatuses?: IssueStatus[];
   hiddenStatuses?: IssueStatus[];
   onMoveIssue: (
@@ -662,11 +659,13 @@ function SwimLaneViewImpl({
     // Status is enforced by visible-column rendering, not by filterIssues
     statusFilters: [],
     priorityFilters: activeFiltersProp?.priorityFilters ?? [],
-    // The controller has already projected `/api/working-agents` into this
-    // assignee list, so extra children use the same membership as Table.
     assigneeFilters: activeFiltersProp?.assigneeFilters ?? [],
     includeNoAssignee: activeFiltersProp?.includeNoAssignee ?? false,
     assigneeFilterActive: activeFiltersProp?.assigneeFilterActive ?? false,
+    // Extra children are not part of the server-grouped page yet, so apply
+    // the same running-task issue ids returned by `/api/working-agents`.
+    agentRunningFilter: activeFiltersProp?.agentRunningFilter ?? false,
+    runningIssueIds: activeFiltersProp?.runningIssueIds,
     creatorFilters: activeFiltersProp?.creatorFilters ?? [],
     projectFilters: activeFiltersProp?.projectFilters ?? [],
     includeNoProject: activeFiltersProp?.includeNoProject ?? false,

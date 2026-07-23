@@ -337,11 +337,12 @@ describe("IssueSurface — table pagination ownership", () => {
       ),
       getWorkspaceWorkingAgents: vi.fn(() =>
         Promise.resolve(
-          runningIssues.map((_, index) => ({
+          runningIssues.map((issue, index) => ({
             id: `agent-${index}`,
             name: `Agent ${index}`,
             avatar_url: null,
             running_task_count: 1,
+            issue_ids: [issue.id],
           })),
         ),
       ),
@@ -376,10 +377,7 @@ describe("IssueSurface — table pagination ownership", () => {
         parent_id: null,
         query: expect.objectContaining({
           filters: expect.objectContaining({
-            assignees: runningIssues.map((_, index) => ({
-              type: "agent",
-              id: `agent-${index}`,
-            })),
+            working_issue_ids: runningIssues.map((issue) => issue.id),
           }),
         }),
       }),
