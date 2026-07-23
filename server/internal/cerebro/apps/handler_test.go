@@ -351,6 +351,7 @@ func TestMiniAppsRouterExposesSignedRuntimeBundleAndCallback(t *testing.T) {
 		`r.Post("/api/cerebro/apps-internal/{id}/{version}/callback", cerebroAppsHandler.RuntimeCallback)`,
 		`r.Post("/api/cerebro/apps-internal/host/registry", cerebroAppsHandler.WorkerRegistryCall)`,
 		`r.Post("/api/cerebro/apps-internal/host/connection", cerebroAppsHandler.WorkerConnectionCall)`,
+		`r.Get("/api/cerebro/apps-runtime/*", cerebroAppsHandler.RuntimeAsset)`,
 	} {
 		if !strings.Contains(router, route) {
 			t.Fatalf("signed mini-app runtime route is missing: %s", route)

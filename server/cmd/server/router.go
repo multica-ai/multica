@@ -1022,6 +1022,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Post("/api/cerebro/apps-internal/{id}/{version}/callback", cerebroAppsHandler.RuntimeCallback)
 	r.Post("/api/cerebro/apps-internal/host/registry", cerebroAppsHandler.WorkerRegistryCall)
 	r.Post("/api/cerebro/apps-internal/host/connection", cerebroAppsHandler.WorkerConnectionCall)
+	// CEREBRO-PATCH(cerebro-mini-app-runtime-assets): Published app frontend assets are served through the backend API origin.
+	r.Get("/api/cerebro/apps-runtime/*", cerebroAppsHandler.RuntimeAsset)
 	// CEREBRO-PATCH(cerebro-github-pr-link-route): FIR-2568 service-to-service PR-link write for the registry's poll-based scanner. Outside the user-auth group on purpose — the caller is a backend service presenting CEREBRO_GITHUB_LINK_KEY as a Bearer token (loopback-only when the key is unset).
 	r.Post("/api/cerebro/github/pull-requests", cerebroGitHubPRLinkHandler.Post)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)

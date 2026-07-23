@@ -45,6 +45,7 @@ type Handler struct {
 	enabled           bool
 	connections       connectionCaller
 	runtime           runtimeDeployer
+	runtimeAssets     runtimeAssetFetcher
 	runtimeServiceKey string
 }
 
@@ -56,6 +57,10 @@ type runtimeDeployer interface {
 
 type lifecycleRuntime interface {
 	Lifecycle(ctx context.Context, action, serviceID string) error
+}
+
+type runtimeAssetFetcher interface {
+	Asset(ctx context.Context, assetPath, rawQuery string) (RuntimeAsset, error)
 }
 
 func applyRuntimeLifecycle(ctx context.Context, runtime lifecycleRuntime, action string, serviceIDs []string) error {
@@ -88,9 +93,56 @@ func NewHandler(pool *pgxpool.Pool) *Handler {
 	runtimeURL := strings.TrimSpace(os.Getenv("CEREBRO_APPS_RUNTIME_URL"))
 	runtimeKey := strings.TrimSpace(os.Getenv("CEREBRO_APPS_RUNTIME_SERVICE_KEY"))
 	if runtimeURL != "" && runtimeKey != "" {
-		handler.runtime = NewRuntimeClient(runtimeURL, runtimeKey)
+		runtimeClient := NewRuntimeClient(runtimeURL, runtimeKey)
+		handler.runtime = runtimeClient
+		handler.runtimeAssets = runtimeClient
 	}
 	return handler
+}
+
+func (h *Handler) RuntimeAsset(w http.ResponseWriter, r *http.Request) {
+	assetPath := chi.URLParam(r, "*")
+	if h == nil || h.runtimeAssets == nil || !isAllowedRuntimeAssetPath(assetPath) {
+		http.NotFound(w, r)
+		return
+	}
+	asset, err := h.runtimeAssets.Asset(r.Context(), assetPath, r.URL.RawQuery)
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "app runtime is unavailable")
+		return
+	}
+	for _, name := range []string{"Cache-Control", "Content-Security-Policy", "Content-Type"} {
+		if value := asset.Headers.Get(name); value != "" {
+			w.Header().Set(name, value)
+		}
+	}
+	w.WriteHeader(asset.Status)
+	_, _ = w.Write(asset.Body)
+}
+
+func isAllowedRuntimeAssetPath(assetPath string) bool {
+	if assetPath == "sdk/multica.js" {
+		return true
+	}
+	parts := strings.SplitN(assetPath, "/", 4)
+	if len(parts) < 3 || parts[0] != "apps" {
+		return false
+	}
+	if _, err := uuid.Parse(parts[1]); err != nil || !semverPattern.MatchString(parts[2]) {
+		return false
+	}
+	if len(parts) == 3 || parts[3] == "" {
+		return true
+	}
+	if strings.Contains(parts[3], "\\") || strings.Contains(parts[3], "//") {
+		return false
+	}
+	for _, segment := range strings.Split(parts[3], "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *Handler) authenticateRuntimeRequest(r *http.Request, body []byte) bool {
