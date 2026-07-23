@@ -446,6 +446,8 @@ func TestCursorStepFinishParsing(t *testing.T) {
 	t.Parallel()
 
 	part := cursorStepFinishPart{}
+	// The trailing "cost" key is ignored: cursor-agent does not report per-step
+	// cost, and unknown keys must not break token parsing.
 	data := `{"tokens":{"input":500,"output":200,"cache":{"read":100}},"cost":0.01}`
 	if err := json.Unmarshal([]byte(data), &part); err != nil {
 		t.Fatalf("unmarshal: %v", err)

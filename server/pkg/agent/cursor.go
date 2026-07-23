@@ -474,7 +474,15 @@ type cursorStreamEvent struct {
 	// tool_result fields
 	Output string `json:"output,omitempty"`
 
-	// result fields
+	// result fields.
+	//
+	// The result event reports token counts only; cursor-agent's stream-json
+	// carries no per-turn cost (no `total_cost_usd`, no per-step `cost`). This
+	// was verified against the real CLI (2026.07.20, both stream-json and json
+	// output) and Cursor's CLI docs. So — unlike Grok, whose turn cost xAI
+	// reports authoritatively — Cursor spend is estimated downstream from the
+	// static rate table, never carried through here. Add a cost field only
+	// when a real payload proves the CLI emits one.
 	ResultText       string       `json:"result,omitempty"`
 	IsError          bool         `json:"is_error,omitempty"`
 	InputTokens      int64        `json:"inputTokens,omitempty"`
@@ -482,7 +490,6 @@ type cursorStreamEvent struct {
 	CacheReadTokens  int64        `json:"cacheReadTokens,omitempty"`
 	CacheWriteTokens int64        `json:"cacheWriteTokens,omitempty"`
 	Usage            *cursorUsage `json:"usage,omitempty"`
-	TotalCost        float64      `json:"total_cost_usd,omitempty"`
 
 	// error fields
 	ErrorMsg string `json:"error,omitempty"`
@@ -572,6 +579,9 @@ type cursorTextPart struct {
 	Text string `json:"text"`
 }
 
+// cursorStepFinishPart carries per-step token counts. cursor-agent does not
+// report a per-step cost (see cursorStreamEvent's result-fields note), so only
+// tokens are parsed here.
 type cursorStepFinishPart struct {
 	Tokens struct {
 		Input  int `json:"input"`
@@ -580,7 +590,6 @@ type cursorStepFinishPart struct {
 			Read int `json:"read"`
 		} `json:"cache"`
 	} `json:"tokens"`
-	Cost float64 `json:"cost"`
 }
 
 // ── Helpers ──
