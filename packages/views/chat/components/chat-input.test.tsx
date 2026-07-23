@@ -392,29 +392,32 @@ describe("ChatInput @ context wiring", () => {
 });
 
 describe("ChatInput project context", () => {
+  type ChatProject = NonNullable<
+    React.ComponentProps<typeof ChatInput>["projects"]
+  >[number];
+  const sampleProject: ChatProject = {
+    id: "project-alpha",
+    workspace_id: "ws-1",
+    title: "Project Alpha",
+    description: null,
+    icon: "📘",
+    status: "planned",
+    priority: "none",
+    lead_type: null,
+    lead_id: null,
+    start_date: null,
+    due_date: null,
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+    issue_count: 0,
+    done_count: 0,
+    resource_count: 0,
+  };
+
   it("renders the selected project chip and forwards context changes", () => {
     const onProjectChange = vi.fn();
     renderInput({
-      projects: [
-        {
-          id: "project-alpha",
-          workspace_id: "ws-1",
-          title: "Project Alpha",
-          description: null,
-          icon: "📘",
-          status: "planned",
-          priority: "none",
-          lead_type: null,
-          lead_id: null,
-          start_date: null,
-          due_date: null,
-          created_at: new Date(0).toISOString(),
-          updated_at: new Date(0).toISOString(),
-          issue_count: 0,
-          done_count: 0,
-          resource_count: 0,
-        },
-      ],
+      projects: [sampleProject],
       projectId: "project-alpha",
       onProjectChange,
     });
@@ -422,6 +425,59 @@ describe("ChatInput project context", () => {
     fireEvent.click(screen.getByRole("button", { name: "Change project context" }));
 
     expect(onProjectChange).toHaveBeenCalledWith(null);
+  });
+
+  it("locks the project control while a send is in flight so a mid-send switch cannot retarget the session", async () => {
+    // A brand-new chat creates its session row lazily during send, bound to
+    // the project selected at click time. If the user could switch project
+    // while that create is in flight, the session would be created against the
+    // old project while the UI already shows the new one — the agent would
+    // then receive a project/repo context the user no longer intends
+    // (MUL-5150). The control must stay locked for the whole send, not only
+    // once the agent is running.
+    let resolveSend: (accepted: boolean) => void;
+    const sendPromise = new Promise<boolean>((res) => {
+      resolveSend = res;
+    });
+    const onSend = vi.fn<ChatInputOnSend>(() => sendPromise);
+    const onProjectChange = vi.fn();
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange,
+      onSend,
+    });
+
+    // Interactive before send starts.
+    expect(
+      screen.getByRole("button", { name: "Change project context" }),
+    ).not.toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "slow network" },
+    });
+    let sendBtn: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendBtn = buttons[buttons.length - 1]!;
+      expect(sendBtn).not.toBeDisabled();
+    });
+    fireEvent.click(sendBtn!);
+
+    // Send pending → project control locked; a click cannot fire a change.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Change project context" }),
+      ).toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Change project context" }));
+    expect(onProjectChange).not.toHaveBeenCalled();
+
+    // Resolve the pending send so the promise doesn't dangle past the test.
+    await act(async () => {
+      resolveSend!(true);
+      await sendPromise;
+    });
   });
 });
 

@@ -497,7 +497,15 @@ export function ChatInput({
         : t(($) => $.input.placeholder_default);
 
   const uploadEnabled = !!onUploadFile && !disabled && !noAgent;
-  const projectSelectionEnabled = !!onProjectChange && !disabled && !noAgent && !isRunning;
+  // Also lock the project control while a send is in flight (`isSubmitting`),
+  // not just once the agent is running (`isRunning`). On a brand-new chat the
+  // session row is created lazily during send with the project selected at
+  // click time; letting the user switch project mid-send would create the
+  // session against the old project while the UI already shows the new one,
+  // so the agent receives a project/repo context the user no longer intends
+  // (and the editor clears as if the send landed on the current selection).
+  const projectSelectionEnabled =
+    !!onProjectChange && !disabled && !noAgent && !isRunning && !isSubmitting;
   const selectedProject = projects.find((project) => project.id === projectId);
 
   return (
