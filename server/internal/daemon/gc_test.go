@@ -1523,14 +1523,13 @@ func TestApplyGCAction_PreOpenRetargetFailsClosed(t *testing.T) {
 	}
 }
 
-func TestRunGC_FailClosedPreservesWorkspaceStorage(t *testing.T) {
+func TestRunGC_ReachesCleanupAndPreservesActiveRoot(t *testing.T) {
 	d := newGCTestDaemon(t, http.NewServeMux())
 	d.cfg.GCOrphanTTL = 0
 	root := d.cfg.WorkspacesRoot
 
 	staleRoot := createTaskDir(t, root, "ws-stale", "task", nil)
-	staleMarker := filepath.Join(staleRoot, "keep")
-	if err := os.WriteFile(staleMarker, []byte("stale"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(staleRoot, "keep"), []byte("stale"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1548,15 +1547,6 @@ func TestRunGC_FailClosedPreservesWorkspaceStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	managedArtifact := filepath.Join(staleRoot, "codex-home", ".sandbox-bin")
-	if err := os.MkdirAll(managedArtifact, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	artifactMarker := filepath.Join(managedArtifact, "keep")
-	if err := os.WriteFile(artifactMarker, []byte("artifact"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
 	repoRef := filepath.Join(root, ".repos", "repo.git", "refs", "heads", "main")
 	if err := os.MkdirAll(filepath.Dir(repoRef), 0o755); err != nil {
 		t.Fatal(err)
@@ -1565,37 +1555,13 @@ func TestRunGC_FailClosedPreservesWorkspaceStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	trashMarker := filepath.Join(root, gcTrashDirName, "quarantine", "keep")
-	if err := os.MkdirAll(filepath.Dir(trashMarker), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(trashMarker, []byte("trash"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	var downstreamCalled atomic.Bool
-	d.gcBeforeApplyHook = func(string) { downstreamCalled.Store(true) }
-	d.envRootPreOpenHook = func(string) { downstreamCalled.Store(true) }
-	d.artifactCleanupHook = func(string) { downstreamCalled.Store(true) }
-
-	before, err := os.Stat(staleRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
 	d.runGC(context.Background())
-	after, err := os.Stat(staleRoot)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !os.SameFile(before, after) {
-		t.Fatal("inactive stale root identity changed")
+	if _, err := os.Stat(staleRoot); !os.IsNotExist(err) {
+		t.Fatalf("scheduled/manual GC did not remove stale root: %v", err)
 	}
 	for marker, want := range map[string]string{
-		staleMarker:     "stale",
 		predictedMarker: "predicted",
-		artifactMarker:  "artifact",
 		repoRef:         "deadbeef",
-		trashMarker:     "trash",
 	} {
 		got, err := os.ReadFile(marker)
 		if err != nil {
@@ -1605,8 +1571,42 @@ func TestRunGC_FailClosedPreservesWorkspaceStorage(t *testing.T) {
 			t.Fatalf("runGC changed %s: got %q, want %q", marker, got, want)
 		}
 	}
-	if downstreamCalled.Load() {
-		t.Fatal("runGC invoked downstream discovery or mutation helper")
+}
+
+func TestEnvRootLease_MarkAbsentThenMkdirRejectsGCReservation(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	root := filepath.Join(t.TempDir(), "predicted")
+	release, ok := d.markActiveEnvRoot(context.Background(), root)
+	if !ok {
+		t.Fatal("mark absent root failed")
+	}
+	defer release()
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, reserved := d.reserveEnvRootForGC(root); reserved {
+		t.Fatal("mkdir changed lease identity and allowed GC reservation")
+	}
+}
+
+func TestEnvRootLease_MutateContentsRejectsGCReservation(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	root := filepath.Join(t.TempDir(), "existing")
+	if err := os.MkdirAll(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	release, ok := d.markActiveEnvRoot(context.Background(), root)
+	if !ok {
+		t.Fatal("mark existing root failed")
+	}
+	defer release()
+	if err := os.WriteFile(filepath.Join(root, "mutated"), []byte("new contents"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, reserved := d.reserveEnvRootForGC(root); reserved {
+		t.Fatal("content mutation changed lease identity and allowed GC reservation")
 	}
 }
 
