@@ -5,7 +5,7 @@
  * (react-markdown link component), and link-hover-card (Open button).
  */
 
-import { isGlobalPath } from "@multica/core/paths";
+import { isGlobalPath, isReservedSlug } from "@multica/core/paths";
 
 /**
  * Top-level workspace-scoped routes. Used to detect "/{route}/..." paths that
@@ -33,16 +33,31 @@ const WORKSPACE_ROUTE_SEGMENTS = new Set([
 ]);
 
 /**
- * Path prefixes served by the backend rather than the app router. A link to one
- * of these is a download / raw resource even though it sits on the app origin,
- * so it must stay an external open instead of becoming an in-app route
- * (`/api/attachments/<id>/download` is the common one in agent-written content).
+ * Report whether a path is a workspace-scoped app page — `/{slug}/...` where the
+ * first segment is a slug a workspace could actually own.
+ *
+ * The app origin also serves things the app router does not own: `/api/*`,
+ * `/uploads/*` (local-storage attachments, proxied by web), `/_next/*`,
+ * `/favicon.ico`, and the pre-workspace routes. Every one of those first
+ * segments is already a reserved slug, so the reserved list — the same one the
+ * backend enforces at workspace creation — answers this question without a
+ * parallel deny-list that has to be kept in sync with the backend's routes.
  */
-const NON_ROUTE_PREFIXES = ["/api/", "/_next/"];
+function isWorkspaceScopedPath(pathname: string): boolean {
+  const first = pathname.split("/")[1] ?? "";
+  if (!first) return false;
+  let segment: string;
+  try {
+    segment = decodeURIComponent(first);
+  } catch {
+    return false;
+  }
+  return !isReservedSlug(segment.toLowerCase());
+}
 
 /**
- * Convert an absolute URL that points at this deployment's own app into the
- * in-app path it addresses; `null` for anything else.
+ * Convert an absolute URL that points at a workspace page on this deployment's
+ * own app into the in-app path it addresses; `null` for anything else.
  *
  * An agent or a user pasting `https://<app-host>/acme/issues/123` means the same
  * destination as `/acme/issues/123`. Without this, the URL reads as external and
@@ -70,9 +85,7 @@ export function toInternalAppPath(
   // Opaque origins (file:, data:) compare equal to each other; only real web
   // origins identify the app.
   if (target.protocol !== "http:" && target.protocol !== "https:") return null;
-  if (NON_ROUTE_PREFIXES.some((prefix) => target.pathname.startsWith(prefix))) {
-    return null;
-  }
+  if (!isWorkspaceScopedPath(target.pathname)) return null;
   return `${target.pathname}${target.search}${target.hash}`;
 }
 

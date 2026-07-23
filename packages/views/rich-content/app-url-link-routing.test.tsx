@@ -19,13 +19,15 @@ vi.mock("../issues/hooks", () => ({
   useResolveIssueIdentifier: () => null,
 }));
 
-vi.mock("@multica/core/paths", () => ({
+// Only the workspace hooks are stubbed — the real path helpers stay in place so
+// the reserved-slug rule that decides in-app vs external is the shipped one.
+vi.mock("@multica/core/paths", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/paths")>()),
   useWorkspacePaths: () => ({
     issueDetail: (id: string) => `/test/issues/${id}`,
     projectDetail: (id: string) => `/test/projects/${id}`,
   }),
   useWorkspaceSlug: () => "test",
-  isGlobalPath: () => false,
 }));
 
 vi.mock("../navigation", () => ({
@@ -110,6 +112,20 @@ describe("RichContent link routing", () => {
     expect(navigatedPaths).toEqual([]);
     expect(openSpy).toHaveBeenCalledWith(
       download,
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
+
+  it("keeps a same-origin /uploads file external — the backend serves it, not the router", () => {
+    const upload = `${APP_ORIGIN}/uploads/2026/07/notes.pdf`;
+    renderContent(`[notes.pdf](${upload})`);
+
+    screen.getByText("notes.pdf").click();
+
+    expect(navigatedPaths).toEqual([]);
+    expect(openSpy).toHaveBeenCalledWith(
+      upload,
       "_blank",
       "noopener,noreferrer",
     );

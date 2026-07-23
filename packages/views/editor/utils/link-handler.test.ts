@@ -38,11 +38,29 @@ describe("toInternalAppPath", () => {
     expect(toInternalAppPath(`${APP_ORIGIN}/acme/issues/1`, null)).toBeNull();
   });
 
-  it("keeps backend-served paths external so downloads still work", () => {
+  it("keeps backend-served paths external so downloads and assets still work", () => {
+    // Every one of these first segments is a reserved slug, which is exactly
+    // why the reserved list — not a hand-kept deny-list — decides this.
     expect(
       toInternalAppPath(`${APP_ORIGIN}/api/attachments/abc/download`, APP_ORIGIN),
     ).toBeNull();
+    expect(
+      toInternalAppPath(`${APP_ORIGIN}/uploads/2026/07/report.pdf`, APP_ORIGIN),
+    ).toBeNull();
+    expect(toInternalAppPath(`${APP_ORIGIN}/uploads`, APP_ORIGIN)).toBeNull();
     expect(toInternalAppPath(`${APP_ORIGIN}/_next/static/x.js`, APP_ORIGIN)).toBeNull();
+    expect(toInternalAppPath(`${APP_ORIGIN}/favicon.ico`, APP_ORIGIN)).toBeNull();
+  });
+
+  it("keeps pre-workspace and root paths external — they are not workspace pages", () => {
+    expect(toInternalAppPath(`${APP_ORIGIN}/login`, APP_ORIGIN)).toBeNull();
+    expect(toInternalAppPath(`${APP_ORIGIN}/auth/callback`, APP_ORIGIN)).toBeNull();
+    expect(toInternalAppPath(`${APP_ORIGIN}/`, APP_ORIGIN)).toBeNull();
+  });
+
+  it("ignores case and percent-encoding when matching a reserved first segment", () => {
+    expect(toInternalAppPath(`${APP_ORIGIN}/UPLOADS/x.pdf`, APP_ORIGIN)).toBeNull();
+    expect(toInternalAppPath(`${APP_ORIGIN}/%75ploads/x.pdf`, APP_ORIGIN)).toBeNull();
   });
 
   it("returns null for non-http schemes and unparseable hrefs", () => {
