@@ -471,7 +471,6 @@
     "copy": "Copy",
     "close": "Close",
     "executed_by": "Run by {{name}}",
-    "sort_time_order": "Time order",
     "sort_chronological": "Oldest first",
     "sort_newest_first": "Newest first",
     "sort_to_newest": "Currently oldest first. Click to show newest first",

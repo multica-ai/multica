@@ -191,8 +191,18 @@ describe("ExecutionLogDialog", () => {
     const summary = await screen.findByTestId("execution-log-summary");
     expect(summary).toHaveTextContent("Ran for 1m 0s");
     expect(summary).toHaveTextContent("1 tool call");
+    expect(screen.getByTestId("execution-log-duration")).toHaveAttribute(
+      "data-slot",
+      "badge",
+    );
+    expect(screen.getByTestId("execution-log-tool-count")).toHaveAttribute(
+      "data-slot",
+      "badge",
+    );
     expect(summary).toHaveTextContent("Started");
+    expect(screen.getByTestId("execution-log-start-time")).toHaveAttribute("title");
     expect(screen.getByTestId("execution-log-end-time")).toHaveTextContent("Ended");
+    expect(screen.getByTestId("execution-log-end-time")).toHaveAttribute("title");
     expect(screen.queryByTestId("execution-log-in-progress")).not.toBeInTheDocument();
     expect(summary).not.toHaveTextContent("·");
     expect(summary).toHaveClass("gap-x-3");
@@ -308,6 +318,7 @@ describe("ExecutionLogDialog", () => {
     const chronologicalToggle = screen.getByRole("button", { name: "Oldest first" });
     const expandToggle = screen.getByRole("button", { name: "Expand all" });
     expect(chronologicalToggle).toHaveAttribute("aria-pressed", "true");
+    expect(chronologicalToggle).toHaveTextContent("Oldest first");
     expect(expandToggle).toHaveAttribute("aria-pressed", "false");
     expect(screen.getByRole("button", { name: "Copy all" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run information" })).toBeInTheDocument();
@@ -315,6 +326,7 @@ describe("ExecutionLogDialog", () => {
 
     fireEvent.click(chronologicalToggle);
     expect(chronologicalToggle).toHaveAttribute("aria-pressed", "false");
+    expect(chronologicalToggle).toHaveTextContent("Newest first");
 
     fireEvent.click(screen.getByRole("button", { name: "结论" }));
 

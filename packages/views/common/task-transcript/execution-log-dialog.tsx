@@ -239,6 +239,34 @@ function formatDateTime(iso: string): string {
   });
 }
 
+function isSameLocalDay(leftIso: string, rightIso: string): boolean {
+  const left = new Date(leftIso);
+  const right = new Date(rightIso);
+  return (
+    left.getFullYear() === right.getFullYear() &&
+    left.getMonth() === right.getMonth() &&
+    left.getDate() === right.getDate()
+  );
+}
+
+/** Compact toolbar time; the full local date-time remains in the title. */
+function formatSummaryTime(iso: string, includeDate: boolean): string {
+  return new Date(iso).toLocaleString(
+    undefined,
+    includeDate
+      ? {
+          month: "short",
+          day: "numeric",
+          hour: "2-digit",
+          minute: "2-digit",
+        }
+      : {
+          hour: "2-digit",
+          minute: "2-digit",
+        },
+  );
+}
+
 function LiveRunDuration({ start }: { start: string }) {
   const { t } = useT("issues");
   const [duration, setDuration] = useState(() =>
@@ -697,6 +725,19 @@ export function ExecutionLogDialog({
   const startedLabel = task.started_at ? formatDateTime(task.started_at) : null;
   const completedLabel =
     isTerminal && task.completed_at ? formatDateTime(task.completed_at) : null;
+  const crossesLocalDay = !!(
+    isTerminal &&
+    task.started_at &&
+    task.completed_at &&
+    !isSameLocalDay(task.started_at, task.completed_at)
+  );
+  const startedSummaryLabel = task.started_at
+    ? formatSummaryTime(task.started_at, crossesLocalDay)
+    : null;
+  const completedSummaryLabel =
+    completedLabel && task.completed_at
+      ? formatSummaryTime(task.completed_at, crossesLocalDay)
+      : null;
   const hasRunSummary = !!(
     duration ||
     liveStart ||
@@ -956,34 +997,51 @@ export function ExecutionLogDialog({
                 className="flex min-w-0 flex-1 items-center gap-x-3 overflow-hidden whitespace-nowrap text-xs text-muted-foreground"
               >
                 {(liveStart || duration) && (
-                  <span className="shrink-0">
+                  <Badge
+                    data-testid="execution-log-duration"
+                    variant="secondary"
+                    className="h-6 shrink-0 px-2 font-normal text-muted-foreground"
+                  >
                     {liveStart ? (
                       <LiveRunDuration start={liveStart} />
                     ) : (
                       t(($) => $.execution_log.run_duration, { duration })
                     )}
-                  </span>
+                  </Badge>
                 )}
                 {toolCount > 0 && (
-                  <span className="shrink-0">
+                  <Badge
+                    data-testid="execution-log-tool-count"
+                    variant="secondary"
+                    className="h-6 shrink-0 px-2 font-normal text-muted-foreground"
+                  >
                     {t(($) => $.execution_log.tool_calls, {
                       count: toolCount,
                     })}
-                  </span>
+                  </Badge>
                 )}
-                {startedLabel && (
-                  <span className="inline-flex shrink-0 items-center gap-1">
+                {startedLabel && startedSummaryLabel && (
+                  <span
+                    data-testid="execution-log-start-time"
+                    className="inline-flex shrink-0 items-center gap-1"
+                    title={startedLabel}
+                  >
                     <span>{t(($) => $.execution_log.details_started)}</span>
-                    <span className="text-foreground/70">{startedLabel}</span>
+                    <span className="tabular-nums text-foreground/70">
+                      {startedSummaryLabel}
+                    </span>
                   </span>
                 )}
-                {completedLabel && (
+                {completedLabel && completedSummaryLabel && (
                   <span
                     data-testid="execution-log-end-time"
                     className="inline-flex shrink-0 items-center gap-1"
+                    title={completedLabel}
                   >
                     <span>{t(($) => $.execution_log.details_completed)}</span>
-                    <span className="text-foreground/70">{completedLabel}</span>
+                    <span className="tabular-nums text-foreground/70">
+                      {completedSummaryLabel}
+                    </span>
                   </span>
                 )}
               </div>
@@ -1017,7 +1075,9 @@ export function ExecutionLogDialog({
                       ) : (
                         <ArrowUpNarrowWide className="h-3 w-3" />
                       )}
-                      {t(($) => $.execution_log.sort_time_order)}
+                      {chronological
+                        ? t(($) => $.execution_log.sort_chronological)
+                        : t(($) => $.execution_log.sort_newest_first)}
                     </ExecutionLogToggleButton>
                   )}
 
@@ -1475,7 +1535,12 @@ function ExecutionLogToolbarSkeleton() {
       className="shrink-0 space-y-2 border-b px-4 py-2.5"
     >
       <div className="flex max-w-full items-center gap-3">
-        <Skeleton className="h-3 w-80" />
+        <div className="flex min-w-0 items-center gap-3">
+          <Skeleton className="h-6 w-20 rounded-full" />
+          <Skeleton className="h-6 w-24 rounded-full" />
+          <Skeleton className="h-3 w-24" />
+          <Skeleton className="h-3 w-24" />
+        </div>
         <div className="ml-auto flex items-center gap-1">
           <Skeleton className="h-7 w-24 rounded-md" />
           <Skeleton className="h-7 w-20 rounded-md" />

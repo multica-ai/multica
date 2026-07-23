@@ -451,7 +451,6 @@
     "copy": "コピー",
     "close": "閉じる",
     "executed_by": "{{name}} が実行",
-    "sort_time_order": "時系列",
     "sort_chronological": "古い順",
     "sort_newest_first": "新しい順",
     "sort_to_newest": "現在は古い順です。クリックすると新しい順になります",

@@ -450,7 +450,6 @@
     "copy": "복사",
     "close": "닫기",
     "executed_by": "{{name}} 실행",
-    "sort_time_order": "시간 순서",
     "sort_chronological": "오래된 순",
     "sort_newest_first": "최신 순",
     "sort_to_newest": "현재 오래된 순입니다. 클릭하면 최신 순으로 전환됩니다",
