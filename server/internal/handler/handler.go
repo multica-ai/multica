@@ -216,6 +216,8 @@ type Handler struct {
 	DuplicateCheckJudger *duplicatecheck.Judger
 	// CEREBRO-PATCH(handler-custom-status-resolver): FIR-1550 v2b — resolver invoked from UpdateIssue.
 	CustomStatusResolver CustomStatusResolver
+	// CEREBRO-PATCH(handler-issue-status-gate): FIR-3659 — before.issue.status_change hook gate for agent actors; see cerebro_issue_status_gate.go.
+	IssueStatusGate IssueStatusChangeGate
 	// CEREBRO-PATCH(handler-identity-provisioner): FIR-2523 Google Workspace
 	// auto-membership hook. Wired by the router; nil = no auto-provisioning.
 	IdentityProvisioner IdentityProvisionerInvoker

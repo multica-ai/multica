@@ -185,12 +185,22 @@ func (s *Store) CreateRun(ctx context.Context, workspaceID, actorID, evalID uuid
 	if err != nil {
 		return EvalRun{}, err
 	}
-	if s.runExecutor == nil {
-		return EvalRun{}, ErrRunExecutorMissing
-	}
-	execution, err := s.runExecutor.Execute(ctx, eval)
-	if err != nil {
-		return EvalRun{}, fmt.Errorf("execute eval: %w", err)
+	var execution RunExecution
+	// Issue-target evals (FIR-3659) run programmatically against the issue row
+	// — no gateway executor required, so they work wherever the store does.
+	if spec, specErr := ParseTarget(eval.Target); specErr == nil && spec.Kind == TargetIssue {
+		execution, err = s.executeIssueEval(ctx, eval, spec, input.IssueID)
+		if err != nil {
+			return EvalRun{}, fmt.Errorf("execute eval: %w", err)
+		}
+	} else {
+		if s.runExecutor == nil {
+			return EvalRun{}, ErrRunExecutorMissing
+		}
+		execution, err = s.runExecutor.Execute(ctx, eval)
+		if err != nil {
+			return EvalRun{}, fmt.Errorf("execute eval: %w", err)
+		}
 	}
 	if (execution.Status != RunStatusPassed && execution.Status != RunStatusFailed && execution.Status != RunStatusError) ||
 		!json.Valid(execution.Results) || execution.CostCents < 0 || execution.LatencyMS < 0 {

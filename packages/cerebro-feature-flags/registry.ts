@@ -424,7 +424,13 @@ export type CerebroFlagKey =
   // product stays dormant until local + CI verification is complete.
   | "cerebro_mini_apps"
   // FIR-2835: verified on-behalf-of chat sessions created by external apps.
-  | "cerebro_embedded_chat";
+  | "cerebro_embedded_chat"
+  // FIR-3659: Workpad — agents keep a plan checklist at the top of the issue
+  // description (created before in_progress, maintained for the life of the
+  // issue). ON injects the Workpad protocol into every agent's runtime brief so
+  // agents create and keep the checklist updated. Default OFF until QA'd on
+  // staging; enforcement (the status-change gate) is a separate hook policy.
+  | "cerebro_workpad";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -838,6 +844,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-3172: default OFF. Enabling is a separate release decision.
   cerebro_mini_apps: false,
   cerebro_embedded_chat: false,
+  // FIR-3659: default OFF. Enabling injects the Workpad protocol into agent briefs.
+  cerebro_workpad: false,
 };
 
 /**
@@ -1916,6 +1924,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: workspace is the default, the highest permission across groups wins, and a member's own setting wins over both. On by default. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so it can never widen access to a secret, the sandbox, or a repo. FIR-2175, FIR-3062.",
+  },
+  {
+    key: "cerebro_workpad",
+    label: "Workpad",
+    group: "issues",
+    description:
+      "Ask agents to keep a Workpad — a plan checklist at the top of the issue description, created before they start and kept updated as they work, so you can follow the plan from the issue. On injects the Workpad protocol into every agent's runtime brief. Off by default; the existing checklist rendering is unchanged and enforcement (blocking an agent from starting without a Workpad) is a separate hook policy. FIR-3659.",
   },
 ];
 

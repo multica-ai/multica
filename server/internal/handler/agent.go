@@ -242,13 +242,14 @@ type AgentTaskResponse struct {
 	WakeupPrompt      string `json:"wakeup_prompt,omitempty"`       // prompt stored on a platform wakeup task
 	WakeupTriggerType string `json:"wakeup_trigger_type,omitempty"` // time, issue_status, or github_ci for wakeup tasks
 
-	TriggerUserID     string `json:"trigger_user_id,omitempty"`     // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggering comment author — trace user-label (FIR-2438)
-	TriggerUserName   string `json:"trigger_user_name,omitempty"`   // CEREBRO-PATCH(agent-task-trigger-user-name): TECH-3295 R3 — display name of the chain's human origin for the trace user-label
-	IssueKind         string `json:"issue_kind,omitempty"`          // CEREBRO-PATCH(agent-task-issue-kind): issue.kind ('channel'/'dm'/'') so trace upload can label the surface (FIR-2438)
-	IssueSnapshot     string `json:"issue_snapshot,omitempty"`      // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
-	BundleContextHint bool   `json:"bundle_context_hint,omitempty"` // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
-	GraphifyNudge     string `json:"graphify_nudge,omitempty"`      // CEREBRO-PATCH(agent-task-graphify-nudge): FIR-1311 — standing "use the graphify code graph" instruction inlined into the start prompt when the graphify saving is on
-	MemoryContext     string `json:"memory_context,omitempty"`      // CEREBRO-PATCH(agent-task-memory-context): FIR-1794 layer 3 — automatically recalled memories inlined into the start prompt when cerebro_memory is on
+	TriggerUserID       string `json:"trigger_user_id,omitempty"`       // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggering comment author — trace user-label (FIR-2438)
+	TriggerUserName     string `json:"trigger_user_name,omitempty"`     // CEREBRO-PATCH(agent-task-trigger-user-name): TECH-3295 R3 — display name of the chain's human origin for the trace user-label
+	IssueKind           string `json:"issue_kind,omitempty"`            // CEREBRO-PATCH(agent-task-issue-kind): issue.kind ('channel'/'dm'/'') so trace upload can label the surface (FIR-2438)
+	IssueSnapshot       string `json:"issue_snapshot,omitempty"`        // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
+	BundleContextHint   bool   `json:"bundle_context_hint,omitempty"`   // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
+	GraphifyNudge       string `json:"graphify_nudge,omitempty"`        // CEREBRO-PATCH(agent-task-graphify-nudge): FIR-1311 — standing "use the graphify code graph" instruction inlined into the start prompt when the graphify saving is on
+	MemoryContext       string `json:"memory_context,omitempty"`        // CEREBRO-PATCH(agent-task-memory-context): FIR-1794 layer 3 — automatically recalled memories inlined into the start prompt when cerebro_memory is on
+	WorkpadBriefEnabled bool   `json:"workpad_brief_enabled,omitempty"` // CEREBRO-PATCH(agent-task-workpad-brief): FIR-3659 — carries the workspace cerebro_workpad verdict so the daemon brief includes the Workpad protocol
 
 	NewCommentCount          int                  `json:"new_comment_count,omitempty"`         // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
 	NewCommentsSince         string               `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it

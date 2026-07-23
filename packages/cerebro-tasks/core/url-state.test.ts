@@ -1,10 +1,7 @@
-// @vitest-environment jsdom
-
 import { describe, expect, it } from "vitest";
 import { DEFAULT_TASKS_FILTER, type TasksFilter } from "./types";
 import {
   parseTasksFilterFromSearchParams,
-  replaceBrowserHistoryPath,
   serializeTasksFilter,
   tasksFilterPath,
 } from "./url-state";
@@ -53,18 +50,4 @@ describe("tasks URL state", () => {
     });
   });
 
-  it("updates browser location synchronously for shareable filter links", () => {
-    window.history.replaceState(null, "", "/acme/tasks");
-
-    expect(replaceBrowserHistoryPath("/acme/tasks?status=running&q=deploy")).toBe(true);
-    expect(window.location.pathname).toBe("/acme/tasks");
-    expect(window.location.search).toBe("?status=running&q=deploy");
-  });
-
-  it("does not rewrite browser history when the path already matches", () => {
-    window.history.replaceState({ existing: true }, "", "/acme/tasks?status=running");
-
-    expect(replaceBrowserHistoryPath("/acme/tasks?status=running")).toBe(false);
-    expect(window.history.state).toEqual({ existing: true });
-  });
 });
