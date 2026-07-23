@@ -50,7 +50,7 @@ only.
 |---|---|---|
 | `maxAgentDescriptionLength = 255` | 31 | Cap is 255 **Unicode code points** (comment: counted via `utf8.RuneCountInString`, matches Postgres `char_length`) |
 | `AgentResponse` omits plaintext `custom_env` | 33–53 | Exposes only `has_custom_env` (52) and `custom_env_key_count` (53); comment cites MUL-2600 |
-| `CreateAgentRequest` fields | 565–585 | `description`, `instructions`, `runtime_config`, `custom_env`, `custom_args`, `model`, `thinking_level` (plus name/avatar/visibility/mcp_config/max_concurrent_tasks) |
+| `CreateAgentRequest` fields | 919–956 | `description`, `instructions`, `avatar_url`, `runtime_config`, `custom_env`, `custom_args`, `model`, `thinking_level` (plus name/visibility/mcp_config/max_concurrent_tasks/permission inputs) |
 | `name` required | 623–625 | 400 "name is required" |
 | `description` ≤ 255 code points | 627–629 | `utf8.RuneCountInString(req.Description) > maxAgentDescriptionLength` → 400 |
 | `runtime_id` required | 631–633 | `if req.RuntimeID == ""` → 400 "runtime_id is required" |
@@ -62,7 +62,8 @@ only.
 | `mcp_config` null-skip on create | 704–705 | raw JSON copied through unless the body value is the literal `null` |
 | `mcp_config` redacted on read | 54, 848–851 | `redactMcpConfig` sets `McpConfigRedacted=true`; a private agent read by a member also redacts (494, 509) |
 | Qwen Code managed-MCP injection | `pkg/agent/qwen.go` | Non-null `mcp_config` is written to a daemon-owned 0600 temporary JSON file and passed with `--mcp-config`; the file is removed after the process exits, while `null` preserves native inheritance. |
-| `CreateAgent` insert params | 708–722 | persists runtime_config, instructions, custom_env, custom_args, model, thinking_level, mcp_config, visibility, max_concurrent_tasks |
+| Random emoji avatar default | `agent_avatar.go` 11–32; `agent.go` 1127–1133 | Omitted, empty, or whitespace-only `avatar_url` becomes a cryptographically selected `emoji:<glyph>` sentinel; explicit values are preserved. The template handler uses the same helper at `agent_template.go` 458. |
+| `CreateAgent` insert params | 1127–1145 | persists avatar_url, runtime_config, instructions, custom_env, custom_args, model, thinking_level, mcp_config, visibility, max_concurrent_tasks |
 | `UpdateAgent` rejects `custom_env` | 910–913 | if `custom_env` present in body → 400 "use PUT /api/agents/{id}/env (or `multica agent env set`)" |
 | `UpdateAgent` persists / clears `mcp_config` | 944–948, 1060–1061 | Tri-state from the raw body: key omitted → no change; literal `null` → `ClearAgentMcpConfig`; object → replace. No 400 like `custom_env` — `mcp_config` IS updatable here |
 | `description` ≤ 255 on update too | 921–924 | same cap re-checked on update |

@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/multica-ai/multica/server/internal/cli"
@@ -1200,39 +1201,98 @@ func (d *Daemon) customProfileLaunchForRuntime(runtimeID string) (profileLaunchS
 	return spec, true
 }
 
-func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
-	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
-	var runtimes []map[string]string
-	var failedProfiles []map[string]string
+// runtimeVersionProbeConcurrency bounds how many `<cli> --version` probes run
+// at once during registration. Version detection is process-spawn bound rather
+// than CPU bound, and each probe already carries its own timeout, so a modest
+// fan-out is safe even when a host has many agent CLIs installed.
+const runtimeVersionProbeConcurrency = 8
+
+// detectBuiltinRuntimes version-detects every configured built-in agent CLI and
+// returns a registration entry for each one that resolves and clears the
+// minimum-version gate. Probes run concurrently, bounded by
+// runtimeVersionProbeConcurrency.
+//
+// The previous implementation probed serially, so total latency was the SUM of
+// every CLI's `--version` call. On an onboarding host with several coding tools
+// installed that stacked into many seconds of dead time before the daemon could
+// register — long enough that the desktop runtime step timed out into its empty
+// "no runtime found" state while the probes were still running (MUL-5119).
+// Fanning the probes out makes total latency track the SLOWEST single probe
+// instead of their sum, so a freshly-created workspace lights up its runtimes
+// well inside the UI's scanning window.
+//
+// Each probe still self-heals a vanished pinned path (MUL-4486) and re-detects
+// the live version — no result is cached across registrations, so an in-place
+// CLI upgrade is still reported with its current version. A probe that fails to
+// detect a version or is below the minimum supported version is logged and
+// skipped, exactly as the serial loop did.
+func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string {
+	type detected struct {
+		name    string
+		version string
+	}
+	var (
+		mu      sync.Mutex
+		results []detected
+		g       errgroup.Group
+	)
+	g.SetLimit(runtimeVersionProbeConcurrency)
 	for name, entry := range d.cfg.Agents {
-		// Self-heal a pinned executable path an in-place upgrade deleted
-		// (MUL-4486) so version detection — and thus staying registered/online
-		// — recovers without a daemon restart. resolveAgentEntry already
-		// version-gates the healed binary; the detect + min-version check below
-		// still runs to produce the version string this registration reports.
-		entry, _ = d.resolveAgentEntry(ctx, name, entry)
-		version, err := detectAgentVersion(ctx, entry.Path)
-		if err != nil {
-			d.logger.Warn("skip registering runtime", "name", name, "error", err)
-			continue
-		}
-		if err := checkAgentMinVersion(name, version); err != nil {
-			d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
-			continue
-		}
-		d.setAgentVersion(name, version)
-		d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
-		displayName := providerDisplayName(name)
+		name, entry := name, entry
+		g.Go(func() error {
+			// Self-heal a pinned executable path an in-place upgrade deleted
+			// (MUL-4486) so version detection — and thus staying
+			// registered/online — recovers without a daemon restart.
+			// resolveAgentEntry already version-gates the healed binary; the
+			// detect + min-version check below still runs to produce the
+			// version string this registration reports.
+			entry, _ = d.resolveAgentEntry(ctx, name, entry)
+			version, err := detectAgentVersion(ctx, entry.Path)
+			if err != nil {
+				d.logger.Warn("skip registering runtime", "name", name, "error", err)
+				return nil
+			}
+			if err := checkAgentMinVersion(name, version); err != nil {
+				d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
+				return nil
+			}
+			d.setAgentVersion(name, version)
+			d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
+			mu.Lock()
+			results = append(results, detected{name: name, version: version})
+			mu.Unlock()
+			return nil
+		})
+	}
+	// No probe returns a non-nil error — failures are logged and skipped above —
+	// so Wait only blocks for the in-flight probes to finish.
+	_ = g.Wait()
+
+	// Source iteration (a map) and parallel completion order are both
+	// nondeterministic; sort by provider so the registration payload is stable
+	// across runs and order-sensitive tests stay deterministic.
+	sort.Slice(results, func(i, j int) bool { return results[i].name < results[j].name })
+
+	runtimes := make([]map[string]string, 0, len(results))
+	for _, r := range results {
+		displayName := providerDisplayName(r.name)
 		if d.cfg.DeviceName != "" {
 			displayName = fmt.Sprintf("%s (%s)", displayName, d.cfg.DeviceName)
 		}
 		runtimes = append(runtimes, map[string]string{
 			"name":    displayName,
-			"type":    name,
-			"version": version,
+			"type":    r.name,
+			"version": r.version,
 			"status":  "online",
 		})
 	}
+	return runtimes
+}
+
+func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
+	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
+	runtimes := d.detectBuiltinRuntimes(ctx)
+	var failedProfiles []map[string]string
 
 	// Append any workspace custom runtime profiles whose command resolves on
 	// this host (MUL-3284). This is best-effort: a fetch error (e.g. an older

@@ -1132,7 +1132,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		Name:                     req.Name,
 		Description:              req.Description,
 		Instructions:             req.Instructions,
-		AvatarUrl:                ptrToText(req.AvatarURL),
+		AvatarUrl:                newAgentAvatar(req.AvatarURL),
 		RuntimeMode:              runtime.RuntimeMode,
 		RuntimeConfig:            rc,
 		RuntimeID:                runtime.ID,

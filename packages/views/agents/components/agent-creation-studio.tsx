@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -50,6 +51,10 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import {
+  UI_EASE_OUT,
+  UI_MOTION_DURATION,
+} from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useAppForeground } from "../../common/use-app-foreground";
@@ -71,7 +76,23 @@ import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { SkillMultiSelect } from "./skill-multi-select";
 
 type StudioMode = "choose" | "templates" | "blank" | "template" | "ai";
+type StudioScreenKey =
+  | "choose"
+  | "templates"
+  | "configure"
+  | "ai-setup"
+  | "ai-builder";
+type TransitionDirection = 1 | -1;
 type PermissionScope = "private" | "workspace" | "members";
+
+export function getAgentCreationScreenKey(
+  mode: StudioMode,
+  builderSessionId: string,
+): StudioScreenKey {
+  if (mode === "blank" || mode === "template") return "configure";
+  if (mode === "ai") return builderSessionId ? "ai-builder" : "ai-setup";
+  return mode;
+}
 
 export interface AgentDraft {
   name: string;
@@ -121,6 +142,7 @@ export function AgentCreationStudio() {
   const currentUser = useAuthStore((state) => state.user);
   const duplicateId = navigation.searchParams.get("duplicate");
   const squadId = navigation.searchParams.get("squad");
+  const shouldReduceMotion = useReducedMotion() ?? false;
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
@@ -136,6 +158,8 @@ export function AgentCreationStudio() {
     ? agents.find((agent) => agent.id === duplicateId) ?? null
     : null;
   const [mode, setMode] = useState<StudioMode>(duplicateId ? "blank" : "choose");
+  const [transitionDirection, setTransitionDirection] =
+    useState<TransitionDirection>(1);
   const [draft, setDraft] = useState<AgentDraft>(EMPTY_DRAFT);
   const [sourceTemplate, setSourceTemplate] = useState<AgentTemplateSummary | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<AgentTemplateSummary | null>(null);
@@ -388,6 +412,7 @@ export function AgentCreationStudio() {
           : t(($) => $.creation_studio.step_configure);
 
   const resetCreationMode = () => {
+    setTransitionDirection(-1);
     setMode("choose");
     setSelectedTemplate(null);
     setSourceTemplate(null);
@@ -403,7 +428,6 @@ export function AgentCreationStudio() {
       qc.removeQueries({ queryKey: chatKeys.messages(builderSessionId) });
       qc.removeQueries({ queryKey: chatKeys.pendingTask(builderSessionId) });
       builderSessionIdRef.current = "";
-      setBuilderSessionId("");
       return true;
     } catch (error) {
       setBuilderError(
@@ -422,6 +446,7 @@ export function AgentCreationStudio() {
       navigation.push(paths.agents());
       return;
     }
+    setTransitionDirection(-1);
     if (mode === "templates" && selectedTemplate) {
       setSelectedTemplate(null);
       return;
@@ -441,7 +466,13 @@ export function AgentCreationStudio() {
       ...EMPTY_DRAFT,
       runtimeId: current.runtimeId || usableRuntimes[0]?.id || "",
     }));
+    setTransitionDirection(1);
     setMode("blank");
+  };
+
+  const chooseAI = () => {
+    setTransitionDirection(1);
+    setMode("ai");
   };
 
   const applyTemplate = () => {
@@ -455,6 +486,7 @@ export function AgentCreationStudio() {
       instructions: detail.instructions,
       runtimeId: current.runtimeId || usableRuntimes[0]?.id || "",
     }));
+    setTransitionDirection(1);
     setMode("template");
   };
 
@@ -468,6 +500,7 @@ export function AgentCreationStudio() {
         model: draft.model.trim() || undefined,
       });
       if (!session.session_id) throw new Error(t(($) => $.creation_studio.builder.start_failed));
+      setTransitionDirection(1);
       setBuilderSessionId(session.session_id);
     } catch (error) {
       setBuilderError(
@@ -648,6 +681,40 @@ export function AgentCreationStudio() {
     }
   };
 
+  const screenKey = getAgentCreationScreenKey(mode, builderSessionId);
+  const screenVariants = {
+    initial: (direction: TransitionDirection) => ({
+      opacity: 0,
+      transform: shouldReduceMotion
+        ? "translateX(0)"
+        : direction === 1
+          ? "translateX(8px)"
+          : "translateX(-8px)",
+    }),
+    animate: {
+      opacity: 1,
+      transform: "translateX(0)",
+      transition: {
+        duration: shouldReduceMotion
+          ? UI_MOTION_DURATION.fast
+          : UI_MOTION_DURATION.standard,
+        ease: UI_EASE_OUT,
+      },
+    },
+    exit: (direction: TransitionDirection) => ({
+      opacity: 0,
+      transform: shouldReduceMotion
+        ? "translateX(0)"
+        : direction === 1
+          ? "translateX(-8px)"
+          : "translateX(8px)",
+      transition: {
+        duration: UI_MOTION_DURATION.fast,
+        ease: UI_EASE_OUT,
+      },
+    }),
+  };
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background">
       <header className="flex h-14 shrink-0 items-center gap-3 border-b px-5">
@@ -680,10 +747,24 @@ export function AgentCreationStudio() {
         )}
       </header>
 
+      <AnimatePresence
+        mode="wait"
+        initial={false}
+        custom={transitionDirection}
+      >
+        <motion.div
+          key={screenKey}
+          custom={transitionDirection}
+          variants={screenVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          className="flex min-h-0 flex-1 flex-col"
+        >
       {mode === "choose" && (
         <ModeChooser
           onBlank={chooseBlank}
-          onAI={() => setMode("ai")}
+          onAI={chooseAI}
         />
       )}
 
@@ -794,6 +875,8 @@ export function AgentCreationStudio() {
           </div>
         </div>
       )}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }

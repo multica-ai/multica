@@ -10,11 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
-import type {
-  Issue,
-  IssueTableFacetSpec,
-  IssueTableFacetsResponse,
-} from "@multica/core/types";
+import type { Issue } from "@multica/core/types";
 import type { MyIssuesScope } from "@multica/core/issues/stores/my-issues-view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useT } from "../../i18n";
@@ -31,8 +27,6 @@ export function MyIssuesHeader({
   onScopeChange,
   isRefreshing = false,
   facetCountsExact = true,
-  tableFacetCounts,
-  onTableFacetChange,
 }: {
   allIssues: Issue[];
   /** The rows the agents-working filter would leave on screen — undefined
@@ -44,8 +38,6 @@ export function MyIssuesHeader({
   isRefreshing?: boolean;
   /** See IssueDisplayControls.facetCountsExact. */
   facetCountsExact?: boolean;
-  tableFacetCounts?: IssueTableFacetsResponse;
-  onTableFacetChange: (facet: IssueTableFacetSpec | null) => void;
 }) {
   const { t } = useT("my-issues");
   const { t: tIssues } = useT("issues");
@@ -129,8 +121,6 @@ export function MyIssuesHeader({
           <IssueDisplayControls
             scopedIssues={allIssues}
             facetCountsExact={facetCountsExact}
-            tableFacetCounts={tableFacetCounts}
-            onTableFacetChange={onTableFacetChange}
           />
           <ViewRefreshIndicator active={isRefreshing} />
         </div>

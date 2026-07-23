@@ -322,15 +322,7 @@ test: ## Run Go tests after ensuring the target DB exists and migrations are app
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	cd server && go run ./cmd/migrate up
-	# pkg/agent spawns many subprocess-backed tests with hard 5s deadlines; under
-	# -race on high-core machines the default GOMAXPROCS fan-out starves their
-	# parent event loops so they miss the deadline. Run the rest of the suite at
-	# full concurrency and cap only pkg/agent's package- and within-package
-	# parallelism, keeping those tests within budget without slowing the whole suite.
-	# Build the package list via explicit assignments so a go list failure
-	# fails this target instead of being swallowed by command substitution.
-	cd server && pkgs="$$(go list ./...)" && pkgs="$$(printf '%s\n' "$$pkgs" | grep -vE '/pkg/agent(/|$$)')" && go test -race $$pkgs
-	cd server && go test -race -p 2 -parallel 2 ./pkg/agent/...
+	bash scripts/test-go.sh --race
 
 # Database
 ##@ Database

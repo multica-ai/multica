@@ -294,6 +294,32 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.8",
+        date: "2026-07-22",
+        title: "Per-agent skill controls, sharper desktop tabs, and steadier tasks",
+        changes: [],
+        features: [
+          "You can now turn individual skills on or off for each agent.",
+          "Desktop tabs now show the right icon and title for whatever you opened.",
+          "You can now add sub-issues right inside the table view.",
+        ],
+        improvements: [
+          "New agents now get a colorful emoji avatar automatically.",
+          "Grouped issue tables now load faster and stay consistent.",
+        ],
+        fixes: [
+          "Importing skills from large repositories no longer times out.",
+          "Codex tasks no longer stall on their first turn.",
+          "Tasks now resume where they left off after you switch accounts, instead of failing.",
+          "Editing a cell in the issue table no longer closes on its own, and clicking a title opens the issue.",
+          "Sub-issue lists now stay up to date when you open an issue.",
+          "Grok agents now report their token usage accurately.",
+          "Qwen agents can now run shell commands and edit files during tasks.",
+          "The chat editor's format menu is back, so you can clear formatting again.",
+          "On mobile, the My Issues list no longer gets stuck refreshing.",
+        ],
+      },
+      {
         version: "0.4.7",
         date: "2026-07-21",
         title: "Qwen Code runtime, live chat diagrams, and Windows agent fixes",

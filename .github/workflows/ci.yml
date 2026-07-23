@@ -169,8 +169,11 @@ jobs:
       - name: Run migrations
         run: cd server && go run ./cmd/migrate up
 
+      - name: Verify Go test wrapper
+        run: bash scripts/test-go.test.sh
+
       - name: Test
-        run: cd server && go test -race ./...
+        run: bash scripts/test-go.sh --race
 
   windows-execenv:
     # The environment-preparation deadline owns a process tree, not just a Go

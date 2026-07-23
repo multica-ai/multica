@@ -21,6 +21,7 @@ import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
 import { RESOURCES } from "@multica/views/locales";
+import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
 // apps/web/app/layout.tsx HTML_LANG. index.html ships a static lang="en";
@@ -452,6 +453,11 @@ export default function App() {
           localeAdapter={localeAdapter}
         >
           <DesktopAuthSessionBridge />
+          {windowContext.kind === "main" && (
+            <DesktopClientUsageReporter
+              apiUrl={runtimeConfigResult.config.apiUrl}
+            />
+          )}
           {windowContext.kind === "issue" ? (
             <IssueWindowContent />
           ) : (

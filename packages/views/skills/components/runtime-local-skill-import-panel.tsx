@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -49,6 +50,10 @@ import {
 } from "@multica/ui/components/ui/select";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import {
+  UI_EASE_OUT,
+  UI_MOTION_DURATION,
+} from "@multica/ui/lib/motion";
 import { useT } from "../../i18n";
 import { HighlightText } from "../../search/highlight-text";
 import { isNameConflictError } from "../lib/utils";
@@ -506,6 +511,7 @@ export function RuntimeLocalSkillImportPanel({
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id ?? null);
+  const shouldReduceMotion = useReducedMotion() ?? false;
 
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const localRuntimes = useMemo(
@@ -1148,6 +1154,86 @@ export function RuntimeLocalSkillImportPanel({
     }
   };
 
+  const footerContent =
+    bulkState.phase === "done" || bulkState.phase === "cancelled" ? (
+      <>
+        <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {bulkState.phase === "cancelled"
+            ? t(($) => $.runtime_import.bulk_cancelled_hint)
+            : t(($) => $.runtime_import.bulk_complete_hint)}
+        </div>
+        <Button type="button" size="sm" onClick={handleDone}>
+          {t(($) => $.runtime_import.bulk_done_button)}
+        </Button>
+      </>
+    ) : resolvingConflicts ? (
+      <>
+        <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {t(($) => $.runtime_import.conflict_footer, {
+            count: pendingConflicts.length,
+          })}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => void handleApplyConflictResolutions()}
+          disabled={!canApplyConflictResolutions}
+        >
+          {t(($) => $.runtime_import.conflict_apply_button)}
+        </Button>
+      </>
+    ) : importing ? (
+      <>
+        <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {t(($) => $.runtime_import.bulk_progress, {
+            completed: bulkState.completed,
+            total: bulkState.total,
+          })}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={handleCancel}
+        >
+          {t(($) => $.runtime_import.bulk_cancel_button)}
+        </Button>
+      </>
+    ) : (
+      <>
+        <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {singleSelectedSkill ? (
+            <>
+              {t(($) => $.runtime_import.ready)}{" "}
+              <span className="font-medium text-foreground">
+                {editName.trim() || singleSelectedSkill.name}
+              </span>{" "}
+              {t(($) => $.runtime_import.into_workspace)}
+            </>
+          ) : selectedKeys.size > 1 ? (
+            t(($) => $.runtime_import.bulk_ready, {
+              count: selectedKeys.size,
+            })
+          ) : (
+            t(($) => $.runtime_import.select_skill)
+          )}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          onClick={handleBulkImport}
+          disabled={!canImport}
+        >
+          <Download className="h-3 w-3" />
+          {selectedKeys.size > 1
+            ? t(($) => $.runtime_import.bulk_import_button, {
+                count: selectedKeys.size,
+              })
+            : t(($) => $.runtime_import.import_button)}
+        </Button>
+      </>
+    );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Sticky top: runtime picker + status */}
@@ -1210,94 +1296,73 @@ export function RuntimeLocalSkillImportPanel({
           importing && bulkState.phase !== "importing" ? "pointer-events-none opacity-60" : ""
         }`}
       >
-        {middle}
-        {bulkState.phase === "idle" && (
-          <p className="mt-3 text-xs text-muted-foreground">
-            {t(($) => $.runtime_import.ignored_files_hint)}
-          </p>
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={bulkState.phase}
+            initial={{
+              opacity: 0,
+              transform: shouldReduceMotion
+                ? "translateY(0)"
+                : "translateY(8px)",
+            }}
+            animate={{
+              opacity: 1,
+              transform: "translateY(0)",
+              transition: {
+                duration: shouldReduceMotion
+                  ? UI_MOTION_DURATION.fast
+                  : UI_MOTION_DURATION.standard,
+                ease: UI_EASE_OUT,
+              },
+            }}
+            exit={{
+              opacity: 0,
+              transform: shouldReduceMotion
+                ? "translateY(0)"
+                : "translateY(-8px)",
+              transition: {
+                duration: shouldReduceMotion
+                  ? UI_MOTION_DURATION.fast
+                  : UI_MOTION_DURATION.micro,
+                ease: UI_EASE_OUT,
+              },
+            }}
+          >
+            {middle}
+            {bulkState.phase === "idle" && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                {t(($) => $.runtime_import.ignored_files_hint)}
+              </p>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       {/* Sticky bottom: contextual actions per phase */}
       <div className="flex shrink-0 items-center gap-3 border-t bg-muted/30 px-5 py-3">
-        {bulkState.phase === "done" || bulkState.phase === "cancelled" ? (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {bulkState.phase === "cancelled"
-                ? t(($) => $.runtime_import.bulk_cancelled_hint)
-                : t(($) => $.runtime_import.bulk_complete_hint)}
-            </div>
-            <Button type="button" size="sm" onClick={handleDone}>
-              {t(($) => $.runtime_import.bulk_done_button)}
-            </Button>
-          </>
-        ) : resolvingConflicts ? (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {t(($) => $.runtime_import.conflict_footer, {
-                count: pendingConflicts.length,
-              })}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => void handleApplyConflictResolutions()}
-              disabled={!canApplyConflictResolutions}
-            >
-              {t(($) => $.runtime_import.conflict_apply_button)}
-            </Button>
-          </>
-        ) : importing ? (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {t(($) => $.runtime_import.bulk_progress, {
-                completed: bulkState.completed,
-                total: bulkState.total,
-              })}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={handleCancel}
-            >
-              {t(($) => $.runtime_import.bulk_cancel_button)}
-            </Button>
-          </>
-        ) : (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {singleSelectedSkill ? (
-                <>
-                  {t(($) => $.runtime_import.ready)}{" "}
-                  <span className="font-medium text-foreground">
-                    {editName.trim() || singleSelectedSkill.name}
-                  </span>{" "}
-                  {t(($) => $.runtime_import.into_workspace)}
-                </>
-              ) : selectedKeys.size > 1 ? (
-                t(($) => $.runtime_import.bulk_ready, {
-                  count: selectedKeys.size,
-                })
-              ) : (
-                t(($) => $.runtime_import.select_skill)
-              )}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleBulkImport}
-              disabled={!canImport}
-            >
-              <Download className="h-3 w-3" />
-              {selectedKeys.size > 1
-                ? t(($) => $.runtime_import.bulk_import_button, {
-                    count: selectedKeys.size,
-                  })
-                : t(($) => $.runtime_import.import_button)}
-            </Button>
-          </>
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={bulkState.phase}
+            className="flex min-w-0 flex-1 items-center gap-3"
+            initial={{ opacity: 0 }}
+            animate={{
+              opacity: 1,
+              transition: {
+                duration: UI_MOTION_DURATION.fast,
+                ease: UI_EASE_OUT,
+              },
+            }}
+            exit={{
+              opacity: 0,
+              transition: {
+                duration: UI_MOTION_DURATION.micro,
+                ease: UI_EASE_OUT,
+              },
+            }}
+          >
+            {footerContent}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );
