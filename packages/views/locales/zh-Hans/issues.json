@@ -260,7 +260,7 @@
     "pull_request_card_status_conflicts": "存在合并冲突",
     "pull_request_card_status_checks_failed": "部分检查失败",
     "pull_request_card_status_checks_pending": "部分检查仍在运行",
-    "pull_request_card_status_checks_passed": "检查通过",
+    "pull_request_card_status_checks_passed": "全部检查通过",
     "pull_request_card_status_ready": "可以合入",
     "pull_request_card_status_unknown": "暂无检查信息",
     "pull_request_card_draft_prefix": "Draft · {{status}}",
