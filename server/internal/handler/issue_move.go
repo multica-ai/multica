@@ -105,6 +105,14 @@ func (h *Handler) MoveIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// V1 intentionally keeps the canonical write on UpdateIssue so released
+	// clients and the new move endpoint share validation, realtime and task
+	// side effects. That means anchor resolution and the write are not one
+	// transaction: stale/out-of-order anchors fail closed with 409 where
+	// detectable, and an exhausted float gap also returns 409 instead of
+	// silently renumbering neighboring issues. A future rebalance must move
+	// every position writer (including the legacy PUT path) behind one
+	// transactional ordering boundary.
 	beforePosition, ok := h.issueMoveAnchorPosition(w, r, current.WorkspaceID, beforeID)
 	if !ok {
 		return
