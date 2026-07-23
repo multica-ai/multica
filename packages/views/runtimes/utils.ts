@@ -601,7 +601,16 @@ export interface CostBreakdown {
 export function estimateCostBreakdown(usage: Priceable): CostBreakdown {
   const pricing = resolvePricing(usage.model, usage.provider);
   if (!pricing) {
-    return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    // No rates to split by, but the provider may still have priced the turn
+    // itself. Returning zeros here would make the stacked chart disagree with
+    // the headline `estimateCost` on exactly the rows whose cost is EXACT, so
+    // the charge lands whole in one bucket instead.
+    return {
+      input: (usage.cost_usd_ticks ?? 0) / COST_USD_TICKS_PER_USD,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    };
   }
   const uncosted = uncostedTokens(usage);
   const breakdown: CostBreakdown = {

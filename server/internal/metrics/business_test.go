@@ -264,3 +264,42 @@ func TestDistributeAuthoritativeCost(t *testing.T) {
 		})
 	}
 }
+
+// TestBusinessMetricsRecordsProviderCostForUnpricedModel covers the gap where
+// a model has no rate row but the provider priced the turn itself
+// (`grok-composer-*` is in the Grok Build catalog and absent from xAI's price
+// sheet). Returning early on "no rates" would drop real spend from
+// llm_cost_usd for want of a rate the charge does not need.
+func TestBusinessMetricsRecordsProviderCostForUnpricedModel(t *testing.T) {
+	m := NewBusinessMetrics()
+
+	const actualUSD = 1.23456789
+	m.RecordLLMUsage("issue", "local", "grok", "grok-composer-2.5-fast",
+		500, 100, 0, 0, int64(actualUSD*CostUSDTicksPerUSD))
+
+	// No rates means no way to split by token type, so the whole charge lands
+	// in one bucket — but it must be the whole charge.
+	got := testutil.ToFloat64(m.llmCostUSD.WithLabelValues(
+		"grok", "grok-composer-2.5-fast", "input", "local", "issue"))
+	if math.Abs(got-actualUSD) > 1e-9 {
+		t.Fatalf("recorded cost = %v, want %v", got, actualUSD)
+	}
+	// The tokens still have no rate, so they stay in the unpriced counter —
+	// "unpriced" describes the rate table, not the money.
+	if got := testutil.ToFloat64(m.llmUnpricedTokens.WithLabelValues("grok", "grok-composer-2.5-fast", "input")); got != 500 {
+		t.Errorf("unpriced input tokens = %v, want 500", got)
+	}
+}
+
+// TestBusinessMetricsUnpricedModelWithoutCostStaysAtZero is the control: no
+// rates and no provider cost must record no spend, not a fabricated one.
+func TestBusinessMetricsUnpricedModelWithoutCostStaysAtZero(t *testing.T) {
+	m := NewBusinessMetrics()
+
+	m.RecordLLMUsage("issue", "local", "grok", "grok-composer-2.5-fast", 500, 100, 0, 0, 0)
+
+	if got := testutil.ToFloat64(m.llmCostUSD.WithLabelValues(
+		"grok", "grok-composer-2.5-fast", "input", "local", "issue")); got != 0 {
+		t.Fatalf("recorded cost = %v, want 0", got)
+	}
+}

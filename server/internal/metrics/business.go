@@ -268,6 +268,18 @@ func (m *BusinessMetrics) RecordLLMUsage(source, runtimeMode, rawProvider, model
 		m.recordUnpricedTokens(provider, alias, "output", outputTokens)
 		m.recordUnpricedTokens(provider, alias, "cache_read", cacheReadTokens)
 		m.recordUnpricedTokens(provider, alias, "cache_write", cacheWriteTokens)
+		// Having no rate row does not mean having no cost: the provider may
+		// have priced the turn itself (`grok-composer-*` is in the Grok Build
+		// catalog but absent from xAI's price sheet). Dropping the charge here
+		// would under-report real spend purely for lack of a rate we no longer
+		// need. Without rates there is nothing to split the total by, so it
+		// lands whole in the `input` bucket — the same fallback
+		// distributeAuthoritativeCost uses when it has no shape to scale.
+		if costUSDTicks > 0 {
+			m.llmCostUSD.
+				WithLabelValues(provider, alias, NormalizeTokenType("input"), runtimeMode, source).
+				Add(float64(costUSDTicks) / CostUSDTicksPerUSD)
+		}
 		m.llmRequests.WithLabelValues(provider, "unknown", runtimeMode).Inc()
 		return
 	}

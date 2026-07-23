@@ -630,6 +630,48 @@ describe("estimateCost", () => {
     ).toBeCloseTo(1.23456789, 8);
   });
 
+  it("keeps the breakdown and the headline agreeing on an unpriced model", () => {
+    // `grok-composer-*` has no rate row, so there is nothing to split by — but
+    // the provider priced the turn. If the breakdown returned zeros here the
+    // stacked chart would read $0 while the headline read the real cost, and
+    // the unmapped banner (correctly) would not be shown to explain it.
+    const usage = {
+      ...zeroUsage,
+      provider: "grok",
+      model: "grok-composer-2.5-fast",
+      input_tokens: 500,
+      output_tokens: 100,
+      cost_usd_ticks: 12_345_678_900,
+      uncosted_input_tokens: 0,
+      uncosted_output_tokens: 0,
+      uncosted_cache_read_tokens: 0,
+      uncosted_cache_write_tokens: 0,
+    };
+    const b = estimateCostBreakdown(usage);
+    expect(b.input + b.output + b.cacheRead + b.cacheWrite).toBeCloseTo(
+      estimateCost(usage),
+      8,
+    );
+    expect(b.input).toBeCloseTo(1.23456789, 8);
+  });
+
+  it("reports no cost for an unpriced model the provider did not price either", () => {
+    // The control for the case above: no rates and no provider cost must stay
+    // at zero rather than inventing a figure.
+    const usage = {
+      ...zeroUsage,
+      provider: "grok",
+      model: "grok-composer-2.5-fast",
+      input_tokens: 500,
+      output_tokens: 100,
+    };
+    expect(estimateCost(usage)).toBe(0);
+    const b = estimateCostBreakdown(usage);
+    expect(b.input + b.output + b.cacheRead + b.cacheWrite).toBe(0);
+    // ...and it still asks the user for a rate, because one would help here.
+    expect(collectUnmappedModels([usage])).toEqual(["grok/grok-composer-2.5-fast"]);
+  });
+
   it("keeps the cost breakdown summing to the total on provider-priced rows", () => {
     // The stacked chart is drawn from the breakdown while the headline uses
     // estimateCost; if the authoritative charge were dropped from the split
