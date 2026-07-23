@@ -81,7 +81,12 @@ type issueTableDateFilterRequest struct {
 }
 
 type issueTableFiltersRequest struct {
-	Statuses          []string                     `json:"statuses,omitempty"`
+	Statuses []string `json:"statuses,omitempty"`
+	// StatusIds is the catalog facet (MUL-4809): the picker sends status ids so a
+	// custom status is selectable here exactly like on the list surface. Statuses
+	// (legacy tokens) stays for older clients; when both are present they AND, so
+	// a client that sends only one is unaffected.
+	StatusIds         []string                     `json:"status_ids,omitempty"`
 	Priorities        []string                     `json:"priorities,omitempty"`
 	Assignees         []issueTableActorRef         `json:"assignees,omitempty"`
 	IncludeNoAssignee bool                         `json:"include_no_assignee,omitempty"`
@@ -243,6 +248,7 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 	normalized.Search = strings.TrimSpace(normalized.Search)
 	normalized.Scope.AssigneeTypes = sortedUniqueStrings(normalized.Scope.AssigneeTypes)
 	normalized.Filters.Statuses = sortedUniqueStrings(normalized.Filters.Statuses)
+	normalized.Filters.StatusIds = sortedUniqueStrings(normalized.Filters.StatusIds)
 	normalized.Filters.Priorities = sortedUniqueStrings(normalized.Filters.Priorities)
 	normalized.Filters.ProjectIDs = sortedUniqueStrings(normalized.Filters.ProjectIDs)
 	normalized.Filters.LabelIDs = sortedUniqueStrings(normalized.Filters.LabelIDs)
@@ -407,6 +413,21 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 	}
 	if len(spec.Filters.Statuses) > 0 {
 		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Filters.Statuses))))
+	}
+	// Catalog facet (MUL-4809): select exact status rows, so two custom statuses
+	// sharing a Category stay distinguishable here the way they are on the list.
+	if len(spec.Filters.StatusIds) > 0 {
+		ids := sortedUniqueStrings(spec.Filters.StatusIds)
+		parsed := make([]pgtype.UUID, 0, len(ids))
+		for _, raw := range ids {
+			u, err := util.ParseUUID(raw)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid filters.status_ids")
+				return issueTableSQL{}, false
+			}
+			parsed = append(parsed, u)
+		}
+		where = append(where, fmt.Sprintf("i.status_id = ANY(%s::uuid[])", addArg(parsed)))
 	}
 	for _, priority := range spec.Filters.Priorities {
 		if !issueTableContainsString(validIssuePriorities, priority) {

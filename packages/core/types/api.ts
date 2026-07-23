@@ -264,6 +264,10 @@ export type IssueTableScope =
 
 export interface IssueTableFilters {
   statuses?: IssueStatus[];
+  /** Catalog status ids (MUL-4809). Preferred over `statuses`: a custom status
+   * is only expressible here, and two custom statuses sharing a Category stay
+   * distinct. Falls back to `statuses` when the catalog is unavailable. */
+  status_ids?: string[];
   priorities?: IssuePriority[];
   assignees?: IssueActorRef[];
   include_no_assignee?: boolean;

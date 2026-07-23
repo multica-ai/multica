@@ -326,13 +326,15 @@ export function useIssueSurfaceController({
     return {
       scope: queryScope,
       filters: {
-        // Table filters on legacy status tokens only. statusFilters is widened
-        // to string[] for the catalog (MUL-4809), so narrow it back here; a
-        // custom-status selection is not expressible on this surface yet and is
-        // covered by the deferred catalog-keyed Table/board follow-up.
-        ...(statusFilters.length > 0
-          ? { statuses: statusFilters as IssueStatus[] }
-          : {}),
+        // Prefer the catalog facet: the picker stores catalog ids, which are not
+        // legacy tokens, so sending them as `statuses` would fail validation and
+        // 400 the whole Table. Fall back to legacy tokens only when the catalog
+        // is unavailable (old server / unseeded workspace) — MUL-4809.
+        ...(statusFilterIds.length > 0
+          ? { status_ids: statusFilterIds }
+          : statusFilters.length > 0
+            ? { statuses: statusFilters as IssueStatus[] }
+            : {}),
         ...(priorityFilters.length > 0 ? { priorities: priorityFilters } : {}),
         ...(assigneeFilters.length > 0 ? { assignees: assigneeFilters } : {}),
         ...(includeNoAssignee ? { include_no_assignee: true } : {}),
@@ -370,6 +372,7 @@ export function useIssueSurfaceController({
     sort.sort_by,
     sort.sort_direction,
     statusFilters,
+    statusFilterIds,
     viewIncludeNoProject,
     viewProjectFilters,
   ]);
