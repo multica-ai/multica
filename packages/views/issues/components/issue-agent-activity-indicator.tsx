@@ -19,6 +19,25 @@ import { useT } from "../../i18n";
 
 const EMPTY_GROUPS: IssueTaskGroups = { running: [], queued: [] };
 
+// Dwell threshold before the activity card opens (MUL-5189).
+//
+// This badge is a passive cue riding on the right edge of dense scrolling
+// lists (inbox rows, issue rows, board cards), and it appears on every issue
+// an agent currently touches. Base UI's 600ms default is tuned for a hover
+// target the user aims at; here the pointer crosses the badge constantly on
+// its way to the row, the archive button, or the next row, so 600ms fires on
+// travel rather than on intent and a 288px card lands over the rows below.
+//
+// 900ms sits past casual travel but still inside a deliberate "what is it
+// doing?" pause. The header chip (issue-agent-header-chip) keeps its 150ms
+// on purpose: it is one large chip the user aims at, not a per-row cue.
+//
+// The card body is read-only — no links, no buttons — so there is no hover
+// bridge to protect and the close delay only needs to absorb pointer wobble
+// across the 4px gap.
+const OPEN_DELAY_MS = 900;
+const CLOSE_DELAY_MS = 150;
+
 interface IssueAgentActivityIndicatorProps {
   issueId: string;
   // Avatar tier. Kept very small — this is a corner-of-card cue, not a
@@ -90,6 +109,8 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
   return (
     <HoverCard>
       <HoverCardTrigger
+        delay={OPEN_DELAY_MS}
+        closeDelay={CLOSE_DELAY_MS}
         render={
           <span className="inline-flex shrink-0 items-center gap-1" />
         }
