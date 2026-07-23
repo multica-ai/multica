@@ -43,6 +43,9 @@ type Target struct {
 	PasswordSelector string
 	SubmitSelector   string
 	NavigateLinkName string
+	// ExpectedPathSuffix proves that navigation reached the intended in-app
+	// route instead of accepting global sidebar markers from another page.
+	ExpectedPathSuffix string
 	// VersionPath is a same-origin, public endpoint whose response contains the
 	// deployed commit. It is configured only for Multica so a successful UI
 	// verification also proves exactly which production build served it.
@@ -78,7 +81,7 @@ var targets = map[string]Target{
 	"multica": {
 		Name: "multica", URL: "http://multica.internal:3000/login",
 		NavigateLinkName: "Issues", NavigateExactText: true,
-		VersionPath:  "/version",
+		ExpectedPathSuffix: "/issues", VersionPath: "/version",
 		ExpectedText: []string{"Issues", "Agents", "Settings"}, SessionCookie: true,
 	},
 	// Cerebro staging runs on its own Sliplane server, so the verifier cannot
@@ -154,6 +157,9 @@ func TargetFor(name string) (Target, error) {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	if target.VersionPath != "" && (!strings.HasPrefix(target.VersionPath, "/") || strings.Contains(target.VersionPath, "://")) {
+		return Target{}, fmt.Errorf("internal browser target is misconfigured")
+	}
+	if target.ExpectedPathSuffix != "" && (!strings.HasPrefix(target.ExpectedPathSuffix, "/") || strings.Contains(target.ExpectedPathSuffix, "://")) {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	return target, nil
@@ -450,7 +456,7 @@ func fetchVersionCommit(ctx context.Context, versionURL string) (string, error) 
 
 func safeVersionCommit(commit string) bool {
 	if commit == "unknown" {
-		return true
+		return false
 	}
 	if len(commit) < 7 || len(commit) > 64 {
 		return false
@@ -476,6 +482,9 @@ func (r *Runner) readVersion(ctx context.Context, target Target) (string, error)
 	defer cancel()
 	started := time.Now()
 	commit, err := r.fetchVersion(stageCtx, versionURL(target))
+	if err == nil && !safeVersionCommit(commit) {
+		err = fmt.Errorf("version endpoint returned an invalid commit")
+	}
 	exitClass := commandFailureKind("success")
 	if err != nil {
 		exitClass = commandFailureUnknown
@@ -809,6 +818,14 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	if err != nil {
 		return r.failure(target, baseArgs, target.URL, err)
 	}
+	finalURLText := strings.TrimSpace(string(finalURL))
+	if target.ExpectedPathSuffix != "" {
+		parsedFinalURL, parseErr := url.Parse(finalURLText)
+		if parseErr != nil || !strings.HasSuffix(strings.TrimSuffix(parsedFinalURL.Path, "/"), target.ExpectedPathSuffix) {
+			return r.failure(target, baseArgs, "unexpected final path",
+				stageError{stage: "url", kind: commandFailureNotFound})
+		}
+	}
 	versionCommit, err := r.readVersion(ctx, target)
 	if err != nil {
 		return r.failure(target, baseArgs, "version endpoint: "+target.VersionPath, err)
@@ -825,7 +842,7 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	}
 	errors := decodeErrors(rawErrors)
 	return Result{
-		App: target.Name, InternalHost: target.Host(), FinalURL: strings.TrimSpace(string(finalURL)),
+		App: target.Name, InternalHost: target.Host(), FinalURL: finalURLText,
 		Markers: append([]string(nil), target.ExpectedText...), Errors: errors, ScreenshotPNG: screenshot,
 		VersionCommit: versionCommit,
 	}, nil
