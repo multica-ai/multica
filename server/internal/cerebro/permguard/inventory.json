@@ -2015,6 +2015,18 @@
     {
       "id": "PUT /api/cerebro/operating-system/elements/{key}",
       "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/share-inboxes/",
+      "gate": "workspace_member + human_only"
+    },
+    {
+      "id": "DELETE /api/cerebro/share-inboxes/{id}",
+      "gate": "workspace_member + human_only"
+    },
+    {
+      "id": "POST /api/webhooks/ios-share/{token}",
+      "gate": "pre_auth_token"
     }
   ],
   "mcp": [

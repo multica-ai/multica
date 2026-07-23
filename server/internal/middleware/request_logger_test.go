@@ -146,6 +146,9 @@ func TestRedactWebhookPath(t *testing.T) {
 		{"/api/webhooks/autopilots/awt_secret", "/api/webhooks/autopilots/[redacted]"},
 		{"/api/webhooks/autopilots/awt_secret/", "/api/webhooks/autopilots/[redacted]/"},
 		{"/api/webhooks/autopilots/", "/api/webhooks/autopilots/"},
+		// CEREBRO-PATCH(ios-share-inbox): FIR-3545 redaction coverage for the iOS share ingress token.
+		{"/api/webhooks/ios-share/sit_secret", "/api/webhooks/ios-share/[redacted]"},
+		{"/api/webhooks/ios-share/", "/api/webhooks/ios-share/"},
 		{"/api/webhooks/github", "/api/webhooks/github"},
 		{"/api/runtimes/abc", "/api/runtimes/abc"},
 		{"/", "/"},

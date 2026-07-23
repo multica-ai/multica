@@ -1265,6 +1265,12 @@ var excluded = map[string]string{
 	"PATCH /api/cerebro/saved-filters/{id}":  "self_only — caller's own saved filters (FIR-1659)",
 	"DELETE /api/cerebro/saved-filters/{id}": "self_only — caller's own saved filters (FIR-1659)",
 
+	// cerebro iOS share inboxes — personal token-bound intake endpoints;
+	// owner_user_id enforces caller identity so a member can never touch
+	// another member's inbox (FIR-3545).
+	"POST /api/cerebro/share-inboxes/":       "self_only — caller's own iOS share inboxes (FIR-3545)",
+	"DELETE /api/cerebro/share-inboxes/{id}": "self_only — caller's own iOS share inboxes (FIR-3545)",
+
 	// cerebro dictation — one-shot audio→text proxy; self-authenticates via the
 	// workspace token, persists no governable state, no agent tool equivalent.
 	"POST /api/workspaces/{id}/cerebro/dictation/transcribe": "transcription-proxy — stateless audio→text, self-authenticates via workspace token, persists no governable state (FIR-1637)",
@@ -1364,6 +1370,7 @@ var excluded = map[string]string{
 	"POST /auth/logout":                                       "pre-auth — clears identity",
 	"POST /api/webhooks/github":                               "pre-auth signed webhook — GitHub HMAC authorises delivery",
 	"POST /api/webhooks/stripe":                               "pre-auth signed webhook — Stripe HMAC authorises delivery",
+	"POST /api/webhooks/ios-share/{token}":                   "pre-auth signed webhook — sit_ bearer token in path authorises iOS share intake (FIR-3545)",
 	"POST /api/cerebro/github/pull-requests":                  "pre-auth service-to-service — CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push (FIR-2568)",
 	"POST /api/cerebro/exchange-rates":                        "pre-auth service-to-service — CEREBRO_EXCHANGE_INGEST_KEY bearer token authorises the multica-hatchet-worker's daily FX snapshot push (FIR-43)",
 	"POST /api/cerebro/apps-internal/{id}/{version}/callback": "pre-auth service-to-service — signed Mini Apps runtime callback advances one deployment state (FIR-3172)",

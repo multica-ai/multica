@@ -1091,6 +1091,19 @@ type CerebroGroupRuntimeAccess struct {
 	GrantedAt pgtype.Timestamptz `json:"granted_at"`
 }
 
+type CerebroIosShareInbox struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+	OwnerUserID pgtype.UUID        `json:"owner_user_id"`
+	Name        string             `json:"name"`
+	TokenHash   string             `json:"token_hash"`
+	TokenPrefix string             `json:"token_prefix"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	RevokedAt   pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroIssueDateReminder struct {
 	IssueID      pgtype.UUID        `json:"issue_id"`
 	Kind         string             `json:"kind"`

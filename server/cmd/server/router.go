@@ -1032,6 +1032,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// purpose: the bearer token in the URL path IS the credential. Workspace
 	// context is derived from the trigger row, never from request headers.
 	r.Post("/api/webhooks/autopilots/{token}", h.HandleAutopilotWebhook)
+	// CEREBRO-PATCH(ios-share-inbox): FIR-3545 token-in-path public intake for iOS Shortcuts.
+	r.Post("/api/webhooks/ios-share/{token}", h.HandleIOSShareInbox)
 	// CEREBRO-PATCH(runtime-setup-routes): public token-gated runtime setup
 	r.Post("/api/runtime-setup/exchange", h.ExchangeRuntimeSetupToken)
 	r.Get("/install-runtime.sh", h.ServeInstallRuntimeScript)
@@ -1119,6 +1121,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceMember(queries))
+			// CEREBRO-PATCH(ios-share-inbox): FIR-3545 authenticated credential management.
+			r.Route("/api/cerebro/share-inboxes", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Get("/", h.ListIOSShareInboxes)
+				r.Post("/", h.CreateIOSShareInbox)
+				r.Delete("/{id}", h.RevokeIOSShareInbox)
+			})
 
 			r.With(middleware.RequireUserScope).Get("/api/agents/backfill-avatars", cerebroAgentAvatarHandler.BackfillStatus) // CEREBRO-PATCH(agent-avatar-backfill): keep static GET before /api/agents/{id}.
 			r.With(middleware.AllowTaskScopeForAgent("id")).Get("/api/agents/{id}", h.GetAgent)

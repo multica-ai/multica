@@ -45,6 +45,7 @@ func webhookTriggerIDFromContext(ctx context.Context) string {
 // segment after this prefix IS a bearer credential, so the logger must
 // redact it — see redactWebhookPath.
 const webhookIngressPathPrefix = "/api/webhooks/autopilots/"
+const iosShareIngressPathPrefix = "/api/webhooks/ios-share/" // CEREBRO-PATCH(ios-share-inbox): FIR-3545 — the iOS share path token is a bearer credential and must be redacted from logs.
 
 // redactWebhookPath returns a logger-safe version of a request path. For
 // the autopilot webhook ingress path the trailing token segment is replaced
@@ -55,18 +56,26 @@ const webhookIngressPathPrefix = "/api/webhooks/autopilots/"
 // only credential gating the route. Without redaction, every successful
 // delivery prints a replayable URL into the structured log stream.
 func redactWebhookPath(path string) string {
-	if !strings.HasPrefix(path, webhookIngressPathPrefix) {
+	// CEREBRO-PATCH(ios-share-inbox): FIR-3545 — also redact the iOS share-sheet ingress token from request logs.
+	prefix := ""
+	for _, candidate := range []string{webhookIngressPathPrefix, iosShareIngressPathPrefix} {
+		if strings.HasPrefix(path, candidate) {
+			prefix = candidate
+			break
+		}
+	}
+	if prefix == "" {
 		return path
 	}
-	rest := path[len(webhookIngressPathPrefix):]
+	rest := path[len(prefix):]
 	if rest == "" {
 		return path
 	}
 	// Preserve any sub-path after the token (currently none, but defensive).
 	if slash := strings.IndexByte(rest, '/'); slash >= 0 {
-		return webhookIngressPathPrefix + "[redacted]" + rest[slash:]
+		return prefix + "[redacted]" + rest[slash:]
 	}
-	return webhookIngressPathPrefix + "[redacted]"
+	return prefix + "[redacted]"
 }
 
 // boundedBuffer captures up to Cap bytes from a stream then silently drops the
