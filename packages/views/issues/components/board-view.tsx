@@ -36,6 +36,10 @@ import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
 import type { ChildProgress } from "./list-row";
 import type { IssueCreateDefaults } from "../surface/types";
+import type {
+  IssueStatusPageState,
+  IssueStatusPagination,
+} from "../surface/use-issue-status-branches";
 import { useDragSettle } from "./use-drag-settle";
 import { useT } from "../../i18n";
 import {
@@ -162,6 +166,7 @@ function BoardViewImpl({
   sort,
   projectId,
   onCreateIssue,
+  statusPagination,
 }: {
   issues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
@@ -180,6 +185,7 @@ function BoardViewImpl({
   /** When set, the per-column "+" pre-fills the project on the create form. */
   projectId?: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
+  statusPagination?: IssueStatusPagination;
 }) {
   const { t } = useT("issues");
   const storeGrouping = useViewStore((s) => s.grouping);
@@ -512,19 +518,34 @@ function BoardViewImpl({
         ) : (
           groups.map((group) =>
             isStatusGroup(group) ? (
-              <PaginatedBoardColumn
-                key={group.id}
-                group={group}
-                issueIds={columns[group.id] ?? EMPTY_IDS}
-                issueMap={issueMapRef.current}
-                childProgressMap={childProgressMap}
-                projectMap={projectMap}
-                myIssuesOpts={myIssuesOpts}
-                sort={sort}
-                projectId={projectId}
-                onCreateIssue={onCreateIssue}
-                sortLabel={sortLabel}
-              />
+              statusPagination ? (
+                <ServerPaginatedBoardColumn
+                  key={group.id}
+                  group={group}
+                  issueIds={columns[group.id] ?? EMPTY_IDS}
+                  issueMap={issueMapRef.current}
+                  childProgressMap={childProgressMap}
+                  projectMap={projectMap}
+                  page={statusPagination[group.status]}
+                  projectId={projectId}
+                  onCreateIssue={onCreateIssue}
+                  sortLabel={sortLabel}
+                />
+              ) : (
+                <PaginatedBoardColumn
+                  key={group.id}
+                  group={group}
+                  issueIds={columns[group.id] ?? EMPTY_IDS}
+                  issueMap={issueMapRef.current}
+                  childProgressMap={childProgressMap}
+                  projectMap={projectMap}
+                  myIssuesOpts={myIssuesOpts}
+                  sort={sort}
+                  projectId={projectId}
+                  onCreateIssue={onCreateIssue}
+                  sortLabel={sortLabel}
+                />
+              )
             ) : (
               assigneeGroupQueryKey && assigneeGroupFilter ? (
                 <PaginatedAssigneeBoardColumn
@@ -572,6 +593,7 @@ function BoardViewImpl({
             hiddenStatuses={hiddenStatuses}
             myIssuesOpts={myIssuesOpts}
             sort={sort}
+            statusPagination={statusPagination}
           />
         )}
       </div>
@@ -646,6 +668,58 @@ const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn(
           <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
         ) : undefined
       }
+    />
+  );
+});
+
+const ServerPaginatedBoardColumn = memo(function ServerPaginatedBoardColumn({
+  group,
+  issueIds,
+  issueMap,
+  childProgressMap,
+  projectMap,
+  page,
+  projectId,
+  onCreateIssue,
+  sortLabel,
+}: {
+  group: BoardColumnGroup & { status: IssueStatus };
+  issueIds: string[];
+  issueMap: Map<string, Issue>;
+  childProgressMap?: Map<string, ChildProgress>;
+  projectMap?: Map<string, Project>;
+  page: IssueStatusPageState;
+  projectId?: string;
+  onCreateIssue?: (defaults: IssueCreateDefaults) => void;
+  sortLabel?: string | null;
+}) {
+  const { t } = useT("issues");
+  const footer = page.isError ? (
+    <button
+      type="button"
+      className="w-full py-2 text-xs text-destructive hover:underline"
+      onClick={page.retry}
+    >
+      {t(($) => $.table.load_more_failed_retry)}
+    </button>
+  ) : page.hasMore ? (
+    <InfiniteScrollSentinel
+      onVisible={page.loadMore}
+      loading={page.isLoading || page.isFetching}
+    />
+  ) : undefined;
+  return (
+    <BoardColumn
+      group={group}
+      issueIds={issueIds}
+      issueMap={issueMap}
+      childProgressMap={childProgressMap}
+      projectMap={projectMap}
+      totalCount={page.total}
+      projectId={projectId}
+      onCreateIssue={onCreateIssue}
+      sortLabel={sortLabel}
+      footer={footer}
     />
   );
 });
@@ -762,21 +836,31 @@ function BoardHiddenColumnsPanel({
   hiddenStatuses,
   myIssuesOpts,
   sort,
+  statusPagination,
 }: {
   hiddenStatuses: IssueStatus[];
   myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
   sort?: IssueSortParam;
+  statusPagination?: IssueStatusPagination;
 }) {
   return (
     <HiddenColumnsPanel
       hiddenStatuses={hiddenStatuses}
       renderRow={(status) => (
-        <BoardHiddenColumnRow
-          key={status}
-          status={status}
-          myIssuesOpts={myIssuesOpts}
-          sort={sort}
-        />
+        statusPagination ? (
+          <HiddenColumnRow
+            key={status}
+            status={status}
+            total={statusPagination[status].total}
+          />
+        ) : (
+          <BoardHiddenColumnRow
+            key={status}
+            status={status}
+            myIssuesOpts={myIssuesOpts}
+            sort={sort}
+          />
+        )
       )}
     />
   );

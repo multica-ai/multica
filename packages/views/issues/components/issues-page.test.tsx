@@ -62,6 +62,73 @@ vi.mock("../../workspace/workspace-avatar", () => ({
 // Mock api (queries use api internally)
 const mockListIssues = vi.hoisted(() => vi.fn().mockResolvedValue({ issues: [], total: 0 }));
 const mockListGroupedIssues = vi.hoisted(() => vi.fn().mockResolvedValue({ groups: [] }));
+const mockListIssueTableRows = vi.hoisted(() =>
+  vi.fn(async (request: any) => {
+    const status = request.group_key?.replace(/^status:/, "");
+    const response = await mockListIssues({
+      status,
+      limit: 50,
+      offset: 0,
+      ...(request.query.scope.assignee_types
+        ? { assignee_types: request.query.scope.assignee_types }
+        : {}),
+    });
+    return {
+      query_fingerprint: "test",
+      group_key: request.group_key,
+      parent_id: null,
+      total: 0,
+      rows: response.issues.map((issue: Issue) => ({
+        issue,
+        direct_child_count: 0,
+      })),
+      branch_total: response.issues.length,
+      next_cursor: null,
+    };
+  }),
+);
+const mockListIssueTableFacets = vi.hoisted(() =>
+  vi.fn(async (request: any) => {
+    const statuses = [
+      "backlog",
+      "todo",
+      "in_progress",
+      "in_review",
+      "done",
+      "blocked",
+      "cancelled",
+    ];
+    const groups = await Promise.all(
+      statuses.map(async (status) => ({
+        status,
+        response: await mockListIssues({
+          status,
+          limit: 50,
+          offset: 0,
+          ...(request.query.scope.assignee_types
+            ? { assignee_types: request.query.scope.assignee_types }
+            : {}),
+        }),
+      })),
+    );
+    return {
+      query_fingerprint: "test",
+      total: groups.reduce((sum, group) => sum + group.response.issues.length, 0),
+      facets: request.facets.map((facet: any) => ({
+        ...facet,
+        values:
+          facet.kind === "status"
+            ? groups
+                .filter((group) => group.response.issues.length > 0)
+                .map((group) => ({
+                  key: group.status,
+                  count: group.response.issues.length,
+                }))
+            : [],
+      })),
+    };
+  }),
+);
 const mockListMembers = vi.hoisted(() =>
   vi.fn().mockResolvedValue([
     {
@@ -118,6 +185,8 @@ vi.mock("@multica/core/api", () => ({
     getBaseUrl: () => "http://127.0.0.1:8080",
     listIssues: (...args: any[]) => mockListIssues(...args),
     listGroupedIssues: (...args: any[]) => mockListGroupedIssues(...args),
+    listIssueTableRows: (request: any) => mockListIssueTableRows(request),
+    listIssueTableFacets: (request: any) => mockListIssueTableFacets(request),
     updateIssue: vi.fn(),
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
@@ -126,6 +195,8 @@ vi.mock("@multica/core/api", () => ({
   getApi: () => ({
     listIssues: (...args: any[]) => mockListIssues(...args),
     listGroupedIssues: (...args: any[]) => mockListGroupedIssues(...args),
+    listIssueTableRows: (request: any) => mockListIssueTableRows(request),
+    listIssueTableFacets: (request: any) => mockListIssueTableFacets(request),
     updateIssue: vi.fn(),
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
