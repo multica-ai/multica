@@ -432,8 +432,7 @@ export type CerebroFlagKey =
   // staging; enforcement (the status-change gate) is a separate hook policy.
   | "cerebro_workpad"
   // FIR-3608: scoped, non-personal, workspace-bound service tokens (`msv_`)
-  // managed from Settings → Tokens. Default OFF until the surface is QA'd on
-  // staging.
+  // managed from Settings → Tokens.
   | "cerebro_service_tokens";
 
 /**
@@ -850,7 +849,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_embedded_chat: false,
   // FIR-3659: default OFF. Enabling injects the Workpad protocol into agent briefs.
   cerebro_workpad: false,
-  cerebro_service_tokens: false, // FIR-3608 — off until QA'd on staging.
+  cerebro_service_tokens: true,
 };
 
 /**

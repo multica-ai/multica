@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -58,13 +59,18 @@ type Store interface {
 	AppendAudit(ctx context.Context, e AuditEvent) error
 }
 
+type workspaceFlagReader interface {
+	ListCerebroWorkspaceFeatureFlags(ctx context.Context, workspaceID pgtype.UUID) ([]cerebrodb.ListCerebroWorkspaceFeatureFlagsRow, error)
+}
+
 // cerebroStore adapts the sqlc-generated cerebrodb.Queries to Store.
 type cerebroStore struct {
-	q *cerebrodb.Queries
+	q     *cerebrodb.Queries
+	flags workspaceFlagReader
 }
 
 // NewStore returns a Store backed by the cerebro sqlc queries.
-func NewStore(q *cerebrodb.Queries) Store { return &cerebroStore{q: q} }
+func NewStore(q *cerebrodb.Queries) Store { return &cerebroStore{q: q, flags: q} }
 
 func (s *cerebroStore) Create(ctx context.Context, p CreateParams) (Token, error) {
 	scopesJSON, err := marshalScopes(p.Scopes)
@@ -108,7 +114,10 @@ func (s *cerebroStore) GetByHash(ctx context.Context, tokenHash string) (Token, 
 }
 
 func (s *cerebroStore) FeatureEnabled(ctx context.Context, workspaceID string) (bool, error) {
-	rows, err := s.q.ListCerebroWorkspaceFeatureFlags(ctx, toUUID(workspaceID))
+	if s.flags == nil {
+		return false, ErrNotConfigured
+	}
+	rows, err := s.flags.ListCerebroWorkspaceFeatureFlags(ctx, toUUID(workspaceID))
 	if err != nil {
 		return false, err
 	}
@@ -117,7 +126,7 @@ func (s *cerebroStore) FeatureEnabled(ctx context.Context, workspaceID string) (
 			return row.Enabled, nil
 		}
 	}
-	return false, nil
+	return DefaultEnabled, nil
 }
 
 func (s *cerebroStore) Touch(ctx context.Context, tokenID string) error {

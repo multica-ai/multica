@@ -22,8 +22,9 @@ var (
 )
 
 const (
-	FlagKey       = "cerebro_service_tokens"
-	MaxExpiryDays = 365
+	FlagKey        = "cerebro_service_tokens"
+	DefaultEnabled = true
+	MaxExpiryDays  = 365
 )
 
 // Identity is the resolved, server-authoritative result of authenticating a
@@ -98,8 +99,8 @@ func (s *TokenService) Mint(ctx context.Context, workspaceID, name string, scope
 	return tok, raw, nil
 }
 
-// Enabled resolves the workspace-level kill switch. Missing configuration and
-// lookup errors fail closed at callers.
+// Enabled resolves the workspace-level kill switch. A missing override uses
+// the registry default; lookup errors fail closed at callers.
 func (s *TokenService) Enabled(ctx context.Context, workspaceID string) (bool, error) {
 	return s.store.FeatureEnabled(ctx, workspaceID)
 }
