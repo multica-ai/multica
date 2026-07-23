@@ -8,6 +8,7 @@ import { WebProviders } from "@/components/web-providers";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import { getRequestLocale } from "@/lib/request-locale";
+import { ServiceWorkerRegister } from "@/components/sw-register";
 import "./globals.css";
 
 // Inter is the Latin UI face. next/font produces a hashed family (`__Inter_xxx`)
@@ -69,8 +70,20 @@ export const metadata: Metadata = {
   description:
     "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
   icons: {
-    icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
+    icon: [
+      { url: "/favicon.svg", type: "image/svg+xml" },
+      { url: "/icons/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icons/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
     shortcut: ["/favicon.svg"],
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180", type: "image/png" }],
+  },
+  // Lets iOS Safari launch an installed Multica in standalone mode with the
+  // right title; Android/desktop installability is driven by the manifest.
+  appleWebApp: {
+    capable: true,
+    title: "Multica",
+    statusBarStyle: "default",
   },
   openGraph: {
     type: "website",
@@ -135,6 +148,7 @@ export default async function RootLayout({
             strategy="beforeInteractive"
           />
         )}
+        <ServiceWorkerRegister />
         <ThemeProvider>
           <WebProviders locale={locale} resources={resources}>
             {children}
