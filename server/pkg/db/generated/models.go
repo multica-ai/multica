@@ -959,11 +959,11 @@ type TaskUsageHourly struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 	// Sum of provider-reported cost (1e-10 USD) over the rows in this bucket that had one; 0 when none did.
 	CostUsdTicks int64 `json:"cost_usd_ticks"`
-	// Input tokens from rows with no provider-reported cost — the portion still priced from the static rate table.
-	UncostedInputTokens      int64 `json:"uncosted_input_tokens"`
-	UncostedOutputTokens     int64 `json:"uncosted_output_tokens"`
-	UncostedCacheReadTokens  int64 `json:"uncosted_cache_read_tokens"`
-	UncostedCacheWriteTokens int64 `json:"uncosted_cache_write_tokens"`
+	// Input tokens from rows with no provider-reported cost — the portion still priced from the static rate table. NULL on buckets not yet recomputed since this column existed; readers COALESCE to input_tokens.
+	UncostedInputTokens      pgtype.Int8 `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     pgtype.Int8 `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  pgtype.Int8 `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens pgtype.Int8 `json:"uncosted_cache_write_tokens"`
 }
 
 type TaskUsageHourlyDirty struct {

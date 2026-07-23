@@ -38,34 +38,37 @@ COMMENT ON COLUMN task_usage.cost_usd_ticks IS
 -- The existing token columns keep their meaning (every row in the bucket) so
 -- token displays are untouched.
 --
--- These are additive columns with defaults, so the unique key, the dirty-queue
--- key shape, and every trigger in migration 102 are unaffected.
+-- The `uncosted_*` columns are NULLABLE WITH NO DEFAULT, and that is load-
+-- bearing: NULL means "this bucket has never been recomputed since the split
+-- existed", which is every pre-existing row. Readers COALESCE it to the
+-- bucket's own token total, i.e. "estimate all of it" — exactly what those
+-- rows did before. A `NOT NULL DEFAULT 0` would instead assert "nothing here
+-- needs estimating" and collapse every historical bucket's cost to $0 until
+-- the rollup happened to touch it again, which is why this migration does NOT
+-- rewrite history to seed them: with NULL there is nothing to seed. A bare
+-- ADD COLUMN is metadata-only, so this stays a fast DDL with no table rewrite,
+-- no WAL churn, and no lock held proportional to table size.
+--
+-- The rollup writes concrete values for every bucket it recomputes, so rows
+-- heal into the split naturally as they are touched.
+--
+-- `cost_usd_ticks` is NOT NULL DEFAULT 0 because 0 is the honest identity for
+-- a sum of "no rows here were priced by their provider", which is true of
+-- every historical bucket.
+--
+-- All additive, so the unique key, the dirty-queue key shape, and every
+-- trigger in migration 102 are unaffected.
 ALTER TABLE task_usage_hourly
-    ADD COLUMN IF NOT EXISTS cost_usd_ticks             BIGINT NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS uncosted_input_tokens      BIGINT NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS uncosted_output_tokens     BIGINT NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS uncosted_cache_read_tokens BIGINT NOT NULL DEFAULT 0,
-    ADD COLUMN IF NOT EXISTS uncosted_cache_write_tokens BIGINT NOT NULL DEFAULT 0;
+    ADD COLUMN IF NOT EXISTS cost_usd_ticks              BIGINT NOT NULL DEFAULT 0,
+    ADD COLUMN IF NOT EXISTS uncosted_input_tokens       BIGINT,
+    ADD COLUMN IF NOT EXISTS uncosted_output_tokens      BIGINT,
+    ADD COLUMN IF NOT EXISTS uncosted_cache_read_tokens  BIGINT,
+    ADD COLUMN IF NOT EXISTS uncosted_cache_write_tokens BIGINT;
 
 COMMENT ON COLUMN task_usage_hourly.cost_usd_ticks IS
     'Sum of provider-reported cost (1e-10 USD) over the rows in this bucket that had one; 0 when none did.';
 COMMENT ON COLUMN task_usage_hourly.uncosted_input_tokens IS
-    'Input tokens from rows with no provider-reported cost — the portion still priced from the static rate table.';
-
--- Existing buckets pre-date the column and were all estimated, so seed the
--- uncosted counters from the totals. Without this, every historical bucket
--- would report 0 uncosted tokens and its cost would collapse to 0 until the
--- rollup happened to touch it again.
-UPDATE task_usage_hourly
-   SET uncosted_input_tokens       = input_tokens,
-       uncosted_output_tokens      = output_tokens,
-       uncosted_cache_read_tokens  = cache_read_tokens,
-       uncosted_cache_write_tokens = cache_write_tokens
- WHERE cost_usd_ticks = 0
-   AND uncosted_input_tokens = 0
-   AND uncosted_output_tokens = 0
-   AND uncosted_cache_read_tokens = 0
-   AND uncosted_cache_write_tokens = 0;
+    'Input tokens from rows with no provider-reported cost — the portion still priced from the static rate table. NULL on buckets not yet recomputed since this column existed; readers COALESCE to input_tokens.';
 
 -- Teach the rollup to populate them. Body is migration 102's, with the two
 -- new expression groups in `recomputed` and the matching SET list on
