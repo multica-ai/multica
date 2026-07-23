@@ -286,9 +286,9 @@ func TestGateToolPolicy_ExpiredRoleBindingIsRejectedAtCallTime(t *testing.T) {
 	}
 }
 
-// TestGateToolPolicy_AskFailsClosed proves the authoritative Policy Decision
-// Service never turns an unresolved generic Ask into tool access.
-func TestGateToolPolicy_AskFailsClosed(t *testing.T) {
+// TestGateToolPolicy_AskApprovedRuns proves a human-triggered Ask reaches the
+// approval service and an approved decision allows the call.
+func TestGateToolPolicy_AskApprovedRuns(t *testing.T) {
 	ap := &gateFakeApprovals{status: approvals.StatusApproved} // human already approved
 	e, agentID := newToolPolicyGatedExecutor(t, ap)
 	const tool = "web_fetch"
@@ -296,23 +296,23 @@ func TestGateToolPolicy_AskFailsClosed(t *testing.T) {
 
 	// A human triggered this run, so the Ask has someone to answer it.
 	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, policyTestRegistry(tool), GatewayRequestMeta{TriggerUserID: "11111111-1111-1111-1111-111111111111"})
-	if allowed || reason == "" {
-		t.Fatalf("generic Ask must fail closed; got allowed=%v reason=%q", allowed, reason)
+	if !allowed {
+		t.Fatalf("approved Ask must allow the tool; reason=%q", reason)
 	}
-	if ap.intakes != 0 {
-		t.Fatalf("generic Ask must not bypass the policy service through an inbox request, got %d", ap.intakes)
+	if ap.intakes != 1 {
+		t.Fatalf("approved Ask must reach approval intake once, got %d", ap.intakes)
 	}
 }
 
 // TestGateToolPolicy_AskRejectedBlocks proves the same Ask row remains denied
-// regardless of the approval fake's configured outcome.
+// after the approval service rejects it.
 func TestGateToolPolicy_AskRejectedBlocks(t *testing.T) {
 	ap := &gateFakeApprovals{status: approvals.StatusRejected}
 	e, agentID := newToolPolicyGatedExecutor(t, ap)
 	const tool = "web_fetch"
 	setAgentToolPolicy(t, agentID, tool, toolpolicy.SettingAsk)
 
-	// A human trigger does not weaken the Policy Decision Service's fail-closed Ask.
+	// A human trigger sends Ask to the approval service.
 	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, policyTestRegistry(tool), GatewayRequestMeta{TriggerUserID: "11111111-1111-1111-1111-111111111111"})
 	if allowed {
 		t.Fatal("rejected Ask must block the tool")
@@ -320,8 +320,8 @@ func TestGateToolPolicy_AskRejectedBlocks(t *testing.T) {
 	if reason == "" {
 		t.Fatal("rejected call must carry a reason")
 	}
-	if ap.intakes != 0 {
-		t.Fatalf("generic Ask must be denied before approval intake, got %d", ap.intakes)
+	if ap.intakes != 1 {
+		t.Fatalf("rejected Ask must reach approval intake once, got %d", ap.intakes)
 	}
 }
 

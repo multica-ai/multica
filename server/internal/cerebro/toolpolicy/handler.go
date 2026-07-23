@@ -313,6 +313,10 @@ func (h *Handler) Table(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid base")
 		return
 	}
+	platformActorOwner := false
+	if !agentID.Valid && userID.Valid {
+		platformActorOwner = h.Store.workspaceActorIsOwner(r.Context(), workspaceID, userID)
+	}
 
 	rows, err := h.Store.Table(r.Context(), TableQuery{
 		WorkspaceID:        workspaceID,
@@ -325,6 +329,7 @@ func (h *Handler) Table(w http.ResponseWriter, r *http.Request) {
 		IncludePlatform:    h.Store.PlatformCapabilitiesEnabled(r.Context(), workspaceID, member.UserID),
 		IncludeAgentStart:  h.Store.AgentStartCapabilitiesEnabled(r.Context(), workspaceID, member.UserID),
 		IncludeCredentials: h.Store.CredentialAuthoringEnabled(r.Context(), workspaceID, member.UserID),
+		PlatformActorOwner: platformActorOwner,
 	})
 	if err != nil {
 		h.serverError(w, r, "list tool policy table", err)

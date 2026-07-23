@@ -12,9 +12,36 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestCapabilityToolFromPlatformRowReportsCallability(t *testing.T) {
+	denied := capabilityToolFromRow(cerebrotoolpolicy.TableRow{
+		ToolKey:   "hooks:write",
+		Source:    platformcatalog.Source,
+		Effective: cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingDeny, Reason: "Explicit grant required"},
+	})
+	if denied.Allowed || denied.Callable {
+		t.Fatalf("denied hooks:write = %+v, want allowed=false callable=false", denied)
+	}
+	if !denied.Available || !denied.Enforced {
+		t.Fatalf("denied hooks:write = %+v, want registered action available and enforced", denied)
+	}
+	if denied.BlockedReason != "Explicit grant required" || denied.HowToFix == "" {
+		t.Fatalf("denied hooks:write explanation = %+v, want reason and remediation", denied)
+	}
+
+	allowed := capabilityToolFromRow(cerebrotoolpolicy.TableRow{
+		ToolKey:   "hooks:write",
+		Source:    platformcatalog.Source,
+		Effective: cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingAllow, DecidedBy: cerebrotoolpolicy.LayerAgent},
+	})
+	if !allowed.Allowed || !allowed.Available || !allowed.Enforced || !allowed.Callable {
+		t.Fatalf("allowed hooks:write = %+v, want callable effective action", allowed)
+	}
+}
 
 func TestBuildAgentCapabilityLimits_Empty(t *testing.T) {
 	got := buildAgentCapabilityLimits(nil, nil)

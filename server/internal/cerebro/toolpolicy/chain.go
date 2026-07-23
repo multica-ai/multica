@@ -49,7 +49,11 @@
 // the two models side by side.
 package toolpolicy
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
+)
 
 // Setting is the per-layer choice for a single tool.
 type Setting string
@@ -483,7 +487,7 @@ func resolveOpenable(in Input) Effective {
 	}
 }
 
-// ResolveOptIn decides an OFF-by-default capability gate from the explicit
+// resolveOptIn decides an OFF-by-default capability gate from the explicit
 // per-layer settings. It exists because Resolve (the tighten-only chain) cannot
 // express opt-in: Resolve only ever TIGHTENS below its Base and refuses to
 // loosen ("Loosening is not permitted; the running value stands"), so a Deny
@@ -498,20 +502,20 @@ func resolveOpenable(in Input) Effective {
 // LayerGroup has already been collapsed to its single most-permissive value by
 // CombineGroups before it reaches here, so a User with no row inherits any
 // group grant. Used by capability gates such as tools:test-as-user (FIR-1771).
-func ResolveOptIn(in Input) bool {
+func resolveOptIn(in Input) bool {
 	if in.Settings[LayerUser] == SettingDeny {
 		return false
 	}
 	return in.Settings[LayerUser] == SettingAllow || in.Settings[LayerGroup] == SettingAllow
 }
 
-// ResolveActorOptIn extends the existing human opt-in contract to an agent
+// resolveActorOptIn extends the existing human opt-in contract to an agent
 // actor without turning the workspace default into access. Agent access needs
 // an explicit Agent-layer Allow and remains capped by the human, runtime,
 // delegation, system, and workspace-Disable safety layers.
-func ResolveActorOptIn(in Input, agentActor bool) bool {
+func resolveActorOptIn(in Input, agentActor bool) bool {
 	if !agentActor {
-		return ResolveOptIn(in)
+		return resolveOptIn(in)
 	}
 	if in.Settings[LayerWorkspace] == SettingDisable {
 		return false
@@ -523,6 +527,85 @@ func ResolveActorOptIn(in Input, agentActor bool) bool {
 		}
 	}
 	return in.Settings[LayerAgent] == SettingAllow
+}
+
+// ResolvePermission is the pure effective decision shared by every read surface
+// and call-time authorizer. The permission key selects its one declared
+// contract from platformaccess; keys without a special contract use the
+// ordinary policy chain.
+func ResolvePermission(in Input, key string, actor platformaccess.Actor) Effective {
+	contract, special := platformaccess.ForKey(key)
+	if !special {
+		return Resolve(in)
+	}
+	if !actor.Authenticated {
+		return Effective{Setting: SettingDeny, Reason: "Authenticated actor required"}
+	}
+	enforcement := contract.Enforcement
+	switch enforcement {
+	case platformaccess.EnforcementPolicy:
+		return Resolve(in)
+	case platformaccess.EnforcementAuthenticatedRead:
+		if actor.Authenticated {
+			return Effective{Setting: SettingAllow, Reason: "Available to authenticated members and agents"}
+		}
+		return Effective{Setting: SettingDeny, Reason: "Authenticated actor required"}
+	case platformaccess.EnforcementOwnerOnly:
+		if actor.Owner {
+			return Effective{Setting: SettingAllow, Reason: "Workspace owner"}
+		}
+		return Effective{Setting: SettingDeny, Reason: "Workspace owner only"}
+	case platformaccess.EnforcementHumanOptIn:
+		if actor.Agent {
+			return Effective{Setting: SettingDeny, Reason: "Human-only capability"}
+		}
+		return resolveActorOptInEffective(in, false)
+	case platformaccess.EnforcementHumanOptInOrAdmin:
+		if actor.Agent {
+			return Effective{Setting: SettingDeny, Reason: "Human-only capability"}
+		}
+		if actor.Admin || actor.Owner {
+			return Effective{Setting: SettingAllow, Reason: "Workspace owner or administrator"}
+		}
+		return resolveActorOptInEffective(in, false)
+	case platformaccess.EnforcementActorOptIn:
+		return resolveActorOptInEffective(in, actor.Agent)
+	case platformaccess.EnforcementAgentOptIn:
+		if !actor.Agent {
+			return Effective{Setting: SettingDeny, Reason: "Agent-only capability"}
+		}
+		return resolveActorOptInEffective(in, true)
+	default:
+		return Effective{Setting: SettingDeny, Reason: "Unknown platform enforcement model"}
+	}
+}
+
+func resolveActorOptInEffective(in Input, agentActor bool) Effective {
+	if !resolveActorOptIn(in, agentActor) {
+		if in.Settings[LayerWorkspace] == SettingDisable {
+			return Effective{Setting: SettingDeny, DecidedBy: LayerWorkspace, Reason: "Disabled by workspace"}
+		}
+		for _, layer := range []Layer{LayerUser, LayerGroup, LayerRuntime, LayerOnBehalfOf, LayerSystem} {
+			if setting := in.Settings[layer]; setting == SettingDeny || setting == SettingAsk || setting == SettingDisable {
+				verdict := SettingDeny
+				if setting == SettingAsk {
+					verdict = SettingAsk
+				}
+				return Effective{Setting: verdict, DecidedBy: layer, CappedBy: layer, Reason: "Explicit opt-in is capped by " + string(layer)}
+			}
+		}
+		if agentActor {
+			return Effective{Setting: SettingDeny, Reason: "Explicit agent grant required"}
+		}
+		return Effective{Setting: SettingDeny, Reason: "Explicit user or group grant required"}
+	}
+	if agentActor {
+		return Effective{Setting: SettingAllow, DecidedBy: LayerAgent, Reason: "Allowed by explicit agent grant"}
+	}
+	if in.Settings[LayerUser] == SettingAllow {
+		return Effective{Setting: SettingAllow, DecidedBy: LayerUser, Reason: "Allowed by explicit user grant"}
+	}
+	return Effective{Setting: SettingAllow, DecidedBy: LayerGroup, Reason: "Allowed by explicit group grant"}
 }
 
 // CombineGroups collapses the settings from every group a user belongs to into

@@ -40,6 +40,16 @@ const AgentCapabilityToolSchema = z
     reason: z.string().default(""),
     managed_externally: z.boolean().default(false),
     capped_by_groups: z.array(z.string()).default([]),
+    // FIR-3388 — keep the five different capability questions separate.
+    // They are optional for rolling deploy compatibility with an older API;
+    // invalid values are discarded, never coerced into a positive verdict.
+    allowed: z.boolean().optional().catch(undefined),
+    available: z.boolean().optional().catch(undefined),
+    enforced: z.boolean().optional().catch(undefined),
+    callable: z.boolean().optional().catch(undefined),
+    verified: z.boolean().optional().catch(undefined),
+    blocked_reason: z.string().catch("").default(""),
+    how_to_fix: z.string().catch("").default(""),
     availability: z
       .object({
         level: z.enum(["declared", "discovered", "verified"]).catch("declared"),
@@ -81,6 +91,15 @@ const AgentCapabilityConnEndpointSchema = z
   .object({
     path: z.string().default(""),
     methods: z.array(z.string()).default([]),
+    summary: z.string().default(""),
+    permission: z.string().default(""),
+    allowed: z.boolean().optional().catch(undefined),
+    available: z.boolean().optional().catch(undefined),
+    enforced: z.boolean().optional().catch(undefined),
+    callable: z.boolean().optional().catch(undefined),
+    verified: z.boolean().optional().catch(undefined),
+    blocked_reason: z.string().catch("").default(""),
+    how_to_fix: z.string().catch("").default(""),
   })
   .loose();
 
@@ -89,6 +108,13 @@ const AgentCapabilityConnToolSchema = z
     name: z.string().default(""),
     description: z.string().default(""),
     permission: z.string().default(""),
+    allowed: z.boolean().optional().catch(undefined),
+    available: z.boolean().optional().catch(undefined),
+    enforced: z.boolean().optional().catch(undefined),
+    callable: z.boolean().optional().catch(undefined),
+    verified: z.boolean().optional().catch(undefined),
+    blocked_reason: z.string().catch("").default(""),
+    how_to_fix: z.string().catch("").default(""),
   })
   .loose();
 

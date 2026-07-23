@@ -18,7 +18,7 @@ import (
 func registerCerebroAgentCapabilitiesTools(srv *mcp.Server, client *cli.APIClient) {
 	srv.RegisterTool(mcp.Tool{
 		Name:        "get_agent_capabilities",
-		Description: `Get YOUR OWN capabilities card — what you can do (skills), may use (tools, with allow/ask/deny), have access to (credentials — names/types only, never secret values), and are limited by (sandbox + MCP servers). Omit agent_id to inspect yourself; pass agent_id only to inspect another agent before routing work to it. Call this whenever you are unsure what you are allowed to do.`,
+		Description: `Get YOUR OWN capabilities card — what you can do (skills), which actions are allowed, available, enforced, callable, and verified, why a call is blocked, how to fix it, what credentials you can reference (names/types only, never secret values), and what limits apply. Tool registration is not permission. Omit agent_id to inspect yourself; pass agent_id only to inspect another agent before routing work to it. Call this whenever you are unsure what you are allowed to do.`,
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

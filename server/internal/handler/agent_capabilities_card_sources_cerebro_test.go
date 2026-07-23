@@ -45,7 +45,7 @@ func TestClassifyCapabilityRows_SplitsToolsReposAndConnVerdicts(t *testing.T) {
 		{ToolKey: "connection:bigquery", Source: "connection-tool", ResourcePattern: "bigquery.insert", Effective: eff(cerebrotoolpolicy.SettingDeny, cerebrotoolpolicy.LayerAgent)},
 		// connection-wide + endpoint rows are rendered structurally — must be skipped
 		{ToolKey: "connection:bigquery", Source: "connection", ResourcePattern: "", Effective: eff(cerebrotoolpolicy.SettingAllow, cerebrotoolpolicy.LayerWorkspace)},
-		{ToolKey: "connection:registry", Source: "connection-endpoint", ResourcePattern: "/datasets", Effective: eff(cerebrotoolpolicy.SettingAllow, cerebrotoolpolicy.LayerWorkspace)},
+		{ToolKey: "connection:registry", Source: "connection-endpoint", ResourcePattern: "GET /datasets", Effective: eff(cerebrotoolpolicy.SettingAllow, cerebrotoolpolicy.LayerWorkspace)},
 		// scanned MCP tool that belongs to the bigquery connection (Category =
 		// connection name) — must be grouped under the connection, not flat.
 		{ToolKey: "bigquery.query", Title: "query", Category: "bigquery", Source: "scan", Effective: eff(cerebrotoolpolicy.SettingAllow, cerebrotoolpolicy.LayerWorkspace)},
@@ -75,8 +75,11 @@ func TestClassifyCapabilityRows_SplitsToolsReposAndConnVerdicts(t *testing.T) {
 	if len(repos[0].Permissions) != 3 || repos[0].Permissions[2].Permission != "deny" {
 		t.Fatalf("expected repo to carry read/checkout/push verdicts, got %+v", repos[0].Permissions)
 	}
-	if connPerms["bigquery"]["bigquery.insert"] != "deny" {
+	if connPerms["bigquery"]["bigquery.insert"].Permission != "deny" {
 		t.Fatalf("expected connection-tool verdict mapped, got %v", connPerms)
+	}
+	if connPerms["registry"]["GET /datasets"].Permission != "allow" {
+		t.Fatalf("expected connection-endpoint verdict mapped, got %v", connPerms)
 	}
 	// The scanned tool is grouped under its connection.
 	if len(connTools["bigquery"]) != 1 || connTools["bigquery"][0].Title != "query" {
@@ -100,7 +103,9 @@ func TestAgentCapabilityConnections_FallbackToPersistedToolsStampedSecretsDroppe
 		},
 	}
 
-	connPerms := map[string]map[string]string{"bigquery": {"bigquery.insert": "deny"}}
+	connPerms := map[string]map[string]AgentCapabilityTool{
+		"bigquery": {"bigquery.insert": {Permission: "deny", Reason: "agent denied this tool"}},
+	}
 	got := buildAgentCapabilityConnections(conns, connPerms, nil)
 
 	if len(got) != 2 {
@@ -118,6 +123,12 @@ func TestAgentCapabilityConnections_FallbackToPersistedToolsStampedSecretsDroppe
 	}
 	if insert.Permission != "deny" {
 		t.Fatalf("expected bigquery.insert stamped deny, got %q", insert.Permission)
+	}
+	if insert.Allowed || insert.Callable || !insert.Available || !insert.Enforced {
+		t.Fatalf("unexpected denied connection truth: %+v", insert)
+	}
+	if len(got[1].Endpoints) != 1 || got[1].Endpoints[0].Permission != "deny" || got[1].Endpoints[0].Available || got[1].Endpoints[0].Callable {
+		t.Fatalf("disabled API endpoint did not fail closed: %+v", got[1].Endpoints)
 	}
 
 	// Hard guarantee: no auth secret may appear anywhere in the serialized card.

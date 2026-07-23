@@ -97,6 +97,30 @@ func TestLocalTaskMandateStoresCapabilityKeyNotBareToolName(t *testing.T) {
 		t.Fatalf("mandate unexpectedly holds the bare tool name 'Bash'; got %v", mandate)
 	}
 
+	// A later runtime report is authoritative: when Bash disappears from the
+	// installed surface, it disappears from Capabilities and a fresh mandate.
+	if _, err := capReg.Report(ctx, wsUUID, reporter, []capabilityregistry.ReportInput{
+		{Key: "tools:Read", Title: "Read", Category: "tools", Source: "runtime_report", Owners: []capabilityregistry.Subject{reporter}, Users: []capabilityregistry.Subject{reporter}},
+	}); err != nil {
+		t.Fatalf("replace runtime capability snapshot: %v", err)
+	}
+	liveCaps, err := capReg.List(ctx, wsUUID, &reporter, nil)
+	if err != nil {
+		t.Fatalf("list authoritative capabilities: %v", err)
+	}
+	for _, capability := range liveCaps {
+		if capability.Key == "tools:Bash" {
+			t.Fatalf("removed tool remains in Capabilities: %+v", capability)
+		}
+	}
+	_, freshMandate, err := testHandler.cerebroEffectiveToolsForClaim(ctx, runtime, agent, "", "")
+	if err != nil {
+		t.Fatalf("fresh claim after runtime report: %v", err)
+	}
+	if containsString(freshMandate, "tools:Bash") {
+		t.Fatalf("removed tool remains in fresh mandate: %v", freshMandate)
+	}
+
 	// Issue the mandate and exercise Authorize both ways.
 	store := taskmandate.NewStore(testPool)
 	var taskID string
