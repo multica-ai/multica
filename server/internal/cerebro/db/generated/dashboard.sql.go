@@ -269,7 +269,11 @@ LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE cs.workspace_id = $1
   AND cm.role = 'user'
   AND cm.created_at >= $2 AND cm.created_at < $3
-  AND ($4::text = '' OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid)))
+  AND (
+    $4::text = ''
+    OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid))
+    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR a.id = $5::uuid))
+  )
 ORDER BY cm.created_at DESC
 LIMIT 200
 `
@@ -834,7 +838,11 @@ JOIN "user" u ON u.id = cs.creator_id
 WHERE cs.workspace_id = $1
   AND cm.role = 'user'
   AND cm.created_at >= $2 AND cm.created_at < $3
-  AND ($4::text = '' OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid)))
+  AND (
+    $4::text = ''
+    OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid))
+    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR cs.agent_id = $5::uuid))
+  )
 GROUP BY day
 ORDER BY day
 `
