@@ -115,6 +115,11 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		invalidEventCount := 0
 		assistantEventCount := 0
 		toolUseCount := 0
+		// unknownSubtypeCount tracks thinking/tool_call events whose subtype we
+		// don't recognize. They are ignored (never synthesized into a message)
+		// and surfaced once as a bounded, content-free diagnostic so an upstream
+		// protocol addition is visible instead of silent.
+		unknownSubtypeCount := 0
 		lastEventType := "none"
 		// stepUsage accumulates per-step token counts from "step_finish" events.
 		// resultUsage holds authoritative session totals from "result" events.
@@ -166,16 +171,34 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			case "thinking":
 				// Reasoning is a top-level event streamed as deltas, not a
-				// content block inside assistant messages. Forward each delta
-				// as it lands so the daemon's 500ms flush shows reasoning while
-				// the task is still running.
-				if content := thinking.consume(evt.Subtype, evt.Text); content != "" {
-					trySend(msgCh, Message{Type: MessageThinking, Content: content})
+				// content block inside assistant messages. Match subtypes
+				// explicitly: only `delta` carries reasoning content (forwarded
+				// as it lands so the daemon's 500ms flush shows it mid-run),
+				// `completed` closes the block. An unknown subtype is NOT folded
+				// into reasoning — silently absorbing upstream additions is the
+				// exact failure mode this fix exists to prevent (MUL-5231).
+				switch evt.Subtype {
+				case "delta":
+					if content := thinking.delta(evt.Text); content != "" {
+						trySend(msgCh, Message{Type: MessageThinking, Content: content})
+					}
+				case "completed":
+					thinking.complete()
+				default:
+					unknownSubtypeCount++
 				}
 
 			case "tool_call":
-				call := parseCursorToolCall(&evt)
-				if evt.Subtype == "started" {
+				// Only the two subtypes that define a call's boundaries drive the
+				// transcript: `started` opens it, `completed` closes it. A
+				// non-terminal (e.g. a future `progress`) or missing subtype must
+				// NOT synthesize a result — that would decrement the daemon's
+				// in-flight tool count early and drop a still-running long tool
+				// from the tool watchdog onto the shorter idle watchdog, which
+				// can force-stop it as falsely stuck (MUL-5231 review).
+				switch evt.Subtype {
+				case "started":
+					call := parseCursorToolCall(&evt)
 					toolUseCount++
 					trySend(msgCh, Message{
 						Type:   MessageToolUse,
@@ -183,17 +206,17 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 						CallID: call.CallID,
 						Input:  call.Input,
 					})
-					break
+				case "completed":
+					call := parseCursorToolCall(&evt)
+					trySend(msgCh, Message{
+						Type:   MessageToolResult,
+						Tool:   call.Name,
+						CallID: call.CallID,
+						Output: call.Result,
+					})
+				default:
+					unknownSubtypeCount++
 				}
-				// Every non-started subtype terminates the call. Emitting a
-				// result for each keeps the daemon's in-flight tool count
-				// balanced, so its watchdog cannot fire on a completed call.
-				trySend(msgCh, Message{
-					Type:   MessageToolResult,
-					Tool:   call.Name,
-					CallID: call.CallID,
-					Output: call.Result,
-				})
 
 			case "tool_use":
 				toolUseCount++
@@ -356,6 +379,13 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			lastEventType:       lastEventType,
 		})
 
+		if unknownSubtypeCount > 0 {
+			// Content-free and emitted once per run: signals that the CLI sent a
+			// thinking/tool_call subtype we chose to ignore, so a protocol
+			// addition is diagnosable without the parser having guessed at it.
+			b.cfg.Logger.Warn("cursor-agent ignored unknown event subtypes", "count", unknownSubtypeCount)
+		}
+
 		b.cfg.Logger.Info("cursor-agent finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		finalOutput := output.String()
@@ -467,25 +497,10 @@ type cursorThinkingStream struct {
 	anySent   bool
 }
 
-// consume returns the content to forward for one thinking event, or "" when
-// there is nothing to send.
-func (t *cursorThinkingStream) consume(subtype, text string) string {
-	if subtype != "completed" {
-		return t.emit(text)
-	}
-	// A block that streamed deltas has already been forwarded. Only take the
-	// terminal text when it is the block's sole carrier, so a CLI that repeats
-	// the whole block here cannot duplicate the reasoning.
-	if t.blockOpen {
-		t.blockOpen = false
-		return ""
-	}
-	content := t.emit(text)
-	t.blockOpen = false
-	return content
-}
-
-func (t *cursorThinkingStream) emit(text string) string {
+// delta returns the content to forward for one `delta` event, or "" when the
+// fragment is empty. The first fragment of a new block is prefixed with a blank
+// line so the daemon's concatenation keeps blocks visually separated.
+func (t *cursorThinkingStream) delta(text string) string {
 	if text == "" {
 		return ""
 	}
@@ -495,6 +510,13 @@ func (t *cursorThinkingStream) emit(text string) string {
 	t.blockOpen = true
 	t.anySent = true
 	return text
+}
+
+// complete closes the current reasoning block. The terminal event carries no
+// content of its own in the observed protocol, so nothing is forwarded; the
+// next block's first delta gets the separating blank line.
+func (t *cursorThinkingStream) complete() {
+	t.blockOpen = false
 }
 
 // cursorToolCall is a top-level `tool_call` event projected onto the fields the

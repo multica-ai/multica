@@ -715,57 +715,33 @@ func TestCursorThinkingStreamForwardsDeltasAndSeparatesBlocks(t *testing.T) {
 	t.Parallel()
 
 	var stream cursorThinkingStream
-	events := []struct {
-		subtype string
-		text    string
-		want    string
-	}{
-		{subtype: "delta", text: "first ", want: "first "},
-		{subtype: "delta", text: "block", want: "block"},
-		{subtype: "completed", text: "", want: ""},
-		// A new block must not be glued onto the previous one: the daemon
-		// concatenates every thinking message into one transcript entry.
-		{subtype: "delta", text: "second block", want: "\n\nsecond block"},
-		{subtype: "completed", text: "", want: ""},
+	if got := stream.delta("first "); got != "first " {
+		t.Fatalf("first delta = %q, want %q", got, "first ")
 	}
-	for i, evt := range events {
-		if got := stream.consume(evt.subtype, evt.text); got != evt.want {
-			t.Errorf("event %d consume(%q, %q) = %q, want %q", i, evt.subtype, evt.text, got, evt.want)
-		}
+	if got := stream.delta("block"); got != "block" {
+		t.Fatalf("mid-block delta = %q, want %q", got, "block")
 	}
+	stream.complete()
+	// A new block must not be glued onto the previous one: the daemon
+	// concatenates every thinking message into one transcript entry.
+	if got := stream.delta("second block"); got != "\n\nsecond block" {
+		t.Fatalf("first delta of next block = %q, want %q", got, "\n\nsecond block")
+	}
+	stream.complete()
 }
 
-func TestCursorThinkingStreamNeverDuplicatesCompletedText(t *testing.T) {
+func TestCursorThinkingStreamDropsEmptyDeltas(t *testing.T) {
 	t.Parallel()
 
-	t.Run("streamed block ignores terminal text", func(t *testing.T) {
-		t.Parallel()
-		var stream cursorThinkingStream
-		stream.consume("delta", "reasoning")
-		if got := stream.consume("completed", "reasoning"); got != "" {
-			t.Fatalf("completed after deltas = %q, want empty", got)
-		}
-	})
-
-	t.Run("terminal text is the block when nothing streamed", func(t *testing.T) {
-		t.Parallel()
-		var stream cursorThinkingStream
-		if got := stream.consume("completed", "whole block"); got != "whole block" {
-			t.Fatalf("completed without deltas = %q, want %q", got, "whole block")
-		}
-		// That block is closed, so the next one still gets its separator.
-		if got := stream.consume("delta", "next block"); got != "\n\nnext block" {
-			t.Fatalf("delta after a terminal-text block = %q, want %q", got, "\n\nnext block")
-		}
-	})
-
-	t.Run("empty deltas are dropped", func(t *testing.T) {
-		t.Parallel()
-		var stream cursorThinkingStream
-		if got := stream.consume("delta", ""); got != "" {
-			t.Fatalf("empty delta = %q, want empty", got)
-		}
-	})
+	var stream cursorThinkingStream
+	if got := stream.delta(""); got != "" {
+		t.Fatalf("empty delta = %q, want empty", got)
+	}
+	// An empty delta must not open a block, so the first real fragment is still
+	// treated as the very first content (no leading separator).
+	if got := stream.delta("real"); got != "real" {
+		t.Fatalf("first real delta = %q, want %q", got, "real")
+	}
 }
 
 func TestParseCursorToolCall(t *testing.T) {

@@ -162,3 +162,90 @@ func TestCursorExecuteParsesRecordedStream(t *testing.T) {
 		t.Error("session id not captured from the recorded stream")
 	}
 }
+
+// TestCursorExecuteIgnoresUnknownSubtypes pins the fail-safe: a `tool_call` or
+// `thinking` event whose subtype we don't recognize (a future non-terminal
+// event, or one arriving without a subtype) must be dropped, not coerced into a
+// message. Synthesizing a tool_result from a non-terminal subtype would
+// decrement the daemon's in-flight tool count early and drop a still-running
+// long tool onto the shorter idle watchdog; folding unknown text into reasoning
+// corrupts the transcript. Both are the silent-misparse regression this parser
+// exists to prevent (MUL-5231 review).
+func TestCursorExecuteIgnoresUnknownSubtypes(t *testing.T) {
+	t.Parallel()
+
+	// One real tool call (started + completed) bracketing an unknown
+	// `progress` subtype and a subtype-less tool_call; one real thinking delta
+	// alongside an unknown-subtype thinking event that carries text.
+	lines := []string{
+		`{"type":"system","subtype":"init","session_id":"sess-unknown"}`,
+		`{"type":"thinking","subtype":"delta","text":"real reasoning"}`,
+		`{"type":"thinking","subtype":"progress","text":"NOT reasoning"}`,
+		`{"type":"thinking","text":"also NOT reasoning"}`,
+		`{"type":"tool_call","subtype":"started","call_id":"call-x","tool_call":{"readToolCall":{"args":{"path":"/x"}},"toolCallId":"call-x"}}`,
+		`{"type":"tool_call","subtype":"progress","call_id":"call-x","tool_call":{"readToolCall":{"args":{"path":"/x"}},"toolCallId":"call-x"}}`,
+		`{"type":"tool_call","call_id":"call-x","tool_call":{"readToolCall":{"args":{"path":"/x"}},"toolCallId":"call-x"}}`,
+		`{"type":"tool_call","subtype":"completed","call_id":"call-x","tool_call":{"readToolCall":{"args":{"path":"/x"},"result":{"success":{}}},"toolCallId":"call-x"}}`,
+		`{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"sess-unknown"}`,
+	}
+	script := "#!/bin/sh\n"
+	for _, line := range lines {
+		script += fmt.Sprintf("printf '%%s\\n' %s\n", shellSingleQuote(line))
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "cursor-agent")
+	writeTestExecutable(t, fakePath, []byte(script))
+	backend, err := New("cursor", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("New(cursor): %v", err)
+	}
+	session, err := backend.Execute(t.Context(), "hello", ExecOptions{Timeout: 30 * time.Second})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var messages []Message
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for msg := range session.Messages {
+			messages = append(messages, msg)
+		}
+	}()
+	result := <-session.Result
+	<-done
+
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed; error=%q", result.Status, result.Error)
+	}
+
+	var thinking strings.Builder
+	var toolUses, toolResults int
+	for _, msg := range messages {
+		switch msg.Type {
+		case MessageThinking:
+			thinking.WriteString(msg.Content)
+		case MessageToolUse:
+			toolUses++
+		case MessageToolResult:
+			toolResults++
+		}
+	}
+	if thinking.String() != "real reasoning" {
+		t.Errorf("thinking = %q, want only the delta content %q", thinking.String(), "real reasoning")
+	}
+	if toolUses != 1 {
+		t.Errorf("tool_use count = %d, want 1 (only the started event)", toolUses)
+	}
+	// Exactly one result: the `completed` event. The `progress` and
+	// subtype-less events must not each add a spurious result.
+	if toolResults != 1 {
+		t.Errorf("tool_result count = %d, want 1 (only the completed event)", toolResults)
+	}
+}
+
+// shellSingleQuote wraps s in single quotes for POSIX sh, escaping any embedded
+// single quote, so a JSON line reaches printf verbatim.
+func shellSingleQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
