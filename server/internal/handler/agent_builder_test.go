@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -400,26 +401,54 @@ func TestSendDirectChatMessageUsesCurrentlyBoundRuntime(t *testing.T) {
 	}
 }
 
-// waitForLockWaiter blocks until some backend in this database is waiting on a
-// lock, which is how the interleaving tests below observe "the other side is
-// parked on the chat_session row" without guessing at timings. Returns false if
-// no waiter appears before the deadline — that is the signal that the path under
-// test never took the lock at all.
-func waitForLockWaiter(t *testing.T, timeout time.Duration) bool {
+// holderBackendPID returns the server-side PID of the backend serving tx, so a
+// waiter can later be attributed to this specific lock holder.
+func holderBackendPID(t *testing.T, ctx context.Context, tx pgx.Tx) int {
+	t.Helper()
+	var pid int
+	if err := tx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&pid); err != nil {
+		t.Fatalf("read holder backend pid: %v", err)
+	}
+	return pid
+}
+
+// waitForWaiterBlockedBy blocks until some backend is waiting on a lock held by
+// holderPID, which is how the interleaving tests below observe "the other side
+// is parked on our chat_session row" without guessing at timings.
+//
+// pg_blocking_pids is what makes this specific. `go test ./...` runs package
+// test binaries in parallel against one DATABASE_URL, so a probe for "any
+// Lock-waiting backend" could match an unrelated package and let the holder
+// commit early — after which the path under test would start clean, read the
+// committed state, and pass even with its lock removed. Attributing the waiter
+// to this transaction's PID removes that false-green path.
+//
+// Returns false only after the deadline with no attributable waiter, which is
+// the signal that the path under test never took the lock. A probe error is
+// fatal rather than swallowed: a permissions or connectivity failure must not
+// be reported as "that path is not locking".
+func waitForWaiterBlockedBy(t *testing.T, holderPID int, timeout time.Duration) bool {
 	t.Helper()
 	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
+	for {
 		var waiting int
-		err := testPool.QueryRow(context.Background(), `
+		if err := testPool.QueryRow(context.Background(), `
 			SELECT count(*) FROM pg_stat_activity
-			WHERE datname = current_database() AND wait_event_type = 'Lock'
-		`).Scan(&waiting)
-		if err == nil && waiting > 0 {
+			WHERE datname = current_database()
+			  AND state = 'active'
+			  AND wait_event_type = 'Lock'
+			  AND $1::int = ANY(pg_blocking_pids(pid))
+		`, holderPID).Scan(&waiting); err != nil {
+			t.Fatalf("probe pg_stat_activity for waiters blocked by pid %d: %v", holderPID, err)
+		}
+		if waiting > 0 {
 			return true
+		}
+		if time.Now().After(deadline) {
+			return false
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	return false
 }
 
 // A rebind that has not committed yet must hold off a concurrent send, and the
@@ -454,6 +483,7 @@ func TestSendDirectChatMessageWaitsForUncommittedRebind(t *testing.T) {
 		t.Fatalf("begin rebind tx: %v", err)
 	}
 	defer tx.Rollback(context.Background())
+	holderPID := holderBackendPID(t, ctx, tx)
 	qtx := testHandler.Queries.WithTx(tx)
 	if _, err := qtx.LockChatSessionForRuntimeBind(ctx, session.ID); err != nil {
 		t.Fatalf("lock chat session: %v", err)
@@ -490,13 +520,13 @@ func TestSendDirectChatMessageWaitsForUncommittedRebind(t *testing.T) {
 		results <- sendResult{task: sent.Task}
 	}()
 
-	if !waitForLockWaiter(t, 10*time.Second) {
+	if !waitForWaiterBlockedBy(t, holderPID, 10*time.Second) {
 		select {
 		case got := <-results:
 			t.Fatalf("send completed (err=%v, runtime=%q) while an uncommitted rebind held the chat_session lock; the send path is not taking the lock",
 				got.err, uuidToString(got.task.RuntimeID))
 		default:
-			t.Fatal("send never blocked on the chat_session lock; the send path is not taking the lock")
+			t.Fatalf("send never blocked on the chat_session lock held by pid %d; the send path is not taking the lock", holderPID)
 		}
 	}
 	select {
@@ -545,6 +575,7 @@ func TestSwitchAgentBuilderRuntimeWaitsForUncommittedSend(t *testing.T) {
 		t.Fatalf("begin send tx: %v", err)
 	}
 	defer tx.Rollback(context.Background())
+	holderPID := holderBackendPID(t, ctx, tx)
 	qtx := testHandler.Queries.WithTx(tx)
 	if _, err := qtx.LockChatSessionForRuntimeBind(ctx, parseUUID(created.SessionID)); err != nil {
 		t.Fatalf("lock chat session: %v", err)
@@ -569,12 +600,12 @@ func TestSwitchAgentBuilderRuntimeWaitsForUncommittedSend(t *testing.T) {
 		codes <- w.Code
 	}()
 
-	if !waitForLockWaiter(t, 10*time.Second) {
+	if !waitForWaiterBlockedBy(t, holderPID, 10*time.Second) {
 		select {
 		case code := <-codes:
 			t.Fatalf("switch returned %d while an uncommitted send held the chat_session lock; the switch path is not taking the lock", code)
 		default:
-			t.Fatal("switch never blocked on the chat_session lock; the switch path is not taking the lock")
+			t.Fatalf("switch never blocked on the chat_session lock held by pid %d; the switch path is not taking the lock", holderPID)
 		}
 	}
 
@@ -701,5 +732,72 @@ func TestSwitchAgentBuilderRuntimeEnforcesRuntimeAndSessionOwnership(t *testing.
 	}
 	if boundRuntimeID != publicRuntimeID {
 		t.Fatalf("carrier runtime = %q after refused switches, want the original %q", boundRuntimeID, publicRuntimeID)
+	}
+}
+
+// The probe above is only as good as its attribution: a database-wide "is
+// anything waiting on a lock?" check would match another package's test binary
+// on the shared DATABASE_URL and let the interleaving tests commit their holder
+// early, turning them green even with the lock under test removed. This pins the
+// property directly — a waiter blocked by a DIFFERENT backend must not count.
+func TestWaitForWaiterBlockedByIgnoresUnrelatedWaiters(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	mine := newBuilderSession(t)
+	theirs := newBuilderSession(t)
+
+	// Our holder: locks our own session and blocks nobody.
+	holderTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin holder tx: %v", err)
+	}
+	defer holderTx.Rollback(context.Background())
+	holderPID := holderBackendPID(t, ctx, holderTx)
+	if _, err := holderTx.Exec(ctx, `SELECT id FROM chat_session WHERE id = $1 FOR UPDATE`, mine.SessionID); err != nil {
+		t.Fatalf("hold our own session lock: %v", err)
+	}
+
+	// An unrelated holder on a different row, plus a backend parked behind it —
+	// the shape of another package's test running against the same database.
+	otherTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin unrelated holder tx: %v", err)
+	}
+	defer otherTx.Rollback(context.Background())
+	otherPID := holderBackendPID(t, ctx, otherTx)
+	if _, err := otherTx.Exec(ctx, `SELECT id FROM chat_session WHERE id = $1 FOR UPDATE`, theirs.SessionID); err != nil {
+		t.Fatalf("hold unrelated session lock: %v", err)
+	}
+
+	blocked := make(chan struct{})
+	go func() {
+		defer close(blocked)
+		waiterTx, err := testPool.Begin(context.Background())
+		if err != nil {
+			return
+		}
+		defer waiterTx.Rollback(context.Background())
+		_, _ = waiterTx.Exec(context.Background(), `SELECT id FROM chat_session WHERE id = $1 FOR UPDATE`, theirs.SessionID)
+	}()
+
+	// The unrelated waiter is genuinely parked, so a database-wide probe would
+	// fire here.
+	if !waitForWaiterBlockedBy(t, otherPID, 10*time.Second) {
+		t.Fatal("the unrelated waiter never blocked; this test cannot prove anything")
+	}
+	// Attributed to our holder, it must not.
+	if waitForWaiterBlockedBy(t, holderPID, 500*time.Millisecond) {
+		t.Fatal("probe matched a waiter blocked by another backend; the interleaving tests could commit their holder early and pass with the lock removed")
+	}
+
+	if err := otherTx.Rollback(ctx); err != nil {
+		t.Fatalf("release unrelated lock: %v", err)
+	}
+	select {
+	case <-blocked:
+	case <-time.After(10 * time.Second):
+		t.Fatal("unrelated waiter did not finish after its blocker released")
 	}
 }
