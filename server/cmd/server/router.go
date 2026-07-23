@@ -627,6 +627,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroAgentOfficeHandler := cerebroagentoffice.NewHandler(cerebroagentoffice.New(cerebroQueries, pool, bus)) // CEREBRO-PATCH(agent-office-notif-bus): FIR-1775 — bus drives change-request inbox notifications.
 	h.AgentContextDirectEdit = cerebroAgentOfficeHandler.Svc                                                      // CEREBRO-PATCH(agent-office-direct-edit-wire): FIR-1775 Phase 2 — direct UpdateAgent edits snapshot into version history.
 	cerebroModelRegistryHandler := wireCerebroModelRegistry(cerebroQueries, pool)                                 // CEREBRO-PATCH(cerebro-model-registry-routes): FIR-2698 model registry — startup table load + metrics hook + handler (cerebro_model_registry_routes.go).
+	cerebroServiceTokenHandler := wireCerebroServiceToken(cerebroQueries, queries, h.IssueService)                // CEREBRO-PATCH(service-token-auth): FIR-3608 scoped service tokens — token service + authenticator + handler (cerebro_service_token_routes.go).
 	// CEREBRO-PATCH(cerebro-identity-handler): FIR-2523 Google Workspace identity-source handler + provisioner seam.
 	cerebroIdentityService := cerebroidentity.New(cerebroQueries, queries) // CEREBRO-PATCH(cerebro-identity-login-sync-rollback): FIR-2724 keep BigQuery group sync out of login.
 	cerebroIdentityHandler := cerebroidentity.NewHandler(cerebroIdentityService)
@@ -1192,6 +1193,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// are rejected with 403; the allowlist group above is the
 		// only place they may operate.
 		r.Use(middleware.RequireUserScope)
+
+		mountCerebroServiceTokenRoutes(r, cerebroServiceTokenHandler, queries) // CEREBRO-PATCH(service-token-auth): FIR-3608 service-token management + scoped machine surface, mounted at Auth-group top level so the machine routes are NOT wrapped by RequireWorkspaceMember (wiring in cerebro_service_token_routes.go).
 
 		// --- User-scoped routes (no workspace context required) ---
 		r.Get("/api/me", h.GetMe)

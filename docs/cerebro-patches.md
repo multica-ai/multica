@@ -1759,3 +1759,9 @@ Approved by Jesper Hvejsel on FIR-3539 ("Fix det" + "find en måde hvor det ikke
 | Patch | Location | Reason |
 |---|---|---|
 | `attachment-ocr-hermetic-test` | `server/internal/handler/file_test.go` | `TestGetAttachmentContent_PDFWithoutTextAndNoOCRBinary` relied on the host actually lacking `pdftoppm`/`tesseract`, so it passed in CI (no OCR binaries) but false-failed on dev machines with OCR installed. The test now pins `attachmenttext.DefaultRunner` to a runner that reports the OCR tools as absent, exercising the no-OCR path deterministically. Test-only; matches the existing `DefaultRunner` injection used by the sibling OCR tests. Ideally upstreamed at `multica-ai/multica`. |
+
+## FIR-3608 — Scoped service tokens (`msv_`)
+
+| Patch | Location | Reason |
+|---|---|---|
+| `service-token-auth` | server/internal/middleware/auth.go (2)<br>server/internal/handler/actor_guards.go (1)<br>server/cmd/server/router.go (2) | ~5 marked | FIR-3608 — non-personal, workspace-bound, scoped, revocable API credentials for external systems and provisioned agents. All logic lives in the cerebro zone (`server/internal/cerebro/servicetoken` + `/api`). The upstream files only gain: an `msv_` branch in `Auth` that delegates to `servicetoken.AuthBranch` (resolve + fail-closed `/api/service/` boundary + scope context); `service_token` added to the `RequireHumanActor` machine-actor denylist (the guard's own doc mandates this for any new machine credential); and the two one-line wire/mount calls in router.go. Read/write access is gated by `servicetoken.RequireScope` on the `/api/service/*` surface. Migration `9156_cerebro_service_token`. Tests: `server/internal/cerebro/servicetoken/middleware_test.go` (skills:read succeeds on read route, 403 on write route + fail-closed boundary + revoke). |

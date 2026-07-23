@@ -1640,6 +1640,30 @@ type CerebroSearchEmbeddingQueue struct {
 	LastError   pgtype.Text        `json:"last_error"`
 }
 
+type CerebroServiceToken struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	TokenHash   string             `json:"token_hash"`
+	TokenPrefix string             `json:"token_prefix"`
+	Scopes      []byte             `json:"scopes"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	LastUsedAt  pgtype.Timestamptz `json:"last_used_at"`
+	Revoked     bool               `json:"revoked"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type CerebroServiceTokenAudit struct {
+	ID             pgtype.UUID        `json:"id"`
+	ServiceTokenID pgtype.UUID        `json:"service_token_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	Event          string             `json:"event"`
+	ActorUserID    pgtype.UUID        `json:"actor_user_id"`
+	Detail         []byte             `json:"detail"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type CerebroSession struct {
 	ID            pgtype.UUID        `json:"id"`
 	IssueID       pgtype.UUID        `json:"issue_id"`
