@@ -15,23 +15,43 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { Virtuoso, type Components } from "react-virtuoso";
+import { Virtuoso, type Components, type VirtuosoHandle } from "react-virtuoso";
 import {
   AlertCircle,
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
   Brain,
   Check,
+  CheckCircle2,
   ChevronRight,
   Copy,
+  Cpu,
+  Filter,
+  Folder,
   Loader2,
+  MoreHorizontal,
   X,
+  XCircle,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@multica/ui/components/ui/popover";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { api } from "@multica/core/api";
 import {
   executionLogPageOptions,
   flattenExecutionLogPages,
@@ -41,7 +61,7 @@ import {
   useTranscriptViewStore,
   type TranscriptSortDirection,
 } from "@multica/core/agents/stores";
-import type { AgentTask } from "@multica/core/types/agent";
+import type { Agent, AgentRuntime, AgentTask } from "@multica/core/types/agent";
 import type { TaskMessagePayload } from "@multica/core/types/events";
 import { redactSecrets } from "./redact";
 import {
@@ -54,6 +74,7 @@ import {
   traceEventSummary,
   traceToolArgSummary,
 } from "./trace-event-presenter";
+import { AttributionBadge } from "../../issues/components/attribution-badge";
 import { useT } from "../../i18n";
 
 const TOOL_KEY_PREFIX = "tool:";
@@ -90,6 +111,76 @@ function clampStyle(lines: number): React.CSSProperties {
     WebkitLineClamp: lines,
     overflow: "hidden",
   };
+}
+
+// ─── Fixed kind colors (reused from AgentTranscriptDialog) ───────────────────
+//
+// The timeline segments + legend dots are the ONE place this dialog uses fixed
+// palette colors instead of design tokens: they must match AgentTranscriptDialog
+// so a given event kind reads as the same color across both transcript surfaces.
+// Kind → color mirrors that dialog's getEventColor / colorClasses.
+
+type ExecEventColor = "agent" | "thinking" | "tool" | "result" | "error";
+
+function execEventColor(message: TaskMessagePayload): ExecEventColor {
+  switch (traceEventKind(message)) {
+    case "agent":
+      return "agent";
+    case "thinking":
+      return "thinking";
+    case "tool_use":
+      return "tool";
+    case "tool_result":
+      return "result";
+    case "error":
+      return "error";
+    default:
+      return "result";
+  }
+}
+
+const EXEC_COLOR_CLASSES: Record<ExecEventColor, { bar: string; barActive: string }> = {
+  agent: { bar: "bg-emerald-400/60", barActive: "bg-emerald-500" },
+  thinking: { bar: "bg-violet-400/60", barActive: "bg-violet-500" },
+  tool: { bar: "bg-blue-400/60", barActive: "bg-blue-500" },
+  result: {
+    bar: "bg-slate-300/60 dark:bg-slate-600/60",
+    barActive: "bg-slate-400 dark:bg-slate-500",
+  },
+  error: { bar: "bg-red-400/60", barActive: "bg-red-500" },
+};
+
+const EXEC_COLOR_ORDER: ExecEventColor[] = ["agent", "thinking", "tool", "result", "error"];
+
+// Legend labels intentionally reuse the presenter's provider-native kind
+// vocabulary (traceEventLabel emits "Agent"/"Thinking"/… untranslated by design)
+// so the legend and the row kind labels can never disagree.
+const EXEC_KIND_LABEL: Record<ExecEventColor, string> = {
+  agent: "Agent",
+  thinking: "Thinking",
+  tool: "Tool",
+  result: "Result",
+  error: "Error",
+};
+
+/** Wall-clock duration between two ISO timestamps, e.g. "1m 0s". */
+function formatDuration(start: string, end: string): string {
+  const seconds = Math.max(
+    0,
+    Math.floor((new Date(end).getTime() - new Date(start).getTime()) / 1000),
+  );
+  if (seconds < 60) return `${seconds}s`;
+  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+}
+
+/** Short local date-time for the run-detail rows. */
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 // ─── Virtuoso loading-edge slot (loading-older / older-page error) ───────────
@@ -172,9 +263,25 @@ export function ExecutionLogDialog({
   // every loaded row at once. Holds `execEventKey` values; a row is open iff its
   // key is present.
   const [expandedKeys, setExpandedKeys] = useState<Set<string>>(() => new Set());
+  // Segment click highlights the target row briefly, then clears.
+  const [highlightedKey, setHighlightedKey] = useState<string | null>(null);
+  const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
+  const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
+
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  const highlightTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keys already considered by the default-expand-new pass, so only expandable
+  // rows that NEWLY enter the loaded window auto-open — mirrors
+  // AgentTranscriptDialog's autoExpandedSeqsRef. A manual collapse marks the key
+  // here so it is never re-opened.
+  const autoAppliedKeysRef = useRef<Set<string>>(new Set());
+  const initializedRef = useRef(false);
+  const prevDefaultExpandedRef = useRef(false);
 
   const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
   const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
+  const defaultExpanded = useTranscriptViewStore((s) => s.defaultExpanded);
+  const setDefaultExpanded = useTranscriptViewStore((s) => s.setDefaultExpanded);
   const chronological = sortDirection === "chronological";
 
   // Selected chip keys are in the presenter's traceEventFilterKey format
@@ -264,6 +371,9 @@ export function ExecutionLogDialog({
     expandableKeys.length > 0 && expandableKeys.every((k) => expandedKeys.has(k));
 
   const toggleExpanded = useCallback((key: string) => {
+    // Mark as user-touched so the default-expand pass never re-opens a row the
+    // user just collapsed.
+    autoAppliedKeysRef.current.add(key);
     setExpandedKeys((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -273,6 +383,7 @@ export function ExecutionLogDialog({
   }, []);
 
   const handleBulkExpand = useCallback(() => {
+    for (const key of expandableKeys) autoAppliedKeysRef.current.add(key);
     setExpandedKeys(allExpanded ? new Set() : new Set(expandableKeys));
   }, [allExpanded, expandableKeys]);
 
@@ -296,6 +407,121 @@ export function ExecutionLogDialog({
       setTimeout(() => setCopied(false), 2000);
     });
   }, [orderedMessages]);
+
+  const handleSegmentClick = useCallback(
+    (index: number) => {
+      const message = orderedMessages[index];
+      if (!message) return;
+      setHighlightedKey(execEventKey(message));
+      // Virtuoso scrollToIndex takes the DATA index (position in `data`), not the
+      // firstItemIndex-offset index — so the orderedMessages index is correct.
+      virtuosoRef.current?.scrollToIndex({ index, align: "center" });
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+      highlightTimerRef.current = setTimeout(() => setHighlightedKey(null), 1600);
+    },
+    [orderedMessages],
+  );
+
+  // Default-expand-new preference: when ON, expandable rows that ENTER the loaded
+  // window (initial mount + newly fetched older pages) auto-open, without
+  // reopening a row the user manually collapsed. Mirrors AgentTranscriptDialog.
+  useEffect(() => {
+    const switchedOn = defaultExpanded && prevDefaultExpandedRef.current !== defaultExpanded;
+    prevDefaultExpandedRef.current = defaultExpanded;
+
+    if (!initializedRef.current || switchedOn) {
+      initializedRef.current = true;
+      autoAppliedKeysRef.current = new Set(defaultExpanded ? expandableKeys : []);
+      setExpandedKeys(defaultExpanded ? new Set(expandableKeys) : new Set());
+      return;
+    }
+
+    if (!defaultExpanded) return;
+
+    const unseen = expandableKeys.filter((k) => !autoAppliedKeysRef.current.has(k));
+    if (unseen.length === 0) return;
+    for (const key of unseen) autoAppliedKeysRef.current.add(key);
+    setExpandedKeys((prev) => new Set([...prev, ...unseen]));
+  }, [defaultExpanded, expandableKeys]);
+
+  // Run-context metadata for the identity / summary / detail rows.
+  useEffect(() => {
+    if (!open) return;
+    let cancelled = false;
+    if (task.agent_id) {
+      api
+        .getAgent(task.agent_id)
+        .then((agent) => {
+          if (!cancelled) setAgentInfo(agent);
+        })
+        .catch(() => {});
+    }
+    if (task.runtime_id) {
+      api
+        .listRuntimes()
+        .then((runtimes) => {
+          if (cancelled) return;
+          const rt = runtimes.find((r) => r.id === task.runtime_id);
+          if (rt) setRuntimeInfo(rt);
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [open, task.agent_id, task.runtime_id]);
+
+  useEffect(
+    () => () => {
+      if (highlightTimerRef.current) clearTimeout(highlightTimerRef.current);
+    },
+    [],
+  );
+
+  // Loaded #seq range (reduce, not Math.min(...spread), so a large loaded window
+  // never overflows the call-argument limit).
+  const seqRange = useMemo(() => {
+    if (messages.length === 0) return null;
+    let min = Infinity;
+    let max = -Infinity;
+    for (const m of messages) {
+      if (m.seq < min) min = m.seq;
+      if (m.seq > max) max = m.seq;
+    }
+    return { min, max };
+  }, [messages]);
+
+  const legendKinds = useMemo(() => {
+    const present = new Set(messages.map(execEventColor));
+    return EXEC_COLOR_ORDER.filter((c) => present.has(c));
+  }, [messages]);
+
+  // Secondary one-liner: duration · tool calls · model · runtime.
+  const duration =
+    task.started_at && task.completed_at
+      ? formatDuration(task.started_at, task.completed_at)
+      : null;
+  const toolCount =
+    first?.type_facets?.find((f) => f.key === "tool_use")?.count ??
+    messages.filter((m) => m.type === "tool_use").length;
+  const modelLabel = agentInfo?.model && agentInfo.model.length > 0 ? agentInfo.model : null;
+  const runtimeLabel = runtimeInfo ? runtimeInfo.name : null;
+
+  const summaryParts: string[] = [];
+  if (duration) summaryParts.push(duration);
+  if (toolCount > 0) {
+    summaryParts.push(t(($) => $.execution_log.tool_calls, { count: toolCount }));
+  }
+  if (modelLabel) summaryParts.push(modelLabel);
+  if (runtimeLabel) summaryParts.push(runtimeLabel);
+
+  // Run detail rows live in the "more" menu, never the flat header. Workdir is
+  // the server-derived RELATIVE path only — the absolute work_dir never renders.
+  const runtimeDetail = runtimeInfo ? `${runtimeInfo.name} (${runtimeInfo.runtime_mode})` : null;
+  const workdir = task.relative_work_dir || null;
+  const startedLabel = task.started_at ? formatDateTime(task.started_at) : null;
+  const completedLabel = task.completed_at ? formatDateTime(task.completed_at) : null;
+  const hasRunDetails = !!(runtimeDetail || workdir || startedLabel || completedLabel);
 
   const listContext: LogListContext = {
     isFetchingEarlier: isFetchingNextPage,
@@ -330,6 +556,7 @@ export function ExecutionLogDialog({
   } else if (scrollEl) {
     body = (
       <Virtuoso<TaskMessagePayload, LogListContext>
+        ref={virtuosoRef}
         // Remount when direction flips so the list lands at that direction's
         // start point (bottom for chronological, top for newest-first).
         key={sortDirection}
@@ -349,6 +576,7 @@ export function ExecutionLogDialog({
               message={message}
               open={expandedKeys.has(key)}
               onToggle={() => toggleExpanded(key)}
+              highlighted={highlightedKey === key}
             />
           );
         }}
@@ -367,13 +595,44 @@ export function ExecutionLogDialog({
 
         {/* ── Header ─────────────────────────────────────────────── */}
         <div className="border-b px-4 py-3 shrink-0 space-y-2">
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-            <div className="flex min-w-0 items-center gap-2">
-              <span className="font-medium text-sm">{t(($) => $.execution_log.dialog_title)}</span>
-              <span className="truncate text-sm text-muted-foreground">{agentName}</span>
-            </div>
+          {/* Line 1 — identity */}
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+            <span className="font-medium text-sm">{t(($) => $.execution_log.dialog_title)}</span>
+            <RunStatusBadge status={task.status} />
+            <span className="min-w-0 truncate text-sm text-muted-foreground">{agentName}</span>
+            <AttributionBadge attribution={task.attribution} className="shrink-0" />
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              aria-label={t(($) => $.execution_log.close)}
+              className="ml-auto flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
 
-            <div className="ml-auto flex shrink-0 items-center gap-1">
+          {/* Line 2 — muted one-line run summary */}
+          {summaryParts.length > 0 && (
+            <div className="truncate text-xs text-muted-foreground">
+              {summaryParts.join(" · ")}
+            </div>
+          )}
+
+          {/* Reading toolbar: sort · expand · filter · more */}
+          {rawTotal > 0 && (
+            <div className="flex flex-wrap items-center gap-1">
+              {messages.length > 0 && (
+                <SortDirectionToggle
+                  value={sortDirection}
+                  onChange={setSortDirection}
+                  labels={{
+                    chronological: t(($) => $.execution_log.sort_chronological),
+                    newestFirst: t(($) => $.execution_log.sort_newest_first),
+                    ariaLabel: t(($) => $.execution_log.sort_label),
+                  }}
+                />
+              )}
+
               {expandableKeys.length > 0 && (
                 <button
                   type="button"
@@ -381,6 +640,9 @@ export function ExecutionLogDialog({
                     allExpanded ? "execution-log-collapse-all" : "execution-log-expand-all"
                   }
                   onClick={handleBulkExpand}
+                  title={t(($) => $.execution_log.expand_scope_tooltip, {
+                    n: expandableKeys.length,
+                  })}
                   aria-label={
                     allExpanded
                       ? t(($) => $.execution_log.collapse_all)
@@ -399,80 +661,187 @@ export function ExecutionLogDialog({
                 </button>
               )}
 
-              {messages.length > 0 && (
-                <SortDirectionToggle
-                  value={sortDirection}
-                  onChange={setSortDirection}
-                  labels={{
-                    chronological: t(($) => $.execution_log.sort_chronological),
-                    newestFirst: t(($) => $.execution_log.sort_newest_first),
-                    ariaLabel: t(($) => $.execution_log.sort_label),
-                  }}
-                />
-              )}
-
-              <button
-                type="button"
-                onClick={handleCopyLoaded}
-                aria-label={t(($) => $.execution_log.copy_loaded)}
-                className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                <span className="hidden sm:inline">
-                  {copied ? t(($) => $.execution_log.copied) : t(($) => $.execution_log.copy_loaded)}
-                </span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onOpenChange(false)}
-                aria-label={t(($) => $.execution_log.close)}
-                className="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-          </div>
-
-          {/* Counts */}
-          <div className="text-xs text-muted-foreground">
-            <span data-testid="execution-log-total">{rawTotal}</span>{" "}
-            {t(($) => $.execution_log.events_label)}
-            {filterActive && (
-              <>
-                {" · "}
-                {t(($) => $.execution_log.matched_count, { n: matchedTotal })}
-              </>
-            )}
-            {" · "}
-            {t(($) => $.execution_log.loaded_count, { n: messages.length })}
-          </div>
-
-          {/* Filter chips (OR semantics; a tool chip covers tool_use + tool_result) */}
-          {chips.length > 0 && (
-            <div className="flex flex-wrap gap-1.5">
-              {chips.map((chip) => {
-                const active = selectedKeys.includes(chip.key);
-                return (
-                  <button
-                    key={chip.key}
-                    type="button"
-                    onClick={() => toggleKey(chip.key)}
-                    aria-pressed={active}
+              {chips.length > 0 && (
+                <Popover>
+                  <PopoverTrigger
+                    data-testid="execution-log-filter"
+                    aria-label={t(($) => $.execution_log.filter)}
                     className={cn(
-                      "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
-                      active
-                        ? "border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                      "flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs transition-colors",
+                      filterActive
+                        ? "bg-blue-500/10 text-blue-600 hover:bg-blue-500/20 dark:text-blue-400"
                         : "text-muted-foreground hover:bg-accent hover:text-foreground",
                     )}
                   >
-                    {chip.label}
-                    <span className="tabular-nums text-muted-foreground/70">{chip.count}</span>
-                  </button>
-                );
-              })}
+                    <Filter className="h-3 w-3" />
+                    <span className="hidden sm:inline">{t(($) => $.execution_log.filter)}</span>
+                    {filterActive && (
+                      <span className="ml-0.5 rounded-full bg-blue-500/20 px-1.5 py-0 text-[10px] font-medium tabular-nums">
+                        {selectedKeys.length}
+                      </span>
+                    )}
+                  </PopoverTrigger>
+                  <PopoverContent align="start" className="w-72 gap-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-medium">
+                        {filterActive
+                          ? t(($) => $.execution_log.filter_selected, {
+                              n: selectedKeys.length,
+                            })
+                          : t(($) => $.execution_log.filter)}
+                      </span>
+                      {filterActive && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedKeys([])}
+                          className="rounded px-1.5 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                        >
+                          {t(($) => $.execution_log.clear_filters)}
+                        </button>
+                      )}
+                    </div>
+                    {/* Facet chips (OR semantics; a tool chip covers tool_use + tool_result) */}
+                    <div className="flex flex-wrap gap-1.5">
+                      {chips.map((chip) => {
+                        const active = selectedKeys.includes(chip.key);
+                        return (
+                          <button
+                            key={chip.key}
+                            type="button"
+                            onClick={() => toggleKey(chip.key)}
+                            aria-pressed={active}
+                            className={cn(
+                              "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] transition-colors",
+                              active
+                                ? "border-blue-500/40 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                                : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                            )}
+                          >
+                            {chip.label}
+                            <span className="tabular-nums text-muted-foreground/70">
+                              {chip.count}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
+
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  data-testid="execution-log-more"
+                  aria-label={t(($) => $.execution_log.more)}
+                  className="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuItem closeOnClick={false} onClick={handleCopyLoaded}>
+                    {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                    {copied
+                      ? t(($) => $.execution_log.copied)
+                      : t(($) => $.execution_log.copy_loaded)}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuCheckboxItem
+                    data-testid="execution-log-default-expand"
+                    checked={defaultExpanded}
+                    onCheckedChange={(checked) => setDefaultExpanded(checked === true)}
+                  >
+                    {t(($) => $.execution_log.default_expanded)}
+                  </DropdownMenuCheckboxItem>
+                  {hasRunDetails && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <div className="space-y-1 px-1.5 py-1 text-xs">
+                        {runtimeDetail && (
+                          <RunDetailRow
+                            icon={<Cpu className="h-3 w-3" />}
+                            label={t(($) => $.execution_log.details_runtime)}
+                            value={runtimeDetail}
+                          />
+                        )}
+                        {workdir && (
+                          <RunDetailRow
+                            icon={<Folder className="h-3 w-3" />}
+                            label={t(($) => $.execution_log.details_workdir)}
+                            value={workdir}
+                            mono
+                          />
+                        )}
+                        {startedLabel && (
+                          <RunDetailRow
+                            label={t(($) => $.execution_log.details_started)}
+                            value={startedLabel}
+                          />
+                        )}
+                        {completedLabel && (
+                          <RunDetailRow
+                            label={t(($) => $.execution_log.details_completed)}
+                            value={completedLabel}
+                          />
+                        )}
+                      </div>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           )}
         </div>
+
+        {/* ── Color timeline + loaded-window counts ──────────────── */}
+        {messages.length > 0 && (
+          <div
+            data-testid="execution-log-timeline"
+            className="border-b px-4 py-2.5 shrink-0 space-y-1.5"
+          >
+            <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+              <div className="min-w-0 truncate">
+                <span data-testid="execution-log-total">{rawTotal}</span>{" "}
+                {t(($) => $.execution_log.events_label)}
+                {filterActive && (
+                  <>
+                    {" · "}
+                    {t(($) => $.execution_log.matched_count, { n: matchedTotal })}
+                  </>
+                )}
+                {" · "}
+                {t(($) => $.execution_log.loaded_count, { n: messages.length })}
+              </div>
+              {seqRange && (
+                <span className="shrink-0 tabular-nums">
+                  {`#${seqRange.min}–#${seqRange.max}`}
+                </span>
+              )}
+            </div>
+
+            <ExecutionTimelineBar
+              messages={orderedMessages}
+              highlightedKey={highlightedKey}
+              onSegmentClick={handleSegmentClick}
+              ariaLabel={t(($) => $.execution_log.timeline_label)}
+            />
+
+            {legendKinds.length > 0 && (
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                {legendKinds.map((kind) => (
+                  <span
+                    key={kind}
+                    className="inline-flex items-center gap-1 text-[10px] text-muted-foreground"
+                  >
+                    <span
+                      className={cn("h-2 w-2 rounded-full", EXEC_COLOR_CLASSES[kind].barActive)}
+                    />
+                    {EXEC_KIND_LABEL[kind]}
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Optional header slot (e.g. webhook payload preview) ── */}
         {headerSlot && (
@@ -489,6 +858,145 @@ export function ExecutionLogDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Run status badge ────────────────────────────────────────────────────────
+
+// Small identity-line badge for the run's terminal/active status. Uses the
+// shared `status_*` copy already in the execution_log namespace + semantic
+// tokens. A default branch keeps a server-added status readable.
+function RunStatusBadge({ status }: { status: AgentTask["status"] }) {
+  const { t } = useT("issues");
+  const base =
+    "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium";
+  switch (status) {
+    case "completed":
+      return (
+        <span className={cn(base, "bg-success/15 text-success")}>
+          <CheckCircle2 className="h-3 w-3" />
+          {t(($) => $.execution_log.status_completed)}
+        </span>
+      );
+    case "failed":
+      return (
+        <span className={cn(base, "bg-destructive/15 text-destructive")}>
+          <XCircle className="h-3 w-3" />
+          {t(($) => $.execution_log.status_failed)}
+        </span>
+      );
+    case "running":
+      return (
+        <span className={cn(base, "bg-info/15 text-info")}>
+          <Loader2 className="h-3 w-3 animate-spin" />
+          {t(($) => $.execution_log.status_running)}
+        </span>
+      );
+    case "dispatched":
+      return (
+        <span className={cn(base, "bg-info/15 text-info")}>
+          {t(($) => $.execution_log.status_dispatched)}
+        </span>
+      );
+    case "queued":
+      return (
+        <span className={cn(base, "bg-muted text-muted-foreground")}>
+          {t(($) => $.execution_log.status_queued)}
+        </span>
+      );
+    case "waiting_local_directory":
+      return (
+        <span className={cn(base, "bg-muted text-muted-foreground")}>
+          {t(($) => $.execution_log.status_waiting_local_directory)}
+        </span>
+      );
+    case "cancelled":
+      return (
+        <span className={cn(base, "bg-muted text-muted-foreground")}>
+          {t(($) => $.execution_log.status_cancelled)}
+        </span>
+      );
+    default:
+      return (
+        <span className={cn(base, "bg-muted text-muted-foreground capitalize")}>{status}</span>
+      );
+  }
+}
+
+// ─── Run detail row (more-menu) ──────────────────────────────────────────────
+
+function RunDetailRow({
+  icon,
+  label,
+  value,
+  mono,
+}: {
+  icon?: React.ReactNode;
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex items-start gap-2">
+      <span className="flex shrink-0 items-center gap-1 text-muted-foreground">
+        {icon}
+        {label}
+      </span>
+      <span
+        className={cn(
+          "min-w-0 flex-1 break-all text-right text-foreground/80",
+          mono && "font-mono",
+        )}
+      >
+        {value}
+      </span>
+    </div>
+  );
+}
+
+// ─── Color timeline bar ──────────────────────────────────────────────────────
+
+// One thin segment per LOADED message, in the current sort order, colored by
+// kind. Represents ONLY the loaded window; there is no dimmed non-matching
+// state — a filter change simply redraws for the matched+loaded set. Clicking a
+// segment scrolls its row into view (data index === position in `messages`).
+function ExecutionTimelineBar({
+  messages,
+  highlightedKey,
+  onSegmentClick,
+  ariaLabel,
+}: {
+  messages: TaskMessagePayload[];
+  highlightedKey: string | null;
+  onSegmentClick: (index: number) => void;
+  ariaLabel: string;
+}) {
+  return (
+    <div
+      role="navigation"
+      aria-label={ariaLabel}
+      className="flex h-4 gap-px overflow-hidden rounded"
+    >
+      {messages.map((message, index) => {
+        const color = execEventColor(message);
+        const key = execEventKey(message);
+        const active = highlightedKey === key;
+        const label = `#${message.seq} ${EXEC_KIND_LABEL[color]}`;
+        return (
+          <button
+            key={key}
+            type="button"
+            onClick={() => onSegmentClick(index)}
+            title={label}
+            aria-label={label}
+            className={cn(
+              "h-full min-w-0 flex-1 transition-opacity hover:opacity-80",
+              active ? EXEC_COLOR_CLASSES[color].barActive : EXEC_COLOR_CLASSES[color].bar,
+            )}
+          />
+        );
+      })}
+    </div>
   );
 }
 
@@ -566,10 +1074,12 @@ function ExecutionLogRow({
   message,
   open,
   onToggle,
+  highlighted,
 }: {
   message: TaskMessagePayload;
   open: boolean;
   onToggle: () => void;
+  highlighted?: boolean;
 }) {
   const time = message.created_at
     ? new Date(message.created_at).toLocaleTimeString(undefined, {
@@ -579,7 +1089,10 @@ function ExecutionLogRow({
     : null;
 
   return (
-    <div data-testid="execution-log-row" className="border-b px-4 py-2.5">
+    <div
+      data-testid="execution-log-row"
+      className={cn("border-b px-4 py-2.5 transition-colors", highlighted && "bg-accent/60")}
+    >
       <div className="flex items-start gap-3">
         <div className="min-w-0 flex-1">
           <ExecutionLogRowBody message={message} open={open} onToggle={onToggle} />

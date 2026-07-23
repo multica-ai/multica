@@ -223,3 +223,87 @@ test("compat: a double-encoded tool result renders as readable decoded text", as
   await page.waitForTimeout(300);
   await dialog.screenshot({ path: `${SHOTS_DIR}/05-decoded-tool-result.png` });
 });
+
+test("filter: the popover narrows the list to a facet and clears back", async ({ page }) => {
+  await openLog(page);
+  const filter = page.getByTestId("execution-log-filter");
+  const timeline = page.getByTestId("execution-log-timeline");
+  const agentRow = page
+    .getByTestId("execution-log-row")
+    .filter({ hasText: "full plan for the Execution Log" });
+
+  // No filter yet: the trigger carries no selected-count badge.
+  await expect(filter).not.toContainText("1");
+
+  // Open the popover — facet chips (aria-pressed toggles) live in the portaled
+  // content, so screenshot the whole page to capture the overlay.
+  await filter.click();
+  const errorChip = page.locator("button[aria-pressed]").filter({ hasText: /error/i }).first();
+  await expect(errorChip).toBeVisible();
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: `${SHOTS_DIR}/06-filter-popover.png` });
+
+  // Selecting the Error facet drops every non-error row from the data (not just
+  // scrolls it away), so the Agent narration is gone and the counts show "matched".
+  await errorChip.click();
+  await expect(filter).toContainText("1");
+  await expect(timeline).toContainText("matched");
+  await expect(agentRow).toHaveCount(0);
+  await expect(
+    page.getByTestId("execution-log-row").filter({ hasText: /connection refused/i }).first(),
+  ).toBeVisible();
+
+  // Clear restores the full run at the data level. Selecting a chip dismisses the
+  // popover, so re-open it if the Clear control isn't already on screen.
+  const clear = page.getByRole("button", { name: "Clear" });
+  if (!(await clear.isVisible().catch(() => false))) {
+    await filter.click();
+    await expect(clear).toBeVisible();
+  }
+  await clear.click();
+  await expect(filter).not.toContainText("1");
+  await expect(timeline).not.toContainText("matched");
+});
+
+test("default-expand: the 'more' menu toggle opens all loaded content", async ({ page }) => {
+  const dialog = await openLog(page);
+
+  // Open the "more" menu: it holds copy, the default-expand preference, and the
+  // run-detail rows (runtime + mode) that were moved out of the flat header.
+  await page.getByTestId("execution-log-more").click();
+  await expect(page.getByText("Copy loaded")).toBeVisible();
+  await expect(page.getByText(/Readability E2E Runtime \(cloud\)/)).toBeVisible();
+  const toggle = page.getByTestId("execution-log-default-expand");
+  await expect(toggle).toBeVisible();
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: `${SHOTS_DIR}/07-more-menu.png` });
+
+  // Turning it on expands every loaded expandable row — the toolbar's expand
+  // control flips to "collapse all", the same end state as bulk-expand.
+  await toggle.click();
+  await page.keyboard.press("Escape"); // dismiss the menu to view the list
+  await expect(page.getByTestId("execution-log-collapse-all")).toBeVisible();
+  await page.waitForTimeout(300);
+  await dialog.screenshot({ path: `${SHOTS_DIR}/08-default-expanded.png` });
+});
+
+test("timeline: clicking a color segment locates that event in the list", async ({ page }) => {
+  const dialog = await openLog(page);
+  const timeline = page.getByTestId("execution-log-timeline");
+  await expect(timeline).toBeVisible();
+
+  // Chronological opens anchored at the newest event; the oldest (#1, the
+  // "Starting the task" text) is off-screen at the top.
+  const firstEvent = page
+    .getByTestId("execution-log-row")
+    .filter({ hasText: "Starting the task" })
+    .first();
+
+  // One clickable segment per loaded event, in order. Clicking the first jumps
+  // the virtualized list to event #1.
+  const firstSegment = timeline.locator('[role="navigation"] button').first();
+  await firstSegment.click();
+  await expect(firstEvent).toBeVisible({ timeout: 5000 });
+  await page.waitForTimeout(300);
+  await dialog.screenshot({ path: `${SHOTS_DIR}/09-timeline-locate.png` });
+});

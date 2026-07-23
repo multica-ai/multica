@@ -13,6 +13,8 @@ import { ExecutionLogDialog } from "./execution-log-dialog";
 vi.mock("@multica/core/api", () => ({
   api: {
     listTaskMessagesPage: vi.fn(),
+    getAgent: vi.fn(),
+    listRuntimes: vi.fn(),
   },
 }));
 
@@ -71,6 +73,8 @@ function pageWith(overrides: Partial<ExecutionLogPage>): ExecutionLogPage {
 }
 
 const listTaskMessagesPage = vi.mocked(api.listTaskMessagesPage);
+const getAgent = vi.mocked(api.getAgent);
+const listRuntimes = vi.mocked(api.listRuntimes);
 
 function renderDialog() {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -88,6 +92,12 @@ function renderDialog() {
 
 beforeEach(() => {
   listTaskMessagesPage.mockReset();
+  getAgent.mockReset();
+  listRuntimes.mockReset();
+  // Run-context lookups are best-effort; the dialog swallows failures. Keep them
+  // resolving empty so the identity/summary rows just render without metadata.
+  getAgent.mockRejectedValue(new Error("no agent in test"));
+  listRuntimes.mockResolvedValue([]);
 });
 
 afterEach(() => {
