@@ -3,6 +3,23 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## macos26-seatbelt-port-glob — sandbox network policy on macOS 26
+
+- `server/pkg/agent/sandbox/macos.go` — `translateAllowlistToTCPRules` now emits a
+  single `(allow network-outbound (remote tcp "*:*"))` for public hosts instead of
+  per-port `(remote tcp "*:<port>")` rules.
+- **Why:** on macOS 26 (Tahoe, Darwin 25.x) seatbelt silently drops port-scoped
+  `(remote tcp "*:<port>")` rules — the profile parses but every outbound connection
+  to an allowlisted port fails with `FailedToOpenSocket`. This broke **all sandboxed
+  Claude agent tasks** (Claude connects to `api.anthropic.com:443`); Codex was
+  unaffected because it does not run under the seatbelt wrapper. Proven by A/B test:
+  `*:443` blocks, `*:*` works, bare `*` is rejected by the parser. Port-level
+  filtering is impossible on macOS 26, so `*:*` is the only viable form.
+- **Trade-off:** loses public-host port scoping (was 443-only). Hostname filtering was
+  already impossible (documented seatbelt limitation); loopback rules are unchanged.
+- **Upstream:** this is a genuine macOS-26 bug, not cerebro-specific — should be landed
+  at `multica-ai/multica` and re-synced, at which point this patch can be dropped.
+
 ## FIR-2996 — Usage dashboard skill telemetry routes
 
 - `server/cmd/server/router.go` exposes daemon reporting at `POST /api/daemon/tasks/{taskId}/skill-usage` and the workspace read at `GET /api/dashboard/usage/skills`.
