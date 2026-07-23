@@ -24,7 +24,7 @@ import (
 // hinge on the Prepare-time .managed_env.json provenance, not the terminal GC
 // file. runTask writes that provenance via execenv.Prepare; this test never
 // writes .gc_meta.json, so it fails against the pre-fix GC-meta-keyed gate.
-func TestRunTaskSquadLeaderReusesWorkdirBeforeGCMetaWritten(t *testing.T) {
+func TestRunTaskSquadLeaderReuseFailsClosedWithoutObjectBoundContract(t *testing.T) {
 	t.Parallel()
 
 	d, argsFile, cleanup := newLeaderReuseTestDaemon(t)
@@ -52,15 +52,15 @@ func TestRunTaskSquadLeaderReusesWorkdirBeforeGCMetaWritten(t *testing.T) {
 	if err != nil {
 		t.Fatalf("second runTask: %v", err)
 	}
-	if secondResult.WorkDir != firstResult.WorkDir {
-		t.Fatalf("second WorkDir = %q, want reused leader workdir %q", secondResult.WorkDir, firstResult.WorkDir)
+	if secondResult.WorkDir == firstResult.WorkDir {
+		t.Fatalf("second task reused pathname-only prior workdir %q", firstResult.WorkDir)
 	}
 	args, err := os.ReadFile(argsFile)
 	if err != nil {
 		t.Fatalf("read claude args: %v", err)
 	}
-	if !strings.Contains(string(args), "--resume\nsession-leader-reuse\n") {
-		t.Fatalf("second claude invocation did not resume prior session; args:\n%s", args)
+	if strings.Contains(string(args), "--resume\nsession-leader-reuse\n") {
+		t.Fatalf("second claude invocation resumed without object-bound reuse; args:\n%s", args)
 	}
 }
 

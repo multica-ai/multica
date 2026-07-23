@@ -1586,6 +1586,47 @@ func TestRunGC_PreReservationRetargetUsesPinnedCycleIdentity(t *testing.T) {
 	}
 }
 
+func TestRunGC_CycleIdentityKeyBlocksABARetargetWithActiveClaimant(t *testing.T) {
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.GCOrphanTTL = 0
+	originalRoot := d.cfg.WorkspacesRoot
+	movedRoot := originalRoot + "-moved"
+	taskDir := createTaskDir(t, originalRoot, "ws-cycle-aba", "task", nil)
+	externalRoot := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(externalRoot, "ws-cycle-aba", "task"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var releaseClaim func()
+	d.gcAfterExpectedHook = func(string) {
+		d.gcAfterExpectedHook = nil
+		if err := os.Rename(originalRoot, movedRoot); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(externalRoot, originalRoot); err != nil {
+			t.Fatal(err)
+		}
+		var ok bool
+		releaseClaim, ok = d.markActiveEnvRoot(context.Background(), filepath.Join(movedRoot, "ws-cycle-aba", "task"))
+		if !ok {
+			t.Fatal("active claimant could not acquire pinned A task")
+		}
+		if err := os.Remove(originalRoot); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Rename(movedRoot, originalRoot); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d.runGC(context.Background())
+	if releaseClaim == nil {
+		t.Fatal("A→B→A hook did not run")
+	}
+	defer releaseClaim()
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Fatalf("active claimant A was mutated after A→B→A retarget: %v", err)
+	}
+}
+
 func TestCleanTaskArtifacts_AncestorSymlinkSwapCannotEscapeRoot(t *testing.T) {
 	t.Parallel()
 	d := newGCTestDaemon(t, http.NewServeMux())

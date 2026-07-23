@@ -332,6 +332,8 @@ type Daemon struct {
 	envRootQuarantineHook func(string) // test-only: runs after WorkspacesRoot is opened, before rename
 	envRootPreOpenHook    func(string) // test-only: runs after reservation, before a filesystem root is opened
 	gcBeforeApplyHook     func(string) // test-only: runs after decision, before reservation
+	gcAfterExpectedHook   func(string) // test-only: runs after pinned identity read, before key creation
+	gcAfterReserveHook    func(string) // test-only: runs after reservation, before mutation
 	gcCycleRoot           *os.Root     // pinned for the synchronous runGC cycle
 	artifactCleanupHook   func(string) // test-only: runs while the artifact-cleanup reservation is held
 	artifactRemoveHook    func(string) // test-only: runs after artifact inspection, before fd-relative removal
@@ -4197,10 +4199,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, ctx.Err()
 	}
 	defer releasePredicted()
-	var priorRootIdentity os.FileInfo
 	if task.PriorWorkDir != "" {
 		priorRoot := filepath.Dir(task.PriorWorkDir)
-		priorRootIdentity, _ = os.Stat(priorRoot)
 		if priorRoot != predictedRoot {
 			releasePrior, ok := d.markActiveEnvRoot(ctx, priorRoot)
 			if !ok {
@@ -4325,35 +4325,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.PriorWorkDir != "" && d.envRootPreOpenHook != nil {
 		d.envRootPreOpenHook(filepath.Dir(task.PriorWorkDir))
 	}
-	priorIdentityMatches := false
-	if priorRootIdentity != nil {
-		currentPrior, statErr := os.Stat(filepath.Dir(task.PriorWorkDir))
-		priorIdentityMatches = statErr == nil && os.SameFile(priorRootIdentity, currentPrior)
-	}
-	if priorIdentityMatches &&
-		canonicalPathIdentity(d.cfg.WorkspacesRoot) == d.workspacesRootIdentity &&
-		shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
-		var err error
-		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
-			WorkspacesRoot:        d.cfg.WorkspacesRoot,
-			Profile:               d.cfg.Profile,
-			WorkDir:               task.PriorWorkDir,
-			Provider:              provider,
-			CodexVersion:          codexVersion,
-			ResumeSessionID:       task.PriorSessionID,
-			OpenclawBin:           openclawBin,
-			McpConfig:             effectiveMcpConfig,
-			CursorMcpAuthSource:   cursorMcpAuthSource,
-			OpenclawGateway:       openclawGateway,
-			HermesSourceHome:      hermesSourceHome,
-			HermesSourceMustExist: hermesSourceMustExist,
-			HermesEnv:             hermesEnv,
-			CodexCustomArgs:       codexSandboxArgs,
-			Task:                  taskCtx,
-		})
-		if err != nil {
-			return TaskResult{}, fmt.Errorf("reuse execution environment: %w", err)
-		}
+	// Prior-workdir reuse is fail-closed until execenv.Reuse accepts a pinned
+	// object/handle. A pathname check followed by pathname-based mutation cannot
+	// atomically prove that it is still operating on the leased filesystem
+	// object, so always Prepare a fresh environment.
+	if task.PriorWorkDir != "" {
+		taskLog.Info("prior workdir reuse disabled: object-bound reuse unavailable")
 	}
 	if env == nil {
 		var err error
@@ -5514,7 +5491,7 @@ func (d *Daemon) markActiveEnvRoot(ctx context.Context, envRoot string) (release
 	if envRoot == "" {
 		return func() {}, true
 	}
-	key := canonicalPathIdentity(envRoot)
+	key := envRootGuardKey(envRoot, nil)
 	d.activeEnvRootsMu.Lock()
 	d.ensureActiveEnvRootStateLocked()
 	if d.workspacesRootIdentity == "" && len(d.activeEnvRoots) == 0 && len(d.deletingEnvRoots) == 0 {
@@ -5550,7 +5527,7 @@ func (d *Daemon) markActiveEnvRoot(ctx context.Context, envRoot string) (release
 }
 
 func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
-	key := canonicalPathIdentity(envRoot)
+	key := envRootGuardKey(envRoot, nil)
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
@@ -5605,6 +5582,17 @@ type envRootGCLease struct {
 	expected os.FileInfo
 }
 
+func envRootGuardKey(path string, known os.FileInfo) string {
+	info := known
+	if info == nil {
+		info, _ = os.Stat(path)
+	}
+	if info != nil {
+		return fmt.Sprintf("file:%T:%v", info.Sys(), info.Sys())
+	}
+	return "path:" + canonicalPathIdentity(path)
+}
+
 // reserveEnvRootForGC atomically confirms that no live task is using envRoot
 // and prevents a new task from entering until release runs. This closes the
 // check-then-remove race between the GC loop and task startup: either GC sees
@@ -5636,7 +5624,10 @@ func (d *Daemon) reserveEnvRootForGCIdentity(envRoot string) (envRootGCLease, bo
 	if err != nil || !expected.IsDir() {
 		return envRootGCLease{}, false
 	}
-	key := canonicalPathIdentity(envRoot)
+	if d.gcAfterExpectedHook != nil {
+		d.gcAfterExpectedHook(envRoot)
+	}
+	key := envRootGuardKey(envRoot, expected)
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
@@ -5644,6 +5635,9 @@ func (d *Daemon) reserveEnvRootForGCIdentity(envRoot string) (envRootGCLease, bo
 		return envRootGCLease{}, false
 	}
 	d.deletingEnvRoots[key] = true
+	if d.gcAfterReserveHook != nil {
+		d.gcAfterReserveHook(envRoot)
+	}
 	release := func() {
 		d.activeEnvRootsMu.Lock()
 		delete(d.deletingEnvRoots, key)
