@@ -152,3 +152,115 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 		t.Fatalf("enforce/unconfigured: got allowed=%v decision=%v, want true/allow", r["allowed"], r["decision"])
 	}
 }
+
+func TestResolveDaemonToolPolicy_NormalizesCursorHookNames(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	orig := testHandler.CerebroQueries
+	testHandler.CerebroQueries = cerebrodb.New(testPool)
+	t.Cleanup(func() { testHandler.CerebroQueries = orig })
+
+	ctx := context.Background()
+	var runtimeID, ownerID, agentID, taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
+		VALUES ($1, 'cursor-tool-policy-runtime', 'local', 'cursor', 'online', '', '{}'::jsonb, now())
+		RETURNING id
+	`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create Cursor runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Cursor Tool Policy Owner', 'cursor-tool-policy-owner@multica.test')
+		RETURNING id
+	`).Scan(&ownerID); err != nil {
+		t.Fatalf("create owner user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE email = 'cursor-tool-policy-owner@multica.test'`)
+	})
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
+	`, testWorkspaceID, ownerID); err != nil {
+		t.Fatalf("add owner as member: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args
+		)
+		VALUES ($1, 'cursor-tool-policy-test-agent', '', 'local', '{}'::jsonb,
+		        $2, 'workspace', 1, $3, '', '{}'::jsonb, '[]'::jsonb)
+		RETURNING id
+	`, testWorkspaceID, runtimeID, ownerID).Scan(&agentID); err != nil {
+		t.Fatalf("create Cursor agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+		VALUES ($1, $2, 'running', 0)
+		RETURNING id
+	`, agentID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO cerebro_task_mandate (task_id, workspace_id, agent_id, allowed_tools, expires_at)
+		VALUES ($1, $2, $3, '["tools:run_terminal_cmd","tools:read_file","tools:Task"]'::jsonb, now() + interval '1 hour')
+	`, taskID, testWorkspaceID, agentID); err != nil {
+		t.Fatalf("issue task mandate: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
+
+	resolve := func(tool string, args map[string]any) map[string]any {
+		t.Helper()
+		body := map[string]any{"tool_name": tool, "agent_id": agentID, "task_id": taskID, "args": args}
+		req := withURLParams(
+			newRequest(http.MethodPost, "/api/daemon/workspaces/"+testWorkspaceID+"/tool-policy/resolve", body),
+			"workspaceId", testWorkspaceID,
+		)
+		w := httptest.NewRecorder()
+		testHandler.ResolveDaemonToolPolicy(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("status %d for %s: %s", w.Code, tool, w.Body.String())
+		}
+		var resp map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatalf("decode response: %v", err)
+		}
+		return resp
+	}
+
+	for _, tool := range []string{"Shell", "Read", "Task"} {
+		if r := resolve(tool, map[string]any{"command": "pwd"}); r["allowed"] != true || r["decision"] != "allow" {
+			t.Errorf("Cursor %s: got allowed=%v decision=%v, want true/allow", tool, r["allowed"], r["decision"])
+		}
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, resource_pattern, setting)
+		VALUES ($1, 'tools:run_terminal_cmd', 'agent', $2, 'curl', 'deny')
+	`, testWorkspaceID, agentID); err != nil {
+		t.Fatalf("seed Cursor command deny: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `
+			DELETE FROM cerebro_tool_policy
+			WHERE workspace_id=$1 AND tool_key='tools:run_terminal_cmd' AND subject_id=$2
+		`, testWorkspaceID, agentID)
+	})
+	if r := resolve("Shell", map[string]any{"command": "curl https://example.com"}); r["allowed"] != false || r["decision"] != "deny" {
+		t.Fatalf("Cursor Shell curl: got allowed=%v decision=%v, want false/deny", r["allowed"], r["decision"])
+	}
+}

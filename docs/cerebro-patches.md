@@ -1789,3 +1789,11 @@ listening on `before.issue.status_change` exists.
 | `daemon-task-workpad-brief` | `server/internal/daemon/types.go`, `server/internal/daemon/daemon.go` | `WorkpadBriefEnabled` on the daemon `Task` (JSON from the claim response) and its copy into `TaskContextForEnv`. |
 | `agent-task-workpad-brief` | `server/internal/handler/agent.go` | `WorkpadBriefEnabled` field on `AgentTaskResponse` so the claim response ships the workspace verdict to the daemon. |
 | `daemon-workpad-brief` | `server/internal/handler/daemon.go` | One-line `h.applyWorkpadBrief(...)` call at claim (resolver lives in the cerebro-prefixed `daemon_workpad_brief_cerebro.go`). |
+
+## FIR-3729 — Cursor tool-policy key normalization
+
+| Patch | Location | Reason |
+|---|---|---|
+| `cursor-tool-policy-key` | `server/internal/handler/daemon_tool_policy_cerebro.go` | Normalize Cursor `preToolUse` names to the canonical Cursor runtime inventory before task-mandate and permission checks, so allowed Cursor tools are not denied because the provider uses different names. |
+
+Approved by Jesper Hvejsel via FIR-3729 takeover request, 2026-07-23.
