@@ -153,11 +153,98 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	workingAgentID := createHandlerTestAgent(t, "working-agents-running", []byte(`{}`))
 	queuedAgentID := createHandlerTestAgent(t, "working-agents-queued", []byte(`{}`))
 
+	// An agent owned by someone else keeps the squad fixtures mutually
+	// exclusive: it can lead a squad without accidentally satisfying the
+	// "leader owned by me" branch.
+	var outsiderUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Working Agents Outsider', 'working-agents-outsider-' || gen_random_uuid()::text || '@multica.test')
+		RETURNING id
+	`).Scan(&outsiderUserID); err != nil {
+		t.Fatalf("insert outsider user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, outsiderUserID)
+	})
+
+	var outsiderAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config
+		)
+		VALUES (
+			$1, 'working-agents-outsider', '', 'cloud', '{}'::jsonb,
+			$2, 'workspace', 'private', 1, $3,
+			'', '{}'::jsonb, '[]'::jsonb, '{}'::jsonb
+		)
+		RETURNING id
+	`, testWorkspaceID, testRuntimeID, outsiderUserID).Scan(&outsiderAgentID); err != nil {
+		t.Fatalf("insert outsider agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, outsiderAgentID)
+	})
+
+	insertedSquadIDs := make([]string, 0, 3)
+	insertSquad := func(name, leaderID string) string {
+		t.Helper()
+		var squadID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO squad (
+				workspace_id, name, description, leader_id, creator_id
+			)
+			VALUES ($1, $2, '', $3, $4)
+			RETURNING id
+		`,
+			testWorkspaceID,
+			name,
+			leaderID,
+			testUserID,
+		).Scan(&squadID); err != nil {
+			t.Fatalf("insert squad %q: %v", name, err)
+		}
+		insertedSquadIDs = append(insertedSquadIDs, squadID)
+		return squadID
+	}
+	directMemberSquadID := insertSquad(
+		"working-agents-direct-member-squad",
+		outsiderAgentID,
+	)
+	ownedLeaderSquadID := insertSquad(
+		"working-agents-owned-leader-squad",
+		workingAgentID,
+	)
+	ownedMemberSquadID := insertSquad(
+		"working-agents-owned-member-squad",
+		outsiderAgentID,
+	)
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO squad_member (squad_id, member_type, member_id)
+		VALUES
+			($1, 'member', $2),
+			($3, 'agent', $4)
+	`,
+		directMemberSquadID,
+		testUserID,
+		ownedMemberSquadID,
+		workingAgentID,
+	); err != nil {
+		t.Fatalf("insert squad involvement fixtures: %v", err)
+	}
+	t.Cleanup(func() {
+		for _, squadID := range insertedSquadIDs {
+			testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, squadID)
+		}
+	})
+
 	// Insert source issues directly: this test is about the working-agent
 	// projection, so it must not inherit unrelated CreateIssue validation or
-	// side effects. The three fixtures cover assigned-to-me, assigned to an
-	// owned agent, and outside My Issues.
-	insertedIssueIDs := make([]string, 0, 3)
+	// side effects. The fixtures cover every direct My Issues relation plus
+	// all three squad-involvement branches.
+	insertedIssueIDs := make([]string, 0, 6)
 	insertIssue := func(
 		title, creatorType, creatorID string,
 		assigneeType, assigneeID any,
@@ -197,16 +284,37 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 	ownedAgentIssueID := insertIssue(
 		"working-agent-owned-agent",
 		"agent",
-		workingAgentID,
+		outsiderAgentID,
 		"agent",
 		workingAgentID,
 	)
 	outsideIssueID := insertIssue(
 		"working-agent-outside-mine",
 		"agent",
-		workingAgentID,
+		outsiderAgentID,
 		nil,
 		nil,
+	)
+	directMemberSquadIssueID := insertIssue(
+		"working-agent-direct-member-squad",
+		"agent",
+		outsiderAgentID,
+		"squad",
+		directMemberSquadID,
+	)
+	ownedLeaderSquadIssueID := insertIssue(
+		"working-agent-owned-leader-squad",
+		"agent",
+		outsiderAgentID,
+		"squad",
+		ownedLeaderSquadID,
+	)
+	ownedMemberSquadIssueID := insertIssue(
+		"working-agent-owned-member-squad",
+		"agent",
+		outsiderAgentID,
+		"squad",
+		ownedMemberSquadID,
 	)
 	t.Cleanup(func() {
 		for _, issueID := range insertedIssueIDs {
@@ -224,10 +332,10 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		t.Fatalf("insert autopilot run: %v", err)
 	}
 
-	// Six running tasks on one agent: three issue relations, chat, autopilot,
+	// Nine running tasks on one agent: six issue relations, chat, autopilot,
 	// and quick-create (no source FK). The autopilot task also carries issue_id
 	// to prove source precedence keeps it out of type=issue.
-	insertedTaskIDs := make([]string, 0, 7)
+	insertedTaskIDs := make([]string, 0, 10)
 	for _, fixture := range []struct {
 		agentID        string
 		status         string
@@ -238,6 +346,9 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		{workingAgentID, "running", assignedIssueID, nil, nil},
 		{workingAgentID, "running", ownedAgentIssueID, nil, nil},
 		{workingAgentID, "running", outsideIssueID, nil, nil},
+		{workingAgentID, "running", directMemberSquadIssueID, nil, nil},
+		{workingAgentID, "running", ownedLeaderSquadIssueID, nil, nil},
+		{workingAgentID, "running", ownedMemberSquadIssueID, nil, nil},
 		{workingAgentID, "running", nil, chatSessionID, nil},
 		{workingAgentID, "running", assignedIssueID, nil, autopilotRunID},
 		{workingAgentID, "running", nil, nil, nil},
@@ -274,15 +385,15 @@ func TestListWorkspaceWorkingAgents(t *testing.T) {
 		query     string
 		wantCount int32
 	}{
-		{name: "all sources", wantCount: 6},
-		{name: "issue", query: "?type=issue", wantCount: 3},
+		{name: "all sources", wantCount: 9},
+		{name: "issue", query: "?type=issue", wantCount: 6},
 		{name: "autopilot", query: "?type=autopilot", wantCount: 1},
 		{name: "chat", query: "?type=chat", wantCount: 1},
-		{name: "mine defaults to any", query: "?type=issue&scope=mine", wantCount: 2},
-		{name: "mine any", query: "?type=issue&scope=mine&relation=any", wantCount: 2},
+		{name: "mine defaults to any", query: "?type=issue&scope=mine", wantCount: 5},
+		{name: "mine any", query: "?type=issue&scope=mine&relation=any", wantCount: 5},
 		{name: "mine assigned", query: "?type=issue&scope=mine&relation=assigned", wantCount: 1},
 		{name: "mine created", query: "?type=issue&scope=mine&relation=created", wantCount: 1},
-		{name: "mine involved", query: "?type=issue&scope=mine&relation=involved", wantCount: 1},
+		{name: "mine involved", query: "?type=issue&scope=mine&relation=involved", wantCount: 4},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			w := httptest.NewRecorder()
