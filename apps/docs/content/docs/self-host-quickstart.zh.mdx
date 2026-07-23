@@ -219,7 +219,7 @@ SELECT cron.unschedule('rollup_task_usage_hourly')
 
 ## 升级
 
-Docker Compose 部署有两种升级写法，两者**完全等价**——`make selfhost` 就是下面这两条命令的封装（`Makefile:79-107`），用哪个都行：
+Docker Compose 部署有两种升级写法。在已有部署上两者**结果相同**——`Makefile` 里的 `selfhost` target 跑的就是同一套 `docker compose pull` + `up -d`，只是额外多做了两件事：`.env` 缺失时生成一份，以及等 `/health` 就绪后打印一段状态汇总。用哪个都行：
 
 ```bash
 cd multica
@@ -251,7 +251,7 @@ grep MULTICA_IMAGE_TAG .env
 
 ### `.env` 不会被覆盖
 
-`make selfhost` 只在 `.env` **不存在**的时候才生成它（`Makefile:80-95`）。在已有部署上重复跑，你的 `JWT_SECRET`、Postgres 密码、邮件配置、`FRONTEND_ORIGIN` 都原样保留。
+`make selfhost` 只在 `.env` **不存在**的时候才生成它。在已有部署上重复跑，你的 `JWT_SECRET`、Postgres 密码、邮件配置、`FRONTEND_ORIGIN` 都原样保留。
 
 ### 升级前先备份 Postgres
 
@@ -259,8 +259,12 @@ migration 只往前走、不回滚，所以正式环境升级前先导一份：
 
 ```bash
 docker compose -f docker-compose.selfhost.yml exec -T postgres \
-  pg_dump -U multica multica | gzip > multica-backup.sql.gz
+  pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
 ```
+
+<Callout type="warning">
+**不要把 `pg_dump` 直接管道接给 `gzip`。** shell 取的是管道里**最后一条**命令的退出码，所以 `pg_dump ... | gzip > backup.sql.gz` 在导出失败时照样返回 `0`，留下一个格式完全合法、但里面什么都没有的 20 字节压缩包。先重定向到文件，`pg_dump` 自己的退出码才算数，`&&` 也只会压缩真正成功的那份导出。
+</Callout>
 
 如果你改过 `POSTGRES_USER` / `POSTGRES_DB`，把 `multica` 换成 `.env` 里的实际值。数据存在名为 `multica_pgdata` 的 volume 里，`docker compose down` 不会删它——但 `down -v` 会。
 
@@ -285,7 +289,9 @@ curl -s localhost:8080/readyz
 
 ### Kubernetes
 
-Helm 有自己的升级路径——在 values 文件里钉 `images.backend.tag` / `images.frontend.tag` 然后 `helm upgrade`，或者用 `kubectl -n multica rollout restart` 重新拉一个浮动 tag。见下面的 [Kubernetes 部署（替代方案）](#kubernetes-部署替代方案)。
+Helm 有自己的升级路径：在 values 文件里把 `images.backend.tag` / `images.frontend.tag` 设成你要的版本，然后 `helm upgrade`。改 tag 就改了 pod spec，Kubernetes 会拉新镜像并滚动更新——这是可靠的路径。
+
+`kubectl -n multica rollout restart` 本身**不是**升级。chart 默认 `pullPolicy: IfNotPresent`（`deploy/helm/multica/values.yaml`），节点上已经缓存过这个 tag 的话，restart 只会用回旧镜像，什么都没变——和钉死 `MULTICA_IMAGE_TAG` 是同一类坑。真要靠浮动 tag 走这条路，得先把 `images.backend.pullPolicy` / `images.frontend.pullPolicy` 设成 `Always`。见下面的 [Kubernetes 部署（替代方案）](#kubernetes-部署替代方案)。
 
 ## Kubernetes 部署（替代方案）
 
@@ -330,7 +336,7 @@ multica setup self-host \
   --app-url http://multica.dev.lan
 ```
 
-只想拉最新镜像、不动 chart：`kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend`。要锁到某个 Multica 版本，就在 values 文件里设 `images.backend.tag` / `images.frontend.tag`，再 `helm upgrade`。`helm -n multica uninstall multica` 只删工作负载，PVC 和 Secret 都保留；`kubectl delete namespace multica` 才会全清。
+要换到某个 Multica 版本，就在 values 文件里设 `images.backend.tag` / `images.frontend.tag`，再 `helm upgrade`——升级也走这条路，因为 tag 变了才会强制重新拉取并滚动更新。`kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend` 只有在你同时把 `images.backend.pullPolicy` / `images.frontend.pullPolicy` 设成 `Always` 时才会重新拉浮动 tag；chart 默认是 `IfNotPresent`，会直接复用节点上已缓存的镜像。`helm -n multica uninstall multica` 只删工作负载，PVC 和 Secret 都保留；`kubectl delete namespace multica` 才会全清。
 
 完整参考——三种登录方式、为了绕过 web 镜像 build-time 写死的 `REMOTE_API_URL` 而加的 `backend` ExternalName 别名、资源限制、TLS——都在仓库的 [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative)。
 

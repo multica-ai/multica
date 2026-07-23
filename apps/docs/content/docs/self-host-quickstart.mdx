@@ -218,7 +218,7 @@ Full reference — including operations notes and the Kubernetes deployment shap
 
 ## Upgrading
 
-Two ways to upgrade a Docker Compose install. They are **equivalent** — `make selfhost` is a wrapper around exactly these commands (`Makefile:79-107`), so pick whichever you prefer:
+Two ways to upgrade a Docker Compose install. On an existing install they produce the **same result** — the `selfhost` target in the `Makefile` runs the same `docker compose pull` + `up -d`, and additionally creates `.env` when it is missing and waits on `/health` before printing a status summary. Pick whichever you prefer:
 
 ```bash
 cd multica
@@ -250,7 +250,7 @@ grep MULTICA_IMAGE_TAG .env
 
 ### Your `.env` is not overwritten
 
-`make selfhost` only generates `.env` when the file is **missing** (`Makefile:80-95`). Re-running it on an existing install leaves your `JWT_SECRET`, Postgres password, email settings, and `FRONTEND_ORIGIN` exactly as they were.
+`make selfhost` only generates `.env` when the file is **missing**. Re-running it on an existing install leaves your `JWT_SECRET`, Postgres password, email settings, and `FRONTEND_ORIGIN` exactly as they were.
 
 ### Back up Postgres first
 
@@ -258,8 +258,12 @@ Migrations are forward-only, so take a dump before upgrading a deployment you ca
 
 ```bash
 docker compose -f docker-compose.selfhost.yml exec -T postgres \
-  pg_dump -U multica multica | gzip > multica-backup.sql.gz
+  pg_dump -U multica multica > multica-backup.sql && gzip multica-backup.sql
 ```
+
+<Callout type="warning">
+**Do not pipe `pg_dump` straight into `gzip`.** A shell reports the exit status of the *last* command in a pipeline, so `pg_dump … | gzip > backup.sql.gz` exits `0` even when the dump failed — leaving a perfectly valid 20-byte archive containing nothing. Redirecting to a file first makes `pg_dump`'s own exit status the one that counts, and `&&` only compresses a dump that actually succeeded.
+</Callout>
 
 Use your own `POSTGRES_USER` / `POSTGRES_DB` from `.env` if you changed them from the `multica` defaults. Data lives in the named volume `multica_pgdata`, which survives `docker compose down` — but not `down -v`.
 
@@ -284,7 +288,9 @@ Anything other than HTTP 200 with both checks `ok` means the new version did not
 
 ### Kubernetes
 
-Helm has its own upgrade path — `helm upgrade` with `images.backend.tag` / `images.frontend.tag` pinned in your values file, or `kubectl -n multica rollout restart` to re-pull a floating tag. See [Kubernetes deployment](#kubernetes-deployment-alternative) below.
+Helm has its own upgrade path: set `images.backend.tag` / `images.frontend.tag` to the release you want in your values file, then `helm upgrade`. Changing the tag changes the pod spec, so Kubernetes pulls the new image and rolls the Deployments — this is the reliable route.
+
+`kubectl -n multica rollout restart` is **not** an upgrade on its own. The chart ships `pullPolicy: IfNotPresent` (`deploy/helm/multica/values.yaml`), so a node that already has that tag cached reuses the old image and the restart silently changes nothing — the same class of trap as a pinned `MULTICA_IMAGE_TAG`. If you want to track a floating tag that way, set `images.backend.pullPolicy` / `images.frontend.pullPolicy` to `Always` first. See [Kubernetes deployment](#kubernetes-deployment-alternative) below.
 
 ## Kubernetes deployment (alternative)
 
@@ -329,7 +335,7 @@ multica setup self-host \
   --app-url http://multica.dev.lan
 ```
 
-To pull the latest images without changing the chart, `kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend`. To pin a specific Multica release, set `images.backend.tag` / `images.frontend.tag` in your values file and `helm upgrade`. `helm -n multica uninstall multica` removes the workloads but keeps the PVCs and Secret; `kubectl delete namespace multica` wipes everything.
+To move to a specific Multica release, set `images.backend.tag` / `images.frontend.tag` in your values file and `helm upgrade` — that is also how you upgrade, since a changed tag forces a new pull and rollout. `kubectl -n multica rollout restart deploy/multica-backend deploy/multica-frontend` only re-pulls a floating tag if you also set `images.backend.pullPolicy` / `images.frontend.pullPolicy` to `Always`; the chart default is `IfNotPresent`, which reuses whatever the node already cached. `helm -n multica uninstall multica` removes the workloads but keeps the PVCs and Secret; `kubectl delete namespace multica` wipes everything.
 
 The full reference — three login modes, the `backend` ExternalName workaround for the build-time-baked `REMOTE_API_URL` in the web image, resource limits, and TLS — lives in the repo's [`SELF_HOSTING.md`](https://github.com/multica-ai/multica/blob/main/SELF_HOSTING.md#kubernetes-deployment-alternative).
 
