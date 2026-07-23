@@ -486,7 +486,7 @@
     "status_failed": "실패함",
     "status_cancelled": "취소됨",
     "timeline_label": "타임라인",
-    "tool_calls_other": "도구 호출 {{count}}회",
+    "events_count_other": "이벤트 {{count}}개",
     "run_duration": "{{duration}} 동안 실행",
     "filter": "필터",
     "clear_filters": "지우기",

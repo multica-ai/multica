@@ -232,39 +232,12 @@ function formatDuration(start: string, end: string): string {
 /** Short local date-time for the run-detail rows. */
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString(undefined, {
+    year: "numeric",
     month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",
   });
-}
-
-function isSameLocalDay(leftIso: string, rightIso: string): boolean {
-  const left = new Date(leftIso);
-  const right = new Date(rightIso);
-  return (
-    left.getFullYear() === right.getFullYear() &&
-    left.getMonth() === right.getMonth() &&
-    left.getDate() === right.getDate()
-  );
-}
-
-/** Compact toolbar time; the full local date-time remains in the title. */
-function formatSummaryTime(iso: string, includeDate: boolean): string {
-  return new Date(iso).toLocaleString(
-    undefined,
-    includeDate
-      ? {
-          month: "short",
-          day: "numeric",
-          hour: "2-digit",
-          minute: "2-digit",
-        }
-      : {
-          hour: "2-digit",
-          minute: "2-digit",
-        },
-  );
 }
 
 function LiveRunDuration({ start }: { start: string }) {
@@ -707,9 +680,6 @@ export function ExecutionLogDialog({
       ? formatDuration(task.started_at, task.completed_at)
       : null;
   const liveStart = isLive ? (task.started_at ?? task.dispatched_at) : null;
-  const toolCount = usingLiveSource
-    ? liveAllMessages.filter((message) => message.type === "tool_use").length
-    : (first?.type_facets?.find((facet) => facet.key === "tool_use")?.count ?? 0);
 
   // Low-frequency debugging metadata stays in the information popover.
   // Workdir is the server-derived RELATIVE path only — the absolute work_dir
@@ -725,23 +695,10 @@ export function ExecutionLogDialog({
   const startedLabel = task.started_at ? formatDateTime(task.started_at) : null;
   const completedLabel =
     isTerminal && task.completed_at ? formatDateTime(task.completed_at) : null;
-  const crossesLocalDay = !!(
-    isTerminal &&
-    task.started_at &&
-    task.completed_at &&
-    !isSameLocalDay(task.started_at, task.completed_at)
-  );
-  const startedSummaryLabel = task.started_at
-    ? formatSummaryTime(task.started_at, crossesLocalDay)
-    : null;
-  const completedSummaryLabel =
-    completedLabel && task.completed_at
-      ? formatSummaryTime(task.completed_at, crossesLocalDay)
-      : null;
   const hasRunSummary = !!(
     duration ||
     liveStart ||
-    toolCount > 0 ||
+    rawTotal > 0 ||
     startedLabel ||
     completedLabel
   );
@@ -1009,18 +966,18 @@ export function ExecutionLogDialog({
                     )}
                   </Badge>
                 )}
-                {toolCount > 0 && (
+                {rawTotal > 0 && (
                   <Badge
-                    data-testid="execution-log-tool-count"
+                    data-testid="execution-log-event-count"
                     variant="secondary"
                     className="h-6 shrink-0 px-2 font-normal text-muted-foreground"
                   >
-                    {t(($) => $.execution_log.tool_calls, {
-                      count: toolCount,
+                    {t(($) => $.execution_log.events_count, {
+                      count: rawTotal,
                     })}
                   </Badge>
                 )}
-                {startedLabel && startedSummaryLabel && (
+                {startedLabel && (
                   <span
                     data-testid="execution-log-start-time"
                     className="inline-flex shrink-0 items-center gap-1"
@@ -1028,11 +985,11 @@ export function ExecutionLogDialog({
                   >
                     <span>{t(($) => $.execution_log.details_started)}</span>
                     <span className="tabular-nums text-foreground/70">
-                      {startedSummaryLabel}
+                      {startedLabel}
                     </span>
                   </span>
                 )}
-                {completedLabel && completedSummaryLabel && (
+                {completedLabel && (
                   <span
                     data-testid="execution-log-end-time"
                     className="inline-flex shrink-0 items-center gap-1"
@@ -1040,7 +997,7 @@ export function ExecutionLogDialog({
                   >
                     <span>{t(($) => $.execution_log.details_completed)}</span>
                     <span className="tabular-nums text-foreground/70">
-                      {completedSummaryLabel}
+                      {completedLabel}
                     </span>
                   </span>
                 )}

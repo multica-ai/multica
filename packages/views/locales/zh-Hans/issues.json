@@ -486,7 +486,7 @@
     "status_failed": "失败",
     "status_cancelled": "已取消",
     "timeline_label": "时间线",
-    "tool_calls_other": "{{count}} 次工具调用",
+    "events_count_other": "{{count}} 个事件",
     "run_duration": "运行 {{duration}}",
     "filter": "筛选",
     "clear_filters": "清除",

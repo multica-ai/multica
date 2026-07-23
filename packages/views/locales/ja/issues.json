@@ -487,7 +487,7 @@
     "status_failed": "失敗",
     "status_cancelled": "キャンセル済み",
     "timeline_label": "タイムライン",
-    "tool_calls_other": "ツール呼び出し {{count}} 件",
+    "events_count_other": "イベント {{count}} 件",
     "run_duration": "実行時間 {{duration}}",
     "filter": "フィルター",
     "clear_filters": "クリア",

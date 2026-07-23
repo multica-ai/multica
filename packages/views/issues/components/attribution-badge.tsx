@@ -10,6 +10,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
 import { useT } from "../../i18n";
+import { ActorAvatar as HoverableActorAvatar } from "../../common/actor-avatar";
 
 /** First + last initial, for the avatar fallback when there's no picture. */
 function initialsOf(name: string): string {
@@ -119,29 +120,27 @@ export function AttributionBadge({
           : t(($) => $.execution_log.attribution.on_behalf_of, { name });
 
     return (
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span
-              className={cn(
-                "inline-flex min-w-0 items-center gap-1.5 text-xs",
-                uncertain ? "text-warning" : "text-muted-foreground",
-                className,
-              )}
-            >
-              <ActorAvatar
-                name={name}
-                initials={initialsOf(name)}
-                avatarUrl={initiator.avatar_url}
-                size="xs"
-                className="shrink-0"
-              />
-              <span className="min-w-0 truncate">{label}</span>
-            </span>
-          }
+      <span
+        className={cn(
+          "inline-flex min-w-0 items-center gap-1.5 text-xs",
+          uncertain ? "text-warning" : "text-muted-foreground",
+          className,
+        )}
+      >
+        <HoverableActorAvatar
+          actorType="member"
+          actorId={initiator.id}
+          size="xs"
+          enableHoverCard
+          className="shrink-0"
         />
-        <TooltipContent>{sourceLabel}</TooltipContent>
-      </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={<span className="min-w-0 truncate">{label}</span>}
+          />
+          <TooltipContent>{sourceLabel}</TooltipContent>
+        </Tooltip>
+      </span>
     );
   }
 

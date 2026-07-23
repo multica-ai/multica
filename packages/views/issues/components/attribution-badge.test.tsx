@@ -13,6 +13,25 @@ vi.mock("@multica/ui/components/common/actor-avatar", () => ({
   ),
 }));
 
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: ({
+    actorType,
+    actorId,
+    enableHoverCard,
+  }: {
+    actorType: string;
+    actorId: string;
+    enableHoverCard?: boolean;
+  }) => (
+    <span
+      data-testid="hoverable-member-avatar"
+      data-actor-type={actorType}
+      data-actor-id={actorId}
+      data-hover-card={String(!!enableHoverCard)}
+    />
+  ),
+}));
+
 import { AttributionBadge } from "./attribution-badge";
 
 afterEach(cleanup);
@@ -164,5 +183,17 @@ describe("AttributionBadge", () => {
     );
 
     expect(screen.getByText(expected)).toBeInTheDocument();
+    expect(screen.getByTestId("hoverable-member-avatar")).toHaveAttribute(
+      "data-actor-type",
+      "member",
+    );
+    expect(screen.getByTestId("hoverable-member-avatar")).toHaveAttribute(
+      "data-actor-id",
+      "u1",
+    );
+    expect(screen.getByTestId("hoverable-member-avatar")).toHaveAttribute(
+      "data-hover-card",
+      "true",
+    );
   });
 });

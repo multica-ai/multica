@@ -190,19 +190,21 @@ describe("ExecutionLogDialog", () => {
 
     const summary = await screen.findByTestId("execution-log-summary");
     expect(summary).toHaveTextContent("Ran for 1m 0s");
-    expect(summary).toHaveTextContent("1 tool call");
+    expect(summary).toHaveTextContent("1 event");
     expect(screen.getByTestId("execution-log-duration")).toHaveAttribute(
       "data-slot",
       "badge",
     );
-    expect(screen.getByTestId("execution-log-tool-count")).toHaveAttribute(
+    expect(screen.getByTestId("execution-log-event-count")).toHaveAttribute(
       "data-slot",
       "badge",
     );
     expect(summary).toHaveTextContent("Started");
     expect(screen.getByTestId("execution-log-start-time")).toHaveAttribute("title");
+    expect(screen.getByTestId("execution-log-start-time")).toHaveTextContent("2026");
     expect(screen.getByTestId("execution-log-end-time")).toHaveTextContent("Ended");
     expect(screen.getByTestId("execution-log-end-time")).toHaveAttribute("title");
+    expect(screen.getByTestId("execution-log-end-time")).toHaveTextContent("2026");
     expect(screen.queryByTestId("execution-log-in-progress")).not.toBeInTheDocument();
     expect(summary).not.toHaveTextContent("·");
     expect(summary).toHaveClass("gap-x-3");
@@ -282,6 +284,9 @@ describe("ExecutionLogDialog", () => {
 
     await waitFor(() =>
       expect(screen.getByTestId("execution-log-total")).toHaveTextContent("42"),
+    );
+    expect(screen.getByTestId("execution-log-event-count")).toHaveTextContent(
+      "42 events",
     );
   });
 
