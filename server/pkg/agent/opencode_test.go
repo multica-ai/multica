@@ -979,7 +979,7 @@ func TestOpencodeBackendInjectsThinkingVariant(t *testing.T) {
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
 		Model:         "opencode/deepseek-v4",
 		ThinkingLevel: "max",
-		CustomArgs:    []string{"--variant", "low", "--auto", "--keep-me"},
+		CustomArgs:    []string{"--variant", "low", "--auto", "--keep-me"}, // CEREBRO-PATCH(opencode-permission-flag): reject the retired flag.
 		Timeout:       5 * time.Second,
 	})
 	if err != nil {
