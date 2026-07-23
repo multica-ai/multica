@@ -18,10 +18,18 @@ test("Capabilities shows the effective allow and deny policy after reload", asyn
   const workspace = (await api.getWorkspaces())[0]!;
   api.setWorkspaceId(workspace.id);
   api.setWorkspaceSlug(workspace.slug);
-  await api.setWorkspaceFeatureFlag("cerebro_agent_page_redesign", true);
 
   const database = new pg.Client(DATABASE_URL);
   await database.connect();
+  const previousFeatureFlag = await database.query<{ enabled: boolean }>(
+    `SELECT enabled
+       FROM cerebro_feature_flags
+      WHERE workspace_id = $1
+        AND user_id = '00000000-0000-0000-0000-000000000000'
+        AND flag_key = 'cerebro_agent_page_redesign'`,
+    [workspace.id],
+  );
+  await api.setWorkspaceFeatureFlag("cerebro_agent_page_redesign", true);
   const userId = (
     await database.query(`SELECT id FROM "user" WHERE email = $1 LIMIT 1`, [
       "e2e@multica.ai",
@@ -52,7 +60,7 @@ test("Capabilities shows the effective allow and deny policy after reload", asyn
     await database.query(
       `INSERT INTO cerebro_tool_policy (
          workspace_id, tool_key, layer, subject_id, setting, resource_pattern
-       ) VALUES ($1, 'get_issue', 'agent', $2, 'allow', ''),
+       ) VALUES ($1, 'create_issue', 'agent', $2, 'allow', ''),
                 ($1, 'delete_issue', 'agent', $2, 'deny', '')`,
       [workspace.id, agentId],
     );
@@ -62,23 +70,73 @@ test("Capabilities shows the effective allow and deny policy after reload", asyn
     });
     await page.getByRole("button", { name: "Capabilities" }).click();
 
-    const allowed = page.locator('[title*="allow"]').filter({ hasText: /get.issue/i });
-    const denied = page.locator('[title*="deny"]').filter({ hasText: /delete.issue/i });
+    const allowed = page
+      .locator('[title*="allow"]')
+      .filter({ hasText: /^Create issue/ });
+    const denied = page
+      .locator('[title*="deny"]')
+      .filter({ hasText: /^Delete issue/ });
     await expect(allowed).toBeVisible();
     await expect(denied).toBeVisible();
+
+    const assertEffectiveAccess = async () => {
+      const capabilities = await api.getAgentCapabilities(agentId);
+      expect(
+        capabilities.tools.find((tool) => tool.key === "create_issue"),
+      ).toMatchObject({
+        permission: "allow",
+        allowed: true,
+        callable: true,
+      });
+      expect(
+        capabilities.tools.find((tool) => tool.key === "delete_issue"),
+      ).toMatchObject({
+        permission: "deny",
+        allowed: false,
+        callable: false,
+      });
+    };
+    await assertEffectiveAccess();
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: "Capabilities" }).click();
     await expect(allowed).toBeVisible();
     await expect(denied).toBeVisible();
+    await assertEffectiveAccess();
+    const evidencePath = process.env.PLAYWRIGHT_EVIDENCE_PATH;
+    const screenshot = await page.screenshot({
+      fullPage: true,
+      path: evidencePath,
+    });
+    await test.info().attach("capabilities-after-reload", {
+      body: screenshot,
+      contentType: "image/png",
+    });
   } finally {
     await database.query(`DELETE FROM cerebro_tool_policy WHERE subject_id = $1`, [
       agentId,
     ]);
     await database.query(`DELETE FROM agent WHERE id = $1`, [agentId]);
     await database.query(`DELETE FROM agent_runtime WHERE id = $1`, [runtimeId]);
+    if (previousFeatureFlag.rowCount === 0) {
+      await database.query(
+        `DELETE FROM cerebro_feature_flags
+          WHERE workspace_id = $1
+            AND user_id = '00000000-0000-0000-0000-000000000000'
+            AND flag_key = 'cerebro_agent_page_redesign'`,
+        [workspace.id],
+      );
+    } else {
+      await database.query(
+        `UPDATE cerebro_feature_flags
+            SET enabled = $2, updated_at = NOW()
+          WHERE workspace_id = $1
+            AND user_id = '00000000-0000-0000-0000-000000000000'
+            AND flag_key = 'cerebro_agent_page_redesign'`,
+        [workspace.id, previousFeatureFlag.rows[0]!.enabled],
+      );
+    }
     await database.end();
-    await api.setWorkspaceFeatureFlag("cerebro_agent_page_redesign", false);
     await api.cleanup();
   }
 });

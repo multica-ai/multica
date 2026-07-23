@@ -94,6 +94,23 @@ export class TestApiClient {
     return res.json();
   }
 
+  async getAgentCapabilities(agentId: string): Promise<{
+    tools: Array<{
+      key: string;
+      permission: string;
+      allowed?: boolean;
+      callable?: boolean;
+    }>;
+  }> {
+    const res = await this.authedFetch(`/api/agents/${agentId}/capabilities`);
+    if (!res.ok) {
+      throw new Error(
+        `getAgentCapabilities failed: ${res.status} ${await res.text()}`,
+      );
+    }
+    return res.json();
+  }
+
   setWorkspaceId(id: string) {
     this.workspaceId = id;
   }
