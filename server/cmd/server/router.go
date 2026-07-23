@@ -1106,6 +1106,34 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Initiatives (Initiatives & Orchestrator). The whole surface is
+			// release-flagged: every handler starts with
+			// requireInitiativesEnabled and 404s while the flag is off.
+			// Mutations additionally require a human actor: initiative gates
+			// (plan approval, pause/cancel) exist precisely to put a human
+			// above the agents, so a mat_ task token or cloud-node PAT must
+			// not be able to drive them — an agent could otherwise approve
+			// the very plan it is executing. Reads stay machine-accessible.
+			r.Route("/api/initiatives", func(r chi.Router) {
+				r.Get("/", h.ListInitiatives)
+				r.With(handler.RequireHumanActor).Post("/", h.CreateInitiative)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetInitiative)
+					r.Get("/plan", h.GetInitiativePlan)
+					r.Get("/events", h.ListInitiativeEvents)
+					r.Get("/blockers", h.ListInitiativeBlockers)
+					r.Group(func(r chi.Router) {
+						r.Use(handler.RequireHumanActor)
+						r.Patch("/", h.UpdateInitiative)
+						r.Post("/plan", h.RequestInitiativePlan)
+						r.Post("/plan/approve", h.ApproveInitiativePlan)
+						r.Post("/pause", h.PauseInitiative)
+						r.Post("/resume", h.ResumeInitiative)
+						r.Post("/cancel", h.CancelInitiative)
+					})
+				})
+			})
+
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)

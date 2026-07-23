@@ -16,6 +16,11 @@ const (
 	// ResourceLabels controls the agent- and skill-scoped label namespaces.
 	// Issue labels remain available while this release flag is off.
 	ResourceLabels = "settings_resource_labels"
+	// InitiativesOrchestrator gates the Initiatives & Orchestrator feature:
+	// the /api/initiatives surface, the reconciler job/listeners, and the
+	// frontend navigation entry. Off by default until the orchestrator
+	// pipeline (RFC delivery steps 2-7) is stable.
+	InitiativesOrchestrator = "initiatives_orchestrator"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -29,6 +34,7 @@ const (
 var frontendPublicFlags = []string{
 	ComposioMCPApps,
 	ResourceLabels,
+	InitiativesOrchestrator,
 }
 
 func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) bool {
@@ -37,6 +43,10 @@ func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) boo
 
 func ResourceLabelsEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, ResourceLabels, false)
+}
+
+func InitiativesEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, InitiativesOrchestrator, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

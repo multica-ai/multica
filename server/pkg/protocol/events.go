@@ -125,6 +125,18 @@ const (
 	EventSquadUpdated = "squad:updated"
 	EventSquadDeleted = "squad:deleted"
 
+	// Initiative events (Initiatives & Orchestrator). All are workspace
+	// broadcasts. `updated` carries the full initiative payload; granular
+	// task/event/blocker events carry ids plus the changed row so frontends
+	// can patch caches without refetching. `needs_human` additionally rides
+	// the inbox path via its own inbox item.
+	EventInitiativeCreated       = "initiative:created"
+	EventInitiativeUpdated       = "initiative:updated"
+	EventInitiativeTaskUpdated   = "initiative:task_updated"
+	EventInitiativeEventAppended = "initiative:event_appended"
+	EventInitiativeBlocker       = "initiative:blocker"
+	EventInitiativeNeedsHuman    = "initiative:needs_human"
+
 	// Daemon events
 	EventDaemonHeartbeat              = "daemon:heartbeat"
 	EventDaemonHeartbeatAck           = "daemon:heartbeat_ack"

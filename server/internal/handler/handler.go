@@ -139,6 +139,7 @@ type Handler struct {
 	TaskService            *service.TaskService
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
+	InitiativeService      *service.InitiativeService
 	EmailService           *service.EmailService
 	UpdateStore            UpdateStore
 	ModelListStore         ModelListStore
@@ -275,6 +276,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		TaskService:                  taskSvc,
 		IssueService:                 service.NewIssueService(queries, txStarter, bus, analyticsClient, taskSvc),
 		AutopilotService:             service.NewAutopilotService(queries, txStarter, bus, taskSvc),
+		InitiativeService:            service.NewInitiativeService(queries, txStarter, bus),
 		EmailService:                 emailService,
 		UpdateStore:                  NewInMemoryUpdateStore(),
 		ModelListStore:               NewInMemoryModelListStore(),
@@ -401,6 +403,7 @@ func uuidStringsOrEmpty(us []pgtype.UUID) []string {
 
 func int8ToPtr(v pgtype.Int8) *int64 { return util.Int8ToPtr(v) }
 func int4ToPtr(v pgtype.Int4) *int32 { return util.Int4ToPtr(v) }
+func int2ToPtr(v pgtype.Int2) *int16 { return util.Int2ToPtr(v) }
 func ptrToInt4(v *int32) pgtype.Int4 { return util.PtrToInt4(v) }
 
 // parseUUIDOrBadRequest validates a UUID string sourced from user input

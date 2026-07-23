@@ -573,6 +573,85 @@ type InboxItem struct {
 	Details       []byte             `json:"details"`
 }
 
+type Initiative struct {
+	ID                         pgtype.UUID        `json:"id"`
+	WorkspaceID                pgtype.UUID        `json:"workspace_id"`
+	Title                      string             `json:"title"`
+	Idea                       string             `json:"idea"`
+	Constraints                []byte             `json:"constraints"`
+	Status                     string             `json:"status"`
+	AutonomyLevel              pgtype.Int2        `json:"autonomy_level"`
+	PlanVersion                int32              `json:"plan_version"`
+	OrchestratorAgentID        pgtype.UUID        `json:"orchestrator_agent_id"`
+	BudgetLimitTokens          pgtype.Int8        `json:"budget_limit_tokens"`
+	BudgetSpentTokens          int64              `json:"budget_spent_tokens"`
+	MaxParallelTasks           pgtype.Int4        `json:"max_parallel_tasks"`
+	MaxAttempts                pgtype.Int4        `json:"max_attempts"`
+	StallTimeoutSeconds        pgtype.Int4        `json:"stall_timeout_seconds"`
+	ExternalWaitTimeoutSeconds pgtype.Int4        `json:"external_wait_timeout_seconds"`
+	PausePrevStatus            pgtype.Text        `json:"pause_prev_status"`
+	PauseReason                pgtype.Text        `json:"pause_reason"`
+	NeedsHumanReason           pgtype.Text        `json:"needs_human_reason"`
+	CreatedBy                  pgtype.UUID        `json:"created_by"`
+	ApprovedBy                 pgtype.UUID        `json:"approved_by"`
+	ApprovedAt                 pgtype.Timestamptz `json:"approved_at"`
+	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type InitiativeBlocker struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	InitiativeID    pgtype.UUID        `json:"initiative_id"`
+	TaskID          pgtype.UUID        `json:"task_id"`
+	SourceCommentID pgtype.UUID        `json:"source_comment_id"`
+	Category        pgtype.Text        `json:"category"`
+	Status          string             `json:"status"`
+	Question        string             `json:"question"`
+	Resolution      []byte             `json:"resolution"`
+	AnsweredBy      pgtype.UUID        `json:"answered_by"`
+	AnsweredAt      pgtype.Timestamptz `json:"answered_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type InitiativeEvent struct {
+	ID           pgtype.UUID        `json:"id"`
+	WorkspaceID  pgtype.UUID        `json:"workspace_id"`
+	InitiativeID pgtype.UUID        `json:"initiative_id"`
+	TaskID       pgtype.UUID        `json:"task_id"`
+	ActorType    string             `json:"actor_type"`
+	ActorID      pgtype.UUID        `json:"actor_id"`
+	EventType    string             `json:"event_type"`
+	Payload      []byte             `json:"payload"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type InitiativeTask struct {
+	ID                   pgtype.UUID        `json:"id"`
+	InitiativeID         pgtype.UUID        `json:"initiative_id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	PlanVersion          int32              `json:"plan_version"`
+	TaskKey              string             `json:"task_key"`
+	Title                string             `json:"title"`
+	Description          string             `json:"description"`
+	Role                 string             `json:"role"`
+	DependsOn            []pgtype.UUID      `json:"depends_on"`
+	AcceptanceCriteria   []byte             `json:"acceptance_criteria"`
+	RequiredCapabilities []string           `json:"required_capabilities"`
+	State                string             `json:"state"`
+	StateReason          pgtype.Text        `json:"state_reason"`
+	Attempt              int32              `json:"attempt"`
+	MaxAttempts          pgtype.Int4        `json:"max_attempts"`
+	AssigneeHint         []byte             `json:"assignee_hint"`
+	IssueID              pgtype.UUID        `json:"issue_id"`
+	Branch               pgtype.Text        `json:"branch"`
+	StallStrikes         int32              `json:"stall_strikes"`
+	LastActivityAt       pgtype.Timestamptz `json:"last_activity_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Issue struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_initiative_blocker_initiative;
