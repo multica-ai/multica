@@ -514,7 +514,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString(cerebroFeatureBrief())                                            // CEREBRO-PATCH(cerebro-feature-brief): FIR-3377 adds Cerebro Feature Flags section to Available Commands
 	b.WriteString(cerebroChatBrief())                                               // CEREBRO-PATCH(cerebro-chat-brief): TECH-3183 adds Chat Reply section to Available Commands
 	b.WriteString(cerebroChannelsBrief())                                           // CEREBRO-PATCH(tech-3255-channels-brief): TECH-3255 adds Channels & DMs and Agent Usage sections to Available Commands
-	b.WriteString(cerebroWorkpadBrief())                                            // CEREBRO-PATCH(cerebro-workpad-brief): FIR-3659 adds the flag-gated Workpad protocol section
+	b.WriteString(cerebroWorkpadBrief(ctx.WorkpadBriefEnabled))                     // CEREBRO-PATCH(cerebro-workpad-brief): FIR-3659 adds the cerebro_workpad-gated Workpad protocol section
 	b.WriteString(cerebroToolsBriefForMode(ctx.EffectiveTools, ctx.ToolsBriefMode)) // CEREBRO-PATCH(cerebro-tools-brief-callsite): FIR-2312 adds dynamic per-permission Connections & MCP tools section; FIR-3212 folds it when tools_brief_mode=summary
 
 	// Comment Formatting guardrail for ALL providers. The MUL-2904

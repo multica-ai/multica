@@ -1770,14 +1770,21 @@ eval running the deterministic workpad check), `server/internal/cerebro/workflow
 `server/internal/cerebro/workflows/hook_eval_condition.go` (`eval_failed` deferred condition
 operator, fresh-run semantics), `server/internal/handler/cerebro_issue_status_gate.go`
 (handler-side seam) and `server/internal/daemon/execenv/cerebro_workpad_brief.go`
-(flag-gated Workpad protocol brief section, `CEREBRO_WORKPAD_BRIEF_ENABLED`).
-The gate only ever applies to agent actors; members are never blocked. Everything is
-dark until `CEREBRO_WORKFLOW_HOOKS_ENABLED` is on AND a workspace hook policy listening
-on `before.issue.status_change` exists.
+(the Workpad protocol brief section). The brief is gated by the `cerebro_workpad`
+workspace feature flag (`packages/cerebro-feature-flags/registry.ts`, default OFF),
+resolved server-side at claim in `server/internal/handler/daemon_workpad_brief_cerebro.go`
+and carried to the daemon brief via `TaskContextForEnv.WorkpadBriefEnabled`.
+The gate only ever applies to agent actors; members are never blocked. Enforcement
+stays dark until `CEREBRO_WORKFLOW_HOOKS_ENABLED` is on AND a workspace hook policy
+listening on `before.issue.status_change` exists.
 
 | Patch | Location | Reason |
 |---|---|---|
 | `issue-status-gate` | `server/internal/handler/issue.go` | 5-line call into `cerebroGateIssueStatusChange` before the UpdateIssue transaction so a hook policy can 422 an agent's status change (workpad start-gate). |
 | `handler-issue-status-gate` | `server/internal/handler/handler.go` | `IssueStatusGate` seam field on Handler (interface satisfied by `*cerebroworkflows.IssueStatusGate`). |
 | `issue-status-gate-wire` | `server/cmd/server/router.go` | Wire `workflowHooksFeature.StatusGate` into the handler seam. |
-| `cerebro-workpad-brief` | `server/internal/daemon/execenv/runtime_config.go` | One `b.WriteString(cerebroWorkpadBrief())` callsite adding the flag-gated Workpad protocol section to the runtime brief. |
+| `cerebro-workpad-brief` | `server/internal/daemon/execenv/runtime_config.go` | One `b.WriteString(cerebroWorkpadBrief(ctx.WorkpadBriefEnabled))` callsite adding the `cerebro_workpad`-gated Workpad protocol section to the runtime brief. |
+| `execenv-workpad-brief` | `server/internal/daemon/execenv/execenv.go` | `WorkpadBriefEnabled bool` field on `TaskContextForEnv` carrying the resolved flag verdict into the brief builder. |
+| `daemon-task-workpad-brief` | `server/internal/daemon/types.go`, `server/internal/daemon/daemon.go` | `WorkpadBriefEnabled` on the daemon `Task` (JSON from the claim response) and its copy into `TaskContextForEnv`. |
+| `agent-task-workpad-brief` | `server/internal/handler/agent.go` | `WorkpadBriefEnabled` field on `AgentTaskResponse` so the claim response ships the workspace verdict to the daemon. |
+| `daemon-workpad-brief` | `server/internal/handler/daemon.go` | One-line `h.applyWorkpadBrief(...)` call at claim (resolver lives in the cerebro-prefixed `daemon_workpad_brief_cerebro.go`). |

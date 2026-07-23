@@ -1,7 +1,6 @@
 package execenv
 
 import (
-	"os"
 	"strings"
 )
 
@@ -14,19 +13,13 @@ import (
 // not the gate — it exists so agents do the right thing on the first attempt
 // instead of learning the rule from a 422.
 //
-// Gated by CEREBRO_WORKPAD_BRIEF_ENABLED so the rollout order can be:
-// brief on (agents learn the convention) → policies on (the gate enforces it).
+// Gated by the cerebro_workpad workspace feature flag (resolved server-side at
+// claim time and carried into the brief via TaskContextForEnv.WorkpadBriefEnabled)
+// so the rollout order can be: brief on (agents learn the convention) → policies
+// on (the gate enforces it).
 
-func cerebroWorkpadBriefEnabled() bool {
-	switch strings.ToLower(strings.TrimSpace(os.Getenv("CEREBRO_WORKPAD_BRIEF_ENABLED"))) {
-	case "1", "true", "yes", "on":
-		return true
-	}
-	return false
-}
-
-func cerebroWorkpadBrief() string {
-	if !cerebroWorkpadBriefEnabled() {
+func cerebroWorkpadBrief(enabled bool) string {
+	if !enabled {
 		return ""
 	}
 	var b strings.Builder

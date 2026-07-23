@@ -1603,6 +1603,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			h.applyContextDuplicationSaving(r.Context(), &resp, issue, task.ID)
 			// CEREBRO-PATCH(daemon-graphify-nudge): nudge agents to use the graphify code graph when the saving is on (FIR-1311)
 			h.applyGraphifyNudge(r.Context(), &resp, issue)
+			// CEREBRO-PATCH(daemon-workpad-brief): include the Workpad protocol section when cerebro_workpad is on (FIR-3659)
+			h.applyWorkpadBrief(r.Context(), &resp, issue)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
