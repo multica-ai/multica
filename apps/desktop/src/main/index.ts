@@ -8,6 +8,7 @@ import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
 import { openExternalSafely, downloadURLSafely } from "./external-url";
+import { PendingDownloadAuthorizations } from "./download-authorization";
 import { installContextMenu } from "./context-menu";
 import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
@@ -63,6 +64,8 @@ import {
 // same session. window.webContents.session is shared, and createWindow() can
 // be called again on macOS (app "activate" after all windows are closed).
 const downloadDialogSessions = new WeakSet<Electron.Session>();
+const requestHeaderSessions = new WeakSet<Electron.Session>();
+const pendingDownloadAuthorizations = new PendingDownloadAuthorizations();
 
 function installDownloadSaveDialogHandler(window: BrowserWindow): void {
   const { session } = window.webContents;
@@ -73,6 +76,32 @@ function installDownloadSaveDialogHandler(window: BrowserWindow): void {
       defaultPath: join(app.getPath("downloads"), item.getFilename()),
     });
   });
+}
+
+function installSessionRequestHeaderHandler(window: BrowserWindow): void {
+  const { session } = window.webContents;
+  if (requestHeaderSessions.has(session)) return;
+  requestHeaderSessions.add(session);
+
+  session.webRequest.onBeforeSendHeaders(
+    { urls: ["http://*/*", "https://*/*", "wss://*/*", "ws://*/*"] },
+    (details, callback) => {
+      if (details.url.startsWith("ws://") || details.url.startsWith("wss://")) {
+        delete details.requestHeaders.Origin;
+      } else {
+        pendingDownloadAuthorizations.apply(details);
+      }
+      callback({ requestHeaders: details.requestHeaders });
+    },
+  );
+  session.webRequest.onCompleted(
+    { urls: ["http://*/*", "https://*/*"] },
+    (details) => pendingDownloadAuthorizations.finish(details.id),
+  );
+  session.webRequest.onErrorOccurred(
+    { urls: ["http://*/*", "https://*/*"] },
+    (details) => pendingDownloadAuthorizations.finish(details.id),
+  );
 }
 
 // Bundled icon used for dock/taskbar branding. macOS/Windows production
@@ -369,15 +398,10 @@ function createWindow(): BrowserWindow {
     }
   });
 
-  // Strip Origin header from WebSocket upgrade requests so the server's
-  // origin whitelist doesn't reject connections from localhost dev origins.
-  window.webContents.session.webRequest.onBeforeSendHeaders(
-    { urls: ["wss://*/*", "ws://*/*"] },
-    (details, callback) => {
-      delete details.requestHeaders["Origin"];
-      callback({ requestHeaders: details.requestHeaders });
-    },
-  );
+  // One shared session hook strips WebSocket Origin and injects one-shot
+  // bearer auth for native attachment downloads. It is installed once per
+  // session because Electron only keeps the most recent listener per event.
+  installSessionRequestHeaderHandler(window);
 
   window.on("ready-to-show", () => {
     // Restore max/fullscreen after normal bounds are applied.
@@ -507,6 +531,7 @@ function createIssueWindow(context: IssueWindowContext): void {
   window.on("ready-to-show", () => window.show());
   installLocaleRefresh(window);
   installDownloadSaveDialogHandler(window);
+  installSessionRequestHeaderHandler(window);
 
   window.webContents.setWindowOpenHandler((details) => {
     void openExternalSafely(details.url);
@@ -690,14 +715,37 @@ if (!gotTheLock) {
       return { ok: true } as const;
     });
 
-    ipcMain.handle("file:download-url", (event, url: string) => {
-      const sourceWindow = BrowserWindow.fromWebContents(event.sender);
-      if (!sourceWindow) {
-        console.warn("[download] ignored file:download-url — source window torn down");
-        return;
-      }
-      downloadURLSafely(sourceWindow, url);
-    });
+    ipcMain.handle(
+      "file:download-url",
+      (event, url: unknown, options?: unknown) => {
+        const sourceWindow = BrowserWindow.fromWebContents(event.sender);
+        if (!sourceWindow) {
+          console.warn(
+            "[download] ignored file:download-url — source window torn down",
+          );
+          return;
+        }
+        if (typeof url !== "string") {
+          console.warn("[download] ignored file:download-url — invalid URL");
+          return;
+        }
+
+        const authorization =
+          options && typeof options === "object" && !Array.isArray(options)
+            ? (options as { authorization?: unknown }).authorization
+            : undefined;
+        const trustedAPIBaseURL = runtimeConfigResult.ok
+          ? runtimeConfigResult.config.apiUrl
+          : null;
+        pendingDownloadAuthorizations.register(
+          url,
+          authorization,
+          trustedAPIBaseURL,
+          sourceWindow.webContents.id,
+        );
+        downloadURLSafely(sourceWindow, url);
+      },
+    );
 
     // Sync IPC: app version + normalized OS for preload. Sync (not invoke) so
     // preload can attach the values to `desktopAPI.appInfo` before any renderer

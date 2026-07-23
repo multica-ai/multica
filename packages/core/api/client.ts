@@ -398,6 +398,15 @@ export class ApiClient {
     this.token = token;
   }
 
+  /**
+   * Returns the bearer header for a platform transport that cannot use this
+   * client's fetch pipeline. Callers must enforce the destination origin at
+   * their own trusted boundary before putting this value on the wire.
+   */
+  getAuthorizationHeader(): string | null {
+    return this.token ? `Bearer ${this.token}` : null;
+  }
+
   private readCsrfToken(): string | null {
     if (typeof document === "undefined") return null;
     const match = document.cookie
