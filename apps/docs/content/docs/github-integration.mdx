@@ -224,11 +224,11 @@ GitHub's [webhook contract](https://docs.github.com/en/webhooks/webhook-events-a
 
 So under the recommended read-only setup Multica learns that a suite **finished**, never that one **started**. Two things follow:
 
-- **In-flight CI is not surfaced.** A PR whose checks are still running shows *Checks haven't reported yet*, the same as a PR with no CI at all. There is no running/pending indicator.
+- **In-flight CI is not surfaced, at any permission level.** A PR whose checks are still running shows *Checks haven't reported yet*, the same as a PR with no CI at all. There is no running/pending indicator.
 - **A green row means "what reported, passed" — not "everything passed."** If a repo has two reporting apps (say GitHub Actions and Vercel) and only one has finished, the row reads **Checks passed** based on that one suite. This is why the copy is *Checks passed* and not *All checks passed*. Treat the row as a lower bound and open the PR on GitHub before merging on its say-so.
 
 <Callout type="info">
-**Why not just request `checks: write`?** Write-level access to Checks lets an app **create and update check runs on your repositories** — it is a repo-write capability, not a broader read. Multica is a read-only mirror and never writes to GitHub, so requesting a write scope purely to render an in-progress spinner is a trade we don't make on your behalf. If your team wants in-flight status and accepts that scope, set **Checks** to **Read and write** on your own App: the server already records `requested` / `rerequested` as pending and the sidebar will start showing *Some checks haven't completed yet* with no code change.
+**Why doesn't raising the permission fix this?** It doesn't — `checks: write` is not a bigger read. GitHub sends `requested` / `rerequested` to say "**GitHub has created a check suite for YOUR app on this commit; now add your check runs to it**", not "some other CI provider started". Multica is an observer and never creates check runs, so those events carry no information about GitHub Actions or Vercel. The webhook handler ignores every action except `completed` for exactly this reason. Real in-flight status needs a different mechanism — polling the checks API, or a `check_run`-based model — not a permission bump.
 </Callout>
 
 ## Limitations
@@ -238,7 +238,7 @@ A few rough edges to be aware of today:
 - **No manual link UI yet** — the only way to link a PR is to have the identifier in its branch, title, or body.
 - **CI status is per check suite, not per job** — Multica rolls each reporting app (GitHub Actions, Vercel, …) up to one pass/fail result. Individual job names and logs stay on GitHub. Review comments and reviewers are not surfaced.
 - **CI status needs the `check_suite` subscription** — an App created before this event was documented will show *Checks haven't reported yet* on every PR forever. See [PR rows show no CI status](#pr-rows-show-no-ci-status).
-- **No in-flight CI, and a green row is a lower bound** — read-level Checks access only receives `completed` suites, so running checks are invisible and a row can read *Checks passed* while another provider is still going. Details and the opt-in fix in [what CI status can and cannot tell you](#what-ci-status-can-and-cannot-tell-you).
+- **No in-flight CI, and a green row is a lower bound** — Multica only ever records `completed` suites, so running checks are invisible and a row can read *Checks passed* while another provider is still going. Details in [what CI status can and cannot tell you](#what-ci-status-can-and-cannot-tell-you).
 - **No workspace-level config** for the merge → Done rule — it's a fixed default (`merged → done`, unless `cancelled`). Workspace-customizable mappings are a future addition.
 - **Multi-PR-to-one-issue is conservative on merge** — if two PRs both reference `MUL-123` and the first one merges, the issue is moved to `Done` immediately. A follow-up change to wait for all linked PRs to resolve before advancing is in progress.
 

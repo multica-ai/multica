@@ -222,11 +222,11 @@ GitHub 的 [webhook 契约](https://docs.github.com/en/webhooks/webhook-events-a
 
 所以在推荐的只读配置下，Multica 只知道一个 suite **跑完了**，永远不知道它**开始了**。由此有两个结论：
 
-- **运行中的 CI 不会显示。** check 还在跑的 PR 显示「Checks 还没有汇报」，和一个根本没配 CI 的 PR 长得一模一样。没有运行中指示。
+- **运行中的 CI 不会显示，任何权限级别都一样。** check 还在跑的 PR 显示「Checks 还没有汇报」，和一个根本没配 CI 的 PR 长得一模一样。没有运行中指示。
 - **绿色那一行的意思是「已汇报的都通过了」，不是「全都通过了」。** 如果一个仓库有两个上报方（比如 GitHub Actions 和 Vercel），只有一个跑完时，这一行就会基于那一个 suite 显示**检查通过**。这正是文案是「检查通过」而不是「全部检查通过」的原因。把这一行当作下界看，真要合并之前还是去 GitHub 上确认。
 
 <Callout type="info">
-**为什么不直接申请 `checks: write`？** Checks 的写权限允许一个 App **在你的仓库上创建和修改 check run**——那是仓库写能力，不是更大范围的读。Multica 是一个只读镜像，从不向 GitHub 写入，为了渲染一个「进行中」的转圈就去要一个写 scope，这个取舍我们不替你做。如果你的团队确实想要运行中状态、也接受这个 scope，可以自己把 App 的 **Checks** 改成 **Read and write**：服务端已经会把 `requested` / `rerequested` 记为 pending，侧栏会开始显示「Checks 运行中」，不需要改任何代码。
+**那把权限提上去不就好了？** 不行——`checks: write` 不是「读得更多」。GitHub 发 `requested` / `rerequested` 的意思是「**GitHub 已经在这个 commit 上为你的 App 建了一个 check suite，现在请你往里加 check run**」，而不是「别的 CI 提供方开始跑了」。Multica 是观察者，从不创建 check run，所以这些事件根本不携带关于 GitHub Actions 或 Vercel 的任何信息。webhook handler 正是因此只接受 `completed`，其他 action 一律忽略。真正的运行中状态需要换机制——轮询 checks API，或者改用基于 `check_run` 的模型——提权解决不了。
 </Callout>
 
 ## 已知限制
@@ -235,7 +235,7 @@ GitHub 的 [webhook 契约](https://docs.github.com/en/webhooks/webhook-events-a
 
 - **手动 link UI 暂未提供**——关联 PR 的唯一方法是把 issue 编号写到 PR 分支 / 标题 / 正文
 - **CI 状态按 check suite 聚合，不细到 job**——每个上报方（GitHub Actions、Vercel……）折叠成一个通过 / 失败的结果，具体 job 名称和日志仍然只在 GitHub 上。reviewer 评论和 reviewer 列表没接进 Multica
-- **看不到运行中的 CI，绿色只是下界**——只读的 Checks 权限只能收到 `completed` 事件，所以正在跑的 check 完全不可见，而且在另一个上报方还没跑完时行里就可能显示「检查通过」。细节和可选的解法见 [CI 状态能说明什么、不能说明什么](#ci-状态能说明什么不能说明什么)
+- **看不到运行中的 CI，绿色只是下界**——Multica 只会记录 `completed` 的 suite，所以正在跑的 check 完全不可见，而且在另一个上报方还没跑完时行里就可能显示「检查通过」。细节见 [CI 状态能说明什么、不能说明什么](#ci-状态能说明什么不能说明什么)
 - **CI 状态依赖 `check_suite` 订阅**——在补上这个事件之前创建的 App，每个 PR 会永远显示「Checks 还没有汇报」。见 [PR 行不显示 CI 状态](#pr-行不显示-ci-状态)
 - **没有工作区级别的 merge → status 映射配置**——默认固定是 `merged → done`（cancelled 除外）。可配置映射是后续迭代
 - **同 issue 多 PR 时，merge 行为偏激进**——两个 PR 都引用 `MUL-123` 时，第一个 merge 就把 issue 转 Done。"等所有关联 PR 都解决再推进 issue 状态"的优化已经在做了

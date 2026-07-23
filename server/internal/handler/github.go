@@ -1025,12 +1025,8 @@ type ghCheckSuitePayload struct {
 }
 
 // handleCheckSuiteEvent records the CI suite state for each PR the suite
-// references. We persist all non-terminal actions (`requested`, `rerequested`)
-// as well as `completed`: a `requested`/`rerequested` event has status
-// `queued`/`in_progress` and an empty conclusion, which the aggregation query
-// counts as pending. Without persisting them, the per-PR `checks_pending`
-// count stays at 0 while CI is mid-run and the PR card falls through to
-// "checks not reported yet" until the first suite finishes.
+// references. Only the `completed` action is recorded — see the action gate
+// below for why `requested` / `rerequested` must be ignored.
 //
 // The suite payload may reference multiple PRs (e.g. the same head SHA is
 // open against several base branches), so we iterate. A reference whose PR
@@ -1040,6 +1036,30 @@ func (h *Handler) handleCheckSuiteEvent(ctx context.Context, body []byte) {
 	var p ghCheckSuitePayload
 	if err := json.Unmarshal(body, &p); err != nil {
 		slog.Warn("github: bad check_suite payload", "err", err)
+		return
+	}
+	// Multica observes other apps' CI results; it is not itself a CI provider.
+	//
+	// `check_suite.requested` / `.rerequested` are NOT "some CI provider just
+	// started running". GitHub delivers them only to Apps holding Checks
+	// *write*, and their meaning is "GitHub has created a check suite FOR YOU
+	// on this commit — now add your check runs to it"
+	// (https://docs.github.com/en/apps/creating-github-apps/writing-code-for-a-github-app/building-ci-checks-with-a-github-app).
+	//
+	// Multica never creates or completes check runs, so recording such a suite
+	// would park a `queued` row that nothing can ever move to `completed`. The
+	// aggregation counts it as pending forever, and because `checks_pending`
+	// outranks `checks_passed` in derivePullRequestStatusKind, every PR row on
+	// that installation would freeze on "checks running" and mask the real
+	// pass/fail result. Self-hosters who already grant Checks write would hit
+	// this on every push, so the gate is on the action, not on the permission.
+	//
+	// Consequence, stated so it is not rediscovered as a bug: in-flight CI is
+	// not observable through this event at read level, so the PR card shows
+	// completed suites only. A genuine "running" signal needs a different
+	// mechanism (polling the checks API, or a check_run-based model) — do not
+	// resurrect `requested` as a substitute for it.
+	if p.Action != "completed" {
 		return
 	}
 	if p.Installation.ID == 0 {
