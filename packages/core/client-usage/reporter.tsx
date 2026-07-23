@@ -13,6 +13,14 @@ export function utcDay(date = new Date()): string {
   return date.toISOString().slice(0, 10);
 }
 
+// Per-day dedup marker. Including the client version means a same-day client
+// upgrade (e.g. a new Vercel deployment loaded in the browser) re-reports and
+// refreshes client_usage_daily.client_version instead of being skipped until
+// the next UTC day.
+export function usageReportMarker(day: string, version?: string): string {
+  return `${day}:${version ?? "unknown"}`;
+}
+
 export function ClientUsageReporter({
   storage,
   identity,
@@ -40,10 +48,11 @@ export function ClientUsageReporter({
     try {
       const installID = getOrCreateInstallId(storage);
       const reportedKey = `${LAST_REPORTED_PREFIX}:${activeUserID}:${platform}:${installID}`;
-      if (storage.getItem(reportedKey) === day) return;
+      const marker = usageReportMarker(day, identity?.version);
+      if (storage.getItem(reportedKey) === marker) return;
       inFlight.current = true;
       await getApi().upsertClientUsage({ install_id: installID });
-      storage.setItem(reportedKey, day);
+      storage.setItem(reportedKey, marker);
     } catch {
       // Usage reporting is best-effort and must never interrupt app startup.
     } finally {
@@ -53,7 +62,7 @@ export function ClientUsageReporter({
         void reportIfNeeded();
       }
     }
-  }, [identity?.platform, storage]);
+  }, [identity?.platform, identity?.version, storage]);
 
   useEffect(() => {
     void reportIfNeeded();

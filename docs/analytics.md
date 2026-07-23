@@ -731,13 +731,25 @@ and login. Clearing/resetting that profile intentionally creates a new
 installation. Web and Desktop never share an installation ID.
 
 Clients report after authentication when that installation has no successful
-report for the current UTC day, and re-check on focus/resume. Desktop updates
-the same daily row after its first local-runtime probe and whenever the
-same-day runtime signature changes. Reports contain only client kind/version,
-a coarse OS bucket, optional current workspace context, and aggregate runtime
-provider/online/offline counts. The server supplies user, date, and timestamps.
-Device names, hostnames, local usernames, filesystem paths, raw user agents,
-IP addresses, and raw probe errors are not stored here.
+report for the current UTC day **at the current client version**, and re-check
+on focus/resume. Because the per-day dedup marker includes the reported client
+version, a same-day client upgrade (for example a new Vercel Web deployment
+loaded in the browser) re-reports and refreshes `client_version` instead of
+being skipped until the next UTC day. Desktop updates the same daily row after
+its first local-runtime probe and whenever the same-day runtime signature
+changes. Reports contain only client kind/version, a coarse OS bucket, optional
+current workspace context, and aggregate runtime provider/online/offline counts.
+The server supplies user, date, and timestamps. Device names, hostnames, local
+usernames, filesystem paths, raw user agents, IP addresses, and raw probe errors
+are not stored here.
+
+`client_version` is a build/deploy identifier, not a per-user app version. On
+Web it resolves at build time to the first of `NEXT_PUBLIC_APP_VERSION` (release
+workflow or manual override), `VERCEL_DEPLOYMENT_ID` (unique per Vercel
+deployment), or `VERCEL_GIT_COMMIT_SHA`, falling back to the `apps/web`
+package.json version for local/plain-Docker builds. Reading the Vercel
+variables requires "Automatically expose System Environment Variables" enabled
+on the Vercel project.
 
 `first_active_at` and `last_active_at` are the first and latest successful
 reports **within that UTC day**, not lifetime installation timestamps. Compute
