@@ -16,6 +16,9 @@ export interface IssueActivityState {
 export interface IssueSurfaceActivity {
   activityByIssueId: Map<string, IssueActivityState>;
   runningIssueIds: Set<string>;
+  /** Distinct agents with a visible running issue task. Stable snapshot order
+   * is retained so avatar stacks do not reshuffle between equivalent reads. */
+  runningAgentIds: string[];
 }
 
 function isQueuedTaskStatus(status: AgentTask["status"]) {
@@ -58,6 +61,8 @@ export function deriveIssueSurfaceActivity(
   tasks: readonly AgentTask[],
 ): IssueSurfaceActivity {
   const activityByIssueId = new Map<string, IssueActivityState>();
+  const runningAgentIds: string[] = [];
+  const seenRunningAgents = new Set<string>();
 
   for (const task of tasks) {
     if (!task.issue_id) continue;
@@ -76,6 +81,10 @@ export function deriveIssueSurfaceActivity(
     if (task.status === "running") {
       current.runningTasks.push(task);
       current.isWorking = true;
+      if (!seenRunningAgents.has(task.agent_id)) {
+        seenRunningAgents.add(task.agent_id);
+        runningAgentIds.push(task.agent_id);
+      }
     } else {
       current.queuedTasks.push(task);
       current.isQueued = true;
@@ -89,7 +98,7 @@ export function deriveIssueSurfaceActivity(
     if (activity.isWorking) runningIssueIds.add(issueId);
   }
 
-  return { activityByIssueId, runningIssueIds };
+  return { activityByIssueId, runningIssueIds, runningAgentIds };
 }
 
 export function useIssueSurfaceActivity(): IssueSurfaceActivity {

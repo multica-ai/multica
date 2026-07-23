@@ -245,6 +245,9 @@ export interface IssueTableFilters {
     end: string;
   };
   working_only?: boolean;
+  /** Visible agents whose running issue tasks define the activity window.
+   * Omitted keeps the legacy any-running-agent behavior; [] matches none. */
+  working_agent_ids?: string[];
   include_sub_issues?: boolean;
 }
 
@@ -347,6 +350,7 @@ export type IssueTableFacetSpec =
   | { kind: "creator" }
   | { kind: "project" }
   | { kind: "label" }
+  | { kind: "working_agent" }
   | { kind: "property"; property_id: string };
 
 export interface IssueTableFacetsRequest {

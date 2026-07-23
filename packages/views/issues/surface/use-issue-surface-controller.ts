@@ -63,10 +63,13 @@ export interface IssueSurfaceController {
   projectIssues: Issue[];
   issues: Issue[];
   swimlaneIssues: Issue[];
-  /** The rows the agents-working filter would leave on screen. Feeds the
-   *  header chip so its count IS the post-click row count (MUL-4884). */
-  /** See IssueSurfaceData.workingScopeIssues — undefined means UNKNOWN. */
+  /** The rows the agents-working filter would leave on non-Table surfaces.
+   * See IssueSurfaceData.workingScopeIssues — undefined means the issue
+   * projection is unknown; Table uses workingAgentIds instead. */
   workingScopeIssues: Issue[] | undefined;
+  /** Exact agent ids from the bounded server Table activity facet. Undefined
+   * outside Table or while the facet is unresolved. */
+  workingAgentIds: string[] | undefined;
   filteredGanttIssues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
   assigneeGroupQueryKey?: QueryKey;
@@ -326,7 +329,15 @@ export function useIssueSurfaceController({
           ? { properties: effectivePropertyFilters }
           : {}),
         ...(date ? { date } : {}),
-        ...(agentRunningFilter ? { working_only: true } : {}),
+        ...(agentRunningFilter
+          ? {
+              working_only: true,
+              // The snapshot endpoint already applies agent visibility.
+              // Keep the established intent explicit while the server
+              // narrows it to this visible agent set.
+              working_agent_ids: activity.runningAgentIds,
+            }
+          : {}),
         include_sub_issues: showSubIssues,
       },
       ...(debouncedTableSearch ? { search: debouncedTableSearch } : {}),
@@ -337,6 +348,7 @@ export function useIssueSurfaceController({
     };
   }, [
     agentRunningFilter,
+    activity.runningAgentIds,
     assigneeFilters,
     creatorFilters,
     dateParams,
@@ -376,6 +388,40 @@ export function useIssueSurfaceController({
     // statements and repeatedly scan the issue table after invalidation.
     enabled: usesTable && activeTableFacet !== null,
   });
+  const tableWorkingFacetRequest = useMemo(
+    () => ({
+      query: {
+        ...tableQuerySpec,
+        filters: {
+          ...tableQuerySpec.filters,
+          working_only: true,
+          working_agent_ids: activity.runningAgentIds,
+        },
+      },
+      facets: [{ kind: "working_agent" as const }],
+      include_total: false,
+    }),
+    [activity.runningAgentIds, tableQuerySpec],
+  );
+  const tableWorkingFacetsQuery = useQuery({
+    ...issueTableFacetsOptions(wsId, tableWorkingFacetRequest),
+    // With no visible running issue task the exact answer is already known.
+    enabled: usesTable && activity.runningAgentIds.length > 0,
+  });
+  const workingAgentIds = useMemo(() => {
+    if (!usesTable) return undefined;
+    if (activity.runningAgentIds.length === 0) return [];
+    const response = tableWorkingFacetsQuery.data;
+    if (!response?.query_fingerprint) return undefined;
+    const facet = response.facets.find(
+      (candidate) => candidate.kind === "working_agent",
+    );
+    return facet?.values.map((value) => value.key);
+  }, [
+    activity.runningAgentIds.length,
+    tableWorkingFacetsQuery.data,
+    usesTable,
+  ]);
   useEffect(() => {
     if (!usesTable) setActiveTableFacet(null);
   }, [usesTable]);
@@ -519,6 +565,7 @@ export function useIssueSurfaceController({
     viewMode: effectiveViewMode,
     allowGantt: allowedModes.has("gantt") && !!projectId,
     ...data,
+    workingAgentIds,
     // Keep TableView mounted for an empty search result so its local search
     // control remains available to refine or clear the query. Include the
     // debounced value as well to avoid a brief empty-screen flash while a

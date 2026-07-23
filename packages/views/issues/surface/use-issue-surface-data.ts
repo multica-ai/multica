@@ -62,9 +62,9 @@ export interface IssueSurfaceData {
   issues: Issue[];
   swimlaneIssues: Issue[];
   /** The rows the agents-working filter would leave on screen. `undefined`
-   *  means the set is genuinely unknown: Table membership is server-owned,
-   *  and the activity chip must not reconstruct a complete issue window just
-   *  to decorate the header. */
+   *  means the issue-object projection is unknown: Table membership is
+   *  server-owned, and its chip uses the controller's bounded agent facet
+   *  rather than reconstructing a complete issue window. */
   workingScopeIssues: Issue[] | undefined;
   filteredGanttIssues: Issue[];
   assigneeGroups?: IssueAssigneeGroup[];
@@ -345,8 +345,8 @@ export function useIssueSurfaceData({
       // second complete issue window merely to decorate the activity chip:
       // that was the final hidden auto-materialization loop behind the old
       // 1,000-row ceiling. An empty task set is trivially known; otherwise
-      // keep the chip indeterminate until a bounded server facet supplies
-      // the matching task/issue projection.
+      // leave the issue-object projection unknown. The controller supplies
+      // the chip's exact agent ids through a bounded server facet.
       if (!hasRunningIssues) return EMPTY_ISSUES;
       return undefined;
     }

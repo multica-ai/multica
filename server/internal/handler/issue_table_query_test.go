@@ -83,19 +83,23 @@ func (tx *issueTableEnrichmentFailTx) QueryRow(ctx context.Context, sql string, 
 }
 
 func TestCanonicalIssueTableFingerprintNormalizesSetLikeArrays(t *testing.T) {
+	leftWorkingAgentIDs := []string{"b", "a", "b"}
 	left := issueTableQuerySpec{
 		Scope: issueTableScope{Kind: "workspace", AssigneeTypes: []string{"agent", "member", "agent"}},
 		Filters: issueTableFiltersRequest{
-			Statuses:   []string{"todo", "backlog", "todo"},
-			ProjectIDs: []string{"b", "a"},
+			Statuses:        []string{"todo", "backlog", "todo"},
+			ProjectIDs:      []string{"b", "a"},
+			WorkingAgentIDs: &leftWorkingAgentIDs,
 		},
 		Sort: issueTableSortRequest{Field: "title", Direction: "asc"},
 	}
+	rightWorkingAgentIDs := []string{"a", "b"}
 	right := issueTableQuerySpec{
 		Scope: issueTableScope{Kind: "workspace", AssigneeTypes: []string{"member", "agent"}},
 		Filters: issueTableFiltersRequest{
-			Statuses:   []string{"backlog", "todo"},
-			ProjectIDs: []string{"a", "b"},
+			Statuses:        []string{"backlog", "todo"},
+			ProjectIDs:      []string{"a", "b"},
+			WorkingAgentIDs: &rightWorkingAgentIDs,
 		},
 		Sort: issueTableSortRequest{Field: "title", Direction: "asc"},
 	}
@@ -252,6 +256,145 @@ func TestIssueTableRowsCommitsBeforeBestEffortEnrichment(t *testing.T) {
 		strings.Contains(rowQuerySQL, "membership AS") ||
 		strings.Contains(rowQuerySQL, "FROM membership child") {
 		t.Fatalf("flat rows query must page directly without hierarchy work:\n%s", rowQuerySQL)
+	}
+}
+
+func TestIssueTableWorkingAgentFacetAndFilter(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	suffix := time.Now().UnixNano()
+	agentA := createHandlerTestAgent(t, fmt.Sprintf("table-working-a-%d", suffix), []byte(`{}`))
+	agentB := createHandlerTestAgent(t, fmt.Sprintf("table-working-b-%d", suffix), []byte(`{}`))
+
+	var projectID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO project (workspace_id, title)
+		VALUES ($1, $2)
+		RETURNING id
+	`, testWorkspaceID, fmt.Sprintf("Table working agents %d", suffix)).Scan(&projectID); err != nil {
+		t.Fatalf("create project: %v", err)
+	}
+
+	var finalNumber int
+	if err := testPool.QueryRow(ctx, `
+		UPDATE workspace
+		SET issue_counter = GREATEST(
+			issue_counter,
+			(SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)
+		) + 2
+		WHERE id = $1
+		RETURNING issue_counter
+	`, testWorkspaceID).Scan(&finalNumber); err != nil {
+		t.Fatalf("reserve issue numbers: %v", err)
+	}
+
+	var issueA, issueB string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			position, number, project_id
+		)
+		VALUES ($1, 'working-agent-a', 'in_progress', 'none', 'member', $2, 1, $3, $4)
+		RETURNING id
+	`, testWorkspaceID, testUserID, finalNumber-1, projectID).Scan(&issueA); err != nil {
+		t.Fatalf("create issue A: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			position, number, project_id
+		)
+		VALUES ($1, 'working-agent-b', 'in_progress', 'none', 'member', $2, 2, $3, $4)
+		RETURNING id
+	`, testWorkspaceID, testUserID, finalNumber, projectID).Scan(&issueB); err != nil {
+		t.Fatalf("create issue B: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
+		VALUES
+			($1, $3, $4, 'running', 0),
+			($2, $3, $5, 'running', 0)
+	`, agentA, agentB, testRuntimeID, issueA, issueB); err != nil {
+		t.Fatalf("create running tasks: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`, issueA, issueB)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id IN ($1, $2)`, issueA, issueB)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID)
+	})
+
+	visibleAgentIDs := []string{agentA}
+	query := issueTableQuerySpec{
+		Scope: issueTableScope{Kind: "project", ProjectID: projectID},
+		Filters: issueTableFiltersRequest{
+			WorkingOnly:     true,
+			WorkingAgentIDs: &visibleAgentIDs,
+		},
+		Sort: issueTableSortRequest{Field: "position", Direction: "asc"},
+	}
+
+	includeTotal := false
+	facetsRecorder := httptest.NewRecorder()
+	testHandler.ListIssueTableFacets(facetsRecorder, newRequest("POST", "/api/issues/table/facets", issueTableFacetsRequest{
+		Query:        query,
+		Facets:       []issueTableFacetSpec{{Kind: "working_agent"}},
+		IncludeTotal: &includeTotal,
+	}))
+	if facetsRecorder.Code != http.StatusOK {
+		t.Fatalf("working-agent facets status = %d: %s", facetsRecorder.Code, facetsRecorder.Body.String())
+	}
+	var facets issueTableFacetsResponse
+	if err := json.NewDecoder(facetsRecorder.Body).Decode(&facets); err != nil {
+		t.Fatalf("decode working-agent facets: %v", err)
+	}
+	if len(facets.Facets) != 1 || len(facets.Facets[0].Values) != 1 {
+		t.Fatalf("unexpected working-agent facets: %#v", facets.Facets)
+	}
+	if value := facets.Facets[0].Values[0]; value.Key != agentA || value.Count != 1 {
+		t.Fatalf("working-agent facet = %#v, want agent A with one issue", value)
+	}
+
+	compile := func(filters issueTableFiltersRequest) issueTableSQL {
+		t.Helper()
+		recorder := httptest.NewRecorder()
+		compiled, ok := testHandler.compileIssueTableQuery(
+			recorder,
+			newRequest("POST", "/api/issues/table/rows", nil),
+			issueTableQuerySpec{
+				Scope:   query.Scope,
+				Filters: filters,
+				Sort:    query.Sort,
+			},
+		)
+		if !ok {
+			t.Fatalf("compile working-agent query status = %d: %s", recorder.Code, recorder.Body.String())
+		}
+		return compiled
+	}
+
+	narrowed := compile(query.Filters)
+	if !strings.Contains(narrowed.where, "atq.agent_id = ANY(") ||
+		!strings.Contains(narrowed.where, "atq.status = 'running'") {
+		t.Fatalf("agent-id filter missing from table predicate: %s", narrowed.where)
+	}
+
+	legacy := compile(issueTableFiltersRequest{WorkingOnly: true})
+	if !strings.Contains(legacy.where, "atq.status = 'running'") ||
+		strings.Contains(legacy.where, "atq.agent_id = ANY(") {
+		t.Fatalf("legacy working_only predicate changed: %s", legacy.where)
+	}
+
+	emptyAgentIDs := []string{}
+	empty := compile(issueTableFiltersRequest{
+		WorkingOnly:     true,
+		WorkingAgentIDs: &emptyAgentIDs,
+	})
+	if !strings.Contains(empty.where, "FALSE") {
+		t.Fatalf("empty working-agent list did not compile to an empty window: %s", empty.where)
 	}
 }
 

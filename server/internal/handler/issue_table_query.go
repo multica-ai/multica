@@ -92,7 +92,11 @@ type issueTableFiltersRequest struct {
 	Properties        map[string][]string          `json:"properties,omitempty"`
 	Date              *issueTableDateFilterRequest `json:"date,omitempty"`
 	WorkingOnly       bool                         `json:"working_only,omitempty"`
-	IncludeSubIssues  *bool                        `json:"include_sub_issues,omitempty"`
+	// Nil preserves the legacy working_only predicate (any running task).
+	// A present list narrows that predicate to the caller-visible agents;
+	// present-but-empty deliberately matches no issues.
+	WorkingAgentIDs  *[]string `json:"working_agent_ids,omitempty"`
+	IncludeSubIssues *bool     `json:"include_sub_issues,omitempty"`
 }
 
 type issueTableSortRequest struct {
@@ -248,6 +252,13 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 	normalized.Filters.LabelIDs = sortedUniqueStrings(normalized.Filters.LabelIDs)
 	normalized.Filters.Assignees = sortedUniqueActors(normalized.Filters.Assignees)
 	normalized.Filters.Creators = sortedUniqueActors(normalized.Filters.Creators)
+	if normalized.Filters.WorkingAgentIDs != nil {
+		values := sortedUniqueStrings(*normalized.Filters.WorkingAgentIDs)
+		if values == nil {
+			values = []string{}
+		}
+		normalized.Filters.WorkingAgentIDs = &values
+	}
 	for key, values := range normalized.Filters.Properties {
 		normalized.Filters.Properties[key] = sortedUniqueStrings(values)
 	}
@@ -574,7 +585,24 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		where = append(where, fmt.Sprintf("i.%s >= %s AND i.%s < %s", column, addArg(start), column, addArg(end)))
 	}
 
-	if spec.Filters.WorkingOnly {
+	if spec.Filters.WorkingAgentIDs != nil {
+		workingAgentIDs, ok := parseIssueTableUUIDList(
+			w,
+			sortedUniqueStrings(*spec.Filters.WorkingAgentIDs),
+			"filters.working_agent_ids",
+		)
+		if !ok {
+			return issueTableSQL{}, false
+		}
+		if len(workingAgentIDs) == 0 {
+			where = append(where, "FALSE")
+		} else {
+			where = append(where, fmt.Sprintf(
+				"EXISTS (SELECT 1 FROM agent_task_queue atq WHERE atq.issue_id = i.id AND atq.status = 'running' AND atq.agent_id = ANY(%s::uuid[]))",
+				addArg(workingAgentIDs),
+			))
+		}
+	} else if spec.Filters.WorkingOnly {
 		where = append(where, "EXISTS (SELECT 1 FROM agent_task_queue atq WHERE atq.issue_id = i.id AND atq.status = 'running')")
 	}
 	if spec.Filters.IncludeSubIssues != nil && !*spec.Filters.IncludeSubIssues {

@@ -27,6 +27,7 @@ import {
 export function MyIssuesHeader({
   allIssues,
   workingIssues,
+  workingAgentIds,
   scope,
   onScopeChange,
   isRefreshing = false,
@@ -35,10 +36,10 @@ export function MyIssuesHeader({
   onTableFacetChange,
 }: {
   allIssues: Issue[];
-  /** The rows the agents-working filter would leave on screen — undefined
-   *  when the set is unknown (chip renders indeterminate). Scopes the chip:
-   *  it counts the agents working on these rows. */
+  /** The rows the agents-working filter would leave on screen. Undefined for
+   *  server-backed Table, where workingAgentIds supplies the exact scope. */
   workingIssues: Issue[] | undefined;
+  workingAgentIds?: string[];
   scope: MyIssuesScope;
   onScopeChange: (scope: MyIssuesScope) => void;
   isRefreshing?: boolean;
@@ -125,6 +126,7 @@ export function MyIssuesHeader({
             value={agentRunningFilter}
             onToggle={toggleAgentRunningFilter}
             workingIssues={workingIssues}
+            workingAgentIds={workingAgentIds}
           />
           <IssueDisplayControls
             scopedIssues={allIssues}

@@ -18,6 +18,8 @@ import type {
   AgentTask,
   Issue,
   IssueStatus,
+  IssueTableFacetsRequest,
+  IssueTableFacetsResponse,
   ListIssuesParams,
   ListIssuesResponse,
 } from "@multica/core/types";
@@ -130,6 +132,7 @@ describe("useIssueSurfaceController", () => {
     getAgentTaskSnapshot = vi.fn(() => never<AgentTask[]>());
     setApiInstance({
       listIssues,
+      listIssueTableFacets: vi.fn(() => never()),
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot,
@@ -655,18 +658,24 @@ describe("useIssueSurfaceController", () => {
     );
   });
 
-  it("sends the agents-working filter as a backend predicate without sending running ids", async () => {
+  it("sends the visible running-agent ids with the Table working predicate", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     store.getState().toggleAgentRunningFilter();
     listIssues.mockResolvedValue({ issues: [], total: 0 });
     setApiInstance({
       listIssues,
+      listIssueTableFacets: vi.fn(() => never()),
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() =>
         Promise.resolve([
-          { id: "task-1", issue_id: "issue-running", status: "running" },
+          {
+            id: "task-1",
+            agent_id: "agent-1",
+            issue_id: "issue-running",
+            status: "running",
+          },
         ] as unknown as AgentTask[]),
       ),
       getChildIssueProgress: vi.fn(() => never()),
@@ -681,8 +690,68 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    expect(result.current.tableQuerySpec.filters.working_only).toBe(true);
+    await waitFor(() => {
+      expect(result.current.tableQuerySpec.filters.working_only).toBe(true);
+      expect(result.current.tableQuerySpec.filters.working_agent_ids).toEqual([
+        "agent-1",
+      ]);
+    });
     expect(listIssues).not.toHaveBeenCalled();
+  });
+
+  it("resolves the Table chip from the bounded working-agent facet", async () => {
+    const store = getIssueSurfaceViewStore("project:p1");
+    store.getState().setViewMode("table");
+    const listIssueTableFacets = vi.fn().mockResolvedValue({
+      query_fingerprint: "sha256:working-agents",
+      total: 0,
+      facets: [
+        {
+          kind: "working_agent",
+          values: [{ key: "agent-1", count: 2 }],
+        },
+      ],
+    });
+    setApiInstance({
+      listIssues,
+      listIssueTableFacets,
+      listGroupedIssues: vi.fn(() => never()),
+      listProjects: vi.fn(() => never()),
+      listProperties: vi.fn(() => Promise.resolve({ properties: [] })),
+      getAgentTaskSnapshot: vi.fn(() =>
+        Promise.resolve([
+          makeRunningTask("task-1", "agent-1", "issue-1"),
+          makeRunningTask("task-2", "agent-2", "issue-2"),
+        ]),
+      ),
+      getChildIssueProgress: vi.fn(() => never()),
+    } as unknown as ApiClient);
+
+    const { result } = renderHook(
+      () =>
+        useIssueSurfaceController({
+          scope: { type: "project", projectId: "p1" },
+          modes: ["table"],
+        }),
+      { wrapper: makeWrapper(qc, "project:p1") },
+    );
+
+    await waitFor(() =>
+      expect(result.current.workingAgentIds).toEqual(["agent-1"]),
+    );
+    expect(listIssueTableFacets).toHaveBeenCalledWith(
+      expect.objectContaining({
+        query: expect.objectContaining({
+          filters: expect.objectContaining({
+            working_only: true,
+            working_agent_ids: ["agent-1", "agent-2"],
+          }),
+        }),
+        facets: [{ kind: "working_agent" }],
+        include_total: false,
+      }),
+    );
+    expect(result.current.workingScopeIssues).toBeUndefined();
   });
 
   it("keeps the table working-chip scope unknown without materializing a second issue window", async () => {
@@ -700,11 +769,17 @@ describe("useIssueSurfaceController", () => {
     );
     setApiInstance({
       listIssues,
+      listIssueTableFacets: vi.fn(() => never()),
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() =>
         Promise.resolve([
-          { id: "task-1", issue_id: "issue-running", status: "running" },
+          {
+            id: "task-1",
+            agent_id: "agent-1",
+            issue_id: "issue-running",
+            status: "running",
+          },
         ] as unknown as AgentTask[]),
       ),
       getChildIssueProgress: vi.fn(() => never()),
@@ -779,12 +854,14 @@ describe("useIssueSurfaceController", () => {
     });
     setApiInstance({
       listIssues,
+      listIssueTableFacets: vi.fn(() => never()),
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() =>
         Promise.resolve(
           runningIssues.map((issue, index) => ({
             id: `task-${index}`,
+            agent_id: `agent-${index}`,
             issue_id: issue.id,
             status: "running",
           })) as unknown as AgentTask[],
@@ -827,12 +904,14 @@ describe("useIssueSurfaceController", () => {
     });
     setApiInstance({
       listIssues,
+      listIssueTableFacets: vi.fn(() => never()),
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() =>
         Promise.resolve(
           runningIssues.map((issue, index) => ({
             id: `task-${index}`,
+            agent_id: `agent-${index}`,
             issue_id: issue.id,
             status: "running",
           })) as unknown as AgentTask[],
@@ -863,29 +942,40 @@ describe("useIssueSurfaceController", () => {
   it("keeps the Table activity scope unknown across task-snapshot rekeys", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
-    // Running set A resolves to a complete window; then the set changes to B
-    // and B's request stays pending. keepPreviousData leaves A's rows as
-    // PLACEHOLDER under the new key — publishing them (paired with the new
-    // snapshot) would be a precise-looking number for a scope nobody fetched
-    // (round-6 review P2#1). Until B resolves, the scope must be unknown.
-    const issueA = makeIssue({ id: "run-A", status: "in_progress" });
-    let snapshotIssueId = "run-A";
-    listIssues.mockImplementation((params?: ListIssuesParams) => {
-      if (params?.ids?.includes("run-A")) {
-        return Promise.resolve({ issues: [issueA], total: 1 });
+    // Agent A's facet resolves; then the snapshot moves to agent B and B's
+    // facet stays pending. The old response must not be published under the
+    // new allowlist.
+    let snapshotAgentId = "agent-A";
+    const listIssueTableFacets = vi.fn(
+      (
+        request: IssueTableFacetsRequest,
+      ): Promise<IssueTableFacetsResponse> => {
+        if (request.query.filters.working_agent_ids?.includes("agent-A")) {
+          return Promise.resolve({
+            query_fingerprint: "sha256:agent-A",
+            total: 0,
+            facets: [
+              {
+                kind: "working_agent",
+                values: [{ key: "agent-A", count: 1 }],
+              },
+            ],
+          });
+        }
+        return never<IssueTableFacetsResponse>();
       }
-      if (params?.ids) return never<ListIssuesResponse>();
-      return Promise.resolve({ issues: [], total: 0 });
-    });
+    );
     setApiInstance({
       listIssues,
+      listIssueTableFacets,
       listGroupedIssues: vi.fn(() => never()),
       listProjects: vi.fn(() => never()),
       getAgentTaskSnapshot: vi.fn(() =>
         Promise.resolve([
           {
             id: "task-1",
-            issue_id: snapshotIssueId,
+            agent_id: snapshotAgentId,
+            issue_id: `issue-${snapshotAgentId}`,
             status: "running",
           },
         ] as unknown as AgentTask[]),
@@ -903,12 +993,11 @@ describe("useIssueSurfaceController", () => {
     );
 
     await waitFor(() =>
-      expect(result.current.workingScopeIssues).toBeUndefined(),
+      expect(result.current.workingAgentIds).toEqual(["agent-A"]),
     );
     expect(listIssues).not.toHaveBeenCalled();
 
-    // The running set moves to B; B's ids window never resolves in this test.
-    snapshotIssueId = "run-B";
+    snapshotAgentId = "agent-B";
     await act(async () => {
       await qc.invalidateQueries({
         queryKey: agentTaskSnapshotOptions("ws-1").queryKey,
@@ -916,7 +1005,7 @@ describe("useIssueSurfaceController", () => {
     });
 
     await waitFor(() => {
-      expect(result.current.workingScopeIssues).toBeUndefined();
+      expect(result.current.workingAgentIds).toBeUndefined();
     });
   });
 

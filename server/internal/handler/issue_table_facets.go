@@ -15,7 +15,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// The workspace property catalog is capped at 20 active definitions. Six
+// The workspace property catalog is capped at 20 active definitions. Seven
 // built-in dimensions plus that catalog fit under this guard with headroom,
 // while preventing a single request from scheduling hundreds of sequential
 // aggregation scans inside one snapshot transaction.
@@ -63,6 +63,13 @@ func issueTableQueryWithoutFacet(input issueTableQuerySpec, facet issueTableFace
 		output.Filters.IncludeNoProject = false
 	case "label":
 		output.Filters.LabelIDs = nil
+	case "working_agent":
+		// This is a bounded activity projection rather than a filter-menu
+		// facet. The JOIN below applies the caller-visible agent allowlist;
+		// remove it from the base issue predicate so each matching agent gets
+		// its own value instead of merely inheriting an issue-level EXISTS.
+		output.Filters.WorkingOnly = false
+		output.Filters.WorkingAgentIDs = nil
 	case "property":
 		delete(output.Filters.Properties, facet.PropertyID)
 	}
@@ -194,6 +201,33 @@ func (h *Handler) issueTableFacetQuery(w http.ResponseWriter, r *http.Request, r
 		query = fmt.Sprintf(`SELECT COALESCE(i.project_id::text, '__none__'), COUNT(*)::bigint FROM issue i WHERE %s GROUP BY 1`, compiled.where)
 	case "label":
 		query = fmt.Sprintf(`SELECT itl.label_id::text, COUNT(DISTINCT i.id)::bigint FROM issue i JOIN issue_to_label itl ON itl.issue_id = i.id WHERE %s GROUP BY itl.label_id`, compiled.where)
+	case "working_agent":
+		if requestQuery.Filters.WorkingAgentIDs == nil {
+			writeError(w, http.StatusBadRequest, "filters.working_agent_ids is required for working_agent facet")
+			return response, false
+		}
+		workingAgentIDs, ok := parseIssueTableUUIDList(
+			w,
+			sortedUniqueStrings(*requestQuery.Filters.WorkingAgentIDs),
+			"filters.working_agent_ids",
+		)
+		if !ok {
+			return response, false
+		}
+		if len(workingAgentIDs) == 0 {
+			return response, true
+		}
+		agentIDsRef := "$" + fmt.Sprint(len(compiled.args)+1)
+		compiled.args = append(compiled.args, workingAgentIDs)
+		query = fmt.Sprintf(`
+SELECT atq.agent_id::text, COUNT(DISTINCT i.id)::bigint
+FROM issue i
+JOIN agent_task_queue atq
+  ON atq.issue_id = i.id
+ AND atq.status = 'running'
+ AND atq.agent_id = ANY(%s::uuid[])
+WHERE %s
+GROUP BY atq.agent_id`, agentIDsRef, compiled.where)
 	case "property":
 		propertyID, err := util.ParseUUID(facet.PropertyID)
 		if err != nil {

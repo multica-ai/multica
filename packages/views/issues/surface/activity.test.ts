@@ -34,6 +34,7 @@ describe("deriveIssueSurfaceActivity", () => {
     ]);
 
     expect(activity.runningIssueIds).toEqual(new Set(["i-1"]));
+    expect(activity.runningAgentIds).toEqual(["agent-1"]);
     expect(activity.activityByIssueId.get("i-1")).toMatchObject({
       isWorking: true,
       isQueued: false,
@@ -47,6 +48,17 @@ describe("deriveIssueSurfaceActivity", () => {
       isQueued: true,
     });
     expect(activity.activityByIssueId.has("i-4")).toBe(false);
+  });
+
+  it("deduplicates running agents and excludes issue-less tasks", () => {
+    const activity = deriveIssueSurfaceActivity([
+      task({ id: "run-1", agent_id: "agent-1", issue_id: "i-1", status: "running" }),
+      task({ id: "run-2", agent_id: "agent-1", issue_id: "i-2", status: "running" }),
+      task({ id: "run-3", agent_id: "agent-2", issue_id: "i-2", status: "running" }),
+      task({ id: "chat", agent_id: "agent-3", issue_id: undefined, status: "running" }),
+    ]);
+
+    expect(activity.runningAgentIds).toEqual(["agent-1", "agent-2"]);
   });
 });
 

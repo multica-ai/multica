@@ -795,6 +795,7 @@ export function ViewRefreshIndicator({ active }: { active: boolean }) {
 export function IssuesHeader({
   scopedIssues,
   workingIssues,
+  workingAgentIds,
   allowGantt = false,
   dateFilter = null,
   onDateFilterChange,
@@ -804,10 +805,12 @@ export function IssuesHeader({
   onTableFacetChange,
 }: {
   scopedIssues: Issue[];
-  /** The rows the agents-working filter would leave on screen — undefined
-   *  when the set is unknown (chip renders indeterminate). Scopes the chip:
-   *  it counts the agents working on these rows. */
+  /** The rows the agents-working filter would leave on screen. Undefined for
+   *  server-backed Table, where workingAgentIds supplies the exact scope. */
   workingIssues: Issue[] | undefined;
+  /** Exact server-backed Table activity scope. Undefined outside Table or
+   * while its bounded facet is unresolved. */
+  workingAgentIds?: string[];
   allowGantt?: boolean;
   dateFilter?: IssueDateFilter | null;
   onDateFilterChange?: (filter: IssueDateFilter | null) => void;
@@ -903,6 +906,7 @@ export function IssuesHeader({
             value={agentRunningFilter}
             onToggle={toggleAgentRunningFilter}
             workingIssues={workingIssues}
+            workingAgentIds={workingAgentIds}
           />
           <IssueDisplayControls
             scopedIssues={scopedIssues}

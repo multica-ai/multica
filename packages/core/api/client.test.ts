@@ -105,6 +105,51 @@ describe("ApiClient server Table query", () => {
     });
   });
 
+  it("round-trips the bounded working-agent facet contract", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          query_fingerprint: "sha256:working-agents",
+          total: 0,
+          facets: [
+            {
+              kind: "working_agent",
+              values: [{ key: "agent-1", count: 2 }],
+            },
+          ],
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.listIssueTableFacets({
+        query: {
+          scope: { kind: "workspace" },
+          filters: {
+            working_only: true,
+            working_agent_ids: ["agent-1", "agent-2"],
+          },
+          sort: { field: "position", direction: "asc" },
+        },
+        facets: [{ kind: "working_agent" }],
+        include_total: false,
+      }),
+    ).resolves.toMatchObject({
+      facets: [
+        {
+          kind: "working_agent",
+          values: [{ key: "agent-1", count: 2 }],
+        },
+      ],
+    });
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toContain(
+      '"working_agent_ids":["agent-1","agent-2"]',
+    );
+  });
+
   it("falls back safely when Table responses are malformed", async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
       Promise.resolve(

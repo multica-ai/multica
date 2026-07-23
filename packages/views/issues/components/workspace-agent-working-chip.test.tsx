@@ -230,6 +230,27 @@ describe("WorkspaceAgentWorkingChip", () => {
     expect(mockState.avatarAgentIds).toBeUndefined();
   });
 
+  it("renders the exact server-backed Table agent scope without issue materialization", () => {
+    mockState.snapshot = [
+      makeTask({ id: "t-1", agent_id: "agent-1", issue_id: "issue-1" }),
+      makeTask({ id: "t-2", agent_id: "agent-off-scope", issue_id: "issue-2" }),
+    ];
+
+    renderWithI18n(
+      <WorkspaceAgentWorkingChip
+        value={false}
+        onToggle={() => {}}
+        workingIssues={undefined}
+        workingAgentIds={["agent-1"]}
+      />,
+    );
+
+    expect(
+      screen.getByRole("button", { name: "1 agent working" }),
+    ).toBeTruthy();
+    expect(mockState.avatarAgentIds).toEqual(["agent-1"]);
+  });
+
   it("shows 0 when nothing is running", () => {
     mockState.snapshot = [];
 

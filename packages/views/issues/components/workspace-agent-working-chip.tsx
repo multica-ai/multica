@@ -31,9 +31,11 @@ interface WorkspaceAgentWorkingChipProps {
   // is what keeps that judgement in step with the list (MUL-4884).
   //
   // `undefined` means the scope is UNKNOWN. Table deliberately does not
-  // materialize all cursor branches just to derive this decoration, so the
-  // chip shows an indeterminate "—" while the toggle remains available.
+  // materialize all cursor branches just to derive this decoration.
   workingIssues: readonly Issue[] | undefined;
+  // Server-backed Table supplies the same scope as a bounded working-agent
+  // facet. Undefined means unresolved/not applicable; [] is a known zero.
+  workingAgentIds?: readonly string[];
 }
 
 export interface WorkingChipView {
@@ -146,12 +148,14 @@ export function WorkspaceAgentWorkingChip({
   value,
   onToggle,
   workingIssues,
+  workingAgentIds,
 }: WorkspaceAgentWorkingChipProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
 
-  const scopeKnown = workingIssues !== undefined;
+  const scopeKnown =
+    workingIssues !== undefined || workingAgentIds !== undefined;
   const view = useMemo(
     () => deriveWorkingChipView(snapshot, workingIssues ?? []),
     [snapshot, workingIssues],
@@ -159,7 +163,8 @@ export function WorkspaceAgentWorkingChip({
 
   // The number and the avatar stack are the same list, so they cannot
   // disagree.
-  const agentCount = view.agentIds.length;
+  const agentIds = workingAgentIds ?? view.agentIds;
+  const agentCount = agentIds.length;
   const hasAgents = scopeKnown && agentCount > 0;
 
   const label = scopeKnown
@@ -183,7 +188,7 @@ export function WorkspaceAgentWorkingChip({
       aria-label={label}
     >
       {hasAgents && (
-        <AgentAvatarStack agentIds={view.agentIds} size="sm" max={3} />
+        <AgentAvatarStack agentIds={agentIds} size="sm" max={3} />
       )}
       <span className="tabular-nums md:hidden">
         {scopeKnown ? agentCount : "—"}
@@ -195,7 +200,7 @@ export function WorkspaceAgentWorkingChip({
   // No hover card while the scope is unknown: there is no issue list to
   // show, and an empty card would read as "nothing running" — the exact
   // claim the unknown state exists to avoid.
-  if (!scopeKnown) return trigger;
+  if (!scopeKnown || workingIssues === undefined) return trigger;
 
   return (
     <HoverCard>

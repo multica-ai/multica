@@ -31,11 +31,12 @@ export interface IssueSurfaceRenderContext {
   controller: IssueSurfaceController;
   issues: Issue[];
   /** The rows the agents-working filter would leave on screen, with this
-   *  surface's `clientFilter` applied — headers feed it to the working chip
-   *  so the chip's count is the post-click row count (MUL-4884). Undefined
-   *  means the set is UNKNOWN (not materialized by the server-backed Table);
-   *  the chip renders an indeterminate state instead of a number. */
+   *  surface's `clientFilter` applied. Undefined means the issue projection
+   *  is not materialized by the server-backed Table; workingAgentIds then
+   *  carries its bounded exact chip scope. */
   workingIssues: Issue[] | undefined;
+  /** Exact Table activity scope, supplied by the bounded server facet. */
+  workingAgentIds: string[] | undefined;
 }
 
 interface IssueSurfaceComponentProps extends IssueSurfaceProps {
@@ -166,7 +167,12 @@ function IssueSurfaceContent({
     [clientFilter, controller.workingScopeIssues],
   );
   const renderContext = useMemo(
-    () => ({ controller, issues, workingIssues }),
+    () => ({
+      controller,
+      issues,
+      workingIssues,
+      workingAgentIds: controller.workingAgentIds,
+    }),
     [controller, issues, workingIssues],
   );
   const openCreateIssue = useCallback(
@@ -208,6 +214,7 @@ function IssueSurfaceContent({
           <IssuesHeader
             scopedIssues={controller.surfaceIssues}
             workingIssues={workingIssues}
+            workingAgentIds={controller.workingAgentIds}
             allowGantt={controller.allowGantt}
             isRefreshing={controller.isRefreshing}
             facetCountsExact={
