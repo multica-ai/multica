@@ -2878,6 +2878,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 
 	resp := issueToResponse(issue, prefix)
 	resp.Attachments = buildAttachmentResponses(res.Attachments)
+	// Echo the resolved catalog status the create transaction just wrote, so a
+	// client that renders straight from this response shows the custom status
+	// (name/icon/color) instead of falling back to the legacy token until the
+	// next refetch (MUL-4809). Mirrors the update + list read paths.
+	applyStatusDetail(&resp, h.statusDetailsByIssue(r.Context(), issue.WorkspaceID, []pgtype.UUID{issue.ID}))
 	// Echo the authoritative labels attached in the create transaction. Always
 	// non-nil (empty slice when none) so a newer client can tell the backend
 	// understood label_ids and skip its legacy post-create attach fallback.

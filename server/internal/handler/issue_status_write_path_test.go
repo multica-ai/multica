@@ -497,3 +497,35 @@ func TestUpdateIssueStatusWriteWaitsOnArchiveLock(t *testing.T) {
 		t.Fatal("update did not double-write status_id")
 	}
 }
+
+// TestCreateIssueResponseCarriesStatusDetail pins the create RESPONSE, not just
+// the persisted row (MUL-4809). The create path double-wrote status_id correctly
+// but echoed a response with status_id / status_detail nil, so a client
+// rendering straight from the POST result showed the legacy token instead of the
+// custom status until the next refetch. GET and list already hydrated; create
+// must too.
+func TestCreateIssueResponseCarriesStatusDetail(t *testing.T) {
+	ensureTestWorkspaceStatuses(t)
+	custom, code, body := createStatus(t, map[string]any{
+		"name": "Create Echo", "category": "in_progress", "icon": "in_progress", "color": "warning",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create custom status: %d %s", code, body)
+	}
+	t.Cleanup(func() { deleteStatus(t, custom.ID, "") })
+
+	created, code, body := createIssueWithStatusFields(t, map[string]any{
+		"title": "create echoes status detail", "status_id": custom.ID, "priority": "none",
+	})
+	if code != http.StatusCreated {
+		t.Fatalf("create issue: %d %s", code, body)
+	}
+	t.Cleanup(func() { deleteTestIssue(t, created.ID) })
+
+	if created.StatusID == nil || *created.StatusID != custom.ID {
+		t.Fatalf("create response status_id = %v, want %s", created.StatusID, custom.ID)
+	}
+	if created.StatusDetail == nil || created.StatusDetail.Name != "Create Echo" {
+		t.Fatalf("create response status_detail = %v, want the custom status", created.StatusDetail)
+	}
+}
