@@ -239,6 +239,8 @@ func equalOptionalString(a, b *string) bool {
 }
 
 func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec) (string, error) {
+	explicitEmptyAssignees :=
+		spec.Filters.Assignees != nil && len(spec.Filters.Assignees) == 0
 	normalized := spec
 	normalized.Search = strings.TrimSpace(normalized.Search)
 	normalized.Scope.AssigneeTypes = sortedUniqueStrings(normalized.Scope.AssigneeTypes)
@@ -252,11 +254,13 @@ func canonicalIssueTableFingerprint(workspaceID string, spec issueTableQuerySpec
 		normalized.Filters.Properties[key] = sortedUniqueStrings(values)
 	}
 	encoded, err := json.Marshal(struct {
-		WorkspaceID string              `json:"workspace_id"`
-		Query       issueTableQuerySpec `json:"query"`
+		WorkspaceID            string              `json:"workspace_id"`
+		Query                  issueTableQuerySpec `json:"query"`
+		ExplicitEmptyAssignees bool                `json:"explicit_empty_assignees,omitempty"`
 	}{
-		WorkspaceID: workspaceID,
-		Query:       normalized,
+		WorkspaceID:            workspaceID,
+		Query:                  normalized,
+		ExplicitEmptyAssignees: explicitEmptyAssignees,
 	})
 	if err != nil {
 		return "", err
@@ -491,7 +495,7 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		return issueTableSQL{}, false
 	}
 
-	if len(spec.Filters.Assignees) > 0 || spec.Filters.IncludeNoAssignee {
+	if spec.Filters.Assignees != nil || spec.Filters.IncludeNoAssignee {
 		ors := make([]string, 0, len(spec.Filters.Assignees)+1)
 		for _, value := range spec.Filters.Assignees {
 			actor, ok := parseIssueTableActor(w, value, "filters.assignees")
@@ -503,7 +507,16 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		if spec.Filters.IncludeNoAssignee {
 			ors = append(ors, "(i.assignee_type IS NULL AND i.assignee_id IS NULL)")
 		}
-		where = append(where, "("+strings.Join(ors, " OR ")+")")
+		if len(ors) == 0 {
+			// Omitted assignees means "no assignee filter"; an explicitly
+			// empty list means "match none". The workspace working-agent
+			// quick filter relies on this distinction when the final agent
+			// finishes (or when an explicit assignee selection intersects the
+			// working set to empty).
+			where = append(where, "FALSE")
+		} else {
+			where = append(where, "("+strings.Join(ors, " OR ")+")")
+		}
 	}
 
 	if len(spec.Filters.Creators) > 0 {

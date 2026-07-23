@@ -2032,6 +2032,59 @@ type AgentRunCount struct {
 	RunCount int32  `json:"run_count"`
 }
 
+// WorkspaceWorkingAgent is the privacy-safe agent summary returned by the
+// workspace working-agents endpoint. It deliberately carries only display
+// information plus the current running-task count; full AgentResponse fields
+// include runtime and integration configuration that this chip does not need.
+type WorkspaceWorkingAgent struct {
+	ID               string  `json:"id"`
+	Name             string  `json:"name"`
+	AvatarURL        *string `json:"avatar_url"`
+	RunningTaskCount int32   `json:"running_task_count"`
+}
+
+// ListWorkspaceWorkingAgents returns every currently working user-authored
+// agent in the workspace, independent of issue filters or Table pagination.
+// Access filtering mirrors the other workspace-wide agent aggregations so a
+// private/non-allow-listed agent is never exposed by its name, avatar, count,
+// or even presence.
+func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.ListWorkspaceWorkingAgents(r.Context(), parseUUID(workspaceID))
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list workspace working agents")
+		return
+	}
+
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	resp := make([]WorkspaceWorkingAgent, 0, len(rows))
+	for _, row := range rows {
+		agentID := uuidToString(row.ID)
+		if _, ok := allowed[agentID]; !ok {
+			continue
+		}
+		resp = append(resp, WorkspaceWorkingAgent{
+			ID:               agentID,
+			Name:             row.Name,
+			AvatarURL:        textToPtr(row.AvatarUrl),
+			RunningTaskCount: row.RunningTaskCount,
+		})
+	}
+
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // GetWorkspaceAgentRunCounts returns 30-day total run counts for every
 // agent in the workspace. Same single-fetch pattern as live-tasks /
 // activity to keep the Agents list cheap regardless of agent count.

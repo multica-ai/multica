@@ -130,6 +130,44 @@ func TestCanonicalIssueTableFingerprintBindsWorkspace(t *testing.T) {
 	}
 }
 
+func TestIssueTableExplicitEmptyAssigneesMatchesNone(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	base := issueTableQuerySpec{
+		Scope: issueTableScope{Kind: "workspace"},
+		Sort:  issueTableSortRequest{Field: "position", Direction: "asc"},
+	}
+	withEmpty := base
+	withEmpty.Filters.Assignees = []issueTableActorRef{}
+
+	unfilteredFingerprint, err := canonicalIssueTableFingerprint(testWorkspaceID, base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	emptyFingerprint, err := canonicalIssueTableFingerprint(testWorkspaceID, withEmpty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unfilteredFingerprint == emptyFingerprint {
+		t.Fatal("explicit empty assignees must not share the unfiltered cursor fingerprint")
+	}
+
+	w := httptest.NewRecorder()
+	compiled, ok := testHandler.compileIssueTableQuery(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		withEmpty,
+	)
+	if !ok {
+		t.Fatalf("compile failed: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(compiled.where, "FALSE") {
+		t.Fatalf("explicit empty assignees predicate = %q, want FALSE", compiled.where)
+	}
+}
+
 func TestIssueTableCursorRejectsAnotherQuery(t *testing.T) {
 	groupKey := "status:todo"
 	cursor := issueTableCursor{

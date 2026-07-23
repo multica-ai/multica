@@ -1222,6 +1222,26 @@ SELECT t.* FROM (
   ORDER BY atq.agent_id, atq.completed_at DESC NULLS LAST
 ) t;
 
+-- name: ListWorkspaceWorkingAgents :many
+-- Workspace-level source for the issues-header "agents working" chip.
+-- One row per visible, user-authored agent with at least one task that has
+-- actually started running. Chat/autopilot tasks count too: the chip reports
+-- who is working in the workspace, not only work linked to the current issue
+-- surface. Hidden system agents and archived agents never appear.
+SELECT
+  a.id,
+  a.name,
+  a.avatar_url,
+  COUNT(*)::int AS running_task_count
+FROM agent a
+JOIN agent_task_queue atq ON atq.agent_id = a.id
+WHERE a.workspace_id = $1
+  AND a.kind = 'user'
+  AND a.archived_at IS NULL
+  AND atq.status = 'running'
+GROUP BY a.id, a.name, a.avatar_url, a.created_at
+ORDER BY a.created_at ASC;
+
 -- name: ListTasksByIssue :many
 SELECT * FROM agent_task_queue
 WHERE issue_id = $1

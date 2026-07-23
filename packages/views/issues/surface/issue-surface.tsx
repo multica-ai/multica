@@ -207,7 +207,6 @@ function IssueSurfaceContent({
         ) : (
           <IssuesHeader
             scopedIssues={controller.surfaceIssues}
-            workingIssues={workingIssues}
             allowGantt={controller.allowGantt}
             isRefreshing={controller.isRefreshing}
             facetCountsExact={

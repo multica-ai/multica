@@ -20,6 +20,7 @@ import type {
   IssueStatus,
   ListIssuesParams,
   ListIssuesResponse,
+  WorkspaceWorkingAgent,
 } from "@multica/core/types";
 import { useIssueSurfaceController } from "./use-issue-surface-controller";
 import { IssueTableExportIntegrityError } from "../components/table-view-model";
@@ -655,7 +656,7 @@ describe("useIssueSurfaceController", () => {
     );
   });
 
-  it("sends the agents-working filter as a backend predicate without sending running ids", async () => {
+  it("sends workspace working-agent ids through the Table assignee filter", async () => {
     const store = getIssueSurfaceViewStore("project:p1");
     store.getState().setViewMode("table");
     store.getState().toggleAgentRunningFilter();
@@ -669,6 +670,22 @@ describe("useIssueSurfaceController", () => {
           { id: "task-1", issue_id: "issue-running", status: "running" },
         ] as unknown as AgentTask[]),
       ),
+      getWorkspaceWorkingAgents: vi.fn(() =>
+        Promise.resolve([
+          {
+            id: "agent-1",
+            name: "Agent 1",
+            avatar_url: null,
+            running_task_count: 1,
+          },
+          {
+            id: "agent-2",
+            name: "Agent 2",
+            avatar_url: null,
+            running_task_count: 2,
+          },
+        ] satisfies WorkspaceWorkingAgent[]),
+      ),
       getChildIssueProgress: vi.fn(() => never()),
     } as unknown as ApiClient);
 
@@ -681,7 +698,13 @@ describe("useIssueSurfaceController", () => {
       { wrapper: makeWrapper(qc, "project:p1") },
     );
 
-    expect(result.current.tableQuerySpec.filters.working_only).toBe(true);
+    await waitFor(() =>
+      expect(result.current.tableQuerySpec.filters.assignees).toEqual([
+        { type: "agent", id: "agent-1" },
+        { type: "agent", id: "agent-2" },
+      ]),
+    );
+    expect(result.current.tableQuerySpec.filters.working_only).toBeUndefined();
     expect(listIssues).not.toHaveBeenCalled();
   });
 

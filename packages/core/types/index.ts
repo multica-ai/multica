@@ -13,6 +13,7 @@ export type {
   TaskEvidence,
   AgentActivityBucket,
   AgentRunCount,
+  WorkspaceWorkingAgent,
   TaskFailureReason,
   AgentRuntime,
   RuntimeDevice,

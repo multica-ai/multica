@@ -229,6 +229,33 @@ describe("ApiClient server Table query", () => {
   });
 });
 
+describe("ApiClient workspace working agents", () => {
+  it("reads the independent workspace-level projection", async () => {
+    const payload = [
+      {
+        id: "agent-1",
+        name: "Agent 1",
+        avatar_url: null,
+        running_task_count: 2,
+      },
+    ];
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(payload), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(client.getWorkspaceWorkingAgents()).resolves.toEqual(payload);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/working-agents",
+      expect.any(Object),
+    );
+  });
+});
+
 describe("ApiClient label response schemas", () => {
   it("falls back safely for malformed label catalog, label, and resource responses", async () => {
     const fetchMock = vi.fn().mockImplementation(() =>

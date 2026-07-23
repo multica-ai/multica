@@ -6,6 +6,11 @@ export const agentTaskSnapshotKeys = {
   list: (wsId: string) => [...agentTaskSnapshotKeys.all(wsId), "list"] as const,
 };
 
+export const workspaceWorkingAgentsKeys = {
+  all: (wsId: string) => ["workspaces", wsId, "working-agents"] as const,
+  list: (wsId: string) => [...workspaceWorkingAgentsKeys.all(wsId), "list"] as const,
+};
+
 export const agentActivityKeys = {
   all: (wsId: string) => ["workspaces", wsId, "agent-activity"] as const,
   last30d: (wsId: string) => [...agentActivityKeys.all(wsId), "30d"] as const,
@@ -29,6 +34,19 @@ export function agentTaskSnapshotOptions(wsId: string) {
   return queryOptions({
     queryKey: agentTaskSnapshotKeys.list(wsId),
     queryFn: () => api.getAgentTaskSnapshot(),
+    staleTime: 30 * 1000,
+    gcTime: 5 * 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+// Workspace-level working-agent summaries. Task lifecycle WebSocket events
+// invalidate this cache immediately; the short stale time is the reconnect /
+// missed-event safety net.
+export function workspaceWorkingAgentsOptions(wsId: string) {
+  return queryOptions({
+    queryKey: workspaceWorkingAgentsKeys.list(wsId),
+    queryFn: () => api.getWorkspaceWorkingAgents(),
     staleTime: 30 * 1000,
     gcTime: 5 * 60 * 1000,
     refetchOnWindowFocus: true,

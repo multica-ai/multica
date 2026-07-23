@@ -198,6 +198,16 @@ export interface AgentRunCount {
   run_count: number;
 }
 
+// Privacy-safe display summary returned by GET /api/working-agents. The
+// endpoint is workspace-scoped and includes each user-authored agent with at
+// least one running task exactly once.
+export interface WorkspaceWorkingAgent {
+  id: string;
+  name: string;
+  avatar_url: string | null;
+  running_task_count: number;
+}
+
 /**
  * A departed-member-safe user ref resolved from the global user table. `name` /
  * `email` / `avatar_url` are absent until the server hydrates them (present on

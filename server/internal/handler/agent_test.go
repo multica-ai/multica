@@ -144,6 +144,74 @@ func TestListWorkspaceAgentTaskSnapshot(t *testing.T) {
 	}
 }
 
+func TestListWorkspaceWorkingAgents(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	workingAgentID := createHandlerTestAgent(t, "working-agents-running", []byte(`{}`))
+	queuedAgentID := createHandlerTestAgent(t, "working-agents-queued", []byte(`{}`))
+
+	insertedTaskIDs := make([]string, 0, 3)
+	for _, fixture := range []struct {
+		agentID string
+		status  string
+	}{
+		{workingAgentID, "running"},
+		{workingAgentID, "running"},
+		{queuedAgentID, "queued"},
+	} {
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
+			VALUES ($1, $2, $3, 0)
+			RETURNING id
+		`, fixture.agentID, testRuntimeID, fixture.status).Scan(&taskID); err != nil {
+			t.Fatalf("insert %s task: %v", fixture.status, err)
+		}
+		insertedTaskIDs = append(insertedTaskIDs, taskID)
+	}
+	t.Cleanup(func() {
+		for _, taskID := range insertedTaskIDs {
+			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		}
+	})
+
+	w := httptest.NewRecorder()
+	testHandler.ListWorkspaceWorkingAgents(
+		w,
+		newRequest(http.MethodGet, "/api/working-agents", nil),
+	)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListWorkspaceWorkingAgents: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var agents []WorkspaceWorkingAgent
+	if err := json.NewDecoder(w.Body).Decode(&agents); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+
+	var working *WorkspaceWorkingAgent
+	for i := range agents {
+		switch agents[i].ID {
+		case workingAgentID:
+			working = &agents[i]
+		case queuedAgentID:
+			t.Errorf("queued-only agent must not be returned")
+		}
+	}
+	if working == nil {
+		t.Fatalf("running agent %s was not returned", workingAgentID)
+	}
+	if working.Name != "working-agents-running" {
+		t.Errorf("name = %q, want %q", working.Name, "working-agents-running")
+	}
+	if working.RunningTaskCount != 2 {
+		t.Errorf("running_task_count = %d, want 2", working.RunningTaskCount)
+	}
+}
+
 func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

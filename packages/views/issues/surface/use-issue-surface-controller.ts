@@ -14,6 +14,7 @@ import type {
   Project,
 } from "@multica/core/types";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
 import type {
   AssigneeGroupedIssuesFilter,
@@ -268,6 +269,29 @@ export function useIssueSurfaceController({
     projectFilterState;
 
   const activity = useIssueSurfaceActivity();
+  const { data: workspaceWorkingAgents = [] } = useQuery(
+    workspaceWorkingAgentsOptions(wsId),
+  );
+  const tableAssigneeFilters = useMemo(() => {
+    if (!agentRunningFilter) return assigneeFilters;
+
+    const workingAgentIds = new Set(
+      workspaceWorkingAgents.map((agent) => agent.id),
+    );
+    if (assigneeFilters.length === 0) {
+      return workspaceWorkingAgents.map((agent) => ({
+        type: "agent" as const,
+        id: agent.id,
+      }));
+    }
+
+    // The quick filter and the regular assignee picker are both predicates
+    // on the same field, so compose them with intersection (AND semantics).
+    return assigneeFilters.filter(
+      (assignee) =>
+        assignee.type === "agent" && workingAgentIds.has(assignee.id),
+    );
+  }, [agentRunningFilter, assigneeFilters, workspaceWorkingAgents]);
 
   const tableQuerySpec = useMemo<IssueTableQuerySpec>(() => {
     let queryScope: IssueTableQuerySpec["scope"];
@@ -314,8 +338,14 @@ export function useIssueSurfaceController({
       filters: {
         ...(statusFilters.length > 0 ? { statuses: statusFilters } : {}),
         ...(priorityFilters.length > 0 ? { priorities: priorityFilters } : {}),
-        ...(assigneeFilters.length > 0 ? { assignees: assigneeFilters } : {}),
-        ...(includeNoAssignee ? { include_no_assignee: true } : {}),
+        ...(agentRunningFilter
+          ? { assignees: tableAssigneeFilters }
+          : assigneeFilters.length > 0
+            ? { assignees: assigneeFilters }
+            : {}),
+        ...(!agentRunningFilter && includeNoAssignee
+          ? { include_no_assignee: true }
+          : {}),
         ...(creatorFilters.length > 0 ? { creators: creatorFilters } : {}),
         ...(viewProjectFilters.length > 0
           ? { project_ids: viewProjectFilters }
@@ -326,7 +356,6 @@ export function useIssueSurfaceController({
           ? { properties: effectivePropertyFilters }
           : {}),
         ...(date ? { date } : {}),
-        ...(agentRunningFilter ? { working_only: true } : {}),
         include_sub_issues: showSubIssues,
       },
       ...(debouncedTableSearch ? { search: debouncedTableSearch } : {}),
@@ -350,6 +379,7 @@ export function useIssueSurfaceController({
     sort.sort_by,
     sort.sort_direction,
     statusFilters,
+    tableAssigneeFilters,
     viewIncludeNoProject,
     viewProjectFilters,
   ]);

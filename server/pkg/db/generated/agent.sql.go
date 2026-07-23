@@ -3933,6 +3933,59 @@ func (q *Queries) ListWorkspaceAgentTaskSnapshot(ctx context.Context, workspaceI
 	return items, nil
 }
 
+const listWorkspaceWorkingAgents = `-- name: ListWorkspaceWorkingAgents :many
+SELECT
+  a.id,
+  a.name,
+  a.avatar_url,
+  COUNT(*)::int AS running_task_count
+FROM agent a
+JOIN agent_task_queue atq ON atq.agent_id = a.id
+WHERE a.workspace_id = $1
+  AND a.kind = 'user'
+  AND a.archived_at IS NULL
+  AND atq.status = 'running'
+GROUP BY a.id, a.name, a.avatar_url, a.created_at
+ORDER BY a.created_at ASC
+`
+
+type ListWorkspaceWorkingAgentsRow struct {
+	ID               pgtype.UUID `json:"id"`
+	Name             string      `json:"name"`
+	AvatarUrl        pgtype.Text `json:"avatar_url"`
+	RunningTaskCount int32       `json:"running_task_count"`
+}
+
+// Workspace-level source for the issues-header "agents working" chip.
+// One row per visible, user-authored agent with at least one task that has
+// actually started running. Chat/autopilot tasks count too: the chip reports
+// who is working in the workspace, not only work linked to the current issue
+// surface. Hidden system agents and archived agents never appear.
+func (q *Queries) ListWorkspaceWorkingAgents(ctx context.Context, workspaceID pgtype.UUID) ([]ListWorkspaceWorkingAgentsRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceWorkingAgents, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWorkspaceWorkingAgentsRow{}
+	for rows.Next() {
+		var i ListWorkspaceWorkingAgentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.AvatarUrl,
+			&i.RunningTaskCount,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markAgentTaskWaitingLocalDirectory = `-- name: MarkAgentTaskWaitingLocalDirectory :one
 UPDATE agent_task_queue
 SET status = 'waiting_local_directory',

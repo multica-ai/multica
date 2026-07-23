@@ -18,6 +18,7 @@ import { labelKeys } from "../labels/queries";
 import { propertyKeys } from "../properties/queries";
 import {
   agentTaskSnapshotKeys,
+  workspaceWorkingAgentsKeys,
   agentActivityKeys,
   agentRunCountsKeys,
   agentTasksKeys,
@@ -494,6 +495,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
@@ -601,6 +603,7 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+          qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
           // Squad members status is derived per agent, so any agent
           // change (status flip, archive, runtime swap) needs to refresh the
           // per-squad members-status cache without refetching the static squad
@@ -695,6 +698,7 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (!wsId) return;
         qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+        qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.list(wsId) });
         // Table's working_only predicate is evaluated from task lifecycle
         // state on the server. Without invalidating its server-owned graph,
         // rows/groups/facets can remain permanently stale (global staleTime

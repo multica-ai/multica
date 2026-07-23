@@ -32,6 +32,7 @@ import type {
   AgentTask,
   AgentActivityBucket,
   AgentRunCount,
+  WorkspaceWorkingAgent,
   AgentRuntime,
   RuntimeProfile,
   CreateRuntimeProfileRequest,
@@ -1673,6 +1674,13 @@ export class ApiClient {
   // Workspace is resolved server-side from the X-Workspace-Slug header.
   async getAgentTaskSnapshot(): Promise<AgentTask[]> {
     return this.fetch(`/api/agent-task-snapshot`);
+  }
+
+  // Independent workspace-level projection for the issues header. Unlike the
+  // task snapshot, this already deduplicates running agents and returns the
+  // display fields the chip/hover need.
+  async getWorkspaceWorkingAgents(): Promise<WorkspaceWorkingAgent[]> {
+    return this.fetch(`/api/working-agents`);
   }
 
   // Per-agent daily activity for the last 30 days, anchored on
