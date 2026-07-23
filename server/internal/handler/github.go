@@ -190,7 +190,7 @@ func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow) GitHubPullRe
 // "pending" is close to unreachable by design (MUL-5180): only `completed`
 // suites are recorded and only `completed` suites are aggregated, so the
 // pending bucket now catches just the degenerate case of a completed suite
-// carrying a null conclusion. It is deliberately NOT an "CI is running"
+// carrying a null conclusion. It is deliberately NOT a "CI is running"
 // signal — that is not observable from this event at read-level access.
 func aggregateChecksConclusion(failed, passed, pending, total int64) *string {
 	if total == 0 {

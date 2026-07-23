@@ -1798,7 +1798,8 @@ func TestWebhook_CheckSuite_NonCompletedActionsIgnored(t *testing.T) {
 // `queued`, and nothing will ever complete them. If the aggregate still
 // counted those rows, `checks_pending` would outrank `checks_passed` and the
 // PR would stay pinned to "checks running" after the upgrade — for as long as
-// the head SHA stands, which for a merged-but-open PR can be forever.
+// the head SHA stands — which, on a long-lived PR nobody pushes to again,
+// is indefinitely.
 //
 // The row is inserted directly because the fixed handler can no longer
 // produce one; that is exactly the point of the test.
@@ -1920,6 +1921,22 @@ func TestCheckSuite_LegacyStashRowNotReplayed(t *testing.T) {
 	}
 	if live != 0 {
 		t.Errorf("expected the skipped stash row not to be written, got %d live rows", live)
+	}
+
+	// The stash must be empty afterwards. Together with the pre-count above
+	// this proves the drain actually ran on THIS row rather than missing it:
+	// if a future change to firePullRequestWebhookWithHead moved the repo
+	// address, the row would still be sitting here and the assertions above
+	// would be passing for the wrong reason.
+	if err := testPool.QueryRow(ctx,
+		`SELECT count(*) FROM github_pending_check_suite
+		 WHERE workspace_id = $1 AND repo_owner = 'acme'
+		   AND repo_name = 'ci-repo-legacy-stash' AND pr_number = 99`,
+		testWorkspaceID).Scan(&stashed); err != nil {
+		t.Fatalf("count stash after drain: %v", err)
+	}
+	if stashed != 0 {
+		t.Errorf("expected the drain to consume the stash row, got %d rows left", stashed)
 	}
 }
 
