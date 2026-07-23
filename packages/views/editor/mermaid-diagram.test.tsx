@@ -127,32 +127,39 @@ async function expectViewerStaysClosed() {
 }
 
 describe("MermaidDiagram theme changes", () => {
-  it("keeps the viewer open and preserves zoom when the theme flips", async () => {
-    render(<MermaidDiagram chart={CHART} />);
-    await openViewer();
+  it(
+    "keeps the viewer open and preserves zoom when the theme flips",
+    async () => {
+      render(<MermaidDiagram chart={CHART} />);
+      await openViewer();
 
-    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-    const zoomed = currentScale();
-    expect(zoomed).toBeGreaterThan(0.8);
+      fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+      const zoomed = currentScale();
+      expect(zoomed).toBeGreaterThan(0.8);
 
-    // Flip the theme the way the app does; the component observes documentElement
-    // and re-renders the diagram with new theme colors.
-    await act(async () => {
-      document.documentElement.classList.add("dark");
-      // Let the MutationObserver callback and the async re-render settle.
-      await Promise.resolve();
-    });
+      // Flip the theme the way the app does; the component observes documentElement
+      // and re-renders the diagram with new theme colors.
+      await act(async () => {
+        document.documentElement.classList.add("dark");
+        // Let the MutationObserver callback and the async re-render settle.
+        await Promise.resolve();
+      });
 
-    await waitFor(() => {
-      expect(mermaidRenderMock.mock.calls.length).toBeGreaterThan(1);
-    });
+      await waitFor(() => {
+        expect(mermaidRenderMock.mock.calls.length).toBeGreaterThan(1);
+      });
 
-    // The viewer previously unmounted here: the re-render cleared the rendered
-    // document to null before the new one arrived, closing the dialog and
-    // throwing away the user's zoom and position mid-read.
-    expect(screen.getByRole("application")).toBeInTheDocument();
-    expect(currentScale()).toBeCloseTo(zoomed, 5);
-  });
+      // The viewer previously unmounted here: the re-render cleared the rendered
+      // document to null before the new one arrived, closing the dialog and
+      // throwing away the user's zoom and position mid-read.
+      expect(screen.getByRole("application")).toBeInTheDocument();
+      expect(currentScale()).toBeCloseTo(zoomed, 5);
+    },
+    // Dialog portal setup and the MutationObserver callback can be starved while
+    // the full views suite shares a saturated CI runner. Keep the larger budget
+    // local to this integration-style test instead of weakening the suite default.
+    15_000,
+  );
 
   it("never blanks the diagram while the themed re-render is still in flight", async () => {
     render(<MermaidDiagram chart={CHART} />);

@@ -63,11 +63,17 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import {
   TableCell,
-  TableFooter,
   TableRow,
 } from "@multica/ui/components/ui/table";
 import { cn } from "@multica/ui/lib/utils";
+import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { ALL_STATUSES } from "@multica/core/issues/config";
+import {
+  issueKeys,
+  issueTableGroupsOptions,
+  issueTableRowPageOptions,
+} from "@multica/core/issues/queries";
 import {
   TABLE_SYSTEM_COLUMNS,
   propertyIdFromViewKey,
@@ -88,10 +94,21 @@ import type {
   Issue,
   IssueProperty,
   IssuePropertyValue,
+  IssueStatus,
+  IssueTableGroupDescriptor,
+  IssueTableGroupSpec,
+  IssueTableQuerySpec,
+  IssueTableRowsResponse,
   Project,
   UpdateIssueRequest,
 } from "@multica/core/types";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQueries,
+  useQuery,
+  useQueryClient,
+  type UseQueryResult,
+} from "@tanstack/react-query";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { LabelChip } from "../../labels/label-chip";
 import { useNavigation } from "../../navigation";
@@ -112,11 +129,9 @@ import {
 import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import {
   buildIssueTableCsv,
-  buildIssueTableRows,
   getIssueTableSelectionRange,
-  isTableStructureSuspended,
+  IssueTableExportIntegrityError,
   refreshFrozenTableRows,
-  shouldAutoLoadNextWindowPage,
   type IssueTableDisplayRow,
 } from "./table-view-model";
 import type { ChildProgress } from "./list-row";
@@ -126,17 +141,11 @@ const SELECT_COLUMN_ID = "__select";
 const ADD_COLUMN_ID = "__add";
 
 type TableViewProps = {
-  issues: Issue[];
+  serverQuery: IssueTableQuerySpec;
   childProgressMap: Map<string, ChildProgress>;
-  fetchNextPage: () => Promise<unknown>;
-  hasNextPage: boolean;
-  isFetchingNextPage: boolean;
-  /** The window query is in error state — page auto-advance (structure loop
-   *  AND scroll sentinel) must stop and hand control to the explicit Retry. */
-  windowError: boolean;
-  total: number;
   search: string;
   onSearchChange: (query: string) => void;
+  onLoadedIssuesChange: (issues: Issue[]) => void;
   onCreateIssue: (defaults: IssueCreateDefaults) => void;
   exportIssues: () => Promise<Issue[]>;
   resolveExportLookups: (needs: {
@@ -147,6 +156,100 @@ type TableViewProps = {
     childProgressMap: Map<string, ChildProgress>;
   }>;
 };
+
+type ServerBranch = {
+  key: string;
+  groupKey: string | null;
+  parentId: string | null;
+  ancestorIds: string[];
+  cursors: Array<string | null>;
+};
+
+type ServerBranchState = {
+  identity: string;
+  structureIdentity: string;
+  branches: Map<string, ServerBranch>;
+};
+
+type ServerBranchPageTarget = {
+  branch: ServerBranch;
+  cursor: string | null;
+};
+
+type ServerBranchData = {
+  rows: IssueTableRowsResponse["rows"];
+  total: number;
+  nextCursor: string | null;
+  headUpdatedAt: number;
+  headFetching: boolean;
+  loading: boolean;
+  error: boolean;
+  placeholder: boolean;
+};
+
+type LoadedIssueState = {
+  membershipIdentity: string;
+  issues: Map<string, Issue>;
+};
+
+function serverBranchKey(groupKey: string | null, parentId: string | null) {
+  return `${groupKey ?? "ungrouped"}::${parentId ?? "root"}`;
+}
+
+function sameStringArray(left: string[], right: string[]) {
+  return (
+    left.length === right.length &&
+    left.every((value, index) => value === right[index])
+  );
+}
+
+/** Rebase the branch graph synchronously when a query changes.
+ *
+ * Filters/search/sort keep the same group/hierarchy structure, so preserving
+ * branch identities while resetting every cursor to the head lets React Query
+ * show the previous rows during the new request. A real structure change
+ * (group kind or hierarchy) discards incompatible group/parent identities. */
+function rebaseServerBranchState(
+  previous: ServerBranchState,
+  identity: string,
+  structureIdentity: string,
+  usesServerGrouping: boolean,
+): ServerBranchState {
+  if (previous.identity === identity) return previous;
+
+  const branches =
+    previous.structureIdentity === structureIdentity
+      ? new Map(
+          [...previous.branches].map(([key, branch]) => [
+            key,
+            { ...branch, cursors: [null] },
+          ]),
+        )
+      : new Map<string, ServerBranch>();
+
+  if (!usesServerGrouping) {
+    const key = serverBranchKey(null, null);
+    if (!branches.has(key)) {
+      branches.set(key, {
+        key,
+        groupKey: null,
+        parentId: null,
+        ancestorIds: [],
+        cursors: [null],
+      });
+    }
+  }
+
+  return { identity, structureIdentity, branches };
+}
+
+function tableGroupSpec(grouping: string): IssueTableGroupSpec {
+  if (grouping === "status") return { kind: "status" };
+  if (grouping === "assignee") return { kind: "assignee" };
+  const propertyId = propertyIdFromViewKey(grouping);
+  if (propertyId) return { kind: "property", property_id: propertyId };
+  return { kind: "none" };
+}
 
 type ColumnLabelKey =
   | "title"
@@ -1075,15 +1178,11 @@ function IssueTableBodyCell({
 }
 
 export function TableView({
-  issues,
+  serverQuery,
   childProgressMap,
-  fetchNextPage,
-  hasNextPage,
-  isFetchingNextPage,
-  windowError,
-  total,
   search,
   onSearchChange,
+  onLoadedIssuesChange,
   onCreateIssue,
   exportIssues,
   resolveExportLookups,
@@ -1096,7 +1195,10 @@ export function TableView({
   const actions = useIssueSurfaceActionsOptional();
   const selection = useIssueSurfaceSelection();
   const { getActorName } = useActorName();
-  const { data: properties = [] } = useQuery(propertyListOptions(wsId));
+  const {
+    data: properties = [],
+    isSuccess: propertyCatalogSettled,
+  } = useQuery(propertyListOptions(wsId));
   const propertyById = useMemo(
     () => new Map(properties.map((property) => [property.id, property])),
     [properties],
@@ -1105,11 +1207,21 @@ export function TableView({
     () => new Set(properties.map((property) => property.id)),
     [properties],
   );
+  const groupablePropertyIds = useMemo(
+    () =>
+      new Set(
+        properties
+          .filter((property) => ["select", "checkbox"].includes(property.type))
+          .map((property) => property.id),
+      ),
+    [properties],
+  );
   const tableColumns = useViewStore((state) => state.tableColumns);
   const toggleTableColumn = useViewStore((state) => state.toggleTableColumn);
   const reorderTableColumn = useViewStore((state) => state.reorderTableColumn);
   const setTableColumnWidth = useViewStore((state) => state.setTableColumnWidth);
   const tableGrouping = useViewStore((state) => state.tableGrouping);
+  const setTableGrouping = useViewStore((state) => state.setTableGrouping);
   const tableCollapsedGroups = useViewStore((state) => state.tableCollapsedGroups);
   const toggleTableGroupCollapsed = useViewStore(
     (state) => state.toggleTableGroupCollapsed,
@@ -1131,49 +1243,639 @@ export function TableView({
 
   const groupingPropertyId = propertyIdFromViewKey(tableGrouping);
   const effectiveTableGrouping =
-    groupingPropertyId && !activePropertyIds.has(groupingPropertyId)
+    groupingPropertyId &&
+    propertyCatalogSettled &&
+    !groupablePropertyIds.has(groupingPropertyId)
       ? "none"
       : tableGrouping;
-
-  // Grouping and hierarchy are whole-window statements, so the window must
-  // be materialized for them — but only under an explicit ceiling: grouping
-  // is persisted view state and hierarchy is on by default, so an unbounded
-  // loop would re-download entire large workspaces on every visit (round-3
-  // review P1#1). Below the ceiling the remaining pages load sequentially
-  // (one per completed fetch — flipping the toggles off stops the loop),
-  // which also makes hierarchy apply without scrolling to the last page
-  // (round-3 P1#2). Above the ceiling both features suspend silently; the
-  // window keeps the one-page-per-scroll sentinel.
-  // Advancement gates (error stop, hard loaded-count ceiling, fresh total)
-  // live in shouldAutoLoadNextWindowPage — see its doc for the failure
-  // modes each gate closes (round-4 review P1#1/P1#2).
-  const structureSuspended = isTableStructureSuspended(total);
-  const structureWanted = effectiveTableGrouping !== "none" || tableHierarchy;
-  const structureGrouping = structureSuspended ? "none" : effectiveTableGrouping;
-  const structureHierarchy = tableHierarchy && !structureSuspended;
-  const loadedCount = issues.length;
   useEffect(() => {
     if (
-      shouldAutoLoadNextWindowPage({
-        windowWanted: structureWanted,
-        total,
-        loadedCount,
-        hasNextPage,
-        isFetchingNextPage,
-        hasError: windowError,
-      })
+      !groupingPropertyId ||
+      !propertyCatalogSettled ||
+      groupablePropertyIds.has(groupingPropertyId)
     ) {
-      void fetchNextPage();
+      return;
     }
+    setTableGrouping("none");
+    toast.info(t(($) => $.table.group_property_unavailable));
   }, [
-    fetchNextPage,
-    hasNextPage,
-    isFetchingNextPage,
-    loadedCount,
-    structureWanted,
-    total,
-    windowError,
+    groupablePropertyIds,
+    groupingPropertyId,
+    propertyCatalogSettled,
+    setTableGrouping,
+    t,
   ]);
+
+  const serverGroupSpec = useMemo(
+    () => tableGroupSpec(effectiveTableGrouping),
+    [effectiveTableGrouping],
+  );
+  const usesServerGrouping = serverGroupSpec.kind !== "none";
+  const serverGroupsRequestGroup =
+    serverGroupSpec.kind === "none"
+      ? ({ kind: "status" } as const)
+      : serverGroupSpec;
+  const serverGroupsQuery = useInfiniteQuery({
+    ...issueTableGroupsOptions(
+      wsId,
+      serverQuery,
+      serverGroupsRequestGroup,
+    ),
+    enabled: usesServerGrouping,
+  });
+  const {
+    data: serverGroupsData,
+    isPending: serverGroupsPending,
+    isError: serverGroupsError,
+    hasNextPage: hasNextServerGroupPage,
+    isFetchingNextPage: fetchingNextServerGroupPage,
+    refetch: refetchServerGroups,
+    fetchNextPage: fetchNextServerGroupPage,
+  } = serverGroupsQuery;
+  useEffect(() => {
+    const body =
+      serverGroupsQuery.error instanceof ApiError &&
+      serverGroupsQuery.error.body &&
+      typeof serverGroupsQuery.error.body === "object"
+        ? (serverGroupsQuery.error.body as { error?: unknown })
+        : null;
+    if (
+      serverGroupsQuery.error instanceof ApiError &&
+      serverGroupsQuery.error.status === 422 &&
+      body?.error === "unsupported_group"
+    ) {
+      setTableGrouping("none");
+      toast.info(t(($) => $.table.group_property_unavailable));
+    }
+  }, [serverGroupsQuery.error, setTableGrouping, t]);
+  const serverGroups = useMemo(
+    () => serverGroupsData?.pages.flatMap((page) => page.groups) ?? [],
+    [serverGroupsData?.pages],
+  );
+  const serverIdentity = useMemo(
+    () => JSON.stringify([serverQuery, serverGroupSpec, tableHierarchy]),
+    [serverGroupSpec, serverQuery, tableHierarchy],
+  );
+  const serverStructureIdentity = useMemo(
+    () => JSON.stringify([serverGroupSpec, tableHierarchy]),
+    [serverGroupSpec, tableHierarchy],
+  );
+  const collapsedGroupSet = useMemo(
+    () => new Set(tableCollapsedGroups),
+    [tableCollapsedGroups],
+  );
+  const collapsedParentSet = useMemo(
+    () => new Set(tableCollapsedParents),
+    [tableCollapsedParents],
+  );
+  const [serverBranchState, setServerBranchState] =
+    useState<ServerBranchState>({
+      identity: "",
+      structureIdentity: "",
+      branches: new Map(),
+    });
+
+  const rebasedServerBranchState = useMemo(
+    () =>
+      rebaseServerBranchState(
+        serverBranchState,
+        serverIdentity,
+        serverStructureIdentity,
+        usesServerGrouping,
+      ),
+    [
+      serverBranchState,
+      serverIdentity,
+      serverStructureIdentity,
+      usesServerGrouping,
+    ],
+  );
+
+  // Commit the synchronous rebase after render. Consumers use the derived
+  // state above immediately, so a filter/search/sort transition never has an
+  // empty frame while this effect catches state up.
+  useEffect(() => {
+    if (rebasedServerBranchState !== serverBranchState) {
+      setServerBranchState(rebasedServerBranchState);
+    }
+  }, [rebasedServerBranchState, serverBranchState]);
+
+  const activeServerBranches = rebasedServerBranchState.branches;
+  const serverBranchPlaceholderRef = useRef(
+    new Map<string, IssueTableRowsResponse>(),
+  );
+  const serverBranchPageTargets = useMemo<ServerBranchPageTarget[]>(
+    () =>
+      [...activeServerBranches.values()].flatMap((branch) =>
+        branch.cursors.map((cursor) => ({ branch, cursor })),
+      ),
+    [activeServerBranches],
+  );
+  // useQueries compares and installs the supplied query list in an effect.
+  // Keeping this array stable prevents a settled branch from being installed
+  // again on every render (which can otherwise create a render loop once the
+  // virtualized table starts measuring rows).
+  const serverBranchQueries = useMemo(
+    () =>
+      serverBranchPageTargets.map(({ branch, cursor }) => {
+        const placeholder =
+          cursor === null
+            ? serverBranchPlaceholderRef.current.get(
+                `${serverStructureIdentity}:${branch.key}`,
+              )
+            : undefined;
+        return {
+          ...issueTableRowPageOptions(wsId, {
+            query: serverQuery,
+            group: serverGroupSpec,
+            group_key: branch.groupKey,
+            hierarchy: { enabled: tableHierarchy },
+            parent_id: branch.parentId,
+            page: { limit: 50, cursor },
+          }),
+          // QueriesObserver replaces observers by query hash, so
+          // keepPreviousData alone cannot bridge a changed table query inside
+          // useQueries. Retain the last settled head per structural branch to
+          // keep the previous table painted while the new query is pending.
+          ...(placeholder ? { placeholderData: () => placeholder } : {}),
+          enabled:
+            (branch.groupKey === null ||
+              !collapsedGroupSet.has(branch.groupKey)) &&
+            !branch.ancestorIds.some((id) => collapsedParentSet.has(id)),
+        };
+      }),
+    [
+      collapsedGroupSet,
+      collapsedParentSet,
+      serverBranchPageTargets,
+      serverGroupSpec,
+      serverQuery,
+      serverStructureIdentity,
+      tableHierarchy,
+      wsId,
+    ],
+  );
+  const combineServerBranchQueries = useCallback(
+    (results: Array<UseQueryResult<IssueTableRowsResponse, Error>>) => {
+      const byBranch: Record<string, ServerBranchData> = {};
+      for (let index = 0; index < serverBranchPageTargets.length; index += 1) {
+        const target = serverBranchPageTargets[index];
+        const result = results[index];
+        if (!target || !result) continue;
+        const current = byBranch[target.branch.key] ?? {
+          rows: [],
+          total: 0,
+          nextCursor: null,
+          headUpdatedAt: 0,
+          headFetching: false,
+          loading: false,
+          error: false,
+          placeholder: false,
+        };
+        const page = result.data;
+        if (page) {
+          current.rows.push(...page.rows);
+          if (target.cursor === null) current.total = page.total;
+          current.nextCursor = page.next_cursor;
+        }
+        if (target.cursor === null) {
+          current.headUpdatedAt = result.dataUpdatedAt;
+          current.headFetching = result.isFetching;
+        }
+        current.loading ||= result.isPending || result.isFetching;
+        current.error ||= result.isError;
+        current.placeholder ||= result.isPlaceholderData;
+        byBranch[target.branch.key] = current;
+      }
+      return byBranch;
+    },
+    [serverBranchPageTargets],
+  );
+  // `combine` is structurally shared by React Query. It must return only plain
+  // objects/arrays: Map instances and freshly-created retry closures cannot be
+  // shared, and make useQueries publish a different snapshot on every render.
+  const serverBranchData = useQueries({
+    queries: serverBranchQueries,
+    combine: combineServerBranchQueries,
+  });
+
+  useEffect(() => {
+    const next = new Map<string, IssueTableRowsResponse>();
+    for (const branch of activeServerBranches.values()) {
+      const key = `${serverStructureIdentity}:${branch.key}`;
+      const data = serverBranchData[branch.key];
+      if (!data || data.placeholder || data.loading || data.error) {
+        const previous = serverBranchPlaceholderRef.current.get(key);
+        if (previous) next.set(key, previous);
+        continue;
+      }
+      next.set(key, {
+        query_fingerprint: "__table_placeholder__",
+        group_key: branch.groupKey,
+        parent_id: branch.parentId,
+        total: data.total,
+        rows: data.rows,
+        branch_total: data.rows.length,
+        next_cursor: null,
+      });
+    }
+    // Bound placeholders to the active structural graph. Sort/filter/search
+    // transitions reuse these entries; old group/property configurations do
+    // not accumulate for the lifetime of the Table component.
+    serverBranchPlaceholderRef.current = next;
+  }, [
+    activeServerBranches,
+    serverBranchData,
+    serverStructureIdentity,
+  ]);
+
+  // Re-derive ancestry from the current row graph after realtime re-parenting.
+  // Branch keys are parent ids, so an existing branch can move under a new
+  // collapsed ancestor without being re-activated by the viewport sentinel.
+  useEffect(() => {
+    const desiredAncestors = new Map<string, string[]>();
+    const visited = new Set<string>();
+    const visit = (
+      groupKey: string | null,
+      parentId: string | null,
+      ancestors: string[],
+    ) => {
+      const key = serverBranchKey(groupKey, parentId);
+      if (visited.has(key)) return;
+      visited.add(key);
+      desiredAncestors.set(key, ancestors);
+      for (const row of serverBranchData[key]?.rows ?? []) {
+        if (row.direct_child_count > 0) {
+          visit(groupKey, row.issue.id, [...ancestors, row.issue.id]);
+        }
+      }
+    };
+
+    if (usesServerGrouping) {
+      for (const group of serverGroups) visit(group.key, null, []);
+    } else {
+      visit(null, null, []);
+    }
+
+    setServerBranchState((previous) => {
+      if (previous.identity !== serverIdentity) return previous;
+      let branches: Map<string, ServerBranch> | null = null;
+      for (const [key, ancestors] of desiredAncestors) {
+        const branch = previous.branches.get(key);
+        if (!branch || sameStringArray(branch.ancestorIds, ancestors)) continue;
+        branches ??= new Map(previous.branches);
+        branches.set(key, { ...branch, ancestorIds: ancestors });
+      }
+      return branches ? { ...previous, branches } : previous;
+    });
+  }, [serverBranchData, serverGroups, serverIdentity, usesServerGrouping]);
+
+  const activateServerBranch = useCallback(
+    (
+      groupKey: string | null,
+      parentId: string | null,
+      ancestorIds: string[],
+    ) => {
+      setServerBranchState((previous) => {
+        if (previous.identity !== serverIdentity) return previous;
+        const key = serverBranchKey(groupKey, parentId);
+        const existing = previous.branches.get(key);
+        if (existing && sameStringArray(existing.ancestorIds, ancestorIds)) {
+          return previous;
+        }
+        const branches = new Map(previous.branches);
+        branches.set(
+          key,
+          existing
+            ? { ...existing, ancestorIds }
+            : {
+                key,
+                groupKey,
+                parentId,
+                ancestorIds,
+                cursors: [null],
+              },
+        );
+        return { ...previous, branches };
+      });
+    },
+    [serverIdentity],
+  );
+
+  // A broad Table invalidation refetches every active page. As soon as the
+  // head starts refreshing, every later cursor is obsolete; discard them
+  // before their concurrent responses can create a duplicate or missing row.
+  // The revision check is a second line of defence for clients that restore a
+  // refreshed head directly into the cache without exposing a fetching frame.
+  const branchHeadRevisionRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    const previousRevisions = branchHeadRevisionRef.current;
+    const nextRevisions: Record<string, number> = {};
+    const branchesToTrim = new Set<string>();
+    for (const [key, branch] of activeServerBranches) {
+      const revision = serverBranchData[key]?.headUpdatedAt ?? 0;
+      if (revision === 0) continue;
+      nextRevisions[key] = revision;
+      const seen = previousRevisions[key];
+      if (
+        branch.cursors.length > 1 &&
+        (serverBranchData[key]?.headFetching ||
+          (seen !== undefined && seen !== revision))
+      ) {
+        branchesToTrim.add(key);
+      }
+    }
+    // Keep only the current query's active branches. This bounds the revision
+    // bookkeeping across long sessions with many filter/search identities.
+    branchHeadRevisionRef.current = nextRevisions;
+    if (branchesToTrim.size === 0) return;
+
+    setServerBranchState((previous) => {
+      if (previous.identity !== serverIdentity) return previous;
+      let branches: Map<string, ServerBranch> | null = null;
+      for (const [key, branch] of previous.branches) {
+        if (branchesToTrim.has(key)) {
+          branches ??= new Map(previous.branches);
+          branches.set(key, { ...branch, cursors: [null] });
+        }
+      }
+      return branches ? { ...previous, branches } : previous;
+    });
+  }, [activeServerBranches, serverBranchData, serverIdentity]);
+
+  const loadNextServerBranchPage = useCallback(
+    (branchKey: string, cursor: string) => {
+      setServerBranchState((previous) => {
+        if (previous.identity !== serverIdentity) return previous;
+        const branch = previous.branches.get(branchKey);
+        if (!branch || branch.cursors.includes(cursor)) return previous;
+        const branches = new Map(previous.branches);
+        branches.set(branchKey, {
+          ...branch,
+          cursors: [...branch.cursors, cursor],
+        });
+        return { ...previous, branches };
+      });
+    },
+    [serverIdentity],
+  );
+
+  const retryServerBranch = useCallback(
+    (branchKey: string) => {
+      const branch = activeServerBranches.get(branchKey);
+      if (!branch) return;
+      void queryClient.refetchQueries({
+        queryKey: issueKeys.tableRows(
+          wsId,
+          serverQuery,
+          serverGroupSpec,
+          branch.groupKey,
+          tableHierarchy,
+          branch.parentId,
+        ),
+        exact: false,
+        type: "active",
+      });
+    },
+    [
+      activeServerBranches,
+      queryClient,
+      serverGroupSpec,
+      serverQuery,
+      tableHierarchy,
+      wsId,
+    ],
+  );
+
+  const serverGroupLabel = useCallback(
+    (descriptor: IssueTableGroupDescriptor) => {
+      const value = descriptor.value;
+      if (value.kind === "status") {
+        if (ALL_STATUSES.includes(value.status as IssueStatus)) {
+          return t(($) => $.status[value.status as IssueStatus]);
+        }
+        // Installed clients can receive a status introduced by a newer
+        // backend. Keep the group usable instead of collapsing the response
+        // to the schema fallback or rendering an empty label.
+        return value.status;
+      }
+      if (value.kind === "assignee") {
+        return value.actor
+          ? getActorName(value.actor.type, value.actor.id)
+          : t(($) => $.table.unassigned);
+      }
+      if (value.value_state === "unset") return t(($) => $.table.no_value);
+      if (value.value_state === "unavailable") {
+        return t(($) => $.table.value_unavailable);
+      }
+      const property = propertyById.get(value.property_id);
+      if (typeof value.value === "boolean") {
+        return value.value
+          ? t(($) => $.pickers.custom_property.true_label)
+          : t(($) => $.pickers.custom_property.false_label);
+      }
+      return (
+        property?.config.options?.find((option) => option.id === value.value)
+          ?.name ?? String(value.value ?? "")
+      );
+    },
+    [getActorName, propertyById, t],
+  );
+
+  const serverDisplayRows = useMemo<IssueTableDisplayRow[]>(() => {
+    const result: IssueTableDisplayRow[] = [];
+    const seenIssueIds = new Set<string>();
+    const appendBranch = (
+      groupKey: string | null,
+      parentId: string | null,
+      depth: number,
+      ancestorIds: string[],
+    ) => {
+      const key = serverBranchKey(groupKey, parentId);
+      const data = serverBranchData[key];
+      if (!data) {
+        const registered = activeServerBranches.has(key);
+        result.push({
+          kind: "load_more",
+          key: `${registered ? "loading" : "activate"}:${key}`,
+          label: t(($) => $.table.loading_branch),
+          loading: registered,
+          autoLoad: !registered,
+          onLoad: registered
+            ? undefined
+            : () => activateServerBranch(groupKey, parentId, ancestorIds),
+        });
+        return;
+      }
+      if (data.rows.length === 0 && data.loading) {
+        result.push({
+          kind: "load_more",
+          key: `loading:${key}`,
+          label: t(($) => $.table.loading_branch),
+          loading: true,
+        });
+      }
+      for (const row of data.rows) {
+        // A realtime move can briefly leave the same entity in old and new
+        // branch caches. Render the first authoritative position only; duplicate
+        // ids otherwise create duplicate React keys and duplicate selection.
+        if (seenIssueIds.has(row.issue.id)) continue;
+        seenIssueIds.add(row.issue.id);
+        const collapsed = collapsedParentSet.has(row.issue.id);
+        result.push({
+          kind: "issue",
+          key: row.issue.id,
+          issue: row.issue,
+          depth,
+          hasChildren: tableHierarchy && row.direct_child_count > 0,
+          collapsed,
+        });
+        if (tableHierarchy && row.direct_child_count > 0 && !collapsed) {
+          appendBranch(groupKey, row.issue.id, depth + 1, [
+            ...ancestorIds,
+            row.issue.id,
+          ]);
+        }
+      }
+      if (data.error) {
+        result.push({
+          kind: "load_more",
+          key: `retry:${key}`,
+          label: t(($) => $.table.load_more_failed_retry),
+          loading: false,
+          onLoad: () => retryServerBranch(key),
+        });
+      } else if (data.nextCursor) {
+        const nextCursor = data.nextCursor;
+        result.push({
+          kind: "load_more",
+          key: `more:${key}:${nextCursor}`,
+          label: t(($) => $.table.load_more),
+          loading: data.loading,
+          autoLoad: true,
+          onLoad: () => loadNextServerBranchPage(key, nextCursor),
+        });
+      }
+    };
+
+    if (usesServerGrouping) {
+      for (const descriptor of serverGroups) {
+        const collapsed = collapsedGroupSet.has(descriptor.key);
+        result.push({
+          kind: "group",
+          key: descriptor.key,
+          label: serverGroupLabel(descriptor),
+          count: descriptor.count,
+          collapsed,
+        });
+        if (!collapsed) appendBranch(descriptor.key, null, 0, []);
+      }
+    } else {
+      appendBranch(null, null, 0, []);
+    }
+    if (
+      usesServerGrouping &&
+      serverGroups.length === 0 &&
+      serverGroupsPending
+    ) {
+      result.push({
+        kind: "load_more",
+        key: "loading:groups",
+        label: t(($) => $.table.loading_branch),
+        loading: true,
+      });
+    } else if (usesServerGrouping && serverGroupsError) {
+      result.push({
+        kind: "load_more",
+        key: "retry:groups",
+        label: t(($) => $.table.load_failed_retry),
+        loading: false,
+        onLoad: () => void refetchServerGroups(),
+      });
+    } else if (usesServerGrouping && hasNextServerGroupPage) {
+      result.push({
+        kind: "load_more",
+        key: "more:groups",
+        label: t(($) => $.table.load_more),
+        loading: fetchingNextServerGroupPage,
+        autoLoad: true,
+        onLoad: () => void fetchNextServerGroupPage(),
+      });
+    }
+    return result;
+  }, [
+    collapsedGroupSet,
+    collapsedParentSet,
+    activeServerBranches,
+    activateServerBranch,
+    loadNextServerBranchPage,
+    retryServerBranch,
+    serverBranchData,
+    serverGroupLabel,
+    serverGroups,
+    serverGroupsPending,
+    serverGroupsError,
+    hasNextServerGroupPage,
+    fetchingNextServerGroupPage,
+    refetchServerGroups,
+    fetchNextServerGroupPage,
+    t,
+    tableHierarchy,
+    usesServerGrouping,
+  ]);
+
+  const tableMembershipIdentity = useMemo(
+    () =>
+      JSON.stringify([
+        serverQuery.scope,
+        serverQuery.filters,
+        serverQuery.search ?? "",
+      ]),
+    [serverQuery.filters, serverQuery.scope, serverQuery.search],
+  );
+  const authoritativeLoadedIssues = useMemo(() => {
+    const byId = new Map<string, Issue>();
+    for (const branch of Object.values(serverBranchData)) {
+      // Previous-data placeholders keep the old table painted during a query
+      // transition, but they are not members of the new filter/search window.
+      if (branch.placeholder) continue;
+      for (const row of branch.rows) byId.set(row.issue.id, row.issue);
+    }
+    return [...byId.values()];
+  }, [serverBranchData]);
+  const [loadedIssueState, setLoadedIssueState] = useState<LoadedIssueState>({
+    membershipIdentity: tableMembershipIdentity,
+    issues: new Map(),
+  });
+  useEffect(() => {
+    setLoadedIssueState((previous) => {
+      const reset = previous.membershipIdentity !== tableMembershipIdentity;
+      const issues = reset
+        ? new Map<string, Issue>()
+        : new Map(previous.issues);
+      let changed = reset;
+      for (const issue of authoritativeLoadedIssues) {
+        if (issues.get(issue.id) !== issue) {
+          issues.set(issue.id, issue);
+          changed = true;
+        }
+      }
+      return changed
+        ? { membershipIdentity: tableMembershipIdentity, issues }
+        : previous;
+    });
+  }, [authoritativeLoadedIssues, tableMembershipIdentity]);
+  const loadedIssues = useMemo(
+    () =>
+      loadedIssueState.membershipIdentity === tableMembershipIdentity
+        ? [...loadedIssueState.issues.values()]
+        : [],
+    [
+      loadedIssueState.issues,
+      loadedIssueState.membershipIdentity,
+      tableMembershipIdentity,
+    ],
+  );
 
   const visibleColumnConfigs = useMemo(
     () =>
@@ -1184,60 +1886,31 @@ export function TableView({
     [activePropertyIds, tableColumns],
   );
 
-  const liveDisplayRows = useMemo(
-    () =>
-      buildIssueTableRows(issues, {
-        grouping: structureGrouping,
-        properties,
-        collapsedGroups: new Set(tableCollapsedGroups),
-        collapsedParents: new Set(tableCollapsedParents),
-        hierarchy: structureHierarchy,
-        windowComplete: !hasNextPage,
-        getActorName,
-        getStatusLabel: (status) => t(($) => $.status[status]),
-        noValueLabel: t(($) => $.table.no_value),
-        unassignedLabel: t(($) => $.table.unassigned),
-        trueLabel: t(($) => $.pickers.custom_property.true_label),
-        falseLabel: t(($) => $.pickers.custom_property.false_label),
-      }),
-    [
-      getActorName,
-      hasNextPage,
-      issues,
-      properties,
-      t,
-      tableCollapsedGroups,
-      tableCollapsedParents,
-      structureGrouping,
-      structureHierarchy,
-    ],
-  );
-
   // While a cell editor popup / rename input is open, hold the row structure
-  // still: window materialization, the end-of-load hierarchy assembly, and
-  // realtime refetches all rebuild the row list, and a reorder can move the
-  // anchor row out of the virtualized render window — unmounting the cell and
-  // closing the popup the user just opened (MUL-5108). The snapshot freezes
-  // ORDER only; issue objects inside the rows keep tracking the live cache so
-  // the open editor reflects optimistic updates. Live structure snaps back
-  // the moment the editor closes. Ref writes happen during render on purpose:
-  // the snapshot must be captured from the same render that flips `editing`
-  // on, and both branches are idempotent under StrictMode double-render.
+  // still: server branch pagination and realtime refetches can rebuild or
+  // reorder the row list, moving the anchor row out of the virtualized render
+  // window and closing the popup the user just opened (MUL-5108). The snapshot
+  // freezes ORDER only; issue objects inside the rows keep tracking live
+  // server-query data so the open editor reflects optimistic updates. Live
+  // structure snaps back the moment the editor closes. Ref writes happen
+  // during render on purpose: the snapshot must be captured from the same
+  // render that flips `editing` on, and both branches are idempotent under
+  // StrictMode double-render.
   const frozenRowsRef = useRef<IssueTableDisplayRow[] | null>(null);
   if (editingCellKey === null) frozenRowsRef.current = null;
   else if (frozenRowsRef.current === null)
-    frozenRowsRef.current = liveDisplayRows;
+    frozenRowsRef.current = serverDisplayRows;
   const frozenRows = frozenRowsRef.current;
   const issueById = useMemo(
-    () => new Map(issues.map((issue) => [issue.id, issue])),
-    [issues],
+    () => new Map(authoritativeLoadedIssues.map((issue) => [issue.id, issue])),
+    [authoritativeLoadedIssues],
   );
   const displayRows = useMemo(
     () =>
-      frozenRows && frozenRows !== liveDisplayRows
+      frozenRows && frozenRows !== serverDisplayRows
         ? refreshFrozenTableRows(frozenRows, issueById)
-        : liveDisplayRows,
-    [frozenRows, issueById, liveDisplayRows],
+        : serverDisplayRows,
+    [frozenRows, issueById, serverDisplayRows],
   );
   const visibleIssueIds = useMemo(
     () =>
@@ -1246,9 +1919,12 @@ export function TableView({
         .map((row) => row.issue.id),
     [displayRows],
   );
+  useEffect(() => {
+    onLoadedIssuesChange(loadedIssues);
+  }, [loadedIssues, onLoadedIssuesChange]);
   const selectedIssues = useMemo(
-    () => issues.filter((issue) => selection.selectedIds.has(issue.id)),
-    [issues, selection.selectedIds],
+    () => loadedIssues.filter((issue) => selection.selectedIds.has(issue.id)),
+    [loadedIssues, selection.selectedIds],
   );
   const handleIssueSelection = useCallback(
     (issueId: string, shiftKey: boolean) => {
@@ -1538,37 +2214,16 @@ export function TableView({
       toast.success(t(($) => $.table.export_success, { count: rows.length }));
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : t(($) => $.table.export_failed),
+        error instanceof Error &&
+          !(error instanceof IssueTableExportIntegrityError) &&
+          error.message
+          ? error.message
+          : t(($) => $.table.export_failed),
       );
     } finally {
       setExporting(null);
     }
   };
-
-  const footer = (
-    <TableFooter className="border-0 bg-transparent">
-      <TableRow className="h-px border-0 hover:bg-transparent">
-        <TableCell
-          colSpan={table.getVisibleLeafColumns().length}
-          className="h-px p-0"
-        >
-          <InfiniteScrollSentinel
-            onVisible={() => {
-              // A failed window stops implicit loading too — otherwise every
-              // visibility transition retries into the same failure. The
-              // toolbar Retry is the explicit resume path.
-              if (hasNextPage && !isFetchingNextPage && !windowError) {
-                void fetchNextPage();
-              }
-            }}
-            loading={false}
-            rootMargin="320px"
-            className="h-px w-px"
-          />
-        </TableCell>
-      </TableRow>
-    </TableFooter>
-  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -1579,17 +2234,7 @@ export function TableView({
           placeholder={t(($) => $.table.search_placeholder)}
           clearLabel={t(($) => $.table.search_clear)}
         />
-        <span className="mr-auto min-w-0 truncate text-xs text-muted-foreground">
-          {windowError && hasNextPage && (
-            <button
-              type="button"
-              onClick={() => void fetchNextPage()}
-              className="text-destructive underline-offset-2 hover:underline"
-            >
-              {t(($) => $.table.load_more_failed_retry)}
-            </button>
-          )}
-        </span>
+        <span className="mr-auto" />
         <DropdownMenu>
           <DropdownMenuTrigger
             render={
@@ -1637,7 +2282,6 @@ export function TableView({
         >
           <DataTable
             table={table}
-            footer={footer}
             virtualizeRows
             emptyMessage={t(($) => $.table.empty)}
             onRowClick={(row) => {
@@ -1646,14 +2290,52 @@ export function TableView({
               }
             }}
             renderRow={(row) => {
-              if (row.original.kind !== "group") return null;
-              return (
-                <IssueTableGroupRow
-                  group={row.original}
-                  colSpan={table.getVisibleLeafColumns().length}
-                  onToggle={() => toggleTableGroupCollapsed(row.original.key)}
-                />
-              );
+              if (row.original.kind === "group") {
+                return (
+                  <IssueTableGroupRow
+                    group={row.original}
+                    colSpan={table.getVisibleLeafColumns().length}
+                    onToggle={() => toggleTableGroupCollapsed(row.original.key)}
+                  />
+                );
+              }
+              if (row.original.kind === "load_more") {
+                const loadMoreRow = row.original;
+                return (
+                  <TableRow className="hover:bg-transparent">
+                    <TableCell
+                      colSpan={table.getVisibleLeafColumns().length}
+                      className="relative h-9 px-4 py-1"
+                    >
+                      {loadMoreRow.autoLoad &&
+                        loadMoreRow.onLoad &&
+                        !loadMoreRow.loading && (
+                        <InfiniteScrollSentinel
+                          onVisible={loadMoreRow.onLoad}
+                          loading={false}
+                          rootMargin="240px"
+                          className="absolute inset-y-0 left-0 w-px"
+                        />
+                      )}
+                      <button
+                        type="button"
+                        disabled={loadMoreRow.loading || !loadMoreRow.onLoad}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          loadMoreRow.onLoad?.();
+                        }}
+                        className="sticky left-4 flex items-center gap-2 text-xs text-muted-foreground enabled:hover:text-foreground disabled:cursor-default"
+                      >
+                        {loadMoreRow.loading && (
+                          <Loader2 className="size-3.5 animate-spin" />
+                        )}
+                        {loadMoreRow.label}
+                      </button>
+                    </TableCell>
+                  </TableRow>
+                );
+              }
+              return null;
             }}
             className="min-h-0 flex-1"
           />

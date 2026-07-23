@@ -169,6 +169,7 @@ export function AgentCreationStudio() {
   const [builderSessionId, setBuilderSessionId] = useState("");
   const [builderStarting, setBuilderStarting] = useState(false);
   const [builderClosing, setBuilderClosing] = useState(false);
+  const [builderSwitchingRuntime, setBuilderSwitchingRuntime] = useState(false);
   const [builderError, setBuilderError] = useState<string | null>(null);
   const [builderRestoreDraft, setBuilderRestoreDraft] = useState<{
     id: string;
@@ -511,9 +512,52 @@ export function AgentCreationStudio() {
     }
   };
 
+  // Rebinds the conversation's execution runtime on the server BEFORE the draft
+  // reflects the new selection. Updating the draft first is what produced
+  // MUL-5163: the picker showed runtime B while every subsequent message still
+  // ran on the runtime the session was created with.
+  const switchBuilderRuntime = async (runtimeId: string) => {
+    if (!runtimeId || runtimeId === draft.runtimeId) return;
+    // Before the conversation exists there is no carrier to rebind, so the
+    // picker is still plain draft state.
+    if (!builderSessionId) {
+      setDraft((current) => ({ ...current, runtimeId, model: "" }));
+      return;
+    }
+    if (builderSwitchingRuntime) return;
+    setBuilderSwitchingRuntime(true);
+    setBuilderError(null);
+    try {
+      const result = await api.switchAgentBuilderRuntime(builderSessionId, {
+        runtime_id: runtimeId,
+      });
+      // Follow the runtime the server says it bound. Resolving here at all means
+      // the rebind committed, so refusing to move the draft would leave the
+      // picker pointing at a runtime that no longer executes anything — the same
+      // split this whole change removes. The client fallback already resolves an
+      // unparseable success body to the requested id.
+      const boundRuntimeId = result.runtime_id || runtimeId;
+      // Model ids are per-runtime; clear it so the new runtime resolves its own
+      // default instead of keeping one it may not serve.
+      setDraft((current) => ({ ...current, runtimeId: boundRuntimeId, model: "" }));
+      toast.success(t(($) => $.creation_studio.builder.switch_runtime_success));
+    } catch (error) {
+      setBuilderError(
+        error instanceof Error
+          ? error.message
+          : t(($) => $.creation_studio.builder.switch_runtime_failed),
+      );
+    } finally {
+      setBuilderSwitchingRuntime(false);
+    }
+  };
+
   const sendBuilderMessage = async (content: string): Promise<boolean> => {
     const text = content.trim();
-    if (!text || !builderSessionId || builderPending) return false;
+    // builderSwitchingRuntime blocks the send while a rebind is in flight: the
+    // server serialises the two anyway, but letting the message through would
+    // mean the user cannot tell which runtime answered it.
+    if (!text || !builderSessionId || builderPending || builderSwitchingRuntime) return false;
     setBuilderError(null);
     try {
       const encodedContent = encodeBuilderInput(
@@ -864,6 +908,11 @@ export function AgentCreationStudio() {
                 members={members}
                 currentUserId={currentUser?.id ?? null}
                 createError={createError}
+                onRuntimeSelect={(runtimeId) => {
+                  void switchBuilderRuntime(runtimeId);
+                }}
+                runtimeSwitchPending={builderPending}
+                runtimeSwitchInFlight={builderSwitchingRuntime}
               />
             </div>
             <StudioFooter
@@ -1057,6 +1106,9 @@ function ConfigurationPanel({
   currentUserId,
   createError,
   compact = false,
+  onRuntimeSelect,
+  runtimeSwitchPending = false,
+  runtimeSwitchInFlight = false,
 }: {
   draft: AgentDraft;
   onChange: (draft: AgentDraft) => void;
@@ -1066,11 +1118,30 @@ function ConfigurationPanel({
   currentUserId: string | null;
   createError: string | null;
   compact?: boolean;
+  /** Builder sessions rebind the server-side carrier instead of only editing
+   *  the draft. Absent for the plain create flows, where the draft is the only
+   *  state that exists. */
+  onRuntimeSelect?: (runtimeId: string) => void;
+  /** A builder reply is in flight, so the server would refuse the rebind. */
+  runtimeSwitchPending?: boolean;
+  /** A rebind request is in flight. */
+  runtimeSwitchInFlight?: boolean;
 }) {
   const { t } = useT("agents");
   const selectedRuntime = runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
   const set = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => onChange({ ...draft, [key]: value });
   const otherMembers = members.filter((member) => member.user_id !== currentUserId);
+  const runtimeLocked = runtimeSwitchPending || runtimeSwitchInFlight;
+  const handleRuntimeSelect = (id: string) => {
+    if (id === draft.runtimeId) return;
+    if (onRuntimeSelect) {
+      onRuntimeSelect(id);
+      return;
+    }
+    // Model is per-runtime; clear it on runtime change so the new
+    // runtime resolves its own default instead of a stale value.
+    onChange({ ...draft, runtimeId: id, model: "" });
+  };
 
   return (
     <div className={cn("space-y-8", compact && "space-y-6")}>
@@ -1167,24 +1238,33 @@ function ConfigurationPanel({
       >
         <SettingsCard>
           <div className={cn("grid gap-4 px-4 py-4", !compact && "sm:grid-cols-2")}>
-            <RuntimePicker
-              runtimes={runtimes}
-              runtimesLoading={runtimesLoading}
-              members={members}
-              currentUserId={currentUserId}
-              selectedRuntimeId={draft.runtimeId}
-              onSelect={(id) => {
-                // Model is per-runtime; clear it on runtime change so the new
-                // runtime resolves its own default instead of a stale value.
-                if (id !== draft.runtimeId) onChange({ ...draft, runtimeId: id, model: "" });
-              }}
-            />
+            <div className="min-w-0">
+              <RuntimePicker
+                runtimes={runtimes}
+                runtimesLoading={runtimesLoading}
+                members={members}
+                currentUserId={currentUserId}
+                selectedRuntimeId={draft.runtimeId}
+                onSelect={handleRuntimeSelect}
+                disabled={runtimeLocked}
+              />
+              {/* A silently greyed-out picker is the worst version of this: the
+                  user reaches for it exactly when the current runtime has gone
+                  wrong, so say what unblocks it instead of just refusing. */}
+              {runtimeSwitchPending && (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  {t(($) => $.creation_studio.builder.switch_runtime_pending)}
+                </p>
+              )}
+            </div>
             <ModelDropdown
               runtimeId={selectedRuntime?.id ?? null}
               runtimeOnline={selectedRuntime?.status === "online"}
               value={draft.model}
               onChange={(value) => set("model", value)}
-              disabled={!selectedRuntime}
+              // A successful switch clears the model, so an edit made while the
+              // rebind is in flight would be silently discarded.
+              disabled={!selectedRuntime || runtimeSwitchInFlight}
             />
           </div>
         </SettingsCard>
