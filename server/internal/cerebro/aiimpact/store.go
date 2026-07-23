@@ -2,7 +2,10 @@ package aiimpact
 
 import (
 	"context"
+	"database/sql"
 	"errors"
+	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -15,6 +18,239 @@ var ErrNotFound = errors.New("AI Impact resource not found")
 type Store struct{ pool *pgxpool.Pool }
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+func peoplePeriodWindow(period PeoplePeriod, now time.Time) (time.Time, string, error) {
+	switch period {
+	case PeoplePeriodHour:
+		return now.Add(-time.Hour), "minute", nil
+	case PeoplePeriodDay:
+		return now.Add(-24 * time.Hour), "hour", nil
+	case PeoplePeriodWeek:
+		return now.Add(-7 * 24 * time.Hour), "day", nil
+	case PeoplePeriodMonth:
+		return now.Add(-30 * 24 * time.Hour), "day", nil
+	default:
+		return time.Time{}, "", fmt.Errorf("unsupported people period %q", period)
+	}
+}
+
+// ListPeopleImpact reads direct workspace activity and only exposes sampled
+// quality outcomes once at least five measurements exist for that person.
+func (s *Store) ListPeopleImpact(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	period PeoplePeriod,
+	now time.Time,
+) ([]PersonImpact, error) {
+	start, grain, err := peoplePeriodWindow(period, now)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		WITH people AS (
+			SELECT u.id, 'member'::text AS person_type, u.name
+			FROM member m
+			JOIN "user" u ON u.id = m.user_id
+			WHERE m.workspace_id = $1
+			UNION ALL
+			SELECT a.id, 'agent'::text, a.name
+			FROM agent a
+			WHERE a.workspace_id = $1 AND a.archived_at IS NULL
+		),
+		person_runs AS (
+			SELECT p.id, p.person_type, r.id AS analytics_run_id, r.run_id,
+				r.cost_cents, r.project_id
+			FROM people p
+			JOIN cerebro_analytics_run r ON r.workspace_id = $1
+				AND r.started_at >= $2
+				AND (
+					(p.person_type = 'member' AND r.person_id = p.id)
+					OR (p.person_type = 'agent' AND r.agent_id = p.id)
+				)
+		),
+		run_totals AS (
+			SELECT id, person_type,
+				COUNT(DISTINCT run_id)::bigint AS runs,
+				CASE
+					WHEN COUNT(*) FILTER (WHERE cost_cents IS NOT NULL) = 0 THEN NULL
+					ELSE SUM(cost_cents) FILTER (WHERE cost_cents IS NOT NULL)::bigint
+				END AS cost_cents
+			FROM person_runs
+			GROUP BY id, person_type
+		),
+		quality_totals AS (
+			SELECT pr.id, pr.person_type,
+				COUNT(DISTINCT q.analytics_run_id)::bigint AS sample_size,
+				AVG(q.score) FILTER (
+					WHERE q.measurement_type <> 'satisfaction' AND q.score IS NOT NULL
+				) AS solution_quality,
+				AVG(q.score) FILTER (
+					WHERE q.category ILIKE '%prompt%' AND q.score IS NOT NULL
+				) AS prompt_effectiveness,
+				AVG(q.confidence) FILTER (WHERE q.confidence IS NOT NULL) AS confidence,
+				COUNT(*) FILTER (
+					WHERE q.measurement_type = 'satisfaction'
+						AND q.verdict IN ('approved', '👍', '❤️', '🎉')
+				)::float8
+				/ NULLIF(COUNT(*) FILTER (
+					WHERE q.measurement_type = 'satisfaction'
+						AND q.verdict IN ('approved', 'rejected', '👍', '👎', '❤️', '🎉')
+				), 0)::float8 AS frustration_free
+			FROM person_runs pr
+			JOIN cerebro_analytics_quality_measurement q
+				ON q.analytics_run_id = pr.analytics_run_id AND q.workspace_id = $1
+			GROUP BY pr.id, pr.person_type
+		),
+		skill_totals AS (
+			SELECT pr.id, pr.person_type, SUM(sk.invocation_count)::bigint AS skill_activity
+			FROM person_runs pr
+			JOIN cerebro_analytics_run_skill sk
+				ON sk.analytics_run_id = pr.analytics_run_id AND sk.workspace_id = $1
+			GROUP BY pr.id, pr.person_type
+		),
+		issue_totals AS (
+			SELECT p.id, p.person_type, COUNT(DISTINCT i.id)::bigint AS issues
+			FROM people p
+			JOIN issue i ON i.workspace_id = $1 AND i.kind = 'issue'
+				AND i.created_at >= $2
+				AND (
+					(i.creator_type = p.person_type AND i.creator_id = p.id)
+					OR (i.assignee_type = p.person_type AND i.assignee_id = p.id)
+				)
+			GROUP BY p.id, p.person_type
+		),
+		project_totals AS (
+			SELECT id, person_type, COUNT(DISTINCT project_id)::bigint AS projects
+			FROM (
+				SELECT p.id, p.person_type, project.id AS project_id
+				FROM people p
+				JOIN project ON project.workspace_id = $1 AND project.created_at >= $2
+					AND project.lead_type = p.person_type AND project.lead_id = p.id
+				UNION ALL
+				SELECT id, person_type, project_id
+				FROM person_runs
+				WHERE project_id IS NOT NULL
+			) person_projects
+			GROUP BY id, person_type
+		),
+		chat_totals AS (
+			SELECT p.id, p.person_type, COUNT(DISTINCT cs.id)::bigint AS chats
+			FROM people p
+			JOIN chat_session cs ON cs.workspace_id = $1 AND cs.created_at >= $2
+				AND (
+					(p.person_type = 'member' AND cs.creator_id = p.id)
+					OR (p.person_type = 'agent' AND cs.agent_id = p.id)
+				)
+			GROUP BY p.id, p.person_type
+		),
+		channel_totals AS (
+			SELECT p.id, p.person_type, COUNT(DISTINCT i.id)::bigint AS channels
+			FROM people p
+			JOIN issue i ON i.workspace_id = $1 AND i.kind IN ('channel', 'group')
+				AND i.created_at >= $2
+			LEFT JOIN issue_subscriber subscriber
+				ON subscriber.issue_id = i.id AND subscriber.user_id = p.id
+			WHERE (i.creator_type = p.person_type AND i.creator_id = p.id)
+				OR subscriber.user_id IS NOT NULL
+			GROUP BY p.id, p.person_type
+		)
+		SELECT p.id, p.person_type, p.name,
+			COALESCE(rt.runs, 0), COALESCE(it.issues, 0),
+			COALESCE(pt.projects, 0),
+			COALESCE(ct.chats, 0), COALESCE(cht.channels, 0),
+			COALESCE(st.skill_activity, 0), rt.cost_cents,
+			CASE WHEN COALESCE(qt.sample_size, 0) >= 5 THEN qt.solution_quality END,
+			CASE WHEN COALESCE(qt.sample_size, 0) >= 5 THEN qt.frustration_free END,
+			CASE WHEN COALESCE(qt.sample_size, 0) >= 5 THEN qt.prompt_effectiveness END,
+			CASE WHEN COALESCE(qt.sample_size, 0) >= 5 THEN qt.confidence END,
+			CASE WHEN COALESCE(qt.sample_size, 0) >= 5 THEN qt.sample_size ELSE 0 END
+		FROM people p
+		LEFT JOIN run_totals rt ON rt.id = p.id AND rt.person_type = p.person_type
+		LEFT JOIN quality_totals qt ON qt.id = p.id AND qt.person_type = p.person_type
+		LEFT JOIN skill_totals st ON st.id = p.id AND st.person_type = p.person_type
+		LEFT JOIN issue_totals it ON it.id = p.id AND it.person_type = p.person_type
+		LEFT JOIN project_totals pt ON pt.id = p.id AND pt.person_type = p.person_type
+		LEFT JOIN chat_totals ct ON ct.id = p.id AND ct.person_type = p.person_type
+		LEFT JOIN channel_totals cht ON cht.id = p.id AND cht.person_type = p.person_type
+		ORDER BY COALESCE(rt.runs, 0) DESC, p.person_type, p.name, p.id`,
+		workspaceID, start)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	people := make([]PersonImpact, 0)
+	byKey := make(map[string]int)
+	for rows.Next() {
+		var person PersonImpact
+		var cost sql.NullInt64
+		var solutionQuality, frustrationFree, promptEffectiveness, confidence sql.NullFloat64
+		if err := rows.Scan(
+			&person.ID, &person.Type, &person.Name,
+			&person.Usage.Runs, &person.Usage.Issues, &person.Usage.Projects,
+			&person.Usage.Chats, &person.Usage.Channels,
+			&person.Outcomes.SkillActivity, &cost,
+			&solutionQuality, &frustrationFree, &promptEffectiveness, &confidence,
+			&person.SampleSize,
+		); err != nil {
+			return nil, err
+		}
+		person.Activity = make([]PeopleActivityBucket, 0)
+		if cost.Valid {
+			person.Outcomes.CostCents = &cost.Int64
+		}
+		if solutionQuality.Valid {
+			person.Outcomes.SolutionQuality = &solutionQuality.Float64
+		}
+		if frustrationFree.Valid {
+			person.Outcomes.FrustrationFree = &frustrationFree.Float64
+		}
+		if promptEffectiveness.Valid {
+			person.Outcomes.PromptEffectiveness = &promptEffectiveness.Float64
+		}
+		if confidence.Valid {
+			person.Confidence = &confidence.Float64
+		}
+		key := person.Type + ":" + person.ID.String()
+		byKey[key] = len(people)
+		people = append(people, person)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	activityRows, err := s.pool.Query(ctx, `
+		SELECT person_type, person_id, date_trunc($3::text, started_at) AS bucket,
+			COUNT(DISTINCT run_id)::bigint
+		FROM (
+			SELECT 'member'::text AS person_type, person_id, started_at, run_id
+			FROM cerebro_analytics_run
+			WHERE workspace_id = $1 AND started_at >= $2 AND person_id IS NOT NULL
+			UNION ALL
+			SELECT 'agent'::text, agent_id, started_at, run_id
+			FROM cerebro_analytics_run
+			WHERE workspace_id = $1 AND started_at >= $2 AND agent_id IS NOT NULL
+		) activity
+		GROUP BY person_type, person_id, date_trunc($3::text, started_at)
+		ORDER BY bucket`, workspaceID, start, grain)
+	if err != nil {
+		return nil, err
+	}
+	defer activityRows.Close()
+	for activityRows.Next() {
+		var personType string
+		var personID uuid.UUID
+		var bucket PeopleActivityBucket
+		if err := activityRows.Scan(&personType, &personID, &bucket.Bucket, &bucket.Count); err != nil {
+			return nil, err
+		}
+		if index, ok := byKey[personType+":"+personID.String()]; ok {
+			people[index].Activity = append(people[index].Activity, bucket)
+		}
+	}
+	return people, activityRows.Err()
+}
 
 const functionColumns = `id, workspace_id, name, description, owner_type, owner_id,
  active, created_at, updated_at`

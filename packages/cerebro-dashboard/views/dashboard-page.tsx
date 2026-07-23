@@ -44,7 +44,7 @@ export function DashboardPage() {
   const aiImpactOverview = useQuery(aiImpactOverviewOptions(aiImpactWsId));
   const aiImpactFunctions = useQuery(aiImpactFunctionsOptions(aiImpactWsId));
   const aiImpactQualityRisk = useQuery(aiImpactQualityRiskOptions(aiImpactWsId));
-  const people = useQuery(aiImpactPeopleOptions(tab === "people" ? wsId : "", peoplePeriod));
+  const people = useQuery(aiImpactPeopleOptions(tab === "people" && aiImpactEnabled ? wsId : "", peoplePeriod));
 
   if (!enabled) return null;
 
@@ -137,7 +137,7 @@ export function DashboardPage() {
               }}
             />
           )}
-          {tab === "people" && (
+          {tab === "people" && aiImpactEnabled && (
             <>
               {people.isError && <p className="mx-6 mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">Failed to load People.</p>}
               <PeopleControlRoom people={people.data?.people ?? []} period={peoplePeriod} onPeriodChange={setPeoplePeriod} loading={people.isLoading} />

@@ -24,7 +24,7 @@ export function DashboardTabBar({ showAIImpact = false }: { showAIImpact?: boole
   const setTab = useDashboardStore((s) => s.setTab);
   const tabs = showAIImpact
     ? [...CORE_TABS, AI_IMPACT_TAB, PEOPLE_TAB]
-    : [...CORE_TABS, PEOPLE_TAB];
+    : CORE_TABS;
 
   return (
     <nav aria-label="Dashboard sections" className="inline-flex h-full items-stretch gap-6">

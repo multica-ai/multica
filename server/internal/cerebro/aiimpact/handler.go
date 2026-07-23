@@ -37,6 +37,7 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/cerebro/ai-impact/overview/summary", h.ListOverviewSummary)
 	r.Get("/api/cerebro/ai-impact/functions/summary", h.ListFunctionSummaries)
 	r.Get("/api/cerebro/ai-impact/quality-risk/decisions", h.ListQualityRiskDecisions)
+	r.Get("/api/cerebro/ai-impact/people", h.ListPeopleImpact)
 	r.Get("/api/cerebro/ai-impact/functions/{functionId}/evidence", h.ListFunctionEvidence)
 	r.Get("/api/cerebro/ai-impact/operating-loops/{operatingLoopId}/evidence", h.ListOperatingLoopEvidence)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/evidence", h.ListMetricEvidence)
@@ -44,6 +45,88 @@ func (h *Handler) Mount(r chi.Router) {
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/latest-observations", h.ListLatestObservations)
 	r.Get("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.ListObservations)
 	r.Post("/api/cerebro/ai-impact/metrics/{metricId}/observations", h.AppendObservation)
+}
+
+type peopleActivityResponse struct {
+	Bucket time.Time `json:"bucket"`
+	Count  int64     `json:"count"`
+}
+
+type peopleUsageResponse struct {
+	Runs     int64 `json:"runs"`
+	Issues   int64 `json:"issues"`
+	Projects int64 `json:"projects"`
+	Chats    int64 `json:"chats"`
+	Channels int64 `json:"channels"`
+}
+
+type peopleOutcomesResponse struct {
+	NeedsSolved         *NeedsSolved `json:"needs_solved"`
+	SolutionQuality     *float64     `json:"solution_quality"`
+	FrustrationFree     *float64     `json:"frustration_free"`
+	PromptEffectiveness *float64     `json:"prompt_effectiveness"`
+	SkillActivity       int64        `json:"skill_activity"`
+	CostCents           *int64       `json:"cost_cents"`
+}
+
+type personImpactResponse struct {
+	ID         uuid.UUID                `json:"id"`
+	Type       string                   `json:"type"`
+	Name       string                   `json:"name"`
+	Activity   []peopleActivityResponse `json:"activity"`
+	Usage      peopleUsageResponse      `json:"usage"`
+	Outcomes   peopleOutcomesResponse   `json:"outcomes"`
+	Confidence *float64                 `json:"confidence"`
+	SampleSize int64                    `json:"sample_size"`
+}
+
+// ListPeopleImpact returns privacy-protected, per-person direct usage and sampled outcomes.
+func (h *Handler) ListPeopleImpact(w http.ResponseWriter, r *http.Request) {
+	workspaceID, _, _, ok := observationRequestContext(w, r)
+	if !ok {
+		return
+	}
+	period, err := ParsePeoplePeriod(r.URL.Query().Get("period"))
+	if err != nil {
+		writeObservationError(w, http.StatusBadRequest, "invalid period")
+		return
+	}
+	people, err := h.service.ListPeopleImpact(r.Context(), workspaceID, period, time.Now().UTC())
+	if err != nil {
+		writeObservationError(w, http.StatusInternalServerError, "failed to list People impact")
+		return
+	}
+	response := make([]personImpactResponse, 0, len(people))
+	for _, person := range people {
+		activity := make([]peopleActivityResponse, 0, len(person.Activity))
+		for _, bucket := range person.Activity {
+			activity = append(activity, peopleActivityResponse{Bucket: bucket.Bucket, Count: bucket.Count})
+		}
+		response = append(response, personImpactResponse{
+			ID:       person.ID,
+			Type:     person.Type,
+			Name:     person.Name,
+			Activity: activity,
+			Usage: peopleUsageResponse{
+				Runs:     person.Usage.Runs,
+				Issues:   person.Usage.Issues,
+				Projects: person.Usage.Projects,
+				Chats:    person.Usage.Chats,
+				Channels: person.Usage.Channels,
+			},
+			Outcomes: peopleOutcomesResponse{
+				NeedsSolved:         person.Outcomes.NeedsSolved,
+				SolutionQuality:     person.Outcomes.SolutionQuality,
+				FrustrationFree:     person.Outcomes.FrustrationFree,
+				PromptEffectiveness: person.Outcomes.PromptEffectiveness,
+				SkillActivity:       person.Outcomes.SkillActivity,
+				CostCents:           person.Outcomes.CostCents,
+			},
+			Confidence: person.Confidence,
+			SampleSize: person.SampleSize,
+		})
+	}
+	writeObservationJSON(w, http.StatusOK, map[string]any{"period": period, "people": response})
 }
 
 type overviewFamilyResponse struct {

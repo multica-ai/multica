@@ -57,3 +57,15 @@ func TestCanConfigureOwnerAdminOnly(t *testing.T) {
 		t.Fatal("role matrix invalid")
 	}
 }
+
+func TestParsePeoplePeriodAcceptsOnlySupportedWindows(t *testing.T) {
+	for _, value := range []string{"hour", "day", "week", "month"} {
+		period, err := ParsePeoplePeriod(value)
+		if err != nil || string(period) != value {
+			t.Fatalf("ParsePeoplePeriod(%q) = %q, %v", value, period, err)
+		}
+	}
+	if _, err := ParsePeoplePeriod("year"); err == nil {
+		t.Fatal("ParsePeoplePeriod(year) succeeded, want error")
+	}
+}

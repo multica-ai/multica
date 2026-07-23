@@ -42,6 +42,63 @@ const (
 	DecisionStop    Decision = "Stop"
 )
 
+type PeoplePeriod string
+
+const (
+	PeoplePeriodHour  PeoplePeriod = "hour"
+	PeoplePeriodDay   PeoplePeriod = "day"
+	PeoplePeriodWeek  PeoplePeriod = "week"
+	PeoplePeriodMonth PeoplePeriod = "month"
+)
+
+func ParsePeoplePeriod(value string) (PeoplePeriod, error) {
+	period := PeoplePeriod(value)
+	switch period {
+	case PeoplePeriodHour, PeoplePeriodDay, PeoplePeriodWeek, PeoplePeriodMonth:
+		return period, nil
+	default:
+		return "", errors.New("invalid people period")
+	}
+}
+
+type PeopleActivityBucket struct {
+	Bucket time.Time
+	Count  int64
+}
+
+type PeopleUsage struct {
+	Runs     int64
+	Issues   int64
+	Projects int64
+	Chats    int64
+	Channels int64
+}
+
+type NeedsSolved struct {
+	Solved     int64
+	Measurable int64
+}
+
+type PeopleOutcomes struct {
+	NeedsSolved         *NeedsSolved
+	SolutionQuality     *float64
+	FrustrationFree     *float64
+	PromptEffectiveness *float64
+	SkillActivity       int64
+	CostCents           *int64
+}
+
+type PersonImpact struct {
+	ID         uuid.UUID
+	Type       string
+	Name       string
+	Activity   []PeopleActivityBucket
+	Usage      PeopleUsage
+	Outcomes   PeopleOutcomes
+	Confidence *float64
+	SampleSize int64
+}
+
 type FunctionInput struct {
 	Name        string
 	Description string

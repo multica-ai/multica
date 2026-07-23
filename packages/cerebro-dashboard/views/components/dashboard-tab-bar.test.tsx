@@ -18,7 +18,7 @@ describe("DashboardTabBar", () => {
 	it("hides AI Impact when its workspace flag is off", () => {
 		render(<DashboardTabBar showAIImpact={false} />);
 		expect(screen.queryByRole("button", { name: "AI Impact" })).toBeNull();
-		expect(screen.getByRole("button", { name: "People" })).toBeTruthy();
+		expect(screen.queryByRole("button", { name: "People" })).toBeNull();
 	});
 
   it("uses the approved purple active marker", () => {

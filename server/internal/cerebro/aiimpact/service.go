@@ -28,6 +28,16 @@ type ServiceStore interface {
 	) (Observation, error)
 	ListObservations(ctx context.Context, workspaceID, metricID uuid.UUID) ([]Observation, error)
 	ListWorkspaceObservations(ctx context.Context, workspaceID uuid.UUID) ([]Observation, error)
+	ListPeopleImpact(ctx context.Context, workspaceID uuid.UUID, period PeoplePeriod, now time.Time) ([]PersonImpact, error)
+}
+
+func (s *Service) ListPeopleImpact(
+	ctx context.Context,
+	workspaceID uuid.UUID,
+	period PeoplePeriod,
+	now time.Time,
+) ([]PersonImpact, error) {
+	return s.store.ListPeopleImpact(ctx, workspaceID, period, now)
 }
 
 func (s *Service) ListFunctions(ctx context.Context, workspaceID uuid.UUID) ([]Function, error) {

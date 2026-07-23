@@ -125,7 +125,7 @@ export function PeopleControlRoom({
         <ControlRoomPanel
           title={selected?.name ?? "Person results"}
           meta={selected ? selected.sample_size > 0 && selected.confidence !== null
-            ? `${selected.sample_size} sampled conversations · ${formatPercent(selected.confidence)} confidence`
+            ? `${selected.sample_size} sampled results · ${formatPercent(selected.confidence)} confidence`
             : "Direct usage only · coaching assessment not available"
             : undefined}
         >

@@ -11,7 +11,9 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
 vi.mock("@multica/core/paths", () => ({
   useCurrentWorkspace: () => ({ id: "workspace-1", slug: "firtal" }),
 }));
-const { useFeatureFlag } = vi.hoisted(() => ({ useFeatureFlag: vi.fn(() => true) }));
+const { useFeatureFlag } = vi.hoisted(() => ({
+  useFeatureFlag: vi.fn<(key: string) => boolean>(() => true),
+}));
 vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag }));
 vi.mock("@multica/views/layout/page-header", () => ({
   PageHeader: ({ children }: { children: React.ReactNode }) => <header>{children}</header>,
@@ -85,6 +87,10 @@ describe("DashboardPage AI Impact integration", () => {
 
     cleanup();
     useDashboardStore.setState({ tab: "people" });
+    render(<DashboardPage />);
+    expect(screen.queryByText(/People read model/)).toBeNull();
+
+    cleanup();
     useFeatureFlag.mockImplementation(() => true);
     render(<DashboardPage />);
     expect(screen.getByText("People read model: 1")).toBeTruthy();

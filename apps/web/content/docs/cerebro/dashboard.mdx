@@ -1,6 +1,6 @@
 ---
 title: Dashboard
-description: Explore workspace activity, usage, cost, savings, quality, and individual runs from one shared view.
+description: Explore workspace activity, usage, cost, savings, quality, AI impact, and individual runs from one shared view.
 ---
 
 The **Dashboard** brings workspace activity and AI usage into one place. Open it from **Dashboard** in the left navigation.
@@ -12,12 +12,34 @@ Use the tabs at the top to switch between:
 - **Overview** for workspace throughput, issue outcomes, active people, cost, and shared analytics visuals.
 - **Runs** for usage, cost, savings, quality, and run-level debugging.
 - **Messages** for message activity, spend, senders, recipients, conversation flow, search, and conversation details.
+- **AI Impact** for evidence-backed outcomes, Function decisions, quality, and risk.
+- **People** for private member and agent usage and sampled outcomes without employee ranking.
+
+**AI Impact** and **People** are hidden until the workspace feature is enabled. They require the main **Dashboard** feature as well.
 
 ## Filter the complete Dashboard
 
 Choose a period, then use **Add filter** to filter by person, project, runtime, source, provider, model, skill, status, cost kind, or quality signal. Active filters are shown as chips and remain active when you switch between **Overview**, **Runs**, and **Messages**. Select a chip to remove it, or use **Clear all**.
 
-Charts, people, status rows, message flows, table cells, source cards, and activity cells are interactive. Selecting one adds the corresponding filter to the complete Dashboard.
+Charts, people, status rows, message flows, table cells, source cards, and activity cells are interactive. Selecting one adds the corresponding filter to the complete Dashboard. Filters local to **AI Impact** do not change the other Dashboard sections.
+
+## Review AI Impact
+
+**AI Impact** has three views:
+
+- **Overview** groups the latest evidence by Adoption, Output, Outcome, Quality, Economics, and Risk.
+- **Functions** shows each active Function, its Operating Loops, and whether the current evidence says **Scale**, **Observe**, or **Stop**.
+- **Quality & Risk** makes guardrail decisions visible without mixing estimated evidence into measured value.
+
+Every result keeps its period, evidence status, confidence, source, and measurement method. **Measured**, **Estimated**, and **Missing** remain separate. Missing evidence is never displayed as zero, and the Dashboard does not use illustrative values as live data.
+
+## Inspect People
+
+**People** uses a split view: select a member or agent on the left and inspect that person's results on the right. Choose **Hour**, **Day**, **Week**, or **Month** to change the activity window.
+
+Direct usage covers **Runs**, **Issues**, **Projects**, **Chats**, and **Channels**. It also shows skill activity and measured run cost when those data exist. **Needs solved** is the primary sampled outcome, supported by solution quality, frustration-free usage, prompt effectiveness, and confidence.
+
+Sampled outcomes stay private and are not an employee score or ranking. A sampled outcome is only shown when enough direct measurements exist; otherwise the value is **Missing**. When a source such as `firtal-ai-coach` has not produced a structured assessment, the Dashboard does not infer or invent one.
 
 ## Read the workspace pulse
 

@@ -21,6 +21,16 @@ type recordingObservationStore struct {
 	listBindingsWorkspaceID              uuid.UUID
 	listMetricsWorkspaceID               uuid.UUID
 	listWorkspaceObservationsWorkspaceID uuid.UUID
+	people                               []PersonImpact
+}
+
+func (s *recordingObservationStore) ListPeopleImpact(
+	_ context.Context,
+	_ uuid.UUID,
+	_ PeoplePeriod,
+	_ time.Time,
+) ([]PersonImpact, error) {
+	return append([]PersonImpact(nil), s.people...), nil
 }
 
 func (s *recordingObservationStore) ListWorkspaceObservations(
