@@ -98,6 +98,31 @@ const ROW_GROUPS: RowGroup[] = [
     title: "On issues you're assigned to",
     rows: [
       {
+        routingKey: "new_comment.assignee",
+        label: "New comment",
+        hint: "A person commented on an issue you're assigned to.",
+      },
+      {
+        routingKey: "agent_comment_no_tag.assignee",
+        label: "Agent comment — no tag",
+        hint: "An agent commented without tagging anyone on an issue you're assigned to.",
+      },
+      {
+        routingKey: "agent_comment_member_tag.assignee",
+        label: "Agent comment — tagging a person",
+        hint: "An agent tagged a teammate on an issue you're assigned to.",
+      },
+      {
+        routingKey: "agent_comment_agent_tag.assignee",
+        label: "Agent comment — tagging another agent",
+        hint: "An agent handed off work on an issue you're assigned to.",
+      },
+      {
+        routingKey: "status_changed.assignee",
+        label: "Status changed",
+        hint: "An issue you're assigned to moved to a new status.",
+      },
+      {
         routingKey: "due_date_changed.assignee",
         label: "Due date changed",
         hint: "A deadline on an issue you're assigned to moved.",
@@ -113,27 +138,27 @@ const ROW_GROUPS: RowGroup[] = [
     title: "On issues you follow",
     rows: [
       {
-        routingKey: "new_comment",
+        routingKey: "new_comment.follower",
         label: "New comment",
-        hint: "Bumped to Inbox automatically if you're @-tagged.",
+        hint: "A person commented on an issue you follow.",
       },
       {
         // TECH-2961: agent-authored comments are split by tag, so monologues,
         // member-tag escalations and agent-tag hand-offs can be controlled
         // independently of human comment traffic.
-        routingKey: "agent_comment_no_tag",
+        routingKey: "agent_comment_no_tag.follower",
         label: "Agent comment — no tag",
-        hint: "An agent commented and didn't tag anyone. Off in your inbox by default so monologues don't pile up.",
+        hint: "An agent commented without tagging anyone on an issue you follow.",
       },
       {
-        routingKey: "agent_comment_member_tag",
+        routingKey: "agent_comment_member_tag.follower",
         label: "Agent comment — tagging a person",
-        hint: "An agent commented and @-tagged a teammate. On in your inbox by default so escalations stay visible.",
+        hint: "An agent tagged a teammate on an issue you follow.",
       },
       {
-        routingKey: "agent_comment_agent_tag",
+        routingKey: "agent_comment_agent_tag.follower",
         label: "Agent comment — tagging another agent",
-        hint: "An agent handed work to another agent. On in your inbox by default so hand-offs are easy to follow.",
+        hint: "An agent handed off work on an issue you follow.",
       },
       {
         routingKey: "assignee_changed",
@@ -141,7 +166,7 @@ const ROW_GROUPS: RowGroup[] = [
         hint: "Someone else gained or lost ownership.",
       },
       {
-        routingKey: "status_changed",
+        routingKey: "status_changed.follower",
         label: "Status changed",
         hint: "Issue moved to a new status.",
       },
@@ -515,14 +540,6 @@ export function NotificationsTab() {
         </div>
       </section>
 
-      <CommentsSection
-        user={user}
-        saving={savingChannelKey === "inbox:new_comment"}
-        onChange={(next) =>
-          handleChannelToggle("inbox", "new_comment", next ? "on" : "off")
-        }
-      />
-
       <AutoSubscribeSection
         rows={autoSubscribeRows}
         user={user}
@@ -583,56 +600,6 @@ interface DirectMessageSectionProps {
   user: ReturnType<typeof useAuthStore.getState>["user"];
   saving: boolean;
   onChange: (next: boolean) => void | Promise<void>;
-}
-
-interface CommentsSectionProps {
-  user: ReturnType<typeof useAuthStore.getState>["user"];
-  saving: boolean;
-  onChange: (next: boolean) => void | Promise<void>;
-}
-
-function CommentsSection({
-  user,
-  saving,
-  onChange,
-}: CommentsSectionProps) {
-  const checked =
-    getChannelChoice(
-      user?.preferences as Record<string, unknown> | undefined,
-      "inbox",
-      "new_comment",
-    ) === "on";
-  return (
-    <section className="space-y-3">
-      <div className="flex items-center gap-2">
-        <MessageSquare className="h-4 w-4 text-muted-foreground" />
-        <h3 className="text-sm font-semibold">Comments</h3>
-        <span className="text-xs text-muted-foreground">
-          — New comments on issues you follow
-        </span>
-      </div>
-      <Card>
-        <CardContent className="px-4 py-3">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <Label className="text-sm font-medium">
-                Send comments to Inbox
-              </Label>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                New comments on issues you follow.
-              </p>
-            </div>
-            <Switch
-              aria-label="Send comments to Inbox"
-              checked={checked}
-              disabled={saving || !user}
-              onCheckedChange={(next) => void onChange(next)}
-            />
-          </div>
-        </CardContent>
-      </Card>
-    </section>
-  );
 }
 
 // FIR-308: Direct-message notification preferences. The on/off-per-channel for
@@ -965,6 +932,7 @@ function ChannelSection({
                       </p>
                     </div>
                     <Switch
+                      aria-label={`${meta.title}: ${group.title}: ${row.label}`}
                       checked={value === "on"}
                       disabled={disabled || savingChannelKey === slot}
                       onCheckedChange={(next) =>

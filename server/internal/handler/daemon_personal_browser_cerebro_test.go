@@ -8,6 +8,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 func TestPersonalBrowserFeatureEnabled_UsesPersonalOverrideWhenWorkspaceIsUnset(t *testing.T) {
@@ -17,11 +19,12 @@ func TestPersonalBrowserFeatureEnabled_UsesPersonalOverrideWhenWorkspaceIsUnset(
 
 	ctx := context.Background()
 	var ownerID string
+	ownerEmail := "personal-browser-owner-" + uuid.NewString() + "@multica.test"
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
-		VALUES ('Personal Browser Owner', 'personal-browser-owner@multica.test')
+		VALUES ('Personal Browser Owner', $1)
 		RETURNING id
-	`).Scan(&ownerID); err != nil {
+	`, ownerEmail).Scan(&ownerID); err != nil {
 		t.Fatalf("create owner: %v", err)
 	}
 	t.Cleanup(func() {
@@ -78,11 +81,12 @@ func TestAuthorizePersonalBrowser_RequiresFeatureAndPermission(t *testing.T) {
 
 	ctx := context.Background()
 	var ownerID, agentID string
+	ownerEmail := "personal-browser-authorization-owner-" + uuid.NewString() + "@multica.test"
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email)
-		VALUES ('Personal Browser Authorization Owner', 'personal-browser-authorization-owner@multica.test')
+		VALUES ('Personal Browser Authorization Owner', $1)
 		RETURNING id
-	`).Scan(&ownerID); err != nil {
+	`, ownerEmail).Scan(&ownerID); err != nil {
 		t.Fatalf("create owner: %v", err)
 	}
 	if _, err := testPool.Exec(ctx, `

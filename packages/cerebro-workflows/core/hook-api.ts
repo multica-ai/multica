@@ -18,7 +18,7 @@ type HookPolicyTransport = z.infer<typeof hookPolicySchema>;
 export interface HookWriteTransport {
   name: string; description: string; mode: "dry_run"; fail_mode: WorkflowHook["fail_mode"];
   events: HookEventType[]; bindings: Array<{ kind: WorkflowHook["bindings"][number]["kind"]; id: string }>;
-  conditions: Array<{ field: string; op: string; value?: string }>;
+  conditions: Array<{ field: string; op: string; value?: string; values?: string[] }>;
   handlers: Array<{ id: string; decision: WorkflowHook["decision"]; requirement: string; actions: HookActionDraft[] }>;
 }
 
@@ -27,7 +27,7 @@ function fromTransport(policy: HookPolicyTransport): WorkflowHook {
 	const handler = policy.handlers[0] ?? { id: "", decision: fallback.decision, requirement: fallback.requirement, actions: [] };
   return {
     id: policy.id, version: policy.version, name: policy.name, description: policy.description,
-		mode: policy.mode, fail_mode: policy.fail_mode,
+		mode: policy.mode, fail_mode: policy.fail_mode === "open" ? "warn" : policy.fail_mode,
     events: policy.events.filter((event): event is HookEventType => typeof event === "string") as HookEventType[],
     bindings: policy.bindings.map((binding) => ({ kind: binding.kind, value: binding.id })),
     conditions: policy.conditions.map((condition, index) => ({ field: condition.field, operator: condition.op, value: condition.values?.map(String).join(", ") ?? (condition.value === undefined ? "" : String(condition.value)), conjunction: index < policy.conditions.length - 1 ? "AND" : undefined })),
@@ -51,9 +51,15 @@ export function parseHookListResponse(raw: unknown): WorkflowHook[] {
 
 export function toHookTransport(hook: WorkflowHook): HookWriteTransport {
   return {
-    name: hook.name, description: hook.description, mode: "dry_run", fail_mode: hook.fail_mode,
+    name: hook.name, description: hook.description, mode: "dry_run", fail_mode: hook.fail_mode === "open" ? "warn" : hook.fail_mode,
     events: hook.events, bindings: hook.bindings.map((binding) => ({ kind: binding.kind, id: binding.value })),
-    conditions: hook.conditions.map((condition) => ({ field: condition.field, op: condition.operator, ...(condition.value === "" ? {} : { value: condition.value }) })),
+    conditions: hook.conditions.map((condition) => {
+      const base = { field: condition.field, op: condition.operator };
+      if (condition.operator === "not_in") {
+        return { ...base, values: condition.value.split(",").map((value) => value.trim()).filter(Boolean) };
+      }
+      return condition.value === "" ? base : { ...base, value: condition.value };
+    }),
     handlers: [{ id: "primary", decision: hook.decision, requirement: hook.requirement, actions: hook.actions }],
   };
 }

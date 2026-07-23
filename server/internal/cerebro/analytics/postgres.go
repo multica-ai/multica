@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/pkg/pricing"
 )
 
 type loadRunFunc func(context.Context, string) (RunProjection, error)
@@ -68,7 +69,7 @@ func (s *postgresSourceDB) loadRun(ctx context.Context, runID string) (RunProjec
 		LEFT JOIN autopilot_run apr ON apr.id=atq.autopilot_run_id
 		LEFT JOIN autopilot ap ON ap.id=apr.autopilot_id
 		LEFT JOIN "user" person ON person.id=COALESCE(atq.initiator_user_id,CASE WHEN trigger_comment.author_type='member' THEN trigger_comment.author_id END,cs.creator_id,CASE WHEN i.creator_type='member' THEN i.creator_id END,CASE WHEN ap.created_by_type='member' THEN ap.created_by_id END,CASE WHEN parent_issue.creator_type='member' THEN parent_issue.creator_id END)
-		LEFT JOIN LATERAL (SELECT SUM(input_tokens)::bigint input_tokens,SUM(output_tokens)::bigint output_tokens,SUM(cache_read_tokens)::bigint cache_read_tokens,SUM(cache_write_tokens)::bigint cache_write_tokens,CASE WHEN COUNT(*)>0 THEN COALESCE(SUM(cost_cents),0)::bigint END cost_cents,MAX(provider) provider,MAX(model) model FROM task_usage WHERE task_id=atq.id) usage ON true
+		LEFT JOIN LATERAL (SELECT SUM(input_tokens)::bigint input_tokens,SUM(output_tokens)::bigint output_tokens,SUM(cache_read_tokens)::bigint cache_read_tokens,SUM(cache_write_tokens)::bigint cache_write_tokens,CASE WHEN COUNT(*)>0 THEN COALESCE(SUM(cost_cents),0)::bigint END cost_cents,MAX(provider) provider,MAX(model) model FROM model_usage_task_rollup WHERE task_id=atq.id) usage ON true
 		WHERE atq.id=$1`, runID).Scan(
 		&r.RunID, &r.WorkspaceID, &r.Population, &r.SourceType, &r.SourceID, &r.SourceLabel,
 		&r.PersonID, &r.PersonLabel, &r.AgentID, &r.AgentLabel, &r.ProjectID, &r.ProjectLabel, &r.RuntimeID, &r.RuntimeLabel,
@@ -77,6 +78,25 @@ func (s *postgresSourceDB) loadRun(ctx context.Context, runID string) (RunProjec
 	if err != nil {
 		return RunProjection{}, err
 	}
+	usageRows, err := s.pool.Query(ctx, `SELECT COALESCE(model,''),input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cost_cents FROM model_usage_task_rollup WHERE task_id=$1`, runID)
+	if err != nil {
+		return RunProjection{}, err
+	}
+	var usageCosts []usageCostRow
+	for usageRows.Next() {
+		var row usageCostRow
+		if err := usageRows.Scan(&row.Model, &row.InputTokens, &row.OutputTokens, &row.CacheReadTokens, &row.CacheWriteTokens, &row.StoredCostCents); err != nil {
+			usageRows.Close()
+			return RunProjection{}, err
+		}
+		usageCosts = append(usageCosts, row)
+	}
+	if err := usageRows.Err(); err != nil {
+		usageRows.Close()
+		return RunProjection{}, err
+	}
+	usageRows.Close()
+	r.CostCents, r.CostKind = summarizeUsageCost(usageCosts)
 	if r.SourceID != "" {
 		href := "/issues/" + r.SourceID + "?run=" + r.RunID
 		kind := r.SourceType
@@ -134,6 +154,37 @@ func (s *postgresSourceDB) loadRun(ctx context.Context, runID string) (RunProjec
 		r.Quality = append(r.Quality, v)
 	}
 	return r, qualityRows.Err()
+}
+
+type usageCostRow struct {
+	Model                                                        string
+	InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens int64
+	StoredCostCents                                              int64
+}
+
+// summarizeUsageCost preserves exact gateway charges and fills the runtime
+// gap when a usage row has tokens but no recorded charge. A mixed run is
+// marked calculated so consumers never mistake an estimate for an invoice.
+func summarizeUsageCost(rows []usageCostRow) (*int64, string) {
+	if len(rows) == 0 {
+		return nil, "missing"
+	}
+	var total int64
+	kind := "actual"
+	for _, row := range rows {
+		if row.StoredCostCents > 0 {
+			total += row.StoredCostCents
+			continue
+		}
+		if row.InputTokens != 0 || row.OutputTokens != 0 || row.CacheReadTokens != 0 || row.CacheWriteTokens != 0 {
+			total += int64(pricing.ComputeCents(row.Model, pricing.Usage{
+				InputTokens: row.InputTokens, OutputTokens: row.OutputTokens,
+				CacheReadTokens: row.CacheReadTokens, CacheWriteTokens: row.CacheWriteTokens,
+			}))
+			kind = "calculated"
+		}
+	}
+	return &total, kind
 }
 
 // qualitySourcesSQL loads every quality and satisfaction measurement for one
@@ -224,7 +275,7 @@ func (s *PostgresProjectionStore) UpsertRun(ctx context.Context, r RunProjection
 	}
 	defer tx.Rollback(ctx)
 	var analyticsRunID string
-	err = tx.QueryRow(ctx, `INSERT INTO cerebro_analytics_run (workspace_id,run_id,population,source_type,source_id,source_label,person_id,person_label,agent_id,agent_label,project_id,project_label,runtime_id,runtime_label,status,started_at,completed_at,duration_seconds,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cost_cents,cost_kind,provider,model,trace_id,projected_at) VALUES ($1,$2,$3,$4,NULLIF($5,'')::uuid,NULLIF($6,''),NULLIF($7,'')::uuid,NULLIF($8,''),NULLIF($9,'')::uuid,NULLIF($10,''),NULLIF($11,'')::uuid,NULLIF($12,''),NULLIF($13,'')::uuid,NULLIF($14,''),$15,$16,$17,$18,$19,$20,$21,$22,$23,CASE WHEN $23::bigint IS NULL THEN 'missing' ELSE 'actual' END,NULLIF($24,''),NULLIF($25,''),NULLIF($26,''),now()) ON CONFLICT (workspace_id,run_id) DO UPDATE SET population=EXCLUDED.population,source_type=EXCLUDED.source_type,source_id=EXCLUDED.source_id,source_label=EXCLUDED.source_label,person_id=EXCLUDED.person_id,person_label=EXCLUDED.person_label,agent_id=EXCLUDED.agent_id,agent_label=EXCLUDED.agent_label,project_id=EXCLUDED.project_id,project_label=EXCLUDED.project_label,runtime_id=EXCLUDED.runtime_id,runtime_label=EXCLUDED.runtime_label,status=EXCLUDED.status,started_at=EXCLUDED.started_at,completed_at=EXCLUDED.completed_at,duration_seconds=EXCLUDED.duration_seconds,input_tokens=EXCLUDED.input_tokens,output_tokens=EXCLUDED.output_tokens,cache_read_tokens=EXCLUDED.cache_read_tokens,cache_write_tokens=EXCLUDED.cache_write_tokens,cost_cents=EXCLUDED.cost_cents,cost_kind=EXCLUDED.cost_kind,provider=EXCLUDED.provider,model=EXCLUDED.model,trace_id=EXCLUDED.trace_id,projected_at=now() RETURNING id::text`, r.WorkspaceID, r.RunID, r.Population, r.SourceType, r.SourceID, r.SourceLabel, r.PersonID, r.PersonLabel, r.AgentID, r.AgentLabel, r.ProjectID, r.ProjectLabel, r.RuntimeID, r.RuntimeLabel, r.Status, r.StartedAt, r.CompletedAt, r.DurationSeconds, r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens, r.CostCents, r.Provider, r.Model, r.TraceID).Scan(&analyticsRunID)
+	err = tx.QueryRow(ctx, `INSERT INTO cerebro_analytics_run (workspace_id,run_id,population,source_type,source_id,source_label,person_id,person_label,agent_id,agent_label,project_id,project_label,runtime_id,runtime_label,status,started_at,completed_at,duration_seconds,input_tokens,output_tokens,cache_read_tokens,cache_write_tokens,cost_cents,cost_kind,provider,model,trace_id,projected_at) VALUES ($1,$2,$3,$4,NULLIF($5,'')::uuid,NULLIF($6,''),NULLIF($7,'')::uuid,NULLIF($8,''),NULLIF($9,'')::uuid,NULLIF($10,''),NULLIF($11,'')::uuid,NULLIF($12,''),NULLIF($13,'')::uuid,NULLIF($14,''),$15,$16,$17,$18,$19,$20,$21,$22,$23,COALESCE(NULLIF($24,''),CASE WHEN $23::bigint IS NULL THEN 'missing' ELSE 'actual' END),NULLIF($25,''),NULLIF($26,''),NULLIF($27,''),now()) ON CONFLICT (workspace_id,run_id) DO UPDATE SET population=EXCLUDED.population,source_type=EXCLUDED.source_type,source_id=EXCLUDED.source_id,source_label=EXCLUDED.source_label,person_id=EXCLUDED.person_id,person_label=EXCLUDED.person_label,agent_id=EXCLUDED.agent_id,agent_label=EXCLUDED.agent_label,project_id=EXCLUDED.project_id,project_label=EXCLUDED.project_label,runtime_id=EXCLUDED.runtime_id,runtime_label=EXCLUDED.runtime_label,status=EXCLUDED.status,started_at=EXCLUDED.started_at,completed_at=EXCLUDED.completed_at,duration_seconds=EXCLUDED.duration_seconds,input_tokens=EXCLUDED.input_tokens,output_tokens=EXCLUDED.output_tokens,cache_read_tokens=EXCLUDED.cache_read_tokens,cache_write_tokens=EXCLUDED.cache_write_tokens,cost_cents=EXCLUDED.cost_cents,cost_kind=EXCLUDED.cost_kind,provider=EXCLUDED.provider,model=EXCLUDED.model,trace_id=EXCLUDED.trace_id,projected_at=now() RETURNING id::text`, r.WorkspaceID, r.RunID, r.Population, r.SourceType, r.SourceID, r.SourceLabel, r.PersonID, r.PersonLabel, r.AgentID, r.AgentLabel, r.ProjectID, r.ProjectLabel, r.RuntimeID, r.RuntimeLabel, r.Status, r.StartedAt, r.CompletedAt, r.DurationSeconds, r.InputTokens, r.OutputTokens, r.CacheReadTokens, r.CacheWriteTokens, r.CostCents, r.CostKind, r.Provider, r.Model, r.TraceID).Scan(&analyticsRunID)
 	if err != nil {
 		return err
 	}

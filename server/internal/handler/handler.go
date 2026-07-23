@@ -145,6 +145,8 @@ type Handler struct {
 	BudgetService *service.BudgetService
 	PushService   *service.PushService
 	PingStore     *PingStore
+
+	InternalBrowserJobs *internalBrowserJobStore // CEREBRO-PATCH(internal-agent-browser-qa-async): FIR-3006
 	// CEREBRO-PATCH(handler-channel-listen): channel-listener (per-(channel,agent)
 	// listen-mode) service. Set by the router after construction so the upstream
 	// handler.New signature stays unchanged.
@@ -189,6 +191,11 @@ type Handler struct {
 	// CEREBRO-PATCH(handler-tool-executor): TECH-3226 server-side tool execution
 	// seam for external runtimes (firtal-local). nil = invoke endpoint returns 501.
 	ToolExecutor ToolExecutorInvoker
+	// CEREBRO-PATCH(handler-capability-evidence): FIR-3398 — read seam over the
+	// availability evidence ledger. nil = no probe wired, and the capabilities
+	// card then reports availability status=unknown instead of claiming nothing
+	// is proved.
+	CapabilityEvidence AgentCapabilityEvidenceLookup
 	// CEREBRO-PATCH(handler-tool-meta): JEH-1353 — ordered list of registered
 	// tools and name→description lookup for the tool grant admin API.
 	cerebroToolItems  []CerebroToolItem
@@ -198,8 +205,7 @@ type Handler struct {
 	runtimeToolsAdmin RuntimeToolsAdminService
 	// CEREBRO-PATCH(handler-runtime-tool-access): TECH-3071 read-only effective runtime tool access preview.
 	runtimeToolAccess RuntimeToolAccessService
-	// CEREBRO-PATCH(handler-runtime-tools-scan): JEH-1710 daemon-side ingest
-	runtimeToolsScan RuntimeToolsScanService
+	// CEREBRO-PATCH(handler-runtime-tool-store-retirement): FIR-3403 removed legacy runtime tool scan storage.
 	// CEREBRO-PATCH(handler-capability-register): FIR-2129 normalized capability register.
 	capabilityRegister CapabilityRegisterService
 	// CEREBRO-PATCH(handler-cloud-runtime-tool-scan): FIR-2284 server-side scan for cloud runtimes.
@@ -214,8 +220,7 @@ type Handler struct {
 	// auto-membership hook. Wired by the router; nil = no auto-provisioning.
 	IdentityProvisioner IdentityProvisionerInvoker
 	// CEREBRO-PATCH(handler-approval-gate): FIR-2586 shared approval seam for
-	// daemon repo checkout. nil when CEREBRO_APPROVAL_GATE_ENABLED is off, so an
-	// "Ask" verdict keeps its prior block; non-nil routes it to the one /approvals
+	// daemon repo checkout. The gate routes an "Ask" verdict to /approvals // CEREBRO-PATCH(handler-approval-switch-retirement): always policy-controlled.
 	// inbox (CheckDaemonRepoCapability creates the ask, the daemon long-polls it).
 	ApprovalGate       *permgate.Gate
 	PlatformActionGate *platformaction.Gate // CEREBRO-PATCH(handler-platform-action-gate): FIR-3266 server-owned agent mutation floor.
@@ -535,7 +540,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		cfg: cfg,
 		// CEREBRO-PATCH(handler-push-service-wire): wire pushService into the
 		// handler so /api/push/public-key reports enabled when VAPID is set.
-		PushService: pushService,
+		PushService:         pushService,
+		InternalBrowserJobs: newInternalBrowserJobStore(), // CEREBRO-PATCH(internal-agent-browser-qa-async): FIR-3006
 	}
 }
 
@@ -771,6 +777,11 @@ func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (act
 	}
 
 	return "agent", agentID
+}
+
+// ResolveActor exposes the validated actor resolver to fork-owned handlers. // CEREBRO-PATCH(eval-actor-resolver): FIR-3496 prevents forged X-Agent-ID ownership.
+func (h *Handler) ResolveActor(r *http.Request, userID, workspaceID string) (string, string) {
+	return h.resolveActor(r, userID, workspaceID)
 }
 
 func requireUserID(w http.ResponseWriter, r *http.Request) (string, bool) {

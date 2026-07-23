@@ -4,7 +4,9 @@ import { issueListOptions } from "@multica/core/issues/queries";
 import { projectListOptions } from "@multica/core/projects";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
 import type { OperatingPeriod, Rock, StrategyItem, Terminology } from "../core/types";
-import { goalTypesOptions, useSaveRock } from "../core/queries";
+import { formatPeriodRange, nextPeriodInput } from "../core/periods";
+import { goalTypesOptions, useSavePeriod, useSaveRock } from "../core/queries";
+import { SearchSelect } from "./search-select";
 
 interface RockFormProps {
   wsId: string;
@@ -16,9 +18,12 @@ interface RockFormProps {
   onCancel: () => void;
 }
 
-function selectedValues(element: HTMLSelectElement) {
-  return Array.from(element.selectedOptions, (option) => option.value);
-}
+const HEALTH_OPTIONS = [
+  { value: "unset", label: "Not reported" },
+  { value: "on_track", label: "On track" },
+  { value: "at_risk", label: "At risk" },
+  { value: "off_track", label: "Off track" },
+];
 
 export function RockForm({ wsId, terminology, periods, strategyItems, rock, onSaved, onCancel }: RockFormProps) {
   const projects = useQuery(projectListOptions(wsId));
@@ -27,6 +32,7 @@ export function RockForm({ wsId, terminology, periods, strategyItems, rock, onSa
   const agents = useQuery(agentListOptions(wsId));
   const goalTypes = useQuery(goalTypesOptions(wsId));
   const save = useSaveRock(wsId);
+  const savePeriod = useSavePeriod(wsId);
   const [title, setTitle] = useState(rock?.title ?? "");
   const [description, setDescription] = useState(rock?.description ?? "");
   const [periodId, setPeriodId] = useState(rock?.period_id ?? "");
@@ -41,6 +47,10 @@ export function RockForm({ wsId, terminology, periods, strategyItems, rock, onSa
   useEffect(() => {
     if (!periodId && periods[0]) setPeriodId(periods[0].id);
   }, [periodId, periods]);
+
+  function planNextPeriod() {
+    savePeriod.mutate({ input: nextPeriodInput(periods) }, { onSuccess: (period) => { if (period) setPeriodId(period.id); } });
+  }
 
   function submit(event: FormEvent) {
     event.preventDefault();
@@ -75,52 +85,47 @@ export function RockForm({ wsId, terminology, periods, strategyItems, rock, onSa
       <label className="grid gap-1 text-sm sm:col-span-2">Description
         <textarea aria-label="Description" value={description} onChange={(event) => setDescription(event.target.value)} rows={3} className="rounded-md border bg-background px-3 py-2" />
       </label>
-      <label className="grid gap-1 text-sm">Period
-        <select aria-label="Period" required value={periodId} onChange={(event) => setPeriodId(event.target.value)} className="h-10 rounded-md border bg-background px-3">
-          <option value="">Select period</option>
-          {periods.map((period) => <option key={period.id} value={period.id}>{period.name}</option>)}
-        </select>
-      </label>
-      <label className="grid gap-1 text-sm">Type
-        <select aria-label="Type" value={goalTypeId} onChange={(event) => setGoalTypeId(event.target.value)} className="h-10 rounded-md border bg-background px-3">
-          <option value="">No type</option>
-          {(goalTypes.data?.goal_types ?? []).map((goalType) => <option key={goalType.id} value={goalType.id}>{goalType.name}</option>)}
-        </select>
-      </label>
-      <label className="grid gap-1 text-sm">Owner
-        <select aria-label="Owner" value={owner} onChange={(event) => setOwner(event.target.value)} className="h-10 rounded-md border bg-background px-3">
-          <option value="">No owner</option>
-          {(members.data ?? []).map((member) => <option key={member.id} value={`member:${member.id}`}>{member.name}</option>)}
-          {(agents.data ?? []).map((agent) => <option key={agent.id} value={`agent:${agent.id}`}>{agent.name}</option>)}
-        </select>
-      </label>
+      <div className="grid gap-1 text-sm"><span>Period</span>
+        <SearchSelect label="Period" options={periods.map((period) => ({ value: period.id, label: period.name, hint: formatPeriodRange(period) }))} value={periodId} onChange={setPeriodId} actionLabel="Plan next period" onAction={planNextPeriod} placeholder="Select period" />
+      </div>
+      <div className="grid gap-1 text-sm"><span>Type</span>
+        <SearchSelect label="Type" options={(goalTypes.data?.goal_types ?? []).map((goalType) => ({ value: goalType.id, label: goalType.name, hint: goalType.scope_label || undefined, color: goalType.color || undefined }))} value={goalTypeId} onChange={setGoalTypeId} clearLabel="No type" placeholder="No type" />
+      </div>
+      <div className="grid gap-1 text-sm"><span>Owner</span>
+        <SearchSelect label="Owner" options={[...(members.data ?? []).map((member) => ({ value: `member:${member.id}`, label: member.name, group: "Members" })), ...(agents.data ?? []).map((agent) => ({ value: `agent:${agent.id}`, label: agent.name, group: "Agents" }))]} value={owner} onChange={setOwner} clearLabel="No owner" placeholder="No owner" />
+      </div>
       <label className="grid gap-1 text-sm">Confidence
         <input aria-label="Confidence" type="number" min={0} max={100} value={confidence} onChange={(event) => setConfidence(Number(event.target.value))} className="h-10 rounded-md border bg-background px-3" />
       </label>
-      <label className="grid gap-1 text-sm">Reported health
-        <select aria-label="Reported health" value={reportedHealth} onChange={(event) => setReportedHealth(event.target.value as "unset" | "on_track" | "at_risk" | "off_track")} className="h-10 rounded-md border bg-background px-3">
-          <option value="unset">Not reported</option>
-          <option value="on_track">On track</option>
-          <option value="at_risk">At risk</option>
-          <option value="off_track">Off track</option>
-        </select>
-      </label>
-      <label className="grid gap-1 text-sm sm:col-span-2">Strategy connection
-        <select aria-label="Strategy connection" value={strategyItemId} onChange={(event) => setStrategyItemId(event.target.value)} className="h-10 rounded-md border bg-background px-3">
-          <option value="">No Strategy connection</option>
-          {strategyItems.filter((item) => item.state === "active").map((item) => <option key={item.id} value={item.id}>{item.title}</option>)}
-        </select>
-      </label>
-      <label className="grid gap-1 text-sm">Projects <span className="text-xs text-muted-foreground">Optional · select multiple</span>
-        <select aria-label="Projects" multiple value={projectIds} onChange={(event) => setProjectIds(selectedValues(event.target))} className="min-h-28 rounded-md border bg-background px-3 py-2">
-          {(projects.data ?? []).map((project) => <option key={project.id} value={project.id}>{project.title}</option>)}
-        </select>
-      </label>
-      <label className="grid gap-1 text-sm">Issues <span className="text-xs text-muted-foreground">Optional · select multiple</span>
-        <select aria-label="Issues" multiple value={issueIds} onChange={(event) => setIssueIds(selectedValues(event.target))} className="min-h-28 rounded-md border bg-background px-3 py-2">
-          {(issues.data ?? []).map((issue) => <option key={issue.id} value={issue.id}>{issue.identifier} · {issue.title}</option>)}
-        </select>
-      </label>
+      <div className="grid gap-1 text-sm"><span>Reported health</span>
+        <SearchSelect label="Reported health" options={HEALTH_OPTIONS} value={reportedHealth} onChange={(value) => setReportedHealth(value as "unset" | "on_track" | "at_risk" | "off_track")} placeholder="Not reported" />
+      </div>
+      <div className="grid gap-1 text-sm sm:col-span-2"><span>{terminology.strategy} connection</span>
+        <SearchSelect label="Strategy connection" options={strategyItems.filter((item) => item.state === "active").map((item) => ({ value: item.id, label: item.title }))} value={strategyItemId} onChange={setStrategyItemId} clearLabel={`No ${terminology.strategy} connection`} placeholder={`No ${terminology.strategy} connection`} />
+      </div>
+      <div className="grid gap-1.5 text-sm"><span>Projects <span className="text-xs text-muted-foreground">Optional · select multiple</span></span>
+        <SearchSelect label="Projects" multiple options={(projects.data ?? []).map((project) => ({ value: project.id, label: project.title }))} values={projectIds} onValuesChange={setProjectIds} placeholder="No projects linked" />
+        {projectIds.length > 0 && (
+          <ul aria-label="Linked projects" className="flex flex-wrap gap-1.5">
+            {projectIds.map((id) => {
+              const label = (projects.data ?? []).find((project) => project.id === id)?.title ?? id;
+              return <li key={id}><button type="button" aria-label={`Remove project ${label}`} onClick={() => setProjectIds(projectIds.filter((value) => value !== id))} className="flex max-w-full items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs"><span className="truncate">{label}</span><span aria-hidden className="text-muted-foreground">×</span></button></li>;
+            })}
+          </ul>
+        )}
+      </div>
+      <div className="grid gap-1.5 text-sm"><span>Issues <span className="text-xs text-muted-foreground">Optional · select multiple</span></span>
+        <SearchSelect label="Issues" multiple options={(issues.data ?? []).map((issue) => ({ value: issue.id, label: `${issue.identifier} · ${issue.title}` }))} values={issueIds} onValuesChange={setIssueIds} placeholder="No issues linked" />
+        {issueIds.length > 0 && (
+          <ul aria-label="Linked issues" className="flex flex-wrap gap-1.5">
+            {issueIds.map((id) => {
+              const issue = (issues.data ?? []).find((candidate) => candidate.id === id);
+              const label = issue ? `${issue.identifier} · ${issue.title}` : id;
+              return <li key={id}><button type="button" aria-label={`Remove issue ${label}`} onClick={() => setIssueIds(issueIds.filter((value) => value !== id))} className="flex max-w-full items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs"><span className="truncate">{label}</span><span aria-hidden className="text-muted-foreground">×</span></button></li>;
+            })}
+          </ul>
+        )}
+      </div>
       {save.isError && <p role="alert" className="text-sm text-destructive sm:col-span-2">The {terminology.rock.toLowerCase()} could not be saved.</p>}
       <div className="flex justify-end gap-2 sm:col-span-2">
         <button type="button" onClick={onCancel} className="h-10 rounded-md border px-4 text-sm font-medium">Cancel</button>

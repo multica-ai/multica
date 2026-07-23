@@ -23,7 +23,7 @@ func TestBrokerDeliversChatDoneToSessionSubscriber(t *testing.T) {
 	bus := events.New()
 	b := NewBroker(bus)
 
-	sub, cancel := b.Subscribe("session-1")
+	sub, cancel := b.Subscribe("session-1", "")
 	defer cancel()
 
 	bus.Publish(events.Event{
@@ -48,11 +48,48 @@ func TestBrokerDeliversChatDoneToSessionSubscriber(t *testing.T) {
 	}
 }
 
+func TestBrokerDeliversTaskMessageOnlyToMatchingTaskSubscriber(t *testing.T) {
+	bus := events.New()
+	b := NewBroker(bus)
+
+	matching, cancelMatching := b.Subscribe("session-1", "task-1")
+	defer cancelMatching()
+	other, cancelOther := b.Subscribe("session-2", "task-2")
+	defer cancelOther()
+
+	message := protocol.TaskMessagePayload{
+		TaskID: "task-1",
+		Seq:    7,
+		Type:   "tool_use",
+		Tool:   "get_forecast",
+		Input:  map[string]any{"month": "2026-07"},
+	}
+	bus.Publish(events.Event{
+		Type:    protocol.EventTaskMessage,
+		TaskID:  "task-1",
+		Payload: message,
+	})
+
+	ev := recvEvent(t, matching)
+	if ev.Type != EventMessage || ev.Message == nil {
+		t.Fatalf("event = %+v, want task message", ev)
+	}
+	if ev.Message.Seq != 7 || ev.Message.Tool != "get_forecast" {
+		t.Fatalf("message = %+v, want forecast call at seq 7", ev.Message)
+	}
+
+	select {
+	case ev := <-other:
+		t.Fatalf("received event for another task: %+v", ev)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestBrokerIgnoresOtherSessions(t *testing.T) {
 	bus := events.New()
 	b := NewBroker(bus)
 
-	sub, cancel := b.Subscribe("session-1")
+	sub, cancel := b.Subscribe("session-1", "")
 	defer cancel()
 
 	bus.Publish(events.Event{
@@ -72,7 +109,7 @@ func TestBrokerMapsTaskFailedPayload(t *testing.T) {
 	bus := events.New()
 	b := NewBroker(bus)
 
-	sub, cancel := b.Subscribe("session-1")
+	sub, cancel := b.Subscribe("session-1", "")
 	defer cancel()
 
 	// broadcastTaskEvent publishes task:* events with a map payload and no
@@ -100,7 +137,7 @@ func TestBrokerMapsTaskCancelledPayload(t *testing.T) {
 	bus := events.New()
 	b := NewBroker(bus)
 
-	sub, cancel := b.Subscribe("session-1")
+	sub, cancel := b.Subscribe("session-1", "")
 	defer cancel()
 
 	bus.Publish(events.Event{
@@ -122,7 +159,7 @@ func TestBrokerCancelStopsDelivery(t *testing.T) {
 	bus := events.New()
 	b := NewBroker(bus)
 
-	sub, cancel := b.Subscribe("session-1")
+	sub, cancel := b.Subscribe("session-1", "")
 	cancel()
 
 	bus.Publish(events.Event{
@@ -147,7 +184,7 @@ func TestBrokerDoesNotBlockBusOnSlowSubscriber(t *testing.T) {
 	bus := events.New()
 	b := NewBroker(bus)
 
-	_, cancel := b.Subscribe("session-1")
+	_, cancel := b.Subscribe("session-1", "")
 	defer cancel()
 
 	done := make(chan struct{})

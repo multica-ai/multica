@@ -75,6 +75,61 @@ func TestHandlerListsStrategyItems(t *testing.T) {
 	}
 }
 
+func TestHandlerListsVisionPlan(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{listVisionPlan: func(context.Context, pgtype.UUID) (VisionPlanResponse, error) {
+		return VisionPlanResponse{Sections: []VisionPlanSectionResponse{{ID: "section-1", Name: "Core Values", SectionType: "list"}}}, nil
+	}})
+	req := memberRequest(http.MethodGet, "/api/cerebro/vision-plan", "")
+	rec := httptest.NewRecorder()
+
+	h.ListVisionPlan(rec, req)
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "Core Values") {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerCreatesVisionPlanSection(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{createVisionSection: func(_ context.Context, _ pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
+		return VisionPlanSectionResponse{ID: "section-1", Name: input.Name, SectionType: input.SectionType}, nil
+	}})
+	req := memberRequest(http.MethodPost, "/api/cerebro/vision-plan/sections", `{"name":"Customer Promise","section_type":"structured","position":4}`)
+	rec := httptest.NewRecorder()
+
+	h.CreateVisionPlanSection(rec, req)
+
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), "Customer Promise") {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerRejectsInvalidVisionPlanItemUUID(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{})
+	req := memberRequest(http.MethodPut, "/api/cerebro/vision-plan/items/not-a-uuid", `{"section_id":"550e8400-e29b-41d4-a716-446655440000","title":"Clear niche"}`)
+	req = withURLParam(req, "id", "not-a-uuid")
+	rec := httptest.NewRecorder()
+
+	h.UpdateVisionPlanItem(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerRejectsDisabledVisionPlan(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{listVisionPlan: func(context.Context, pgtype.UUID) (VisionPlanResponse, error) {
+		return VisionPlanResponse{}, ErrElementDisabled
+	}})
+	req := memberRequest(http.MethodGet, "/api/cerebro/vision-plan", "")
+	rec := httptest.NewRecorder()
+
+	h.ListVisionPlan(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestHandlerMapsCrossWorkspaceRockToNotFound(t *testing.T) {
 	h := NewHandler(&fakeHandlerService{upsertRock: func(context.Context, pgtype.UUID, RockInput) error {
 		return ErrProjectNotInWorkspace
@@ -111,6 +166,34 @@ func TestHandlerListsElements(t *testing.T) {
 	h.ListElements(rec, req)
 
 	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"goals"`) {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerGetsMeeting(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{getMeeting: func(context.Context, pgtype.UUID) (MeetingConfigResponse, error) {
+		return MeetingConfigResponse{CadenceUnit: "week", CadenceCount: 1, CurrentNoteID: "note-current"}, nil
+	}})
+	req := memberRequest(http.MethodGet, "/api/cerebro/meetings", "")
+	rec := httptest.NewRecorder()
+
+	h.GetMeeting(rec, req)
+
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"cadence_unit":"week"`) || !strings.Contains(rec.Body.String(), `"current_note_id":"note-current"`) {
+		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHandlerCreatesOrgChartSeat(t *testing.T) {
+	h := NewHandler(&fakeHandlerService{createOrgSeat: func(_ context.Context, _ pgtype.UUID, input OrgChartSeatInput) (OrgChartSeatResponse, error) {
+		return OrgChartSeatResponse{ID: "seat-1", Name: input.Name, Vacant: true}, nil
+	}})
+	req := memberRequest(http.MethodPost, "/api/cerebro/org-chart/seats", `{"name":"Operations","responsibilities":["Run the weekly plan"],"position":0}`)
+	rec := httptest.NewRecorder()
+
+	h.CreateOrgChartSeat(rec, req)
+
+	if rec.Code != http.StatusCreated || !strings.Contains(rec.Body.String(), "Operations") {
 		t.Fatalf("status = %d body = %s", rec.Code, rec.Body.String())
 	}
 }
@@ -199,13 +282,70 @@ func withURLParam(req *http.Request, key, value string) *http.Request {
 }
 
 type fakeHandlerService struct {
-	createStrategy func(context.Context, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error)
-	listStrategy   func(context.Context, pgtype.UUID) ([]StrategyItemResponse, error)
-	upsertRock     func(context.Context, pgtype.UUID, RockInput) error
-	listElements   func(context.Context, pgtype.UUID) ([]OsElementResponse, error)
-	updateElement  func(context.Context, pgtype.UUID, string, bool) (OsElementResponse, error)
-	createGoalType func(context.Context, pgtype.UUID, GoalTypeInput) (GoalTypeResponse, error)
-	createPeriod   func(context.Context, pgtype.UUID, OperatingPeriodInput) (OperatingPeriodResponse, error)
+	getMeeting          func(context.Context, pgtype.UUID) (MeetingConfigResponse, error)
+	createOrgSeat       func(context.Context, pgtype.UUID, OrgChartSeatInput) (OrgChartSeatResponse, error)
+	createStrategy      func(context.Context, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error)
+	listStrategy        func(context.Context, pgtype.UUID) ([]StrategyItemResponse, error)
+	upsertRock          func(context.Context, pgtype.UUID, RockInput) error
+	listElements        func(context.Context, pgtype.UUID) ([]OsElementResponse, error)
+	updateElement       func(context.Context, pgtype.UUID, string, bool) (OsElementResponse, error)
+	createGoalType      func(context.Context, pgtype.UUID, GoalTypeInput) (GoalTypeResponse, error)
+	createPeriod        func(context.Context, pgtype.UUID, OperatingPeriodInput) (OperatingPeriodResponse, error)
+	listVisionPlan      func(context.Context, pgtype.UUID) (VisionPlanResponse, error)
+	createVisionSection func(context.Context, pgtype.UUID, VisionPlanSectionInput) (VisionPlanSectionResponse, error)
+}
+
+func (f *fakeHandlerService) GetMeeting(ctx context.Context, ws pgtype.UUID) (MeetingConfigResponse, error) {
+	if f.getMeeting == nil {
+		return MeetingConfigResponse{}, nil
+	}
+	return f.getMeeting(ctx, ws)
+}
+func (f *fakeHandlerService) UpdateMeeting(context.Context, pgtype.UUID, MeetingConfigInput) (MeetingConfigResponse, error) {
+	return MeetingConfigResponse{}, nil
+}
+func (f *fakeHandlerService) ListOrgChartSeats(context.Context, pgtype.UUID) ([]OrgChartSeatResponse, error) {
+	return []OrgChartSeatResponse{}, nil
+}
+func (f *fakeHandlerService) CreateOrgChartSeat(ctx context.Context, ws pgtype.UUID, input OrgChartSeatInput) (OrgChartSeatResponse, error) {
+	if f.createOrgSeat == nil {
+		return OrgChartSeatResponse{}, nil
+	}
+	return f.createOrgSeat(ctx, ws, input)
+}
+func (f *fakeHandlerService) UpdateOrgChartSeat(context.Context, pgtype.UUID, pgtype.UUID, OrgChartSeatInput) (OrgChartSeatResponse, error) {
+	return OrgChartSeatResponse{}, nil
+}
+func (f *fakeHandlerService) DeleteOrgChartSeat(context.Context, pgtype.UUID, pgtype.UUID) (bool, error) {
+	return true, nil
+}
+
+func (f *fakeHandlerService) ListVisionPlan(ctx context.Context, ws pgtype.UUID) (VisionPlanResponse, error) {
+	if f.listVisionPlan == nil {
+		return VisionPlanResponse{}, nil
+	}
+	return f.listVisionPlan(ctx, ws)
+}
+func (f *fakeHandlerService) CreateVisionPlanSection(ctx context.Context, ws pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
+	if f.createVisionSection == nil {
+		return VisionPlanSectionResponse{}, nil
+	}
+	return f.createVisionSection(ctx, ws, input)
+}
+func (f *fakeHandlerService) UpdateVisionPlanSection(context.Context, pgtype.UUID, pgtype.UUID, VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
+	return VisionPlanSectionResponse{}, nil
+}
+func (f *fakeHandlerService) DeleteVisionPlanSection(context.Context, pgtype.UUID, pgtype.UUID) (bool, error) {
+	return true, nil
+}
+func (f *fakeHandlerService) CreateVisionPlanItem(context.Context, pgtype.UUID, VisionPlanItemInput) (VisionPlanItemResponse, error) {
+	return VisionPlanItemResponse{}, nil
+}
+func (f *fakeHandlerService) UpdateVisionPlanItem(context.Context, pgtype.UUID, pgtype.UUID, VisionPlanItemInput) (VisionPlanItemResponse, error) {
+	return VisionPlanItemResponse{}, nil
+}
+func (f *fakeHandlerService) DeleteVisionPlanItem(context.Context, pgtype.UUID, pgtype.UUID) (bool, error) {
+	return true, nil
 }
 
 func (f *fakeHandlerService) ListElements(ctx context.Context, ws pgtype.UUID) ([]OsElementResponse, error) {

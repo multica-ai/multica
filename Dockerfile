@@ -52,7 +52,8 @@ RUN apk add --no-cache \
 RUN npm install --global agent-browser@0.26.0 \
     && npm cache clean --force
 
-ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
+    HOME=/home/app
 
 WORKDIR /app
 

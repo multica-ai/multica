@@ -12,12 +12,14 @@
     "./task-transcript-safety": "./task-transcript-safety.ts"
   },
   "dependencies": {
+    "@multica/cerebro-tool-policy": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "lucide-react": "catalog:",
     "recharts": "3.8.0",
+    "sonner": "^2.0.7",
     "zod": "catalog:"
   },
   "peerDependencies": {

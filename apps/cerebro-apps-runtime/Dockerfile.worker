@@ -7,5 +7,6 @@ RUN pnpm install --frozen-lockfile --prod --filter @multica/cerebro-apps-runtime
 WORKDIR /srv/apps/cerebro-apps-runtime
 COPY apps/cerebro-apps-runtime/ ./
 ENV NODE_ENV=production PORT=4311
+EXPOSE 4311
 USER node
 ENTRYPOINT ["node", "worker-entry.mjs"]

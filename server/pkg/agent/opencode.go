@@ -17,10 +17,10 @@ import (
 // opencodeBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args.
 var opencodeBlockedArgs = map[string]blockedArgMode{
-	"--format":                       blockedWithValue,  // json output format for daemon communication
-	"--dir":                          blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
-	"--variant":                      blockedWithValue,  // owned by agent.thinking_level
-	"--dangerously-skip-permissions": blockedStandalone, // daemon manages non-interactive permission prompts
+	"--format":  blockedWithValue,  // json output format for daemon communication
+	"--dir":     blockedWithValue,  // task workdir anchor for skill / AGENTS.md discovery
+	"--variant": blockedWithValue,  // owned by agent.thinking_level
+	"--auto":    blockedStandalone, // CEREBRO-PATCH(opencode-auto-flag): daemon manages non-interactive permission prompts using the installed CLI contract.
 }
 
 // opencodeBackend implements Backend by spawning `opencode run --format json`
@@ -49,7 +49,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	args := []string{"run", "--format", "json", "--dangerously-skip-permissions"}
+	args := []string{"run", "--format", "json", "--auto"} // CEREBRO-PATCH(opencode-auto-flag): the installed runtime removed --dangerously-skip-permissions.
 	// Anchor OpenCode's project discovery (AGENTS.md walk-up + .opencode/skills/
 	// project config scan) at the task workdir. Without this, OpenCode falls
 	// back to PWD (inherited from the daemon process) or process.cwd(), which
@@ -192,12 +192,13 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		}
 
 		resCh <- Result{
-			Status:     scanResult.status,
-			Output:     scanResult.output,
-			Error:      scanResult.errMsg,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  scanResult.sessionID,
-			Usage:      usage,
+			Status:      scanResult.status,
+			Output:      scanResult.output,
+			Error:       scanResult.errMsg,
+			DurationMs:  duration.Milliseconds(),
+			SessionID:   scanResult.sessionID,
+			Usage:       usage,
+			UsageEvents: finalizeOpenCodeCallUsageEvents(scanResult.usageEvents, opts.Model, scanResult.sessionID),
 		}
 	}()
 
@@ -208,11 +209,12 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 
 // eventResult holds the accumulated state from processing the event stream.
 type eventResult struct {
-	status    string
-	errMsg    string
-	output    string
-	sessionID string
-	usage     TokenUsage // accumulated token usage across all steps
+	status      string
+	errMsg      string
+	output      string
+	sessionID   string
+	usage       TokenUsage // accumulated token usage across all steps
+	usageEvents []ModelUsageEvent
 }
 
 // processEvents reads JSON lines from r, dispatches events to ch, and returns
@@ -221,6 +223,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	var output strings.Builder
 	var sessionID string
 	var usage TokenUsage
+	var usageEvents []ModelUsageEvent // CEREBRO-PATCH(agent-opencode-call-usage-events): FIR-3337 retain native per-step usage.
 	finalStatus := "completed"
 	var finalError string
 	// CEREBRO-PATCH(agent-opencode-context-footprint): FIR-1870 last-turn footprint for the context-window indicator (cumulative usage over-counts the cached prefix).
@@ -256,6 +259,7 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 		case "step_finish":
 			// Accumulate token usage from step_finish events.
 			if t := event.Part.Tokens; t != nil {
+				usageEvents = appendOpenCodeCallUsageEvent(usageEvents, t, sessionID, time.Now())
 				var cr, cw int64
 				if t.Cache != nil {
 					cr, cw = t.Cache.Read, t.Cache.Write
@@ -282,11 +286,12 @@ func (b *opencodeBackend) processEvents(r io.Reader, ch chan<- Message) eventRes
 	lastTurn.apply(&usage) // CEREBRO-PATCH(agent-opencode-context-footprint): FIR-1870 overlay last-turn footprint onto the cumulative usage.
 
 	return eventResult{
-		status:    finalStatus,
-		errMsg:    finalError,
-		output:    output.String(),
-		sessionID: sessionID,
-		usage:     usage,
+		status:      finalStatus,
+		errMsg:      finalError,
+		output:      output.String(),
+		sessionID:   sessionID,
+		usage:       usage,
+		usageEvents: usageEvents,
 	}
 }
 

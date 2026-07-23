@@ -99,6 +99,12 @@ func TestRuntimeCallbackOnlyMakesReadyVersionCurrent(t *testing.T) {
 	if len(ready.queries) != 3 || !strings.Contains(ready.queries[1], "current_version") || !strings.Contains(ready.queries[1], "status='approved'") || !strings.Contains(ready.queries[2], "app.version.published") {
 		t.Fatalf("ready callback did not switch current version atomically: %#v", ready.queries)
 	}
+	// Parameters used only inside jsonb_build_object need an explicit cast:
+	// pgx prepares the statement and Postgres cannot infer the type, which
+	// rejected every runtime callback on staging (FIR-3315).
+	if !strings.Contains(ready.queries[2], "jsonb_build_object('version',$2::text)") {
+		t.Fatalf("ready audit insert lost its parameter cast: %#v", ready.queries[2])
+	}
 
 	failed := &recordingDeploymentExec{}
 	if err := updateDeploymentState(context.Background(), failed, appID, "2.0.0", deploymentCallback{Status: "failed", Error: "/srv/private.js"}); err != nil {
@@ -106,6 +112,9 @@ func TestRuntimeCallbackOnlyMakesReadyVersionCurrent(t *testing.T) {
 	}
 	if len(failed.queries) != 2 || strings.Contains(failed.queries[0], "current_version") || !strings.Contains(failed.queries[1], "app.runtime.failed") {
 		t.Fatalf("failed callback changed current version: %#v", failed.queries)
+	}
+	if !strings.Contains(failed.queries[1], "jsonb_build_object('version',$2::text)") {
+		t.Fatalf("failed audit insert lost its parameter cast: %#v", failed.queries[1])
 	}
 	if err := updateDeploymentState(context.Background(), failed, appID, "2.0.0", deploymentCallback{Status: "unknown"}); err == nil {
 		t.Fatal("unknown deployment status was accepted")
@@ -153,6 +162,9 @@ func TestRollbackWaitsForAHealthyTargetAndRecordsIntent(t *testing.T) {
 	}
 	if len(recorder.queries) != 2 || !strings.Contains(recorder.queries[0], "status='provisioning'") || strings.Contains(recorder.queries[0], "current_version") || recorder.args[1][2] != "app.version.rollback" {
 		t.Fatalf("rollback switched before health or missed audit: queries=%#v args=%#v", recorder.queries, recorder.args)
+	}
+	if !strings.Contains(recorder.queries[1], "jsonb_build_object('version',$4::text") {
+		t.Fatalf("rollback audit insert lost its parameter cast: %#v", recorder.queries[1])
 	}
 }
 
@@ -339,6 +351,7 @@ func TestMiniAppsRouterExposesSignedRuntimeBundleAndCallback(t *testing.T) {
 		`r.Post("/api/cerebro/apps-internal/{id}/{version}/callback", cerebroAppsHandler.RuntimeCallback)`,
 		`r.Post("/api/cerebro/apps-internal/host/registry", cerebroAppsHandler.WorkerRegistryCall)`,
 		`r.Post("/api/cerebro/apps-internal/host/connection", cerebroAppsHandler.WorkerConnectionCall)`,
+		`r.Get("/api/cerebro/apps-runtime/*", cerebroAppsHandler.RuntimeAsset)`,
 	} {
 		if !strings.Contains(router, route) {
 			t.Fatalf("signed mini-app runtime route is missing: %s", route)

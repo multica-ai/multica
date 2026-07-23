@@ -282,7 +282,8 @@ func resolveChannelChoiceFromBlock(notifBlock map[string]any, channel, key strin
 		return channelDefault(channel, key)
 	}
 
-	override, _ := channelBlock[key].(string)
+	// CEREBRO-PATCH(notification-audience-inheritance): FIR-3650 lets split keys inherit a legacy explicit choice until migration 9154 backfills them.
+	override := cerebroNotificationChoice(channelBlock, key)
 	switch override {
 	case "on":
 		return true
@@ -344,7 +345,8 @@ func channelDefault(channel, key string) bool {
 	if !ok {
 		return false
 	}
-	return defaults[key]
+	// CEREBRO-PATCH(notification-audience-defaults): FIR-3650 derives split defaults without duplicating the routing matrix.
+	return cerebroNotificationChannelDefault(defaults, channel, key)
 }
 
 // CEREBRO-PATCH(notify-all-mobile-inbox-primary): keep the mobile inbox
@@ -354,10 +356,11 @@ func channelDefault(channel, key string) bool {
 // promoting notification-primary events to mobile push just because the user
 // manually routes that key into inbox.
 func primaryChannelForKey(key string) string {
-	if defaultChannelChoices[channelInbox][key] {
+	// CEREBRO-PATCH(notification-audience-defaults): FIR-3650 includes derived split defaults in mobile-master routing.
+	if channelDefault(channelInbox, key) {
 		return channelInbox
 	}
-	if defaultChannelChoices[channelNotifications][key] {
+	if channelDefault(channelNotifications, key) {
 		return channelNotifications
 	}
 	return ""
@@ -390,7 +393,8 @@ func routeKey(notifType string, isAssignee bool) string {
 	if rk, ok := skillRoutingKey[notifType]; ok {
 		return rk
 	}
-	if !splitTypes[notifType] {
+	// CEREBRO-PATCH(notification-audience-split): FIR-3650 keeps Firtal-only split types in a fork-owned file.
+	if !splitTypes[notifType] && !isCerebroAudienceSplitType(notifType) {
 		return notifType
 	}
 	if isAssignee {

@@ -49,6 +49,12 @@ vi.mock("./use-holder-directory", () => ({
         ownerId: "user-jesper",
         runtimeId: "runtime-cloud",
       },
+      {
+        id: "agent-shared",
+        name: "Shared agent",
+        ownerId: null,
+        runtimeId: "runtime-cloud",
+      },
     ],
     runtimes: [
       {
@@ -104,17 +110,12 @@ beforeEach(() => {
     usage: [],
   });
   mockFetchToolPolicyTable.mockReset();
-  mockFetchToolPolicyTable.mockImplementation(
-    async (_wsId: string, ctx: { userId?: string }) => ({
-      tools: ctx,
-    }),
-  );
-  mockFetchToolPolicyTable.mockResolvedValue([
+  mockFetchToolPolicyTable.mockImplementation(async (_wsId: string, context: { userId?: string; agentId?: string }) => [
     {
       tool_key: "tools:test-as-user",
       effective: {
-        setting: "deny",
-        decided_by: "workspace",
+        setting: context.userId === "user-sara" && context.agentId ? "allow" : "deny",
+        decided_by: context.userId === "user-sara" && context.agentId ? "user" : "workspace",
         capped_by: "",
       },
     },
@@ -126,7 +127,9 @@ describe("PermissionDetailPage permission audit", () => {
     renderPage();
 
     expect(
-      await screen.findByRole("heading", { name: "Permission audit" }),
+      await screen.findByRole("heading", {
+        name: "Why Access and Permission audit",
+      }),
     ).toBeInTheDocument();
     const table = await screen.findByRole("table", { name: "Permission audit" });
     for (const heading of [
@@ -190,5 +193,20 @@ describe("PermissionDetailPage permission audit", () => {
     );
     expect(card).not.toHaveAttribute("open");
     expect(within(card).getByText("Effective Deny")).toBeInTheDocument();
+  });
+
+  it("shows every user's effective decision when inspecting an agent", async () => {
+    const user = userEvent.setup();
+    renderPage();
+
+    await user.click(await screen.findByRole("tab", { name: /^Agents\b/ }));
+    await user.click(screen.getByRole("button", { name: "View users for Lone" }));
+
+    expect(screen.getByText("Shared agent")).toBeInTheDocument();
+    const table = await screen.findByRole("table", { name: "Users for Lone" });
+    expect(within(table).getByText("Jesper Hvejsel")).toBeInTheDocument();
+    expect(within(table).getByText("Sara")).toBeInTheDocument();
+    expect(within(table).getByText("Allow")).toBeInTheDocument();
+    expect(within(table).getByText("Deny")).toBeInTheDocument();
   });
 });

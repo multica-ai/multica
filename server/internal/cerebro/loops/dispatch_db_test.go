@@ -175,7 +175,7 @@ func TestGateEvaluator_DispatchesRevisionOnFailure(t *testing.T) {
 		Checks:        [][]string{check},
 		AgentID:       agentID,
 		RevisionSkill: "build",
-		Caps:          Caps{MaxIterations: 10, MaxRevisions: 10, NoProgressStalls: 10},
+		Caps:          GateLimits{MaxIterations: 10, MaxRevisions: 10, NoProgressStalls: 10},
 	}
 
 	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value); err != nil {
@@ -318,7 +318,7 @@ func TestGateEvaluator_JudgeRevisionCarriesBlockingIssues(t *testing.T) {
 		AgentID:       agentID,
 		JudgeChecks:   []JudgeCheck{judgeCheck},
 		RevisionSkill: "build",
-		Caps:          Caps{MaxIterations: 10, MaxRevisions: 10, NoProgressStalls: 2},
+		Caps:          GateLimits{MaxIterations: 10, MaxRevisions: 10, NoProgressStalls: 2},
 	}
 
 	if _, err := eval.EvaluateCheckGate(ctx, uuidToString(issueID), gate, value); err != nil {

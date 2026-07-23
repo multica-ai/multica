@@ -13,6 +13,12 @@ import {
   rocksListSchema,
   strategyListSchema,
   strategyHistoryListSchema,
+  visionPlanSchema,
+  EMPTY_VISION_PLAN,
+  EMPTY_MEETING,
+  EMPTY_ORG_CHART,
+  meetingSchema,
+  orgChartSeatListSchema,
 } from "./api-schemas";
 
 describe("operating system API schemas", () => {
@@ -99,5 +105,35 @@ describe("operating system API schemas", () => {
     expect(objectConnectionListSchema.safeParse({ connections: null }).success).toBe(false);
     expect(objectConnectionListSchema.safeParse({ connections: [{ target_id: 4 }] }).success).toBe(false);
     expect(EMPTY_CONNECTIONS).toEqual({ connections: [] });
+  });
+
+  it("parses Vision Plan sections, structured parts, owners and Goal connections", () => {
+    const parsed = visionPlanSchema.parse({ sections: [{
+      id: "s1", workspace_id: "w1", key: "marketing-strategy", name: "Marketing Strategy",
+      section_type: "structured", position: 3, created_at: "", updated_at: "", items: [{
+        id: "i1", workspace_id: "w1", section_id: "s1", title: "Nordic operators", description: "",
+        part_label: "Target market", owner_type: "agent", owner_id: "a1", owner_name: "Lone",
+        position: 0, state: "active", goal_connections: [{ connection_id: "c1", goal_id: "g1" }], created_at: "", updated_at: "",
+      }],
+    }] });
+    expect(parsed.sections[0]?.items[0]).toMatchObject({ part_label: "Target market", owner_name: "Lone", goal_connections: [{ goal_id: "g1" }] });
+    expect(visionPlanSchema.safeParse({ sections: null }).success).toBe(false);
+    expect(EMPTY_VISION_PLAN).toEqual({ sections: [] });
+  });
+
+  it("parses meeting configuration and safely downgrades new enum values", () => {
+    const parsed = meetingSchema.parse({
+      workspace_id: "w1", cadence_unit: "weekly", cadence_count: 2, current_note_id: 42,
+      agenda: [{ id: "review", name: "Review", position: 0, binding: "future_data" }], available_note_types: [{ id: "weekly", name: "Weekly", cadence_unit: "week", cadence_count: 1, enabled: true, current_note_id: null }],
+    });
+    expect(parsed).toMatchObject({ cadence_unit: "manual", cadence_count: 2, current_note_id: undefined, agenda: [{ binding: "none" }], available_note_types: [{ current_note_id: undefined }] });
+    expect(EMPTY_MEETING.agenda).toEqual([]);
+  });
+
+  it("rejects malformed org chart seats instead of casting them", () => {
+    const parsed = orgChartSeatListSchema.parse({ seats: [{ id: "s1", workspace_id: "w1", name: "Operations", responsibilities: null, vacant: true }] });
+    expect(parsed.seats[0]).toMatchObject({ name: "Operations", responsibilities: [], vacant: true });
+    expect(orgChartSeatListSchema.safeParse({ seats: [{ id: 1 }] }).success).toBe(false);
+    expect(EMPTY_ORG_CHART).toEqual({ seats: [] });
   });
 });

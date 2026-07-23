@@ -202,3 +202,29 @@ func TestRevealCredential_ErrorNeverIncludesResponseBody(t *testing.T) {
 		t.Fatalf("sensitive response body leaked through error: %v", err)
 	}
 }
+
+func TestRevealCredential_RetriesTransientAgentVaultFailure(t *testing.T) {
+	const secret = "registry-password-after-retry"
+	calls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			http.Error(w, "temporary upstream failure", http.StatusBadGateway)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"credentials":[{"key":"PASSWORD","value":"` + secret + `"}]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(Config{InternalURL: srv.URL}, fakeConns{list: []connections.Connection{agentVaultConn(srv.URL, "owner-token")}})
+	c.retryDelay = func(context.Context, int) error { return nil }
+	value, err := c.RevealCredential(context.Background(), pgtype.UUID{}, "Shared/browser-login/registry", "PASSWORD")
+
+	if err != nil {
+		t.Fatalf("RevealCredential: %v", err)
+	}
+	if value != secret || calls != 2 {
+		t.Fatalf("RevealCredential = (%q, %d calls), want (%q, 2 calls)", value, calls, secret)
+	}
+}

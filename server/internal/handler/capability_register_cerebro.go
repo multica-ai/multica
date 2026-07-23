@@ -238,9 +238,8 @@ func capabilityItemsFromSnapshot(snapshot map[string]json.RawMessage) []capabili
 }
 
 // CEREBRO-PATCH(capability-register-scan-bridge): FIR-2284 — a daemon MCP
-// tools/list scan ("Scan now") lands in the legacy cerebro_runtime_tool list,
-// but the unified FIR-2230 tool-policy table reads the capability register
-// (cerebro_capability). Mirror the scanned MCP tools into the register so a
+// tools/list scan ("Scan now") lands directly in the capability register.
+// Mirror the scanned MCP tools so a
 // scan actually surfaces them in the table the admin screen renders — the same
 // bridge persistRuntimeCapabilitySnapshot does for the heartbeat snapshot.
 // Best-effort: a register failure must not fail the daemon's scan ingest, so

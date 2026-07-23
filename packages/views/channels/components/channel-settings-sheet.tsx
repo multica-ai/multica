@@ -18,7 +18,7 @@ import {
   useConvertGroupToChannel, // CEREBRO-PATCH(channel-group-kind): FIR-2159 — promote a group to a named channel.
 } from "@multica/core/channels";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
-import { useArchiveChannel } from "@multica/cerebro-channels";
+import { ChannelCopyLinkAction, useArchiveChannel } from "@multica/cerebro-channels"; // CEREBRO-PATCH(dm-header-menu): FIR-3387 — Copy link lives in the cerebro zone.
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import type { Channel, ChannelPermissions } from "@multica/core/types";
 import {
@@ -141,7 +141,7 @@ export function ChannelSettingsSheet({
           <SheetDescription>
             {isChannel
               ? "Manage this channel — name, permissions, agents and more."
-              : "Pin or archive this direct message."}
+              : "Copy, pin or archive this direct message."}
           </SheetDescription>
         </SheetHeader>
 
@@ -220,6 +220,7 @@ export function ChannelSettingsSheet({
           <section className="px-4 py-3">
             <SectionLabel>Actions</SectionLabel>
             <div className="mt-1 flex flex-col gap-1.5">
+              <ChannelCopyLinkAction /> {/* CEREBRO-PATCH(dm-header-menu): FIR-3387 — current conversation URL. */}
               <Button
                 variant="outline"
                 size="sm"

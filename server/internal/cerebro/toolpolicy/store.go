@@ -10,22 +10,26 @@ package toolpolicy
 // chain Input from stored rows.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 // Store reads and writes the explicit per-layer tool settings.
 type Store struct {
-	pool *pgxpool.Pool
+	pool roleQueryer
 	q    *cerebrodb.Queries
 	// vaults, when set, lets the credentials table surface Agent Vault boxes as
 	// grantable agentvault-vault:<name> rows (FIR-1739). Optional and nil-safe:
@@ -33,9 +37,21 @@ type Store struct {
 	vaults agentvault.VaultLister
 }
 
+type roleQueryer interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	Query(context.Context, string, ...any) (pgx.Rows, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
+}
+
 // NewStore constructs a Store backed by the given pool.
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{pool: pool, q: cerebrodb.New(pool)}
+}
+
+// NewStoreDB preserves role-binding resolution for callers that already own a
+// generated query set plus the handler's database interface.
+func NewStoreDB(db roleQueryer, q *cerebrodb.Queries) *Store {
+	return &Store{pool: db, q: q}
 }
 
 // WithVaultLister wires an Agent Vault vault lister so the credentials tab also
@@ -51,14 +67,15 @@ func (s *Store) WithVaultLister(v agentvault.VaultLister) *Store {
 	return s
 }
 
-// NewStoreFromQueries constructs a Store for the resolution path only — Resolve,
-// ListForSubject, Set, Clear, and group expansion all need just the generated
-// queries. The Table read model additionally needs a *pgxpool.Pool for its
-// custom join query, so callers that render the admin table must use NewStore;
-// the runtime enforcement gate, which only resolves, uses this lighter
-// constructor and never touches Table.
+// NewStoreFromQueries constructs a fully connected Store from an existing
+// generated query set. Queries retains the same DBTX adapter used to create it,
+// so custom role-binding reads must use that adapter too; otherwise callers of
+// this constructor would silently resolve without active roles.
 func NewStoreFromQueries(q *cerebrodb.Queries) *Store {
-	return &Store{q: q}
+	if q == nil {
+		return &Store{}
+	}
+	return &Store{pool: q.Database(), q: q}
 }
 
 // ErrUnknownLayer / ErrUnknownSetting guard the authoring API against values the
@@ -270,6 +287,11 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 		return Input{}, fmt.Errorf("toolpolicy: load context settings: %w", err)
 	}
 
+	// Thread the resolving runtime into the condition-matching context, so a
+	// runtime-scoped rule (arg_allowlist on runtime_id — the shape migration
+	// 9153 writes for legacy group/user grants) bites at every chain gate.
+	reqCtx := requestContextWithRuntime(in)
+
 	input := Input{Settings: map[Layer]Setting{}, Base: in.Base, IsSystem: in.IsSystem}
 	var groupSettings []Setting
 	for _, r := range rows {
@@ -279,7 +301,7 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 		if err != nil {
 			return Input{}, fmt.Errorf("toolpolicy: decode conditions for layer %q: %w", layer, err)
 		}
-		setting, applies := ConditionedSetting(setting, cond, in.RequestContext, in.Eval)
+		setting, applies := ConditionedSetting(setting, cond, reqCtx, in.Eval)
 		if !applies {
 			// The WHEN layer's terms are not met (or the row fails closed): the
 			// row drops out, so this layer inherits as if the row were absent.
@@ -294,7 +316,134 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 	if len(groupSettings) > 0 {
 		input.Settings[LayerGroup] = CombineGroups(groupSettings...)
 	}
+	roleSettings, err := s.activeRoleSettings(ctx, in, reqCtx)
+	if err != nil {
+		return Input{}, err
+	}
+	if len(roleSettings) > 0 {
+		roleSetting := CombineGroups(roleSettings...)
+		if existing, ok := input.Settings[LayerAgent]; ok {
+			// A role grant folds into the agent layer, but it may only TIGHTEN an
+			// explicit agent-layer choice, never loosen it. CombineGroups is most-
+			// permissive (allow<ask<deny), so combining a role `allow` with an
+			// explicit agent `deny` here silently erased the deny — a role could
+			// cancel an administrator's "Deny this tool for this agent" (FIR-3403).
+			// Where the agent has no explicit row the role setting applies verbatim
+			// (this branch is skipped), so a role still grants access as intended.
+			roleSetting = MoreRestrictive(existing, roleSetting)
+		}
+		input.Settings[LayerAgent] = roleSetting
+	}
 	return input, nil
+}
+
+// activeRoleSettings expands unexpired member/agent bindings into the policy
+// decision. An expired binding is filtered by the database clock on every
+// resolve, so access disappears at the call itself without a cleanup worker.
+//
+// A role permission is the FULL rule set for a tool, not just a setting: each
+// rule carries resource_pattern (matched verbatim against the query, exactly
+// like ListCerebroToolPolicyForContext) and conditions (evaluated through
+// ConditionedSetting). Reading only 'setting' let a resource- or
+// condition-scoped allow act as a whole-tool allow (FIR-3403 finding 2).
+func (s *Store) activeRoleSettings(ctx context.Context, in Query, reqCtx RequestContext) ([]Setting, error) {
+	if s == nil || s.pool == nil {
+		return nil, errors.New("toolpolicy: role binding store is not configured")
+	}
+	rows, err := s.pool.Query(ctx, `
+		SELECT r.permissions -> $4
+		FROM cerebro_role_assignment b
+		JOIN cerebro_role r ON r.id=b.role_id
+		WHERE r.workspace_id=$1
+		  AND (b.expires_at IS NULL OR b.expires_at > now())
+		  AND ((b.subject_type='agent' AND b.subject_id=$2)
+		    OR (b.subject_type='member' AND b.subject_id=$3))
+		  AND r.permissions ? $4`, in.WorkspaceID, in.AgentID, in.UserID, in.ToolKey)
+	if err != nil {
+		return nil, fmt.Errorf("toolpolicy: load role bindings: %w", err)
+	}
+	defer rows.Close()
+	var out []Setting
+	for rows.Next() {
+		var raw []byte
+		if err := rows.Scan(&raw); err != nil {
+			return nil, err
+		}
+		rules, err := decodeRolePermission(raw)
+		if err != nil {
+			return nil, fmt.Errorf("toolpolicy: decode role permission for %q: %w", in.ToolKey, err)
+		}
+		for _, rule := range rules {
+			if rule.ResourcePattern != in.ResourcePattern {
+				continue
+			}
+			setting := Setting(rule.Setting)
+			if !validSetting(setting) || setting == SettingInherit {
+				continue
+			}
+			setting, applies := ConditionedSetting(setting, rule.Conditions, reqCtx, in.Eval)
+			if !applies {
+				continue
+			}
+			out = append(out, setting)
+		}
+	}
+	return out, rows.Err()
+}
+
+// rolePermissionRule is one rule inside a role's per-tool permission list —
+// the same (setting, resource_pattern, conditions) triple a direct
+// cerebro_tool_policy row carries, packaged into cerebro_role.permissions by
+// migration 9152.
+type rolePermissionRule struct {
+	Setting         string     `json:"setting"`
+	ResourcePattern string     `json:"resource_pattern"`
+	Conditions      *Condition `json:"conditions"`
+}
+
+// decodeRolePermission decodes one tool's permission value from
+// cerebro_role.permissions. The canonical shape is a LIST of rules (several
+// rows for one tool must not collapse). A bare object is accepted as a
+// single-rule list for rows written by the pre-fix migration shape, so an
+// already-migrated environment keeps resolving without a rewrite.
+func decodeRolePermission(raw []byte) ([]rolePermissionRule, error) {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return nil, nil
+	}
+	if trimmed[0] == '[' {
+		var rules []rolePermissionRule
+		if err := json.Unmarshal(trimmed, &rules); err != nil {
+			return nil, err
+		}
+		return rules, nil
+	}
+	var rule rolePermissionRule
+	if err := json.Unmarshal(trimmed, &rule); err != nil {
+		return nil, err
+	}
+	return []rolePermissionRule{rule}, nil
+}
+
+// requestContextWithRuntime returns the query's request context with the
+// resolving runtime threaded into ArgValues, so a runtime-scoped rule
+// (arg_allowlist on runtime_id — the shape migration 9153 writes when it
+// preserves legacy per-runtime group/user grants) is matched at every gate.
+// The caller's map is copied, never mutated. When no runtime is in scope the
+// argument stays absent, so a runtime-scoped Allow fails closed to Deny
+// (ConditionedSetting) instead of silently applying workspace-wide.
+func requestContextWithRuntime(in Query) RequestContext {
+	rc := in.RequestContext
+	if !in.RuntimeID.Valid {
+		return rc
+	}
+	av := make(map[string]string, len(rc.ArgValues)+1)
+	for k, v := range rc.ArgValues {
+		av[k] = v
+	}
+	av["runtime_id"] = util.UUIDToString(in.RuntimeID)
+	rc.ArgValues = av
+	return rc
 }
 
 // resolveGroupIDs returns the group ids that enter the chain at LayerGroup.

@@ -371,30 +371,13 @@ func (t *FirtalAssignIssueTool) Call(ctx context.Context, args map[string]any) (
 //   - get_schema        → POST /api/registry/execute with {dataSourceId, agent_metadata: true}
 //   - execute           → POST /api/registry/execute with the full structured-query body
 //
-// Per-data-source authorisation is enforced from agent_tool_grant.config_json.
-// The default (no config row, empty allowlist) denies every data source — admins
-// must explicitly opt in via GrantAgentTool with a config_json that lists the
-// allowed dataSourceId values (or sets allowed_data_sources_all=true).
+// Per-data-source and privileged action authorisation is enforced by the
+// unified role/tool-policy chain.
 type FirtalRegistryTool struct {
 	queries  *db.Queries
 	cerebro  *cerebrodb.Queries
 	tctx     ToolContext
 	registry *Registry
-}
-
-// firtalRegistryGrantConfig is the per-agent grant config_json shape for the
-// firtal_registry tool. Data-source access is now governed solely by the
-// unified tool-policy chain (FIR-2208); the legacy allowed_data_sources /
-// allowed_data_sources_all fields have been retired and are no longer read.
-type firtalRegistryGrantConfig struct {
-	// AllowedApps opts the agent into the list_apps action (app + owner
-	// catalog lookup via /api/apps). Deny-by-default.
-	AllowedApps bool `json:"allowed_apps"`
-	// AllowWrite opts the agent into the update_app action (deploy-write upsert
-	// via /api/apps/deploy). Strictly deny-by-default: a write requires this
-	// explicit flag. The registry itself still gates the call on a system key
-	// with apps_write_enabled + a per-app write grant.
-	AllowWrite bool `json:"allow_write"`
 }
 
 // fdrRegistrySettings is the workspace.settings envelope read for the registry
@@ -535,11 +518,6 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 		return "", err
 	}
 
-	config, err := t.loadGrantConfig(ctx)
-	if err != nil {
-		return "", fmt.Errorf("firtal_registry: load grant config: %w", err)
-	}
-
 	switch action {
 	case "list_data_sources":
 		return t.callList(ctx, baseURL, apiKey)
@@ -563,14 +541,14 @@ func (t *FirtalRegistryTool) Call(ctx context.Context, args map[string]any) (str
 		}
 		return t.callExecute(ctx, baseURL, apiKey, body)
 	case "list_apps":
-		if !config.AllowedApps {
-			return "", fmt.Errorf("firtal_registry: list_apps is not enabled for this agent (set allowed_apps in the firtal_registry grant config)")
+		if err := t.chainGateAction(ctx, action); err != nil {
+			return "", err
 		}
 		githubRepo, _ := args["github_repo"].(string)
 		return t.callApps(ctx, baseURL, apiKey, strings.TrimSpace(githubRepo))
 	case "update_app":
-		if !config.AllowWrite {
-			return "", fmt.Errorf("firtal_registry: update_app is not enabled for this agent (set allow_write in the firtal_registry grant config)")
+		if err := t.chainGateAction(ctx, action); err != nil {
+			return "", err
 		}
 		fields, ok := args["fields"].(map[string]any)
 		if !ok || len(fields) == 0 {
@@ -597,6 +575,9 @@ func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, action, ds
 		return nil
 	}
 	store := toolpolicy.NewStoreFromQueries(t.cerebro)
+	if t.registry != nil && t.registry.db != nil {
+		store = toolpolicy.NewStoreDB(t.registry.db, t.cerebro)
+	}
 	eval := t.registryPolicyCELEvaluator(ctx)
 
 	// FIR-2269: enforce a data-source rule authored at ANY actor layer — not just
@@ -675,6 +656,29 @@ func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, action, ds
 	return nil
 }
 
+func (t *FirtalRegistryTool) chainGateAction(ctx context.Context, action string) error {
+	if t.cerebro == nil || t.registry == nil || t.registry.db == nil {
+		return fmt.Errorf("firtal_registry: permission check unavailable for action %q", action)
+	}
+	agent, err := t.queries.GetAgent(ctx, t.tctx.AgentID)
+	if err != nil {
+		return fmt.Errorf("firtal_registry: permission check failed for action %q", action)
+	}
+	effective, err := toolpolicy.NewStoreDB(t.registry.db, t.cerebro).Resolve(ctx, toolpolicy.Query{
+		WorkspaceID:     t.tctx.WorkspaceID,
+		ToolKey:         "firtal_registry",
+		ResourcePattern: "action:" + action,
+		RuntimeID:       agent.RuntimeID,
+		AgentID:         t.tctx.AgentID,
+		UserID:          agent.OwnerID,
+		Base:            toolpolicy.SettingDeny,
+	})
+	if err != nil || effective.Setting != toolpolicy.SettingAllow {
+		return fmt.Errorf("firtal_registry: action %q is denied by policy", action)
+	}
+	return nil
+}
+
 // registryPolicyCELEvaluator returns the shared CEL evaluator when the default-OFF
 // cerebro_policy_cel flag is on for this workspace, else nil — the gateway twin of
 // the daemon gate's daemonPolicyCELEvaluator, so a firtal_registry data-source rule
@@ -721,24 +725,6 @@ func snakeToCamelRegistryArg(key string) string {
 	default:
 		return key
 	}
-}
-
-func (t *FirtalRegistryTool) loadGrantConfig(ctx context.Context) (firtalRegistryGrantConfig, error) {
-	if t.registry == nil {
-		return firtalRegistryGrantConfig{}, nil
-	}
-	raw, err := t.registry.GetGrantConfig(ctx, t.tctx.AgentID, "firtal_registry")
-	if err != nil {
-		return firtalRegistryGrantConfig{}, err
-	}
-	if len(raw) == 0 {
-		return firtalRegistryGrantConfig{}, nil
-	}
-	var cfg firtalRegistryGrantConfig
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		return firtalRegistryGrantConfig{}, fmt.Errorf("parse config_json: %w", err)
-	}
-	return cfg, nil
 }
 
 func (t *FirtalRegistryTool) loadRegistryCredentials(ctx context.Context) (string, string, error) {
@@ -1766,6 +1752,12 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 	r.Register(&FirtalSearchArtifactsTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalListRuntimesTool{queries: queries, tctx: tctx})
 	r.Register(&FirtalGetMeTool{queries: queries, tctx: tctx})
+	// FIR-3398: the self-lookup existed only on the MCP surface. Registering it
+	// here is what makes get_agent_capabilities real on the Gateway rather than
+	// merely granted. Nil provider keeps it absent (see ToolContext).
+	if tctx.CapabilitiesProvider != nil {
+		r.Register(&FirtalGetAgentCapabilitiesTool{provider: tctx.CapabilitiesProvider, tctx: tctx})
+	}
 	r.Register(&FirtalListGroupsTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&FirtalCredentialListTool{cerebro: cerebroQueries, tctx: tctx})
 	r.Register(&FirtalRegistryTool{queries: queries, cerebro: cerebroQueries, tctx: tctx, registry: r})
@@ -1780,5 +1772,8 @@ func registerBuiltinTools(r *Registry, queries *db.Queries, cerebroQueries *cere
 		r.Register(&FirtalReportLoopCheckTool{store: tctx.LoopStore, tctx: tctx})
 		r.Register(&FirtalReportLoopJudgeTool{store: tctx.LoopStore, tctx: tctx})
 		r.Register(&FirtalReportLoopHumanTool{store: tctx.LoopStore, tctx: tctx})
+		if tctx.LoopStep != nil {
+			r.Register(&FirtalOpenLoopStepTool{store: tctx.LoopStore, capability: *tctx.LoopStep})
+		}
 	}
 }

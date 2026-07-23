@@ -9,15 +9,10 @@ import * as React from "react";
 import { ListPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@multica/ui/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@multica/ui/components/ui/dialog";
+import { Sheet, SheetContent, SheetFooter, SheetHeader, SheetTitle } from "@multica/ui/components/ui/sheet";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useCreateIssue } from "@multica/core/issues/mutations";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
@@ -42,12 +37,18 @@ export function NoteCreateIssueDialog({
   const navigation = useNavigation();
   const paths = useWorkspacePaths();
   const [title, setTitle] = React.useState("");
+  const [useNoteContent, setUseNoteContent] = React.useState(true);
+  const [description, setDescription] = React.useState("");
   const [submitting, setSubmitting] = React.useState(false);
 
   // Re-seed the title from the note each time the dialog opens, so it tracks
   // edits the user made to the note since last time.
   React.useEffect(() => {
-    if (open) setTitle(firstLineTitle(note));
+    if (open) {
+      setTitle(firstLineTitle(note));
+      setUseNoteContent(true);
+      setDescription("");
+    }
   }, [open, note]);
 
   const handleCreate = async () => {
@@ -58,7 +59,7 @@ export function NoteCreateIssueDialog({
     try {
       issue = await createIssue.mutateAsync({
         title: trimmed,
-        description: note.body ?? "",
+        description: useNoteContent ? note.body ?? "" : description,
       });
     } catch {
       toast.error("Could not create issue");
@@ -84,21 +85,21 @@ export function NoteCreateIssueDialog({
   };
 
   return (
-    <Dialog
+    <Sheet
       open={open}
       onOpenChange={(v) => {
         if (!v && submitting) return;
         onOpenChange(v);
       }}
     >
-      <DialogContent className="max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 text-base">
+      <SheetContent className="flex w-full flex-col overflow-y-auto sm:max-w-xl">
+        <SheetHeader>
+          <SheetTitle className="flex items-center gap-2 text-base">
             <ListPlus className="size-4" />
             Create issue from note
-          </DialogTitle>
-        </DialogHeader>
-        <div className="flex flex-col gap-3 py-1">
+          </SheetTitle>
+        </SheetHeader>
+        <div className="flex flex-1 flex-col gap-4 py-4">
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="note-issue-title">Title</Label>
             <Input
@@ -112,12 +113,19 @@ export function NoteCreateIssueDialog({
               autoFocus
             />
           </div>
-          <p className="text-xs text-muted-foreground">
-            The note’s content becomes the issue description, and the new issue
-            is linked back on this note.
-          </p>
+          <div className="flex flex-col gap-2">
+            <Label>Description</Label>
+            <div className="grid grid-cols-2 gap-2">
+              <Button type="button" variant={useNoteContent ? "secondary" : "outline"} onClick={() => setUseNoteContent(true)}>Use note content</Button>
+              <Button type="button" variant={!useNoteContent ? "secondary" : "outline"} onClick={() => setUseNoteContent(false)}>Write another description</Button>
+            </div>
+            {!useNoteContent && (
+              <Textarea value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Issue description" className="min-h-48" autoFocus />
+            )}
+          </div>
+          <p className="text-xs text-muted-foreground">The new issue is linked back on this note.</p>
         </div>
-        <DialogFooter>
+        <SheetFooter>
           <Button
             variant="ghost"
             onClick={() => onOpenChange(false)}
@@ -128,8 +136,8 @@ export function NoteCreateIssueDialog({
           <Button onClick={handleCreate} disabled={!title.trim() || submitting}>
             Create issue
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </SheetFooter>
+      </SheetContent>
+    </Sheet>
   );
 }

@@ -12,15 +12,11 @@ export type {
 // the augmentation into the typecheck.
 import "./augment";
 
-// JEH-1290 W8 — agent tool grant types (cerebro-only, not in upstream)
+// Cerebro runtime tool inventory and effective-access types.
 export type { AgentTool } from "./augment";
 
 // JEH-1710 — runtime-level unified tool inventory + grant types
 export type {
   RuntimeTool,
   RuntimeToolEffectiveAccess,
-  RuntimeToolGroupGrant,
-  RuntimeToolUserGrant,
-  RuntimeToolGrants,
-  AgentToolOverride,
 } from "./augment";

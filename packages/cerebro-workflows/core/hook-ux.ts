@@ -12,7 +12,7 @@ export interface ActionFieldDefinition {
   label: string;
   input: "text" | "textarea" | "number" | "datetime-local" | "checkbox" | "target" | "select";
   required?: boolean;
-  target?: "agent" | "member" | "issue" | "workflow" | "skill" | "squad" | "artifact";
+  target?: "agent" | "member" | "issue" | "workflow" | "skill" | "squad" | "artifact" | "eval";
   help?: string;
   options?: ReadonlyArray<{ value: string; label: string }>;
 }
@@ -63,6 +63,12 @@ export const ACTION_CONFIGURATION: Record<string, ActionDefinition> = {
   "judge.gate": { label: "Judge gate", description: "Ask a judge agent to decide against a written rubric.", fields: [
     { key: "agent_id", label: "Judge agent", input: "target", target: "agent", required: true },
     { key: "rubric", label: "Rubric", input: "textarea", required: true },
+  ] },
+  "eval.run": { label: "Run eval", description: "Run a cerebro eval when this event fires.", fields: [
+    { key: "eval_id", label: "Eval", input: "target", target: "eval", required: true },
+  ] },
+  "eval.gate": { label: "Eval gate", description: "Block this hook unless the eval's latest run passed.", fields: [
+    { key: "eval_id", label: "Eval", input: "target", target: "eval", required: true },
   ] },
   "wakeup.create": { label: "Create wakeup", description: "Schedule a single future wakeup.", fields: [
     { key: "fire_at", label: "Wake up at", input: "datetime-local", required: true },
@@ -115,23 +121,40 @@ const eventPhrase = (event?: HookEventType) => {
   return label.replace(/^Before /, "before ").replace(/^After /, "after ").replace(/^When /, "when ").replace(/^the selected/, "when the selected");
 };
 
-export function stepSummary(hook: WorkflowHook, step: HookStepKey): string {
+export function triggerSummary(hook: WorkflowHook): string {
   const firstEvent = hook.events.at(0);
+  return !firstEvent ? "Choose a trigger" : hook.events.length === 1 ? HOOK_EVENT_OPTIONS.find((option) => option.value === firstEvent)?.label ?? firstEvent : `${hook.events.length} triggers`;
+}
+
+export function scopeSummary(hook: WorkflowHook): string {
   const firstBinding = hook.bindings.at(0);
+  return !firstBinding ? "Choose what this applies to" : hook.bindings.length === 1 ? `1 ${firstBinding.kind === "session" ? "chat or session" : firstBinding.kind}` : `${hook.bindings.length} scopes`;
+}
+
+export function filterSummary(hook: WorkflowHook): string {
+  return hook.conditions.length === 0 ? "Every time" : hook.conditions.length === 1 ? "1 filter" : `${hook.conditions.length} filters`;
+}
+
+export function decisionSummary(hook: WorkflowHook): string {
+  return ({ allow: "Guide (let it continue)", block: "Stop the action", modify: "Modify the action", require: "Require an outcome" })[hook.decision];
+}
+
+export function failModeSummary(hook: WorkflowHook): string {
+  return ({ open: "Continue", closed: "Stop", warn: "Continue and log" })[hook.fail_mode];
+}
+
+export function stepSummary(hook: WorkflowHook, step: HookStepKey): string {
   const firstAction = hook.actions.at(0);
-  if (step === "trigger") return !firstEvent ? "Choose a trigger" : hook.events.length === 1 ? HOOK_EVENT_OPTIONS.find((option) => option.value === firstEvent)?.label ?? firstEvent : `${hook.events.length} triggers`;
-  if (step === "scope") return !firstBinding ? "Choose a scope" : hook.bindings.length === 1 ? `1 ${firstBinding.kind === "session" ? "chat or session" : firstBinding.kind}` : `${hook.bindings.length} scopes`;
-  if (step === "filter") return hook.conditions.length === 0 ? "Always" : hook.conditions.length === 1 ? `1 condition` : `${hook.conditions.length} grouped conditions`;
-  if (step === "decision") return ({ allow: "Allow the action", block: "Block the action", modify: "Modify the action", require: "Require an outcome" })[hook.decision];
-  if (step === "action") return !firstAction ? "Choose an action" : hook.actions.length === 1 ? ACTION_CONFIGURATION[firstAction.type]?.label ?? firstAction.label : `${hook.actions.length} actions`;
-  return ({ open: "Fail open", closed: "Fail closed", warn: "Continue with a warning" })[hook.fail_mode];
+  if (step === "when") return `${triggerSummary(hook)} · ${scopeSummary(hook)} · ${filterSummary(hook)}`;
+  if (step === "guide") return decisionSummary(hook);
+  return !firstAction ? "Choose an action" : hook.actions.length === 1 ? ACTION_CONFIGURATION[firstAction.type]?.label ?? firstAction.label : `${hook.actions.length} actions`;
 }
 
 export function describeHook(hook: WorkflowHook): string {
   const trigger = eventPhrase(hook.events[0]);
   const scope = hook.bindings.length === 0 ? "the selected work" : hook.bindings.some((binding) => binding.kind === "workspace") ? "this workspace" : hook.bindings.map((binding) => binding.kind === "session" ? "chat or session" : binding.kind).join(" or ");
   const condition = hook.conditions.length === 0 ? "every time" : `when ${hook.conditions.length === 1 ? "its condition matches" : `${hook.conditions.length} conditions match`}`;
-  const decision = ({ allow: "allow it to continue", block: "block it", modify: "modify it", require: "require the stated outcome" })[hook.decision];
+  const decision = ({ allow: "let it continue with guidance", block: "stop it", modify: "modify it", require: "require the stated outcome" })[hook.decision];
   const actions = hook.actions.length === 0 ? "take no follow-up action" : hook.actions.map((action) => {
     const label = (ACTION_CONFIGURATION[action.type]?.label ?? action.label).toLowerCase();
     return label === "notify member" ? "notify a member" : label;
@@ -150,4 +173,5 @@ export const HOOK_TEMPLATES: ReadonlyArray<{ id: string; title: string; descript
   { id: "wakeup-failure", title: "Record wakeup failures", description: "Keep a visible audit trail when a wakeup cannot fire.", hook: templateHook({ name: "Record wakeup failures", events: ["on.wakeup.fire_failure"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "attempt", operator: "gte", value: "1" }], decision: "allow", actions: [{ type: "audit.record", label: "Record audit event", config: { event: "wakeup_fire_failed" } }] }) },
   { id: "judge-completion", title: "Judge work before completion", description: "Require a judge agent to check a written rubric.", hook: templateHook({ name: "Judge completion", events: ["before.task.complete"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "issue.status", operator: "eq", value: "in_review" }], decision: "require", requirement: "The judge must approve the completion evidence.", actions: [{ type: "judge.gate", label: "Judge gate", config: { rubric: "Approve only when the outcome and verification evidence are complete." } }] }) },
   { id: "handoff-stalled", title: "Handoff stalled work", description: "Pass repeatedly failing work to a fresh agent session.", hook: templateHook({ name: "Handoff stalled work", events: ["on.task.failure"], bindings: [{ kind: "workspace", value: "" }], conditions: [{ field: "attempt", operator: "gte", value: "2" }], decision: "require", requirement: "Continue in a fresh session with full state.", actions: [{ type: "session.handoff", label: "Start Handoff", config: { start_new: true, summary: "The task is stalled after repeated failures.", done: "Preserve completed work and evidence.", remaining: "Diagnose the recurring failure and continue.", max_depth: 2 } }] }) },
+  { id: "think-before-comment", title: "Think before an agent comments", description: "Before a message is sent, a judge confirms the agent considered a wakeup, a tag, or a handoff.", hook: templateHook({ name: "Think before comment", description: "Requires a judge to confirm the agent thought about next steps before sending a message.", events: ["before.message.send"], bindings: [{ kind: "workspace", value: "" }], conditions: [], decision: "require", requirement: "Before sending, confirm the agent considered whether to set a wakeup, tag a person, or hand off immediately.", actions: [{ type: "judge.gate", label: "Judge gate", config: { rubric: "Approve the message only if it shows the agent considered: (1) whether a wakeup should be scheduled before waiting on anything, (2) whether a person or agent should be tagged or looped in, and (3) whether an immediate handoff would be better than commenting. Otherwise return what the agent must address first." } }] }) },
 ];

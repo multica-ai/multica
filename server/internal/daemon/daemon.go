@@ -2992,12 +2992,14 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// goroutine. Both claude.go and codex.go populate result.Usage even when
 	// runCtx is cancelled, so dropping this on the cancelled path silently
 	// under-reports billing.
-	if len(result.Usage) > 0 {
-		if usageErr := d.client.ReportTaskUsage(ctx, task.ID, result.Usage); usageErr != nil {
+	usageEvents := modelUsageEventsForReport(result, time.Now().UTC()) // CEREBRO-PATCH(daemon-model-usage-event-report): FIR-3337 sends native call events or an explicit aggregate fallback alongside legacy usage during cutover.
+	if len(result.Usage) > 0 || len(usageEvents) > 0 {
+		if usageErr := d.client.ReportTaskUsage(ctx, task.ID, result.Usage, usageEvents); usageErr != nil {
 			taskLog.Warn("report task usage failed", "error", usageErr)
 		}
 	}
 	d.reportTaskSkillUsage(ctx, task, provider, result) // CEREBRO-PATCH(task-skill-usage-report): FIR-2996 extract explicit SKILL.md reads from supported runtime transcripts.
+	d.enqueueTraceUpload(task, provider, result)        // CEREBRO-PATCH(daemon-trace-upload): queue transcript for Registry upload before an early return can discard the result (FIR-3645).
 
 	// Check if we were cancelled by the polling goroutine.
 	select {
@@ -3611,6 +3613,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		WorkspaceContext:                 task.WorkspaceContext,
 		EffectiveTools:                   effectiveToolsForEnv(task.EffectiveTools), // CEREBRO-PATCH(daemon-task-effective-tools-ctx): FIR-2312 carry resolved non-CLI tools into the brief
 	}
+	taskCtx.WorkspaceBriefMode, taskCtx.ToolsBriefMode = briefLayerModesForTask(task) // CEREBRO-PATCH(brief-layer-modes): FIR-3212 nil-agent safe.
 
 	// Mark candidate env roots as active before any env work so the GC loop
 	// can't reclaim artifacts inside them mid-execution. We mark both the
@@ -3846,24 +3849,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			agentEnv[k] = v
 		}
 	}
-	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — wire Claude Code's
-	// PreToolUse hook to the local tool-policy resolve IPC when the workspace
-	// has opted in (claim carries the resolved stage). No-op for the default
-	// "off" stage and for non-Claude providers.
+	// CEREBRO-PATCH(daemon-tool-policy-ipc): FIR-3401 — wire every supported
+	// local provider to the mandatory tool-policy resolve IPC. Claude's combined
+	// settings document must retain the task's fast-mode choice.
 	speedMode := speedModeForTask(task)
-	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(
-		provider,
-		task.LocalToolPolicyStage,
-		env.WorkDir,
-		provider == "claude" && speedMode == "fast",
-	)
+	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(provider, env.WorkDir, provider == "claude" && speedMode == "fast")
 	if tperr != nil {
 		return TaskResult{}, fmt.Errorf("tool-policy prep: %w", tperr)
 	}
-	if toolPolicySpawn != nil {
-		for k, v := range toolPolicySpawn.Env {
-			agentEnv[k] = v
-		}
+	policyAgentID := ""
+	if task.Agent != nil {
+		policyAgentID = task.Agent.ID
 	}
 	backend, err := agent.New(provider, agent.Config{
 		ExecutablePath: entry.Path,
@@ -3871,6 +3867,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		Logger:         d.logger,
 		// CEREBRO-PATCH(runtime-sandbox-override-claim): JEH-418 — honour the claim's per-runtime sandbox override + policy at spawn (restored after upstream sync #4530, FIR-2743).
 		Sandbox: d.buildSandboxConfig(provider, task.SandboxEnabled, parseRuntimeSandboxPolicy(task.RuntimeSandboxPolicy), task.Agent),
+		ToolPolicy: func(ctx context.Context, tool string, args map[string]any) (bool, string) {
+			return d.resolveToolPolicy(ctx, toolPolicyResolveRequest{
+				WorkspaceID: task.WorkspaceID,
+				AgentID:     policyAgentID,
+				TaskID:      task.ID,
+				ToolName:    tool,
+				Args:        args,
+			})
+		},
 	})
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("create agent backend: %w", err)
@@ -3899,7 +3904,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		mcpConfig = task.Agent.McpConfig
 	}
 	// CEREBRO-PATCH(daemon-pi-harness): FIR-3272 lock Pi to the Firtal Connections + policy extension.
-	customArgs, err = preparePiHarness(task.PiHarnessEnabled, provider, env.WorkDir, task.LocalToolPolicyStage, customArgs, mcpConfig, agentEnv)
+	customArgs, err = preparePiHarness(task.PiHarnessEnabled, provider, env.WorkDir, "enforce", customArgs, mcpConfig, agentEnv) // CEREBRO-PATCH(daemon-policy-switch-retirement): FIR-3403 policy enforcement is mandatory.
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("prepare Pi harness: %w", err)
 	}
@@ -4029,6 +4034,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// failure (no session established) from a failure during actual execution.
 	if result.Status == "failed" && task.PriorSessionID != "" && result.SessionID == "" {
 		firstUsage := result.Usage
+		firstUsageEvents := result.UsageEvents
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
 		execOpts.ResumeSessionID = ""
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID)
@@ -4037,6 +4043,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		} else {
 			result = retryResult
 			result.Usage = mergeUsage(firstUsage, result.Usage)
+			result.UsageEvents = append(firstUsageEvents, result.UsageEvents...)
 			tools = retryTools
 		}
 	}
@@ -4083,12 +4090,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			// a normal completion so the task is not incorrectly marked as
 			// blocked.
 			return TaskResult{
-				Status:    "completed",
-				Comment:   "",
-				SessionID: result.SessionID,
-				WorkDir:   env.WorkDir,
-				EnvRoot:   env.RootDir,
-				Usage:     usageEntries,
+				Status:      "completed",
+				Comment:     "",
+				SessionID:   result.SessionID,
+				WorkDir:     env.WorkDir,
+				EnvRoot:     env.RootDir,
+				Usage:       usageEntries,
+				UsageEvents: result.UsageEvents,
 			}, nil
 		}
 		// Detect "poisoned" terminal output: the agent didn't reach a real
@@ -4109,16 +4117,18 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				WorkDir:       env.WorkDir,
 				EnvRoot:       env.RootDir,
 				Usage:         usageEntries,
+				UsageEvents:   result.UsageEvents,
 				FailureReason: reason,
 			}, nil
 		}
 		return TaskResult{
-			Status:    "completed",
-			Comment:   result.Output,
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
-			Usage:     usageEntries,
+			Status:      "completed",
+			Comment:     result.Output,
+			SessionID:   result.SessionID,
+			WorkDir:     env.WorkDir,
+			EnvRoot:     env.RootDir,
+			Usage:       usageEntries,
+			UsageEvents: result.UsageEvents,
 		}, nil
 	case "timeout":
 		// Surface session_id/work_dir so the chat resume pointer is kept
@@ -4144,6 +4154,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			EnvRoot:       env.RootDir,
 			FailureReason: failureReason,
 			Usage:         usageEntries,
+			UsageEvents:   result.UsageEvents,
 		}, nil
 	case "idle_watchdog":
 		// The idle watchdog force-stopped the run because the backend
@@ -4163,6 +4174,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			EnvRoot:       env.RootDir,
 			FailureReason: "idle_watchdog",
 			Usage:         usageEntries,
+			UsageEvents:   result.UsageEvents,
 		}, nil
 	case "cancelled":
 		// Server cancelled the task (e.g. issue reassignment, user cancel).
@@ -4171,12 +4183,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// status string for the "agent finished" log line so operators can
 		// distinguish "task cancelled by server" from a real timeout.
 		return TaskResult{
-			Status:    "cancelled",
-			Comment:   "task cancelled by server",
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
-			Usage:     usageEntries,
+			Status:      "cancelled",
+			Comment:     "task cancelled by server",
+			SessionID:   result.SessionID,
+			WorkDir:     env.WorkDir,
+			EnvRoot:     env.RootDir,
+			Usage:       usageEntries,
+			UsageEvents: result.UsageEvents,
 		}, nil
 	default:
 		errMsg := result.Error
@@ -4220,6 +4233,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			WorkDir:       env.WorkDir,
 			EnvRoot:       env.RootDir,
 			Usage:         usageEntries,
+			UsageEvents:   result.UsageEvents,
 			FailureReason: failureReason,
 		}, nil
 	}

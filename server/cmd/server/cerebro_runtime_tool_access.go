@@ -57,10 +57,6 @@ func (a *runtimeToolAccessAdapter) ListEffectiveTools(ctx context.Context, q han
 				DecidedBy: row.Policy.DecidedBy,
 				CappedBy:  row.Policy.CappedBy,
 			},
-			RuntimeGrant: handler.RuntimeToolGrantStateView{
-				Effective: row.RuntimeGrant.Effective,
-				Reason:    row.RuntimeGrant.Reason,
-			},
 			Protocol: handler.RuntimeToolProtocolStateView{
 				Effective:          row.Protocol.Effective,
 				RequiredProtocols:  row.Protocol.RequiredProtocols,

@@ -43,12 +43,18 @@ vi.mock("../../common/actor-issues-panel", () => ({
 // (CerebroAgentContextTab), which needs an auth store the harness doesn't set
 // up. Stub just that surface while keeping the real AgentTabSections layout —
 // the component actually under test here — intact.
+const contextTabProps = vi.hoisted(() => ({
+  current: null as { runtimes?: AgentRuntime[] } | null,
+}));
 vi.mock("@multica/cerebro-agent-context/views", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("@multica/cerebro-agent-context/views")>();
   return {
     ...actual,
-    CerebroAgentContextTab: () => <div>cerebro-agent-context-tab</div>,
+    CerebroAgentContextTab: (props: { runtimes?: AgentRuntime[] }) => {
+      contextTabProps.current = props;
+      return <div>cerebro-agent-context-tab</div>;
+    },
   };
 });
 
@@ -139,6 +145,7 @@ function renderPane(runtimes: AgentRuntime[]) {
 
 beforeEach(() => {
   larkListingRef.current = { installations: [], configured: false };
+  contextTabProps.current = null;
 });
 
 // CEREBRO-PATCH(agent-office-tab): FIR-1775 — MCP and Integrations now live in
@@ -180,6 +187,18 @@ describe("AgentOverviewPane MCP tab visibility", () => {
     renderPane([]);
     expandAdvanced();
     expect(screen.getByRole("button", { name: /^MCP$/i })).toBeInTheDocument();
+  });
+});
+
+// FIR-3212 — the Instructions surface hosts the Engine swap panel, which can
+// only offer candidates if the pane hands its loaded runtimes down. Dropping
+// the prop leaves the swap select permanently empty with no error, so assert
+// the wiring rather than the rendered output of the stubbed child.
+describe("AgentOverviewPane context tab wiring", () => {
+  it("passes the loaded runtimes to the context tab so Engine swap has candidates", () => {
+    const runtimes = [makeRuntime("claude")];
+    renderPane(runtimes);
+    expect(contextTabProps.current?.runtimes).toEqual(runtimes);
   });
 });
 

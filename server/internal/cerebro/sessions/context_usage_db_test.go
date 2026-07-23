@@ -279,6 +279,102 @@ func TestContextUsage_PrefersFootprintOverCumulative(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(model-usage-context-consumer-test): FIR-3337 the session bar
+// must read the canonical call ledger even when no legacy usage row exists.
+func TestContextUsage_ReadsCanonicalModelUsageEvent(t *testing.T) {
+	if sessTestPool == nil {
+		t.Skip("no test DB")
+	}
+	issueID, workspaceID := seedIssue(t)
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
+	rootID := seedRootComment(t, issueID, workspaceID)
+	taskID := seedTaskWithUsage(t, issueID, workspaceID, rootID, "gpt-5.6-sol", 999_000, 0)
+
+	ctx := context.Background()
+	if _, err := sessTestPool.Exec(ctx, `DELETE FROM task_usage WHERE task_id = $1::uuid`, taskID); err != nil {
+		t.Fatalf("delete legacy usage: %v", err)
+	}
+	if _, err := sessTestPool.Exec(ctx, `
+		INSERT INTO model_usage_event (
+			event_id, task_id, workspace_id, issue_id, agent_id, runtime_id,
+			session_root_comment_id, sequence, observed_at, provider, model,
+			input_tokens, output_tokens, reasoning_tokens, cache_read_tokens,
+			context_tokens, context_window_tokens, source, completeness, counter_semantics)
+		SELECT 'call-1', t.id, i.workspace_id, t.issue_id, t.agent_id, t.runtime_id,
+		       $2::uuid, 1, now(), 'openai', 'gpt-5.6-sol',
+		       20000, 500, 100, 80000, 100000, 1050000,
+		       'transcript_fallback', 'complete', 'delta'
+		FROM agent_task_queue t JOIN issue i ON i.id = t.issue_id
+		WHERE t.id = $1::uuid`, taskID, rootID); err != nil {
+		t.Fatalf("insert canonical usage event: %v", err)
+	}
+
+	var resp contextUsageResponse
+	if err := json.Unmarshal(callContextUsage(h, issueID, workspaceID).Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !resp.HasData {
+		t.Fatal("has_data = false, want canonical event to drive the context bar")
+	}
+	if resp.ContextTokens != 100_000 || resp.MaxContextTokens != 1_050_000 || resp.UsedPercent != 9 {
+		t.Fatalf("context = %d/%d (%d%%), want 100000/1050000 (9%%)", resp.ContextTokens, resp.MaxContextTokens, resp.UsedPercent)
+	}
+	if resp.Model != "gpt-5.6-sol" || resp.CacheSharePercent != 80 || resp.Approximate {
+		t.Fatalf("canonical context attribution = %+v", resp)
+	}
+}
+
+// CEREBRO-PATCH(model-usage-session-consumers): FIR-3337 must not reuse
+// the last pre-compaction footprint when compaction is the task's final event.
+func TestContextUsage_FinalCompactionClearsStaleFootprint(t *testing.T) {
+	if sessTestPool == nil {
+		t.Skip("no test DB")
+	}
+	issueID, workspaceID := seedIssue(t)
+	h := NewHandler(sessTestPool, db.New(sessTestPool), nil, nil)
+	rootID := seedRootComment(t, issueID, workspaceID)
+	taskID := seedTaskWithUsage(t, issueID, workspaceID, rootID, "gpt-5.6-sol", 999_000, 0)
+
+	if _, err := sessTestPool.Exec(context.Background(), `DELETE FROM task_usage WHERE task_id = $1::uuid`, taskID); err != nil {
+		t.Fatalf("delete legacy usage: %v", err)
+	}
+	seedCanonicalModelUsageEvent(t, taskID, rootID, "call-before-compaction", "gpt-5.6-sol", 1,
+		20_000, 500, 80_000, 100_000, 1_050_000, "", 10)
+	seedCanonicalModelUsageEvent(t, taskID, rootID, "final-compaction", "gpt-5.6-sol", 2,
+		0, 0, 0, 100_000, 1_050_000, "provider_explicit", 0)
+
+	var resp contextUsageResponse
+	if err := json.Unmarshal(callContextUsage(h, issueID, workspaceID).Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.ContextTokens != 0 {
+		t.Fatalf("context_tokens = %d, want 0 after final compaction instead of stale pre-compaction footprint", resp.ContextTokens)
+	}
+	if resp.Approximate {
+		t.Fatal("approximate = true, want an explicit post-compaction reset")
+	}
+}
+
+func seedCanonicalModelUsageEvent(t *testing.T, taskID, sessionRootID, eventID, model string, sequence, input, output, cacheRead, contextTokens, contextWindow int64, compactionKind string, observedSecondsAgo int64) {
+	t.Helper()
+	if _, err := sessTestPool.Exec(context.Background(), `
+		INSERT INTO model_usage_event (
+			event_id, task_id, workspace_id, issue_id, agent_id, runtime_id,
+			session_root_comment_id, sequence, observed_at, provider, model,
+			input_tokens, output_tokens, cache_read_tokens, context_tokens,
+			context_window_tokens, compaction_kind, source, completeness, counter_semantics)
+		SELECT $3, t.id, i.workspace_id, t.issue_id, t.agent_id, t.runtime_id,
+		       $2::uuid, $5, now() - ($12::bigint * interval '1 second'), 'openai', $4,
+		       $6, $7, $8, $9, $10, $11,
+		       'transcript_fallback', 'complete', 'delta'
+		FROM agent_task_queue t JOIN issue i ON i.id = t.issue_id
+		WHERE t.id = $1::uuid`,
+		taskID, sessionRootID, eventID, model, sequence, input, output, cacheRead,
+		contextTokens, contextWindow, compactionKind, observedSecondsAgo); err != nil {
+		t.Fatalf("insert canonical usage event %s: %v", eventID, err)
+	}
+}
+
 // TestContextUsage_ClampsOverWindowCumulative proves FIR-1931 Fix C: a heavy run
 // with NO last-turn footprint, whose cumulative cache_read alone is several times
 // the window, must report a token figure clamped to the window (never 6986k /

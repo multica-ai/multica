@@ -29,7 +29,10 @@ vi.mock("@multica/core/auth", () => ({
     selector({ user: { id: "member-1" } }),
 }));
 vi.mock("./analytics-dashboard", () => ({ AnalyticsDashboard: () => null }));
-vi.mock("./message-detail-sheet", () => ({ MessageDetailSheet: () => null }));
+vi.mock("./message-detail-sheet", () => ({
+  MessageDetailSheet: ({ message }: { message: { id: string } | null }) =>
+    message ? <div>Opened conversation {message.id}</div> : null,
+}));
 
 afterEach(cleanup);
 
@@ -62,6 +65,36 @@ describe("MessagesControlRoom", () => {
     expect(screen.getByText("Conversation flow")).toBeTruthy();
     expect(screen.getByText("All messages")).toBeTruthy();
     expect(screen.getByText("Please verify the Dashboard")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Open conversation with Lone" }));
+    expect(screen.getByText("Opened conversation message-1")).toBeTruthy();
+  });
+
+  it("paginates the messages table", () => {
+    const original = queryResult.data.messages;
+    queryResult.data.messages = Array.from({ length: 12 }, (_, index) => ({
+      ...original[0]!,
+      id: `message-${index + 1}`,
+      content: `Message ${index + 1}`,
+    }));
+
+    render(
+      <MessagesControlRoom
+        workspaceId="workspace-1"
+        workspaceSlug="firtal"
+        data={overview}
+        isLoading={false}
+        filters={[]}
+        onFiltersChange={vi.fn()}
+        onNewVisual={vi.fn()}
+        onSelectActor={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Message 10")).toBeTruthy();
+    expect(screen.queryByText("Message 11")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Next messages page" }));
+    expect(screen.getByText("Message 11")).toBeTruthy();
+    queryResult.data.messages = original;
   });
 
   it("filters every Messages panel when a sender is selected", () => {
@@ -80,7 +113,7 @@ describe("MessagesControlRoom", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Filter Dashboard by sender Jesper" }));
-    expect(onSelectActor).toHaveBeenCalledWith("member-1", "Jesper");
+    expect(onSelectActor).toHaveBeenCalledWith("member-1", "Jesper", "member");
   });
 
   it("treats nullable message aggregates as empty lists", () => {
@@ -109,4 +142,5 @@ describe("MessagesControlRoom", () => {
     expect(screen.getByText("No message activity in the selected range.")).toBeTruthy();
     expect(screen.getByText("No message flows in the selected range.")).toBeTruthy();
   });
+
 });

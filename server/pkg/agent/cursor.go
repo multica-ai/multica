@@ -115,6 +115,7 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// otherwise we fall back to stepUsage.
 		stepUsage := make(map[string]TokenUsage)
 		resultUsage := make(map[string]TokenUsage)
+		var usageEvents []ModelUsageEvent // CEREBRO-PATCH(agent-cursor-call-usage-events): FIR-3337 retain native per-step model usage.
 		hasResultUsage := false
 		// CEREBRO-PATCH(agent-cursor-context-footprint): FIR-1870 last-turn footprint for the context-window indicator; the result event's usage is the cumulative session total and over-counts the cached prefix.
 		var lastTurn lastTurnFootprint
@@ -210,13 +211,15 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 					if model == "" {
 						model = "cursor"
 					}
+					usageEvents = appendCursorCallUsageEvent(usageEvents, model, sessionID, part, time.Now())
 					u := stepUsage[model]
 					u.InputTokens += int64(part.Tokens.Input)
 					u.OutputTokens += int64(part.Tokens.Output)
 					u.CacheReadTokens += int64(part.Tokens.Cache.Read)
+					u.CacheWriteTokens += int64(part.Tokens.Cache.Write) // CEREBRO-PATCH(agent-cursor-call-usage-events): retain native cache creation.
 					stepUsage[model] = u
 					// CEREBRO-PATCH(agent-cursor-context-footprint): FIR-1870 last-turn footprint; input excludes cache, so whole prompt = input + cache.read.
-					lastTurn.observe(model, int64(part.Tokens.Input)+int64(part.Tokens.Cache.Read), int64(part.Tokens.Cache.Read))
+					lastTurn.observe(model, int64(part.Tokens.Input)+int64(part.Tokens.Cache.Read)+int64(part.Tokens.Cache.Write), int64(part.Tokens.Cache.Read))
 				}
 			}
 		}
@@ -225,6 +228,10 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// to accumulated step_finish usage.
 		if !hasResultUsage {
 			resultUsage = stepUsage
+		} else {
+			// CEREBRO-PATCH(agent-cursor-call-usage-events): FIR-3337 reconcile
+			// streamed deltas to Cursor's authoritative final usage totals.
+			usageEvents = appendCursorResultUsageReconciliation(usageEvents, resultUsage, sessionID, time.Now())
 		}
 		lastTurn.applyToMap(resultUsage) // CEREBRO-PATCH(agent-cursor-context-footprint): FIR-1870 overlay last-turn footprint onto the cumulative session totals.
 
@@ -245,12 +252,13 @@ func (b *cursorBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		b.cfg.Logger.Info("cursor-agent finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     output.String(),
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  sessionID,
-			Usage:      resultUsage,
+			Status:      finalStatus,
+			Output:      output.String(),
+			Error:       finalError,
+			DurationMs:  duration.Milliseconds(),
+			SessionID:   sessionID,
+			Usage:       resultUsage,
+			UsageEvents: usageEvents,
 		}
 	}()
 
@@ -309,6 +317,7 @@ func (b *cursorBackend) accumulateResultUsage(usage map[string]TokenUsage, evt *
 	u.InputTokens += evt.Usage.InputTokens
 	u.OutputTokens += evt.Usage.OutputTokens
 	u.CacheReadTokens += evt.Usage.CacheReadInputTokens
+	u.CacheWriteTokens += evt.Usage.CacheWriteInputTokens // CEREBRO-PATCH(agent-cursor-call-usage-events): retain result cache creation.
 	usage[model] = u
 }
 
@@ -353,9 +362,10 @@ func (evt *cursorStreamEvent) readSessionID() string {
 }
 
 type cursorUsage struct {
-	InputTokens          int64 `json:"input_tokens"`
-	OutputTokens         int64 `json:"output_tokens"`
-	CacheReadInputTokens int64 `json:"cached_input_tokens"`
+	InputTokens           int64 `json:"input_tokens"`
+	OutputTokens          int64 `json:"output_tokens"`
+	CacheReadInputTokens  int64 `json:"cached_input_tokens"`
+	CacheWriteInputTokens int64 `json:"cache_creation_input_tokens"` // CEREBRO-PATCH(agent-cursor-call-usage-events): authoritative cache creation.
 }
 
 type cursorAssistantMessage struct {
@@ -381,7 +391,8 @@ type cursorStepFinishPart struct {
 		Input  int `json:"input"`
 		Output int `json:"output"`
 		Cache  struct {
-			Read int `json:"read"`
+			Read  int `json:"read"`
+			Write int `json:"write"` // CEREBRO-PATCH(agent-cursor-call-usage-events): native step cache creation.
 		} `json:"cache"`
 	} `json:"tokens"`
 	Cost float64 `json:"cost"`

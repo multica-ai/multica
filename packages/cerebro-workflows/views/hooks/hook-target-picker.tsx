@@ -5,9 +5,11 @@ import { Check, ChevronsUpDown, Search } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
+import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@multica/ui/components/ui/drawer";
+import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 
 export interface HookTargetOption { value: string; label: string; description?: string }
-export type HookDirectory = Partial<Record<"agent" | "member" | "model" | "issue" | "project" | "workflow" | "session" | "squad" | "skill" | "artifact", HookTargetOption[]>> & {
+export type HookDirectory = Partial<Record<"agent" | "member" | "model" | "issue" | "project" | "workflow" | "session" | "squad" | "skill" | "artifact" | "eval", HookTargetOption[]>> & {
   searchIssues?: (query: string) => Promise<HookTargetOption[]>;
 };
 
@@ -15,6 +17,7 @@ export function HookTargetPicker({ label, value, options, onChange, onSearch }: 
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [remoteOptions, setRemoteOptions] = useState<HookTargetOption[]>([]);
+  const isMobile = useIsMobile();
   const allOptions = remoteOptions.length > 0 ? remoteOptions : options;
   const selected = [...options, ...remoteOptions].find((option) => option.value === value);
   useEffect(() => {
@@ -28,12 +31,12 @@ export function HookTargetPicker({ label, value, options, onChange, onSearch }: 
     return onSearch ? allOptions : query ? allOptions.filter((option) => `${option.label} ${option.description ?? ""}`.toLowerCase().includes(query)) : allOptions;
   }, [allOptions, onSearch, search]);
 
-  return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setSearch(""); }}>
-    <PopoverTrigger render={<Button type="button" variant="outline" className="h-9 w-full justify-between font-normal" aria-label={label} />}>
+  const setPickerOpen = (next: boolean) => { setOpen(next); if (!next) setSearch(""); };
+  const trigger = <Button type="button" variant="outline" className="h-9 w-full justify-between font-normal" aria-label={label} onClick={isMobile ? () => setPickerOpen(true) : undefined}>
       <span className={selected ? "truncate" : "truncate text-muted-foreground"}>{selected?.label ?? `Select ${label.toLowerCase()}`}</span>
       <ChevronsUpDown className="size-3.5 text-muted-foreground" />
-    </PopoverTrigger>
-    <PopoverContent align="start" className="w-80 max-w-[calc(100vw-2rem)] gap-0 p-0">
+    </Button>;
+  const picker = <>
       <div className="flex items-center gap-2 border-b p-2">
         <Search className="size-3.5 text-muted-foreground" />
         <Input autoFocus aria-label={`Search ${label.toLowerCase()}`} value={search} onChange={(event) => setSearch(event.target.value)} className="h-7 border-0 shadow-none focus-visible:ring-0" />
@@ -45,6 +48,12 @@ export function HookTargetPicker({ label, value, options, onChange, onSearch }: 
         </button>)}
         {filtered.length === 0 && <p className="p-3 text-center text-sm text-muted-foreground">No matching options</p>}
       </div>
-    </PopoverContent>
+    </>;
+
+  if (isMobile) return <>{trigger}<Drawer open={open} onOpenChange={setPickerOpen}><DrawerContent className="w-full"><DrawerHeader><DrawerTitle>Select {label.toLowerCase()}</DrawerTitle></DrawerHeader><div className="min-h-0 overflow-y-auto pb-4">{picker}</div></DrawerContent></Drawer></>;
+
+  return <Popover open={open} onOpenChange={setPickerOpen}>
+    <PopoverTrigger render={trigger} />
+    <PopoverContent align="start" className="w-80 max-w-[calc(100vw-2rem)] gap-0 p-0">{picker}</PopoverContent>
   </Popover>;
 }

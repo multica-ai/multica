@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -60,6 +61,40 @@ func TestCerebroEffectiveToolsForBriefMapsAndFilters(t *testing.T) {
 	}
 	if e := byName["customer-service / draft_reply"]; e.Verdict != "ask" {
 		t.Errorf("expected ask verdict carried through, got %q", e.Verdict)
+	}
+}
+
+func TestCerebroEffectiveToolsForClaimLocksInitialPolicyAndSessionIntersection(t *testing.T) {
+	rows := []RuntimeToolEffectiveAccessView{
+		exposedToolView("Read", "runtime", "", "Read files", "allow", true),
+		exposedToolView("Bash", "runtime", "", "Run commands", "deny", false),
+		exposedToolView("Write", "runtime", "", "Write files", "allow", true),
+	}
+	h := &Handler{runtimeToolAccess: fakeRuntimeToolAccess{rows: rows}}
+	agent := &TaskAgentData{ID: "11111111-1111-1111-1111-111111111111"}
+
+	tools, mandate, err := h.cerebroEffectiveToolsForClaim(context.Background(), db.AgentRuntime{}, agent, "agent", "")
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim: unexpected error %v", err)
+	}
+	tools, mandate = filterClaimToolsForSessionMode(tools, mandate, []string{"Read", "Bash"})
+	if len(mandate) != 1 || mandate[0] != "Read" {
+		t.Fatalf("initial task mandate = %v, want exact policy/runtime/session intersection [Read]", mandate)
+	}
+
+	// Opening the later policy changes a fresh resolution, but cannot expand the
+	// already-issued per-run snapshot. Bash therefore remains outside this run.
+	rows[1].Policy.Effective = "allow"
+	rows[1].ExposureEffective.Effective = true
+	_, freshlyResolved, freshErr := h.cerebroEffectiveToolsForClaim(context.Background(), db.AgentRuntime{}, agent, "agent", "")
+	if freshErr != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim (fresh): unexpected error %v", freshErr)
+	}
+	if !containsString(freshlyResolved, "Bash") {
+		t.Fatalf("fresh policy resolution = %v, want Bash after opening the rule", freshlyResolved)
+	}
+	if containsString(mandate, "Bash") {
+		t.Fatalf("issued task mandate expanded after policy change: %v", mandate)
 	}
 }
 
@@ -162,5 +197,47 @@ func TestCerebroEffectiveToolsForBriefAddsInstructionsOnlyForExposedConnections(
 	got := h.cerebroEffectiveToolsForBrief(context.Background(), db.AgentRuntime{}, &TaskAgentData{ID: agentID}, "agent", "")
 	if len(got) != 1 || got[0].Instructions != "Search before answering." || got[0].Connection != "company-brain" {
 		t.Fatalf("unexpected tools: %#v", got)
+	}
+}
+
+// TestCerebroEffectiveToolsForClaimDistinguishesResolveErrorFromEmpty is the
+// FIR-3403 TRIN 1b regression guard. The task mandate is a fail-closed allowlist:
+// an empty mandate denies EVERY tool (including built-in Bash/Read/Edit), so
+// "could not resolve" must never collapse into the same nil result as "resolved
+// to zero tools". A resolver error must surface as an error (the claim path fails
+// the claim), while a genuine zero-tool resolution must stay a non-error empty
+// result (an empty mandate may legitimately be issued).
+func TestCerebroEffectiveToolsForClaimDistinguishesResolveErrorFromEmpty(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+
+	// 1) Resolver present but ListEffectiveTools fails → error, no silent lockout.
+	hErr := &Handler{runtimeToolAccess: fakeRuntimeToolAccess{err: errors.New("db unreachable")}}
+	tools, mandate, err := hErr.cerebroEffectiveToolsForClaim(context.Background(), db.AgentRuntime{}, &TaskAgentData{ID: agentID}, "agent", "")
+	if err == nil {
+		t.Fatalf("resolve error must return a non-nil error, got tools=%v mandate=%v", tools, mandate)
+	}
+	if tools != nil || mandate != nil {
+		t.Fatalf("resolve error must return nil tools/mandate, got tools=%v mandate=%v", tools, mandate)
+	}
+
+	// 2) Malformed agent id (resolver would be consulted) → error.
+	if _, _, badErr := hErr.cerebroEffectiveToolsForClaim(context.Background(), db.AgentRuntime{}, &TaskAgentData{ID: "not-a-uuid"}, "agent", ""); badErr == nil {
+		t.Fatalf("a malformed agent id must return an error, not a silent empty mandate")
+	}
+
+	// 3) Resolver returns zero rows (no error) → legitimate empty result, no error.
+	hEmpty := &Handler{runtimeToolAccess: fakeRuntimeToolAccess{rows: nil}}
+	_, emptyMandate, emptyErr := hEmpty.cerebroEffectiveToolsForClaim(context.Background(), db.AgentRuntime{}, &TaskAgentData{ID: agentID}, "agent", "")
+	if emptyErr != nil {
+		t.Fatalf("a genuine zero-tool resolution must not be an error, got %v", emptyErr)
+	}
+	if len(emptyMandate) != 0 {
+		t.Fatalf("zero-tool resolution must yield an empty mandate, got %v", emptyMandate)
+	}
+
+	// 4) Resolver not wired (feature unavailable) → non-error, unchanged behaviour.
+	hNil := &Handler{}
+	if _, _, nilErr := hNil.cerebroEffectiveToolsForClaim(context.Background(), db.AgentRuntime{}, &TaskAgentData{ID: agentID}, "agent", ""); nilErr != nil {
+		t.Fatalf("an unwired resolver must not fail the claim, got %v", nilErr)
 	}
 }

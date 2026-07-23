@@ -14,7 +14,7 @@
 // revealed gutter field closes it — there is no pull-to-close gesture. On
 // desktop the strip drag latches on release past the threshold, and the same
 // click-to-close applies. The permanent view stays available as the
-// "Line authors" toggle in the ⋯ menu.
+// "Line history" toggle in the ⋯ menu.
 
 import * as React from "react";
 

@@ -62,6 +62,61 @@ type StrategyItemInput struct {
 	State        string `json:"state,omitempty"`
 }
 
+type VisionPlanSectionInput struct {
+	Name        string `json:"name"`
+	SectionType string `json:"section_type"`
+	Position    int32  `json:"position"`
+}
+
+type VisionPlanItemInput struct {
+	SectionID   string `json:"section_id"`
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+	PartLabel   string `json:"part_label,omitempty"`
+	OwnerType   string `json:"owner_type,omitempty"`
+	OwnerID     string `json:"owner_id,omitempty"`
+	Position    int32  `json:"position"`
+	State       string `json:"state,omitempty"`
+}
+
+type VisionPlanGoalConnection struct {
+	ConnectionID string `json:"connection_id"`
+	GoalID       string `json:"goal_id"`
+}
+
+type VisionPlanItemResponse struct {
+	ID              string                     `json:"id"`
+	WorkspaceID     string                     `json:"workspace_id"`
+	SectionID       string                     `json:"section_id"`
+	Title           string                     `json:"title"`
+	Description     string                     `json:"description"`
+	PartLabel       string                     `json:"part_label,omitempty"`
+	OwnerType       string                     `json:"owner_type,omitempty"`
+	OwnerID         string                     `json:"owner_id,omitempty"`
+	OwnerName       string                     `json:"owner_name,omitempty"`
+	Position        int32                      `json:"position"`
+	State           string                     `json:"state"`
+	GoalConnections []VisionPlanGoalConnection `json:"goal_connections"`
+	CreatedAt       string                     `json:"created_at"`
+	UpdatedAt       string                     `json:"updated_at"`
+}
+
+type VisionPlanSectionResponse struct {
+	ID          string                   `json:"id"`
+	WorkspaceID string                   `json:"workspace_id"`
+	Key         string                   `json:"key"`
+	Name        string                   `json:"name"`
+	SectionType string                   `json:"section_type"`
+	Position    int32                    `json:"position"`
+	Items       []VisionPlanItemResponse `json:"items"`
+	CreatedAt   string                   `json:"created_at"`
+	UpdatedAt   string                   `json:"updated_at"`
+}
+
+type VisionPlanResponse struct {
+	Sections []VisionPlanSectionResponse `json:"sections"`
+}
+
 type RockInput struct {
 	Title          string   `json:"title,omitempty"`
 	Description    string   `json:"description,omitempty"`
@@ -204,6 +259,69 @@ type ObjectConnectionInput struct {
 	TargetID         string `json:"target_id"`
 	RelationshipType string `json:"relationship_type,omitempty"`
 	Provenance       string `json:"provenance,omitempty"`
+}
+
+type MeetingAgendaSectionInput struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Position int32  `json:"position"`
+	Binding  string `json:"binding"`
+}
+
+type MeetingAgendaSectionResponse struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Position int32  `json:"position"`
+	Binding  string `json:"binding"`
+}
+
+type MeetingNoteTypeResponse struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	CadenceUnit   string `json:"cadence_unit"`
+	CadenceCount  int32  `json:"cadence_count"`
+	Enabled       bool   `json:"enabled"`
+	CurrentNoteID string `json:"current_note_id,omitempty"`
+}
+
+type MeetingConfigInput struct {
+	NoteTypeID   string                      `json:"note_type_id,omitempty"`
+	CadenceUnit  string                      `json:"cadence_unit"`
+	CadenceCount int32                       `json:"cadence_count"`
+	Agenda       []MeetingAgendaSectionInput `json:"agenda"`
+}
+
+type MeetingConfigResponse struct {
+	WorkspaceID        string                         `json:"workspace_id"`
+	NoteTypeID         string                         `json:"note_type_id,omitempty"`
+	NoteTypeName       string                         `json:"note_type_name,omitempty"`
+	CurrentNoteID      string                         `json:"current_note_id,omitempty"`
+	CadenceUnit        string                         `json:"cadence_unit"`
+	CadenceCount       int32                          `json:"cadence_count"`
+	Agenda             []MeetingAgendaSectionResponse `json:"agenda"`
+	AvailableNoteTypes []MeetingNoteTypeResponse      `json:"available_note_types"`
+}
+
+type OrgChartSeatInput struct {
+	ParentID         string   `json:"parent_id,omitempty"`
+	Name             string   `json:"name"`
+	Responsibilities []string `json:"responsibilities"`
+	OwnerType        string   `json:"owner_type,omitempty"`
+	OwnerID          string   `json:"owner_id,omitempty"`
+	Position         int32    `json:"position"`
+}
+
+type OrgChartSeatResponse struct {
+	ID               string   `json:"id"`
+	WorkspaceID      string   `json:"workspace_id"`
+	ParentID         string   `json:"parent_id,omitempty"`
+	Name             string   `json:"name"`
+	Responsibilities []string `json:"responsibilities"`
+	OwnerType        string   `json:"owner_type,omitempty"`
+	OwnerID          string   `json:"owner_id,omitempty"`
+	OwnerName        string   `json:"owner_name,omitempty"`
+	Vacant           bool     `json:"vacant"`
+	Position         int32    `json:"position"`
 }
 
 type ObjectConnectionResponse struct {

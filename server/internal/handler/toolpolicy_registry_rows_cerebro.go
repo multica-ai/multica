@@ -4,27 +4,22 @@ package handler
 // firtal_registry per-data-source projection to the unified tool-policy table.
 //
 // The tool-policy table handler (internal/cerebro/toolpolicy) is pure: it knows
-// nothing about the Firtal Data Registry proxy or about agent_tool_grant. This
+// nothing about the Firtal Data Registry proxy. This
 // file lives in package handler — which already owns the FDR data-source lister
 // and the DB pool — and is injected into the tool-policy handler as its
-// RegistryRows hook (wired in cmd/server/router.go). It reads the agent's
-// firtal_registry grant (agent_tool_grant.config_json) and the workspace's data
-// source catalog, maps both onto the toolpolicy projection types, and returns
+// RegistryRows hook (wired in cmd/server/router.go). It reads the workspace's
+// data source catalog, maps it onto the toolpolicy projection types, and returns
 // ok=false whenever the fold-in does not apply, so the table is left untouched.
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
-
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
 // toolPolicyRegistryRows implements cerebrotoolpolicy.RegistryRowsFunc. It returns
-// the data-source catalog + the agent's grant for a (workspace, agent), or
+// the data-source catalog for a workspace, or
 // ok=false when there is nothing to project (registry not configured, no data
 // sources). Errors loading the grant or the catalog are returned so the caller
 // can log them, but never block the rest of the table.
@@ -43,23 +38,11 @@ func (h *Handler) ToolPolicyRegistryRows(ctx context.Context, workspaceID, agent
 		return cerebrotoolpolicy.RegistryProjection{}, false, nil
 	}
 
-	// FIR-2269: at a non-agent scope (workspace, runtime, group, user, system view)
-	// there is no per-agent grant to project — return the catalog alone so the
-	// caller folds in authorable rows from the authored chain. The per-agent grant
-	// (agent_tool_grant) is only meaningful, and only loaded, for an agent.
-	var grant cerebrotoolpolicy.RegistryGrant
-	if agentID.Valid {
-		grant, err = h.loadFirtalRegistryGrant(ctx, agentID)
-		if err != nil {
-			return cerebrotoolpolicy.RegistryProjection{}, false, err
-		}
-	}
-
 	rows := make([]cerebrotoolpolicy.RegistryDataSource, 0, len(dataSources))
 	for _, ds := range dataSources {
 		rows = append(rows, cerebrotoolpolicy.RegistryDataSource{ID: ds.ID, Name: ds.Name})
 	}
-	return cerebrotoolpolicy.RegistryProjection{DataSources: rows, Grant: grant}, true, nil
+	return cerebrotoolpolicy.RegistryProjection{DataSources: rows}, true, nil
 }
 
 // listFirtalRegistryDataSourcesForWorkspace returns the workspace's FDR data
@@ -85,39 +68,4 @@ func (h *Handler) listFirtalRegistryDataSourcesForWorkspace(ctx context.Context,
 	}
 	setCachedFirtalRegistryDataSources(wsID, items)
 	return items, nil
-}
-
-// loadFirtalRegistryGrant reads the agent's enabled firtal_registry grant
-// (agent_tool_grant.config_json) and reduces it to the projection's RegistryGrant.
-// A missing or disabled grant yields a zero grant (deny-by-default: no source
-// allowed), which is correct — the projection then marks every source Deny.
-func (h *Handler) loadFirtalRegistryGrant(ctx context.Context, agentID pgtype.UUID) (cerebrotoolpolicy.RegistryGrant, error) {
-	var raw []byte
-	err := h.DB.QueryRow(ctx,
-		`SELECT config_json FROM agent_tool_grant WHERE agent_id = $1 AND tool_name = $2 AND enabled = true`,
-		agentID, cerebrotoolpolicy.RegistryToolKey,
-	).Scan(&raw)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return cerebrotoolpolicy.RegistryGrant{}, nil
-		}
-		return cerebrotoolpolicy.RegistryGrant{}, err
-	}
-	if len(raw) == 0 {
-		return cerebrotoolpolicy.RegistryGrant{}, nil
-	}
-
-	var cfg struct {
-		AllowedDataSources []string `json:"allowed_data_sources"`
-		AllowedAll         bool     `json:"allowed_data_sources_all"`
-	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		// A malformed config is treated as no grant (deny-by-default) rather than a
-		// hard failure, matching the gateway's defensive parse.
-		return cerebrotoolpolicy.RegistryGrant{}, nil
-	}
-	return cerebrotoolpolicy.RegistryGrant{
-		AllowedAll:         cfg.AllowedAll,
-		AllowedDataSources: cfg.AllowedDataSources,
-	}, nil
 }

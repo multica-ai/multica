@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { MobileRowActions, roundRowAction } from "./cerebro-inbox-row-actions";
 
 describe("roundRowAction", () => {
-  it("turns the existing row menu action into a direct Remove from <Round> action", () => {
+  it("offers Change Round + Remove when the issue is already in a round", () => {
     const result = roundRowAction([
       {
         round: { id: "round-1", name: "Weekly commercial review" },
@@ -14,8 +14,26 @@ describe("roundRowAction", () => {
     ] as never, "issue-1");
 
     expect(result).toEqual({
-      label: "Remove from Weekly commercial review",
+      inRound: true,
+      label: "Change Round",
+      removeLabel: "Remove from Weekly commercial review",
       roundId: "round-1",
+    });
+  });
+
+  it("offers a single Add to Round action when the issue is not in a round", () => {
+    const result = roundRowAction([
+      {
+        round: { id: "round-1", name: "Weekly commercial review" },
+        members: [{ issue_id: "other-issue" }],
+      },
+    ] as never, "issue-1");
+
+    expect(result).toEqual({
+      inRound: false,
+      label: "Add to Round",
+      removeLabel: null,
+      roundId: null,
     });
   });
 });

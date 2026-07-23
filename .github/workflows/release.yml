@@ -1,6 +1,10 @@
 name: Release
 
 on:
+  # Friday release creates tags with GITHUB_TOKEN. GitHub deliberately does not
+  # fan those tag pushes into another workflow, so Friday release dispatches
+  # this workflow explicitly after pushing the tag.
+  workflow_dispatch:
   push:
     tags:
       # GitHub Actions uses glob patterns here, not regex. Match versioned

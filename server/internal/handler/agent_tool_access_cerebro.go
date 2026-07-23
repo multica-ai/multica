@@ -6,7 +6,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -32,27 +31,6 @@ type toolAccessResponse struct {
 	User      string            `json:"user"`
 	UserID    string            `json:"user_id"`
 	Tools     []toolAccessEntry `json:"tools"`
-}
-
-// explainToolAccess mirrors the default-deny rule in
-// ResolveCerebroAgentToolAccess and returns (callable, human reason).
-func explainToolAccess(row cerebrodb.ExplainCerebroAgentToolAccessRow) (bool, string) {
-	if !row.RuntimeEnabled {
-		return false, "tool disabled on the runtime"
-	}
-	if row.HasOverride && !row.OverrideEnabled {
-		return false, "disabled for this agent (override)"
-	}
-	if row.UserIsAdmin {
-		return true, "workspace owner/admin — access check bypassed"
-	}
-	if row.UserGrant {
-		return true, "granted directly to the user"
-	}
-	if row.GroupGrants != "" {
-		return true, "granted via group: " + row.GroupGrants
-	}
-	return false, "no grant: not admin, no direct grant, no group grant"
 }
 
 // ExplainAgentToolAccess handles GET /api/agents/{id}/tool-access?user=<id|email>.
@@ -84,14 +62,19 @@ func (h *Handler) ExplainAgentToolAccess(w http.ResponseWriter, r *http.Request)
 		targetUUID = user.ID
 	}
 
-	if h.CerebroQueries == nil {
-		writeError(w, http.StatusInternalServerError, "cerebro queries unavailable")
+	if h.runtimeToolAccess == nil || !agent.RuntimeID.Valid {
+		writeError(w, http.StatusServiceUnavailable, "runtime tool access preview unavailable")
 		return
 	}
-
-	rows, err := h.CerebroQueries.ExplainCerebroAgentToolAccess(r.Context(), cerebrodb.ExplainCerebroAgentToolAccessParams{
-		ID:     agent.ID,
-		UserID: targetUUID,
+	rt, err := h.Queries.GetAgentRuntime(r.Context(), agent.RuntimeID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
+	rows, err := h.runtimeToolAccess.ListEffectiveTools(r.Context(), RuntimeToolAccessQuery{
+		WorkspaceID: agent.WorkspaceID, RuntimeID: rt.ID, RuntimeMode: rt.RuntimeMode,
+		RuntimeProvider: rt.Provider, RuntimeCapabilities: marshalRuntimeCapabilities(normalizedRuntimeCapabilities(rt.Provider, rt.Capabilities, rt.ToolsConfig)),
+		AgentID: agent.ID, UserID: targetUUID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "resolve tool access: "+err.Error())
@@ -100,22 +83,15 @@ func (h *Handler) ExplainAgentToolAccess(w http.ResponseWriter, r *http.Request)
 
 	entries := make([]toolAccessEntry, 0, len(rows))
 	for _, row := range rows {
-		callable, reason := explainToolAccess(row)
 		e := toolAccessEntry{
-			Tool:            row.ToolName,
-			Source:          row.Source,
-			Callable:        callable,
-			Reason:          reason,
-			RuntimeEnabled:  row.RuntimeEnabled,
-			HasOverride:     row.HasOverride,
-			OverrideEnabled: row.OverrideEnabled,
-			UserIsAdmin:     row.UserIsAdmin,
-			UserGrant:       row.UserGrant,
-			GroupGrants:     row.GroupGrants,
+			Tool: row.Descriptor.ToolKey, Source: row.Descriptor.Source,
+			Callable: row.ExposureEffective.Effective, Reason: row.ExposureEffective.Reason,
+			RuntimeEnabled:  row.Inventory.Enabled,
+			HasOverride:     row.Layers["decided_by"] == "agent",
+			OverrideEnabled: row.Layers["decided_by"] == "agent" && row.Policy.Effective != "deny",
+			UserGrant:       row.Layers["decided_by"] == "user",
 		}
-		if row.McpServerName.Valid {
-			e.McpServer = row.McpServerName.String
-		}
+		e.McpServer = row.Inventory.MCPServerName
 		entries = append(entries, e)
 	}
 

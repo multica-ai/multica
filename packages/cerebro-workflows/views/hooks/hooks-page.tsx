@@ -6,9 +6,9 @@ import { PageHeader } from "@multica/views/layout/page-header";
 import type { HookMode, WorkflowHook } from "../../core/hook-types";
 import { describeHook } from "../../core/hook-ux";
 
-export function HooksPage({ hooks, onOpenHook, onOpenHistory }: { hooks: WorkflowHook[]; onOpenHook: (id?: string) => void; onOpenHistory?: () => void }) {
+export function HooksPage({ hooks, onOpenHook }: { hooks: WorkflowHook[]; onOpenHook: (id?: string) => void }) {
   return <div className="flex h-full flex-col bg-background">
-    <PageHeader className="flex-wrap justify-between gap-3 px-4 sm:px-5"><div className="min-w-0"><h1 className="text-sm font-semibold">Hooks</h1><p className="truncate text-[11px] text-muted-foreground">Workflows · trigger, filter, decide, and act</p></div><div className="ml-auto flex gap-2">{onOpenHistory && <Button variant="outline" size="sm" onClick={onOpenHistory}>Run history</Button>}<Button size="sm" onClick={() => onOpenHook()}><Plus className="size-4" />New hook</Button></div></PageHeader>
+    <PageHeader className="justify-between gap-2 px-3 sm:px-5"><div className="min-w-0 flex-1"><h1 className="text-sm font-semibold">Hooks</h1><p className="truncate text-[11px] text-muted-foreground">Workflows · trigger, filter, decide, and act</p></div><Button className="shrink-0" size="sm" onClick={() => onOpenHook()}><Plus className="size-4" />New hook</Button></PageHeader>
     <div className="overflow-y-auto p-4 sm:p-6"><div className="grid gap-2">{hooks.map((hook) => <button type="button" key={hook.id ?? hook.name} className="grid w-full gap-3 rounded-lg border p-4 text-left transition hover:bg-muted/40 md:grid-cols-[minmax(12rem,1.2fr)_minmax(16rem,1fr)_minmax(8rem,auto)_auto] md:items-center" onClick={() => onOpenHook(hook.id)}>
       <span className="min-w-0"><strong className="block truncate">{hook.name || "Untitled hook"}</strong><span className="block truncate text-xs text-muted-foreground">{hook.description || "No description"}</span></span>
       <span className="text-xs">{describeHook(hook)}</span>

@@ -44,41 +44,48 @@ vi.mock("sonner", () => ({
 import { NotificationsTab } from "./notifications-tab";
 
 describe("NotificationsTab", () => {
-  it("shows a comments setting with Inbox enabled by default", () => {
+  it("shows separate New comment choices for assigned and followed issues", () => {
     render(<NotificationsTab />);
 
     expect(
-      screen.getByRole("heading", { name: "Comments" }),
-    ).toBeInTheDocument();
+      screen.getByRole("switch", {
+        name: "Inbox: On issues you're assigned to: New comment",
+      }),
+    ).toBeChecked();
     expect(
-      screen.getByText("New comments on issues you follow."),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("switch", { name: "Send comments to Inbox" }),
+      screen.getByRole("switch", {
+        name: "Inbox: On issues you follow: New comment",
+      }),
     ).toBeChecked();
   });
 
-  it("stores the comments setting under the Inbox notification route", async () => {
+  it("stores the assigned comment setting under its split routing key", async () => {
     const user = userEvent.setup();
     mockUpdateMyPreferences.mockResolvedValue({
       id: "user-1",
-      preferences: { notifications: { inbox: { new_comment: "off" } } },
+      preferences: {
+        notifications: { inbox: { "new_comment.assignee": "off" } },
+      },
     });
 
     render(<NotificationsTab />);
 
     await user.click(
-      screen.getByRole("switch", { name: "Send comments to Inbox" }),
+      screen.getByRole("switch", {
+        name: "Inbox: On issues you're assigned to: New comment",
+      }),
     );
 
     expect(mockUpdateMyPreferences).toHaveBeenCalledWith({
       notifications: {
-        inbox: { new_comment: "off" },
+        inbox: { "new_comment.assignee": "off" },
       },
     });
     expect(mockSetUser).toHaveBeenCalledWith({
       id: "user-1",
-      preferences: { notifications: { inbox: { new_comment: "off" } } },
+      preferences: {
+        notifications: { inbox: { "new_comment.assignee": "off" } },
+      },
     });
   });
 });

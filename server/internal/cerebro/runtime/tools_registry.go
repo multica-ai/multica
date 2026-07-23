@@ -2,16 +2,13 @@ package runtime
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"sync"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -32,9 +29,7 @@ type Tool interface {
 	Call(ctx context.Context, args map[string]any) (string, error)
 }
 
-// Registry holds all registered Tool implementations and provides a
-// DB-backed lookup of which tools are enabled for a given agent via the
-// agent_tool_grant table.
+// Registry holds all registered Tool implementations.
 type Registry struct {
 	mu    sync.RWMutex
 	tools map[string]Tool
@@ -72,125 +67,6 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	defer r.mu.RUnlock()
 	t, ok := r.tools[name]
 	return t, ok
-}
-
-// GetEnabledToolsForAgent queries agent_tool_grant for the given agent and
-// returns the subset of registered tools that are both enabled in the DB and
-// present in the in-memory registry. On DB error it falls back to an empty
-// list (fail-safe: don't give unexpected tools on error).
-func (r *Registry) GetEnabledToolsForAgent(ctx context.Context, agentID pgtype.UUID) []Tool {
-	if !agentID.Valid || r.db == nil {
-		return nil
-	}
-
-	rows, err := r.db.Query(ctx,
-		`SELECT tool_name FROM agent_tool_grant WHERE agent_id = $1 AND enabled = true`,
-		agentID,
-	)
-	if err != nil {
-		slog.Warn("tool registry: agent_tool_grant query failed",
-			"agent_id", util.UUIDToString(agentID),
-			"error", err,
-		)
-		return nil
-	}
-	defer rows.Close()
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	var out []Tool
-	for rows.Next() {
-		var name string
-		if err := rows.Scan(&name); err != nil {
-			continue
-		}
-		if t, ok := r.tools[name]; ok {
-			out = append(out, t)
-		}
-	}
-	if err := rows.Err(); err != nil {
-		slog.Warn("tool registry: scan error",
-			"agent_id", util.UUIDToString(agentID),
-			"error", err,
-		)
-	}
-	return out
-}
-
-// GetCascadeEnabledToolsForAgent resolves the tool list for an agent using
-// the cerebro_runtime_tool cascade (JEH-1710 bid 5):
-//
-//	tool is callable iff
-//	  runtime_tool.enabled = true
-//	  AND (user has a direct user_grant
-//	       OR user is in a group with a group_grant
-//	       OR the user is workspace owner/admin)
-//	  AND (no override OR override.enabled = true)
-//
-// If the agent's runtime has no cerebro_runtime_tool rows (the new grant
-// system has not been configured for this runtime yet), this falls back to
-// the legacy agent_tool_grant path so existing agents keep working until the
-// bid-6 migration backfills the new tables.
-//
-// userID may be invalid (e.g. autopilot runs without an originating user).
-// In that case the cascade cannot match the workspace-admin/user-grant arms
-// of the rule, so we fall back to the legacy path rather than fail closed —
-// otherwise scheduled autopilots would lose every tool overnight when bid 6
-// rolls out. Once issue-driven autopilots all carry an original_user_id this
-// can be tightened to fail closed.
-func (r *Registry) GetCascadeEnabledToolsForAgent(ctx context.Context, cerebro *cerebrodb.Queries, agentID, userID pgtype.UUID) []Tool {
-	if cerebro == nil || !agentID.Valid {
-		return r.GetEnabledToolsForAgent(ctx, agentID)
-	}
-
-	configured, err := cerebro.HasCerebroRuntimeToolsForAgent(ctx, agentID)
-	if err != nil {
-		slog.Warn("tool registry: cascade configured-check failed",
-			"agent_id", util.UUIDToString(agentID),
-			"error", err,
-		)
-		return nil
-	}
-	if !configured {
-		return r.GetEnabledToolsForAgent(ctx, agentID)
-	}
-
-	if !userID.Valid {
-		slog.Info("tool registry: cascade skipped — no originating user, falling back to legacy grants",
-			"agent_id", util.UUIDToString(agentID),
-		)
-		return r.GetEnabledToolsForAgent(ctx, agentID)
-	}
-
-	rows, err := cerebro.ResolveCerebroAgentToolAccess(ctx, cerebrodb.ResolveCerebroAgentToolAccessParams{
-		ID:     agentID,
-		UserID: userID,
-	})
-	if err != nil {
-		slog.Warn("tool registry: cascade resolution failed",
-			"agent_id", util.UUIDToString(agentID),
-			"user_id", util.UUIDToString(userID),
-			"error", err,
-		)
-		return nil
-	}
-
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	out := make([]Tool, 0, len(rows))
-	seen := make(map[string]struct{}, len(rows))
-	for _, row := range rows {
-		if _, dup := seen[row.ToolName]; dup {
-			// Same tool surfaced via multiple grant arms — only register once.
-			continue
-		}
-		seen[row.ToolName] = struct{}{}
-		if t, ok := r.tools[row.ToolName]; ok {
-			out = append(out, t)
-		}
-	}
-	return out
 }
 
 // GetToolPolicyEnabledToolsForAgent builds an agent's tool list from the
@@ -336,29 +212,6 @@ func normalizeAnthropicSchemaNode(node any) any {
 	}
 }
 
-// GetGrantConfig returns the config_json bytes stored on this agent's
-// agent_tool_grant row for the named tool, or (nil, nil) when no row exists,
-// the grant is disabled, the registry has no pool (test contexts), or the
-// agentID is invalid. The bytes are the raw stored JSON — the caller decides
-// how to parse them. Returns (nil, err) only on a real DB failure.
-func (r *Registry) GetGrantConfig(ctx context.Context, agentID pgtype.UUID, toolName string) ([]byte, error) {
-	if r == nil || r.db == nil || !agentID.Valid {
-		return nil, nil
-	}
-	var config []byte
-	err := r.db.QueryRow(ctx,
-		`SELECT config_json FROM agent_tool_grant WHERE agent_id = $1 AND tool_name = $2 AND enabled = true`,
-		agentID, toolName,
-	).Scan(&config)
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	return config, nil
-}
-
 // AllToolSchemas returns a name → InputSchema map for all currently registered
 // tools. Schemas are static (do not depend on ToolContext or DB queries) so
 // this can be called on a throwaway registry created with nil queries.
@@ -372,20 +225,6 @@ func (r *Registry) AllToolSchemas() map[string]map[string]any {
 		out[name] = t.InputSchema()
 	}
 	return out
-}
-
-// GrantAgentTool upserts an agent_tool_grant row. Pass nil configJSON for no
-// configuration. If the grant already exists the enabled flag and config are
-// updated.
-func GrantAgentTool(ctx context.Context, pool *pgxpool.Pool, agentID pgtype.UUID, toolName string, configJSON []byte) error {
-	_, err := pool.Exec(ctx,
-		`INSERT INTO agent_tool_grant (agent_id, tool_name, config_json, enabled)
-         VALUES ($1, $2, $3, true)
-         ON CONFLICT (agent_id, tool_name)
-         DO UPDATE SET config_json = EXCLUDED.config_json, enabled = true`,
-		agentID, toolName, configJSON,
-	)
-	return err
 }
 
 // ToolMeta holds display metadata for a registered tool. Used by the admin API
@@ -435,6 +274,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "create_artifact", Description: "Create a workspace artifact.", Status: ToolStatusExcluded},
 	{Name: "create_artifact_folder", Description: "Create an artifact folder.", Status: ToolStatusExcluded},
 	{Name: "create_connection", Description: "Create a workspace connection. Requires the manage_connections capability.", Status: ToolStatusNewlyImplemented},
+	{Name: "create_command", Description: "Create a reusable workflow command. CLI-runtime MCP tool over POST /api/cerebro/commands.", Status: ToolStatusNewlyImplemented},
 	{Name: "create_eval", Description: "Create a versioned eval contract. CLI-runtime MCP tool over POST /api/cerebro/evals.", Status: ToolStatusExcluded},
 	{Name: "create_group", Description: "Create a workspace group.", Status: ToolStatusExcluded},
 	{Name: "create_issue", Description: "Create a new issue in the current workspace.", Status: ToolStatusImplemented},
@@ -448,7 +288,9 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "delete_artifact", Description: "Delete an artifact.", Status: ToolStatusExcluded},
 	{Name: "delete_artifact_folder", Description: "Delete an artifact folder.", Status: ToolStatusExcluded},
 	{Name: "delete_connection", Description: "Delete a workspace connection by UUID. Requires the manage_connections capability.", Status: ToolStatusNewlyImplemented},
+	{Name: "delete_command", Description: "Delete a reusable workflow command. CLI-runtime MCP tool over DELETE /api/cerebro/commands/{id}.", Status: ToolStatusNewlyImplemented},
 	{Name: "delete_eval", Description: "Delete a versioned eval contract. CLI-runtime MCP tool over DELETE /api/cerebro/evals/{id}.", Status: ToolStatusExcluded},
+	{Name: "delete_eval_schedule", Description: "Switch an eval back to manual-only runs. CLI-runtime MCP tool over DELETE /api/cerebro/evals/{id}/schedule.", Status: ToolStatusExcluded},
 	{Name: "delete_group", Description: "Delete a workspace group.", Status: ToolStatusExcluded},
 	{Name: "delete_workflow", Description: "Delete a workflow by UUID. CLI-runtime MCP tool over DELETE /api/cerebro/workflows/{id}.", Status: ToolStatusExcluded},
 	{Name: "fork_session", Description: "Fork an attached work session for a subtask.", Status: ToolStatusExcluded},
@@ -456,7 +298,9 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "get_active_workflow", Description: "Get the Issue workflow currently active on an issue. CLI-runtime MCP tool over GET /api/cerebro/workflows/for-issue/{issueId}.", Status: ToolStatusExcluded},
 	{Name: "get_artifact", Description: "Fetch one artifact with metadata and content.", Status: ToolStatusExcluded},
 	{Name: "get_connection", Description: "Get one workspace connection by UUID. Auth secrets are returned masked.", Status: ToolStatusNewlyImplemented},
+	{Name: "get_command", Description: "Get one reusable workflow command. CLI-runtime MCP tool over GET /api/cerebro/commands/{id}.", Status: ToolStatusNewlyImplemented},
 	{Name: "get_eval", Description: "Get one versioned eval contract. CLI-runtime MCP tool over GET /api/cerebro/evals/{id}.", Status: ToolStatusExcluded},
+	{Name: "get_eval_schedule", Description: "Get one eval's recurring schedule. CLI-runtime MCP tool over GET /api/cerebro/evals/{id}/schedule.", Status: ToolStatusExcluded},
 	{Name: "get_group", Description: "Fetch one workspace group.", Status: ToolStatusExcluded},
 	{Name: "get_issue", Description: "Get full details of a Multica issue: title, description, status, priority, and comments.", Status: ToolStatusImplemented},
 	{Name: "get_me", Description: "Return the calling agent's ID, name, and workspace context.", Status: ToolStatusImplemented},
@@ -469,6 +313,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "list_attachments", Description: "List file attachments on a Multica issue or chat message.", Status: ToolStatusNewlyImplemented},
 	{Name: "list_comments", Description: "List all comments on a Multica issue in chronological order.", Status: ToolStatusImplemented},
 	{Name: "list_connections", Description: "List the workspace's connections.", Status: ToolStatusNewlyImplemented},
+	{Name: "list_commands", Description: "List reusable workflow commands. CLI-runtime MCP tool over GET /api/cerebro/commands.", Status: ToolStatusNewlyImplemented},
 	{Name: "list_eval_bindings", Description: "List workflow-to-eval gate bindings. CLI-runtime MCP tool over GET /api/cerebro/evals/bindings.", Status: ToolStatusExcluded},
 	{Name: "list_eval_runs", Description: "List immutable runs for one eval. CLI-runtime MCP tool over GET /api/cerebro/evals/{id}/runs.", Status: ToolStatusExcluded},
 	{Name: "list_evals", Description: "List versioned eval contracts. CLI-runtime MCP tool over GET /api/cerebro/evals.", Status: ToolStatusExcluded},
@@ -492,6 +337,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "read_attachment", Description: "Read text content from an attachment by ID.", Status: ToolStatusNewlyImplemented},
 	{Name: "read_note", Description: "Read a note/document by ID — its title, full body, owner, visibility, and scope.", Status: ToolStatusExcluded},
 	{Name: "record_eval_run", Description: "Record an immutable eval result. CLI-runtime MCP tool over POST /api/cerebro/evals/{id}/runs.", Status: ToolStatusExcluded},
+	{Name: "run_eval", Description: "Run an active eval through the trusted server-side runner. CLI-runtime MCP tool over POST /api/cerebro/evals/{id}/run.", Status: ToolStatusExcluded},
 	{Name: "publish_workflow_hook", Description: "Publish a tested Workflow hook after server-side authorisation. CLI-runtime MCP tool over POST /api/cerebro/workflow-hooks/{id}/publish.", Status: ToolStatusExcluded},
 	{Name: "request_approval", Description: "Request a human decision for an action from the agent's current surface.", Status: ToolStatusNewlyImplemented},
 	{Name: "remove_group_agent", Description: "Remove an agent from a group allowlist.", Status: ToolStatusExcluded},
@@ -512,6 +358,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "set_artifact_folder", Description: "Set an artifact's folder.", Status: ToolStatusExcluded},
 	{Name: "suggest_artifact_folder", Description: "Propose an existing folder for an artifact; a person accepts before it moves.", Status: ToolStatusExcluded},
 	{Name: "set_group_capability", Description: "Grant a capability to a group.", Status: ToolStatusExcluded},
+	{Name: "set_eval_schedule", Description: "Create or replace an eval's recurring schedule. CLI-runtime MCP tool over PUT /api/cerebro/evals/{id}/schedule.", Status: ToolStatusExcluded},
 	{Name: "skill_audit", Description: "Audit skill metadata and governance state.", Status: ToolStatusExcluded},
 	{Name: "skill_diff", Description: "Show a unified diff between two versions of a skill. CLI-runtime MCP tool over GET /api/skills/{id}/versions.", Status: ToolStatusExcluded},
 	{Name: "skill_fork", Description: "Fork a skill into a new owned copy.", Status: ToolStatusExcluded},
@@ -533,6 +380,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "toggle_workflow", Description: "Enable or disable a workflow. CLI-runtime MCP tool over POST /api/cerebro/workflows/{id}/toggle.", Status: ToolStatusExcluded},
 	{Name: "test_workflow_hook", Description: "Test a Workflow hook without side effects and refresh its baseline. CLI-runtime MCP tool over POST /api/cerebro/workflow-hooks/{id}/test.", Status: ToolStatusExcluded},
 	{Name: "update_connection", Description: "Update a workspace connection. Requires the manage_connections capability.", Status: ToolStatusNewlyImplemented},
+	{Name: "update_command", Description: "Replace a reusable workflow command. CLI-runtime MCP tool over PUT /api/cerebro/commands/{id}.", Status: ToolStatusNewlyImplemented},
 	{Name: "update_eval", Description: "Replace a versioned eval contract. CLI-runtime MCP tool over PUT /api/cerebro/evals/{id}.", Status: ToolStatusExcluded},
 	{Name: "update_artifact", Description: "Update artifact metadata or content.", Status: ToolStatusExcluded},
 	{Name: "update_artifact_folder", Description: "Update an artifact folder.", Status: ToolStatusExcluded},
@@ -548,6 +396,17 @@ var multicaMCPToolMatrix = []ToolMeta{
 func MulticaMCPToolMatrix() []ToolMeta {
 	out := make([]ToolMeta, len(multicaMCPToolMatrix))
 	copy(out, multicaMCPToolMatrix)
+	return out
+}
+
+// GatewayNativeToolNames returns the stable names of tools implemented by the
+// gateway itself rather than by the Multica MCP bridge. Capability identity
+// consumers use this read-only inventory instead of duplicating the list.
+func GatewayNativeToolNames() []string {
+	out := make([]string, len(legacyGatewayToolMeta))
+	for i, tool := range legacyGatewayToolMeta {
+		out[i] = tool.Name
+	}
 	return out
 }
 
@@ -572,18 +431,4 @@ func callableBuiltinToolNames() []string {
 		}
 	}
 	return names
-}
-
-// SeedKristianTools grants only concrete callable tools to Kristian's agent. It
-// is idempotent — safe to call on every server start.
-func SeedKristianTools(ctx context.Context, pool *pgxpool.Pool, kristianAgentID pgtype.UUID) error {
-	if !kristianAgentID.Valid {
-		return fmt.Errorf("SeedKristianTools: invalid agent UUID")
-	}
-	for _, name := range callableBuiltinToolNames() {
-		if err := GrantAgentTool(ctx, pool, kristianAgentID, name, nil); err != nil {
-			return fmt.Errorf("SeedKristianTools: grant %q: %w", name, err)
-		}
-	}
-	return nil
 }

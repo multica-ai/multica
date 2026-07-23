@@ -19,7 +19,7 @@ Use the tabs at the top to switch between:
 
 ## Filter the complete Dashboard
 
-Choose a period, then use **Add filter** to filter by person, project, runtime, source, provider, model, skill, status, cost kind, or quality signal. Active filters are shown as chips and remain active when you switch between **Overview**, **Runs**, and **Messages**. Select a chip to remove it, or use **Clear all**.
+Choose a period, then use **Add filter** to filter by person, agent, project, runtime, source, provider, model, skill, status, cost kind, or quality signal. Active filters are shown as chips and remain active when you switch between **Overview**, **Runs**, and **Messages**. Person and agent selections also narrow every value in **Overview** and **Messages**; run-specific dimensions apply to the analytics panels. Select a chip to remove it, or use **Clear all**.
 
 Charts, people, status rows, message flows, table cells, source cards, and activity cells are interactive. Selecting one adds the corresponding filter to the complete Dashboard. Filters local to **AI Impact** do not change the other Dashboard sections.
 
@@ -45,17 +45,17 @@ Sampled outcomes stay private and are not an employee score or ranking. A sample
 
 **Overview** starts with **Workspace pulse**: issues opened and completed, completed and failed tasks, active agents and members, and measured gateway cost. Use **Work throughput** to select a day, **Issue outcomes** to select a status, or a person row to narrow the complete Dashboard.
 
-Saved and default analytics visuals use the same filters. Select **New visual** to add a visual without leaving **Overview**.
+Saved and default analytics visuals use the same filters. Open **Dashboard actions** (the three-dot menu), then select **New visual** to add a visual without leaving **Overview**.
 
 ## Explore activity and usage
 
 The Runs view includes:
 
-- total runs, tokens, gateway cost, measured savings, and missing cost data;
+- total runs, tokens, exact or calculated runtime cost, measured savings, and missing cost data;
 - an **Activity grid** with **Hour**, **Day**, and **Month** views;
 - runs and savings over time;
 - breakdowns by model, outcome, person, source, runtime, provider, skill, and project;
-- quality gates and skill-learning signals;
+- quality signals from judge gates, skill observations, member approvals, and reactions;
 - a paginated **Matching runs** table.
 
 Use the previous and next controls on a panel to move through its data without changing the shared filters.
@@ -68,7 +68,7 @@ Use **Open full Trace** to open the complete trace when one is available.
 
 ## Create a visual
 
-Select **New visual** to choose a visualization, **Metric**, **Dimension**, **Breakdown**, and **Grain**. The new visual uses the current Dashboard filters and remains available after reload.
+Open **Dashboard actions** (the three-dot menu), then select **New visual** to choose a visualization, **Metric**, **Dimension**, **Breakdown**, and **Grain**. The preview changes with the selected setup. A **Table** can contain several metrics. The new visual uses the current Dashboard filters and remains available after reload.
 
 Use **Configure** on a visual to adjust its setup.
 
@@ -76,4 +76,4 @@ Use **Configure** on a visual to adjust its setup.
 
 **Messages** shows direct and channel message totals, measured cost, daily message activity, top senders and recipients, and **Conversation flow**. Select a day, sender, recipient, or flow to narrow every Messages panel.
 
-Use **Search all messages** to find content, people, agents, or issues within the current selection. Select a message row to open its conversation details, then use **Open full conversation in Inbox** to continue in the original thread.
+Use **Search all messages** to find content, people, agents, or issues within the current selection. Use the message button to open its mobile-friendly conversation details, then use **Open full conversation in Inbox** to continue in the original thread. Use **Previous** and **Next** to move through message pages.

@@ -1,0 +1,30 @@
+FROM golang:1.26-alpine AS builder
+
+RUN apk add --no-cache git
+WORKDIR /src
+COPY server/go.mod server/go.sum ./server/
+COPY packages/cerebro-pdf-text ./packages/cerebro-pdf-text
+COPY packages/cerebro-attachment-text ./packages/cerebro-attachment-text
+COPY packages/cerebro-pi-harness ./packages/cerebro-pi-harness
+RUN cd server && go mod download
+COPY server/ ./server/
+RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/browser-verifier-runner ./cmd/browser-verifier-runner
+
+FROM alpine:3.21
+RUN apk add --no-cache ca-certificates chromium freetype harfbuzz nodejs npm nss ttf-freefont tzdata \
+    && npm install --global agent-browser@0.26.0 \
+    && npm cache clean --force \
+    && addgroup -S app \
+    && adduser -S -G app app \
+    && mkdir -p /home/app \
+    && chown -R app:app /home/app
+
+ENV AGENT_BROWSER_EXECUTABLE_PATH=/usr/bin/chromium-browser \
+    AGENT_BROWSER_ARGS=--no-sandbox,--disable-dev-shm-usage \
+    AGENT_BROWSER_PROXY_BYPASS=*.internal,localhost,127.0.0.1 \
+    HOME=/home/app
+WORKDIR /app
+COPY --from=builder /src/server/bin/browser-verifier-runner .
+USER app
+EXPOSE 8080
+ENTRYPOINT ["./browser-verifier-runner"]

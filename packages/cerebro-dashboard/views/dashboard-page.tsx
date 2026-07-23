@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
@@ -33,6 +33,7 @@ export function DashboardPage() {
   const actorName = useDashboardStore((s) => s.actorName);
   const tab = useDashboardStore((s) => s.tab);
   const setActor = useDashboardStore((s) => s.setActor);
+  const setScope = useDashboardStore((s) => s.setScope);
   const [visualBuilderOpen, setVisualBuilderOpen] = useState(false);
   const [peoplePeriod, setPeoplePeriod] = useState<PeopleImpactPeriod>("day");
   const [analyticsFilters, setAnalyticsFilters] = useState<AnalyticsFilter[]>(() =>
@@ -45,6 +46,22 @@ export function DashboardPage() {
   const aiImpactFunctions = useQuery(aiImpactFunctionsOptions(aiImpactWsId));
   const aiImpactQualityRisk = useQuery(aiImpactQualityRiskOptions(aiImpactWsId));
   const people = useQuery(aiImpactPeopleOptions(tab === "people" && aiImpactEnabled ? wsId : "", peoplePeriod));
+
+  const selectActor = (id: string, name: string, type: "member" | "agent") => {
+    setScope(type === "agent" ? "agents" : "members");
+    setActor(id, name);
+    setAnalyticsFilters((current) => [
+      ...current.filter((filter) => filter.dimension !== "person" && filter.dimension !== "agent"),
+      { dimension: type === "agent" ? "agent" : "person", operator: "in", values: [name] },
+    ]);
+  };
+
+  useEffect(() => {
+    const hasActorFilter = analyticsFilters.some((filter) =>
+      (filter.dimension === "person" || filter.dimension === "agent") && filter.values.length > 0,
+    );
+    if (actorId && !hasActorFilter) setActor(null);
+  }, [actorId, analyticsFilters, setActor]);
 
   if (!enabled) return null;
 
@@ -96,7 +113,7 @@ export function DashboardPage() {
             </p>
           )}
 
-          {tab === "overview" && <OverviewControlRoom workspaceId={workspace.id} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={(id, name) => setActor(id, name)} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
+          {tab === "overview" && <OverviewControlRoom workspaceId={workspace.id} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={selectActor} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
 
           {tab === "runs" && (
             <>
@@ -123,7 +140,7 @@ export function DashboardPage() {
             </>
           )}
 
-          {tab === "messages" && <MessagesControlRoom workspaceId={workspace.id} workspaceSlug={workspace.slug} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={(id, name) => setActor(id, name)} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
+          {tab === "messages" && <MessagesControlRoom workspaceId={workspace.id} workspaceSlug={workspace.slug} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={selectActor} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
 
           {tab === "ai-impact" && aiImpactEnabled && (
             <AIImpactControlRoom

@@ -51,6 +51,25 @@ type IssueLoopCompiler interface {
 	ActivateOnIssue(ctx context.Context, workspaceID, workflowID, projectID, createdByID, issueID pgtype.UUID, createdByType string, loopSpecJSON []byte) error
 }
 
+type HumanBlockResolver interface {
+	ResolveHumanBlock(ctx context.Context, workflowID, issueID pgtype.UUID, blockID string, approved bool, note, approverID string) error
+}
+
+// IssueLoopState is the live Chain v2 state a signed-in member may act on.
+// PendingHumanChecks only contains approvals assigned to that member.
+type IssueLoopState struct {
+	Stopped            bool
+	StopReason         string
+	PendingHumanChecks []PendingHumanCheck
+}
+
+// IssueLoopStateReader is implemented by the Chain v2 bridge. Keeping the
+// read model beside the bridge prevents the workflow HTTP layer from reading
+// retired generated delivery-gate rows.
+type IssueLoopStateReader interface {
+	ReadIssueLoopState(ctx context.Context, workflowID, issueID pgtype.UUID, memberID string) (IssueLoopState, error)
+}
+
 // WithIssueLoopCompiler plugs in the issue-loop bridge implementation.
 // Optional and nil-safe: without it, an issue_loop workflow's loop_spec is
 // persisted but never compiled onto the engine — the recipe is stored, ready

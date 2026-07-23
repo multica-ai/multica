@@ -8,7 +8,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
+	"github.com/multica-ai/multica/server/internal/cerebro/capabilityregistry"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
@@ -25,9 +25,8 @@ const (
 	ProtocolUnsupported = "unsupported"
 )
 
-type RuntimeTools interface {
-	ListTools(ctx context.Context, runtimeID pgtype.UUID) ([]runtimetools.Tool, error)
-	ResolveAccess(ctx context.Context, agentID, userID pgtype.UUID) ([]runtimetools.ResolvedTool, error)
+type CapabilityLister interface {
+	List(ctx context.Context, workspaceID pgtype.UUID, subject *capabilityregistry.Subject, keys []string) ([]capabilityregistry.View, error)
 }
 
 type PolicyResolver interface {
@@ -35,12 +34,12 @@ type PolicyResolver interface {
 }
 
 type Service struct {
-	runtimeTools RuntimeTools
+	capabilities CapabilityLister
 	policy       PolicyResolver
 }
 
-func New(runtimeTools RuntimeTools, policy PolicyResolver) *Service {
-	return &Service{runtimeTools: runtimeTools, policy: policy}
+func New(capabilities CapabilityLister, policy PolicyResolver) *Service {
+	return &Service{capabilities: capabilities, policy: policy}
 }
 
 type Query struct {
@@ -61,7 +60,6 @@ type EffectiveTool struct {
 	Descriptor        Descriptor        `json:"descriptor"`
 	Inventory         InventoryState    `json:"inventory"`
 	Policy            PolicyState       `json:"policy"`
-	RuntimeGrant      GrantState        `json:"runtime_grant"`
 	Protocol          ProtocolState     `json:"protocol"`
 	Credential        CredentialState   `json:"credential"`
 	ExposureEffective ExposureEffective `json:"exposure_effective"`
@@ -94,11 +92,6 @@ type PolicyState struct {
 	CappedBy  string `json:"capped_by,omitempty"`
 }
 
-type GrantState struct {
-	Effective string `json:"effective"`
-	Reason    string `json:"reason"`
-}
-
 type ProtocolState struct {
 	Effective          string   `json:"effective"`
 	RequiredProtocols  []string `json:"required_protocols"`
@@ -119,30 +112,19 @@ type ExposureEffective struct {
 }
 
 func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveTool, error) {
-	if s == nil || s.runtimeTools == nil || s.policy == nil {
+	if s == nil || s.capabilities == nil || s.policy == nil {
 		return nil, fmt.Errorf("toolaccess: service not configured")
 	}
-	tools, err := s.runtimeTools.ListTools(ctx, q.RuntimeID)
+	subject := capabilityregistry.Subject{Type: "runtime", ID: uuidString(q.RuntimeID)}
+	tools, err := s.capabilities.List(ctx, q.WorkspaceID, &subject, nil)
 	if err != nil {
 		return nil, err
-	}
-
-	grants := map[string]struct{}{}
-	grantKnown := q.AgentID.Valid && q.UserID.Valid
-	if grantKnown {
-		resolved, err := s.runtimeTools.ResolveAccess(ctx, q.AgentID, q.UserID)
-		if err != nil {
-			return nil, err
-		}
-		for _, t := range resolved {
-			grants[t.Name] = struct{}{}
-		}
 	}
 
 	runtimeProtocols := RuntimeProtocols(q.RuntimeMode, q.RuntimeProvider, q.RuntimeCapabilities)
 	out := make([]EffectiveTool, 0, len(tools))
 	for _, t := range tools {
-		desc := DescriptorForTool(t)
+		desc := DescriptorForCapability(t)
 		policy, err := s.policy.Resolve(ctx, toolpolicy.Query{
 			WorkspaceID:  q.WorkspaceID,
 			ToolKey:      desc.ToolKey,
@@ -156,16 +138,15 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 			return nil, fmt.Errorf("resolve policy for %s: %w", desc.ToolKey, err)
 		}
 
-		grant := grantState(t, grantKnown, grants)
 		protocol := protocolState(desc.Protocols, runtimeProtocols)
 		credential := CredentialForDescriptor(desc)
-		exposure := exposureEffective(t.Enabled, policy, grant, protocol, credential)
+		enabled := policy.Setting != toolpolicy.SettingDeny
+		exposure := exposureEffective(enabled, policy, protocol, credential)
 
 		out = append(out, EffectiveTool{
 			Descriptor:        desc,
-			Inventory:         inventoryState(t),
+			Inventory:         inventoryState(t, q.RuntimeID, enabled),
 			Policy:            policyState(policy),
-			RuntimeGrant:      grant,
 			Protocol:          protocol,
 			Credential:        credential,
 			ExposureEffective: exposure,
@@ -175,17 +156,17 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 	return out, nil
 }
 
-func DescriptorForTool(t runtimetools.Tool) Descriptor {
+func DescriptorForCapability(t capabilityregistry.View) Descriptor {
 	protocols := []string{"native_tool_loop", "mcp_stdio", "mcp_http_sse", "managed_http_tool_loop"}
 	source := "platform"
-	if t.Source == runtimetools.SourceMCP {
+	if t.Source == "scan" {
 		source = "mcp"
 		protocols = []string{"mcp_stdio", "mcp_http_sse"}
 	}
-	risk := RiskClass(t.Name, t.Source)
+	risk := RiskClass(t.Key, source)
 	return Descriptor{
-		ToolKey:                  t.Name,
-		DisplayName:              t.Name,
+		ToolKey:                  t.Key,
+		DisplayName:              t.Title,
 		Description:              t.Description,
 		Source:                   source,
 		RiskClass:                risk,
@@ -205,7 +186,7 @@ func RiskClass(toolName, source string) string {
 		return "write"
 	case strings.Contains(name, "web_fetch") || strings.Contains(name, "fetch") || strings.Contains(name, "registry"):
 		return "network"
-	case source == runtimetools.SourceMCP:
+	case source == "mcp":
 		return "runtime_native"
 	default:
 		return "read"
@@ -286,25 +267,12 @@ func CredentialForDescriptor(desc Descriptor) CredentialState {
 	return CredentialState{Effective: CredentialNotRequired, Reason: "tool descriptor does not require a credential"}
 }
 
-func grantState(t runtimetools.Tool, known bool, grants map[string]struct{}) GrantState {
-	if !known {
-		return GrantState{Effective: AccessUnknown, Reason: "agent and member context were not both supplied"}
-	}
-	if _, ok := grants[t.Name]; ok {
-		return GrantState{Effective: AccessAllow, Reason: "allowed by runtime tool grants for this agent/member context"}
-	}
-	return GrantState{Effective: AccessDeny, Reason: "not allowed by runtime tool grants for this agent/member context"}
-}
-
-func exposureEffective(enabled bool, policy toolpolicy.Effective, grant GrantState, protocol ProtocolState, credential CredentialState) ExposureEffective {
+func exposureEffective(enabled bool, policy toolpolicy.Effective, protocol ProtocolState, credential CredentialState) ExposureEffective {
 	if !enabled {
 		return ExposureEffective{Effective: false, Reason: "disabled in runtime inventory"}
 	}
 	if policy.Setting == toolpolicy.SettingDeny {
 		return ExposureEffective{Effective: false, Reason: policy.Reason}
-	}
-	if grant.Effective == AccessDeny {
-		return ExposureEffective{Effective: false, Reason: grant.Reason}
 	}
 	if protocol.Effective != ProtocolSupported {
 		return ExposureEffective{Effective: false, Reason: protocol.UnsupportedMessage}
@@ -315,22 +283,23 @@ func exposureEffective(enabled bool, policy toolpolicy.Effective, grant GrantSta
 	if policy.Setting == toolpolicy.SettingAsk && !protocol.SupportsAsk {
 		return ExposureEffective{Effective: false, Reason: "policy requires Ask, but runtime does not support approval waiting"}
 	}
-	if grant.Effective == AccessUnknown {
-		return ExposureEffective{Effective: false, Reason: grant.Reason}
-	}
 	if policy.Setting == toolpolicy.SettingAsk {
 		return ExposureEffective{Effective: true, Reason: policy.Reason}
 	}
-	return ExposureEffective{Effective: true, Reason: "allowed by policy, runtime grants, protocol, and credential checks"}
+	return ExposureEffective{Effective: true, Reason: "allowed by policy, protocol, and credential checks"}
 }
 
-func inventoryState(t runtimetools.Tool) InventoryState {
+func inventoryState(t capabilityregistry.View, runtimeID pgtype.UUID, enabled bool) InventoryState {
+	serverName := ""
+	if value, ok := t.Metadata["server_name"].(string); ok {
+		serverName = value
+	}
 	return InventoryState{
-		RuntimeID:     uuidString(t.RuntimeID),
-		ToolName:      t.Name,
+		RuntimeID:     uuidString(runtimeID),
+		ToolName:      t.Key,
 		Source:        t.Source,
-		MCPServerName: t.MCPServerName,
-		Enabled:       t.Enabled,
+		MCPServerName: serverName,
+		Enabled:       enabled,
 	}
 }
 

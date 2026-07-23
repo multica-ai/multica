@@ -3,7 +3,7 @@ import { render } from "@testing-library/react";
 import { useNavigation } from "@multica/views/navigation";
 
 // next/navigation hooks are not available in jsdom — stub the three the web
-// adapter reads. We only care about the openInNewTab wiring here.
+// adapter reads. These tests cover the browser-specific adapter wiring.
 vi.mock("next/navigation", () => ({
   useRouter: () => ({
     push: vi.fn(),
@@ -23,7 +23,7 @@ function Probe({ onAdapter }: { onAdapter: (nav: ReturnType<typeof useNavigation
   return null;
 }
 
-describe("WebNavigationProvider — openInNewTab (TECH-3702)", () => {
+describe("WebNavigationProvider", () => {
   let openSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -32,6 +32,7 @@ describe("WebNavigationProvider — openInNewTab (TECH-3702)", () => {
 
   afterEach(() => {
     openSpy.mockRestore();
+    window.history.replaceState(null, "", "/");
   });
 
   it("exposes openInNewTab so modifier-click handlers do not silently no-op on web", () => {
@@ -53,5 +54,27 @@ describe("WebNavigationProvider — openInNewTab (TECH-3702)", () => {
       "_blank",
       "noopener,noreferrer",
     );
+  });
+
+  it("preserves Next router state when replacing the URL silently", () => {
+    const routerState = { __NA: true, tree: ["", {}] };
+    window.history.replaceState(
+      routerState,
+      "",
+      "/acme/inbox?chat=new-chat&agent=agent-1",
+    );
+
+    let nav: ReturnType<typeof useNavigation> | undefined;
+    render(
+      <WebNavigationProvider>
+        <Probe onAdapter={(n) => (nav = n)} />
+      </WebNavigationProvider>,
+    );
+
+    nav?.replaceSilent?.("/acme/inbox");
+
+    expect(window.location.pathname).toBe("/acme/inbox");
+    expect(window.location.search).toBe("");
+    expect(window.history.state).toEqual(routerState);
   });
 });

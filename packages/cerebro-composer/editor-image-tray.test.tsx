@@ -5,6 +5,7 @@ import {
   fireEvent,
   cleanup,
   waitFor,
+  act,
 } from "@testing-library/react";
 import { createRef } from "react";
 import { EditorImageTray } from "./editor-image-tray";
@@ -161,13 +162,15 @@ describe("EditorImageTray persistence round-trip", () => {
     render(<EditorImageTray ref={ref} onUploadFile={onUploadFile} />);
 
     const file = new File(["x"], "c.png", { type: "image/png" });
-    ref.current?.uploadFile(file);
+    await act(async () => {
+      ref.current?.uploadFile(file);
+    });
 
     await waitFor(() => {
       expect(onUploadFile).toHaveBeenCalledWith(file);
+      expect(screen.getByTestId("chip")).toHaveTextContent("c.png");
     });
     // Shows as a tray chip and never went inline through the editor.
-    expect(screen.getByTestId("chip")).toHaveTextContent("c.png");
     expect(innerUploadFile).not.toHaveBeenCalled();
   });
 

@@ -3,9 +3,14 @@ import { createHookDraft, HOOK_EVENT_OPTIONS } from "./hook-types";
 import {
   ACTION_CONFIGURATION,
   HOOK_TEMPLATES,
+  decisionSummary,
   describeHook,
+  failModeSummary,
   fieldDefinition,
+  filterSummary,
+  scopeSummary,
   stepSummary,
+  triggerSummary,
 } from "./hook-ux";
 
 describe("Hooks UX contract", () => {
@@ -30,6 +35,11 @@ describe("Hooks UX contract", () => {
     expect(ACTION_CONFIGURATION["task.retry"]?.fields.find((field) => field.key === "task_id")?.required).toBe(true);
   });
 
+  it("exposes eval.run and eval.gate actions targeting an eval (FIR-3496)", () => {
+    expect(ACTION_CONFIGURATION["eval.run"]?.fields[0]).toMatchObject({ key: "eval_id", target: "eval", required: true });
+    expect(ACTION_CONFIGURATION["eval.gate"]?.fields[0]).toMatchObject({ key: "eval_id", target: "eval", required: true });
+  });
+
   it("uses human labels and typed value metadata for filter fields", () => {
     expect(fieldDefinition("issue.status")).toMatchObject({ label: "Issue status", input: "select" });
     expect(fieldDefinition("attempt")).toMatchObject({ label: "Attempt number", input: "number" });
@@ -43,6 +53,16 @@ describe("Hooks UX contract", () => {
     expect(HOOK_TEMPLATES.filter((template) => template.id !== "scratch").every((template) => template.hook.events.length > 0)).toBe(true);
   });
 
+  it("ships the think-before-comment recipe wiring before.message.send to a judge gate", () => {
+    const recipe = HOOK_TEMPLATES.find((template) => template.id === "think-before-comment");
+    expect(recipe?.hook.events).toEqual(["before.message.send"]);
+    expect(recipe?.hook.decision).toBe("require");
+    const judge = recipe?.hook.actions.find((action) => action.type === "judge.gate");
+    expect(judge).toBeDefined();
+    expect(String(judge?.config.rubric ?? "")).toMatch(/wakeup/i);
+    expect(String(judge?.config.rubric ?? "")).toMatch(/hand off|handoff/i);
+  });
+
   it("keeps chain and overview summaries in sync with the current draft", () => {
     const hook = {
       ...createHookDraft(),
@@ -54,9 +74,13 @@ describe("Hooks UX contract", () => {
       requirement: "Add a continuation",
       actions: [{ type: "member.notify", label: "Notify member", config: { member_id: "member-1" } }],
     };
-    expect(stepSummary(hook, "trigger")).toBe("Before task completes");
-    expect(stepSummary(hook, "scope")).toBe("1 issue");
-    expect(stepSummary(hook, "decision")).toBe("Block the action");
+    expect(triggerSummary(hook)).toBe("Before task completes");
+    expect(scopeSummary(hook)).toBe("1 issue");
+    expect(filterSummary(hook)).toBe("1 filter");
+    expect(decisionSummary(hook)).toBe("Stop the action");
+    expect(failModeSummary(hook)).toBe("Continue and log");
+    expect(stepSummary(hook, "when")).toBe("Before task completes · 1 issue · 1 filter");
+    expect(stepSummary(hook, "guide")).toBe("Stop the action");
     expect(describeHook(hook)).toContain("before a task completes");
     expect(describeHook(hook)).toContain("notify a member");
   });

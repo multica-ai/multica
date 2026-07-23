@@ -585,6 +585,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 	c := &codexClient{
 		cfg:                  b.cfg,
+		requestContext:       runCtx, // CEREBRO-PATCH(codex-tool-policy-context): pin approvals to this run.
 		stdin:                stdin,
 		pending:              make(map[int]*pendingRPC),
 		notificationProtocol: "unknown",
@@ -859,6 +860,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		// Build usage map from accumulated codex usage.
 		// First check JSON-RPC notifications (often empty for Codex).
 		var usageMap map[string]TokenUsage
+		var usageEvents []ModelUsageEvent
 		c.usageMu.Lock()
 		u := c.usage
 		c.usageMu.Unlock()
@@ -866,8 +868,11 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		// Fallback: if no usage from JSON-RPC, scan Codex session JSONL logs.
 		// Codex writes token_count events to ~/.codex/sessions/YYYY/MM/DD/*.jsonl.
 		if u.InputTokens == 0 && u.OutputTokens == 0 {
-			if scanned := scanCodexSessionUsage(startTime); scanned != nil {
+			// CEREBRO-PATCH(codex-session-bound-usage): FIR-3337 prevents a
+			// concurrent Codex task's transcript from being attributed here.
+			if scanned := scanCodexSessionUsage(startTime, threadID); scanned != nil {
 				u = scanned.usage
+				usageEvents = scanned.events
 				if scanned.model != "" && opts.Model == "" {
 					opts.Model = scanned.model
 				}
@@ -884,12 +889,13 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			SessionID:  threadID,
-			DurationMs: duration.Milliseconds(),
-			Usage:      usageMap,
+			Status:      finalStatus,
+			Output:      finalOutput,
+			Error:       finalError,
+			SessionID:   threadID,
+			DurationMs:  duration.Milliseconds(),
+			Usage:       usageMap,
+			UsageEvents: usageEvents,
 		}
 	}()
 
@@ -1162,6 +1168,7 @@ func describeCodexSemanticActivity(msg Message) string {
 
 type codexClient struct {
 	cfg                Config
+	requestContext     context.Context // CEREBRO-PATCH(codex-tool-policy-context): FIR-3403
 	stdin              interface{ Write([]byte) (int, error) }
 	mu                 sync.Mutex
 	nextID             int
@@ -1373,12 +1380,11 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
 
-	// Auto-approve all exec/patch requests in daemon mode
 	switch method {
 	case "item/commandExecution/requestApproval", "execCommandApproval":
-		c.respond(id, map[string]any{"decision": "accept"})
+		c.handleCerebroToolPolicyDecision(id, "bash", raw["params"]) // CEREBRO-PATCH(codex-tool-policy-gate): FIR-3403
 	case "item/fileChange/requestApproval", "applyPatchApproval":
-		c.respond(id, map[string]any{"decision": "accept"})
+		c.handleCerebroToolPolicyDecision(id, "apply_patch", raw["params"])
 	case "mcpServer/elicitation/request":
 		c.respond(id, map[string]any{"action": "accept", "content": nil, "_meta": nil})
 	default:
@@ -1777,14 +1783,16 @@ func codexInt64(m map[string]any, keys ...string) int64 {
 
 // codexSessionUsage holds usage extracted from a Codex session JSONL file.
 type codexSessionUsage struct {
-	usage TokenUsage
-	model string
+	usage     TokenUsage
+	model     string
+	sessionID string
+	events    []ModelUsageEvent
 }
 
 // scanCodexSessionUsage scans Codex session JSONL files written after startTime
 // to extract token usage. Codex writes token_count events to
 // ~/.codex/sessions/YYYY/MM/DD/*.jsonl.
-func scanCodexSessionUsage(startTime time.Time) *codexSessionUsage {
+func scanCodexSessionUsage(startTime time.Time, sessionIDs ...string) *codexSessionUsage {
 	root := codexSessionRoot()
 	if root == "" {
 		return nil
@@ -1802,23 +1810,14 @@ func scanCodexSessionUsage(startTime time.Time) *codexSessionUsage {
 		return nil
 	}
 
-	// Only scan files modified after startTime (this task's session).
-	var result codexSessionUsage
-	for _, f := range files {
-		info, err := os.Stat(f)
-		if err != nil || info.ModTime().Before(startTime) {
-			continue
-		}
-		if u := parseCodexSessionFile(f); u != nil {
-			// Take the last matching file's data (usually there's only one per task).
-			result = *u
-		}
+	var targetSessionID string
+	if len(sessionIDs) > 0 {
+		targetSessionID = sessionIDs[0]
 	}
 
-	if result.usage.InputTokens == 0 && result.usage.OutputTokens == 0 {
-		return nil
-	}
-	return &result
+	// CEREBRO-PATCH(codex-session-bound-usage): FIR-3337 prefer the active
+	// thread, then preserve the historical mtime fallback for older transcripts.
+	return selectCodexSessionUsage(files, startTime, targetSessionID)
 }
 
 // codexSessionRoot returns the Codex sessions directory.
@@ -1844,8 +1843,10 @@ func codexSessionRoot() string {
 
 // codexSessionTokenCount represents a token_count event in Codex JSONL.
 type codexSessionTokenCount struct {
-	Type    string `json:"type"`
-	Payload *struct {
+	Timestamp time.Time `json:"timestamp"`
+	Type      string    `json:"type"`
+	Payload   *struct {
+		ID   string `json:"id"`
 		Type string `json:"type"`
 		Info *struct {
 			TotalTokenUsage *struct {
@@ -1862,7 +1863,8 @@ type codexSessionTokenCount struct {
 				CacheReadInputTokens  int64 `json:"cache_read_input_tokens"`
 				ReasoningOutputTokens int64 `json:"reasoning_output_tokens"`
 			} `json:"last_token_usage"`
-			Model string `json:"model"`
+			Model              string `json:"model"`
+			ModelContextWindow int64  `json:"model_context_window"`
 		} `json:"info"`
 		Model string `json:"model"`
 	} `json:"payload"`
@@ -1878,6 +1880,13 @@ func parseCodexSessionFile(path string) *codexSessionUsage {
 
 	var result codexSessionUsage
 	found := false
+	fallbackObservedAt := time.Now().UTC()
+	if info, statErr := f.Stat(); statErr == nil {
+		fallbackObservedAt = info.ModTime().UTC()
+	}
+	// CEREBRO-PATCH(agent-codex-call-usage-events): FIR-3337 keeps the upstream
+	// parser hook small while Cerebro owns canonical event construction.
+	eventBuilder := newCodexUsageEventBuilder(fallbackObservedAt)
 
 	scanner := bufio.NewScanner(f)
 	scanner.Buffer(make([]byte, 0, 256*1024), 1024*1024)
@@ -1886,7 +1895,7 @@ func parseCodexSessionFile(path string) *codexSessionUsage {
 		line := scanner.Bytes()
 
 		// Fast pre-filter.
-		if !bytesContainsStr(line, "token_count") && !bytesContainsStr(line, "turn_context") {
+		if !bytesContainsStr(line, "token_count") && !bytesContainsStr(line, "turn_context") && !bytesContainsStr(line, "session_meta") && !bytesContainsStr(line, "compact") {
 			continue
 		}
 
@@ -1894,10 +1903,24 @@ func parseCodexSessionFile(path string) *codexSessionUsage {
 		if err := json.Unmarshal(line, &evt); err != nil || evt.Payload == nil {
 			continue
 		}
+		if evt.Type == "session_meta" && evt.Payload.ID != "" {
+			result.sessionID = evt.Payload.ID
+			continue
+		}
 
 		// Track model from turn_context events.
 		if evt.Type == "turn_context" && evt.Payload.Model != "" {
 			result.model = evt.Payload.Model
+			continue
+		}
+
+		// Codex rollout versions use both a top-level `compacted` checkpoint
+		// and an `event_msg/context_compacted` notification. Record only the
+		// checkpoint when both are present; the event notification remains a
+		// compatibility fallback for versions without checkpoint records.
+		if evt.Type == "compacted" || evt.Payload.Type == "compaction" || evt.Payload.Type == "context_compacted" {
+			// CEREBRO-PATCH(agent-codex-call-usage-events): canonical compaction hook.
+			result.events = eventBuilder.appendCompaction(result.events, result.sessionID, result.model, evt)
 			continue
 		}
 
@@ -1922,6 +1945,8 @@ func parseCodexSessionFile(path string) *codexSessionUsage {
 				if last := evt.Payload.Info.LastTokenUsage; last != nil {
 					result.usage.ContextInputTokens = last.InputTokens
 					result.usage.ContextCacheReadTokens = max(last.CachedInputTokens, last.CacheReadInputTokens)
+					// CEREBRO-PATCH(agent-codex-call-usage-events): canonical call hook.
+					result.events = eventBuilder.appendCall(result.events, result.sessionID, result.model, evt)
 				}
 				if evt.Payload.Info.Model != "" {
 					result.model = evt.Payload.Info.Model
@@ -1934,6 +1959,8 @@ func parseCodexSessionFile(path string) *codexSessionUsage {
 	if !found {
 		return nil
 	}
+	// CEREBRO-PATCH(agent-codex-call-usage-events): finalize task-scoped identity.
+	result.events = finalizeCodexUsageEvents(result.events, result.sessionID, result.model)
 	return &result
 }
 

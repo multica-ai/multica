@@ -7,8 +7,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5/pgconn"
-	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/jackc/pgx/v5/pgtype" // CEREBRO-PATCH(agent-tool-grant-retirement): FIR-3403 legacy grant DB imports removed.
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -17,20 +16,18 @@ import (
 type CerebroToolItem struct {
 	Name        string
 	Description string
-	Status      string // CEREBRO-PATCH(agent-tools-status): carries implemented/excluded registry state into admin API.
+	Status      string         // CEREBRO-PATCH(agent-tools-status): carries implemented/excluded registry state into admin API.
 	InputSchema map[string]any // CEREBRO-PATCH(handler-tool-schema): TECH-3226 JSON Schema for the tool; nil for tools not in the server registry.
 }
 
 // AgentToolResponse is the wire shape returned by GET /api/agents/{id}/tools.
-// Includes display metadata (name, description) plus the grant's enabled flag
-// and optional config. Tools without a grant row are included with enabled=false.
+// Includes display metadata (name, description) plus policy-derived availability. // CEREBRO-PATCH(agent-tool-grant-retirement): no legacy config/grant fields.
 type AgentToolResponse struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	Status      string          `json:"status"` // CEREBRO-PATCH(agent-tools-status-response): let UI show explicit exclusions.
 	Enabled     bool            `json:"enabled"`
 	InputSchema json.RawMessage `json:"input_schema,omitempty"` // CEREBRO-PATCH(handler-tool-schema): TECH-3226 JSON Schema; omitted for tools not in the server registry.
-	ConfigJSON  json.RawMessage `json:"config,omitempty"`
 }
 
 // SetCerebroToolMeta wires tool display metadata into the handler. Called by
@@ -40,6 +37,7 @@ type AgentToolResponse struct {
 // CEREBRO-PATCH(handler-tool-meta-setter): wires tool metadata without
 // changing the upstream handler.New signature.
 func (h *Handler) SetCerebroToolMeta(items []CerebroToolItem) {
+	// CEREBRO-PATCH(agent-tool-grant-retirement): metadata is independent of the removed legacy grant store.
 	h.cerebroToolItems = items
 	m := make(map[string]string, len(items))
 	statuses := make(map[string]string, len(items))
@@ -52,61 +50,32 @@ func (h *Handler) SetCerebroToolMeta(items []CerebroToolItem) {
 }
 
 // ListAgentTools handles GET /api/agents/{id}/tools
-// Returns all registered tools, annotated with description and enabled status.
-// Tools with no grant row are included with enabled=false so the admin UI can
-// toggle them without a pre-existing row.
+// Returns all registered tools, annotated with policy-derived enabled status.
 func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
+	// CEREBRO-PATCH(agent-tool-grant-retirement): policy replaces direct agent_tool_grant reads and writes.
 	id := chi.URLParam(r, "id")
 	agent, ok := h.loadAgentForUser(w, r, id)
 	if !ok {
 		return
 	}
 
-	// Fetch all grant rows for this agent.
-	rows, err := h.DB.Query(r.Context(),
-		`SELECT tool_name, config_json, enabled
-         FROM agent_tool_grant
-         WHERE agent_id = $1`,
-		agent.ID,
-	)
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to query tool grants: "+err.Error())
-		return
-	}
-	defer rows.Close()
-
-	type grantRow struct {
-		config  []byte
-		enabled bool
-	}
-	grants := make(map[string]grantRow)
-	for rows.Next() {
-		var (
-			name      string
-			configRaw []byte
-			enabled   bool
-		)
-		if err := rows.Scan(&name, &configRaw, &enabled); err != nil {
-			writeError(w, http.StatusInternalServerError, "scan error: "+err.Error())
-			return
-		}
-		grants[name] = grantRow{config: configRaw, enabled: enabled}
-	}
-	if err := rows.Err(); err != nil {
-		writeError(w, http.StatusInternalServerError, "rows error: "+err.Error())
-		return
-	}
-
-	// CEREBRO-PATCH(agent-tools-cascade-check): TECH-3226 — also mark tools
-	// enabled when the cascade system grants them, so firtal-local (and any
-	// other external runtime that fetches /tools) sees the correct enabled list.
-	cascadeEnabled := map[string]bool{}
-	if h.CerebroQueries != nil {
-		if userID, err := util.ParseUUID(r.Header.Get("X-User-ID")); err == nil {
-			if cascadeRows, err := h.CerebroQueries.ResolveCerebroAgentToolAccess(r.Context(),
-				cerebrodb.ResolveCerebroAgentToolAccessParams{ID: agent.ID, UserID: userID}); err == nil {
-				for _, cr := range cascadeRows {
-					cascadeEnabled[cr.ToolName] = true
+	// CEREBRO-PATCH(agent-tools-policy-read): FIR-3403 — the external runtime
+	// listing reads the same capability register + tool-policy decision as the
+	// runtime page and call-time gate.
+	policyEnabled := map[string]bool{}
+	if h.runtimeToolAccess != nil && agent.RuntimeID.Valid {
+		if rt, err := h.Queries.GetAgentRuntime(r.Context(), agent.RuntimeID); err == nil {
+			userID := agent.OwnerID
+			if headerID, ok := parseOptionalUUID(r.Header.Get("X-User-ID")); ok {
+				userID = headerID
+			}
+			if rows, err := h.runtimeToolAccess.ListEffectiveTools(r.Context(), RuntimeToolAccessQuery{
+				WorkspaceID: agent.WorkspaceID, RuntimeID: rt.ID, RuntimeMode: rt.RuntimeMode,
+				RuntimeProvider: rt.Provider, RuntimeCapabilities: marshalRuntimeCapabilities(normalizedRuntimeCapabilities(rt.Provider, rt.Capabilities, rt.ToolsConfig)),
+				AgentID: agent.ID, UserID: userID,
+			}); err == nil {
+				for _, row := range rows {
+					policyEnabled[row.Descriptor.ToolKey] = row.Policy.Effective != "deny"
 				}
 			}
 		}
@@ -118,7 +87,7 @@ func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 	// state once so the listing matches what the runtime will actually offer.
 	memRecallEnabled, memWriteEnabled := h.cerebroMemoryToolStates(r, agent.ID, agent.WorkspaceID)
 
-	// Build response from the ordered tool list merged with grant data.
+	// CEREBRO-PATCH(agent-tool-grant-retirement): build the response from canonical policy, without legacy grant config.
 	out := make([]AgentToolResponse, 0, len(h.cerebroToolItems))
 	for _, item := range h.cerebroToolItems {
 		resp := AgentToolResponse{
@@ -131,13 +100,7 @@ func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 				resp.InputSchema = json.RawMessage(raw)
 			}
 		}
-		if g, ok := grants[item.Name]; ok {
-			resp.Enabled = g.enabled
-			if len(g.config) > 0 {
-				resp.ConfigJSON = json.RawMessage(g.config)
-			}
-		}
-		if cascadeEnabled[item.Name] {
+		if policyEnabled[item.Name] { // CEREBRO-PATCH(agent-tool-grant-retirement): canonical policy replaces legacy grant/config reads.
 			resp.Enabled = true
 		}
 		if item.Status == "explicitly_excluded" {
@@ -155,91 +118,47 @@ func (h *Handler) ListAgentTools(w http.ResponseWriter, r *http.Request) {
 		out = append(out, resp)
 	}
 
+	// CEREBRO-PATCH(workflow-open-step-tool): FIR-3493 — open_loop_step is a
+	// task-scoped capability, not an administrator grant. Offer it to external
+	// runtimes only when the authenticated task's trusted workflow context says
+	// the current block allows more steps. InvokeAgentTool re-validates the same
+	// task and the runtime layer pins the exact IDs and limits before execution.
+	if r.Header.Get("X-Actor-Source") == "task_token" {
+		if taskID, err := util.ParseUUID(r.Header.Get("X-Task-ID")); err == nil {
+			if task, err := h.Queries.GetAgentTask(r.Context(), taskID); err == nil && task.AgentID == agent.ID && taskAllowsOpenLoopStep(task.Context) {
+				schema, _ := json.Marshal(map[string]any{
+					"type": "object", "additionalProperties": false, "properties": map[string]any{},
+				})
+				out = append(out, AgentToolResponse{
+					Name:        "open_loop_step",
+					Description: "Open the next step of the workflow block currently running. The server enforces the block and phase limits.",
+					Status:      "implemented",
+					Enabled:     true,
+					InputSchema: schema,
+				})
+			}
+		}
+	}
+
 	writeJSON(w, http.StatusOK, out)
 }
 
-// UpsertAgentTool handles PUT /api/agents/{id}/tools/{name}
-// Toggles the enabled flag and updates config_json for a tool grant. Creates
-// the grant if it doesn't exist yet.
-func (h *Handler) UpsertAgentTool(w http.ResponseWriter, r *http.Request) {
-	id := chi.URLParam(r, "id")
-	agent, ok := h.loadAgentForUser(w, r, id)
-	if !ok {
-		return
+func taskAllowsOpenLoopStep(raw json.RawMessage) bool {
+	var context struct {
+		LoopStep struct {
+			Steps struct {
+				Allowed bool `json:"allowed"`
+				Max     int  `json:"max"`
+			} `json:"steps"`
+		} `json:"loop_step"`
 	}
-	if _, ok := h.canManageAgent(w, r, agent); !ok {
-		return
-	}
-	toolName := chi.URLParam(r, "name")
-	if toolName == "" {
-		writeError(w, http.StatusBadRequest, "tool name is required")
-		return
-	}
-	if status, ok := h.cerebroToolStatus[toolName]; !ok {
-		writeError(w, http.StatusNotFound, "tool not registered")
-		return
-	} else if status == "explicitly_excluded" {
-		writeError(w, http.StatusBadRequest, "tool is explicitly excluded and cannot be enabled")
-		return
-	}
+	return json.Unmarshal(raw, &context) == nil && context.LoopStep.Steps.Allowed && context.LoopStep.Steps.Max > 0
+}
 
-	var body struct {
-		Enabled bool            `json:"enabled"`
-		Config  json.RawMessage `json:"config"`
+func parseOptionalUUID(raw string) (pgtype.UUID, bool) { // CEREBRO-PATCH(agent-tool-grant-retirement): legacy UpsertAgentTool ended above this fork seam.
+	if raw == "" {
+		return pgtype.UUID{}, false
 	}
-	body.Enabled = true
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err.Error() != "EOF" {
-		writeError(w, http.StatusBadRequest, "invalid request body: "+err.Error())
-		return
-	}
-
-	var configJSON []byte
-	if len(body.Config) > 0 && string(body.Config) != "null" {
-		configJSON = body.Config
-	}
-
-	_, err := h.DB.Exec(r.Context(),
-		`INSERT INTO agent_tool_grant (agent_id, tool_name, config_json, enabled)
-         VALUES ($1, $2, $3, $4)
-         ON CONFLICT (agent_id, tool_name)
-         DO UPDATE SET config_json = COALESCE(EXCLUDED.config_json, agent_tool_grant.config_json), enabled = EXCLUDED.enabled`, // CEREBRO-PATCH(agent-tool-grant-preserve-config): preserve existing config_json when PUT is called without a config body.
-		agent.ID, toolName, configJSON, body.Enabled,
-	)
-	if err != nil {
-		if pgErr, ok := err.(*pgconn.PgError); ok && pgErr.Code == "23503" {
-			writeError(w, http.StatusNotFound, "agent not found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "upsert tool grant: "+err.Error())
-		return
-	}
-
-	row := h.DB.QueryRow(r.Context(),
-		`SELECT tool_name, config_json, enabled
-         FROM agent_tool_grant
-         WHERE agent_id = $1 AND tool_name = $2`,
-		agent.ID, toolName,
-	)
-	var (
-		name    string
-		cfgRaw  []byte
-		enabled bool
-	)
-	if err := row.Scan(&name, &cfgRaw, &enabled); err != nil {
-		writeError(w, http.StatusInternalServerError, "fetch updated grant: "+err.Error())
-		return
-	}
-
-	resp := AgentToolResponse{
-		Name:    name,
-		Status:  h.cerebroToolStatus[name],
-		Enabled: enabled,
-	}
-	if desc, ok := h.cerebroToolDesc[name]; ok {
-		resp.Description = desc
-	}
-	if len(cfgRaw) > 0 {
-		resp.ConfigJSON = json.RawMessage(cfgRaw)
-	}
-	writeJSON(w, http.StatusOK, resp)
+	u, err := util.ParseUUID(raw)
+	return u, err == nil
 }

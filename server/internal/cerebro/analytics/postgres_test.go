@@ -40,3 +40,23 @@ func TestPostgresProjectionSourceWrapsLoadFailure(t *testing.T) {
 		t.Fatal("LoadRun() error = nil, want error")
 	}
 }
+
+func TestSummarizeUsageCostTracksRuntimeTokenUsage(t *testing.T) {
+	gotCents, gotKind := summarizeUsageCost([]usageCostRow{
+		{Model: "claude-sonnet-4-6", InputTokens: 1_000_000},
+	})
+	if gotCents == nil || *gotCents <= 0 || gotKind != "calculated" {
+		t.Fatalf("summarizeUsageCost() = (%v, %q), want positive calculated cost", gotCents, gotKind)
+	}
+
+	exact := int64(42)
+	gotCents, gotKind = summarizeUsageCost([]usageCostRow{{Model: "gateway", StoredCostCents: exact}})
+	if gotCents == nil || *gotCents != exact || gotKind != "actual" {
+		t.Fatalf("summarizeUsageCost() = (%v, %q), want (42, actual)", gotCents, gotKind)
+	}
+
+	gotCents, gotKind = summarizeUsageCost(nil)
+	if gotCents != nil || gotKind != "missing" {
+		t.Fatalf("summarizeUsageCost(nil) = (%v, %q), want (nil, missing)", gotCents, gotKind)
+	}
+}

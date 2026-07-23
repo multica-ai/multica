@@ -81,6 +81,10 @@ func TestClassifyRules(t *testing.T) {
 		{"rate limit", "rate limit exceeded for tier 3", ReasonAgentProviderCapacityOrRateLimit},
 		{"overloaded", "overloaded_error: please retry", ReasonAgentProviderCapacityOrRateLimit},
 		{"no capacity available", "no capacity available; try again later", ReasonAgentProviderCapacityOrRateLimit},
+		// CEREBRO-PATCH(taskfailure-model-capacity): FIR-3501 — "Selected model is at capacity" contains "selected model" (a
+		// model-not-found signal) but is a transient overload — capacity rule 5
+		// runs before model-not-found rule 8, so "at capacity" wins.
+		{"model at capacity", "Selected model is at capacity. Please try a different model.", ReasonAgentProviderCapacityOrRateLimit},
 
 		// 6. Provider 5xx / server error.
 		{"server had an error", "the server had an error processing your request", ReasonAgentProviderServerError},

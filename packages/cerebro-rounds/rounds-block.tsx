@@ -1,7 +1,10 @@
 "use client";
 
-import { ChevronDown, ChevronRight, Pause, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
-import { Fragment, useState, type ReactNode } from "react";
+import { CheckCircle2, ChevronDown, ChevronRight, GripVertical, Pause, Pencil, Play, Plus, Search, Settings, Trash2, X } from "lucide-react";
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core";
+import { SortableContext, arrayMove, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@multica/ui/components/ui/dropdown-menu";
@@ -10,11 +13,115 @@ import { Label } from "@multica/ui/components/ui/label";
 import { Drawer, DrawerContent, DrawerHeader, DrawerTitle } from "@multica/ui/components/ui/drawer";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useAddIssueToRound, useCreateRound, useDeleteRound, useRemoveIssueFromRound, useRoundStatuses, useUpdateRound } from "./queries";
+import { useAddIssueToRound, useCreateRound, useDeleteRound, useRemoveIssueFromRound, useReorderRounds, useRoundStatuses, useUpdateRound } from "./queries";
 import { roundMembershipLabel, type RoundStatus } from "./schemas";
 import type { RoundInput } from "./api";
 
 type RoundView = "ready" | "handled" | "all";
+
+const COMPLETED_ROUND_PAUSE_MS = 60_000;
+
+/**
+ * FIR-3646 — drag-and-drop round order, shared by the inbox block and the
+ * Manage rounds panel so both lists sort the same way. The render prop hands
+ * each round its own grip: only the grip starts a drag, so Play, Pause and the
+ * expand button stay clickable. Without onReorder no grip is rendered and the
+ * list behaves exactly as before.
+ */
+function SortableRounds({ statuses, onReorder, children }: {
+  statuses: RoundStatus[];
+  onReorder?: (roundIds: string[]) => void;
+  children: (status: RoundStatus, handle: ReactNode) => ReactNode;
+}) {
+  const ids = statuses.map((status) => status.round.id);
+  // 5px threshold so a click inside a round still registers as a click.
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+  const draggable = onReorder !== undefined && statuses.length > 1;
+  const onDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    const from = ids.indexOf(String(active.id));
+    const to = ids.indexOf(String(over.id));
+    if (from < 0 || to < 0) return;
+    onReorder?.(arrayMove(ids, from, to));
+  };
+  return <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={onDragEnd}>
+    <SortableContext items={ids} strategy={verticalListSortingStrategy}>
+      {statuses.map((status) => <SortableRound key={status.round.id} status={status} draggable={draggable}>{children}</SortableRound>)}
+    </SortableContext>
+  </DndContext>;
+}
+
+function SortableRound({ status, draggable, children }: {
+  status: RoundStatus;
+  draggable: boolean;
+  children: (status: RoundStatus, handle: ReactNode) => ReactNode;
+}) {
+  const { setNodeRef, setActivatorNodeRef, attributes, listeners, transform, transition, isDragging } = useSortable({ id: status.round.id });
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 20 : undefined,
+    opacity: isDragging ? 0.85 : undefined,
+  };
+  const handle = draggable ? <button
+    ref={setActivatorNodeRef}
+    type="button"
+    {...attributes}
+    {...listeners}
+    className="cursor-grab touch-none rounded p-0.5 text-muted-foreground/50 hover:bg-muted hover:text-muted-foreground active:cursor-grabbing"
+    aria-label={`Drag to reorder ${status.round.name}`}
+  >
+    <GripVertical className="size-3.5" />
+  </button> : null;
+  return <div ref={setNodeRef} style={style}>{children(status, handle)}</div>;
+}
+
+function RoundAction({
+  roundName,
+  activeCycleId,
+  complete,
+  onStart,
+  onPause,
+}: {
+  roundName: string;
+  activeCycleId?: string;
+  complete: boolean;
+  onStart: () => void;
+  onPause: () => void;
+}) {
+  const requestedCycleId = useRef<string | null>(null);
+  const onPauseRef = useRef(onPause);
+  onPauseRef.current = onPause;
+
+  useEffect(() => {
+    if (!activeCycleId || !complete) {
+      requestedCycleId.current = null;
+      return;
+    }
+
+    const timeout = window.setTimeout(() => {
+      if (requestedCycleId.current === activeCycleId) return;
+      requestedCycleId.current = activeCycleId;
+      onPauseRef.current();
+    }, COMPLETED_ROUND_PAUSE_MS);
+
+    return () => window.clearTimeout(timeout);
+  }, [activeCycleId, complete]);
+
+  if (activeCycleId) {
+    return <Button size="sm" variant="ghost" onClick={() => {
+      requestedCycleId.current = activeCycleId;
+      onPause();
+    }} className={complete ? "bg-success text-success-foreground hover:bg-success/90 hover:text-success-foreground" : undefined} aria-label={`Pause ${roundName}`}>
+      <Pause className="size-3.5" /><span className="sr-only">Pause</span>
+    </Button>;
+  }
+
+  return <Button size="sm" variant="ghost" onClick={onStart} aria-label={`Play ${roundName}`}>
+    <Play className="size-3.5" /><span className="sr-only">Play</span>
+  </Button>;
+}
 
 export function RoundsBlock({
   statuses,
@@ -25,6 +132,7 @@ export function RoundsBlock({
   onStart,
   onPause,
   onSelectIssue,
+  onReorder,
   settings,
   renderIssue,
   dragHandle,
@@ -39,6 +147,8 @@ export function RoundsBlock({
   onStart: (id: string) => void;
   onPause: (id: string) => void;
   onSelectIssue: (id: string) => void;
+  /** FIR-3646 — the rounds in their new order after a drag, first id first. */
+  onReorder?: (roundIds: string[]) => void;
   settings?: ReactNode;
   renderIssue?: (issueId: string) => ReactNode;
   dragHandle?: ReactNode;
@@ -50,6 +160,24 @@ export function RoundsBlock({
   const [query, setQuery] = useState("");
   const [views, setViews] = useState<Record<string, RoundView>>({});
   const needle = query.trim().toLocaleLowerCase();
+  const messageSet = messageIssueIds ? new Set(messageIssueIds) : null;
+  const matchesNeedle = (issueId: string) =>
+    (issueTitles[issueId] ?? issueId).toLocaleLowerCase().includes(needle);
+  const matchingRoundIds = needle
+    ? statuses
+        .filter((status) => status.members.some((member) =>
+          (!messageSet || messageSet.has(member.issue_id)) && matchesNeedle(member.issue_id)))
+        .map((status) => status.round.id)
+        .join(",")
+    : "";
+
+  useEffect(() => {
+    if (!matchingRoundIds) return;
+    const ids = matchingRoundIds.split(",");
+    setExpandedIds((current) =>
+      ids.every((id) => current.has(id)) ? current : new Set([...current, ...ids]),
+    );
+  }, [matchingRoundIds]);
 
   const renderMember = (issueId: string) => {
     if (renderIssue) return <Fragment key={issueId}>{renderIssue(issueId)}</Fragment>;
@@ -58,7 +186,7 @@ export function RoundsBlock({
       </button>;
   };
 
-  const renderRound = (s: RoundStatus) => {
+  const renderRound = (s: RoundStatus, roundHandle: ReactNode) => {
     const open = expandedIds.has(s.round.id);
     const view = views[s.round.id] ?? "ready";
     const allIds = s.members.map((member) => member.issue_id);
@@ -80,11 +208,19 @@ export function RoundsBlock({
     );
     const readyIds = orderedIds.filter((issueId) => readySet.has(issueId));
     const handledIds = orderedIds.filter((issueId) => handledSet.has(issueId));
-    const ids = (view === "ready" ? readyIds : view === "handled" ? handledIds : orderedIds)
-      .filter((issueId) => !needle || (issueTitles[issueId] ?? issueId).toLocaleLowerCase().includes(needle));
-    const summary = s.active_cycle ? `${readyIds.length} ready` : "Ready to start";
-    return <div key={s.round.id}>
+    const complete = s.active_cycle != null && readyIds.length === 0;
+    const ids = (needle
+      ? orderedIds
+      : view === "ready"
+        ? readyIds
+        : view === "handled"
+          ? handledIds
+          : orderedIds
+    ).filter((issueId) => !needle || matchesNeedle(issueId));
+    const summary = complete ? "Complete" : s.active_cycle ? `${readyIds.length} ready` : "Ready to start";
+    return <div>
       <div className="flex items-center gap-2 px-3 py-2">
+        {roundHandle}
         <button type="button" aria-label={`${open ? "Collapse" : "Expand"} ${s.round.name}`} className="flex min-w-0 flex-1 items-center gap-2 text-left" onClick={() => setExpandedIds((prev) => {
           const next = new Set(prev);
           if (open) next.delete(s.round.id); else next.add(s.round.id);
@@ -94,19 +230,25 @@ export function RoundsBlock({
           <span className="truncate text-sm font-medium">{s.round.name}</span>
           <span className="ml-auto text-xs text-muted-foreground">{summary}</span>
         </button>
-        {s.active_cycle ? <Button size="sm" variant="ghost" onClick={() => {
-          setViews((current) => ({ ...current, [s.round.id]: "ready" }));
-          setExpandedIds((current) => {
-            const next = new Set(current);
-            next.delete(s.round.id);
-            return next;
-          });
-          onPause(s.round.id);
-        }} aria-label={`Pause ${s.round.name}`}><Pause className="size-3.5" /><span className="sr-only">Pause</span></Button> : <Button size="sm" variant="ghost" onClick={() => {
-          setViews((current) => ({ ...current, [s.round.id]: "ready" }));
-          setExpandedIds((current) => new Set([...current, s.round.id]));
-          onStart(s.round.id);
-        }} aria-label={`Play ${s.round.name}`}><Play className="size-3.5" /><span className="sr-only">Play</span></Button>}
+        <RoundAction
+          roundName={s.round.name}
+          activeCycleId={s.active_cycle?.id}
+          complete={complete}
+          onPause={() => {
+            setViews((current) => ({ ...current, [s.round.id]: "ready" }));
+            setExpandedIds((current) => {
+              const next = new Set(current);
+              next.delete(s.round.id);
+              return next;
+            });
+            onPause(s.round.id);
+          }}
+          onStart={() => {
+            setViews((current) => ({ ...current, [s.round.id]: "ready" }));
+            setExpandedIds((current) => new Set([...current, s.round.id]));
+            onStart(s.round.id);
+          }}
+        />
       </div>
       {open && <>
         <div className="flex gap-1 border-t border-border/50 px-3 py-2" role="group" aria-label={`${s.round.name} view`}>
@@ -114,9 +256,13 @@ export function RoundsBlock({
             {value === "ready" ? "Ready" : value === "handled" ? "Handled this round" : "All messages"}
           </Button>)}
         </div>
+        {complete && <div role="alert" className="mx-3 mb-2 flex items-center gap-2 rounded-lg border border-success/40 bg-success/10 px-3 py-2 text-success">
+          <CheckCircle2 className="size-4 shrink-0" />
+          <p className="text-xs font-medium">All ready messages handled.</p>
+        </div>}
         <div className="divide-y divide-border/60 border-t border-border/50">
           {ids.map(renderMember)}
-          {ids.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}
+          {ids.length === 0 && !(complete && view === "ready") && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}
         </div>
       </>}
     </div>;
@@ -134,7 +280,7 @@ export function RoundsBlock({
     {!collapsed && <>
       <div className="border-b border-border px-3 py-2"><div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input type="search" aria-label="Search Rounds" placeholder="Search Rounds…" className="pl-8" value={query} onChange={(event) => setQuery(event.target.value)} /></div></div>
       <div className="divide-y divide-border/60">
-        {statuses.map(renderRound)}
+        <SortableRounds statuses={statuses} onReorder={onReorder}>{renderRound}</SortableRounds>
         {statuses.length === 0 && <p className="px-3 py-3 text-xs text-muted-foreground">Nothing here right now.</p>}
       </div>
     </>}
@@ -179,10 +325,12 @@ function ResponsiveRoundPanel({ open, onOpenChange, title, showTrigger = false, 
   </span>;
 }
 
-export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDelete, onRemoveMember }: {
+export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDelete, onRemoveMember, onReorder }: {
   statuses: RoundStatus[]; issueTitles: Record<string, string>;
   onCreate: (input: RoundInput) => void; onUpdate: (id: string, input: RoundInput) => void;
   onDelete: (id: string) => void; onRemoveMember: (roundId: string, issueId: string) => void;
+  /** FIR-3646 — the rounds in their new order after a drag, first id first. */
+  onReorder?: (roundIds: string[]) => void;
 }) {
   const isMobile = useIsMobile();
   const [open, setOpen] = useState(false);
@@ -199,11 +347,12 @@ export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDele
     setCreating(false);
   };
 
-  const renderRound = (s: RoundStatus) => {
+  const renderRound = (s: RoundStatus, roundHandle: ReactNode) => {
     const expanded = expandedIds.has(s.round.id);
     const count = s.members.length;
-    return <div key={s.round.id} className="min-w-0 rounded-lg border">
+    return <div className="min-w-0 rounded-lg border">
       <div className="flex min-w-0 items-center gap-1 p-2">
+        {roundHandle}
         {/* The issue list is collapsed behind a count. Expanding every round's
             full membership made the panel an unbounded wall of titles that ran
             off the bottom on desktop and filled the drawer on mobile
@@ -245,7 +394,7 @@ export function RoundManager({ statuses, issueTitles, onCreate, onUpdate, onDele
             min-content, which a nowrap title makes as wide as the whole string
             (FIR-3293). */}
         <div className="flex min-w-0 flex-col gap-2">
-          {statuses.map(renderRound)}
+          <SortableRounds statuses={statuses} onReorder={onReorder}>{renderRound}</SortableRounds>
           {statuses.length === 0 && <p className="py-4 text-center text-sm text-muted-foreground">No rounds yet.</p>}
         </div>
       </div>}
@@ -326,6 +475,6 @@ export function RoundPickerDialog({ issueId, open, onOpenChange }: { issueId: st
 
 export function ConnectedRoundManager({ statuses, issueTitles }: { statuses: RoundStatus[]; issueTitles: Record<string, string> }) {
   const wsId = useWorkspaceId();
-  const create = useCreateRound(wsId); const update = useUpdateRound(wsId); const remove = useRemoveIssueFromRound(wsId); const del = useDeleteRound(wsId);
-  return <RoundManager statuses={statuses} issueTitles={issueTitles} onCreate={(input) => create.mutate(input)} onUpdate={(id, input) => update.mutate({ id, input })} onDelete={(id) => del.mutate(id)} onRemoveMember={(roundId, issueId) => remove.mutate({ roundId, issueId })} />;
+  const create = useCreateRound(wsId); const update = useUpdateRound(wsId); const remove = useRemoveIssueFromRound(wsId); const del = useDeleteRound(wsId); const reorder = useReorderRounds(wsId);
+  return <RoundManager statuses={statuses} issueTitles={issueTitles} onCreate={(input) => create.mutate(input)} onUpdate={(id, input) => update.mutate({ id, input })} onDelete={(id) => del.mutate(id)} onRemoveMember={(roundId, issueId) => remove.mutate({ roundId, issueId })} onReorder={(roundIds) => reorder.mutate(roundIds)} />;
 }

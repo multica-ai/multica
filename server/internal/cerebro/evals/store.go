@@ -2,21 +2,37 @@ package evals
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/loops"
 )
 
 var (
-	ErrNotFound  = errors.New("eval not found")
-	ErrImmutable = errors.New("active eval definitions are immutable; create a new version")
+	ErrNotFound                 = errors.New("eval not found")
+	ErrImmutable                = errors.New("active eval definitions are immutable; create a new version")
+	ErrRunExecutorMissing       = errors.New("server-side eval runner is not configured")
+	ErrInvalidRunExecution      = errors.New("server-side eval runner returned an invalid result")
+	ErrBlockingBindingProtected = errors.New("blocking eval binding is protected")
 )
 
-type Store struct{ pool *pgxpool.Pool }
+type Store struct {
+	pool        *pgxpool.Pool
+	runExecutor RunExecutor
+}
 
 func NewStore(pool *pgxpool.Pool) *Store { return &Store{pool: pool} }
+
+func (s *Store) WithRunExecutor(executor RunExecutor) *Store {
+	s.runExecutor = executor
+	return s
+}
 
 const evalColumns = `id, workspace_id, eval_key, version, title, description, status,
  owner, objective, target, datasets, graders, thresholds, runner, source,
@@ -91,9 +107,18 @@ func (s *Store) Update(ctx context.Context, workspaceID, id uuid.UUID, input Eva
 	return value, err
 }
 
-func (s *Store) Delete(ctx context.Context, workspaceID, id uuid.UUID) error {
-	result, err := s.pool.Exec(ctx, `DELETE FROM cerebro_eval WHERE workspace_id=$1 AND id=$2`, workspaceID, id)
+func (s *Store) HasBlockingBinding(ctx context.Context, workspaceID, id uuid.UUID) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (SELECT 1 FROM cerebro_workflow_eval_binding WHERE workspace_id=$1 AND eval_id=$2 AND blocking)`, workspaceID, id).Scan(&exists)
+	return exists, err
+}
+
+func (s *Store) Delete(ctx context.Context, workspaceID, id uuid.UUID, allowBlocking bool) error {
+	result, err := s.pool.Exec(ctx, `DELETE FROM cerebro_eval e WHERE workspace_id=$1 AND id=$2 AND ($3 OR NOT EXISTS (SELECT 1 FROM cerebro_workflow_eval_binding b WHERE b.workspace_id=e.workspace_id AND b.eval_id=e.id AND b.blocking))`, workspaceID, id, allowBlocking)
 	if err == nil && result.RowsAffected() == 0 {
+		if exists, existsErr := s.HasBlockingBinding(ctx, workspaceID, id); existsErr == nil && exists {
+			return ErrBlockingBindingProtected
+		}
 		return ErrNotFound
 	}
 	return err
@@ -112,25 +137,72 @@ func scanRun(row pgx.Row) (EvalRun, error) {
 	return value, err
 }
 
+// formatIssueKey builds a case key ("MUL-123") from the workspace prefix and the
+// issue number. Both come from a LEFT JOIN, so either may be absent (a run with
+// no issue, or a drifted row); in that case it returns "" and the UI falls back
+// to the raw id.
+func formatIssueKey(prefix *string, number *int32) string {
+	if prefix == nil || number == nil || *prefix == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s-%d", *prefix, *number)
+}
+
 func (s *Store) ListRuns(ctx context.Context, workspaceID, evalID uuid.UUID) ([]EvalRun, error) {
-	rows, err := s.pool.Query(ctx, `SELECT `+runColumns+` FROM cerebro_eval_run
-        WHERE workspace_id=$1 AND eval_id=$2 ORDER BY created_at DESC LIMIT 100`, workspaceID, evalID)
+	rows, err := s.pool.Query(ctx, `SELECT
+        r.id, r.workspace_id, r.eval_id, r.eval_version, r.target_version, r.workflow_id,
+        r.issue_id, r.status, r.results, r.evidence_artifact_id, r.cost_cents, r.latency_ms,
+        r.created_by_id, r.created_by_type, r.started_at, r.completed_at, r.created_at,
+        i.number, w.issue_prefix
+      FROM cerebro_eval_run r
+      LEFT JOIN issue i ON i.id = r.issue_id
+      LEFT JOIN workspace w ON w.id = r.workspace_id
+      WHERE r.workspace_id=$1 AND r.eval_id=$2 ORDER BY r.created_at DESC LIMIT 100`, workspaceID, evalID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	runs := make([]EvalRun, 0)
 	for rows.Next() {
-		run, err := scanRun(rows)
-		if err != nil {
+		var run EvalRun
+		var number *int32
+		var prefix *string
+		if err := rows.Scan(&run.ID, &run.WorkspaceID, &run.EvalID, &run.EvalVersion,
+			&run.TargetVersion, &run.WorkflowID, &run.IssueID, &run.Status, &run.Results,
+			&run.EvidenceArtifactID, &run.CostCents, &run.LatencyMS, &run.CreatedByID,
+			&run.CreatedByType, &run.StartedAt, &run.CompletedAt, &run.CreatedAt,
+			&number, &prefix); err != nil {
 			return nil, err
 		}
+		run.IssueKey = formatIssueKey(prefix, number)
 		runs = append(runs, run)
 	}
 	return runs, rows.Err()
 }
 
 func (s *Store) CreateRun(ctx context.Context, workspaceID, actorID, evalID uuid.UUID, actorType string, input EvalRunInput) (EvalRun, error) {
+	eval, err := s.Get(ctx, workspaceID, evalID)
+	if err != nil {
+		return EvalRun{}, err
+	}
+	if s.runExecutor == nil {
+		return EvalRun{}, ErrRunExecutorMissing
+	}
+	execution, err := s.runExecutor.Execute(ctx, eval)
+	if err != nil {
+		return EvalRun{}, fmt.Errorf("execute eval: %w", err)
+	}
+	if (execution.Status != RunStatusPassed && execution.Status != RunStatusFailed && execution.Status != RunStatusError) ||
+		!json.Valid(execution.Results) || execution.CostCents < 0 || execution.LatencyMS < 0 {
+		return EvalRun{}, ErrInvalidRunExecution
+	}
+	input.TargetVersion = execution.TargetVersion
+	input.Status = execution.Status
+	input.Results = execution.Results
+	input.CostCents = execution.CostCents
+	input.LatencyMS = execution.LatencyMS
+	input.StartedAt = execution.StartedAt
+	input.CompletedAt = execution.CompletedAt
 	run, err := scanRun(s.pool.QueryRow(ctx, `INSERT INTO cerebro_eval_run (
         workspace_id, eval_id, eval_version, target_version, workflow_id, issue_id,
         status, results, evidence_artifact_id, cost_cents, latency_ms, created_by_id,
@@ -144,6 +216,20 @@ func (s *Store) CreateRun(ctx context.Context, workspaceID, actorID, evalID uuid
 		return EvalRun{}, ErrNotFound
 	}
 	return run, err
+}
+
+// RunForIssue executes evalID against the given issue using the store's wired
+// runner (the same server executor as eval Run-now) and persists the run. It
+// returns the run id and status as strings so callers outside this package —
+// the eval.run hook action — need not import evals types (avoiding the
+// evals→loops→workflows import cycle). Fails closed when no runner is wired:
+// CreateRun returns ErrRunExecutorMissing, which the hook records as a failure.
+func (s *Store) RunForIssue(ctx context.Context, workspaceID, actorID, evalID, issueID uuid.UUID, actorType string) (string, string, error) {
+	run, err := s.CreateRun(ctx, workspaceID, actorID, evalID, actorType, EvalRunInput{IssueID: &issueID})
+	if err != nil {
+		return "", "", err
+	}
+	return run.ID.String(), run.Status, nil
 }
 
 func (s *Store) ListBindings(ctx context.Context, workspaceID uuid.UUID, workflowID *uuid.UUID) ([]Binding, error) {
@@ -173,6 +259,71 @@ func (s *Store) ListBindings(ctx context.Context, workspaceID uuid.UUID, workflo
 		items = append(items, item)
 	}
 	return items, rows.Err()
+}
+
+func (s *Store) ListMonitorAdvisoryEvalKeys(ctx context.Context, workflowID pgtype.UUID) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT e.eval_key
+      FROM cerebro_workflow_eval_binding b
+      JOIN cerebro_eval e ON e.id=b.eval_id
+      JOIN cerebro_workflow w ON w.id=$1
+      WHERE b.workflow_id=COALESCE(w.generated_from_workflow_id, w.id)
+        AND b.phase='monitor' AND NOT b.blocking
+      ORDER BY e.eval_key`, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := make([]string, 0)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
+// ListEvalBindingKeys returns every gate bound to this workflow, at every
+// phase. The Issue workflow bridge uses it to reject a recipe naming a gate the
+// engine could not resolve, at save time instead of mid-run. The COALESCE
+// mirrors ListMonitorAdvisoryEvalKeys: an activation marker resolves back to
+// the recipe that owns the bindings.
+func (s *Store) ListEvalBindingKeys(ctx context.Context, workflowID pgtype.UUID) ([]loops.EvalBindingKey, error) {
+	rows, err := s.pool.Query(ctx, `SELECT DISTINCT e.eval_key, b.phase
+      FROM cerebro_workflow_eval_binding b
+      JOIN cerebro_eval e ON e.id=b.eval_id
+      JOIN cerebro_workflow w ON w.id=$1
+      WHERE b.workflow_id=COALESCE(w.generated_from_workflow_id, w.id)
+      ORDER BY e.eval_key, b.phase`, workflowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	keys := make([]loops.EvalBindingKey, 0)
+	for rows.Next() {
+		var key loops.EvalBindingKey
+		if err := rows.Scan(&key.EvalKey, &key.Phase); err != nil {
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	return keys, rows.Err()
+}
+
+func (s *Store) GetBinding(ctx context.Context, workspaceID, id uuid.UUID) (Binding, error) {
+	var item Binding
+	err := s.pool.QueryRow(ctx, `SELECT b.id, b.workspace_id, b.workflow_id, b.eval_id, b.phase, b.blocking,
+		b.created_by_id, b.created_at, e.eval_key, e.version, e.title
+		FROM cerebro_workflow_eval_binding b JOIN cerebro_eval e ON e.id=b.eval_id
+		WHERE b.workspace_id=$1 AND b.id=$2`, workspaceID, id).Scan(
+		&item.ID, &item.WorkspaceID, &item.WorkflowID, &item.EvalID, &item.Phase,
+		&item.Blocking, &item.CreatedByID, &item.CreatedAt, &item.EvalKey,
+		&item.EvalVersion, &item.EvalTitle)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Binding{}, ErrNotFound
+	}
+	return item, err
 }
 
 func (s *Store) CreateBinding(ctx context.Context, workspaceID, actorID uuid.UUID, input BindingInput) (Binding, error) {
@@ -208,9 +359,12 @@ func (s *Store) DeleteBinding(ctx context.Context, workspaceID, id uuid.UUID) er
 	return err
 }
 
-// BlockingEvalsPassed fails closed: every blocking delivery binding must have a
-// latest run for this workflow+issue, and that latest run must be passed.
-func (s *Store) BlockingEvalsPassed(ctx context.Context, workflowID, issueID uuid.UUID) (bool, error) {
+// BlockingEvalsPassed fails closed: every blocking binding for the requested
+// phase must have a latest server-scored passing run for this workflow+issue.
+func (s *Store) BlockingEvalsPassed(ctx context.Context, workflowID, issueID uuid.UUID, phase string) (bool, error) {
+	if !validEvalPhase(phase) {
+		return false, fmt.Errorf("invalid eval binding phase %q", phase)
+	}
 	var allPassed bool
 	err := s.pool.QueryRow(ctx, `WITH selected_workflow AS (
       SELECT COALESCE(generated_from_workflow_id, id) AS id
@@ -225,8 +379,165 @@ func (s *Store) BlockingEvalsPassed(ctx context.Context, workflowID, issueID uui
           AND r.issue_id=$2 AND r.eval_id=b.eval_id AND r.eval_version=e.version
         ORDER BY r.created_at DESC LIMIT 1
       ) latest ON TRUE
-      WHERE b.phase='delivery' AND b.blocking
+      WHERE b.phase=$3 AND b.blocking
         AND COALESCE(latest.status, '') <> 'passed'
-    )`, workflowID, issueID).Scan(&allPassed)
+    )`, workflowID, issueID, phase).Scan(&allPassed)
 	return allPassed, err
+}
+
+// FailingAdvisoryEvals returns the advisory (non-blocking) bindings for the
+// requested phase whose latest server-scored run for this workflow+issue is not
+// a pass — the mirror of BlockingEvalsPassed for warn-only bindings. A binding
+// with no run counts as failing (warn on missing evidence). The AdvisoryWarner
+// turns each returned binding into an owner/admin inbox card; it NEVER affects a
+// gate's advance decision.
+func (s *Store) FailingAdvisoryEvals(ctx context.Context, workflowID, issueID uuid.UUID, phase string) ([]Binding, error) {
+	if !validEvalPhase(phase) {
+		return nil, fmt.Errorf("invalid eval binding phase %q", phase)
+	}
+	rows, err := s.pool.Query(ctx, `WITH selected_workflow AS (
+      SELECT COALESCE(generated_from_workflow_id, id) AS id
+      FROM cerebro_workflow WHERE id=$1
+    )
+    SELECT b.id, b.workspace_id, b.workflow_id, b.eval_id, b.phase, b.blocking,
+      b.created_by_id, b.created_at, e.eval_key, e.version, e.title, latest.id, COALESCE(latest.status, '')
+    FROM cerebro_workflow_eval_binding b
+    JOIN cerebro_eval e ON e.id=b.eval_id
+    JOIN selected_workflow selected ON selected.id=b.workflow_id
+    LEFT JOIN LATERAL (
+      SELECT r.id, r.status FROM cerebro_eval_run r
+      WHERE r.workspace_id=b.workspace_id AND r.workflow_id=b.workflow_id
+        AND r.issue_id=$2 AND r.eval_id=b.eval_id AND r.eval_version=e.version
+      ORDER BY r.created_at DESC LIMIT 1
+    ) latest ON TRUE
+    WHERE b.phase=$3 AND NOT b.blocking
+      AND COALESCE(latest.status, '') <> 'passed'
+    ORDER BY b.created_at DESC`, workflowID, issueID, phase)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Binding, 0)
+	for rows.Next() {
+		var item Binding
+		if err := rows.Scan(&item.ID, &item.WorkspaceID, &item.WorkflowID, &item.EvalID,
+			&item.Phase, &item.Blocking, &item.CreatedByID, &item.CreatedAt, &item.EvalKey,
+			&item.EvalVersion, &item.EvalTitle, &item.LatestRunID, &item.LatestRunStatus); err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, rows.Err()
+}
+
+func (s *Store) AdvisoryNotificationExists(ctx context.Context, workspaceID, recipientID uuid.UUID, notificationKey string) (bool, error) {
+	var exists bool
+	err := s.pool.QueryRow(ctx, `SELECT EXISTS (
+      SELECT 1 FROM inbox_item
+      WHERE workspace_id=$1 AND recipient_type='member' AND recipient_id=$2
+        AND type=$3 AND details->>'notification_key'=$4
+    )`, workspaceID, recipientID, inboxTypeEvalAdvisoryFailed, notificationKey).Scan(&exists)
+	return exists, err
+}
+
+// LatestRunPassed reports whether the newest run of eval evalID for this issue
+// passed. Fails closed: no run → (false, nil). Used by the eval.gate hook action
+// and the eval_passed hook condition, which key on eval+issue (not workflow).
+func (s *Store) LatestRunPassed(ctx context.Context, workspaceID, evalID, issueID uuid.UUID) (bool, error) {
+	var passed bool
+	err := s.pool.QueryRow(ctx, `SELECT COALESCE((
+      SELECT r.status = 'passed' FROM cerebro_eval_run r
+      WHERE r.workspace_id=$1 AND r.eval_id=$2 AND r.issue_id=$3
+      ORDER BY r.created_at DESC LIMIT 1
+    ), FALSE)`, workspaceID, evalID, issueID).Scan(&passed)
+	return passed, err
+}
+
+// EvalPassed is an alias of LatestRunPassed used by the eval_passed hook
+// condition resolver (U3), where the resolver interface is keyed on eval+issue.
+func (s *Store) EvalPassed(ctx context.Context, workspaceID, evalID, issueID uuid.UUID) (bool, error) {
+	return s.LatestRunPassed(ctx, workspaceID, evalID, issueID)
+}
+
+// VersionPassRate is the pass/total tally for one target_version of an eval.
+type VersionPassRate struct {
+	TargetVersion string `json:"target_version"`
+	Passed        int    `json:"passed"`
+	Total         int    `json:"total"`
+}
+
+// Rate returns the fraction of runs that passed for this target version, or 0
+// when there are no runs (guards a zero divide).
+func (v VersionPassRate) Rate() float64 {
+	if v.Total == 0 {
+		return 0
+	}
+	return float64(v.Passed) / float64(v.Total)
+}
+
+// PassRateByTargetVersion returns the pass/total tally per target_version for an
+// eval, newest target_version first (ordered by each version's most recent run).
+// Used by the drift alarm to detect a pass-rate regression between the newest
+// target version and the one before it.
+func (s *Store) PassRateByTargetVersion(ctx context.Context, workspaceID, evalID uuid.UUID) ([]VersionPassRate, error) {
+	rows, err := s.pool.Query(ctx, `
+      SELECT target_version,
+        count(*) FILTER (WHERE status = 'passed') AS passed,
+        count(*) AS total
+      FROM cerebro_eval_run
+      WHERE workspace_id=$1 AND eval_id=$2
+      GROUP BY target_version
+      ORDER BY max(created_at) DESC`, workspaceID, evalID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]VersionPassRate, 0)
+	for rows.Next() {
+		var v VersionPassRate
+		if err := rows.Scan(&v.TargetVersion, &v.Passed, &v.Total); err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, rows.Err()
+}
+
+// LatestRunStatusForEval returns the status of the newest run of an eval across
+// all issues/versions, and whether any run exists. Used by the drift alarm to
+// flag an eval whose most recent run failed.
+func (s *Store) LatestRunStatusForEval(ctx context.Context, workspaceID, evalID uuid.UUID) (string, bool, error) {
+	var status string
+	err := s.pool.QueryRow(ctx, `
+      SELECT status FROM cerebro_eval_run
+      WHERE workspace_id=$1 AND eval_id=$2
+      ORDER BY created_at DESC LIMIT 1`, workspaceID, evalID).Scan(&status)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	return status, true, nil
+}
+
+// ListActiveEvals returns every active eval across all workspaces, newest first.
+// The drift alarm walks these each tick; a workspace with no active evals simply
+// contributes nothing.
+func (s *Store) ListActiveEvals(ctx context.Context) ([]Eval, error) {
+	rows, err := s.pool.Query(ctx, `SELECT `+evalColumns+` FROM cerebro_eval
+        WHERE status='active' ORDER BY updated_at DESC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]Eval, 0)
+	for rows.Next() {
+		eval, err := scanEval(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, eval)
+	}
+	return items, rows.Err()
 }

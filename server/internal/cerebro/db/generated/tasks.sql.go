@@ -104,7 +104,7 @@ LEFT JOIN LATERAL (
         COALESCE(SUM(tu.cache_read_tokens), 0)::bigint  AS cache_read_tokens,
         COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS cache_write_tokens,
         MAX(tu.model) AS model
-    FROM task_usage tu WHERE tu.task_id = atq.id
+    FROM model_usage_task_rollup tu WHERE tu.task_id = atq.id
 ) AS task_cost ON true
 LEFT JOIN comment trg_comment ON trg_comment.id = atq.trigger_comment_id
 LEFT JOIN member trg_member ON trg_member.id = trg_comment.author_id

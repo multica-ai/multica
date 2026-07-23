@@ -34,6 +34,12 @@ import (
 const (
 	CapabilityCreateRuntime = "create_runtime"
 	CapabilityCreateAgent   = "create_agent"
+	// App lifecycle capabilities are enforced by the mini-app handlers. They
+	// live in the same group-capability store so non-admin builders can receive
+	// only the app actions they need.
+	CapabilityAppsCreate = "apps.create"
+	CapabilityAppsManage = "apps.manage"
+	CapabilityAppsDelete = "apps.delete"
 	// CapabilityCreateSharedFilters gates who may create shared/workspace saved
 	// filters (FIR-1659 Fase 4). Read by the savedfilters handler via
 	// HasCerebroCapability; granted per group on the group detail page.
@@ -43,6 +49,11 @@ const (
 	// user must belong to a group that has been granted this capability before
 	// they can enable or write memory. Granted per group on the group detail page.
 	CapabilityCreateMemory = "create_memory"
+	// CapabilitySetBlockingGate gates who may bind an eval to an Issue workflow
+	// as a *blocking* gate (FIR-3496). Default deny: a workspace admin always
+	// may, otherwise the user must belong to a group granted this capability.
+	// Advisory (warn-only) bindings are unrestricted; only Block requires it.
+	CapabilitySetBlockingGate = "set_blocking_gate"
 )
 
 // knownCapabilities mirrors the DB-side CHECK; validating in Go gives a clean
@@ -50,8 +61,12 @@ const (
 var knownCapabilities = map[string]struct{}{
 	CapabilityCreateRuntime:       {},
 	CapabilityCreateAgent:         {},
+	CapabilityAppsCreate:          {},
+	CapabilityAppsManage:          {},
+	CapabilityAppsDelete:          {},
 	CapabilityCreateSharedFilters: {},
 	CapabilityCreateMemory:        {},
+	CapabilitySetBlockingGate:     {},
 }
 
 // IsKnownCapability returns true for the small fixed set of capability
@@ -316,6 +331,13 @@ func (s *Service) CanCreateAgent(ctx context.Context, viewer Viewer, workspaceID
 // deny: only an admin or a member of a group granted create_memory passes.
 func (s *Service) CanCreateMemory(ctx context.Context, viewer Viewer, workspaceID pgtype.UUID) (bool, error) {
 	return s.hasCapability(ctx, viewer, workspaceID, CapabilityCreateMemory)
+}
+
+// CanSetBlockingGate — same shape as CanCreateMemory but for binding an eval as
+// a blocking workflow gate (FIR-3496). Default deny: only an admin or a member
+// of a group granted set_blocking_gate passes. Enforced only for Block bindings.
+func (s *Service) CanSetBlockingGate(ctx context.Context, viewer Viewer, workspaceID pgtype.UUID) (bool, error) {
+	return s.hasCapability(ctx, viewer, workspaceID, CapabilitySetBlockingGate)
 }
 
 func (s *Service) hasCapability(ctx context.Context, viewer Viewer, workspaceID pgtype.UUID, capability string) (bool, error) {

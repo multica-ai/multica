@@ -37,19 +37,15 @@ func TestParseRejectsGarbage(t *testing.T) {
 }
 
 func TestGated(t *testing.T) {
-	gated := []string{"Bash", "Write", "Edit", "NotebookEdit", "WebFetch", "WebSearch", "Task",
-		"mcp__supabase__execute_sql", "mcp__github__create_pr"}
+	gated := []string{"Bash", "Write", "Edit", "Read", "Grep", "Glob", "TodoWrite",
+		"run_shell_command", "write_file", "mcp__supabase__execute_sql", "mcp__github__create_pr"}
 	for _, tool := range gated {
 		if !Gated(tool) {
 			t.Errorf("Gated(%q) = false, want true", tool)
 		}
 	}
-	allow := []string{"Read", "Grep", "Glob", "TodoWrite", "ToolSearch", "Skill",
-		"ScheduleWakeup", "Monitor", "EnterPlanMode", "ExitPlanMode", "AskUserQuestion", ""}
-	for _, tool := range allow {
-		if Gated(tool) {
-			t.Errorf("Gated(%q) = true, want false (default-allow)", tool)
-		}
+	if Gated("") {
+		t.Error("empty tool name must not be treated as a valid tool")
 	}
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parseRoundStatuses, roundExcludedIssueIds, type RoundStatus } from "./schemas";
+import { parseRoundStatuses, roundExcludedIssueIds, sortRoundStatuses, type RoundStatus } from "./schemas";
 
 describe("round API compatibility", () => {
   it("parses membership and the active answer snapshot", () => {
@@ -56,5 +56,20 @@ describe("roundExcludedIssueIds", () => {
 
   it("excludes nothing when there are no rounds", () => {
     expect(roundExcludedIssueIds([])).toEqual(new Set());
+  });
+
+  // FIR-3646 — the optimistic order behind a drag.
+  describe("sortRoundStatuses", () => {
+    const statuses = [status("r1", [], null), status("r2", [], null), status("r3", [], null)];
+    const names = (list: RoundStatus[]) => list.map((entry) => entry.round.id);
+
+    it("puts the rounds in the given order", () => {
+      expect(names(sortRoundStatuses(statuses, ["r3", "r1", "r2"]))).toEqual(["r3", "r1", "r2"]);
+    });
+
+    it("keeps rounds the order does not mention, and ignores unknown ids", () => {
+      expect(names(sortRoundStatuses(statuses, ["r3", "gone"]))).toEqual(["r3", "r1", "r2"]);
+      expect(names(sortRoundStatuses(statuses, []))).toEqual(["r1", "r2", "r3"]);
+    });
   });
 });

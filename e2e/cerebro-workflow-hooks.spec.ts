@@ -3,6 +3,9 @@ import { mkdirSync } from "node:fs";
 import { createTestApi, loginAsDefault } from "./helpers";
 
 const HOOK_ID = "22222222-2222-2222-2222-222222222222";
+const ENFORCED_HOOK_ID = "00000000-0000-0000-0000-000000000003";
+const NEW_HOOK_ID = "55555555-5555-5555-5555-555555555555";
+const EVAL_ID = "66666666-6666-6666-6666-666666666666";
 const SHA = process.env.GITHUB_SHA ?? process.env.CI_COMMIT_SHA ?? "local-candidate";
 const SHOT_DIR = `e2e/screenshots/fir-3321/${SHA}`;
 
@@ -16,7 +19,7 @@ const basePolicy = {
   events: ["before.task.complete"],
   bindings: [{ kind: "workspace", id: "" }],
   conditions: [
-    { field: "issue.status", op: "not_in", value: "done, cancelled" },
+    { field: "issue.status", op: "not_in", values: ["done", "cancelled"] },
     { field: "continuation", op: "not_exists" },
     { field: "attempt", op: "lt", value: 3 },
   ],
@@ -69,20 +72,19 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
     await page.goto(`/${slug}/workflows/hooks/${HOOK_ID}`);
     const chain = page.getByRole("list", { name: "Hook chain" });
     await expect(chain).toBeVisible();
-    await expect(chain.getByRole("button", { name: /Configure/ })).toHaveCount(6);
+    await expect(chain.getByRole("button", { name: /Configure/ })).toHaveCount(3);
+    await expect(chain.getByRole("button", { name: "Configure When" })).toBeVisible();
+    await expect(chain.getByRole("button", { name: "Configure Guide or enforce" })).toBeVisible();
+    await expect(chain.getByRole("button", { name: "Configure Actions" })).toBeVisible();
     await capture(page, testInfo, "02-hook-editor");
 
-    await page.getByRole("button", { name: "Configure Filter" }).click();
+    await page.getByRole("button", { name: "Configure When" }).click();
     await expect(page.getByLabel("Filter field 1")).toContainText("Issue status");
-    const conjunction = page.getByLabel("Filter conjunction 2");
-    await expect(conjunction).toContainText("AND");
-    await conjunction.click();
-    await page.getByRole("option", { name: "OR" }).click();
-    await expect(conjunction).toContainText("OR");
+    await expect(page.getByText("All of the following must match")).toBeVisible();
+    await expect(page.getByLabel("Filter conjunction 2")).toHaveCount(0);
     await expect(page.getByText(/\{\s*"field"/)).toHaveCount(0);
     await capture(page, testInfo, "03-filter-rows");
 
-    await page.getByRole("button", { name: "Configure Applies to" }).click();
     const scope = page.getByRole("combobox", { name: "Scope 1" });
     for (const value of ["model", "issue", "session"]) {
       await scope.click();
@@ -113,9 +115,9 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
     await page.getByRole("button", { name: /Start from scratch/ }).click();
     await expect(page.getByLabel("Hook name")).toHaveValue("");
     await expect(page.getByRole("button", { name: "Publish" })).toBeDisabled();
-    await expect(page.getByRole("button", { name: "Configure Trigger" })).toHaveAttribute("data-state", "incomplete");
+    await expect(page.getByRole("button", { name: "Configure When" })).toHaveAttribute("data-state", "incomplete");
 
-    await page.getByRole("button", { name: "Configure Action" }).click();
+    await page.getByRole("button", { name: "Configure Actions" }).click();
     await page.getByRole("button", { name: "Add action", exact: true }).click();
     await page.getByLabel("Action 1 type").click();
     await expect(page.getByRole("option", { name: "Start agent" })).toBeVisible();
@@ -131,18 +133,47 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
   test("saves a named target and keeps it after reload", async ({ page }) => {
     const slug = "e2e-workspace";
     await page.goto(`/${slug}/workflows/hooks/${HOOK_ID}`);
-    await page.getByRole("button", { name: "Configure Applies to" }).click();
+    await page.getByRole("button", { name: "Configure When" }).click();
     await page.getByRole("combobox", { name: "Scope 1" }).click();
     await page.getByRole("option", { name: "Agent" }).click();
     await page.getByLabel("Agent").click();
     await page.getByRole("button", { name: /Lone/ }).click();
+    const saveRequest = page.waitForRequest((request) => request.url().endsWith(`/api/cerebro/workflow-hooks/${HOOK_ID}`) && request.method() === "PUT");
     await page.getByRole("button", { name: "Save draft" }).click();
+    expect((await saveRequest).postDataJSON().conditions[0]).toEqual({ field: "issue.status", op: "not_in", values: ["done", "cancelled"] });
     await page.reload();
-    await page.getByRole("button", { name: "Configure Applies to" }).click();
+    await page.getByRole("button", { name: "Configure When" }).click();
     await expect(page.getByLabel("Agent")).toContainText("Lone");
   });
 
-  test("keeps workflows and hooks usable at 390 by 844", async ({ page }, testInfo) => {
+  test("adds an eval gate action and saves its selected eval", async ({ page }) => {
+    const slug = "e2e-workspace";
+    await page.goto(`/${slug}/workflows/hooks/${HOOK_ID}`);
+    await page.getByRole("button", { name: "Configure Actions" }).click();
+    await page.getByRole("button", { name: "Add action", exact: true }).click();
+    await page.getByLabel("Action 2 type").click();
+    await page.getByRole("option", { name: "Eval gate" }).click();
+    await page.getByRole("button", { name: "Eval" }).click();
+    await page.getByRole("button", { name: /Answer quality/ }).click();
+
+    const saveRequest = page.waitForRequest((request) => request.url().endsWith(`/api/cerebro/workflow-hooks/${HOOK_ID}`) && request.method() === "PUT");
+    await page.getByRole("button", { name: "Save draft" }).click();
+    const saved = (await saveRequest).postDataJSON();
+    expect(saved.handlers[0].actions).toContainEqual({ type: "eval.gate", config: { eval_id: EVAL_ID } });
+  });
+
+  test("warns before a live hook is saved as a draft", async ({ page }, testInfo) => {
+    const slug = "e2e-workspace";
+    await page.goto(`/${slug}/workflows/hooks/${ENFORCED_HOOK_ID}`);
+    await expect(page.getByText(/Enforced v2/)).toBeVisible();
+    await page.getByRole("button", { name: "Save draft" }).click();
+    await expect(page.getByRole("dialog", { name: "Save as draft?" })).toContainText("This hook is live. Saving a draft switches it to Dry run until you publish again.");
+    await capture(page, testInfo, "09-enforced-draft-warning");
+    await page.getByRole("button", { name: "Keep enforced" }).click();
+    await expect(page.getByRole("dialog", { name: "Save as draft?" })).toHaveCount(0);
+  });
+
+  test("completes the full Hooks journey at 390 by 844", async ({ page }, testInfo) => {
     const slug = "e2e-workspace";
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`/${slug}/workflows`);
@@ -153,17 +184,74 @@ test.describe("FIR-3321 Workflow Hooks delivery", () => {
     await expectNoHorizontalScroll(page);
 
     await page.goto(`/${slug}/workflows/hooks`);
+    const newHook = page.getByRole("button", { name: "New hook" });
+    await expectClickable(page, newHook);
     await expectNoHorizontalScroll(page);
     await capture(page, testInfo, "06-hooks-mobile");
+    await newHook.click();
 
-    await page.goto(`/${slug}/workflows/hooks/${HOOK_ID}`);
-    await expect(page.getByRole("list", { name: "Hook chain" })).toBeVisible();
-    await page.getByRole("button", { name: "Configure Filter" }).click();
-    await expect(page.getByRole("region", { name: "filter configuration" })).toBeVisible();
+    const recipe = page.getByRole("button", { name: /Require a continuation before completion/ });
+    await expectClickable(page, recipe);
+    await recipe.click();
+    const steps = page.getByRole("list", { name: "Hook steps" });
+    await expect(steps.getByRole("button")).toHaveCount(3);
+
+    await page.getByRole("button", { name: "Go to When step" }).click();
+    await expect(page.getByRole("region", { name: "when configuration" })).toBeVisible();
+    for (const region of ["guide", "actions"]) {
+      const next = page.getByRole("button", { name: "Next step" });
+      await expectClickable(page, next);
+      await next.click();
+      await expect(page.getByRole("region", { name: `${region} configuration` })).toBeVisible();
+    }
+    await page.getByRole("radio", { name: "Stop" }).click();
+    const back = page.getByRole("button", { name: "Back one step" });
+    await expectClickable(page, back);
+    await back.click();
+    await expect(page.getByRole("region", { name: "guide configuration" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Go to When step" }).click();
+    await page.getByRole("combobox", { name: "Scope 1" }).click();
+    await page.getByRole("option", { name: "Agent" }).click();
+    await page.getByRole("button", { name: "Agent" }).click();
+    const targetSheet = page.locator('[data-slot="drawer-content"]');
+    await expect(targetSheet).toBeVisible();
+    await expect(targetSheet).toHaveClass(/w-full/);
+    await capture(page, testInfo, "07-mobile-target-sheet");
+    await targetSheet.getByRole("button", { name: /Lone/ }).click();
+
+    const save = page.getByRole("button", { name: "Save draft" });
+    await expectClickable(page, save);
+    await save.click();
+    await expect(page).toHaveURL(new RegExp(`/workflows/hooks/${NEW_HOOK_ID}$`));
+
+    const testHook = page.getByRole("button", { name: "Test" });
+    await expectClickable(page, testHook);
+    await testHook.click();
+    await expect(page.getByRole("region", { name: "Test and history" })).toBeVisible();
+
+    const publish = page.getByRole("button", { name: "Publish" });
+    await expectClickable(page, publish);
+    await publish.click();
+    const confirm = page.getByRole("button", { name: "Confirm publish" });
+    await expectClickable(page, confirm);
+    await confirm.click();
+    await expect(page.getByText(/Enforced v/)).toBeVisible();
     await expectNoHorizontalScroll(page);
-    await capture(page, testInfo, "07-editor-mobile");
+    await capture(page, testInfo, "08-mobile-published-hook");
   });
 });
+
+async function expectClickable(page: Page, locator: ReturnType<Page["getByRole"]>) {
+  await expect(locator).toBeVisible();
+  await expect(locator).toBeEnabled();
+  await expect(locator).toBeInViewport();
+  await locator.evaluate((element) => {
+    const point = element.getBoundingClientRect();
+    const top = document.elementFromPoint(point.left + point.width / 2, point.top + point.height / 2);
+    if (top !== element && !element.contains(top)) throw new Error("Control is covered and cannot be clicked");
+  });
+}
 
 async function expectNoHorizontalScroll(page: Page) {
   await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -180,12 +268,30 @@ async function capture(page: Page, testInfo: TestInfo, name: string) {
 
 async function mockHookAPI(page: Page) {
   let currentPolicy = { ...basePolicy };
+  let enforcedPolicy = { ...basePolicy, id: ENFORCED_HOOK_ID, name: "Enforced policy", mode: "enforce" };
+  let newPolicy: typeof basePolicy | null = null;
   await page.route("**/api/agents?**", (route) => route.fulfill({ json: [{ id: "11111111-1111-1111-1111-111111111111", name: "Lone", model: "codex", archived_at: null }] }));
   await page.route("**/api/skills?**", (route) => route.fulfill({ json: [{ id: "44444444-4444-4444-4444-444444444444", name: "verification-before-completion", description: "Verify behavior" }] }));
+  await page.route("**/api/cerebro/evals", (route) => route.fulfill({ json: { evals: [{ id: EVAL_ID, title: "Answer quality", status: "active" }] } }));
   await page.route("**/api/cerebro/workflow-hooks**", async (route) => {
     const request = route.request();
     const url = new URL(request.url());
     const path = url.pathname;
+    if (path.endsWith(`/${NEW_HOOK_ID}/runs`)) return route.fulfill({ json: { runs: [run] } });
+    if (path.endsWith(`/${NEW_HOOK_ID}/test`) && request.method() === "POST") {
+      if (newPolicy) newPolicy = { ...newPolicy, observed_run_count: 1, can_publish: true };
+      return route.fulfill({ json: { side_effects: false, result: run.result, baseline_at: basePolicy.baseline_at } });
+    }
+    if (path.endsWith(`/${NEW_HOOK_ID}/publish`) && request.method() === "POST") {
+      if (newPolicy) newPolicy = { ...newPolicy, mode: "enforce", version: newPolicy.version + 1 };
+      return route.fulfill({ json: newPolicy });
+    }
+    if (path.endsWith(`/${NEW_HOOK_ID}`) && request.method() === "PUT") {
+      const body = request.postDataJSON();
+      newPolicy = { ...(newPolicy ?? basePolicy), ...body, id: NEW_HOOK_ID, version: (newPolicy?.version ?? 0) + 1 };
+      return route.fulfill({ json: newPolicy });
+    }
+    if (path.endsWith(`/${NEW_HOOK_ID}`)) return route.fulfill({ json: newPolicy });
     if (path.endsWith(`/${HOOK_ID}/runs`)) return route.fulfill({ json: { runs: [run] } });
     if (path.endsWith(`/${HOOK_ID}/test`) && request.method() === "POST") return route.fulfill({ json: { side_effects: false, result: run.result, baseline_at: basePolicy.baseline_at } });
     if (path.endsWith(`/${HOOK_ID}/publish`) && request.method() === "POST") return route.fulfill({ json: { ...currentPolicy, mode: "enforce" } });
@@ -194,14 +300,26 @@ async function mockHookAPI(page: Page) {
       currentPolicy = { ...currentPolicy, ...body, id: HOOK_ID, version: currentPolicy.version + 1 };
       return route.fulfill({ json: currentPolicy });
     }
+    if (path.endsWith(`/${ENFORCED_HOOK_ID}`) && request.method() === "PUT") {
+      const body = request.postDataJSON();
+      enforcedPolicy = { ...enforcedPolicy, ...body, id: ENFORCED_HOOK_ID, version: enforcedPolicy.version + 1 };
+      return route.fulfill({ json: enforcedPolicy });
+    }
     if (path.endsWith(`/${HOOK_ID}`)) return route.fulfill({ json: currentPolicy });
+    if (path.endsWith(`/${ENFORCED_HOOK_ID}`)) return route.fulfill({ json: enforcedPolicy });
     if (request.method() === "GET") {
       return route.fulfill({ json: { hooks: [
         { ...basePolicy, id: "00000000-0000-0000-0000-000000000001", name: "Off policy", mode: "off" },
         currentPolicy,
-        { ...basePolicy, id: "00000000-0000-0000-0000-000000000003", name: "Enforced policy", mode: "enforce" },
+        enforcedPolicy,
         { ...basePolicy, id: "00000000-0000-0000-0000-000000000004", name: "Managed policy", mode: "managed" },
+        ...(newPolicy ? [newPolicy] : []),
       ] } });
+    }
+    if (request.method() === "POST") {
+      const body = request.postDataJSON();
+      newPolicy = { ...basePolicy, ...body, id: NEW_HOOK_ID, version: 1, observed_run_count: 0, can_publish: false, mode: "dry_run" };
+      return route.fulfill({ json: newPolicy });
     }
     return route.fulfill({ status: 200, json: basePolicy });
   });

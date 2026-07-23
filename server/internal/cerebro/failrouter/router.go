@@ -43,6 +43,15 @@ var routes = map[string]Route{
 	taskfailure.ReasonAgentRuntimeMissingExecutable.String():    {Action: ActionAlert},
 	taskfailure.ReasonAgentUnknown.String():                     {Action: ActionSurface},
 	"codex_semantic_inactivity":                                 {Action: ActionRetry, FreshSession: true},
+	// FIR-3651: the daemon's idle watchdog force-stops a run whose agent
+	// backend went silent — typically blocked on a tool call against a frozen
+	// child process (see daemon.go's "idle_watchdog" case). That is the same
+	// shape as codex_semantic_inactivity and deserves the same treatment: the
+	// old session is wedged, so retry on a fresh one. It had no entry at all,
+	// which means Lookup missed and FailTask fell back to Surface — 31 runs
+	// died on a stuck subprocess with no second attempt. Bounded to one retry
+	// so a persistently frozen environment cannot loop.
+	"idle_watchdog": {Action: ActionRetry, FreshSession: true, RetryLimit: 1},
 }
 
 func Lookup(reason string) (Route, bool) {

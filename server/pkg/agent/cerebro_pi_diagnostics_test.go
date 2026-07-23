@@ -218,7 +218,7 @@ func TestPiCommandArgsAreSafeForLogging(t *testing.T) {
 }
 
 func TestPiGatewayFallbackUsesManagedDefaultModel(t *testing.T) {
-	t.Parallel()
+	t.Setenv("FIRTAL_REGISTRY_MODEL", "")
 
 	env := map[string]string{
 		"FIRTAL_REGISTRY_URL": "https://registry.example.test",

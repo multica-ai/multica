@@ -8,7 +8,7 @@ const label = (fallback: string) => z.unknown().optional().transform((value) =>
 
 export const DEFAULT_TERMINOLOGY = {
   strategy: "Strategy", rock: "Goal", rocks: "Goals",
-  vision_plan: "Vision Plan", meetings: "Meetings", org_chart: "Org Chart",
+  vision_plan: "Vision Plan", meetings: "Cycles", org_chart: "Roles",
   scorecard: "Scorecard", issues_list: "Issues List", strategy_map: "Strategy Map",
 } as const;
 const terminologySchema = z.object({
@@ -45,6 +45,19 @@ export const strategyItemSchema = z.object({
   state: fallbackEnum(["active", "archived", "unknown"] as const, "unknown"),
   created_at: z.string(), updated_at: z.string(),
 });
+export const visionPlanItemSchema = z.object({
+  id: z.string(), workspace_id: z.string(), section_id: z.string(), title: z.string(), description: z.string().default(""),
+  part_label: z.string().optional(), owner_type: z.enum(["member", "agent"]).optional(), owner_id: z.string().optional(), owner_name: z.string().optional(),
+  position: z.number().int(), state: z.enum(["active", "archived"]).catch("active"),
+  goal_connections: z.array(z.object({ connection_id: z.string(), goal_id: z.string() })).default([]),
+  created_at: z.string(), updated_at: z.string(),
+});
+export const visionPlanSectionSchema = z.object({
+  id: z.string(), workspace_id: z.string(), key: z.string(), name: z.string(),
+  section_type: z.enum(["list", "structured", "process"]).catch("list"), position: z.number().int(),
+  items: z.array(visionPlanItemSchema).default([]), created_at: z.string(), updated_at: z.string(),
+});
+export const visionPlanSchema = z.object({ sections: z.array(visionPlanSectionSchema) });
 const health = fallbackEnum(["on_track", "at_risk", "off_track", "unset", "unknown"] as const, "unknown");
 const reportedHealth = fallbackEnum(["on_track", "at_risk", "off_track", "unset"] as const, "unset");
 const rockProjectSchema = z.object({ id: z.string(), title: z.string(), issue_count: z.number().int().min(0), done_issue_count: z.number().int().min(0) });
@@ -86,6 +99,23 @@ export const objectConnectionSchema = z.object({
   created_by_id: z.string(), created_at: z.string(),
 });
 export const objectConnectionListSchema = z.object({ connections: z.array(objectConnectionSchema) });
+const meetingCadence = fallbackEnum(["manual", "day", "week", "month", "quarter"] as const, "manual");
+const meetingBinding = fallbackEnum(["none", "scorecard", "goals", "issues_list"] as const, "none");
+const meetingAgendaSchema = z.object({ id: z.string(), name: z.string(), position: z.number().int().default(0), binding: meetingBinding });
+const safeOptionalId = z.unknown().optional().transform((value) => typeof value === "string" && value.trim() ? value : undefined);
+const meetingNoteTypeSchema = z.object({ id: z.string(), name: z.string(), cadence_unit: meetingCadence, cadence_count: z.number().int().positive().catch(1), enabled: z.boolean().catch(false), current_note_id: safeOptionalId });
+export const meetingSchema = z.object({
+  workspace_id: z.string(), note_type_id: z.string().optional(), note_type_name: z.string().optional(), current_note_id: safeOptionalId,
+  cadence_unit: meetingCadence, cadence_count: z.number().int().positive().catch(1),
+  agenda: z.array(meetingAgendaSchema).nullable().transform((value) => value ?? []),
+  available_note_types: z.array(meetingNoteTypeSchema).nullable().transform((value) => value ?? []),
+});
+export const orgChartSeatSchema = z.object({
+  id: z.string(), workspace_id: z.string(), parent_id: z.string().optional(), name: z.string(),
+  responsibilities: z.array(z.string()).nullable().transform((value) => value ?? []), owner_type: z.enum(["member", "agent"]).optional(), owner_id: z.string().optional(),
+  owner_name: z.string().optional(), vacant: z.boolean().default(true), position: z.number().int().default(0),
+});
+export const orgChartSeatListSchema = z.object({ seats: z.array(orgChartSeatSchema).nullable().transform((value) => value ?? []) });
 export const EMPTY_STRATEGY = { strategy_items: [] };
 export const EMPTY_STRATEGY_HISTORY = { history: [] };
 export const EMPTY_ROCKS = { rocks: [] };
@@ -93,4 +123,7 @@ export const EMPTY_PERIODS = { periods: [] };
 export const EMPTY_ELEMENTS = { elements: [] };
 export const EMPTY_GOAL_TYPES = { goal_types: [] };
 export const EMPTY_CONNECTIONS = { connections: [] };
+export const EMPTY_MEETING = { workspace_id: "", cadence_unit: "manual" as const, cadence_count: 1, agenda: [], available_note_types: [] };
+export const EMPTY_ORG_CHART = { seats: [] };
+export const EMPTY_VISION_PLAN = { sections: [] };
 export const DEFAULT_SETTINGS = { workspace_id: "", terminology: { ...DEFAULT_TERMINOLOGY } };

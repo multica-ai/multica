@@ -42,6 +42,9 @@ export interface PermissionAuditResolved {
   setting: string;
   decidedBy: string;
   cappedBy: string;
+  policySetting?: string;
+  availabilityLevel?: string;
+  governanceSeverity?: PermissionAuditSeverity;
 }
 
 export interface PermissionAuditCell {
@@ -54,16 +57,54 @@ export interface PermissionAuditEffectiveCell {
   contextLabel: string;
   setting: string;
   source: string;
+  policySetting?: string;
+  availabilityLevel?: string;
+  governanceSeverity?: PermissionAuditSeverity;
 }
+
+export type PermissionAuditSeverity = "critical" | "high" | "medium" | "low";
 
 export interface PermissionAuditRow {
   user: PermissionAuditMember;
+  severity: PermissionAuditSeverity;
   workspace: PermissionAuditCell[];
   runtimes: PermissionAuditCell[];
   agents: PermissionAuditCell[];
   groups: PermissionAuditCell[];
   direct: PermissionAuditCell[];
   effective: PermissionAuditEffectiveCell[];
+}
+
+const SEVERITY_RANK: Record<PermissionAuditSeverity, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
+
+function auditSeverity(
+  effective: PermissionAuditEffectiveCell[],
+): PermissionAuditSeverity {
+  const severityFor = (
+    cell: PermissionAuditEffectiveCell,
+  ): PermissionAuditSeverity => {
+    if (cell.governanceSeverity) return cell.governanceSeverity;
+    if (
+      cell.policySetting === "allow" &&
+      cell.availabilityLevel !== undefined &&
+      cell.availabilityLevel !== "verified"
+    ) {
+      return "critical";
+    }
+    if (cell.setting === "allow") return "high";
+    if (cell.setting === "ask") return "medium";
+    return "low";
+  };
+
+  return effective.reduce<PermissionAuditSeverity>((worst, cell) => {
+    const severity = severityFor(cell);
+    return SEVERITY_RANK[severity] < SEVERITY_RANK[worst] ? severity : worst;
+  }, "low");
 }
 
 function byName<T extends { name: string }>(a: T, b: T): number {
@@ -164,7 +205,7 @@ export function buildPermissionAuditRows({
   const workspaceHolder = holders.find((holder) => holder.layer === "workspace");
   const runtimeById = new Map(runtimes.map((runtime) => [runtime.id, runtime]));
 
-  return [...members].sort(byName).map((member) => {
+  const rows = [...members].sort(byName).map((member) => {
     const memberContexts = contexts.filter(
       (context) => context.userId === member.id,
     );
@@ -184,8 +225,24 @@ export function buildPermissionAuditRows({
       .filter((group) => group.userIds.includes(member.id))
       .sort(byName);
 
+    const effective = memberContexts.flatMap((context) => {
+      const resolved = resolvedByContext.get(context.id);
+      if (!resolved) return [];
+      return [
+        {
+          contextLabel: context.label,
+          setting: resolved.setting,
+          source: layerName(resolved.cappedBy || resolved.decidedBy),
+          policySetting: resolved.policySetting,
+          availabilityLevel: resolved.availabilityLevel,
+          governanceSeverity: resolved.governanceSeverity,
+        },
+      ];
+    });
+
     return {
       user: member,
+      severity: auditSeverity(effective),
       workspace: [
         {
           id: workspaceHolder?.subject_id ?? "workspace",
@@ -215,17 +272,12 @@ export function buildPermissionAuditRows({
           setting: settingFor("user", member.id),
         },
       ],
-      effective: memberContexts.flatMap((context) => {
-        const resolved = resolvedByContext.get(context.id);
-        if (!resolved) return [];
-        return [
-          {
-            contextLabel: context.label,
-            setting: resolved.setting,
-            source: layerName(resolved.cappedBy || resolved.decidedBy),
-          },
-        ];
-      }),
+      effective,
     };
+  });
+
+  return rows.sort((a, b) => {
+    const severity = SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity];
+    return severity || byName(a.user, b.user);
   });
 }

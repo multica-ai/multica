@@ -1,6 +1,7 @@
 package evals
 
 import (
+	"context"
 	"encoding/json"
 	"time"
 
@@ -46,13 +47,16 @@ type EvalInput struct {
 }
 
 type EvalRun struct {
-	ID                 uuid.UUID       `json:"id"`
-	WorkspaceID        uuid.UUID       `json:"workspace_id"`
-	EvalID             uuid.UUID       `json:"eval_id"`
-	EvalVersion        string          `json:"eval_version"`
-	TargetVersion      string          `json:"target_version"`
-	WorkflowID         *uuid.UUID      `json:"workflow_id,omitempty"`
-	IssueID            *uuid.UUID      `json:"issue_id,omitempty"`
+	ID            uuid.UUID  `json:"id"`
+	WorkspaceID   uuid.UUID  `json:"workspace_id"`
+	EvalID        uuid.UUID  `json:"eval_id"`
+	EvalVersion   string     `json:"eval_version"`
+	TargetVersion string     `json:"target_version"`
+	WorkflowID    *uuid.UUID `json:"workflow_id,omitempty"`
+	IssueID       *uuid.UUID `json:"issue_id,omitempty"`
+	// IssueKey is the human-readable case key (e.g. "MUL-123") resolved from the
+	// issue's number and the workspace prefix. Computed on read, not a column.
+	IssueKey           string          `json:"issue_key,omitempty"`
 	Status             string          `json:"status"`
 	Results            json.RawMessage `json:"results"`
 	EvidenceArtifactID *uuid.UUID      `json:"evidence_artifact_id,omitempty"`
@@ -78,18 +82,37 @@ type EvalRunInput struct {
 	CompletedAt        *time.Time      `json:"completed_at"`
 }
 
+// RunExecution is the trusted result produced by the server-side eval runner.
+// CreateRun deliberately copies these fields over the caller's report so an
+// external status or cases array can never open a workflow gate.
+type RunExecution struct {
+	TargetVersion string
+	Status        string
+	Results       json.RawMessage
+	CostCents     int64
+	LatencyMS     int64
+	StartedAt     *time.Time
+	CompletedAt   *time.Time
+}
+
+type RunExecutor interface {
+	Execute(ctx context.Context, eval Eval) (RunExecution, error)
+}
+
 type Binding struct {
-	ID          uuid.UUID `json:"id"`
-	WorkspaceID uuid.UUID `json:"workspace_id"`
-	WorkflowID  uuid.UUID `json:"workflow_id"`
-	EvalID      uuid.UUID `json:"eval_id"`
-	Phase       string    `json:"phase"`
-	Blocking    bool      `json:"blocking"`
-	CreatedByID uuid.UUID `json:"created_by_id"`
-	CreatedAt   time.Time `json:"created_at"`
-	EvalKey     string    `json:"eval_key"`
-	EvalVersion string    `json:"eval_version"`
-	EvalTitle   string    `json:"eval_title"`
+	ID              uuid.UUID  `json:"id"`
+	WorkspaceID     uuid.UUID  `json:"workspace_id"`
+	WorkflowID      uuid.UUID  `json:"workflow_id"`
+	EvalID          uuid.UUID  `json:"eval_id"`
+	Phase           string     `json:"phase"`
+	Blocking        bool       `json:"blocking"`
+	CreatedByID     uuid.UUID  `json:"created_by_id"`
+	CreatedAt       time.Time  `json:"created_at"`
+	EvalKey         string     `json:"eval_key"`
+	EvalVersion     string     `json:"eval_version"`
+	EvalTitle       string     `json:"eval_title"`
+	LatestRunID     *uuid.UUID `json:"latest_run_id,omitempty"`
+	LatestRunStatus string     `json:"latest_run_status,omitempty"`
 }
 
 type BindingInput struct {

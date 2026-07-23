@@ -28,6 +28,12 @@ type Condition struct {
 	Values []any  `json:"values,omitempty"`
 }
 
+// OpEvalPassed is a deferred (DB-backed) hook condition operator: it is true iff
+// the referenced eval's latest run for the event's issue passed. It is NOT
+// handled by the pure match() below (which fails closed on it via default);
+// splitHookConditions routes it to the DB-backed resolveHookConditions instead.
+const OpEvalPassed = "eval_passed"
+
 func parseConditions(raw []byte) ([]Condition, error) {
 	if len(raw) == 0 {
 		return nil, nil
@@ -72,6 +78,16 @@ func match(c Condition, ctx map[string]any) bool {
 			}
 		}
 		return false
+	case "not_in":
+		if !ok || len(c.Values) == 0 {
+			return false
+		}
+		for _, v := range c.Values {
+			if fmt.Sprint(got) == fmt.Sprint(v) {
+				return false
+			}
+		}
+		return true
 	case "is_null":
 		return !ok || got == nil
 	case "is_not_null":
@@ -80,6 +96,8 @@ func match(c Condition, ctx map[string]any) bool {
 		return ok && strings.HasPrefix(fmt.Sprint(got), fmt.Sprint(c.Value))
 	case "exists":
 		return ok && got != nil
+	case "not_exists":
+		return !ok || got == nil
 	case "gte":
 		left, leftOK := numericValue(got)
 		right, rightOK := numericValue(c.Value)

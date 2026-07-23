@@ -1,7 +1,7 @@
 import type { HookEventType, WorkflowHook } from "./hook-types";
 import { ACTION_CONFIGURATION } from "./hook-ux";
 
-export type HookStepKey = "trigger" | "scope" | "filter" | "decision" | "action" | "failure";
+export type HookStepKey = "when" | "guide" | "actions";
 export interface HookValidationResult { valid: boolean; message?: string }
 
 const COMMON_FIELDS = ["actor.type", "actor.id", "issue.id", "project.id", "workflow.id", "agent.id", "model", "session.id", "attempt", "hook_depth"];
@@ -33,32 +33,31 @@ export function fieldsForEvents(events: readonly HookEventType[]): string[] {
 
 export function validateHookStep(hook: WorkflowHook, step: HookStepKey): HookValidationResult {
   switch (step) {
-    case "trigger":
-      return hook.events.length > 0 ? { valid: true } : { valid: false, message: "Choose at least one trigger." };
-    case "scope":
-      if (hook.bindings.length === 0) return { valid: false, message: "Choose at least one scope." };
-      return hook.bindings.every((binding) => binding.kind === "workspace" || binding.value.trim().length > 0)
-        ? { valid: true }
-        : { valid: false, message: "Choose a named target for every scope." };
-    case "filter": {
-      if (hook.conditions.length === 0) return { valid: false, message: "Add at least one condition." };
+    case "when": {
+      // "When" combines the trigger, the scope it applies to, and any optional filters.
+      if (hook.events.length === 0) return { valid: false, message: "Choose at least one trigger." };
+      if (hook.bindings.length === 0) return { valid: false, message: "Choose what this applies to." };
+      if (!hook.bindings.every((binding) => binding.kind === "workspace" || binding.value.trim().length > 0)) {
+        return { valid: false, message: "Choose a named target for every scope." };
+      }
+      // Filters are optional — no conditions means the hook runs every time.
       const fields = fieldsForEvents(hook.events);
       if (hook.conditions.some((condition) => !fields.includes(condition.field))) {
-        return { valid: false, message: "Choose a field available for the selected trigger." };
+        return { valid: false, message: "Choose a filter field available for the selected trigger." };
       }
       if (hook.conditions.some((condition) => !condition.operator || (!["exists", "not_exists"].includes(condition.operator) && !condition.value.trim()))) {
-        return { valid: false, message: "Complete every condition." };
+        return { valid: false, message: "Complete every filter." };
       }
       return { valid: true };
     }
-    case "decision":
-      return hook.decision ? { valid: true } : { valid: false, message: "Choose a decision." };
-    case "action":
-      if (["block", "require"].includes(hook.decision) && !hook.requirement.trim()) return { valid: false, message: "Describe the required outcome." };
+    case "guide":
+      if (!hook.decision) return { valid: false, message: "Choose whether to guide or enforce." };
+      if (["block", "require"].includes(hook.decision) && !hook.requirement.trim()) return { valid: false, message: "Describe what the agent must do." };
+      return { valid: true };
+    case "actions":
       if (hook.actions.length === 0) return { valid: false, message: "Add at least one action." };
-      return hook.actions.every(actionIsConfigured) ? { valid: true } : { valid: false, message: "Complete every action." };
-    case "failure":
-      return hook.fail_mode ? { valid: true } : { valid: false, message: "Choose failure behavior." };
+      if (!hook.actions.every(actionIsConfigured)) return { valid: false, message: "Complete every action." };
+      return hook.fail_mode ? { valid: true } : { valid: false, message: "Choose what happens if the check cannot run." };
   }
 }
 
@@ -73,7 +72,7 @@ function actionIsConfigured(action: WorkflowHook["actions"][number]): boolean {
 
 export function validateHook(hook: WorkflowHook): HookValidationResult {
   if (!hook.name.trim()) return { valid: false, message: "Name this hook." };
-  for (const step of ["trigger", "scope", "filter", "decision", "action", "failure"] as const) {
+  for (const step of ["when", "guide", "actions"] as const) {
     const result = validateHookStep(hook, step);
     if (!result.valid) return result;
   }

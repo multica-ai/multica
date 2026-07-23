@@ -19,7 +19,7 @@ func TestPostgresHookRepositoryListReturnsOnlyLatestPolicyVersionPerFamily(t *te
 			INSERT INTO cerebro_workflow_hook_policy (
 				family_id, workspace_id, name, policy_version, mode,
 				fail_mode, created_by_id, created_by_type
-			) VALUES ($1, $2, $3, $4, $5, 'open', $6, 'member')
+			) VALUES ($1, $2, $3, $4, $5, 'warn', $6, 'member')
 		`, familyID, fixture.workspaceID, "Versioned policy", version+1, mode, fixture.userID); err != nil {
 			t.Fatalf("insert policy version %d: %v", version+1, err)
 		}
@@ -34,6 +34,23 @@ func TestPostgresHookRepositoryListReturnsOnlyLatestPolicyVersionPerFamily(t *te
 	}
 	if policies[0].Version != 2 || policies[0].Mode != HookModeDryRun {
 		t.Fatalf("effective policy = version %d mode %q, want version 2 dry_run", policies[0].Version, policies[0].Mode)
+	}
+}
+
+func TestPostgresHookRepositoryRetiresOpenFailModeOnWrite(t *testing.T) {
+	pool := openWorkflowIntegrationPool(t)
+	ctx := context.Background()
+	fixture := setupWorkflowIntegrationFixture(t, pool)
+	repo := NewPostgresHookRepository(pool)
+	policy := newTestHookPolicy("", HookAllow, HookModeDryRun, HookBinding{Kind: HookScopeWorkspace, ID: ""})
+	policy.FailMode = HookFailMode("open")
+
+	created, err := repo.Create(ctx, uuidString(fixture.workspaceID), HookPermissionActor{Type: "member", ID: uuidString(fixture.userID)}, policy)
+	if err != nil {
+		t.Fatalf("create policy: %v", err)
+	}
+	if created.FailMode != HookFailWarn {
+		t.Fatalf("fail mode = %q, want %q", created.FailMode, HookFailWarn)
 	}
 }
 

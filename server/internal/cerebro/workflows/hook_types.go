@@ -25,7 +25,6 @@ const (
 type HookFailMode string
 
 const (
-	HookFailOpen   HookFailMode = "open"
 	HookFailClosed HookFailMode = "closed"
 	HookFailWarn   HookFailMode = "warn"
 )

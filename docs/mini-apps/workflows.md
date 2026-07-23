@@ -2,6 +2,8 @@
 
 Workflows are not created, edited, or tested from the Apps catalog or app detail screen. Apps is a pure app surface powered by the app SDK; the separate **Workflows** product owns workflow authoring and runs. This document only describes the legacy backend attachment contract for integrations that still refer to an app version.
 
+The CLI follows the same boundary: author current workflows with `multica workflow create --file workflow.json`, which uses `POST /api/cerebro/workflows`. The legacy `multica app workflow` command and `/api/cerebro/app-workflows` route are not workflow-authoring surfaces, and a legacy app-workflow document must not be sent unchanged to the current Workflows route.
+
 A workflow is an immutable versioned JSON document attached to an app version. It has one trigger and an ordered list of steps.
 
 Supported triggers:

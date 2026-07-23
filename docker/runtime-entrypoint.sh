@@ -21,7 +21,7 @@ mkdir -p "$PROFILE_DIR" "$PI_CODING_AGENT_DIR" "$HERMES_HOME"
 
 log() { printf '%s runtime: %s\n' "$(date -Iseconds)" "$1" >&2; }
 
-for agent_path in "$MULTICA_PI_PATH" "$MULTICA_HERMES_PATH"; do
+for agent_path in "$MULTICA_PI_PATH" "$MULTICA_HERMES_PATH" "$MULTICA_CURSOR_PATH"; do
   if [[ ! -x "$agent_path" ]]; then
     log "FATAL: configured agent executable is unavailable: $agent_path"
     exit 1

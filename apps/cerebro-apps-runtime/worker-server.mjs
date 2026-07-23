@@ -8,7 +8,7 @@ const json = (value, status = 200) => new Response(JSON.stringify(value), { stat
 export async function createWorkerRuntime(options) {
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const response = await fetchImpl(options.bundleUrl, { headers: { authorization: `Bearer ${options.bundleToken}` } });
-  if (!response.ok) throw new Error("App bundle failed validation");
+  if (!response.ok) throw new Error(`App bundle download failed with status ${response.status}`);
   const payload = await response.json();
 	const { files, bundleSha256 } = validateFiles(payload.files, options.appId, options.version);
 	if (options.expectedBundleSha256 && !safeEqual(bundleSha256, options.expectedBundleSha256)) throw new Error("App bundle failed validation");

@@ -825,6 +825,7 @@ func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 		"## Available Commands",
 		"core agent loop and common issue create/update tasks",
 		"`multica <command> --help`",
+		"For every access question, use `get_agent_capabilities` as the canonical lookup", // CEREBRO-PATCH(canonical-access-brief-test): FIR-3403
 		"multica issue get <id> --output json",
 		"multica issue comment list <issue-id>",
 		"multica issue create --title",

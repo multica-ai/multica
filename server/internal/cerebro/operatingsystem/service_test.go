@@ -38,6 +38,98 @@ func TestValidateStrategyInput(t *testing.T) {
 	}
 }
 
+func TestValidateVisionPlanSectionInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   VisionPlanSectionInput
+		wantErr bool
+	}{
+		{name: "list", input: VisionPlanSectionInput{Name: "Core Values", SectionType: "list"}},
+		{name: "structured", input: VisionPlanSectionInput{Name: "Marketing Strategy", SectionType: "structured"}},
+		{name: "process", input: VisionPlanSectionInput{Name: "Core Processes", SectionType: "process"}},
+		{name: "missing name", input: VisionPlanSectionInput{SectionType: "list"}, wantErr: true},
+		{name: "invalid type", input: VisionPlanSectionInput{Name: "Custom", SectionType: "cards"}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateVisionPlanSectionInput(tt.input); (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateVisionPlanSectionInput(%#v) error = %v", tt.input, err)
+			}
+		})
+	}
+}
+
+func TestValidateVisionPlanItemInput(t *testing.T) {
+	valid := VisionPlanItemInput{SectionID: testWorkspaceID, Title: "Serve a clear niche"}
+	if err := ValidateVisionPlanItemInput(valid); err != nil {
+		t.Fatalf("valid item rejected: %v", err)
+	}
+
+	tests := []VisionPlanItemInput{
+		{SectionID: "bad", Title: valid.Title},
+		{SectionID: valid.SectionID},
+		{SectionID: valid.SectionID, Title: valid.Title, OwnerType: "member"},
+		{SectionID: valid.SectionID, Title: valid.Title, OwnerType: "team", OwnerID: testMemberID},
+	}
+	for _, input := range tests {
+		if err := ValidateVisionPlanItemInput(input); err == nil {
+			t.Fatalf("invalid item accepted: %#v", input)
+		}
+	}
+}
+
+func TestValidateMeetingInput(t *testing.T) {
+	valid := MeetingConfigInput{
+		CadenceUnit: "week", CadenceCount: 1,
+		Agenda: []MeetingAgendaSectionInput{{ID: "check-in", Name: "Check-in", Binding: "none"}},
+	}
+	if err := ValidateMeetingInput(valid); err != nil {
+		t.Fatalf("valid meeting rejected: %v", err)
+	}
+	invalid := []MeetingConfigInput{
+		{CadenceUnit: "fortnight", CadenceCount: 1},
+		{CadenceUnit: "week", CadenceCount: 0},
+		{CadenceUnit: "week", CadenceCount: 1, Agenda: []MeetingAgendaSectionInput{{Name: "", Binding: "none"}}},
+		{CadenceUnit: "week", CadenceCount: 1, Agenda: []MeetingAgendaSectionInput{{Name: "Review", Binding: "unknown"}}},
+	}
+	for _, input := range invalid {
+		if err := ValidateMeetingInput(input); err == nil {
+			t.Fatalf("invalid meeting accepted: %#v", input)
+		}
+	}
+}
+
+func TestApplyMeetingNoteTypeUsesRecurringNoteCadence(t *testing.T) {
+	response := MeetingConfigResponse{
+		NoteTypeID: "note-weekly", CadenceUnit: "month", CadenceCount: 3,
+	}
+	applyMeetingNoteType(&response, []MeetingNoteTypeResponse{{
+		ID: "note-weekly", Name: "Business Review", CadenceUnit: "week", CadenceCount: 1, Enabled: true, CurrentNoteID: "note-current",
+	}})
+
+	if response.NoteTypeName != "Business Review" || response.CurrentNoteID != "note-current" || response.CadenceUnit != "week" || response.CadenceCount != 1 {
+		t.Fatalf("meeting timing did not follow recurring note: %#v", response)
+	}
+}
+
+func TestValidateOrgChartSeatInput(t *testing.T) {
+	valid := OrgChartSeatInput{Name: "Operations", Responsibilities: []string{"Run the weekly plan"}}
+	if err := ValidateOrgChartSeatInput(valid); err != nil {
+		t.Fatalf("valid seat rejected: %v", err)
+	}
+	invalid := []OrgChartSeatInput{
+		{Name: ""},
+		{Name: "Operations", OwnerType: "member"},
+		{Name: "Operations", OwnerType: "team", OwnerID: testMemberID},
+		{Name: "Operations", OwnerType: "member", OwnerID: "not-a-uuid"},
+	}
+	for _, input := range invalid {
+		if err := ValidateOrgChartSeatInput(input); err == nil {
+			t.Fatalf("invalid seat accepted: %#v", input)
+		}
+	}
+}
+
 func TestValidateRockInput(t *testing.T) {
 	valid := RockInput{
 		Title:          "Cut fulfilment cost 12%",
@@ -103,7 +195,7 @@ func TestDefaultTerminologyUsesNeutralNamesForEveryElement(t *testing.T) {
 	got := DefaultTerminology()
 	want := Terminology{
 		Strategy: "Strategy", Rock: "Goal", Rocks: "Goals",
-		VisionPlan: "Vision Plan", Meetings: "Meetings", OrgChart: "Org Chart",
+		VisionPlan: "Vision Plan", Meetings: "Cycles", OrgChart: "Roles",
 		Scorecard: "Scorecard", IssuesList: "Issues List", StrategyMap: "Strategy Map",
 	}
 	if got != want {
@@ -135,8 +227,8 @@ func TestElementRegistryEnablesTodaysElementsByDefault(t *testing.T) {
 	if !byKey["goals"].Enabled || !byKey["vision_plan"].Enabled {
 		t.Fatal("elements with a shipped interface must default to enabled")
 	}
-	if byKey["meetings"].Enabled || byKey["scorecard"].Enabled {
-		t.Fatal("elements without a shipped interface must default to disabled")
+	if !byKey["meetings"].Enabled || !byKey["org_chart"].Enabled || byKey["scorecard"].Enabled {
+		t.Fatal("shipped Stage 4 elements must default to enabled while scorecard remains disabled")
 	}
 }
 

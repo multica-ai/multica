@@ -15,19 +15,24 @@ package runtime
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/accessdecision"
 	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+var toolPolicyGateProbeSequence atomic.Uint64
 
 // seedConnectionAsk seeds an MCP connection with two tools and an agent-layer Ask
 // on draft_reply, returning a cleanup. It skips the test if the workspace_connection
@@ -77,7 +82,7 @@ func TestGateConnectionTool_AskRoutesThroughInbox(t *testing.T) {
 	seedConnectionAsk(t, agentID, toolpolicy.SettingAsk)
 	ctx := context.Background()
 
-	allowed, _ := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, "draft_reply", nil, nil, GatewayRequestMeta{})
+	allowed, _ := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, "draft_reply", nil, policyTestRegistry("draft_reply"), GatewayRequestMeta{})
 	if !allowed {
 		t.Fatal("approved connection Ask must let the tool continue")
 	}
@@ -85,7 +90,7 @@ func TestGateConnectionTool_AskRoutesThroughInbox(t *testing.T) {
 		t.Fatalf("connection Ask must create exactly one inbox request, got %d", ap.intakes)
 	}
 
-	allowed, _ = e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, "lookup_order", nil, nil, GatewayRequestMeta{})
+	allowed, _ = e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, "lookup_order", nil, policyTestRegistry("lookup_order"), GatewayRequestMeta{})
 	if !allowed {
 		t.Fatal("unset connection tool must run")
 	}
@@ -107,7 +112,7 @@ func TestGateConnectionTool_PeriodGrantSkipsSecondAsk(t *testing.T) {
 	ctx := context.Background()
 
 	// First call: no reusable grant yet, so it raises one ask and is approved.
-	allowed, _ := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, "draft_reply", nil, nil, GatewayRequestMeta{})
+	allowed, _ := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, "draft_reply", nil, policyTestRegistry("draft_reply"), GatewayRequestMeta{})
 	if !allowed {
 		t.Fatal("approved connection Ask must let the first call continue")
 	}
@@ -124,7 +129,7 @@ func TestGateConnectionTool_PeriodGrantSkipsSecondAsk(t *testing.T) {
 
 	// Second call for the same tool: the still-valid grant short-circuits to
 	// allowed with NO new ask.
-	allowed, _ = e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, "draft_reply", nil, nil, GatewayRequestMeta{})
+	allowed, _ = e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, "draft_reply", nil, policyTestRegistry("draft_reply"), GatewayRequestMeta{})
 	if !allowed {
 		t.Fatal("a still-valid period grant must let the second call continue")
 	}
@@ -143,7 +148,7 @@ func TestGateConnectionTool_DenyBlocksAlwaysOn(t *testing.T) {
 	e.gate = nil // approval gate OFF — Deny must still hold
 	seedConnectionAsk(t, agentID, toolpolicy.SettingDeny)
 
-	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, "draft_reply", nil, nil, GatewayRequestMeta{})
+	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, "draft_reply", nil, policyTestRegistry("draft_reply"), GatewayRequestMeta{})
 	if allowed {
 		t.Fatal("connection Deny must block even with the approval gate off")
 	}
@@ -173,11 +178,11 @@ func newToolPolicyGatedExecutor(t *testing.T, ap *gateFakeApprovals) (*FirtalGat
 		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id, owner_id)
 		VALUES ($1, $2, 'local', $3, $4)
 		RETURNING id
-	`, runtimeAccountTestWSID, "tool-policy-gate-probe", runtimeAccountTestRuntimeID, runtimeAccountTestUserID).Scan(&agentID); err != nil {
+	`, runtimeAccountTestWSID, fmt.Sprintf("tool-policy-gate-probe-%d", toolPolicyGateProbeSequence.Add(1)), runtimeAccountTestRuntimeID, runtimeAccountTestUserID).Scan(&agentID); err != nil {
 		t.Fatalf("create agent: %v", err)
 	}
 	t.Cleanup(func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1`, runtimeAccountTestWSID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND layer = 'agent' AND subject_id = $2`, runtimeAccountTestWSID, agentID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
 	})
 
@@ -187,9 +192,25 @@ func newToolPolicyGatedExecutor(t *testing.T, ap *gateFakeApprovals) (*FirtalGat
 		logger:     slog.Default(),
 		toolPolicy: toolpolicy.NewStore(pool),
 	}
+	e.SetAccessDecisionObserver(accessdecision.NewObserver(e.toolPolicy, nil, &shadowLedgerWriter{}))
 	gate := &permgate.Gate{Approvals: ap, PollInterval: time.Millisecond, WaitTimeout: time.Second}
-	e.EnableApprovalGate(gate, nil) // empty allowlist = all agents gated
+	e.EnableApprovalGate(gate)
 	return e, agentID
+}
+
+func policyTestRegistry(toolName string) *Registry {
+	reg := NewRegistry(nil)
+	switch toolName {
+	case "draft_reply", "lookup_order":
+		reg.Register(&gatewayMCPTool{
+			exposedName:    toolName,
+			connectionName: "customer-service-mcp",
+			toolName:       toolName,
+		})
+	default:
+		reg.Register(stubTool{name: toolName})
+	}
+	return reg
 }
 
 func setAgentToolPolicy(t *testing.T, agentID pgtype.UUID, tool string, setting toolpolicy.Setting) {
@@ -211,10 +232,10 @@ func setAgentToolPolicy(t *testing.T, agentID pgtype.UUID, tool string, setting 
 func TestGateToolPolicy_DenyBlocksRealToolCall(t *testing.T) {
 	ap := &gateFakeApprovals{}
 	e, agentID := newToolPolicyGatedExecutor(t, ap)
-	const tool = "deploy_restart"
+	const tool = "web_fetch"
 	setAgentToolPolicy(t, agentID, tool, toolpolicy.SettingDeny)
 
-	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, nil, GatewayRequestMeta{})
+	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, policyTestRegistry(tool), GatewayRequestMeta{})
 	if allowed {
 		t.Fatal("a Deny row on the agent layer must block the tool")
 	}
@@ -226,42 +247,81 @@ func TestGateToolPolicy_DenyBlocksRealToolCall(t *testing.T) {
 	}
 }
 
-// TestGateToolPolicy_AskCreatesInboxAndAwaits proves an Ask row routes through
-// the inbox + await machinery and continues when a human approves.
-func TestGateToolPolicy_AskCreatesInboxAndAwaits(t *testing.T) {
+// TestGateToolPolicy_ExpiredRoleBindingIsRejectedAtCallTime proves the live
+// Gateway resolve does not keep using a role after its binding expires. The
+// same role denies while active, then disappears from the very next call after
+// its database expiry is moved into the past.
+func TestGateToolPolicy_ExpiredRoleBindingIsRejectedAtCallTime(t *testing.T) {
+	e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
+	ctx := context.Background()
+	const tool = "web_fetch"
+
+	var roleID pgtype.UUID
+	if err := runtimeAccountTestPool.QueryRow(ctx, `
+		INSERT INTO cerebro_role (workspace_id, name, permissions)
+		VALUES ($1, $2, jsonb_build_object($3::text, jsonb_build_object('setting', 'deny')))
+		RETURNING id`, runtimeAccountTestWSID, fmt.Sprintf("expiring-gateway-role-%d", toolPolicyGateProbeSequence.Add(1)), tool).Scan(&roleID); err != nil {
+		if strings.Contains(err.Error(), `column "permissions"`) {
+			t.Skip("FIR-3402 role migration not present in test database")
+		}
+		t.Fatalf("create expiring role: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = runtimeAccountTestPool.Exec(context.Background(), `DELETE FROM cerebro_role WHERE id=$1`, roleID)
+	})
+	if _, err := runtimeAccountTestPool.Exec(ctx, `
+		INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, expires_at)
+		VALUES ($1, 'agent', $2, now() + interval '1 hour')`, roleID, agentID); err != nil {
+		t.Fatalf("assign expiring role: %v", err)
+	}
+
+	if allowed, _ := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, tool, nil, policyTestRegistry(tool), GatewayRequestMeta{}); allowed {
+		t.Fatal("active deny role must block the live Gateway call")
+	}
+	if _, err := runtimeAccountTestPool.Exec(ctx, `UPDATE cerebro_role_assignment SET expires_at=now() - interval '1 second' WHERE role_id=$1 AND subject_id=$2`, roleID, agentID); err != nil {
+		t.Fatalf("expire role binding: %v", err)
+	}
+	if allowed, reason := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, tool, nil, policyTestRegistry(tool), GatewayRequestMeta{}); !allowed {
+		t.Fatalf("expired role binding still affected live Gateway call: %s", reason)
+	}
+}
+
+// TestGateToolPolicy_AskFailsClosed proves the authoritative Policy Decision
+// Service never turns an unresolved generic Ask into tool access.
+func TestGateToolPolicy_AskFailsClosed(t *testing.T) {
 	ap := &gateFakeApprovals{status: approvals.StatusApproved} // human already approved
 	e, agentID := newToolPolicyGatedExecutor(t, ap)
 	const tool = "web_fetch"
 	setAgentToolPolicy(t, agentID, tool, toolpolicy.SettingAsk)
 
 	// A human triggered this run, so the Ask has someone to answer it.
-	allowed, _ := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, nil, GatewayRequestMeta{TriggerUserID: "11111111-1111-1111-1111-111111111111"})
-	if !allowed {
-		t.Fatal("approved Ask must let the tool continue")
+	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, policyTestRegistry(tool), GatewayRequestMeta{TriggerUserID: "11111111-1111-1111-1111-111111111111"})
+	if allowed || reason == "" {
+		t.Fatalf("generic Ask must fail closed; got allowed=%v reason=%q", allowed, reason)
 	}
-	if ap.intakes != 1 {
-		t.Fatalf("Ask must create exactly one inbox request, got %d", ap.intakes)
+	if ap.intakes != 0 {
+		t.Fatalf("generic Ask must not bypass the policy service through an inbox request, got %d", ap.intakes)
 	}
 }
 
-// TestGateToolPolicy_AskRejectedBlocks proves the same Ask row stops the tool
-// when the human rejects.
+// TestGateToolPolicy_AskRejectedBlocks proves the same Ask row remains denied
+// regardless of the approval fake's configured outcome.
 func TestGateToolPolicy_AskRejectedBlocks(t *testing.T) {
 	ap := &gateFakeApprovals{status: approvals.StatusRejected}
 	e, agentID := newToolPolicyGatedExecutor(t, ap)
 	const tool = "web_fetch"
 	setAgentToolPolicy(t, agentID, tool, toolpolicy.SettingAsk)
 
-	// A human triggered this run, so the Ask reaches the inbox before being rejected.
-	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, nil, GatewayRequestMeta{TriggerUserID: "11111111-1111-1111-1111-111111111111"})
+	// A human trigger does not weaken the Policy Decision Service's fail-closed Ask.
+	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, policyTestRegistry(tool), GatewayRequestMeta{TriggerUserID: "11111111-1111-1111-1111-111111111111"})
 	if allowed {
 		t.Fatal("rejected Ask must block the tool")
 	}
 	if reason == "" {
 		t.Fatal("rejected call must carry a reason")
 	}
-	if ap.intakes != 1 {
-		t.Fatalf("Ask must create exactly one inbox request, got %d", ap.intakes)
+	if ap.intakes != 0 {
+		t.Fatalf("generic Ask must be denied before approval intake, got %d", ap.intakes)
 	}
 }
 
@@ -277,7 +337,7 @@ func TestGateToolPolicy_SystemRunAskBecomesDeny(t *testing.T) {
 	setAgentToolPolicy(t, agentID, tool, toolpolicy.SettingAsk)
 
 	// No triggering human → System run. The Ask must collapse to Deny.
-	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, nil, GatewayRequestMeta{})
+	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, tool, nil, policyTestRegistry(tool), GatewayRequestMeta{})
 	if allowed {
 		t.Fatal("a System run (no human) must not let an Ask tool through")
 	}
@@ -289,16 +349,12 @@ func TestGateToolPolicy_SystemRunAskBecomesDeny(t *testing.T) {
 	}
 }
 
-// TestGateToolPolicy_WorkspaceFlagOffBypassesGate proves the cerebro_approval_gate
-// workspace flag is honoured: with the flag set OFF for the workspace, even a Deny
-// row on the agent layer is bypassed — guardToolCall returns allowed before it
-// ever resolves the chain — so an admin can disable enforcement from Settings →
-// Features without a server restart. The default-ON path is exercised by every
-// other test here (no flag row → GetCerebroFeatureFlag default true).
-func TestGateToolPolicy_WorkspaceFlagOffBypassesGate(t *testing.T) {
+// TestGateToolPolicy_WorkspaceApprovalFlagCannotBypassPolicy proves the approval
+// inbox feature flag never disables the authoritative Policy Decision Service.
+func TestGateToolPolicy_WorkspaceApprovalFlagCannotBypassPolicy(t *testing.T) {
 	ap := &gateFakeApprovals{}
 	e, agentID := newToolPolicyGatedExecutor(t, ap)
-	const tool = "deploy_restart"
+	const tool = "web_fetch"
 	setAgentToolPolicy(t, agentID, tool, toolpolicy.SettingDeny)
 
 	// Turn the workspace flag OFF (all-zero sentinel user_id = workspace-level row).
@@ -317,9 +373,9 @@ func TestGateToolPolicy_WorkspaceFlagOffBypassesGate(t *testing.T) {
 			runtimeAccountTestWSID)
 	})
 
-	allowed, _ := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, tool, nil, nil, GatewayRequestMeta{})
-	if !allowed {
-		t.Fatal("with cerebro_approval_gate OFF, even a Deny row must be bypassed")
+	allowed, _ := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, tool, nil, policyTestRegistry(tool), GatewayRequestMeta{})
+	if allowed {
+		t.Fatal("cerebro_approval_gate OFF must not bypass a Policy Decision Service Deny")
 	}
 	if ap.intakes != 0 {
 		t.Fatalf("a bypassed gate must not create an inbox request, got %d", ap.intakes)
@@ -333,7 +389,7 @@ func TestGateToolPolicy_UnconfiguredToolAllowed(t *testing.T) {
 	ap := &gateFakeApprovals{}
 	e, agentID := newToolPolicyGatedExecutor(t, ap)
 
-	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, "add_comment", nil, nil, GatewayRequestMeta{})
+	allowed, reason := e.guardToolCall(context.Background(), agentID, runtimeAccountTestWSID, "add_comment", nil, policyTestRegistry("add_comment"), GatewayRequestMeta{})
 	if !allowed || reason != "" {
 		t.Fatalf("unconfigured tool must be allowed; got allowed=%v reason=%q", allowed, reason)
 	}

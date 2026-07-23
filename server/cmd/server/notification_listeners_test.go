@@ -28,6 +28,24 @@ func inboxItemsForRecipient(t *testing.T, queries *db.Queries, recipientID strin
 	return items
 }
 
+// CEREBRO-PATCH(notification-audience-split-tests): FIR-3650 verifies both follower default destinations.
+func assertInboxAndNotificationsRoutes(t *testing.T, items []db.ListInboxItemsRow, notificationType string) {
+	t.Helper()
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items for %s, got %d", notificationType, len(items))
+	}
+	routeCounts := map[string]int{}
+	for _, item := range items {
+		if item.Type != notificationType {
+			t.Fatalf("expected type %q, got %q", notificationType, item.Type)
+		}
+		routeCounts[item.Route]++
+	}
+	if routeCounts[routeInbox] != 1 || routeCounts[routeNotifications] != 1 {
+		t.Fatalf("expected one inbox and one notifications item, got routes %+v", routeCounts)
+	}
+}
+
 // cleanupInboxForIssue deletes all inbox items related to a given issue.
 func cleanupInboxForIssue(t *testing.T, issueID string) {
 	t.Helper()
@@ -735,31 +753,24 @@ func TestNotification_StatusChanged(t *testing.T) {
 		t.Fatalf("expected 0 inbox items for actor, got %d", len(actorItems))
 	}
 
-	// sub1 should get a status_changed notification
+	// CEREBRO-PATCH(notification-audience-split-tests): FIR-3650 follower defaults add Inbox without removing Notifications.
+	// sub1 should get the follower defaults: Inbox plus Notifications.
 	sub1Items := inboxItemsForRecipient(t, queries, sub1ID)
-	if len(sub1Items) != 1 {
-		t.Fatalf("expected 1 inbox item for sub1, got %d", len(sub1Items))
-	}
-	if sub1Items[0].Type != "status_changed" {
-		t.Fatalf("expected type 'status_changed', got %q", sub1Items[0].Type)
-	}
-	if sub1Items[0].Severity != "info" {
-		t.Fatalf("expected severity 'info', got %q", sub1Items[0].Severity)
-	}
+	assertInboxAndNotificationsRoutes(t, sub1Items, "status_changed")
 	// Title is now just the issue title; details contain from/to
 	expectedTitle := "status test issue"
-	if sub1Items[0].Title != expectedTitle {
-		t.Fatalf("expected title %q, got %q", expectedTitle, sub1Items[0].Title)
+	for _, item := range sub1Items {
+		if item.Severity != "info" {
+			t.Fatalf("expected severity 'info', got %q", item.Severity)
+		}
+		if item.Title != expectedTitle {
+			t.Fatalf("expected title %q, got %q", expectedTitle, item.Title)
+		}
 	}
 
-	// sub2 should also get a status_changed notification
+	// sub2 should get the same follower defaults.
 	sub2Items := inboxItemsForRecipient(t, queries, sub2ID)
-	if len(sub2Items) != 1 {
-		t.Fatalf("expected 1 inbox item for sub2, got %d", len(sub2Items))
-	}
-	if sub2Items[0].Type != "status_changed" {
-		t.Fatalf("expected type 'status_changed', got %q", sub2Items[0].Type)
-	}
+	assertInboxAndNotificationsRoutes(t, sub2Items, "status_changed")
 }
 
 // TestNotification_CommentCreated verifies that all subscribers except the
@@ -1346,17 +1357,15 @@ func TestNotification_ParentBubble_StatusChanged(t *testing.T) {
 		},
 	})
 
+	// CEREBRO-PATCH(notification-audience-split-tests): FIR-3650 preserves both follower destinations on parent bubbling.
 	items := inboxItemsForRecipient(t, queries, parentSubID)
-	if len(items) != 1 {
-		t.Fatalf("expected 1 inbox item bubbled to parent subscriber, got %d", len(items))
-	}
-	if items[0].Type != "status_changed" {
-		t.Fatalf("expected type 'status_changed', got %q", items[0].Type)
-	}
+	assertInboxAndNotificationsRoutes(t, items, "status_changed")
 	// The inbox item should point to the sub-issue, not the parent.
-	if util.UUIDToString(items[0].IssueID) != subID {
-		t.Fatalf("expected inbox item issue_id=%s (sub-issue), got %s",
-			subID, util.UUIDToString(items[0].IssueID))
+	for _, item := range items {
+		if util.UUIDToString(item.IssueID) != subID {
+			t.Fatalf("expected inbox item issue_id=%s (sub-issue), got %s",
+				subID, util.UUIDToString(item.IssueID))
+		}
 	}
 }
 

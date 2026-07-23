@@ -23,8 +23,12 @@ func TestIsKnownCapability(t *testing.T) {
 	}{
 		{CapabilityCreateRuntime, true},
 		{CapabilityCreateAgent, true},
+		{CapabilityAppsCreate, true},
+		{CapabilityAppsManage, true},
+		{CapabilityAppsDelete, true},
 		{CapabilityCreateSharedFilters, true},
 		{CapabilityCreateMemory, true},
+		{CapabilitySetBlockingGate, true},
 		{"", false},
 		{"manage_billing", false},
 		{"CREATE_RUNTIME", false}, // case-sensitive
@@ -60,6 +64,9 @@ func TestAdminOverride_SkipsDB(t *testing.T) {
 	if ok, err := svc.CanSeeProjectViaGroup(ctx, viewer, uuid(5)); err != nil || !ok {
 		t.Fatalf("admin CanSeeProjectViaGroup: ok=%v err=%v", ok, err)
 	}
+	if ok, err := svc.CanSetBlockingGate(ctx, viewer, ws); err != nil || !ok {
+		t.Fatalf("admin CanSetBlockingGate: ok=%v err=%v", ok, err)
+	}
 }
 
 // Non-admin, no user id — also short-circuits to false without touching DB.
@@ -80,6 +87,9 @@ func TestUnauthenticatedViewer_DeniesWithoutDB(t *testing.T) {
 	}
 	if ok, err := svc.CanSeeProjectViaGroup(ctx, viewer, uuid(5)); err != nil || ok {
 		t.Fatalf("unauthenticated CanSeeProjectViaGroup: ok=%v err=%v", ok, err)
+	}
+	if ok, err := svc.CanSetBlockingGate(ctx, viewer, ws); err != nil || ok {
+		t.Fatalf("unauthenticated CanSetBlockingGate: ok=%v err=%v", ok, err)
 	}
 }
 
@@ -296,6 +306,30 @@ func TestCapability_RoundTrip(t *testing.T) {
 	err = svc.RemoveCapability(ctx, gpTestWorkspaceID, gpTestUserID, gpTestGroupID, "manage_billing")
 	if !errors.Is(err, ErrUnknownCapability) {
 		t.Fatalf("expected ErrUnknownCapability, got %v", err)
+	}
+}
+
+// Blocking-gate capability: a non-admin needs the set_blocking_gate grant to
+// pass CanSetBlockingGate; without it, denied. FIR-3496.
+func TestSetBlockingGate_RoundTrip(t *testing.T) {
+	svc := newGPTestService(t)
+	ctx := context.Background()
+	viewer := Viewer{UserID: gpTestUserID}
+
+	if ok, err := svc.CanSetBlockingGate(ctx, viewer, gpTestWorkspaceID); err != nil || ok {
+		t.Fatalf("CanSetBlockingGate before grant: ok=%v err=%v", ok, err)
+	}
+	if _, err := svc.SetCapability(ctx, gpTestWorkspaceID, gpTestUserID, gpTestGroupID, CapabilitySetBlockingGate); err != nil {
+		t.Fatalf("SetCapability(set_blocking_gate) failed: %v", err)
+	}
+	if ok, err := svc.CanSetBlockingGate(ctx, viewer, gpTestWorkspaceID); err != nil || !ok {
+		t.Fatalf("CanSetBlockingGate after grant: ok=%v err=%v", ok, err)
+	}
+	if err := svc.RemoveCapability(ctx, gpTestWorkspaceID, gpTestUserID, gpTestGroupID, CapabilitySetBlockingGate); err != nil {
+		t.Fatalf("RemoveCapability failed: %v", err)
+	}
+	if ok, err := svc.CanSetBlockingGate(ctx, viewer, gpTestWorkspaceID); err != nil || ok {
+		t.Fatalf("CanSetBlockingGate after revoke: ok=%v err=%v", ok, err)
 	}
 }
 

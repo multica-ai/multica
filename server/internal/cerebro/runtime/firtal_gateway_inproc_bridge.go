@@ -9,20 +9,14 @@ package runtime
 // the task's own identity — so authorization is decided exactly as it would be
 // for a remote CLI call, never bypassed.
 //
-// Default OFF: SetInProcessBridge is only called by the server when the
-// MULTICA_SERVER_FIRTAL_GATEWAY_INPROCESS_BRIDGE env flag is set, so the fleet
-// is completely unaffected until the rollout switch is flipped. Even with the
-// flag on, a bridged tool is only EXPOSED to the model once the runtime's tool
-// cascade / permission policy enables it (the authoritative per-runtime lever):
+// The bridge is wired whenever the server supplies its router. A bridged tool
+// is only EXPOSED to the model once the canonical permission policy enables it:
 // the bridge supplies the handlers; the cascade decides what is callable. The
 // admin denylist is a static safety net beside that lever.
 
 import (
 	"context"
 	"net/http"
-	"os"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -34,22 +28,11 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// inProcBridgeEnvFlag gates the FIR-1449 in-process bridge. Default off.
-const inProcBridgeEnvFlag = "MULTICA_SERVER_FIRTAL_GATEWAY_INPROCESS_BRIDGE"
-
-// MaybeEnableInProcessBridge enables the in-process bridge on e when the
-// MULTICA_SERVER_FIRTAL_GATEWAY_INPROCESS_BRIDGE env flag is truthy, handing it
-// the server's router. No-op otherwise, so the fleet is unaffected by default.
-// Mirrors MaybeEnableApprovalGate's controlled-rollout pattern.
+// MaybeEnableInProcessBridge wires the in-process bridge. The historical
+// server environment switch was intentionally removed: exposure is governed
+// by the canonical policy service, not by a second server-side switch.
 func MaybeEnableInProcessBridge(e *FirtalGatewayExecutor, handler http.Handler) {
 	if e == nil || handler == nil {
-		return
-	}
-	raw := strings.TrimSpace(os.Getenv(inProcBridgeEnvFlag))
-	if raw == "" {
-		return
-	}
-	if on, err := strconv.ParseBool(raw); err != nil || !on {
 		return
 	}
 	e.SetInProcessBridge(handler)

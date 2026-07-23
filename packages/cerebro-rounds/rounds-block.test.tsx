@@ -1,11 +1,14 @@
 // @vitest-environment jsdom
 import "@testing-library/jest-dom/vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { IssueRoundsSectionView, RoundsBlock } from "./rounds-block";
 import type { RoundStatus } from "./schemas";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const status = (handled = false, active = true): RoundStatus => ({
   round: { id: "round-1", workspace_id: "ws", owner_id: "owner", name: "Daily", created_at: "", updated_at: "" },
@@ -76,6 +79,58 @@ describe("RoundsBlock", () => {
     expect(onStart).toHaveBeenCalledWith("round-1");
   });
 
+  it("automatically expands every round with matching messages and searches across all views (FIR-3440)", () => {
+    const weekly = status(true);
+    weekly.round = { ...weekly.round, id: "round-2", name: "Weekly" };
+    weekly.members = [{ ...weekly.members[0]!, round_id: "round-2", issue_id: "weekly" }];
+    weekly.active_cycle = {
+      ...weekly.active_cycle!,
+      id: "cycle-2",
+      round_id: "round-2",
+      items: [{ issue_id: "weekly", handled_at: null }],
+    };
+
+    render(
+      <RoundsBlock
+        statuses={[status(true), weekly]}
+        {...props}
+        issueTitles={{
+          ...props.issueTitles,
+          ready: "Returns ready",
+          handled: "Returns handled",
+          running: "Pricing running",
+          wakeup: "Pricing wakeup",
+          weekly: "Returns weekly",
+        }}
+        messageIssueIds={["handled", "ready", "running", "wakeup", "weekly"]}
+        renderIssue={(issueId) => <div data-testid={`row-${issueId}`}>{issueId}</div>}
+      />,
+    );
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), {
+      target: { value: "returns" },
+    });
+
+    expect(screen.getByRole("button", { name: "Collapse Daily" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Collapse Weekly" })).toBeInTheDocument();
+    expect(screen.getByTestId("row-ready")).toBeInTheDocument();
+    expect(screen.getByTestId("row-handled")).toBeInTheDocument();
+    expect(screen.getByTestId("row-weekly")).toBeInTheDocument();
+    expect(screen.queryByTestId("row-running")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("row-wakeup")).not.toBeInTheDocument();
+  });
+
+  it("does not expand a round when only an issue without an Inbox message matches", () => {
+    render(<RoundsBlock statuses={[status(true)]} {...props} />);
+
+    fireEvent.change(screen.getByRole("searchbox", { name: "Search Rounds" }), {
+      target: { value: "orphan" },
+    });
+
+    expect(screen.getByRole("button", { name: "Expand Daily" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Orphan issue" })).not.toBeInTheDocument();
+  });
+
   it("offers Pause only for an active snapshot and folds it away", () => {
     const onPause = vi.fn();
     const { rerender } = render(<RoundsBlock statuses={[status()]} {...props} onPause={onPause} />);
@@ -87,6 +142,45 @@ describe("RoundsBlock", () => {
     rerender(<RoundsBlock statuses={[status(false, false)]} {...props} onPause={onPause} />);
     expect(screen.queryByRole("button", { name: "Pause Daily" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Play Daily" })).toBeInTheDocument();
+  });
+
+  it("keeps green Pause available on a completed Round so it can be closed immediately", () => {
+    const onPause = vi.fn();
+    const completed = status(true);
+    completed.active_cycle!.items = completed.active_cycle!.items.map((item) => ({
+      ...item,
+      handled_at: "2026-07-14T12:01:00Z",
+    }));
+
+    render(<RoundsBlock statuses={[completed]} {...props} onPause={onPause} />);
+
+    expect(screen.getByText("Complete")).toBeInTheDocument();
+    const pause = screen.getByRole("button", { name: "Pause Daily" });
+    expect(pause).toHaveClass("bg-success");
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Daily" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("All ready messages handled.");
+
+    fireEvent.click(pause);
+    expect(onPause).toHaveBeenCalledWith("round-1");
+  });
+
+  it("automatically closes a completed Round after one minute", () => {
+    vi.useFakeTimers();
+    const onPause = vi.fn();
+    const completed = status(true);
+    completed.active_cycle!.items = completed.active_cycle!.items.map((item) => ({
+      ...item,
+      handled_at: "2026-07-14T12:01:00Z",
+    }));
+
+    render(<RoundsBlock statuses={[completed]} {...props} onPause={onPause} />);
+
+    act(() => vi.advanceTimersByTime(59_999));
+    expect(onPause).not.toHaveBeenCalled();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(onPause).toHaveBeenCalledWith("round-1");
   });
 });
 

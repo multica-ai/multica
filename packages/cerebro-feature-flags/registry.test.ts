@@ -53,6 +53,20 @@ describe("cerebro feature flag grouping", () => {
     expect(CEREBRO_FLAG_DEFAULTS.cerebro_pi_harness).toBe(true);
   });
 
+  it("ships the Projects tree table dark behind a workspace kill switch", () => {
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_projects_tree).toBe(false);
+    expect(CEREBRO_FLAGS.find((flag) => flag.key === "cerebro_projects_tree")?.group).toBe(
+      "workspace",
+    );
+  });
+
+  it("ships note version history on (FIR-3601 item 6 — built + server-tested)", () => {
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_note_versions).toBe(true);
+    // Document-level history is a separate, still-gated rollout — keep it off
+    // so flipping notes on does not silently enable documents too.
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_document_versions).toBe(false);
+  });
+
   it("has unique group keys", () => {
     expect(groupKeys.size).toBe(CEREBRO_FLAG_GROUPS.length);
   });

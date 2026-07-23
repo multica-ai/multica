@@ -1,7 +1,6 @@
 // Package claudehook holds the pure, IO-free helpers a Claude Code PreToolUse
 // hook needs: parsing the stdin payload Claude sends per tool call, deciding
-// whether a tool is gated (vs default-allow read/planning tools that never need
-// a permission round-trip), and extracting the operator-meaningful resource
+// whether a payload names a real tool, and extracting the operator-meaningful resource
 // pattern (shell binary, file path, URL, …) a policy chain can refine on.
 //
 // It is the shared half of the local-runtime per-tool enforcement seam
@@ -77,34 +76,11 @@ func (in Input) Dir() string {
 	return in.Workdir
 }
 
-// gatedTools is the set of Claude Code built-in tools that carry a real side
-// effect (execute, write, fetch, delegate) and are therefore resolved against
-// the tool-policy chain. Everything NOT in this set — Read, Grep, Glob,
-// TodoWrite, ToolSearch, Skill, ScheduleWakeup, Monitor, EnterPlanMode,
-// ExitPlanMode, AskUserQuestion — is default-allow: the hook short-circuits to
-// allow without any permission round-trip, exactly as the persona hook does.
-// Keeping the gated set to the impactful tools bounds the per-tool resolve
-// traffic to the calls that can actually change or reach outside the workdir.
-//
-// MCP tools (mcp__<server>__<action>) are always gated via the prefix check in
-// Gated, so a per-connection Deny/Ask reaches local runtimes too.
-var gatedTools = map[string]bool{
-	"Bash":         true,
-	"Write":        true,
-	"Edit":         true,
-	"NotebookEdit": true,
-	"WebFetch":     true,
-	"WebSearch":    true,
-	"Task":         true,
-}
-
 // Gated reports whether a tool call must be resolved against the policy chain.
-// A non-gated tool is default-allow and never triggers a resolve round-trip.
+// Every named tool is gated so a provider cannot grow an enforcement-free
+// built-in simply by adding a new tool name.
 func Gated(tool string) bool {
-	if gatedTools[tool] {
-		return true
-	}
-	return strings.HasPrefix(tool, "mcp__")
+	return strings.TrimSpace(tool) != ""
 }
 
 // PolicyToolKey maps a Claude Code tool name to the canonical capability key the

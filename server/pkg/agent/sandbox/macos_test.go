@@ -391,7 +391,8 @@ func TestGenerate_AllowedHostsBecomeNetworkRules(t *testing.T) {
 	}
 	wants := []string{
 		`(allow network-outbound (remote tcp "localhost:19514"))`,
-		`(allow network-outbound (remote tcp "*:443"))`,
+		// CEREBRO-PATCH(macos26-seatbelt-port-glob): public host → portless "*:*"
+		`(allow network-outbound (remote tcp "*:*"))`,
 	}
 	for _, w := range wants {
 		if !strings.Contains(out, w) {
@@ -469,35 +470,36 @@ func TestTranslateAllowlistToTCPRules(t *testing.T) {
 			},
 		},
 		{
-			name: "different public hosts on same port collapse to one wildcard rule",
+			// CEREBRO-PATCH(macos26-seatbelt-port-glob): public hosts collapse
+			// to a single portless "*:*" rule (macOS 26 drops port-scoped rules).
+			name: "public hosts collapse to one wildcard all-ports rule",
 			in:   []string{"api.anthropic.com:443", "statsig.anthropic.com:443"},
 			want: []string{
-				`(allow network-outbound (remote tcp "*:443"))`,
+				`(allow network-outbound (remote tcp "*:*"))`,
 			},
 		},
 		{
-			name: "loopback and public on same port produce two distinct rules",
+			name: "loopback and public produce distinct rules",
 			in:   []string{"127.0.0.1:443", "api.anthropic.com:443"},
 			want: []string{
 				`(allow network-outbound (remote tcp "localhost:443"))`,
-				`(allow network-outbound (remote tcp "*:443"))`,
+				`(allow network-outbound (remote tcp "*:*"))`,
 			},
 		},
 		{
-			name: "loopback rules sort before public; ports sort lexicographically within group",
+			name: "loopback rules sort before the single public wildcard rule",
 			in:   []string{"api.example.com:80", "api.example.com:443", "localhost:9000", "localhost:80"},
 			want: []string{
 				`(allow network-outbound (remote tcp "localhost:80"))`,
 				`(allow network-outbound (remote tcp "localhost:9000"))`,
-				`(allow network-outbound (remote tcp "*:443"))`,
-				`(allow network-outbound (remote tcp "*:80"))`,
+				`(allow network-outbound (remote tcp "*:*"))`,
 			},
 		},
 		{
 			name: "garbage entries are dropped",
 			in:   []string{"", "  ", "not-a-host-port", ":443", "host:", "api.anthropic.com:443"},
 			want: []string{
-				`(allow network-outbound (remote tcp "*:443"))`,
+				`(allow network-outbound (remote tcp "*:*"))`,
 			},
 		},
 	}

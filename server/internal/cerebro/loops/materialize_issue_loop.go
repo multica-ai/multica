@@ -1,34 +1,18 @@
 package loops
 
-// materialize_issue_loop.go implements workflows.IssueLoopCompiler: the
-// bridge from a saved Issue workflow recipe (workflow_type == "issue_loop",
-// its loop_spec column) to the engine actually running it. This is the
-// "Compile() is never called from the live app" gap FIR-2283's plan
-// identified — SyncIssueLoop is what closes it.
-//
-// On every Create/Update of an issue_loop workflow, workflows.Handler calls
-// SyncIssueLoop, which:
-//  1. parses loop_spec into a Spec (plus the issue-specific CompileParams
-//     bindings the editor collects alongside it — worker agent/skill,
-//     planning agent/skill, status names),
-//  2. calls Compile to get the dispatch/gate/escalate rules,
-//  3. deletes any rules a previous sync generated for this recipe, and
-//  4. persists the fresh set as real cerebro_workflow rows (workflow_type
-//     stays "standard" on those — they are literally standard rules, just
-//     machine-authored), each tagged back to the recipe via
-//     generated_from_workflow_id so List can hide them and a future sync can
-//     find and replace them.
-//
-// Reuses the same "loops writes directly through cerebrodb" pattern
-// materialize.go already established for the planning-dispatch rule — no new
-// dependency shape, just a second write path through the same seam.
+// This file is the live bridge from an Issue workflow recipe to the block
+// chain runtime. Version 1 recipes are migrated in migration 9147; the server
+// intentionally accepts only ChainVersion after that cutover.
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/workflows"
@@ -36,260 +20,396 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// WorkspaceSkillLister lists the skills defined in a workspace so an
-// issue_loop recipe's plan/build skills can be checked for existence at
-// save time (FIR-2283 followup). Satisfied directly by *db.Queries, so
-// router.go passes the upstream queries handle with no adapter.
 type WorkspaceSkillLister interface {
-	ListSkillSummariesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListSkillSummariesByWorkspaceRow, error)
+	ListSkillSummariesByWorkspace(context.Context, pgtype.UUID) ([]db.ListSkillSummariesByWorkspaceRow, error)
 }
 
-// IssueLoopBridge implements workflows.IssueLoopCompiler over the generated
-// cerebro DB queries and the issue-loop column store.
+// EvalBindingKey identifies one quality gate bound to a workflow. The engine
+// resolves an eval block on the pair, not the key alone: the block runner joins
+// on `e.eval_key = block.EvalKey AND b.phase = block.EvalPhase`, so a key bound
+// at the wrong phase is just as unresolvable as a key that was never bound.
+type EvalBindingKey struct {
+	EvalKey string
+	Phase   string
+}
+
+type MonitorEvalBindingLister interface {
+	ListMonitorAdvisoryEvalKeys(context.Context, pgtype.UUID) ([]string, error)
+	// ListEvalBindingKeys returns every gate bound to this workflow, at every
+	// phase, so a recipe naming an unbound gate can be rejected at save time.
+	ListEvalBindingKeys(context.Context, pgtype.UUID) ([]EvalBindingKey, error)
+}
+
 type IssueLoopBridge struct {
-	queries *cerebrodb.Queries
-	columns *workflows.IssueLoopColumnStore
-	// skills is optional and nil-safe: without it, a recipe's plan/build
-	// skills are not existence-checked at save time (the runtime run_skill
-	// dispatch still fails hard on a missing skill). Wired via WithSkillLister.
-	skills WorkspaceSkillLister
+	pool         *pgxpool.Pool
+	queries      *cerebrodb.Queries
+	issues       *db.Queries
+	columns      *workflows.IssueLoopColumnStore
+	skills       WorkspaceSkillLister
+	monitorEvals MonitorEvalBindingLister
+	driver       *ChainDriver
+	dispatcher   *TaskDispatcher
 }
 
-// NewIssueLoopBridge builds an IssueLoopBridge over the given queries and
-// issue-loop column store.
-func NewIssueLoopBridge(queries *cerebrodb.Queries, columns *workflows.IssueLoopColumnStore) *IssueLoopBridge {
-	return &IssueLoopBridge{queries: queries, columns: columns}
+func NewIssueLoopBridge(pool *pgxpool.Pool, queries *cerebrodb.Queries, issues *db.Queries, columns *workflows.IssueLoopColumnStore) *IssueLoopBridge {
+	dispatcher := NewTaskDispatcher(issues)
+	return &IssueLoopBridge{pool: pool, queries: queries, issues: issues, columns: columns, dispatcher: dispatcher, driver: NewChainDriver(NewStore(pool), dispatcher)}
 }
 
-// WithSkillLister plugs in the workspace skill lister used to reject a recipe
-// whose plan_skill/build_skill names don't exist in the workspace, at save
-// time instead of at dispatch time. Optional and nil-safe; returns the
-// receiver for chainable init.
+func (b *IssueLoopBridge) WithEvalBlockRunner(r EvalBlockRunner) *IssueLoopBridge {
+	b.dispatcher.WithEvalBlockRunner(r)
+	return b
+}
+
+func (b *IssueLoopBridge) WithBusyWakeupScheduler(s BusyWakeupScheduler) *IssueLoopBridge {
+	b.dispatcher.WithBusyWakeupScheduler(s)
+	return b
+}
+
 func (b *IssueLoopBridge) WithSkillLister(l WorkspaceSkillLister) *IssueLoopBridge {
 	b.skills = l
 	return b
 }
 
-// validateSkillsExist rejects a recipe that names a plan_skill / build_skill /
-// per-phase build_skill / judge_skill the workspace doesn't have. Nil-safe:
-// without a skill lister wired, it is a no-op (the runtime run_skill dispatch
-// still enforces existence, just later and less visibly). References are
-// checked in a fixed order so the first missing skill reported is
-// deterministic.
-func (b *IssueLoopBridge) validateSkillsExist(ctx context.Context, workspaceID pgtype.UUID, wire issueLoopSpecWire) error {
+func (b *IssueLoopBridge) WithMonitorEvalBindingLister(l MonitorEvalBindingLister) *IssueLoopBridge {
+	b.monitorEvals = l
+	return b
+}
+
+func (b *IssueLoopBridge) withMonitorEvalBindings(ctx context.Context, workflowID pgtype.UUID, chain *Chain) (*Chain, error) {
+	if b.monitorEvals == nil {
+		return chain, nil
+	}
+	keys, err := b.monitorEvals.ListMonitorAdvisoryEvalKeys(ctx, workflowID)
+	if err != nil {
+		return nil, fmt.Errorf("list monitor eval bindings: %w", err)
+	}
+	seen := make(map[string]bool)
+	phaseIDs := make(map[string]bool)
+	for _, phase := range chain.Phases {
+		phaseIDs[phase.ID] = true
+		for _, block := range phase.Blocks {
+			if block.Type == BlockEval && block.EvalPhase == "monitor" {
+				seen[block.EvalKey] = true
+			}
+		}
+	}
+	blocks := make([]Block, 0, len(keys))
+	for _, key := range keys {
+		if key == "" || seen[key] {
+			continue
+		}
+		seen[key] = true
+		blocks = append(blocks, Block{ID: "monitor-" + key, Type: BlockEval, EvalKey: key, EvalPhase: "monitor"})
+	}
+	if len(blocks) == 0 {
+		return chain, nil
+	}
+	copyChain := *chain
+	copyChain.Phases = append([]Phase(nil), chain.Phases...)
+	phaseID := "eval-monitor"
+	for n := 2; phaseIDs[phaseID]; n++ {
+		phaseID = fmt.Sprintf("eval-monitor-%d", n)
+	}
+	status := chain.DoneStatus
+	if status == "" {
+		status = "done"
+	}
+	copyChain.Phases = append(copyChain.Phases, Phase{ID: phaseID, Name: "Monitor evals", Status: status, Blocks: blocks, Limits: PhaseLimits{MaxSteps: len(blocks), MaxRounds: 1, NoProgressStalls: 1}})
+	return &copyChain, nil
+}
+
+func decodeChain(raw []byte) (*Chain, error) {
+	var chain Chain
+	if err := json.Unmarshal(raw, &chain); err != nil {
+		return nil, fmt.Errorf("loop_spec: invalid JSON: %w", err)
+	}
+	if chain.Version == 1 {
+		return nil, fmt.Errorf("loop_spec: version 1 is retired; run the Chain v2 migration")
+	}
+	if err := chain.Validate(); err != nil {
+		return nil, fmt.Errorf("loop_spec: %w", err)
+	}
+	return &chain, nil
+}
+
+func (b *IssueLoopBridge) validateSkillsExist(ctx context.Context, workspaceID pgtype.UUID, chain *Chain) error {
 	if b.skills == nil {
 		return nil
 	}
-	type ref struct{ label, name string }
-	refs := []ref{
-		{"plan_skill", wire.PlanSkill},
-		{"build_skill", wire.BuildSkill},
-		{"judge_skill", wire.JudgeSkill},
-	}
-	for i, ph := range wire.Spec.Phases {
-		refs = append(refs, ref{fmt.Sprintf("phases[%d].build_skill", i), ph.BuildSkill})
-	}
-	anyNamed := false
-	for _, r := range refs {
-		if r.name != "" {
-			anyNamed = true
-			break
-		}
-	}
-	if !anyNamed {
-		return nil
-	}
-	skills, err := b.skills.ListSkillSummariesByWorkspace(ctx, workspaceID)
+	rows, err := b.skills.ListSkillSummariesByWorkspace(ctx, workspaceID)
 	if err != nil {
 		return fmt.Errorf("loop_spec: verify skills: %w", err)
 	}
-	have := make(map[string]struct{}, len(skills))
-	for _, sk := range skills {
-		have[sk.Name] = struct{}{}
+	have := make(map[string]struct{}, len(rows))
+	for _, row := range rows {
+		have[row.Name] = struct{}{}
 	}
-	for _, r := range refs {
-		if r.name == "" {
-			continue
-		}
-		if _, ok := have[r.name]; !ok {
-			return fmt.Errorf("loop_spec: %s %q does not exist in this workspace", r.label, r.name)
+	for pi, phase := range chain.Phases {
+		for bi, block := range phase.Blocks {
+			for _, skill := range block.ConfiguredSkills() {
+				if _, ok := have[skill]; !ok {
+					return fmt.Errorf("loop_spec: phases[%d].blocks[%d].skill %q does not exist in this workspace", pi, bi, skill)
+				}
+			}
 		}
 	}
 	return nil
 }
 
-// issueLoopSpecWire is the JSON wire shape of an issue_loop recipe's
-// loop_spec column: the loops.Spec fields the Issue workflow editor sets
-// (embedded, so its keys flatten into the same JSON object), plus the
-// issue-specific bindings CompileParams needs that a hand-authored loop.yaml
-// would get from elsewhere (worker agent/skill, planning agent/skill, status
-// names, judge fallback).
-type issueLoopSpecWire struct {
-	Spec
-
-	// Build bindings — who builds, and what skill it runs each round.
-	BuildAgentID  string `json:"build_agent_id"`
-	BuildSkill    string `json:"build_skill"`
-	BuildModel    string `json:"build_model,omitempty"`
-	BuildThinking string `json:"build_thinking,omitempty"`
-
-	// Planning bindings — only meaningful when Spec.Planning is true.
-	// PlanAgentID is accepted for a future per-phase agent but not yet wired:
-	// Compile always dispatches the planning phase to the worker agent (see
-	// PlanningDispatchRule(params.AgentID, ...)), so today planning and build
-	// share the same agent regardless of PlanAgentID.
-	PlanAgentID  string `json:"plan_agent_id,omitempty"`
-	PlanSkill    string `json:"plan_skill,omitempty"`
-	PlanModel    string `json:"plan_model,omitempty"`
-	PlanThinking string `json:"plan_thinking,omitempty"`
-
-	// Status names. Empty falls back to CompileParams.withDefaults()
-	// (todo / in_progress / in_review / done).
-	PlanningStatus string `json:"planning_status,omitempty"`
-	BuildStatus    string `json:"build_status,omitempty"`
-	ReviewStatus   string `json:"review_status,omitempty"`
-	DoneStatus     string `json:"done_status,omitempty"`
-
-	// Spec-wide judge fallback bindings, used only by a judge check whose own
-	// Verification doesn't carry AssigneeID/Skill.
-	JudgeAgentID  string `json:"judge_agent_id,omitempty"`
-	JudgeSkill    string `json:"judge_skill,omitempty"`
-	JudgeModel    string `json:"judge_model,omitempty"`
-	JudgeThinking string `json:"judge_thinking,omitempty"`
+// An eval block whose key has no gate bound to this workflow used to save fine
+// and only fail mid-run, as `resolve eval block "…": no rows in result set`
+// from block_runner.go. Rejecting it here moves that failure to the moment the
+// user can still do something about it.
+func (b *IssueLoopBridge) validateEvalBindingsExist(ctx context.Context, workflowID pgtype.UUID, chain *Chain) error {
+	if b.monitorEvals == nil {
+		return nil
+	}
+	hasEvalBlock := false
+	for _, phase := range chain.Phases {
+		for _, block := range phase.Blocks {
+			if block.Type == BlockEval {
+				hasEvalBlock = true
+			}
+		}
+	}
+	if !hasEvalBlock {
+		return nil
+	}
+	bound, err := b.monitorEvals.ListEvalBindingKeys(ctx, workflowID)
+	if err != nil {
+		return fmt.Errorf("loop_spec: verify quality gates: %w", err)
+	}
+	have := make(map[EvalBindingKey]struct{}, len(bound))
+	for _, key := range bound {
+		have[key] = struct{}{}
+	}
+	for pi, phase := range chain.Phases {
+		for bi, block := range phase.Blocks {
+			if block.Type != BlockEval {
+				continue
+			}
+			// An empty phase means delivery everywhere else in the engine
+			// (block_runner.go), so it must mean delivery here too.
+			evalPhase := block.EvalPhase
+			if evalPhase == "" {
+				evalPhase = "delivery"
+			}
+			if _, ok := have[EvalBindingKey{EvalKey: block.EvalKey, Phase: evalPhase}]; !ok {
+				return fmt.Errorf("loop_spec: phases[%d].blocks[%d].eval_key %q has no %s gate bound to this workflow — bind it under Workflow gates first", pi, bi, block.EvalKey, evalPhase)
+			}
+		}
+	}
+	return nil
 }
 
-// SyncIssueLoop parses workflowID's loop_spec, compiles it PROJECT-WIDE, and
-// replaces its previously-generated project-wide child rules with the fresh
-// set. Called after every create/update of the recipe itself.
 func (b *IssueLoopBridge) SyncIssueLoop(ctx context.Context, workspaceID, workflowID, projectID, createdByID pgtype.UUID, createdByType string, loopSpecJSON []byte) error {
-	return b.syncIssueLoop(ctx, workspaceID, workflowID, projectID, createdByID, createdByType, loopSpecJSON, pgtype.UUID{})
+	chain, err := decodeChain(loopSpecJSON)
+	if err != nil {
+		return err
+	}
+	if err := b.validateSkillsExist(ctx, workspaceID, chain); err != nil {
+		return err
+	}
+	if err := b.validateEvalBindingsExist(ctx, workflowID, chain); err != nil {
+		return err
+	}
+	return b.columns.DeleteGeneratedChildren(ctx, workflowID)
 }
 
-// ActivateOnIssue compiles workflowID's saved recipe scoped to issueID alone
-// (FIR-2283 v2 point 8), independent from the project-wide compile and from
-// any other issue's activation of the same recipe.
 func (b *IssueLoopBridge) ActivateOnIssue(ctx context.Context, workspaceID, workflowID, projectID, createdByID, issueID pgtype.UUID, createdByType string, loopSpecJSON []byte) error {
 	if !issueID.Valid {
 		return fmt.Errorf("activate on issue: issueID is required")
 	}
-	return b.syncIssueLoop(ctx, workspaceID, workflowID, projectID, createdByID, createdByType, loopSpecJSON, issueID)
-}
-
-// syncIssueLoop is the shared compile-and-materialize path for both
-// SyncIssueLoop (issueID zero value — project-wide) and ActivateOnIssue
-// (issueID set). Delete-then-recreate always replaces the previous
-// generated set for the SAME scope rather than diffing, so a re-sync never
-// leaves a stale rule behind; DeleteGeneratedChildren[ForIssue] is scoped so
-// this never touches a different scope's rows.
-func (b *IssueLoopBridge) syncIssueLoop(ctx context.Context, workspaceID, workflowID, projectID, createdByID pgtype.UUID, createdByType string, loopSpecJSON []byte, issueID pgtype.UUID) error {
-	var wire issueLoopSpecWire
-	if err := json.Unmarshal(loopSpecJSON, &wire); err != nil {
-		return fmt.Errorf("loop_spec: invalid JSON: %w", err)
-	}
-	// build_agent_id is intentionally optional (FIR-2283 v2): a recipe with no
-	// pinned build agent falls back to the triggering issue's own assignee at
-	// dispatch time — see CompileParams.AgentID. A multi-phase recipe (FIR-2283
-	// followup point 6) carries the build skill per phase, so the top-level
-	// build_skill is not required there — Compile drives the loop from phase 0.
-	if wire.BuildSkill == "" && len(wire.Spec.Phases) == 0 {
-		return fmt.Errorf("loop_spec: build_skill is required")
-	}
-	// Reject a recipe that names a skill the workspace doesn't have, at save
-	// time — otherwise the miss only surfaces at dispatch as a "Workflow
-	// failed" issue ("agent does not have skill X attached"), invisible to the
-	// person who built the recipe (FIR-2283 followup).
-	if err := b.validateSkillsExist(ctx, workspaceID, wire); err != nil {
+	chain, err := decodeChain(loopSpecJSON)
+	if err != nil {
 		return err
 	}
-
-	params := CompileParams{
-		AgentID:        wire.BuildAgentID,
-		BuildSkill:     wire.BuildSkill,
-		BuildModel:     wire.BuildModel,
-		BuildThinking:  wire.BuildThinking,
-		BuildStatus:    wire.BuildStatus,
-		ReviewStatus:   wire.ReviewStatus,
-		DoneStatus:     wire.DoneStatus,
-		PlanAgentID:    wire.PlanAgentID,
-		PlanSkill:      wire.PlanSkill,
-		PlanModel:      wire.PlanModel,
-		PlanThinking:   wire.PlanThinking,
-		PlanningStatus: wire.PlanningStatus,
-		JudgeAgentID:   wire.JudgeAgentID,
-		JudgeSkill:     wire.JudgeSkill,
-		JudgeModel:     wire.JudgeModel,
-		JudgeThinking:  wire.JudgeThinking,
+	if err := b.validateSkillsExist(ctx, workspaceID, chain); err != nil {
+		return err
 	}
-	if issueID.Valid {
-		params.IssueID = util.UUIDToString(issueID)
+	if err := b.validateEvalBindingsExist(ctx, workflowID, chain); err != nil {
+		return err
 	}
-
-	rules, err := Compile(&wire.Spec, params)
-	if err != nil {
-		return fmt.Errorf("compile loop spec: %w", err)
-	}
-
-	if !issueID.Valid {
-		// FIR-2283 followup (Tine live-test finding): an Issue workflow recipe
-		// is a per-issue TEMPLATE — it only runs when activated on a specific
-		// issue (ActivateOnIssue). Compiling it project-wide materialized
-		// globally-firing rules (notably an unscoped loop:planning-dispatch)
-		// that fired on unrelated issues entering the planning status. So the
-		// project-wide sync on recipe save still Compiles above (to validate the
-		// recipe is runnable), but materializes NOTHING — it only cleans up any
-		// project-wide rules a previous save generated. Rules are created solely
-		// per-issue, in the issueID.Valid branch below.
-		return b.columns.DeleteGeneratedChildren(ctx, workflowID)
-	}
-
 	if err := b.columns.DeleteAllGeneratedChildrenForIssue(ctx, issueID); err != nil {
 		return err
 	}
-	for _, rule := range rules {
-		if err := b.materializeRule(ctx, workspaceID, workflowID, projectID, createdByID, createdByType, rule, issueID); err != nil {
+	if err := b.createActivationMarker(ctx, workspaceID, workflowID, projectID, createdByID, issueID, createdByType); err != nil {
+		return err
+	}
+	return b.advanceChain(ctx, workflowID, issueID, chain)
+}
+
+// ResolveHumanBlock records the authenticated decision at the durable Chain
+// v2 step and immediately re-enters the same chain.
+func (b *IssueLoopBridge) ResolveHumanBlock(ctx context.Context, workflowID, issueID pgtype.UUID, blockID string, approved bool, note, approverID string) error {
+	fields, err := b.columns.Get(ctx, workflowID)
+	if err != nil {
+		return err
+	}
+	chain, err := decodeChain(fields.LoopSpec)
+	if err != nil {
+		return err
+	}
+	store := NewStore(b.pool)
+	for _, phase := range chain.Phases {
+		steps, err := store.ListSteps(ctx, PhaseRunKey{IssueID: issueID, WorkflowID: workflowID, PhaseID: phase.ID})
+		if err != nil {
 			return err
 		}
+		for _, step := range steps {
+			if step.BlockID != blockID || (step.Status != StepWaiting && step.Status != StepRunning) {
+				continue
+			}
+			var block *Block
+			for i := range phase.Blocks {
+				if phase.Blocks[i].ID == blockID {
+					block = &phase.Blocks[i]
+					break
+				}
+			}
+			if block == nil || block.Type != BlockHuman || block.ApproverType != AssigneeMember || block.ApproverID != approverID {
+				return errors.New("not authorized to approve this human block")
+			}
+			status := StepCompleted
+			if !approved {
+				status = StepFailed
+			}
+			outcome, _ := json.Marshal(map[string]any{"approved": approved, "note": note})
+			if err := store.RecordStepOutcome(ctx, step.StepRef, status, outcome); err != nil {
+				return err
+			}
+			return b.advanceChain(ctx, workflowID, issueID, chain)
+		}
+	}
+	return fmt.Errorf("human block %q has no pending step", blockID)
+}
+
+// ReadIssueLoopState returns only the current member's actionable Human
+// blocks. It reads the Chain v2 tables directly rather than the retired
+// generated delivery-gate state.
+func (b *IssueLoopBridge) ReadIssueLoopState(ctx context.Context, workflowID, issueID pgtype.UUID, memberID string) (workflows.IssueLoopState, error) {
+	fields, err := b.columns.Get(ctx, workflowID)
+	if err != nil {
+		return workflows.IssueLoopState{}, err
+	}
+	chain, err := decodeChain(fields.LoopSpec)
+	if err != nil {
+		return workflows.IssueLoopState{}, err
+	}
+
+	state := workflows.IssueLoopState{PendingHumanChecks: []workflows.PendingHumanCheck{}}
+	store := NewStore(b.pool)
+	for _, phase := range chain.Phases {
+		key := PhaseRunKey{IssueID: issueID, WorkflowID: workflowID, PhaseID: phase.ID}
+		phaseState, err := store.LoadPhaseRun(ctx, key)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return workflows.IssueLoopState{}, err
+		}
+		if err == nil && phaseState.Status == PhaseFailed {
+			state.Stopped = true
+			state.StopReason = phaseState.FailureReason
+		}
+		steps, err := store.ListSteps(ctx, key)
+		if err != nil {
+			return workflows.IssueLoopState{}, err
+		}
+		for _, step := range steps {
+			if step.Status != StepWaiting {
+				continue
+			}
+			for _, block := range phase.Blocks {
+				if block.ID == step.BlockID && block.Type == BlockHuman && block.ApproverType == AssigneeMember && block.ApproverID == memberID {
+					state.PendingHumanChecks = append(state.PendingHumanChecks, workflows.PendingHumanCheck{CheckID: block.ID, Prompt: approvalPromptFromOutcome(block.Prompt, step.Outcome), AssigneeType: block.ApproverType, AssigneeID: block.ApproverID})
+					break
+				}
+			}
+		}
+	}
+	return state, nil
+}
+
+// ResumeActiveIssueLoops re-enters every binding retained by the cutover
+// migration. Durable step claims make repeated startup calls idempotent.
+func (b *IssueLoopBridge) ResumeActiveIssueLoops(ctx context.Context) error {
+	if b == nil || b.pool == nil {
+		return nil
+	}
+	rows, err := b.pool.Query(ctx, `SELECT recipe.id, marker.generated_for_issue_id, recipe.loop_spec FROM cerebro_workflow marker JOIN cerebro_workflow recipe ON recipe.id=marker.generated_from_workflow_id WHERE marker.name='loop:chain-activation' AND marker.generated_for_issue_id IS NOT NULL AND recipe.workflow_type='issue_loop'`)
+	if err != nil {
+		return err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var workflowID, issueID pgtype.UUID
+		var raw []byte
+		if err := rows.Scan(&workflowID, &issueID, &raw); err != nil {
+			return err
+		}
+		chain, err := decodeChain(raw)
+		if err != nil {
+			return err
+		}
+		if err := b.advanceChain(ctx, workflowID, issueID, chain); err != nil {
+			return err
+		}
+	}
+	return rows.Err()
+}
+
+// The marker preserves the existing recipe<->issue read model without keeping
+// generated legacy rules. It is disabled and can never dispatch.
+func (b *IssueLoopBridge) createActivationMarker(ctx context.Context, workspaceID, workflowID, projectID, createdByID, issueID pgtype.UUID, createdByType string) error {
+	row, err := b.queries.CreateCerebroWorkflow(ctx, cerebrodb.CreateCerebroWorkflowParams{
+		WorkspaceID: workspaceID, ProjectID: projectID, Name: "loop:chain-activation",
+		Enabled: false, TriggerType: workflows.TriggerStatusChanged, TriggerConfig: json.RawMessage(`{"to_status":"__chain_driver__"}`),
+		Conditions: json.RawMessage(`[]`), ActionType: workflows.ActionSetStatus,
+		ActionConfig: json.RawMessage(`{"status":"done"}`), EditorMode: workflows.EditorModeForm,
+		EditorLayout: json.RawMessage(`null`), CreatedByID: createdByID, CreatedByType: createdByType,
+	})
+	if err != nil {
+		return fmt.Errorf("create chain activation marker: %w", err)
+	}
+	if err := b.columns.SetGeneratedFromForIssue(ctx, row.ID, workflowID, issueID); err != nil {
+		return fmt.Errorf("tag chain activation marker: %w", err)
 	}
 	return nil
 }
 
-func (b *IssueLoopBridge) materializeRule(ctx context.Context, workspaceID, workflowID, projectID, createdByID pgtype.UUID, createdByType string, rule Rule, issueID pgtype.UUID) error {
-	triggerConfigJSON, err := json.Marshal(rule.TriggerConfig)
+func (b *IssueLoopBridge) advanceChain(ctx context.Context, workflowID, issueID pgtype.UUID, chain *Chain) error {
+	issue, err := b.issues.GetIssue(ctx, issueID)
 	if err != nil {
-		return fmt.Errorf("marshal %s trigger config: %w", rule.Name, err)
+		return fmt.Errorf("load chain issue: %w", err)
 	}
-	conditionsJSON := []byte("[]")
-	if len(rule.Conditions) > 0 {
-		conditionsJSON, err = json.Marshal(rule.Conditions)
+	chain, err = b.withMonitorEvalBindings(ctx, workflowID, chain)
+	if err != nil {
+		return err
+	}
+	run := ChainRun{IssueID: issueID, WorkflowID: workflowID, IssueStatus: issue.Status, AgentID: util.UUIDToString(issue.AssigneeID)}
+	for {
+		decision, err := b.driver.Advance(ctx, chain, run)
 		if err != nil {
-			return fmt.Errorf("marshal %s conditions: %w", rule.Name, err)
+			return err
+		}
+		switch decision.Kind {
+		case ChainWait:
+			return nil
+		case ChainSetStatus, ChainDone:
+			if decision.Status == "" || decision.Status == run.IssueStatus {
+				return nil
+			}
+			if _, err := b.issues.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issueID, WorkspaceID: issue.WorkspaceID, Status: decision.Status}); err != nil {
+				return fmt.Errorf("set chain issue status: %w", err)
+			}
+			run.IssueStatus = decision.Status
+			if decision.Kind == ChainDone {
+				return nil
+			}
+		case ChainFailed:
+			_, err := b.issues.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: issueID, WorkspaceID: issue.WorkspaceID, Status: "blocked"})
+			return err
+		default:
+			return fmt.Errorf("unknown chain decision %q", decision.Kind)
 		}
 	}
-	actionConfigJSON, err := json.Marshal(rule.ActionConfig)
-	if err != nil {
-		return fmt.Errorf("marshal %s action config: %w", rule.Name, err)
-	}
-
-	row, err := b.queries.CreateCerebroWorkflow(ctx, cerebrodb.CreateCerebroWorkflowParams{
-		WorkspaceID:   workspaceID,
-		ProjectID:     projectID,
-		Name:          rule.Name,
-		Enabled:       true,
-		TriggerType:   rule.TriggerType,
-		TriggerConfig: triggerConfigJSON,
-		Conditions:    conditionsJSON,
-		ActionType:    rule.ActionType,
-		ActionConfig:  actionConfigJSON,
-		EditorMode:    workflows.EditorModeForm,
-		EditorLayout:  []byte("null"),
-		CreatedByID:   createdByID,
-		CreatedByType: createdByType,
-	})
-	if err != nil {
-		return fmt.Errorf("create %s workflow: %w", rule.Name, err)
-	}
-	if issueID.Valid {
-		return b.columns.SetGeneratedFromForIssue(ctx, row.ID, workflowID, issueID)
-	}
-	return b.columns.SetGeneratedFrom(ctx, row.ID, workflowID)
 }

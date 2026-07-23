@@ -34,10 +34,6 @@ func TestDaemonPermissionCerebroWiringPresent(t *testing.T) {
 		why      string
 	}{
 		{
-			fragment: "resp.LocalToolPolicyStage = string(stage)",
-			why:      "ClaimTaskByRuntime must return the staged local tool-policy mode, or the daemon never wires the Claude PreToolUse hook and local per-tool enforcement is silently off (TECH-2563).",
-		},
-		{
 			fragment: "applyCapabilityPolicyToClaim(&resp, ws.Settings, runtimeID)",
 			why:      "ClaimTaskByRuntime must apply the workspace capability policy, or sandbox allowlists and per-agent MCP denies from Settings are silently unenforced (FIR-458).",
 		},

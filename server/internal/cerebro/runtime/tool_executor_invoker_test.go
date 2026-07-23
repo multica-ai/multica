@@ -1,7 +1,7 @@
 package runtime
 
 // CEREBRO-PATCH(tool-executor-invoker-test): TECH-3226 — integration tests for
-// ToolExecutorInvoker.Invoke: real cascade permission check + real tool execution,
+// ToolExecutorInvoker.Invoke: real policy permission check + real tool execution,
 // not mocks. Validates that the invoke path is equivalent to firtal-gateway.
 
 import (
@@ -12,7 +12,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	cerebroloops "github.com/multica-ai/multica/server/internal/cerebro/loops"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -39,47 +42,27 @@ func createInvokerTestAgent(t *testing.T, name string) pgtype.UUID {
 	return agentID
 }
 
-// grantCascadeTool upserts a cerebro_runtime_tool row (enabled) and a user
-// grant for runtimeAccountTestUserID, which is what ResolveCerebroAgentToolAccess
-// checks when the acting user is not workspace owner/admin.
-func grantCascadeTool(t *testing.T, toolName string) {
+func setInvokerToolPolicy(t *testing.T, agentID pgtype.UUID, toolName string, setting toolpolicy.Setting) {
 	t.Helper()
-	ctx := context.Background()
-	pool := runtimeAccountTestPool
-	rid := runtimeAccountTestRuntimeID
-	uid := runtimeAccountTestUserID
-
-	// Upsert the tool registration on the runtime (source='cloud', enabled).
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO cerebro_runtime_tool (runtime_id, tool_name, source, enabled)
-		VALUES ($1, $2, 'cloud', true)
-		ON CONFLICT (runtime_id, tool_name, mcp_server_name) DO UPDATE SET enabled = true
-	`, rid, toolName); err != nil {
-		t.Fatalf("upsert cerebro_runtime_tool %q: %v", toolName, err)
-	}
-	// Grant the tool to the test user directly.
-	if _, err := pool.Exec(ctx, `
-		INSERT INTO cerebro_runtime_tool_user_grant (runtime_id, tool_name, user_id)
-		VALUES ($1, $2, $3)
-		ON CONFLICT (runtime_id, tool_name, user_id) DO NOTHING
-	`, rid, toolName, uid); err != nil {
-		t.Fatalf("insert user grant for %q: %v", toolName, err)
+	if _, err := runtimeAccountTestPool.Exec(context.Background(), `
+		INSERT INTO cerebro_tool_policy (workspace_id, tool_key, layer, subject_id, setting)
+		VALUES ($1, $2, 'agent', $3, $4)
+		ON CONFLICT (workspace_id, tool_key, layer, subject_id, resource_pattern)
+		DO UPDATE SET setting = EXCLUDED.setting
+	`, runtimeAccountTestWSID, toolName, agentID, string(setting)); err != nil {
+		t.Fatalf("set tool policy %q: %v", toolName, err)
 	}
 	t.Cleanup(func() {
-		pool.Exec(context.Background(), `
-			DELETE FROM cerebro_runtime_tool_user_grant
-			WHERE runtime_id = $1 AND tool_name = $2 AND user_id = $3
-		`, rid, toolName, uid)
-		pool.Exec(context.Background(), `
-			DELETE FROM cerebro_runtime_tool
-			WHERE runtime_id = $1 AND tool_name = $2
-		`, rid, toolName)
+		runtimeAccountTestPool.Exec(context.Background(), `
+			DELETE FROM cerebro_tool_policy
+			WHERE workspace_id = $1 AND tool_key = $2 AND layer = 'agent' AND subject_id = $3
+		`, runtimeAccountTestWSID, toolName, agentID)
 	})
 }
 
 // TestToolExecutorInvoker_ListIssues_RealDB verifies that Invoke runs the real
 // list_issues tool against the DB when the cascade grants allow it.
-// Sets up cerebro_runtime_tool + user grant (the production cascade path).
+// Sets up the canonical tool-policy decision used by the production path.
 func TestToolExecutorInvoker_ListIssues_RealDB(t *testing.T) {
 	if runtimeAccountTestPool == nil {
 		t.Skip("database not available")
@@ -87,11 +70,13 @@ func TestToolExecutorInvoker_ListIssues_RealDB(t *testing.T) {
 	ctx := context.Background()
 
 	agentID := createInvokerTestAgent(t, "larry-invoke-list-issues")
-	grantCascadeTool(t, "list_issues")
+	setInvokerToolPolicy(t, agentID, "list_issues", toolpolicy.SettingAllow)
 
 	invoker := &ToolExecutorInvoker{
 		Queries:        db.New(runtimeAccountTestPool),
 		CerebroQueries: cerebrodb.New(runtimeAccountTestPool),
+		Pool:           runtimeAccountTestPool,
+		Policy:         toolpolicy.NewStore(runtimeAccountTestPool),
 	}
 
 	result, err := invoker.Invoke(
@@ -99,6 +84,7 @@ func TestToolExecutorInvoker_ListIssues_RealDB(t *testing.T) {
 		agentID, runtimeAccountTestWSID,
 		pgtype.UUID{},            // userID: zero = agent authorship
 		runtimeAccountTestUserID, // cascadeUserID drives the cascade check
+		pgtype.UUID{},            // taskID: not task-scoped
 		"list_issues",
 		map[string]any{},
 	)
@@ -122,12 +108,15 @@ func TestToolExecutorInvoker_ToolNotGranted_ReturnsErrToolNotPermitted(t *testin
 	}
 	ctx := context.Background()
 
-	// Agent with NO grants (no cerebro_runtime_tool and no agent_tool_grant).
+	// Agent with an explicit canonical policy denial.
 	agentID := createInvokerTestAgent(t, "larry-invoke-no-grant")
+	setInvokerToolPolicy(t, agentID, "list_issues", toolpolicy.SettingDeny)
 
 	invoker := &ToolExecutorInvoker{
 		Queries:        db.New(runtimeAccountTestPool),
 		CerebroQueries: cerebrodb.New(runtimeAccountTestPool),
+		Pool:           runtimeAccountTestPool,
+		Policy:         toolpolicy.NewStore(runtimeAccountTestPool),
 	}
 
 	_, err := invoker.Invoke(
@@ -135,6 +124,7 @@ func TestToolExecutorInvoker_ToolNotGranted_ReturnsErrToolNotPermitted(t *testin
 		agentID, runtimeAccountTestWSID,
 		pgtype.UUID{},
 		runtimeAccountTestUserID,
+		pgtype.UUID{},
 		"list_issues",
 		map[string]any{},
 	)
@@ -143,5 +133,79 @@ func TestToolExecutorInvoker_ToolNotGranted_ReturnsErrToolNotPermitted(t *testin
 	}
 	if !errors.Is(err, handler.ErrToolNotPermitted) {
 		t.Fatalf("expected ErrToolNotPermitted, got: %v", err)
+	}
+}
+
+func TestToolExecutorInvoker_OpenLoopStepUsesTaskScopedCapabilityWithoutGrant(t *testing.T) {
+	if runtimeAccountTestPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	pool := runtimeAccountTestPool
+	agentID := createInvokerTestAgent(t, "larry-open-loop-step")
+	var issueID, workflowID, taskID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_type, creator_id)
+		VALUES ($1, 'Open loop step', 'member', $2) RETURNING id
+	`, runtimeAccountTestWSID, runtimeAccountTestUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO cerebro_workflow (
+			workspace_id, name, trigger_type, trigger_config, conditions,
+			action_type, action_config, created_by_id, created_by_type
+		) VALUES ($1, 'Open loop step', 'status_changed', '{}', '[]', 'set_status', '{}', $2, 'member')
+		RETURNING id
+	`, runtimeAccountTestWSID, runtimeAccountTestUserID).Scan(&workflowID); err != nil {
+		t.Fatalf("create workflow: %v", err)
+	}
+	store := cerebroloops.NewStore(pool)
+	limits := cerebroloops.PhaseLimits{MaxSteps: 3, MaxRounds: 1, NoProgressStalls: 1}
+	current := cerebroloops.StepRef{
+		PhaseRunKey: cerebroloops.PhaseRunKey{IssueID: issueID, WorkflowID: workflowID, PhaseID: "build"},
+		BlockID:     "build", Number: 1,
+	}
+	if _, _, err := store.OpenStep(ctx, current, limits); err != nil {
+		t.Fatalf("open current step: %v", err)
+	}
+	taskContext, _ := json.Marshal(map[string]any{
+		"type": "workflow_block",
+		"loop_step": map[string]any{
+			"workflow_id": util.UUIDToString(workflowID), "phase_id": "build", "block_id": "build", "step_number": 1,
+			"steps": cerebroloops.StepsConfig{Allowed: true, Max: 2}, "phase_limits": limits,
+		},
+	})
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, context)
+		VALUES ($1, $2, $3, 'queued', 0, $4) RETURNING id
+	`, agentID, runtimeAccountTestRuntimeID, issueID, taskContext).Scan(&taskID); err != nil {
+		t.Fatalf("create workflow task: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		pool.Exec(context.Background(), `DELETE FROM cerebro_workflow WHERE id = $1`, workflowID)
+		pool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	invoker := &ToolExecutorInvoker{
+		Queries: db.New(pool), CerebroQueries: cerebrodb.New(pool), Pool: pool, LoopStore: store,
+	}
+	if _, err := invoker.Invoke(ctx, agentID, runtimeAccountTestWSID, pgtype.UUID{}, runtimeAccountTestUserID, pgtype.UUID{}, "open_loop_step", map[string]any{}); !errors.Is(err, handler.ErrToolNotPermitted) {
+		t.Fatalf("open_loop_step without its task capability was not denied: %v", err)
+	}
+	result, err := invoker.Invoke(ctx, agentID, runtimeAccountTestWSID, pgtype.UUID{}, runtimeAccountTestUserID, taskID, "open_loop_step", map[string]any{})
+	if err != nil {
+		t.Fatalf("invoke task-scoped open_loop_step: %v", err)
+	}
+	var opened map[string]any
+	if err := json.Unmarshal([]byte(result), &opened); err != nil {
+		t.Fatalf("decode open result: %v", err)
+	}
+	if opened["step_number"] != float64(2) {
+		t.Fatalf("opened result = %v", opened)
+	}
+	steps, err := store.ListSteps(ctx, current.PhaseRunKey)
+	if err != nil || len(steps) != 2 || steps[1].Number != 2 {
+		t.Fatalf("durable opened steps = %+v err=%v", steps, err)
 	}
 }

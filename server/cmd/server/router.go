@@ -22,8 +22,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 account handler import
 	cerebroaccount "github.com/multica-ai/multica/server/internal/cerebro/account"
-	// CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin handler import
-	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
 	// CEREBRO-PATCH(cerebro-agent-memory-routes): FIR-1794 Gate 3 per-(user,agent) memory toggle service import.
 	cerebroagentmemory "github.com/multica-ai/multica/server/internal/cerebro/agentmemory"
 	cerebroanalytics "github.com/multica-ai/multica/server/internal/cerebro/analytics"
@@ -43,9 +41,11 @@ import (
 	// CEREBRO-PATCH(cerebro-credentials-routes): JEH-1196 credential registry handler import
 	cerebrocredentials "github.com/multica-ai/multica/server/internal/cerebro/credentials"
 	// CEREBRO-PATCH(cerebro-dashboard-route): JEH-684 dashboard handler import
+	cerebrocommands "github.com/multica-ai/multica/server/internal/cerebro/commands" // CEREBRO-PATCH(cerebro-commands-route): FIR-3493 reusable workflow command catalog.
 	cerebrodashboard "github.com/multica-ai/multica/server/internal/cerebro/dashboard"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroevals "github.com/multica-ai/multica/server/internal/cerebro/evals"                   // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 eval catalog API.
+	cerebroevalrun "github.com/multica-ai/multica/server/internal/cerebro/evals/runservice"      // CEREBRO-PATCH(cerebro-evals-routes): FIR-3493 server-owned eval execution.
 	operatingsystem "github.com/multica-ai/multica/server/internal/cerebro/operatingsystem"      // CEREBRO-PATCH(operating-system-routes): FIR-2816 fork route module.
 	cerebroplatformaction "github.com/multica-ai/multica/server/internal/cerebro/platformaction" // CEREBRO-PATCH(router-platform-action-gate): FIR-3266 always-on agent mutation floor.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 loop planning-dispatch materializer import
@@ -97,8 +97,6 @@ import (
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
 	// CEREBRO-PATCH(router-semantic-search): FIR-2604 semantic Provider + worker.
 	cerebrosemantic "github.com/multica-ai/multica/server/internal/cerebro/semantic"
-	// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 unified runtime tool admin service.
-	"github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	// CEREBRO-PATCH(router-capability-register): FIR-2129 capability register service.
 	cerebrocapabilityregistry "github.com/multica-ai/multica/server/internal/cerebro/capabilityregistry"
 	// CEREBRO-PATCH(router-cloud-runtime-tool-scan): FIR-2284 server-side cloud-runtime tool scan.
@@ -252,6 +250,32 @@ type RouterOptions struct {
 	// the bus. When nil, the route is registered with a 503 stub so the
 	// router still builds for tests that don't wire the engine.
 	WorkflowService *cerebroworkflows.Service
+}
+
+type workflowBusyWakeupScheduler struct {
+	service *cerebrowakeup.Service
+	queries *db.Queries
+}
+
+func (s *workflowBusyWakeupScheduler) ScheduleBusyWakeup(ctx context.Context, d cerebroloops.BlockDispatch) error {
+	agent := d.Run.AgentID
+	if len(d.Block.Agents) > 0 {
+		agent = d.Block.Agents[0].AgentID
+	}
+	agentID, err := util.ParseUUID(agent)
+	if err != nil {
+		return err
+	}
+	issue, err := s.queries.GetIssue(ctx, d.Run.IssueID)
+	if err != nil {
+		return err
+	}
+	_, err = s.service.Create(ctx, issue.WorkspaceID, cerebrowakeup.CreateRequest{
+		AgentID: agentID, IssueID: d.Run.IssueID, TriggerType: cerebrowakeup.TriggerTime,
+		FireAt: pgtype.Timestamptz{Time: time.Now().Add(5 * time.Minute), Valid: true},
+		Prompt: cerebroloops.BusyWakeupPrompt(d),
+	})
+	return err
 }
 
 // NewRouterWithOptions builds the fully-configured Chi router and
@@ -657,7 +681,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	avMod := cerebroagentvault.NewModule(pool)                                                                              // CEREBRO-PATCH(cerebro-agentvault-broker-wire): TECH-3196 per-agent Agent Vault broker at claim.
 	h.AgentVaultBroker = avMod.Service                                                                                      // CEREBRO-PATCH(cerebro-agentvault-broker-service): TECH-3196 expose grant-reconciling service.
 	h.PersonalBrowserSecrets = cerebroagentvault.NewClient(cerebroagentvault.LoadConfig(), cerebroConnectionsHandler.Store) // CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006 server-only value bridge.
-	h.InternalBrowserQA = cerebrointernalbrowserqa.NewRunner(cerebrointernalbrowserqa.ExecCommander{})                      // CEREBRO-PATCH(internal-agent-browser-qa): FIR-3006 server-side *.internal browser verification.
+	// CEREBRO-PATCH(internal-agent-browser-qa): FIR-3006 run Chromium on the
+	// target's Sliplane server. A local runner remains available for development.
+	if verifierURL := strings.TrimSpace(os.Getenv("BROWSER_VERIFIER_URL")); verifierURL != "" {
+		if runner, runnerErr := cerebrointernalbrowserqa.NewRemoteRunner(verifierURL, os.Getenv("BROWSER_VERIFIER_TOKEN"), http.DefaultClient); runnerErr == nil {
+			h.InternalBrowserQA = runner
+		} else {
+			slog.Error("browser verifier runner is misconfigured", "error", runnerErr)
+		}
+	} else {
+		h.InternalBrowserQA = cerebrointernalbrowserqa.NewRunner(cerebrointernalbrowserqa.ExecCommander{})
+	}
 	// CEREBRO-PATCH(cerebro-agentvault-mirror-wire): FIR-1739 Part B project tool-policy credential grants onto the Agent Vault access table.
 	avMod.Service.SetGrantMirror(&chainCredentialGrantSource{policy: cerebrotoolpolicy.NewStore(pool), creds: cerebroQueries}, avMod.Store)
 	// CEREBRO-PATCH(cerebro-agentvault-access-routes): TECH-3196 per-agent access-table CRUD handler; FIR-2478 vault-listing resolves the "Agent Vault" connection.
@@ -710,7 +744,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-account-routes): JEH-921 workspace accounts handler
 	cerebroAccountHandler := cerebroaccount.New(cerebroQueries, bus)
 	// CEREBRO-PATCH(router-approval-gate): FIR-2586 build the shared approval gate
-	// once (nil when CEREBRO_APPROVAL_GATE_ENABLED is off) and wire it into every
+	// once and wire it into every // CEREBRO-PATCH(router-approval-switch-retirement): FIR-3403 approval policy no longer has a server switch.
 	// enforcement point so an "Ask" lands in the one /approvals inbox: daemon repo
 	// checkout (h.ApprovalGate) and credential governance (newCredentialsPolicy).
 	sharedApprovalGate := cerebroruntime.BuildApprovalGate(cerebroQueries, pool, bus)
@@ -770,22 +804,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.ToolExecutor = &cerebroruntime.ToolExecutorInvoker{
 		Queries:        queries,
 		CerebroQueries: cerebroQueries,
-		Pool:           pool, // CEREBRO-PATCH(invoke-grant-config-pool): TECH-3356 — registry needs the pool to read agent_tool_grant.config_json.
+		Pool:           pool, // Server-side tools retain database-backed configuration access.
+		Policy:         cerebrotoolpolicy.NewStore(pool),
+		LoopStore:      cerebroloops.NewStore(pool), // CEREBRO-PATCH(workflow-open-step-invoker): FIR-3493 wires task-scoped step opening into external runtimes.
 	}
-	// CEREBRO-PATCH(router-runtime-tools-admin): JEH-1710 wire the unified
-	// runtime tool admin service (per-runtime tool inventory + group/user
-	// grants + per-agent overrides) and the daemon-side scan ingest seam.
-	runtimeToolsSvc := runtimetools.New(pool)
-	h.SetRuntimeToolsAdmin(newRuntimeToolsAdminAdapter(runtimeToolsSvc))
-	h.SetRuntimeToolAccess(newRuntimeToolAccessAdapter(cerebrotoolaccess.New(runtimeToolsSvc, cerebrotoolpolicy.NewStore(pool))))
-	h.SetRuntimeToolsScan(newRuntimeToolsScanAdapter(runtimeToolsSvc))
 	// CEREBRO-PATCH(router-capability-register): FIR-2129 wire capability register API.
 	capabilityRegisterSvc := cerebrocapabilityregistry.New(pool)
 	h.SetCapabilityRegister(newCapabilityRegisterAdapter(capabilityRegisterSvc))
+	// runtime tool admin service (capability register inventory + canonical
+	// tool-policy authoring) and read-only effective access preview.
+	policyStore := cerebrotoolpolicy.NewStore(pool)
+	h.SetRuntimeToolsAdmin(newRuntimeToolsAdminAdapter(pool, capabilityRegisterSvc, policyStore))
+	h.SetRuntimeToolAccess(newRuntimeToolAccessAdapter(cerebrotoolaccess.New(capabilityRegisterSvc, policyStore)))
 	// CEREBRO-PATCH(router-cloud-runtime-tool-scan): FIR-2284 — server-side "Scan now"
 	// for cloud runtimes (no daemon): record the gateway's callable built-in tool
-	// surface into the capability register (the unified table's source) + legacy inventory.
-	h.SetCloudRuntimeToolScanner(cloudtoolscan.New(capabilityRegisterSvc, runtimeToolsSvc, callableCloudToolMeta()))
+	// surface into the capability register, the unified table's source.
+	h.SetCloudRuntimeToolScanner(cloudtoolscan.New(capabilityRegisterSvc, callableCloudToolMeta()))
 	// CEREBRO-PATCH(cerebro-tasks-route): JEH-900 tasks page handler instance
 	cerebroTasksHandler := cerebrotasks.New(cerebroQueries)
 	// CEREBRO-PATCH(cerebro-terminal-routes): interactive terminal handler instance
@@ -798,26 +832,41 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	daemonHub.SetDisconnectHandler(cerebroTerminalBridge.OnDaemonDisconnect)
 	// CEREBRO-PATCH(workflow-plan-document-wire): FIR-3052 wire shared plan document creation/logging for Issue workflows.
 	workflowPlanDocuments := cerebroworkflows.NewPlanDocumentService(queries)
+	var legacyLoopAdvancer *cerebroworkflows.LoopPhaseAdvancer
 	if opts.WorkflowService != nil {
 		opts.WorkflowService.WithPlanDocuments(workflowPlanDocuments)
-		// CEREBRO-PATCH(workflow-loop-advancer-wire): FIR-3052 — advance Plan -> Build on plan-task completion via the engine's own Dispatch; nil-safe seam.
-		h.TaskService.WorkflowLoopAdvancer = cerebroworkflows.NewLoopPhaseAdvancer(opts.WorkflowService)
+		legacyLoopAdvancer = cerebroworkflows.NewLoopPhaseAdvancer(opts.WorkflowService)
 	}
 	// CEREBRO-PATCH(cerebro-workflows-routes): JEH-1047 workflow handler instance; JEH-1108 PR3 wires the engine Service so the test-only /_test/cron-sweep endpoint can fire the sweeper synchronously.
 	cerebroWorkflowsHandler := cerebroworkflows.NewHandler(cerebroQueries).
 		WithService(opts.WorkflowService).
 		WithPlanDocuments(workflowPlanDocuments)
-	cerebroEvalsHandler := cerebroevals.NewHandler(pool)                                            // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 eval catalog handler.
-	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool)) // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature.
-	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate                      // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
+	evalExecutor := cerebroevalrun.New(pool)
+	cerebroEvalsHandler := cerebroevals.NewHandler(pool).WithRunExecutor(evalExecutor).WithActorResolver(h.ResolveActor).WithBlockingGateAuthorizer(evalBlockingGateAdapter{svc: cerebroGroupPermissionsHandler.Service}) // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308/FIR-3493 eval catalog + server runner. CEREBRO-PATCH(cerebro-evals-blocking-gate): FIR-3496 restrict blocking bindings. CEREBRO-PATCH(cerebro-evals-actor): FIR-3496 trusted ownership identity.
+	cerebroCommandsHandler := cerebrocommands.NewHandler(pool).WithActorResolver(h.ResolveActor)                                                                                                                          // CEREBRO-PATCH(cerebro-commands-route): FIR-3493 reusable workflow command catalog.
+	workflowHooksFeature := cerebroworkflows.NewHookFeature(pool, cerebrotoolpolicy.NewStore(pool), cerebroevals.NewStore(pool).WithRunExecutor(evalExecutor))                                                            // CEREBRO-PATCH(workflow-hooks-wire): FIR-3101 fork-owned Workflow hook feature; FIR-3496 Phase 4 eval store (eval.gate verdict + eval.run via the shared Run-now executor).
+	h.TaskService.WorkflowCompletionGate = workflowHooksFeature.CompletionGate                                                                                                                                            // CEREBRO-PATCH(workflow-hooks-completion-wire): FIR-3101 pre-completion delegation.
 	// CEREBRO-PATCH(cerebro-workflows-loop-planning): FIR-2283 — plug the loop planning-dispatch materializer so a run_skill workflow's `loop_planning` toggle actually creates its companion planning-phase rule (see workflows/loop_planning.go).
 	cerebroWorkflowsHandler.WithLoopPlanningMaterializer(cerebroloops.NewPlanningMaterializer(cerebroQueries))
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop): FIR-2283 — plug the Issue workflow bridge (workflow_type=="issue_loop": save -> Compile -> materialize the dispatch/gate/escalate rules) and the control-strip/approval seam onto the compiled delivery gate.
 	cerebroIssueLoopColumns := cerebroworkflows.NewIssueLoopColumnStore(pool)
+	workflowWakeups := cerebrowakeup.New(cerebroQueries, queries, h.TaskService, bus)
+	cerebroIssueLoopBridge := cerebroloops.NewIssueLoopBridge(pool, cerebroQueries, queries, cerebroIssueLoopColumns).
+		WithSkillLister(queries).
+		WithMonitorEvalBindingLister(cerebroevals.NewStore(pool)).
+		WithEvalBlockRunner(cerebroevals.NewBlockRunner(pool, evalExecutor).WithAdvisoryWarner(cerebroevals.NewAdvisoryWarner(cerebroevals.NewStore(pool), cerebroQueries, queries, bus))). // CEREBRO-PATCH(cerebro-eval-block-advisory): FIR-3496 phase-aware BlockEval uses the same warn-only notifier.
+		WithBusyWakeupScheduler(&workflowBusyWakeupScheduler{service: workflowWakeups, queries: queries})
+	if err := cerebroIssueLoopBridge.ResumeActiveIssueLoops(context.Background()); err != nil {
+		slog.Error("resume active Issue workflow chains", "error", err)
+	}
+	// CEREBRO-PATCH(cerebro-issue-loop-chain-cutover): FIR-3493 bid 8 — drop the legacy LoopCheckStore wiring; Chain v2 (ChainDriver) now owns block-step advancement, so the old check store is no longer wired here.
 	cerebroWorkflowsHandler.WithIssueLoopColumns(cerebroIssueLoopColumns).
 		// CEREBRO-PATCH(cerebro-issue-loop-skill-validate): FIR-2283 followup — reject a recipe naming a skill the workspace lacks at save time.
-		WithIssueLoopCompiler(cerebroloops.NewIssueLoopBridge(cerebroQueries, cerebroIssueLoopColumns).WithSkillLister(queries)).
-		WithLoopCheckStore(cerebroloops.NewLoopCheckStoreAdapter(cerebroloops.NewStore(pool)))
+		WithIssueLoopCompiler(cerebroIssueLoopBridge)
+	// FIR-3493 bid 8: block tasks complete their durable step and immediately
+	// advance the same chain. The old plan-only hook remains a no-op fallback
+	// for tasks created before the cutover.
+	h.TaskService.WorkflowLoopAdvancer = cerebroloops.NewChainTaskAdvancer(cerebroIssueLoopBridge, legacyLoopAdvancer)
 	// CEREBRO-PATCH(cerebro-workflows-issue-loop-activation): FIR-2283 v2 point 8 — plug the upstream issue lookup so the per-issue activation endpoints can confirm the target issue exists and belongs to the caller's workspace.
 	cerebroWorkflowsHandler.WithIssueLookup(queries)
 	// CEREBRO-PATCH(handler-issue-workflow-activator-wire): FIR-2283 followup — let CreateIssue (HTTP + CLI `--workflow`) start a new issue on an Issue workflow in the same call, reusing the workflows handler's ActivateForIssue.
@@ -976,6 +1025,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.Post("/api/cerebro/apps-internal/{id}/{version}/callback", cerebroAppsHandler.RuntimeCallback)
 	r.Post("/api/cerebro/apps-internal/host/registry", cerebroAppsHandler.WorkerRegistryCall)
 	r.Post("/api/cerebro/apps-internal/host/connection", cerebroAppsHandler.WorkerConnectionCall)
+	// CEREBRO-PATCH(cerebro-mini-app-runtime-assets): Published app frontend assets are served through the backend API origin.
+	r.Get("/api/cerebro/apps-runtime/*", cerebroAppsHandler.RuntimeAsset)
 	// CEREBRO-PATCH(cerebro-github-pr-link-route): FIR-2568 service-to-service PR-link write for the registry's poll-based scanner. Outside the user-auth group on purpose — the caller is a backend service presenting CEREBRO_GITHUB_LINK_KEY as a Bearer token (loopback-only when the key is unset).
 	r.Post("/api/cerebro/github/pull-requests", cerebroGitHubPRLinkHandler.Post)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
@@ -984,6 +1035,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// purpose: the bearer token in the URL path IS the credential. Workspace
 	// context is derived from the trigger row, never from request headers.
 	r.Post("/api/webhooks/autopilots/{token}", h.HandleAutopilotWebhook)
+	// CEREBRO-PATCH(ios-share-inbox): FIR-3545 token-in-path public intake for iOS Shortcuts.
+	r.Post("/api/webhooks/ios-share/{token}", h.HandleIOSShareInbox)
 	// CEREBRO-PATCH(runtime-setup-routes): public token-gated runtime setup
 	r.Post("/api/runtime-setup/exchange", h.ExchangeRuntimeSetupToken)
 	r.Get("/install-runtime.sh", h.ServeInstallRuntimeScript)
@@ -1071,6 +1124,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceMember(queries))
+			// CEREBRO-PATCH(ios-share-inbox): FIR-3545 authenticated credential management.
+			r.Route("/api/cerebro/share-inboxes", func(r chi.Router) {
+				r.Use(handler.RequireHumanActor)
+				r.Get("/", h.ListIOSShareInboxes)
+				r.Post("/", h.CreateIOSShareInbox)
+				r.Delete("/{id}", h.RevokeIOSShareInbox)
+			})
 
 			r.With(middleware.RequireUserScope).Get("/api/agents/backfill-avatars", cerebroAgentAvatarHandler.BackfillStatus) // CEREBRO-PATCH(agent-avatar-backfill): keep static GET before /api/agents/{id}.
 			r.With(middleware.AllowTaskScopeForAgent("id")).Get("/api/agents/{id}", h.GetAgent)
@@ -1089,9 +1149,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// a user turns memory on for themselves on one agent, never a task token.
 			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/memory-settings", h.GetAgentMemorySettings)
 			r.With(middleware.RequireUserScope).Put("/api/agents/{id}/memory-settings", h.SetAgentMemorySettings)
-			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess)  // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
-			r.With(middleware.RequireUserScope).Post("/api/agents/{id}/tool-grants", h.AddAgentToolGrant)      // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
-			r.With(middleware.RequireUserScope).Delete("/api/agents/{id}/tool-grants", h.RemoveAgentToolGrant) // CEREBRO-PATCH(cerebro-agent-tool-grant-write): FIR-1496 agent-centric runtime tool grant write.
+			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess) // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
 
 			// Issue routes registered flat (not via r.Route) so they
 			// share the chi routing tree with the user-only sibling
@@ -1526,6 +1584,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/cerebro/rounds", func(r chi.Router) {
 				r.Get("/", cerebroRoundsHandler.List)
 				r.Post("/", cerebroRoundsHandler.Create)
+				r.Post("/reorder", cerebroRoundsHandler.Reorder) // CEREBRO-PATCH(rounds-reorder): FIR-3646 drag-and-drop round order.
 				r.Route("/{roundId}", func(r chi.Router) {
 					r.Get("/", cerebroRoundsHandler.Get)
 					r.Patch("/", cerebroRoundsHandler.Update)
@@ -1778,17 +1837,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// CEREBRO-PATCH(agent-capabilities-card-task-route): FIR-2243 — GET /capabilities is registered in the task-allowlist group above (AllowTaskScopeForAgent) so an agent's own task token can also reach it; chi forbids a duplicate flat+nested registration of the same path.
 					r.Get("/capabilities/swap", h.GetAgentCapabilitySwap)                      // CEREBRO-PATCH(agent-capabilities-swap-route): FIR-3212 Swap slice — operator-facing preview of what a runtime change costs this agent; human route only, so it stays out of the task-token allowlist above.
 					r.Get("/capabilities/approval-impact", h.GetAgentCapabilityApprovalImpact) // CEREBRO-PATCH(agent-capabilities-approval-route): FIR-3212 Approval slice — what approving a pending proposal actually changes on this agent's engine; human route only, same as the swap preview above.
-					// CEREBRO-PATCH(agent-tools-routes): cerebro tool grant admin endpoints.
-					// NOTE: GET /tools and POST /tools/{name}/invoke are registered in the
-					// task-allowlist group above so agent task tokens can also reach them.
-					r.Route("/tools/{name}", func(r chi.Router) {
-						r.Put("/", h.UpsertAgentTool)
-					})
-					// CEREBRO-PATCH(agent-tool-overrides-routes): JEH-1710 per-agent
-					// override of the runtime tool default.
-					r.Get("/tool-overrides", h.ListAgentToolOverrides)
-					r.Put("/tool-overrides/{toolName}", h.PutAgentToolOverride)
-					r.Delete("/tool-overrides/{toolName}", h.DeleteAgentToolOverride)
 					// CEREBRO-PATCH(agent-infisical-secrets): Infisical folder grants for daemon spawn injection.
 					r.Get("/infisical-folders", h.ListAgentInfisicalFolders)
 					r.Put("/infisical-folders", h.ReplaceAgentInfisicalFolders)
@@ -1916,14 +1964,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/tools", h.ListRuntimeTools)
 					// CEREBRO-PATCH(runtime-agnostic-tool-access): TECH-3071 read-only effective access preview.
 					r.Get("/tools/effective", h.ListRuntimeToolEffectiveAccess)
-					r.Patch("/tools/{toolName}", h.SetRuntimeToolEnabled)
 					// CEREBRO-PATCH(router-runtime-tools-scan-now): FIR-2230 admin-triggered live scan.
 					r.Post("/tools/scan-now", h.RequestRuntimeToolScan)
-					r.Get("/tool-grants", h.ListRuntimeToolGrants)
-					r.Post("/tools/{toolName}/groups/{groupId}", h.AddRuntimeToolGroupGrant)
-					r.Delete("/tools/{toolName}/groups/{groupId}", h.RemoveRuntimeToolGroupGrant)
-					r.Post("/tools/{toolName}/users/{userId}", h.AddRuntimeToolUserGrant)
-					r.Delete("/tools/{toolName}/users/{userId}", h.RemoveRuntimeToolUserGrant)
+					// CEREBRO-PATCH(runtime-tool-policy-only): FIR-3403 legacy runtime authoring routes removed; use /api/tool-policy.
 					r.Delete("/", h.DeleteAgentRuntime)
 					// Cascade variant of DELETE: archive every active agent
 					// bound to this runtime, cancel their tasks, then delete
@@ -2135,6 +2178,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/api/cerebro/personal-browser/secure-fill", h.SecureFillPersonalBrowser)   // CEREBRO-PATCH(personal-browser-secure-fill): FIR-3006
 			r.Post("/api/cerebro/agent-browser/provision-auth", h.ProvisionAgentBrowserAuth)   // CEREBRO-PATCH(agent-browser-vault-route): FIR-3006
 			r.Post("/api/cerebro/agent-browser/internal-verify", h.VerifyInternalAgentBrowser) // CEREBRO-PATCH(internal-agent-browser-qa-route): FIR-3006
+			r.Get("/api/cerebro/agent-browser/internal-verify/{jobId}", h.GetInternalAgentBrowserVerification) // CEREBRO-PATCH(internal-agent-browser-qa-async): FIR-3006
 			// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools for the Multica MCP server (agent token; default-deny per agent).
 			r.Get("/api/cerebro/connection-tools", cerebroConnectionToolsHandler.List)
 			r.Post("/api/cerebro/connection-tools/call", cerebroConnectionToolsHandler.Call)
@@ -2165,7 +2209,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Post("/{id}/done", cerebroReminderHandler.MarkDone)
 				r.Delete("/{id}", cerebroReminderHandler.Delete)
 			})
-			r.Mount("/api/cerebro/agent-passes", cerebroagentpass.NewAdminRoutes(cerebroQueries)) // CEREBRO-PATCH(cerebro-agent-passes-routes): JEH-1731 agent-pass admin API.
 			// CEREBRO-PATCH(cerebro-terminal-routes): interactive terminal endpoints.
 			r.Route("/api/cerebro/terminal", func(r chi.Router) {
 				r.Post("/sessions", cerebroTerminalHandler.CreateSession)
@@ -2203,6 +2246,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 			r.Mount("/api/cerebro/workflow-hooks", workflowHooksFeature.Routes()) // CEREBRO-PATCH(workflow-hooks-routes): FIR-3101 fork-owned management API.
 			r.Mount("/api/cerebro/evals", cerebroEvalsHandler.Routes())           // CEREBRO-PATCH(cerebro-evals-routes): FIR-3308 catalog, runs, and workflow bindings.
+			r.Mount("/api/cerebro/commands", cerebroCommandsHandler.Routes())     // CEREBRO-PATCH(cerebro-commands-route): FIR-3493 reusable workflow command catalog.
 			// CEREBRO-PATCH(session-mode-config-routes): FIR-3111 versioned Mode configuration.
 			r.Route("/api/cerebro/session-modes", func(r chi.Router) {
 				r.Get("/", cerebroSessionModeHandler.List)

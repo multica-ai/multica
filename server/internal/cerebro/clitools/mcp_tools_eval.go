@@ -22,10 +22,32 @@ func registerEvalTools(srv *mcp.Server, client *cli.APIClient) {
 	registerEvalMutation(srv, client, "update_eval", "Replace a versioned eval contract.", "PUT", "/api/cerebro/evals/{eval_id}", "eval", object, id("eval_id", "Eval UUID"))
 	registerEvalDelete(srv, client, "delete_eval", "Delete an eval contract.", "/api/cerebro/evals/{eval_id}", "eval_id")
 	registerEvalGet(srv, client, "list_eval_runs", "List immutable runs for one eval.", "/api/cerebro/evals/{eval_id}/runs", id("eval_id", "Eval UUID"))
+	registerEvalPost(srv, client, "run_eval", "Run an active eval now through the trusted server-side runner.", "/api/cerebro/evals/{eval_id}/run", id("eval_id", "Eval UUID"))
 	registerEvalMutation(srv, client, "record_eval_run", "Record an immutable eval run, including issue/workflow links and result evidence.", "POST", "/api/cerebro/evals/{eval_id}/runs", "run", object, id("eval_id", "Eval UUID"))
+	registerEvalGet(srv, client, "get_eval_schedule", "Get the recurring schedule for one eval, or null for manual-only.", "/api/cerebro/evals/{eval_id}/schedule", id("eval_id", "Eval UUID"))
+	registerEvalMutation(srv, client, "set_eval_schedule", "Create or replace an eval's daily or weekly cron schedule.", "PUT", "/api/cerebro/evals/{eval_id}/schedule", "schedule", object, id("eval_id", "Eval UUID"))
+	registerEvalDelete(srv, client, "delete_eval_schedule", "Switch an eval back to manual-only runs.", "/api/cerebro/evals/{eval_id}/schedule", "eval_id")
 	registerEvalGet(srv, client, "list_eval_bindings", "List workflow-to-eval gate bindings.", "/api/cerebro/evals/bindings", nil)
 	registerEvalMutation(srv, client, "bind_eval", "Bind an eval to a workflow phase as blocking or advisory.", "POST", "/api/cerebro/evals/bindings", "binding", object, nil)
 	registerEvalDelete(srv, client, "unbind_eval", "Delete a workflow-to-eval binding.", "/api/cerebro/evals/bindings/{binding_id}", "binding_id")
+}
+
+func registerEvalPost(srv *mcp.Server, client *cli.APIClient, name, description, path string, properties map[string]any) {
+	required := make([]string, 0, len(properties))
+	for key := range properties {
+		required = append(required, key)
+	}
+	srv.RegisterTool(mcp.Tool{Name: name, Description: description, InputSchema: map[string]any{"type": "object", "properties": properties, "required": required}}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+		resolved, err := resolveEvalPath(path, args)
+		if err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		var out any
+		if err := client.PostJSON(ctx, resolved, map[string]any{}, &out); err != nil {
+			return mcp.ErrorResult(err.Error()), nil
+		}
+		return jsonText(out)
+	})
 }
 
 func registerEvalGet(srv *mcp.Server, client *cli.APIClient, name, description, path string, properties map[string]any) {

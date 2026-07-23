@@ -135,30 +135,30 @@ type recentTask struct {
 }
 
 type overviewResponse struct {
-	Range                 string          `json:"range"`
-	PeriodStart           string          `json:"period_start"`
-	PeriodEnd             string          `json:"period_end"`
-	IssuesCreated         kpi             `json:"issues_created"`
-	IssuesCompleted       kpi             `json:"issues_completed"`
-	ChatMessages          kpi             `json:"chat_messages"`
-	ChannelMessages       kpi             `json:"channel_messages"`
-	ChannelsActive        kpi             `json:"channels_active"`
-	TasksCompleted        kpi             `json:"tasks_completed"`
-	TasksFailed           kpi             `json:"tasks_failed"`
-	AgentsActive          kpi             `json:"agents_active"`
-	MembersActive         kpi             `json:"members_active"`
-	SpendCents            kpi             `json:"spend_cents"`
-	IssuesByStatus        []bucket        `json:"issues_by_status"`
-	IssuesByPriority      []bucket        `json:"issues_by_priority"`
-	IssuesByOnBehalfOf    []topActor      `json:"issues_by_on_behalf_of"`
-	Timeline              []dayBucket     `json:"timeline"`
-	TopAgents             []topActor      `json:"top_agents"`
-	TopMembers            []topActor      `json:"top_members"`
-	TopMessageSenders     []topActor         `json:"top_message_senders"`
-	TopMessageRecipients  []topActor         `json:"top_message_recipients"`
-	MessageFlow           []messageFlowEntry `json:"message_flow"`
-	ActivityFeed          []activityEntry    `json:"activity_feed"`
-	RecentTasks           []recentTask       `json:"recent_tasks"`
+	Range                string             `json:"range"`
+	PeriodStart          string             `json:"period_start"`
+	PeriodEnd            string             `json:"period_end"`
+	IssuesCreated        kpi                `json:"issues_created"`
+	IssuesCompleted      kpi                `json:"issues_completed"`
+	ChatMessages         kpi                `json:"chat_messages"`
+	ChannelMessages      kpi                `json:"channel_messages"`
+	ChannelsActive       kpi                `json:"channels_active"`
+	TasksCompleted       kpi                `json:"tasks_completed"`
+	TasksFailed          kpi                `json:"tasks_failed"`
+	AgentsActive         kpi                `json:"agents_active"`
+	MembersActive        kpi                `json:"members_active"`
+	SpendCents           kpi                `json:"spend_cents"`
+	IssuesByStatus       []bucket           `json:"issues_by_status"`
+	IssuesByPriority     []bucket           `json:"issues_by_priority"`
+	IssuesByOnBehalfOf   []topActor         `json:"issues_by_on_behalf_of"`
+	Timeline             []dayBucket        `json:"timeline"`
+	TopAgents            []topActor         `json:"top_agents"`
+	TopMembers           []topActor         `json:"top_members"`
+	TopMessageSenders    []topActor         `json:"top_message_senders"`
+	TopMessageRecipients []topActor         `json:"top_message_recipients"`
+	MessageFlow          []messageFlowEntry `json:"message_flow"`
+	ActivityFeed         []activityEntry    `json:"activity_feed"`
+	RecentTasks          []recentTask       `json:"recent_tasks"`
 }
 
 // Overview returns the full dashboard payload for the current workspace.
@@ -654,20 +654,35 @@ func (h *Handler) Overview(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// spendCents sums task_usage.cost_cents for the workspace in [start, end),
+// spendCents prices runtime usage for the workspace in [start, end),
 // optionally restricted to a single actor scope (agent-id or member-id).
 // The query honors the upper bound, so the prior period reports its real
 // total instead of being silently zeroed out.
 func (h *Handler) spendCents(ctx context.Context, wsID pgtype.UUID, start, end time.Time, actorType pgtype.Text, actorID pgtype.UUID) int {
-	cents, err := h.Cerebro.DashboardSpendCentsInPeriod(ctx, cerebrodb.DashboardSpendCentsInPeriodParams{
+	rows, err := h.Cerebro.DashboardUsageCostRowsInPeriod(ctx, cerebrodb.DashboardUsageCostRowsInPeriodParams{
 		WorkspaceID: wsID,
 		CreatedAt:   ts(start),
-		CreatedAt_2: ts(end),
+		CreatedAt2:  ts(end),
 		ActorType:   actorType,
 		ActorID:     actorID,
 	})
 	if err != nil {
 		return 0
+	}
+	return sumDashboardUsageCost(rows)
+}
+
+func sumDashboardUsageCost(rows []cerebrodb.DashboardUsageCostRowsInPeriodRow) int {
+	var cents int64
+	for _, row := range rows {
+		if row.CostCents > 0 {
+			cents += row.CostCents
+			continue
+		}
+		cents += int64(pricing.ComputeCents(row.Model, pricing.Usage{
+			InputTokens: row.InputTokens, OutputTokens: row.OutputTokens,
+			CacheReadTokens: row.CacheReadTokens, CacheWriteTokens: row.CacheWriteTokens,
+		}))
 	}
 	return int(cents)
 }

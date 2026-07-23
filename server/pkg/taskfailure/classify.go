@@ -107,7 +107,9 @@ func Classify(rawError string) Reason {
 		"balance is too low",
 		"monthly usage limit",
 		"usage limit",
-		"spend limit", // CEREBRO-PATCH(taskfailure-spend-limit): FIR-1889 — Claude monthly spend cap wording
+		"spend limit",   // CEREBRO-PATCH(taskfailure-spend-limit): FIR-1889 — Claude monthly spend cap wording
+		"session limit", // CEREBRO-PATCH(taskfailure-session-limit): FIR-3651 — "hit your session limit · resets 2:30pm" matches no rule below; 34 runs died in agent_error.unknown instead of pausing to the reset time.
+		"weekly limit",  // CEREBRO-PATCH(taskfailure-session-limit): FIR-3651 — same wording family as the per-session cap.
 		"you've hit your limit",
 		// Curly apostrophe variant: providers and copy-pasted error
 		// strings sometimes use U+2019 instead of ASCII '. SQL ILIKE
@@ -126,6 +128,7 @@ func Classify(rawError string) Reason {
 		"overloaded",
 		"529",
 		"no capacity available",
+		"at capacity", // CEREBRO-PATCH(taskfailure-model-capacity): FIR-3501 — "Selected model is at capacity" is a transient overload, not a missing model.
 	):
 		return ReasonAgentProviderCapacityOrRateLimit
 
@@ -146,6 +149,12 @@ func Classify(rawError string) Reason {
 	//    timeout below the HTTP layer.
 	case containsAny(lower,
 		"stream disconnected",
+		// CEREBRO-PATCH(taskfailure-connection-closed): FIR-3651 — ported from upstream
+		// MUL-4910. The Claude Code CLI's mid-stream disconnect ("API Error: Connection
+		// closed mid-response.") fell through to agent_error.unknown and terminated the
+		// task; it belongs in the retryable network bucket. Drop on the next upstream sync.
+		"connection closed",
+		"mid-response",
 		"error sending request",
 		"unable to connect",
 		"dial tcp",

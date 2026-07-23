@@ -1,5 +1,28 @@
 # Permission architecture — the real structure & completeness register
 
+> **FIR-3402 canonical access source.** Versioned roles plus role bindings are
+> the only durable way to grant agent access. `toolpolicy.Store` expands active
+> bindings into the same Policy Decision Service input used by authored policy
+> rows; expired bindings are filtered with the database clock on every resolve.
+> A per-run Task Mandate then freezes the allowed-tool envelope and is checked
+> again on every managed or local-runtime call. Migration 9147 deletes the two
+> superseded direct stores; automated contract coverage prevents either route
+> or SQL access path from returning.
+
+> **FIR-3403 runtime-tool consolidation.** The capability register is the sole
+> runtime-tool inventory, availability evidence proves discovery, and
+> `cerebro_tool_policy` is the sole access authoring store. Migration 9148 moves
+> existing runtime/group/user/agent choices before irreversibly deleting the
+> former runtime-tool tables. A source regression test rejects any new Go or SQL
+> reader for those retired tables.
+> Role expansion is constructor-independent: generated query sets expose their
+> original DB adapter to `toolpolicy.Store`, and a missing role store fails the
+> resolve instead of omitting roles. The server-owned governance sweeper reads
+> live role assignments on startup and daily, expires only the affected role
+> assignments through a monotonic tighten-only action, and reports expired,
+> orphaned, and unused access by severity. The Permission
+> audit read model exposes and sorts by the same explicit severity concept.
+
 **Read this together with [`permission-system.md`](./permission-system.md).** That doc is the
 *behavioral* map ("what is enforced live today vs. off by default", row by row). **This**
 doc is the *structural* map: what permission **models** actually exist, which gates are
@@ -12,7 +35,9 @@ Line numbers drift; this doc cites files + functions. Grep the function name if 
 > **Secure browser fill (FIR-3006):** this is a code-only compound gate, not a
 > new permission model. It requires `tools:personal-browser` for the target host
 > and an explicit exact-resource `credential.reveal` Allow authored on the
-> `browser-testers` group. The resource is one app-specific Agent Vault box,
+> `browser-testers` group. The owner must be a member of that group and the
+> exact calling agent must be on the same group's agent allowlist. The resource
+> is one app-specific Agent Vault box,
 > `agentvault-vault:Shared/browser-login/<app>`; no capability-wide reveal is
 > accepted. Plaintext exists only between the backend Agent Vault client and the
 > desktop Chromium injection frame.
@@ -31,9 +56,13 @@ control. Section 4 is the complete register of those code-only gates. If you are
 
 ---
 
-## 2. The intended model — the 5 permission interfaces
+## 2. The canonical model — capability register + tool-policy layers
 
-The unified tool-policy chain is the model we want **everything** to converge on.
+The capability register says what exists; the unified tool-policy chain says
+who may use it. Runtime discovery writes capability evidence, never access.
+Workspace/runtime/agent/group/user choices are authored only in
+`cerebro_tool_policy`; runtime executors, the Permissions UI,
+`get_agent_capabilities`, and the injected tool brief resolve that same source.
 
 - **The 5 interfaces = the 5 layers** of the chain: `workspace / runtime / agent / group / user`
   (`server/internal/cerebro/toolpolicy/chain.go:62-70`). These are the 5 settable surfaces
@@ -130,15 +159,15 @@ The unified tool-policy chain is the model we want **everything** to converge on
 |---|---|---|
 | agent-browser unix-socket (`tools:agent-browser`, **Base=Deny**) | `daemon_tool_policy_cerebro.go:281` | live |
 | personal browser per-action host gate (`tools:personal-browser`, agent opt-in + feature kill switch) | `personal_browser_authorize_cerebro.go` `AuthorizePersonalBrowser` | live |
-| agent-browser Agent Vault login provisioning (`credential.reveal`, exact `Shared/browser-login/<app>` box + `browser-testers`) | `handler/agent_browser_auth_cerebro.go` | live |
+| agent-browser Agent Vault login provisioning (`credential.reveal`, exact `Shared/browser-login/<app>` box + owner membership and exact-agent allowlist in `browser-testers`) | `handler/agent_browser_auth_cerebro.go` | live |
 | repo checkout (`repo.checkout`, Base=Allow) | `handler/repo_approval_cerebro.go:42` `CheckDaemonRepoCapability` | live |
 | `create_local_runtime` | `group_permissions_cerebro.go:186` | live |
 | `manage_connections` | `group_permissions_cerebro.go:237` (+ router middleware) | live |
 | `create_issue` platform action | `platformaction/gate.go`; REST hook `handler/issue.go`; workspace MCP hook `handler/workspace_mcp_cerebro.go`; Gateway hook `runtime/approval_gate.go` | live, always-on for agents |
 | connection per-tool Deny/Ask | `table_connection.go:305` `ConnectionToolEffective` | live |
 | mention `trigger_other_agent` (layered over a code baseline) | `mentiongate/gate.go:92` | live |
-| general gateway tool calls (`guardToolCallViaPolicy`, via `ResolveGeneral`) | `approval_gate.go:314` | **off by default** (env `CEREBRO_APPROVAL_GATE_ENABLED` + `MODE=toolpolicy`) |
-| local-CLI tool calls (Claude/Codex/Cursor/Gemini, via `ResolveGeneral`) | `daemon_tool_policy_cerebro.go:68` | **off by default** (flags `cerebro_local_tool_policy`(+`_enforce`)) |
+| general gateway tool calls (Policy Decision Service via `accessdecision.Observer`) | `runtime/access_decision_shadow.go` + `approval_gate.go` | **live and fail-closed**; no server rollout switch |
+| local-CLI tool calls (Claude/Codex/Cursor/Gemini, via `ResolveGeneral`) | `daemon_tool_policy_cerebro.go:68` | **always enforced**; provider adapters fail closed |
 
 Both **general** gates resolve through `Store.ResolveGeneral`, so when `cerebro_member_override`
 (FIR-2175, default ON) is on for the workspace they apply the member-override model; OFF keeps
@@ -150,7 +179,7 @@ Everything below in section 4 is **not** on this list — it is a separate model
 
 ---
 
-## 2a. The canonical inventory — the 57 platform capabilities
+## 2a. The canonical platform-action inventory — 62 capabilities
 
 There is already an authoritative, code-owned inventory of platform actions:
 `server/internal/cerebro/platformcatalog/catalog.go` (`var catalog`, exposed via `All()`).
@@ -183,7 +212,7 @@ three surface for visibility and are not yet an enforcement point.
 | Autopilots | `create_autopilot`, `trigger_autopilot`, `autopilot_scope`, `autopilot_webhook` ⚠ |
 | Artifacts | `manage_artifacts`, `manage_notes`, `manage_note_types` |
 | Agents | `create_agent`, `update_agent`, `trigger_other_agent`, `schedule_agent_wakeup`, `manage_agent_passes`, `manage_work_sessions`, `create_memory` |
-| Runtimes | `manage_runtime`, `manage_runtime_tool_access`, `manage_runtime_accounts`, `manage_cloud_runtime`, `create_runtime`, `create_local_runtime`, `use_other_runtime`, `daemon_runtime_callback` ⚠ |
+| Runtimes | `manage_runtime`, `manage_runtime_accounts`, `manage_cloud_runtime`, `create_runtime`, `create_local_runtime`, `use_other_runtime`, `daemon_runtime_callback` ⚠ |
 | Groups | `manage_group`, `manage_group_members` |
 | Permissions | `manage_roles`, `manage_tool_policy`, `manage_agent_vault_access`, `decide_approval`, `manage_credential_access`, `manage_group_overrides`, `manage_workspace_overrides`, `manage_collections` |
 | Projects | `manage_project`, `manage_project_access` ⚠, `manage_status_models`, `manage_project_sprints` |
@@ -220,17 +249,18 @@ Eval catalog mutations (`POST`/`PUT`/`DELETE /api/cerebro/evals*`) belong to `ma
 
 ---
 
-## 3. The four parallel models (the honest reality)
+## 3. Remaining permission models around the canonical engine
 
 | # | Model | Backing | Authored where | In the 5 interfaces? |
 |---|---|---|---|---|
 | **M1** | **HTTP role / membership / ownership middleware** | hardcoded Go string compares + membership rows | nowhere (code) | **No** |
-| **M2** | **Tool-policy chain** (section 2) | `cerebro_tool_policy` | the 5 UI interfaces | **Yes** (this is the slice) |
+| **M2** | **Capability register + tool-policy chain** (section 2) | `cerebro_capability` inventory/evidence + `cerebro_tool_policy` decisions | Settings → Permissions | **Yes — canonical runtime-tool path** |
 | **M3** | **Group capabilities** | `cerebro_group_capability` / `_runtime_access` / `_agent_access` | Groups UI + `multica group capability` CLI | partly (group layer only) |
 | **M4** | **Per-feature stores + the grant resolver** | one bespoke table/config per feature (see 4.3) | a different screen/dialog per feature, or nothing | **No** |
 
-M1 is by far the largest. M4 is the most scattered. M2 is the target; M3/M4 are what we
-migrate onto it.
+M1 is by far the largest. M4 is the most scattered. M2 is authoritative for
+runtime-tool inventory and policy; M3/M4 remain separate only for the explicitly
+listed feature-specific floors and stores.
 
 ---
 
@@ -266,6 +296,7 @@ Middleware defs in `server/internal/middleware/`; helpers `roleAllowed` (`handle
 | `CanCreateRuntime` / `CanCreateAgent` | `grouppermissions/permissions.go:295,300` | create a runtime / agent | admin→true; else `cerebro_group_capability` row |
 | `CanUseRuntime` / `CanUseAgent` | `permissions.go:322,336` | use a runtime / trigger an agent | admin→true; else `_runtime_access` / `_agent_access` rows |
 | `CanSeeProjectViaGroup` | `permissions.go:352` | project visibility via group | DB rows |
+| `apps.RequireCapability` (`apps.create`, `apps.manage`, `apps.delete`) | `cerebro/apps/admin.go` | app creation, lifecycle/Collection management, and deletion | admin→true; else `cerebro_group_capability` row |
 
 *(These are settable via the Groups UI + `multica group capability`, but they are a
 **different store** from `cerebro_tool_policy` and only partly overlap the 5 interfaces —
@@ -277,12 +308,13 @@ there is no workspace/runtime/agent/user authoring of these capabilities, only g
 |---|---|---|---|---|
 | **Credentials** `enforce` | `credentials/service.go:95`; chain `cerebro_credentials_policy.go:248` | attach/read/reveal/rotate/revoke a secret | **deny-by-default for agents** | the **grant resolver** (`permissions/resolver.go`, now a deny-by-default floor — `cerebro_workspace_grant` dropped, FIR-1512) + owner check + tool-policy chain |
 | **web_fetch host policy** | `webfetchpolicy/policy.go:73,156`; gate `firtal_gateway_tools_extended.go:830` | which hosts `web_fetch` reaches | allow-list `{firtal.com, docs.anthropic.com}` | `cerebro_web_fetch_policy` table |
-| **firtal_registry scope** | `firtal_gateway_tools_extended.go:630,545` `loadGrantConfig` | data-source/app/write scope | **deny-by-default** (`allow_write` not implied by read) | per-agent `agent_tool_grant.config_json` |
+| **firtal_registry scope** | `runtime/firtal_gateway_tools_extended.go` + `toolpolicy.chainGateDataSource` | data-source/app/write scope | **deny-by-default** for resource rows; write is never implied by read | canonical `cerebro_tool_policy` resource rows plus server-owned Registry connection configuration |
 | **agentvault** | `agentvault/store.go` `ListForAgent`/`SetAccess`, reconciled via `mirror.go` | which secret boxes the agent token is scoped to | empty → no brokering | per-agent `Access[]` list; flag `cerebro_agent_vault` (off) |
 | **autopilot scope** | `access/autopilot_scope.go:118,150,179` `CanSee/Edit/Trigger` | autopilot visibility/edit/trigger | unknown scope → **fail closed**; private → creator-only | `autopilot.scope` columns |
 | **sandbox profile** (OS wall) | `sandboxprofile/profile.go:91-139`; `daemon/sandbox.go:98` | network mode, writable/denied paths, shell deny, keychain | empty → Developer (open); ReadOnly → DenyShell; keychain **deny-by-default** for new agents | hardcoded preset → `sandbox_policy` jsonb |
 | **commentguard** | `commentguard/guard.go` | reject agent comment with no recipient + sub-issue rules | **flags default OFF**; DB err → fail-open | feature flags |
-| **tool exposure / grant-allowlist** | `tools_registry.go:122,146` `GetCascadeEnabledToolsForAgent` / `ResolveCerebroAgentToolAccess` | which tools an agent is handed (empty → chat-only) | unconfigured runtime → **falls back to legacy `agent_tool_grant`** (fail-open, not fail-closed) | `cerebro_runtime_tool*` tables (a **different** table family from `cerebro_tool_policy`) |
+| **Firtal Gateway tool exposure** | `runtime.policyDecisionTools` / `runtime.guardToolCall` | which tools a Gateway agent is handed and may call (empty/error → chat-only) | **fail closed** through the Policy Decision Service; no cascade or `agent_tool_grant` fallback | live per-task registry + canonical capability catalog + `cerebro_tool_policy`; availability-card verification remains reporting-only |
+| **task-scoped workflow step capability** | `runtime/firtal_gateway_loop.go` `loopStepCapabilityFromTask`; gateway and external invoke paths in `firtal_gateway_executor.go`, `handler/agent_tools.go`, and `runtime/tool_executor_invoker.go` | lets only the agent task for a steps-enabled workflow block call `open_loop_step` | absent or malformed task context → tool absent; wrong agent/task pair → denied; authored block/phase limit exceeded → durable phase failure | trusted `agent_task_queue.context` + durable loop state; intentionally bypasses ordinary runtime-tool grants only for this exact task capability |
 | **tool registry exclusion** | `tools_registry.go:308` `ToolStatusExcluded` | ~47 tools never registered | code-owned | source code |
 | **private-agent access** | `handler/agent_access.go:75` | who sees/uses a private agent | creator/owner-only | agent row |
 | **folder action guard** | `handler/artifact_folder_action_guard_cerebro.go` `requireFolderActionAllowed`; calls in `artifact_folder.go` delete/update | who may delete/rename/move a folder | **flag default OFF** (any member); when ON for the folder's OWNER → owner + workspace owner/admin only; unowned → open; lookup err → fail-open | flag `cerebro_folder_action_guard` resolved for the folder owner (locked-ws > owner personal > unlocked-ws > default) |
@@ -461,8 +493,8 @@ The end state we are building toward (FIR-1496):
 4. **Persona service removed** (§5.1, done); the **capability engine** (§5.2) is a documented,
    usable function that consolidates onto the chain via the engine-flip (§5.3, tracked in
    FIR-3176 — FIR-1512 closed 2026-07-13 as superseded) — never an ad-hoc drop.
-5. **Visible enforcement state.** The flags that decide whether policy rows are actually
-   enforced (`cerebro_local_tool_policy(_enforce)`, `cerebro_approval_gate`) must be shown next
+5. **Visible enforcement state.** The settings that affect policy execution (including
+   `cerebro_approval_gate`) must be shown next
    to the policy tables — an admin setting Deny must see whether enforcement is on.
 
 Until then: **do not assume the 5 interfaces are the whole story.** Before claiming "X is

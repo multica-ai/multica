@@ -99,21 +99,35 @@ test.describe("Cerebro session mode", () => {
     const original = await instructions.inputValue();
     const changed = `${original}\n\nE2E version marker ${Date.now()}`;
     await instructions.fill(changed);
-    await page.getByLabel("Version note").fill("E2E settings verification");
+    await page.getByRole("button", { name: /^Review/ }).click();
+    const dirtyDialog = page.getByRole("alertdialog");
+    await expect(dirtyDialog.getByRole("heading", { name: "You have unsaved changes" })).toBeVisible();
+    await dirtyDialog.getByRole("button", { name: "Keep editing" }).click();
+    await expect(page.getByLabel("Instructions")).toHaveValue(changed);
     await page.getByRole("button", { name: "Publish version" }).click();
-    await expect(page.getByRole("status")).toHaveText("Version published. New runs will use it.");
-    await expect(published).toHaveText(`Published version ${before + 1}`);
+    const publishDialog = page.getByRole("alertdialog");
+    await expect(publishDialog.getByRole("heading", { name: "Publish this Mode?" })).toBeVisible();
+    await publishDialog.getByLabel("Version note").fill("E2E settings verification");
+    await publishDialog.getByRole("button", { name: "Publish version" }).click();
+    await expect(page.getByText("Version published. New runs will use it.")).toBeVisible();
+    await expect(published).toContainText(`Published version ${before + 1}`);
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByLabel("Instructions")).toHaveValue(changed);
 
     const originalVersion = page.getByText(`Version ${before}`, { exact: true });
-    const originalVersionRow = originalVersion.locator("..").locator("..");
+    const originalVersionRow = originalVersion.locator("..").locator("..").locator("..");
     await originalVersionRow.getByRole("button", { name: "Restore" }).click();
+    const restoreDialog = page.getByRole("alertdialog");
+    await expect(restoreDialog.getByRole("heading", { name: `Restore version ${before}?` })).toBeVisible();
+    await restoreDialog.getByRole("button", { name: "Restore version" }).click();
     await expect(published).toHaveText(`Published version ${before + 2}`);
     await expect(page.getByLabel("Instructions")).toHaveValue(original);
 
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByRole("combobox", { name: "Active Mode" })).toBeVisible();
+    await expect(page.getByText("Plan settings")).toBeVisible();
     await expect(page.getByLabel("Instructions")).toHaveValue(original);
     expectBrowserClean();
   });

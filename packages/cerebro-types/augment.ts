@@ -32,6 +32,35 @@ export interface SkillMetadata {
  */
 export type SystemPromptMode = "" | "append" | "replace" | "prepend";
 
+/**
+ * FIR-3212: how much of the shared Multica workspace brief an agent reads before
+ * its task. Mirrors `WorkspaceBriefMode*` in
+ * `server/internal/cerebro/agentoffice/cerebro_brief_layer_modes.go` — keep the
+ * two in step.
+ *
+ * - `""` — the full shared brief, exactly as every agent gets today (default).
+ * - `"off"` — strip the shared workspace brief; the injected config keeps only
+ *   the agent's own identity layers, for triage/CFO/support agents whose role
+ *   text carries their whole contract.
+ *
+ * `"full"` is also accepted on write as the explicit spelling of the default,
+ * but the server normalises it back to `""`.
+ */
+export type WorkspaceBriefMode = "" | "off";
+
+/**
+ * FIR-3212: how the generated Connections & MCP tools list is rendered in an
+ * agent's brief. Mirrors `ToolsBriefMode*` in the same Go file — keep in step.
+ *
+ * - `""` — list every resolved tool individually, as today (default).
+ * - `"summary"` — fold each connection's generated endpoint tools to one line
+ *   (name, count, ask-count, discovery pointer); platform MCP tools stay listed.
+ *
+ * `"full"` is also accepted on write as the explicit default spelling and is
+ * normalised to `""` by the server.
+ */
+export type ToolsBriefMode = "" | "summary";
+
 declare module "@multica/core/types/agent" {
   interface SkillSummary {
     // TECH-3077: included when the server returns metadata (cerebro skill-metadata feature).
@@ -47,6 +76,21 @@ declare module "@multica/core/types/agent" {
      * approving it and dropping it silently at run time.
      */
     system_prompt_mode?: SystemPromptMode;
+    /**
+     * FIR-3212: typed shortcut for the workspace-brief mode stored in
+     * `runtime_config`. `""` (or `"full"`) restores today's full shared brief;
+     * `"off"` strips it. Applied after a `runtime_config` override in the same
+     * request, so an explicit mode wins. The server rejects an unknown mode
+     * with 400 rather than storing it and dropping it silently at run time.
+     */
+    workspace_brief_mode?: WorkspaceBriefMode;
+    /**
+     * FIR-3212: typed shortcut for the tools-brief mode stored in
+     * `runtime_config`. `""` (or `"full"`) lists every tool individually as
+     * today; `"summary"` folds each connection to one line. Same ordering and
+     * validation rules as `workspace_brief_mode`.
+     */
+    tools_brief_mode?: ToolsBriefMode;
   }
   interface Agent {
     // TECH-3670: per-surface discovery visibility. Orthogonal to `visibility`
@@ -188,7 +232,7 @@ declare module "@multica/core/types/autopilot" {
 }
 
 // JEH-1284/1290: Agent tool grants — W3 registry + W8 UI.
-// AgentTool is a cerebro-only concept (agent_tool_grant table).
+// AgentTool describes one item in the read-only runtime capability inventory.
 export interface AgentTool {
   name: string;
   description: string;
@@ -235,10 +279,6 @@ export interface RuntimeToolEffectiveAccess {
     decided_by?: string;
     capped_by?: string;
   };
-  runtime_grant: {
-    effective: string;
-    reason: string;
-  };
   protocol: {
     effective: string;
     required_protocols: string[];
@@ -258,42 +298,12 @@ export interface RuntimeToolEffectiveAccess {
   layers?: Record<string, string>;
 }
 
-export interface RuntimeToolGroupGrant {
-  runtime_id: string;
-  tool_name: string;
-  group_id: string;
-  group_name: string;
-  granted_at: string;
-}
-
-export interface RuntimeToolUserGrant {
-  runtime_id: string;
-  tool_name: string;
-  user_id: string;
-  user_name: string;
-  user_email: string;
-  user_avatar_url: string;
-  granted_at: string;
-}
-
-export interface RuntimeToolGrants {
-  group_grants: RuntimeToolGroupGrant[];
-  user_grants: RuntimeToolUserGrant[];
-}
-
 // JEH-1710 (bid 4): per-agent override on top of the runtime-level tool grant.
 // One row per (agent_id, tool_name) with `enabled` forcing the effective state
 // either on or off — the absence of a row means the agent inherits the runtime
 // default. The override never widens beyond a runtime that has the tool off
 // for everyone; it expresses the agent-specific exception inside the rules the
 // runtime already permits.
-export interface AgentToolOverride {
-  agent_id: string;
-  tool_name: string;
-  enabled: boolean;
-  updated_at: string;
-}
-
 // TECH-3352: per-user snooze ("remind me") target on a channel/DM. A future
 // timestamp means the conversation is muted and hidden from the normal inbox
 // views until then; null/absent means not snoozed. The server overlays this

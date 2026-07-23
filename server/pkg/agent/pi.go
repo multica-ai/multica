@@ -262,6 +262,7 @@ func (b *piBackend) executeOnce(ctx context.Context, prompt string, opts ExecOpt
 		finalStatus := "completed"
 		var finalError string
 		usage := make(map[string]TokenUsage)
+		var usageEvents []ModelUsageEvent // CEREBRO-PATCH(agent-pi-call-usage-events): FIR-3337 retain native per-turn model usage.
 		// CEREBRO-PATCH(agent-pi-context-footprint): FIR-1870 last-turn footprint for the context-window indicator (cumulative usage over-counts the cached prefix).
 		var lastTurn lastTurnFootprint
 
@@ -330,6 +331,7 @@ func (b *piBackend) executeOnce(ctx context.Context, prompt string, opts ExecOpt
 					if model == "" {
 						model = "unknown"
 					}
+					usageEvents = appendPiCallUsageEvent(usageEvents, msg, model, sessionPath, time.Now())
 					u := usage[model]
 					u.InputTokens += msg.Usage.Input
 					u.OutputTokens += msg.Usage.Output
@@ -382,12 +384,13 @@ func (b *piBackend) executeOnce(ctx context.Context, prompt string, opts ExecOpt
 
 		lastTurn.applyToMap(usage) // CEREBRO-PATCH(agent-pi-context-footprint): FIR-1870 overlay last-turn footprint onto the cumulative usage map.
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     output.String(),
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  sessionPath,
-			Usage:      usage,
+			Status:      finalStatus,
+			Output:      output.String(),
+			Error:       finalError,
+			DurationMs:  duration.Milliseconds(),
+			SessionID:   sessionPath,
+			Usage:       usage,
+			UsageEvents: usageEvents,
 		}
 	}()
 

@@ -20,13 +20,14 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/auth"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
-	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy" // CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 staged local tool-policy import.
-	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode"     // CEREBRO-PATCH(session-modes): FIR-3111 normalize claim profiles.
+	"github.com/multica-ai/multica/server/internal/cerebro/sessionmode" // CEREBRO-PATCH(session-modes): FIR-3111 normalize claim profiles.
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/pricing"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1433,14 +1434,6 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		resp.RuntimeSandboxPolicy = withAgentBrowserSandbox(resp.RuntimeSandboxPolicy)
 	}
 
-	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — resolve the staged
-	// local-runtime enforcement mode from workspace settings so the daemon
-	// wires the Claude PreToolUse hook only when the workspace opted in.
-	// Off (default) leaves the field empty and the daemon wires nothing.
-	if stage := h.localToolPolicyMode(r.Context(), runtime.WorkspaceID); stage != localtoolpolicy.ModeOff {
-		resp.LocalToolPolicyStage = string(stage)
-	}
-
 	// Resolve the runtime owner's profile description so the daemon can
 	// inject "## Requesting User" into the brief. Empty fields short-circuit
 	// the heading entirely on the daemon side; cloud / system runtimes with
@@ -1487,6 +1480,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
+			resp.IssueTitle = issue.Title // CEREBRO-PATCH(agent-task-issue-title): FIR-3708 — the M1 fields existed but were never assigned, so every trace row landed with a NULL issue title
+			if parent, perr := h.Queries.GetIssue(r.Context(), issue.ParentIssueID); issue.ParentIssueID.Valid && perr == nil { // CEREBRO-PATCH(agent-task-issue-title)
+				resp.ParentIssueTitle = parent.Title // CEREBRO-PATCH(agent-task-issue-title)
+			} // CEREBRO-PATCH(agent-task-issue-title)
 
 			// Squad-leader briefing injection: keyed off the task being a
 			// leader-task (is_leader_task) carrying a squad_id — NOT off the
@@ -2155,19 +2152,24 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			skillPayloadBytes = len(skillPayload)
 		}
 	}
-	resp.EffectiveTools = h.cerebroEffectiveToolsForBrief(r.Context(), runtime, resp.Agent, resp.InitiatorType, resp.InitiatorID) // CEREBRO-PATCH(agent-task-effective-tools-callsite): FIR-2312 resolve per-permission non-CLI tools for the brief
+	var mandateTools []string
+	var toolResolveErr error
+	resp.EffectiveTools, mandateTools, toolResolveErr = h.cerebroEffectiveToolsForClaim(r.Context(), runtime, resp.Agent, resp.InitiatorType, resp.InitiatorID) // CEREBRO-PATCH(agent-task-effective-tools-callsite): FIR-2312 resolve per-permission tools once for both the brief and immutable mandate
+	if toolResolveErr != nil {
+		// CEREBRO-PATCH(agent-task-tool-resolve-failclaim): FIR-3403 TRIN 1b — never issue an empty (total-lockout) mandate on a resolution error; fail the claim so the task retries.
+		outcome = "error_tool_resolve"
+		slog.Error("task claim: failed to resolve agent tool mandate", "task_id", uuidToString(task.ID), "error", toolResolveErr)
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent tool mandate")
+		return
+	}
 	if resp.SessionModeConfig != nil && len(resp.SessionModeConfig.AllowedTools) > 0 {
-		allowed := make(map[string]struct{}, len(resp.SessionModeConfig.AllowedTools))
-		for _, name := range resp.SessionModeConfig.AllowedTools {
-			allowed[strings.ToLower(strings.TrimSpace(name))] = struct{}{}
-		}
-		filtered := resp.EffectiveTools[:0]
-		for _, tool := range resp.EffectiveTools {
-			if _, ok := allowed[strings.ToLower(strings.TrimSpace(tool.Name))]; ok {
-				filtered = append(filtered, tool)
-			}
-		}
-		resp.EffectiveTools = filtered
+		resp.EffectiveTools, mandateTools = filterClaimToolsForSessionMode(resp.EffectiveTools, mandateTools, resp.SessionModeConfig.AllowedTools)
+	}
+	if err := taskmandate.NewStoreDB(h.DB).Issue(r.Context(), task.ID, parseUUID(resp.WorkspaceID), task.AgentID, mandateTools, time.Now().Add(24*time.Hour)); err != nil {
+		outcome = "error_task_mandate"
+		slog.Error("task claim: failed to issue task mandate", "task_id", uuidToString(task.ID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to issue task mandate")
+		return
 	}
 	h.applyMemoryAutoRecall(r.Context(), &resp, *task) // CEREBRO-PATCH(daemon-memory-autorecall-callsite): FIR-1794 layer 3 — auto-recall memories into the claim when cerebro_memory is on
 
@@ -2429,7 +2431,8 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var req struct {
-		Usage []TaskUsagePayload `json:"usage"`
+		Usage  []TaskUsagePayload      `json:"usage"`
+		Events []agent.ModelUsageEvent `json:"events"` // CEREBRO-PATCH(handler-model-usage-events): FIR-3337 canonical call-level measurements.
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -2442,19 +2445,62 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 	// resolve to a provider instead of landing as '' and pricing $0.
 	var runtimeProvider string
 	runtimeProviderLoaded := false
+	loadRuntimeProvider := func() string {
+		if !runtimeProviderLoaded {
+			if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
+				runtimeProvider = normalizeProvider(rt.Provider)
+			} else {
+				slog.Warn("load runtime provider for usage backfill failed",
+					"task_id", taskID, "runtime_id", uuidToString(task.RuntimeID), "error", err)
+			}
+			runtimeProviderLoaded = true
+		}
+		return runtimeProvider
+	}
+
+	// Validate every runtime event before writing either the canonical ledger
+	// or its temporary legacy projections. Core owns this boundary; attribution
+	// is derived by InsertModelUsageEvent from the authenticated task.
+	normalizedEvents := make([]agent.ModelUsageEvent, 0, len(req.Events))
+	for _, event := range req.Events {
+		fallbackProvider := ""
+		if normalizeProvider(event.Provider) == "" {
+			fallbackProvider = loadRuntimeProvider()
+		}
+		normalized, err := normalizeAndValidateModelUsageEvent(event, fallbackProvider)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid model usage event")
+			return
+		}
+		normalizedEvents = append(normalizedEvents, normalized)
+	}
+	// CEREBRO-PATCH(handler-model-usage-model-budget): FIR-3337 retains legacy
+	// charging only for provider/model pairs not represented by canonical events.
+	eventCoverage := modelUsageEventCoverage(normalizedEvents)
+
+	newEventInserted := false
+	for _, event := range normalizedEvents {
+		// CEREBRO-PATCH(handler-model-usage-event-ingestion): FIR-3337 append the
+		// canonical event and its financial projections in one transaction.
+		inserted, err := h.ingestModelUsageEvent(r.Context(), task, event)
+		if err != nil {
+			slog.Error("insert model usage event failed", "task_id", taskID, "event_id", event.EventID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to record model usage")
+			return
+		}
+		newEventInserted = newEventInserted || inserted
+	}
+
+	if len(normalizedEvents) > 0 && !newEventInserted {
+		h.logModelUsageEventShadowReconciliation(r.Context(), task.ID)
+		writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+		return
+	}
+
 	for _, u := range req.Usage {
 		provider := normalizeProvider(u.Provider)
 		if provider == "" {
-			if !runtimeProviderLoaded {
-				if rt, err := h.Queries.GetAgentRuntime(r.Context(), task.RuntimeID); err == nil {
-					runtimeProvider = normalizeProvider(rt.Provider)
-				} else {
-					slog.Warn("load runtime provider for usage backfill failed",
-						"task_id", taskID, "runtime_id", uuidToString(task.RuntimeID), "error", err)
-				}
-				runtimeProviderLoaded = true
-			}
-			provider = runtimeProvider
+			provider = loadRuntimeProvider()
 		}
 		if err := h.Queries.UpsertTaskUsage(r.Context(), db.UpsertTaskUsageParams{
 			TaskID:           parseUUID(taskID),
@@ -2470,9 +2516,14 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
-		h.recordUsageBudgetAndAccount(r.Context(), task, u)
+		if !modelUsageCovered(eventCoverage, provider, u.Model) {
+			h.recordUsageBudgetAndAccount(r.Context(), task, u)
+		}
 		h.recordCerebroTaskContextFootprint(r.Context(), taskID, u) // CEREBRO-PATCH(handler-daemon-context-footprint): FIR-1856 persist last-turn footprint for the window indicator.
 		h.projectAnalyticsRun(r.Context(), taskID)                  // CEREBRO-PATCH(analytics-projection): FIR-2996 refresh canonical usage after cost writes.
+	}
+	if len(normalizedEvents) > 0 {
+		h.logModelUsageEventShadowReconciliation(r.Context(), task.ID)
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})

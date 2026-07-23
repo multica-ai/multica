@@ -4,15 +4,19 @@ package main
 // auth vault without placing the password in argv, stdout, stderr, or logs.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/internalbrowserqa"
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/spf13/cobra"
 )
@@ -45,15 +49,50 @@ type agentBrowserProvisionOptions struct {
 }
 
 type internalBrowserVerifyRequest struct {
-	App string `json:"app"`
+	App   string `json:"app"`
+	Async bool   `json:"async,omitempty"`
 }
 
 type internalBrowserVerifyResponse struct {
-	App          string   `json:"app"`
-	InternalHost string   `json:"internal_host"`
-	FinalURL     string   `json:"final_url"`
-	Markers      []string `json:"markers"`
-	Errors       []string `json:"errors"`
+	JobID         string   `json:"job_id"`
+	State         string   `json:"state"`
+	Error         string   `json:"error"`
+	App           string   `json:"app"`
+	InternalHost  string   `json:"internal_host"`
+	FinalURL      string   `json:"final_url"`
+	Markers       []string `json:"markers"`
+	Errors        []string `json:"errors"`
+	ScreenshotPNG []byte   `json:"screenshot_png"`
+	FailureStage  string   `json:"failure_stage"`
+	FailureCause  string   `json:"failure_cause"`
+	FailureDetail string   `json:"failure_detail"`
+}
+
+// internalBrowserFailureHint turns a stage and cause into the one sentence a
+// reader actually needs. An unrecognised pair falls through to stage + cause
+// rather than being swallowed, so a new cause is never silently hidden.
+func internalBrowserFailureHint(stage, cause string) string {
+	switch cause {
+	case "dns":
+		return "the internal address does not exist — check the hostname"
+	case "dns-timeout":
+		return "the internal address could not be looked up in time — check the hostname and private DNS"
+	case "connection":
+		return "the address resolved but nothing accepted the connection — check the port and that the app is running"
+	case "browser-launch":
+		return "the verifier could not start its browser"
+	case "not-found":
+		if stage == "markers" {
+			return "the page loaded but the expected text was missing — check login and the page content"
+		}
+		return "the element the verifier looked for was not on the page"
+	case "timeout":
+		return "the app resolved and connected but answered too slowly"
+	}
+	if stage == "" && cause == "" {
+		return ""
+	}
+	return "failed at stage " + stage + " (" + cause + ")"
 }
 
 type agentBrowserAuthSaver interface {
@@ -123,15 +162,115 @@ var agentBrowserProvisionAuthCmd = &cobra.Command{
 	},
 }
 
-func verifyInternalAgentBrowser(ctx context.Context, client *cli.APIClient, out io.Writer, app string) error {
+func verifyInternalAgentBrowser(ctx context.Context, client *cli.APIClient, out io.Writer, app, screenshotPath string) error {
 	var response internalBrowserVerifyResponse
-	if err := client.PostJSON(ctx, "/api/cerebro/agent-browser/internal-verify", internalBrowserVerifyRequest{App: app}, &response); err != nil {
+	status, err := client.PostJSONWithDiagnostic(ctx,
+		"/api/cerebro/agent-browser/internal-verify",
+		internalBrowserVerifyRequest{App: app, Async: true}, &response, http.StatusUnprocessableEntity)
+	if err != nil {
 		return err
 	}
-	return json.NewEncoder(out).Encode(response)
+	if status == http.StatusAccepted {
+		if response.JobID == "" {
+			return fmt.Errorf("internal browser verification returned an invalid job")
+		}
+		response, status, err = pollInternalBrowserVerification(ctx, client, response.JobID)
+		if err != nil {
+			return err
+		}
+	}
+	if status == http.StatusUnprocessableEntity {
+		return reportInternalBrowserFailure(out, response, screenshotPath)
+	}
+	if !bytes.HasPrefix(response.ScreenshotPNG, []byte("\x89PNG\r\n\x1a\n")) {
+		return fmt.Errorf("internal browser verification returned an invalid screenshot")
+	}
+	absPath, err := writeInternalBrowserScreenshot(response.ScreenshotPNG, screenshotPath)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(out).Encode(map[string]any{
+		"app": response.App, "internal_host": response.InternalHost, "final_url": response.FinalURL,
+		"markers": response.Markers, "errors": response.Errors, "screenshot": absPath,
+	})
 }
 
-const internalBrowserVerifyTimeout = 2 * time.Minute
+func pollInternalBrowserVerification(ctx context.Context, client *cli.APIClient, jobID string) (internalBrowserVerifyResponse, int, error) {
+	path := "/api/cerebro/agent-browser/internal-verify/" + jobID
+	for {
+		var response internalBrowserVerifyResponse
+		status, err := client.GetJSONWithDiagnostic(ctx, path, &response, http.StatusUnprocessableEntity)
+		if err != nil {
+			return internalBrowserVerifyResponse{}, status, err
+		}
+		if status != http.StatusAccepted {
+			return response, status, nil
+		}
+		select {
+		case <-ctx.Done():
+			return internalBrowserVerifyResponse{}, 0, ctx.Err()
+		case <-time.After(2 * time.Second):
+		}
+	}
+}
+
+func writeInternalBrowserScreenshot(screenshot []byte, screenshotPath string) (string, error) {
+	absPath, err := filepath.Abs(screenshotPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve screenshot path")
+	}
+	file, err := os.OpenFile(absPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o600)
+	if err != nil {
+		return "", fmt.Errorf("write screenshot")
+	}
+	if _, err := file.Write(screenshot); err != nil {
+		_ = file.Close()
+		_ = os.Remove(absPath)
+		return "", fmt.Errorf("write screenshot")
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(absPath)
+		return "", fmt.Errorf("write screenshot")
+	}
+	if err := os.Chmod(absPath, 0o600); err != nil {
+		_ = os.Remove(absPath)
+		return "", fmt.Errorf("secure screenshot")
+	}
+	return absPath, nil
+}
+
+// reportInternalBrowserFailure prints the diagnostics for a failed verification
+// and saves the failure screenshot when the verifier managed to take one, then
+// returns a non-nil error so the command still exits non-zero.
+func reportInternalBrowserFailure(out io.Writer, response internalBrowserVerifyResponse, screenshotPath string) error {
+	report := map[string]any{
+		"ok": false, "app": response.App, "error": response.Error,
+		"internal_host": response.InternalHost, "attempted": response.FailureDetail,
+		"failure_stage": response.FailureStage, "failure_cause": response.FailureCause,
+	}
+	if hint := internalBrowserFailureHint(response.FailureStage, response.FailureCause); hint != "" {
+		report["hint"] = hint
+	}
+	if bytes.HasPrefix(response.ScreenshotPNG, []byte("\x89PNG\r\n\x1a\n")) {
+		if absPath, err := writeInternalBrowserScreenshot(response.ScreenshotPNG, screenshotPath); err == nil {
+			report["screenshot"] = absPath
+		}
+	}
+	if err := json.NewEncoder(out).Encode(report); err != nil {
+		return err
+	}
+	message := response.Error
+	if message == "" {
+		message = "internal browser verification failed"
+	}
+	return fmt.Errorf("%s", message)
+}
+
+// The caller must outlast the verifier's own worst case, plus a margin for the
+// request itself. At two minutes it did not: the verifier can spend 155s on the
+// open stage alone once the cold-start retry fires, so the CLI hung up mid-retry
+// and reported "context deadline exceeded" for apps that were merely idle.
+const internalBrowserVerifyTimeout = internalbrowserqa.MaxVerificationDuration + time.Minute
 
 func configureInternalBrowserVerifyClient(client *cli.APIClient) {
 	client.HTTPClient.Timeout = internalBrowserVerifyTimeout
@@ -146,6 +285,10 @@ var agentBrowserInternalVerifyCmd = &cobra.Command{
 		if app == "" {
 			return fmt.Errorf("--app is required")
 		}
+		screenshotPath, _ := cmd.Flags().GetString("screenshot")
+		if screenshotPath == "" {
+			screenshotPath = fmt.Sprintf("%s-internal-verify.png", app)
+		}
 		client, err := newAPIClient(cmd)
 		if err != nil {
 			return err
@@ -153,7 +296,7 @@ var agentBrowserInternalVerifyCmd = &cobra.Command{
 		configureInternalBrowserVerifyClient(client)
 		ctx, cancel := context.WithTimeout(cmd.Context(), internalBrowserVerifyTimeout)
 		defer cancel()
-		return verifyInternalAgentBrowser(ctx, client, os.Stdout, app)
+		return verifyInternalAgentBrowser(ctx, client, os.Stdout, app, screenshotPath)
 	},
 }
 
@@ -164,6 +307,7 @@ func init() {
 	agentBrowserProvisionAuthCmd.Flags().String("username-key", "", "Credential key containing the login username")
 	agentBrowserProvisionAuthCmd.Flags().String("password-key", "", "Credential key containing the login password")
 	agentBrowserCmd.AddCommand(agentBrowserProvisionAuthCmd)
-	agentBrowserInternalVerifyCmd.Flags().String("app", "", "Allowlisted app: multica, cerebro, registry, finance, pricing, or customer-service")
+	agentBrowserInternalVerifyCmd.Flags().String("app", "", "Allowlisted app: multica, cerebro, registry, finance, pricing, customer-service, warehouse, or data-catalog")
+	agentBrowserInternalVerifyCmd.Flags().String("screenshot", "", "PNG output path (default: <app>-internal-verify.png)")
 	agentBrowserCmd.AddCommand(agentBrowserInternalVerifyCmd)
 }

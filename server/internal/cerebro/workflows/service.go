@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -40,11 +41,16 @@ type Service struct {
 	issues  IssueActions
 	bus     *events.Bus
 
-	// enabled is the env-gated phase-1 master switch. PR 2 ships the
-	// per-user `cerebro_workflows` UI flag alongside this env var; the env
-	// var stays as the master kill switch so an ops-driven disable doesn't
-	// require a UI round-trip.
+	// enabled is the env-gated global master switch (CEREBRO_WORKFLOWS_ENABLED).
+	// When true it force-enables the engine for every workspace. When false
+	// (the default in prod) the per-workspace cerebro_workflows_engine feature
+	// flag decides instead — see engineEnabledForWorkspace in engine_flag.go.
 	enabled bool
+
+	// engineFlagCache memoizes the per-workspace cerebro_workflows_engine
+	// feature flag so the bus hot-path doesn't hit the DB on every event.
+	// Keyed by workspace UUID bytes ([16]byte) -> engineFlagEntry.
+	engineFlagCache sync.Map
 
 	// gateEval decides OpCheckPasses (loop delivery gate) conditions. Optional
 	// and nil-safe: without it an OpCheckPasses gate fails closed. Wired via
@@ -90,8 +96,9 @@ func New(queries *cerebrodb.Queries, issues IssueActions, bus *events.Bus) *Serv
 	}
 }
 
-// Enabled reports whether the engine should act on events. Exported so the
-// listener can short-circuit before doing any work on a hot path.
+// Enabled reports the global env master switch (CEREBRO_WORKFLOWS_ENABLED).
+// Per-workspace gating goes through engineEnabledForWorkspace instead; this
+// remains to satisfy the webhookInboundExecutor interface.
 func (s *Service) Enabled() bool { return s.enabled }
 
 // workflow is the engine's flat projection of a cerebrodb.CerebroWorkflow
@@ -126,12 +133,12 @@ type workflow struct {
 // filter to the ones that should fire, and execute each via the retry-aware
 // inner Execute.
 func (s *Service) Dispatch(ctx context.Context, te TriggerEvent) error {
-	if !s.enabled {
-		return nil
-	}
 	wsID, err := parseUUID(te.WorkspaceID)
 	if err != nil {
 		return fmt.Errorf("dispatch: workspace_id: %w", err)
+	}
+	if !s.engineEnabledForWorkspace(ctx, wsID) {
+		return nil
 	}
 
 	rows, err := s.queries.ListCerebroWorkflowsForTrigger(ctx, cerebrodb.ListCerebroWorkflowsForTriggerParams{
@@ -292,9 +299,8 @@ func (s *Service) RunRetrySweeper(ctx context.Context, tick time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if !s.enabled {
-				continue
-			}
+			// Per-run workspace gating happens in sweepRetries; the sweep is
+			// cheap (one indexed query) when there is nothing pending.
 			if err := s.sweepRetries(ctx); err != nil {
 				slog.Warn("workflow retry sweep failed", "error", err)
 			}
@@ -314,6 +320,11 @@ func (s *Service) sweepRetries(ctx context.Context) error {
 		wfRow, err := s.queries.GetCerebroWorkflow(ctx, row.WorkflowID)
 		if err != nil {
 			slog.Warn("workflow retry: workflow gone", "run_id", uuidString(row.ID), "error", err)
+			continue
+		}
+		if !s.engineEnabledForWorkspace(ctx, wfRow.WorkspaceID) {
+			// Engine disabled for this workspace: leave the run pending so it
+			// resumes if the flag is turned back on.
 			continue
 		}
 		var te TriggerEvent

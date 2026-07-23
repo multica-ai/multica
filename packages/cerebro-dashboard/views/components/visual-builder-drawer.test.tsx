@@ -47,4 +47,23 @@ describe("VisualBuilderDrawer", () => {
     fireEvent.click(screen.getByRole("button", { name: "Close new visual" }));
     expect(onClose).toHaveBeenCalledOnce();
   });
+
+  it("previews the selected presentation and lets tables contain several metrics", () => {
+    const onSave = vi.fn();
+    render(<VisualBuilderDrawer catalog={catalog} onClose={vi.fn()} onSave={onSave} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Table" }));
+    fireEvent.click(screen.getByRole("button", { name: "Add metric" }));
+    fireEvent.change(screen.getByLabelText("Metric 2"), { target: { value: "cost_cents" } });
+
+    const preview = screen.getByRole("region", { name: "Visual preview" });
+    expect(preview.textContent).toContain("Runs");
+    expect(preview.textContent).toContain("Cost cents");
+
+    fireEvent.click(screen.getByRole("button", { name: "Add visual to Dashboard" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      presentation: "table",
+      metrics: ["runs", "cost_cents"],
+    }));
+  });
 });

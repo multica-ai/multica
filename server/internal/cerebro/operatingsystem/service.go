@@ -20,6 +20,7 @@ import (
 
 var ErrProjectNotInWorkspace = errors.New("project not found in workspace")
 var ErrOwnerNotInWorkspace = errors.New("owner not found in workspace")
+var ErrElementDisabled = errors.New("operating system element is disabled")
 
 var validStrategyKinds = map[string]bool{
 	"core_value": true, "core_focus": true, "horizon_goal": true,
@@ -31,6 +32,14 @@ var validHorizonUnits = map[string]bool{
 
 var validRockHealth = map[string]bool{
 	"on_track": true, "at_risk": true, "off_track": true, "unset": true,
+}
+
+var validMeetingCadenceUnits = map[string]bool{
+	"manual": true, "day": true, "week": true, "month": true, "quarter": true,
+}
+
+var validMeetingBindings = map[string]bool{
+	"none": true, "scorecard": true, "goals": true, "issues_list": true,
 }
 
 type ProjectReader interface {
@@ -53,7 +62,7 @@ func NewService(queries *cerebrodb.Queries, projects ProjectReader) *Service {
 func DefaultTerminology() Terminology {
 	return Terminology{
 		Strategy: "Strategy", Rock: "Goal", Rocks: "Goals",
-		VisionPlan: "Vision Plan", Meetings: "Meetings", OrgChart: "Org Chart",
+		VisionPlan: "Vision Plan", Meetings: "Cycles", OrgChart: "Roles",
 		Scorecard: "Scorecard", IssuesList: "Issues List", StrategyMap: "Strategy Map",
 	}
 }
@@ -72,8 +81,8 @@ func ElementRegistry() []OsElement {
 	return []OsElement{
 		{Key: "vision_plan", DefaultEnabled: true},
 		{Key: "goals", DefaultEnabled: true},
-		{Key: "meetings", DefaultEnabled: false},
-		{Key: "org_chart", DefaultEnabled: false},
+		{Key: "meetings", DefaultEnabled: true},
+		{Key: "org_chart", DefaultEnabled: true},
 		{Key: "scorecard", DefaultEnabled: false},
 		{Key: "issues_list", DefaultEnabled: false},
 		{Key: "strategy_map", DefaultEnabled: false},
@@ -216,6 +225,89 @@ func ValidateStrategyInput(input StrategyItemInput) error {
 	}
 	if input.HorizonUnit != "" || input.HorizonCount != 0 {
 		return errors.New("only horizon goals accept a horizon")
+	}
+	return nil
+}
+
+func ValidateVisionPlanSectionInput(input VisionPlanSectionInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return errors.New("name is required")
+	}
+	if input.SectionType != "list" && input.SectionType != "structured" && input.SectionType != "process" {
+		return errors.New("section_type must be list, structured, or process")
+	}
+	return nil
+}
+
+func ValidateVisionPlanItemInput(input VisionPlanItemInput) error {
+	if _, err := util.ParseUUID(input.SectionID); err != nil {
+		return errors.New("section_id must be a UUID")
+	}
+	if strings.TrimSpace(input.Title) == "" {
+		return errors.New("title is required")
+	}
+	if input.State != "" && input.State != "active" && input.State != "archived" {
+		return errors.New("state must be active or archived")
+	}
+	if (input.OwnerType == "") != (input.OwnerID == "") {
+		return errors.New("owner_type and owner_id must be provided together")
+	}
+	if input.OwnerType != "" {
+		if input.OwnerType != "member" && input.OwnerType != "agent" {
+			return errors.New("owner_type must be member or agent")
+		}
+		if _, err := util.ParseUUID(input.OwnerID); err != nil {
+			return errors.New("owner_id must be a UUID")
+		}
+	}
+	return nil
+}
+
+func ValidateMeetingInput(input MeetingConfigInput) error {
+	if !validMeetingCadenceUnits[input.CadenceUnit] {
+		return fmt.Errorf("cadence_unit must be manual, day, week, month, or quarter")
+	}
+	if input.CadenceCount <= 0 {
+		return errors.New("cadence_count must be > 0")
+	}
+	seen := make(map[string]bool, len(input.Agenda))
+	for _, section := range input.Agenda {
+		if strings.TrimSpace(section.ID) == "" {
+			return errors.New("agenda section id is required")
+		}
+		if strings.TrimSpace(section.Name) == "" {
+			return errors.New("agenda section name is required")
+		}
+		if !validMeetingBindings[section.Binding] {
+			return fmt.Errorf("invalid agenda binding %q", section.Binding)
+		}
+		if seen[section.ID] {
+			return fmt.Errorf("agenda section %q already exists", section.ID)
+		}
+		seen[section.ID] = true
+	}
+	return nil
+}
+
+func ValidateOrgChartSeatInput(input OrgChartSeatInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return errors.New("name is required")
+	}
+	if (input.OwnerType == "") != (input.OwnerID == "") {
+		return errors.New("owner_type and owner_id must be provided together")
+	}
+	if input.OwnerType != "" && input.OwnerType != "member" && input.OwnerType != "agent" {
+		return errors.New("owner_type must be member or agent")
+	}
+	if input.OwnerID != "" {
+		if _, err := util.ParseUUID(input.OwnerID); err != nil {
+			return errors.New("owner_id must be a UUID")
+		}
+	}
+	if input.ParentID != "" {
+		if _, err := util.ParseUUID(input.ParentID); err != nil {
+			return errors.New("parent_id must be a UUID")
+		}
 	}
 	return nil
 }
@@ -418,6 +510,489 @@ func (s *Service) UpdateStrategyItem(ctx context.Context, workspaceID, id pgtype
 func (s *Service) DeleteStrategyItem(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
 	count, err := s.queries.DeleteStrategyItem(ctx, cerebrodb.DeleteStrategyItemParams{ID: id, WorkspaceID: workspaceID})
 	return count > 0, err
+}
+
+func (s *Service) ensureVisionPlanEnabled(ctx context.Context, workspaceID pgtype.UUID) error {
+	elements, err := s.ListElements(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, element := range elements {
+		if element.Key == "vision_plan" && element.Enabled {
+			return nil
+		}
+	}
+	return ErrElementDisabled
+}
+
+func (s *Service) ensureElementEnabled(ctx context.Context, workspaceID pgtype.UUID, key string) error {
+	elements, err := s.ListElements(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	for _, element := range elements {
+		if element.Key == key && element.Enabled {
+			return nil
+		}
+	}
+	return ErrElementDisabled
+}
+
+func defaultMeetingAgenda() []MeetingAgendaSectionResponse {
+	return []MeetingAgendaSectionResponse{
+		{ID: "check-in", Name: "Check-in", Position: 0, Binding: "none"},
+		{ID: "scorecard-review", Name: "Scorecard review", Position: 1, Binding: "scorecard"},
+		{ID: "goal-review", Name: "Goal review", Position: 2, Binding: "goals"},
+		{ID: "headlines", Name: "Headlines", Position: 3, Binding: "none"},
+		{ID: "todos", Name: "Todos", Position: 4, Binding: "none"},
+		{ID: "issue-solving", Name: "Issue solving", Position: 5, Binding: "issues_list"},
+		{ID: "conclude", Name: "Conclude", Position: 6, Binding: "none"},
+	}
+}
+
+func (s *Service) meetingNoteTypes(ctx context.Context, workspaceID pgtype.UUID) ([]MeetingNoteTypeResponse, error) {
+	rows, err := s.queries.ListCerebroNoteTypesByWorkspace(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]MeetingNoteTypeResponse, 0, len(rows))
+	for _, row := range rows {
+		if !row.Enabled || row.CadenceUnit == "manual" {
+			continue
+		}
+		out = append(out, MeetingNoteTypeResponse{
+			ID: util.UUIDToString(row.ID), Name: row.Name,
+			CadenceUnit: row.CadenceUnit, CadenceCount: row.CadenceCount, Enabled: row.Enabled,
+			CurrentNoteID: util.UUIDToString(row.RunningDocArtifactID),
+		})
+	}
+	return out, nil
+}
+
+func applyMeetingNoteType(response *MeetingConfigResponse, noteTypes []MeetingNoteTypeResponse) {
+	if response.NoteTypeID == "" {
+		return
+	}
+	for _, noteType := range noteTypes {
+		if noteType.ID != response.NoteTypeID {
+			continue
+		}
+		response.NoteTypeName = noteType.Name
+		response.CurrentNoteID = noteType.CurrentNoteID
+		response.CadenceUnit = noteType.CadenceUnit
+		response.CadenceCount = noteType.CadenceCount
+		return
+	}
+}
+
+func parseMeetingAgenda(raw []byte) ([]MeetingAgendaSectionResponse, error) {
+	if len(raw) == 0 {
+		return []MeetingAgendaSectionResponse{}, nil
+	}
+	var agenda []MeetingAgendaSectionResponse
+	if err := json.Unmarshal(raw, &agenda); err != nil {
+		return nil, errors.New("meeting agenda is invalid")
+	}
+	return agenda, nil
+}
+
+func (s *Service) meetingResponse(ctx context.Context, workspaceID pgtype.UUID, row *cerebrodb.CerebroOperatingMeeting, agenda []MeetingAgendaSectionResponse) (MeetingConfigResponse, error) {
+	noteTypes, err := s.meetingNoteTypes(ctx, workspaceID)
+	if err != nil {
+		return MeetingConfigResponse{}, err
+	}
+	response := MeetingConfigResponse{
+		WorkspaceID: util.UUIDToString(workspaceID), CadenceUnit: "manual", CadenceCount: 1,
+		Agenda: agenda, AvailableNoteTypes: noteTypes,
+	}
+	if row != nil {
+		response.CadenceUnit = row.CadenceUnit
+		response.CadenceCount = row.CadenceCount
+		if row.NoteTypeID.Valid {
+			response.NoteTypeID = util.UUIDToString(row.NoteTypeID)
+		}
+	}
+	applyMeetingNoteType(&response, noteTypes)
+	return response, nil
+}
+
+func (s *Service) GetMeeting(ctx context.Context, workspaceID pgtype.UUID) (MeetingConfigResponse, error) {
+	if err := s.ensureElementEnabled(ctx, workspaceID, "meetings"); err != nil {
+		return MeetingConfigResponse{}, err
+	}
+	row, err := s.queries.GetOperatingMeeting(ctx, workspaceID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return s.meetingResponse(ctx, workspaceID, nil, defaultMeetingAgenda())
+	}
+	if err != nil {
+		return MeetingConfigResponse{}, err
+	}
+	agenda, err := parseMeetingAgenda(row.Agenda)
+	if err != nil {
+		return MeetingConfigResponse{}, err
+	}
+	return s.meetingResponse(ctx, workspaceID, &row, agenda)
+}
+
+func (s *Service) UpdateMeeting(ctx context.Context, workspaceID pgtype.UUID, input MeetingConfigInput) (MeetingConfigResponse, error) {
+	if err := s.ensureElementEnabled(ctx, workspaceID, "meetings"); err != nil {
+		return MeetingConfigResponse{}, err
+	}
+	if err := ValidateMeetingInput(input); err != nil {
+		return MeetingConfigResponse{}, err
+	}
+	noteTypeID := pgtype.UUID{}
+	cadenceUnit := input.CadenceUnit
+	cadenceCount := input.CadenceCount
+	if input.NoteTypeID != "" {
+		parsed, err := util.ParseUUID(input.NoteTypeID)
+		if err != nil {
+			return MeetingConfigResponse{}, errors.New("note_type_id must be a UUID")
+		}
+		noteType, err := s.queries.GetCerebroNoteType(ctx, parsed)
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return MeetingConfigResponse{}, pgx.ErrNoRows
+			}
+			return MeetingConfigResponse{}, err
+		}
+		if noteType.WorkspaceID != workspaceID {
+			return MeetingConfigResponse{}, pgx.ErrNoRows
+		}
+		if !noteType.Enabled || noteType.CadenceUnit == "manual" {
+			return MeetingConfigResponse{}, errors.New("note_type_id must reference an enabled recurring note")
+		}
+		noteTypeID = parsed
+		cadenceUnit = noteType.CadenceUnit
+		cadenceCount = noteType.CadenceCount
+	}
+	agenda := make([]MeetingAgendaSectionResponse, 0, len(input.Agenda))
+	for _, section := range input.Agenda {
+		agenda = append(agenda, MeetingAgendaSectionResponse{
+			ID: strings.TrimSpace(section.ID), Name: strings.TrimSpace(section.Name),
+			Position: section.Position, Binding: section.Binding,
+		})
+	}
+	rawAgenda, err := json.Marshal(agenda)
+	if err != nil {
+		return MeetingConfigResponse{}, err
+	}
+	row, err := s.queries.UpsertOperatingMeeting(ctx, cerebrodb.UpsertOperatingMeetingParams{
+		WorkspaceID: workspaceID, NoteTypeID: noteTypeID, CadenceUnit: cadenceUnit,
+		CadenceCount: cadenceCount, Agenda: rawAgenda,
+	})
+	if err != nil {
+		return MeetingConfigResponse{}, err
+	}
+	return s.meetingResponse(ctx, workspaceID, &row, agenda)
+}
+
+func responsibilities(raw []byte) []string {
+	var values []string
+	if json.Unmarshal(raw, &values) != nil {
+		return []string{}
+	}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func orgSeatResponse(id, workspaceID, parentID pgtype.UUID, name string, rawResponsibilities []byte, ownerType pgtype.Text, ownerID pgtype.UUID, ownerName string, position int32) OrgChartSeatResponse {
+	return OrgChartSeatResponse{
+		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID), ParentID: nullableUUIDString(parentID),
+		Name: name, Responsibilities: responsibilities(rawResponsibilities), OwnerType: ownerType.String,
+		OwnerID: nullableUUIDString(ownerID), OwnerName: ownerName, Vacant: !ownerID.Valid, Position: position,
+	}
+}
+
+func nullableUUIDString(id pgtype.UUID) string {
+	if !id.Valid {
+		return ""
+	}
+	return util.UUIDToString(id)
+}
+
+func (s *Service) validateOrgChartParent(ctx context.Context, workspaceID, seatID, parentID pgtype.UUID) error {
+	if !parentID.Valid {
+		return nil
+	}
+	rows, err := s.queries.ListOrgChartSeats(ctx, workspaceID)
+	if err != nil {
+		return err
+	}
+	parents := make(map[string]pgtype.UUID, len(rows))
+	for _, row := range rows {
+		parents[util.UUIDToString(row.ID)] = row.ParentID
+		if row.ID == parentID && row.WorkspaceID != workspaceID {
+			return pgx.ErrNoRows
+		}
+	}
+	if _, ok := parents[util.UUIDToString(parentID)]; !ok {
+		return pgx.ErrNoRows
+	}
+	if seatID.Valid {
+		current := parentID
+		for current.Valid {
+			if current == seatID {
+				return errors.New("parent_id would create a cycle")
+			}
+			var ok bool
+			current, ok = parents[util.UUIDToString(current)]
+			if !ok {
+				break
+			}
+		}
+	}
+	return nil
+}
+
+func (s *Service) ListOrgChartSeats(ctx context.Context, workspaceID pgtype.UUID) ([]OrgChartSeatResponse, error) {
+	if err := s.ensureElementEnabled(ctx, workspaceID, "org_chart"); err != nil {
+		return nil, err
+	}
+	rows, err := s.queries.ListOrgChartSeats(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]OrgChartSeatResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, orgSeatResponse(row.ID, row.WorkspaceID, row.ParentID, row.Name, row.Responsibilities, row.OwnerType, row.OwnerID, row.OwnerName, row.Position))
+	}
+	return out, nil
+}
+
+func (s *Service) saveOrgChartSeat(ctx context.Context, workspaceID, seatID pgtype.UUID, input OrgChartSeatInput) (OrgChartSeatResponse, error) {
+	if err := s.ensureElementEnabled(ctx, workspaceID, "org_chart"); err != nil {
+		return OrgChartSeatResponse{}, err
+	}
+	if err := ValidateOrgChartSeatInput(input); err != nil {
+		return OrgChartSeatResponse{}, err
+	}
+	parentID := pgtype.UUID{}
+	if input.ParentID != "" {
+		parentID, _ = util.ParseUUID(input.ParentID)
+	}
+	if err := s.validateOrgChartParent(ctx, workspaceID, seatID, parentID); err != nil {
+		return OrgChartSeatResponse{}, err
+	}
+	ownerID := pgtype.UUID{}
+	ownerType := pgtype.Text{}
+	if input.OwnerID != "" {
+		ownerID, _ = util.ParseUUID(input.OwnerID)
+		if err := EnsureOwnerInWorkspace(ctx, s.projects, input.OwnerType, ownerID, workspaceID); err != nil {
+			return OrgChartSeatResponse{}, err
+		}
+		ownerType = pgtype.Text{String: input.OwnerType, Valid: true}
+	}
+	rawResponsibilities, err := json.Marshal(responsibilitiesFromInput(input.Responsibilities))
+	if err != nil {
+		return OrgChartSeatResponse{}, err
+	}
+	if seatID.Valid {
+		row, err := s.queries.UpdateOrgChartSeat(ctx, cerebrodb.UpdateOrgChartSeatParams{
+			ID: seatID, WorkspaceID: workspaceID, ParentID: parentID, Name: strings.TrimSpace(input.Name),
+			Responsibilities: rawResponsibilities, OwnerType: ownerType, OwnerID: ownerID, Position: input.Position,
+		})
+		if err != nil {
+			return OrgChartSeatResponse{}, err
+		}
+		return orgSeatResponse(row.ID, row.WorkspaceID, row.ParentID, row.Name, row.Responsibilities, row.OwnerType, row.OwnerID, row.OwnerName, row.Position), nil
+	}
+	row, err := s.queries.CreateOrgChartSeat(ctx, cerebrodb.CreateOrgChartSeatParams{
+		WorkspaceID: workspaceID, ParentID: parentID, Name: strings.TrimSpace(input.Name),
+		Responsibilities: rawResponsibilities, OwnerType: ownerType, OwnerID: ownerID, Position: input.Position,
+	})
+	if err != nil {
+		return OrgChartSeatResponse{}, err
+	}
+	return orgSeatResponse(row.ID, row.WorkspaceID, row.ParentID, row.Name, row.Responsibilities, row.OwnerType, row.OwnerID, row.OwnerName, row.Position), nil
+}
+
+func responsibilitiesFromInput(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
+}
+
+func (s *Service) CreateOrgChartSeat(ctx context.Context, workspaceID pgtype.UUID, input OrgChartSeatInput) (OrgChartSeatResponse, error) {
+	return s.saveOrgChartSeat(ctx, workspaceID, pgtype.UUID{}, input)
+}
+
+func (s *Service) UpdateOrgChartSeat(ctx context.Context, workspaceID, seatID pgtype.UUID, input OrgChartSeatInput) (OrgChartSeatResponse, error) {
+	return s.saveOrgChartSeat(ctx, workspaceID, seatID, input)
+}
+
+func (s *Service) DeleteOrgChartSeat(ctx context.Context, workspaceID, seatID pgtype.UUID) (bool, error) {
+	if err := s.ensureElementEnabled(ctx, workspaceID, "org_chart"); err != nil {
+		return false, err
+	}
+	count, err := s.queries.DeleteOrgChartSeat(ctx, cerebrodb.DeleteOrgChartSeatParams{ID: seatID, WorkspaceID: workspaceID})
+	return count > 0, err
+}
+
+func (s *Service) ListVisionPlan(ctx context.Context, workspaceID pgtype.UUID) (VisionPlanResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.EnsureDefaultVisionPlanSections(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.EnsureLegacyVisionPlanSections(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.AssignLegacyVisionPlanItems(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	sectionRows, err := s.queries.ListVisionPlanSections(ctx, workspaceID)
+	if err != nil {
+		return VisionPlanResponse{}, err
+	}
+	itemRows, err := s.queries.ListVisionPlanItems(ctx, workspaceID)
+	if err != nil {
+		return VisionPlanResponse{}, err
+	}
+	connectionRows, err := s.queries.ListVisionPlanGoalConnections(ctx, workspaceID)
+	if err != nil {
+		return VisionPlanResponse{}, err
+	}
+
+	connections := make(map[string][]VisionPlanGoalConnection)
+	for _, row := range connectionRows {
+		itemID := util.UUIDToString(row.StrategyItemID)
+		connections[itemID] = append(connections[itemID], VisionPlanGoalConnection{
+			ConnectionID: util.UUIDToString(row.ID), GoalID: util.UUIDToString(row.GoalID),
+		})
+	}
+	items := make(map[string][]VisionPlanItemResponse)
+	for _, row := range itemRows {
+		response := visionPlanItemResponse(
+			row.ID, row.WorkspaceID, row.SectionID, row.Title, row.Description, row.PartLabel,
+			row.OwnerType, row.OwnerID, row.OwnerName, row.Position, row.State,
+			row.CreatedAt, row.UpdatedAt,
+		)
+		response.GoalConnections = connections[response.ID]
+		if response.GoalConnections == nil {
+			response.GoalConnections = []VisionPlanGoalConnection{}
+		}
+		items[response.SectionID] = append(items[response.SectionID], response)
+	}
+	sections := make([]VisionPlanSectionResponse, 0, len(sectionRows))
+	for _, row := range sectionRows {
+		section := visionPlanSectionResponse(row)
+		section.Items = items[section.ID]
+		if section.Items == nil {
+			section.Items = []VisionPlanItemResponse{}
+		}
+		sections = append(sections, section)
+	}
+	return VisionPlanResponse{Sections: sections}, nil
+}
+
+func (s *Service) CreateVisionPlanSection(ctx context.Context, workspaceID pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
+	if err := ValidateVisionPlanSectionInput(input); err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
+	row, err := s.queries.CreateVisionPlanSection(ctx, cerebrodb.CreateVisionPlanSectionParams{
+		WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType, Position: input.Position,
+	})
+	if err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
+	return visionPlanSectionResponse(row), nil
+}
+
+func (s *Service) UpdateVisionPlanSection(ctx context.Context, workspaceID, id pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
+	if err := ValidateVisionPlanSectionInput(input); err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
+	row, err := s.queries.UpdateVisionPlanSection(ctx, cerebrodb.UpdateVisionPlanSectionParams{
+		ID: id, WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType, Position: input.Position,
+	})
+	if err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
+	return visionPlanSectionResponse(row), nil
+}
+
+func (s *Service) DeleteVisionPlanSection(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return false, err
+	}
+	count, err := s.queries.DeleteVisionPlanSection(ctx, cerebrodb.DeleteVisionPlanSectionParams{ID: id, WorkspaceID: workspaceID})
+	return count > 0, err
+}
+
+func (s *Service) CreateVisionPlanItem(ctx context.Context, workspaceID pgtype.UUID, input VisionPlanItemInput) (VisionPlanItemResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanItemResponse{}, err
+	}
+	if err := ValidateVisionPlanItemInput(input); err != nil {
+		return VisionPlanItemResponse{}, err
+	}
+	sectionID, _ := util.ParseUUID(input.SectionID)
+	ownerID := pgtype.UUID{}
+	if input.OwnerID != "" {
+		ownerID, _ = util.ParseUUID(input.OwnerID)
+		if err := EnsureOwnerInWorkspace(ctx, s.projects, input.OwnerType, ownerID, workspaceID); err != nil {
+			return VisionPlanItemResponse{}, err
+		}
+	}
+	row, err := s.queries.CreateVisionPlanItem(ctx, cerebrodb.CreateVisionPlanItemParams{
+		ID: sectionID, WorkspaceID: workspaceID, Title: strings.TrimSpace(input.Title),
+		Description: strings.TrimSpace(input.Description), Position: input.Position, State: defaultState(input.State),
+		PartLabel: strings.TrimSpace(input.PartLabel), OwnerType: text(input.OwnerType), OwnerID: ownerID,
+	})
+	if err != nil {
+		return VisionPlanItemResponse{}, err
+	}
+	return visionPlanItemResponse(row.ID, row.WorkspaceID, row.SectionID, row.Title, row.Description, row.PartLabel, row.OwnerType, row.OwnerID, "", row.Position, row.State, row.CreatedAt, row.UpdatedAt), nil
+}
+
+func (s *Service) UpdateVisionPlanItem(ctx context.Context, workspaceID, id pgtype.UUID, input VisionPlanItemInput) (VisionPlanItemResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanItemResponse{}, err
+	}
+	if err := ValidateVisionPlanItemInput(input); err != nil {
+		return VisionPlanItemResponse{}, err
+	}
+	sectionID, _ := util.ParseUUID(input.SectionID)
+	ownerID := pgtype.UUID{}
+	if input.OwnerID != "" {
+		ownerID, _ = util.ParseUUID(input.OwnerID)
+		if err := EnsureOwnerInWorkspace(ctx, s.projects, input.OwnerType, ownerID, workspaceID); err != nil {
+			return VisionPlanItemResponse{}, err
+		}
+	}
+	row, err := s.queries.UpdateVisionPlanItem(ctx, cerebrodb.UpdateVisionPlanItemParams{
+		ID: id, WorkspaceID: workspaceID, SectionID: sectionID, Title: strings.TrimSpace(input.Title),
+		Description: strings.TrimSpace(input.Description), Position: input.Position, State: defaultState(input.State),
+		PartLabel: strings.TrimSpace(input.PartLabel), OwnerType: text(input.OwnerType), OwnerID: ownerID,
+	})
+	if err != nil {
+		return VisionPlanItemResponse{}, err
+	}
+	return visionPlanItemResponse(row.ID, row.WorkspaceID, row.SectionID, row.Title, row.Description, row.PartLabel, row.OwnerType, row.OwnerID, "", row.Position, row.State, row.CreatedAt, row.UpdatedAt), nil
+}
+
+func (s *Service) DeleteVisionPlanItem(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return false, err
+	}
+	return s.DeleteStrategyItem(ctx, workspaceID, id)
 }
 
 func (s *Service) UpsertRock(ctx context.Context, workspaceID pgtype.UUID, input RockInput) error {
@@ -703,6 +1278,14 @@ func (s *Service) CreateConnection(ctx context.Context, workspaceID pgtype.UUID,
 	if err != nil {
 		return ObjectConnectionResponse{}, err
 	}
+	if input.SourceType == "strategy_item" && input.TargetType == "rock" {
+		if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: params.SourceID, WorkspaceID: workspaceID}); err != nil {
+			return ObjectConnectionResponse{}, err
+		}
+		if _, err := s.queries.GetRock(ctx, cerebrodb.GetRockParams{ID: params.TargetID, WorkspaceID: workspaceID}); err != nil {
+			return ObjectConnectionResponse{}, err
+		}
+	}
 	row, err := s.queries.CreateObjectConnection(ctx, params)
 	if IsDuplicateConnection(err) {
 		return ObjectConnectionResponse{}, fmt.Errorf("duplicate connection: %w", err)
@@ -898,6 +1481,24 @@ func strategyResponse(id, workspaceID pgtype.UUID, kind, title, description stri
 		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID), Kind: kind,
 		Title: title, Description: description, HorizonUnit: horizonUnit.String,
 		HorizonCount: horizonCount.Int32, HorizonLabel: horizonLabel.String, Position: position, State: state,
+		CreatedAt: timestamp(createdAt), UpdatedAt: timestamp(updatedAt),
+	}
+}
+
+func visionPlanSectionResponse(row cerebrodb.CerebroVisionPlanSection) VisionPlanSectionResponse {
+	return VisionPlanSectionResponse{
+		ID: util.UUIDToString(row.ID), WorkspaceID: util.UUIDToString(row.WorkspaceID),
+		Key: row.Key, Name: row.Name, SectionType: row.SectionType, Position: row.Position,
+		Items: []VisionPlanItemResponse{}, CreatedAt: timestamp(row.CreatedAt), UpdatedAt: timestamp(row.UpdatedAt),
+	}
+}
+
+func visionPlanItemResponse(id, workspaceID, sectionID pgtype.UUID, title, description, partLabel string, ownerType pgtype.Text, ownerID pgtype.UUID, ownerName string, position int32, state string, createdAt, updatedAt pgtype.Timestamptz) VisionPlanItemResponse {
+	return VisionPlanItemResponse{
+		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID), SectionID: util.UUIDToString(sectionID),
+		Title: title, Description: description, PartLabel: partLabel,
+		OwnerType: ownerType.String, OwnerID: util.UUIDToString(ownerID), OwnerName: ownerName,
+		Position: position, State: state, GoalConnections: []VisionPlanGoalConnection{},
 		CreatedAt: timestamp(createdAt), UpdatedAt: timestamp(updatedAt),
 	}
 }

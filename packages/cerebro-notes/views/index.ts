@@ -1,4 +1,5 @@
-export { NotesPage } from "./notes-page";
+export { NoteEditor, NotesPage } from "./notes-page";
+export { CyclesPage } from "./cycles-page";
 export { NotesNavItem } from "./notes-nav-item";
 export { NotesInboxBox } from "./notes-inbox-box";
 export type { NotesInboxBoxProps, NotesBoxSort } from "./notes-inbox-box";

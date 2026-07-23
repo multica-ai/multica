@@ -489,9 +489,6 @@ var catalog = []Capability{
 			"POST /api/agents/{id}/skills/add",
 			"PUT /api/agents/{id}/env",
 			"PUT /api/agents/{id}/infisical-folders",
-			"PUT /api/agents/{id}/tools/{name}/",
-			"PUT /api/agents/{id}/tool-overrides/{toolName}",
-			"DELETE /api/agents/{id}/tool-overrides/{toolName}",
 			// Agent Office — versioning + governance for agent context (FIR-1775),
 			// the direct analog of skill governance under manage_skills: editing an
 			// agent's context (proposing a change-request, reviewing one, rolling
@@ -541,17 +538,6 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:           "manage_agent_passes",
-		Title:         "Manage agent passes",
-		Category:      CategoryAgents,
-		Description:   "Issue or revoke an agent pass (a scoped, time-boxed permission for an agent to act on an issue).",
-		DescriptionZh: "签发或撤销 agent 通行证（一种限定范围、有时限、允许 agent 在工单上行动的权限）。",
-		Ops: []string{
-			"POST /api/cerebro/agent-passes/",
-			"DELETE /api/cerebro/agent-passes/{passId}",
-		},
-	},
-	{
 		Key:           "manage_work_sessions",
 		Title:         "Drive agent work session",
 		Category:      CategoryAgents,
@@ -585,26 +571,10 @@ var catalog = []Capability{
 			"PATCH /api/runtimes/{runtimeId}/sandbox-policy",
 			"PATCH /api/runtimes/{runtimeId}/tools-config",
 			"PUT /api/cerebro/terminal/runtimes/{runtimeId}/presentation-mode",
-			"PATCH /api/runtimes/{runtimeId}/tools/{toolName}",
 			"POST /api/runtimes/{runtimeId}/tools/scan-now",
 			"POST /api/runtimes/{runtimeId}/local-skills",
 			"POST /api/runtimes/{runtimeId}/local-skills/import",
 			"POST /api/runtimes/{runtimeId}/models",
-		},
-	},
-	{
-		Key:           "manage_runtime_tool_access",
-		Title:         "Grant runtime tool access",
-		Category:      CategoryRuntimes,
-		Description:   "Grant or revoke a specific runtime tool for a group or user (per-tool allowlist on a machine, or through an agent's assigned runtime).",
-		DescriptionZh: "为群组或用户授予或撤销特定 runtime 工具（机器上的按工具白名单，或通过 agent 所分配的 runtime）。",
-		Ops: []string{
-			"POST /api/agents/{id}/tool-grants",
-			"DELETE /api/agents/{id}/tool-grants",
-			"POST /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
-			"DELETE /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
-			"POST /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
-			"DELETE /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
 		},
 	},
 	{
@@ -877,9 +847,9 @@ var catalog = []Capability{
 	},
 	{
 		Key:           "manage_operating_system",
-		Title:         "Manage Rocks / Strategy",
+		Title:         "Manage Operating System",
 		Category:      CategoryProjects,
-		Description:   "Create, edit, or delete Rocks and Strategy items, connect them to other objects, and customise operating-system terminology.",
+		Description:   "Read and manage Operating System settings, goals, vision-plan content, meetings, org-chart seats, connections, and terminology.",
 		DescriptionZh: "创建、编辑或删除 Rocks 与 Strategy 项目，将其连接到其他对象，并自定义 operating-system 术语。",
 		Ops: []string{
 			"PUT /api/cerebro/operating-system/settings/",
@@ -893,12 +863,22 @@ var catalog = []Capability{
 			"POST /api/cerebro/strategy-items/",
 			"PUT /api/cerebro/strategy-items/{id}",
 			"DELETE /api/cerebro/strategy-items/{id}",
+			"POST /api/cerebro/vision-plan/sections",
+			"PUT /api/cerebro/vision-plan/sections/{id}",
+			"DELETE /api/cerebro/vision-plan/sections/{id}",
+			"POST /api/cerebro/vision-plan/items",
+			"PUT /api/cerebro/vision-plan/items/{id}",
+			"DELETE /api/cerebro/vision-plan/items/{id}",
 			"POST /api/cerebro/rocks/",
 			"PUT /api/cerebro/rocks/{id}",
 			"DELETE /api/cerebro/rocks/{id}",
 			"POST /api/cerebro/rocks/{id}/check-ins",
 			"POST /api/cerebro/object-connections/",
 			"DELETE /api/cerebro/object-connections/{id}",
+			"PUT /api/cerebro/meetings/",
+			"POST /api/cerebro/org-chart/seats",
+			"PUT /api/cerebro/org-chart/seats/{id}",
+			"DELETE /api/cerebro/org-chart/seats/{id}",
 		},
 	},
 
@@ -1087,6 +1067,9 @@ var catalog = []Capability{
 		Description:   "Create, edit, delete, or toggle workflows and their eval gates, or regenerate workflow tokens and signing secrets.",
 		DescriptionZh: "创建、编辑、删除、启停工作流，或重新生成其令牌和签名密钥。",
 		Ops: []string{
+			"POST /api/cerebro/commands/",
+			"PUT /api/cerebro/commands/{id}",
+			"DELETE /api/cerebro/commands/{id}",
 			"POST /api/cerebro/workflows/",
 			"PUT /api/cerebro/workflows/{id}",
 			"DELETE /api/cerebro/workflows/{id}",
@@ -1101,6 +1084,9 @@ var catalog = []Capability{
 			"PUT /api/cerebro/evals/{id}",
 			"DELETE /api/cerebro/evals/{id}",
 			"POST /api/cerebro/evals/{id}/runs",
+			"POST /api/cerebro/evals/{id}/run",
+			"PUT /api/cerebro/evals/{id}/schedule",
+			"DELETE /api/cerebro/evals/{id}/schedule",
 			"POST /api/cerebro/evals/bindings",
 			"DELETE /api/cerebro/evals/bindings/{bindingId}",
 		},
@@ -1251,6 +1237,7 @@ var excluded = map[string]string{
 	"POST /api/cerebro/rounds/":                              "self_only — caller's own inbox rounds (FIR-2736)",
 	"PATCH /api/cerebro/rounds/{roundId}/":                   "self_only — caller's own inbox rounds (FIR-2736)",
 	"DELETE /api/cerebro/rounds/{roundId}/":                  "self_only — caller's own inbox rounds (FIR-2736)",
+	"POST /api/cerebro/rounds/reorder":                       "self_only — caller's own inbox rounds (FIR-3646)",
 	"POST /api/cerebro/rounds/{roundId}/members":             "self_only — caller's own inbox rounds (FIR-2736)",
 	"DELETE /api/cerebro/rounds/{roundId}/members/{issueId}": "self_only — caller's own inbox rounds (FIR-2736)",
 	"POST /api/cerebro/rounds/{roundId}/pause":               "self_only — caller's own inbox rounds (FIR-3429)",
@@ -1277,6 +1264,12 @@ var excluded = map[string]string{
 	"POST /api/cerebro/saved-filters/":       "self_only — caller's own saved filters (FIR-1659)",
 	"PATCH /api/cerebro/saved-filters/{id}":  "self_only — caller's own saved filters (FIR-1659)",
 	"DELETE /api/cerebro/saved-filters/{id}": "self_only — caller's own saved filters (FIR-1659)",
+
+	// cerebro iOS share inboxes — personal token-bound intake endpoints;
+	// owner_user_id enforces caller identity so a member can never touch
+	// another member's inbox (FIR-3545).
+	"POST /api/cerebro/share-inboxes/":       "self_only — caller's own iOS share inboxes (FIR-3545)",
+	"DELETE /api/cerebro/share-inboxes/{id}": "self_only — caller's own iOS share inboxes (FIR-3545)",
 
 	// cerebro dictation — one-shot audio→text proxy; self-authenticates via the
 	// workspace token, persists no governable state, no agent tool equivalent.
@@ -1352,7 +1345,7 @@ var excluded = map[string]string{
 	"POST /api/cerebro/personal-browser/authorize":    "resolve-seam — agent-only per-action gate for the tools:personal-browser tool; runs the tool-policy chain internally with Base=Deny + host condition (FIR-2037), the enforcement point itself, not a separately-governable platform action",
 	"POST /api/cerebro/personal-browser/secure-fill":  "credential-bridge — signed-in desktop-only secret bridge; validates the embedded agent token and resolves credential.reveal for the exact Agent Vault box before returning a value to the desktop process (FIR-3006), not a separately-governable platform action",
 	"POST /api/cerebro/agent-browser/provision-auth":  "credential-bridge — task-token-only Agent Vault bridge for the local multica agent-browser provision-auth command; resolves browser-testers plus exact-box credential.reveal before the CLI writes the password to agent-browser over stdin (FIR-3006), not a separately-governable platform action",
-	"POST /api/cerebro/agent-browser/internal-verify": "credential-bridge — task-token-only internal browser verification; enforces the fixed private-DNS target list, browser-testers membership, and exact-box credential.reveal before running agent-browser server-side (FIR-3006), not a separately-governable platform action",
+	"POST /api/cerebro/agent-browser/internal-verify": "credential-bridge — task-token-only internal browser verification with a PNG screenshot result; enforces the fixed private-DNS target list, browser-testers membership, and exact-box credential.reveal before running agent-browser server-side (FIR-3006), not a separately-governable platform action",
 
 	// connection-tools — agent-only (mat_ token) dispatch of an api-type workspace
 	// connection as a server-side tool (FIR-2273). Per-endpoint authorization is
@@ -1377,6 +1370,7 @@ var excluded = map[string]string{
 	"POST /auth/logout":                                       "pre-auth — clears identity",
 	"POST /api/webhooks/github":                               "pre-auth signed webhook — GitHub HMAC authorises delivery",
 	"POST /api/webhooks/stripe":                               "pre-auth signed webhook — Stripe HMAC authorises delivery",
+	"POST /api/webhooks/ios-share/{token}":                   "pre-auth signed webhook — sit_ bearer token in path authorises iOS share intake (FIR-3545)",
 	"POST /api/cerebro/github/pull-requests":                  "pre-auth service-to-service — CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push (FIR-2568)",
 	"POST /api/cerebro/exchange-rates":                        "pre-auth service-to-service — CEREBRO_EXCHANGE_INGEST_KEY bearer token authorises the multica-hatchet-worker's daily FX snapshot push (FIR-43)",
 	"POST /api/cerebro/apps-internal/{id}/{version}/callback": "pre-auth service-to-service — signed Mini Apps runtime callback advances one deployment state (FIR-3172)",

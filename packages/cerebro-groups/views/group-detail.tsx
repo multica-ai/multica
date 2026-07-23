@@ -754,9 +754,6 @@ function AgentsSection({
   const { data: rows = [] } = useQuery(groupAgentsOptions(wsId, groupId));
   const { data: allAgents = [] } = useQuery(agentListOptions(wsId));
   const { data: allRuntimes = [] } = useQuery(runtimeListOptions(wsId));
-  const { data: capabilityRows = [] } = useQuery(
-    groupCapabilitiesOptions(wsId, groupId),
-  );
   const { data: runtimeRows = [] } = useQuery(
     groupRuntimesOptions(wsId, groupId),
   );
@@ -788,10 +785,6 @@ function AgentsSection({
     for (const rt of allRuntimes) m.set(rt.id, rt);
     return m;
   }, [allRuntimes]);
-  const hasCreateAgent = useMemo(
-    () => capabilityRows.some((r) => r.capability === "create_agent"),
-    [capabilityRows],
-  );
   const allowedAgents = useMemo(
     () => liveAgents.filter((a) => allowed.has(a.id)),
     [liveAgents, allowed],
@@ -800,7 +793,6 @@ function AgentsSection({
     () =>
       liveAgents
         .filter((a) => !allowed.has(a.id))
-        .filter((a) => hasCreateAgent || a.visibility !== "private")
         .filter((a) => {
           if (pickerSearch === "") return true;
           const q = pickerSearch.toLowerCase();
@@ -809,7 +801,7 @@ function AgentsSection({
             (a.description ?? "").toLowerCase().includes(q)
           );
         }),
-    [liveAgents, allowed, hasCreateAgent, pickerSearch],
+    [liveAgents, allowed, pickerSearch],
   );
 
   const handleAddAgent = async (agentId: string) => {
@@ -1067,7 +1059,7 @@ function AgentsSection({
   );
 }
 
-// FIR-3091 slice 2 — the four group capabilities are a boolean-grant system
+// FIR-3091 slice 2 — group capabilities are a boolean-grant system
 // (present/absent), separate from the tool-policy chain. We render them in the
 // same catalog card skin used by the Permissions section below, so the Groups
 // page shows one consistent card design instead of a switch-stripe stacked on
@@ -1094,6 +1086,27 @@ const GROUP_CAPABILITIES: {
     testId: "capability-create-agent",
   },
   {
+    key: "apps.create",
+    label: "Create apps",
+    tooltip:
+      "Members of this group can create workspace apps without receiving permission to publish, retry or delete them.",
+    testId: "capability-apps-create",
+  },
+  {
+    key: "apps.manage",
+    label: "Manage apps",
+    tooltip:
+      "Members of this group can preview, publish, retry, roll back and approve scopes for workspace apps they can see through Collections.",
+    testId: "capability-apps-manage",
+  },
+  {
+    key: "apps.delete",
+    label: "Delete apps",
+    tooltip:
+      "Members of this group can permanently delete workspace apps and their app-owned data.",
+    testId: "capability-apps-delete",
+  },
+  {
     key: "create_shared_filters",
     label: "Create shared filters",
     tooltip:
@@ -1106,6 +1119,13 @@ const GROUP_CAPABILITIES: {
     tooltip:
       "Members of this group can use agent & member memory: enable it on an agent for themselves and write memories. Default deny — without this, memory stays read-only company context at most. Requires the workspace memory switch to be on.",
     testId: "capability-create-memory",
+  },
+  {
+    key: "set_blocking_gate",
+    label: "Set blocking eval gates",
+    tooltip:
+      "Members of this group can make an eval block a workflow. Without this grant they can still add warn-only eval connections. Workspace admins always have access.",
+    testId: "capability-set-blocking-gate",
   },
 ];
 

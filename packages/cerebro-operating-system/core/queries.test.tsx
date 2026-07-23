@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { connectionsOptions, elementsOptions, goalTypesOptions, operatingSystemKeys, periodsOptions, rocksOptions, strategyOptions } from "./queries";
+import { connectionsOptions, elementsOptions, goalTypesOptions, meetingOptions, operatingSystemKeys, orgChartOptions, periodsOptions, rocksOptions, strategyOptions } from "./queries";
 
 describe("operating system query keys", () => {
   it("scopes every list by workspace", () => {
@@ -9,6 +9,8 @@ describe("operating system query keys", () => {
     expect(periodsOptions("ws-b").queryKey).toEqual(["cerebro", "operating-system", "ws-b", "periods"]);
     expect(elementsOptions("ws-a").queryKey).toEqual(["cerebro", "operating-system", "ws-a", "elements"]);
     expect(goalTypesOptions("ws-a").queryKey).toEqual(["cerebro", "operating-system", "ws-a", "goal-types"]);
+    expect(meetingOptions("ws-a").queryKey).toEqual(["cerebro", "operating-system", "ws-a", "meeting"]);
+    expect(orgChartOptions("ws-a").queryKey).toEqual(["cerebro", "operating-system", "ws-a", "org-chart"]);
     expect(operatingSystemKeys.all("ws-a")).not.toEqual(operatingSystemKeys.all("ws-b"));
     expect(connectionsOptions("ws-a", "strategy_item", "s1").queryKey).toEqual([
       "cerebro", "operating-system", "ws-a", "connections", "strategy_item", "s1",

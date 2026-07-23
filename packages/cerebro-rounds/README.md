@@ -11,6 +11,10 @@ snapshot began, and All messages always shows the full member list with the
 same rows, in the same order, used by the normal inbox. Round members without a
 current inbox message do not render a separate issue-title row.
 
+Rounds are listed in the owner's own order. Dragging a round by its grip — in
+the inbox block or in the Manage rounds panel — writes that order for the owner,
+and a newly created round lands last. Both lists render the same order.
+
 Starting again replaces the active snapshot. Replies continue through their
 ordinary trigger path and only add a handled timestamp to the current snapshot.
 Pausing ends the active snapshot, folds the Round, and returns its unanswered

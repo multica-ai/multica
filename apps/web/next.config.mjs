@@ -39,6 +39,7 @@ const allowedDevOrigins = process.env.CORS_ALLOWED_ORIGINS
 
 /** @type {import("next").NextConfig} */
 const nextConfig = {
+  devIndicators: false,
   ...(process.env.STANDALONE === "true" ? { output: "standalone" } : {}),
   // Trim the "Collecting build traces" step. On the single-Mac prod runtime
   // (sara) that step repeatedly SIGTERM'd / OOM'd at the very end of an
@@ -115,6 +116,7 @@ const nextConfig = {
     "@multica/cerebro-ui",
     "@multica/cerebro-users",
     "@multica/cerebro-workflows",
+    "@multica/cerebro-commands",
     "@multica/cerebro-evals",
     "@multica/core",
     "@multica/ui",

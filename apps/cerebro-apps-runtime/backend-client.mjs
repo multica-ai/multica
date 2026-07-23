@@ -47,7 +47,7 @@ export class BackendClient {
     });
     if (!response.ok) throw new Error("Backend deployment read failed");
     const rows = await response.json();
-    return rows.map((row) => ({ appId: row.app_id, version: row.version, bundleSha256: row.bundle_sha256 }));
+    return rows.map((row) => ({ appId: row.app_id, appName: row.app_name, version: row.version, bundleSha256: row.bundle_sha256 }));
   }
 
   async deployment(appId, version) {

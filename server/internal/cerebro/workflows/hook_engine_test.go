@@ -318,7 +318,7 @@ func TestHookEngineTimeoutUsesExplicitFailMode(t *testing.T) {
 
 func newTestHookPolicy(id string, decision HookDecision, mode HookMode, binding HookBinding) HookPolicy {
 	return HookPolicy{
-		ID: id, Version: 1, Name: id, Mode: mode, FailMode: HookFailOpen,
+		ID: id, Version: 1, Name: id, Mode: mode, FailMode: HookFailWarn,
 		Events:   []HookEventType{HookBeforeTaskComplete, HookBeforePromptAssemble, HookOnError},
 		Bindings: []HookBinding{binding},
 		Handlers: []HookHandler{{ID: "handler-1", Decision: decision}},

@@ -18,11 +18,24 @@ import (
 type handlerService interface {
 	GetSettings(context.Context, pgtype.UUID) (SettingsResponse, error)
 	UpdateSettings(context.Context, pgtype.UUID, Terminology) (SettingsResponse, error)
+	GetMeeting(context.Context, pgtype.UUID) (MeetingConfigResponse, error)
+	UpdateMeeting(context.Context, pgtype.UUID, MeetingConfigInput) (MeetingConfigResponse, error)
+	ListOrgChartSeats(context.Context, pgtype.UUID) ([]OrgChartSeatResponse, error)
+	CreateOrgChartSeat(context.Context, pgtype.UUID, OrgChartSeatInput) (OrgChartSeatResponse, error)
+	UpdateOrgChartSeat(context.Context, pgtype.UUID, pgtype.UUID, OrgChartSeatInput) (OrgChartSeatResponse, error)
+	DeleteOrgChartSeat(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
 	CreateStrategyItem(context.Context, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error)
 	ListStrategyItems(context.Context, pgtype.UUID) ([]StrategyItemResponse, error)
 	ListStrategyHistory(context.Context, pgtype.UUID) ([]StrategyHistoryResponse, error)
 	UpdateStrategyItem(context.Context, pgtype.UUID, pgtype.UUID, StrategyItemInput) (StrategyItemResponse, error)
 	DeleteStrategyItem(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
+	ListVisionPlan(context.Context, pgtype.UUID) (VisionPlanResponse, error)
+	CreateVisionPlanSection(context.Context, pgtype.UUID, VisionPlanSectionInput) (VisionPlanSectionResponse, error)
+	UpdateVisionPlanSection(context.Context, pgtype.UUID, pgtype.UUID, VisionPlanSectionInput) (VisionPlanSectionResponse, error)
+	DeleteVisionPlanSection(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
+	CreateVisionPlanItem(context.Context, pgtype.UUID, VisionPlanItemInput) (VisionPlanItemResponse, error)
+	UpdateVisionPlanItem(context.Context, pgtype.UUID, pgtype.UUID, VisionPlanItemInput) (VisionPlanItemResponse, error)
+	DeleteVisionPlanItem(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
 	ListPeriods(context.Context, pgtype.UUID) ([]OperatingPeriodResponse, error)
 	CreatePeriod(context.Context, pgtype.UUID, OperatingPeriodInput) (OperatingPeriodResponse, error)
 	UpdatePeriod(context.Context, pgtype.UUID, pgtype.UUID, OperatingPeriodInput) (OperatingPeriodResponse, error)
@@ -57,6 +70,16 @@ func (h *Handler) MountRoutes(r chi.Router) {
 		r.Get("/", h.ListElements)
 		r.Put("/{key}", h.UpdateElement)
 	})
+	r.Route("/api/cerebro/meetings", func(r chi.Router) {
+		r.Get("/", h.GetMeeting)
+		r.Put("/", h.UpdateMeeting)
+	})
+	r.Route("/api/cerebro/org-chart", func(r chi.Router) {
+		r.Get("/", h.ListOrgChartSeats)
+		r.Post("/seats", h.CreateOrgChartSeat)
+		r.Put("/seats/{id}", h.UpdateOrgChartSeat)
+		r.Delete("/seats/{id}", h.DeleteOrgChartSeat)
+	})
 	r.Route("/api/cerebro/goal-types", func(r chi.Router) {
 		r.Get("/", h.ListGoalTypes)
 		r.Post("/", h.CreateGoalType)
@@ -70,6 +93,15 @@ func (h *Handler) MountRoutes(r chi.Router) {
 		r.Delete("/{id}", h.DeleteStrategyItem)
 	})
 	r.Get("/api/cerebro/strategy-history", h.ListStrategyHistory)
+	r.Route("/api/cerebro/vision-plan", func(r chi.Router) {
+		r.Get("/", h.ListVisionPlan)
+		r.Post("/sections", h.CreateVisionPlanSection)
+		r.Put("/sections/{id}", h.UpdateVisionPlanSection)
+		r.Delete("/sections/{id}", h.DeleteVisionPlanSection)
+		r.Post("/items", h.CreateVisionPlanItem)
+		r.Put("/items/{id}", h.UpdateVisionPlanItem)
+		r.Delete("/items/{id}", h.DeleteVisionPlanItem)
+	})
 	r.Route("/api/cerebro/rocks", func(r chi.Router) {
 		r.Get("/", h.ListRocks)
 		r.Post("/", h.UpsertRock)
@@ -123,6 +155,80 @@ func (h *Handler) UpdateSettings(w http.ResponseWriter, r *http.Request) {
 	writeResult(w, http.StatusOK, out, err)
 }
 
+func (h *Handler) GetMeeting(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	out, err := h.service.GetMeeting(r.Context(), ws)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) UpdateMeeting(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	var input MeetingConfigInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.UpdateMeeting(r.Context(), ws, input)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) ListOrgChartSeats(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	items, err := h.service.ListOrgChartSeats(r.Context(), ws)
+	writeResult(w, http.StatusOK, map[string]any{"seats": items}, err)
+}
+
+func (h *Handler) CreateOrgChartSeat(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	var input OrgChartSeatInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.CreateOrgChartSeat(r.Context(), ws, input)
+	writeResult(w, http.StatusCreated, out, err)
+}
+
+func (h *Handler) UpdateOrgChartSeat(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var input OrgChartSeatInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.UpdateOrgChartSeat(r.Context(), ws, id, input)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) DeleteOrgChartSeat(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	deleted, err := h.service.DeleteOrgChartSeat(r.Context(), ws, id)
+	writeDelete(w, deleted, err)
+}
+
 func (h *Handler) ListStrategyItems(w http.ResponseWriter, r *http.Request) {
 	ws, _, ok := requestScope(w, r)
 	if !ok {
@@ -172,6 +278,101 @@ func (h *Handler) DeleteStrategyItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	deleted, err := h.service.DeleteStrategyItem(r.Context(), ws, id)
+	writeDelete(w, deleted, err)
+}
+
+func (h *Handler) ListVisionPlan(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	out, err := h.service.ListVisionPlan(r.Context(), ws)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) CreateVisionPlanSection(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	var input VisionPlanSectionInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.CreateVisionPlanSection(r.Context(), ws, input)
+	writeResult(w, http.StatusCreated, out, err)
+}
+
+func (h *Handler) UpdateVisionPlanSection(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var input VisionPlanSectionInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.UpdateVisionPlanSection(r.Context(), ws, id, input)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) DeleteVisionPlanSection(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	deleted, err := h.service.DeleteVisionPlanSection(r.Context(), ws, id)
+	writeDelete(w, deleted, err)
+}
+
+func (h *Handler) CreateVisionPlanItem(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	var input VisionPlanItemInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.CreateVisionPlanItem(r.Context(), ws, input)
+	writeResult(w, http.StatusCreated, out, err)
+}
+
+func (h *Handler) UpdateVisionPlanItem(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	var input VisionPlanItemInput
+	if !decodeBody(w, r, &input) {
+		return
+	}
+	out, err := h.service.UpdateVisionPlanItem(r.Context(), ws, id, input)
+	writeResult(w, http.StatusOK, out, err)
+}
+
+func (h *Handler) DeleteVisionPlanItem(w http.ResponseWriter, r *http.Request) {
+	ws, _, ok := requestScope(w, r)
+	if !ok {
+		return
+	}
+	id, ok := uuidParam(w, r, "id")
+	if !ok {
+		return
+	}
+	deleted, err := h.service.DeleteVisionPlanItem(r.Context(), ws, id)
 	writeDelete(w, deleted, err)
 }
 
@@ -487,7 +688,7 @@ func writeDelete(w http.ResponseWriter, deleted bool, err error) {
 
 func writeServiceError(w http.ResponseWriter, err error) {
 	switch {
-	case errors.Is(err, ErrProjectNotInWorkspace), errors.Is(err, pgx.ErrNoRows):
+	case errors.Is(err, ErrProjectNotInWorkspace), errors.Is(err, ErrElementDisabled), errors.Is(err, pgx.ErrNoRows):
 		writeError(w, http.StatusNotFound, err.Error())
 	case strings.Contains(err.Error(), "duplicate connection"):
 		writeError(w, http.StatusConflict, "connection already exists")

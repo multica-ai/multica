@@ -21,6 +21,9 @@ test("opens a permission detail from Settings > Permissions", async ({ page }) =
     );
     const workspaceSlug = await loginAsDefault(page);
 
+    await page.goto(`/${workspaceSlug}/issues`);
+    await expect(page.getByText("Backlog", { exact: true }).first()).toBeVisible();
+
     await page.goto(`/${workspaceSlug}/settings?tab=permissions`);
 
     const permissionLink = page.getByRole("button", {

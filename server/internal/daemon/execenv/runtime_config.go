@@ -364,6 +364,9 @@ func CleanupRuntimeConfig(workDir, provider string) error {
 // buildMetaSkillContent generates the meta skill markdown that teaches the agent
 // about the Multica runtime environment and available CLI tools.
 func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
+	if cerebroWorkspaceBriefOff(ctx) { // CEREBRO-PATCH(brief-layer-modes): FIR-3212 workspace_brief_mode=off renders identity layers only
+		return buildAgentOnlyBrief(provider, ctx) // CEREBRO-PATCH(brief-layer-modes)
+	} // CEREBRO-PATCH(brief-layer-modes)
 	var b strings.Builder
 
 	b.WriteString("# Multica Agent Runtime\n\n")
@@ -475,6 +478,7 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("## Available Commands\n\n")
 	b.WriteString("**Use `--output json` for structured data.** Human table output now prints routable issue keys (for example `MUL-123`) and short UUID prefixes for workspace resources; use `--full-id` on list commands when you need canonical UUIDs.\n\n")
 	b.WriteString("The default brief includes the commands needed for the core agent loop and common issue create/update tasks. For everything else, run `multica --help`, `multica <command> --help`, or `multica <command> <subcommand> --help`; prefer `--output json` when the command supports it.\n\n")
+	b.WriteString("For every access question, use `get_agent_capabilities` as the canonical lookup. Never infer access from an agent description, instructions, or a visible UI control.\n\n") // CEREBRO-PATCH(canonical-access-brief): FIR-3403
 	b.WriteString("### Core\n")
 	b.WriteString("- `multica issue get <id> --output json` — Get full issue details.\n")
 	b.WriteString("- `multica issue comment list <issue-id> [--thread <comment-id> [--tail N] | --recent N] [--before <ts> --before-id <uuid>] [--since <RFC3339>] [--full] --output json` — List comments on an issue. Default returns the full flat timeline (server cap 2000). On busy issues prefer the thread-aware reads: `--thread <comment-id>` returns one conversation (root + every reply); `--thread <id> --tail N` caps replies to the N most recent (root is always included, even at `--tail 0`); `--recent N` returns the N most recently active threads. **Resolve-aware folding is on by default for the complete-thread reads (default list, `--recent`, `--thread` without `--tail`): a resolved thread collapses to its root + conclusion comment (reply-resolved) or its root only (root-resolved), with the dropped count reported on the root as `folded_count` and `thread_resolved: true` — so you skip settled discussion. Pass `--full` to get a folded thread's complete discussion. Folding never applies to `--since`/`--tail`/`--roots-only` reads (they return partial threads), so `--full` is a no-op there.** `--before` / `--before-id` walks older replies under `--thread --tail` (stderr label: `Next reply cursor`) or older threads under `--recent` (stderr label: `Next thread cursor`). `--since` is for incremental polling and may combine with `--thread` (with or without `--tail`) or `--recent`.\n")
@@ -505,12 +509,12 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 	b.WriteString("- `multica issue metadata delete <issue-id> --key <k>` — Remove a metadata key.\n\n")
 	b.WriteString("### Squad maintenance\n")
 	b.WriteString("- `multica squad member set-role <squad-id> --member-id <id> --member-type <agent|member> --role <role> [--output json]` — Change a squad member role in place; use this instead of remove+add when only the role changes.\n\n")
-	b.WriteString(cerebroArtifactBrief())                // CEREBRO-PATCH(runtime-config-artifact-brief): adds Documents & Artifacts section to Available Commands
-	b.WriteString(cerebroWakeupBrief())                  // CEREBRO-PATCH(cerebro-wakeup-brief): TECH-3013 adds Agent Wakeup section to Available Commands
-	b.WriteString(cerebroFeatureBrief())                 // CEREBRO-PATCH(cerebro-feature-brief): FIR-3377 adds Cerebro Feature Flags section to Available Commands
-	b.WriteString(cerebroChatBrief())                    // CEREBRO-PATCH(cerebro-chat-brief): TECH-3183 adds Chat Reply section to Available Commands
-	b.WriteString(cerebroChannelsBrief())                // CEREBRO-PATCH(tech-3255-channels-brief): TECH-3255 adds Channels & DMs and Agent Usage sections to Available Commands
-	b.WriteString(cerebroToolsBrief(ctx.EffectiveTools)) // CEREBRO-PATCH(cerebro-tools-brief-callsite): FIR-2312 adds dynamic per-permission Connections & MCP tools section
+	b.WriteString(cerebroArtifactBrief())                                           // CEREBRO-PATCH(runtime-config-artifact-brief): adds Documents & Artifacts section to Available Commands
+	b.WriteString(cerebroWakeupBrief())                                             // CEREBRO-PATCH(cerebro-wakeup-brief): TECH-3013 adds Agent Wakeup section to Available Commands
+	b.WriteString(cerebroFeatureBrief())                                            // CEREBRO-PATCH(cerebro-feature-brief): FIR-3377 adds Cerebro Feature Flags section to Available Commands
+	b.WriteString(cerebroChatBrief())                                               // CEREBRO-PATCH(cerebro-chat-brief): TECH-3183 adds Chat Reply section to Available Commands
+	b.WriteString(cerebroChannelsBrief())                                           // CEREBRO-PATCH(tech-3255-channels-brief): TECH-3255 adds Channels & DMs and Agent Usage sections to Available Commands
+	b.WriteString(cerebroToolsBriefForMode(ctx.EffectiveTools, ctx.ToolsBriefMode)) // CEREBRO-PATCH(cerebro-tools-brief-callsite): FIR-2312 adds dynamic per-permission Connections & MCP tools section; FIR-3212 folds it when tools_brief_mode=summary
 
 	// Comment Formatting guardrail for ALL providers. The MUL-2904
 	// duplicate-comment loop happened because an agent inlined a backtick-wrapped

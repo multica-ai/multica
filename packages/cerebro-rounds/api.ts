@@ -10,6 +10,12 @@ export async function listRounds(): Promise<Round[]> {
   const raw = await api.cerebroRequest<unknown>(path);
   return parseWithFallback(raw, listSchema, { rounds: [] }, { endpoint: path }).rounds;
 }
+/** FIR-3646 — persist the drag-and-drop order, first id first. */
+export async function reorderRounds(roundIds: string[]): Promise<Round[]> {
+  const path = "/api/cerebro/rounds/reorder";
+  const raw = await api.cerebroRequest<unknown>(path, { method: "POST", body: JSON.stringify({ round_ids: roundIds }) });
+  return parseWithFallback(raw, listSchema, { rounds: [] }, { endpoint: path }).rounds;
+}
 export async function getRoundStatus(id: string): Promise<RoundStatus | null> {
   const path = `/api/cerebro/rounds/${id}/status`;
   return parseWithFallback(await api.cerebroRequest<unknown>(path), roundStatusSchema, null, { endpoint: path });

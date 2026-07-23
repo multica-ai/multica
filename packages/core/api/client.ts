@@ -202,7 +202,7 @@ import {
   AgentToolsListSchema,
   RuntimeToolsListSchema,
   RuntimeToolEffectiveAccessListSchema,
-  RuntimeToolGrantsSchema,
+  // CEREBRO-PATCH(runtime-authoring-retirement): FIR-3403 removed legacy grant schema import.
   CapabilityListResponseSchema,
   AgentAvatarBackfillStatusSchema,
   AgentTemplateSchema,
@@ -2206,8 +2206,9 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(api-client-runtime-tools-admin): JEH-1710 — workspace
-  // owner/admin endpoints that drive the RuntimeToolsCard. Schema-validated
+  // CEREBRO-PATCH(api-client-runtime-tools-inventory): FIR-3403 retains only
+  // inventory and effective diagnostics; access authoring uses tool-policy.
+  // Schema-validated
   // per API Response Compatibility rules so a future server-side drift
   // (e.g. an unknown source enum value) renders gracefully.
   async listRuntimeTools(runtimeId: string): Promise<import("@multica/cerebro-types").RuntimeTool[]> {
@@ -2234,29 +2235,7 @@ export class ApiClient {
     }) as import("@multica/cerebro-types").RuntimeToolEffectiveAccess[];
   }
 
-  async setRuntimeToolEnabled(
-    runtimeId: string,
-    toolName: string,
-    enabled: boolean,
-  ): Promise<void> {
-    await this.fetch(
-      `/api/runtimes/${runtimeId}/tools/${encodeURIComponent(toolName)}`,
-      { method: "PATCH", body: JSON.stringify({ enabled }) },
-    );
-  }
-
-  async listRuntimeToolGrants(
-    runtimeId: string,
-  ): Promise<import("@multica/cerebro-types").RuntimeToolGrants> {
-    const path = `/api/runtimes/${runtimeId}/tool-grants`;
-    const raw = await this.fetch(path);
-    return parseWithFallback(
-      raw,
-      RuntimeToolGrantsSchema,
-      { group_grants: [], user_grants: [] },
-      { endpoint: path },
-    ) as import("@multica/cerebro-types").RuntimeToolGrants;
-  }
+  // CEREBRO-PATCH(runtime-authoring-retirement): legacy runtime grant writers were removed; tool-policy is canonical.
 
   // CEREBRO-PATCH(capability-register-client): FIR-2129 single capability register client API.
   async listCapabilities(params: {
@@ -2290,49 +2269,7 @@ export class ApiClient {
     }) as CapabilityListResponse;
   }
 
-  async addRuntimeToolGroupGrant(
-    runtimeId: string,
-    toolName: string,
-    groupId: string,
-  ): Promise<void> {
-    await this.fetch(
-      `/api/runtimes/${runtimeId}/tools/${encodeURIComponent(toolName)}/groups/${groupId}`,
-      { method: "POST" },
-    );
-  }
-
-  async removeRuntimeToolGroupGrant(
-    runtimeId: string,
-    toolName: string,
-    groupId: string,
-  ): Promise<void> {
-    await this.fetch(
-      `/api/runtimes/${runtimeId}/tools/${encodeURIComponent(toolName)}/groups/${groupId}`,
-      { method: "DELETE" },
-    );
-  }
-
-  async addRuntimeToolUserGrant(
-    runtimeId: string,
-    toolName: string,
-    userId: string,
-  ): Promise<void> {
-    await this.fetch(
-      `/api/runtimes/${runtimeId}/tools/${encodeURIComponent(toolName)}/users/${userId}`,
-      { method: "POST" },
-    );
-  }
-
-  async removeRuntimeToolUserGrant(
-    runtimeId: string,
-    toolName: string,
-    userId: string,
-  ): Promise<void> {
-    await this.fetch(
-      `/api/runtimes/${runtimeId}/tools/${encodeURIComponent(toolName)}/users/${userId}`,
-      { method: "DELETE" },
-    );
-  }
+  // CEREBRO-PATCH(runtime-authoring-retirement): no legacy per-user/group runtime grant writers remain below this seam.
 
   // CEREBRO-PATCH(api-client-terminal): cerebro interactive-terminal endpoints.
   async getRuntimePresentationMode(runtimeId: string): Promise<{ runtime_id: string; presentation_mode: "headless" | "interactive" }> {

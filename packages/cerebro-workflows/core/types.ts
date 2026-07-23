@@ -32,7 +32,7 @@ export type CerebroWorkflowEditorMode = "form" | "canvas";
 
 // FIR-2283 — Issue workflow. "standard" is the existing trigger -> conditions
 // -> action rule (unchanged). "issue_loop" is a Plan/Build/Delivery-gate/Done
-// recipe: it carries a LoopSpec instead of a trigger/action, and the server
+// recipe: it carries a LoopChainSpec instead of a trigger/action, and the server
 // compiles it onto the loop engine (see loop_spec below).
 export type CerebroWorkflowType = "standard" | "issue_loop";
 
@@ -97,132 +97,68 @@ export interface CerebroWorkflow {
   outbound_webhook_secret_set?: boolean;
   // FIR-2283. Absent on older cached responses -> treat as "standard".
   workflow_type?: CerebroWorkflowType;
-  loop_spec?: LoopSpec;
+  loop_spec?: LoopChainSpec;
 }
 
-// --- FIR-2283 Issue workflow: loop_spec wire shape ---
-// Mirrors server/internal/cerebro/loops.Spec + the issue-specific bindings
-// loops.CompileParams needs (see materialize_issue_loop.go's
-// issueLoopSpecWire) — the recipe designed on the Issue workflow surface.
+// --- FIR-3493 Issue workflow: Chain v2 loop_spec wire shape ---
 
-export type LoopCheckType = "programmatic" | "judge" | "human";
 export type LoopAssigneeType = "agent" | "member";
 
-// "Confirmed by" in the UI. Maps 1:1 to LoopCheckType; kept as a distinct
-// display-facing alias so the editor's copy can read "A command" / "An AI
-// review" / "A person" without every callsite re-deriving the label.
-export const CONFIRMED_BY_OPTIONS: ReadonlyArray<{
-  value: LoopCheckType;
-  label: string;
-}> = [
-  { value: "programmatic", label: "A command" },
-  { value: "judge", label: "An AI review" },
-  { value: "human", label: "A person" },
-];
+export type LoopBlockType = "session" | "command" | "review" | "human" | "eval";
+export type LoopBusyPolicy = "wait" | "pause" | "wakeup" | "ping_member";
 
-export interface LoopVerification {
+export interface LoopAgentRef {
+  agent_id: string;
+  model?: string;
+  thinking_level?: string;
+}
+
+export interface LoopChainBlock {
   id: string;
-  type: LoopCheckType;
-  /** Short human-readable name, e.g. "Test suite". Display-only. */
-  label?: string;
-
-  // Programmatic ("A command").
-  check?: string[]; // argv array, never a shell string
-  expect?: "exit_zero";
-
-  // Judge ("An AI review"). Runs a skill (preferred) or a free-text prompt
-  // ("rubric") — "Runs: A skill / A prompt" in the editor.
-  rubric?: string;
-  skill?: string;
-
-  // Human ("A person").
-  prompt?: string;
-
-  // Assignee for judge/human checks — "Assign to" in the editor, showing
-  // both agents and people in one list.
-  assignee_type?: LoopAssigneeType;
-  assignee_id?: string;
-  model?: string;
-  thinking_level?: string;
-}
-
-export interface LoopCaps {
-  max_iterations: number;
-  max_revisions: number;
-  no_progress_stalls: number;
-}
-
-// One ordered build phase in a multi-phase loop (FIR-2283 followup point 6).
-// Each phase runs its own build skill and is gated by its own delivery review
-// (verification) that must pass before the next phase's build starts.
-export interface LoopBuildPhase {
-  /** Display name, e.g. "Backend". Names the phase's build/review sessions. */
+  type: LoopBlockType;
   name?: string;
-  build_skill: string;
-  build_agent_id?: string;
-  model?: string;
-  thinking_level?: string;
+  agents?: LoopAgentRef[];
+  on_all_busy?: LoopBusyPolicy;
+  steps?: { allowed: boolean; max?: number };
+  // The issue status the engine sets before this step opens, and the one it
+  // sets once the step is done. Both optional — empty leaves the status alone.
+  status_on_start?: string;
+  status_on_done?: string;
+  skill?: string;
+  skills?: string[];
   goal?: string;
-  verification: LoopVerification[];
+  command_id?: string;
+  check?: string[];
+  expect?: "exit_zero";
+  rubric?: string;
+  prompt?: string;
+  approver_type?: LoopAssigneeType;
+  approver_id?: string;
+  eval_key?: string;
+  eval_phase?: "plan" | "delivery" | "monitor";
 }
 
-export interface LoopSpec {
-  version: 1;
-  // FIR-2283 v2 point 4 — one free-text prompt (skill-taggable) replaces the
-  // old fixed Goal / Definition-of-done pair. Both stay optional on the wire
-  // (the backend spec already treats them as human-notes, not required); the
-  // editor now writes only `goal` and leaves `definition_of_done` unset.
-  goal?: string;
-  definition_of_done?: string;
-  verification: LoopVerification[];
-  caps: LoopCaps;
-  planning?: boolean;
-  // Gates on the Plan step (FIR-2283 v2 point 6) — only meaningful when
-  // planning is true. Unlike verification, a plan gate does NOT require a
-  // programmatic entry: there is no code yet to run a command against
-  // during planning, so a judge-only criterion (e.g. an adversarial AI
-  // review of the plan) is valid on its own.
-  plan_gate?: LoopVerification[];
+export interface LoopPhaseLimits {
+  max_steps: number;
+  max_rounds: number;
+  no_progress_stalls: number;
+  max_wait_seconds?: number;
+}
 
-  // Build bindings. Used for a single-phase loop. When `phases` is set (a
-  // multi-phase loop), these are ignored — each phase carries its own build
-  // skill/agent and its own delivery gate.
-  build_agent_id: string;
-  build_skill: string;
-  build_model?: string;
-  build_thinking?: string;
+export interface LoopChainPhase {
+  id: string;
+  name?: string;
+  status?: string;
+  blocks: LoopChainBlock[];
+  limits: LoopPhaseLimits;
+}
 
-  // Multi-phase build chain (FIR-2283 followup point 6). When non-empty, the
-  // build is split into ordered phases, each gated by its own review that must
-  // pass before the next phase's build begins. Empty/omitted = single-phase.
-  phases?: LoopBuildPhase[];
-
-  // Planning bindings — only meaningful when planning is true.
-  plan_agent_id?: string;
-  plan_skill?: string;
-  plan_model?: string;
-  plan_thinking?: string;
-
-  // Status names — optional, server defaults apply (todo / in_progress /
-  // in_review / done) when omitted.
-  planning_status?: string;
-  build_status?: string;
-  review_status?: string;
+export interface LoopChainSpec {
+  version: 2;
+  phases: LoopChainPhase[];
   done_status?: string;
-
-  // Spec-wide judge fallback, used only by a judge check without its own
-  // assignee_id.
-  judge_agent_id?: string;
-  judge_skill?: string;
-  judge_model?: string;
-  judge_thinking?: string;
 }
 
-export const DEFAULT_LOOP_CAPS: LoopCaps = {
-  max_iterations: 6,
-  max_revisions: 6,
-  no_progress_stalls: 2,
-};
 
 // GET /{id}/loop-state response — the control strip's live read.
 export interface LoopStateResponse {
@@ -333,7 +269,7 @@ export interface WorkflowWriteInput {
   editor_layout?: unknown;
   // FIR-2283. Omit for a standard workflow.
   workflow_type?: CerebroWorkflowType;
-  loop_spec?: LoopSpec;
+  loop_spec?: LoopChainSpec;
 }
 
 // Display metadata for the form builder. Order here is the order shown in
@@ -443,8 +379,8 @@ export const RUN_STATUS_BADGE: Record<CerebroWorkflowRunStatus, string> = {
   queued: "bg-muted text-muted-foreground",
   running: "bg-info/10 text-info",
   success: "bg-success/10 text-success",
-  failed: "bg-warning/10 text-warning",
-  escalated: "bg-destructive/10 text-destructive",
+  failed: "bg-destructive/10 text-destructive",
+  escalated: "bg-warning/10 text-warning",
 };
 
 // Outbound webhook headers — the server-side guard rejects anything that
@@ -460,3 +396,21 @@ export const FORBIDDEN_OUTBOUND_HEADER_PREFIXES: ReadonlyArray<string> = [
 ];
 
 export const HEADER_NAME_RE = /^[A-Za-z0-9-]+$/;
+
+// A quality gate bound to an Issue workflow. This mirrors the eval package's
+// EvalBinding, deliberately re-declared here instead of imported: cerebro-evals
+// already depends on cerebro-workflows, so importing back would make the two
+// packages circular. Only the fields the workflow editor reads are declared;
+// the schema is passthrough, so extra server fields survive untouched.
+export interface WorkflowEvalBinding {
+  id: string;
+  workspace_id: string;
+  workflow_id: string;
+  eval_id: string;
+  phase: string;
+  blocking: boolean;
+  eval_key: string;
+  eval_version: string;
+  eval_title: string;
+  created_at: string;
+}

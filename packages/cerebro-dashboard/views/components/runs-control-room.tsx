@@ -5,6 +5,7 @@ import { useQueries } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import {
   CartesianGrid,
+  LabelList,
   Line,
   LineChart,
   ResponsiveContainer,
@@ -239,7 +240,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
         <section aria-label="Usage KPIs" className="grid grid-cols-2 divide-x divide-y overflow-hidden rounded-lg border bg-card sm:grid-cols-3 lg:grid-cols-5 lg:divide-y-0">
           <Kpi label="Runs" value={compact(kpiRow.runs)} note="in selected range" />
           <Kpi label="Tokens" value={compact(num(kpiRow.input_tokens) + num(kpiRow.output_tokens))} note="input + output" />
-          <Kpi label="Gateway cost" value={dollars(kpiRow.cost_cents)} note="measured spend" />
+          <Kpi label="Runtime cost" value={dollars(kpiRow.cost_cents)} note="exact charges plus token estimates" />
           <Kpi label="Measured savings" value={dollars(kpiRow.saved_cents)} note="graphify & context" accent="text-emerald-600" />
           <Kpi label="Missing cost data" value={compact(kpiRow.missing_cost_runs)} note="runs without cost" accent={num(kpiRow.missing_cost_runs) > 0 ? "text-amber-600" : "text-emerald-600"} />
         </section>
@@ -330,7 +331,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
         </div>
 
         {/* Quality */}
-        <Panel title="Quality gates & learning signals" meta="Measured data only · click to filter runs">
+        <Panel title="Quality gates & learning signals" meta="Judge gates, skill observations, approvals, and reactions · click to filter runs">
           <div className="grid lg:grid-cols-[220px_1fr]">
             <div className="border-b p-4 lg:border-b-0 lg:border-r">
               <Eyebrow>Judge gate outcome</Eyebrow>
@@ -360,7 +361,7 @@ export function RunsControlRoom({ workspaceId, filters, onFiltersChange, onNewVi
                   );
                 })}
                 {(qualityObs?.rows ?? []).length === 0 && (
-                  <p className="text-xs text-muted-foreground">No categorized quality data yet.</p>
+                  <p className="text-xs text-muted-foreground">No stored judge gates, skill observations, approvals, or reactions are linked to runs in this range yet.</p>
                 )}
               </div>
               <div className="mt-4">
@@ -676,10 +677,17 @@ export function TimeSeries({ result }: { result: Result }) {
           <YAxis yAxisId="left" tick={false} tickLine={false} axisLine={false} width={0} />
           <YAxis yAxisId="right" orientation="right" tick={false} tickLine={false} axisLine={false} width={0} />
           <Tooltip contentStyle={{ fontSize: 11 }} />
-          <Line yAxisId="left" type="monotone" dataKey="Runs" stroke="#8b7cf6" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
-          <Line yAxisId="right" type="monotone" dataKey="Savings" stroke="#65c18c" strokeWidth={2} dot={false} activeDot={{ r: 4 }} />
+          <Line yAxisId="left" type="monotone" dataKey="Runs" stroke="#8b7cf6" strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }}>
+            <LabelList dataKey="Runs" position="top" className="fill-[#6f63d7] text-[9px]" />
+          </Line>
+          <Line yAxisId="right" type="monotone" dataKey="Savings" stroke="#65c18c" strokeWidth={2} dot={{ r: 2 }} activeDot={{ r: 4 }}>
+            <LabelList dataKey="Savings" position="bottom" className="fill-[#438a62] text-[9px]" formatter={(value: unknown) => `$${num(value)}`} />
+          </Line>
         </LineChart>
       </ResponsiveContainer>
+      <div className="sr-only">
+        {series.map((point, index) => <span key={index} aria-label={`Runs point ${point.Runs}`} />)}
+      </div>
     </div>
   );
 }

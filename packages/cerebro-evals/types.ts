@@ -37,12 +37,48 @@ export interface EvalRun {
   target_version: string;
   workflow_id?: string;
   issue_id?: string;
+  issue_key?: string;
   status: EvalRunStatus;
   results: Record<string, unknown>;
   evidence_artifact_id?: string;
   cost_cents: number;
   latency_ms: number;
   created_at: string;
+}
+
+// The typed shape of an eval run's `results` JSONB, produced by the Go engine
+// (runner.Report / runner.CaseReport, FIR-3496 Fase 2). The See-why screen reads
+// this to show, per task, what was asked, expected, produced, and why it passed
+// or failed. Kept in lockstep with server/internal/cerebro/evals/runner/runner.go
+// and scoring.go — snake_case keys match the Go json tags.
+export interface EvalCaseReport {
+  case_id: string;
+  situation: string;
+  expected: string;
+  produced: string;
+  passed: boolean;
+  critical: boolean;
+  reason: string;
+  error?: string;
+}
+
+export interface EvalRunOutcome {
+  total: number;
+  passed: number;
+  pass_rate: number;
+  critical_total: number;
+  critical_failed: number;
+  min_pass_rate: number;
+  threshold_met: boolean;
+  critical_rule_met: boolean;
+  status: string;
+}
+
+export interface EvalReport {
+  cases: EvalCaseReport[];
+  outcome: EvalRunOutcome;
+  cost_cents: number;
+  latency_ms: number;
 }
 
 export interface EvalBinding {
@@ -56,4 +92,23 @@ export interface EvalBinding {
   eval_version: string;
   eval_title: string;
   created_at: string;
+}
+
+export interface EvalSchedule {
+  id: string;
+  workspace_id: string;
+  eval_id: string;
+  schedule_expr: string;
+  timezone: string;
+  enabled: boolean;
+  next_run_at?: string;
+  last_run_at?: string;
+  created_by_id: string;
+  created_at: string;
+}
+
+export interface EvalScheduleInput {
+  schedule_expr: string;
+  timezone: string;
+  enabled: boolean;
 }

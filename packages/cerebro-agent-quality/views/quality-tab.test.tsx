@@ -131,6 +131,25 @@ describe("CerebroAgentQualityTab", () => {
     expect(screen.getByText(/3\s*\/\s*5 passed/)).toBeInTheDocument();
   });
 
+  it("shows confidence with the sample size it was averaged over", async () => {
+    mockCerebroRequest.mockResolvedValue({ versions: [measuredVersion] });
+    renderTab();
+
+    // avg_confidence is confidence_sum / confident server-side, so `confident`
+    // (5) is the literal denominator. An average without its sample size is
+    // exactly the "number without context" this tab exists to avoid.
+    expect(await screen.findByText(/0\.90/)).toBeInTheDocument();
+    expect(screen.getByText(/across 5 measurements/i)).toBeInTheDocument();
+  });
+
+  it("omits the confidence sample size when nothing carried a confidence", async () => {
+    mockCerebroRequest.mockResolvedValue({ versions: [unmeasuredVersion] });
+    renderTab();
+
+    await screen.findByText("v1.3.0");
+    expect(screen.queryByText(/across .* measurements/i)).not.toBeInTheDocument();
+  });
+
   it("renders missing measurements as an em dash, never zero", async () => {
     mockCerebroRequest.mockResolvedValue({ versions: [unmeasuredVersion] });
     renderTab();

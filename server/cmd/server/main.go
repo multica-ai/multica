@@ -15,16 +15,18 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
-	// CEREBRO-PATCH(main-agent-pass-gate): JEH-1327 cerebro agent-pass gate import
-	cerebroagentpass "github.com/multica-ai/multica/server/internal/cerebro/agentpass"
-	cerebroapprovals "github.com/multica-ai/multica/server/internal/cerebro/approvals" // CEREBRO-PATCH(main-request-approval): FIR-3266 agent-callable approval intake.
+	cerebroaccessdecision "github.com/multica-ai/multica/server/internal/cerebro/accessdecision"     // CEREBRO-PATCH(main-access-decision-shadow): FIR-3399 observational Gateway Decision Ledger.
+	cerebroaccessgovernance "github.com/multica-ai/multica/server/internal/cerebro/accessgovernance" // CEREBRO-PATCH(main-access-governance): FIR-3403 tighten-only access governance sweeper.
+	cerebroapprovals "github.com/multica-ai/multica/server/internal/cerebro/approvals"               // CEREBRO-PATCH(main-request-approval): FIR-3266 agent-callable approval intake.
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	cerebroevals "github.com/multica-ai/multica/server/internal/cerebro/evals"                   // CEREBRO-PATCH(main-eval-gate): FIR-3308 blocking workflow evals.
+	cerebroevalrun "github.com/multica-ai/multica/server/internal/cerebro/evals/runservice"      // CEREBRO-PATCH(main-eval-schedule-sweeper): FIR-3496 reuse the Run-now executor for scheduled evals.
 	cerebroplatformaction "github.com/multica-ai/multica/server/internal/cerebro/platformaction" // CEREBRO-PATCH(main-platform-action-gate): FIR-3266 gateway mutation floor.
 	// CEREBRO-PATCH(main-gws-group-sync): FIR-2596 Google Workspace group sync worker import
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
 	cerebroidentitysync "github.com/multica-ai/multica/server/internal/cerebro/identitysync"
 	cerebroruntime "github.com/multica-ai/multica/server/internal/cerebro/runtime"
+	cerebrotaskmandate "github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	// CEREBRO-PATCH(main-semantic-search-worker): FIR-2604 embedding worker import.
 	cerebrosemantic "github.com/multica-ai/multica/server/internal/cerebro/semantic"
@@ -33,8 +35,6 @@ import (
 	// CEREBRO-PATCH(main-wakeup): FIR-3013 agent wakeup scheduler.
 	cerebrowakeup "github.com/multica-ai/multica/server/internal/cerebro/wakeup"
 	// CEREBRO-PATCH(rounds-answer-snapshots): FIR-3179 — Rounds have no scheduler or background execution loop.
-	// CEREBRO-PATCH(main-runtime-tool-backfill): JEH-1710 bid 6 cloud-tool registry backfill import
-	cerebroruntimetools "github.com/multica-ai/multica/server/internal/cerebro/runtimetools"
 	// CEREBRO-PATCH(main-workflows-engine): JEH-1047 cerebro workflow engine import
 	cerebroworkflows "github.com/multica-ai/multica/server/internal/cerebro/workflows"
 	// CEREBRO-PATCH(main-loop-gate-evaluator): FIR-2283 loop delivery-gate evaluator import
@@ -59,8 +59,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
-	"github.com/multica-ai/multica/server/internal/util"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	db "github.com/multica-ai/multica/server/pkg/db/generated" // CEREBRO-PATCH(main-legacy-switch-retirement): FIR-3403 removed obsolete startup switches and seed wiring.
 	"github.com/redis/go-redis/v9"
 )
 
@@ -358,7 +357,9 @@ func main() {
 	// CEREBRO-PATCH(main-loop-gate-evaluator): FIR-2283 plug the loop delivery-gate evaluator (check_passes) into the engine, with the egress that dispatches enqueued checks to the worker agent's runtime.
 	// CEREBRO-PATCH(main-loop-status-reverter): FIR-2283 v2 — also plug in the status-revert egress, so a gate revising visibly moves the board back to Build/Plan.
 	baseLoopGate := cerebroloops.NewGateEvaluator(pool).WithDispatcher(cerebroloops.NewTaskDispatcher(queries).WithSessionStamper(workflowSessionStamper)).WithStatusSetter(cerebroloops.NewIssueStatusSetter(queries)) // CEREBRO-PATCH(main-eval-gate): FIR-3308 preserve existing checks.
-	workflowSvc.WithGateEvaluator(cerebroevals.NewGateEvaluator(baseLoopGate, cerebroevals.NewStore(pool)))                                                                                                             // CEREBRO-PATCH(main-eval-gate): require bound eval runs after normal checks.
+	evalGateStore := cerebroevals.NewStore(pool)                                                                                                                                                                        // CEREBRO-PATCH(main-eval-advisory): FIR-3496 share one store between the blocking gate and the advisory warner.
+	evalAdvisoryWarner := cerebroevals.NewAdvisoryWarner(evalGateStore, cerebrodb.New(pool), queries, bus)                                                                                                              // CEREBRO-PATCH(main-eval-advisory): FIR-3496 warn owners/admins on failing advisory (non-blocking) eval bindings.
+	workflowSvc.WithGateEvaluator(cerebroevals.NewGateEvaluator(baseLoopGate, evalGateStore).WithAdvisoryWarner(evalAdvisoryWarner))                                                                                    // CEREBRO-PATCH(main-eval-gate): require bound eval runs after normal checks.
 	// CEREBRO-PATCH(router-push-service): pushSvc threaded through to handlers.
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, pushSvc, RouterOptions{
 		HTTPMetrics:        httpMetrics,
@@ -382,12 +383,6 @@ func main() {
 	gatewayRuntimeCtx, gatewayRuntimeCancel := context.WithCancel(context.Background())
 	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
 	taskSvc.Analytics = analyticsClient
-	// CEREBRO-PATCH(main-agent-pass-gate): JEH-1327 wire the agent-pass pre-enqueue gate.
-	if agentPassSvc, err := cerebroagentpass.New(cerebrodb.New(pool), nil); err != nil {
-		slog.Error("agent-pass gate construction failed; gate disabled", "error", err)
-	} else {
-		taskSvc.AgentPass = agentPassSvc
-	}
 	taskSvc.Metrics = businessMetrics
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
 	registerAutopilotListeners(bus, autopilotSvc)
@@ -408,6 +403,10 @@ func main() {
 
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
+	// CEREBRO-PATCH(main-access-governance): FIR-3403 — inspect live role
+	// bindings for expired, orphaned, and unused access. The scanner only
+	// reports tighten-only findings and has no access-opening operation.
+	go cerebroaccessgovernance.NewDatabaseSweeper(pool).Run(sweepCtx, cerebroaccessgovernance.DefaultInterval)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotScheduler(autopilotCtx, queries, autopilotSvc)
 	// CEREBRO-PATCH(main-wakeup): FIR-3013 due-time wakeup sweeper.
@@ -446,6 +445,10 @@ func main() {
 	go cerebronotetypes.NewSweeper(pool, cerebrodb.New(pool)).Run(sweepCtx, 24*time.Hour)
 	// CEREBRO-PATCH(main-skill-learning-sweeper): TECH-3077 skill self-learning. Turns threshold-crossing observations into change-request proposals. No-ops for workspaces with cerebro_skill_learning flag off.
 	go cerebrolearn.NewLearningSweeper(pool, cerebrodb.New(pool), queries).Run(sweepCtx, 6*time.Hour)
+	// CEREBRO-PATCH(main-eval-schedule-sweeper): FIR-3496 scheduled eval runs. Deployment kill switch plus per-workspace cerebro_evals flag.
+	go cerebroevals.NewScheduleSweeper(cerebroevals.NewStore(pool), cerebroevalrun.New(pool)).Run(sweepCtx, time.Minute)
+	// CEREBRO-PATCH(main-eval-drift-sweeper): FIR-3496 daily eval drift alarm (fail + pass-rate regression). Gated OFF by CEREBRO_EVAL_DRIFT_ENABLED.
+	go cerebroevals.NewDriftSweeper(cerebroevals.NewStore(pool), cerebrodb.New(pool), queries, bus).Run(sweepCtx, 24*time.Hour)
 	if gatewayCfg, err := cerebroruntime.LoadFirtalGatewayRuntimeConfig(); err != nil {
 		slog.Error("invalid firtal gateway server runtime config", "error", err)
 		os.Exit(1)
@@ -454,31 +457,26 @@ func main() {
 		gatewayExecutor.SetApprovalRequester(cerebroapprovals.New(cerebrodb.New(pool), pool, bus))                                                                     // CEREBRO-PATCH(main-request-approval): FIR-3266 wire human approval intake.
 		gatewayExecutor.SetPlatformActionGate(cerebroplatformaction.NewDefault(cerebrotoolpolicy.NewStore(pool), queries, cerebrodb.New(pool), pool, bus))             // CEREBRO-PATCH(main-platform-action-gate): FIR-3266 always-on gateway mutation floor.
 		gatewayExecutor.SetAttachmentStorage(cerebroruntime.FirtalGatewayAttachmentStorage())                                                                          // CEREBRO-PATCH(main-firtal-gateway-attachment-storage): wire server-side attachment storage into the gateway runtime.
-		cerebroruntime.MaybeEnableApprovalGate(gatewayExecutor, cerebrodb.New(pool), pool, bus)                                                                        // CEREBRO-PATCH(main-firtal-gateway-approval-gate): FIR-2193 default-off approval enforcement gate, controlled rollout via env.
+		gatewayExecutor.EnableApprovalGate(h.ApprovalGate)                                                                                                             // CEREBRO-PATCH(main-firtal-gateway-approval-gate): FIR-3403 one policy-controlled approval seam; no server rollout switch.
 		// CEREBRO-PATCH(main-firtal-gateway-connection-deny): TECH-3174 always-on per-tool connection Deny on the gateway path.
 		gatewayExecutor.SetConnectionDenyStore(cerebrotoolpolicy.NewStore(pool))
 		// CEREBRO-PATCH(main-firtal-gateway-api-connection-tools): FIR-2166 C PR2 — expose enabled API-type connections as server-side-dispatched agent tools, behind the default-off cerebro_api_connection_tools workspace flag.
 		gatewayExecutor.SetAPIConnectionStore(cerebroconnections.New(pool))
 		// CEREBRO-PATCH(main-loop-report-store): FIR-2283 — wire the loop check store so worker agents can call report_loop_check to report check exit codes back to the delivery gate.
 		gatewayExecutor.SetLoopStore(cerebroloops.NewStore(pool))
-		// CEREBRO-PATCH(main-firtal-gateway-inproc-bridge): FIR-1449 default-off in-process bridge to the full CLI tool surface, controlled rollout via env.
+		// CEREBRO-PATCH(main-firtal-gateway-agent-capabilities): FIR-3398 — wire the capabilities card builder so the gateway answers get_agent_capabilities from the same implementation as the HTTP route.
+		gatewayExecutor.SetAgentCapabilitiesProvider(h)
+		// CEREBRO-PATCH(main-gateway-availability-probe): FIR-3398 — probe the gateway's real tool registry once at startup and hand the card the evidence, so a tool the matrix declares callable but the registry never implemented shows as "not proven" instead of as a capability the agent has. Must be wired AFTER SetAgentCapabilitiesProvider: the self-lookup only registers when a provider is present.
+		h.CapabilityEvidence = cerebroruntime.NewGatewayAvailabilityLedger(gatewayRuntimeCtx, h, queries)
+		mandates := cerebrotaskmandate.NewStore(pool)
+		gatewayExecutor.SetTaskMandates(mandates)
+		gatewayExecutor.SetAccessDecisionObserver(cerebroaccessdecision.NewObserver(cerebrotoolpolicy.NewStore(pool), h.CapabilityEvidence, cerebroaccessdecision.NewStore(pool)).WithMandates(mandates))
+		// CEREBRO-PATCH(main-firtal-gateway-inproc-bridge): FIR-1449 policy-controlled in-process bridge to the full CLI tool surface.
 		cerebroruntime.MaybeEnableInProcessBridge(gatewayExecutor, r)
 		go gatewayExecutor.Run(gatewayRuntimeCtx)
-		// CEREBRO-PATCH(main-seed-kristian): JEH-1353 — seed Kristian's approved
-		// Multica MCP tool package on every startup (idempotent upsert).
-		// KristianAgentID is the canonical UUID for Kristian in this workspace.
-		const kristianAgentID = "6fe22e7e-6a81-4403-be26-fafd89871cf6"
-		if kid, err := util.ParseUUID(kristianAgentID); err == nil {
-			if err := cerebroruntime.SeedKristianTools(context.Background(), pool, kid); err != nil {
-				slog.Warn("seed Kristian tools failed", "error", err)
-			}
-		}
-		// CEREBRO-PATCH(main-runtime-tool-backfill): JEH-1710 bid 6 — backfill cerebro_runtime_tool cloud built-ins.
+		// CEREBRO-PATCH(main-cloud-capability-startup-scan): keep the canonical
+		// capability register fresh for cloud runtimes on every deploy.
 		go func() {
-			if err := cerebroruntimetools.SeedBuiltinCloudToolsForAllRuntimes(context.Background(), pool); err != nil {
-				slog.Warn("seed cerebro_runtime_tool cloud rows failed", "error", err)
-			}
-			// CEREBRO-PATCH(main-cloud-capability-startup-scan): TECH-3657 — also sync the capability register so the admin matrix self-heals on deploy.
 			if err := seedCloudCapabilitiesForAllRuntimes(context.Background(), pool); err != nil {
 				slog.Warn("seed cloud runtime capabilities failed", "error", err)
 			}

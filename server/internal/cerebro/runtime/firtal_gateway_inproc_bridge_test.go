@@ -43,33 +43,15 @@ func TestSetInProcessBridge_EnableState(t *testing.T) {
 	}
 }
 
-func TestMaybeEnableInProcessBridge_EnvGate(t *testing.T) {
-	cases := []struct {
-		val  string
-		want bool
-	}{
-		{"", false},
-		{"0", false},
-		{"false", false},
-		{"nonsense", false},
-		{"1", true},
-		{"true", true},
-		{"TRUE", true},
-	}
-	for _, tc := range cases {
-		t.Run("val="+tc.val, func(t *testing.T) {
-			t.Setenv(inProcBridgeEnvFlag, tc.val)
-			e := &FirtalGatewayExecutor{}
-			MaybeEnableInProcessBridge(e, dummyHandler())
-			if got := e.inProcessBridgeEnabled(); got != tc.want {
-				t.Fatalf("env=%q: enabled=%v, want %v", tc.val, got, tc.want)
-			}
-		})
+func TestMaybeEnableInProcessBridge_AlwaysWiresPolicyControlledBridge(t *testing.T) {
+	e := &FirtalGatewayExecutor{}
+	MaybeEnableInProcessBridge(e, dummyHandler())
+	if !e.inProcessBridgeEnabled() {
+		t.Fatal("bridge should be wired without a server environment switch")
 	}
 }
 
 func TestMaybeEnableInProcessBridge_NilHandler(t *testing.T) {
-	t.Setenv(inProcBridgeEnvFlag, "1")
 	e := &FirtalGatewayExecutor{}
 	MaybeEnableInProcessBridge(e, nil)
 	if e.inProcessBridgeEnabled() {

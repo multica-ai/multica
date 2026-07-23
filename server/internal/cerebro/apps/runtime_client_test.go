@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func TestRuntimeClientSignsDeploymentRequest(t *testing.T) {
@@ -35,11 +37,27 @@ func TestRuntimeClientSignsDeploymentRequest(t *testing.T) {
 	client := NewRuntimeClient(server.URL, secret)
 	err := client.Deploy(context.Background(), RuntimeDeploymentRequest{
 		AppID:        "f1540000-0000-4154-8154-000000000001",
+		AppName:      "Allergen Formatter",
 		Version:      "1.0.0",
 		BundleSHA256: strings.Repeat("a", 64),
 	})
 	if err != nil {
 		t.Fatalf("deploy: %v", err)
+	}
+}
+
+func TestRuntimeDeploymentRequestIncludesHumanAppName(t *testing.T) {
+	body, err := json.Marshal(RuntimeDeploymentRequest{
+		AppID:        "f1540000-0000-4154-8154-000000000001",
+		AppName:      "Allergen Formatter",
+		Version:      "1.0.0",
+		BundleSHA256: strings.Repeat("a", 64),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), `"app_name":"Allergen Formatter"`) {
+		t.Fatalf("human app name missing from deployment request: %s", body)
 	}
 }
 
@@ -125,6 +143,81 @@ func TestRuntimeClientHonorsRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestRuntimeClientFetchesImmutableFrontendAsset(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet ||
+			r.URL.Path != "/apps/f1540000-0000-4154-8154-000000000001/1.0.0/index.html" ||
+			r.URL.Query().Get("view") != "default" {
+			t.Fatalf("unexpected runtime asset request: %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte("<h1>Allergen Formatter</h1>"))
+	}))
+	defer server.Close()
+
+	asset, err := NewRuntimeClient(server.URL, "secret").Asset(
+		context.Background(),
+		"apps/f1540000-0000-4154-8154-000000000001/1.0.0/index.html",
+		"view=default",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asset.Status != http.StatusOK || string(asset.Body) != "<h1>Allergen Formatter</h1>" {
+		t.Fatalf("unexpected runtime asset: %+v", asset)
+	}
+	if asset.Headers.Get("Content-Type") != "text/html; charset=utf-8" ||
+		asset.Headers.Get("Content-Security-Policy") != "default-src 'self'" {
+		t.Fatalf("runtime response headers were not preserved: %v", asset.Headers)
+	}
+}
+
+func TestRuntimeAssetHandlerOnlyProxiesFrontendAndSDK(t *testing.T) {
+	runtime := &fakeRuntimeAssetFetcher{
+		asset: RuntimeAsset{
+			Status:  http.StatusOK,
+			Headers: http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
+			Body:    []byte("<h1>Allergen Formatter</h1>"),
+		},
+	}
+	handler := &Handler{runtimeAssets: runtime}
+	router := chi.NewRouter()
+	router.Get("/api/cerebro/apps-runtime/*", handler.RuntimeAsset)
+
+	allowed := httptest.NewRecorder()
+	router.ServeHTTP(allowed, httptest.NewRequest(
+		http.MethodGet,
+		"/api/cerebro/apps-runtime/apps/f1540000-0000-4154-8154-000000000001/1.0.0/index.html",
+		nil,
+	))
+	if allowed.Code != http.StatusOK || !strings.Contains(allowed.Body.String(), "Allergen Formatter") {
+		t.Fatalf("frontend asset returned %d: %s", allowed.Code, allowed.Body.String())
+	}
+	if runtime.path != "apps/f1540000-0000-4154-8154-000000000001/1.0.0/index.html" {
+		t.Fatalf("unexpected proxied path %q", runtime.path)
+	}
+
+	blocked := httptest.NewRecorder()
+	router.ServeHTTP(blocked, httptest.NewRequest(http.MethodGet, "/api/cerebro/apps-runtime/deployments", nil))
+	if blocked.Code != http.StatusNotFound || runtime.calls != 1 {
+		t.Fatalf("control-plane route was proxied: status=%d calls=%d", blocked.Code, runtime.calls)
+	}
+}
+
+type fakeRuntimeAssetFetcher struct {
+	asset RuntimeAsset
+	path  string
+	calls int
+}
+
+func (f *fakeRuntimeAssetFetcher) Asset(_ context.Context, path, _ string) (RuntimeAsset, error) {
+	f.calls++
+	f.path = path
+	return f.asset, nil
+}
+
 func TestRuntimeSignatureRejectsReplayAndTampering(t *testing.T) {
 	now := time.Date(2026, time.July, 15, 18, 0, 0, 0, time.UTC)
 	body := []byte(`{"status":"ready"}`)
@@ -143,18 +236,26 @@ func TestRuntimeSignatureRejectsReplayAndTampering(t *testing.T) {
 	}
 }
 
-func TestBundleTokenIsBoundToAppVersionAndExpiry(t *testing.T) {
-	now := time.Date(2026, time.July, 15, 18, 0, 0, 0, time.UTC)
+func TestBundleTokenIsBoundToAppVersionAndDurable(t *testing.T) {
 	appID := "f1540000-0000-4154-8154-000000000001"
-	token := mintBundleToken("secret", appID, "1.0.0", now.Add(30*time.Minute))
-	if err := verifyBundleToken("secret", token, appID, "1.0.0", now); err != nil {
+	token := mintBundleToken("secret", appID, "1.0.0")
+	if err := verifyBundleToken("secret", token, appID, "1.0.0"); err != nil {
 		t.Fatalf("valid bundle token rejected: %v", err)
 	}
-	if err := verifyBundleToken("secret", token, appID, "2.0.0", now); err == nil {
+	if err := verifyBundleToken("secret", token, appID, "2.0.0"); err == nil {
 		t.Fatal("bundle token escaped its version")
 	}
-	if err := verifyBundleToken("secret", token, appID, "1.0.0", now.Add(31*time.Minute)); err == nil {
-		t.Fatal("expired bundle token was accepted")
+	if err := verifyBundleToken("secret", token, "a1540000-0000-4154-8154-000000000002", "1.0.0"); err == nil {
+		t.Fatal("bundle token escaped its app")
+	}
+	if err := verifyBundleToken("other-secret", token, appID, "1.0.0"); err == nil {
+		t.Fatal("bundle token accepted under the wrong signing key")
+	}
+	// Durability regression: the token carries no expiry, so a worker that was
+	// provisioned long ago and restarts today must still be able to download its
+	// bundle. A token minted "in the past" (any time) stays valid.
+	if err := verifyBundleToken("secret", token, appID, "1.0.0"); err != nil {
+		t.Fatalf("durable bundle token rejected on a later restart: %v", err)
 	}
 }
 

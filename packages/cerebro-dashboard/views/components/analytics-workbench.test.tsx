@@ -76,6 +76,8 @@ describe("AnalyticsWorkbench", () => {
       />,
     );
     expect(screen.getByRole("img", { name: "Runs trend chart" })).toBeTruthy();
+    expect(screen.getByLabelText("Runs trend point 3")).toBeTruthy();
+    expect(screen.getByLabelText("Runs trend point 8")).toBeTruthy();
     expect(screen.getByText("11")).toBeTruthy();
   });
 

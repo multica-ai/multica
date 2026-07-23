@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/accessdecision"
+	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
+	"github.com/multica-ai/multica/server/internal/cerebro/capabilitycatalog"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/mcp"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -15,20 +18,20 @@ import (
 // "echoed:"+text, so the text length controls the size of the tool result that
 // lands in the transcript (and is later pruned).
 func echoToolCallResponse(text string) string {
-	return fmt.Sprintf(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"echo","arguments":"{\"text\":\"%s\"}"}}]}}],"firtal":{"input_tokens":1,"output_tokens":1}}`, text)
+	return fmt.Sprintf(`{"choices":[{"message":{"content":null,"tool_calls":[{"id":"c","type":"function","function":{"name":"get_issue","arguments":"{\"text\":\"%s\"}"}}]}}],"firtal":{"input_tokens":1,"output_tokens":1}}`, text)
 }
 
 // anthropicEchoToolUse is the Anthropic-native (/v1/messages) equivalent: a
 // tool_use block calling echo with the given text.
 func anthropicEchoToolUse(text string) string {
-	return fmt.Sprintf(`{"content":[{"type":"tool_use","id":"c1","name":"echo","input":{"text":"%s"}}],"firtal":{"input_tokens":1,"output_tokens":1}}`, text)
+	return fmt.Sprintf(`{"content":[{"type":"tool_use","id":"c1","name":"get_issue","input":{"text":"%s"}}],"firtal":{"input_tokens":1,"output_tokens":1}}`, text)
 }
 
 // echoMCPServer registers the echo tool used by the compounding loops. The tool
 // returns "echoed:"+text so a caller can size the tool result by the arg length.
 func echoMCPServer() *mcp.Server {
 	srv := mcp.NewServer("test-tools", "0.0.0")
-	srv.RegisterTool(mcp.Tool{Name: "echo"}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
+	srv.RegisterTool(mcp.Tool{Name: "get_issue"}, func(ctx context.Context, args map[string]any) (mcp.CallToolResult, error) {
 		return mcp.TextResult("echoed:" + args["text"].(string)), nil
 	})
 	return srv
@@ -46,7 +49,13 @@ func runPruneLoopWithTexts(t *testing.T, texts []string, pruneOn bool) GatewayCo
 	script = append(script, `{"choices":[{"message":{"content":"final answer"}}],"firtal":{"input_tokens":1,"output_tokens":1}}`)
 	gateway, _ := fakeGatewayScript(t, script)
 
-	e := &FirtalGatewayExecutor{gateway: gateway, logger: testLogger()}
+	e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
+	setAgentToolPolicy(t, agentID, "get_issue", toolpolicy.SettingAllow)
+	e.SetAccessDecisionObserver(accessdecision.NewObserver(e.toolPolicy, shadowEvidence{
+		capabilitycatalog.PlatformTool("get_issue").ID: {Level: availabilityevidence.LevelVerified},
+	}, &shadowLedgerWriter{}))
+	e.gateway = gateway
+	e.logger = testLogger()
 	completion, err := e.runToolLoopWithServer(context.Background(),
 		// MaxToolRounds == len(texts) forces every text into its own round, so
 		// pruning fires after each round and the loop ends on the forced final call.
@@ -54,10 +63,10 @@ func runPruneLoopWithTexts(t *testing.T, texts []string, pruneOn bool) GatewayCo
 		db.Agent{},
 		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
 		GatewayRequestMeta{TaskID: "t1"},
-		pgtype.UUID{},
-		pgtype.UUID{},
+		agentID,
+		runtimeAccountTestWSID,
 		echoMCPServer(),
-		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "echo"}}},
+		[]GatewayToolDef{{Type: "function", Function: GatewayToolFunction{Name: "get_issue"}}},
 		pruneOn,
 	)
 	if err != nil {
@@ -78,15 +87,21 @@ func runAnthropicPruneLoop(t *testing.T, texts []string, pruneOn bool) GatewayCo
 	script = append(script, `{"content":[{"type":"text","text":"final answer"}],"firtal":{"input_tokens":1,"output_tokens":1}}`)
 	gateway, _ := fakeGatewayScript(t, script)
 
-	e := &FirtalGatewayExecutor{gateway: gateway, logger: testLogger()}
+	e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
+	setAgentToolPolicy(t, agentID, "get_issue", toolpolicy.SettingAllow)
+	e.SetAccessDecisionObserver(accessdecision.NewObserver(e.toolPolicy, shadowEvidence{
+		capabilitycatalog.PlatformTool("get_issue").ID: {Level: availabilityevidence.LevelVerified},
+	}, &shadowLedgerWriter{}))
+	e.gateway = gateway
+	e.logger = testLogger()
 	completion, err := e.runAnthropicToolLoop(context.Background(),
 		FirtalGatewayRuntimeConfig{BaseURL: "https://x", APIKey: "rk", Model: "claude-sonnet-4-6", MaxTokens: 4096, MaxToolRounds: len(texts)},
 		db.Agent{},
 		[]GatewayMessage{{Role: "system", Content: "system"}, {Role: "user", Content: "go"}},
 		GatewayRequestMeta{TaskID: "t1"},
-		pgtype.UUID{},
-		pgtype.UUID{},
-		[]AnthropicTool{{Name: "echo", InputSchema: map[string]any{"type": "object"}}},
+		agentID,
+		runtimeAccountTestWSID,
+		[]AnthropicTool{{Name: "get_issue", InputSchema: map[string]any{"type": "object"}}},
 		ToolContext{},
 		echoMCPServer(),
 		nil,   // registry

@@ -1,0 +1,2 @@
+-- Intentionally irreversible: rollback must never recreate a retired access
+-- path. Canonical capability reports and tool-policy rows remain intact.

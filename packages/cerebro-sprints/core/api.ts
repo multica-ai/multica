@@ -5,6 +5,7 @@ import {
   EMPTY_SELECTABLE_SPRINTS_LIST,
   EMPTY_SPRINT_ISSUES_LIST,
   EMPTY_SPRINTS_LIST,
+  EMPTY_WORKSPACE_SPRINTS_LIST,
   recurringTaskSchema,
   recurringTasksListSchema,
   selectableSprintsListSchema,
@@ -13,6 +14,7 @@ import {
   sprintSchema,
   sprintSettingsSchema,
   sprintsListSchema,
+  workspaceSprintsListSchema,
 } from "./api-schemas";
 import type {
   CompleteSprintInput,
@@ -29,6 +31,7 @@ import type {
   SprintSettingsWriteInput,
   SprintsListResponse,
   SprintUpdateInput,
+  WorkspaceSprintsResponse,
 } from "./types";
 
 // ===========================================================================
@@ -81,6 +84,13 @@ export async function fetchSprints(projectId: string): Promise<SprintsListRespon
   const raw = await api.cerebroRequest<unknown>(`/api/cerebro/projects/${projectId}/sprints`);
   return parseWithFallback(raw, sprintsListSchema, EMPTY_SPRINTS_LIST, {
     endpoint: "fetchSprints",
+  });
+}
+
+export async function fetchWorkspaceSprints(): Promise<WorkspaceSprintsResponse> {
+  const raw = await api.cerebroRequest<unknown>("/api/cerebro/sprints");
+  return parseWithFallback(raw, workspaceSprintsListSchema, EMPTY_WORKSPACE_SPRINTS_LIST, {
+    endpoint: "fetchWorkspaceSprints",
   });
 }
 

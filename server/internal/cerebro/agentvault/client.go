@@ -30,16 +30,20 @@ type connectionResolver interface {
 // resolves the workspace's "Agent Vault" connection at call time and uses that
 // connection's own Bearer credential — no admin login, no env secret.
 type Client struct {
-	cfg   Config
-	conns connectionResolver
-	http  *http.Client
+	cfg        Config
+	conns      connectionResolver
+	http       *http.Client
+	retryDelay func(context.Context, int) error
 }
 
 // NewClient builds a Client. conns resolves the Agent Vault connection per
 // workspace; a nil conns makes ListVaults degrade to an empty list (the same
 // "not configured" contract the vaults endpoint has always used).
 func NewClient(cfg Config, conns connectionResolver) *Client {
-	return &Client{cfg: cfg, conns: conns, http: &http.Client{Timeout: 20 * time.Second}}
+	return &Client{
+		cfg: cfg, conns: conns, http: &http.Client{Timeout: 20 * time.Second},
+		retryDelay: waitForCredentialRetry,
+	}
 }
 
 // Vault is one Agent Vault box as listed by GET /v1/vaults. Only the two fields
@@ -131,28 +135,61 @@ func (c *Client) RevealCredential(ctx context.Context, workspaceID pgtype.UUID, 
 // a credential endpoint may itself contain sensitive material and must never
 // be propagated into server logs or an agent-facing error.
 func (c *Client) getSensitive(ctx context.Context, fullURL, bearer string, out any) error {
+	const attempts = 3
+	for attempt := 1; attempt <= attempts; attempt++ {
+		retry, err := c.getSensitiveOnce(ctx, fullURL, bearer, out)
+		if err == nil || !retry || attempt == attempts {
+			return err
+		}
+		delay := c.retryDelay
+		if delay == nil {
+			delay = waitForCredentialRetry
+		}
+		if err := delay(ctx, attempt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (c *Client) getSensitiveOnce(ctx context.Context, fullURL, bearer string, out any) (bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, fullURL, nil)
 	if err != nil {
-		return err
+		return false, err
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+bearer)
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return err
+		return ctx.Err() == nil, err
 	}
 	defer resp.Body.Close()
 	payload, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
-		return err
+		return true, err
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return fmt.Errorf("status %d", resp.StatusCode)
+		return retryableCredentialStatus(resp.StatusCode), fmt.Errorf("status %d", resp.StatusCode)
 	}
 	if err := json.Unmarshal(payload, out); err != nil {
-		return fmt.Errorf("decode response")
+		return false, fmt.Errorf("decode response")
 	}
-	return nil
+	return false, nil
+}
+
+func retryableCredentialStatus(status int) bool {
+	return status == http.StatusTooManyRequests || status >= http.StatusInternalServerError
+}
+
+func waitForCredentialRetry(ctx context.Context, attempt int) error {
+	timer := time.NewTimer(time.Duration(attempt) * 200 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // resolveConnection finds the enabled "Agent Vault" connection for the workspace:

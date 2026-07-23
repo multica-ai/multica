@@ -59,8 +59,9 @@ var cronParser = cron.NewParser(
 // goroutine at server boot; the caller wires the cancellation context and
 // the tick interval (production uses 1 minute, tests inject smaller values).
 //
-// Gated on Service.Enabled() per-tick — flipping CEREBRO_WORKFLOWS_ENABLED
-// after boot quiesces the sweeper without restarting the process.
+// Each swept workflow is gated per-workspace on the cerebro_workflows_engine
+// feature flag (see engineEnabledForWorkspace), so toggling the flag quiesces
+// or resumes a workspace's cron workflows without restarting the process.
 func (s *Service) RunCronSweeper(ctx context.Context, tick time.Duration) {
 	if tick <= 0 {
 		tick = time.Minute
@@ -72,9 +73,7 @@ func (s *Service) RunCronSweeper(ctx context.Context, tick time.Duration) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			if !s.enabled {
-				continue
-			}
+			// Per-workflow workspace gating happens inside sweepCron.
 			if err := s.sweepCron(ctx); err != nil {
 				slog.Warn("workflow cron sweep failed", "error", err)
 			}
@@ -101,6 +100,9 @@ func (s *Service) sweepCron(ctx context.Context) error {
 	}
 	now := nowFunc()
 	for _, row := range rows {
+		if !s.engineEnabledForWorkspace(ctx, row.WorkspaceID) {
+			continue
+		}
 		if err := s.sweepCronOne(ctx, row, now); err != nil {
 			// Per-workflow failures are absorbed so one bad row doesn't
 			// block the sweep. Logged with workflow_id so an operator can

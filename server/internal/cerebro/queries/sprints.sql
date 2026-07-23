@@ -108,9 +108,18 @@ ORDER BY sequence_no DESC;
 -- $1 = workspace_id; sqlc.narg('status') optionally filters by sprint status.
 SELECT s.id, s.workspace_id, s.project_id, s.name, s.sequence_no, s.status,
        s.start_date, s.end_date, s.goal, s.created_at, s.updated_at,
-       p.title AS project_title
+       p.title AS project_title,
+       progress.issue_count,
+       progress.done_count
 FROM cerebro_sprint s
 JOIN project p ON p.id = s.project_id
+LEFT JOIN LATERAL (
+    SELECT COUNT(*) AS issue_count,
+           COUNT(*) FILTER (WHERE i.status IN ('done', 'cancelled')) AS done_count
+    FROM cerebro_sprint_issue si
+    JOIN issue i ON i.id = si.issue_id
+    WHERE si.sprint_id = s.id
+) progress ON true
 WHERE s.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR s.status = sqlc.narg('status')::text)
 ORDER BY (s.status = 'active') DESC, p.title ASC, s.sequence_no DESC;

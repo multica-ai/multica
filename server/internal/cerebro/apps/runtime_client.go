@@ -12,14 +12,18 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
 
 var errRuntimeUnavailable = errors.New("app runtime is unavailable")
 
+const maxRuntimeAssetBytes = 1 << 20
+
 type RuntimeDeploymentRequest struct {
 	AppID        string `json:"app_id"`
+	AppName      string `json:"app_name"`
 	Version      string `json:"version"`
 	BundleSHA256 string `json:"bundle_sha256"`
 }
@@ -29,6 +33,12 @@ type RuntimeClient struct {
 	secret     string
 	httpClient *http.Client
 	now        func() time.Time
+}
+
+type RuntimeAsset struct {
+	Status  int
+	Headers http.Header
+	Body    []byte
 }
 
 func NewRuntimeClient(baseURL, secret string) *RuntimeClient {
@@ -89,6 +99,39 @@ func (c *RuntimeClient) Invoke(ctx context.Context, appID, version string, input
 	return json.RawMessage(output), nil
 }
 
+func (c *RuntimeClient) Asset(ctx context.Context, assetPath, rawQuery string) (RuntimeAsset, error) {
+	target, err := url.Parse(c.baseURL)
+	if err != nil {
+		return RuntimeAsset{}, errRuntimeUnavailable
+	}
+	target.Path = strings.TrimRight(target.Path, "/") + "/" + assetPath
+	target.RawPath = ""
+	target.RawQuery = rawQuery
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	if err != nil {
+		return RuntimeAsset{}, errRuntimeUnavailable
+	}
+	response, err := c.httpClient.Do(req)
+	if err != nil {
+		return RuntimeAsset{}, errRuntimeUnavailable
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxRuntimeAssetBytes+1))
+	if err != nil || len(body) > maxRuntimeAssetBytes {
+		return RuntimeAsset{}, errRuntimeUnavailable
+	}
+	if response.StatusCode != http.StatusOK && response.StatusCode != http.StatusNotFound {
+		return RuntimeAsset{}, errRuntimeUnavailable
+	}
+	headers := make(http.Header)
+	for _, name := range []string{"Cache-Control", "Content-Security-Policy", "Content-Type"} {
+		if value := response.Header.Get(name); value != "" {
+			headers.Set(name, value)
+		}
+	}
+	return RuntimeAsset{Status: response.StatusCode, Headers: headers, Body: body}, nil
+}
+
 func (c *RuntimeClient) Lifecycle(ctx context.Context, action, serviceID string) error {
 	if action != "pause" && action != "delete" {
 		return errRuntimeUnavailable
@@ -141,7 +184,6 @@ func verifyRuntimeSignature(secret, method, requestPath string, body []byte, tim
 type bundleTokenPayload struct {
 	AppID   string `json:"app_id"`
 	Version string `json:"version"`
-	Expires int64  `json:"exp"`
 }
 
 type invocationGrant struct {
@@ -183,15 +225,20 @@ func verifyInvocationGrant(secret, token string, now time.Time) (invocationGrant
 	return grant, nil
 }
 
-func mintBundleToken(secret, appID, version string, expires time.Time) string {
-	payload, _ := json.Marshal(bundleTokenPayload{AppID: appID, Version: version, Expires: expires.Unix()})
+// mintBundleToken issues a durable, app+version-scoped capability. It carries no
+// expiry: a worker re-downloads its immutable, hash-verified bundle on every
+// container start, and its Sliplane env is immutable, so the token must remain
+// valid for the worker's whole lifetime. See mintBundleToken in
+// apps/cerebro-apps-runtime/auth.mjs (the production minter) for the same rule.
+func mintBundleToken(secret, appID, version string) string {
+	payload, _ := json.Marshal(bundleTokenPayload{AppID: appID, Version: version})
 	encoded := base64.RawURLEncoding.EncodeToString(payload)
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(encoded))
 	return encoded + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil))
 }
 
-func verifyBundleToken(secret, token, appID, version string, now time.Time) error {
+func verifyBundleToken(secret, token, appID, version string) error {
 	parts := strings.Split(token, ".")
 	if len(parts) != 2 {
 		return errors.New("invalid bundle token")
@@ -207,7 +254,7 @@ func verifyBundleToken(secret, token, appID, version string, now time.Time) erro
 		return errors.New("invalid bundle token")
 	}
 	var payload bundleTokenPayload
-	if json.Unmarshal(raw, &payload) != nil || payload.AppID != appID || payload.Version != version || now.Unix() >= payload.Expires {
+	if json.Unmarshal(raw, &payload) != nil || payload.AppID != appID || payload.Version != version {
 		return errors.New("invalid bundle token")
 	}
 	return nil

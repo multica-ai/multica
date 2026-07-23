@@ -3,112 +3,162 @@ import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { Rock, StrategyItem } from "../core/types";
+import type { Rock, VisionPlanSection } from "../core/types";
 import { StrategyPage } from "./strategy-page";
 
 const state = vi.hoisted(() => ({
   enabled: true,
-  strategyLoading: false,
-  strategyError: false,
-  strategy: [] as StrategyItem[],
+  loading: false,
+  error: false,
+  sections: [] as VisionPlanSection[],
   rocks: [] as Rock[],
-  terminology: { strategy: "Strategy", rock: "Rock", rocks: "Rocks" },
   createItem: vi.fn(),
   updateItem: vi.fn(),
+  deleteItem: vi.fn(),
+  createSection: vi.fn(),
+  updateSection: vi.fn(),
+  deleteSection: vi.fn(),
+  createConnection: vi.fn(),
+  deleteConnection: vi.fn(),
 }));
 
 vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag: () => state.enabled }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
+vi.mock("@multica/core/workspace/queries", () => ({
+  memberListOptions: () => ({ queryKey: ["members"] }),
+  agentListOptions: () => ({ queryKey: ["agents"] }),
+}));
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
   return { ...actual, useQuery: (options: { queryKey: readonly string[] }) => {
-    if (options.queryKey.includes("settings")) return { data: { terminology: state.terminology } };
-    if (options.queryKey.includes("strategy-history")) return { data: { history: state.strategy.map((item) => ({ id: `history-${item.id}`, strategy_item_id: item.id, action: "updated", title: item.title, snapshot: item, changed_at: item.updated_at })) } };
-    if (options.queryKey.includes("strategy")) return { data: { strategy_items: state.strategy }, isLoading: state.strategyLoading, isError: state.strategyError };
+    if (options.queryKey.includes("settings")) return { data: { terminology: { strategy: "Strategy", rock: "Goal", rocks: "Goals", vision_plan: "Vision Plan", meetings: "Cycles", org_chart: "Roles", scorecard: "Scorecard", issues_list: "Issues List", strategy_map: "Strategy Map" } } };
+    if (options.queryKey.includes("vision-plan")) return { data: { sections: state.sections }, isLoading: state.loading, isError: state.error };
     if (options.queryKey.includes("rocks")) return { data: { rocks: state.rocks } };
+    if (options.queryKey.includes("periods")) return { data: { periods: [] } };
+    if (options.queryKey.includes("members")) return { data: [{ id: "member-1", name: "Maja" }] };
+    if (options.queryKey.includes("agents")) return { data: [{ id: "agent-1", name: "Lone" }] };
     return { data: undefined };
   } };
 });
 vi.mock("../core/queries", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../core/queries")>();
+  const mutation = (fn: ReturnType<typeof vi.fn>) => ({ mutate: fn, isPending: false });
   return { ...actual,
-    useCreateStrategyItem: () => ({ mutate: state.createItem, isPending: false }),
-    useUpdateStrategyItem: () => ({ mutate: state.updateItem, isPending: false }),
+    useCreateVisionPlanItem: () => mutation(state.createItem),
+    useUpdateVisionPlanItem: () => mutation(state.updateItem),
+    useDeleteVisionPlanItem: () => mutation(state.deleteItem),
+    useCreateVisionPlanSection: () => mutation(state.createSection),
+    useUpdateVisionPlanSection: () => mutation(state.updateSection),
+    useDeleteVisionPlanSection: () => mutation(state.deleteSection),
+    useCreateConnection: () => mutation(state.createConnection),
+    useDeleteConnection: () => mutation(state.deleteConnection),
+    useSaveRock: () => mutation(vi.fn()),
   };
 });
 
-const item = (partial: Partial<StrategyItem>): StrategyItem => ({
-  id: partial.id ?? "strategy-1", workspace_id: "workspace-1", kind: partial.kind ?? "horizon_goal",
-  title: partial.title ?? "Become the most trusted operator", description: partial.description ?? "",
-  horizon_count: partial.horizon_count, horizon_unit: partial.horizon_unit, horizon_label: partial.horizon_label,
-  position: partial.position ?? 0, state: partial.state ?? "active",
-  created_at: "2026-07-01T00:00:00Z", updated_at: "2026-07-01T00:00:00Z",
+const section = (partial: Partial<VisionPlanSection>): VisionPlanSection => ({
+  id: partial.id ?? "section-1", workspace_id: "workspace-1", key: partial.key ?? "core-values",
+  name: partial.name ?? "Core Values", section_type: partial.section_type ?? "list", position: partial.position ?? 0,
+  items: partial.items ?? [], created_at: "2026-07-01T00:00:00Z", updated_at: "2026-07-01T00:00:00Z",
 });
 
-const rock: Rock = {
-  id: "rock-1", workspace_id: "workspace-1", title: "Win Norway", owner_type: "agent", owner_id: "agent-1", owner_name: "Sara",
-  period_id: "period-1", period_name: "Q3 2026", period_start: "2026-07-01", period_end: "2026-09-30",
-  confidence: 75, reported_health: "on_track", derived_health: { state: "at_risk", reason: "Execution is in progress", calculated_at: "2026-07-13T00:00:00Z" },
-  health_score: 63, issue_count: 4, done_issue_count: 1, blocked_issue_count: 0, project_count: 0, projects: [], issues: [], check_ins: [],
-  strategy_item_id: "one", strategy_item_title: "Win the Nordic market", created_at: "2026-07-01T00:00:00Z", updated_at: "2026-07-01T00:00:00Z",
-};
+describe("Vision Plan", () => {
+  const renderEdit = () => render(<StrategyPage />);
+  const openTraction = () => fireEvent.click(screen.getByRole("tab", { name: "Traction" }));
 
-describe("StrategyPage", () => {
-  beforeEach(() => { state.enabled = true; state.strategyLoading = false; state.strategyError = false; state.strategy = []; state.rocks = []; state.createItem.mockReset(); state.updateItem.mockReset(); });
-
-  it("renders the v4 Strategy shell without mixing in Settings", () => {
-    render(<StrategyPage />);
-    expect(screen.getByRole("heading", { name: "Strategy" })).toBeInTheDocument();
-    expect(screen.getByText(/From long-term direction to weekly execution/)).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "History" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Edit map" })).toBeInTheDocument();
-    expect(screen.queryByText("Customize labels")).not.toBeInTheDocument();
-    expect(screen.getByText(/Built on Multica/)).toBeInTheDocument();
-  });
-
-  it("renders the four-column strategy cascade and live Rock health", () => {
-    state.strategy = [
-      item({ id: "value", kind: "core_value", title: "Own the outcome" }),
-      item({ id: "focus", kind: "core_focus", title: "AI-native commerce" }),
-      item({ id: "ten", title: "Nordic category leader", horizon_count: 10, horizon_unit: "year", horizon_label: "10-Year Target" }),
-      item({ id: "three", title: "Build the platform", horizon_count: 3, horizon_unit: "year", horizon_label: "3-Year Picture" }),
-      item({ id: "one", title: "Win the Nordic market", horizon_count: 1, horizon_unit: "year", horizon_label: "1-Year Plan" }),
+  beforeEach(() => {
+    state.enabled = true; state.loading = false; state.error = false; state.rocks = [];
+    state.sections = [
+      section({ id: "values", key: "core-values", name: "Core Values", position: 0, items: [{
+        id: "item-1", workspace_id: "workspace-1", section_id: "values", title: "Own the outcome", description: "",
+        position: 0, state: "active", goal_connections: [], created_at: "", updated_at: "",
+      }, {
+        id: "item-2", workspace_id: "workspace-1", section_id: "values", title: "Care deeply", description: "",
+        position: 1, state: "active", goal_connections: [], created_at: "", updated_at: "",
+      }] }),
+      section({ id: "marketing", key: "marketing-strategy", name: "Marketing Strategy", section_type: "structured", position: 1 }),
+      section({ id: "processes", key: "core-processes", name: "Core Processes", section_type: "process", position: 2 }),
+      section({ id: "one-year", key: "one-year-plan", name: "One-Year Plan", position: 3, items: [{
+        id: "annual-goal", workspace_id: "workspace-1", section_id: "one-year", title: "Reach 100m revenue", description: "",
+        position: 0, state: "active", goal_connections: [], created_at: "", updated_at: "",
+      }] }),
     ];
-    state.rocks = [rock];
-    render(<StrategyPage />);
+    for (const fn of [state.createItem, state.updateItem, state.deleteItem, state.createSection, state.updateSection, state.deleteSection, state.createConnection, state.deleteConnection]) fn.mockReset();
+  });
+
+  it("lays Vision out as labelled rows with the 3-Year Picture beside them", () => {
+    state.sections = [...state.sections, section({ id: "picture", key: "three-year-picture", name: "Three-Year Picture", position: 4 })];
+
+    renderEdit();
+
+    expect(screen.getByRole("heading", { name: "Strategy Map" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Core Values" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Core Focus" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "10-Year Target" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "3-Year Picture" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "1-Year Plan" })).toBeInTheDocument();
-    expect(screen.getByRole("heading", { name: "Quarterly Rocks" })).toBeInTheDocument();
-    expect(screen.getByText("Win Norway")).toBeInTheDocument();
-    expect(screen.getByText("At risk")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Marketing Strategy" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Three-Year Picture" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Own the outcome")).toBeInTheDocument();
+    // The named blanks the paper organiser asks for are offered as one-click chips.
+    expect(screen.getByRole("button", { name: /Target Market \/ The List/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Add section" })).toBeInTheDocument();
+  }, 30_000);
+
+  it("lays Traction out as 1-Year Plan, Goals with a Who column, and Issues List", () => {
+    state.sections = [...state.sections, section({ id: "issues", key: "issues-list", name: "Issues List", position: 5 })];
+    state.rocks = [{ id: "rock-1", title: "Launch Denmark", owner_name: "Maja" } as Rock];
+
+    renderEdit();
+    openTraction();
+
+    expect(screen.getByRole("region", { name: "One-Year Plan" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Goals" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Issues List" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Who" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Maja" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Launch Denmark" })).toBeInTheDocument();
+  }, 30_000);
+
+  it("keeps sections outside the organiser visible instead of dropping them", () => {
+    renderEdit();
+    // Core Processes is not one of the six V/TO slots.
+    expect(screen.getByRole("region", { name: "Other sections" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Core Processes")).toBeInTheDocument();
   });
 
-  it("opens Edit map and saves a named horizon", () => {
-    render(<StrategyPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Edit map" }));
-    fireEvent.click(screen.getByRole("button", { name: "+ Add item" }));
-    fireEvent.change(screen.getByLabelText("Title"), { target: { value: "Category leader" } });
-    fireEvent.change(screen.getByLabelText("Horizon name"), { target: { value: "10-Year Target" } });
-    fireEvent.change(screen.getByLabelText("Horizon count"), { target: { value: "10" } });
-    fireEvent.click(screen.getByRole("button", { name: "Save Strategy item" }));
-    expect(state.createItem).toHaveBeenCalledWith(expect.objectContaining({ title: "Category leader", horizon_label: "10-Year Target", horizon_count: 10 }), expect.any(Object));
+  it("adds and updates inline content without opening a modal", () => {
+    renderEdit();
+    const input = screen.getByLabelText("Add item to Core Values");
+    fireEvent.change(input, { target: { value: "Care deeply" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(state.createItem).toHaveBeenCalledWith(expect.objectContaining({ section_id: "values", title: "Care deeply", position: 2 }));
+
+    fireEvent.change(screen.getByDisplayValue("Own the outcome"), { target: { value: "Own every outcome" } });
+    fireEvent.blur(screen.getByDisplayValue("Own every outcome"));
+    expect(state.updateItem).toHaveBeenCalledWith(expect.objectContaining({ id: "item-1", input: expect.objectContaining({ title: "Own every outcome" }) }));
+
+    fireEvent.click(screen.getByRole("button", { name: "Move Own the outcome down" }));
+    expect(state.updateItem).toHaveBeenCalledWith(expect.objectContaining({ id: "item-1", input: expect.objectContaining({ position: 1 }) }));
   });
 
-  it("renders a custom named horizon as its own cascade column", () => {
-    state.strategy = [item({ title: "Expand Europe", horizon_count: 18, horizon_unit: "month", horizon_label: "FY27 North Star" })];
-    render(<StrategyPage />);
-    expect(screen.getByRole("heading", { name: "FY27 North Star" })).toBeInTheDocument();
-    expect(screen.getByText("Expand Europe")).toBeInTheDocument();
+  it("renames an extra section inline", () => {
+    renderEdit();
+    fireEvent.change(screen.getByDisplayValue("Core Processes"), { target: { value: "Our Processes" } });
+    fireEvent.blur(screen.getByDisplayValue("Our Processes"));
+    expect(state.updateSection).toHaveBeenCalledWith(expect.objectContaining({ id: "processes", input: expect.objectContaining({ name: "Our Processes" }) }));
   });
 
-  it("shows a useful History panel", () => {
-    state.strategy = [item({ title: "Updated target" })];
-    render(<StrategyPage />);
-    fireEvent.click(screen.getByRole("button", { name: "History" }));
-    expect(screen.getByRole("heading", { name: "Strategy history" })).toBeInTheDocument();
-    expect(screen.getAllByText("Updated target")).toHaveLength(2);
+  it("renders drag grips so cards and extra columns can be reordered", () => {
+    renderEdit();
+    expect(screen.getByRole("button", { name: "Reorder Own the outcome" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reorder Core Processes" })).toBeInTheDocument();
+    // The six fixed V/TO slots are part of the organiser and cannot be dragged away.
+    expect(screen.queryByRole("button", { name: "Reorder Core Values" })).not.toBeInTheDocument();
+  });
+
+  it("offers Goal connections only for One-Year Plan items", () => {
+    renderEdit();
+    expect(screen.queryByRole("button", { name: "Own the outcome Goals" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Care deeply Goals" })).not.toBeInTheDocument();
+
+    openTraction();
+    expect(screen.getByRole("button", { name: "Reach 100m revenue Goals" })).toBeInTheDocument();
   });
 });

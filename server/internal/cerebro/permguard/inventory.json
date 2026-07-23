@@ -149,18 +149,6 @@
       "gate": "workspace_member"
     },
     {
-      "id": "DELETE /api/agents/{id}/tool-grants",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/agents/{id}/tool-overrides/{toolName}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/agents/{id}/tool-grants",
-      "gate": "workspace_admin"
-    },
-    {
       "id": "POST /api/agents/{id}/context/change-requests",
       "gate": "workspace_member"
     },
@@ -202,10 +190,6 @@
     },
     {
       "id": "DELETE /api/autopilots/{id}/triggers/{triggerId}/",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/cerebro/agent-passes/{passId}",
       "gate": "workspace_admin"
     },
     {
@@ -277,6 +261,10 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/rounds/reorder",
+      "gate": "self_only"
+    },
+    {
       "id": "POST /api/cerebro/rounds/{roundId}/members",
       "gate": "self_only"
     },
@@ -333,6 +321,14 @@
       "gate": "workspace_member"
     },
     {
+      "id": "DELETE /api/cerebro/evals/{id}/schedule",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/cerebro/commands/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "DELETE /api/cerebro/status-models/default",
       "gate": "workspace_admin"
     },
@@ -342,6 +338,14 @@
     },
     {
       "id": "DELETE /api/cerebro/strategy-items/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/cerebro/vision-plan/items/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/cerebro/vision-plan/sections/{id}",
       "gate": "workspace_member"
     },
     {
@@ -493,14 +497,6 @@
       "gate": "cerebro_runtime_access"
     },
     {
-      "id": "DELETE /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "DELETE /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
-      "gate": "workspace_admin"
-    },
-    {
       "id": "DELETE /api/skills/{id}/",
       "gate": "skill_ownership"
     },
@@ -641,10 +637,6 @@
       "gate": "workspace_admin"
     },
     {
-      "id": "PATCH /api/runtimes/{runtimeId}/tools/{toolName}",
-      "gate": "workspace_admin"
-    },
-    {
       "id": "PATCH /api/squads/{id}/members/role",
       "gate": "workspace_member"
     },
@@ -757,10 +749,6 @@
       "gate": "workspace_member"
     },
     {
-      "id": "POST /api/cerebro/agent-passes/",
-      "gate": "workspace_admin"
-    },
-    {
       "id": "POST /api/cerebro/channels/{id}/typing",
       "gate": "workspace_member"
     },
@@ -865,6 +853,14 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/vision-plan/items",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/vision-plan/sections",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cerebro/terminal/sessions",
       "gate": "workspace_member"
     },
@@ -893,7 +889,15 @@
       "gate": "workspace_member"
     },
     {
+      "id": "POST /api/cerebro/evals/{id}/run",
+      "gate": "workspace_member"
+    },
+    {
       "id": "POST /api/cerebro/evals/{id}/runs",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/commands/",
       "gate": "workspace_member"
     },
     {
@@ -1453,14 +1457,6 @@
       "gate": "workspace_admin"
     },
     {
-      "id": "POST /api/runtimes/{runtimeId}/tools/{toolName}/groups/{groupId}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/runtimes/{runtimeId}/tools/{toolName}/users/{userId}",
-      "gate": "workspace_admin"
-    },
-    {
       "id": "POST /api/runtimes/{runtimeId}/unpause",
       "gate": "cerebro_runtime_access"
     },
@@ -1677,14 +1673,6 @@
       "gate": "cerebro_agent_access"
     },
     {
-      "id": "PUT /api/agents/{id}/tool-overrides/{toolName}",
-      "gate": "workspace_admin"
-    },
-    {
-      "id": "PUT /api/agents/{id}/tools/{name}/",
-      "gate": "cerebro_agent_access"
-    },
-    {
       "id": "PUT /api/artifact-folders/{id}",
       "gate": "workspace_member"
     },
@@ -1749,6 +1737,22 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/cerebro/meetings/",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/org-chart/seats",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/org-chart/seats/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "DELETE /api/cerebro/org-chart/seats/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/cerebro/projects/{projectID}/sprint-settings/",
       "gate": "via:PUT /api/cerebro/projects/{projectID}/sprint-settings/"
     },
@@ -1777,7 +1781,23 @@
       "gate": "workspace_member"
     },
     {
+      "id": "PUT /api/cerebro/evals/{id}/schedule",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/commands/{id}",
+      "gate": "workspace_member"
+    },
+    {
       "id": "PUT /api/cerebro/strategy-items/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/vision-plan/items/{id}",
+      "gate": "workspace_member"
+    },
+    {
+      "id": "PUT /api/cerebro/vision-plan/sections/{id}",
       "gate": "workspace_member"
     },
     {
@@ -1995,6 +2015,18 @@
     {
       "id": "PUT /api/cerebro/operating-system/elements/{key}",
       "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/cerebro/share-inboxes/",
+      "gate": "workspace_member + human_only"
+    },
+    {
+      "id": "DELETE /api/cerebro/share-inboxes/{id}",
+      "gate": "workspace_member + human_only"
+    },
+    {
+      "id": "POST /api/webhooks/ios-share/{token}",
+      "gate": "pre_auth_token"
     }
   ],
   "mcp": [
@@ -2151,6 +2183,10 @@
       "gate": "via:POST /api/workspaces/{id}/connections"
     },
     {
+      "id": "create_command",
+      "gate": "via:POST /api/cerebro/commands/"
+    },
+    {
       "id": "create_eval",
       "gate": "via:POST /api/cerebro/evals/"
     },
@@ -2171,8 +2207,16 @@
       "gate": "via:DELETE /api/workspaces/{id}/connections/{connId}"
     },
     {
+      "id": "delete_command",
+      "gate": "via:DELETE /api/cerebro/commands/{id}"
+    },
+    {
       "id": "delete_eval",
       "gate": "via:DELETE /api/cerebro/evals/{id}"
+    },
+    {
+      "id": "delete_eval_schedule",
+      "gate": "via:DELETE /api/cerebro/evals/{id}/schedule"
     },
     {
       "id": "delete_workflow",
@@ -2183,8 +2227,16 @@
       "exempt": "read-only — wraps GET /api/workspaces/{id}/connections/{connId}"
     },
     {
+      "id": "get_command",
+      "exempt": "read-only — wraps GET /api/cerebro/commands/{id}"
+    },
+    {
       "id": "get_eval",
       "exempt": "read-only — wraps GET /api/cerebro/evals/{id}"
+    },
+    {
+      "id": "get_eval_schedule",
+      "exempt": "read-only — wraps GET /api/cerebro/evals/{id}/schedule"
     },
     {
       "id": "get_active_workflow",
@@ -2205,6 +2257,10 @@
     {
       "id": "list_connections",
       "exempt": "read-only — wraps GET /api/workspaces/{id}/connections"
+    },
+    {
+      "id": "list_commands",
+      "exempt": "read-only — wraps GET /api/cerebro/commands"
     },
     {
       "id": "list_eval_bindings",
@@ -2239,6 +2295,14 @@
       "gate": "via:POST /api/cerebro/evals/{id}/runs"
     },
     {
+      "id": "run_eval",
+      "gate": "via:POST /api/cerebro/evals/{id}/run"
+    },
+    {
+      "id": "set_eval_schedule",
+      "gate": "via:PUT /api/cerebro/evals/{id}/schedule"
+    },
+    {
       "id": "test_workflow_hook",
       "gate": "via:POST /api/cerebro/workflow-hooks/{id}/test"
     },
@@ -2253,6 +2317,10 @@
     {
       "id": "update_connection",
       "gate": "via:PUT /api/workspaces/{id}/connections/{connId}"
+    },
+    {
+      "id": "update_command",
+      "gate": "via:PUT /api/cerebro/commands/{id}"
     },
     {
       "id": "update_eval",
@@ -2573,26 +2641,6 @@
       "gate": "via:POST /api/cerebro/apps/{id}/disable"
     },
     {
-      "id": "app workflow create",
-      "gate": "via:POST /api/cerebro/app-workflows/"
-    },
-    {
-      "id": "app workflow disable",
-      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/{state:enable|disable}"
-    },
-    {
-      "id": "app workflow enable",
-      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/{state:enable|disable}"
-    },
-    {
-      "id": "app workflow runs",
-      "exempt": "read-only — wraps GET /api/cerebro/app-workflows/{workflowId}/runs"
-    },
-    {
-      "id": "app workflow test",
-      "gate": "via:POST /api/cerebro/app-workflows/{workflowId}/test"
-    },
-    {
       "id": "agent archive",
       "gate": "via:POST /api/agents/{id}/archive"
     },
@@ -2687,14 +2735,6 @@
     {
       "id": "agent tool-access",
       "exempt": "read-only — wraps GET /api/agents/{id}/tool-access"
-    },
-    {
-      "id": "agent tool-grant add",
-      "gate": "via:POST /api/agents/{id}/tool-grants"
-    },
-    {
-      "id": "agent tool-grant remove",
-      "gate": "via:DELETE /api/agents/{id}/tool-grants"
     },
     {
       "id": "agent usage",
@@ -3547,6 +3587,26 @@
     {
       "id": "version",
       "exempt": "local-only — prints build metadata"
+    },
+    {
+      "id": "command create",
+      "gate": "via:POST /api/cerebro/commands/"
+    },
+    {
+      "id": "command delete",
+      "gate": "via:DELETE /api/cerebro/commands/{id}"
+    },
+    {
+      "id": "command get",
+      "exempt": "read-only — wraps GET /api/cerebro/commands/{id}"
+    },
+    {
+      "id": "command list",
+      "exempt": "read-only — wraps GET /api/cerebro/commands"
+    },
+    {
+      "id": "command update",
+      "gate": "via:PUT /api/cerebro/commands/{id}"
     },
     {
       "id": "wakeup cancel",

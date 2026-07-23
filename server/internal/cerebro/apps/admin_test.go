@@ -59,7 +59,7 @@ func TestAllergenFormatterIsAnInstallablePublishedBuiltin(t *testing.T) {
 	if !strings.Contains(string(allergenFormatterSnapshot), `"Allergen Formatter"`) || !strings.Contains(string(allergenFormatterSnapshot), `"integration"`) {
 		t.Fatal("FIR-154 snapshot is not the real scoped app bundle")
 	}
-	bundle, err := ValidateBundle("Allergen Formatter", "1.0.0", allergenFormatterBundleFiles())
+	bundle, err := ValidateBundle("Allergen Formatter", allergenFormatterVersion, allergenFormatterBundleFiles())
 	if err != nil {
 		t.Fatalf("built-in bundle is not publishable: %v", err)
 	}
@@ -69,6 +69,20 @@ func TestAllergenFormatterIsAnInstallablePublishedBuiltin(t *testing.T) {
 	backend := string(allergenFormatterBundleFiles()[3].Content)
 	if !strings.Contains(backend, `multica.connections.call("ai_gateway", "chat.completions"`) || strings.Contains(backend, `const names=`) {
 		t.Fatal("Allergen Formatter must make one person-bound AI call instead of formatting locally")
+	}
+	frontend := string(allergenFormatterBundleFiles()[2].Content)
+	if strings.Contains(frontend, "f1540000-0000-4154-8154-000000000001") ||
+		!strings.Contains(frontend, "window.location.pathname") {
+		t.Fatal("Allergen Formatter must derive its installed app identity from the runtime URL")
+	}
+	for _, safeguard := range []string{
+		`String.fromCharCode(96).repeat(3)`,
+		`Array.isArray(result.formatted_ingredients)`,
+		`.trim().toUpperCase()`,
+	} {
+		if !strings.Contains(backend, safeguard) {
+			t.Fatalf("Allergen Formatter must normalize AI JSON before rendering; missing %q", safeguard)
+		}
 	}
 }
 

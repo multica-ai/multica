@@ -46,7 +46,7 @@ func TestInstalledOpencodeRejectsPromptFlag(t *testing.T) {
 		t.Skip("opencode not installed")
 	}
 	out, err := exec.Command(path, "run", "--format", "json",
-		"--dangerously-skip-permissions", "--prompt", "you are a bot", "say hi").CombinedOutput()
+		"--auto", "--prompt", "you are a bot", "say hi").CombinedOutput()
 	if err == nil {
 		t.Fatalf("expected opencode to reject --prompt, but it exited 0:\n%s", out)
 	}
@@ -61,7 +61,7 @@ func TestOpencodeEmittedFlagsExistInInstalledCLI(t *testing.T) {
 	// The flags opencode.go builds in Execute().
 	emitted := []string{
 		"--format",
-		"--dangerously-skip-permissions",
+		"--auto",
 		"--dir",
 		"--model",
 		"--variant",

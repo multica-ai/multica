@@ -53,6 +53,18 @@ type ToolContext struct {
 	// by FirtalReportLoopCheckTool so worker agents can report check exit codes
 	// back to the delivery gate. Nil disables the tool (no loop check reporting).
 	LoopStore *cerebroloops.Store
+	// CapabilitiesProvider builds the agent's own capabilities card for
+	// get_agent_capabilities (FIR-3398). Nil disables the tool, so the Gateway
+	// never answers a self-lookup with a card it assembled itself.
+	CapabilitiesProvider AgentCapabilitiesProvider
+	// TaskMandates is the immutable per-task tool ceiling. The capabilities
+	// self-lookup applies it to the returned card so the answer matches the same
+	// call-time guard every tool execution passes through.
+	TaskMandates taskMandateStore
+	// LoopStep is a server-derived capability for the exact workflow block step
+	// represented by the current task. Nil means this task may not open another
+	// step. Agents never supply these IDs or limits themselves.
+	LoopStep *LoopStepCapability
 }
 
 // NewFirtalGatewayToolServer builds the in-process MCP server with the POC

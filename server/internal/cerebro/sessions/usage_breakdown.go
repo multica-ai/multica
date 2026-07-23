@@ -2,8 +2,8 @@ package sessions
 
 // FIR-1931: the context bar is clickable and opens a sheet that breaks the
 // issue's spend down PER SESSION (= per thread) and aggregates a total for the
-// whole issue. This file serves that read-only breakdown from data we already
-// have (task_usage + the last-turn footprint) — no new collection.
+// whole issue. Canonical call events drive new runs; legacy usage remains the
+// historical fallback without double-counting tasks written to both stores.
 //
 // Cost rule mirrors the rest of the cost views: prefer the exact gateway charge
 // stored in task_usage.cost_cents; where a run reported none (cost_cents = 0,
@@ -141,15 +141,16 @@ func (h *Handler) UsageBreakdown(w http.ResponseWriter, r *http.Request) {
 
 // sessionAgg is the summed spend/tokens for one session across all its runs.
 type sessionAgg struct {
-	runCount                              int64
+	runCount                             int64
 	input, output, cacheRead, cacheWrite int64
 	costCents                            int64
 	model                                string // the heaviest-by-input model in the session, for display
 }
 
-// sessionUsageAgg sums task_usage across every run in the session's thread
-// subtree (same membership as latestRunUsage). Cost is summed per run: the exact
-// gateway cost_cents when present, else the pricing-table estimate so a
+// sessionUsageAgg reads the compatibility rollup across every run in the
+// session's thread subtree (same membership as latestRunUsage). The database
+// view selects canonical calls or the historical fallback once per task.
+// Exact cost wins; zero cost falls back to the pricing table so a
 // daemon/non-gateway run is never booked as free.
 func (h *Handler) sessionUsageAgg(ctx context.Context, issueID, rootID pgtype.UUID, isFirst bool) (sessionAgg, error) {
 	const q = `
@@ -157,16 +158,18 @@ func (h *Handler) sessionUsageAgg(ctx context.Context, issueID, rootID pgtype.UU
 			SELECT $2::uuid
 			UNION ALL
 			SELECT c.id FROM comment c JOIN thread ON c.parent_id = thread.id
+		), scoped_tasks AS (
+			SELECT t.id
+			FROM agent_task_queue t
+			WHERE t.issue_id = $1
+			  AND ( t.trigger_comment_id IN (SELECT id FROM thread)
+			        OR ($3::bool AND t.trigger_comment_id IS NULL) )
 		)
-		SELECT tu.model,
-		       tu.input_tokens, tu.output_tokens,
-		       tu.cache_read_tokens, tu.cache_write_tokens,
-		       COALESCE(tu.cost_cents, 0)
-		FROM agent_task_queue t
-		JOIN task_usage tu ON tu.task_id = t.id
-		WHERE t.issue_id = $1
-		  AND ( t.trigger_comment_id IN (SELECT id FROM thread)
-		        OR ($3::bool AND t.trigger_comment_id IS NULL) )`
+		SELECT usage.task_id, usage.model, usage.input_tokens,
+		       usage.output_tokens, usage.cache_read_tokens,
+		       usage.cache_write_tokens, usage.cost_cents
+		FROM model_usage_task_rollup usage
+		JOIN scoped_tasks task ON task.id = usage.task_id`
 
 	rows, err := h.pool.Query(ctx, q, issueID, rootID, isFirst)
 	if err != nil {
@@ -176,13 +179,15 @@ func (h *Handler) sessionUsageAgg(ctx context.Context, issueID, rootID pgtype.UU
 
 	var agg sessionAgg
 	var topInput int64
+	seenTasks := make(map[string]struct{})
 	for rows.Next() {
 		var model pgtype.Text
+		var taskID pgtype.UUID
 		var input, output, cacheRead, cacheWrite, cost int64
-		if err := rows.Scan(&model, &input, &output, &cacheRead, &cacheWrite, &cost); err != nil {
+		if err := rows.Scan(&taskID, &model, &input, &output, &cacheRead, &cacheWrite, &cost); err != nil {
 			return sessionAgg{}, err
 		}
-		agg.runCount++
+		seenTasks[util.UUIDToString(taskID)] = struct{}{}
 		agg.input += input
 		agg.output += output
 		agg.cacheRead += cacheRead
@@ -207,5 +212,6 @@ func (h *Handler) sessionUsageAgg(ctx context.Context, issueID, rootID pgtype.UU
 	if err := rows.Err(); err != nil {
 		return sessionAgg{}, err
 	}
+	agg.runCount = int64(len(seenTasks))
 	return agg, nil
 }

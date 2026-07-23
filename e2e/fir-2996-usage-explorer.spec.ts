@@ -131,7 +131,9 @@ test("Dashboard shares filters, drills into runs, and persists a new visual", as
 
     await page.getByRole("button", { name: "Runs", exact: true }).click();
     await expect(page.getByText("Missing cost data")).toBeVisible();
-    await expect(page.getByRole("button", { name: "Customize layout" })).toBeVisible();
+    await page.getByRole("button", { name: "Dashboard actions" }).click();
+    await expect(page.getByRole("menuitem", { name: "Customize layout" })).toBeVisible();
+    await page.keyboard.press("Escape");
     await expect(page.getByText(/Workspace operations · \d{2} [A-Z][a-z]{2} – \d{2} [A-Z][a-z]{2}/)).toBeVisible();
     await expect(page.getByRole("button", { name: "Add filter" })).toHaveCSS("background-color", "rgb(101, 87, 216)");
     await expect(page.getByText("Runs by time · click cell to drill down")).toBeVisible();
@@ -139,7 +141,7 @@ test("Dashboard shares filters, drills into runs, and persists a new visual", as
     const judgeRing = page.getByLabel(/Judge gate outcome \d+%/);
     await expect(judgeRing.locator("circle")).toHaveCount(3);
     await expect(judgeRing.locator("circle").nth(2)).toHaveAttribute("stroke", "#00a56a");
-    await expect(page.getByText("Click person or metric to filter")).toBeVisible();
+    await expect(page.getByText("Click a member or metric to filter")).toBeVisible();
     await expect(page.getByText("Categorized skill-learning observations")).toBeVisible();
     await expect(page.getByText("Provider · model · skill")).toBeVisible();
     await expect(page.getByLabel("Runs and savings trend").getByText("Runs")).toBeVisible();
@@ -152,24 +154,24 @@ test("Dashboard shares filters, drills into runs, and persists a new visual", as
     await expect(matchingRuns.getByRole("heading", { name: "Matching runs" })).toBeVisible();
     await matchingRuns.getByRole("button", { name: "issue" }).first().click();
     await expect(page).toHaveURL(/source=issue/);
-    await page.getByRole("button", { name: "Source: issue ×" }).click();
+    await page.getByRole("button", { name: "Triggered from is Issue ×" }).click();
 
     await matchingRuns.getByRole("button", { name: "Usage run", exact: true }).click();
-    await expect(page).toHaveURL(/reference_label=Usage\+run/);
-    await page.getByRole("button", { name: "Reference label: Usage run ×" }).click();
+    await expect(page).toHaveURL(/issue=Usage\+run/);
+    await page.getByRole("button", { name: "Issue is Usage run ×" }).click();
 
     await matchingRuns.getByRole("button", { name: "completed" }).first().click();
     await expect(page).toHaveURL(/status=completed/);
-    await page.getByRole("button", { name: "Status: completed ×" }).click();
+    await page.getByRole("button", { name: "Status is completed ×" }).click();
 
     await matchingRuns.getByRole("button", { name: "$0" }).first().click();
     await expect(page).toHaveURL(/cost_kind=actual/);
-    await page.getByRole("button", { name: "Cost kind: actual ×" }).click();
+    await page.getByRole("button", { name: "Cost data is actual ×" }).click();
 
     await page.locator("section[aria-label='Activity grid'] button[title*=' runs']").first().click();
     await expect(page).toHaveURL(/time\.gte=/);
     await page.getByRole("button", { name: "Overview", exact: true }).click();
-    const timeFilterChips = page.getByRole("button", { name: /Time: .*×/ });
+    const timeFilterChips = page.getByRole("button", { name: /Time [≥≤] .*×/ });
     await expect(timeFilterChips).toHaveCount(2);
     await timeFilterChips.first().click();
     await timeFilterChips.first().click();
@@ -193,7 +195,8 @@ test("Dashboard shares filters, drills into runs, and persists a new visual", as
     await page.getByRole("button", { name: "Close run context" }).click();
     await expect(page.getByRole("complementary", { name: "Run and debug context" })).toBeHidden();
 
-    await page.getByRole("button", { name: "New visual" }).click();
+    await page.getByRole("button", { name: "Dashboard actions" }).click();
+    await page.getByRole("menuitem", { name: "New visual" }).click();
     await page.setViewportSize({ width: 1600, height: 1000 });
     const visualBuilder = page.getByRole("complementary", { name: "New visual" });
     await expect(visualBuilder).toBeVisible();
@@ -209,15 +212,15 @@ test("Dashboard shares filters, drills into runs, and persists a new visual", as
     expect(kpiBox!.x + kpiBox!.width).toBeLessThanOrEqual(builderBox!.x);
     await page.getByRole("button", { name: "Line chart" }).click();
     await page.getByLabel("Metric").selectOption("cost_cents");
-    await page.getByLabel("Dimension").selectOption("model");
-    await page.getByLabel("Breakdown").selectOption("provider");
+    await page.getByLabel("Dimension").selectOption("project");
+    await page.getByLabel("Breakdown").selectOption("person");
     await page.waitForTimeout(1000);
     await page.getByTestId("dashboard-content").screenshot({ path: testInfo.outputPath("dashboard-new-visual-1600x1000.png") });
     await page.getByRole("button", { name: "Add visual to Dashboard" }).click();
-    await expect(page.getByRole("heading", { name: "Model cost cents by provider" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Project cost cents by person" })).toBeVisible();
     await page.reload();
     await page.getByRole("button", { name: "Runs", exact: true }).click();
-    await expect(page.getByRole("heading", { name: "Model cost cents by provider" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Project cost cents by person" })).toBeVisible();
   } finally {
     await db.query(`DELETE FROM cerebro_analytics_visual WHERE workspace_id=$1`, [workspace.id]).catch(() => {});
     await db.end();

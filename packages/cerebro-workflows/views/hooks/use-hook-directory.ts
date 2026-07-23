@@ -10,6 +10,10 @@ import { agentListOptions, memberListOptions, skillListOptions, squadListOptions
 import { cerebroWorkflowsListOptions } from "../../core";
 import type { HookDirectory, HookTargetOption } from "./hook-target-picker";
 
+// Fetched inline (not via @multica/cerebro-evals) to keep the package dependency
+// one-directional: cerebro-evals depends on cerebro-workflows, never the reverse.
+interface EvalDirectoryEntry { id: string; title: string; status: string }
+
 export function useHookDirectory(workspaceId: string): HookDirectory {
   const agents = useQuery(agentListOptions(workspaceId));
   const issues = useQuery(issueListOptions(workspaceId));
@@ -20,6 +24,11 @@ export function useHookDirectory(workspaceId: string): HookDirectory {
   const skills = useQuery(skillListOptions(workspaceId));
   const squads = useQuery(squadListOptions(workspaceId));
   const workflows = useQuery(cerebroWorkflowsListOptions(workspaceId));
+  const evals = useQuery({
+    queryKey: ["workflow-hooks", workspaceId, "evals"],
+    queryFn: () => api.cerebroRequest<{ evals: EvalDirectoryEntry[] }>("/api/cerebro/evals"),
+    enabled: !!workspaceId,
+  });
 
   return useMemo(() => {
     const activeAgents = (agents.data ?? []).filter((agent) => !agent.archived_at);
@@ -38,7 +47,8 @@ export function useHookDirectory(workspaceId: string): HookDirectory {
       workflow: (workflows.data?.workflows ?? []).map((workflow) => ({ value: workflow.id, label: workflow.name, description: workflow.workflow_type === "issue_loop" ? "Issue workflow" : "Standard workflow" })),
       session: (sessions.data ?? []).map((session) => ({ value: session.id, label: session.title || "Untitled chat", description: session.status === "archived" ? "Archived chat" : "Active chat" })),
       artifact: (artifacts.data ?? []).map((artifact) => ({ value: artifact.id, label: artifact.title, description: artifact.kind })),
+      eval: (evals.data?.evals ?? []).map((item) => ({ value: item.id, label: item.title, description: item.status })),
       searchIssues: async (query: string) => (await api.searchIssues({ q: query, limit: 20, include_closed: true })).issues.map((issue) => ({ value: issue.id, label: issue.title, description: issue.identifier })),
     };
-  }, [agents.data, artifacts.data, issues.data, members.data, projects.data, sessions.data, skills.data, squads.data, workflows.data]);
+  }, [agents.data, artifacts.data, evals.data, issues.data, members.data, projects.data, sessions.data, skills.data, squads.data, workflows.data]);
 }

@@ -844,6 +844,10 @@ func TestGetAttachmentContent_PDFText(t *testing.T) { // CEREBRO-PATCH(pdf-attac
 }
 
 func TestGetAttachmentContent_PDFWithoutTextAndNoOCRBinary(t *testing.T) {
+	origRunner := attachmenttext.DefaultRunner // CEREBRO-PATCH(attachment-ocr-hermetic-test): pin runner to a no-OCR host regardless of what is installed locally.
+	attachmenttext.DefaultRunner = missingOCRRunner{}
+	defer func() { attachmenttext.DefaultRunner = origRunner }()
+
 	store := &mockStorage{}
 	origStorage := testHandler.Storage
 	testHandler.Storage = store

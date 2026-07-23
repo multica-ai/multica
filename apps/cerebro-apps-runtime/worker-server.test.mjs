@@ -69,6 +69,20 @@ test("loads backend relative modules from the verified bundle", async () => {
   assert.deepEqual(await response.json(), { value: "MILK" });
 });
 
+test("surfaces the HTTP status when the bundle download itself fails", async () => {
+  // Regression: an expired/invalid bundle token makes the backend answer 401.
+  // The worker must report that status rather than masking it as a generic
+  // "validation" failure, which made the deploy crash opaque to diagnose.
+  await assert.rejects(createWorkerRuntime({
+    appId: "f1540000-0000-4154-8154-000000000001",
+    version: "1.0.0",
+    bundleUrl: "http://backend.internal/bundle",
+    bundleToken: "expired-token",
+    invokeKey: "key",
+    fetch: async () => new Response("runtime authentication failed", { status: 401 }),
+  }), /App bundle download failed with status 401/);
+});
+
 test("rejects a bundle whose file hash changed", async () => {
   const tampered = files.map((entry) => ({ ...entry }));
   tampered[2].content_base64 = Buffer.from("changed").toString("base64");

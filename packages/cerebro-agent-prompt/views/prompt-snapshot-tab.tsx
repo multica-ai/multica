@@ -10,6 +10,7 @@ import { useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { FileCode2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
+import { estimateTokensFromLength } from "@multica/cerebro-profile/core";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
@@ -54,6 +55,16 @@ const shortSha = (sha: string) => (sha ? sha.slice(0, 8) : "—");
 
 function formatBytes(n: number): string {
   return `${n.toLocaleString("en-US")} bytes`;
+}
+
+// Bytes answer "how much was stored"; tokens answer "how much of the model's
+// context this run actually spent" — the question a reader of this tab has.
+// Estimated from the recorded byte count (the stored view is redacted, so its
+// text is not what was sent) and always rendered with a "~" so it never reads
+// as an exact count. Agent prompts are English (workspace rule).
+function formatTokens(bytes: number): string {
+  const { tokens } = estimateTokensFromLength(bytes, "en");
+  return `~${tokens.toLocaleString("en-US")} tokens`;
 }
 
 function formatRunDate(iso: string | null | undefined): string {
@@ -264,11 +275,16 @@ function SnapshotView({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
         <span>{formatRunDate(snapshot.created_at)}</span>
+        <span className="font-mono" title={`Run ${snapshot.task_id}`}>
+          run {snapshot.task_id}
+        </span>
         <span className="font-mono">
           {snapshot.provider} {snapshot.runtime_version}
         </span>
         <Badge variant="outline">{snapshot.agent_context_version || "no version"}</Badge>
-        <span>{formatBytes(snapshot.total_bytes)}</span>
+        <span>
+          {formatBytes(snapshot.total_bytes)} · {formatTokens(snapshot.total_bytes)}
+        </span>
         <span className="font-mono" title={snapshot.sha256_redacted}>
           sha256 {shortSha(snapshot.sha256_redacted)}
         </span>

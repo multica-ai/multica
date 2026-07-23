@@ -17,6 +17,7 @@ import {
   MailWarning,
   Layers3,
   MoreHorizontal,
+  X,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
@@ -99,9 +100,22 @@ export function roundRowAction(statuses: RoundStatus[], issueId: string | null |
         status.members.some((member) => member.issue_id === issueId),
       )
     : undefined;
+  // When the issue is already in a round the three-dot menu must offer both
+  // "Change Round" and "Remove from …" (FIR-3441). Outside a round it stays a
+  // single "Add to Round" action.
   return current
-    ? { label: `Remove from ${current.round.name}`, roundId: current.round.id }
-    : { label: "Add to Round", roundId: null };
+    ? {
+        inRound: true as const,
+        label: "Change Round",
+        removeLabel: `Remove from ${current.round.name}`,
+        roundId: current.round.id,
+      }
+    : {
+        inRound: false as const,
+        label: "Add to Round",
+        removeLabel: null,
+        roundId: null,
+      };
 }
 
 function animateRowArchiveExit(
@@ -156,13 +170,15 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
   const [reminderOpen, setReminderOpen] = useState(false);
   const [roundPickerOpen, setRoundPickerOpen] = useState(false);
   const roundAction = roundRowAction(roundStatuses, item.issue_id);
-  const handleRoundAction = useCallback(() => {
+  // Always open the picker for add/change. Remove is a separate menu action
+  // when the issue already belongs to a round (FIR-3441).
+  const handleOpenRoundPicker = useCallback(() => {
     if (!item.issue_id) return;
-    if (roundAction.roundId) {
-      removeFromRound.mutate({ roundId: roundAction.roundId, issueId: item.issue_id });
-      return;
-    }
     setRoundPickerOpen(true);
+  }, [item.issue_id]);
+  const handleRemoveFromRound = useCallback(() => {
+    if (!item.issue_id || !roundAction.roundId) return;
+    removeFromRound.mutate({ roundId: roundAction.roundId, issueId: item.issue_id });
   }, [item.issue_id, removeFromRound, roundAction.roundId]);
   const [customReminder, setCustomReminder] = useState(() =>
     toDateTimeLocalValue(nextBusinessDayNineAm()),
@@ -214,8 +230,14 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
       onToggleRead={handleToggleRead}
       onToggleMute={handleToggleMute}
       onArchive={onArchive}
-      onAddToRound={roundsEnabled && item.issue_id ? handleRoundAction : undefined}
+      onAddToRound={roundsEnabled && item.issue_id ? handleOpenRoundPicker : undefined}
       roundActionLabel={roundAction.label}
+      onRemoveFromRound={
+        roundsEnabled && item.issue_id && roundAction.inRound
+          ? handleRemoveFromRound
+          : undefined
+      }
+      removeFromRoundLabel={roundAction.removeLabel ?? undefined}
     />
   );
 
@@ -228,7 +250,7 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
           onArchive={onArchive}
           onToggleRead={handleToggleRead}
           onToggleMute={handleToggleMute}
-          onAddToRound={roundsEnabled && item.issue_id ? handleRoundAction : undefined}
+          onAddToRound={roundsEnabled && item.issue_id ? handleOpenRoundPicker : undefined}
           unread={!item.read}
           renderDrawerMenu={(close) => (
             // The long-press drawer is NOT a Menu.Root — Base UI's
@@ -254,9 +276,18 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
               }}
               onAddToRound={roundsEnabled && item.issue_id ? () => {
                 close();
-                handleRoundAction();
+                handleOpenRoundPicker();
               } : undefined}
               roundActionLabel={roundAction.label}
+              onRemoveFromRound={
+                roundsEnabled && item.issue_id && roundAction.inRound
+                  ? () => {
+                      close();
+                      handleRemoveFromRound();
+                    }
+                  : undefined
+              }
+              removeFromRoundLabel={roundAction.removeLabel ?? undefined}
             />
           )}
         />
@@ -1064,6 +1095,8 @@ function MenuItems({
   onArchive,
   onAddToRound,
   roundActionLabel,
+  onRemoveFromRound,
+  removeFromRoundLabel,
 }: {
   item: InboxItem;
   muted: boolean;
@@ -1073,6 +1106,8 @@ function MenuItems({
   onArchive: () => void;
   onAddToRound?: () => void;
   roundActionLabel: string;
+  onRemoveFromRound?: () => void;
+  removeFromRoundLabel?: string;
 }) {
   // Same items rendered inside DropdownMenu, ContextMenu, and Drawer — the
   // primitives all accept the shadcn DropdownMenuItem children since their
@@ -1092,6 +1127,12 @@ function MenuItems({
         {muted ? strings.unmute : strings.mute}
       </DropdownMenuItem>
       {onAddToRound && <DropdownMenuItem onClick={onAddToRound}><Layers3 className="size-4" />{roundActionLabel}</DropdownMenuItem>}
+      {onRemoveFromRound && removeFromRoundLabel && (
+        <DropdownMenuItem onClick={onRemoveFromRound}>
+          <X className="size-4" />
+          {removeFromRoundLabel}
+        </DropdownMenuItem>
+      )}
       <DropdownMenuItem onClick={onArchive}>
         <Archive className="size-4" />
         {strings.archive_label}
@@ -1115,6 +1156,8 @@ function DrawerActionList({
   onArchive,
   onAddToRound,
   roundActionLabel,
+  onRemoveFromRound,
+  removeFromRoundLabel,
 }: {
   item: InboxItem;
   muted: boolean;
@@ -1124,6 +1167,8 @@ function DrawerActionList({
   onArchive: () => void;
   onAddToRound?: () => void;
   roundActionLabel: string;
+  onRemoveFromRound?: () => void;
+  removeFromRoundLabel?: string;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -1140,6 +1185,12 @@ function DrawerActionList({
         <span>{muted ? strings.unmute : strings.mute}</span>
       </DrawerActionButton>
       {onAddToRound && <DrawerActionButton onClick={onAddToRound}><Layers3 className="size-5" /><span>{roundActionLabel}</span></DrawerActionButton>}
+      {onRemoveFromRound && removeFromRoundLabel && (
+        <DrawerActionButton onClick={onRemoveFromRound}>
+          <X className="size-5" />
+          <span>{removeFromRoundLabel}</span>
+        </DrawerActionButton>
+      )}
       <DrawerActionButton onClick={onArchive}>
         <Archive className="size-5" />
         <span>{strings.archive_label}</span>

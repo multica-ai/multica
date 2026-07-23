@@ -45,6 +45,16 @@ export const sprintsListSchema = z.object({
   sprints: z.array(sprintSchema),
 });
 
+export const workspaceSprintSchema = sprintSchema.extend({
+  project_title: z.string().default(""),
+  issue_count: z.number().int().min(0).default(0),
+  done_count: z.number().int().min(0).default(0),
+});
+
+export const workspaceSprintsListSchema = z.object({
+  sprints: z.array(workspaceSprintSchema),
+});
+
 export const completeSprintResponseSchema = z.object({
   sprint: sprintSchema,
   issues_moved: z.number().int().min(0).default(0),
@@ -104,6 +114,7 @@ export const recurringTasksListSchema = z.object({
 });
 
 export const EMPTY_SPRINTS_LIST = { sprints: [] };
+export const EMPTY_WORKSPACE_SPRINTS_LIST = { sprints: [] };
 export const EMPTY_SELECTABLE_SPRINTS_LIST = { sprints: [] };
 export const EMPTY_SPRINT_ISSUES_LIST = { issues: [] };
 export const EMPTY_RECURRING_TASKS_LIST = { recurring_tasks: [] };
