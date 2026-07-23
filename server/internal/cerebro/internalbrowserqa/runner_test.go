@@ -118,7 +118,7 @@ func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string
 	case len(args) > 0 && args[len(args)-1] == "url":
 		return []byte("http://firtal-data-registry-private.internal:3000/\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "snapshot":
-		return []byte("Dashboard\nData Sources\nYour roles:\nIssues\nAgents\nSettings\nDesk\nAnalytics\nLogout\n"), nil
+		return []byte("Dashboard\nData Sources\nAuthentication\nAPI Keys\nYour roles:\nIssues\nAgents\nSettings\nDesk\nAnalytics\nLogout\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "errors":
 		return []byte("[]\n"), nil
 	default:
@@ -331,6 +331,13 @@ func TestTargetForUsesOnlyInternalAllowlist(t *testing.T) {
 	}
 	if !strings.HasSuffix(target.Host(), ".internal:3000") {
 		t.Fatalf("registry host = %q, want internal host", target.Host())
+	}
+	if target.NavigateLinkName != "API Keys" {
+		t.Fatalf("registry navigation = %q, want API Keys", target.NavigateLinkName)
+	}
+	wantMarkers := []string{"Authentication", "API Keys"}
+	if strings.Join(target.ExpectedText, "|") != strings.Join(wantMarkers, "|") {
+		t.Fatalf("registry markers = %v, want %v", target.ExpectedText, wantMarkers)
 	}
 	if _, err := TargetFor("https://registry.firtal.com"); err == nil {
 		t.Fatal("arbitrary public URL was accepted as a target")

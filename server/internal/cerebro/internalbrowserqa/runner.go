@@ -82,7 +82,8 @@ var targets = map[string]Target{
 	"registry": {
 		Name: "registry", URL: "http://firtal-data-registry-private.internal:3000/auth/login?manual=true",
 		Vault: "Shared/browser-login/registry", UsernameSelector: "#email", PasswordSelector: "#password",
-		SubmitSelector: "button[type=submit]", ExpectedText: []string{"Dashboard", "Data Sources"},
+		SubmitSelector: "button[type=submit]", NavigateLinkName: "API Keys",
+		ExpectedText: []string{"Authentication", "API Keys"},
 	},
 	// Finance is firtal-agents-private, not firtal-internal-private — those are
 	// two different apps that share a login, so pointing at the wrong one logged
