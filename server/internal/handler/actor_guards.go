@@ -99,7 +99,7 @@ func RequireHumanActor(next http.Handler) http.Handler {
 		// strips any client-supplied value before stamping its own,
 		// so a non-empty value here is authoritative.
 		switch r.Header.Get("X-Actor-Source") {
-		case "task_token", "cloud_pat":
+		case "task_token", "cloud_pat", "service_token": // CEREBRO-PATCH(service-token-auth): service tokens are machine actors (FIR-3608)
 			writeError(w, http.StatusForbidden, "this endpoint is only available to human actors")
 			return
 		}
