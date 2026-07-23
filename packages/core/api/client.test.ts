@@ -65,10 +65,11 @@ describe("ApiClient agent builder runtime switch", () => {
     expect(JSON.parse(String(call[1].body))).toEqual({ runtime_id: "runtime-b" });
   });
 
-  it("falls back to an empty runtime id for a malformed response", async () => {
-    // The caller compares this against the runtime it asked for, so an empty id
-    // reads as "the switch did not happen" rather than a silent success that
-    // would put the picker and the executing runtime back out of sync.
+  it("falls back to the requested runtime id for a malformed success body", async () => {
+    // A 2xx means the rebind committed onto the runtime we asked for, so the
+    // fallback must say so. Reporting "unknown" here would leave the picker on
+    // the old runtime while the conversation executes on the new one — the very
+    // split this endpoint exists to close.
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ runtime_id: 42 }), {
         status: 200,
@@ -80,7 +81,24 @@ describe("ApiClient agent builder runtime switch", () => {
     const client = new ApiClient("https://api.example.test");
     await expect(
       client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
-    ).resolves.toEqual({ runtime_id: "" });
+    ).resolves.toEqual({ runtime_id: "runtime-b" });
+  });
+
+  it("rejects without a fallback when the switch is refused", async () => {
+    // 409 (a reply in flight) means nothing was committed, so the caller must
+    // see a rejection and keep the old runtime selected.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "stop the current reply before switching runtime" }), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
+    ).rejects.toBeInstanceOf(ApiError);
   });
 });
 

@@ -176,6 +176,7 @@ import {
   CreateAgentFromTemplateResponseSchema,
   AgentBuilderRuntimeSwitchSchema,
   AgentBuilderSessionSchema,
+  agentBuilderRuntimeSwitchFallback,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
   DashboardUsageByAgentListSchema,
@@ -187,7 +188,6 @@ import {
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
   EMPTY_CREATE_AGENT_FROM_TEMPLATE_RESPONSE,
-  EMPTY_AGENT_BUILDER_RUNTIME_SWITCH,
   EMPTY_AGENT_BUILDER_SESSION,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
@@ -1013,7 +1013,11 @@ export class ApiClient {
 
   /** Rebinds a live builder conversation to another runtime. Callers must not
    *  show the new runtime as selected until this resolves — the whole point is
-   *  that the UI's runtime and the executing runtime agree. */
+   *  that the UI's runtime and the executing runtime agree.
+   *
+   *  A non-2xx throws before we get here and nothing was committed. Reaching the
+   *  parse means the server bound `data.runtime_id`, so that is the fallback for
+   *  an unparseable body — see agentBuilderRuntimeSwitchFallback. */
   async switchAgentBuilderRuntime(
     sessionId: string,
     data: { runtime_id: string },
@@ -1025,7 +1029,7 @@ export class ApiClient {
     return parseWithFallback(
       raw,
       AgentBuilderRuntimeSwitchSchema,
-      EMPTY_AGENT_BUILDER_RUNTIME_SWITCH,
+      agentBuilderRuntimeSwitchFallback(data.runtime_id),
       { endpoint: "PATCH /api/agent-builder/sessions/{id}/runtime" },
     );
   }

@@ -988,13 +988,15 @@ export const AgentBuilderRuntimeSwitchSchema = z.object({
   runtime_id: z.string(),
 }).loose();
 
-// A malformed switch response must not read as "the server bound runtime B".
-// The caller compares the returned id against the one it asked for and treats a
-// mismatch — including this empty fallback — as a failed switch, so the picker
-// keeps showing the runtime that is actually executing.
-export const EMPTY_AGENT_BUILDER_RUNTIME_SWITCH: AgentBuilderRuntimeSwitch = {
-  runtime_id: "",
-};
+// This endpoint returns 2xx only after the carrier has been bound to the
+// runtime the caller asked for; anything else is a thrown error and no commit.
+// So the safe fallback for an unparseable SUCCESS body is the requested id, not
+// an empty one: the rebind did happen, and reporting "unknown" would leave the
+// picker showing a runtime that is no longer executing — the exact split this
+// endpoint exists to close.
+export const agentBuilderRuntimeSwitchFallback = (
+  requestedRuntimeID: string,
+): AgentBuilderRuntimeSwitch => ({ runtime_id: requestedRuntimeID });
 
 // Squad list responses carry lightweight membership previews used by hover
 // cards. The preview fields are additive API fields, so older backends default

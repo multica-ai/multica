@@ -531,15 +531,15 @@ export function AgentCreationStudio() {
       const result = await api.switchAgentBuilderRuntime(builderSessionId, {
         runtime_id: runtimeId,
       });
-      // Trust the runtime the server reports it bound, not the one we asked for:
-      // a drifted or malformed response must leave the picker showing the
-      // runtime that is actually executing.
-      if (result.runtime_id !== runtimeId) {
-        throw new Error(t(($) => $.creation_studio.builder.switch_runtime_failed));
-      }
+      // Follow the runtime the server says it bound. Resolving here at all means
+      // the rebind committed, so refusing to move the draft would leave the
+      // picker pointing at a runtime that no longer executes anything — the same
+      // split this whole change removes. The client fallback already resolves an
+      // unparseable success body to the requested id.
+      const boundRuntimeId = result.runtime_id || runtimeId;
       // Model ids are per-runtime; clear it so the new runtime resolves its own
       // default instead of keeping one it may not serve.
-      setDraft((current) => ({ ...current, runtimeId, model: "" }));
+      setDraft((current) => ({ ...current, runtimeId: boundRuntimeId, model: "" }));
       toast.success(t(($) => $.creation_studio.builder.switch_runtime_success));
     } catch (error) {
       setBuilderError(

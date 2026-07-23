@@ -98,4 +98,26 @@ describe("RuntimePicker (creation studio)", () => {
     expect(trigger(container).getAttribute("aria-expanded")).not.toBe("true");
     expect(onSelect).not.toHaveBeenCalled();
   });
+
+  // Switching the Mine/All tab re-selects the first usable runtime in the new
+  // list, so it is a second path into onSelect. Leaving it live while disabled
+  // would let a locked picker start a switch the server then has to refuse.
+  it("does not select through the Mine/All filter while disabled", () => {
+    const { container, onSelect } = renderPicker({
+      runtimes: [
+        ...RUNTIMES,
+        makeRuntime({ id: "rt-other", name: "Claude (other.local)", owner_id: "user-other", visibility: "public" }),
+      ],
+      disabled: true,
+    });
+    const filters = [...container.querySelectorAll("button")].filter(
+      (button) => button.getAttribute("data-slot") !== "popover-trigger",
+    );
+    expect(filters.length).toBeGreaterThan(0);
+    for (const button of filters) {
+      expect(button.disabled).toBe(true);
+      fireEvent.click(button);
+    }
+    expect(onSelect).not.toHaveBeenCalled();
+  });
 });
