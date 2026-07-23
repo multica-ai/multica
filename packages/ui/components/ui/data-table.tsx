@@ -126,27 +126,29 @@ export function DataTable<TData>({
       setResizingColumnId(header.column.id);
       setColumnWidth(header, startWidth);
 
-      const originalCursor = document.body.style.cursor;
-      const originalUserSelect = document.body.style.userSelect;
-      document.body.style.cursor = "col-resize";
-      document.body.style.userSelect = "none";
+      // Lock the resize cursor globally so it survives the pointer leaving the
+      // narrow handle; the matching rule lives in packages/ui/styles/base.css.
+      document.documentElement.setAttribute("data-table-resizing", "true");
 
       const handlePointerMove = (pointerEvent: PointerEvent) => {
         setColumnWidth(header, startWidth + pointerEvent.clientX - startX);
       };
 
+      // stopResize is idempotent; wire it to every drag-end path (including a
+      // window blur mid-drag) so the global resize-cursor lock can never strand.
       const stopResize = () => {
         window.removeEventListener("pointermove", handlePointerMove);
         window.removeEventListener("pointerup", stopResize);
         window.removeEventListener("pointercancel", stopResize);
-        document.body.style.cursor = originalCursor;
-        document.body.style.userSelect = originalUserSelect;
+        window.removeEventListener("blur", stopResize);
+        document.documentElement.removeAttribute("data-table-resizing");
         setResizingColumnId(null);
       };
 
       window.addEventListener("pointermove", handlePointerMove);
       window.addEventListener("pointerup", stopResize);
       window.addEventListener("pointercancel", stopResize);
+      window.addEventListener("blur", stopResize);
     },
     [setColumnWidth],
   );
