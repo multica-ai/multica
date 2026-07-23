@@ -320,15 +320,16 @@ type Daemon struct {
 	pauseClaims    bool // when true, the batch poller skips claiming
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
-	activeEnvRootsMu   sync.Mutex
-	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
-	activeEnvRoots     map[string]int  // env root path -> reference count (handles reuse paths marked twice)
-	deletingEnvRoots   map[string]bool // env roots reserved by GC; new tasks wait until the mutation finishes
+	activeEnvRootsMu      sync.Mutex
+	activeEnvRootsChanged chan struct{}   // closed and replaced when an in-flight env-root GC mutation finishes
+	activeEnvRoots        map[string]int  // env root path -> reference count (handles reuse paths marked twice)
+	deletingEnvRoots      map[string]bool // env roots reserved by GC; new tasks wait until the mutation finishes
 	// Test hooks for deterministic GC failure/race coverage. Nil in production.
 	activeEnvRootWaitHook func(string)
 	renameEnvRootHook     func(string, string) error
 	removeEnvRootHook     func(string) error
 	artifactCleanupHook   func(string) // test-only: runs while the artifact-cleanup reservation is held
+	artifactRemoveHook    func(string) // test-only: runs after artifact inspection, before fd-relative removal
 
 	activeCodexStoresMu   sync.Mutex
 	activeCodexStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
@@ -405,7 +406,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
 	}
-	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
+	d.activeEnvRootsChanged = make(chan struct{})
 	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
 	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
@@ -3263,12 +3264,16 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// correctly nested within these.
 	predictedEnvRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
 	if predictedEnvRoot != "" {
-		d.markActiveEnvRoot(predictedEnvRoot)
+		if !d.markActiveEnvRootContext(ctx, predictedEnvRoot) {
+			return
+		}
 		defer d.unmarkActiveEnvRoot(predictedEnvRoot)
 	}
 	if task.PriorWorkDir != "" {
 		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != predictedEnvRoot {
-			d.markActiveEnvRoot(priorRoot)
+			if !d.markActiveEnvRootContext(ctx, priorRoot) {
+				return
+			}
 			defer d.unmarkActiveEnvRoot(priorRoot)
 		}
 	}
@@ -4173,12 +4178,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// predicted root for a fresh Prepare and the prior root for Reuse — they
 	// usually differ (Reuse keeps the original task's directory).
 	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
-	d.markActiveEnvRoot(predictedRoot)
+	if !d.markActiveEnvRootContext(ctx, predictedRoot) {
+		return TaskResult{}, ctx.Err()
+	}
 	defer d.unmarkActiveEnvRoot(predictedRoot)
 	if task.PriorWorkDir != "" {
 		priorRoot := filepath.Dir(task.PriorWorkDir)
 		if priorRoot != predictedRoot {
-			d.markActiveEnvRoot(priorRoot)
+			if !d.markActiveEnvRootContext(ctx, priorRoot) {
+				return TaskResult{}, ctx.Err()
+			}
 			defer d.unmarkActiveEnvRoot(priorRoot)
 		}
 	}
@@ -4349,7 +4358,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
 	// future changes diverge from PredictRootDir.
 	if env.RootDir != predictedRoot && env.RootDir != "" {
-		d.markActiveEnvRoot(env.RootDir)
+		if !d.markActiveEnvRootContext(ctx, env.RootDir) {
+			return TaskResult{}, ctx.Err()
+		}
 		defer d.unmarkActiveEnvRoot(env.RootDir)
 	}
 	taskTempDir, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
@@ -5466,40 +5477,58 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 // reference-counted so a reuse path marked twice (predicted + prior) only
 // becomes inactive after both unmark calls.
 func (d *Daemon) markActiveEnvRoot(envRoot string) {
+	d.markActiveEnvRootContext(context.Background(), envRoot)
+}
+
+// markActiveEnvRootContext waits for an in-flight mutation without making task
+// cancellation depend on filesystem progress. It returns false when ctx is
+// cancelled before the root can be claimed.
+func (d *Daemon) markActiveEnvRootContext(ctx context.Context, envRoot string) bool {
 	if envRoot == "" {
-		return
+		return true
 	}
+	key := canonicalPathIdentity(envRoot)
 	d.activeEnvRootsMu.Lock()
-	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
-	for d.deletingEnvRoots[envRoot] {
+	for d.deletingEnvRoots[key] {
 		if d.activeEnvRootWaitHook != nil {
 			d.activeEnvRootWaitHook(envRoot)
 		}
-		d.activeEnvRootsCond.Wait()
+		changed := d.activeEnvRootsChanged
+		d.activeEnvRootsMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return false
+		case <-changed:
+		}
+		d.activeEnvRootsMu.Lock()
 	}
-	d.activeEnvRoots[envRoot]++
+	d.activeEnvRoots[key]++
+	d.activeEnvRootsMu.Unlock()
+	return true
 }
 
 func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
 	if envRoot == "" {
 		return
 	}
+	key := canonicalPathIdentity(envRoot)
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
-	if d.activeEnvRoots[envRoot] <= 1 {
-		delete(d.activeEnvRoots, envRoot)
+	if d.activeEnvRoots[key] <= 1 {
+		delete(d.activeEnvRoots, key)
 		return
 	}
-	d.activeEnvRoots[envRoot]--
+	d.activeEnvRoots[key]--
 }
 
 func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
+	key := canonicalPathIdentity(envRoot)
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
-	return d.activeEnvRoots[envRoot] > 0
+	return d.activeEnvRoots[key] > 0
 }
 
 func (d *Daemon) ensureActiveEnvRootStateLocked() {
@@ -5509,8 +5538,35 @@ func (d *Daemon) ensureActiveEnvRootStateLocked() {
 	if d.deletingEnvRoots == nil {
 		d.deletingEnvRoots = make(map[string]bool)
 	}
-	if d.activeEnvRootsCond == nil {
-		d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
+	if d.activeEnvRootsChanged == nil {
+		d.activeEnvRootsChanged = make(chan struct{})
+	}
+}
+
+// canonicalPathIdentity returns one guard key for lexical and symlink aliases.
+// For not-yet-created predicted roots it resolves the nearest existing
+// ancestor and appends the missing suffix.
+func canonicalPathIdentity(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	current := filepath.Clean(abs)
+	var suffix []string
+	for {
+		resolved, resolveErr := filepath.EvalSymlinks(current)
+		if resolveErr == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			return filepath.Clean(resolved)
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return filepath.Clean(abs)
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
 	}
 }
 
@@ -5523,17 +5579,19 @@ func (d *Daemon) reserveEnvRootForGC(envRoot string) (release func(), ok bool) {
 	if envRoot == "" {
 		return nil, false
 	}
+	key := canonicalPathIdentity(envRoot)
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
-	if d.activeEnvRoots[envRoot] > 0 || d.deletingEnvRoots[envRoot] {
+	if d.activeEnvRoots[key] > 0 || d.deletingEnvRoots[key] {
 		return nil, false
 	}
-	d.deletingEnvRoots[envRoot] = true
+	d.deletingEnvRoots[key] = true
 	return func() {
 		d.activeEnvRootsMu.Lock()
-		delete(d.deletingEnvRoots, envRoot)
-		d.activeEnvRootsCond.Broadcast()
+		delete(d.deletingEnvRoots, key)
+		close(d.activeEnvRootsChanged)
+		d.activeEnvRootsChanged = make(chan struct{})
 		d.activeEnvRootsMu.Unlock()
 	}, true
 }
