@@ -1570,6 +1570,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Route("/api/cerebro/rounds", func(r chi.Router) {
 				r.Get("/", cerebroRoundsHandler.List)
 				r.Post("/", cerebroRoundsHandler.Create)
+				r.Post("/reorder", cerebroRoundsHandler.Reorder) // CEREBRO-PATCH(rounds-reorder): FIR-3646 drag-and-drop round order.
 				r.Route("/{roundId}", func(r chi.Router) {
 					r.Get("/", cerebroRoundsHandler.Get)
 					r.Patch("/", cerebroRoundsHandler.Update)

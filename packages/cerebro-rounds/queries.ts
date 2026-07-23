@@ -1,6 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { inboxKeys } from "@multica/core/inbox/queries";
-import { addIssueToRound, createRound, deleteRound, getRoundStatus, listRounds, pauseRound, removeIssueFromRound, startRound, updateRound, type RoundInput } from "./api";
+import { addIssueToRound, createRound, deleteRound, getRoundStatus, listRounds, pauseRound, removeIssueFromRound, reorderRounds, startRound, updateRound, type RoundInput } from "./api";
+import { sortRoundStatuses, type RoundStatus } from "./schemas";
 
 export const roundKeys = { all: (wsId: string) => ["cerebro-rounds", wsId] as const };
 
@@ -20,6 +21,26 @@ export function usePauseRound(wsId: string) {
       qc.invalidateQueries({ queryKey: roundKeys.all(wsId) }),
       qc.invalidateQueries({ queryKey: inboxKeys.list(wsId) }),
     ]),
+  });
+}
+/**
+ * FIR-3646 — drag-and-drop round order. The dropped order is applied to the
+ * cache first so the list does not snap back while the request is in flight.
+ */
+export function useReorderRounds(wsId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (roundIds: string[]) => reorderRounds(roundIds),
+    onMutate: async (roundIds: string[]) => {
+      await qc.cancelQueries({ queryKey: roundKeys.all(wsId) });
+      const previous = qc.getQueryData<RoundStatus[]>(roundKeys.all(wsId));
+      if (previous) qc.setQueryData(roundKeys.all(wsId), sortRoundStatuses(previous, roundIds));
+      return { previous };
+    },
+    onError: (_error, _roundIds, context) => {
+      if (context?.previous) qc.setQueryData(roundKeys.all(wsId), context.previous);
+    },
+    onSettled: () => qc.invalidateQueries({ queryKey: roundKeys.all(wsId) }),
   });
 }
 export function useAddIssueToRound(wsId: string) { const invalidate = useInvalidate(wsId); return useMutation({ mutationFn: ({ roundId, issueId }: {roundId:string; issueId:string}) => addIssueToRound(roundId, issueId), onSettled: invalidate }); }

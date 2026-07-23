@@ -488,7 +488,13 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3556 (Wave 3): comments + suggestions on notes/documents. ON (FIR-1647):
   // shared surface + the comment composer can @-tag people/agents/issues.
   cerebro_note_comments: true,
-  cerebro_note_versions: false,
+  // FIR-3601 item 6: ON by default. Note version history is fully built and
+  // server-tested (note/versions.go + wave3_db_test.go) and the "History"
+  // action + restore sheet are wired in the note ⋯ menu — it was only ever
+  // hidden because this flag defaulted off, which read to users as "version
+  // history doesn't work". Matches its completed siblings (comments,
+  // line_authors) which are on. The document-history flag below stays off.
+  cerebro_note_versions: true,
   // FIR-2697: document version history — off until QA'd on staging.
   cerebro_document_versions: false,
   // FIR-2697 part 2: folder suggestions with accept — off until QA'd on staging.

@@ -57,6 +57,20 @@ export function roundMembershipLabel(statuses: RoundStatus[], issueId: string): 
  * so filtering on the cycle left every other member showing in both places at
  * once (FIR-3293).
  */
+/**
+ * Round statuses in the order the ids give, for the optimistic update behind a
+ * drag (FIR-3646). Ids the cache does not know are ignored and statuses the
+ * order does not mention keep their relative position at the end, so a stale
+ * order never drops a round out of the list.
+ */
+export function sortRoundStatuses(statuses: RoundStatus[], roundIds: readonly string[]): RoundStatus[] {
+  const ordered = roundIds
+    .map((id) => statuses.find((status) => status.round.id === id))
+    .filter((status): status is RoundStatus => status !== undefined);
+  const placed = new Set(ordered.map((status) => status.round.id));
+  return [...ordered, ...statuses.filter((status) => !placed.has(status.round.id))];
+}
+
 export function roundExcludedIssueIds(statuses: RoundStatus[]): Set<string> {
   return new Set(statuses.flatMap((status) => status.members.map((member) => member.issue_id)));
 }

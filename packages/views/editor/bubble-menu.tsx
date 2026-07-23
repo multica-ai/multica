@@ -74,6 +74,8 @@ import {
   FilePlus,
   Loader2,
   MessageSquarePlus, // CEREBRO-PATCH(bubble-menu-comment-on-selection): note comment affordance (TECH-3637).
+  IndentIncrease, // CEREBRO-PATCH(notes-indent-controls): FIR-3601 list indentation controls.
+  IndentDecrease,
 } from "lucide-react";
 
 // ---------------------------------------------------------------------------
@@ -338,6 +340,7 @@ function MoreFormatPopover({
     icon: React.ComponentType<{ className?: string }>;
     active: boolean;
     action: () => void;
+    disabled?: boolean; // CEREBRO-PATCH(notes-indent-controls): FIR-3601 disables invalid list moves.
   }[] = [
     { label: t(($) => $.bubble_menu.italic), icon: Italic, active: fmt.italic, action: () => editor.chain().focus().toggleItalic().run() },
     { label: t(($) => $.bubble_menu.strikethrough), icon: Strikethrough, active: fmt.strike, action: () => editor.chain().focus().toggleStrike().run() },
@@ -345,6 +348,20 @@ function MoreFormatPopover({
     { label: t(($) => $.bubble_menu.list_dropdown.ordered_list), icon: ListOrdered, active: fmt.orderedList, action: () => editor.chain().focus().toggleOrderedList().run() },
     { label: t(($) => $.bubble_menu.quote), icon: Quote, active: fmt.blockquote, action: () => editor.chain().focus().toggleBlockquote().run() },
     { label: t(($) => $.bubble_menu.code), icon: Code, active: fmt.code, action: () => editor.chain().focus().toggleCode().run() },
+    {
+      label: "Increase indent", // CEREBRO-PATCH(notes-indent-controls): FIR-3601 format actions.
+      icon: IndentIncrease,
+      active: false,
+      disabled: !editor.can().sinkListItem(editor.isActive("taskItem") ? "taskItem" : "listItem"),
+      action: () => editor.chain().focus().sinkListItem(editor.isActive("taskItem") ? "taskItem" : "listItem").run(),
+    },
+    {
+      label: "Decrease indent",
+      icon: IndentDecrease,
+      active: false,
+      disabled: !editor.can().liftListItem(editor.isActive("taskItem") ? "taskItem" : "listItem"),
+      action: () => editor.chain().focus().liftListItem(editor.isActive("taskItem") ? "taskItem" : "listItem").run(),
+    },
   ];
 
   return (
@@ -372,7 +389,8 @@ function MoreFormatPopover({
           <button
             type="button"
             key={row.label}
-            className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground"
+            disabled={row.disabled} // CEREBRO-PATCH(notes-indent-controls): FIR-3601 disabled state.
+            className="flex w-full cursor-default items-center gap-2 rounded-md px-1.5 py-1 text-xs outline-hidden select-none hover:bg-accent hover:text-accent-foreground disabled:pointer-events-none disabled:opacity-50"
             onMouseDown={(e) => {
               e.preventDefault();
               row.action();

@@ -20,9 +20,14 @@ type Round struct {
 	WorkspaceID string    `json:"workspace_id"`
 	OwnerID     string    `json:"owner_id"`
 	Name        string    `json:"name"`
+	Position    int32     `json:"position"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
+
+// roundColumns is the projection every round query returns, in the order
+// scanRound reads them.
+const roundColumns = `id::text,workspace_id::text,owner_id::text,name,position,created_at,updated_at`
 
 type Member struct {
 	RoundID     string    `json:"round_id"`
@@ -64,11 +69,15 @@ func (s *Service) Create(ctx context.Context, workspaceID, ownerID pgtype.UUID, 
 	if name == "" {
 		return Round{}, fmt.Errorf("name is required")
 	}
-	return scanRound(s.Pool.QueryRow(ctx, `INSERT INTO cerebro_round(workspace_id,owner_id,name) VALUES($1,$2,$3) RETURNING id::text,workspace_id::text,owner_id::text,name,created_at,updated_at`, workspaceID, ownerID, name))
+	// A new round lands last in the owner's order instead of jumping to the
+	// top of a hand-sorted list (FIR-3646).
+	return scanRound(s.Pool.QueryRow(ctx, `INSERT INTO cerebro_round(workspace_id,owner_id,name,position)
+		VALUES($1,$2,$3,(SELECT COALESCE(MAX(position)+1,0) FROM cerebro_round WHERE workspace_id=$1 AND owner_id=$2))
+		RETURNING `+roundColumns, workspaceID, ownerID, name))
 }
 
 func (s *Service) List(ctx context.Context, workspaceID, ownerID pgtype.UUID) ([]Round, error) {
-	rows, err := s.Pool.Query(ctx, `SELECT id::text,workspace_id::text,owner_id::text,name,created_at,updated_at FROM cerebro_round WHERE workspace_id=$1 AND owner_id=$2 ORDER BY created_at`, workspaceID, ownerID)
+	rows, err := s.Pool.Query(ctx, `SELECT `+roundColumns+` FROM cerebro_round WHERE workspace_id=$1 AND owner_id=$2 ORDER BY position,created_at`, workspaceID, ownerID)
 	if err != nil {
 		return nil, err
 	}
@@ -85,7 +94,7 @@ func (s *Service) List(ctx context.Context, workspaceID, ownerID pgtype.UUID) ([
 }
 
 func (s *Service) Get(ctx context.Context, workspaceID, ownerID, id pgtype.UUID) (Round, error) {
-	r, err := scanRound(s.Pool.QueryRow(ctx, `SELECT id::text,workspace_id::text,owner_id::text,name,created_at,updated_at FROM cerebro_round WHERE id=$1 AND workspace_id=$2 AND owner_id=$3`, id, workspaceID, ownerID))
+	r, err := scanRound(s.Pool.QueryRow(ctx, `SELECT `+roundColumns+` FROM cerebro_round WHERE id=$1 AND workspace_id=$2 AND owner_id=$3`, id, workspaceID, ownerID))
 	if errors.Is(err, pgx.ErrNoRows) {
 		return Round{}, ErrNotFound
 	}
@@ -103,7 +112,41 @@ func (s *Service) Update(ctx context.Context, workspaceID, ownerID, id pgtype.UU
 	if current.Name == "" {
 		return Round{}, fmt.Errorf("name is required")
 	}
-	return scanRound(s.Pool.QueryRow(ctx, `UPDATE cerebro_round SET name=$4,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND owner_id=$3 RETURNING id::text,workspace_id::text,owner_id::text,name,created_at,updated_at`, id, workspaceID, ownerID, current.Name))
+	return scanRound(s.Pool.QueryRow(ctx, `UPDATE cerebro_round SET name=$4,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND owner_id=$3 RETURNING `+roundColumns, id, workspaceID, ownerID, current.Name))
+}
+
+// Reorder writes the caller's round order, first id first. Every id must be a
+// round the caller owns; an unknown or repeated id rejects the whole request so
+// a stale client can never half-apply an order (FIR-3646).
+func (s *Service) Reorder(ctx context.Context, workspaceID, ownerID pgtype.UUID, ids []pgtype.UUID) ([]Round, error) {
+	if len(ids) == 0 {
+		return nil, fmt.Errorf("round_ids is required")
+	}
+	seen := make(map[pgtype.UUID]bool, len(ids))
+	for _, id := range ids {
+		if seen[id] {
+			return nil, fmt.Errorf("duplicate round id")
+		}
+		seen[id] = true
+	}
+	tx, err := s.Pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	for index, id := range ids {
+		ct, err := tx.Exec(ctx, `UPDATE cerebro_round SET position=$4,updated_at=now() WHERE id=$1 AND workspace_id=$2 AND owner_id=$3`, id, workspaceID, ownerID, index)
+		if err != nil {
+			return nil, err
+		}
+		if ct.RowsAffected() == 0 {
+			return nil, ErrNotFound
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return s.List(ctx, workspaceID, ownerID)
 }
 
 func (s *Service) Delete(ctx context.Context, workspaceID, ownerID, id pgtype.UUID) error {
@@ -116,7 +159,7 @@ func (s *Service) Delete(ctx context.Context, workspaceID, ownerID, id pgtype.UU
 
 func scanRound(row pgx.Row) (Round, error) {
 	var r Round
-	err := row.Scan(&r.ID, &r.WorkspaceID, &r.OwnerID, &r.Name, &r.CreatedAt, &r.UpdatedAt)
+	err := row.Scan(&r.ID, &r.WorkspaceID, &r.OwnerID, &r.Name, &r.Position, &r.CreatedAt, &r.UpdatedAt)
 	return r, err
 }
 

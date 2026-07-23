@@ -1599,6 +1599,7 @@ type CerebroRound struct {
 	Name        string             `json:"name"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Position    int32              `json:"position"`
 }
 
 type CerebroRoundCycle struct {

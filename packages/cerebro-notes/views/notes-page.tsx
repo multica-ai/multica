@@ -25,6 +25,7 @@ import {
   GitMerge,
   Users,
   PenLine,
+  Minus,
 } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -95,6 +96,7 @@ import type { Note } from "../core";
 import {
   artifactFoldersOptions,
   useCreateArtifactFolder,
+  useDeleteArtifactFolder,
   useUpdateArtifactFolder,
 } from "@multica/cerebro-artifacts/core";
 import type { ArtifactFolder, MemberWithUser } from "@multica/core/types";
@@ -510,6 +512,7 @@ function FolderRail({
 }) {
   const createFolder = useCreateArtifactFolder();
   const renameFolder = useUpdateArtifactFolder();
+  const deleteFolder = useDeleteArtifactFolder();
   const [adding, setAdding] = React.useState(false);
   const [name, setName] = React.useState("");
   const [dragOver, setDragOver] = React.useState<string | null>(null);
@@ -693,6 +696,18 @@ function FolderRail({
                 >
                   <Pencil className="size-3.5" />
                 </button>
+                <button
+                  onClick={() => {
+                    if (window.confirm(`Delete “${f.name}”? Notes in it will move to the root.`)) {
+                      deleteFolder.mutate({ id: f.id });
+                    }
+                  }}
+                  aria-label={`Delete ${f.name}`}
+                  title="Delete folder"
+                  className="shrink-0 rounded p-1 text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive focus:opacity-100 group-hover:opacity-100"
+                >
+                  <Trash2 className="size-3.5" />
+                </button>
                 {/* FIR-1590 → Collections: per-folder grant editor. */}
                 <FolderAccessColumn
                   surface="artifact"
@@ -853,8 +868,16 @@ export function NoteEditor({
   // workspace feature flag so each user can turn it on/off from the note ⋯ menu).
   // Defaults to ON; stored in localStorage so the preference survives a reload.
   const [conflictMergeEnabled, setConflictMergeEnabled] = React.useState(
-    () => localStorage.getItem(`note:conflict-merge:${note.id}`) !== "0",
+    () => localStorage.getItem(`note:conflict-merge:${note.id}`) === "1",
   );
+  const [fontScale, setFontScale] = React.useState<0 | 1 | 2>(() => {
+    const saved = Number(localStorage.getItem("note:font-scale"));
+    return saved === 0 || saved === 2 ? saved : 1;
+  });
+  const changeFontScale = (next: 0 | 1 | 2) => {
+    setFontScale(next);
+    localStorage.setItem("note:font-scale", String(next));
+  };
   function toggleConflictMerge() {
     const next = !conflictMergeEnabled;
     setConflictMergeEnabled(next);
@@ -1040,6 +1063,25 @@ export function NoteEditor({
   );
   const setNoteFolder = useSetNoteFolder();
   const currentFolder = folders.find((f) => f.id === note.folder_id) ?? null;
+  const [folderSearch, setFolderSearch] = React.useState("");
+  const folderChoices = React.useMemo(() => {
+    const byParent = new Map<string | null, ArtifactFolder[]>();
+    for (const folder of folders) {
+      const parent = folder.parent_id ?? null;
+      byParent.set(parent, [...(byParent.get(parent) ?? []), folder]);
+    }
+    const out: Array<{ folder: ArtifactFolder; depth: number; path: string }> = [];
+    const walk = (parent: string | null, depth: number, prefix: string) => {
+      for (const folder of (byParent.get(parent) ?? []).sort((a, b) => a.name.localeCompare(b.name))) {
+        const path = prefix ? `${prefix} / ${folder.name}` : folder.name;
+        out.push({ folder, depth, path });
+        walk(folder.id, depth + 1, path);
+      }
+    };
+    walk(null, 0, "");
+    const query = folderSearch.trim().toLowerCase();
+    return query ? out.filter((choice) => choice.path.toLowerCase().includes(query)) : out;
+  }, [folders, folderSearch]);
 
   // Comment anchors paint an orange highlight over the quoted span (TECH-3637):
   // every root comment/suggestion that has a quote, plus the in-progress draft
@@ -1235,6 +1277,15 @@ export function NoteEditor({
               }
             />
             <DropdownMenuContent align="start" className="w-56">
+              <div className="p-1" onKeyDown={(e) => e.stopPropagation()}>
+                <Input
+                  value={folderSearch}
+                  onChange={(e) => setFolderSearch(e.target.value)}
+                  placeholder="Search folders…"
+                  className="h-8"
+                  autoFocus
+                />
+              </div>
               <DropdownMenuRadioGroup
                 value={note.folder_id ?? ""}
                 onValueChange={(v) =>
@@ -1243,9 +1294,9 @@ export function NoteEditor({
               >
                 <DropdownMenuLabel>Folder</DropdownMenuLabel>
                 <DropdownMenuRadioItem value="">No folder</DropdownMenuRadioItem>
-                {folders.map((f) => (
-                  <DropdownMenuRadioItem key={f.id} value={f.id}>
-                    {f.name}
+                {folderChoices.map(({ folder, depth, path }) => (
+                  <DropdownMenuRadioItem key={folder.id} value={folder.id} title={path}>
+                    <span style={{ paddingLeft: depth * 12 }}>{folder.name}</span>
                   </DropdownMenuRadioItem>
                 ))}
               </DropdownMenuRadioGroup>
@@ -1278,6 +1329,16 @@ export function NoteEditor({
             )}
           </Button>
         )}
+
+        <div className="flex items-center rounded-md border">
+          <Button size="icon-sm" variant="ghost" aria-label="Decrease note font size" disabled={fontScale === 0} onClick={() => changeFontScale((fontScale - 1) as 0 | 1 | 2)}>
+            <Minus className="size-3.5" />
+          </Button>
+          <span className="px-1 text-xs text-muted-foreground">Text</span>
+          <Button size="icon-sm" variant="ghost" aria-label="Increase note font size" disabled={fontScale === 2} onClick={() => changeFontScale((fontScale + 1) as 0 | 1 | 2)}>
+            <Plus className="size-3.5" />
+          </Button>
+        </div>
 
         {/* Everything else lives behind one shared "⋯" menu — the same
             component the Documents view uses (FIR-1647, request 5 + 6). */}
@@ -1342,8 +1403,8 @@ export function NoteEditor({
             lineAuthorsEnabled && {
               key: "line-authors",
               label: showLineAuthors
-                ? "Line authors: On"
-                : "Line authors: Off",
+                ? "Line history: On"
+                : "Line history: Off",
               icon: Users,
               onSelect: toggleLineAuthors,
             },
@@ -1473,7 +1534,11 @@ export function NoteEditor({
           )}
           <div
             ref={contentSlideRef}
-            className="flex min-h-0 flex-1 flex-col bg-background"
+            className={cn(
+              "flex min-h-0 flex-1 flex-col bg-background",
+              fontScale === 0 && "[&_.rich-text-editor_p]:!text-sm [&_.rich-text-editor_li]:!text-sm",
+              fontScale === 2 && "[&_.rich-text-editor_p]:!text-lg [&_.rich-text-editor_li]:!text-lg",
+            )}
           >
           {readOnly ? (
             <ReadonlyContent content={note.body} className="min-h-[50vh] flex-1" />
