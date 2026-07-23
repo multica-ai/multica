@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -1446,43 +1447,47 @@ func (e *FirtalGatewayExecutor) runToolLoopWithServer(ctx context.Context, cfg F
 			Content:   completion.Output,
 			ToolCalls: completion.ToolCalls,
 		})
-		for _, call := range completion.ToolCalls {
-			// MCP-server path: API-connection tools are never registered here, so
-			// there is no per-task registry to consult (nil).
-			if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, decodeToolArgs(call.Function.Arguments), nil, meta); !allowed {
-				e.logger.Info("firtal gateway tool call blocked by approval gate",
+		// CEREBRO-PATCH(firtal-gateway-parallel-tool-calls): FIR-3675 — dispatch
+		// this turn's tool calls with bounded concurrency; the tool results are
+		// appended to history in call order below, matched by tool_call_id.
+		outcomes := dispatchToolCallsConcurrent(ctx, cfg.ToolCallConcurrency, completion.ToolCalls,
+			func(ctx context.Context, _ int, call GatewayToolCall) gatewayToolOutcome {
+				// MCP-server path: API-connection tools are never registered here, so
+				// there is no per-task registry to consult (nil).
+				if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, decodeToolArgs(call.Function.Arguments), nil, meta); !allowed {
+					e.logger.Info("firtal gateway tool call blocked by approval gate",
+						"task_id", meta.TaskID,
+						"agent_id", meta.AgentID,
+						"workspace_id", meta.WorkspaceID,
+						"round", round+1,
+						"tool", call.Function.Name,
+						"tool_call_id", call.ID,
+						"reason", reason,
+					)
+					return gatewayToolOutcome{
+						resultText: fmt.Sprintf("blocked by approval gate: %s", reason),
+						isError:    true,
+					}
+				}
+				result, dur := e.dispatchTool(ctx, cfg, toolSrv, call)
+				e.logger.Info("firtal gateway tool call",
 					"task_id", meta.TaskID,
 					"agent_id", meta.AgentID,
 					"workspace_id", meta.WorkspaceID,
 					"round", round+1,
 					"tool", call.Function.Name,
 					"tool_call_id", call.ID,
-					"reason", reason,
+					"duration_ms", dur.Milliseconds(),
+					"is_error", result.IsError,
 				)
-				history = append(history, GatewayMessage{
-					Role:       "tool",
-					ToolCallID: call.ID,
-					Content:    fmt.Sprintf("blocked by approval gate: %s", reason),
-				})
-				continue
-			}
-			result, dur := e.dispatchTool(ctx, cfg, toolSrv, call)
-			e.logger.Info("firtal gateway tool call",
-				"task_id", meta.TaskID,
-				"agent_id", meta.AgentID,
-				"workspace_id", meta.WorkspaceID,
-				"round", round+1,
-				"tool", call.Function.Name,
-				"tool_call_id", call.ID,
-				"duration_ms", dur.Milliseconds(),
-				"is_error", result.IsError,
-			)
-			resultText := toolResultText(result)
-			acc.ToolResultChars += int64(len(resultText))
+				return gatewayToolOutcome{resultText: toolResultText(result), isError: result.IsError}
+			})
+		for i, call := range completion.ToolCalls {
+			acc.ToolResultChars += int64(len(outcomes[i].resultText))
 			history = append(history, GatewayMessage{
 				Role:       "tool",
 				ToolCallID: call.ID,
-				Content:    resultText,
+				Content:    outcomes[i].resultText,
 			})
 		}
 		if pruneOn {
@@ -1602,48 +1607,55 @@ func (e *FirtalGatewayExecutor) runGatewayCompatRegistryToolLoop(
 			}
 		}
 
-		for _, call := range completion.ToolCalls {
-			start := time.Now()
-			args := map[string]any{}
-			resultText := ""
-			isError := false
-			if raw := strings.TrimSpace(call.Function.Arguments); raw != "" {
-				if err := json.Unmarshal([]byte(raw), &args); err != nil {
-					resultText = fmt.Sprintf("invalid tool arguments JSON: %v", err)
-					isError = true
+		// CEREBRO-PATCH(firtal-gateway-parallel-tool-calls): FIR-3675 — dispatch
+		// this turn's tool calls with bounded concurrency; results are collected
+		// in call order below so the transcript is identical to the sequential path.
+		outcomes := dispatchToolCallsConcurrent(ctx, cfg.ToolCallConcurrency, completion.ToolCalls,
+			func(ctx context.Context, _ int, call GatewayToolCall) gatewayToolOutcome {
+				start := time.Now()
+				args := map[string]any{}
+				resultText := ""
+				isError := false
+				if raw := strings.TrimSpace(call.Function.Arguments); raw != "" {
+					if err := json.Unmarshal([]byte(raw), &args); err != nil {
+						resultText = fmt.Sprintf("invalid tool arguments JSON: %v", err)
+						isError = true
+					}
 				}
-			}
-			if !isError {
-				if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, args, registry, meta); !allowed {
-					resultText = fmt.Sprintf("blocked by approval gate: %s", reason)
-					isError = true
+				if !isError {
+					if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, args, registry, meta); !allowed {
+						resultText = fmt.Sprintf("blocked by approval gate: %s", reason)
+						isError = true
+					}
 				}
-			}
-			if !isError {
-				var err error
-				toolCtx, cancelTool := toolCallContext(ctx, cfg)
-				resultText, err = registry.Call(toolCtx, call.Function.Name, args)
-				cancelTool()
-				if err != nil {
-					resultText = fmt.Sprintf("tool error: %v", err)
-					isError = true
+				if !isError {
+					var err error
+					toolCtx, cancelTool := toolCallContext(ctx, cfg)
+					resultText, err = registry.Call(toolCtx, call.Function.Name, args)
+					cancelTool()
+					if err != nil {
+						resultText = fmt.Sprintf("tool error: %v", err)
+						isError = true
+					}
 				}
-			}
-			e.logger.Info("firtal gateway chat-completions fallback tool call",
-				"task_id", meta.TaskID,
-				"agent_id", meta.AgentID,
-				"workspace_id", meta.WorkspaceID,
-				"round", round+1,
-				"tool_name", call.Function.Name,
-				"tool_call_id", call.ID,
-				"duration_ms", time.Since(start).Milliseconds(),
-				"is_error", isError,
-			)
-			acc.ToolResultChars += int64(len(resultText))
+				e.logger.Info("firtal gateway chat-completions fallback tool call",
+					"task_id", meta.TaskID,
+					"agent_id", meta.AgentID,
+					"workspace_id", meta.WorkspaceID,
+					"round", round+1,
+					"tool_name", call.Function.Name,
+					"tool_call_id", call.ID,
+					"duration_ms", time.Since(start).Milliseconds(),
+					"is_error", isError,
+				)
+				return gatewayToolOutcome{resultText: resultText, isError: isError}
+			})
+		for i, call := range completion.ToolCalls {
+			acc.ToolResultChars += int64(len(outcomes[i].resultText))
 			history = append(history, GatewayMessage{
 				Role:       "tool",
 				ToolCallID: call.ID,
-				Content:    resultText,
+				Content:    outcomes[i].resultText,
 			})
 		}
 		if pruneOn {
@@ -1793,75 +1805,85 @@ func (e *FirtalGatewayExecutor) runAnthropicToolLoop(
 			}
 		}
 
-		toolResultBlocks := make([]AnthropicContentBlock, 0, len(completion.ToolCalls))
-		for _, call := range completion.ToolCalls {
-			start := time.Now()
-			var (
-				resultText string
-				isError    bool
-			)
-			if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, decodeToolArgs(call.Function.Arguments), registry, meta); !allowed {
-				resultText = fmt.Sprintf("blocked by approval gate: %s", reason)
-				isError = true
-			} else if useRegistry && registry != nil {
-				args := map[string]any{}
-				if raw := strings.TrimSpace(call.Function.Arguments); raw != "" {
-					if err := json.Unmarshal([]byte(raw), &args); err != nil {
-						resultText = fmt.Sprintf("invalid tool arguments JSON: %v", err)
-						isError = true
-					}
-				}
-				if !isError {
-					toolCtx, cancelTool := toolCallContext(ctx, cfg)
-					resultText, err = registry.Call(toolCtx, call.Function.Name, args)
-					cancelTool()
-					if err != nil {
-						// Fall through to MCP server if registry doesn't know this tool.
-						if toolSrv != nil {
-							mcpResult, dur := e.dispatchTool(ctx, cfg, toolSrv, call)
-							e.logger.Info("firtal gateway anthropic tool call (mcp fallback)",
-								"task_id", meta.TaskID,
-								"agent_id", meta.AgentID,
-								"round", round+1,
-								"tool", call.Function.Name,
-								"duration_ms", dur.Milliseconds(),
-								"is_error", mcpResult.IsError,
-							)
-							resultText = toolResultText(mcpResult)
-							isError = mcpResult.IsError
-						} else {
-							resultText = fmt.Sprintf("tool error: %v", err)
+		// CEREBRO-PATCH(firtal-gateway-parallel-tool-calls): FIR-3675 — dispatch
+		// this turn's tool calls with bounded concurrency; the tool_result blocks
+		// are assembled in call order below so they stay positionally matched to
+		// the tool_use blocks Anthropic requires.
+		outcomes := dispatchToolCallsConcurrent(ctx, cfg.ToolCallConcurrency, completion.ToolCalls,
+			func(ctx context.Context, _ int, call GatewayToolCall) gatewayToolOutcome {
+				start := time.Now()
+				var (
+					resultText string
+					isError    bool
+				)
+				if allowed, reason := e.guardToolCall(ctx, agentID, workspaceID, call.Function.Name, decodeToolArgs(call.Function.Arguments), registry, meta); !allowed {
+					resultText = fmt.Sprintf("blocked by approval gate: %s", reason)
+					isError = true
+				} else if useRegistry && registry != nil {
+					args := map[string]any{}
+					if raw := strings.TrimSpace(call.Function.Arguments); raw != "" {
+						if err := json.Unmarshal([]byte(raw), &args); err != nil {
+							resultText = fmt.Sprintf("invalid tool arguments JSON: %v", err)
 							isError = true
 						}
 					}
+					if !isError {
+						toolCtx, cancelTool := toolCallContext(ctx, cfg)
+						callResult, err := registry.Call(toolCtx, call.Function.Name, args)
+						cancelTool()
+						if err != nil {
+							// Fall through to MCP server if registry doesn't know this tool.
+							if toolSrv != nil {
+								mcpResult, dur := e.dispatchTool(ctx, cfg, toolSrv, call)
+								e.logger.Info("firtal gateway anthropic tool call (mcp fallback)",
+									"task_id", meta.TaskID,
+									"agent_id", meta.AgentID,
+									"round", round+1,
+									"tool", call.Function.Name,
+									"duration_ms", dur.Milliseconds(),
+									"is_error", mcpResult.IsError,
+								)
+								resultText = toolResultText(mcpResult)
+								isError = mcpResult.IsError
+							} else {
+								resultText = fmt.Sprintf("tool error: %v", err)
+								isError = true
+							}
+						} else {
+							resultText = callResult
+						}
+					}
+				} else if toolSrv != nil {
+					mcpResult, _ := e.dispatchTool(ctx, cfg, toolSrv, call)
+					resultText = toolResultText(mcpResult)
+					isError = mcpResult.IsError
+				} else {
+					resultText = fmt.Sprintf("tool %q not available", call.Function.Name)
+					isError = true
 				}
-			} else if toolSrv != nil {
-				mcpResult, _ := e.dispatchTool(ctx, cfg, toolSrv, call)
-				resultText = toolResultText(mcpResult)
-				isError = mcpResult.IsError
-			} else {
-				resultText = fmt.Sprintf("tool %q not available", call.Function.Name)
-				isError = true
-			}
 
-			dur := time.Since(start)
-			e.logger.Info("firtal gateway anthropic tool call",
-				"task_id", meta.TaskID,
-				"agent_id", meta.AgentID,
-				"workspace_id", meta.WorkspaceID,
-				"round", round+1,
-				"tool_name", call.Function.Name,
-				"tool_call_id", call.ID,
-				"duration_ms", dur.Milliseconds(),
-				"is_error", isError,
-			)
+				dur := time.Since(start)
+				e.logger.Info("firtal gateway anthropic tool call",
+					"task_id", meta.TaskID,
+					"agent_id", meta.AgentID,
+					"workspace_id", meta.WorkspaceID,
+					"round", round+1,
+					"tool_name", call.Function.Name,
+					"tool_call_id", call.ID,
+					"duration_ms", dur.Milliseconds(),
+					"is_error", isError,
+				)
+				return gatewayToolOutcome{resultText: resultText, isError: isError}
+			})
 
-			acc.ToolResultChars += int64(len(resultText))
+		toolResultBlocks := make([]AnthropicContentBlock, 0, len(completion.ToolCalls))
+		for i, call := range completion.ToolCalls {
+			acc.ToolResultChars += int64(len(outcomes[i].resultText))
 			toolResultBlocks = append(toolResultBlocks, AnthropicContentBlock{
 				Type:      "tool_result",
 				ToolUseID: call.ID,
 				Content: []AnthropicContentBlock{
-					{Type: "text", Text: resultText},
+					{Type: "text", Text: outcomes[i].resultText},
 				},
 			})
 		}
@@ -1937,6 +1959,51 @@ func toolCallContext(ctx context.Context, cfg FirtalGatewayRuntimeConfig) (conte
 		return ctx, func() {}
 	}
 	return context.WithTimeout(ctx, cfg.ToolCallTimeout)
+}
+
+// CEREBRO-PATCH(firtal-gateway-parallel-tool-calls): FIR-3675.
+// gatewayToolOutcome carries one dispatched tool call's result. isError mirrors
+// the per-loop error flag so callers append the same tool_result they would
+// have built sequentially.
+type gatewayToolOutcome struct {
+	resultText string
+	isError    bool
+}
+
+// dispatchToolCallsConcurrent runs dispatch for each tool call in calls with at
+// most concurrency goroutines in flight, and returns the outcomes in the SAME
+// index order as calls. Order preservation is load-bearing: the Anthropic
+// messages protocol matches each tool_result to its tool_use positionally, and
+// the OpenAI-compat transport pairs them by tool_call_id, so a shuffled result
+// slice would corrupt the transcript. concurrency <= 1 (or a single call) runs
+// strictly sequentially, byte-for-byte the old behavior. Each outcome slot is
+// written by exactly one goroutine, so no lock guards the slice.
+func dispatchToolCallsConcurrent(
+	ctx context.Context,
+	concurrency int,
+	calls []GatewayToolCall,
+	dispatch func(ctx context.Context, idx int, call GatewayToolCall) gatewayToolOutcome,
+) []gatewayToolOutcome {
+	outcomes := make([]gatewayToolOutcome, len(calls))
+	if concurrency <= 1 || len(calls) <= 1 {
+		for i, call := range calls {
+			outcomes[i] = dispatch(ctx, i, call)
+		}
+		return outcomes
+	}
+	sem := make(chan struct{}, concurrency)
+	var wg sync.WaitGroup
+	for i, call := range calls {
+		wg.Add(1)
+		sem <- struct{}{}
+		go func(idx int, call GatewayToolCall) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			outcomes[idx] = dispatch(ctx, idx, call)
+		}(i, call)
+	}
+	wg.Wait()
+	return outcomes
 }
 
 func (e *FirtalGatewayExecutor) dispatchTool(ctx context.Context, cfg FirtalGatewayRuntimeConfig, srv *mcp.Server, call GatewayToolCall) (mcp.CallToolResult, time.Duration) {
