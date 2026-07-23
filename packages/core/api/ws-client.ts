@@ -16,6 +16,17 @@ const UNPARSEABLE_LOG_MAX_CHARS = 200;
 const RECONNECT_BASE_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 30_000;
 
+// Application-level heartbeat. Browsers/Electron cannot send WebSocket
+// protocol PING frames, and half-open TCP connections (VPN drops, laptop
+// sleep, mobile network handoffs) frequently leave the client believing it
+// is still connected — `onclose` never fires, so the reconnect loop above
+// is never scheduled. Sending an app-level `{type:"ping"}` every
+// HEARTBEAT_INTERVAL_MS and requiring _any_ inbound frame within
+// HEARTBEAT_TIMEOUT_MS proves the pipe is alive; missing that window
+// triggers a manual close() that flows into the existing reconnect path.
+const HEARTBEAT_INTERVAL_MS = 25_000;
+const HEARTBEAT_TIMEOUT_MS = 10_000;
+
 function summarizeUnparseable(data: unknown): string {
   const text = typeof data === "string" ? data : String(data);
   if (text.length <= UNPARSEABLE_LOG_MAX_CHARS) return text;
@@ -43,6 +54,11 @@ export class WSClient {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
   private hasConnectedBefore = false;
+  // Application-level heartbeat timers. `heartbeatTimer` fires every
+  // HEARTBEAT_INTERVAL_MS to send a ping; `heartbeatTimeout` is armed on each
+  // ping and cleared by any inbound frame — if it fires, the pipe is dead.
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private heartbeatTimeout: ReturnType<typeof setTimeout> | null = null;
   // One-shot per connection. A non-conforming frame can repeat hundreds of
   // times per session, so we log the first drop and suppress the rest. Reset
   // on each connect() so a fresh connection logs once again.
@@ -100,6 +116,10 @@ export class WSClient {
     };
 
     this.ws.onmessage = (event) => {
+      // Any inbound frame — data, pong, ack, error — proves the pipe is
+      // alive. Clear the pending liveness timeout before parsing so a slow
+      // JSON.parse on a huge frame doesn't count against the deadline.
+      this.markAlive();
       let msg: WSMessage;
       try {
         msg = JSON.parse(event.data as string) as WSMessage;
@@ -133,6 +153,9 @@ export class WSClient {
         this.onAuthenticated();
         return;
       }
+      // Swallow pong frames — their sole purpose is proving liveness, which
+      // markAlive() above already recorded.
+      if ((msg as any).type === "pong") return;
       this.logger.debug("received", msg.type);
       const eventHandlers = this.handlers.get(msg.type);
       if (eventHandlers) {
@@ -146,6 +169,7 @@ export class WSClient {
     };
 
     this.ws.onclose = () => {
+      this.stopHeartbeat();
       this.scheduleReconnect();
     };
 
@@ -153,6 +177,84 @@ export class WSClient {
       // Suppress — onclose handles reconnect; errors during StrictMode
       // double-fire are expected in dev and harmless.
     };
+  }
+
+  /**
+   * Force a liveness probe. The realtime provider calls this whenever the
+   * environment suggests the connection may have silently died — the OS
+   * fired `online` after a network drop, or the browser tab / desktop
+   * window regained visibility after being backgrounded. If the pipe is
+   * still healthy the ping is a no-op; if it's dead, the heartbeat timeout
+   * fires and drops the socket so the existing reconnect path takes over.
+   */
+  probe() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    this.sendPing();
+  }
+
+  private startHeartbeat() {
+    this.stopHeartbeat();
+    this.heartbeatTimer = setInterval(
+      () => this.sendPing(),
+      HEARTBEAT_INTERVAL_MS,
+    );
+  }
+
+  private stopHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    if (this.heartbeatTimeout) {
+      clearTimeout(this.heartbeatTimeout);
+      this.heartbeatTimeout = null;
+    }
+  }
+
+  private sendPing() {
+    if (!this.ws || this.ws.readyState !== WebSocket.OPEN) return;
+    // Only arm one liveness timeout at a time — a probe() call during an
+    // already-pending ping window shouldn't restart the deadline and mask a
+    // dead pipe.
+    if (this.heartbeatTimeout) return;
+    try {
+      this.ws.send(JSON.stringify({ type: "ping" }));
+    } catch {
+      this.dropDeadConnection();
+      return;
+    }
+    this.heartbeatTimeout = setTimeout(() => {
+      this.heartbeatTimeout = null;
+      this.logger.warn("ws: heartbeat timeout, connection is half-open");
+      this.dropDeadConnection();
+    }, HEARTBEAT_TIMEOUT_MS);
+  }
+
+  private markAlive() {
+    if (this.heartbeatTimeout) {
+      clearTimeout(this.heartbeatTimeout);
+      this.heartbeatTimeout = null;
+    }
+  }
+
+  private dropDeadConnection() {
+    if (!this.ws) return;
+    // Manually invoke onclose semantics: browsers won't fire onclose on a
+    // half-open socket for a long time, so we detach the current instance,
+    // stop timers, and hand off to scheduleReconnect() directly.
+    const dead = this.ws;
+    this.ws = null;
+    this.stopHeartbeat();
+    try {
+      dead.onclose = null;
+      dead.onerror = null;
+      dead.onmessage = null;
+      dead.onopen = null;
+      dead.close();
+    } catch {
+      // ignore — already closed / never opened
+    }
+    this.scheduleReconnect();
   }
 
   /**
@@ -182,6 +284,7 @@ export class WSClient {
   private onAuthenticated() {
     this.logger.info("connected");
     this.reconnectAttempt = 0;
+    this.startHeartbeat();
     if (this.hasConnectedBefore) {
       for (const cb of this.onReconnectCallbacks) {
         try {
@@ -195,6 +298,7 @@ export class WSClient {
   }
 
   disconnect() {
+    this.stopHeartbeat();
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

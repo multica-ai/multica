@@ -100,7 +100,36 @@ export function WSProvider({
     setWsClient(ws);
     ws.connect();
 
+    // Half-open TCP connections (VPN drops, laptop sleep, mobile network
+    // handoff) frequently leave the WebSocket alive-looking from the
+    // client's perspective — `onclose` never fires, and the exponential
+    // backoff reconnect in WSClient never gets scheduled. Poke the socket
+    // whenever the OS/browser hints that the environment changed: `online`
+    // fires when the network comes back, and `visibilitychange` fires when
+    // the tab / Electron window returns to the foreground after being
+    // backgrounded (which is when the user typically notices "I'm not
+    // getting messages"). `probe()` is cheap when the pipe is healthy and
+    // triggers a hard reconnect when it's dead.
+    const probe = () => ws.probe();
+    const onVisibilityChange = () => {
+      if (typeof document !== "undefined" && !document.hidden) probe();
+    };
+    if (typeof window !== "undefined") {
+      window.addEventListener("online", probe);
+      window.addEventListener("focus", probe);
+    }
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", onVisibilityChange);
+    }
+
     return () => {
+      if (typeof window !== "undefined") {
+        window.removeEventListener("online", probe);
+        window.removeEventListener("focus", probe);
+      }
+      if (typeof document !== "undefined") {
+        document.removeEventListener("visibilitychange", onVisibilityChange);
+      }
       ws.disconnect();
       setWsClient(null);
     };
