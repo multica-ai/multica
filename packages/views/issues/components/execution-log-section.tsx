@@ -15,7 +15,11 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { formatDuration } from "../../agents/components/agent-activity-hover-content";
-import { TranscriptButton } from "../../common/task-transcript";
+import {
+  ExecutionLogTrigger,
+  useExecutionLogSession,
+  type OpenExecutionLog,
+} from "../../common/task-transcript";
 import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
@@ -108,68 +112,86 @@ export function ExecutionLogSection({ issueId }: ExecutionLogSectionProps) {
     });
   }, [tasks]);
 
-  if (activeTasks.length === 0 && pastTasks.length === 0) return null;
+  const { openExecutionLog, executionLogDialog } =
+    useExecutionLogSession(tasks);
+
+  if (activeTasks.length === 0 && pastTasks.length === 0) {
+    return <>{executionLogDialog}</>;
+  }
 
   return (
-    <div>
-      <button
-        type="button"
-        className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${
-          open ? "" : "text-muted-foreground hover:text-foreground"
-        }`}
-        onClick={() => setOpen(!open)}
-      >
-        {t(($) => $.execution_log.section)}
-        <ChevronRight
-          className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${
-            open ? "rotate-90" : ""
+    <>
+      <div>
+        <button
+          type="button"
+          className={`flex w-full items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors mb-2 hover:bg-accent/70 ${
+            open ? "" : "text-muted-foreground hover:text-foreground"
           }`}
-        />
-        {activeTasks.length > 0 && (
-          <span className="ml-auto inline-flex items-center gap-1 text-info">
-            <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
-            <span className="font-mono tabular-nums">{activeTasks.length}</span>
-          </span>
-        )}
-      </button>
-      {open && (
-        <div className="space-y-0.5 pl-2">
-          {activeTasks.map((task) => (
-            <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
-          ))}
-
-          {pastTasks.length > 0 && (
-            <>
-              {activeTasks.length > 0 && (
-                <div className="my-1.5 border-t border-border/60" />
-              )}
-              <button
-                type="button"
-                data-testid="show-past-runs"
-                onClick={() => setShowPast(!showPast)}
-                className="flex w-full items-center gap-1 rounded px-1 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
-              >
-                <ChevronRight
-                  className={`!size-3 shrink-0 stroke-[2.5] transition-transform ${
-                    showPast ? "rotate-90" : ""
-                  }`}
-                />
-                {showPast
-                  ? t(($) => $.execution_log.hide_past, { count: pastTasks.length })
-                  : t(($) => $.execution_log.show_past, { count: pastTasks.length })}
-              </button>
-              {showPast && (
-                <div className="mt-0.5 space-y-0.5">
-                  {pastTasks.map((task) => (
-                    <PastRow key={task.id} task={task} issueId={issueId} />
-                  ))}
-                </div>
-              )}
-            </>
+          onClick={() => setOpen(!open)}
+        >
+          {t(($) => $.execution_log.section)}
+          <ChevronRight
+            className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${
+              open ? "rotate-90" : ""
+            }`}
+          />
+          {activeTasks.length > 0 && (
+            <span className="ml-auto inline-flex items-center gap-1 text-info">
+              <span className="h-1.5 w-1.5 rounded-full bg-info animate-pulse" />
+              <span className="font-mono tabular-nums">{activeTasks.length}</span>
+            </span>
           )}
-        </div>
-      )}
-    </div>
+        </button>
+        {open && (
+          <div className="space-y-0.5 pl-2">
+            {activeTasks.map((task) => (
+              <ActiveTaskRow
+                key={task.id}
+                task={task}
+                issueId={issueId}
+                onOpenExecutionLog={openExecutionLog}
+              />
+            ))}
+
+            {pastTasks.length > 0 && (
+              <>
+                {activeTasks.length > 0 && (
+                  <div className="my-1.5 border-t border-border/60" />
+                )}
+                <button
+                  type="button"
+                  data-testid="show-past-runs"
+                  onClick={() => setShowPast(!showPast)}
+                  className="flex w-full items-center gap-1 rounded px-1 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent/40 hover:text-foreground"
+                >
+                  <ChevronRight
+                    className={`!size-3 shrink-0 stroke-[2.5] transition-transform ${
+                      showPast ? "rotate-90" : ""
+                    }`}
+                  />
+                  {showPast
+                    ? t(($) => $.execution_log.hide_past, { count: pastTasks.length })
+                    : t(($) => $.execution_log.show_past, { count: pastTasks.length })}
+                </button>
+                {showPast && (
+                  <div className="mt-0.5 space-y-0.5">
+                    {pastTasks.map((task) => (
+                      <PastRow
+                        key={task.id}
+                        task={task}
+                        issueId={issueId}
+                        onOpenExecutionLog={openExecutionLog}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+      </div>
+      {executionLogDialog}
+    </>
   );
 }
 
@@ -250,14 +272,17 @@ function useStatusLabel(status: AgentTask["status"]): string {
 
 // One active (running / queued / dispatched / parked) task row. Running rows
 // keep status to a single live elapsed timer; transcript and stop stay available
-// as hover actions. Transcript content lazy-loads on click via TranscriptButton,
+// as hover actions. Transcript content lazy-loads on click via
+// ExecutionLogTrigger,
 // so the row no longer fetches task messages just to render a count.
 export function ActiveTaskRow({
   task,
   issueId,
+  onOpenExecutionLog,
 }: {
   task: AgentTask;
   issueId: string;
+  onOpenExecutionLog: OpenExecutionLog;
 }) {
   const { t } = useT("issues");
   const [cancelling, setCancelling] = useState(false);
@@ -319,10 +344,9 @@ export function ActiveTaskRow({
       </RowStatus>
       <RowActions>
         {showTranscript && (
-          <TranscriptButton
+          <ExecutionLogTrigger
             task={task}
-            agentName=""
-            isLive={task.status === "running"}
+            onOpen={onOpenExecutionLog}
             title={t(($) => $.execution_log.transcript_tooltip)}
           />
         )}
@@ -363,7 +387,15 @@ export function ActiveTaskRow({
 
 // ─── Past row ──────────────────────────────────────────────────────────────
 
-function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+function PastRow({
+  task,
+  issueId,
+  onOpenExecutionLog,
+}: {
+  task: AgentTask;
+  issueId: string;
+  onOpenExecutionLog: OpenExecutionLog;
+}) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const [retrying, setRetrying] = useState(false);
@@ -416,7 +448,11 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
         <span className="text-muted-foreground">{time}</span>
       </RowStatus>
       <RowActions>
-        <TranscriptButton task={task} agentName="" title={t(($) => $.execution_log.transcript_tooltip)} />
+        <ExecutionLogTrigger
+          task={task}
+          onOpen={onOpenExecutionLog}
+          title={t(($) => $.execution_log.transcript_tooltip)}
+        />
         {canRetry && (
           <Tooltip>
             <TooltipTrigger

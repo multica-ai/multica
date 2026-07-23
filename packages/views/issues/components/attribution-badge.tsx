@@ -31,7 +31,7 @@ function initialsOf(name: string): string {
  * earns no warning tone; its historical origin still shows in the tooltip and
  * the raw `source` field (MUL-4768).
  *
- * Two shapes, both silent when no responsible member resolved (MUL-4765):
+ * Three shapes, all silent when no responsible member resolved (MUL-4765):
  *  - `variant="badge"` (default): the full "on behalf of <name>" chip. Renders
  *    nothing when there's no accountable member, so an unassigned run reads as
  *    plain rather than a warning.
@@ -39,6 +39,9 @@ function initialsOf(name: string): string {
  *    source in a hover tooltip. Compact enough for a dense task row. Renders
  *    nothing when there's no accountable member — an avatar-only surface has
  *    nothing meaningful to show for an unattributed run.
+ *  - `variant="inline"`: avatar + source-aware plain text for a sentence-like
+ *    run header. Direct actions say "Started by", automated rules say
+ *    "Responsible", and delegated sources retain "on behalf of".
  *
  * Renders nothing when the task has no attribution at all (older backends) —
  * the caller should optional-chain `task.attribution`.
@@ -50,7 +53,7 @@ export function AttributionBadge({
 }: {
   attribution?: TaskAttribution;
   className?: string;
-  variant?: "badge" | "avatar";
+  variant?: "badge" | "avatar" | "inline";
 }) {
   const { t } = useT("issues");
   if (!attribution) return null;
@@ -103,6 +106,44 @@ export function AttributionBadge({
   const uncertain =
     attribution.precise === false && attribution.source !== "backfill";
   const initiator = attribution.initiator;
+
+  if (variant === "inline") {
+    if (!initiator) return null;
+    const name = initiator.name || t(($) => $.execution_log.attribution.someone);
+    const label =
+      attribution.source === "direct_human"
+        ? t(($) => $.execution_log.attribution.initiated_by, { name })
+        : attribution.source === "trigger_owner" ||
+            attribution.source === "rule_owner"
+          ? t(($) => $.execution_log.attribution.responsible, { name })
+          : t(($) => $.execution_log.attribution.on_behalf_of, { name });
+
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              className={cn(
+                "inline-flex min-w-0 items-center gap-1.5 text-xs",
+                uncertain ? "text-warning" : "text-muted-foreground",
+                className,
+              )}
+            >
+              <ActorAvatar
+                name={name}
+                initials={initialsOf(name)}
+                avatarUrl={initiator.avatar_url}
+                size="xs"
+                className="shrink-0"
+              />
+              <span className="min-w-0 truncate">{label}</span>
+            </span>
+          }
+        />
+        <TooltipContent>{sourceLabel}</TooltipContent>
+      </Tooltip>
+    );
+  }
 
   // Avatar-only shape: just the accountable member's face, with the name +
   // source in a hover tooltip. Nothing to show without an accountable member.

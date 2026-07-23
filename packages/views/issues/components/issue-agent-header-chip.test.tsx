@@ -33,6 +33,13 @@ vi.mock("@multica/core/chat/queries", () => ({
   taskMessagesOptions: mockState.taskMessagesOptions,
 }));
 
+vi.mock("../../common/task-transcript", () => ({
+  useExecutionLogSession: () => ({
+    openExecutionLog: vi.fn(),
+    executionLogDialog: null,
+  }),
+}));
+
 vi.mock("@multica/ui/components/ui/popover", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
   return {

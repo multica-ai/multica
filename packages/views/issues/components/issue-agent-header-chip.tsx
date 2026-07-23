@@ -13,6 +13,10 @@ import { api } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
 import type { AgentTask } from "@multica/core/types";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
+import {
+  useExecutionLogSession,
+  type OpenExecutionLog,
+} from "../../common/task-transcript";
 import { ActiveTaskRow } from "./execution-log-section";
 import { useT } from "../../i18n";
 
@@ -73,20 +77,40 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
     }
     return { running, queued };
   }, [tasks]);
+  const { openExecutionLog, executionLogDialog } =
+    useExecutionLogSession(tasks);
 
   // No active work → render nothing.
-  if (running.length === 0 && queued.length === 0) return null;
+  if (running.length === 0 && queued.length === 0) {
+    return <>{executionLogDialog}</>;
+  }
 
-  return <ActiveChip issueId={issueId} running={running} queued={queued} />;
+  return (
+    <>
+      <ActiveChip
+        issueId={issueId}
+        running={running}
+        queued={queued}
+        onOpenExecutionLog={openExecutionLog}
+      />
+      {executionLogDialog}
+    </>
+  );
 });
 
 interface ActiveChipProps {
   issueId: string;
   running: AgentTask[];
   queued: AgentTask[];
+  onOpenExecutionLog: OpenExecutionLog;
 }
 
-function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
+function ActiveChip({
+  issueId,
+  running,
+  queued,
+  onOpenExecutionLog,
+}: ActiveChipProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
 
@@ -167,7 +191,12 @@ function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
           </div>
           <div className="flex flex-col gap-0.5">
             {activeTasks.map((task) => (
-              <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
+              <ActiveTaskRow
+                key={task.id}
+                task={task}
+                issueId={issueId}
+                onOpenExecutionLog={onOpenExecutionLog}
+              />
             ))}
           </div>
         </PopoverContent>

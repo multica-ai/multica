@@ -9,11 +9,9 @@ export type TranscriptFilterKey = string;
 
 interface TranscriptViewState {
   sortDirection: TranscriptSortDirection;
-  preserveFilters: boolean;
   selectedFilterKeys: TranscriptFilterKey[];
   defaultExpanded: boolean;
   setSortDirection: (dir: TranscriptSortDirection) => void;
-  setPreserveFilters: (preserve: boolean) => void;
   setSelectedFilterKeys: (keys: TranscriptFilterKey[]) => void;
   toggleFilterKey: (key: TranscriptFilterKey) => void;
   clearFilterKeys: () => void;
@@ -22,7 +20,6 @@ interface TranscriptViewState {
 
 const DEFAULTS = {
   sortDirection: "chronological" as TranscriptSortDirection,
-  preserveFilters: false,
   selectedFilterKeys: [] as TranscriptFilterKey[],
   defaultExpanded: false,
 };
@@ -36,7 +33,6 @@ export const useTranscriptViewStore = create<TranscriptViewState>()(
     (set) => ({
       ...DEFAULTS,
       setSortDirection: (sortDirection) => set({ sortDirection }),
-      setPreserveFilters: (preserveFilters) => set({ preserveFilters }),
       setSelectedFilterKeys: (selectedFilterKeys) =>
         set({ selectedFilterKeys: uniqueFilterKeys(selectedFilterKeys) }),
       toggleFilterKey: (key) =>
@@ -53,7 +49,6 @@ export const useTranscriptViewStore = create<TranscriptViewState>()(
       storage: createJSONStorage(() => defaultStorage),
       partialize: (state) => ({
         sortDirection: state.sortDirection,
-        preserveFilters: state.preserveFilters,
         selectedFilterKeys: state.selectedFilterKeys,
         defaultExpanded: state.defaultExpanded,
       }),
@@ -62,8 +57,9 @@ export const useTranscriptViewStore = create<TranscriptViewState>()(
         const p = persisted as Partial<TranscriptViewState>;
         return {
           ...current,
-          ...p,
+          sortDirection: p.sortDirection ?? DEFAULTS.sortDirection,
           selectedFilterKeys: uniqueFilterKeys(p.selectedFilterKeys ?? []),
+          defaultExpanded: p.defaultExpanded ?? DEFAULTS.defaultExpanded,
         };
       },
     },

@@ -18,9 +18,13 @@ vi.mock("../../common/actor-avatar", () => ({
 }));
 
 vi.mock("../../common/task-transcript", () => ({
-  TranscriptButton: ({ title }: { title?: string }) => (
+  ExecutionLogTrigger: ({ title }: { title?: string }) => (
     <button type="button">{title ?? "Transcript"}</button>
   ),
+  useExecutionLogSession: () => ({
+    openExecutionLog: vi.fn(),
+    executionLogDialog: null,
+  }),
 }));
 
 vi.mock("./terminate-task-confirm-dialog", () => ({
@@ -68,6 +72,7 @@ describe("ActiveTaskRow", () => {
           coalesced_comment_ids: ["comment-1", "comment-2"],
         })}
         issueId="issue-1"
+        onOpenExecutionLog={vi.fn()}
       />,
     );
 
@@ -80,7 +85,13 @@ describe("ActiveTaskRow", () => {
   });
 
   it("does not make transcript actions depend on hover-only rendering", () => {
-    renderWithI18n(<ActiveTaskRow task={makeTask()} issueId="issue-1" />);
+    renderWithI18n(
+      <ActiveTaskRow
+        task={makeTask()}
+        issueId="issue-1"
+        onOpenExecutionLog={vi.fn()}
+      />,
+    );
 
     const transcriptButton = screen.getByRole("button", { name: "View transcript" });
     const status = screen.getByText("5m 04s");

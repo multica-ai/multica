@@ -178,6 +178,21 @@ export function taskMessagesOptions(taskId: string) {
 }
 
 /**
+ * One-shot backfill for a live execution-log session. This uses a separate,
+ * immediately collectible key because the caller seq-merges the result into
+ * the WS-owned taskMessages cache instead of allowing a fetch to replace it.
+ */
+export function taskMessagesBackfillOptions(taskId: string) {
+  return queryOptions({
+    queryKey: [...chatKeys.taskMessages(taskId), "backfill"] as const,
+    queryFn: () => api.listTaskMessages(taskId),
+    enabled: isTaskMessageTaskId(taskId),
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
+
+/**
  * Merge task-message batches into one seq-ordered, seq-deduplicated list for
  * the shared `["task-messages", taskId]` cache. Existing entries win on
  * conflict, and the original array reference is preserved when nothing new
@@ -241,6 +256,8 @@ export const executionLogKeys = {
    *  cursor stays a page parameter (never in the key). */
   page: (taskId: string, filterKey: string) =>
     [...executionLogKeys.all(), taskId, filterKey] as const,
+  copyAll: (taskId: string) =>
+    [...executionLogKeys.all(), taskId, "copy-all"] as const,
 };
 
 export interface ExecutionLogFilters {
@@ -276,6 +293,37 @@ export function executionLogPageOptions(
       lastPage.older_cursor ?? undefined,
     enabled: isTaskMessageTaskId(taskId),
     staleTime: Infinity,
+  });
+}
+
+/**
+ * One-shot full history used only by the explicit "Copy all" action. Normal
+ * rendering remains paginated; zero gcTime prevents a second unbounded cache
+ * from lingering after the clipboard operation.
+ */
+export function executionLogCopyAllOptions(taskId: string, limit = 100) {
+  return queryOptions({
+    queryKey: executionLogKeys.copyAll(taskId),
+    queryFn: async () => {
+      const pages: ExecutionLogPage[] = [];
+      const seenCursors = new Set<string>();
+      let before: string | null = null;
+      for (;;) {
+        const page = await api.listTaskMessagesPage(taskId, { before, limit });
+        pages.push(page);
+        const next = page.older_cursor ?? null;
+        if (!next) break;
+        if (seenCursors.has(next)) {
+          throw new Error("Execution Log cursor repeated");
+        }
+        seenCursors.add(next);
+        before = next;
+      }
+      return flattenExecutionLogPages(pages);
+    },
+    enabled: isTaskMessageTaskId(taskId),
+    staleTime: 0,
+    gcTime: 0,
   });
 }
 

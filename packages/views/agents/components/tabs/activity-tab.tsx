@@ -37,7 +37,11 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { AppLink } from "../../../navigation";
-import { TranscriptButton } from "../../../common/task-transcript";
+import {
+  ExecutionLogTrigger,
+  useExecutionLogSession,
+  type OpenExecutionLog,
+} from "../../../common/task-transcript";
 import { AttributionBadge } from "../../../issues/components/attribution-badge";
 import { taskStatusConfig } from "../../config";
 import { failureReasonLabel } from "./task-failure";
@@ -145,6 +149,23 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
   );
   const hasMoreRecent = recentTasksAll.length > recentTasks.length;
 
+  // Active and terminal rows come from separate queries. Keep their union at
+  // the stable tab level so an open execution log survives the hand-off.
+  const executionLogTasks = useMemo(() => {
+    const byId = new Map<string, AgentTask>();
+    for (const task of snapshot) {
+      if (task.agent_id === agent.id && !task.chat_session_id) {
+        byId.set(task.id, task);
+      }
+    }
+    for (const task of agentTasks) {
+      if (!task.chat_session_id) byId.set(task.id, task);
+    }
+    return Array.from(byId.values());
+  }, [agent.id, agentTasks, snapshot]);
+  const { openExecutionLog, executionLogDialog } =
+    useExecutionLogSession(executionLogTasks);
+
   const avgDurationMs = useMemo(
     () => deriveAvgDurationLast30d(agentTasks, Date.now()),
     [agentTasks],
@@ -177,23 +198,30 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
   }, [issueQueries, issueIds]);
 
   return (
-    <div className="flex min-w-0 flex-col gap-6">
-      <NowSection tasks={activeTasks} issueMap={issueMap} agent={agent} />
-      {showPerformance && (
-        <Last30dSection activity={activity} avgDurationMs={avgDurationMs} />
-      )}
-      <RecentWorkSection
-        tasks={recentTasks}
-        totalCount={recentTasksAll.length}
-        hasMore={hasMoreRecent}
-        loading={isLoadingRecent}
-        onShowMore={() =>
-          setRecentDisplayLimit((n) => n + RECENT_PAGE)
-        }
-        issueMap={issueMap}
-        agent={agent}
-      />
-    </div>
+    <>
+      <div className="flex min-w-0 flex-col gap-6">
+        <NowSection
+          tasks={activeTasks}
+          issueMap={issueMap}
+          onOpenExecutionLog={openExecutionLog}
+        />
+        {showPerformance && (
+          <Last30dSection activity={activity} avgDurationMs={avgDurationMs} />
+        )}
+        <RecentWorkSection
+          tasks={recentTasks}
+          totalCount={recentTasksAll.length}
+          hasMore={hasMoreRecent}
+          loading={isLoadingRecent}
+          onShowMore={() =>
+            setRecentDisplayLimit((n) => n + RECENT_PAGE)
+          }
+          issueMap={issueMap}
+          onOpenExecutionLog={openExecutionLog}
+        />
+      </div>
+      {executionLogDialog}
+    </>
   );
 }
 
@@ -290,11 +318,11 @@ function Metric({
 function NowSection({
   tasks,
   issueMap,
-  agent,
+  onOpenExecutionLog,
 }: {
   tasks: AgentTask[];
   issueMap: Map<string, Issue>;
-  agent: Agent;
+  onOpenExecutionLog: OpenExecutionLog;
 }) {
   const { t } = useT("agents");
   return (
@@ -313,7 +341,7 @@ function NowSection({
           tasks={tasks}
           issueMap={issueMap}
           timeMode="active"
-          agent={agent}
+          onOpenExecutionLog={onOpenExecutionLog}
         />
       )}
     </Section>
@@ -396,7 +424,7 @@ function RecentWorkSection({
   loading,
   onShowMore,
   issueMap,
-  agent,
+  onOpenExecutionLog,
 }: {
   tasks: AgentTask[];
   totalCount: number;
@@ -404,7 +432,7 @@ function RecentWorkSection({
   loading: boolean;
   onShowMore: () => void;
   issueMap: Map<string, Issue>;
-  agent: Agent;
+  onOpenExecutionLog: OpenExecutionLog;
 }) {
   const { t } = useT("agents");
   // While the first fetch is in flight we have no counts to summarise, so
@@ -428,7 +456,7 @@ function RecentWorkSection({
             tasks={tasks}
             issueMap={issueMap}
             timeMode="completed"
-            agent={agent}
+            onOpenExecutionLog={onOpenExecutionLog}
           />
           {hasMore && (
             <button
@@ -477,12 +505,12 @@ function TaskList({
   tasks,
   issueMap,
   timeMode,
-  agent,
+  onOpenExecutionLog,
 }: {
   tasks: AgentTask[];
   issueMap: Map<string, Issue>;
   timeMode: "active" | "completed";
-  agent: Agent;
+  onOpenExecutionLog: OpenExecutionLog;
 }) {
   return (
     <div
@@ -498,7 +526,7 @@ function TaskList({
           task={task}
           issueMap={issueMap}
           timeMode={timeMode}
-          agent={agent}
+          onOpenExecutionLog={onOpenExecutionLog}
         />
       ))}
     </div>
@@ -509,12 +537,12 @@ function TaskRow({
   task,
   issueMap,
   timeMode,
-  agent,
+  onOpenExecutionLog,
 }: {
   task: AgentTask;
   issueMap: Map<string, Issue>;
   timeMode: "active" | "completed";
-  agent: Agent;
+  onOpenExecutionLog: OpenExecutionLog;
 }) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
@@ -722,10 +750,9 @@ function TaskRow({
           </Tooltip>
         )}
         {showTranscript && (
-          <TranscriptButton
+          <ExecutionLogTrigger
             task={task}
-            agentName={agent.name}
-            isLive={isRunning}
+            onOpen={onOpenExecutionLog}
             title={t(($) => $.tab_body.activity.transcript_tooltip)}
           />
         )}

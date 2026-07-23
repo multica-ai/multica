@@ -148,4 +148,21 @@ describe("AttributionBadge", () => {
 
     expect(container).toBeEmptyDOMElement();
   });
+
+  it.each([
+    ["direct_human", "Started by Ada Lovelace"],
+    ["rule_owner", "Responsible: Ada Lovelace"],
+  ])("uses source-aware copy for the inline %s variant", (source, expected) => {
+    const attribution: TaskAttribution = {
+      source,
+      precise: true,
+      initiator: { id: "u1", name: "Ada Lovelace" },
+    };
+
+    renderWithI18n(
+      <AttributionBadge attribution={attribution} variant="inline" />,
+    );
+
+    expect(screen.getByText(expected)).toBeInTheDocument();
+  });
 });

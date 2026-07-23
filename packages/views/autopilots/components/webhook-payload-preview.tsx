@@ -21,7 +21,7 @@ interface WebhookPayloadPreviewProps {
  * showing whatever JSON is there with a generic header.
  *
  * This is intentionally read-only and decoupled from any specific dialog
- * — it gets dropped into AgentTranscriptDialog's headerSlot.
+ * — it gets dropped into ExecutionLogDialog's headerSlot.
  */
 export function WebhookPayloadPreview({
   payload,

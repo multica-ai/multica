@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Zap, Play, Clock, Plus, Trash2, CheckCircle2, XCircle, Loader2, Pencil,
   Ban, ChevronDown, ChevronRight,
@@ -55,6 +55,7 @@ import { formatInTimeZone } from "../../common/format-in-time-zone";
 import { SegmentedToggle } from "../../common/segmented-toggle";
 import { useScheduleSubmitGate } from "./schedule-editor/validate";
 import type {
+  AutopilotAssigneeType,
   AutopilotExecutionMode,
   AutopilotRun,
   AutopilotSubscriber,
@@ -62,7 +63,11 @@ import type {
 } from "@multica/core/types";
 import type { AgentTask } from "@multica/core/types/agent";
 import { ReadonlyContent } from "../../editor";
-import { TranscriptButton } from "../../common/task-transcript";
+import {
+  ExecutionLogTrigger,
+  useExecutionLogSession,
+  type OpenExecutionLog,
+} from "../../common/task-transcript";
 import { AutopilotDialog } from "./autopilot-dialog";
 import { runNowToastKind, runNowBlockedKey } from "./run-now-toast";
 import { WebhookPayloadPreview } from "./webhook-payload-preview";
@@ -105,35 +110,55 @@ function WebhookPayloadSlot({ autopilotId, runId }: { autopilotId: string; runId
   return <WebhookPayloadPreview payload={data.trigger_payload} />;
 }
 
-function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: string; agentName: string }) {
+function agentTaskFromRun(
+  run: AutopilotRun,
+  assigneeType: AutopilotAssigneeType,
+  assigneeId: string,
+): AgentTask | null {
+  if (!run.task_id) return null;
+  return {
+    id: run.task_id,
+    agent_id: assigneeType === "agent" ? assigneeId : "",
+    runtime_id: "",
+    issue_id: "",
+    status:
+      run.status === "running"
+        ? "running"
+        : run.status === "completed"
+          ? "completed"
+          : run.status === "failed"
+            ? "failed"
+            : "queued",
+    priority: 0,
+    dispatched_at: null,
+    started_at: run.triggered_at || null,
+    completed_at: run.completed_at || null,
+    result: null,
+    error: run.failure_reason || null,
+    created_at: run.created_at,
+  };
+}
+
+function RunRow({
+  run,
+  assigneeType,
+  assigneeId,
+  onOpenExecutionLog,
+}: {
+  run: AutopilotRun;
+  assigneeType: AutopilotAssigneeType;
+  assigneeId: string;
+  onOpenExecutionLog: OpenExecutionLog;
+}) {
   const { t, i18n } = useT("autopilots");
   const wsPaths = useWorkspacePaths();
   const status = (RUN_VISUAL[run.status as RunStatus] ? (run.status as RunStatus) : "issue_created");
   const visual = RUN_VISUAL[status];
   const StatusIcon = visual.icon;
 
-  // For runs with a task_id (run_only mode), build a minimal AgentTask so
-  // TranscriptButton can lazy-load the execution transcript.
-  const syntheticTask: AgentTask | null = run.task_id
-    ? {
-        id: run.task_id,
-        agent_id: agentId,
-        runtime_id: "",
-        issue_id: "",
-        status:
-          run.status === "running" ? "running" :
-          run.status === "completed" ? "completed" :
-          run.status === "failed" ? "failed" :
-          "queued",
-        priority: 0,
-        dispatched_at: null,
-        started_at: run.triggered_at || null,
-        completed_at: run.completed_at || null,
-        result: null,
-        error: run.failure_reason || null,
-        created_at: run.created_at,
-      }
-    : null;
+  // Run-only executions have no issue task row, so adapt their run record to
+  // the common execution-log task identity.
+  const syntheticTask = agentTaskFromRun(run, assigneeType, assigneeId);
 
   const content = (
     <>
@@ -155,11 +180,11 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
         {formatInTimeZone(run.triggered_at || run.created_at, undefined, i18n.language)}
       </span>
       {syntheticTask && !run.issue_id && (
-        <TranscriptButton
+        <ExecutionLogTrigger
           task={syntheticTask}
-          agentName={agentName}
-          isLive={run.status === "running"}
+          onOpen={onOpenExecutionLog}
           title={t(($) => $.run.view_log)}
+          actor={{ type: assigneeType, id: assigneeId }}
           headerSlot={
             run.source === "webhook" ? (
               <WebhookPayloadSlot autopilotId={run.autopilot_id} runId={run.id} />
@@ -185,36 +210,62 @@ function RunRow({ run, agentId, agentName }: { run: AutopilotRun; agentId: strin
 
 function RunHistoryList({
   runs,
-  agentId,
-  agentName,
+  assigneeType,
+  assigneeId,
 }: {
   runs: AutopilotRun[];
-  agentId: string;
-  agentName: string;
+  assigneeType: AutopilotAssigneeType;
+  assigneeId: string;
 }) {
   const visibleRuns = runs.filter((run) => run.status !== "skipped");
   const skippedRuns = runs.filter((run) => run.status === "skipped");
+  const executionLogTasks = useMemo(
+    () =>
+      runs.flatMap((run) => {
+        const task = agentTaskFromRun(run, assigneeType, assigneeId);
+        return task ? [task] : [];
+      }),
+    [assigneeId, assigneeType, runs],
+  );
+  const { openExecutionLog, executionLogDialog } =
+    useExecutionLogSession(executionLogTasks);
 
   return (
-    <div className="rounded-md border overflow-hidden">
-      {visibleRuns.map((run) => (
-        <RunRow key={run.id} run={run} agentId={agentId} agentName={agentName} />
-      ))}
-      {skippedRuns.length > 0 && (
-        <SkippedRunsGroup runs={skippedRuns} agentId={agentId} agentName={agentName} />
-      )}
-    </div>
+    <>
+      <div className="rounded-md border overflow-hidden">
+        {visibleRuns.map((run) => (
+          <RunRow
+            key={run.id}
+            run={run}
+            assigneeType={assigneeType}
+            assigneeId={assigneeId}
+            onOpenExecutionLog={openExecutionLog}
+          />
+        ))}
+        {skippedRuns.length > 0 && (
+          <SkippedRunsGroup
+            runs={skippedRuns}
+            assigneeType={assigneeType}
+            assigneeId={assigneeId}
+            onOpenExecutionLog={openExecutionLog}
+          />
+        )}
+      </div>
+      {executionLogDialog}
+    </>
   );
 }
 
 function SkippedRunsGroup({
   runs,
-  agentId,
-  agentName,
+  assigneeType,
+  assigneeId,
+  onOpenExecutionLog,
 }: {
   runs: AutopilotRun[];
-  agentId: string;
-  agentName: string;
+  assigneeType: AutopilotAssigneeType;
+  assigneeId: string;
+  onOpenExecutionLog: OpenExecutionLog;
 }) {
   const { t, i18n } = useT("autopilots");
   const [open, setOpen] = useState(false);
@@ -246,7 +297,13 @@ function SkippedRunsGroup({
       {open && (
         <div className="border-t bg-background">
           {runs.map((run) => (
-            <RunRow key={run.id} run={run} agentId={agentId} agentName={agentName} />
+            <RunRow
+              key={run.id}
+              run={run}
+              assigneeType={assigneeType}
+              assigneeId={assigneeId}
+              onOpenExecutionLog={onOpenExecutionLog}
+            />
           ))}
         </div>
       )}
@@ -984,8 +1041,8 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
             ) : (
               <RunHistoryList
                 runs={runs}
-                agentId={autopilot.assignee_id}
-                agentName={getActorName(autopilot.assignee_type, autopilot.assignee_id)}
+                assigneeType={autopilot.assignee_type}
+                assigneeId={autopilot.assignee_id}
               />
             )}
           </section>
