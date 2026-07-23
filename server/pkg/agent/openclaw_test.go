@@ -1676,3 +1676,38 @@ func TestKAV14MigrationCases(t *testing.T) {
 		})
 	}
 }
+
+func TestResolveOpenclawSelectionEmptyIsNoop(t *testing.T) {
+	agentID, model, err := ResolveOpenclawSelection("", []Model{{ID: "main", ModelID: "gpt-4o"}})
+	if err != nil || agentID != "" || model != "" {
+		t.Fatalf("empty selection = agentID=%q model=%q err=%v, want empty no-op", agentID, model, err)
+	}
+}
+
+// TestResolveOpenclawSelectionBoundAgentEmitsBothFlags guards the headline
+// KAV-14 v2 behaviour that the table cases in TestKAV14MigrationCases cannot
+// express: when the persisted value is an agent id whose catalog entry has a
+// bound model (ModelID), resolution must return BOTH the agent id and that
+// bound model, so the daemon dispatches `--agent <id> --model <bound>`. This
+// is the exact shape of the KAV-16 smoke dispatch
+// (`--agent main --model deepseek/deepseek-v4-flash`); without a bound ModelID
+// in the catalog the migration table's agent-id case only proves --agent.
+func TestResolveOpenclawSelectionBoundAgentEmitsBothFlags(t *testing.T) {
+	t.Parallel()
+
+	catalog := []Model{
+		{ID: "main", ModelID: "deepseek/deepseek-v4-flash", Provider: "openclaw"},
+		{ID: "research-bot", ModelID: "gpt-4o", Provider: "openclaw"},
+	}
+
+	agentID, model, err := ResolveOpenclawSelection("main", catalog)
+	if err != nil {
+		t.Fatalf("unexpected error resolving bound agent id: %v", err)
+	}
+	if agentID != "main" {
+		t.Errorf("agentID = %q, want %q", agentID, "main")
+	}
+	if model != "deepseek/deepseek-v4-flash" {
+		t.Errorf("model = %q, want %q (bound model must be forwarded alongside --agent)", model, "deepseek/deepseek-v4-flash")
+	}
+}

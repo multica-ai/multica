@@ -815,6 +815,17 @@ func TestOpenclawEntriesToModelsUsesIDOverName(t *testing.T) {
 	}
 }
 
+func TestOpenclawEntriesToModelsUsesIdentityName(t *testing.T) {
+	input := []byte(`[{"identityName":"main-v2","model":"deepseek/deepseek-v4-flash"}]`)
+	models, ok := parseOpenclawAgentsJSON(input)
+	if !ok || len(models) != 1 {
+		t.Fatalf("expected one identityName entry, ok=%v models=%+v", ok, models)
+	}
+	if models[0].ID != "main-v2" || models[0].ModelID != "deepseek/deepseek-v4-flash" {
+		t.Fatalf("entry=%+v, want agent ID main-v2 and bound model", models[0])
+	}
+}
+
 func TestParseOpenclawAgentsJSONRejectsGarbage(t *testing.T) {
 	if _, ok := parseOpenclawAgentsJSON([]byte("not json")); ok {
 		t.Error("expected ok=false for non-JSON")
