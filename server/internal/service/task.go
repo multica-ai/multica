@@ -270,10 +270,12 @@ func (s *TaskService) captureTaskQueued(ctx context.Context, task db.AgentTaskQu
 	}
 }
 
-type runtimeMCPOverlayData struct {
+type RuntimeMCPOverlayData struct {
 	Overlay       json.RawMessage
 	ConnectedApps json.RawMessage
 }
+
+type runtimeMCPOverlayData = RuntimeMCPOverlayData
 
 // buildRuntimeMCPOverlay computes the optional per-task Composio MCP overlay.
 // Enqueue paths call this BEFORE inserting the queued row so the daemon cannot
@@ -315,6 +317,14 @@ func (s *TaskService) buildRuntimeMCPOverlay(ctx context.Context, originatorUser
 		data.ConnectedApps = raw
 	}
 	return data
+}
+
+// BuildRuntimeMCPOverlay recomputes the optional Composio MCP overlay from the
+// durable agent allowlist + owner connection rows. Daemon claim uses this to
+// hand the runtime a fresh MCP session after daemon/runtime restarts instead of
+// relying on an older enqueue-time session URL.
+func (s *TaskService) BuildRuntimeMCPOverlay(ctx context.Context, originatorUserID pgtype.UUID, agent db.Agent) RuntimeMCPOverlayData {
+	return s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 }
 
 // resolveOriginatorFromTriggerComment returns the top-of-chain HUMAN user

@@ -89,6 +89,11 @@ type InstallationStore interface {
 
 	// ReleaseWSLease releases a lease the caller holds (token-fenced).
 	ReleaseWSLease(ctx context.Context, arg ReleaseLeaseParams) error
+
+	// MarkNeedsReauth persists that an active installation cannot be restored
+	// without fresh credentials. Implementations should also clear any held
+	// lease so this process stops retrying until the user re-installs.
+	MarkNeedsReauth(ctx context.Context, id pgtype.UUID) error
 }
 
 // Config tunes the Supervisor's lifecycle loops. All fields have sensible
@@ -486,6 +491,10 @@ func (s *Supervisor) supervise(ctx context.Context, inst Installation, id string
 		})
 		if err != nil {
 			log.Error("channel engine: build channel failed", "error", err)
+			if errors.Is(err, channel.ErrNeedsReauth) {
+				s.markNeedsReauth(inst.ID, id, log)
+				return
+			}
 			s.releaseLease(inst.ID, leaseTok)
 			if sleep(ctx, backoff) {
 				return
@@ -510,6 +519,10 @@ func (s *Supervisor) supervise(ctx context.Context, inst Installation, id string
 		runCancel()
 		<-renewDone
 		s.disconnect(ch, id, log)
+		if errors.Is(runErr, channel.ErrNeedsReauth) {
+			s.markNeedsReauth(inst.ID, id, log)
+			return
+		}
 		s.releaseLease(inst.ID, leaseTok)
 
 		if ctx.Err() != nil {
@@ -532,6 +545,16 @@ func (s *Supervisor) supervise(ctx context.Context, inst Installation, id string
 		}
 		backoff = nextBackoff(backoff, s.cfg.MaxBackoff)
 	}
+}
+
+func (s *Supervisor) markNeedsReauth(instID pgtype.UUID, id string, log *slog.Logger) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.cfg.LeaseReleaseTimeout)
+	defer cancel()
+	if err := s.store.MarkNeedsReauth(ctx, instID); err != nil {
+		log.Warn("channel engine: mark installation needs re-auth failed", "installation_id", id, "error", err)
+		return
+	}
+	log.Warn("channel engine: installation marked needs re-auth", "installation_id", id)
 }
 
 // acquireLease tries to claim or renew the WS lease. Returns (true, nil)
