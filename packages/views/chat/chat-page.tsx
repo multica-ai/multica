@@ -270,6 +270,7 @@ export function ChatPage() {
         agentName={c.activeAgent?.name}
         projects={c.projects}
         projectId={c.activeProjectId}
+        projectContextUnsupported={c.projectContextUnsupported}
         onProjectChange={changeProjectContext}
         isProjectUpdating={c.isProjectUpdating}
         focusRequest={c.focusInputRequest}

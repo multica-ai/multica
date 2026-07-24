@@ -61,6 +61,7 @@ import {
   isStillOnComposeTarget,
   planProjectContextChange,
 } from "./use-chat-controller";
+import { useChatProjectContextSupport } from "./use-chat-project-context-support";
 import { createLogger } from "@multica/core/logger";
 import type { Agent, Attachment, ChatMessage, ChatMessagesPage, ChatPendingTask, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { useT } from "../../i18n";
@@ -267,6 +268,8 @@ export function ChatWindow() {
     availableAgents.find((a) => a.id === selectedAgentId) ??
     availableAgents[0] ??
     null;
+
+  const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
 
   // Three-state availability — "loading" stays neutral (no banner, no
   // disable) so the input doesn't flash a fake "no agent" state in the
@@ -938,6 +941,7 @@ export function ChatWindow() {
         projects={projects}
         projectId={activeProjectId}
         onProjectChange={handleProjectChange}
+        projectContextUnsupported={projectContextSupport === false}
         isProjectUpdating={
           setSessionProject.isPending || (!!activeSessionId && !currentSession)
         }

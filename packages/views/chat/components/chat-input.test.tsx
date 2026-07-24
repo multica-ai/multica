@@ -422,6 +422,39 @@ describe("ChatInput project context", () => {
     resource_count: 0,
   };
 
+  it("warns next to the chip when the agent's daemon cannot apply the project description", () => {
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange: vi.fn(),
+      projectContextUnsupported: true,
+    });
+
+    expect(
+      screen.getByText(
+        "Project description won't apply — this agent's daemon needs an upgrade",
+      ),
+    ).toBeInTheDocument();
+    // Soft gate: the warning must not lock the control.
+    expect(
+      screen.getByRole("button", { name: "Change project context" }),
+    ).not.toBeDisabled();
+  });
+
+  it("shows no daemon warning when support is current or unknown", () => {
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange: vi.fn(),
+    });
+
+    expect(
+      screen.queryByText(
+        "Project description won't apply — this agent's daemon needs an upgrade",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
   it("renders the selected project chip and forwards context changes", () => {
     const onProjectChange = vi.fn();
     renderInput({

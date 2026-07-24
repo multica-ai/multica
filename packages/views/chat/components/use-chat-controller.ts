@@ -35,6 +35,7 @@ import {
 import { useChatStore } from "@multica/core/chat";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
+import { useChatProjectContextSupport } from "./use-chat-project-context-support";
 import { createLogger } from "@multica/core/logger";
 import type {
   Agent,
@@ -368,6 +369,8 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
   const agentAvailability = useWorkspaceAgentAvailability();
   const noAgent = agentAvailability === "none";
+
+  const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
 
   const presenceDetail = useAgentPresenceDetail(wsId, activeAgent?.id);
   const availability =
@@ -842,6 +845,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     activeSessionId,
     selectedAgentId,
     activeProjectId,
+    projectContextUnsupported: projectContextSupport === false,
     isProjectUpdating:
       setSessionProject.isPending || (!!activeSessionId && !currentSession),
     currentSession,
