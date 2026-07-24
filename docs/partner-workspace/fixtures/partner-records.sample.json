@@ -1,0 +1,330 @@
+{
+  "schema_version": "partner-workspace.sample.v1",
+  "source_policy": {
+    "raw_source_material_in_repo": false,
+    "allowed_material": ["redacted", "normalized", "source_references"]
+  },
+  "partners": [
+    {
+      "id": "partner-wingstop-ai20",
+      "display_name": "Wingstop",
+      "partner_type": "brand",
+      "origin_issue_refs": [
+        {
+          "source_type": "multica_issue",
+          "source_ref": "multica:issue:AI-20"
+        }
+      ],
+      "current_stage": {
+        "id": "stage-wingstop-meeting-coordination",
+        "label": "meeting_scheduled",
+        "summary": "Historical AI-20 record reached international development meeting coordination after background review and schedule negotiation.",
+        "evidence_refs": ["ev-ai20-wingstop-thread", "ev-ai20-wingstop-schedule-comment"]
+      },
+      "contacts": [
+        {
+          "id": "contact-wingstop-business-development",
+          "display_name": "Redacted Wingstop business development contact",
+          "role": "Business Development Manager - International",
+          "organization": "Wingstop",
+          "redaction_level": "redacted",
+          "evidence_refs": ["ev-ai20-wingstop-timeline-comment"]
+        },
+        {
+          "id": "contact-wingstop-global-development",
+          "display_name": "Redacted Wingstop global development coordinator",
+          "role": "Team Coordinator Global Development",
+          "organization": "Wingstop",
+          "redaction_level": "redacted",
+          "evidence_refs": ["ev-ai20-wingstop-schedule-comment"]
+        }
+      ],
+      "inputs": [
+        {
+          "id": "input-wingstop-email-thread",
+          "input_type": "email",
+          "source": {
+            "source_type": "gmail",
+            "source_ref": "gmail:thread:19e6708f96565a63",
+            "source_label": "Wingstop outreach thread",
+            "raw_available_outside_repo": true
+          },
+          "observed_at": "2026-06-10T07:04:09Z",
+          "title": "Wingstop schedule coordination thread",
+          "normalized_summary": "Thread contains initial outreach, company background exchange, review acknowledgement, and proposed meeting times.",
+          "redaction_level": "metadata_only",
+          "evidence_refs": ["ev-ai20-wingstop-thread", "ev-ai20-wingstop-message-19eb04"]
+        },
+        {
+          "id": "input-wingstop-manual-summary",
+          "input_type": "manual_note",
+          "source": {
+            "source_type": "multica_comment",
+            "source_ref": "multica:comment:925fc391-78fc-4fc9-beff-aa23e6267cdd",
+            "source_label": "Wingstop timeline summary",
+            "raw_available_outside_repo": true
+          },
+          "observed_at": "2026-06-01T12:29:00Z",
+          "title": "Operator-reviewed Wingstop timeline",
+          "normalized_summary": "Manual summary lists the known email sequence and recommends a short acknowledgement rather than repeated background material.",
+          "redaction_level": "redacted",
+          "evidence_refs": ["ev-ai20-wingstop-timeline-comment"]
+        },
+        {
+          "id": "input-wingstop-chat-constraint",
+          "input_type": "chat_record",
+          "source": {
+            "source_type": "multica_comment",
+            "source_ref": "multica:comment:2e9b22c4-92db-4f09-ae2f-82e1d5f01df8",
+            "source_label": "User scheduling constraint",
+            "raw_available_outside_repo": true
+          },
+          "observed_at": "2026-06-10T07:36:52Z",
+          "title": "User prefers Beijing work-hour meetings",
+          "normalized_summary": "User asked to avoid late Beijing meetings and to wait while VooV and Zoom real-time translation are tested.",
+          "redaction_level": "redacted",
+          "evidence_refs": ["ev-ai20-wingstop-user-constraint"]
+        }
+      ],
+      "evidence": [
+        {
+          "id": "ev-ai20-wingstop-thread",
+          "source_ref": "gmail:thread:19e6708f96565a63",
+          "evidence_type": "thread_id",
+          "supports": ["claim-wingstop-has-active-outreach-thread", "stage-wingstop-meeting-coordination"],
+          "confidence": "source"
+        },
+        {
+          "id": "ev-ai20-wingstop-message-19eb04",
+          "source_ref": "gmail:message:19eb04b435f7fb20",
+          "evidence_type": "message_id",
+          "supports": ["claim-wingstop-proposed-times"],
+          "confidence": "source"
+        },
+        {
+          "id": "ev-ai20-wingstop-timeline-comment",
+          "source_ref": "multica:comment:925fc391-78fc-4fc9-beff-aa23e6267cdd",
+          "evidence_type": "comment_id",
+          "supports": ["claim-wingstop-background-reviewed"],
+          "confidence": "derived"
+        },
+        {
+          "id": "ev-ai20-wingstop-schedule-comment",
+          "source_ref": "multica:comment:1acd5357-4136-45ab-a744-b12af6d35b81",
+          "evidence_type": "comment_id",
+          "supports": ["action-wingstop-propose-work-hour-options"],
+          "confidence": "derived"
+        },
+        {
+          "id": "ev-ai20-wingstop-user-constraint",
+          "source_ref": "multica:comment:2e9b22c4-92db-4f09-ae2f-82e1d5f01df8",
+          "evidence_type": "comment_id",
+          "supports": ["claim-user-prefers-work-hour-meetings", "action-wingstop-propose-work-hour-options"],
+          "confidence": "source"
+        }
+      ],
+      "actions": [
+        {
+          "id": "action-wingstop-propose-work-hour-options",
+          "action_type": "schedule_meeting",
+          "status": "executed",
+          "title": "Send Beijing work-hour meeting options after human approval",
+          "rationale": "User preferred avoiding late Beijing calls and wanted VooV/Zoom testing before sending a final meeting link.",
+          "requires_human_confirmation": true,
+          "evidence_refs": ["ev-ai20-wingstop-schedule-comment", "ev-ai20-wingstop-user-constraint"]
+        }
+      ],
+      "claims": [
+        {
+          "id": "claim-wingstop-has-active-outreach-thread",
+          "statement": "Wingstop was an active AI-20 outreach partner with a tracked Gmail thread.",
+          "claim_type": "workflow_state",
+          "evidence_refs": ["ev-ai20-wingstop-thread"]
+        },
+        {
+          "id": "claim-wingstop-background-reviewed",
+          "statement": "The AI-20 thread included a company-background review before schedule coordination.",
+          "claim_type": "workflow_state",
+          "evidence_refs": ["ev-ai20-wingstop-timeline-comment"]
+        },
+        {
+          "id": "claim-wingstop-proposed-times",
+          "statement": "A Wingstop coordination message proposed specific meeting time options.",
+          "claim_type": "workflow_state",
+          "evidence_refs": ["ev-ai20-wingstop-message-19eb04"]
+        },
+        {
+          "id": "claim-user-prefers-work-hour-meetings",
+          "statement": "The user preferred meeting options inside Beijing working hours instead of late-day calls.",
+          "claim_type": "user_preference",
+          "evidence_refs": ["ev-ai20-wingstop-user-constraint"]
+        }
+      ]
+    },
+    {
+      "id": "partner-playa-bowls-ai103",
+      "display_name": "Playa Bowls",
+      "partner_type": "brand",
+      "origin_issue_refs": [
+        {
+          "source_type": "multica_issue",
+          "source_ref": "multica:issue:AI-103"
+        }
+      ],
+      "current_stage": {
+        "id": "stage-playa-meeting-scheduled",
+        "label": "meeting_scheduled",
+        "summary": "Active AI-103 record has a confirmed meeting window and pending meeting-tool coordination.",
+        "evidence_refs": ["ev-ai103-description", "ev-ai103-playa-thread"]
+      },
+      "contacts": [
+        {
+          "id": "contact-playa-growth",
+          "display_name": "Redacted Playa Bowls growth contact",
+          "role": "Chief Growth Officer",
+          "organization": "Playa Bowls",
+          "redaction_level": "redacted",
+          "evidence_refs": ["ev-ai103-description"]
+        }
+      ],
+      "inputs": [
+        {
+          "id": "input-playa-email-thread",
+          "input_type": "email",
+          "source": {
+            "source_type": "gmail",
+            "source_ref": "gmail:thread:19e6cbe11a4f708f",
+            "source_label": "Playa Bowls active thread",
+            "raw_available_outside_repo": true
+          },
+          "observed_at": "2026-06-10T07:57:45Z",
+          "title": "Playa Bowls meeting coordination and opportunity discussion",
+          "normalized_summary": "Thread captures China opportunity discussion, potential regional development structure, and meeting coordination.",
+          "redaction_level": "metadata_only",
+          "evidence_refs": ["ev-ai103-playa-thread"]
+        },
+        {
+          "id": "input-playa-meeting-note-placeholder",
+          "input_type": "meeting_note",
+          "source": {
+            "source_type": "manual_entry",
+            "source_ref": "manual:future-meeting-note:playa-bowls",
+            "source_label": "Placeholder for post-call notes",
+            "raw_available_outside_repo": false
+          },
+          "observed_at": "2026-06-19T00:00:00Z",
+          "title": "Post-call note slot",
+          "normalized_summary": "Fixture reserves a non-email input for future meeting notes so the schema is not email-only.",
+          "redaction_level": "redacted",
+          "evidence_refs": ["ev-schema-non-email-requirement"]
+        },
+        {
+          "id": "input-playa-positioning-attachment",
+          "input_type": "attachment",
+          "source": {
+            "source_type": "multica_attachment",
+            "source_ref": "multica:attachment:019eb0ca-20e2-7758-83fe-b226a83982d6",
+            "source_label": "Unified positioning document",
+            "raw_available_outside_repo": true
+          },
+          "observed_at": "2026-06-10T09:08:17Z",
+          "title": "Unified request and positioning attachment",
+          "normalized_summary": "Attachment is referenced as source material for outbound positioning; raw attachment is not committed.",
+          "redaction_level": "metadata_only",
+          "evidence_refs": ["ev-ai103-positioning-attachment"]
+        },
+        {
+          "id": "input-playa-operating-note",
+          "input_type": "manual_note",
+          "source": {
+            "source_type": "multica_issue",
+            "source_ref": "multica:issue:AI-103",
+            "source_label": "AI-103 issue description",
+            "raw_available_outside_repo": true
+          },
+          "observed_at": "2026-06-10T07:57:45Z",
+          "title": "Active operating state for Playa Bowls",
+          "normalized_summary": "Issue description records meeting time, contact role, key topics, and waiting state.",
+          "redaction_level": "redacted",
+          "evidence_refs": ["ev-ai103-description"]
+        }
+      ],
+      "evidence": [
+        {
+          "id": "ev-ai103-description",
+          "source_ref": "multica:issue:AI-103",
+          "evidence_type": "issue_id",
+          "supports": ["stage-playa-meeting-scheduled", "claim-playa-meeting-confirmed", "claim-playa-discussion-topics"],
+          "confidence": "derived"
+        },
+        {
+          "id": "ev-ai103-playa-thread",
+          "source_ref": "gmail:thread:19e6cbe11a4f708f",
+          "evidence_type": "thread_id",
+          "supports": ["claim-playa-has-active-thread", "stage-playa-meeting-scheduled"],
+          "confidence": "source"
+        },
+        {
+          "id": "ev-ai103-positioning-attachment",
+          "source_ref": "multica:attachment:019eb0ca-20e2-7758-83fe-b226a83982d6",
+          "evidence_type": "attachment_id",
+          "supports": ["claim-positioning-attachment-exists"],
+          "confidence": "source"
+        },
+        {
+          "id": "ev-schema-non-email-requirement",
+          "source_ref": "multica:issue:AI-111",
+          "evidence_type": "issue_id",
+          "supports": ["input-playa-meeting-note-placeholder"],
+          "confidence": "source"
+        }
+      ],
+      "actions": [
+        {
+          "id": "action-playa-prepare-meeting",
+          "action_type": "prepare_meeting",
+          "status": "suggested",
+          "title": "Prepare China opportunity and supply-chain discussion notes",
+          "rationale": "AI-103 records topics around regional development, proprietary products, import versus localization, and pilot-first collaboration.",
+          "requires_human_confirmation": false,
+          "evidence_refs": ["ev-ai103-description", "ev-ai103-playa-thread"]
+        },
+        {
+          "id": "action-playa-send-meeting-link",
+          "action_type": "schedule_meeting",
+          "status": "needs_human_confirmation",
+          "title": "Send selected meeting-tool link after tool choice is confirmed",
+          "rationale": "Sending a calendar or meeting link is an external action and must remain human-confirmed.",
+          "requires_human_confirmation": true,
+          "evidence_refs": ["ev-ai103-description"]
+        }
+      ],
+      "claims": [
+        {
+          "id": "claim-playa-has-active-thread",
+          "statement": "Playa Bowls has an active Gmail thread tracked under AI-103.",
+          "claim_type": "workflow_state",
+          "evidence_refs": ["ev-ai103-playa-thread"]
+        },
+        {
+          "id": "claim-playa-meeting-confirmed",
+          "statement": "The AI-103 operating record contains a confirmed Playa Bowls meeting window and a pending meeting-tool step.",
+          "claim_type": "workflow_state",
+          "evidence_refs": ["ev-ai103-description"]
+        },
+        {
+          "id": "claim-playa-discussion-topics",
+          "statement": "The active record identifies pilot-first cooperation, China opportunity, proprietary product supply, and localization as meeting topics.",
+          "claim_type": "recommendation",
+          "evidence_refs": ["ev-ai103-description"]
+        },
+        {
+          "id": "claim-positioning-attachment-exists",
+          "statement": "AI-103 includes an attachment for unified positioning material, referenced by attachment ID only.",
+          "claim_type": "workflow_state",
+          "evidence_refs": ["ev-ai103-positioning-attachment"]
+        }
+      ]
+    }
+  ]
+}
