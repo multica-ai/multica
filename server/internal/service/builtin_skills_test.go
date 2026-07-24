@@ -543,7 +543,8 @@ func TestFocusedTestingSkillUsesStackSpecificProgressiveDisclosure(t *testing.T)
 		"runner-native focused selector",
 		"Do not guess whether a wrapper",
 		"forwards separators or positional arguments",
-		"Never impose\n`expected_file_count=1`",
+		"Never impose",
+		"`expected_file_count=1` on a runner that does not discover by file",
 		"read exactly the matching reference",
 		"Do not borrow a template from another stack",
 	} {
