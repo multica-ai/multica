@@ -2742,7 +2742,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// the requester's workspace since the task started — more robust than
 	// parsing the agent's stdout for an identifier.
 	if qc, ok := s.parseQuickCreateContext(task); ok {
-		s.notifyQuickCreateCompleted(ctx, task, qc)
+		s.notifyQuickCreateCompleted(ctx, task, qc, result)
 	}
 
 	// For chat tasks, broadcast chat:done AFTER commit. The single assistant
@@ -4280,6 +4280,40 @@ func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCrea
 	return qc, true
 }
 
+// maxQuickCreateFailureDetailRunes bounds the failure reason lifted from a
+// quick-create task's final output. A genuine CLI error (a duplicate message,
+// a validation error) is short; an output far larger than this is a runaway
+// raw-stream dump whose head is process narration rather than the real reason
+// (same failure mode as GH #5455), so it is dropped to a generic notice rather
+// than surfaced as the error.
+const maxQuickCreateFailureDetailRunes = 2000
+
+const quickCreateOversizedFailureDetail = "Quick create failed, but the agent's output was too large to show the reason safely. Check the task's execution log for details."
+
+// quickCreateFailureDetail extracts a user-facing failure reason from a
+// quick-create task's final output. The quick-create prompt instructs the agent
+// to exit with the CLI error as its only output when `multica issue create`
+// fails, so this normally carries the real reason (e.g. an active-duplicate
+// message naming the existing issue). Returns "" when there is no usable output
+// so the caller falls back to a generic message; redaction is applied by
+// notifyQuickCreateFailed.
+func quickCreateFailureDetail(result []byte) string {
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(result, &payload); err != nil {
+		return ""
+	}
+	// Same unescape as the comment-fallback path: literal `\n` sequences from
+	// agent stdout become real newlines before the reason reaches the user.
+	body := strings.TrimSpace(util.UnescapeBackslashEscapes(payload.Output))
+	if body == "" {
+		return ""
+	}
+	if utf8.RuneCountInString(body) > maxQuickCreateFailureDetailRunes {
+		return quickCreateOversizedFailureDetail
+	}
+	return body
+}
+
 // notifyQuickCreateCompleted writes a success inbox notification to the
 // requester pointing at the issue the agent just created. The issue is
 // stamped with origin_type=quick_create + origin_id=<task_id> by the
@@ -4287,7 +4321,7 @@ func (s *TaskService) parseQuickCreateContext(task db.AgentTaskQueue) (QuickCrea
 // deterministic — robust against the same agent creating other issues in
 // parallel (e.g. assignment task running while max_concurrent_tasks > 1
 // permits another quick-create alongside it).
-func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateContext) {
+func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateContext, result []byte) {
 	requesterID, err := util.ParseUUID(qc.RequesterID)
 	if err != nil {
 		slog.Warn("quick-create completion: invalid requester id", "task_id", util.UUIDToString(task.ID), "error", err)
@@ -4304,14 +4338,35 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		OriginID:    task.ID,
 	})
 	if err != nil {
-		// No issue created — agent ran to completion but the CLI call must
-		// have failed. Surface as a failure inbox so the user sees something.
+		if !errors.Is(err, pgx.ErrNoRows) {
+			// The lookup itself failed (DB fault, timeout, …), not a confirmed
+			// "no issue". The agent may well have created the issue, so writing
+			// a failure inbox here would both mislead the user and bury a real
+			// issue. Log and bail: the success inbox is lost, but no false
+			// failure is emitted.
+			slog.Error("quick-create completion: issue lookup failed",
+				"task_id", util.UUIDToString(task.ID),
+				"agent_id", util.UUIDToString(task.AgentID),
+				"workspace_id", qc.WorkspaceID,
+				"error", err,
+			)
+			return
+		}
+		// No issue created — the agent ran to completion but the CLI create
+		// call must have failed (most often the active-duplicate guard). The
+		// quick-create prompt tells the agent to exit with the CLI error as its
+		// only output, so prefer that as the failure reason instead of a
+		// generic string; fall back to notifyQuickCreateFailed's own default
+		// when the output is empty. This is what turns the opaque "agent
+		// finished without creating an issue" into the concrete reason (#5885).
+		detail := quickCreateFailureDetail(result)
 		slog.Warn("quick-create completion: no issue found, writing failure inbox",
 			"task_id", util.UUIDToString(task.ID),
 			"agent_id", util.UUIDToString(task.AgentID),
 			"workspace_id", qc.WorkspaceID,
+			"has_detail", detail != "",
 		)
-		s.notifyQuickCreateFailed(ctx, task, qc, "agent finished without creating an issue")
+		s.notifyQuickCreateFailed(ctx, task, qc, detail)
 		return
 	}
 
