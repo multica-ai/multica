@@ -1221,11 +1221,11 @@ const runtimeVersionProbeConcurrency = 8
 // instead of their sum, so a freshly-created workspace lights up its runtimes
 // well inside the UI's scanning window.
 //
-// Each probe still self-heals a vanished pinned path (MUL-4486) and re-detects
-// the live version — no result is cached across registrations, so an in-place
-// CLI upgrade is still reported with its current version. A probe that fails to
-// detect a version or is below the minimum supported version is logged and
-// skipped, exactly as the serial loop did.
+// Each probe still self-heals a vanished pinned path (MUL-4486). Versions
+// detected during an earlier registration (e.g., workspace 1 of N during
+// startup) are reused by later registrations so the daemon spawns at most M
+// --version subprocesses instead of N×M (#5837). A probe that fails to detect
+// a version or is below the minimum supported version is logged and skipped.
 func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string {
 	type detected struct {
 		name    string
@@ -1243,10 +1243,21 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string 
 			// Self-heal a pinned executable path an in-place upgrade deleted
 			// (MUL-4486) so version detection — and thus staying
 			// registered/online — recovers without a daemon restart.
-			// resolveAgentEntry already version-gates the healed binary; the
-			// detect + min-version check below still runs to produce the
-			// version string this registration reports.
-			entry, _ = d.resolveAgentEntry(ctx, name, entry)
+			entry, resolvedVersion := d.resolveAgentEntry(ctx, name, entry)
+			// Reuse a version that was already probed and min-version-checked
+			// for this provider earlier in the same daemon run (e.g., by a
+			// prior workspace's registration during startup). setAgentVersion
+			// is only called after the binary passes both detectAgentVersion
+			// and checkAgentMinVersion, so a non-empty cached value is safe to
+			// skip re-probing. This reduces N-workspace × M-agent startup
+			// overhead from N×M --version spawns to at most M (fixes #5837).
+			if resolvedVersion != "" {
+				d.logger.Debug("agent version from cache", "name", name, "version", resolvedVersion, "path", entry.Path)
+				mu.Lock()
+				results = append(results, detected{name: name, version: resolvedVersion})
+				mu.Unlock()
+				return nil
+			}
 			version, err := detectAgentVersion(ctx, entry.Path)
 			if err != nil {
 				d.logger.Warn("skip registering runtime", "name", name, "error", err)
