@@ -116,6 +116,15 @@ cleared_issue_properties AS (
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 ),
+ws_github_prs AS (
+    SELECT id FROM github_pull_request WHERE workspace_id = $1
+),
+cleared_github_pr_check_runs AS (
+    -- github_pull_request_check_run intentionally has no FK. Remove its rows
+    -- before the workspace delete cascades away the parent PR mirrors.
+    DELETE FROM github_pull_request_check_run
+    WHERE pr_id IN (SELECT id FROM ws_github_prs)
+),
 ws_vcs_prs AS (
     SELECT id FROM vcs_pull_request WHERE workspace_id = $1
 ),

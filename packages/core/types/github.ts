@@ -59,6 +59,8 @@ export interface GitHubInstallation {
 
 export interface GitHubPullRequest {
   id: string;
+  /** Source provider. Older GitHub-only backends omit it. */
+  provider?: "github" | "forgejo" | "gitea" | "gitlab";
   workspace_id: string;
   repo_owner: string;
   repo_name: string;
@@ -79,9 +81,14 @@ export interface GitHubPullRequest {
   /** GitHub's `mergeStateStatus` from the snapshot. Source of the "Ready to
    * merge" claim (only when `clean`); older backends omit it. */
   merge_state_status?: GitHubPullRequestMergeStateStatus | null;
-  /** GitHub's overall CI rollup verdict from the snapshot. `null`/absent means
-   * NO checks yet — never treat absence as passed. */
+  /** GitHub's overall CI rollup verdict from the snapshot. `null` means no
+   * checks only when `snapshot_available === true`; absence alone is not a
+   * positive or "no checks" verdict. */
   checks_rollup?: GitHubPullRequestChecksRollup | null;
+  /** True only when the GitHub API snapshot feature is enabled and the stored
+   * snapshot belongs to this PR's current head. False means the CI/merge
+   * snapshot region must be hidden; omitted preserves legacy provider output. */
+  snapshot_available?: boolean;
   /** Check counts from the snapshot. Older backends omit these; treat absence
    * as 0. `checks_total` is 0 when no checks have been reported. */
   checks_total?: number;

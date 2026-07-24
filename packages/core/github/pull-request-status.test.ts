@@ -57,12 +57,49 @@ describe("deriveChecksStatus", () => {
     });
   });
 
-  it("renders `none` when the rollup is absent — never passed", () => {
-    // Critical: an absent snapshot must never read as a green build, even if a
-    // legacy passed count leaks through.
-    expect(deriveChecksStatus({}).kind).toBe("none");
-    expect(deriveChecksStatus({ checks_rollup: null }).kind).toBe("none");
-    expect(deriveChecksStatus({ checks_passed: 5, checks_total: 5 }).kind).toBe("none");
+  it("renders `none` only for a current snapshot whose rollup is absent", () => {
+    expect(deriveChecksStatus({ snapshot_available: true }).kind).toBe("none");
+    expect(
+      deriveChecksStatus({
+        snapshot_available: true,
+        checks_rollup: null,
+        checks_passed: 5,
+        checks_total: 5,
+      }).kind,
+    ).toBe("none");
+  });
+
+  it("hides CI when the API snapshot is disabled or has not landed", () => {
+    expect(deriveChecksStatus({}).kind).toBe("unavailable");
+    expect(
+      deriveChecksStatus({
+        snapshot_available: false,
+        checks_rollup: "success",
+        checks_conclusion: "passed",
+        checks_total: 5,
+      }).kind,
+    ).toBe("unavailable");
+  });
+
+  it("preserves legacy provider passed, pending, and failed conclusions", () => {
+    expect(
+      deriveChecksStatus({ checks_conclusion: "passed", checks_total: 3 }),
+    ).toEqual({ kind: "passed", total: 3 });
+    expect(
+      deriveChecksStatus({
+        checks_conclusion: "pending",
+        checks_total: 3,
+        checks_passed: 2,
+        checks_pending: 1,
+      }),
+    ).toEqual({ kind: "pending", passed: 2, total: 3, running: 1 });
+    expect(
+      deriveChecksStatus({
+        checks_conclusion: "failed",
+        checks_total: 3,
+        checks_failed: 1,
+      }).kind,
+    ).toBe("failed");
   });
 });
 
@@ -99,6 +136,16 @@ describe("deriveMergeStatus", () => {
     expect(deriveMergeStatus({ mergeable: "unknown" }).kind).toBe("none");
     expect(deriveMergeStatus({ mergeable: null, merge_state_status: "unknown" }).kind).toBe("none");
     expect(deriveMergeStatus({ merge_state_status: "draft" }).kind).toBe("none");
+  });
+
+  it("renders nothing when the API snapshot feature is unavailable", () => {
+    expect(
+      deriveMergeStatus({
+        snapshot_available: false,
+        mergeable: "conflicting",
+        merge_state_status: "dirty",
+      }).kind,
+    ).toBe("none");
   });
 
   it("conflict wins over an otherwise decisive merge state", () => {

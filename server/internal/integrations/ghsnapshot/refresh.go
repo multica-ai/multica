@@ -68,10 +68,14 @@ type Manager struct {
 
 	queue chan address
 
-	mu        sync.Mutex
-	active    map[address]bool // queued OR in-flight → coalesce (single in-flight per PR)
-	attempts  map[address]int  // chase attempts for the current undecided window
-	rateUntil time.Time        // global pause after a secondary rate limit
+	mu       sync.Mutex
+	active   map[address]bool // queued OR in-flight → coalesce (single in-flight per PR)
+	inFlight map[address]bool
+	trailing map[address]bool // one event that arrived while active; replay once after the current fetch
+	attempts map[address]int  // chase attempts for the current undecided window
+	// Secondary rate limits are scoped to the installation whose token incurred
+	// them. One customer must never pause every other installation.
+	rateUntil map[int64]time.Time
 
 	ctx     context.Context
 	started bool
@@ -97,7 +101,10 @@ func NewManager(client *Client, queries *db.Queries, pool TxBeginner, onApplied 
 		fetch:         FetchPRSnapshot,
 		queue:         make(chan address, queueBuffer),
 		active:        map[address]bool{},
+		inFlight:      map[address]bool{},
+		trailing:      map[address]bool{},
 		attempts:      map[address]int{},
+		rateUntil:     map[int64]time.Time{},
 	}
 }
 
@@ -125,9 +132,13 @@ func (m *Manager) Start(ctx context.Context) {
 	go m.sweepLoop(ctx)
 }
 
-// Enqueue schedules a refresh for a PR address. Coalesces: if the address is
-// already queued or in flight, this is a no-op (single in-flight per PR). Never
-// blocks the caller.
+// Enqueue schedules a refresh for a PR address. Repeated events coalesce, but
+// an event that arrives while the address is queued or in flight leaves one
+// trailing refresh behind. That trailing edge matters when a synchronize event
+// advances the head while the old head's request is still running: the guarded
+// old response is discarded, then the new head is fetched immediately. At most
+// one request per address is in flight, and at most one trailing request is
+// retained. Never blocks the caller.
 func (m *Manager) Enqueue(installationID int64, owner, repo string, number int32) {
 	if !m.Enabled() {
 		return
@@ -135,6 +146,9 @@ func (m *Manager) Enqueue(installationID int64, owner, repo string, number int32
 	addr := address{InstallationID: installationID, Owner: owner, Repo: repo, Number: number}
 	m.mu.Lock()
 	if m.active[addr] {
+		if m.inFlight[addr] {
+			m.trailing[addr] = true
+		}
 		m.mu.Unlock()
 		return
 	}
@@ -148,6 +162,8 @@ func (m *Manager) Enqueue(installationID int64, owner, repo string, number int32
 		// rather than block a webhook handler. Unmark so it can be re-enqueued.
 		m.mu.Lock()
 		delete(m.active, addr)
+		delete(m.inFlight, addr)
+		delete(m.trailing, addr)
 		m.mu.Unlock()
 		slog.Warn("ghsnapshot: refresh queue full, dropping enqueue")
 	}
@@ -172,19 +188,19 @@ func (m *Manager) worker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case addr := <-m.queue:
-			m.process(ctx, addr)
 			m.mu.Lock()
-			delete(m.active, addr)
+			m.inFlight[addr] = true
 			m.mu.Unlock()
+			m.process(ctx, addr)
+			m.finish(addr)
 		}
 	}
 }
 
 func (m *Manager) process(ctx context.Context, addr address) {
-	// Global secondary-rate-limit pause + per-request jitter to smooth bursts.
-	m.mu.Lock()
-	pause := m.rateUntil.Sub(m.now())
-	m.mu.Unlock()
+	// Installation-scoped secondary-rate-limit pause + per-request jitter to
+	// smooth bursts.
+	pause := m.rateLimitPause(addr.InstallationID)
 	if pause > 0 {
 		if !sleepCtx(ctx, pause) {
 			return
@@ -200,10 +216,10 @@ func (m *Manager) process(ctx context.Context, addr address) {
 	if err != nil {
 		var rl *RateLimitError
 		if asRateLimit(err, &rl) {
-			m.mu.Lock()
-			m.rateUntil = m.now().Add(rl.RetryAfter)
-			m.mu.Unlock()
-			m.scheduleRetry(addr, rl.RetryAfter)
+			m.extendRateLimit(addr.InstallationID, rl.RetryAfter)
+			// Do not create an unbounded retry loop for a persistently limited
+			// installation. The bounded TTL sweep (open/draft PRs only) or the
+			// next webhook/view event hands the address back after Retry-After.
 			return
 		}
 		// Transient/GitHub failure: keep the last-known snapshot (the row is
@@ -254,6 +270,50 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		m.mu.Lock()
 		delete(m.attempts, addr)
 		m.mu.Unlock()
+	}
+}
+
+func (m *Manager) rateLimitPause(installationID int64) time.Duration {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.rateUntil[installationID].Sub(m.now())
+}
+
+func (m *Manager) extendRateLimit(installationID int64, retryAfter time.Duration) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	until := m.now().Add(retryAfter)
+	if until.After(m.rateUntil[installationID]) {
+		m.rateUntil[installationID] = until
+	}
+}
+
+// finish releases an address after a worker completes it, or turns the single
+// coalesced trailing edge into the next queued refresh without ever allowing
+// two workers to own the same address concurrently.
+func (m *Manager) finish(addr address) {
+	m.mu.Lock()
+	if !m.trailing[addr] {
+		delete(m.active, addr)
+		delete(m.inFlight, addr)
+		m.mu.Unlock()
+		return
+	}
+	delete(m.trailing, addr)
+	delete(m.inFlight, addr)
+	m.mu.Unlock()
+
+	select {
+	case m.queue <- addr:
+	default:
+		// The worker just consumed one slot, so saturation is unlikely, but keep
+		// the webhook path non-blocking and let the TTL sweep recover.
+		m.mu.Lock()
+		delete(m.active, addr)
+		delete(m.inFlight, addr)
+		delete(m.trailing, addr)
+		m.mu.Unlock()
+		slog.Warn("ghsnapshot: refresh queue full, dropping trailing enqueue")
 	}
 }
 

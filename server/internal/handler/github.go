@@ -92,6 +92,12 @@ type GitHubPullRequestResponse struct {
 	// "dirty" | "blocked" | "behind" | "unstable" | "draft" | "has_hooks" |
 	// "unknown" | null. "Ready to merge" is derived ONLY from "clean".
 	MergeStateStatus *string `json:"merge_state_status"`
+	// SnapshotAvailable distinguishes a current API snapshot from both
+	// "feature disabled / not fetched yet" and "a current snapshot whose
+	// statusCheckRollup is null". Only the last case may render "no checks".
+	// It is omitted for non-GitHub providers, which keep their webhook-derived
+	// checks_conclusion compatibility path.
+	SnapshotAvailable *bool `json:"snapshot_available,omitempty"`
 	// ChecksRollup is GitHub's overall CI verdict, lowercased: "success" |
 	// "failure" | "pending" | "error" | "expected" | null. null means
 	// statusCheckRollup was null (no checks yet) and must NEVER render as
@@ -156,51 +162,10 @@ func githubInstallationToBroadcast(i db.GithubInstallation) GitHubInstallationRe
 	return resp
 }
 
-func githubPullRequestToResponse(p db.GithubPullRequest) GitHubPullRequestResponse {
-	return GitHubPullRequestResponse{
-		ID:              uuidToString(p.ID),
-		Provider:        "github",
-		WorkspaceID:     uuidToString(p.WorkspaceID),
-		RepoOwner:       p.RepoOwner,
-		RepoName:        p.RepoName,
-		Number:          p.PrNumber,
-		Title:           p.Title,
-		State:           p.State,
-		HtmlURL:         p.HtmlUrl,
-		Branch:          textToPtr(p.Branch),
-		AuthorLogin:     textToPtr(p.AuthorLogin),
-		AuthorAvatarURL: textToPtr(p.AuthorAvatarUrl),
-		MergedAt:        timestampToPtr(p.MergedAt),
-		ClosedAt:        timestampToPtr(p.ClosedAt),
-		PRCreatedAt:     timestampToString(p.PrCreatedAt),
-		PRUpdatedAt:     timestampToString(p.PrUpdatedAt),
-		MergeableState:  textToPtr(p.MergeableState),
-		// A bare PR row has no aggregated check counts — webhook broadcasts of a
-		// single PR fall through here and the frontend re-queries the list for
-		// the full snapshot (mergeable / rollup / counts).
-		ChecksConclusion: nil,
-		FailedCheckNames: []string{},
-		Additions:        p.Additions,
-		Deletions:        p.Deletions,
-		ChangedFiles:     p.ChangedFiles,
-	}
-}
-
-// prSnapshotStaleThreshold is how old an open PR's last successful fetch may be
-// before the card greys it out as stale. Healthy pipelines refresh open PRs at
-// least every sweep interval (~10m), so crossing 30m means refreshes are not
-// landing (GitHub outage, revoked key) and the shown data is last-known.
-const prSnapshotStaleThreshold = 30 * time.Minute
-
-func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow) GitHubPullRequestResponse {
-	stale := false
-	if p.SnapshotFetchedAt.Valid && (p.State == "open" || p.State == "draft") {
-		stale = time.Since(p.SnapshotFetchedAt.Time) > prSnapshotStaleThreshold
-	}
-	failedNames := p.FailedCheckNames
-	if failedNames == nil {
-		failedNames = []string{}
-	}
+func githubPullRequestToResponse(p db.GithubPullRequest, snapshotEnabled bool) GitHubPullRequestResponse {
+	snapshotAvailable := currentGitHubSnapshotAvailable(
+		snapshotEnabled, p.HeadSha, p.SnapshotHeadSha, p.SnapshotFetchedAt,
+	)
 	return GitHubPullRequestResponse{
 		ID:                uuidToString(p.ID),
 		Provider:          "github",
@@ -219,22 +184,84 @@ func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow) GitHubPullRe
 		PRCreatedAt:       timestampToString(p.PrCreatedAt),
 		PRUpdatedAt:       timestampToString(p.PrUpdatedAt),
 		MergeableState:    textToPtr(p.MergeableState),
-		Mergeable:         lowerTextPtr(p.ApiMergeable),
-		MergeStateStatus:  lowerTextPtr(p.ApiMergeStateStatus),
-		ChecksRollup:      lowerTextPtr(p.ChecksRollupState),
-		ChecksConclusion:  rollupToConclusion(p.ChecksRollupState, p.ChecksFailed, p.ChecksRunning, p.ChecksPassed),
-		ChecksTotal:       p.ChecksTotal,
-		ChecksPassed:      p.ChecksPassed,
-		ChecksFailed:      p.ChecksFailed,
-		ChecksRunning:     p.ChecksRunning,
-		ChecksPending:     p.ChecksRunning,
-		FailedCheckNames:  failedNames,
+		SnapshotAvailable: &snapshotAvailable,
+		// A bare PR row has no aggregated check counts — webhook broadcasts of a
+		// single PR fall through here and the frontend re-queries the list for
+		// the full snapshot (mergeable / rollup / counts).
+		ChecksConclusion: nil,
+		FailedCheckNames: []string{},
+		Additions:        p.Additions,
+		Deletions:        p.Deletions,
+		ChangedFiles:     p.ChangedFiles,
+	}
+}
+
+// prSnapshotStaleThreshold is how old an open PR's last successful fetch may be
+// before the card greys it out as stale. Healthy pipelines refresh open PRs at
+// least every sweep interval (~10m), so crossing 30m means refreshes are not
+// landing (GitHub outage, revoked key) and the shown data is last-known.
+const prSnapshotStaleThreshold = 30 * time.Minute
+
+func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow, snapshotEnabled bool) GitHubPullRequestResponse {
+	snapshotAvailable := currentGitHubSnapshotAvailable(
+		snapshotEnabled, p.HeadSha, p.SnapshotHeadSha, p.SnapshotFetchedAt,
+	)
+	stale := false
+	if snapshotAvailable && (p.State == "open" || p.State == "draft") {
+		stale = time.Since(p.SnapshotFetchedAt.Time) > prSnapshotStaleThreshold
+	}
+	failedNames := p.FailedCheckNames
+	if failedNames == nil {
+		failedNames = []string{}
+	}
+	resp := GitHubPullRequestResponse{
+		ID:                uuidToString(p.ID),
+		Provider:          "github",
+		WorkspaceID:       uuidToString(p.WorkspaceID),
+		RepoOwner:         p.RepoOwner,
+		RepoName:          p.RepoName,
+		Number:            p.PrNumber,
+		Title:             p.Title,
+		State:             p.State,
+		HtmlURL:           p.HtmlUrl,
+		Branch:            textToPtr(p.Branch),
+		AuthorLogin:       textToPtr(p.AuthorLogin),
+		AuthorAvatarURL:   textToPtr(p.AuthorAvatarUrl),
+		MergedAt:          timestampToPtr(p.MergedAt),
+		ClosedAt:          timestampToPtr(p.ClosedAt),
+		PRCreatedAt:       timestampToString(p.PrCreatedAt),
+		PRUpdatedAt:       timestampToString(p.PrUpdatedAt),
+		MergeableState:    textToPtr(p.MergeableState),
+		SnapshotAvailable: &snapshotAvailable,
+		FailedCheckNames:  []string{},
 		SnapshotStale:     stale,
-		SnapshotFetchedAt: timestampToPtr(p.SnapshotFetchedAt),
 		Additions:         p.Additions,
 		Deletions:         p.Deletions,
 		ChangedFiles:      p.ChangedFiles,
 	}
+	if snapshotAvailable {
+		resp.Mergeable = lowerTextPtr(p.ApiMergeable)
+		resp.MergeStateStatus = lowerTextPtr(p.ApiMergeStateStatus)
+		resp.ChecksRollup = lowerTextPtr(p.ChecksRollupState)
+		resp.ChecksConclusion = rollupToConclusion(p.ChecksRollupState, p.ChecksFailed, p.ChecksRunning, p.ChecksPassed)
+		resp.ChecksTotal = p.ChecksTotal
+		resp.ChecksPassed = p.ChecksPassed
+		resp.ChecksFailed = p.ChecksFailed
+		resp.ChecksRunning = p.ChecksRunning
+		resp.ChecksPending = p.ChecksRunning
+		resp.FailedCheckNames = failedNames
+		resp.SnapshotFetchedAt = timestampToPtr(p.SnapshotFetchedAt)
+	}
+	return resp
+}
+
+func currentGitHubSnapshotAvailable(
+	enabled bool,
+	headSHA string,
+	snapshotHeadSHA string,
+	fetchedAt pgtype.Timestamptz,
+) bool {
+	return enabled && fetchedAt.Valid && snapshotHeadSHA != "" && snapshotHeadSHA == headSHA
 }
 
 // aggregateChecksConclusion collapses per-PR commit-status counts into a
@@ -669,14 +696,17 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	}
 	out := make([]GitHubPullRequestResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, issuePullRequestRowToResponse(row))
+		out = append(out, issuePullRequestRowToResponse(row, h.PRRefresh.Enabled()))
 		// Page-visit trigger (MUL-5265): if this card's snapshot is missing or
 		// older than the view TTL, kick an async refresh. Non-blocking — the
 		// current (possibly stale) response is returned immediately and the
 		// fresh snapshot arrives via the pull_request:updated realtime event.
 		h.PRRefresh.MaybeEnqueueOnView(
 			row.InstallationID, row.RepoOwner, row.RepoName, row.PrNumber,
-			row.SnapshotFetchedAt.Time, row.SnapshotFetchedAt.Valid,
+			row.SnapshotFetchedAt.Time,
+			row.SnapshotFetchedAt.Valid &&
+				row.SnapshotHeadSha != "" &&
+				row.SnapshotHeadSha == row.HeadSha,
 		)
 	}
 	// PRs from token-based providers (Forgejo / Gitea / GitLab) share the same
@@ -715,7 +745,7 @@ func (h *Handler) broadcastPRSnapshotApplied(ctx context.Context, prID pgtype.UU
 		linked = append(linked, uuidToString(id))
 	}
 	h.publish(protocol.EventPullRequestUpdated, uuidToString(pr.WorkspaceID), "system", "", map[string]any{
-		"pull_request":     githubPullRequestToResponse(pr),
+		"pull_request":     githubPullRequestToResponse(pr, h.PRRefresh.Enabled()),
 		"linked_issue_ids": linked,
 	})
 }
@@ -1113,7 +1143,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 	}
 
 	workspaceID := uuidToString(wsID)
-	resp := githubPullRequestToResponse(pr)
+	resp := githubPullRequestToResponse(pr, h.PRRefresh.Enabled())
 
 	// Auto-link: scan title/body/branch for issue identifiers, look them
 	// up in this workspace, attach the link rows. Idempotent (ON CONFLICT

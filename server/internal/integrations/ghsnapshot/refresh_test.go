@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
+	"errors"
 	"testing"
 	"time"
 )
@@ -70,8 +71,9 @@ func TestMaybeEnqueueOnViewRespectsTTL(t *testing.T) {
 	}
 }
 
-// TestProcessRateLimitedSetsPause proves a rate-limited fetch pauses the whole
-// pipeline until Retry-After elapses (acceptance criterion 3) and writes nothing.
+// TestProcessRateLimitedSetsPause proves a rate-limited fetch pauses only that
+// installation until Retry-After elapses (acceptance criterion 3) and writes
+// nothing.
 func TestProcessRateLimitedSetsPause(t *testing.T) {
 	m := NewManager(enabledClient(t), nil, nil, nil)
 	now := time.Unix(20000, 0)
@@ -88,8 +90,64 @@ func TestProcessRateLimitedSetsPause(t *testing.T) {
 	// rate-limit path never touches storage.
 	m.process(ctx, address{InstallationID: 1, Owner: "o", Repo: "r", Number: 1})
 
-	if got := m.rateUntil; !got.Equal(now.Add(90 * time.Second)) {
+	if got := m.rateUntil[1]; !got.Equal(now.Add(90 * time.Second)) {
 		t.Fatalf("rateUntil = %v, want %v", got, now.Add(90*time.Second))
+	}
+}
+
+func TestRateLimitDeadlineNeverShortens(t *testing.T) {
+	m := NewManager(enabledClient(t), nil, nil, nil)
+	now := time.Unix(21000, 0)
+	m.now = func() time.Time { return now }
+
+	m.extendRateLimit(1, 90*time.Second)
+	m.extendRateLimit(1, 30*time.Second)
+	if got := m.rateUntil[1]; !got.Equal(now.Add(90 * time.Second)) {
+		t.Fatalf("shorter Retry-After replaced deadline: %v", got)
+	}
+
+	m.extendRateLimit(1, 2*time.Minute)
+	if got := m.rateUntil[1]; !got.Equal(now.Add(2 * time.Minute)) {
+		t.Fatalf("later Retry-After was not retained: %v", got)
+	}
+}
+
+func TestRateLimitIsolatedByInstallation(t *testing.T) {
+	m := NewManager(enabledClient(t), nil, nil, nil)
+	now := time.Unix(22000, 0)
+	m.now = func() time.Time { return now }
+	m.jitter = func() time.Duration { return 0 }
+	m.extendRateLimit(1, time.Hour)
+
+	called := false
+	m.fetch = func(context.Context, *Client, int64, string, string, int32) (*PRSnapshot, error) {
+		called = true
+		return nil, errors.New("stop after fetch")
+	}
+	m.process(context.Background(), address{InstallationID: 2, Owner: "o", Repo: "r", Number: 1})
+	if !called {
+		t.Fatal("installation 1 rate limit blocked installation 2")
+	}
+	if pause := m.rateLimitPause(2); pause > 0 {
+		t.Fatalf("installation 2 unexpectedly paused for %v", pause)
+	}
+}
+
+func TestPersistentRateLimitReturnsToTTLSweep(t *testing.T) {
+	m := NewManager(enabledClient(t), nil, nil, nil)
+	m.jitter = func() time.Duration { return 0 }
+	m.ctx = context.Background()
+	m.fetch = func(context.Context, *Client, int64, string, string, int32) (*PRSnapshot, error) {
+		return nil, &RateLimitError{RetryAfter: time.Millisecond}
+	}
+
+	m.process(context.Background(), address{InstallationID: 1, Owner: "o", Repo: "r", Number: 1})
+	// The old implementation scheduled an unbounded direct retry here. The
+	// manager now records Retry-After and returns ownership to the bounded
+	// open/draft TTL sweep or a later external event.
+	time.Sleep(10 * time.Millisecond)
+	if len(m.queue) != 0 {
+		t.Fatalf("rate-limited fetch scheduled %d direct retries, want 0", len(m.queue))
 	}
 }
 

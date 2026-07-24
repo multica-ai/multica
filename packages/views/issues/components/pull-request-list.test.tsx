@@ -29,6 +29,7 @@ let mockPRs: GitHubPullRequest[] = [];
 function makePR(overrides: Partial<GitHubPullRequest> = {}): GitHubPullRequest {
   return {
     id: "pr-1",
+    provider: "github",
     workspace_id: "ws-1",
     repo_owner: "acme",
     repo_name: "widget",
@@ -45,6 +46,7 @@ function makePR(overrides: Partial<GitHubPullRequest> = {}): GitHubPullRequest {
     pr_updated_at: "2026-01-01T00:00:00Z",
     mergeable: null,
     merge_state_status: null,
+    snapshot_available: true,
     checks_rollup: null,
     checks_total: 0,
     checks_passed: 0,
@@ -103,6 +105,25 @@ describe("PullRequestList sidebar rows", () => {
     expect(screen.queryByText(/All checks passed/)).not.toBeInTheDocument();
   });
 
+  it("hides snapshot status when the GitHub App key is unavailable, even with old data", async () => {
+    mockPRs = [
+      makePR({
+        snapshot_available: false,
+        checks_rollup: "failure",
+        checks_conclusion: "failed",
+        checks_total: 2,
+        checks_failed: 2,
+        mergeable: "conflicting",
+        merge_state_status: "dirty",
+      }),
+    ];
+    renderList();
+    await waitForRender();
+    expect(screen.queryByText(/failed/)).not.toBeInTheDocument();
+    expect(screen.queryByText("No checks yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("Has merge conflicts")).not.toBeInTheDocument();
+  });
+
   it("renders failed count with the first failing check names", async () => {
     mockPRs = [
       makePR({
@@ -145,6 +166,32 @@ describe("PullRequestList sidebar rows", () => {
     expect(badge).toHaveTextContent("5/7");
     expect(badge).toHaveTextContent("2 running");
   });
+
+  it.each([
+    ["forgejo", "passed", "All checks passed (3/3)"],
+    ["gitea", "pending", "2/3 · 1 running"],
+    ["gitlab", "failed", "1/3 failed"],
+  ] as const)(
+    "preserves %s legacy %s check status",
+    async (provider, conclusion, expected) => {
+      mockPRs = [
+        makePR({
+          provider,
+          snapshot_available: undefined,
+          checks_rollup: undefined,
+          checks_conclusion: conclusion,
+          checks_total: 3,
+          checks_passed: conclusion === "passed" ? 3 : 2,
+          checks_failed: conclusion === "failed" ? 1 : 0,
+          checks_running: conclusion === "pending" ? 1 : 0,
+          checks_pending: conclusion === "pending" ? 1 : 0,
+        }),
+      ];
+      renderList();
+      await waitForRender();
+      expect(screen.getByText(expected, { exact: false })).toBeInTheDocument();
+    },
+  );
 
   // --- Mergeability element ------------------------------------------------
 

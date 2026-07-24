@@ -1,4 +1,5 @@
 import type {
+  GitHubPullRequestChecksConclusion,
   GitHubPullRequestChecksRollup,
   GitHubPullRequestMergeable,
   GitHubPullRequestMergeStateStatus,
@@ -23,38 +24,48 @@ import type {
 // CI status
 // ---------------------------------------------------------------------------
 
-// Discriminated union for the CI element. `none` is a first-class state ("no
-// checks yet") that must never be rendered as passed/green.
+// Discriminated union for the CI element. `none` is a current snapshot with no
+// checks; `unavailable` means there is no current snapshot region to render.
 export type PullRequestChecksStatus =
   | { kind: "failed"; failed: number; total: number; names: string[] }
   | { kind: "pending"; passed: number; total: number; running: number }
   | { kind: "passed"; total: number }
-  | { kind: "none" };
+  | { kind: "none" }
+  | { kind: "unavailable" };
 
 export interface PullRequestChecksInput {
+  snapshot_available?: boolean;
   checks_rollup?: GitHubPullRequestChecksRollup | null;
+  checks_conclusion?: GitHubPullRequestChecksConclusion | null;
   checks_total?: number;
   checks_passed?: number;
   checks_failed?: number;
   checks_running?: number;
+  checks_pending?: number;
   failed_check_names?: string[];
 }
 
 // Priority (high → low):
+//   0. explicitly unavailable snapshot             → unavailable
 //   1. rollup failure/error OR any failed count → failed
 //   2. rollup pending/expected                  → pending
 //   3. rollup success                           → passed
-//   4. otherwise (rollup null/absent)           → none  ("no checks yet")
+//   4. legacy provider conclusion               → matching coarse state
+//   5. current snapshot + null rollup            → none ("no checks yet")
+//   6. otherwise                                 → unavailable
 //
-// Failure trusts the count as well as the rollup so a known failure is surfaced
-// even if the rollup verdict lags; "passed" requires an explicit `success`
-// rollup so an absent snapshot is never mistaken for a green build.
+// Failure trusts the count as well as the rollup so a known legacy failure is
+// surfaced even if its coarse conclusion lags. An explicit false availability
+// gate always wins, so disabled or wrong-head GitHub data never leaks through.
 export function deriveChecksStatus(input: PullRequestChecksInput): PullRequestChecksStatus {
+  if (input.snapshot_available === false) {
+    return { kind: "unavailable" };
+  }
   const rollup = input.checks_rollup ?? null;
   const total = input.checks_total ?? 0;
   const passed = input.checks_passed ?? 0;
   const failed = input.checks_failed ?? 0;
-  const running = input.checks_running ?? 0;
+  const running = input.checks_running ?? input.checks_pending ?? 0;
   const names = input.failed_check_names ?? [];
 
   if (rollup === "failure" || rollup === "error" || failed > 0) {
@@ -66,7 +77,20 @@ export function deriveChecksStatus(input: PullRequestChecksInput): PullRequestCh
   if (rollup === "success") {
     return { kind: "passed", total };
   }
-  return { kind: "none" };
+  // Forgejo / Gitea / GitLab and older GitHub backends expose the coarse
+  // webhook-derived conclusion rather than a GraphQL rollup. Preserve those
+  // known passed/pending/failed states without confusing an absent API
+  // snapshot with a current "no checks" verdict.
+  if (input.checks_conclusion === "failed") {
+    return { kind: "failed", failed, total, names };
+  }
+  if (input.checks_conclusion === "pending") {
+    return { kind: "pending", passed, total, running };
+  }
+  if (input.checks_conclusion === "passed") {
+    return { kind: "passed", total };
+  }
+  return input.snapshot_available === true ? { kind: "none" } : { kind: "unavailable" };
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +110,7 @@ export type PullRequestMergeStatus =
   | { kind: "none" };
 
 export interface PullRequestMergeInput {
+  snapshot_available?: boolean;
   mergeable?: GitHubPullRequestMergeable | null;
   merge_state_status?: GitHubPullRequestMergeStateStatus | null;
 }
@@ -102,6 +127,7 @@ export interface PullRequestMergeInput {
 // from `mergeable === "mergeable"`, which does not account for required checks
 // or branch protection.
 export function deriveMergeStatus(input: PullRequestMergeInput): PullRequestMergeStatus {
+  if (input.snapshot_available === false) return { kind: "none" };
   const mergeable = input.mergeable ?? null;
   const mergeState = input.merge_state_status ?? null;
 

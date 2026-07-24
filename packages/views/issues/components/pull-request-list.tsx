@@ -206,9 +206,12 @@ function PullRequestBadge({
   );
 }
 
-// CI element. Always returns a config for non-terminal PRs — including the
-// "no checks yet" state, which renders muted and MUST NOT read as passed/green.
-function getChecksBadge(status: PullRequestChecksStatus, t: IssuesT): PullRequestBadgeConfig {
+// CI element. A current snapshot with a null rollup renders "no checks yet";
+// an unavailable/disabled snapshot renders nothing.
+function getChecksBadge(
+  status: PullRequestChecksStatus,
+  t: IssuesT,
+): PullRequestBadgeConfig | null {
   switch (status.kind) {
     case "failed":
       return {
@@ -238,6 +241,8 @@ function getChecksBadge(status: PullRequestChecksStatus, t: IssuesT): PullReques
         className: "text-muted-foreground",
         label: t(($) => $.detail.pull_request_checks_none),
       };
+    case "unavailable":
+      return null;
   }
 }
 

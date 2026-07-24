@@ -104,14 +104,23 @@ Returns `{"pull_requests": [...]}`. Each element exposes:
   response; the server folds them into `state` (merged wins, then closed, then
   draft, else open).
 - `merged_at` — non-null once merged; a second confirmation of `state: merged`.
+- `provider` — `github`, `forgejo`, `gitea`, or `gitlab`.
 - `mergeable_state` — mirrors GitHub (`clean` / `dirty` surfaced; other values
-  round-trip as unknown).
-- `checks_conclusion` — aggregated CI: `passed`, `failed`, `pending`, or `null`
-  when no check suite has been observed. Backed by `checks_passed`,
-  `checks_failed`, `checks_pending` counts.
+  round-trip as unknown; retained for compatibility).
+- GitHub API snapshot fields: `snapshot_available`, `mergeable`,
+  `merge_state_status`, `checks_rollup`, `checks_total`, `checks_passed`,
+  `checks_failed`, `checks_running`, `failed_check_names`,
+  `snapshot_fetched_at`, and `snapshot_stale`. `snapshot_available == true`
+  means the feature is enabled and the snapshot matches the PR's current head.
+  Only then does `checks_rollup == null` mean "no checks"; false means the
+  snapshot feature is disabled, has not fetched yet, or only has an old head.
+- `checks_conclusion` — coarse CI compatibility status: `passed`, `failed`,
+  `pending`, or `null`. GitHub derives it from the current API snapshot;
+  Forgejo/Gitea/GitLab derive it from webhook commit statuses. Backed by the
+  provider-appropriate check counts.
 
 So "is it merged?" is `state == "merged"` (or `merged_at != null`); "is it still
-a draft?" is `state == "draft"`; CI status is `checks_conclusion`.
+a draft?" is `state == "draft"`; coarse CI status is `checks_conclusion`.
 
 If the command returns no linked PRs after a PR was opened, the link scanner did
 not observe a routable issue key in the PR title/body/branch — or the only match

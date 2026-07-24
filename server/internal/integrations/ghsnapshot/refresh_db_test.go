@@ -168,6 +168,99 @@ func TestApplySnapshotHeadSHAGuard(t *testing.T) {
 	}
 }
 
+// TestInFlightOldHeadKeepsTrailingRefresh covers the synchronize race from the
+// PR review: while head A is fetching, a webhook advances the mirrored row to B
+// and enqueues again. A is discarded by the head guard, but the coalesced
+// trailing edge must still fetch and apply B immediately.
+func TestInFlightOldHeadKeepsTrailingRefresh(t *testing.T) {
+	pool := testDBPool(t)
+	defer pool.Close()
+	q := db.New(pool)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	pr := seedPR(t, pool, q, "A")
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM github_pull_request_check_run WHERE pr_id=$1`, pr.ID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id=$1`, pr.ID)
+	})
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	secondFetched := make(chan struct{})
+	applied := make(chan struct{}, 1)
+	fetchCalls := 0
+
+	m := NewManager(enabledClient(t), q, pool, func(context.Context, pgtype.UUID) {
+		select {
+		case applied <- struct{}{}:
+		default:
+		}
+	})
+	m.concurrency = 2
+	m.sweepInterval = time.Hour
+	m.jitter = func() time.Duration { return 0 }
+	m.fetch = func(context.Context, *Client, int64, string, string, int32) (*PRSnapshot, error) {
+		fetchCalls++
+		if fetchCalls == 1 {
+			close(firstStarted)
+			<-releaseFirst
+			return &PRSnapshot{
+				HeadSHA: "A", Mergeable: "MERGEABLE", MergeStateStatus: "CLEAN",
+				HasChecks: true, RollupState: "SUCCESS",
+			}, nil
+		}
+		close(secondFetched)
+		return &PRSnapshot{
+			HeadSHA: "B", Mergeable: "CONFLICTING", MergeStateStatus: "DIRTY",
+			HasChecks: true, RollupState: "FAILURE",
+			Contexts: []CheckContext{{Name: "backend", Status: "completed", Conclusion: "failure"}},
+		}, nil
+	}
+
+	m.Start(ctx)
+	m.Enqueue(pr.InstallationID, pr.RepoOwner, pr.RepoName, pr.PrNumber)
+	select {
+	case <-firstStarted:
+	case <-time.After(2 * time.Second):
+		t.Fatal("first head fetch did not start")
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE github_pull_request SET head_sha='B' WHERE id=$1`, pr.ID); err != nil {
+		t.Fatal(err)
+	}
+	m.Enqueue(pr.InstallationID, pr.RepoOwner, pr.RepoName, pr.PrNumber)
+
+	select {
+	case <-secondFetched:
+		t.Fatal("second fetch started concurrently; single-PR in-flight guard failed")
+	case <-time.After(20 * time.Millisecond):
+	}
+	close(releaseFirst)
+
+	select {
+	case <-secondFetched:
+	case <-time.After(2 * time.Second):
+		t.Fatal("new-head trailing refresh was swallowed")
+	}
+	select {
+	case <-applied:
+	case <-time.After(2 * time.Second):
+		t.Fatal("new-head snapshot was not applied")
+	}
+
+	got, err := q.GetGitHubPullRequestByID(context.Background(), pr.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.SnapshotHeadSha != "B" || got.ApiMergeable.String != "CONFLICTING" {
+		t.Fatalf("trailing refresh did not replace old snapshot: %+v", got)
+	}
+	if n := checkRunCount(t, pool, pr.ID); n != 1 {
+		t.Fatalf("new-head check runs = %d, want 1", n)
+	}
+}
+
 // TestApplySnapshotReplacesRuns proves each successful apply is an atomic batch
 // replace, not an accumulation.
 func TestApplySnapshotReplacesRuns(t *testing.T) {
