@@ -185,6 +185,9 @@ frontend:
 # Ingress
 # -----------------------------------------------------------------------------
 ingress:
+  # Enabled by default for compatibility with existing installations. Ingress
+  # and Gateway API are mutually exclusive; disable this before enabling
+  # gatewayAPI.enabled.
   enabled: true
   className: traefik
   annotations: {}
@@ -195,6 +198,29 @@ ingress:
   # tls:
   #   - hosts: [multica.dev.lan, api.multica.dev.lan]
   #     secretName: multica-tls
+
+# -----------------------------------------------------------------------------
+# Gateway API
+# -----------------------------------------------------------------------------
+gatewayAPI:
+  # Requires the Gateway API CRDs and a controller-managed Gateway. The chart
+  # creates HTTPRoutes only; it does not create or manage the parent Gateway,
+  # listeners, TLS certificates, or attachment policy. This cannot be enabled
+  # while ingress.enabled is true.
+  enabled: false
+  annotations: {}
+  # Parent Gateway(s) to attach both HTTPRoutes to. Namespace and sectionName
+  # are optional; omit namespace when the Gateway is in the release namespace.
+  parentRefs:
+    - name: gateway
+      # namespace: gateway-system
+      # sectionName: http
+  frontend:
+    hostnames:
+      - multica.dev.lan
+  backend:
+    hostnames:
+      - api.multica.dev.lan
 
 # -----------------------------------------------------------------------------
 # Monitoring

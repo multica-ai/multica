@@ -1,0 +1,3 @@
+{{- if and .Values.ingress.enabled .Values.gatewayAPI.enabled -}}
+{{- fail "ingress.enabled and gatewayAPI.enabled are mutually exclusive; disable one exposure mode" -}}
+{{- end -}}

@@ -161,21 +161,21 @@ multica daemon status
 
 ## Kubernetes Deployment (Alternative)
 
-If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/multica-ai/charts/multica` or the source chart at [`deploy/helm/multica/`](deploy/helm/multica/). It targets a typical k3s / k8s setup with an Ingress controller and a default `ReadWriteOnce` StorageClass — authored against k3s + Traefik + `local-path`, and should work on any cluster with minor tweaks.
+If you already run a Kubernetes cluster, you can deploy Multica there instead of Docker Compose using the released OCI Helm chart at `oci://ghcr.io/multica-ai/charts/multica` or the source chart at [`deploy/helm/multica/`](deploy/helm/multica/). It supports either Kubernetes Ingress or Gateway API for external traffic and expects a default `ReadWriteOnce` StorageClass. Ingress is enabled by default for compatibility; Gateway API is opt-in. The exposure modes are mutually exclusive: rendering the chart with both `ingress.enabled=true` and `gatewayAPI.enabled=true` fails instead of creating competing resources for the same DNS names.
 
 The chart creates the following resources in the target namespace:
 
 - `multica-postgres` — `pgvector/pgvector:pg17` backed by a 10Gi PVC
 - `multica-backend` — Go API/WS server. Backed by a 5Gi `ReadWriteOnce` uploads PVC by default; set `backend.uploads.persistence.enabled=false` when you have configured S3 (`backend.config.s3Bucket`) and don't want the chart to declare the PVC at all.
 - `multica-frontend` — Next.js standalone server
-- Two `Ingress` resources: one for the web host, one for the backend host
+- When enabled, two `Ingress` or two `HTTPRoute` resources: one for the web host and one for the backend host
 - `multica-config` ConfigMap (rendered from `values.yaml`)
 
 The `multica-secrets` Secret is **not** managed by the chart — you create it once with `kubectl` so real values never need to land in git.
 
 > **Runtime frontend upstreams:** current `multica-web` images read `REMOTE_API_URL` and `DOCS_URL` when the Next.js server runs, so API/docs upstream changes do not require a web rebuild. The chart defaults `REMOTE_API_URL` to this release's backend Service. `frontend.compatibility.backendAlias` exists only for legacy images that still baked `REMOTE_API_URL=http://backend:8080` at build time.
 
-> **Prerequisites:** `kubectl` and `helm` (v3.13+ for `--take-ownership`, or v4+) configured for the target cluster, an Ingress controller (Traefik / NGINX), and a default StorageClass.
+> **Prerequisites:** `kubectl` and `helm` (v3.13+ for `--take-ownership`, or v4+) configured for the target cluster, a default StorageClass, and either an Ingress controller (Traefik / NGINX) or Gateway API CRDs plus a controller-managed `Gateway`. The chart creates `HTTPRoute` resources but does not manage the parent `Gateway`, listeners, TLS certificates, or route attachment policy.
 
 ### Step 1 — Point hostnames at the cluster
 
@@ -187,11 +187,11 @@ The chart defaults to `multica.dev.lan` (web) and `api.multica.dev.lan` (backend
   192.168.1.206  multica.dev.lan api.multica.dev.lan
   ```
 
-  Replace `192.168.1.206` with any node IP where your Ingress controller's Service is reachable.
+  Replace `192.168.1.206` with an address where your Ingress controller or Gateway is reachable.
 
-- **Local DNS** (Pi-hole, Unbound, etc.): add A records for both hostnames pointing at the cluster Ingress IP.
+- **Local DNS** (Pi-hole, Unbound, etc.): add A records for both hostnames pointing at the Ingress or Gateway address.
 
-To use different hostnames, override the matching values at install time (see [Step 4](#step-4--install-the-chart)) — `ingress.frontend.host`, `ingress.backend.host`, plus `backend.config.appUrl`, `backend.config.frontendOrigin`, `backend.config.localUploadBaseUrl`, and `backend.config.googleRedirectUri`.
+To use different hostnames, override the matching exposure values at install time (see [Step 4](#step-4--install-the-chart)) — either `ingress.frontend.host` and `ingress.backend.host`, or `gatewayAPI.frontend.hostnames` and `gatewayAPI.backend.hostnames`. Also update `backend.config.appUrl`, `backend.config.frontendOrigin`, `backend.config.localUploadBaseUrl`, and `backend.config.googleRedirectUri`.
 
 ### Step 2 — Create the namespace
 
@@ -217,11 +217,101 @@ Leave optional values empty for now — you can fill them in later (see [Step 5 
 
 ### Step 4 — Install the chart
 
+The default installation uses an Ingress controller:
+
 ```bash
 helm install multica oci://ghcr.io/multica-ai/charts/multica \
   --version <chart-version> \
   -n multica
 ```
+
+For Gateway API, point the routes at an existing Gateway. Add
+`gatewayAPI.parentRefs[0].namespace` when it is outside the `multica` namespace,
+and set `gatewayAPI.parentRefs[0].sectionName` to select a listener. A listener
+permits routes only from its own namespace by default, so a cross-namespace
+Gateway must explicitly select the Multica namespace through
+`listeners[].allowedRoutes.namespaces`. The route-to-Gateway attachment itself
+does not require a `ReferenceGrant`; `allowedRoutes` is the authorization
+boundary.
+
+```bash
+helm install multica oci://ghcr.io/multica-ai/charts/multica \
+  --version <chart-version> \
+  -n multica \
+  --set ingress.enabled=false \
+  --set gatewayAPI.enabled=true \
+  --set 'gatewayAPI.parentRefs[0].name=my-gateway' \
+  --set 'gatewayAPI.parentRefs[0].namespace=gateway-system' \
+  --set 'gatewayAPI.parentRefs[0].sectionName=https'
+```
+
+#### Supported Gateway API boundary
+
+The chart's automated controller test uses **Envoy Gateway v1.8.2** with its
+pinned **Gateway API v1.5.1** dependency. Other conformant controllers should
+work because the chart emits only Standard-channel `HTTPRoute` fields, but they
+are not part of the tested support boundary. The test covers Gateway-only
+rendering, cross-namespace attachment, listener rejection, and an HTTPS
+listener with TLS termination.
+
+For the tested cross-namespace model, label the application namespace and make
+the listener select it:
+
+```bash
+kubectl label namespace multica multica.ai/gateway-access=allowed
+```
+
+```yaml
+apiVersion: gateway.networking.k8s.io/v1
+kind: Gateway
+metadata:
+  name: my-gateway
+  namespace: gateway-system
+spec:
+  gatewayClassName: envoy
+  listeners:
+    - name: http
+      protocol: HTTP
+      port: 80
+      allowedRoutes: &multicaRoutes
+        namespaces:
+          from: Selector
+          selector:
+            matchLabels:
+              multica.ai/gateway-access: allowed
+        kinds:
+          - kind: HTTPRoute
+    - name: https
+      protocol: HTTPS
+      port: 443
+      tls:
+        mode: Terminate
+        certificateRefs:
+          - kind: Secret
+            name: multica-tls
+      allowedRoutes: *multicaRoutes
+```
+
+The TLS Secret belongs in the Gateway namespace (`gateway-system` above), and
+its certificate must cover every configured route hostname. The Multica chart
+does not create or rotate that Secret. Select the `https` listener with
+`gatewayAPI.parentRefs[].sectionName`; add a second parent reference if both
+HTTP and HTTPS listeners should accept the routes.
+
+If `allowedRoutes.namespaces` is omitted or set to `from: Same` on a Gateway in
+another namespace, attachment is intentionally rejected. After installation,
+verify each parent reference reports `Accepted=True`:
+
+```bash
+kubectl -n multica get httproute \
+  -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{range .status.parents[*]}  {.parentRef.namespace}/{.parentRef.name} listener={.parentRef.sectionName}{"\n"}{range .conditions[*]}    {.type}={.status} reason={.reason}{"\n"}{end}{end}{end}'
+```
+
+`Accepted=False` with reason `NotAllowedByListeners` means the listener's
+`allowedRoutes` policy rejected the namespace or route kind. A TLS listener
+with `ResolvedRefs=False` usually means its certificate reference is missing or
+invalid. Hostnames must also intersect the selected listener hostname, if the
+listener declares one.
 
 Released chart versions strip the leading `v` from the Git tag. For example, release tag `v0.3.5` publishes chart version `0.3.5`; the chart defaults the backend and frontend image tags to `v0.3.5`.
 
@@ -230,7 +320,7 @@ To override defaults, export the chart values, edit them, and pass them with `-f
 ```bash
 helm show values oci://ghcr.io/multica-ai/charts/multica \
   --version <chart-version> > my-values.yaml
-# edit my-values.yaml — e.g. change ingress hosts, image tags, resource limits
+# edit my-values.yaml — configure Ingress, or disable it and enable Gateway API
 helm install multica oci://ghcr.io/multica-ai/charts/multica \
   --version <chart-version> \
   -n multica \
@@ -252,7 +342,7 @@ kubectl -n multica get pods -w
 On a cold cluster the backend can sit `Running` but not `Ready` for a few minutes while it waits on PostgreSQL and runs migrations — a startupProbe absorbs this, so the pod should not restart. Once the backend reports `Ready`, migrations have completed and `/healthz` returns OK:
 
 ```bash
-curl -H "Host: api.multica.dev.lan" http://<ingress-ip>/healthz
+curl -H "Host: api.multica.dev.lan" http://<ingress-or-gateway-address>/healthz
 # {"status":"ok","checks":{"db":"ok","migrations":"ok"}}
 ```
 

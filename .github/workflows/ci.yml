@@ -245,3 +245,32 @@ jobs:
 
       - name: Test shell installers
         run: bash scripts/install.test.sh
+
+  helm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Lint and test chart renders
+        run: |
+          helm lint deploy/helm/multica
+          bash scripts/helm-chart.test.sh
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1
+
+      - name: Install Envoy Gateway v1.8.2
+        run: |
+          helm install envoy-gateway \
+            oci://docker.io/envoyproxy/gateway-helm \
+            --version v1.8.2 \
+            --namespace envoy-gateway-system \
+            --create-namespace
+          kubectl -n envoy-gateway-system rollout status deployment/envoy-gateway --timeout=180s
+
+      - name: Test Gateway API attachment contracts
+        run: bash scripts/helm-gateway-integration.test.sh
