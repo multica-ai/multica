@@ -594,6 +594,7 @@
       "toggle_failed_toast": "修改 skill 状态失败",
       "runtime_toggle_aria": "启用或关闭继承的 {{name}}",
       "runtime_toggle_failed_toast": "修改继承 skill 状态失败",
+      "runtime_overridden_badge": "分配的 skill 优先",
       "runtime_missing": "请先分配一个本地运行时，以发现继承的 skill。",
       "runtime_offline": "本地运行时处于离线状态，重新连接后即可刷新继承的 skill。",
       "runtime_discovering": "正在从本地运行时发现 skill…",
