@@ -49,10 +49,14 @@ export function AttributionBadge({
   attribution,
   className,
   variant = "badge",
+  hideAvatar = false,
 }: {
   attribution?: TaskAttribution;
   className?: string;
   variant?: "badge" | "avatar" | "inline";
+  /** Inline variant only: render the name without the avatar, so it does not
+   *  compete with a nearby primary avatar (the transcript identity row). */
+  hideAvatar?: boolean;
 }) {
   const { t } = useT("issues");
   if (!attribution) return null;
@@ -124,13 +128,15 @@ export function AttributionBadge({
                 className
               )}
             >
-              <ActorAvatar
-                name={name}
-                initials={initialsOf(name)}
-                avatarUrl={initiatorInline.avatar_url}
-                size="xs"
-                className="shrink-0"
-              />
+              {!hideAvatar && (
+                <ActorAvatar
+                  name={name}
+                  initials={initialsOf(name)}
+                  avatarUrl={initiatorInline.avatar_url}
+                  size="xs"
+                  className="shrink-0"
+                />
+              )}
               <span className="min-w-0 truncate">{name}</span>
             </span>
           }

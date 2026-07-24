@@ -516,34 +516,39 @@ export function AgentTranscriptDialog({
             (status anchors the left), who ran it, why it exists (trigger),
             and who's accountable. All diagnostics move to the ⓘ popover. */}
         <div className="border-b px-4 py-3 shrink-0">
-          <div className="flex min-w-0 items-center gap-2.5">
+          <div className="flex min-w-0 items-center gap-3">
             {statusBadge}
-            <div className="flex min-w-0 flex-1 items-center gap-x-3 overflow-hidden">
-              <div className="flex min-w-0 items-center gap-2">
-                {task.agent_id ? (
-                  <ActorAvatar actorType="agent" actorId={task.agent_id} size="sm" enableHoverCard />
-                ) : (
-                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
-                    <Bot className="h-3 w-3" />
-                  </div>
-                )}
-                <span className="truncate font-medium text-sm">
-                  {agentName || agentInfo?.name || ""}
-                </span>
-              </div>
-              {/* Why this run exists: the trigger mechanism plus the
-                  accountable human who's answerable for what the agent did. */}
-              <span className="shrink-0 text-xs text-muted-foreground">{triggerLabel}</span>
+            {/* Primary identity: the agent that ran this. It is the one
+                foreground entity — avatar + medium weight. */}
+            <div className="flex min-w-0 items-center gap-2">
+              {task.agent_id ? (
+                <ActorAvatar actorType="agent" actorId={task.agent_id} size="sm" enableHoverCard />
+              ) : (
+                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
+                  <Bot className="h-3 w-3" />
+                </div>
+              )}
+              <span className="truncate font-medium text-sm">
+                {agentName || agentInfo?.name || ""}
+              </span>
+            </div>
+            {/* Provenance, one muted secondary unit set apart from the agent:
+                who triggered the run and how — reads as "<person> · <how>",
+                not three peer entities. The person's avatar is dropped here so
+                two same-size faces don't read as two agents. */}
+            <div className="flex min-w-0 flex-1 items-center gap-x-1.5 overflow-hidden text-xs text-muted-foreground">
               {hasTriggeredBy && (
                 <>
-                  <FactDot />
                   <AttributionBadge
                     attribution={task.attribution}
                     variant="inline"
+                    hideAvatar
                     className="min-w-0"
                   />
+                  <FactDot />
                 </>
               )}
+              <span className="shrink-0">{triggerLabel}</span>
             </div>
 
             <div className="flex shrink-0 items-center gap-0.5">
