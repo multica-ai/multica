@@ -39,3 +39,102 @@ export function redactSecrets(text: string): string {
   }
   return result;
 }
+
+export interface FormattedTaskError {
+  summary: string;
+  detail: string;
+}
+
+const taskErrorSummaryLimit = 240;
+
+function clipSummary(value: string): string {
+  return value.length > taskErrorSummaryLimit
+    ? `${value.slice(0, taskErrorSummaryLimit - 3)}...`
+    : value;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function structuredErrorMessage(value: unknown): string | null {
+  const root = asRecord(value);
+  if (!root) return null;
+
+  const nested = root.error;
+  if (typeof nested === "string") return nested;
+
+  const error = asRecord(nested) ?? root;
+  const message = ["message", "error_description", "detail"]
+    .map((key) => error[key])
+    .find((candidate): candidate is string =>
+      typeof candidate === "string" && candidate.trim().length > 0,
+    );
+  if (!message) return null;
+
+  const param = error.param;
+  return typeof param === "string" &&
+    param.length > 0 &&
+    !message.includes(param)
+    ? `${message} · ${param}`
+    : message;
+}
+
+function parseStructuredError(
+  text: string,
+): { value: unknown; prefix: string } | null {
+  const firstBrace = text.indexOf("{");
+  const lastBrace = text.lastIndexOf("}");
+  const candidates = [
+    { json: text, prefix: "" },
+    ...(firstBrace > 0 && lastBrace > firstBrace
+      ? [{
+          json: text.slice(firstBrace, lastBrace + 1),
+          prefix: text.slice(0, firstBrace).trim(),
+        }]
+      : []),
+  ];
+
+  for (const candidate of candidates) {
+    try {
+      return { value: JSON.parse(candidate.json), prefix: candidate.prefix };
+    } catch {
+      // Plain-text provider errors are expected; try the next shape.
+    }
+  }
+  return null;
+}
+
+/**
+ * Make the persisted terminal task error safe and readable. Providers may
+ * return either plain text or a stringified JSON error envelope.
+ */
+export function formatTaskError(
+  rawError: string | null | undefined,
+): FormattedTaskError | null {
+  const redacted = redactSecrets(rawError?.trim() ?? "");
+  if (!redacted) return null;
+
+  const structured = parseStructuredError(redacted);
+  if (structured) {
+    const pretty = JSON.stringify(structured.value, null, 2);
+    const message = structuredErrorMessage(structured.value);
+    return {
+      summary: clipSummary(
+        ((message ?? structured.prefix) || "Task execution failed")
+          .replace(/\s+/g, " ")
+          .trim(),
+      ),
+      detail: structured.prefix
+        ? `${structured.prefix}\n${pretty}`
+        : pretty,
+    };
+  }
+
+  return {
+    summary: clipSummary(redacted.replace(/\s+/g, " ").trim()),
+    detail: redacted,
+  };
+}

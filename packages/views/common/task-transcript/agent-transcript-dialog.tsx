@@ -48,7 +48,7 @@ import {
 } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { runtimeDisplayName } from "@multica/core/runtimes";
-import { redactSecrets } from "./redact";
+import { formatTaskError, redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
 import {
   traceEventCopyText,
@@ -284,6 +284,8 @@ export function AgentTranscriptDialog({
   );
   const isAntigravityLiveEmpty =
     isLive && displayItems.length === 0 && runtimeInfo?.provider === "antigravity";
+  const terminalError =
+    task.status === "failed" ? formatTaskError(task.error) : null;
 
   // Newest-first shows live events as PREPENDS, and Virtuoso items opt out of
   // native scroll anchoring (`overflow-anchor: none`), so without compensation
@@ -619,6 +621,25 @@ export function AgentTranscriptDialog({
             </div>
           </div>
         </div>
+
+        {terminalError && (
+          <div className="flex shrink-0 items-start gap-2 border-b bg-destructive/5 px-4 py-3">
+            <AlertCircle
+              aria-hidden="true"
+              className="mt-0.5 h-4 w-4 shrink-0 text-destructive"
+            />
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-destructive">
+                {terminalError.summary}
+              </div>
+              {terminalError.detail !== terminalError.summary && (
+                <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words font-mono text-xs text-muted-foreground">
+                  {terminalError.detail}
+                </pre>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* ── List toolbar: read-before-you-read summary (left) + controls
             (right). Duration + event count fill the left, so the row balances
@@ -1128,4 +1149,3 @@ function ToolDetailSurface({ text }: { text: string }) {
     </div>
   );
 }
-
