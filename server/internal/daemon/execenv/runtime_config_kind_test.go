@@ -111,6 +111,10 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 			kindCommentTriggered: true, kindAssignmentTriggered: true,
 			kindAutopilotRunOnly: true, kindChat: true,
 		}},
+		{"## Repository Setup Preflight", map[taskKind]bool{
+			kindCommentTriggered: true, kindAssignmentTriggered: true,
+			kindAutopilotRunOnly: true, kindChat: true,
+		}},
 		{"## Issue Metadata", issueKinds},
 		{"## Instruction Precedence", map[taskKind]bool{kindAssignmentTriggered: true}},
 		{"## Sub-issue Creation", issueKinds},
@@ -149,6 +153,51 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 				t.Errorf("kind=%d: heading %q should NOT be in slim brief (matrix gating regression)", kind, c.heading)
 			}
 		}
+	}
+}
+
+func TestRepositorySetupPreflightIsStackAgnostic(t *testing.T) {
+	t.Parallel()
+
+	var b strings.Builder
+	writeRepositorySetupPreflight(&b)
+	out := b.String()
+
+	for _, want := range []string{
+		"after `multica repo checkout`",
+		"Before editing code or running build/test commands",
+		"`AGENTS.md`, `README`, development docs",
+		"dependency manifests and lockfiles",
+		"missing, stale, or readiness is uncertain",
+		"documented, reproducible setup command",
+		"Do not reinstall when the existing environment is demonstrably ready",
+		"did not unexpectedly modify dependency manifests or lockfiles",
+		"Do not use a failing build or test run",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("repository setup preflight missing %q\n---\n%s", want, out)
+		}
+	}
+
+	for _, packageManager := range []string{"pnpm", "npm install", "yarn", "bun install", "pip install", "poetry", "cargo"} {
+		if strings.Contains(strings.ToLower(out), packageManager) {
+			t.Errorf("repository setup preflight must stay stack-agnostic; found %q\n---\n%s", packageManager, out)
+		}
+	}
+
+	brief := buildMetaSkillContent("codex", TaskContextForEnv{
+		IssueID: "issue-1",
+		Repos:   []RepoContextForEnv{{URL: "https://example.com/repo.git"}},
+	})
+	repositoriesIndex := strings.Index(brief, "\n## Repositories\n")
+	preflightIndex := strings.Index(brief, "\n## Repository Setup Preflight\n")
+	if repositoriesIndex == -1 || preflightIndex <= repositoriesIndex {
+		t.Errorf("repository setup preflight must follow repository checkout guidance\n---\n%s", brief)
+	}
+
+	localBrief := buildMetaSkillContent("codex", TaskContextForEnv{IssueID: "issue-1"})
+	if !strings.Contains(localBrief, "\n## Repository Setup Preflight\n") {
+		t.Errorf("repository setup preflight must also cover an existing local working directory\n---\n%s", localBrief)
 	}
 }
 
