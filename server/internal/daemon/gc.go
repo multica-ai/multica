@@ -125,7 +125,6 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 		return
 	}
 
-	cleanedHere := 0
 	issueCandidates := make([]issueGCCandidate, 0, len(taskEntries))
 	for _, entry := range taskEntries {
 		if ctx.Err() != nil {
@@ -145,17 +144,14 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 			continue
 		}
 		action := d.shouldCleanTaskDir(ctx, taskDir)
-		cleanedHere += d.applyGCAction(taskDir, action, stats)
+		d.applyGCAction(taskDir, action, stats)
 	}
-	cleanedHere += d.gcWorkspaceIssues(ctx, filepath.Base(wsDir), issueCandidates, stats)
+	d.gcWorkspaceIssues(ctx, filepath.Base(wsDir), issueCandidates, stats)
 
-	// Remove the workspace directory itself if it's now empty.
-	if cleanedHere > 0 {
-		remaining, _ := os.ReadDir(wsDir)
-		if len(remaining) == 0 {
-			os.Remove(wsDir)
-		}
-	}
+	// Keep empty workspace directories. Reopening wsDir by pathname here would
+	// escape the cycle's pinned os.Root after an ancestor retarget. Empty dirs
+	// are harmless and bounded by workspace count; task/artifact cleanup above
+	// remains fd-relative and identity-checked.
 }
 
 const issueGCBatchSize = 500

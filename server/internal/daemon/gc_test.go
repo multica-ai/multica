@@ -398,7 +398,7 @@ func TestGcWorkspace_PartialRemovalFailureQuarantinesAndOnlyIncrementsSkipped(t 
 	}
 }
 
-func TestGcWorkspace_CleansEmptyWorkspaceDir(t *testing.T) {
+func TestGcWorkspace_PreservesEmptyWorkspaceDir(t *testing.T) {
 	t.Parallel()
 	issueID := "77777777-7777-7777-7777-777777777777"
 
@@ -421,8 +421,8 @@ func TestGcWorkspace_CleansEmptyWorkspaceDir(t *testing.T) {
 
 	d.gcWorkspace(context.Background(), wsDir, &gcStats{byPattern: map[string]int{}})
 
-	if _, err := os.Stat(wsDir); !os.IsNotExist(err) {
-		t.Fatal("empty workspace dir should be removed after all tasks cleaned")
+	if _, err := os.Stat(wsDir); err != nil {
+		t.Fatalf("empty workspace dir should remain after task cleanup: %v", err)
 	}
 }
 
@@ -1590,6 +1590,44 @@ func TestEnvRootLease_MarkAbsentThenMkdirRejectsGCReservation(t *testing.T) {
 	}
 }
 
+func TestEnvRootLease_SymlinkAncestorRetargetRejectsGCReservation(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	alias := filepath.Join(t.TempDir(), "workspaces")
+	if err := os.Symlink(rootA, alias); err != nil {
+		t.Skipf("symlink unsupported: %v", err)
+	}
+	taskRoot := filepath.Join(alias, "ws", "task")
+	release, ok := d.markActiveEnvRoot(context.Background(), taskRoot)
+	if !ok {
+		t.Fatal("mark through symlink ancestor failed")
+	}
+	defer release()
+	if err := os.Remove(alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(rootB, alias); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(taskRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if _, reserved := d.reserveEnvRootForGC(taskRoot); reserved {
+		t.Fatal("symlink ancestor retarget changed lease key and allowed GC reservation")
+	}
+	releasePrepared, ok := d.markActiveEnvRoot(context.Background(), taskRoot)
+	if !ok {
+		t.Fatal("failed to acquire prepared-object lease")
+	}
+	defer releasePrepared()
+	realPreparedRoot := filepath.Join(rootB, "ws", "task")
+	if _, reserved := d.reserveEnvRootForGC(realPreparedRoot); reserved {
+		t.Fatal("prepared object alias bypassed post-Prepare lease")
+	}
+}
+
 func TestEnvRootLease_MutateContentsRejectsGCReservation(t *testing.T) {
 	t.Parallel()
 	d := newGCTestDaemon(t, http.NewServeMux())
@@ -1607,6 +1645,36 @@ func TestEnvRootLease_MutateContentsRejectsGCReservation(t *testing.T) {
 	}
 	if _, reserved := d.reserveEnvRootForGC(root); reserved {
 		t.Fatal("content mutation changed lease identity and allowed GC reservation")
+	}
+}
+
+func TestGcWorkspace_WorkspacesRootRetargetAfterQuarantinePreservesExternalWorkspace(t *testing.T) {
+	t.Parallel()
+	d := newGCTestDaemon(t, http.NewServeMux())
+	d.cfg.GCOrphanTTL = 0
+	originalRoot := d.cfg.WorkspacesRoot
+	movedRoot := originalRoot + "-moved"
+	wsName := "ws-empty-retarget"
+	taskDir := createTaskDir(t, originalRoot, wsName, "task", nil)
+	externalRoot := t.TempDir()
+	externalWorkspace := filepath.Join(externalRoot, wsName)
+	if err := os.MkdirAll(externalWorkspace, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	d.removeEnvRootHook = func(quarantine string) error {
+		d.removeEnvRootHook = nil
+		if err := os.RemoveAll(quarantine); err != nil {
+			return err
+		}
+		if err := os.Rename(originalRoot, movedRoot); err != nil {
+			return err
+		}
+		return os.Symlink(externalRoot, originalRoot)
+	}
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), filepath.Dir(taskDir), stats)
+	if _, err := os.Stat(externalWorkspace); err != nil {
+		t.Fatalf("pathname workspace cleanup removed external target: %v", err)
 	}
 }
 

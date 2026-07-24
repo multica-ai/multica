@@ -4388,14 +4388,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 		}
 	}
-	// Belt-and-suspenders: also mark whatever root we ended up with, in case
-	// future changes diverge from PredictRootDir.
-	if env.RootDir != predictedRoot && env.RootDir != "" {
+	// Acquire a second lease after Prepare/Reuse even when the pathname equals
+	// predictedRoot. The pre-Prepare lease protects the immutable logical name;
+	// this post-Prepare lease adds the created object's canonical alias key.
+	// Together they close a symlink-ancestor retarget between prediction and
+	// mkdir, while still covering future divergence from PredictRootDir.
+	if env.RootDir != "" {
+		preparedIdentity, identityErr := d.statEnvRootThroughPinnedWorkspace(env.RootDir)
+		if identityErr != nil {
+			return TaskResult{}, fmt.Errorf("prove prepared env root identity: %w", identityErr)
+		}
 		releaseActual, ok := d.markActiveEnvRoot(ctx, env.RootDir)
 		if !ok {
 			return TaskResult{}, ctx.Err()
 		}
 		defer releaseActual()
+		currentIdentity, identityErr := d.statEnvRootThroughPinnedWorkspace(env.RootDir)
+		if identityErr != nil || !os.SameFile(preparedIdentity, currentIdentity) {
+			return TaskResult{}, fmt.Errorf("prepared env root identity changed while acquiring lease")
+		}
 	}
 	taskTempDir, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
 	if err != nil {
@@ -5519,13 +5530,13 @@ func (d *Daemon) markActiveEnvRoot(ctx context.Context, envRoot string) (release
 	if envRoot == "" {
 		return func() {}, true
 	}
-	key := canonicalPathIdentity(envRoot)
+	keys := envRootLeaseKeys(envRoot)
 	d.activeEnvRootsMu.Lock()
 	d.ensureActiveEnvRootStateLocked()
 	if d.workspacesRootIdentity == "" && len(d.activeEnvRoots) == 0 && len(d.deletingEnvRoots) == 0 {
 		d.workspacesRootIdentity = canonicalPathIdentity(d.cfg.WorkspacesRoot)
 	}
-	for d.deletingEnvRoots[key] {
+	for anyEnvRootKeySet(d.deletingEnvRoots, keys) {
 		if d.activeEnvRootWaitHook != nil {
 			d.activeEnvRootWaitHook(envRoot)
 		}
@@ -5538,28 +5549,32 @@ func (d *Daemon) markActiveEnvRoot(ctx context.Context, envRoot string) (release
 		}
 		d.activeEnvRootsMu.Lock()
 	}
-	d.activeEnvRoots[key]++
+	for _, key := range keys {
+		d.activeEnvRoots[key]++
+	}
 	d.activeEnvRootsMu.Unlock()
 	var once sync.Once
 	return func() {
 		once.Do(func() {
 			d.activeEnvRootsMu.Lock()
 			defer d.activeEnvRootsMu.Unlock()
-			if d.activeEnvRoots[key] <= 1 {
-				delete(d.activeEnvRoots, key)
-				return
+			for _, key := range keys {
+				if d.activeEnvRoots[key] <= 1 {
+					delete(d.activeEnvRoots, key)
+					continue
+				}
+				d.activeEnvRoots[key]--
 			}
-			d.activeEnvRoots[key]--
 		})
 	}, true
 }
 
 func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
-	key := canonicalPathIdentity(envRoot)
+	keys := envRootLeaseKeys(envRoot)
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
-	return d.activeEnvRoots[key] > 0
+	return anyEnvRootKeyCounted(d.activeEnvRoots, keys)
 }
 
 func (d *Daemon) ensureActiveEnvRootStateLocked() {
@@ -5605,6 +5620,70 @@ func canonicalPathIdentity(path string) string {
 	}
 }
 
+// envRootLeaseKeys binds both names that must contend:
+//   - logical: the immutable configured pathname, stable across mkdir and
+//     symlink-ancestor retargeting;
+//   - object: the current canonical target, so a real path and symlink alias
+//     to the same object cannot bypass each other.
+//
+// Neither key contains mutable stat fields. Holding both closes the gap where
+// choosing only a logical key misses aliases, while choosing only a resolved
+// key changes after retarget.
+func envRootLeaseKeys(path string) []string {
+	logical := filepath.Clean(path)
+	if abs, err := filepath.Abs(path); err == nil {
+		logical = filepath.Clean(abs)
+	}
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		logical = strings.ToLower(logical)
+	}
+	logical = "logical:" + logical
+	object := "object:" + canonicalPathIdentity(path)
+	return []string{logical, object}
+}
+
+func anyEnvRootKeySet(values map[string]bool, keys []string) bool {
+	for _, key := range keys {
+		if values[key] {
+			return true
+		}
+	}
+	return false
+}
+
+func anyEnvRootKeyCounted(values map[string]int, keys []string) bool {
+	for _, key := range keys {
+		if values[key] > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *Daemon) statEnvRootThroughPinnedWorkspace(envRoot string) (os.FileInfo, error) {
+	rel, err := filepath.Rel(d.cfg.WorkspacesRoot, envRoot)
+	if err != nil || !isContainedRelativePath(rel) {
+		return nil, fmt.Errorf("env root is outside workspaces root")
+	}
+	root, err := os.OpenRoot(d.cfg.WorkspacesRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	info, err := root.Stat(rel)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("env root is not a directory")
+	}
+	pathInfo, err := os.Stat(envRoot)
+	if err != nil || !os.SameFile(info, pathInfo) {
+		return nil, fmt.Errorf("env root pathname does not match pinned object")
+	}
+	return info, nil
+}
+
 type envRootGCLease struct {
 	release  func()
 	expected os.FileInfo
@@ -5644,24 +5723,24 @@ func (d *Daemon) reserveEnvRootForGCIdentity(envRoot string) (envRootGCLease, bo
 	if d.gcAfterExpectedHook != nil {
 		d.gcAfterExpectedHook(envRoot)
 	}
-	// Lease identity is the canonical logical task-root path, not mutable stat
-	// data. It is therefore identical before/after mkdir and content changes.
-	// The pinned os.Root + expected SameFile checks bind mutations to the
-	// discovered filesystem object.
-	key := canonicalPathIdentity(envRoot)
+	keys := envRootLeaseKeys(envRoot)
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
-	if d.activeEnvRoots[key] > 0 || d.deletingEnvRoots[key] {
+	if anyEnvRootKeyCounted(d.activeEnvRoots, keys) || anyEnvRootKeySet(d.deletingEnvRoots, keys) {
 		return envRootGCLease{}, false
 	}
-	d.deletingEnvRoots[key] = true
+	for _, key := range keys {
+		d.deletingEnvRoots[key] = true
+	}
 	if d.gcAfterReserveHook != nil {
 		d.gcAfterReserveHook(envRoot)
 	}
 	release := func() {
 		d.activeEnvRootsMu.Lock()
-		delete(d.deletingEnvRoots, key)
+		for _, key := range keys {
+			delete(d.deletingEnvRoots, key)
+		}
 		close(d.activeEnvRootsChanged)
 		d.activeEnvRootsChanged = make(chan struct{})
 		d.activeEnvRootsMu.Unlock()
