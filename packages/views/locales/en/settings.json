@@ -134,8 +134,69 @@
       "labs": "Labs",
       "members": "Members",
       "labels": "Labels",
-      "properties": "Properties"
+      "properties": "Properties",
+      "statuses": "Statuses"
     }
+  },
+  "statuses": {
+    "title": "Issue statuses",
+    "description": "Customize the statuses in this workspace. Every status belongs to one of five categories — automation reads only the category, while the name, color and icon are for people.",
+    "loading": "Loading statuses…",
+    "add": "Add status",
+    "empty_category": "No statuses in this category yet.",
+    "categories": {
+      "backlog": {
+        "label": "Backlog",
+        "hint": "Not scheduled. Assigned agents are not started automatically."
+      },
+      "todo": {
+        "label": "Todo",
+        "hint": "Queued for work. Assigned agents start from here."
+      },
+      "in_progress": {
+        "label": "In Progress",
+        "hint": "Being worked on — review and blocked stages live here too."
+      },
+      "done": {
+        "label": "Done",
+        "hint": "Completed."
+      },
+      "cancelled": {
+        "label": "Cancelled",
+        "hint": "Dropped without completing."
+      }
+    },
+    "actions_open": "Actions for {name}",
+    "badge_default": "Default",
+    "badge_system": "Built-in",
+    "edit": "Edit",
+    "make_default": "Make default for this category",
+    "default_hint": "Each category has exactly one default. Promoting this one replaces the current default.",
+    "archive": "Archive",
+    "create_title": "New status",
+    "edit_title": "Edit status",
+    "category_locked": "Category: {category} — fixed after creation. To change it, create a new status and move the issues over.",
+    "field_name": "Name",
+    "name_placeholder": "e.g. Needs QA",
+    "field_description": "Description",
+    "description_placeholder": "What this status means (optional)",
+    "field_color": "Color",
+    "field_icon": "Icon",
+    "cancel": "Cancel",
+    "save": "Save",
+    "create": "Create",
+    "created": "Status created",
+    "create_failed": "Couldn't create the status",
+    "updated": "Status updated",
+    "update_failed": "Couldn't update the status",
+    "default_set": "{name} is now the default",
+    "archived": "Status archived",
+    "archive_failed": "Couldn't archive the status",
+    "archive_title": "Archive “{name}”?",
+    "archive_description": "It stops being available for new issues. Built-in statuses can't be archived.",
+    "migrate_to": "Move existing issues to",
+    "migrate_placeholder": "Pick a status",
+    "migrate_hint": "Required if any issue still uses this status. Only statuses in the same category are allowed."
   },
   "properties": {
     "title": "Properties",

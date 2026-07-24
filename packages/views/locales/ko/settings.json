@@ -131,8 +131,69 @@
       "labs": "실험실",
       "members": "멤버",
       "labels": "레이블",
-      "properties": "속성"
+      "properties": "속성",
+      "statuses": "상태"
     }
+  },
+  "statuses": {
+    "title": "이슈 상태",
+    "description": "이 워크스페이스의 상태를 사용자 지정합니다. 각 상태는 다섯 개 카테고리 중 하나에 속하며, 자동화는 카테고리만 읽습니다. 이름·색상·아이콘은 사람을 위한 것입니다.",
+    "loading": "상태를 불러오는 중…",
+    "add": "상태 추가",
+    "empty_category": "이 카테고리에는 아직 상태가 없습니다.",
+    "categories": {
+      "backlog": {
+        "label": "백로그",
+        "hint": "일정 없음. 지정된 에이전트가 자동으로 시작되지 않습니다."
+      },
+      "todo": {
+        "label": "할 일",
+        "hint": "작업 대기. 지정된 에이전트가 여기서 시작합니다."
+      },
+      "in_progress": {
+        "label": "진행 중",
+        "hint": "작업 중 — 리뷰 중과 막힘도 여기에 포함됩니다."
+      },
+      "done": {
+        "label": "완료",
+        "hint": "완료되었습니다."
+      },
+      "cancelled": {
+        "label": "취소됨",
+        "hint": "완료하지 않고 중단했습니다."
+      }
+    },
+    "actions_open": "{name} 작업",
+    "badge_default": "기본",
+    "badge_system": "기본 제공",
+    "edit": "편집",
+    "make_default": "이 카테고리의 기본값으로 설정",
+    "default_hint": "카테고리마다 기본값은 하나뿐입니다. 설정하면 현재 기본값이 대체됩니다.",
+    "archive": "보관",
+    "create_title": "새 상태",
+    "edit_title": "상태 편집",
+    "category_locked": "카테고리: {category} — 생성 후에는 변경할 수 없습니다. 변경하려면 새 상태를 만들고 이슈를 옮기세요.",
+    "field_name": "이름",
+    "name_placeholder": "예: QA 필요",
+    "field_description": "설명",
+    "description_placeholder": "이 상태의 의미 (선택)",
+    "field_color": "색상",
+    "field_icon": "아이콘",
+    "cancel": "취소",
+    "save": "저장",
+    "create": "생성",
+    "created": "상태를 만들었습니다",
+    "create_failed": "상태를 만들지 못했습니다",
+    "updated": "상태를 업데이트했습니다",
+    "update_failed": "상태를 업데이트하지 못했습니다",
+    "default_set": "{name}이(가) 기본값이 되었습니다",
+    "archived": "상태를 보관했습니다",
+    "archive_failed": "상태를 보관하지 못했습니다",
+    "archive_title": "“{name}”을(를) 보관할까요?",
+    "archive_description": "새 이슈에서 선택할 수 없게 됩니다. 기본 제공 상태는 보관할 수 없습니다.",
+    "migrate_to": "기존 이슈를 옮길 상태",
+    "migrate_placeholder": "상태 선택",
+    "migrate_hint": "이 상태를 사용하는 이슈가 있으면 필수입니다. 같은 카테고리의 상태만 선택할 수 있습니다."
   },
   "properties": {
     "title": "속성",

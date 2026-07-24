@@ -20,13 +20,14 @@ import {
   issueSurfaceListOptions,
 } from "@multica/core/issues/surface/repository";
 import type { IssueSurfaceQueryPlan } from "@multica/core/issues/surface/query-plan";
-import type { IssueStatus } from "@multica/core/types";
+import type { IssueStatus, IssueStatusDefinition } from "@multica/core/types";
 import {
   applyIssueFilters,
   filterAssigneeGroups,
   type IssueFilterState,
   type IssueFilters,
 } from "../utils/filter";
+import { resolveStatusFilterTokens } from "../utils/status-filter";
 import type { ChildProgress } from "../components/list-row";
 import type {
   IssueStatusBranches,
@@ -112,6 +113,8 @@ export function useIssueSurfaceData({
   ganttShowCompleted,
   sort,
   statusFilters,
+  statusFilterIds,
+  statusCatalog,
   priorityFilters,
   assigneeFilters,
   includeNoAssignee,
@@ -137,7 +140,13 @@ export function useIssueSurfaceData({
    *  rows without it, so the working scope has to honour it too. */
   ganttShowCompleted: boolean;
   sort: IssueSortParam;
-  statusFilters: IssueStatus[];
+  /** Selected statuses: catalog ids, or legacy tokens from an older persisted
+   *  selection (MUL-4809). */
+  statusFilters: string[];
+  /** The same selection resolved to catalog ids, and the catalog itself, so the
+   *  server facet and the client predicate agree. */
+  statusFilterIds: string[];
+  statusCatalog: IssueStatusDefinition[];
   priorityFilters: IssueFilterState["priorityFilters"];
   assigneeFilters: IssueFilterState["assigneeFilters"];
   includeNoAssignee: boolean;
@@ -155,7 +164,15 @@ export function useIssueSurfaceData({
   const assigneeGroupFilter = useMemo<AssigneeGroupedIssuesFilter>(
     () => ({
       ...queryPlan.groupedScopeFilter,
-      statuses: statusFilters.length > 0 ? statusFilters : [...ALL_STATUSES],
+      // Prefer the catalog facet so a selection can name a custom status; fall
+      // back to legacy tokens when the catalog is unavailable (MUL-4809).
+      ...(statusFilterIds.length > 0
+        ? { status_ids: statusFilterIds }
+        : {
+            statuses: (statusFilters.length > 0
+              ? statusFilters
+              : [...ALL_STATUSES]) as IssueStatus[],
+          }),
       priorities: priorityFilters,
       assignee_filters: assigneeFilters,
       include_no_assignee: includeNoAssignee,
@@ -174,6 +191,7 @@ export function useIssueSurfaceData({
       projectFilters,
       queryPlan.groupedScopeFilter,
       statusFilters,
+      statusFilterIds,
     ],
   );
 
@@ -239,6 +257,7 @@ export function useIssueSurfaceData({
   const baseFilterState = useMemo<IssueFilterState>(
     () => ({
       statusFilters,
+      statusCatalog,
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,
@@ -251,6 +270,7 @@ export function useIssueSurfaceData({
       showSubIssues,
     }),
     [
+      statusCatalog,
       assigneeFilters,
       agentRunningFilter,
       creatorFilters,
@@ -483,11 +503,21 @@ export function useIssueSurfaceData({
     // Default view shows every lifecycle status, `cancelled` last (its
     // canonical position in ALL_STATUSES). An active status filter narrows to
     // the selected subset while preserving that order.
-    if (statusFilters.length > 0) {
-      return ALL_STATUSES.filter((s) => statusFilters.includes(s));
+    //
+    // The selection holds catalog ids (for built-ins too), so it is projected
+    // onto the legacy lanes first — matching raw ids against ALL_STATUSES finds
+    // nothing and hides every lane (MUL-4809). A projection that resolves to
+    // nothing (catalog still loading) keeps all lanes rather than blanking the
+    // surface; the row queries carry `status_ids` and stay correct meanwhile.
+    const selectedTokens = resolveStatusFilterTokens(
+      statusFilters,
+      statusCatalog,
+    );
+    if (selectedTokens.length > 0) {
+      return ALL_STATUSES.filter((s) => selectedTokens.includes(s));
     }
     return ALL_STATUSES;
-  }, [statusFilters]);
+  }, [statusCatalog, statusFilters]);
 
   // Hidden columns are the lifecycle statuses not currently visible, so
   // `cancelled` participates in the board show/hide controls exactly like the
@@ -499,6 +529,10 @@ export function useIssueSurfaceData({
 
   const activeFilters = useMemo(
     () => ({
+      // The catalog travels with the display filters so the client predicate can
+      // match a selection of catalog ids against each issue's status_id, the
+      // same way the server facet does (MUL-4809).
+      statusCatalog,
       priorityFilters,
       assigneeFilters,
       includeNoAssignee,

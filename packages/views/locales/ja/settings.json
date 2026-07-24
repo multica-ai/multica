@@ -131,8 +131,69 @@
       "labs": "ラボ",
       "members": "メンバー",
       "labels": "ラベル",
-      "properties": "プロパティ"
+      "properties": "プロパティ",
+      "statuses": "ステータス"
     }
+  },
+  "statuses": {
+    "title": "Issue ステータス",
+    "description": "このワークスペースのステータスをカスタマイズします。各ステータスは 5 つのカテゴリのいずれかに属し、自動化はカテゴリのみを参照します。名前・色・アイコンは人が読むためのものです。",
+    "loading": "ステータスを読み込み中…",
+    "add": "ステータスを追加",
+    "empty_category": "このカテゴリにはまだステータスがありません。",
+    "categories": {
+      "backlog": {
+        "label": "バックログ",
+        "hint": "未スケジュール。エージェントは自動起動しません。"
+      },
+      "todo": {
+        "label": "未着手",
+        "hint": "実行待ち。担当エージェントはここから開始します。"
+      },
+      "in_progress": {
+        "label": "進行中",
+        "hint": "作業中。レビュー中・ブロック中もここに含まれます。"
+      },
+      "done": {
+        "label": "完了",
+        "hint": "完了しています。"
+      },
+      "cancelled": {
+        "label": "キャンセル済み",
+        "hint": "完了せずに終了しました。"
+      }
+    },
+    "actions_open": "{name} の操作",
+    "badge_default": "デフォルト",
+    "badge_system": "組み込み",
+    "edit": "編集",
+    "make_default": "このカテゴリのデフォルトにする",
+    "default_hint": "各カテゴリのデフォルトは 1 つだけです。設定すると現在のデフォルトが置き換わります。",
+    "archive": "アーカイブ",
+    "create_title": "新しいステータス",
+    "edit_title": "ステータスを編集",
+    "category_locked": "カテゴリ: {category} — 作成後は変更できません。変更するには新しいステータスを作成し、Issue を移動してください。",
+    "field_name": "名前",
+    "name_placeholder": "例: QA 待ち",
+    "field_description": "説明",
+    "description_placeholder": "このステータスの意味（任意）",
+    "field_color": "色",
+    "field_icon": "アイコン",
+    "cancel": "キャンセル",
+    "save": "保存",
+    "create": "作成",
+    "created": "ステータスを作成しました",
+    "create_failed": "ステータスを作成できませんでした",
+    "updated": "ステータスを更新しました",
+    "update_failed": "ステータスを更新できませんでした",
+    "default_set": "{name} をデフォルトにしました",
+    "archived": "ステータスをアーカイブしました",
+    "archive_failed": "ステータスをアーカイブできませんでした",
+    "archive_title": "「{name}」をアーカイブしますか？",
+    "archive_description": "新しい Issue で選択できなくなります。組み込みステータスはアーカイブできません。",
+    "migrate_to": "既存の Issue の移動先",
+    "migrate_placeholder": "ステータスを選択",
+    "migrate_hint": "このステータスを使用中の Issue がある場合は必須です。同じカテゴリのステータスのみ選択できます。"
   },
   "properties": {
     "title": "プロパティ",

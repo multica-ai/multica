@@ -12,6 +12,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -51,10 +52,19 @@ func NewIssueService(q *db.Queries, tx TxStarter, bus *events.Bus, ac analytics.
 // to IssueService.Create. The handler owns the parsing step that turns its
 // request payload into this struct; the service stays transport-agnostic.
 type IssueCreateParams struct {
-	WorkspaceID   pgtype.UUID
-	Title         string
-	Description   pgtype.Text
-	Status        string
+	WorkspaceID pgtype.UUID
+	Title       string
+	Description pgtype.Text
+	// Status is the status INPUT — an alias (Category / legacy) or an exact
+	// display name. Empty defaults to "todo". Create resolves it through the
+	// catalog inside the write transaction and under the status-write lock, so
+	// every create entrypoint double-writes status_id and no assignment can race
+	// an archive (MUL-4809 §3.1 / §6.1 / §5.5). Callers no longer pre-resolve.
+	Status string
+	// StatusIDInput, when set, targets a catalog row directly (the UI picker's
+	// status_id). It is the only way to create straight into a custom status.
+	// Sent together with Status it must resolve to the same row, else 400.
+	StatusIDInput *pgtype.UUID
 	Priority      string
 	AssigneeType  pgtype.Text
 	AssigneeID    pgtype.UUID
@@ -140,6 +150,10 @@ var ErrProjectNotFound = errors.New("project not found in this workspace")
 // label set. Callers translate this into their transport's 400.
 var ErrIssueLabelNotFound = errors.New("issue label not found in this workspace")
 
+// ErrWorkspaceGone signals that the workspace was deleted concurrently (the
+// status-write lock's existence gate failed). Callers translate this into 404.
+var ErrWorkspaceGone = errors.New("workspace no longer exists")
+
 // IssueCreateResult is the typed return from IssueService.Create.
 //
 //   - On the happy path: Issue is the new row, Attachments lists the
@@ -185,6 +199,42 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+
+	// Resolve the status catalog FIRST, under the workspace status-write lock, so
+	// the resolution and this create commit atomically against an archive
+	// migration (MUL-4809 §5.5). LockWorkspaceForStatusWrite also takes the
+	// workspace row FOR KEY SHARE, which is the existence gate + the global
+	// lock-order anchor shared with IncrementIssueCounter below.
+	if err := issuestatus.LockWorkspaceForStatusWrite(ctx, tx, p.WorkspaceID); err != nil {
+		if errors.Is(err, issuestatus.ErrWorkspaceGone) {
+			return IssueCreateResult{}, ErrWorkspaceGone
+		}
+		return IssueCreateResult{}, fmt.Errorf("lock workspace for status write: %w", err)
+	}
+	var statusInput *string
+	switch {
+	case p.Status != "":
+		statusInput = &p.Status
+	case p.StatusIDInput == nil:
+		def := "todo"
+		statusInput = &def
+	}
+	resolvedRow, resolvedToken, seeded, err := issuestatus.ResolveWriteInput(ctx, qtx, p.WorkspaceID, statusInput, p.StatusIDInput)
+	if err != nil {
+		return IssueCreateResult{}, err
+	}
+	var resolvedStatus string
+	var resolvedStatusID pgtype.UUID
+	if seeded {
+		resolvedStatus = resolvedToken
+		resolvedStatusID = resolvedRow.ID
+	} else {
+		// Unseeded workspace: keep the legacy token authoritative, status_id NULL.
+		resolvedStatus = resolvedToken
+		if resolvedStatus == "" {
+			resolvedStatus = "todo"
+		}
+	}
 
 	// Resolve and validate parent / project before reading from the
 	// duplicate guard so a forged parent or project ID is rejected
@@ -248,7 +298,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	// a reorder is still allowed to collide on position — manual ordering
 	// is best-effort and the UI tolerates equal positions by falling back
 	// to the secondary ORDER BY key.
-	newPosition, err := issueposition.NextTopPosition(ctx, tx, p.WorkspaceID, p.Status)
+	newPosition, err := issueposition.NextTopPosition(ctx, tx, p.WorkspaceID, resolvedStatus)
 	if err != nil {
 		return IssueCreateResult{}, fmt.Errorf("next top position: %w", err)
 	}
@@ -259,7 +309,8 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			WorkspaceID:   p.WorkspaceID,
 			Title:         p.Title,
 			Description:   p.Description,
-			Status:        p.Status,
+			Status:        resolvedStatus,
+			StatusID:      resolvedStatusID,
 			Priority:      p.Priority,
 			AssigneeType:  p.AssigneeType,
 			AssigneeID:    p.AssigneeID,
@@ -280,7 +331,8 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			WorkspaceID:   p.WorkspaceID,
 			Title:         p.Title,
 			Description:   p.Description,
-			Status:        p.Status,
+			Status:        resolvedStatus,
+			StatusID:      resolvedStatusID,
 			Priority:      p.Priority,
 			AssigneeType:  p.AssigneeType,
 			AssigneeID:    p.AssigneeID,

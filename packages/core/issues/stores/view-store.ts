@@ -147,7 +147,12 @@ export const CARD_PROPERTY_OPTIONS: { key: keyof CardProperties; label: string }
 export interface IssueViewState {
   viewMode: ViewMode;
   grouping: IssueGrouping;
-  statusFilters: IssueStatus[];
+  /**
+   * Selected statuses. Entries are catalog ids (MUL-4809); a selection persisted
+   * by an older build may still hold legacy status tokens, which the views
+   * resolve at query time rather than rewriting storage.
+   */
+  statusFilters: string[];
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
@@ -201,7 +206,7 @@ export interface IssueViewState {
   setGanttZoom: (zoom: GanttZoom) => void;
   toggleGanttShowCompleted: () => void;
   setGrouping: (grouping: IssueGrouping) => void;
-  toggleStatusFilter: (status: IssueStatus) => void;
+  toggleStatusFilter: (status: string) => void;
   togglePriorityFilter: (priority: IssuePriority) => void;
   toggleAssigneeFilter: (value: ActorFilterValue) => void;
   toggleNoAssignee: () => void;
@@ -212,8 +217,15 @@ export interface IssueViewState {
   togglePropertyFilter: (propertyId: string, optionId: string) => void;
   setDateFilter: (filter: IssueDateFilter | null) => void;
   toggleAgentRunningFilter: () => void;
-  hideStatus: (status: IssueStatus) => void;
-  showStatus: (status: IssueStatus) => void;
+  /**
+   * Column show/hide is expressed through statusFilters, which now holds catalog
+   * ids as well as legacy tokens (MUL-4809) — so these take the same widened key.
+   * NOTE: hideStatus still seeds from ALL_STATUSES when no filter is active; that
+   * seed becomes wrong once the board renders one column per CATALOG status, and
+   * must then be passed the actual visible column keys.
+   */
+  hideStatus: (status: string) => void;
+  showStatus: (status: string) => void;
   clearFilters: () => void;
   setSortBy: (field: SortField) => void;
   setSortDirection: (dir: SortDirection) => void;

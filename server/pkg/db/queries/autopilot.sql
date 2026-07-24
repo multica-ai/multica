@@ -309,21 +309,39 @@ WHERE id = $1
 RETURNING *;
 
 -- name: UpdateAutopilotRunRunning :one
+-- Compare-and-set bind (MUL-4809 §4.1). Only a non-terminal run whose task_id is
+-- unset OR already this same task may be bound:
+--   - task_id IS NULL      -> first bind wins.
+--   - task_id = $2         -> idempotent replay of the same bind (returns the row).
+--   - task_id = other task -> zero rows: the run is already bound to a DIFFERENT
+--     dispatched task and must not be re-bound (the first dispatched task owns it).
+--   - terminal status      -> zero rows: never resurrect a finalized run.
+-- Zero rows surfaces as pgx.ErrNoRows; callers reload to establish the
+-- authoritative state (see bindAutopilotRunTask).
 UPDATE autopilot_run
 SET status = 'running', task_id = $2
 WHERE id = $1
+  AND status IN ('pending', 'issue_created', 'running')
+  AND (task_id IS NULL OR task_id = $2)
 RETURNING *;
 
 -- name: UpdateAutopilotRunCompleted :one
+-- Compare-and-set terminal transition (MUL-4809 §4.1): only an in-flight run may
+-- be completed. Zero rows means the run was already finalized by a concurrent
+-- finalizer of THIS binary — first writer wins; the caller no-ops instead of
+-- overwriting the terminal state or re-publishing. (This CAS cannot constrain an
+-- OLD-version pod still running the unguarded write during a rolling deploy —
+-- that requires the explicit deploy-enable gate tracked as later work.)
 UPDATE autopilot_run
 SET status = 'completed', completed_at = now(), result = sqlc.narg('result')
-WHERE id = $1
+WHERE id = $1 AND status IN ('issue_created', 'running')
 RETURNING *;
 
 -- name: UpdateAutopilotRunFailed :one
+-- Compare-and-set terminal transition (MUL-4809 §4.1); see UpdateAutopilotRunCompleted.
 UPDATE autopilot_run
 SET status = 'failed', completed_at = now(), failure_reason = $2
-WHERE id = $1
+WHERE id = $1 AND status IN ('issue_created', 'running')
 RETURNING *;
 
 -- name: UpdateAutopilotRunSkipped :one
@@ -427,9 +445,73 @@ LIMIT 1;
 -- =====================
 
 -- name: GetAutopilotRunByIssue :one
+-- The in-flight run linked to an issue. Used by the task-outcome sync to find a
+-- run that is still finalizable (MUL-4809 §4.1); already-terminal runs are
+-- excluded, which also makes finalization idempotent under a rolling deploy.
 SELECT * FROM autopilot_run
 WHERE issue_id = $1 AND status IN ('issue_created', 'running')
 LIMIT 1;
+
+-- name: GetLatestAutopilotRunByIssue :one
+-- The most recent run linked to an issue, in ANY status. Attribution needs the
+-- firing trigger's owner even after the run has already finalized (MUL-4809
+-- §4.1: runs now complete on task outcome, so a later issue task can outlive the
+-- active run) — GetAutopilotRunByIssue would return nothing once the run is done.
+SELECT * FROM autopilot_run
+WHERE issue_id = $1
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: HasPendingRetryForTask :one
+-- True when a task has a non-terminal system-retry successor (retry_of_task_id).
+-- The create_issue run-finalization waits on this: FailTask enqueues the retry
+-- BEFORE broadcasting the failure event, so an active successor here means
+-- another attempt is in flight and the run must stay open (MUL-4809 §4.1).
+SELECT count(*) > 0 AS has_pending FROM agent_task_queue
+WHERE retry_of_task_id = $1
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory');
+
+-- name: GetTaskByDispatchedAutopilotRun :one
+-- Recovers the task a create_issue run dispatched when the run's task_id was never
+-- bound — a crash between task enqueue and run.task_id bind, or an unbound run at
+-- gate-flip time (MUL-4809 §4.1). The dispatch stamps dispatched_autopilot_run_id
+-- on the task atomically at INSERT, so this is a PRECISE provenance lookup, not a
+-- time/agent heuristic: an ordinary comment/chat task is never stamped and can
+-- never be returned here, so it can never be misattributed as the run's work.
+-- The stamp is 1:1 with the run, but keep it deterministic under any accidental
+-- duplicate by returning the earliest root attempt.
+SELECT * FROM agent_task_queue
+WHERE dispatched_autopilot_run_id = $1
+  AND retry_of_task_id IS NULL
+ORDER BY created_at ASC, id ASC
+LIMIT 1;
+
+-- name: GetRetrySuccessorTask :one
+-- The system-retry successor of a task (the task whose retry_of_task_id points at
+-- it). System retries form a linear chain, so walking successors from the root
+-- reaches the final attempt — used by the ON-boot reconcile to find a lineage's
+-- terminal leaf (MUL-4809 §4.1 P0-3). ErrNoRows means this task is the leaf.
+SELECT * FROM agent_task_queue
+WHERE retry_of_task_id = $1
+ORDER BY created_at ASC, id ASC
+LIMIT 1;
+
+-- name: ListActiveCreateIssueRunsPaged :many
+-- One keyset page of active create_issue runs (issue_created / running) for the
+-- periodic task-driven reconcile that converges runs whose dispatched task already
+-- reached a terminal result while task-driven finalization was gated off — the event
+-- bus does not replay those past task events (MUL-4809 §4.1 P0-3). Ordered by
+-- (created_at, id); the caller pages forward with @cursor_created_at/@cursor_id and
+-- passes ('-infinity', zero-uuid) for the first page. Batching avoids materializing
+-- every active run at once. Joined to autopilot only to filter execution_mode; no FK
+-- (join, not a constraint).
+SELECT r.* FROM autopilot_run r
+JOIN autopilot a ON a.id = r.autopilot_id
+WHERE r.status IN ('issue_created', 'running')
+  AND a.execution_mode = 'create_issue'
+  AND (r.created_at, r.id) > (@cursor_created_at::timestamptz, @cursor_id::uuid)
+ORDER BY r.created_at ASC, r.id ASC
+LIMIT @row_limit;
 
 -- name: FailAutopilotRunsByIssue :exec
 -- Fails active autopilot runs linked to a given issue.

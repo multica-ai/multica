@@ -1,4 +1,4 @@
-import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
+import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType, StatusCategory } from "./issue";
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
 
@@ -7,6 +7,12 @@ export interface CreateIssueRequest {
   title: string;
   description?: string;
   status?: IssueStatus;
+  /**
+   * Targets a catalog row directly — the only way to create an issue straight
+   * into a CUSTOM status (MUL-4809 §3.1). Sending it together with `status` is
+   * accepted only when both resolve to the same status.
+   */
+  status_id?: string;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType;
   assignee_id?: string;
@@ -26,6 +32,13 @@ export interface UpdateIssueRequest {
   title?: string;
   description?: string;
   status?: IssueStatus;
+  /**
+   * Targets a catalog row directly — the only way to reach a CUSTOM status, and
+   * unambiguous across renames (MUL-4809 §3.1). The API also accepts an alias or
+   * exact display name via `status`; sending both is accepted only when they
+   * resolve to the same status.
+   */
+  status_id?: string;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
   assignee_id?: string | null;
@@ -101,6 +114,16 @@ export interface ListIssuesParams {
   /** Flat-table quick search. Matches issue title words or an exact issue number. */
   q?: string;
   status?: IssueStatus;
+  /** Exact custom-status filter by catalog id (MUL-4809). */
+  status_id?: string;
+  /**
+   * Multi-select custom-status facet by catalog id (MUL-4809). OR within the
+   * field. This is what the catalog-driven board columns and filter chips send;
+   * `statuses` remains the legacy-token equivalent for older clients.
+   */
+  status_ids?: string[];
+  /** Filter by one of the 5 status Categories (MUL-4809). */
+  status_category?: StatusCategory;
   /** Multi-value table facet. OR within the field. */
   statuses?: IssueStatus[];
   priority?: IssuePriority;
@@ -181,6 +204,16 @@ export interface ListGroupedIssuesParams {
   offset?: number;
   workspace_id?: string;
   statuses?: IssueStatus[];
+  /** Exact custom-status filter by catalog id (MUL-4809). */
+  status_id?: string;
+  /**
+   * Multi-select custom-status facet by catalog id (MUL-4809). OR within the
+   * field. This is what the catalog-driven board columns and filter chips send;
+   * `statuses` remains the legacy-token equivalent for older clients.
+   */
+  status_ids?: string[];
+  /** Filter by one of the 5 status Categories (MUL-4809). */
+  status_category?: StatusCategory;
   priorities?: IssuePriority[];
   assignee_types?: IssueAssigneeType[];
   assignee_id?: string;
@@ -249,6 +282,10 @@ export type IssueTableScope =
 
 export interface IssueTableFilters {
   statuses?: IssueStatus[];
+  /** Catalog status ids (MUL-4809). Preferred over `statuses`: a custom status
+   * is only expressible here, and two custom statuses sharing a Category stay
+   * distinct. Falls back to `statuses` when the catalog is unavailable. */
+  status_ids?: string[];
   priorities?: IssuePriority[];
   assignees?: IssueActorRef[];
   include_no_assignee?: boolean;
@@ -323,7 +360,15 @@ export interface IssueTableParentRef {
 }
 
 export type IssueTableGroupValue =
-  | { kind: "status"; status: string }
+  | {
+      kind: "status";
+      /** Legacy token this column projects to (compat for older clients). */
+      status: string;
+      /** Authoritative catalog status (MUL-4809). Two custom statuses sharing a
+       *  Category are distinct columns, so key rendering off this, not `status`. */
+      status_id?: string;
+      status_name?: string;
+    }
   | { kind: "assignee"; actor: IssueTableActorRef | null }
   | { kind: "project"; project_id: string | null }
   | {

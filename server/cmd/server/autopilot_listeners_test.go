@@ -2,9 +2,11 @@ package main
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -128,6 +130,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 // (so it must be reached via the issue_id lookup, not SyncRunFromTask).
 type linkedIssueAutopilotFixture struct {
 	taskSvc *service.TaskService
+	svc     *service.AutopilotService
 	queries *db.Queries
 	run     *db.AutopilotRun
 	taskID  pgtype.UUID
@@ -143,6 +146,9 @@ func dispatchCreateIssueAutopilot(t *testing.T, title string) linkedIssueAutopil
 	bus := events.New()
 	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
 	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	// This fixture asserts task-driven behavior (bind + running); force the gate on
+	// for both dispatch and the terminal listeners registered below (MUL-4809 §4.1).
+	autopilotSvc.FeatureFlags = autopilotTaskDrivenFlags(true)
 	registerAutopilotListeners(bus, autopilotSvc)
 
 	var agentID string
@@ -193,13 +199,25 @@ func dispatchCreateIssueAutopilot(t *testing.T, title string) linkedIssueAutopil
 		t.Fatalf("expected one issue task, got %d", len(tasks))
 	}
 	if tasks[0].AutopilotRunID.Valid {
-		t.Fatal("create_issue issue task unexpectedly has autopilot_run_id; test must exercise linked issue lookup")
+		t.Fatal("create_issue issue task unexpectedly has autopilot_run_id; the run owns the pointer via run.task_id instead")
 	}
-	if run.Status != "issue_created" {
-		t.Fatalf("expected pre-failure run status issue_created, got %q", run.Status)
+	// MUL-4809 §4.1: dispatch now binds the run to its dispatched task and advances
+	// to running. The run finalizes on that task's terminal state (matched by
+	// run.task_id + retry lineage), not on the issue status.
+	if run.Status != "running" {
+		t.Fatalf("expected post-dispatch run status running, got %q", run.Status)
+	}
+	if run.TaskID.Bytes != tasks[0].ID.Bytes {
+		t.Fatalf("run.task_id not bound to the dispatched task: run=%x task=%x", run.TaskID.Bytes, tasks[0].ID.Bytes)
+	}
+	// MUL-4809 §4.1 P0-1: the dispatch stamps the task's provenance at INSERT, so a
+	// crash before the bind can be repaired precisely. Verify the real dispatch path
+	// writes it (not just the bind), which is what makes repair unambiguous.
+	if !tasks[0].DispatchedAutopilotRunID.Valid || tasks[0].DispatchedAutopilotRunID.Bytes != run.ID.Bytes {
+		t.Fatalf("dispatched task not stamped with run provenance: stamp valid=%v", tasks[0].DispatchedAutopilotRunID.Valid)
 	}
 
-	return linkedIssueAutopilotFixture{taskSvc: taskSvc, queries: queries, run: run, taskID: tasks[0].ID}
+	return linkedIssueAutopilotFixture{taskSvc: taskSvc, svc: autopilotSvc, queries: queries, run: run, taskID: tasks[0].ID}
 }
 
 // runTaskWithBudget marks the issue task dispatched with the given attempt
@@ -303,8 +321,64 @@ func TestAutopilotCreateIssueTaskRetryPendingKeepsRunOpen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetAutopilotRun: %v", err)
 	}
-	if updatedRun.Status != "issue_created" {
-		t.Fatalf("expected run to stay issue_created while a retry is pending, got %q", updatedRun.Status)
+	if updatedRun.Status != "running" {
+		t.Fatalf("expected run to stay running (open) while a retry is pending, got %q", updatedRun.Status)
+	}
+}
+
+// TestAutopilotCreateIssueTaskCompletionUpdatesRun is the core §4.1 decoupling:
+// a create_issue run now COMPLETES on its dispatched task's terminal success —
+// no issue status change involved.
+func TestAutopilotCreateIssueTaskCompletionUpdatesRun(t *testing.T) {
+	ctx := context.Background()
+	f := dispatchCreateIssueAutopilot(t, "Create-issue completion listener")
+
+	runTaskWithBudget(t, f.queries, f.taskID, 1)
+
+	if _, err := f.taskSvc.CompleteTask(ctx, f.taskID, []byte(`{"output":"done"}`), "", ""); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+
+	updatedRun, err := f.queries.GetAutopilotRun(ctx, f.run.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotRun: %v", err)
+	}
+	if updatedRun.Status != "completed" {
+		t.Fatalf("expected run status completed after the dispatched task completed, got %q", updatedRun.Status)
+	}
+	if !updatedRun.CompletedAt.Valid {
+		t.Fatal("expected completed_at to be set")
+	}
+}
+
+// TestAutopilotCreateIssueCommentTaskDoesNotFinalizeRun locks in the precise
+// lineage match: a LATER task on the same issue that is NOT the run's dispatched
+// task (nor a retry of it) — e.g. a comment-triggered task — must never finalize
+// the run. This is why the run binds to a specific task_id instead of matching
+// by issue alone.
+func TestAutopilotCreateIssueCommentTaskDoesNotFinalizeRun(t *testing.T) {
+	ctx := context.Background()
+	f := dispatchCreateIssueAutopilot(t, "Create-issue comment-task listener")
+
+	// A fabricated terminal task on the same issue with no retry_of lineage to the
+	// run's dispatched task and no autopilot_run_id — its retry-root is itself, so
+	// it can't match run.task_id.
+	commentTask := db.AgentTaskQueue{
+		ID:      parseUUID("11111111-1111-1111-1111-111111111111"),
+		IssueID: f.run.IssueID,
+		Status:  "completed",
+	}
+	if commentTask.ID.Bytes == f.run.TaskID.Bytes {
+		t.Fatal("fabricated comment task id collided with the run's dispatched task id")
+	}
+	f.svc.SyncRunFromCreateIssueTask(ctx, commentTask)
+
+	updatedRun, err := f.queries.GetAutopilotRun(ctx, f.run.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotRun: %v", err)
+	}
+	if updatedRun.Status != "running" {
+		t.Fatalf("a non-lineage comment task finalized the run (status %q); it must stay running", updatedRun.Status)
 	}
 }
 
@@ -410,6 +484,7 @@ func TestAutopilotCreateIssueDispatchCreatesIssueWhenRuntimeOffline(t *testing.T
 	bus := events.New()
 	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
 	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	autopilotSvc.FeatureFlags = autopilotTaskDrivenFlags(true)
 
 	var runtimeID, agentID string
 	if err := testPool.QueryRow(ctx, `
@@ -465,8 +540,8 @@ func TestAutopilotCreateIssueDispatchCreatesIssueWhenRuntimeOffline(t *testing.T
 	if run == nil {
 		t.Fatal("expected a run, got nil")
 	}
-	if run.Status != "issue_created" {
-		t.Fatalf("expected run status 'issue_created', got %q", run.Status)
+	if run.Status != "running" {
+		t.Fatalf("expected run status 'running' after task-bound dispatch, got %q", run.Status)
 	}
 	if !run.IssueID.Valid {
 		t.Fatal("create_issue dispatch did not link an issue")
@@ -522,6 +597,7 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 	bus := events.New()
 	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
 	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	autopilotSvc.FeatureFlags = autopilotTaskDrivenFlags(true)
 
 	var runtimeID, agentID string
 	if err := testPool.QueryRow(ctx, `
@@ -579,5 +655,79 @@ func TestManualTriggerDoesNotErrorOnPostAdmissionSkip(t *testing.T) {
 	}
 	if run.Status != "skipped" {
 		t.Fatalf("expected run status 'skipped', got %q", run.Status)
+	}
+}
+
+// TestAutopilotRunTerminalTransitionsAreCAS locks in the compare-and-set
+// contract (MUL-4809 §4.1 P0-1): once a run is terminal, neither a racing
+// terminal write nor a late bind may overwrite or resurrect it. Concurrent
+// finalizers OF THIS BINARY become first-writer-wins (the loser gets
+// pgx.ErrNoRows). (Note: this cannot constrain an old-version pod still running
+// the unguarded write during a rolling deploy — that needs the deploy-enable
+// gate tracked as later work.)
+func TestAutopilotRunTerminalTransitionsAreCAS(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+	ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+		WorkspaceID:        parseUUID(testWorkspaceID),
+		Title:              "CAS transition test",
+		AssigneeType:       "agent",
+		AssigneeID:         parseUUID(agentID),
+		Status:             "active",
+		ExecutionMode:      "create_issue",
+		IssueTitleTemplate: pgtype.Text{String: "x", Valid: true},
+		CreatedByType:      "member",
+		CreatedByID:        parseUUID(testUserID),
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilot: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID) })
+
+	run, err := queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+		AutopilotID: ap.ID,
+		Source:      "manual",
+		Status:      "issue_created",
+	})
+	if err != nil {
+		t.Fatalf("CreateAutopilotRun: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM autopilot_run WHERE id = $1`, run.ID) })
+
+	// A terminal transition from an active run succeeds.
+	completed, err := queries.UpdateAutopilotRunCompleted(ctx, db.UpdateAutopilotRunCompletedParams{ID: run.ID})
+	if err != nil || completed.Status != "completed" {
+		t.Fatalf("first complete: status=%q err=%v", completed.Status, err)
+	}
+
+	// A racing FAIL on the already-completed run must be rejected (CAS lost).
+	if _, err := queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
+		ID: run.ID, FailureReason: pgtype.Text{String: "late failure", Valid: true},
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("fail on completed run: want pgx.ErrNoRows, got %v", err)
+	}
+
+	// A late BIND must not resurrect the completed run back to running.
+	if _, err := queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
+		ID: run.ID, TaskID: parseUUID("22222222-2222-2222-2222-222222222222"),
+	}); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("bind on completed run: want pgx.ErrNoRows, got %v", err)
+	}
+
+	// The run is unchanged: still completed, and never bound to the late task.
+	final, err := queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		t.Fatalf("reload run: %v", err)
+	}
+	if final.Status != "completed" || final.TaskID.Valid {
+		t.Fatalf("run mutated after CAS-lost writes: status=%q task_id_valid=%v", final.Status, final.TaskID.Valid)
 	}
 }

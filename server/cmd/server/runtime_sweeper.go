@@ -9,6 +9,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -359,7 +360,9 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *ser
 			if issue, err := queries.GetIssue(ctx, t.IssueID); err == nil {
 				workspaceID = util.UUIDToString(issue.WorkspaceID)
 				issueKey := util.UUIDToString(t.IssueID)
-				if issue.Status == "in_progress" && !processedIssues[issueKey] {
+				// Category is the machine semantics (MUL-4809 §4.2): in_review /
+				// blocked are in_progress and must reset like any in_progress issue.
+				if issuestatus.CategoryForStatusToken(issue.Status) == "in_progress" && !processedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					if hasActive, herr := queries.HasActiveTaskForIssue(ctx, t.IssueID); herr == nil && !hasActive {
 						queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: t.IssueID, Status: "todo", WorkspaceID: issue.WorkspaceID})

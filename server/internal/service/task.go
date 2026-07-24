@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -463,8 +464,11 @@ func (s *TaskService) attributionForIssueTask(ctx context.Context, issue db.Issu
 	// autopilot id, so bridge issue → active run → trigger_id to find the trigger.
 	if s != nil && s.Queries != nil && issue.OriginType.Valid &&
 		issue.OriginType.String == "autopilot" && issue.OriginID.Valid {
+		// Latest run in ANY status: runs now finalize on task outcome (MUL-4809
+		// §4.1), so a follow-up issue task can outlive the active run — the active
+		// GetAutopilotRunByIssue would miss the provenance once the run is done.
 		var triggerID pgtype.UUID
-		if run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID); err == nil {
+		if run, err := s.Queries.GetLatestAutopilotRunByIssue(ctx, issue.ID); err == nil {
 			triggerID = run.TriggerID
 		}
 		return triggerOwnerAttribution(ctx, s.Queries, triggerID, issue.WorkspaceID, issue.OriginID, attribution.EvidenceIssueAssignment, issue.ID)
@@ -904,6 +908,28 @@ func taskErrorType(reason string) string {
 	}
 }
 
+// dispatchedAutopilotRunCtxKey carries the autopilot run a create_issue dispatch is
+// enqueuing a task for, so the task INSERT stamps dispatched_autopilot_run_id
+// atomically (MUL-4809 §4.1 provenance). Only the autopilot create_issue dispatch
+// sets it via withDispatchedAutopilotRun; every other enqueue path leaves it unset
+// and stamps NULL, so an ordinary comment/chat task can never be mistaken for a
+// run's dispatched task during crash-window repair.
+type dispatchedAutopilotRunCtxKey struct{}
+
+// withDispatchedAutopilotRun returns a ctx that stamps the next enqueued task with
+// the dispatching autopilot run id, so a crash before run.task_id is bound can be
+// repaired by precise provenance lookup rather than a time/agent heuristic.
+func withDispatchedAutopilotRun(ctx context.Context, runID pgtype.UUID) context.Context {
+	return context.WithValue(ctx, dispatchedAutopilotRunCtxKey{}, runID)
+}
+
+func dispatchedAutopilotRunFromContext(ctx context.Context) pgtype.UUID {
+	if v, ok := ctx.Value(dispatchedAutopilotRunCtxKey{}).(pgtype.UUID); ok {
+		return v
+	}
+	return pgtype.UUID{}
+}
+
 // EnqueueTaskForIssue creates a queued task for an agent-assigned issue.
 // No context snapshot is stored — the agent fetches all data it needs at
 // runtime via the multica CLI.
@@ -1033,6 +1059,9 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
+		// Autopilot create_issue provenance: set only when this task is the
+		// autopilot's dispatched task (MUL-4809 §4.1); NULL otherwise.
+		DispatchedAutopilotRunID: dispatchedAutopilotRunFromContext(ctx),
 	})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
@@ -1152,6 +1181,9 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
+		// Autopilot create_issue provenance for a squad-leader dispatch: set only
+		// when this task is the autopilot's dispatched task (MUL-4809 §4.1).
+		DispatchedAutopilotRunID: dispatchedAutopilotRunFromContext(ctx),
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
@@ -3026,10 +3058,18 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				RuntimeMcpOverlay:    retryOverlay.Overlay,
 				RuntimeConnectedApps: retryOverlay.ConnectedApps,
 			})
-			if cerr != nil {
+			switch {
+			case errors.Is(cerr, pgx.ErrNoRows):
+				// A concurrent creator (autopilot reconcile back-fill / sweeper) already
+				// made this task's single retry successor; the retry_of_task_id unique
+				// constraint turned our INSERT into a no-op. Not an error — the retry
+				// exists, so leave retried nil and skip the broadcast below (MUL-4809 §4.1).
+				retried = nil
+			case cerr != nil:
 				return fmt.Errorf("create retry task: %w", cerr)
+			default:
+				retried = &child
 			}
-			retried = &child
 		}
 		return nil
 	}); err != nil {
@@ -3314,6 +3354,23 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		// Another path (FailTask's in-tx retry, a concurrent sweeper, or the autopilot
+		// reconcile back-fill) already created this task's retry successor; the
+		// retry_of_task_id unique constraint made our INSERT a no-op (MUL-4809 §4.1 P0-2).
+		// Return the WINNER's successor rather than nil: callers key their retry-pending
+		// bookkeeping off a non-nil child, and a backoff-armed DEFERRED successor is
+		// invisible to HasActiveTaskForIssue — returning nil here would let
+		// HandleFailedTasks reset the issue to todo while a retry is still pending
+		// (MUL-4809 §4.1 P1). No broadcast: the creator already announced it.
+		existing, lookupErr := s.Queries.GetRetrySuccessorTask(ctx, parent.ID)
+		if lookupErr != nil {
+			// Could not confirm the winner's successor. Surface it as an error so callers
+			// treat this failure as retry-pending rather than terminal.
+			return nil, fmt.Errorf("load existing retry successor: %w", lookupErr)
+		}
+		return &existing, nil
+	}
 	if err != nil {
 		slog.Warn("task auto-retry failed",
 			"parent_task_id", util.UUIDToString(parent.ID),
@@ -3600,8 +3657,23 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	for _, t := range tasks {
 		// Auto-retry first so the issue stays in_progress rather than
 		// flapping todo → in_progress within a tick.
-		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
+		child, retryErr := s.MaybeRetryFailedTask(ctx, t)
+		switch {
+		case child != nil:
 			retried++
+			if t.IssueID.Valid {
+				retriedIssues[util.UUIDToString(t.IssueID)] = true
+			}
+		case retryErr != nil && retryEligible(t.FailureReason.String, t):
+			// The retry creation hit a transient error, but this failure IS
+			// retry-eligible so a retry is still owed. Treat the issue as
+			// retry-pending: don't reset it to todo and don't let a create_issue
+			// autopilot run finalize off this non-final attempt. The autopilot
+			// reconcile back-fills the missing retry on a later tick (MUL-4809
+			// §4.1 P0-2); silently dropping the error here is what previously
+			// let the run fail prematurely.
+			slog.Warn("task auto-retry errored; deferring to reconcile back-fill",
+				"task_id", util.UUIDToString(t.ID), "error", retryErr)
 			if t.IssueID.Valid {
 				retriedIssues[util.UUIDToString(t.IssueID)] = true
 			}
@@ -3619,8 +3691,10 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 				workspaceID = util.UUIDToString(issue.WorkspaceID)
 				// Reset stuck in_progress issues only when no other active
 				// task exists for the issue and no retry was just enqueued.
+				// Category, not the raw token, is the machine semantics (MUL-4809
+				// §4.2): in_review and blocked are in_progress and must reset too.
 				issueKey := util.UUIDToString(t.IssueID)
-				if issue.Status == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
+				if issuestatus.CategoryForStatusToken(issue.Status) == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
 					if checkErr != nil {

@@ -248,6 +248,21 @@ func (w *WebhookDeliveryWorker) complete(
 
 func (w *WebhookDeliveryWorker) retryOrFail(ctx context.Context, delivery db.WebhookDelivery, cause error) error {
 	if delivery.DispatchAttempts+1 >= webhookWorkerMaxAttempts {
+		// The delivery has permanently failed. A transient dispatch error (returned as
+		// a nil run) is what routed us here, so a run may still be active/unbound —
+		// converge it first, then record the delivery failed, so we never leave a failed
+		// delivery beside a live run (MUL-4809 §4.1 P0-1). If that convergence is NOT
+		// authoritative (e.g. the same fault still blocks the fail-transition) we must not
+		// drop it silently: log it and rely on the dispatchless reconcile, which converges
+		// the run off this delivery's terminal state and runs even while the task-driven
+		// gate is off.
+		if failErr := w.h.AutopilotService.FailActiveRunForWebhookDelivery(ctx, delivery.ID,
+			"webhook delivery permanently failed: "+cause.Error()); failErr != nil {
+			slog.Warn("webhook worker: run not converged on delivery exhaustion; deferring to dispatchless reconcile",
+				"delivery_id", uuidToString(delivery.ID),
+				"error", failErr,
+			)
+		}
 		return w.complete(ctx, delivery, deliveryStatusFailed, pgtype.UUID{}, cause.Error())
 	}
 	backoff := time.Second * time.Duration(1<<min(delivery.DispatchAttempts, 6))

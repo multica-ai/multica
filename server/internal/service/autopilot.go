@@ -13,15 +13,19 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -35,6 +39,18 @@ type AutopilotService struct {
 	TxStarter TxStarter
 	Bus       *events.Bus
 	TaskSvc   *TaskService
+	// FeatureFlags is the two-phase rollout gate router (MUL-4809 §4.1). Nil is
+	// valid and resolves every gate to its default (task-driven runs OFF = legacy
+	// issue-status finalization), so a service constructed without it stays on the
+	// safe path during a rolling deploy.
+	FeatureFlags *featureflag.Service
+}
+
+// taskDrivenRunsEnabled reports whether this process finalizes create_issue runs
+// off task outcome (new path) rather than issue status (legacy). Default OFF for
+// the two-phase rollout (MUL-4809 §4.1 P0-3).
+func (s *AutopilotService) taskDrivenRunsEnabled(ctx context.Context) bool {
+	return featureflags.AutopilotTaskDrivenRunsEnabled(ctx, s.FeatureFlags)
 }
 
 // DefaultAutopilotTriggerTimezone is the timezone used to render Autopilot
@@ -256,8 +272,14 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 	}
 	if isAutopilotRunComplete(*run) {
 		if autopilot.ExecutionMode == "create_issue" && run.IssueID.Valid {
-			if repairErr := s.ensureWebhookCreateIssueTask(ctx, autopilot, *run); repairErr != nil {
-				return run, repairErr
+			if repairErr := s.ensureWebhookCreateIssueTask(ctx, autopilot, run); repairErr != nil {
+				// The repair did not durably finish, so the run may still be active/
+				// unbound. Return no run alongside the error: the worker treats a nil
+				// run as a transient error and retries the delivery, rather than
+				// permanently recording it failed over a live run (MUL-4809 §4.1 P0-1).
+				// A durable terminal outcome (a dispatch collision that failed the run)
+				// is surfaced as (failedRun, nil) by ensureWebhookCreateIssueTask, not here.
+				return nil, repairErr
 			}
 		}
 		return run, nil
@@ -270,57 +292,201 @@ func (s *AutopilotService) DispatchAutopilotForWebhookDelivery(
 		task, taskErr := s.Queries.GetAutopilotTaskByRun(ctx, run.ID)
 		switch {
 		case taskErr == nil:
-			updated, updateErr := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
-				ID:     run.ID,
-				TaskID: task.ID,
-			})
-			if updateErr != nil {
-				return run, fmt.Errorf("dispatch for webhook delivery: repair task linkage: %w", updateErr)
+			updated, bindErr := s.bindAutopilotRunTask(ctx, run.ID, task.ID)
+			if bindErr != nil {
+				// Uncertain outcome — keep the delivery retryable (MUL-4809 §4.1 P0-1).
+				return nil, fmt.Errorf("dispatch for webhook delivery: repair task linkage: %w", bindErr)
 			}
-			s.TaskSvc.NotifyTaskEnqueued(ctx, task)
+			// Only wake the daemon when this call actually (re)bound the task; if a
+			// racing finalizer already completed the run, updated is that terminal
+			// run and there is nothing to enqueue.
+			if !isAutopilotRunTerminalStatus(updated.Status) {
+				s.TaskSvc.NotifyTaskEnqueued(ctx, task)
+			}
 			return &updated, nil
 		case !errors.Is(taskErr, pgx.ErrNoRows):
-			return run, fmt.Errorf("dispatch for webhook delivery: lookup linked task: %w", taskErr)
+			// Uncertain outcome — keep the delivery retryable (MUL-4809 §4.1 P0-1).
+			return nil, fmt.Errorf("dispatch for webhook delivery: lookup linked task: %w", taskErr)
 		}
 	}
 	// Webhook worker dispatch has no member actor and no human reason-code
 	// surface, so actorUserID is invalid and the reason code is dropped.
 	dispatched, _, err := s.dispatchAutopilotRun(ctx, autopilot, triggerID, "webhook", run, pgtype.UUID{})
+	if err != nil {
+		// Only surface the run to the worker when the dispatch actually committed a
+		// terminal transition (e.g. a doomed dispatch that failRun'd the run): that is
+		// an authoritative business failure and the delivery should record it. Otherwise
+		// the run may still be active and the delivery must stay retryable rather than be
+		// permanently failed over a live run (MUL-4809 §4.1 P0-1).
+		if dispatched != nil && isAutopilotRunTerminalStatus(dispatched.Status) {
+			return dispatched, nil
+		}
+		return nil, err
+	}
 	return dispatched, err
 }
 
-// ensureWebhookCreateIssueTask repairs the create_issue crash window after the
-// issue/run transaction commits but before the ordinary task enqueue commits.
-// Any existing issue task is sufficient evidence that ownership has already
-// moved downstream; otherwise enqueue exactly the same assignee path used by
-// the original dispatch.
-func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, autopilot db.Autopilot, run db.AutopilotRun) error {
-	tasks, err := s.Queries.ListTasksByIssue(ctx, run.IssueID)
-	if err != nil {
-		return fmt.Errorf("dispatch for webhook delivery: inspect issue tasks: %w", err)
+// FailActiveRunForWebhookDelivery converges an autopilot run left active after its
+// webhook delivery has PERMANENTLY failed (exhausted the worker's retries). The
+// transient-error dispatch path returns (nil, err) so the delivery is retried rather
+// than recorded failed over a live run; but if the underlying error never clears, the
+// delivery eventually exhausts and the run — e.g. a create_issue dispatch collision
+// whose fail-transition kept erroring — would otherwise be stranded active/unbound
+// beside a failed delivery. The worker calls this on exhaustion to guarantee the two
+// converge together (MUL-4809 §4.1 P0-1). Idempotent: a no-op when no run is linked to
+// the delivery or it was already finalized by another path.
+// It reports whether the convergence was authoritative: a nil error means no run needs
+// converging or this call (or a racing path) left it terminal. A non-nil error means the
+// run may STILL be active — the caller must not treat the outcome as settled; the ungated
+// dispatchless reconcile is the durable backstop that converges it later.
+func (s *AutopilotService) FailActiveRunForWebhookDelivery(ctx context.Context, deliveryID pgtype.UUID, reason string) error {
+	run, err := s.Queries.GetAutopilotRunByWebhookDelivery(ctx, deliveryID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // no run linked to this delivery — nothing to converge
 	}
-	if len(tasks) > 0 {
+	if err != nil {
+		return fmt.Errorf("load run for webhook delivery: %w", err)
+	}
+	if isAutopilotRunTerminalStatus(run.Status) {
+		return nil // already finalized (the common case: dispatch succeeded / failRun won)
+	}
+	failed, won, ferr := s.failRun(ctx, run.ID, reason)
+	if ferr != nil {
+		return fmt.Errorf("fail active run for webhook delivery: %w", ferr)
+	}
+	if !won {
+		return nil // a racing path already finalized it
+	}
+	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
+	if err != nil {
+		return nil // the run IS terminal; only the analytics/publish side effect is lost
+	}
+	s.captureAutopilotRunFailed(autopilot, failed, failed.Source, reason)
+	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), failed, "failed")
+	return nil
+}
+
+// ensureWebhookCreateIssueTask repairs the create_issue crash window on a reclaimed
+// webhook delivery: the issue/run committed but the dispatched task's enqueue (and,
+// in task-driven mode, the run.task_id bind) did not. It guarantees the dispatched
+// task exists, keyed on PROVEN provenance — never the loose "any issue task exists"
+// evidence — and never gated on the issue status (MUL-4809 §4.1 P0-2). In
+// task-driven mode it also binds the run to that task via CAS; in legacy mode (gate
+// off, rolling-deploy default) it does NOT bind — the run is finalized by issue
+// status like the old pods it runs alongside (MUL-4809 §4.1 P0-3). run is a pointer
+// so a terminal outcome (a dispatch collision failing the run) propagates to the
+// caller and, in turn, to the webhook delivery status.
+func (s *AutopilotService) ensureWebhookCreateIssueTask(ctx context.Context, autopilot db.Autopilot, run *db.AutopilotRun) error {
+	// Already bound (task-driven dispatch finished) or already finalized — nothing
+	// to repair.
+	if run.TaskID.Valid || isAutopilotRunTerminalStatus(run.Status) {
 		return nil
 	}
+	taskDriven := s.taskDrivenRunsEnabled(ctx)
+
+	// Enqueue committed but the bind crashed: the task carries this run's provenance
+	// stamp. A stray comment task on the same issue is unstamped and never matches.
+	dispatched, err := s.Queries.GetTaskByDispatchedAutopilotRun(ctx, run.ID)
+	switch {
+	case err == nil:
+		if taskDriven {
+			return s.bindAndWakeWebhookTask(ctx, *run, dispatched)
+		}
+		return nil // legacy: the dispatched task exists and was already notified; issue status finalizes the run
+	case !errors.Is(err, pgx.ErrNoRows):
+		return fmt.Errorf("dispatch for webhook delivery: lookup dispatched task: %w", err)
+	}
+
+	// No task was ever dispatched (crash before enqueue). Enqueue the same assignee
+	// path the original dispatch would, stamped with this run's provenance. The
+	// enqueue itself notifies the daemon.
 	issue, err := s.Queries.GetIssue(ctx, run.IssueID)
 	if err != nil {
 		return fmt.Errorf("dispatch for webhook delivery: load linked issue: %w", err)
 	}
-	if issue.Status != "todo" && issue.Status != "in_progress" {
-		return nil
-	}
+	dispatchCtx := withDispatchedAutopilotRun(ctx, run.ID)
+	var task db.AgentTaskQueue
 	if autopilot.AssigneeType == "squad" {
-		leader, _, err := s.resolveAutopilotLeader(ctx, autopilot)
-		if err != nil {
-			return fmt.Errorf("dispatch for webhook delivery: resolve squad leader: %w", err)
+		leader, _, lerr := s.resolveAutopilotLeader(ctx, autopilot)
+		if lerr != nil {
+			return fmt.Errorf("dispatch for webhook delivery: resolve squad leader: %w", lerr)
 		}
-		if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, autopilot.AssigneeID, pgtype.UUID{}); err != nil {
-			return fmt.Errorf("dispatch for webhook delivery: repair squad task: %w", err)
-		}
-		return nil
+		task, err = s.TaskSvc.EnqueueTaskForSquadLeader(dispatchCtx, issue, leader.ID, autopilot.AssigneeID, pgtype.UUID{})
+	} else {
+		task, err = s.TaskSvc.EnqueueTaskForIssue(dispatchCtx, issue)
 	}
-	if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
-		return fmt.Errorf("dispatch for webhook delivery: repair issue task: %w", err)
+	if err != nil {
+		// The agent already holds the one pending task allowed per (issue, agent)
+		// (idx_one_pending_task_per_issue_agent), so the autopilot's own dispatched
+		// task can't be enqueued and this run has no provably-dispatched task to bind.
+		// There is no stuck-run monitor, so leaving the run active would strand it
+		// forever. Close the loop by failing the run as a traceable dispatch
+		// collision — the webhook worker then records the delivery as failed. We must
+		// NOT bind the run to the unrelated pending task (that would misattribute the
+		// run's outcome to a comment task).
+		if isAutopilotUniqueViolation(err) {
+			reason := "dispatch collision: agent already has a pending task for this issue"
+			failed, won, ferr := s.failRun(ctx, run.ID, reason)
+			if ferr != nil {
+				// The fail transition itself errored (timeout / connection). The run may
+				// still be active/unbound, so we must NOT report success — that would let
+				// the worker record delivery=dispatched over a live run, exactly the state
+				// this closure forbids. Propagate so the delivery stays retryable.
+				return fmt.Errorf("dispatch for webhook delivery: fail run on dispatch collision: %w", ferr)
+			}
+			if won {
+				*run = failed
+				s.captureAutopilotRunFailed(autopilot, failed, failed.Source, reason)
+				s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), failed, "failed")
+			} else {
+				// CAS miss: another path already finalized this run. Reload the
+				// authoritative row so the caller — and, in turn, the webhook delivery
+				// status — reflect the real terminal state, never the stale active/unbound
+				// run we started from.
+				authoritative, rerr := s.Queries.GetAutopilotRun(ctx, run.ID)
+				if rerr != nil {
+					return fmt.Errorf("dispatch for webhook delivery: reload run after collision CAS miss: %w", rerr)
+				}
+				if !isAutopilotRunTerminalStatus(authoritative.Status) {
+					// A CAS miss means the row left ('issue_created','running'); if it is
+					// somehow still active, do not claim success — keep the delivery retryable.
+					return fmt.Errorf("dispatch for webhook delivery: run %s still active after collision CAS miss", util.UUIDToString(run.ID))
+				}
+				*run = authoritative
+			}
+			slog.Warn("autopilot webhook repair: pending-task collision; run finalized as dispatch collision",
+				"run_id", util.UUIDToString(run.ID), "issue_id", util.UUIDToString(run.IssueID), "status", run.Status)
+			return nil
+		}
+		return fmt.Errorf("dispatch for webhook delivery: repair dispatched task: %w", err)
+	}
+	if !taskDriven {
+		return nil // legacy: the enqueue already notified the daemon; issue status finalizes the run
+	}
+	// Task-driven: bind the run to the task we just enqueued (which already notified
+	// the daemon, so bind without re-waking).
+	if _, bindErr := s.bindAutopilotRunTask(ctx, run.ID, task.ID); bindErr != nil {
+		return fmt.Errorf("dispatch for webhook delivery: bind repaired task: %w", bindErr)
+	}
+	return nil
+}
+
+// isAutopilotUniqueViolation reports whether err is (or wraps) a Postgres unique
+// constraint violation (SQLSTATE 23505).
+func isAutopilotUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
+}
+
+// bindAndWakeWebhookTask CAS-binds the run to its dispatched task and, unless a
+// racing finalizer already ended the run, wakes the daemon to claim the task.
+func (s *AutopilotService) bindAndWakeWebhookTask(ctx context.Context, run db.AutopilotRun, task db.AgentTaskQueue) error {
+	bound, bindErr := s.bindAutopilotRunTask(ctx, run.ID, task.ID)
+	if bindErr != nil {
+		return fmt.Errorf("dispatch for webhook delivery: bind dispatched task: %w", bindErr)
+	}
+	if !isAutopilotRunTerminalStatus(bound.Status) {
+		s.TaskSvc.NotifyTaskEnqueued(ctx, task)
 	}
 	return nil
 }
@@ -510,8 +676,9 @@ func (s *AutopilotService) dispatchAutopilotRun(
 			if skipped, code := s.handleDispatchSkip(ctx, autopilot, run, err); skipped != nil {
 				return skipped, code, nil
 			}
-			s.failRun(ctx, run.ID, err.Error())
-			s.captureAutopilotRunFailed(autopilot, *run, source, err.Error())
+			if failed, won, _ := s.failRun(ctx, run.ID, err.Error()); won {
+				s.captureAutopilotRunFailed(autopilot, failed, source, err.Error())
+			}
 			return run, dispatchFailReasonCode(err), fmt.Errorf("dispatch create_issue: %w", err)
 		}
 	case "run_only":
@@ -519,13 +686,15 @@ func (s *AutopilotService) dispatchAutopilotRun(
 			if skipped, code := s.handleDispatchSkip(ctx, autopilot, run, err); skipped != nil {
 				return skipped, code, nil
 			}
-			s.failRun(ctx, run.ID, err.Error())
-			s.captureAutopilotRunFailed(autopilot, *run, source, err.Error())
+			if failed, won, _ := s.failRun(ctx, run.ID, err.Error()); won {
+				s.captureAutopilotRunFailed(autopilot, failed, source, err.Error())
+			}
 			return run, dispatchFailReasonCode(err), fmt.Errorf("dispatch run_only: %w", err)
 		}
 	default:
-		s.failRun(ctx, run.ID, "unknown execution_mode: "+autopilot.ExecutionMode)
-		s.captureAutopilotRunFailed(autopilot, *run, source, "unknown execution_mode: "+autopilot.ExecutionMode)
+		if failed, won, _ := s.failRun(ctx, run.ID, "unknown execution_mode: "+autopilot.ExecutionMode); won {
+			s.captureAutopilotRunFailed(autopilot, failed, source, "unknown execution_mode: "+autopilot.ExecutionMode)
+		}
 		return run, dispatch.ReasonInternalError, fmt.Errorf("unknown execution_mode: %s", autopilot.ExecutionMode)
 	}
 
@@ -584,6 +753,14 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 
 	qtx := s.Queries.WithTx(tx)
 
+	// Take the workspace status-write lock FIRST (before the duplicate-guard
+	// advisory lock below), so the status resolution + create commit atomically
+	// against an archive-with-migration and every create path shares one lock
+	// order (MUL-4809 §5.5). A concurrently deleted workspace surfaces here.
+	if err := issuestatus.LockWorkspaceForStatusWrite(ctx, tx, ap.WorkspaceID); err != nil {
+		return fmt.Errorf("lock workspace for status write: %w", err)
+	}
+
 	title := s.interpolateTemplate(ap, *run, triggerTimezone)
 	description := s.buildIssueDescription(ap, *run, triggerTimezone)
 
@@ -616,11 +793,25 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		return fmt.Errorf("get next issue position: %w", err)
 	}
 
+	// Resolve the Category alias through the catalog so the issue lands on the
+	// workspace's CURRENT default Todo status (which may be a renamed built-in or
+	// a custom status) and carries the authoritative status_id (MUL-4809 §6.1).
+	// An unseeded workspace degrades to the legacy token with a NULL status_id.
+	newStatus := "todo"
+	var newStatusID pgtype.UUID
+	if resolved, ok, rerr := issuestatus.ResolveForWrite(ctx, qtx, ap.WorkspaceID, "todo"); rerr != nil {
+		return fmt.Errorf("resolve todo status: %w", rerr)
+	} else if ok {
+		newStatus = issuestatus.LegacyStatusToken(resolved)
+		newStatusID = resolved.ID
+	}
+
 	issue, err := qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
 		WorkspaceID:  ap.WorkspaceID,
 		Title:        title,
 		Description:  description,
-		Status:       "todo",
+		Status:       newStatus,
+		StatusID:     newStatusID,
 		Priority:     "none",
 		AssigneeType: pgtype.Text{String: ap.AssigneeType, Valid: true},
 		AssigneeID:   ap.AssigneeID,
@@ -717,7 +908,15 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 	// webhook dispatch has no actor and takes the plain entry points, where the
 	// autopilot-origin issue resolves to rule_owner. The *WithHandoff variants are
 	// the existing actor-carrying enqueue methods; the handoff note is empty here.
-	if ap.AssigneeType == "squad" {
+	// Stamp the dispatched task with this run's provenance at INSERT (MUL-4809
+	// §4.1). If the process crashes between this enqueue and the run.task_id bind
+	// below, the run can be repaired by a precise lookup of the task carrying this
+	// run's id — no time-window guessing, and an ordinary comment task (never
+	// stamped) can never be misattributed as the run's dispatched work.
+	dispatchCtx := withDispatchedAutopilotRun(ctx, run.ID)
+	var dispatchedTask db.AgentTaskQueue
+	switch {
+	case ap.AssigneeType == "squad":
 		// Fail-closed invocation gate: verify the admission principal (manual
 		// clicker, else creator — see autopilotAdmitInvoke) may still invoke the
 		// leader. Catches configs that predate the save-time gate, and configs
@@ -726,18 +925,39 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 			return fmt.Errorf("not allowed to invoke private squad leader")
 		}
 		if actorUserID.Valid {
-			if _, err := s.TaskSvc.EnqueueTaskForSquadLeaderWithHandoff(ctx, issue, leader.ID, ap.AssigneeID, "", actorUserID); err != nil {
-				return fmt.Errorf("enqueue squad leader task: %w", err)
-			}
-		} else if _, err := s.TaskSvc.EnqueueTaskForSquadLeader(ctx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{}); err != nil {
+			dispatchedTask, err = s.TaskSvc.EnqueueTaskForSquadLeaderWithHandoff(dispatchCtx, issue, leader.ID, ap.AssigneeID, "", actorUserID)
+		} else {
+			dispatchedTask, err = s.TaskSvc.EnqueueTaskForSquadLeader(dispatchCtx, issue, leader.ID, ap.AssigneeID, pgtype.UUID{})
+		}
+		if err != nil {
 			return fmt.Errorf("enqueue squad leader task: %w", err)
 		}
-	} else if actorUserID.Valid {
-		if _, err := s.TaskSvc.EnqueueTaskForIssueWithHandoff(ctx, issue, "", actorUserID); err != nil {
+	case actorUserID.Valid:
+		dispatchedTask, err = s.TaskSvc.EnqueueTaskForIssueWithHandoff(dispatchCtx, issue, "", actorUserID)
+		if err != nil {
 			return fmt.Errorf("enqueue task for issue: %w", err)
 		}
-	} else if _, err := s.TaskSvc.EnqueueTaskForIssue(ctx, issue); err != nil {
-		return fmt.Errorf("enqueue task for issue: %w", err)
+	default:
+		dispatchedTask, err = s.TaskSvc.EnqueueTaskForIssue(dispatchCtx, issue)
+		if err != nil {
+			return fmt.Errorf("enqueue task for issue: %w", err)
+		}
+	}
+
+	// Bind the run to its dispatched task and advance issue_created -> running, but
+	// ONLY when task-driven finalization is enabled (MUL-4809 §4.1 P0-3). When the
+	// gate is off (legacy / rolling-deploy default) the run stays in issue_created
+	// and is finalized by issue status (SyncRunFromIssue), matching the old pods it
+	// runs alongside. The task was provenance-stamped above in EITHER mode, so a
+	// later gate flip can bind + finalize the run precisely. The task itself keeps
+	// no autopilot_run_id — it stays an ordinary issue task; the run owns the
+	// pointer instead.
+	if dispatchedTask.ID.Valid && s.taskDrivenRunsEnabled(ctx) {
+		updatedRun, bindErr := s.bindAutopilotRunTask(ctx, run.ID, dispatchedTask.ID)
+		if bindErr != nil {
+			return bindErr
+		}
+		*run = updatedRun
 	}
 
 	slog.Info("autopilot dispatched (create_issue)",
@@ -746,6 +966,7 @@ func (s *AutopilotService) dispatchCreateIssue(ctx context.Context, ap db.Autopi
 		"issue_id", util.UUIDToString(issue.ID),
 		"leader_id", util.UUIDToString(leader.ID),
 		"run_id", util.UUIDToString(run.ID),
+		"task_id", util.UUIDToString(dispatchedTask.ID),
 	)
 	return nil
 }
@@ -929,16 +1150,14 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 		return fmt.Errorf("create autopilot task: %w", err)
 	}
 
-	// Update run with task reference.
-	updatedRun, err := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
-		ID:     run.ID,
-		TaskID: task.ID,
-	})
+	// Bind the run to its task (compare-and-set). A failure here is a real error
+	// — we must not report the dispatch as succeeded if we can't confirm the run
+	// now owns this task.
+	updatedRun, err := s.bindAutopilotRunTask(ctx, run.ID, task.ID)
 	if err != nil {
-		slog.Warn("failed to update run with task_id", "run_id", util.UUIDToString(run.ID), "error", err)
-	} else {
-		*run = updatedRun
+		return fmt.Errorf("bind run_only task: %w", err)
 	}
+	*run = updatedRun
 
 	// Drop the empty-claim cache and wake the daemon. dispatchRunOnly
 	// inserts the task row directly via Queries.CreateAutopilotTask
@@ -955,47 +1174,499 @@ func (s *AutopilotService) dispatchRunOnly(ctx context.Context, ap db.Autopilot,
 	return nil
 }
 
-// SyncRunFromIssue updates the autopilot run when its linked issue reaches a terminal status.
-func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue) {
-	if !issue.OriginType.Valid || issue.OriginType.String != "autopilot" {
+// isAutopilotTaskTerminal reports whether an agent task has reached a terminal
+// state that finalizes an autopilot run.
+func isAutopilotTaskTerminal(status string) bool {
+	return status == "completed" || status == "failed" || status == "cancelled"
+}
+
+// isAutopilotRunTerminalStatus reports whether an autopilot_run has reached a
+// terminal state (no further transition is possible).
+func isAutopilotRunTerminalStatus(status string) bool {
+	return status == "completed" || status == "failed" || status == "skipped"
+}
+
+// bindAutopilotRunTask is the single, idempotent compare-and-set bind used by
+// every dispatch entry point (MUL-4809 §4.1). It advances the run to running and
+// records taskID, then returns the AUTHORITATIVE run so callers never report a
+// dispatch as landing work it did not:
+//
+//   - normal / same-task replay: the CAS succeeds and the bound run is returned.
+//   - CAS lost (pgx.ErrNoRows): reload and decide. A run that a racing task
+//     already finalized (terminal) is returned as-is — the work did land, just
+//     via the task path. Anything else — the run is active but bound to a
+//     DIFFERENT task, the row is gone, or the reload itself failed — is an error,
+//     so schedule/webhook callers do NOT record a phantom success.
+func (s *AutopilotService) bindAutopilotRunTask(ctx context.Context, runID, taskID pgtype.UUID) (db.AutopilotRun, error) {
+	updated, err := s.Queries.UpdateAutopilotRunRunning(ctx, db.UpdateAutopilotRunRunningParams{
+		ID:     runID,
+		TaskID: taskID,
+	})
+	if err == nil {
+		return updated, nil
+	}
+	if !errors.Is(err, pgx.ErrNoRows) {
+		return db.AutopilotRun{}, fmt.Errorf("bind autopilot run to task: %w", err)
+	}
+	current, rerr := s.Queries.GetAutopilotRun(ctx, runID)
+	if rerr != nil {
+		return db.AutopilotRun{}, fmt.Errorf("bind autopilot run %s: reload after CAS miss: %w", util.UUIDToString(runID), rerr)
+	}
+	if isAutopilotRunTerminalStatus(current.Status) {
+		// A racing finalizer already ended the run. This is a legitimate idempotent
+		// success ONLY if this same task owns the run, or the run has no owning task
+		// yet (the pre-bind crash-window compatibility: it finalized via the
+		// issue-scoped fallback before any bind, so this dispatched task IS its
+		// work). A terminal run already owned by a DIFFERENT task means this is a
+		// competing dispatch — it must NOT be reported as landed, or the caller
+		// would wake / treat a second task as the run's work. "terminal" alone is
+		// not proof that THIS task landed.
+		if !current.TaskID.Valid || current.TaskID.Bytes == taskID.Bytes {
+			return current, nil
+		}
+		return db.AutopilotRun{}, fmt.Errorf("bind autopilot run %s: run is terminal (%s) owned by a different task, refusing to report bind of %s as dispatched",
+			util.UUIDToString(runID), current.Status, util.UUIDToString(taskID))
+	}
+	// Active but the CAS excluded it: the run is bound to a different task.
+	return db.AutopilotRun{}, fmt.Errorf("bind autopilot run %s: run is %s bound to a different task, refusing to rebind to %s",
+		util.UUIDToString(runID), current.Status, util.UUIDToString(taskID))
+}
+
+// repairUnboundCreateIssueRun binds an unbound create_issue run to the task it
+// actually dispatched and returns the bound run. The run's task_id was never set —
+// a crash between task enqueue and the run.task_id bind, or an unbound run left by
+// a gate-off (legacy-mode) dispatch that is only now being finalized. The
+// dispatched task is recovered by PRECISE provenance: the task stamped with this
+// run's id at INSERT (dispatched_autopilot_run_id), not a time/agent heuristic. ok
+// is false when no such task exists — the caller must not finalize the run then, so
+// an ordinary comment/chat task on the same issue (never stamped) can never bind
+// here or finalize the run off the wrong outcome (MUL-4809 §4.1).
+func (s *AutopilotService) repairUnboundCreateIssueRun(ctx context.Context, run db.AutopilotRun) (db.AutopilotRun, bool) {
+	dispatched, err := s.Queries.GetTaskByDispatchedAutopilotRun(ctx, run.ID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.AutopilotRun{}, false // no provably-dispatched task — don't finalize off a stray task
+		}
+		slog.Warn("autopilot: failed to find dispatched task for bind repair",
+			"run_id", util.UUIDToString(run.ID), "error", err)
+		return db.AutopilotRun{}, false
+	}
+	bound, err := s.bindAutopilotRunTask(ctx, run.ID, dispatched.ID)
+	if err != nil {
+		slog.Warn("autopilot: bind repair failed",
+			"run_id", util.UUIDToString(run.ID), "task_id", util.UUIDToString(dispatched.ID), "error", err)
+		return db.AutopilotRun{}, false
+	}
+	return bound, true
+}
+
+// retryRootTaskID walks the retry_of_task_id chain up from task to the first
+// attempt (the root). System retries form a short linear chain bounded by
+// max_attempts, so this is a handful of point lookups.
+func (s *AutopilotService) retryRootTaskID(ctx context.Context, task db.AgentTaskQueue) (pgtype.UUID, error) {
+	root := task
+	for root.RetryOfTaskID.Valid {
+		parent, err := s.Queries.GetAgentTask(ctx, root.RetryOfTaskID)
+		if err != nil {
+			return pgtype.UUID{}, err
+		}
+		root = parent
+	}
+	return root.ID, nil
+}
+
+// SyncRunFromCreateIssueTask finalizes a create_issue autopilot run from the
+// terminal state of the task the autopilot dispatched (MUL-4809 §4.1) — the run
+// is driven purely by task outcome, never by the issue status.
+//
+// create_issue tasks carry issue_id (not autopilot_run_id — that stays free so
+// they remain ordinary issue tasks), so the run is found by issue_id and the
+// terminal task is matched to the run's dispatched-task lineage via run.task_id
+// plus the retry_of_task_id chain. That match is what keeps a LATER
+// comment-triggered task on the same issue from finalizing the run.
+//
+// When run.task_id was never bound (a crash between enqueue and bind, or a run
+// dispatched by a pre-§4.1 pod mid-rolling-deploy) it falls back to the
+// issue-scoped "no task still active" check so the run still finalizes rather
+// than hanging.
+func (s *AutopilotService) SyncRunFromCreateIssueTask(ctx context.Context, task db.AgentTaskQueue) {
+	// Two-phase rollout gate (MUL-4809 §4.1 P0-3): while task-driven finalization is
+	// off, create_issue runs are finalized from issue status (SyncRunFromIssue), so
+	// task outcome must not touch them — otherwise a gate-off new pod and an old pod
+	// would run two termination semantics at once.
+	if !s.taskDrivenRunsEnabled(ctx) {
 		return
 	}
-
-	run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID)
-	if err != nil {
-		return // no active run linked to this issue
+	// run_only tasks carry autopilot_run_id and are handled by SyncRunFromTask.
+	if task.AutopilotRunID.Valid || !task.IssueID.Valid || !isAutopilotTaskTerminal(task.Status) {
+		return
 	}
+	run, err := s.Queries.GetAutopilotRunByIssue(ctx, task.IssueID)
+	if err != nil {
+		return // no in-flight run linked to this issue (covers ordinary issue/chat tasks)
+	}
+
+	// When the run's task_id was never bound — a crash between enqueue and bind, or
+	// a run dispatched by a pre-§4.1 pod mid rolling-deploy — repair it before
+	// matching. The repair binds the run to the task it actually dispatched (the
+	// first root task the autopilot queued for the issue), so a later comment/chat
+	// task on the same issue can never be misattributed as the run's dispatched work
+	// and finalize the run off the wrong outcome (MUL-4809 §4.1 item 4).
+	if !run.TaskID.Valid {
+		repaired, ok := s.repairUnboundCreateIssueRun(ctx, run)
+		if !ok {
+			return
+		}
+		run = repaired
+	}
+
+	// Match the terminal task to the run's dispatched-task lineage: run.task_id plus
+	// the retry_of_task_id chain. A task outside that lineage (e.g. a comment task)
+	// leaves the run untouched.
+	root, rerr := s.retryRootTaskID(ctx, task)
+	if rerr != nil {
+		slog.Warn("autopilot: failed to resolve task retry root",
+			"task_id", util.UUIDToString(task.ID), "error", rerr)
+		return
+	}
+	if root.Bytes != run.TaskID.Bytes {
+		return // not this run's dispatched-task lineage (e.g. a comment task)
+	}
+	// Don't finalize the run off a non-final attempt. A system retry is expected when
+	// this failed task is still retry-eligible — either already enqueued (pending) or
+	// still owed because the retry has not been created yet: a crash between the
+	// sweeper's fail-commit and HandleFailedTasks, or a transient CreateRetryTask
+	// error. In every case the run must wait for the final leaf; the retry is created
+	// inline by FailTask or back-filled by the autopilot reconcile, and its outcome
+	// finalizes the run. retryEligible mirrors the reconcile so the two stay in
+	// lock-step, and it subsumes the pending check (a pending retry implies the parent
+	// was eligible) — the HasPendingRetryForTask call is kept as defense in depth
+	// against reason-classification drift (MUL-4809 §4.1 P0-2).
+	if task.Status != "completed" {
+		if retryEligible(task.FailureReason.String, task) {
+			return
+		}
+		pending, perr := s.Queries.HasPendingRetryForTask(ctx, task.ID)
+		if perr != nil {
+			slog.Warn("autopilot: failed to check pending retry",
+				"task_id", util.UUIDToString(task.ID), "error", perr)
+			return
+		}
+		if pending {
+			return
+		}
+	}
+
 	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
 	if err != nil {
 		return
 	}
+	wsID := util.UUIDToString(autopilot.WorkspaceID)
 
-	wsID := util.UUIDToString(issue.WorkspaceID)
-
-	switch issue.Status {
-	case "done", "in_review":
+	switch task.Status {
+	case "completed":
 		updatedRun, err := s.Queries.UpdateAutopilotRunCompleted(ctx, db.UpdateAutopilotRunCompletedParams{
-			ID: run.ID,
+			ID:     run.ID,
+			Result: task.Result,
 		})
 		if err != nil {
-			slog.Warn("failed to complete autopilot run", "run_id", util.UUIDToString(run.ID), "error", err)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return // CAS lost: the run was already finalized by another path
+			}
+			slog.Warn("failed to complete autopilot run from create_issue task",
+				"run_id", util.UUIDToString(run.ID), "error", err)
 			return
 		}
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
-	case "cancelled", "blocked":
-		reason := "issue " + issue.Status
+	case "failed", "cancelled":
+		reason := taskFailureReasonForAutopilotRun(task)
 		updatedRun, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
 			ID:            run.ID,
-			FailureReason: pgtype.Text{String: reason, Valid: true},
+			FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
 		})
 		if err != nil {
-			slog.Warn("failed to fail autopilot run", "run_id", util.UUIDToString(run.ID), "error", err)
+			if errors.Is(err, pgx.ErrNoRows) {
+				return // CAS lost: the run was already finalized by another path
+			}
+			slog.Warn("failed to fail autopilot run from create_issue task",
+				"run_id", util.UUIDToString(run.ID), "error", err)
 			return
 		}
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 		s.publishRunDone(wsID, updatedRun, "failed")
 	}
+}
+
+// autopilotReconcileAdvisoryLockKey serializes the task-driven reconcile across
+// replicas during a rolling deploy (distinct from issuestatus.Backfill's 4809).
+// Finalization is CAS-safe, so the lock is only an optimization to avoid N replicas
+// each scanning; a loser simply skips and the next tick tries again.
+const autopilotReconcileAdvisoryLockKey int64 = 48091
+
+const (
+	// autopilotReconcileBatchSize bounds one keyset page so the reconcile never
+	// materializes every active run at once (MUL-4809 §4.1 P0-3).
+	autopilotReconcileBatchSize int32 = 200
+	// autopilotReconcileInterval is the steady-state re-scan cadence while the gate
+	// is ON — a bounded periodic reconcile, not a one-shot boot scan, so a run left
+	// behind by a transient error or an unsettled retry lineage converges on a later
+	// tick instead of being stranded forever (MUL-4809 §4.1 P0-3).
+	autopilotReconcileInterval = 2 * time.Minute
+	// autopilotReconcileRetryBackoff is the shorter cadence used for the next tick
+	// after one that reported transient errors, so recovery does not wait a full
+	// steady-state interval.
+	autopilotReconcileRetryBackoff = 15 * time.Second
+)
+
+// reconcileOutcome classifies one run's reconcile attempt so the loop can tell a
+// converged run from one that is merely not ready yet from one that hit a transient
+// error and must be revisited on a later tick (MUL-4809 §4.1 P0-2 / P0-3).
+type reconcileOutcome int
+
+const (
+	// reconcileNotReady: no dispatched task yet, the final attempt is still running,
+	// or the retry lineage has not settled past the retry-creation window. A later
+	// tick re-examines it; nothing is stranded.
+	reconcileNotReady reconcileOutcome = iota
+	// reconcileFinalized: this attempt moved the run to a terminal status.
+	reconcileFinalized
+	// reconcileRetryLater: a transient query error — the run is left untouched and
+	// the loop schedules a sooner follow-up.
+	reconcileRetryLater
+)
+
+// reconcileResult reports one reconcile pass's outcome counts. retryable > 0 means at
+// least one run hit a transient error, so the caller should schedule a sooner tick.
+type reconcileResult struct {
+	finalized int
+	retryable int
+}
+
+// RunAutopilotReconcileLoop periodically converges create_issue runs stranded by the
+// "no event replay" gap while the gate is ON (MUL-4809 §4.1 P0-3). Each tick is
+// advisory-locked (one replica walks) and CAS-safe, so it is safe to run on every
+// replica. A one-shot boot scan would permanently lose any run whose query
+// transiently failed, whose lock winner errored, or whose retry lineage had not yet
+// settled; this bounded periodic re-scan converges them on a later tick. It backs off
+// to a short interval after a tick that reported transient errors. Returns when ctx
+// is cancelled.
+func (s *AutopilotService) RunAutopilotReconcileLoop(ctx context.Context, pool *pgxpool.Pool) {
+	for {
+		next := autopilotReconcileInterval
+		res, err := s.ReconcileAutopilotRunsAtBoot(ctx, pool)
+		switch {
+		case err != nil:
+			slog.Error("autopilot task-driven reconcile tick failed", "error", err)
+			next = autopilotReconcileRetryBackoff
+		case res.retryable > 0:
+			slog.Warn("autopilot task-driven reconcile left runs for retry",
+				"finalized", res.finalized, "retryable", res.retryable)
+			next = autopilotReconcileRetryBackoff
+		case res.finalized > 0:
+			slog.Info("autopilot task-driven reconcile finalized runs", "runs_finalized", res.finalized)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(next):
+		}
+	}
+}
+
+// ReconcileAutopilotRunsAtBoot runs ReconcileAutopilotRuns under a Postgres session
+// advisory lock so a single replica does the walk per tick (MUL-4809 §4.1 P0-3). A
+// replica that loses the lock returns a zero result so the next tick — or another
+// replica — takes over. Deliberately NOT gated: the pass itself gates only the
+// task-driven half (see ReconcileAutopilotRuns), because the dispatchless-run
+// convergence must also run during the gate-off first rollout phase.
+func (s *AutopilotService) ReconcileAutopilotRunsAtBoot(ctx context.Context, pool *pgxpool.Pool) (reconcileResult, error) {
+	conn, err := pool.Acquire(ctx)
+	if err != nil {
+		return reconcileResult{}, fmt.Errorf("acquire conn: %w", err)
+	}
+	defer conn.Release()
+	var locked bool
+	if err := conn.QueryRow(ctx, "SELECT pg_try_advisory_lock($1)", autopilotReconcileAdvisoryLockKey).Scan(&locked); err != nil {
+		return reconcileResult{}, fmt.Errorf("try advisory lock: %w", err)
+	}
+	if !locked {
+		return reconcileResult{}, nil
+	}
+	defer func() {
+		_, _ = conn.Exec(context.Background(), "SELECT pg_advisory_unlock($1)", autopilotReconcileAdvisoryLockKey)
+	}()
+	return s.ReconcileAutopilotRuns(ctx)
+}
+
+// ReconcileAutopilotRuns converges stranded active create_issue runs. It has two halves
+// with DIFFERENT gating (MUL-4809 §4.1 P0-1 / P0-3):
+//
+//   - Dispatchless convergence (UNGATED): a run that never got a task and whose webhook
+//     delivery permanently failed is finalized off that durable signal. A permanently
+//     failed dispatch is not task-driven finalization, so this must also run during the
+//     first rollout phase where FF_AUTOPILOT_TASK_DRIVEN_RUNS is off — otherwise a
+//     delivery that exhausted its retries would strand an active run with no worker left
+//     to converge it.
+//   - Task-outcome finalization + retry back-fill (GATED): replays the settled terminal
+//     leaf of the dispatched lineage through the normal CAS finalizer, since the event
+//     bus does not re-deliver past task events. Skipped while the gate is off, where
+//     create_issue runs are still finalized from issue status.
+//
+// Keyset-paginated so it never materializes every active run at once. Idempotent and
+// safe under concurrent replicas. A transient error on any single run is counted
+// (retryable) and left for a later tick rather than stranding the run; only a page-load
+// error aborts the pass.
+func (s *AutopilotService) ReconcileAutopilotRuns(ctx context.Context) (reconcileResult, error) {
+	var res reconcileResult
+	taskDriven := s.taskDrivenRunsEnabled(ctx)
+	// Keyset cursor over (created_at, id); '-infinity' + zero-uuid selects the first
+	// page. Finalized runs drop out of the active-status filter, so paging forward
+	// never revisits or skips a run within a pass.
+	cursorCreatedAt := pgtype.Timestamptz{InfinityModifier: pgtype.NegativeInfinity, Valid: true}
+	cursorID := pgtype.UUID{Valid: true} // all-zero uuid
+	for {
+		batch, err := s.Queries.ListActiveCreateIssueRunsPaged(ctx, db.ListActiveCreateIssueRunsPagedParams{
+			CursorCreatedAt: cursorCreatedAt,
+			CursorID:        cursorID,
+			RowLimit:        autopilotReconcileBatchSize,
+		})
+		if err != nil {
+			return res, fmt.Errorf("list active create_issue runs: %w", err)
+		}
+		if len(batch) == 0 {
+			break
+		}
+		for _, run := range batch {
+			switch s.reconcileCreateIssueRun(ctx, run, taskDriven) {
+			case reconcileFinalized:
+				res.finalized++
+			case reconcileRetryLater:
+				res.retryable++
+			}
+			cursorCreatedAt = run.CreatedAt
+			cursorID = run.ID
+		}
+		if int32(len(batch)) < autopilotReconcileBatchSize {
+			break
+		}
+	}
+	return res, nil
+}
+
+// reconcileCreateIssueRun finalizes one active create_issue run if the final attempt
+// of its dispatched lineage has settled at a terminal status. It distinguishes "not
+// ready" (still pending / retry pending) from "transient error" (revisit later) so a
+// single DB blip never strands the run (MUL-4809 §4.1 P0-2 / P0-3).
+func (s *AutopilotService) reconcileCreateIssueRun(ctx context.Context, run db.AutopilotRun, taskDriven bool) reconcileOutcome {
+	// The dispatched task: the bound task_id, else the provenance-stamped root.
+	var root db.AgentTaskQueue
+	var err error
+	if run.TaskID.Valid {
+		root, err = s.Queries.GetAgentTask(ctx, run.TaskID)
+	} else {
+		root, err = s.Queries.GetTaskByDispatchedAutopilotRun(ctx, run.ID)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No dispatched task. Usually the run is just mid-dispatch (still pending), but
+		// it can also be a stranded webhook collision run whose fail-transition never
+		// succeeded before its delivery exhausted its retries. Converge that off the
+		// delivery's durable terminal state so a permanently-failed delivery never sits
+		// beside a live run (MUL-4809 §4.1 P0-1) — no time heuristic. UNGATED on purpose:
+		// this is dispatch failure, not task-driven finalization, so it must also heal
+		// during the gate-off first rollout phase.
+		return s.reconcileDispatchlessRun(ctx, run)
+	}
+	if err != nil {
+		return reconcileRetryLater // transient error — revisit, do not strand the run
+	}
+	if !taskDriven {
+		// Two-phase rollout: while the gate is off, create_issue runs are finalized from
+		// issue status, so neither the retry back-fill nor task-outcome finalization below
+		// may touch this run (MUL-4809 §4.1 P0-3).
+		return reconcileNotReady
+	}
+	// Walk the linear system-retry chain forward to the final attempt.
+	leaf := root
+	for {
+		succ, serr := s.Queries.GetRetrySuccessorTask(ctx, leaf.ID)
+		if errors.Is(serr, pgx.ErrNoRows) {
+			break // leaf reached
+		}
+		if serr != nil {
+			return reconcileRetryLater // transient error walking the chain — revisit
+		}
+		leaf = succ
+	}
+	if !isAutopilotTaskTerminal(leaf.Status) {
+		return reconcileNotReady // the final attempt is still in flight
+	}
+	// A failed leaf that is still retry-eligible is owed a retry the failure handler has
+	// not created yet: the bulk sweeper marks a task failed, then creates its retry in a
+	// separate step, so a crash (or a transient CreateRetryTask error) in between leaves
+	// the leaf terminal-failed but not final. Finalizing the run now would fail it before
+	// the retry runs, and a later successful retry cannot un-fail a terminal run. Rather
+	// than skip forever (a plain periodic reconcile never creates the retry itself),
+	// back-fill the owed retry here. MaybeRetryFailedTask is idempotent — the
+	// retry_of_task_id unique constraint no-ops a duplicate when the sweeper or another
+	// replica raced us — so this is a safe recovery, not a double attempt. A later tick
+	// converges the run off the retry's outcome (MUL-4809 §4.1 P0-2).
+	if leaf.Status == "failed" && retryEligible(leaf.FailureReason.String, leaf) {
+		if _, err := s.TaskSvc.MaybeRetryFailedTask(ctx, leaf); err != nil {
+			return reconcileRetryLater // transient — revisit and back-fill next tick
+		}
+		return reconcileNotReady // retry now exists (or already did); converge next tick
+	}
+	before := run.Status
+	// Replay the terminal leaf through the normal finalizer: it repairs an unbound run
+	// via provenance and CAS-finalizes. The gate is on here.
+	s.SyncRunFromCreateIssueTask(ctx, leaf)
+	after, err := s.Queries.GetAutopilotRun(ctx, run.ID)
+	if err != nil {
+		return reconcileRetryLater // couldn't confirm the outcome — revisit
+	}
+	if after.Status != before && isAutopilotRunTerminalStatus(after.Status) {
+		return reconcileFinalized
+	}
+	return reconcileNotReady
+}
+
+// reconcileDispatchlessRun converges an active create_issue run that has no dispatched
+// task. Normally that just means the dispatch is still in flight (not ready). But a
+// webhook run whose delivery has PERMANENTLY failed will never get a task — e.g. a
+// dispatch collision whose fail-transition kept erroring until the delivery exhausted
+// its retries — so it is finalized off the delivery's durable terminal state, the only
+// non-heuristic signal that the dispatch is done (MUL-4809 §4.1 P0-1). This is the
+// durable backstop to the worker's best-effort FailActiveRunForWebhookDelivery: it
+// still converges the run after a fault that also blocked that immediate attempt clears.
+func (s *AutopilotService) reconcileDispatchlessRun(ctx context.Context, run db.AutopilotRun) reconcileOutcome {
+	if !run.WebhookDeliveryID.Valid {
+		return reconcileNotReady // not webhook-originated: no durable "dispatch done" signal
+	}
+	delivery, err := s.Queries.GetWebhookDelivery(ctx, run.WebhookDeliveryID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return reconcileNotReady
+	}
+	if err != nil {
+		return reconcileRetryLater
+	}
+	if delivery.Status != "failed" {
+		return reconcileNotReady // dispatch may still be in flight / retrying
+	}
+	// Delivery permanently failed and no task was ever dispatched: the dispatch is
+	// durably done. CAS-fail the run so it converges with the delivery.
+	failed, won, ferr := s.failRun(ctx, run.ID, "webhook dispatch failed: no task dispatched")
+	if ferr != nil {
+		return reconcileRetryLater
+	}
+	if !won {
+		return reconcileNotReady // already finalized by another path
+	}
+	if autopilot, aerr := s.Queries.GetAutopilot(ctx, run.AutopilotID); aerr == nil {
+		s.captureAutopilotRunFailed(autopilot, failed, failed.Source, failed.FailureReason.String)
+		s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), failed, "failed")
+	}
+	return reconcileFinalized
 }
 
 // SyncRunFromTask updates the autopilot run when a run_only task completes or fails.
@@ -1022,6 +1693,9 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 			Result: task.Result,
 		})
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return // CAS lost: the run was already finalized by another path
+			}
 			slog.Warn("failed to complete autopilot run from task", "run_id", util.UUIDToString(run.ID), "error", err)
 			return
 		}
@@ -1037,6 +1711,9 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 			FailureReason: pgtype.Text{String: reason, Valid: true},
 		})
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return // CAS lost: the run was already finalized by another path
+			}
 			slog.Warn("failed to fail autopilot run from task", "run_id", util.UUIDToString(run.ID), "error", err)
 			return
 		}
@@ -1045,67 +1722,58 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 	}
 }
 
-// SyncRunFromLinkedIssueTask fails a create_issue autopilot run when its
-// linked issue task fails terminally before the issue itself reaches a
-// terminal status. create_issue tasks are linked through issue_id rather than
-// autopilot_run_id, so SyncRunFromTask cannot see them directly. Without this
-// the run would hang in `issue_created` forever — and because the failure-rate
-// auto-pause monitor excludes issue_created/running runs, a consistently
-// failing autopilot would never trip the auto-pause either.
-//
-// "Terminal" means no task is still active for the issue. FailTask enqueues an
-// auto-retry for infra-shaped failures (timeout, runtime offline/recovery,
-// codex no-progress) BEFORE it broadcasts the failure event, so an active task
-// here means another attempt is already in flight — we wait for it instead of
-// failing the run prematurely. Once retries are exhausted (or the failure was
-// never retryable in the first place), the run fails carrying the task's reason.
-func (s *AutopilotService) SyncRunFromLinkedIssueTask(ctx context.Context, task db.AgentTaskQueue) {
-	if task.AutopilotRunID.Valid || !task.IssueID.Valid || task.Status != "failed" {
+// SyncRunFromIssue finalizes a create_issue autopilot run from its linked issue's
+// status — the LEGACY path, used only while task-driven finalization is gated off
+// (MUL-4809 §4.1 P0-3). When the task-driven gate is ON this is a no-op: the run is
+// finalized by task outcome (SyncRunFromCreateIssueTask) and issue status must not
+// touch it. Kept behaviorally identical to the pre-§4.1 logic so that during a
+// rolling deploy, a gate-off new pod finalizes runs exactly like the old pods it
+// runs alongside — the guarded terminal SQL only adds first-writer-wins safety.
+func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue) {
+	if s.taskDrivenRunsEnabled(ctx) {
 		return
 	}
-	// Only create_issue runs link through issue_id (and their linked issue is
-	// always origin_type=autopilot by construction), so a hit here both
-	// identifies an in-flight create_issue run and bails the common case of
-	// ordinary issue/chat task failures after a single query.
-	run, err := s.Queries.GetAutopilotRunByIssue(ctx, task.IssueID)
+	if !issue.OriginType.Valid || issue.OriginType.String != "autopilot" {
+		return
+	}
+	run, err := s.Queries.GetAutopilotRunByIssue(ctx, issue.ID)
 	if err != nil {
 		return // no active run linked to this issue
-	}
-	// A still-active task — typically the auto-retry FailTask just enqueued —
-	// means the dispatch isn't terminal yet; wait for the final attempt.
-	hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
-	if err != nil {
-		slog.Warn("failed to check active tasks for autopilot issue failure",
-			"issue_id", util.UUIDToString(task.IssueID),
-			"task_id", util.UUIDToString(task.ID),
-			"error", err,
-		)
-		return
-	}
-	if hasActive {
-		return
 	}
 	autopilot, err := s.Queries.GetAutopilot(ctx, run.AutopilotID)
 	if err != nil {
 		return
 	}
+	wsID := util.UUIDToString(issue.WorkspaceID)
 
-	reason := taskFailureReasonForAutopilotRun(task)
-	updatedRun, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
-		ID:            run.ID,
-		FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
-	})
-	if err != nil {
-		slog.Warn("failed to fail autopilot run from linked issue task",
-			"run_id", util.UUIDToString(run.ID),
-			"issue_id", util.UUIDToString(task.IssueID),
-			"task_id", util.UUIDToString(task.ID),
-			"error", err,
-		)
-		return
+	switch issue.Status {
+	case "done", "in_review":
+		updatedRun, err := s.Queries.UpdateAutopilotRunCompleted(ctx, db.UpdateAutopilotRunCompletedParams{ID: run.ID})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return // CAS lost: the run was already finalized by another path
+			}
+			slog.Warn("failed to complete autopilot run from issue", "run_id", util.UUIDToString(run.ID), "error", err)
+			return
+		}
+		s.captureAutopilotRunCompleted(autopilot, updatedRun)
+		s.publishRunDone(wsID, updatedRun, "completed")
+	case "cancelled", "blocked":
+		reason := "issue " + issue.Status
+		updatedRun, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
+			ID:            run.ID,
+			FailureReason: pgtype.Text{String: reason, Valid: true},
+		})
+		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return // CAS lost: the run was already finalized by another path
+			}
+			slog.Warn("failed to fail autopilot run from issue", "run_id", util.UUIDToString(run.ID), "error", err)
+			return
+		}
+		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
+		s.publishRunDone(wsID, updatedRun, "failed")
 	}
-	s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
-	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), updatedRun, "failed")
 }
 
 func taskFailureReasonForAutopilotRun(task db.AgentTaskQueue) string {
@@ -1114,6 +1782,12 @@ func taskFailureReasonForAutopilotRun(task db.AgentTaskQueue) string {
 	}
 	if task.FailureReason.Valid && strings.TrimSpace(task.FailureReason.String) != "" {
 		return task.FailureReason.String
+	}
+	// A cancelled task carries no error text of its own; keep the run's failure
+	// reason traceable to the cancellation rather than a generic "failed"
+	// (MUL-4809 §9.2 — task cancelled run reason must be attributable).
+	if task.Status == "cancelled" {
+		return "task cancelled"
 	}
 	return "task failed"
 }
@@ -1159,13 +1833,29 @@ func (s *AutopilotService) handleDispatchSkip(ctx context.Context, ap db.Autopil
 	return run, skipErr.code
 }
 
-func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reason string) {
-	if _, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
+// failRun marks a run failed as a compare-and-set. It distinguishes three outcomes
+// so callers on the webhook-delivery path never report success over a still-active
+// run (MUL-4809 §4.1 P0-1):
+//   - (failed, true, nil): THIS call won the terminal transition;
+//   - (zero, false, nil): CAS miss — the run was already finalized by another path.
+//     The caller MUST NOT record a duplicate failure (analytics would double-count),
+//     and should reload the authoritative run before acting on its status;
+//   - (zero, false, err): a real database error — the transition did NOT happen and
+//     the run may still be active. The caller MUST treat the operation as retryable
+//     rather than reporting success.
+func (s *AutopilotService) failRun(ctx context.Context, runID pgtype.UUID, reason string) (db.AutopilotRun, bool, error) {
+	updated, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
 		ID:            runID,
 		FailureReason: pgtype.Text{String: reason, Valid: true},
-	}); err != nil {
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.AutopilotRun{}, false, nil // CAS miss: already finalized elsewhere
+		}
 		slog.Warn("failed to mark autopilot run as failed", "run_id", util.UUIDToString(runID), "error", err)
+		return db.AutopilotRun{}, false, err
 	}
+	return updated, true, nil
 }
 
 // shouldSkipDispatch is the pre-flight admission check from MUL-1899.
