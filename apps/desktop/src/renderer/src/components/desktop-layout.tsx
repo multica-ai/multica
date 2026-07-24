@@ -22,6 +22,7 @@ import {
 } from "@/platform/navigation";
 import { TabBar } from "./tab-bar";
 import { TabContent } from "./tab-content";
+import { UpdateButton } from "./update-button";
 import { WindowOverlay } from "./window-overlay";
 
 const TOP_BAR_HEIGHT_CLASS = "h-12";
@@ -77,6 +78,9 @@ function WindowToolbar() {
           >
             <ChevronRight className="size-4" />
           </button>
+          {/* Renders only when the background update check has found a newer
+              version; otherwise it is hidden. */}
+          <UpdateButton />
         </div>
       </div>
     </div>
