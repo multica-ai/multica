@@ -57,7 +57,7 @@ import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
 import {
-  hasOptimisticInFlight,
+  hasInFlightPendingTask,
   isStillOnComposeTarget,
   planProjectContextChange,
 } from "./use-chat-controller";
@@ -97,42 +97,6 @@ function appendChatMessageToLatestPageCache(
         pages: old.pages.map((page, index) =>
           index === 0 ? { ...page, messages: [...page.messages, message] } : page,
         ),
-      };
-    },
-  );
-}
-
-function replaceOptimisticChatMessageId(
-  qc: ReturnType<typeof useQueryClient>,
-  sessionId: string,
-  optimisticId: string,
-  messageId: string,
-  taskId: string,
-) {
-  const replace = (messages: ChatMessage[] | undefined) => {
-    if (!messages) return messages;
-    if (messages.some((m) => m.id === messageId)) {
-      return messages.filter((m) => m.id !== optimisticId);
-    }
-    return messages.map((m) =>
-      m.id === optimisticId ? { ...m, id: messageId, task_id: taskId } : m,
-    );
-  };
-
-  qc.setQueryData<ChatMessage[]>(
-    chatKeys.messages(sessionId),
-    replace,
-  );
-  qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
-    chatKeys.messagesPage(sessionId),
-    (old) => {
-      if (!old) return old;
-      return {
-        ...old,
-        pages: old.pages.map((page) => ({
-          ...page,
-          messages: replace(page.messages) ?? page.messages,
-        })),
       };
     },
   );
@@ -309,18 +273,18 @@ export function ChatWindow() {
   // Self-heal a dangling `activeSessionId` (persisted / restored from storage)
   // that points at a session which was deleted or lost access: once the
   // sessions list has loaded and doesn't contain it — with no in-flight
-  // optimistic write exempting a just-created session — clear it so the
+  // pending task exempting a just-created session — clear it so the
   // floating window shows the new-chat state instead of an editable empty chat
   // whose send would POST into a nonexistent session. Same fix the shared
-  // controller applies for the tab (kept in sync via `hasOptimisticInFlight`).
+  // controller applies for the tab (kept in sync via `hasInFlightPendingTask`).
   // The earlier "no self-heal" note was about a naive version keyed on stale
-  // `allSessions`; the optimistic-write signal here exempts the freshly-created
-  // session (handleSend seeds its optimistic message + pending task BEFORE
-  // setActiveSession), so it is never mistaken for stale.
+  // `allSessions`; the in-flight-pending-task signal here exempts the
+  // freshly-created session (handleSend seeds its pending task from the send
+  // response BEFORE setActiveSession), so it is never mistaken for stale.
   useEffect(() => {
     if (!activeSessionId || !sessionsLoaded) return;
     if (sessions.some((s) => s.id === activeSessionId)) return;
-    if (hasOptimisticInFlight(qc, activeSessionId)) return;
+    if (hasInFlightPendingTask(qc, activeSessionId)) return;
     uiLogger.info("clearing dangling activeSessionId (floating)", { sessionId: activeSessionId });
     setActiveSession(null);
   }, [activeSessionId, sessionsLoaded, sessions, qc, setActiveSession]);
@@ -383,7 +347,7 @@ export function ChatWindow() {
         activeSessionId &&
         (!sessionsLoaded ||
           sessions.some((s) => s.id === activeSessionId) ||
-          hasOptimisticInFlight(qc, activeSessionId))
+          hasInFlightPendingTask(qc, activeSessionId))
       ) {
         return activeSessionId;
       }
@@ -524,72 +488,17 @@ export function ChatWindow() {
         return false;
       }
 
-      // Optimistic burst — everything that gives the user "I sent a message
-      // and the agent is now working" feedback fires BEFORE the HTTP roundtrip.
-      // Pre-#status-pill the pending-task seed lived after `await
-      // sendChatMessage` and the pill blinked in a few hundred ms after the
-      // user's message — small but visible "did it actually send?" gap.
-      const sentAt = new Date().toISOString();
-      const optimistic: ChatMessage = {
-        id: `optimistic-${Date.now()}`,
-        chat_session_id: sessionId,
-        role: "user",
-        content: finalContent,
-        task_id: null,
-        created_at: sentAt,
-        attachments: draftAttachments,
-      };
-      // Seed cache BEFORE flipping activeSessionId. If we set the active
-      // session first, useQuery's first subscription to the new key sees no
-      // cached data and renders ChatMessageSkeleton for one frame — the
-      // "new-chat first-message" white flash. Priming the cache first means
-      // the very first read after activeSessionId flips hits data
-      // synchronously and ChatMessageList mounts directly.
-      appendChatMessageToLatestPageCache(qc, sessionId, optimistic);
-      qc.setQueryData<ChatMessage[]>(
-        chatKeys.messages(sessionId),
-        (old) => (old ? [...old, optimistic] : [optimistic]),
-      );
-      // Seed the pending-task with a temporary id so the StatusPill mounts
-      // and starts ticking the instant the user clicks send. Real task_id
-      // and server-authoritative created_at land below; until then the pill
-      // is anchored to the local clock (drift is the request RTT, ~50–200ms,
-      // which doesn't change the rendered "Ns" value).
-      qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
-        task_id: `optimistic-${optimistic.id}`,
-        status: "queued",
-        created_at: sentAt,
-      });
-      // Cache primed → safe to publish the new active session, but only if the
-      // user hasn't navigated away mid-send. Compare the live store against the
-      // closure-captured target; see isStillOnComposeTarget for the rule, which
-      // this floating window shares with the chat tab's controller.
-      const live = useChatStore.getState();
-      const stillOnSourceSession = isStillOnComposeTarget(live.activeSessionId, activeSessionId);
-      if (stillOnSourceSession) {
-        setActiveSession(sessionId);
-      }
-      commitInput?.({ extraDraftKeys: [sessionId], clearEditor: stillOnSourceSession });
-      apiLogger.debug("sendChatMessage.optimistic", { sessionId, optimisticId: optimistic.id });
-
+      // Await-then-render: the composer keeps the user's text and attachments
+      // in place (editor locked, button spinning via `submitting`) until the
+      // server accepts the send. Nothing is written into the caches, and the
+      // draft is never cleared, before the roundtrip settles — a slow send never
+      // reads as "posted but the box is still full", and a rejected one keeps
+      // the draft for retry (ChatInput never cleared it).
       let result;
       try {
         result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
       } catch (err) {
-        apiLogger.error("sendChatMessage.error.rollback", { sessionId, optimisticId: optimistic.id, err });
-        stopRequestedBeforeTaskRef.current = false;
-        removeChatMessageFromCaches(qc, sessionId, optimistic.id);
-        qc.setQueryData(chatKeys.pendingTask(sessionId), {});
-        enqueueLocalRestore({
-          id: `send-failed-${optimistic.id}`,
-          content: finalContent,
-          attachments: draftAttachments,
-          // Restore into the session this was sent from. If the user navigated
-          // away (fire-and-forget) the request waits in that session's persisted
-          // queue until they return, rather than dumping content into another
-          // session or dying with this component.
-          sessionId,
-        });
+        apiLogger.error("sendChatMessage.error", { sessionId, err });
         toast.error(t(($) => $.input.send_failed_toast));
         return false;
       }
@@ -598,15 +507,49 @@ export function ChatWindow() {
         messageId: result.message_id,
         taskId: result.task_id,
       });
-      replaceOptimisticChatMessageId(qc, sessionId, optimistic.id, result.message_id, result.task_id);
-      // Replace the temporary task_id with the server's real one (so the WS
-      // task: handlers can match against it) and snap the anchor to the
-      // server's created_at — keeping the elapsed-seconds reading stable.
+
+      // Render the accepted message from the server response. Seed the message
+      // caches BEFORE flipping activeSessionId: if we set the active session
+      // first, useQuery's first subscription to the new key sees no cached data
+      // and renders ChatMessageSkeleton for one frame — the "new-chat
+      // first-message" white flash. Priming the cache first means the very first
+      // read after activeSessionId flips hits data synchronously and
+      // ChatMessageList mounts directly. Seed the pending-task from the server's
+      // real id + created_at so the StatusPill mounts anchored to the true clock
+      // (no local-clock drift, no backwards snap) and the stale-session self-heal
+      // exempts this just-created session until the sessions-list refetch lands.
+      const sent: ChatMessage = {
+        id: result.message_id,
+        chat_session_id: sessionId,
+        role: "user",
+        content: finalContent,
+        task_id: result.task_id,
+        created_at: result.created_at,
+        attachments: draftAttachments,
+      };
+      appendChatMessageToLatestPageCache(qc, sessionId, sent);
+      qc.setQueryData<ChatMessage[]>(
+        chatKeys.messages(sessionId),
+        (old) => (old ? [...old, sent] : [sent]),
+      );
       qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sessionId), {
         task_id: result.task_id,
         status: "queued",
         created_at: result.created_at,
       });
+      // Cache primed → publish the new active session, but only if the user
+      // hasn't navigated away mid-send. Compare the live store against the
+      // closure-captured target; see isStillOnComposeTarget for the rule, which
+      // this floating window shares with the chat tab's controller. commitInput
+      // clears the sent draft, and scrubs the shared editor only when the user
+      // is still on the session they sent from.
+      const live = useChatStore.getState();
+      const stillOnSourceSession = isStillOnComposeTarget(live.activeSessionId, activeSessionId);
+      if (stillOnSourceSession) {
+        setActiveSession(sessionId);
+      }
+      commitInput?.({ extraDraftKeys: [sessionId], clearEditor: stillOnSourceSession });
+
       if (stopRequestedBeforeTaskRef.current) {
         stopRequestedBeforeTaskRef.current = false;
         await cancelChatTask(result.task_id, sessionId, {
@@ -643,7 +586,6 @@ export function ChatWindow() {
       cancelChatTask,
       qc,
       setActiveSession,
-      enqueueLocalRestore,
       t,
     ],
   );

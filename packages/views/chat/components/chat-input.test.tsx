@@ -49,6 +49,11 @@ vi.mock("../../editor", async () => ({
   ...(await vi.importActual<typeof import("../../editor/use-upload-gate")>(
     "../../editor/use-upload-gate",
   )),
+  // Real await-then-render submit contract (pure React) — it only imports
+  // types from ContentEditor / the upload gate, so it pulls in no Tiptap tree.
+  ...(await vi.importActual<typeof import("../../editor/use-composer-submit")>(
+    "../../editor/use-composer-submit",
+  )),
   useFileDropZone: ({ onDrop }: { onDrop: (files: File[]) => void }) => {
     dropHandlers.onDrop = onDrop;
     return { isDragOver: false, dropZoneProps: { "data-testid": "drop-zone" } };

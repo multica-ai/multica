@@ -29,7 +29,9 @@ import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
-import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useEditorUpload } from "../../editor";
+import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useComposerSubmit } from "../../editor";
+import { useCommentUploads } from "./use-comment-uploads";
+import { ComposerUploadChips } from "./composer-upload-chips";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { api, dispatchReasonCode } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
@@ -322,19 +324,21 @@ function useEditAttachmentState(
 ) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
-  const { uploadWithToast } = useEditorUpload();
   const [editing, setEditing] = useState(false);
-  const [saving, setSaving] = useState(false);
   const [initialValue, setInitialValue] = useState(entry.content ?? "");
   const editorRef = useRef<ContentEditorRef>(null);
   // Saving mid-upload would persist the edit without the file the user just
   // pasted in — same failure as posting a new comment.
   const uploadGate = useUploadGate(editorRef);
   const cancelledRef = useRef(false);
-  const savingRef = useRef(false);
   const [content, setContent] = useState(entry.content ?? "");
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
-  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  // Uploads for this edit session (MUL-5181) — coordinator-owned, persisted in
+  // the draft store keyed by the edit draft so scroll-out/close no longer drops
+  // an in-flight upload.
+  const draftKey = `edit:${issueId}:${entry.id}` as const;
+  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload } =
+    useCommentUploads(draftKey, { issueId });
   const [retainedStandaloneIds, setRetainedStandaloneIds] = useState<Set<string> | null>(null);
   const triggerPreview = useCommentTriggerPreview({
     issueId,
@@ -347,12 +351,6 @@ function useEditAttachmentState(
     ? [...(entry.attachments ?? []), ...pendingAttachments]
     : entry.attachments;
 
-  const handleUpload = useCallback(async (file: File) => {
-    const result = await uploadWithToast(file, { issueId });
-    if (result) setPendingAttachments((prev) => [...prev, result]);
-    return result;
-  }, [uploadWithToast, issueId]);
-
   useEffect(() => {
     setSuppressedAgentIds(new Set());
   }, [issueId, entry.id, entry.parent_id]);
@@ -362,7 +360,6 @@ function useEditAttachmentState(
     enabled: editing,
   });
 
-  const draftKey = `edit:${issueId}:${entry.id}` as const;
   const getDraft = useCommentDraftStore.getState().getDraft;
   const setDraft = useCommentDraftStore((s) => s.setDraft);
   const clearDraft = useCommentDraftStore((s) => s.clearDraft);
@@ -392,8 +389,8 @@ function useEditAttachmentState(
     setEditing(false);
     setContent(entry.content ?? "");
     setSuppressedAgentIds(new Set());
-    setPendingAttachments([]);
     setRetainedStandaloneIds(null);
+    // clearDraft drops both the edit text and its pending attachments.
     clearDraft(draftKey);
   };
 
@@ -411,49 +408,52 @@ function useEditAttachmentState(
     resetState();
   };
 
-  const saveEdit = async () => {
-    if (cancelledRef.current || savingRef.current) return;
-    // Submit-time re-read — Cmd+Enter bypasses the Save button entirely.
-    if (uploadGate.isBlocked()) return;
-    const trimmed = editorRef.current
-      ?.getMarkdown()
-      ?.replace(/(\n\s*)+$/, "")
-      .trim();
-    if (!trimmed) return;
-    const activeIds = collectActiveAttachmentIds(
-      trimmed,
-      [...(entry.attachments ?? []), ...pendingAttachments],
-      retainedStandaloneIds,
-    );
-    const attachmentsChanged = !sameIdSet(activeIds, (entry.attachments ?? []).map((a) => a.id));
-    if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged) {
-      resetState();
-      return;
-    }
-    const suppressAgentIds = triggerPreview.agents
-      .filter((agent) => suppressedAgentIds.has(agent.id))
-      .map((agent) => agent.id);
-    savingRef.current = true;
-    setSaving(true);
-    try {
-      await onEdit(
-        entry.id,
+  // Await-then-render save (MUL-5181): shared submit contract, with the edit-
+  // only concerns folded into onSubmit — the cancel-race guard, the no-op
+  // short-circuit, and the failure toast. The hook owns the empty guard,
+  // upload re-check, single-flight, and lock/spin via `submitting`.
+  const { submitting: saving, submit: saveEdit } = useComposerSubmit({
+    editorRef,
+    uploadGate,
+    onSubmit: async (trimmed) => {
+      // A save racing a just-pressed Cancel must never reach the server.
+      if (cancelledRef.current) return false;
+      const activeIds = collectActiveAttachmentIds(
         trimmed,
-        activeIds,
-        suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
+        [...(entry.attachments ?? []), ...pendingAttachments],
+        // Every upload completed in this edit session is bound whether or not it
+        // ended up inline in the body (MUL-5181 — the draft is the source of
+        // truth), on top of the body-referenced + retained-standalone ids.
+        new Set([...(retainedStandaloneIds ?? []), ...pendingAttachments.map((a) => a.id)]),
       );
-      resetState();
-    } catch (err) {
-      toast.error(
-        err instanceof Error && err.message
-          ? err.message
-          : t(($) => $.comment.update_failed),
-      );
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
-  };
+      const attachmentsChanged = !sameIdSet(activeIds, (entry.attachments ?? []).map((a) => a.id));
+      // Nothing changed — close the editor without a write. Accepted, so
+      // onAccepted resets the edit state.
+      if (trimmed === (entry.content ?? "").trim() && !attachmentsChanged) {
+        return true;
+      }
+      const suppressAgentIds = triggerPreview.agents
+        .filter((agent) => suppressedAgentIds.has(agent.id))
+        .map((agent) => agent.id);
+      try {
+        await onEdit(
+          entry.id,
+          trimmed,
+          activeIds,
+          suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
+        );
+        return true;
+      } catch (err) {
+        toast.error(
+          err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.comment.update_failed),
+        );
+        return false;
+      }
+    },
+    onAccepted: resetState,
+  });
 
   return {
     editing,
@@ -464,6 +464,8 @@ function useEditAttachmentState(
     editorRef,
     editorAttachments,
     handleUpload,
+    uploads,
+    removeUpload,
     isDragOver,
     dropZoneProps,
     triggerPreview,
@@ -658,6 +660,9 @@ function CommentRow({
                 })
               }
             />
+          )}
+          {edit.uploads.some((u) => u.status !== "uploaded") && (
+            <ComposerUploadChips uploads={edit.uploads} onRemove={edit.removeUpload} className="mt-2 max-w-full" />
           )}
           <div className="flex items-center justify-between gap-2 mt-2">
             <div className="min-w-0 flex-1">
@@ -970,6 +975,9 @@ function CommentCardImpl({
                         }
                         />
                       )}
+                    {edit.uploads.some((u) => u.status !== "uploaded") && (
+                      <ComposerUploadChips uploads={edit.uploads} onRemove={edit.removeUpload} className="max-w-full" />
+                    )}
                     <CommentTriggerChips
                       agents={edit.triggerPreview.agents}
                       blocked={edit.triggerPreview.blocked}

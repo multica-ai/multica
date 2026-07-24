@@ -81,7 +81,11 @@
   },
   "upload": {
     "failed": "Couldn't upload {{filename}}: {{reason}}",
-    "in_progress": "Uploading…"
+    "in_progress": "Uploading…",
+    "interrupted": "Upload interrupted — the file wasn’t saved. Attach it again.",
+    "remove": "Remove",
+    "uploading_label": "Uploading {{filename}}…",
+    "failed_label": "Couldn’t upload {{filename}}"
   },
   "title_editor": {
     "title_aria_label": "Title"

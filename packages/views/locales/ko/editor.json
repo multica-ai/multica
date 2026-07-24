@@ -74,7 +74,11 @@
   },
   "upload": {
     "failed": "{{filename}}을(를) 업로드하지 못했어요: {{reason}}",
-    "in_progress": "업로드 중…"
+    "in_progress": "업로드 중…",
+    "interrupted": "업로드가 중단되었어요 — 파일이 저장되지 않았어요. 다시 첨부해 주세요.",
+    "remove": "제거",
+    "uploading_label": "{{filename}} 업로드 중…",
+    "failed_label": "{{filename}}을(를) 업로드하지 못했어요"
   },
   "title_editor": {
     "title_aria_label": "제목"

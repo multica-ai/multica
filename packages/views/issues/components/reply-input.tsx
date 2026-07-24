@@ -1,12 +1,10 @@
 "use client";
 
 import { useRef, useState, useCallback, useEffect } from "react";
-import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useEditorUpload } from "../../editor";
+import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ActorAvatar } from "../../common/actor-avatar";
-import type { Attachment } from "@multica/core/types";
-import { contentReferencesAttachment } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import { useCommentDraftStore, type CommentDraftKey } from "@multica/core/issues/stores";
 import { cn } from "@multica/ui/lib/utils";
@@ -14,6 +12,8 @@ import type { AvatarSize } from "@multica/ui/lib/avatar-size";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
+import { useCommentUploads } from "./use-comment-uploads";
+import { ComposerUploadChips } from "./composer-upload-chips";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -65,13 +65,14 @@ function ReplyInput({
   const setDraft = useCommentDraftStore((s) => s.setDraft);
   const clearDraft = useCommentDraftStore((s) => s.clearDraft);
   const [isEmpty, setIsEmpty] = useState(!initialDraft?.trim());
-  const [submitting, setSubmitting] = useState(false);
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
   const triggerPreview = useCommentTriggerPreview({ issueId, parentId, content });
-  // Attachments uploaded in this composer session — see CommentInput for the
-  // rationale (drives both submit-time attachment_ids and editor previews).
-  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
-  const { uploadWithToast } = useEditorUpload();
+  // Uploads for this reply session (MUL-5181) — owned by the coordinator. With
+  // a draftKey they persist in the draft store so scroll-out/close no longer
+  // drops an in-flight upload; without one (no persistence context) they fall
+  // back to session-local state inside the hook.
+  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload } =
+    useCommentUploads(draftKey, { issueId });
 
   // Readonly-first: static shell until intent; an unsent draft mounts the
   // real editor immediately (see CommentInput). This is also what keeps the
@@ -79,7 +80,9 @@ function ReplyInput({
   // into a live editor when the card remounts, an untouched box folds back
   // to the shell.
   const lazy = useLazyEditor({
-    initialActive: !!initialDraft?.trim(),
+    initialActive:
+      !!initialDraft?.trim() ||
+      (draftKey ? useCommentDraftStore.getState().getUploads(draftKey).length > 0 : false),
     editorRef,
   });
   const { isDragOver, dropZoneProps } = useFileDropZone({
@@ -102,14 +105,6 @@ function ReplyInput({
     };
   }, [draftKey, setDraft]);
 
-  const handleUpload = useCallback(async (file: File) => {
-    const result = await uploadWithToast(file, { issueId });
-    if (result) {
-      setPendingAttachments((prev) => [...prev, result]);
-    }
-    return result;
-  }, [uploadWithToast, issueId]);
-
   useEffect(() => {
     setSuppressedAgentIds(new Set());
   }, [issueId, parentId]);
@@ -131,41 +126,33 @@ function ReplyInput({
     });
   }, []);
 
-  const handleSubmit = async () => {
-    const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
-    if (!content || submitting) return;
-    // Submit-time re-read — the shortcut path never sees the disabled button.
-    if (uploadGate.isBlocked()) return;
-    // Track every attachment whose stable download URL OR legacy
-    // storage URL is referenced in the markdown body. Both shapes
-    // can appear in the same comment during the MUL-3130 rollout.
-    const activeIds = pendingAttachments
-      .filter((a) => contentReferencesAttachment(content, a))
-      .map((a) => a.id);
-    const suppressAgentIds = triggerPreview.agents
-      .filter((agent) => suppressedAgentIds.has(agent.id))
-      .map((agent) => agent.id);
-    // Pessimistic submit (see CommentInput): keep the text, lock + spin, clear
-    // only once the server accepts it.
-    setSubmitting(true);
-    try {
-      const ok = await onSubmit(
+  // Await-then-render send (see CommentInput): the shared hook keeps the text,
+  // locks + spins, and clears only once the server accepts it.
+  const { submitting, submit } = useComposerSubmit({
+    editorRef,
+    uploadGate,
+    onSubmit: (content) => {
+      // Draft is the source of truth (MUL-5181): bind every completed upload,
+      // inline or standalone.
+      const activeIds = pendingAttachments.map((a) => a.id);
+      const suppressAgentIds = triggerPreview.agents
+        .filter((agent) => suppressedAgentIds.has(agent.id))
+        .map((agent) => agent.id);
+      return onSubmit(
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
       );
-      if (ok) {
-        editorRef.current?.clearContent();
-        setContent("");
-        setIsEmpty(true);
-        setSuppressedAgentIds(new Set());
-        setPendingAttachments([]);
-        if (draftKey) clearDraft(draftKey);
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    },
+    onAccepted: () => {
+      editorRef.current?.clearContent();
+      setContent("");
+      setIsEmpty(true);
+      setSuppressedAgentIds(new Set());
+      if (draftKey) clearDraft(draftKey);
+      else uploads.forEach((u) => removeUpload(u.clientUploadId));
+    },
+  });
 
   const avatarSize: AvatarSize = size === "sm" ? "sm" : "md";
 
@@ -202,12 +189,11 @@ function ReplyInput({
             onUpdate={(md) => {
               setContent(md);
               setIsEmpty(!md.trim());
-              if (draftKey) {
-                if (md.trim().length > 0) setDraft(draftKey, md);
-                else clearDraft(draftKey);
-              }
+              // setDraft keeps any pending attachments and drops the entry only
+              // when text AND attachments are both empty.
+              if (draftKey) setDraft(draftKey, md);
             }}
-            onSubmit={handleSubmit}
+            onSubmit={submit}
             onUploadFile={handleUpload}
             onUploadingChange={uploadGate.onUploadingChange}
             debounceMs={100}
@@ -217,6 +203,9 @@ function ReplyInput({
             slashCommandMode="command"
           />
         </div>
+        )}
+        {uploads.some((u) => u.status !== "uploaded") && (
+          <ComposerUploadChips uploads={uploads} onRemove={removeUpload} className="mt-1" />
         )}
         {/* Static shell — clones the empty single-line reply box (see
             CommentInput for the pattern). */}
@@ -256,7 +245,7 @@ function ReplyInput({
             onSelect={(file) => lazy.uploadOrQueue([file])}
           />
           <SubmitButton
-            onClick={handleSubmit}
+            onClick={submit}
             disabled={isEmpty}
             loading={submitting}
             busy={uploadGate.uploading}

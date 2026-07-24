@@ -19,6 +19,10 @@ const mockViewport = vi.hoisted(() => ({ isMobile: false }));
 // Counts MockContentEditor mounts. This pins the description to exactly one
 // eager editor per issue and catches stale editor reuse across issue switches.
 const contentEditorMounts = vi.hoisted(() => ({ count: 0 }));
+// Stable empty-attachments reference: the real store returns a shared constant
+// so the `useCommentDraftStore(s => s.getAttachments(key))` selector keeps a
+// stable identity. A fresh `[]` per call would loop useSyncExternalStore.
+const emptyDraftAttachments = vi.hoisted(() => [] as unknown[]);
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
@@ -128,6 +132,11 @@ vi.mock("../../editor", async () => ({
   // Real submit gate (pure React) — see comment-composers.test.tsx.
   ...(await vi.importActual<typeof import("../../editor/use-upload-gate")>(
     "../../editor/use-upload-gate",
+  )),
+  // Real await-then-render submit hook (pure React) so comment/reply/edit
+  // composers run the production submit path.
+  ...(await vi.importActual<typeof import("../../editor/use-composer-submit")>(
+    "../../editor/use-composer-submit",
   )),
   useEditorUpload: () => ({
     uploadWithToast: vi.fn(),
@@ -343,18 +352,32 @@ vi.mock("@multica/core/issues/stores", async () => ({
   useCommentDraftStore: Object.assign(
     (selector?: any) => {
       const state = {
-        drafts: {} as Record<string, { content: string; updatedAt: number }>,
+        drafts: {} as Record<string, { content: string; attachments: unknown[]; updatedAt: number }>,
         getDraft: () => undefined,
+        getAttachments: () => emptyDraftAttachments,
+        getUploads: () => emptyDraftAttachments,
         setDraft: () => {},
+        setAttachments: () => {},
+        addUpload: () => {},
+        settleUpload: () => {},
+        failUpload: () => {},
+        removeUpload: () => {},
         clearDraft: () => {},
       };
       return selector ? selector(state) : state;
     },
     {
       getState: () => ({
-        drafts: {} as Record<string, { content: string; updatedAt: number }>,
+        drafts: {} as Record<string, { content: string; attachments: unknown[]; updatedAt: number }>,
         getDraft: () => undefined,
+        getAttachments: () => emptyDraftAttachments,
+        getUploads: () => emptyDraftAttachments,
         setDraft: () => {},
+        setAttachments: () => {},
+        addUpload: () => {},
+        settleUpload: () => {},
+        failUpload: () => {},
+        removeUpload: () => {},
         clearDraft: () => {},
       }),
     },
