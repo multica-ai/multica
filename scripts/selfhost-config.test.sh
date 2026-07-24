@@ -29,7 +29,8 @@ require_env() {
 }
 
 tmp_env="$(mktemp)"
-trap 'rm -f "$tmp_env"' EXIT
+tmp_dir="$(mktemp -d)"
+trap 'rm -f "$tmp_env"; rm -rf "$tmp_dir"' EXIT
 sed 's/^FRONTEND_PORT=.*/FRONTEND_PORT=3100/' .env.example >"$tmp_env"
 printf '\nBACKEND_PORT=9100\n' >>"$tmp_env"
 
@@ -83,5 +84,10 @@ require_env "$local_env" 'GOOGLE_REDIRECT_URI=http://localhost:3100/auth/callbac
 require_env "$local_env" 'MULTICA_SERVER_URL=ws://localhost:9100/ws'
 require_env "$local_env" 'LOCAL_UPLOAD_BASE_URL=http://localhost:9100'
 require_env "$local_env" 'PLAYWRIGHT_BASE_URL=http://localhost:3100'
+
+worktree_env="$tmp_dir/.env.worktree"
+WORKTREE_NAME=selfhost-config-test bash scripts/init-worktree-env.sh "$worktree_env" >/dev/null
+worktree_backend_port="$(sed -n 's/^PORT=//p' "$worktree_env")"
+require_env "$(cat "$worktree_env")" "MULTICA_PUBLIC_URL=http://localhost:${worktree_backend_port}"
 
 echo "self-host env derivation ok"
