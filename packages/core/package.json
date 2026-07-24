@@ -91,6 +91,8 @@
     "./github/queries": "./github/queries.ts",
     "./vcs": "./vcs/index.ts",
     "./vcs/queries": "./vcs/queries.ts",
+    "./jira": "./jira/index.ts",
+    "./jira/queries": "./jira/queries.ts",
     "./lark": "./lark/index.ts",
     "./lark/queries": "./lark/queries.ts",
     "./composio": "./composio/index.ts",

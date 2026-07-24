@@ -145,6 +145,12 @@ export type {
   ConnectVCSResponse,
 } from "./vcs";
 export type {
+  JiraConnection,
+  ListJiraConnectionsResponse,
+  ConnectJiraRequest,
+  ConnectJiraResponse,
+} from "./jira";
+export type {
   LarkInstallation,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
