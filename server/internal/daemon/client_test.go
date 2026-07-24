@@ -100,6 +100,60 @@ func TestClient_VersionOmittedWhenUnset(t *testing.T) {
 	}
 }
 
+func TestControlPlaneTransportDisablesKeepAlivesOnDarwin(t *testing.T) {
+	transport, ok := newControlPlaneTransport("darwin").(*http.Transport)
+	if !ok {
+		t.Fatalf("control-plane transport = %T, want *http.Transport", transport)
+	}
+	if !transport.DisableKeepAlives {
+		t.Fatal("darwin control-plane transport must disable keep-alives")
+	}
+}
+
+func TestControlPlaneTransportKeepsDefaultReuseOffDarwin(t *testing.T) {
+	transport, ok := newControlPlaneTransport("linux").(*http.Transport)
+	if !ok {
+		t.Fatalf("control-plane transport = %T, want *http.Transport", transport)
+	}
+	if transport.DisableKeepAlives {
+		t.Fatal("non-darwin control-plane transport should preserve default keep-alive reuse")
+	}
+}
+
+func TestPostJSONClosesIdleConnectionsOnTransportError(t *testing.T) {
+	transport := &closeCountingTransport{}
+	c := NewClient("http://daemon.test")
+	c.client = &http.Client{
+		Timeout:   time.Second,
+		Transport: transport,
+	}
+
+	err := c.postJSON(context.Background(), "/api/daemon/test", map[string]any{}, nil)
+	if err == nil {
+		t.Fatal("expected transport error, got nil")
+	}
+	if got := transport.closeCount.Load(); got != 1 {
+		t.Fatalf("CloseIdleConnections calls = %d, want 1", got)
+	}
+}
+
+func TestGetJSONClosesIdleConnectionsOnTransportError(t *testing.T) {
+	transport := &closeCountingTransport{}
+	c := NewClient("http://daemon.test")
+	c.client = &http.Client{
+		Timeout:   time.Second,
+		Transport: transport,
+	}
+
+	err := c.getJSON(context.Background(), "/api/daemon/test", nil)
+	if err == nil {
+		t.Fatal("expected transport error, got nil")
+	}
+	if got := transport.closeCount.Load(); got != 1 {
+		t.Fatalf("CloseIdleConnections calls = %d, want 1", got)
+	}
+}
+
 func TestClient_ListWorkspacesUsesDaemonEndpointAndETag(t *testing.T) {
 	var calls atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
