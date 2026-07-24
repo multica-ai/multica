@@ -625,6 +625,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("vcs integration disabled (MULTICA_VCS_SECRET_KEY not set)")
 	}
 
+	// Jira at-rest encryption: the box encrypts per-workspace Jira API tokens
+	// and webhook secrets. Without it, connect/webhook handlers return 503
+	// (so a misconfigured deployment never stores plaintext secrets).
+	if jiraKey, err := secretbox.LoadKey("MULTICA_JIRA_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(jiraKey)
+		if err != nil {
+			slog.Error("jira: secretbox.New failed; jira integration disabled", "error", err)
+		} else {
+			h.JiraSecretBox = box
+			slog.Info("jira integration enabled")
+		}
+	} else {
+		slog.Info("jira integration disabled (MULTICA_JIRA_SECRET_KEY not set)")
+	}
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -766,6 +781,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// the connection id in the path selects the workspace, provider, and
 	// decryption secret.
 	r.Post("/api/webhooks/vcs/{connectionId}", h.HandleVCSWebhook)
+	// Jira webhook. No Multica auth — authenticated per-connection by a
+	// constant-time compare of the minted webhook secret (header or `secret`
+	// query param; Jira webhooks carry no native signature). The connection
+	// id in the path selects the workspace and decryption secret.
+	r.Post("/api/webhooks/jira/{connectionId}", h.HandleJiraWebhook)
 	// Stripe webhook (no Multica auth — Stripe signs the raw body
 	// with a shared secret, the multica-cloud upstream verifies. We
 	// only forward the bytes + the Stripe-Signature header; see
@@ -895,6 +915,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// for the same reason as GitHub installations; connect /
 					// disconnect are admin-gated in the group below.
 					r.Get("/vcs/connections", h.ListVCSConnections)
+					// Jira connections — member-visible for the same
+					// reason; connect / disconnect are admin-gated below.
+					r.Get("/jira/connections", h.ListJiraConnections)
+					r.Get("/jira/connections/{connectionId}", h.GetJiraConnection)
 					// Custom runtime profiles — listing/reading is member-visible
 					// (the Runtime page renders for everyone; create/edit/delete
 					// are admin-gated below).
@@ -932,6 +956,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/vcs/connections", h.ConnectVCS)
 					r.Post("/vcs/connections/{connectionId}/rotate-webhook", h.RotateVCSConnectionWebhook)
 					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
+					// Jira connect / disconnect (admin-only).
+					r.Post("/jira/connections", h.ConnectJira)
+					r.Delete("/jira/connections/{connectionId}", h.DeleteJiraConnection)
 				})
 
 				// Lark integration. Every endpoint here only requires

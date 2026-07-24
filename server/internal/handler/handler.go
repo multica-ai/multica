@@ -24,6 +24,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
+	"github.com/multica-ai/multica/server/internal/integrations/jira"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -247,6 +248,17 @@ type Handler struct {
 	// error rather than silently storing plaintext. Wired in
 	// cmd/server/router.go after New.
 	VCSSecretBox *secretbox.Box
+	// JiraSecretBox encrypts/decrypts per-workspace Jira API tokens and
+	// webhook secrets at rest. Nil when MULTICA_JIRA_SECRET_KEY is unset; the
+	// connect/webhook handlers return 503 in that case so a misconfigured
+	// deployment surfaces a clear error rather than silently storing
+	// plaintext. Wired in cmd/server/router.go after New.
+	JiraSecretBox *secretbox.Box
+	// JiraClient is the Jira REST seam used by connect-time credential
+	// validation and webhook-time issue enrichment. Always non-nil (New wires
+	// the production HTTP client); tests substitute a mock so the suite never
+	// contacts a real Jira site.
+	JiraClient jira.Client
 	// PRRefresh drives the GitHub API snapshot pipeline for PR cards (MUL-5265):
 	// webhook / page-visit / TTL triggers → authenticated GraphQL fetch →
 	// head-SHA-guarded atomic snapshot write. Always non-nil, but inert (every
@@ -326,6 +338,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		cfg: cfg,
 	}
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
+	h.JiraClient = jira.NewHTTPClient(nil)
 
 	// GitHub API snapshot pipeline for PR cards (MUL-5265). Built
 	// unconditionally but inert (every trigger no-ops) when the App private key
