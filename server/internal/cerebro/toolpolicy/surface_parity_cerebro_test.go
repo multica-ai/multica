@@ -178,8 +178,9 @@ func TestCardBriefSurfaceParity(t *testing.T) {
 // TestTableGeneralGateSurfaceParityWithMemberOverride pins the production
 // configuration that TestCardBriefSurfaceParity deliberately does not cover:
 // the member-override flag is ON. The Settings > Permissions table and the
-// call-time general gate must use the same openable resolution mode, both when
-// an Agent Allow opens a Workspace Deny and when a User Deny closes it again.
+// call-time general gate must use the same openable resolution mode: a User
+// Allow opens a Workspace Deny, while a User Deny remains the ceiling even
+// when the Agent says Allow.
 func TestTableGeneralGateSurfaceParityWithMemberOverride(t *testing.T) {
 	s := newTPStore(t)
 	clearAll(t, s)
@@ -213,16 +214,6 @@ func TestTableGeneralGateSurfaceParityWithMemberOverride(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("set workspace deny: %v", err)
 	}
-	if _, err := s.Set(ctx, SetParams{
-		WorkspaceID: tpTestWorkspaceID,
-		ToolKey:     tool,
-		Layer:       LayerAgent,
-		SubjectID:   agent,
-		Setting:     SettingAllow,
-	}); err != nil {
-		t.Fatalf("set agent allow: %v", err)
-	}
-
 	assertParity := func(want Setting) {
 		t.Helper()
 		rows, err := s.Table(ctx, TableQuery{
@@ -256,10 +247,35 @@ func TestTableGeneralGateSurfaceParityWithMemberOverride(t *testing.T) {
 		}
 	}
 
-	// Workspace Deny is a default in openable mode, so Agent Allow opens it.
+	// Workspace Deny applies while the member inherits it.
+	assertParity(SettingDeny)
+
+	// Workspace Deny is a default in openable mode, so the member's own User
+	// Allow opens it. Both the Settings table and the call-time gate must agree.
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     tool,
+		Layer:       LayerUser,
+		SubjectID:   user,
+		Setting:     SettingAllow,
+	}); err != nil {
+		t.Fatalf("set user allow: %v", err)
+	}
 	assertParity(SettingAllow)
 
-	// A member's own Deny remains the ceiling and blocks that same Agent Allow.
+	// An Agent Allow does not change the member-opened verdict.
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     tool,
+		Layer:       LayerAgent,
+		SubjectID:   agent,
+		Setting:     SettingAllow,
+	}); err != nil {
+		t.Fatalf("set agent allow: %v", err)
+	}
+	assertParity(SettingAllow)
+
+	// A member's own User Deny remains the ceiling and blocks that Agent Allow.
 	if _, err := s.Set(ctx, SetParams{
 		WorkspaceID: tpTestWorkspaceID,
 		ToolKey:     tool,

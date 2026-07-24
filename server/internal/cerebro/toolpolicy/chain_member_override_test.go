@@ -63,6 +63,25 @@ func TestResolveMemberOverride_GroupOverridesWorkspace(t *testing.T) {
 	}
 }
 
+// TestResolveMemberOverride_UserOverridesWorkspace proves the direct member
+// override: an ordinary Workspace Deny is an inherited default, so a more
+// specific User Allow opens it for that member.
+func TestResolveMemberOverride_UserOverridesWorkspace(t *testing.T) {
+	e := ResolveMemberOverride(Input{Settings: set(
+		LayerWorkspace, SettingDeny,
+		LayerUser, SettingAllow,
+	)})
+	if e.Setting != SettingAllow {
+		t.Fatalf("user Allow must override workspace Deny, got %s", e.Setting)
+	}
+	if e.DecidedBy != LayerUser {
+		t.Fatalf("expected DecidedBy=user, got %q", e.DecidedBy)
+	}
+	if e.CappedBy != "" {
+		t.Fatalf("member override is not a cap, got CappedBy=%q", e.CappedBy)
+	}
+}
+
 // TestResolveMemberOverride_InheritsWhenMemberSilent proves the member inherits
 // the group (then workspace) verdict when it sets nothing.
 func TestResolveMemberOverride_InheritsWhenMemberSilent(t *testing.T) {
