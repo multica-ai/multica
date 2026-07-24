@@ -265,6 +265,52 @@ func TestAuth_StripsClientSuppliedActorSource(t *testing.T) {
 	}
 }
 
+// TestAuth_StripsForgedAgentIdentityHeaders pins the fix for the agent
+// impersonation hole: a workspace member authenticating with a normal JWT
+// (or PAT) MUST NOT be able to assume an agent identity by attaching
+// X-Agent-ID / X-Task-ID headers. Both ids are observable via member-readable
+// endpoints (GET /api/issues/{id}/task-runs, GET /api/agents/{id}/tasks), so
+// without stripping, resolveActor's legacy fallback would treat the member as
+// the agent and let them author content as that agent / bypass the
+// private-agent gate. The middleware must discard both headers before the
+// handler runs; only the server-set mat_ task-token branch may set them.
+func TestAuth_StripsForgedAgentIdentityHeaders(t *testing.T) {
+	var gotAgentID, gotTaskID, gotActorSource string
+	called := false
+	mw := Auth(nil, nil, nil)
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		called = true
+		gotAgentID = r.Header.Get("X-Agent-ID")
+		gotTaskID = r.Header.Get("X-Task-ID")
+		gotActorSource = r.Header.Get("X-Actor-Source")
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	token := generateToken(validClaims(), auth.JWTSecret())
+	req := httptest.NewRequest("POST", "/api/issues/abc/comments", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	// Attacker replays a real (agent_id, task_id) pair read from a
+	// member-accessible list endpoint, plus a forged actor-source.
+	req.Header.Set("X-Agent-ID", "11111111-1111-1111-1111-111111111111")
+	req.Header.Set("X-Task-ID", "22222222-2222-2222-2222-222222222222")
+	req.Header.Set("X-Actor-Source", "task_token")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if !called {
+		t.Fatalf("expected next handler to run for a valid JWT, got %d: %s", w.Code, w.Body.String())
+	}
+	if gotActorSource != "" {
+		t.Fatalf("X-Actor-Source must be cleared on the member path, got %q", gotActorSource)
+	}
+	if gotAgentID != "" {
+		t.Fatalf("forged X-Agent-ID must be stripped before the handler, got %q", gotAgentID)
+	}
+	if gotTaskID != "" {
+		t.Fatalf("forged X-Task-ID must be stripped before the handler, got %q", gotTaskID)
+	}
+}
+
 // TestAuth_PATCacheHit pins the optimization: when the PAT cache already
 // holds an entry for this token, the middleware MUST NOT call into queries
 // — it short-circuits before the DB lookup and the last_used_at update.

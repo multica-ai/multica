@@ -89,6 +89,12 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			// request arrived on.
 			r.Header.Del("X-Actor-Source")
 
+			// X-Agent-ID / X-Task-ID are server-set only (see auth.go).
+			// Strip any client-supplied values so they cannot be used to
+			// forge an agent actor identity on this auth path either.
+			r.Header.Del("X-Agent-ID")
+			r.Header.Del("X-Task-ID")
+
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
 				slog.Debug("daemon_auth: missing authorization header", "path", r.URL.Path)
