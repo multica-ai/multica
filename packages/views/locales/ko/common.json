@@ -67,5 +67,20 @@
     "error_already_bound": "이 Slack 계정은 이미 다른 Multica 사용자에 연결되어 있어요. 이전하려면 먼저 명시적으로 연결을 해제해야 합니다.",
     "error_not_member": "로그인한 Multica 계정이 이 워크스페이스의 멤버가 아니에요.",
     "error_unknown": "문제가 발생했어요. 다시 시도해 보고, 계속되면 워크스페이스 관리자에게 문의하세요."
+  },
+  "wechat_bind": {
+    "page_title": "WeChat 계정 연동",
+    "redeeming": "계정을 연동하는 중…",
+    "needs_auth_description": "연동을 완료하려면 Multica에 로그인해야 해요. 링크의 token이 WeChat 계정을 현재 Multica 사용자에게 바인딩하므로 먼저 로그인해야 해요.",
+    "sign_in": "로그인",
+    "done_title": "연동되었어요.",
+    "done_description": "다음에 WeChat에서 봇에 메시지를 보내면 에이전트로 바로 전달돼요. 이 탭을 닫아도 돼요.",
+    "error_title": "연동을 완료할 수 없어요",
+    "error_admin_hint": "계속 실패하면 WeChat에서 봇에게 다시 메시지를 보내 새 링크를 받으세요.",
+    "error_missing_token": "링크에 token이 없어요. WeChat에서 봇에게 다시 메시지를 보내 새 링크를 받으세요.",
+    "error_expired": "이 링크는 유효하지 않거나 만료되었어요(유효 기간 15분). 다시 메시지를 보내 새 링크를 받으세요.",
+    "error_already_bound": "이 WeChat 계정은 이미 다른 Multica 사용자에게 연동되어 있어요. 계정 이전은 명시적 연결 해제가 먼저 필요해요.",
+    "error_not_member": "로그인한 Multica 계정이 이 워크스페이스의 멤버가 아니에요.",
+    "error_unknown": "문제가 발생했어요. 다시 시도해 보고, 계속되면 워크스페이스 관리자에게 문의하세요."
   }
 }

@@ -1325,6 +1325,27 @@ func (q *Queries) UpdateChannelChatSessionBindingReplyTarget(ctx context.Context
 	return err
 }
 
+const updateChannelChatSessionBindingConfig = `-- name: UpdateChannelChatSessionBindingConfig :exec
+UPDATE channel_chat_session_binding
+SET config = $2
+WHERE chat_session_id = $1
+`
+
+type UpdateChannelChatSessionBindingConfigParams struct {
+	ChatSessionID pgtype.UUID `json:"chat_session_id"`
+	Config        []byte      `json:"config"`
+}
+
+// Replaces the opaque JSON config on a chat-session binding. Used by the WeChat
+// adapter to stash the per-message context_token that sendmessage must echo
+// back (the core iLink quirk): every inbound message refreshes the token, so the
+// outbound subscriber reads the latest value off the binding. Channel-agnostic
+// so other adapters with similar per-conversation state can reuse it.
+func (q *Queries) UpdateChannelChatSessionBindingConfig(ctx context.Context, arg UpdateChannelChatSessionBindingConfigParams) error {
+	_, err := q.db.Exec(ctx, updateChannelChatSessionBindingConfig, arg.ChatSessionID, arg.Config)
+	return err
+}
+
 const updateChannelOutboundCardStatus = `-- name: UpdateChannelOutboundCardStatus :exec
 UPDATE channel_outbound_card_message
 SET status = $2,

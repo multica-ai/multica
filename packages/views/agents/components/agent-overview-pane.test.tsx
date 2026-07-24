@@ -59,6 +59,9 @@ const larkListingRef = vi.hoisted(() => ({
 const slackListingRef = vi.hoisted(() => ({
   current: { installations: [] as unknown[], configured: false },
 }));
+const wechatListingRef = vi.hoisted(() => ({
+  current: { installations: [] as unknown[], configured: false },
+}));
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
@@ -72,6 +75,12 @@ vi.mock("@multica/core/slack", () => ({
   slackInstallationsOptions: () => ({
     queryKey: ["slack", "installations"],
     queryFn: () => Promise.resolve(slackListingRef.current),
+  }),
+}));
+vi.mock("@multica/core/wechat", () => ({
+  wechatInstallationsOptions: () => ({
+    queryKey: ["wechat", "installations"],
+    queryFn: () => Promise.resolve(wechatListingRef.current),
   }),
 }));
 
@@ -164,6 +173,7 @@ function openSettings() {
 beforeEach(() => {
   larkListingRef.current = { installations: [], configured: false };
   slackListingRef.current = { installations: [], configured: false };
+  wechatListingRef.current = { installations: [], configured: false };
 });
 
 describe("AgentOverviewPane MCP tab visibility", () => {
@@ -223,9 +233,20 @@ describe("AgentOverviewPane Integrations tab visibility", () => {
     ).toBeInTheDocument();
   });
 
-  it("hides the Integrations tab when neither Lark nor Slack is configured", () => {
+  it("shows the Integrations tab when only WeChat is configured (Lark/Slack off)", async () => {
+    // Regression: the tab gate must consider WeChat too — a WeChat-only
+    // deployment was hiding the tab (and its QR-scan bind entry).
+    wechatListingRef.current = { installations: [], configured: true };
+    renderPane([makeRuntime("claude")]);
+    openCapabilities();
+    expect(
+      await screen.findByRole("tab", { name: /^Integrations$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the Integrations tab when no channel is configured", () => {
     // Default refs are configured:false; the tab must not appear on
-    // deployments without either integration, the common case.
+    // deployments without any integration, the common case.
     renderPane([makeRuntime("claude")]);
     openCapabilities();
     expect(

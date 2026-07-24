@@ -67,5 +67,20 @@
     "error_already_bound": "この Slack アカウントは別の Multica ユーザーに連携済みです。移行するにはまず明示的に解除する必要があります。",
     "error_not_member": "サインインしている Multica アカウントはこのワークスペースのメンバーではありません。",
     "error_unknown": "問題が発生しました。もう一度試し、それでも解決しない場合はワークスペース管理者にお問い合わせください。"
+  },
+  "wechat_bind": {
+    "page_title": "WeChat アカウントをリンク",
+    "redeeming": "アカウントをリンク中…",
+    "needs_auth_description": "リンクを完了するには Multica にサインインしてください。リンクの token は WeChat アカウントを現在の Multica ユーザーにバインドするため、先にログインが必要です。",
+    "sign_in": "サインイン",
+    "done_title": "リンク完了。",
+    "done_description": "次回 WeChat でボットにメッセージを送ると、エージェントに直接届きます。このタブは閉じられます。",
+    "error_title": "リンクを完了できませんでした",
+    "error_admin_hint": "何度も失敗する場合は、WeChat でボットに再度メッセージを送って新しいリンクを取得してください。",
+    "error_missing_token": "リンクに token がありません。WeChat でボットに再度メッセージを送って新しいリンクを取得してください。",
+    "error_expired": "このリンクは無効または期限切れです（有効期限 15 分）。再度メッセージを送って新しいリンクを取得してください。",
+    "error_already_bound": "この WeChat アカウントは別の Multica ユーザーにリンク済みです。アカウント移行には明示的な解除が必要です。",
+    "error_not_member": "サインインした Multica アカウントはこのワークスペースのメンバーではありません。",
+    "error_unknown": "問題が発生しました。もう一度試し、それでも解決しない場合はワークスペース管理者にお問い合わせください。"
   }
 }

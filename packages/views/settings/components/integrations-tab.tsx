@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { LarkTab } from "./lark-tab";
 import { ComposioTab } from "./composio-tab";
 import { SlackTab } from "./slack-tab";
+import { WechatTab } from "./wechat-tab";
 import { ApiError } from "@multica/core/api";
 import { composioToolkitsOptions } from "@multica/core/composio";
 import { useFeatureEnabled } from "@multica/core/config";
@@ -43,6 +44,9 @@ export function IntegrationsTab() {
       )}
       <SettingsSection title={t(($) => $.slack.section_title)}>
         <SlackTab />
+      </SettingsSection>
+      <SettingsSection title={t(($) => $.wechat.section_title)}>
+        <WechatTab />
       </SettingsSection>
     </SettingsTab>
   );

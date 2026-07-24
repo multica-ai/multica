@@ -61,6 +61,13 @@ vi.mock("@multica/core/slack", () => ({
   }),
 }));
 
+vi.mock("@multica/core/wechat", () => ({
+  wechatInstallationsOptions: () => ({
+    queryKey: ["wechat", "installations"],
+    queryFn: vi.fn(),
+  }),
+}));
+
 vi.mock("@multica/core/auth", () => {
   const useAuthStore = Object.assign(
     (sel?: (s: { user: { id: string } }) => unknown) =>
@@ -91,6 +98,14 @@ vi.mock("../../../settings/components/lark-tab", () => ({
 vi.mock("../../../settings/components/slack-tab", () => ({
   SlackAgentBindButton: ({ agentId }: { agentId: string }) => (
     <div data-testid="slack-bind-button" data-agent-id={agentId} />
+  ),
+}));
+
+// WechatAgentBindButton is covered in wechat-tab tests; stub to a marker so the
+// branch-selection assertions stay focused on copy, not the QR flow.
+vi.mock("../../../settings/components/wechat-tab", () => ({
+  WechatAgentBindButton: ({ agentId }: { agentId: string }) => (
+    <div data-testid="wechat-bind-button" data-agent-id={agentId} />
   ),
 }));
 

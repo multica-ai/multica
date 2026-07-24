@@ -29,6 +29,7 @@ import (
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/wechat"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -551,6 +552,56 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
 	}
 
+	// WeChat ClawBot (iLink) integration. Gated by MULTICA_WECHAT_SECRET_KEY (the
+	// at-rest encryption key for each installation's bot_token). The install model
+	// is a QR-login device-flow (the installer scans a QR with their personal
+	// WeChat; the iLink backend returns bot_token + base_url + bot id), mirroring
+	// the Lark device-flow UX. Transport is HTTP long-polling (getupdates), which
+	// maps onto the Supervisor's per-installation Connect loop with no public
+	// ingress needed. Per-account base_url comes from the QR-login response and
+	// overrides MULTICA_WECHAT_BASE_URL for the actual API calls.
+	if wechatKey, err := secretbox.LoadKey("MULTICA_WECHAT_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(wechatKey)
+		if err != nil {
+			slog.Error("wechat: secretbox.New failed; wechat integration disabled", "error", err)
+		} else {
+			wechatBaseURL := strings.TrimSpace(os.Getenv("MULTICA_WECHAT_BASE_URL"))
+			// Binding token service: mints/redeems the single-use token behind the
+			// "link your WeChat account" prompt.
+			wechatBindingSvc := wechat.NewBindingTokenService(queries, pool)
+			h.WechatBindingTokens = wechatBindingSvc
+			// Outbound replier: NeedsBinding prompt / AgentOffline /
+			// AgentArchived / issue-created notices.
+			wechatReplier := wechat.NewOutboundReplier(wechat.OutboundReplierConfig{
+				Binding: wechatBindingSvc,
+				Decrypt: box.Open,
+				AppURL:  appURLFromEnv(),
+				BaseURL: wechatBaseURL,
+				Logger:  slog.Default(),
+			})
+			// Resolver set: the engine pipeline seams (route / identity / dedup /
+			// session / audit) over the generic channel_* queries. Typing is nil
+			// for the MVP (iLink typing needs a getconfig ticket dance, deferred).
+			channelRouter.Register(wechat.TypeWechat, wechat.NewWechatResolverSet(queries, pool, wechatReplier, nil))
+			// Outbound subscriber: posts the agent reply via sendmessage on
+			// EventChatDone, echoing the context_token off the session binding.
+			wechat.NewOutbound(queries, box.Open, wechatBaseURL, slog.Default()).Register(bus)
+			// Per-installation inbound: the Supervisor builds + supervises one
+			// long-poll connection per active WeChat installation.
+			wechat.RegisterWeChat(channelRegistry, wechat.ChannelDeps{Decrypt: box.Open, Logger: slog.Default(), BaseURL: wechatBaseURL})
+			// QR-login install service (begin / poll / persist / list / revoke).
+			regSvc, rerr := wechat.NewRegistrationService(queries, pool, box, wechatBaseURL, slog.Default())
+			if rerr != nil {
+				slog.Error("wechat: RegistrationService init failed; install disabled", "error", rerr)
+			} else {
+				h.WechatRegistration = regSvc
+			}
+			slog.Info("wechat integration enabled (QR scan device-flow)")
+		}
+	} else {
+		slog.Info("wechat integration disabled (MULTICA_WECHAT_SECRET_KEY not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -946,6 +997,21 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/slack/installations/{installationId}", h.RevokeSlackInstallation)
 					r.Post("/slack/install/byo", h.RegisterSlackBYO)
 				})
+
+				// WeChat ClawBot (iLink) integration. Device-flow scan-to-install
+				// like Lark (QR-login): listing is member-visible; begin / status are
+				// member-visible with per-agent canManageAgent authorization (agent
+				// owner OR workspace admin); revoke is admin-only.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/wechat/installations", h.ListWechatInstallations)
+					r.Post("/wechat/install/begin", h.BeginWechatInstall)
+					r.Get("/wechat/install/{sessionId}/status", h.GetWechatInstallStatus)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/wechat/installations/{installationId}", h.RevokeWechatInstallation)
+				})
 			})
 		})
 
@@ -962,6 +1028,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// logged-in user (from the session) is bound to the Slack id the token
 		// carries.
 		r.Post("/api/slack/binding/redeem", h.RedeemSlackBindingToken)
+		// WeChat binding-token redemption. Same rationale as Lark/Slack: NOT
+		// workspace-scoped because the redeemer hits this before they have any
+		// workspace context — the redemption itself mints their binding row. The
+		// logged-in user (from the session) is bound to the WeChat id the token
+		// carries.
+		r.Post("/api/wechat/binding/redeem", h.RedeemWechatBindingToken)
 
 		// Composio integration (MUL-3720). User-scoped (no workspace context):
 		// a connection belongs to a user. These four require a logged-in

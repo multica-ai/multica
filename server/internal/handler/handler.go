@@ -25,6 +25,7 @@ import (
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/wechat"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -221,6 +222,15 @@ type Handler struct {
 	// unless Slack is configured; GetChatChannelHistory then reports "no channel
 	// integration". A future platform satisfies the same reader interface.
 	SlackHistory ChatChannelHistoryReader
+	// WechatRegistration owns the WeChat ClawBot (iLink) QR-login install
+	// lifecycle (begin a QR scan / poll status / list / revoke) and the at-rest
+	// encryption of each installation's bot_token. Nil unless
+	// MULTICA_WECHAT_SECRET_KEY is set.
+	WechatRegistration *wechat.RegistrationService
+	// WechatBindingTokens mints/redeems the user-binding tokens behind the
+	// "link your WeChat account" prompt. Nil unless WeChat is configured
+	// (MULTICA_WECHAT_SECRET_KEY set).
+	WechatBindingTokens *wechat.BindingTokenService
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in

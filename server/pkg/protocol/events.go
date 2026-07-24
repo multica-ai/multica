@@ -163,4 +163,12 @@ const (
 	// invalidate the Slack installations query on either.
 	EventSlackInstallationCreated = "slack_installation:created"
 	EventSlackInstallationRevoked = "slack_installation:revoked"
+
+	// WeChat ClawBot (iLink) installation lifecycle. Same semantics as the Lark
+	// and Slack events: `created` covers the QR-scan device-flow install (the
+	// UNIQUE on (workspace_id, agent_id, channel_type) means at most one row per
+	// agent), `revoked` flips status without deleting the row. Front-ends
+	// invalidate the WeChat installations query on either.
+	EventWechatInstallationCreated = "wechat_installation:created"
+	EventWechatInstallationRevoked = "wechat_installation:revoked"
 )

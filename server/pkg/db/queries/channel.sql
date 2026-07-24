@@ -451,6 +451,16 @@ SET last_message_id = sqlc.narg('last_message_id'),
     last_thread_id  = sqlc.narg('last_thread_id')
 WHERE chat_session_id = $1;
 
+-- name: UpdateChannelChatSessionBindingConfig :exec
+-- Replaces the opaque JSON config on a chat-session binding. Used by the WeChat
+-- adapter to stash the per-message context_token that sendmessage must echo
+-- back (the core iLink quirk): every inbound message refreshes the token, so the
+-- outbound subscriber reads the latest value off the binding. Channel-agnostic
+-- so other adapters with similar per-conversation state can reuse it.
+UPDATE channel_chat_session_binding
+SET config = sqlc.arg('config')
+WHERE chat_session_id = $1;
+
 -- name: DeleteChannelChatSessionBindingBySession :exec
 -- Application-layer integrity (replaces the old chat_session-FK ON DELETE
 -- CASCADE): drop the binding when its chat_session is deleted.

@@ -146,6 +146,10 @@ import type {
   ListSlackInstallationsResponse,
   RegisterSlackBYORequest,
   RedeemSlackBindingTokenResponse,
+  ListWechatInstallationsResponse,
+  BeginWechatInstallResponse,
+  WechatInstallStatusResponse,
+  RedeemWechatBindingTokenResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -2896,6 +2900,41 @@ export class ApiClient {
 
   async redeemSlackBindingToken(token: string): Promise<RedeemSlackBindingTokenResponse> {
     return this.fetch(`/api/slack/binding/redeem`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+  }
+
+  // WeChat ClawBot (iLink) integration. Install model is a QR-login device-flow
+  // (the installer scans a QR with their personal WeChat), mirroring Lark.
+
+  async listWechatInstallations(workspaceId: string): Promise<ListWechatInstallationsResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/wechat/installations`);
+  }
+
+  // beginWechatInstall opens a QR-login session against the iLink backend and
+  // returns the QR code URL the installer scans with their personal WeChat. The
+  // frontend dialog then polls /install/{sessionId}/status until success or
+  // terminal failure.
+  async beginWechatInstall(workspaceId: string, agentId: string): Promise<BeginWechatInstallResponse> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    return this.fetch(`/api/workspaces/${workspaceId}/wechat/install/begin?${search.toString()}`, {
+      method: "POST",
+    });
+  }
+
+  async getWechatInstallStatus(workspaceId: string, sessionId: string): Promise<WechatInstallStatusResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/wechat/install/${sessionId}/status`);
+  }
+
+  async deleteWechatInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/wechat/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async redeemWechatBindingToken(token: string): Promise<RedeemWechatBindingTokenResponse> {
+    return this.fetch(`/api/wechat/binding/redeem`, {
       method: "POST",
       body: JSON.stringify({ token }),
     });

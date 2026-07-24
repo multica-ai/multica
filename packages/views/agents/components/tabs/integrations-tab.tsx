@@ -7,9 +7,11 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
+import { wechatInstallationsOptions } from "@multica/core/wechat";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { LarkAgentBindButton } from "../../../settings/components/lark-tab";
 import { SlackAgentBindButton } from "../../../settings/components/slack-tab";
+import { WechatAgentBindButton } from "../../../settings/components/wechat-tab";
 import { useT } from "../../../i18n";
 
 /**
@@ -43,6 +45,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     ...slackInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: wechatListing } = useQuery({
+    ...wechatInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
     enabled: !!wsId,
@@ -62,6 +68,9 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   // backend would 403.
   const canManageLark = isWorkspaceAdmin || isAgentOwner;
   const canManageSlack = isWorkspaceAdmin;
+  // WeChat bind is device-flow scan (like Lark), so the same gate applies: the
+  // agent's owner OR a workspace owner/admin may bind.
+  const canManageWechat = isWorkspaceAdmin || isAgentOwner;
   const hasActiveInstall =
     listing?.installations.some(
       (inst) => inst.agent_id === agent.id && inst.status === "active",
@@ -74,11 +83,19 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
       (inst) => inst.agent_id === agent.id && inst.status === "active",
     ) ?? false;
 
-  // A member who can manage neither platform (not a workspace admin and not
-  // this agent's owner) gets the read-only note instead of the sections.
-  // Members can still view connected bots in the (member-visible)
-  // Settings → Integrations listing.
-  if (!canManageLark && !canManageSlack) {
+  const wechatConfigured = wechatListing?.configured === true;
+  const wechatInstallSupported = wechatListing?.install_supported === true;
+  const wechatHasActiveInstall =
+    wechatListing?.installations.some(
+      (inst) => inst.agent_id === agent.id && inst.status === "active",
+    ) ?? false;
+  const wechatExisting = wechatListing?.installations.find(
+    (inst) => inst.agent_id === agent.id && inst.status === "active",
+  );
+
+  // A member who can manage none of the platforms (not a workspace admin and
+  // not this agent's owner) gets the read-only note instead of the sections.
+  if (!canManageLark && !canManageSlack && !canManageWechat) {
     return (
       <div className="space-y-6">
         <p className="text-xs text-muted-foreground">
@@ -180,6 +197,41 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             </div>
           ) : (
             <SlackAgentBindButton agentId={agent.id} agentName={agent.name} />
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border">
+        <div className="flex items-start gap-3 p-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+            <MessagesSquare className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="text-sm font-medium">{ts(($) => $.wechat.section_title)}</h3>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {ts(($) => $.wechat.page_description)}
+            </p>
+          </div>
+        </div>
+        <div className="border-t px-4 py-3">
+          {!wechatConfigured ? (
+            <p className="text-xs text-muted-foreground">
+              {ts(($) => $.wechat.not_enabled_title)}
+            </p>
+          ) : !wechatInstallSupported && !wechatHasActiveInstall ? (
+            <div className="space-y-1">
+              <p className="text-xs font-medium">{ts(($) => $.wechat.preview_title)}</p>
+              <p className="text-xs text-muted-foreground">
+                {ts(($) => $.wechat.preview_description)}
+              </p>
+            </div>
+          ) : (
+            <WechatAgentBindButton
+              wsId={wsId}
+              agentId={agent.id}
+              agentName={agent.name}
+              existing={wechatExisting}
+            />
           )}
         </div>
       </section>
