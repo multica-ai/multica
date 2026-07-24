@@ -89,9 +89,13 @@ func (q *Queries) CreateChatDraftRestore(ctx context.Context, arg CreateChatDraf
 }
 
 const createChatMessage = `-- name: CreateChatMessage :one
-INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms, message_kind)
-VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::text, 'message'))
-RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind
+INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms, message_kind, quick_actions)
+VALUES (
+    $1, $2, $3, $4, $5,
+    $6, COALESCE($7::text, 'message'),
+    COALESCE($8::jsonb, '[]'::jsonb)
+)
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions
 `
 
 type CreateChatMessageParams struct {
@@ -102,9 +106,10 @@ type CreateChatMessageParams struct {
 	FailureReason pgtype.Text `json:"failure_reason"`
 	ElapsedMs     pgtype.Int8 `json:"elapsed_ms"`
 	MessageKind   pgtype.Text `json:"message_kind"`
+	QuickActions  []byte      `json:"quick_actions"`
 }
 
-// message_kind defaults to 'message' via COALESCE so every existing caller
+// message_kind and quick_actions default via COALESCE so every existing caller
 // (which omits it) keeps writing ordinary messages; the empty-reply path passes
 // 'no_response' to mark a visible turn with no text output (MUL-4351).
 func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessageParams) (ChatMessage, error) {
@@ -116,6 +121,7 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 		arg.FailureReason,
 		arg.ElapsedMs,
 		arg.MessageKind,
+		arg.QuickActions,
 	)
 	var i ChatMessage
 	err := row.Scan(
@@ -128,6 +134,7 @@ func (q *Queries) CreateChatMessage(ctx context.Context, arg CreateChatMessagePa
 		&i.FailureReason,
 		&i.ElapsedMs,
 		&i.MessageKind,
+		&i.QuickActions,
 	)
 	return i, err
 }
@@ -182,7 +189,8 @@ const createChatTask = `-- name: CreateChatTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
-    runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id
+    runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    quick_actions_disabled
 )
 VALUES (
     $1, $2, NULL, 'queued', $3, $4, $5,
@@ -193,9 +201,10 @@ VALUES (
     $10,
     $11,
     $12,
-    $13
+    $13,
+    COALESCE($14::boolean, FALSE)
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, quick_actions_disabled
 `
 
 type CreateChatTaskParams struct {
@@ -212,6 +221,7 @@ type CreateChatTaskParams struct {
 	OriginatorSource     pgtype.Text `json:"originator_source"`
 	TriggerEvidenceKind  pgtype.Text `json:"trigger_evidence_kind"`
 	TriggerEvidenceRefID pgtype.UUID `json:"trigger_evidence_ref_id"`
+	QuickActionsDisabled pgtype.Bool `json:"quick_actions_disabled"`
 }
 
 // The chat sender (initiator) is a direct_human originator and accountable;
@@ -232,6 +242,7 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		arg.OriginatorSource,
 		arg.TriggerEvidenceKind,
 		arg.TriggerEvidenceRefID,
+		arg.QuickActionsDisabled,
 	)
 	var i AgentTaskQueue
 	err := row.Scan(
@@ -282,6 +293,7 @@ func (q *Queries) CreateChatTask(ctx context.Context, arg CreateChatTaskParams) 
 		&i.TriggerEvidenceKind,
 		&i.TriggerEvidenceRefID,
 		&i.AccountableUserID,
+		&i.QuickActionsDisabled,
 	)
 	return i, err
 }
@@ -379,7 +391,7 @@ func (q *Queries) DeleteChatSession(ctx context.Context, arg DeleteChatSessionPa
 const deleteUserChatMessageByTask = `-- name: DeleteUserChatMessageByTask :one
 DELETE FROM chat_message
 WHERE task_id = $1 AND role = 'user'
-RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions
 `
 
 func (q *Queries) DeleteUserChatMessageByTask(ctx context.Context, taskID pgtype.UUID) (ChatMessage, error) {
@@ -395,12 +407,13 @@ func (q *Queries) DeleteUserChatMessageByTask(ctx context.Context, taskID pgtype
 		&i.FailureReason,
 		&i.ElapsedMs,
 		&i.MessageKind,
+		&i.QuickActions,
 	)
 	return i, err
 }
 
 const getChatMessage = `-- name: GetChatMessage :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions FROM chat_message
 WHERE id = $1
 `
 
@@ -417,6 +430,34 @@ func (q *Queries) GetChatMessage(ctx context.Context, id pgtype.UUID) (ChatMessa
 		&i.FailureReason,
 		&i.ElapsedMs,
 		&i.MessageKind,
+		&i.QuickActions,
+	)
+	return i, err
+}
+
+const getChatMessageByTaskAssistant = `-- name: GetChatMessageByTaskAssistant :one
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions FROM chat_message
+WHERE task_id = $1 AND role = 'assistant'
+ORDER BY created_at DESC
+LIMIT 1
+`
+
+// The completed turn's assistant outcome row, for the quick-actions
+// supplement path (daemon suggestion pass finishing after chat:done).
+func (q *Queries) GetChatMessageByTaskAssistant(ctx context.Context, taskID pgtype.UUID) (ChatMessage, error) {
+	row := q.db.QueryRow(ctx, getChatMessageByTaskAssistant, taskID)
+	var i ChatMessage
+	err := row.Scan(
+		&i.ID,
+		&i.ChatSessionID,
+		&i.Role,
+		&i.Content,
+		&i.TaskID,
+		&i.CreatedAt,
+		&i.FailureReason,
+		&i.ElapsedMs,
+		&i.MessageKind,
+		&i.QuickActions,
 	)
 	return i, err
 }
@@ -522,7 +563,7 @@ func (q *Queries) GetLastChatTaskSession(ctx context.Context, chatSessionID pgty
 }
 
 const getMostRecentUserChatMessage = `-- name: GetMostRecentUserChatMessage :one
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions FROM chat_message
 WHERE chat_session_id = $1 AND role = 'user'
 ORDER BY created_at DESC
 LIMIT 1
@@ -546,6 +587,7 @@ func (q *Queries) GetMostRecentUserChatMessage(ctx context.Context, chatSessionI
 		&i.FailureReason,
 		&i.ElapsedMs,
 		&i.MessageKind,
+		&i.QuickActions,
 	)
 	return i, err
 }
@@ -765,7 +807,7 @@ func (q *Queries) ListChatDraftRestoresBySession(ctx context.Context, chatSessio
 }
 
 const listChatInputMessages = `-- name: ListChatInputMessages :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions FROM chat_message
 WHERE task_id = $1 AND role = 'user'
 ORDER BY created_at ASC, id ASC
 `
@@ -796,6 +838,7 @@ func (q *Queries) ListChatInputMessages(ctx context.Context, taskID pgtype.UUID)
 			&i.FailureReason,
 			&i.ElapsedMs,
 			&i.MessageKind,
+			&i.QuickActions,
 		); err != nil {
 			return nil, err
 		}
@@ -808,7 +851,7 @@ func (q *Queries) ListChatInputMessages(ctx context.Context, taskID pgtype.UUID)
 }
 
 const listChatMessages = `-- name: ListChatMessages :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions FROM chat_message
 WHERE chat_session_id = $1
 ORDER BY created_at ASC
 `
@@ -832,6 +875,7 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 			&i.FailureReason,
 			&i.ElapsedMs,
 			&i.MessageKind,
+			&i.QuickActions,
 		); err != nil {
 			return nil, err
 		}
@@ -844,7 +888,7 @@ func (q *Queries) ListChatMessages(ctx context.Context, chatSessionID pgtype.UUI
 }
 
 const listChatMessagesPage = `-- name: ListChatMessagesPage :many
-SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind FROM chat_message
+SELECT id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions FROM chat_message
 WHERE chat_session_id = $1
   AND (
     $3::timestamptz IS NULL
@@ -885,6 +929,7 @@ func (q *Queries) ListChatMessagesPage(ctx context.Context, arg ListChatMessages
 			&i.FailureReason,
 			&i.ElapsedMs,
 			&i.MessageKind,
+			&i.QuickActions,
 		); err != nil {
 			return nil, err
 		}
@@ -1241,6 +1286,41 @@ func (q *Queries) MarkChatSessionRead(ctx context.Context, id pgtype.UUID) error
 	return err
 }
 
+const setChatMessageQuickActionsByTask = `-- name: SetChatMessageQuickActionsByTask :one
+UPDATE chat_message
+SET quick_actions = $2
+WHERE id = (
+    SELECT inner_msg.id FROM chat_message AS inner_msg
+    WHERE inner_msg.task_id = $1 AND inner_msg.role = 'assistant'
+    ORDER BY inner_msg.created_at DESC
+    LIMIT 1
+)
+RETURNING id, chat_session_id, role, content, task_id, created_at, failure_reason, elapsed_ms, message_kind, quick_actions
+`
+
+type SetChatMessageQuickActionsByTaskParams struct {
+	TaskID       pgtype.UUID `json:"task_id"`
+	QuickActions []byte      `json:"quick_actions"`
+}
+
+func (q *Queries) SetChatMessageQuickActionsByTask(ctx context.Context, arg SetChatMessageQuickActionsByTaskParams) (ChatMessage, error) {
+	row := q.db.QueryRow(ctx, setChatMessageQuickActionsByTask, arg.TaskID, arg.QuickActions)
+	var i ChatMessage
+	err := row.Scan(
+		&i.ID,
+		&i.ChatSessionID,
+		&i.Role,
+		&i.Content,
+		&i.TaskID,
+		&i.CreatedAt,
+		&i.FailureReason,
+		&i.ElapsedMs,
+		&i.MessageKind,
+		&i.QuickActions,
+	)
+	return i, err
+}
+
 const setChatSessionArchived = `-- name: SetChatSessionArchived :one
 UPDATE chat_session
 SET status = CASE WHEN $2::bool THEN 'archived' ELSE 'active' END,
@@ -1327,7 +1407,7 @@ const setChatTaskInputOwnerSelf = `-- name: SetChatTaskInputOwnerSelf :one
 UPDATE agent_task_queue
 SET chat_input_task_id = id
 WHERE id = $1
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, quick_actions_disabled
 `
 
 // Stamps a freshly-created direct-chat task as the owner of its own input batch
@@ -1387,6 +1467,7 @@ func (q *Queries) SetChatTaskInputOwnerSelf(ctx context.Context, id pgtype.UUID)
 		&i.TriggerEvidenceKind,
 		&i.TriggerEvidenceRefID,
 		&i.AccountableUserID,
+		&i.QuickActionsDisabled,
 	)
 	return i, err
 }

@@ -1109,8 +1109,26 @@ describe("ApiClient", () => {
 
     it("falls back to the legacy full-list endpoint when the paged route 404s", async () => {
       const legacy = [
-        { id: "m1", role: "user", content: "hi", created_at: "2026-06-01T00:00:00Z" },
-        { id: "m2", role: "assistant", content: "yo", created_at: "2026-06-01T00:00:01Z" },
+        {
+          id: "m1",
+          chat_session_id: "session-1",
+          role: "user",
+          content: "hi",
+          task_id: null,
+          created_at: "2026-06-01T00:00:00Z",
+          quick_actions: [],
+        },
+        {
+          id: "m2",
+          chat_session_id: "session-1",
+          role: "assistant",
+          content: "yo",
+          task_id: "task-1",
+          created_at: "2026-06-01T00:00:01Z",
+          quick_actions: [
+            { label: "Continue", prompt: "Continue with the next step", primary: true },
+          ],
+        },
       ];
       const fetchMock = vi
         .fn()
@@ -1129,6 +1147,36 @@ describe("ApiClient", () => {
         "https://api.example.test/api/chat/sessions/session-1/messages",
       );
       expect(page).toEqual({ messages: legacy, limit: 50, has_more: false, next_cursor: null });
+    });
+
+    it("keeps a valid reply when its optional quick actions are malformed", async () => {
+      const malformed = [{
+        id: "m1",
+        chat_session_id: "session-1",
+        role: "assistant",
+        content: "safe reply",
+        task_id: "task-1",
+        created_at: "2026-06-01T00:00:00Z",
+        quick_actions: [{ label: 42, prompt: false }],
+      }];
+      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(malformed, 200)));
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listChatMessages("session-1")).resolves.toEqual([
+        expect.objectContaining({ content: "safe reply", quick_actions: [] }),
+      ]);
+    });
+
+    it("falls back to an empty page for a malformed paged response", async () => {
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(jsonResponse({ messages: "broken" }, 200)),
+      );
+
+      const client = new ApiClient("https://api.example.test");
+      await expect(
+        client.listChatMessagesPage("session-1", { limit: 25 }),
+      ).resolves.toEqual({ messages: [], limit: 25, has_more: false, next_cursor: null });
     });
 
     it("does NOT fall back on a cursor request — a 404 there propagates", async () => {

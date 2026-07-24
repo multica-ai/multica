@@ -368,7 +368,11 @@ func writeWorkflowHeader(b *strings.Builder) {
 	b.WriteString("### Workflow\n\n")
 }
 
-// writeWorkflowChat emits the chat-mode workflow.
+// writeWorkflowChat emits the chat-mode workflow. Follow-up quick actions are
+// deliberately NOT taught here: the daemon generates them in a dedicated
+// post-completion suggestion pass (chat_suggest.go), because an optional
+// formatting instruction in this brief proved unreliable across providers and
+// long conversations.
 func writeWorkflowChat(b *strings.Builder) {
 	b.WriteString("**You are in chat mode.** A user is messaging you directly in a chat window.\n\n")
 	b.WriteString("- Respond conversationally and helpfully to the user's message\n")

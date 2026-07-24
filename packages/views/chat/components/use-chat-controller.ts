@@ -613,7 +613,9 @@ export function useChatController(opts?: { isActive?: boolean }) {
 
       let result;
       try {
-        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
+        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds, {
+          quickActionsEnabled: useChatStore.getState().quickActionsEnabled,
+        });
       } catch (err) {
         apiLogger.error("sendChatMessage.error.rollback", { sessionId, optimisticId: optimistic.id, err });
         stopRequestedBeforeTaskRef.current = false;

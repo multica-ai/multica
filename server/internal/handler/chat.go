@@ -667,6 +667,10 @@ func (h *Handler) DeleteChatSession(w http.ResponseWriter, r *http.Request) {
 type SendChatMessageRequest struct {
 	Content       string   `json:"content"`
 	AttachmentIDs []string `json:"attachment_ids"`
+	// QuickActionsEnabled lets the sender opt this turn out of follow-up
+	// suggestion generation (Settings → Chat toggle). Pointer so an absent
+	// field (older clients) means enabled — only an explicit false disables.
+	QuickActionsEnabled *bool `json:"quick_actions_enabled"`
 }
 
 type SendChatMessageResponse struct {
@@ -788,7 +792,8 @@ func (h *Handler) SendChatMessage(w http.ResponseWriter, r *http.Request) {
 	// creator-only), so they are the task initiator — surfaced to the agent
 	// under `## Task Initiator`. actorType/actorID were resolved above for the
 	// invoke gate.
-	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID))
+	quickActionsDisabled := req.QuickActionsEnabled != nil && !*req.QuickActionsEnabled
+	sent, err := h.TaskService.SendDirectChatMessage(r.Context(), session, agent, parseUUID(userID), req.Content, attachmentIDs, actorType, parseUUID(actorID), quickActionsDisabled)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to send chat message: "+err.Error())
 		return
@@ -1531,6 +1536,9 @@ type ChatMessageResponse struct {
 	// direct-chat turn that produced no text reply (MUL-4351). Additive:
 	// clients that don't understand it fall back to the non-empty content.
 	MessageKind string `json:"message_kind"`
+	// QuickActions are sanitized follow-ups generated with this assistant turn.
+	// Always an empty array for legacy rows and user messages.
+	QuickActions []protocol.ChatQuickAction `json:"quick_actions"`
 	// Attachments linked to this message via chat_message_id. The chat
 	// bubble renders file cards from these, and the daemon claim path
 	// (daemon.go) pulls structured metadata from the same source so the
@@ -1565,9 +1573,29 @@ func chatMessageToResponse(m db.ChatMessage, attachments []AttachmentResponse) C
 		FailureReason: textToPtr(m.FailureReason),
 		ElapsedMs:     int8ToPtr(m.ElapsedMs),
 		MessageKind:   normalizeMessageKind(m.MessageKind),
+		QuickActions:  decodeChatQuickActions(m.QuickActions),
 		Attachments:   attachments,
 	}
 }
+
+func decodeChatQuickActions(raw []byte) []protocol.ChatQuickAction {
+	actions := make([]protocol.ChatQuickAction, 0)
+	if len(raw) == 0 {
+		return actions
+	}
+	if err := json.Unmarshal(raw, &actions); err != nil {
+		return []protocol.ChatQuickAction{}
+	}
+	if actions == nil {
+		return []protocol.ChatQuickAction{}
+	}
+	if len(actions) > chatQuickActionResponseLimit {
+		actions = actions[:chatQuickActionResponseLimit]
+	}
+	return actions
+}
+
+const chatQuickActionResponseLimit = 3
 
 // normalizeMessageKind maps a stored chat_message.message_kind to the value the
 // API exposes. Unknown / empty kinds degrade to 'message' so a future kind

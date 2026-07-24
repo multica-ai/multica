@@ -21,6 +21,14 @@ const (
 	AppCapabilityChatDraftRestoreV1 = "chat-draft-restore-v1"
 )
 
+// ChatQuickAction is a server-validated follow-up attached to one assistant
+// reply. Label is the concise chip text; Prompt is the full next user turn.
+type ChatQuickAction struct {
+	Label   string `json:"label"`
+	Prompt  string `json:"prompt"`
+	Primary bool   `json:"primary,omitempty"`
+}
+
 // RPCRequestPayload is the generic daemon→server request envelope carried in a
 // protocol.Message of type EventDaemonRPCRequest. RequestID correlates the
 // response; Method selects the server-side handler (e.g. "tasks.claim"); Body
@@ -97,6 +105,23 @@ type TaskCompletedPayload struct {
 	TaskID string `json:"task_id"`
 	PRURL  string `json:"pr_url,omitempty"`
 	Output string `json:"output,omitempty"`
+	// QuickActionsPending declares that this daemon will follow up with a
+	// quick-actions supplement for this chat turn (the suggestion pass runs
+	// in the background after this callback). Per-turn capability signal:
+	// absent on non-chat tasks, skipped turns, and older daemons — so a
+	// false/missing flag means clients must not wait for suggestions.
+	QuickActionsPending bool `json:"quick_actions_pending,omitempty"`
+}
+
+// ChatQuickActionsPayload supplements one completed chat turn with the
+// sanitized follow-up actions from the daemon's suggestion pass. An empty
+// QuickActions list is a meaningful terminal state — it resolves the
+// pending skeleton with "no suggestions this turn".
+type ChatQuickActionsPayload struct {
+	ChatSessionID string            `json:"chat_session_id"`
+	TaskID        string            `json:"task_id"`
+	MessageID     string            `json:"message_id"`
+	QuickActions  []ChatQuickAction `json:"quick_actions"`
 }
 
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)
@@ -161,13 +186,18 @@ const (
 // the omitempty tags only elide fields for the legacy paths that broadcast
 // without a row.
 type ChatDonePayload struct {
-	ChatSessionID string `json:"chat_session_id"`
-	TaskID        string `json:"task_id"`
-	MessageID     string `json:"message_id,omitempty"`
-	Content       string `json:"content,omitempty"`
-	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
-	CreatedAt     string `json:"created_at,omitempty"`
-	MessageKind   string `json:"message_kind,omitempty"`
+	ChatSessionID string            `json:"chat_session_id"`
+	TaskID        string            `json:"task_id"`
+	MessageID     string            `json:"message_id,omitempty"`
+	Content       string            `json:"content,omitempty"`
+	ElapsedMs     int64             `json:"elapsed_ms,omitempty"`
+	CreatedAt     string            `json:"created_at,omitempty"`
+	MessageKind   string            `json:"message_kind,omitempty"`
+	QuickActions  []ChatQuickAction `json:"quick_actions,omitempty"`
+	// QuickActionsPending tells clients a chat:quick_actions supplement will
+	// follow for this turn (render a placeholder). Never true when
+	// QuickActions is already populated.
+	QuickActionsPending bool `json:"quick_actions_pending,omitempty"`
 }
 
 // Outcome values carried by ChatCancelFinalizedPayload.

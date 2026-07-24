@@ -49,6 +49,7 @@ import {
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
@@ -143,6 +144,9 @@ export function ChatWindow() {
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const { data: quickActionsPending = null } = useQuery(
+    chatQuickActionsPendingOptions(activeSessionId ?? ""),
+  );
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const selectedProjectId = useChatStore((s) => s.selectedProjectId);
   const setOpen = useChatStore((s) => s.setOpen);
@@ -574,7 +578,9 @@ export function ChatWindow() {
 
       let result;
       try {
-        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
+        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds, {
+          quickActionsEnabled: useChatStore.getState().quickActionsEnabled,
+        });
       } catch (err) {
         apiLogger.error("sendChatMessage.error.rollback", { sessionId, optimisticId: optimistic.id, err });
         stopRequestedBeforeTaskRef.current = false;
@@ -898,6 +904,11 @@ export function ChatWindow() {
           hasOlderMessages={!!hasOlderMessages}
           isFetchingOlderMessages={isFetchingOlderMessages}
           onLoadOlderMessages={() => void fetchOlderMessages()}
+          onQuickAction={(action) => handleSend(action.prompt)}
+          quickActionsDisabled={
+            !!pendingTaskId || isSessionArchived || isAgentArchived || noAgent
+          }
+          quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
         />
       ) : (
         <EmptyState

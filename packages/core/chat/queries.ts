@@ -1,7 +1,7 @@
 import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
 import { api } from "../api";
 import type { TaskMessagePayload } from "../types/events";
-import type { ChatSession } from "../types/chat";
+import type { ChatQuickActionsPendingState, ChatSession } from "../types/chat";
 
 // NOTE on workspace scoping:
 // `wsId` is used only as part of queryKey for cache isolation per workspace.
@@ -21,6 +21,10 @@ export const chatKeys = {
   messagesPage: (sessionId: string) => [...chatKeys.messagesPageAll(), sessionId] as const,
   pendingTaskAll: () => ["chat", "pending-task"] as const,
   pendingTask: (sessionId: string) => [...chatKeys.pendingTaskAll(), sessionId] as const,
+  /** Client-only marker: this session's last turn awaits a quick-actions supplement. */
+  quickActionsPendingAll: () => ["chat", "quick-actions-pending"] as const,
+  quickActionsPending: (sessionId: string) =>
+    [...chatKeys.quickActionsPendingAll(), sessionId] as const,
   draftRestoresAll: () => ["chat", "draft-restores"] as const,
   /** Durable deferred-cancellation draft restores for a session (#5219). */
   draftRestores: (sessionId: string) => [...chatKeys.draftRestoresAll(), sessionId] as const,
@@ -224,6 +228,21 @@ export function hasPendingChatTasksOptions(wsId: string) {
   return queryOptions({
     queryKey: chatKeys.pendingTasksHasAny(wsId),
     queryFn: () => api.hasAnyPendingChatTasks(),
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * Client-only cache entry: written by the realtime layer (chat:done raises
+ * it, chat:quick_actions resolves it), never fetched from the server —
+ * `enabled: false` keeps the queryFn from ever running; observers still
+ * re-render on setQueryData.
+ */
+export function chatQuickActionsPendingOptions(sessionId: string) {
+  return queryOptions({
+    queryKey: chatKeys.quickActionsPending(sessionId),
+    queryFn: async (): Promise<ChatQuickActionsPendingState | null> => null,
+    enabled: false,
     staleTime: Infinity,
   });
 }

@@ -185,11 +185,15 @@ UPDATE chat_session SET updated_at = now()
 WHERE id = $1;
 
 -- name: CreateChatMessage :one
--- message_kind defaults to 'message' via COALESCE so every existing caller
+-- message_kind and quick_actions default via COALESCE so every existing caller
 -- (which omits it) keeps writing ordinary messages; the empty-reply path passes
 -- 'no_response' to mark a visible turn with no text output (MUL-4351).
-INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms, message_kind)
-VALUES ($1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms), COALESCE(sqlc.narg(message_kind)::text, 'message'))
+INSERT INTO chat_message (chat_session_id, role, content, task_id, failure_reason, elapsed_ms, message_kind, quick_actions)
+VALUES (
+    $1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason),
+    sqlc.narg(elapsed_ms), COALESCE(sqlc.narg(message_kind)::text, 'message'),
+    COALESCE(sqlc.narg(quick_actions)::jsonb, '[]'::jsonb)
+)
 RETURNING *;
 
 -- name: LinkChatMessageToTask :exec
@@ -240,7 +244,8 @@ WHERE id = $1;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
-    runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id
+    runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    quick_actions_disabled
 )
 VALUES (
     $1, $2, NULL, 'queued', $3, $4, $5,
@@ -251,7 +256,8 @@ VALUES (
     sqlc.narg(runtime_connected_apps),
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
-    sqlc.narg(trigger_evidence_ref_id)
+    sqlc.narg(trigger_evidence_ref_id),
+    COALESCE(sqlc.narg('quick_actions_disabled')::boolean, FALSE)
 )
 RETURNING *;
 
@@ -474,3 +480,22 @@ WHERE chat_session_id IN (
     JOIN agent a ON a.id = cs.agent_id
     WHERE a.runtime_id = $1 AND a.kind = 'system'
 );
+
+-- name: GetChatMessageByTaskAssistant :one
+-- The completed turn's assistant outcome row, for the quick-actions
+-- supplement path (daemon suggestion pass finishing after chat:done).
+SELECT * FROM chat_message
+WHERE task_id = $1 AND role = 'assistant'
+ORDER BY created_at DESC
+LIMIT 1;
+
+-- name: SetChatMessageQuickActionsByTask :one
+UPDATE chat_message
+SET quick_actions = $2
+WHERE id = (
+    SELECT inner_msg.id FROM chat_message AS inner_msg
+    WHERE inner_msg.task_id = $1 AND inner_msg.role = 'assistant'
+    ORDER BY inner_msg.created_at DESC
+    LIMIT 1
+)
+RETURNING *;

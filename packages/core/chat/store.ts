@@ -67,6 +67,13 @@ const OPEN_KEY = "multica:chat:isOpen";
  * be turned off from the Settings → Chat tab.
  */
 const FLOATING_KEY = "multica:chat:floatingChatEnabled";
+/**
+ * Settings → Chat preference: render agent follow-up suggestion chips under
+ * assistant replies. Persisted globally like FLOATING_KEY; missing key =
+ * default ON. Display-only for now — the daemon still generates suggestions
+ * either way (known debt: a server-side preference could skip that call).
+ */
+const QUICK_ACTIONS_KEY = "multica:chat:quickActionsEnabled";
 
 function readDrafts(storage: StorageAdapter, key: string): Record<string, string> {
   const raw = storage.getItem(key);
@@ -292,6 +299,8 @@ export interface ChatState {
   isOpen: boolean;
   /** Settings preference: is the floating chat window available at all. */
   floatingChatEnabled: boolean;
+  /** Settings preference: render follow-up suggestion chips in chat. */
+  quickActionsEnabled: boolean;
   activeSessionId: string | null;
   selectedAgentId: string | null;
   /** Project context for the next session. Existing sessions remain bound to
@@ -312,6 +321,7 @@ export interface ChatState {
   setOpen: (open: boolean) => void;
   toggle: () => void;
   setFloatingChatEnabled: (enabled: boolean) => void;
+  setQuickActionsEnabled: (enabled: boolean) => void;
   setActiveSession: (id: string | null) => void;
   setSelectedAgentId: (id: string) => void;
   setSelectedProjectId: (id: string | null) => void;
@@ -355,6 +365,7 @@ export function createChatStore(options: ChatStoreOptions) {
   // turned it off ("false") from the Settings → Chat tab. A missing key
   // (new user) resolves to enabled.
   const initialFloatingEnabled = storage.getItem(FLOATING_KEY) !== "false";
+  const initialQuickActionsEnabled = storage.getItem(QUICK_ACTIONS_KEY) !== "false";
 
   const initialAgentId = storage.getItem(wsKey(AGENT_STORAGE_KEY));
   const initialDraftSlots = loadDraftSlots(
@@ -367,6 +378,7 @@ export function createChatStore(options: ChatStoreOptions) {
   const store = create<ChatState>((set, get) => ({
     isOpen: initialIsOpen,
     floatingChatEnabled: initialFloatingEnabled,
+    quickActionsEnabled: initialQuickActionsEnabled,
     activeSessionId: storage.getItem(wsKey(SESSION_STORAGE_KEY)),
     selectedAgentId: initialAgentId,
     selectedProjectId: storage.getItem(wsKey(PROJECT_STORAGE_KEY)),
@@ -395,6 +407,11 @@ export function createChatStore(options: ChatStoreOptions) {
       // does not linger until the next toggle.
       set(enabled ? { floatingChatEnabled: true } : { floatingChatEnabled: false, isOpen: false });
       if (!enabled) storage.setItem(OPEN_KEY, "false");
+    },
+    setQuickActionsEnabled: (enabled) => {
+      logger.info("setQuickActionsEnabled", { to: enabled });
+      storage.setItem(QUICK_ACTIONS_KEY, String(enabled));
+      set({ quickActionsEnabled: enabled });
     },
     setActiveSession: (id) => {
       logger.info("setActiveSession", { from: get().activeSessionId, to: id });

@@ -150,6 +150,24 @@ func TestChannelDisplayName(t *testing.T) {
 	}
 }
 
+// Quick actions moved to the daemon's dedicated post-completion suggestion
+// pass; the brief must no longer teach the in-band footer syntax to anyone —
+// a taught agent would emit footers the transcript then has to strip.
+func TestQuickActionsInstructionsAbsentFromAllChatBriefs(t *testing.T) {
+	t.Parallel()
+	contexts := []TaskContextForEnv{
+		{ChatSessionID: "c-1", AgentName: "Eve", AgentID: "eve-1"},
+		{ChatSessionID: "c-1", ChatChannelType: ChannelTypeSlack, AgentName: "Eve", AgentID: "eve-1"},
+		{ChatSessionID: "c-1", ChatChannelType: ChannelTypeFeishu, AgentName: "Eve", AgentID: "eve-1"},
+	}
+	for _, ctx := range contexts {
+		brief := buildMetaSkillContent("claude", ctx)
+		if strings.Contains(brief, "```quick-actions") || strings.Contains(brief, "### Quick Actions") {
+			t.Fatalf("brief (channel=%q) must not teach the in-band quick-actions syntax", ctx.ChatChannelType)
+		}
+	}
+}
+
 // outputSection extracts the brief's `## Output` section for readable failures.
 func outputSection(brief string) string {
 	idx := strings.Index(brief, "\n## Output\n")

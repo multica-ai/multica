@@ -61,25 +61,79 @@
     "send_error": "送信には Enter または Mod+Enter のみ使用できます。",
     "unsafe_error": "このキーは文字入力や基本的なキーボード操作と競合します。",
     "send_enter_hint": "Shift+Enterで段落の挿入、リストの継続、コードブロック内の改行ができます。",
-    "categories": { "general": "一般", "navigation": "ナビゲーション" },
+    "categories": {
+      "general": "一般",
+      "navigation": "ナビゲーション"
+    },
     "actions": {
-      "openSearch": { "label": "検索を開く", "description": "どこからでも検索やコマンドを実行します。" },
-      "createIssue": { "label": "Issueを作成", "description": "優先するissue作成フローを開きます。" },
-      "toggleSidebar": { "label": "サイドバーを切り替え", "description": "メインサイドバーの表示を切り替えます。" },
-      "findInIssue": { "label": "Issue内を検索", "description": "開いているissueの詳細を検索します。" },
-      "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログで issue を作成します。" },
-      "goInbox": { "label": "受信トレイへ移動", "description": "ワークスペースの受信トレイを開きます。" },
-      "goChat": { "label": "チャットへ移動", "description": "ワークスペースのチャットを開きます。" },
-      "goMyIssues": { "label": "自分のIssuesへ移動", "description": "自分に割り当てられたissueを開きます。" },
-      "goIssues": { "label": "Issuesへ移動", "description": "Issue一覧を開きます。" },
-      "goProjects": { "label": "プロジェクトへ移動", "description": "プロジェクト一覧を開きます。" },
-      "goAutopilots": { "label": "自動化へ移動", "description": "ワークスペースの自動化を開きます。" },
-      "goAgents": { "label": "エージェントへ移動", "description": "エージェント一覧を開きます。" },
-      "goSquads": { "label": "Squadsへ移動", "description": "Squad一覧を開きます。" },
-      "goUsage": { "label": "使用量へ移動", "description": "使用量分析を開きます。" },
-      "goRuntimes": { "label": "ランタイムへ移動", "description": "ランタイム設定を開きます。" },
-      "goSkills": { "label": "Skillsへ移動", "description": "Skillライブラリを開きます。" },
-      "goSettings": { "label": "設定へ移動", "description": "ワークスペース設定を開きます。" }
+      "openSearch": {
+        "label": "検索を開く",
+        "description": "どこからでも検索やコマンドを実行します。"
+      },
+      "createIssue": {
+        "label": "Issueを作成",
+        "description": "優先するissue作成フローを開きます。"
+      },
+      "toggleSidebar": {
+        "label": "サイドバーを切り替え",
+        "description": "メインサイドバーの表示を切り替えます。"
+      },
+      "findInIssue": {
+        "label": "Issue内を検索",
+        "description": "開いているissueの詳細を検索します。"
+      },
+      "send": {
+        "label": "送信",
+        "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログで issue を作成します。"
+      },
+      "goInbox": {
+        "label": "受信トレイへ移動",
+        "description": "ワークスペースの受信トレイを開きます。"
+      },
+      "goChat": {
+        "label": "チャットへ移動",
+        "description": "ワークスペースのチャットを開きます。"
+      },
+      "goMyIssues": {
+        "label": "自分のIssuesへ移動",
+        "description": "自分に割り当てられたissueを開きます。"
+      },
+      "goIssues": {
+        "label": "Issuesへ移動",
+        "description": "Issue一覧を開きます。"
+      },
+      "goProjects": {
+        "label": "プロジェクトへ移動",
+        "description": "プロジェクト一覧を開きます。"
+      },
+      "goAutopilots": {
+        "label": "自動化へ移動",
+        "description": "ワークスペースの自動化を開きます。"
+      },
+      "goAgents": {
+        "label": "エージェントへ移動",
+        "description": "エージェント一覧を開きます。"
+      },
+      "goSquads": {
+        "label": "Squadsへ移動",
+        "description": "Squad一覧を開きます。"
+      },
+      "goUsage": {
+        "label": "使用量へ移動",
+        "description": "使用量分析を開きます。"
+      },
+      "goRuntimes": {
+        "label": "ランタイムへ移動",
+        "description": "ランタイム設定を開きます。"
+      },
+      "goSkills": {
+        "label": "Skillsへ移動",
+        "description": "Skillライブラリを開きます。"
+      },
+      "goSettings": {
+        "label": "設定へ移動",
+        "description": "ワークスペース設定を開きます。"
+      }
     },
     "fixed": {
       "title": "固定のシステムショートカット",
@@ -94,7 +148,10 @@
   "chat": {
     "floating_title": "フローティングウィンドウ",
     "floating_label": "フローティングチャット",
-    "floating_hint": "すべてのページの隅にフローティングチャットボタンを表示します。デフォルトはオフ——オンにするとどこからでもチャットを呼び出せます。オフのときは専用タブでのみ利用できます。"
+    "floating_hint": "すべてのページの隅にフローティングチャットボタンを表示します。デフォルトはオフ——オンにするとどこからでもチャットを呼び出せます。オフのときは専用タブでのみ利用できます。",
+    "quick_actions_title": "おすすめアクション",
+    "quick_actions_label": "おすすめアクションを生成",
+    "quick_actions_hint": "エージェントの返信ごとに、次の操作の候補を最大3件生成します。オフにすると、このデバイスから送信したメッセージでは生成されなくなります。既存の候補は引き続き表示されます。"
   },
   "issue": {
     "description": "各作成ダイアログのツールバーに常時表示するフィールドを選択します。非表示のフィールドは ⋯ メニューから引き続き使用でき、値がある間は自動的に表示されます。",
@@ -220,7 +277,11 @@
     "empty": "{{scope}} ラベルはまだありません",
     "no_results": "一致するラベルがありません",
     "save_failed": "ラベルを保存できませんでした",
-    "actions": { "open": "{{name}} の操作", "edit": "編集", "delete": "削除" },
+    "actions": {
+      "open": "{{name}} の操作",
+      "edit": "編集",
+      "delete": "削除"
+    },
     "editor": {
       "create_title": "新しいラベル",
       "edit_title": "ラベルを編集",

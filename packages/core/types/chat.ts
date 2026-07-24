@@ -15,6 +15,28 @@ export interface ChatPinnedAgent {
  */
 export type ChatMessageKind = "message" | "no_response";
 
+/**
+ * A concise follow-up offered by an assistant reply. `label` is rendered in
+ * the UI while `prompt` is the full text sent back to the agent. At most one
+ * action should be primary; clients still render safely if an older or future
+ * server sends more than one.
+ */
+export interface ChatQuickAction {
+  label: string;
+  prompt: string;
+  primary?: boolean;
+}
+
+/**
+ * Client-only marker (never persisted, never fetched) that the identified
+ * turn's quick-actions supplement is still in flight — drives the pill
+ * skeleton between chat:done and chat:quick_actions.
+ */
+export interface ChatQuickActionsPendingState {
+  message_id: string;
+  task_id: string;
+}
+
 /** Preview of a session's most recent message, for the IM-style list. */
 export interface ChatLastMessage {
   content: string;
@@ -108,6 +130,8 @@ export interface ChatMessage {
    * servers and on user messages; treat a missing value as "message".
    */
   message_kind?: ChatMessageKind;
+  /** Up to three server-validated follow-ups generated with this reply. */
+  quick_actions?: ChatQuickAction[];
 }
 
 export interface ChatMessagesCursor {

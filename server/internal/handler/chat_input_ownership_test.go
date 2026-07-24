@@ -39,7 +39,7 @@ func sendDirectChat(t *testing.T, ctx context.Context, agentID, sessionID, conte
 	if err != nil {
 		t.Fatalf("load agent: %v", err)
 	}
-	res, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), content, nil, "member", parseUUID(testUserID))
+	res, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), content, nil, "member", parseUUID(testUserID), false)
 	if err != nil {
 		t.Fatalf("SendDirectChatMessage: %v", err)
 	}
@@ -193,6 +193,66 @@ func TestCompleteTask_ChatNonEmptyOutputWritesMessage(t *testing.T) {
 	}
 	if rows[0].Content != "hi there" {
 		t.Fatalf("expected content 'hi there', got %q", rows[0].Content)
+	}
+}
+
+// TestCompleteTask_ChatQuickActions persists only the visible reply plus a
+// validated action payload. The reserved footer never enters message content.
+func TestCompleteTask_ChatQuickActions(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "quick-actions chat")
+	taskID := sendDirectChat(t, ctx, agentID, sessionID, "what next?")
+	markTaskRunning(t, ctx, taskID)
+
+	output := "Here is the plan.\n\n```quick-actions\n" +
+		`[{"label":"Draft it","prompt":"Draft the complete plan","primary":true},` +
+		`{"label":"Make a checklist","prompt":"Turn this into a checklist"}]` +
+		"\n```"
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), completeResult(t, output), "", ""); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 {
+		t.Fatalf("expected one assistant message, got %d", len(rows))
+	}
+	if rows[0].Content != "Here is the plan." || rows[0].MessageKind != protocol.ChatMessageKindMessage {
+		t.Fatalf("persisted reply = kind %q content %q", rows[0].MessageKind, rows[0].Content)
+	}
+	var actions []protocol.ChatQuickAction
+	if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
+		t.Fatalf("decode quick actions: %v", err)
+	}
+	if len(actions) != 2 || actions[0].Prompt != "Draft the complete plan" || !actions[0].Primary {
+		t.Fatalf("persisted quick actions = %+v", actions)
+	}
+
+	// An actions-only turn (quick-actions footer with no visible text) must NOT
+	// become an empty-content message: older Desktop / mobile clients ignore
+	// quick_actions and would render an empty bubble. It falls through to the
+	// visible no_response fallback instead, and the chips are dropped (MUL-4351).
+	actionsOnlyTask := sendDirectChat(t, ctx, agentID, sessionID, "give me options only")
+	markTaskRunning(t, ctx, actionsOnlyTask)
+	actionsOnly := "```quick-actions\n[{\"label\":\"Continue\",\"prompt\":\"Continue the plan\"}]\n```"
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(actionsOnlyTask), completeResult(t, actionsOnly), "", ""); err != nil {
+		t.Fatalf("complete actions-only task: %v", err)
+	}
+	rows = assistantRows(t, ctx, sessionID)
+	if len(rows) != 2 || rows[1].MessageKind != protocol.ChatMessageKindNoResponse {
+		t.Fatalf("actions-only outcome = %+v", rows)
+	}
+	if rows[1].Content == "" {
+		t.Fatal("actions-only no_response row must carry a non-empty fallback body for old clients")
+	}
+	var droppedActions []protocol.ChatQuickAction
+	if err := json.Unmarshal(rows[1].QuickActions, &droppedActions); err != nil {
+		t.Fatalf("decode quick actions: %v", err)
+	}
+	if len(droppedActions) != 0 {
+		t.Fatalf("actions-only no_response row must not carry quick actions, got %+v", droppedActions)
 	}
 }
 
@@ -382,5 +442,102 @@ func TestCompleteTask_ChannelEmptyOutputWritesNoRow(t *testing.T) {
 	}
 	if rows[0].MessageKind != protocol.ChatMessageKindMessage || rows[0].Content != "channel reply" {
 		t.Fatalf("channel message = kind %q content %q, want message/'channel reply'", rows[0].MessageKind, rows[0].Content)
+	}
+}
+
+// TestCompleteTask_ChatQuickActionsSupplement covers the two-step delivery:
+// the complete callback declares pending, then the supplement endpoint's
+// leniently-parsed payload lands on the same assistant row (overwriting an
+// in-band fallback, which the strip still removes from the visible reply).
+func TestCompleteTask_ChatQuickActionsSupplement(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "suggest-pass chat")
+	taskID := sendDirectChat(t, ctx, agentID, sessionID, "what next?")
+	markTaskRunning(t, ctx, taskID)
+
+	output := "Main reply.\n\n```quick-actions\n" +
+		`[{"label":"From footer","prompt":"in-band fallback"}]` + "\n```"
+	req := TaskCompleteRequest{Output: output, QuickActionsPending: true}
+	result, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal complete request: %v", err)
+	}
+	task, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), result, "", "")
+	if err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 {
+		t.Fatalf("expected one assistant message, got %d", len(rows))
+	}
+	if rows[0].Content != "Main reply." {
+		t.Fatalf("footer must still be stripped from content, got %q", rows[0].Content)
+	}
+
+	raw := "```json\n" + `[{"label":"From pass","prompt":"suggested prompt","primary":true}]` + "\n```"
+	if err := testHandler.TaskService.SupplementChatQuickActions(ctx, *task, raw); err != nil {
+		t.Fatalf("supplement quick actions: %v", err)
+	}
+	rows = assistantRows(t, ctx, sessionID)
+	var actions []protocol.ChatQuickAction
+	if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
+		t.Fatalf("decode quick actions: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Label != "From pass" || !actions[0].Primary {
+		t.Fatalf("supplement must overwrite the in-band fallback, got %+v", actions)
+	}
+
+	// An empty supplement must not clobber existing actions (it only resolves
+	// the pending placeholder client-side).
+	if err := testHandler.TaskService.SupplementChatQuickActions(ctx, *task, ""); err != nil {
+		t.Fatalf("empty supplement: %v", err)
+	}
+	rows = assistantRows(t, ctx, sessionID)
+	actions = nil
+	if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
+		t.Fatalf("decode quick actions after empty supplement: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Label != "From pass" {
+		t.Fatalf("empty supplement must keep existing actions, got %+v", actions)
+	}
+}
+
+// TestDirectChat_QuickActionsOptOutStampsTask: a send carrying the opt-out
+// stamps the task row, which the claim payload forwards so the daemon skips
+// the suggestion pass at the source.
+func TestDirectChat_QuickActionsOptOutStampsTask(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "opt-out chat")
+	sess, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	ag, err := testHandler.Queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+
+	optedOut, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), "no suggestions", nil, "member", parseUUID(testUserID), true)
+	if err != nil {
+		t.Fatalf("send opted-out message: %v", err)
+	}
+	if !optedOut.Task.QuickActionsDisabled {
+		t.Fatal("opt-out send must stamp quick_actions_disabled on the task")
+	}
+
+	// Default (older clients / toggle on) stays enabled.
+	normal, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), "with suggestions", nil, "member", parseUUID(testUserID), false)
+	if err != nil {
+		t.Fatalf("send normal message: %v", err)
+	}
+	if normal.Task.QuickActionsDisabled {
+		t.Fatal("default send must leave quick_actions_disabled false")
 	}
 }

@@ -125,14 +125,15 @@ const (
 // reportTerminalTask gives the durable outbox one insertion point without
 // revisiting every task exit when it is added.
 type terminalTaskReport struct {
-	kind          terminalTaskReportKind
-	taskID        string
-	output        string
-	branchName    string
-	errorMessage  string
-	sessionID     string
-	workDir       string
-	failureReason string
+	kind            terminalTaskReportKind
+	taskID          string
+	output          string
+	branchName      string
+	errorMessage    string
+	sessionID           string
+	workDir             string
+	failureReason       string
+	quickActionsPending bool
 }
 
 type executionEnvironmentCommand func() ([]string, error)
@@ -227,6 +228,10 @@ type Daemon struct {
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
 	runtimeIndex map[string]Runtime // runtimeID -> Runtime for provider lookups
+	// chatSuggestCancels maps chat session id -> *chatSuggestHandle for the
+	// in-flight background suggestion pass, so a new turn on the same session
+	// can abort it (stale suggestions + no concurrent resume on one session).
+	chatSuggestCancels sync.Map
 	// profileLaunchSpecs maps a custom runtime profile_id -> the absolute
 	// executable path plus fixed launch args resolved for that profile
 	// (MUL-3284). Populated in registerRuntimesForWorkspace when a profile's
@@ -3554,14 +3559,25 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
 		err := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:       terminalTaskReportComplete,
-			taskID:     taskID,
-			output:     result.Comment,
-			branchName: result.BranchName,
-			sessionID:  result.SessionID,
-			workDir:    result.WorkDir,
+			kind:                terminalTaskReportComplete,
+			taskID:              taskID,
+			output:              result.Comment,
+			branchName:          result.BranchName,
+			sessionID:           result.SessionID,
+			workDir:             result.WorkDir,
+			quickActionsPending: result.QuickActionsPending,
 		})
 		if err == nil {
+			// Completion landed: the assistant row exists, so the deferred
+			// suggestion pass can now run and supplement it. Deliberately
+			// detached from taskWG and the daemon root ctx: best-effort and
+			// bounded (~20s pass + 30s report), it must not hold up slot
+			// release or graceful shutdown — a shutdown mid-pass just means
+			// this turn's supplement never arrives and the client skeleton
+			// times out.
+			if result.QuickActionsSuggest != nil {
+				go result.QuickActionsSuggest()
+			}
 			return
 		}
 		// CompleteTask retries transient errors internally. A transient
@@ -3643,7 +3659,7 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 
 	switch report.kind {
 	case terminalTaskReportComplete:
-		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir)
+		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.quickActionsPending)
 	case terminalTaskReportFail:
 		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.failureReason)
 	default:
@@ -4057,6 +4073,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// multiple workspaces share a host.
 	if task.WorkspaceID == "" {
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
+	}
+
+	// A new turn on a chat session supersedes any background suggestion pass
+	// still running for the previous turn (see chat_suggest.go).
+	if task.ChatSessionID != "" {
+		d.cancelPendingChatSuggest(task.ChatSessionID)
 	}
 
 	prepareTimeout := d.effectiveTaskPrepareTimeout()
@@ -4766,6 +4788,23 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"agent_error", result.Error,
 	)
 
+	// Follow-up suggestion pass for direct (non-channel) chat turns: one extra
+	// resumed provider turn whose only job is emitting the quick-actions JSON.
+	// Deferred: the completed return below carries the job, and
+	// reportTaskResult starts it only after the completion callback succeeds —
+	// the user's turn ends immediately, suggestions arrive as a supplement.
+	// Skipped for channel-backed sessions (no pill surface), empty replies
+	// (the no_response contract owns those), and poisoned outputs (blocked
+	// path handles those).
+	suggestEligible := result.Status == "completed" && task.ChatSessionID != "" &&
+		task.ChatChannelType == "" && !task.QuickActionsDisabled &&
+		result.SessionID != "" && strings.TrimSpace(result.Output) != ""
+	if suggestEligible {
+		if _, poisoned := classifyPoisonedOutput(result.Output); poisoned {
+			suggestEligible = false
+		}
+	}
+
 	// Convert agent usage map to task usage entries.
 	var usageEntries []TaskUsageEntry
 	for model, u := range result.Usage {
@@ -4821,14 +4860,19 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				FailureReason: reason,
 			}, nil
 		}
-		return TaskResult{
-			Status:    "completed",
-			Comment:   result.Output,
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
-			Usage:     usageEntries,
-		}, nil
+		taskResult = TaskResult{
+			Status:              "completed",
+			Comment:             result.Output,
+			SessionID:           result.SessionID,
+			WorkDir:             env.WorkDir,
+			EnvRoot:             env.RootDir,
+			Usage:               usageEntries,
+			QuickActionsPending: suggestEligible,
+		}
+		if suggestEligible {
+			taskResult.QuickActionsSuggest = d.chatSuggestJob(task, backend, execOpts, result.SessionID, result.Usage, provider, taskLog)
+		}
+		return taskResult, nil
 	case "timeout":
 		// Surface session_id/work_dir so the chat resume pointer is kept
 		// in sync even when the agent times out after building a session.

@@ -1503,7 +1503,7 @@ type DirectChatSendResult struct {
 // (archived / no-runtime), passing the loaded agent in; this method trusts those
 // permission checks. It does NOT trust the agent's runtime_id: that field is
 // re-read inside the transaction (see below).
-func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.ChatSession, agent db.Agent, initiatorUserID pgtype.UUID, content string, attachmentIDs []pgtype.UUID, uploaderType string, uploaderID pgtype.UUID) (*DirectChatSendResult, error) {
+func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.ChatSession, agent db.Agent, initiatorUserID pgtype.UUID, content string, attachmentIDs []pgtype.UUID, uploaderType string, uploaderID pgtype.UUID, quickActionsDisabled bool) (*DirectChatSendResult, error) {
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
 	overlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
@@ -1555,6 +1555,7 @@ func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.Chat
 			OriginatorSource:     attrSource,
 			TriggerEvidenceKind:  attrEvidenceKind,
 			TriggerEvidenceRefID: attrEvidenceRef,
+			QuickActionsDisabled: pgtype.Bool{Bool: quickActionsDisabled, Valid: true},
 		})
 		if err != nil {
 			return fmt.Errorf("create direct chat task: %w", err)
@@ -2755,7 +2756,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		// The assistant outcome row (message / no_response) and any attachment
 		// binding were written inside the completion transaction above by
 		// writeChatCompletionOutcome. Broadcast chat:done AFTER commit.
-		s.broadcastChatDone(ctx, task, chatAssistantMsg)
+		s.broadcastChatDone(ctx, task, chatAssistantMsg, chatQuickActionsPending(result, chatAssistantMsg))
 	}
 
 	// Reconcile agent status
@@ -2798,7 +2799,31 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	// Same unescape as the issue-comment path: literal `\n` from agent stdout
 	// becomes a real newline so the chat panel renders paragraph breaks.
 	body := util.UnescapeBackslashEscapes(payload.Output)
+	// Strip any in-band quick-actions footer from EVERY chat completion — the
+	// reserved syntax must never reach a stored transcript. This includes the
+	// agent-initiated intro turn (chat_input_task_id NULL), which previously
+	// fell outside the strip gate and leaked the raw footer into its content;
+	// channel outputs never carry the syntax, so the split is a no-op there.
+	//
+	// New daemons deliver suggestions out-of-band AFTER this callback (the
+	// chat:quick_actions supplement, see SupplementChatQuickActions); the
+	// stripped in-band footer stays as the source for older daemons and
+	// pre-upgrade provider sessions that still emit it.
+	body, quickActions := splitChatQuickActions(body)
+	for i := range quickActions {
+		quickActions[i].Label = redact.Text(quickActions[i].Label)
+		quickActions[i].Prompt = redact.Text(quickActions[i].Prompt)
+	}
 	isEmpty := strings.TrimSpace(body) == ""
+
+	// Quick actions only accompany a visible reply. With no visible text they
+	// would produce an assistant row with empty content that older Desktop /
+	// mobile clients — which ignore the quick_actions field — render as an empty
+	// bubble, breaking the no_response fallback contract (MUL-4351). Drop them so
+	// an actions-only turn falls through to the visible no_response outcome below.
+	if isEmpty {
+		quickActions = nil
+	}
 
 	// MUL-4899 completion-boundary observation. Measures whether the delivery
 	// contract in the runtime brief is actually landing on the chat surface.
@@ -2836,6 +2861,13 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 		Role:          "assistant",
 		TaskID:        task.ID,
 		ElapsedMs:     computeChatElapsedMs(task),
+	}
+	if len(quickActions) > 0 {
+		encoded, err := json.Marshal(quickActions)
+		if err != nil {
+			return nil, fmt.Errorf("marshal chat quick actions: %w", err)
+		}
+		params.QuickActions = encoded
 	}
 	switch {
 	case !isEmpty:
@@ -4070,19 +4102,23 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	return ""
 }
 
-func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQueue, msg *db.ChatMessage) {
+func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQueue, msg *db.ChatMessage, quickActionsPending bool) {
 	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
 		return
 	}
 	payload := protocol.ChatDonePayload{
-		ChatSessionID: util.UUIDToString(task.ChatSessionID),
-		TaskID:        util.UUIDToString(task.ID),
+		ChatSessionID:       util.UUIDToString(task.ChatSessionID),
+		TaskID:              util.UUIDToString(task.ID),
+		QuickActionsPending: quickActionsPending,
 	}
 	if msg != nil {
 		payload.MessageID = util.UUIDToString(msg.ID)
 		payload.Content = msg.Content
 		payload.MessageKind = msg.MessageKind
+		if len(msg.QuickActions) > 0 {
+			_ = json.Unmarshal(msg.QuickActions, &payload.QuickActions)
+		}
 		if msg.CreatedAt.Valid {
 			payload.CreatedAt = msg.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
 		}

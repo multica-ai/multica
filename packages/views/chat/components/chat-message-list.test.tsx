@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { act, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { chatKeys } from "@multica/core/chat/queries";
@@ -163,5 +163,143 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
 
     expect(await screen.findByText("Draft ready.")).toBeInTheDocument();
     expect(screen.queryByText(/Hidden protocol/)).not.toBeInTheDocument();
+  });
+
+  it("hides a partial quick-actions protocol footer while text streams", async () => {
+    const qc = new QueryClient();
+    qc.setQueryData(chatKeys.taskMessages(TASK_ID), [
+      taskMsg(0, "text", {
+        content:
+          "Draft ready.\n```quick-actions\n[{\"label\":\"Hidden suggestion\"",
+      }),
+    ]);
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[]}
+            pendingTask={{ task_id: TASK_ID, status: "running" }}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByText("Draft ready.")).toBeInTheDocument();
+    expect(screen.queryByText(/Hidden suggestion/)).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatMessageList quick actions", () => {
+  it("renders up to three suggestions and sends the hidden prompt", async () => {
+    const qc = new QueryClient();
+    const onQuickAction = vi.fn();
+    const quickActions = [
+      { label: "Draft the brief", prompt: "Draft the complete launch brief", primary: true },
+      { label: "Make a checklist", prompt: "Create a two-week launch checklist" },
+      { label: "Define success", prompt: "Define the activation success metric" },
+    ];
+
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[{
+              id: "assistant-1",
+              chat_session_id: "session-1",
+              role: "assistant",
+              content: "The plan is ready.",
+              task_id: null,
+              created_at: "2026-07-22T00:00:00Z",
+              quick_actions: quickActions,
+            }]}
+            pendingTask={null}
+            availability="online"
+            onQuickAction={onQuickAction}
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByRole("button", { name: "Draft the brief" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Make a checklist" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Define success" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Draft the brief" }));
+    expect(onQuickAction).toHaveBeenCalledWith(quickActions[0]);
+  });
+
+  it("disables suggestions while another reply is running", async () => {
+    const qc = new QueryClient();
+    render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[{
+              id: "assistant-1",
+              chat_session_id: "session-1",
+              role: "assistant",
+              content: "Ready.",
+              task_id: null,
+              created_at: "2026-07-22T00:00:00Z",
+              quick_actions: [{ label: "Continue", prompt: "Continue" }],
+            }]}
+            pendingTask={null}
+            availability="online"
+            onQuickAction={vi.fn()}
+            quickActionsDisabled
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    expect(await screen.findByRole("button", { name: "Continue" })).toBeDisabled();
+  });
+});
+
+describe("ChatMessageList quick actions skeleton", () => {
+  const assistantMessage = {
+    id: "assistant-1",
+    chat_session_id: "session-1",
+    role: "assistant" as const,
+    content: "The plan is ready.",
+    task_id: null,
+    created_at: "2026-07-22T00:00:00Z",
+  };
+
+  it("renders pill skeletons for the message awaiting its supplement", () => {
+    const qc = new QueryClient();
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[assistantMessage]}
+            pendingTask={null}
+            availability="online"
+            onQuickAction={vi.fn()}
+            quickActionsPendingMessageId="assistant-1"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    expect(container.querySelectorAll(".rounded-full[aria-hidden] , [aria-hidden] .rounded-full").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /suggested/i })).toBeNull();
+  });
+
+  it("shows no skeleton for other messages or without onQuickAction", () => {
+    const qc = new QueryClient();
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[assistantMessage]}
+            pendingTask={null}
+            availability="online"
+            quickActionsPendingMessageId="assistant-1"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    expect(container.querySelector("[aria-hidden] .rounded-full")).toBeNull();
   });
 });
