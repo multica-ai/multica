@@ -485,11 +485,10 @@ export function AgentTranscriptDialog({
   const createdLabel = task.created_at ? formatRunTime(task.created_at) : null;
   const startedLabel = task.started_at ? formatRunTime(task.started_at) : null;
   const completedLabel = task.completed_at ? formatRunTime(task.completed_at) : null;
-  // "When did this run happen" — a read-before-you-read fact worth the toolbar
+  // "When was this run created" — a read-before-you-read fact worth the toolbar
   // surface (the ⓘ popover keeps the full-precision created/started/completed).
-  const whenSource = task.started_at ?? task.created_at ?? null;
-  const whenLabel = whenSource
-    ? new Date(whenSource).toLocaleString(undefined, {
+  const createdShort = task.created_at
+    ? new Date(task.created_at).toLocaleString(undefined, {
         month: "short",
         day: "numeric",
         hour: "2-digit",
@@ -498,7 +497,6 @@ export function AgentTranscriptDialog({
     : null;
   const hasTriggeredBy = !!task.attribution?.initiator;
   const hasRunDetails =
-    hasTriggeredBy ||
     !!runtimeInfo ||
     !!task.relative_work_dir ||
     !!createdLabel ||
@@ -533,10 +531,19 @@ export function AgentTranscriptDialog({
                   {agentName || agentInfo?.name || ""}
                 </span>
               </div>
-              {/* Trigger mechanism (why this run exists). The accountable
-                  human is audit metadata, not read-time context — it lives in
-                  the ⓘ popover as "triggered by", not on this row. */}
+              {/* Why this run exists: the trigger mechanism plus the
+                  accountable human who's answerable for what the agent did. */}
               <span className="shrink-0 text-xs text-muted-foreground">{triggerLabel}</span>
+              {hasTriggeredBy && (
+                <>
+                  <FactDot />
+                  <AttributionBadge
+                    attribution={task.attribution}
+                    variant="inline"
+                    className="min-w-0"
+                  />
+                </>
+              )}
             </div>
 
             <div className="flex shrink-0 items-center gap-0.5">
@@ -560,14 +567,6 @@ export function AgentTranscriptDialog({
                       {t(($) => $.transcript.run_info)}
                     </div>
                     <div className="space-y-1 text-xs">
-                      {hasTriggeredBy && (
-                        <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-3">
-                          <span className="text-muted-foreground">
-                            {t(($) => $.transcript.details_triggered_by)}
-                          </span>
-                          <AttributionBadge attribution={task.attribution} variant="inline" />
-                        </div>
-                      )}
                       {runtimeInfo && (
                         <RunDetailRow label={t(($) => $.transcript.details_runtime)} value={runtimeInfo.name} />
                       )}
@@ -618,19 +617,18 @@ export function AgentTranscriptDialog({
             instead of leaving dead space. ── */}
         <div className="flex items-center gap-3 border-b px-4 py-1.5 shrink-0">
           <div className="flex min-w-0 flex-1 items-center gap-x-1.5 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
-            {whenLabel && (
+            {createdShort && (
               <>
-                <span>{whenLabel}</span>
+                <span>{t(($) => $.transcript.fact_created, { time: createdShort })}</span>
                 <FactDot />
               </>
             )}
             {duration && (
-              <span className="inline-flex items-center gap-1">
-                <Clock className="h-3 w-3" />
-                {duration}
-              </span>
+              <>
+                <span>{t(($) => $.transcript.fact_took, { duration })}</span>
+                <FactDot />
+              </>
             )}
-            {duration && <FactDot />}
             <span>
               {activeFilterKeys.length > 0
                 ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })

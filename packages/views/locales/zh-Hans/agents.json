@@ -792,8 +792,9 @@
     "details_started": "开始",
     "details_completed": "完成",
     "copy_workdir": "复制工作目录",
-    "details_triggered_by": "触发人",
-    "close": "关闭"
+    "close": "关闭",
+    "fact_created": "创建于 {{time}}",
+    "fact_took": "用时 {{duration}}"
   },
   "task_failure": {
     "agent_error": "智能体执行出错",
