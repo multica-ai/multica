@@ -45,6 +45,19 @@ const DefaultAutopilotTriggerTimezone = "UTC"
 
 const autopilotRecentDuplicateWindow = 60 * time.Second
 
+// Scheduled dispatch itself is bounded to two minutes. A receipt that still
+// has no linked issue or task after five minutes is not live work; it is a
+// crashed partial dispatch and must not suppress every later occurrence.
+const autopilotAdmissionPartialGrace = 5 * time.Minute
+
+type autopilotAdmissionOutcome uint8
+
+const (
+	autopilotAdmissionCreated autopilotAdmissionOutcome = iota
+	autopilotAdmissionSkipped
+	autopilotAdmissionReused
+)
+
 func NewAutopilotService(q *db.Queries, tx TxStarter, bus *events.Bus, taskSvc *TaskService) *AutopilotService {
 	return &AutopilotService{Queries: q, TxStarter: tx, Bus: bus, TaskSvc: taskSvc}
 }
@@ -474,7 +487,48 @@ func (s *AutopilotService) dispatchAutopilot(
 		initialStatus = "running"
 	}
 
-	run, err := s.Queries.CreateAutopilotRun(ctx, db.CreateAutopilotRunParams{
+	run, outcome, err := s.createAutopilotRunWithAdmission(
+		ctx,
+		autopilot,
+		triggerID,
+		source,
+		payload,
+		plannedAt,
+		webhookDeliveryID,
+		initialStatus,
+	)
+	if err != nil {
+		return nil, dispatch.ReasonInternalError, fmt.Errorf("create run: %w", err)
+	}
+	switch outcome {
+	case autopilotAdmissionSkipped:
+		return s.finishSkippedRun(ctx, autopilot, run, source, run.FailureReason.String), dispatch.ReasonAlreadyActive, nil
+	case autopilotAdmissionReused:
+		return &run, "", nil
+	}
+	s.captureAutopilotRunStarted(autopilot, run, source)
+	return s.dispatchAutopilotRun(ctx, autopilot, triggerID, source, &run, actorUserID)
+}
+
+// createAutopilotRunWithAdmission prevents overlapping scheduled run_only
+// executions of the same autopilot. Manual and webhook runs remain explicit
+// operator or event actions and retain their existing overlap semantics.
+//
+// The autopilot row lock makes the active-run check and insert one atomic
+// admission decision across server replicas. A rejected occurrence still gets
+// a terminal skipped row, preserving schedule idempotency and run history
+// without creating a task.
+func (s *AutopilotService) createAutopilotRunWithAdmission(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+	plannedAt pgtype.Timestamptz,
+	webhookDeliveryID pgtype.UUID,
+	initialStatus string,
+) (db.AutopilotRun, autopilotAdmissionOutcome, error) {
+	params := db.CreateAutopilotRunParams{
 		AutopilotID:       autopilot.ID,
 		TriggerID:         triggerID,
 		Source:            source,
@@ -483,12 +537,95 @@ func (s *AutopilotService) dispatchAutopilot(
 		SquadID:           autopilotSquadAttribution(autopilot),
 		PlannedAt:         plannedAt,
 		WebhookDeliveryID: webhookDeliveryID,
-	})
-	if err != nil {
-		return nil, dispatch.ReasonInternalError, fmt.Errorf("create run: %w", err)
 	}
-	s.captureAutopilotRunStarted(autopilot, run, source)
-	return s.dispatchAutopilotRun(ctx, autopilot, triggerID, source, &run, actorUserID)
+	if source != "schedule" || autopilot.ExecutionMode != "run_only" {
+		run, err := s.Queries.CreateAutopilotRun(ctx, params)
+		return run, autopilotAdmissionCreated, err
+	}
+
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.AutopilotRun{}, autopilotAdmissionCreated, fmt.Errorf("begin admission tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+
+	if _, err := qtx.LockAutopilotRunAdmission(ctx, autopilot.ID); err != nil {
+		return db.AutopilotRun{}, autopilotAdmissionCreated, fmt.Errorf("lock autopilot admission: %w", err)
+	}
+	if triggerID.Valid && plannedAt.Valid {
+		existing, err := qtx.GetAutopilotRunByTriggerAndPlanned(ctx, db.GetAutopilotRunByTriggerAndPlannedParams{
+			TriggerID: triggerID,
+			PlannedAt: plannedAt,
+		})
+		switch {
+		case err == nil:
+			return existing, autopilotAdmissionReused, nil
+		case !errors.Is(err, pgx.ErrNoRows):
+			return db.AutopilotRun{}, autopilotAdmissionCreated, fmt.Errorf("check planned autopilot admission: %w", err)
+		}
+	}
+	graceSeconds := autopilotAdmissionPartialGrace.Seconds()
+	recovered, err := qtx.RecoverStalePartialAutopilotRunsForAdmission(
+		ctx,
+		db.RecoverStalePartialAutopilotRunsForAdmissionParams{
+			AutopilotID:      autopilot.ID,
+			PartialGraceSecs: graceSeconds,
+		},
+	)
+	if err != nil {
+		return db.AutopilotRun{}, autopilotAdmissionCreated, fmt.Errorf("recover stale autopilot admission: %w", err)
+	}
+
+	active, err := qtx.GetLiveAutopilotRun(ctx, db.GetLiveAutopilotRunParams{
+		AutopilotID:      autopilot.ID,
+		PartialGraceSecs: graceSeconds,
+	})
+	switch {
+	case err == nil:
+		params.Status = "skipped"
+		run, createErr := qtx.CreateAutopilotRun(ctx, params)
+		if createErr != nil {
+			return db.AutopilotRun{}, autopilotAdmissionCreated, fmt.Errorf("create non-overlap receipt: %w", createErr)
+		}
+		reason := "active autopilot run: " + util.UUIDToString(active.ID)
+		run, err = qtx.UpdateAutopilotRunSkipped(ctx, db.UpdateAutopilotRunSkippedParams{
+			ID:            run.ID,
+			FailureReason: pgtype.Text{String: reason, Valid: true},
+		})
+		if err != nil {
+			return db.AutopilotRun{}, autopilotAdmissionCreated, fmt.Errorf("finalize non-overlap receipt: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return db.AutopilotRun{}, autopilotAdmissionCreated, fmt.Errorf("commit non-overlap receipt: %w", err)
+		}
+		s.reportRecoveredAutopilotRuns(autopilot, recovered)
+		return run, autopilotAdmissionSkipped, nil
+	case !errors.Is(err, pgx.ErrNoRows):
+		return db.AutopilotRun{}, autopilotAdmissionCreated, fmt.Errorf("check active autopilot run: %w", err)
+	}
+
+	run, err := qtx.CreateAutopilotRun(ctx, params)
+	if err != nil {
+		return db.AutopilotRun{}, autopilotAdmissionCreated, err
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.AutopilotRun{}, autopilotAdmissionCreated, fmt.Errorf("commit admitted run: %w", err)
+	}
+	s.reportRecoveredAutopilotRuns(autopilot, recovered)
+	return run, autopilotAdmissionCreated, nil
+}
+
+func (s *AutopilotService) reportRecoveredAutopilotRuns(autopilot db.Autopilot, recovered []db.AutopilotRun) {
+	for _, stale := range recovered {
+		reason := stale.FailureReason.String
+		slog.Warn("autopilot admission recovered stale partial run",
+			"autopilot_id", util.UUIDToString(autopilot.ID),
+			"run_id", util.UUIDToString(stale.ID),
+		)
+		s.captureAutopilotRunFailed(autopilot, stale, stale.Source, reason)
+		s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), stale, "failed")
+	}
 }
 
 // dispatchAutopilotRun performs the downstream side effect for an already
@@ -1354,6 +1491,29 @@ func autopilotSquadAttribution(ap db.Autopilot) pgtype.UUID {
 	return pgtype.UUID{}
 }
 
+// finishSkippedRun owns the observable skip protocol after its durable run row
+// exists, regardless of whether admission or a readiness guard created it.
+func (s *AutopilotService) finishSkippedRun(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	run db.AutopilotRun,
+	source string,
+	reason string,
+) *db.AutopilotRun {
+	slog.Info("autopilot dispatch skipped",
+		"autopilot_id", util.UUIDToString(autopilot.ID),
+		"run_id", util.UUIDToString(run.ID),
+		"source", source,
+		"reason", reason,
+	)
+
+	// Bump last_run_at so scheduler advancement and "last seen" UI both
+	// reflect that we did evaluate the trigger this tick.
+	s.Queries.UpdateAutopilotLastRunAt(ctx, autopilot.ID)
+	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), run, "skipped")
+	return &run
+}
+
 // recordSkippedRun persists a `skipped` autopilot_run with the given reason
 // and emits the same WS / analytics signals that a normal terminal transition
 // would. Returns the run + nil error so callers (scheduler tick, manual
@@ -1393,19 +1553,7 @@ func (s *AutopilotService) recordSkippedRun(
 			"run_id", util.UUIDToString(run.ID), "error", err)
 	}
 
-	slog.Info("autopilot dispatch skipped",
-		"autopilot_id", util.UUIDToString(autopilot.ID),
-		"run_id", util.UUIDToString(run.ID),
-		"source", source,
-		"reason", reason,
-	)
-
-	// Bump last_run_at so scheduler advancement and "last seen" UI both
-	// reflect that we did evaluate the trigger this tick.
-	s.Queries.UpdateAutopilotLastRunAt(ctx, autopilot.ID)
-
-	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), run, "skipped")
-	return &run, nil
+	return s.finishSkippedRun(ctx, autopilot, run, source, reason), nil
 }
 
 func (s *AutopilotService) publishRunDone(workspaceID string, run db.AutopilotRun, status string) {

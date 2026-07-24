@@ -2,7 +2,8 @@
 
 - `server/cmd/multica/cmd_autopilot.go` registers `list`, `get`, `create`, `update`, `delete`, `trigger`, `runs`, `trigger-add`, `trigger-update`, `trigger-delete`, and `trigger-rotate-url`.
 - The CLI maps reads/writes to `/api/autopilots`, `/api/autopilots/{id}`, `/api/autopilots/{id}/trigger`, `/api/autopilots/{id}/runs`, and trigger subroutes.
-- `server/internal/service/autopilot.go` has `DispatchAutopilot`, synchronous delivery-idempotent `AdmitAutopilotWebhookDelivery`, and worker-side `DispatchAutopilotForWebhookDelivery`; it creates `autopilot_run` and switches on `execution_mode`.
+- `server/internal/service/autopilot.go` has `DispatchAutopilot`, synchronous delivery-idempotent `AdmitAutopilotWebhookDelivery`, and worker-side `DispatchAutopilotForWebhookDelivery`; it creates `autopilot_run` and switches on `execution_mode`. `createAutopilotRunWithAdmission` serializes scheduled `run_only` admission per autopilot and records a skipped receipt instead of a second task while an earlier run is active.
+- `server/pkg/db/queries/autopilot.sql` provides `LockAutopilotRunAdmission`, `RecoverStalePartialAutopilotRunsForAdmission`, and `GetLiveAutopilotRun`; the parent-row lock serializes admission across replicas, stale unlinked receipts are failed without poisoning later schedules, and only live linked work blocks a new scheduled run.
 - `create_issue` calls `dispatchCreateIssue`; `run_only` calls `dispatchRunOnly`.
 - `resolveAutopilotLeader` resolves squad-assigned autopilots to the squad leader.
 - `AgentReadiness` blocks archived/runtime-unready agents before enqueue.

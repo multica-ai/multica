@@ -234,6 +234,66 @@ RETURNING *;
 -- Autopilot Run Management
 -- =====================
 
+-- name: LockAutopilotRunAdmission :one
+-- Serializes scheduled run_only admission per autopilot. The lock is held by
+-- the caller's transaction until it inserts either the active run or the
+-- durable skipped receipt. Different autopilots remain independent.
+SELECT id FROM autopilot
+WHERE id = $1
+FOR UPDATE;
+
+-- name: RecoverStalePartialAutopilotRunsForAdmission :many
+-- A process can die after creating the run receipt but before linking the
+-- downstream issue/task. Keep recent partials live long enough for the
+-- dispatch path to finish, then fail them so they cannot poison admission
+-- forever. The caller serializes this repair with the autopilot row lock.
+UPDATE autopilot_run
+SET status = 'failed',
+    completed_at = now(),
+    failure_reason = 'recovered stale partial dispatch before scheduled admission',
+    planned_at = NULL
+WHERE autopilot_id = $1
+  AND status IN ('issue_created', 'running')
+  AND issue_id IS NULL
+  AND task_id IS NULL
+  AND triggered_at < now() - make_interval(secs => sqlc.arg('partial_grace_secs')::double precision)
+RETURNING *;
+
+-- name: GetLiveAutopilotRun :one
+-- Treat a recent unlinked receipt as a dispatch in progress. Older partials
+-- are repaired above. Linked work is live only while its downstream issue or
+-- task is live, so a missed terminal listener cannot suppress every future
+-- scheduled occurrence. Issue states match SyncRunFromIssue: in_review is
+-- completed and blocked is failed, so neither is live admission work.
+SELECT ar.* FROM autopilot_run ar
+WHERE ar.autopilot_id = $1
+  AND (
+    (
+      ar.status = 'running'
+      AND (
+        (ar.task_id IS NULL AND ar.triggered_at >= now() - make_interval(secs => sqlc.arg('partial_grace_secs')::double precision))
+        OR EXISTS (
+          SELECT 1 FROM agent_task_queue task
+          WHERE task.id = ar.task_id
+            AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+        )
+      )
+    )
+    OR (
+      ar.status = 'issue_created'
+      AND (
+        (ar.issue_id IS NULL AND ar.triggered_at >= now() - make_interval(secs => sqlc.arg('partial_grace_secs')::double precision))
+        OR EXISTS (
+          SELECT 1 FROM issue i
+          WHERE i.id = ar.issue_id
+            AND i.status IN ('backlog', 'todo', 'in_progress')
+        )
+      )
+    )
+  )
+ORDER BY triggered_at DESC
+LIMIT 1;
+
 -- name: CreateAutopilotRun :one
 -- squad_id is an attribution hook: set to the assignee squad when the
 -- parent autopilot has assignee_type='squad', NULL otherwise. The executing
