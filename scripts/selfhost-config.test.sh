@@ -90,4 +90,54 @@ WORKTREE_NAME=selfhost-config-test bash scripts/init-worktree-env.sh "$worktree_
 worktree_backend_port="$(sed -n 's/^PORT=//p' "$worktree_env")"
 require_env "$(cat "$worktree_env")" "MULTICA_PUBLIC_URL=http://localhost:${worktree_backend_port}"
 
+resolve_local_public_url() {
+  env -i PATH="$PATH" bash -c '
+    set -euo pipefail
+    env_file=$1
+    set -a
+    # shellcheck disable=SC1090
+    . "$env_file"
+    set +a
+    # shellcheck disable=SC1091
+    . scripts/local-env.sh
+    printf "%s\n" "$MULTICA_PUBLIC_URL"
+  ' _ "$1"
+}
+
+make_env_probe="$tmp_dir/print-public-url.mk"
+printf '%s\n' \
+  '.PHONY: print-public-url' \
+  'print-public-url:' \
+  '	@printf "%s\n" "$$MULTICA_PUBLIC_URL"' \
+  >"$make_env_probe"
+
+resolve_make_public_url() {
+  make \
+    --no-print-directory \
+    -s \
+    -f Makefile \
+    -f "$make_env_probe" \
+    ENV_FILE="$1" \
+    print-public-url
+}
+
+old_worktree_env="$tmp_dir/.env.worktree.old"
+grep -v '^MULTICA_PUBLIC_URL=' "$worktree_env" >"$old_worktree_env"
+require_env \
+  "$(resolve_local_public_url "$old_worktree_env")" \
+  "http://localhost:${worktree_backend_port}"
+require_env \
+  "$(resolve_make_public_url "$old_worktree_env")" \
+  "http://localhost:${worktree_backend_port}"
+
+explicit_worktree_env="$tmp_dir/.env.worktree.explicit"
+cp "$old_worktree_env" "$explicit_worktree_env"
+printf '\nMULTICA_PUBLIC_URL=https://api.explicit.example\n' >>"$explicit_worktree_env"
+require_env \
+  "$(resolve_local_public_url "$explicit_worktree_env")" \
+  "https://api.explicit.example"
+require_env \
+  "$(resolve_make_public_url "$explicit_worktree_env")" \
+  "https://api.explicit.example"
+
 echo "self-host env derivation ok"

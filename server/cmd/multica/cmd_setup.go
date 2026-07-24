@@ -287,12 +287,41 @@ func dispatchDaemonAfterSetup(
 	restart setupDaemonRunner,
 ) error {
 	if daemonAlive(health) {
+		if activeTasks := daemonActiveTaskCount(health); activeTasks > 0 {
+			taskLabel := "tasks"
+			if activeTasks == 1 {
+				taskLabel = "task"
+			}
+			restartCmd := "multica daemon restart"
+			if profile := resolveProfile(cmd); profile != "" {
+				restartCmd += " --profile " + profile
+			}
+			return fmt.Errorf(
+				"daemon has %d active %s; setup saved the new configuration but left the running daemon unchanged to avoid cancelling work. Wait for the active work to finish, then run '%s' to apply the new configuration",
+				activeTasks,
+				taskLabel,
+				restartCmd,
+			)
+		}
 		fmt.Fprintln(os.Stderr, "\nRestarting daemon to apply the new configuration...")
 		return restart(cmd, args)
 	}
 
 	fmt.Fprintln(os.Stderr, "\nStarting daemon...")
 	return start(cmd, args)
+}
+
+func daemonActiveTaskCount(health map[string]any) int64 {
+	switch count := health["active_task_count"].(type) {
+	case float64:
+		return int64(count)
+	case int:
+		return int64(count)
+	case int64:
+		return count
+	default:
+		return 0
+	}
 }
 
 // persistSelfHostConfigIfReachable probes serverURL and, only when it answers,

@@ -115,6 +115,30 @@ func TestDispatchDaemonAfterSetup(t *testing.T) {
 			t.Fatalf("calls = %q, want start", got)
 		}
 	})
+
+	t.Run("does not restart while tasks are active", func(t *testing.T) {
+		var calls []string
+		err := dispatchDaemonAfterSetup(
+			&cobra.Command{},
+			nil,
+			map[string]any{
+				"status":            "running",
+				"active_task_count": float64(2),
+			},
+			newRunner(&calls, "start"),
+			newRunner(&calls, "restart"),
+		)
+		if err == nil {
+			t.Fatal("dispatchDaemonAfterSetup: want active-task error")
+		}
+		if !strings.Contains(err.Error(), "2 active tasks") ||
+			!strings.Contains(err.Error(), "multica daemon restart") {
+			t.Fatalf("error = %q, want active count and restart guidance", err)
+		}
+		if len(calls) != 0 {
+			t.Fatalf("calls = %v, want neither start nor restart", calls)
+		}
+	})
 }
 
 // TestResolveSelfHostServerURL covers GitHub #3912: `setup self-host` must
