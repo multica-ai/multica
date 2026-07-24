@@ -63,10 +63,19 @@ func registerActivityListeners(bus *events.Bus, queries *db.Queries) {
 
 		if statusChanged {
 			prevStatus := payload.PrevStatus
-			details, _ := json.Marshal(map[string]string{
-				"from": prevStatus,
-				"to":   issue.Status,
-			})
+			d := map[string]string{"from": prevStatus, "to": issue.Status}
+			// An automated change is recorded under the system actor (activity_log's
+			// actor_type CHECK forbids hook); keep the automation identity here so the
+			// audit log still attributes the change to the hook that made it. Status is
+			// the only change type the executor produces, so it is the only one that
+			// carries automation attribution today.
+			if a := payload.Automation; a != nil {
+				d["automation_source"] = a.Type
+				if a.ID != "" {
+					d["automation_id"] = a.ID
+				}
+			}
+			details, _ := json.Marshal(d)
 			activity, err := queries.CreateActivity(ctx, db.CreateActivityParams{
 				WorkspaceID: parseUUID(issue.WorkspaceID),
 				IssueID:     parseUUID(issue.ID),

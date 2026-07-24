@@ -305,9 +305,12 @@ func (s *HookService) publishIssueTransition(tr IssueTransition) {
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(tr.After.WorkspaceID),
-		ActorType:   tr.ActorType,
-		ActorID:     tr.ActorID,
-		Payload:     tr.Payload,
+		// Normalized to member|agent|system (a hook maps to system) so the activity
+		// / inbox listeners do not fail their actor_type CHECK; the hook identity
+		// rides Payload.Automation and the durable domain event.
+		ActorType: tr.BusActorType,
+		ActorID:   tr.BusActorID,
+		Payload:   tr.Payload,
 	})
 }
 

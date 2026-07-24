@@ -62,13 +62,36 @@ type IssueStatusChange struct {
 // IssueTransition is the result of one status change: the locked before/after
 // pre-image, whether the status actually moved, and the typed issue:updated payload
 // the caller publishes post-commit.
+//
+// BusActorType/BusActorID are the NORMALIZED actor for the best-effort side effects,
+// always one of member|agent|system so they satisfy the activity_log / inbox
+// actor_type CHECK. A hook-driven change maps to system, with its hook identity kept
+// as explicit attribution on Payload.Automation and durably on the domain event's
+// actor_type='hook'. Publishing the raw hook actor here would silently fail the
+// activity_log CHECK and drop the row (review round: activity actor contract).
 type IssueTransition struct {
-	Before    db.Issue
-	After     db.Issue
-	Changed   bool
-	ActorType string
-	ActorID   string
-	Payload   issueevent.IssueUpdatedPayload
+	Before       db.Issue
+	After        db.Issue
+	Changed      bool
+	BusActorType string
+	BusActorID   string
+	Payload      issueevent.IssueUpdatedPayload
+}
+
+// sideEffectActor maps a change's actor to the (type, id) the activity_log / inbox
+// actor_type CHECK permits (member|agent|system), plus explicit automation
+// attribution for anything else. A hook — or any future automation actor — is
+// recorded as system on the side-effect path, its identity preserved as an
+// AutomationSource, while the durable domain_event keeps the true actor.
+func sideEffectActor(a domainevent.Actor) (actorType, actorID string, automation *issueevent.AutomationSource) {
+	switch a.Type {
+	case domainevent.ActorMember, domainevent.ActorAgent:
+		return a.Type, util.UUIDToString(a.ID), nil
+	case domainevent.ActorSystem, "":
+		return domainevent.ActorSystem, "", nil
+	default:
+		return domainevent.ActorSystem, "", &issueevent.AutomationSource{Type: a.Type, ID: util.UUIDToString(a.ID)}
+	}
 }
 
 // applyIssueStatusChangeInTx locks the issue (workspace-scoped, so a change can never
@@ -85,26 +108,26 @@ func applyIssueStatusChangeInTx(ctx context.Context, qtx *db.Queries, prefix str
 		}
 		return IssueTransition{}, nil, err
 	}
+
+	busType, busID, automation := sideEffectActor(ch.Actor)
+	tr := IssueTransition{Before: before, After: before, BusActorType: busType, BusActorID: busID}
+
+	// A no-op is a TRUE no-op: return under the lock before writing, so the target's
+	// updated_at is not bumped and nothing downstream is re-driven (review nit).
+	if before.Status == ch.ToStatus {
+		return tr, nil, nil
+	}
+
 	after, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
 		ID: ch.IssueID, WorkspaceID: ch.WorkspaceID, Status: ch.ToStatus,
 	})
 	if err != nil {
 		return IssueTransition{}, nil, err
 	}
-
-	tr := IssueTransition{
-		Before:    before,
-		After:     after,
-		ActorType: ch.Actor.Type,
-		ActorID:   util.UUIDToString(ch.Actor.ID),
-	}
-	// A no-op transition is a successful change that emits nothing, matching every
-	// other status write in the codebase.
-	if before.Status == after.Status {
-		return tr, nil, nil
-	}
+	tr.After = after
 	tr.Changed = true
 	tr.Payload = issueevent.Build(before, after, issueToMap(after, prefix), true)
+	tr.Payload.Automation = automation
 
 	evt := domainevent.IssueStatusChanged(ch.WorkspaceID, ch.IssueID, ch.Actor,
 		domainevent.IssueStatusChangedPayload{From: before.Status, To: after.Status})

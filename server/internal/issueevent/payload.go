@@ -24,6 +24,19 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+// AutomationSource attributes a change made by an automation (a hook, and later
+// other engines) so the side-effect path can normalize the actor to the
+// member|agent|system contract the activity_log / inbox tables permit WITHOUT
+// losing the audit trail. The durable domain_event still records the true actor
+// (e.g. actor_type='hook'); this carries the same attribution to the best-effort
+// listeners so, for example, the activity log can show a status change was made by
+// an automation rather than a bare "system". Internal only — never serialized to
+// the realtime client.
+type AutomationSource struct {
+	Type string // the automation kind, e.g. "hook"
+	ID   string // its id (a hook id)
+}
+
 // IssueSnapshot is the typed, handler-free projection of an issue that in-memory
 // issue:updated listeners read, replacing the handler.IssueResponse assertion.
 type IssueSnapshot struct {
@@ -97,6 +110,11 @@ type IssueUpdatedPayload struct {
 
 	// Snapshot is the typed issue the listeners read. Never serialized.
 	Snapshot IssueSnapshot `json:"-"`
+
+	// Automation, when set, attributes the change to the automation that made it.
+	// The side-effect actor is normalized to system for a hook change; this keeps
+	// the hook identity for the activity/inbox audit trail. Never serialized.
+	Automation *AutomationSource `json:"-"`
 
 	// TriggerSideEffects separates an authoritative change that must record
 	// activity, notify and drive autopilot/subscriber updates (a user or system

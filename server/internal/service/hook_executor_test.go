@@ -772,10 +772,32 @@ func TestExecutorPublishesIssueTransition(t *testing.T) {
 		t.Errorf("payload diff wrong: StatusChanged=%v prev=%q now=%q",
 			payload.StatusChanged, payload.PrevStatus, payload.Snapshot.Status)
 	}
-	if updated.ActorType != "hook" {
-		t.Errorf("actor type = %q, want hook", updated.ActorType)
+	// The side-effect actor is NORMALIZED to system (activity_log / inbox forbid a
+	// hook actor_type), while the hook identity is preserved as explicit attribution.
+	if updated.ActorType != "system" {
+		t.Errorf("bus actor type = %q, want system (a hook must not be published as a raw actor)", updated.ActorType)
 	}
-	_ = event
+	if payload.Automation == nil || payload.Automation.Type != "hook" {
+		t.Fatalf("payload.Automation = %+v, want hook attribution", payload.Automation)
+	}
+	var hookID string
+	if err := f.pool.QueryRow(ctx, `SELECT hook_id::text FROM hook_execution WHERE event_id = $1`,
+		util.UUIDToString(event.ID)).Scan(&hookID); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Automation.ID != hookID {
+		t.Errorf("automation id = %q, want the firing hook %q", payload.Automation.ID, hookID)
+	}
+	// The durable domain event keeps the TRUE hook actor (domain_event permits it).
+	var evtActor string
+	if err := f.pool.QueryRow(ctx,
+		`SELECT actor_type FROM domain_event WHERE causation_execution_id IS NOT NULL AND type = 'issue.status_changed' AND subject_id = $1 ORDER BY seq DESC LIMIT 1`,
+		f.issueID).Scan(&evtActor); err != nil {
+		t.Fatal(err)
+	}
+	if evtActor != "hook" {
+		t.Errorf("domain_event actor_type = %q, want hook (durable attribution)", evtActor)
+	}
 }
 
 // A no-op transition (target already in the requested status) fires the action
@@ -796,11 +818,26 @@ func TestExecutorNoOpStatusChangePublishesNothing(t *testing.T) {
 	})
 
 	_, execID, _ := f.seedQueuedExecution(t, f.setIssueStatusAction("done"))
+
+	// The no-op must not even bump updated_at: the command returns under the lock
+	// before writing (review nit — a true zero-write no-op).
+	var beforeUpdatedAt time.Time
+	if err := f.pool.QueryRow(ctx, `SELECT updated_at FROM issue WHERE id = $1`, f.issueID).Scan(&beforeUpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+
 	if _, err := f.svc.ClaimAndRun(ctx, 5); err != nil {
 		t.Fatalf("claim and run: %v", err)
 	}
 	if s := f.execState(t, execID); s.status != hookExecSucceeded {
 		t.Errorf("no-op action should still succeed, got %q", s.status)
+	}
+	var afterUpdatedAt time.Time
+	if err := f.pool.QueryRow(ctx, `SELECT updated_at FROM issue WHERE id = $1`, f.issueID).Scan(&afterUpdatedAt); err != nil {
+		t.Fatal(err)
+	}
+	if !afterUpdatedAt.Equal(beforeUpdatedAt) {
+		t.Errorf("no-op status change bumped updated_at (%v -> %v); it should be a true zero-write", beforeUpdatedAt, afterUpdatedAt)
 	}
 	mu.Lock()
 	defer mu.Unlock()
