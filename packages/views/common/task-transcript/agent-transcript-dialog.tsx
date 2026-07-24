@@ -287,6 +287,20 @@ export function AgentTranscriptDialog({
   const isAntigravityLiveEmpty =
     isLive && displayItems.length === 0 && runtimeInfo?.provider === "antigravity";
 
+  // Newest-first shows live events as PREPENDS, and Virtuoso items opt out of
+  // native scroll anchoring (`overflow-anchor: none`), so without compensation
+  // every 500ms flush shifts the reading position. Virtuoso's contract: a
+  // decrease of firstItemIndex by N anchors the viewport across an N-item
+  // prepend, and the value must never increase within an instance — counting
+  // down from a large base satisfies that while the list only grows. Sort,
+  // filter, or task changes can shrink the list, so `listEpoch` remounts the
+  // instance (fresh at top) instead of letting firstItemIndex climb.
+  // `scrollToIndex`/`computeItemKey` are unaffected: indices stay data-relative
+  // (verified against scrollToIndexSystem — it never reads firstItemIndex).
+  const firstItemIndex =
+    sortDirection === "newest_first" ? 1_000_000 - displayItems.length : 0;
+  const listEpoch = `${task.id}:${sortDirection}:${activeFilterKeys.join(",")}`;
+
   const detailSeqs = useMemo(
     () => displayItems.filter(hasEventDetail).map((item) => item.seq),
     [displayItems],
@@ -758,9 +772,11 @@ export function AgentTranscriptDialog({
             // of DOM rows (#5733). Rows expand/collapse to variable heights;
             // Virtuoso re-measures them via ResizeObserver.
             <Virtuoso
+              key={listEpoch}
               ref={virtuosoRef}
               style={{ height: "100%" }}
               data={displayItems}
+              firstItemIndex={firstItemIndex}
               computeItemKey={(_, item) => item.seq}
               components={LIST_COMPONENTS}
               itemContent={(_, item) => (
