@@ -367,6 +367,20 @@ RETURNING *;
 SELECT * FROM channel_user_binding
 WHERE installation_id = $1 AND channel_user_id = $2;
 
+-- name: ListChannelUserBindingsForClaim :many
+-- Reverse lookup used only when building a daemon claim for a direct-human
+-- channel task. A provider-native user id is installation-scoped, so every
+-- dimension is pinned here. LIMIT 2 lets the caller distinguish the expected
+-- single binding from an ambiguous multi-binding without loading an unbounded
+-- result set. The claim path re-checks live workspace membership separately.
+SELECT * FROM channel_user_binding
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND installation_id = sqlc.arg('installation_id')
+  AND channel_type = sqlc.arg('channel_type')
+  AND multica_user_id = sqlc.arg('multica_user_id')
+ORDER BY bound_at DESC, id DESC
+LIMIT 2;
+
 -- name: FindReusableChannelUserBinding :one
 -- Cross-installation account-link reuse (MUL-3911). When a platform user
 -- messages an installation they have NOT linked, but the SAME user id is already

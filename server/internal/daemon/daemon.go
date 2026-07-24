@@ -60,6 +60,10 @@ const (
 	taskSlotCapacityBackoff  = 5 * time.Second
 	repoCheckoutModeEnv      = "MULTICA_REPO_CHECKOUT_MODE"
 	repoCheckoutModeIsolated = "isolated"
+	channelTypeEnv           = "MULTICA_CHANNEL_TYPE"
+	channelInstallationIDEnv = "MULTICA_CHANNEL_INSTALLATION_ID"
+	channelUserIDEnv         = "MULTICA_CHANNEL_USER_ID"
+	larkOpenIDEnv            = "MULTICA_LARK_OPEN_ID"
 	// defaultTaskPrepareTimeout is a hard liveness bound for everything after
 	// claim and before StartTask succeeds: runtime resolution, skill bundles,
 	// execution-environment setup, and the StartTask request itself. It is
@@ -89,6 +93,45 @@ func taskScopedAuthToken(task Task) (string, error) {
 		return "", errors.New("server provided non-task-scoped auth token")
 	}
 	return token, nil
+}
+
+// channelIdentityEnvironment converts server-attested channel identity into
+// per-task child-process metadata. It intentionally returns a fresh map only
+// when the payload is complete and consistent, so callers never expose a
+// partial identity tuple. The values remain attribution metadata: credential
+// routing continues to be derived from MULTICA_TOKEN by the task broker.
+func channelIdentityEnvironment(task Task) (map[string]string, string) {
+	if task.ChannelIdentity == nil {
+		return nil, ""
+	}
+	if strings.TrimSpace(task.ChatSessionID) == "" {
+		return nil, "task_not_channel_chat"
+	}
+
+	channelType := strings.TrimSpace(task.ChannelIdentity.ChannelType)
+	installationID := strings.TrimSpace(task.ChannelIdentity.InstallationID)
+	channelUserID := strings.TrimSpace(task.ChannelIdentity.ChannelUserID)
+	if channelType == "" || installationID == "" || channelUserID == "" {
+		return nil, "identity_incomplete"
+	}
+	if channelType != strings.TrimSpace(task.ChatChannelType) {
+		return nil, "channel_type_mismatch"
+	}
+	for _, value := range []string{channelType, installationID, channelUserID} {
+		if len(value) > 512 || strings.ContainsAny(value, "\x00\r\n") {
+			return nil, "identity_invalid"
+		}
+	}
+
+	env := map[string]string{
+		channelTypeEnv:           channelType,
+		channelInstallationIDEnv: installationID,
+		channelUserIDEnv:         channelUserID,
+	}
+	if channelType == execenv.ChannelTypeFeishu {
+		env[larkOpenIDEnv] = channelUserID
+	}
+	return env, ""
 }
 
 // taskRunner executes a single agent task and returns the result.
@@ -4463,6 +4506,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"TMPDIR":               taskTempDir,
 		"TMP":                  taskTempDir,
 		"TEMP":                 taskTempDir,
+	}
+	if channelEnv, reason := channelIdentityEnvironment(task); reason != "" {
+		taskLog.Warn("channel identity environment omitted",
+			"channel_type", task.ChatChannelType,
+			"reason", reason,
+		)
+	} else {
+		for key, value := range channelEnv {
+			agentEnv[key] = value
+		}
 	}
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode
