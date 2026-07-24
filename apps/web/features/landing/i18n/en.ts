@@ -294,6 +294,33 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.5.0",
+        date: "2026-07-24",
+        title: "Self-hosted Git providers and project-aware Chat",
+        changes: [],
+        features: [
+          "You can now connect self-hosted Git providers — Forgejo, Gitea, and GitLab — alongside GitHub.",
+          "Chat can now use your project's context to give more relevant answers.",
+          "The execution log is now easier to read and stays smooth on long runs.",
+          "The issue table now shows which agents are working, right in the list.",
+          "Copied transcripts now include a timestamp for each event.",
+        ],
+        improvements: [
+          "Cursor agents now show their thinking and tool activity as they work.",
+          "You can now build agents on the latest Kimi Code models.",
+          "Runtime aliases now show consistently everywhere across the app.",
+          "GitHub links in your projects now show a clear owner/repo label.",
+          "Chat now warns you when your machine's agent service is too old for project context.",
+        ],
+        fixes: [
+          "Resumed Grok sessions no longer show up as $0, and billing matches what xAI charged.",
+          "Agent creation errors now stay visible so you can see what went wrong.",
+          "In Lark group chats, replies now stay on the right topic's context.",
+          "Hermes agents no longer misreport provider errors.",
+          "Self-hosted deployments now reach the API and docs reliably.",
+        ],
+      },
+      {
         version: "0.4.9",
         date: "2026-07-23",
         title: "Richer sub-issues, Codex Fast mode, and a smoother UI",

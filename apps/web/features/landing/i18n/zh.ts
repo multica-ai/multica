@@ -294,6 +294,33 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.5.0",
+        date: "2026-07-24",
+        title: "支持自托管 Git 服务，Chat 更懂你的项目",
+        changes: [],
+        features: [
+          "现在除了 GitHub，还能接入 Forgejo、Gitea、GitLab 等自托管 Git 服务。",
+          "Chat 现在能用你的项目上下文，给出更贴合的回答。",
+          "执行日志现在更好读，运行再长也能流畅浏览。",
+          "Issue 表格现在会直接显示哪些智能体正在处理。",
+          "复制的记录现在会带上每条事件的时间戳。",
+        ],
+        improvements: [
+          "Cursor 智能体现在会实时显示它的思考和工具调用。",
+          "现在可以基于最新的 Kimi Code 模型搭建智能体了。",
+          "运行时别名现在在全站各处都能一致显示了。",
+          "项目里的 GitHub 链接现在会清晰显示 owner/repo。",
+          "当你机器上的智能体服务过旧、无法使用项目上下文时，Chat 现在会提醒你。",
+        ],
+        fixes: [
+          "恢复的 Grok 会话不再显示为 $0，计费与 xAI 实际收取一致。",
+          "创建智能体出错时，错误信息现在会一直显示，方便你排查。",
+          "在 Lark 群聊里，回复现在会使用正确话题的上下文。",
+          "Hermes 智能体不再误报供应商错误了。",
+          "自托管部署现在能稳定连上 API 和文档了。",
+        ],
+      },
+      {
         version: "0.4.9",
         date: "2026-07-23",
         title: "更丰富的子 Issue、Codex 极速模式，界面更顺手",
