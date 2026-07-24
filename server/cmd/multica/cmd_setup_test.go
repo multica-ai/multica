@@ -74,6 +74,73 @@ func TestPersistSelfHostConfigIfReachable(t *testing.T) {
 	})
 }
 
+func TestDispatchDaemonAfterSetup(t *testing.T) {
+	newRunner := func(calls *[]string, name string) func(*cobra.Command, []string) error {
+		return func(*cobra.Command, []string) error {
+			*calls = append(*calls, name)
+			return nil
+		}
+	}
+
+	t.Run("restarts an existing daemon so new config takes effect", func(t *testing.T) {
+		var calls []string
+		err := dispatchDaemonAfterSetup(
+			&cobra.Command{},
+			nil,
+			map[string]any{"status": "running"},
+			newRunner(&calls, "start"),
+			newRunner(&calls, "restart"),
+		)
+		if err != nil {
+			t.Fatalf("dispatchDaemonAfterSetup: %v", err)
+		}
+		if got := strings.Join(calls, ","); got != "restart" {
+			t.Fatalf("calls = %q, want restart", got)
+		}
+	})
+
+	t.Run("starts when no daemon is running", func(t *testing.T) {
+		var calls []string
+		err := dispatchDaemonAfterSetup(
+			&cobra.Command{},
+			nil,
+			map[string]any{"status": "stopped"},
+			newRunner(&calls, "start"),
+			newRunner(&calls, "restart"),
+		)
+		if err != nil {
+			t.Fatalf("dispatchDaemonAfterSetup: %v", err)
+		}
+		if got := strings.Join(calls, ","); got != "start" {
+			t.Fatalf("calls = %q, want start", got)
+		}
+	})
+
+	t.Run("does not restart while tasks are active", func(t *testing.T) {
+		var calls []string
+		err := dispatchDaemonAfterSetup(
+			&cobra.Command{},
+			nil,
+			map[string]any{
+				"status":            "running",
+				"active_task_count": float64(2),
+			},
+			newRunner(&calls, "start"),
+			newRunner(&calls, "restart"),
+		)
+		if err == nil {
+			t.Fatal("dispatchDaemonAfterSetup: want active-task error")
+		}
+		if !strings.Contains(err.Error(), "2 active tasks") ||
+			!strings.Contains(err.Error(), "multica daemon restart") {
+			t.Fatalf("error = %q, want active count and restart guidance", err)
+		}
+		if len(calls) != 0 {
+			t.Fatalf("calls = %v, want neither start nor restart", calls)
+		}
+	})
+}
+
 // TestResolveSelfHostServerURL covers GitHub #3912: `setup self-host` must
 // honor MULTICA_SERVER_URL when --server-url is not passed, instead of always
 // defaulting to localhost (which left self-hosters stuck on an "unreachable"
