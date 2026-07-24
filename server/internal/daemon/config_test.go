@@ -275,10 +275,7 @@ func TestLoadConfig_DiscoversQwenCode(t *testing.T) {
 	if !ok {
 		t.Fatalf("qwen was not discovered: %v", cfg.Agents)
 	}
-	wantPath, err := filepath.EvalSymlinks(qwen)
-	if err != nil {
-		t.Fatalf("eval symlinks for qwen: %v", err)
-	}
+	wantPath := canonicalExecutablePath(qwen)
 	if entry.Path != wantPath || entry.Command != "qwen" || entry.Model != "qwen3.8-max-preview" {
 		t.Fatalf("qwen entry = %+v, want path=%q command=qwen model=qwen3.8-max-preview", entry, wantPath)
 	}

@@ -842,8 +842,18 @@ func canonicalExecutablePath(path string) string {
 	if err != nil {
 		return path
 	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
-		return real
+	// Resolve symlinks only in the parent directory, not the final component.
+	// This normalises OS-level directory aliases (e.g. /var → /private/var on
+	// macOS) so paths from different code paths compare equal, while keeping the
+	// final component (a stable-name symlink) unresolved. Auto-updating runtimes
+	// (Claude Code, Antigravity, …) install the agent as a stable symlink
+	// pointing into a versioned subdirectory; resolving the final component bakes
+	// the versioned target into AgentEntry.Path, causing MUL-#5683 when the
+	// runtime GCs the old version. The symlink itself is updated atomically by
+	// the runtime's updater and always points to the live binary.
+	dir := filepath.Dir(abs)
+	if realDir, err := filepath.EvalSymlinks(dir); err == nil {
+		return filepath.Join(realDir, filepath.Base(abs))
 	}
 	return abs
 }
