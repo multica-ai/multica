@@ -126,7 +126,23 @@ function MembersList({
 }) {
   const { t } = useT("squads");
   const p = useWorkspacePaths();
-  const visible = members.slice(0, 3);
+  // Pin the leader to the front so the squad's owner is always the first
+  // face in the compact preview (matches the leader-prominent detail page).
+  // Stable: only lifts the leader, leaves every other member in server order.
+  // Uses slice (not indexed access) so the element type stays defined under
+  // noUncheckedIndexedAccess.
+  const leaderIdx = members.findIndex(
+    (m) => m.member_type === "agent" && m.member_id === leaderId,
+  );
+  const ordered =
+    leaderIdx > 0
+      ? [
+          ...members.slice(leaderIdx, leaderIdx + 1),
+          ...members.slice(0, leaderIdx),
+          ...members.slice(leaderIdx + 1),
+        ]
+      : members;
+  const visible = ordered.slice(0, 3);
   const overflow = Math.max(0, memberCount - visible.length);
 
   return (

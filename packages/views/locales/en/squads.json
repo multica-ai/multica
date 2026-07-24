@@ -67,7 +67,15 @@
     "status_archived": "Archived",
     "issue_status_blocked": "blocked",
     "active_issue_more": "and {{count}} more",
-    "last_active_label": "last active {{time}}"
+    "last_active_label": "last active {{time}}",
+    "status_summary_label": "Status",
+    "filter_all": "All",
+    "agents_section": "Agents",
+    "humans_section": "People",
+    "archived_section": "Archived",
+    "no_role": "No role",
+    "no_match_filter": "No agents match this filter",
+    "empty_roster": "No members yet. Add an agent or member to get started."
   },
   "profile_card": {
     "unavailable": "Squad unavailable",

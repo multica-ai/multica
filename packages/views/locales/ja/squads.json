@@ -66,7 +66,15 @@
     "issue_status_blocked": "ブロック中",
     "active_issue_more": "他 {{count}}件",
     "last_active_label": "最終アクティブ {{time}}",
-    "status_archived": "アーカイブ済み"
+    "status_archived": "アーカイブ済み",
+    "status_summary_label": "ステータス",
+    "filter_all": "すべて",
+    "agents_section": "エージェント",
+    "humans_section": "メンバー",
+    "archived_section": "アーカイブ",
+    "no_role": "役割なし",
+    "no_match_filter": "この絞り込みに一致するエージェントはありません",
+    "empty_roster": "まだメンバーがいません。エージェントまたはメンバーを追加してください。"
   },
   "profile_card": {
     "unavailable": "スクワッドを利用できません",
