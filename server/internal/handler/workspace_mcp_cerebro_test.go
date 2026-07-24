@@ -312,7 +312,11 @@ func exerciseWorkspaceMCPAsAgent(t *testing.T, payload map[string]any) *httptest
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", taskID)
-	ctx, cancel := context.WithTimeout(req.Context(), 50*time.Millisecond)
+	// AuthorizeAndWait must first persist the pending approval before the
+	// request timeout turns that unresolved Ask into platform_action_pending.
+	// Fifty milliseconds is below the observed CI database latency and can
+	// expire before the row exists, incorrectly exercising the hard-deny path.
+	ctx, cancel := context.WithTimeout(req.Context(), time.Second)
 	defer cancel()
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()

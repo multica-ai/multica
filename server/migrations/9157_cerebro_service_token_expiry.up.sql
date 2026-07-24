@@ -57,13 +57,35 @@ SELECT id, workspace_id, 'revoked', NULL,
 FROM revoked_empty;
 
 ALTER TABLE cerebro_service_token
-    ALTER COLUMN expires_at SET NOT NULL,
-    ADD CONSTRAINT cerebro_service_token_expiry_after_creation
-        CHECK (expires_at > created_at),
-    ADD CONSTRAINT cerebro_service_token_read_only_scopes
-        CHECK (
-            revoked OR (
-                jsonb_array_length(scopes) > 0
-                AND scopes <@ '["skills:read","agents:read","issues:read"]'::jsonb
-            )
-        );
+    ALTER COLUMN expires_at SET NOT NULL;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'cerebro_service_token_expiry_after_creation'
+          AND conrelid = 'cerebro_service_token'::regclass
+    ) THEN
+        ALTER TABLE cerebro_service_token
+            ADD CONSTRAINT cerebro_service_token_expiry_after_creation
+            CHECK (expires_at > created_at);
+    END IF;
+
+    IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'cerebro_service_token_read_only_scopes'
+          AND conrelid = 'cerebro_service_token'::regclass
+    ) THEN
+        ALTER TABLE cerebro_service_token
+            ADD CONSTRAINT cerebro_service_token_read_only_scopes
+            CHECK (
+                revoked OR (
+                    jsonb_array_length(scopes) > 0
+                    AND scopes <@ '["skills:read","agents:read","issues:read"]'::jsonb
+                )
+            );
+    END IF;
+END
+$$;

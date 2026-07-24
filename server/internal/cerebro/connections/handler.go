@@ -235,18 +235,7 @@ func (h *Handler) Test(w http.ResponseWriter, r *http.Request) {
 		if connID, err := util.ParseUUID(req.ConnectionID); err == nil {
 			if stored, err := h.Store.Get(r.Context(), connID, wsID); err == nil {
 				storedConnID, haveStoredConn = connID, true
-				if req.AuthConfig.BearerToken == "" {
-					req.AuthConfig.BearerToken = stored.AuthConfig.BearerToken
-				}
-				if req.AuthConfig.APIKey == "" {
-					req.AuthConfig.APIKey = stored.AuthConfig.APIKey
-				}
-				if req.AuthConfig.CFAccessID == "" {
-					req.AuthConfig.CFAccessID = stored.AuthConfig.CFAccessID
-				}
-				if req.AuthConfig.CFAccessSecret == "" {
-					req.AuthConfig.CFAccessSecret = stored.AuthConfig.CFAccessSecret
-				}
+				req.AuthConfig = mergeStoredTestAuth(req.AuthConfig, stored.AuthConfig)
 			}
 		}
 	}
@@ -352,6 +341,26 @@ func preserveMaskedAuth(next, stored AuthConfig) AuthConfig {
 		next.APIKey = stored.APIKey
 	}
 	if next.CFAccessSecret == "***" {
+		next.CFAccessSecret = stored.CFAccessSecret
+	}
+	return next
+}
+
+// mergeStoredTestAuth lets the edit screen probe a saved connection without
+// ever returning its credentials to the browser. Masked values and empty form
+// fields both reuse the stored secret; an explicitly entered replacement wins.
+func mergeStoredTestAuth(next, stored AuthConfig) AuthConfig {
+	next = preserveMaskedAuth(next, stored)
+	if next.BearerToken == "" {
+		next.BearerToken = stored.BearerToken
+	}
+	if next.APIKey == "" {
+		next.APIKey = stored.APIKey
+	}
+	if next.CFAccessID == "" {
+		next.CFAccessID = stored.CFAccessID
+	}
+	if next.CFAccessSecret == "" {
 		next.CFAccessSecret = stored.CFAccessSecret
 	}
 	return next

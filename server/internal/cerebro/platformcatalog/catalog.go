@@ -1382,7 +1382,6 @@ var excluded = map[string]string{
 	// Neither route is an agent tool governed by the platform capability table.
 	"POST /api/service-tokens/":       "admin_only — human owner/admin creates a scoped service credential; RequireWorkspaceRole enforces management access",
 	"DELETE /api/service-tokens/{id}": "admin_only — human owner/admin revokes a scoped service credential; RequireWorkspaceRole enforces management access",
-	"POST /api/service/issues":        "service-token-scope — RequireScope(issues:write) is the route's authorization boundary",
 
 	// pre-auth — establishes or clears identity, or a signed external webhook;
 	// there is no authenticated actor yet to gate on.
