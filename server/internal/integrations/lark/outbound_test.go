@@ -271,6 +271,61 @@ func TestPatcherRoutesMarkdownReplyToCard(t *testing.T) {
 	}
 }
 
+func TestPatcherRedactsReferenceLocalImageBeforeTextRouting(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee454545-ee45-ee45-ee45-eeeeeeeeeeee")
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: protocol.ChatDonePayload{
+			TaskID:        uuidString(taskID),
+			ChatSessionID: uuidString(q.binding.ChatSessionID),
+			Content:       "Scan this:\n\n![scan][K]\n\n[K]: /var/run/app/session/card-image.png",
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one SendTextMessage call; got %d", len(api.textSent))
+	}
+	if got := api.textSent[0].Text; got != "Scan this:\n\n[scan omitted]\n\n" {
+		t.Errorf("local image must be redacted before routing; got %q", got)
+	}
+	if len(api.mdCardSent) != 0 {
+		t.Errorf("redacted plain-text body must not use SendMarkdownCard; got %d", len(api.mdCardSent))
+	}
+}
+
+func TestPatcherRedactsReferenceLocalImageBeforeCardRouting(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee464646-ee46-ee46-ee46-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: protocol.ChatDonePayload{
+			TaskID:        uuidString(taskID),
+			ChatSessionID: uuidString(q.binding.ChatSessionID),
+			Content:       "**Scan:** ![result][local]\n\n> - ~~~\n>   [local]: https://example.com/image.png\n> - [local]: /tmp/screenshot.png",
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.mdCardSent) != 1 {
+		t.Fatalf("expected one SendMarkdownCard call; got %d", len(api.mdCardSent))
+	}
+	if got := api.mdCardSent[0].Markdown; got != "**Scan:** [result omitted]\n\n> - ~~~\n>   [local]: https://example.com/image.png\n" {
+		t.Errorf("local image must be redacted before card routing; got %q", got)
+	}
+	if len(api.textSent) != 0 {
+		t.Errorf("markdown body must not use SendTextMessage; got %d", len(api.textSent))
+	}
+}
+
 // TestPatcherRoutesPlainReplyToText is the inverse: a short prose
 // reply without any markdown syntax should stay on the cheap
 // msg_type=text path so the user sees a normal IM bubble.

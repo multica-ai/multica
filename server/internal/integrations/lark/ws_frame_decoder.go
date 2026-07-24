@@ -92,13 +92,17 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 	}
 
 	// text + post are flattened synchronously here (no external calls —
-	// the decoder must stay fast and dependency-free). merge_forward
-	// leaves Body empty: it needs an HTTP round-trip to expand and is
-	// handled downstream by the enricher, which keys off MessageType.
-	// Other types (image, file, …) also leave Body empty in this MVP;
-	// attachment ingestion is a separate issue.
+	// the decoder must stay fast and dependency-free). interactive cards
+	// are too: the link-share form (a forwarded message-link renders as
+	// one) carries a title + card_link.url we can extract without a
+	// round-trip, and without this case the agent receives an empty body
+	// for every card. merge_forward leaves Body empty: it needs an HTTP
+	// round-trip to expand and is handled downstream by the enricher,
+	// which keys off MessageType. Other types (image, file, …) also
+	// leave Body empty in this MVP; attachment ingestion is a separate
+	// issue.
 	switch evt.Message.MessageType {
-	case "text", "post":
+	case "text", "post", "interactive":
 		msg.Body = resolveMentions(flattenContent(evt.Message.MessageType, evt.Message.Content),
 			evt.Message.Mentions, inst.BotOpenID, botUnionID)
 	}

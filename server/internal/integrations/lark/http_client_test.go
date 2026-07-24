@@ -567,6 +567,117 @@ func TestHTTPClient_SendMarkdownCard_HappyPath(t *testing.T) {
 // then once more implicitly when the outer body is encoded for the
 // HTTP request. Forgetting either pass corrupts the text Lark renders
 // (or worse, rejects the message with a body parse error).
+func TestHTTPClient_SendMarkdownCard_RewritesLocalImages(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_md", 7200)
+	fake.stubSend(
+		map[string]any{
+			"code": 0,
+			"msg":  "ok",
+			"data": map[string]string{"message_id": "om_md_1"},
+		},
+		func(r *http.Request, body map[string]string) {
+			var card map[string]any
+			if err := json.Unmarshal([]byte(body["content"]), &card); err != nil {
+				t.Fatalf("content is not valid card JSON: %v", err)
+			}
+			bodyDoc, _ := card["body"].(map[string]any)
+			elements, _ := bodyDoc["elements"].([]any)
+			el, _ := elements[0].(map[string]any)
+			content, _ := el["content"].(string)
+			if strings.Contains(content, "![](/var/run/app/session/card-image.png)") {
+				t.Fatalf("local image markdown must not be forwarded verbatim: %q", content)
+			}
+			if strings.Contains(content, "/var/run/app/session/card-image.png") {
+				t.Fatalf("local image path must not be exposed in Lark card content: %q", content)
+			}
+			if !strings.Contains(content, "[image omitted]") {
+				t.Fatalf("local image should be replaced with an omission marker: %q", content)
+			}
+		},
+	)
+
+	c := newTestClient(fake, time.Now)
+	_, err := c.SendMarkdownCard(context.Background(), SendMarkdownCardParams{
+		InstallationID: testCreds(),
+		ChatID:         ChatID("oc_chat_42"),
+		Markdown:       "Scan this:\n\n![](/var/run/app/session/card-image.png)",
+	})
+	if err != nil {
+		t.Fatalf("send markdown card: %v", err)
+	}
+}
+
+func TestSanitizeMarkdownForLarkCard_LocalPathFormats(t *testing.T) {
+	cases := []struct {
+		name     string
+		markdown string
+		want     string
+	}{
+		{"unix", `![](/var/run/app/image.png)`, `[image omitted]`},
+		{"windows_backslash", `![scan](C:\Users\agent\image.png)`, `[scan omitted]`},
+		{"windows_slash", `![](C:/Users/agent/image.png)`, `[image omitted]`},
+		{"file_unix", `![](file:///var/run/app/image.png)`, `[image omitted]`},
+		{"file_windows", `![](file:///C:/Users/agent/image.png)`, `[image omitted]`},
+		{"file_host", `![](file://host/share/image.png)`, `[image omitted]`},
+		{"windows_spaces", `![scan](C:\Program Files\app\x.png)`, `[scan omitted]`},
+		{"angle_windows_spaces", `![scan](<C:\Program Files\app\x.png>)`, `[scan omitted]`},
+		{"windows_unc", `![scan](\\server\share\x.png)`, `[scan omitted]`},
+		{"optional_title", `![scan](/tmp/x.png "preview")`, `[scan omitted]`},
+		{"balanced_parentheses", `![scan](/tmp/screenshot(1).png)`, `[scan omitted]`},
+		{"label_balanced_brackets", `![scan [annotated]](/tmp/x.png)`, `[scan [annotated] omitted]`},
+		{"label_escaped_bracket", `![scan \] annotated](/tmp/x.png)`, `[scan \] annotated omitted]`},
+		{"escaped_parenthesis", `![scan](/tmp/screenshot\(1\).png)`, `[scan omitted]`},
+		{"reference_full", "![scan][local]\n\n[local]: /tmp/x.png", "[scan omitted]\n\n"},
+		{"reference_collapsed", "![scan][]\n[scan]: /tmp/x.png", "[scan omitted]\n"},
+		{"reference_shortcut", "![scan]\n[scan]: /tmp/x.png", "[scan omitted]\n"},
+		{"reference_angle_windows_spaces", "![scan][local]\n[local]: <C:\\Program Files\\app\\x.png>", "[scan omitted]\n"},
+		{"reference_multiline_unix", "![scan][local]\n\n[local]:\n/tmp/x.png", "[scan omitted]\n\n"},
+		{"reference_multiline_windows", "![scan][local]\n[local]:\n   C:\\Program Files\\app\\x.png", "[scan omitted]\n"},
+		{"reference_multiline_unc", "![scan][local]\n[local]:\n\\\\server\\share\\x.png", "[scan omitted]\n"},
+		{"reference_multiline_file", "![scan][local]\n[local]:\nfile:///tmp/x.png", "[scan omitted]\n"},
+		{"reference_multiline_remote", "![logo][remote]\n[remote]:\nhttps://example.com/image.png", "![logo][remote]\n[remote]:\nhttps://example.com/image.png"},
+		{"reference_multiline_title", "![scan][local]\n[local]:\n/tmp/x.png\n  \"preview\"\nnext", "[scan omitted]\nnext"},
+		{"destination_escaped_unix_separator", `![scan](\/tmp/x.png)`, `[scan omitted]`},
+		{"destination_decimal_entity_unix_separator", `![scan](&#47;tmp/x.png)`, `[scan omitted]`},
+		{"destination_hex_entity_windows_separator", `![scan](C:&#x5c;Users&#x5c;agent&#x5c;x.png)`, `[scan omitted]`},
+		{"reference_escaped_separator", "![scan][local]\n[local]: \\/tmp/x.png", "[scan omitted]\n"},
+		{"reference_blockquote_definition", "![scan][local]\n\n> [local]: file:private.png", "[scan omitted]\n\n"},
+		{"reference_list_definition", "![scan][local]\n\n- [local]: /tmp/x.png", "[scan omitted]\n\n"},
+		{"reference_unicode_case_fold", "![scan][K]\n\n[K]: /tmp/x.png", "[scan omitted]\n\n"},
+		{"reference_fenced_code_remote_then_local", "![scan][local]\n\n```\n[local]: https://example.com/image.png\n```\n\n[local]: /tmp/x.png", "[scan omitted]\n\n```\n[local]: https://example.com/image.png\n```\n\n"},
+		{"reference_fenced_backtick_suffix_not_close", "![scan][local]\n\n```\n[local]: https://example.com/image.png\n``` still code\n[local]: https://example.com/also-code.png\n```\n\n[local]: /tmp/x.png", "[scan omitted]\n\n```\n[local]: https://example.com/image.png\n``` still code\n[local]: https://example.com/also-code.png\n```\n\n"},
+		{"reference_fenced_tilde_suffix_not_close", "![scan][local]\n\n~~~\n[local]: https://example.com/image.png\n~~~ still code\n[local]: https://example.com/also-code.png\n~~~\n\n[local]: /tmp/x.png", "[scan omitted]\n\n~~~\n[local]: https://example.com/image.png\n~~~ still code\n[local]: https://example.com/also-code.png\n~~~\n\n"},
+		{"reference_blockquote_fence_suffix_not_close", "![scan][local]\n\n> ```\n> [local]: https://example.com/image.png\n> ``` still code\n> [local]: https://example.com/also-code.png\n> ```\n\n[local]: /tmp/x.png", "[scan omitted]\n\n> ```\n> [local]: https://example.com/image.png\n> ``` still code\n> [local]: https://example.com/also-code.png\n> ```\n\n"},
+		{"reference_blockquote_list_continuation_then_local", "![scan][local]\n\n> - ```\n>   [local]: https://example.com/image.png\n>   [local]: https://example.com/also-code.png\n\n[local]: /tmp/x.png", "[scan omitted]\n\n> - ```\n>   [local]: https://example.com/image.png\n>   [local]: https://example.com/also-code.png\n\n"},
+		{"reference_blockquote_list_sibling_then_local", "![scan][local]\n\n> - ```\n>   [local]: https://example.com/image.png\n> - [local]: /tmp/x.png", "[scan omitted]\n\n> - ```\n>   [local]: https://example.com/image.png\n"},
+		{"reference_blockquote_list_sibling_then_remote", "![logo][remote]\n\n> - ```\n>   [remote]: /tmp/x.png\n> - [remote]: https://example.com/image.png", "![logo][remote]\n\n> - ```\n>   [remote]: /tmp/x.png\n> - [remote]: https://example.com/image.png"},
+		{"reference_blockquote_unclosed_fence_then_local", "![scan][local]\n\n> ```\n> [local]: https://example.com/image.png\n\n[local]: /tmp/x.png", "[scan omitted]\n\n> ```\n> [local]: https://example.com/image.png\n\n"},
+		{"reference_blockquote_unclosed_fence_then_remote", "![logo][remote]\n\n> ```\n> [remote]: /tmp/x.png\n\n[remote]: https://example.com/image.png", "![logo][remote]\n\n> ```\n> [remote]: /tmp/x.png\n\n[remote]: https://example.com/image.png"},
+		{"reference_list_unclosed_fence_then_local", "![scan][local]\n\n- ```\n  [local]: https://example.com/image.png\n\n[local]: /tmp/x.png", "[scan omitted]\n\n- ```\n  [local]: https://example.com/image.png\n\n"},
+		{"reference_list_unclosed_fence_blank_then_code_definition", "![scan][local]\n\n- ```\n  [local]: https://example.com/image.png\n\n  [local]: https://example.com/also-code.png\n\n[local]: /tmp/x.png", "[scan omitted]\n\n- ```\n  [local]: https://example.com/image.png\n\n  [local]: https://example.com/also-code.png\n\n"},
+		{"reference_list_sibling_definition_after_unclosed_fence", "![scan][local]\n\n- ```\n  [local]: https://example.com/image.png\n- [local]: /tmp/x.png", "[scan omitted]\n\n- ```\n  [local]: https://example.com/image.png\n"},
+		{"reference_list_sibling_remote_after_unclosed_fence", "![logo][remote]\n\n- ```\n  [remote]: /tmp/x.png\n- [remote]: https://example.com/image.png", "![logo][remote]\n\n- ```\n  [remote]: /tmp/x.png\n- [remote]: https://example.com/image.png"},
+		{"reference_list_unclosed_fence_then_remote", "![logo][remote]\n\n- ```\n  [remote]: /tmp/x.png\n\n[remote]: https://example.com/image.png", "![logo][remote]\n\n- ```\n  [remote]: /tmp/x.png\n\n[remote]: https://example.com/image.png"},
+		{"reference_indented_code_remote_then_local", "![scan][local]\n\n    [local]: https://example.com/image.png\n\n[local]: /tmp/x.png", "[scan omitted]\n\n    [local]: https://example.com/image.png\n\n"},
+		{"reference_fenced_code_local_only", "![logo][local]\n\n```\n[local]: /tmp/x.png\n```", "![logo][local]\n\n```\n[local]: /tmp/x.png\n```"},
+		{"malformed_trailing_backslash_definition", "![scan][x]\n[x]: \\", "![scan][x]\n[x]: \\"},
+		{"malformed_truncated_angle_definition", "![scan][x]\n[x]: <C:\\tmp", "![scan][x]\n[x]: <C:\\tmp"},
+		{"reference_remote", "![logo][remote]\n[remote]: https://example.com/image.png", "![logo][remote]\n[remote]: https://example.com/image.png"},
+		{"remote_url", `![logo](https://example.com/image.png)`, `![logo](https://example.com/image.png)`},
+		{"remote_url_with_title", `![logo](https://example.com/image.png "preview")`, `![logo](https://example.com/image.png "preview")`},
+		{"mixed_images", `![logo](https://example.com/logo.png) ![scan](/tmp/scan.png)`, `![logo](https://example.com/logo.png) [scan omitted]`},
+		{"malformed_local_image", `![scan](/tmp/scan.png`, `![scan](/tmp/scan.png`},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sanitizeMarkdownForLarkCard(tc.markdown); got != tc.want {
+				t.Errorf("sanitizeMarkdownForLarkCard(%q) = %q; want %q", tc.markdown, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestHTTPClient_SendTextMessage_EncodesSpecialCharacters(t *testing.T) {
 	cases := []struct {
 		name string
@@ -1109,8 +1220,8 @@ func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 			"code": 0,
 			"msg":  "ok",
 			"bot": map[string]any{
-				"open_id":   "ou_bot_42",
-				"app_name":  "PersonalAgent",
+				"open_id":    "ou_bot_42",
+				"app_name":   "PersonalAgent",
 				"avatar_url": "https://example/avatar.png",
 			},
 		})

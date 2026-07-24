@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"io"
 	"log/slog"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/text/cases"
 )
 
 // Real Lark/飞书 Open Platform HTTP APIClient.
@@ -61,6 +64,725 @@ const (
 	codeTokenExpired = 99991663
 	codeTokenInvalid = 99991664
 )
+
+func sanitizeMarkdownForLarkCard(markdown string) string {
+	definitions := parseMarkdownReferenceDefinitions(markdown)
+	redactedDefinitions := map[string]struct{}{}
+
+	var sanitized strings.Builder
+	last := 0
+	changed := false
+	for start := 0; start < len(markdown)-1; {
+		relative := strings.Index(markdown[start:], "![")
+		if relative < 0 {
+			break
+		}
+		start += relative
+		end, label, destination, referenceKey, ok := parseMarkdownImage(markdown, start, definitions)
+		if !ok {
+			start += 2
+			continue
+		}
+		if !isLocalMarkdownImageDestination(destination) {
+			start = end
+			continue
+		}
+
+		sanitized.WriteString(markdown[last:start])
+		label = strings.TrimSpace(label)
+		if label == "" {
+			label = "image"
+		}
+		fmt.Fprintf(&sanitized, "[%s omitted]", label)
+		if referenceKey != "" {
+			redactedDefinitions[referenceKey] = struct{}{}
+		}
+		last = end
+		start = end
+		changed = true
+	}
+	if !changed {
+		return markdown
+	}
+	sanitized.WriteString(markdown[last:])
+	result := sanitized.String()
+	if len(redactedDefinitions) > 0 {
+		result = removeMarkdownReferenceDefinitions(result, redactedDefinitions)
+	}
+	return result
+}
+
+type markdownReferenceDefinition struct {
+	destination string
+}
+
+// parseMarkdownImage returns the full image span and its destination. It uses
+// a small scanner instead of a regular expression because destinations may be
+// angle-bracketed, followed by a title, contain balanced/escaped parentheses,
+// or be supplied through a reference-style definition.
+func parseMarkdownImage(markdown string, start int, definitions map[string]markdownReferenceDefinition) (end int, label, destination, referenceKey string, ok bool) {
+	if start < 0 || start+2 > len(markdown) || markdown[start:start+2] != "![" {
+		return 0, "", "", "", false
+	}
+
+	labelEnd, ok := findMarkdownLabelEnd(markdown, start+1)
+	if !ok {
+		return 0, "", "", "", false
+	}
+	label = markdown[start+2 : labelEnd]
+	if labelEnd+1 < len(markdown) && markdown[labelEnd+1] == '(' {
+		end, destination, ok := parseInlineMarkdownImageDestination(markdown, labelEnd+1)
+		return end, label, destination, "", ok
+	}
+	if labelEnd+1 < len(markdown) && markdown[labelEnd+1] == '[' {
+		referenceEnd, ok := findMarkdownLabelEnd(markdown, labelEnd+1)
+		if !ok {
+			return 0, "", "", "", false
+		}
+		referenceLabel := markdown[labelEnd+2 : referenceEnd]
+		if referenceLabel == "" {
+			referenceLabel = label
+		}
+		key := normalizeMarkdownReferenceLabel(referenceLabel)
+		definition, ok := definitions[key]
+		if !ok {
+			return 0, "", "", "", false
+		}
+		return referenceEnd + 1, label, definition.destination, key, true
+	}
+
+	key := normalizeMarkdownReferenceLabel(label)
+	definition, ok := definitions[key]
+	if !ok {
+		return 0, "", "", "", false
+	}
+	return labelEnd + 1, label, definition.destination, key, true
+}
+
+func findMarkdownLabelEnd(markdown string, open int) (int, bool) {
+	if open < 0 || open >= len(markdown) || markdown[open] != '[' {
+		return 0, false
+	}
+	depth := 0
+	for i := open + 1; i < len(markdown); i++ {
+		if markdown[i] == '\\' {
+			i++
+			continue
+		}
+		switch markdown[i] {
+		case '[':
+			depth++
+		case ']':
+			if depth == 0 {
+				return i, true
+			}
+			depth--
+		}
+	}
+	return 0, false
+}
+
+func parseInlineMarkdownImageDestination(markdown string, openParen int) (end int, destination string, ok bool) {
+	i := openParen + 1
+	for i < len(markdown) && isMarkdownSpace(markdown[i]) {
+		i++
+	}
+	destinationStart := i
+	destinationEnd := -1
+	angleDestination := i < len(markdown) && markdown[i] == '<'
+	if angleDestination {
+		destinationStart++
+		i++
+	}
+
+	depth := 0
+	var titleQuote byte
+	titleParen := false
+	for i < len(markdown) {
+		c := markdown[i]
+		if c == '\\' {
+			i += 2
+			continue
+		}
+		if angleDestination {
+			if c == '>' {
+				destinationEnd = i
+				angleDestination = false
+			}
+			i++
+			continue
+		}
+		if titleQuote != 0 {
+			if c == titleQuote {
+				titleQuote = 0
+			}
+			i++
+			continue
+		}
+		if titleParen {
+			if c == ')' {
+				titleParen = false
+			}
+			i++
+			continue
+		}
+		if isMarkdownSpace(c) && depth == 0 && destinationEnd < 0 {
+			next := i
+			for next < len(markdown) && isMarkdownSpace(markdown[next]) {
+				next++
+			}
+			if next < len(markdown) && (markdown[next] == '"' || markdown[next] == '\'') {
+				destinationEnd = i
+				titleQuote = markdown[next]
+				i = next + 1
+				continue
+			}
+			if next < len(markdown) && markdown[next] == '(' {
+				destinationEnd = i
+				titleParen = true
+				i = next + 1
+				continue
+			}
+		}
+		switch c {
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				if destinationEnd < 0 {
+					destinationEnd = i
+				}
+				return i + 1, strings.TrimSpace(markdown[destinationStart:destinationEnd]), true
+			}
+			depth--
+		}
+		i++
+	}
+	return 0, "", false
+}
+
+func parseMarkdownReferenceDefinitions(markdown string) map[string]markdownReferenceDefinition {
+	definitions := map[string]markdownReferenceDefinition{}
+	var state markdownReferenceDefinitionScanState
+	for start := 0; start < len(markdown); {
+		if state.skipLine(markdown, start) {
+			start = nextMarkdownLineStart(markdown, start)
+			continue
+		}
+		label, destination, end, ok := parseMarkdownReferenceDefinitionAt(markdown, start)
+		if ok {
+			key := normalizeMarkdownReferenceLabel(label)
+			if _, exists := definitions[key]; !exists {
+				definitions[key] = markdownReferenceDefinition{destination: destination}
+			}
+			start = end
+			continue
+		}
+		start = nextMarkdownLineStart(markdown, start)
+	}
+	return definitions
+}
+
+type markdownReferenceDefinitionScanState struct {
+	inFence   bool
+	fence     byte
+	fenceLen  int
+	container markdownLineContainer
+}
+
+type markdownLineContainer struct {
+	blockquote        int
+	listContentIndent int
+}
+
+func (s *markdownReferenceDefinitionScanState) skipLine(markdown string, start int) bool {
+	if s.inFence {
+		if !lineBelongsToMarkdownContainer(markdown, start, s.container) {
+			s.inFence = false
+		} else {
+			if parseMarkdownFenceCloseLine(markdown, start, s.fence, s.fenceLen) {
+				s.inFence = false
+			}
+			return true
+		}
+	}
+	if fence, fenceLen, container, ok := parseMarkdownFenceOpenLine(markdown, start); ok {
+		s.inFence = true
+		s.fence = fence
+		s.fenceLen = fenceLen
+		s.container = container
+		return true
+	}
+	return isIndentedMarkdownCodeLine(markdown, start)
+}
+
+func parseMarkdownFenceOpenLine(markdown string, start int) (byte, int, markdownLineContainer, bool) {
+	lineEnd := markdownLineEnd(markdown, start)
+	i, ok := skipMarkdownReferenceDefinitionLinePrefix(markdown, start)
+	if !ok || i >= lineEnd || (markdown[i] != '`' && markdown[i] != '~') {
+		return 0, 0, markdownLineContainer{}, false
+	}
+	fence := markdown[i]
+	j := i
+	for j < lineEnd && markdown[j] == fence {
+		j++
+	}
+	if j-i < 3 {
+		return 0, 0, markdownLineContainer{}, false
+	}
+	if fence == '`' {
+		for k := j; k < lineEnd; k++ {
+			if markdown[k] == '`' {
+				return 0, 0, markdownLineContainer{}, false
+			}
+		}
+	}
+	return fence, j - i, markdownLineContainerForLine(markdown, start), true
+}
+
+func markdownLineContainerForLine(markdown string, start int) markdownLineContainer {
+	var container markdownLineContainer
+	i := start
+	for {
+		j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
+		if !ok || j >= len(markdown) || markdown[j] != '>' {
+			break
+		}
+		container.blockquote++
+		j++
+		if j < len(markdown) && (markdown[j] == ' ' || markdown[j] == '	') {
+			j++
+		}
+		i = j
+	}
+	j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
+	if ok {
+		if after, ok := skipMarkdownListMarker(markdown, j); ok {
+			container.listContentIndent = after - i
+		}
+	}
+	return container
+}
+
+func lineBelongsToMarkdownContainer(markdown string, start int, container markdownLineContainer) bool {
+	current := markdownLineContainerForLine(markdown, start)
+	if current.blockquote < container.blockquote {
+		return false
+	}
+	if container.listContentIndent == 0 {
+		return true
+	}
+	return isBlankMarkdownLine(markdown, start) || markdownLineIndentAfterBlockquotes(markdown, start, container.blockquote) >= container.listContentIndent
+}
+
+func markdownLineIndentAfterBlockquotes(markdown string, start int, blockquotes int) int {
+	lineEnd := markdownLineEnd(markdown, start)
+	i := start
+	for n := 0; n < blockquotes; n++ {
+		j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
+		if !ok || j >= lineEnd || markdown[j] != '>' {
+			return -1
+		}
+		j++
+		if j < lineEnd && (markdown[j] == ' ' || markdown[j] == '	') {
+			j++
+		}
+		i = j
+	}
+	indent := 0
+	for i+indent < lineEnd && markdown[i+indent] == ' ' {
+		indent++
+	}
+	return indent
+}
+
+func isBlankMarkdownLine(markdown string, start int) bool {
+	lineEnd := markdownLineEnd(markdown, start)
+	for start < lineEnd {
+		if markdown[start] != ' ' && markdown[start] != '\t' {
+			return false
+		}
+		start++
+	}
+	return true
+}
+
+func markdownLineIndent(markdown string, start int) int {
+	lineEnd := markdownLineEnd(markdown, start)
+	indent := 0
+	for start+indent < lineEnd && markdown[start+indent] == ' ' {
+		indent++
+	}
+	return indent
+}
+
+func parseMarkdownFenceCloseLine(markdown string, start int, fence byte, fenceLen int) bool {
+	lineEnd := markdownLineEnd(markdown, start)
+	i, ok := skipMarkdownReferenceDefinitionLinePrefix(markdown, start)
+	if !ok || i >= lineEnd || markdown[i] != fence {
+		return false
+	}
+	j := i
+	for j < lineEnd && markdown[j] == fence {
+		j++
+	}
+	if j-i < fenceLen {
+		return false
+	}
+	for j < lineEnd {
+		if markdown[j] != ' ' && markdown[j] != '	' {
+			return false
+		}
+		j++
+	}
+	return true
+}
+
+func isIndentedMarkdownCodeLine(markdown string, start int) bool {
+	lineEnd := markdownLineEnd(markdown, start)
+	if start >= lineEnd {
+		return false
+	}
+	spaces := 0
+	for start+spaces < lineEnd && markdown[start+spaces] == ' ' {
+		spaces++
+	}
+	return spaces >= 4
+}
+
+func parseMarkdownReferenceDefinitionAt(markdown string, start int) (label, destination string, end int, ok bool) {
+	i, ok := skipMarkdownReferenceDefinitionLinePrefix(markdown, start)
+	if !ok || i >= len(markdown) || markdown[i] != '[' {
+		return "", "", 0, false
+	}
+	labelEnd, ok := findMarkdownLabelEnd(markdown, i)
+	if !ok || labelEnd+1 >= len(markdown) || markdown[labelEnd+1] != ':' {
+		return "", "", 0, false
+	}
+	label = markdown[i+1 : labelEnd]
+	if normalizeMarkdownReferenceLabel(label) == "" {
+		return "", "", 0, false
+	}
+	i = labelEnd + 2
+	i, ok = skipMarkdownReferenceDefinitionSpaces(markdown, i)
+	if !ok || i >= len(markdown) {
+		return "", "", 0, false
+	}
+
+	destination, i, ok = parseMarkdownReferenceDefinitionDestination(markdown, i)
+	if !ok || destination == "" {
+		return "", "", 0, false
+	}
+	end = parseMarkdownReferenceDefinitionTitleEnd(markdown, i)
+	return label, destination, end, true
+}
+
+func skipMarkdownReferenceDefinitionSpaces(markdown string, i int) (int, bool) {
+	for i < len(markdown) && (markdown[i] == ' ' || markdown[i] == '\t') {
+		i++
+	}
+	if i < len(markdown) && (markdown[i] == '\n' || markdown[i] == '\r') {
+		i = consumeMarkdownLineEnding(markdown, i)
+		var ok bool
+		i, ok = skipMarkdownReferenceDefinitionLinePrefix(markdown, i)
+		if !ok || i >= len(markdown) || markdown[i] == '\n' || markdown[i] == '\r' {
+			return 0, false
+		}
+	}
+	return i, true
+}
+
+func skipMarkdownReferenceDefinitionLinePrefix(markdown string, i int) (int, bool) {
+	for {
+		j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
+		if !ok || j >= len(markdown) || markdown[j] != '>' {
+			break
+		}
+		j++
+		if j < len(markdown) && (markdown[j] == ' ' || markdown[j] == '\t') {
+			j++
+		}
+		i = j
+	}
+
+	j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
+	if !ok {
+		return 0, false
+	}
+	if after, ok := skipMarkdownListMarker(markdown, j); ok {
+		i = after
+		for {
+			j, ok := skipUpToThreeMarkdownSpaces(markdown, i)
+			if !ok || j >= len(markdown) || markdown[j] != '>' {
+				break
+			}
+			j++
+			if j < len(markdown) && (markdown[j] == ' ' || markdown[j] == '\t') {
+				j++
+			}
+			i = j
+		}
+	}
+	return skipUpToThreeMarkdownSpaces(markdown, i)
+}
+
+func skipUpToThreeMarkdownSpaces(markdown string, i int) (int, bool) {
+	spaces := 0
+	for i+spaces < len(markdown) && markdown[i+spaces] == ' ' {
+		spaces++
+	}
+	if spaces > 3 {
+		return 0, false
+	}
+	return i + spaces, true
+}
+
+func skipMarkdownListMarker(markdown string, i int) (int, bool) {
+	if i >= len(markdown) {
+		return 0, false
+	}
+	if markdown[i] == '-' || markdown[i] == '+' || markdown[i] == '*' {
+		if i+1 < len(markdown) && (markdown[i+1] == ' ' || markdown[i+1] == '\t') {
+			return skipMarkdownListMarkerPadding(markdown, i+2), true
+		}
+		return 0, false
+	}
+	if markdown[i] < '0' || markdown[i] > '9' {
+		return 0, false
+	}
+	j := i
+	for j < len(markdown) && markdown[j] >= '0' && markdown[j] <= '9' && j-i < 9 {
+		j++
+	}
+	if j == i || j >= len(markdown) || (markdown[j] != '.' && markdown[j] != ')') {
+		return 0, false
+	}
+	j++
+	if j < len(markdown) && (markdown[j] == ' ' || markdown[j] == '\t') {
+		return skipMarkdownListMarkerPadding(markdown, j+1), true
+	}
+	return 0, false
+}
+
+func skipMarkdownListMarkerPadding(markdown string, i int) int {
+	for i < len(markdown) && (markdown[i] == ' ' || markdown[i] == '\t') {
+		i++
+	}
+	return i
+}
+
+func parseMarkdownReferenceDefinitionDestination(markdown string, i int) (string, int, bool) {
+	if markdown[i] == '<' {
+		start := i + 1
+		for i = start; i < len(markdown); i++ {
+			if markdown[i] == '\\' {
+				i++
+				continue
+			}
+			if markdown[i] == '\n' || markdown[i] == '\r' {
+				return "", 0, false
+			}
+			if markdown[i] == '>' {
+				return strings.TrimSpace(markdown[start:i]), i + 1, true
+			}
+		}
+		return "", 0, false
+	}
+
+	start := i
+	depth := 0
+	for i < len(markdown) {
+		if markdown[i] == '\\' {
+			if i+1 >= len(markdown) {
+				return "", 0, false
+			}
+			i += 2
+			continue
+		}
+		if markdown[i] == '\n' || markdown[i] == '\r' || markdown[i] == ' ' || markdown[i] == '\t' {
+			break
+		}
+		switch markdown[i] {
+		case '(':
+			depth++
+		case ')':
+			if depth == 0 {
+				break
+			}
+			depth--
+		}
+		i++
+	}
+	return strings.TrimSpace(markdown[start:i]), i, true
+}
+
+func parseMarkdownReferenceDefinitionTitleEnd(markdown string, i int) int {
+	lineEnd := markdownLineEnd(markdown, i)
+	j := i
+	for j < lineEnd && (markdown[j] == ' ' || markdown[j] == '\t') {
+		j++
+	}
+	if j >= lineEnd {
+		end := lineEnd
+		if end < len(markdown) {
+			next := consumeMarkdownLineEnding(markdown, end)
+			if titleEnd, ok := parseIndentedMarkdownReferenceDefinitionTitle(markdown, next); ok {
+				return titleEnd
+			}
+			end = next
+		}
+		return end
+	}
+	if end, ok := parseMarkdownReferenceDefinitionTitle(markdown, j, lineEnd); ok {
+		if end < len(markdown) && (markdown[end] == '\n' || markdown[end] == '\r') {
+			return consumeMarkdownLineEnding(markdown, end)
+		}
+		return end
+	}
+	return lineEnd
+}
+
+func parseIndentedMarkdownReferenceDefinitionTitle(markdown string, start int) (int, bool) {
+	lineEnd := markdownLineEnd(markdown, start)
+	i := start
+	indent := 0
+	for i < lineEnd && markdown[i] == ' ' && indent < 4 {
+		i++
+		indent++
+	}
+	if indent > 3 {
+		return 0, false
+	}
+	end, ok := parseMarkdownReferenceDefinitionTitle(markdown, i, lineEnd)
+	if !ok {
+		return 0, false
+	}
+	if end < len(markdown) && (markdown[end] == '\n' || markdown[end] == '\r') {
+		return consumeMarkdownLineEnding(markdown, end), true
+	}
+	return end, true
+}
+
+func parseMarkdownReferenceDefinitionTitle(markdown string, i, lineEnd int) (int, bool) {
+	if i >= lineEnd {
+		return 0, false
+	}
+	var close byte
+	switch markdown[i] {
+	case '"':
+		close = '"'
+	case '\'':
+		close = '\''
+	case '(':
+		close = ')'
+	default:
+		return 0, false
+	}
+	for i++; i < lineEnd; i++ {
+		if markdown[i] == '\\' {
+			i++
+			continue
+		}
+		if markdown[i] == close {
+			i++
+			for i < lineEnd && (markdown[i] == ' ' || markdown[i] == '\t') {
+				i++
+			}
+			return i, i == lineEnd
+		}
+	}
+	return 0, false
+}
+
+func removeMarkdownReferenceDefinitions(markdown string, redactedDefinitions map[string]struct{}) string {
+	var sanitized strings.Builder
+	var state markdownReferenceDefinitionScanState
+	for start := 0; start < len(markdown); {
+		next := nextMarkdownLineStart(markdown, start)
+		if state.skipLine(markdown, start) {
+			sanitized.WriteString(markdown[start:next])
+			start = next
+			continue
+		}
+		label, destination, end, ok := parseMarkdownReferenceDefinitionAt(markdown, start)
+		_, redact := redactedDefinitions[normalizeMarkdownReferenceLabel(label)]
+		if ok && redact && isLocalMarkdownImageDestination(destination) {
+			start = end
+			continue
+		}
+		sanitized.WriteString(markdown[start:next])
+		start = next
+	}
+	return sanitized.String()
+}
+
+func markdownLineEnd(markdown string, start int) int {
+	for start < len(markdown) && markdown[start] != '\n' && markdown[start] != '\r' {
+		start++
+	}
+	return start
+}
+
+func consumeMarkdownLineEnding(markdown string, i int) int {
+	if i < len(markdown) && markdown[i] == '\r' {
+		i++
+		if i < len(markdown) && markdown[i] == '\n' {
+			i++
+		}
+		return i
+	}
+	if i < len(markdown) && markdown[i] == '\n' {
+		i++
+	}
+	return i
+}
+
+func nextMarkdownLineStart(markdown string, start int) int {
+	return consumeMarkdownLineEnding(markdown, markdownLineEnd(markdown, start))
+}
+
+func normalizeMarkdownReferenceLabel(label string) string {
+	return cases.Fold().String(strings.Join(strings.Fields(label), " "))
+}
+
+func isMarkdownSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\n' || c == '\r'
+}
+
+func isLocalMarkdownImageDestination(destination string) bool {
+	return isLocalMarkdownImageDestinationRaw(destination) ||
+		isLocalMarkdownImageDestinationRaw(decodeMarkdownDestinationForClassification(destination))
+}
+
+func isLocalMarkdownImageDestinationRaw(destination string) bool {
+	lower := strings.ToLower(destination)
+	if strings.HasPrefix(lower, "file:") || strings.HasPrefix(destination, "/") ||
+		strings.HasPrefix(destination, `\\`) {
+		return true
+	}
+	return len(destination) >= 3 &&
+		((destination[0] >= 'a' && destination[0] <= 'z') ||
+			(destination[0] >= 'A' && destination[0] <= 'Z')) &&
+		destination[1] == ':' && (destination[2] == '/' || destination[2] == '\\')
+}
+
+func decodeMarkdownDestinationForClassification(destination string) string {
+	var decoded strings.Builder
+	for i := 0; i < len(destination); i++ {
+		if destination[i] == '\\' && i+1 < len(destination) && isASCIIpunct(destination[i+1]) {
+			decoded.WriteByte(destination[i+1])
+			i++
+			continue
+		}
+		decoded.WriteByte(destination[i])
+	}
+	return html.UnescapeString(decoded.String())
+}
+
+func isASCIIpunct(c byte) bool {
+	return (c >= '!' && c <= '/') || (c >= ':' && c <= '@') ||
+		(c >= '[' && c <= '`') || (c >= '{' && c <= '~')
+}
 
 // HTTPClientConfig configures the production Lark HTTP APIClient.
 type HTTPClientConfig struct {
@@ -358,11 +1080,12 @@ func (c *httpAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 	if err != nil {
 		return "", err
 	}
+	markdown := sanitizeMarkdownForLarkCard(p.Markdown)
 	card := map[string]any{
 		"schema": "2.0",
 		"body": map[string]any{
 			"elements": []any{
-				map[string]any{"tag": "markdown", "content": p.Markdown},
+				map[string]any{"tag": "markdown", "content": markdown},
 			},
 		},
 	}
