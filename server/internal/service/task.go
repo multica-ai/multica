@@ -2776,13 +2776,26 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	// Same unescape as the issue-comment path: literal `\n` from agent stdout
 	// becomes a real newline so the chat panel renders paragraph breaks.
 	body := util.UnescapeBackslashEscapes(payload.Output)
-	var quickActions []protocol.ChatQuickAction
-	if task.ChatInputTaskID.Valid {
-		body, quickActions = splitChatQuickActions(body)
-		for i := range quickActions {
-			quickActions[i].Label = redact.Text(quickActions[i].Label)
-			quickActions[i].Prompt = redact.Text(quickActions[i].Prompt)
-		}
+	// Strip any in-band quick-actions footer from EVERY chat completion — the
+	// reserved syntax must never reach a stored transcript. This includes the
+	// agent-initiated intro turn (chat_input_task_id NULL), which previously
+	// fell outside the strip gate and leaked the raw footer into its content;
+	// channel outputs never carry the syntax, so the split is a no-op there.
+	//
+	// Suggestion source order: the daemon suggestion pass (QuickActionsRaw)
+	// is authoritative; the stripped in-band footer is the fallback for older
+	// daemons and pre-upgrade provider sessions that still emit it.
+	body, inBandActions := splitChatQuickActions(body)
+	quickActions := parseChatQuickActionsOutput(payload.QuickActionsRaw)
+	if len(quickActions) == 0 {
+		// Also reached when the suggest pass deliberately returned "[]" while a
+		// pre-upgrade session appended a stale footer: transitional, harmless
+		// (footer actions passed the same sanitize contract).
+		quickActions = inBandActions
+	}
+	for i := range quickActions {
+		quickActions[i].Label = redact.Text(quickActions[i].Label)
+		quickActions[i].Prompt = redact.Text(quickActions[i].Prompt)
 	}
 	isEmpty := strings.TrimSpace(body) == ""
 

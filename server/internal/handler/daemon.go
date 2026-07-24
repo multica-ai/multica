@@ -2814,6 +2814,10 @@ type TaskCompleteRequest struct {
 	Output    string `json:"output"`
 	SessionID string `json:"session_id"` // Claude session ID for future resumption
 	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	// QuickActionsRaw carries the daemon's chat suggestion pass output; the
+	// json tag must match protocol.TaskCompletedPayload because this request
+	// is re-marshalled into that payload for the completion transaction.
+	QuickActionsRaw string `json:"quick_actions_raw"`
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {

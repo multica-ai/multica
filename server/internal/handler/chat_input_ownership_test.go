@@ -444,3 +444,47 @@ func TestCompleteTask_ChannelEmptyOutputWritesNoRow(t *testing.T) {
 		t.Fatalf("channel message = kind %q content %q, want message/'channel reply'", rows[0].MessageKind, rows[0].Content)
 	}
 }
+
+// TestCompleteTask_ChatQuickActionsFromSuggestPass: the daemon suggestion-pass
+// payload (quick_actions_raw) is the authoritative source — it wins over an
+// in-band footer, is parsed leniently (code fences tolerated), and the footer
+// is still stripped from the visible reply.
+func TestCompleteTask_ChatQuickActionsFromSuggestPass(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "suggest-pass chat")
+	taskID := sendDirectChat(t, ctx, agentID, sessionID, "what next?")
+	markTaskRunning(t, ctx, taskID)
+
+	output := "Main reply.\n\n```quick-actions\n" +
+		`[{"label":"From footer","prompt":"in-band fallback"}]` + "\n```"
+	req := TaskCompleteRequest{
+		Output: output,
+		QuickActionsRaw: "```json\n" +
+			`[{"label":"From pass","prompt":"suggested prompt","primary":true}]` + "\n```",
+	}
+	result, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal complete request: %v", err)
+	}
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), result, "", ""); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+
+	rows := assistantRows(t, ctx, sessionID)
+	if len(rows) != 1 {
+		t.Fatalf("expected one assistant message, got %d", len(rows))
+	}
+	if rows[0].Content != "Main reply." {
+		t.Fatalf("footer must still be stripped from content, got %q", rows[0].Content)
+	}
+	var actions []protocol.ChatQuickAction
+	if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
+		t.Fatalf("decode quick actions: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Label != "From pass" || !actions[0].Primary {
+		t.Fatalf("suggest-pass actions must win over the in-band footer, got %+v", actions)
+	}
+}

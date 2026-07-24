@@ -135,6 +135,7 @@ export function ChatWindow() {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
+  const quickActionsEnabled = useChatStore((s) => s.quickActionsEnabled);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const setOpen = useChatStore((s) => s.setOpen);
@@ -799,7 +800,9 @@ export function ChatWindow() {
           hasOlderMessages={!!hasOlderMessages}
           isFetchingOlderMessages={isFetchingOlderMessages}
           onLoadOlderMessages={() => void fetchOlderMessages()}
-          onQuickAction={(action) => handleSend(action.prompt)}
+          onQuickAction={
+            quickActionsEnabled ? (action) => handleSend(action.prompt) : undefined
+          }
           quickActionsDisabled={
             !!pendingTaskId || isSessionArchived || isAgentArchived || noAgent
           }

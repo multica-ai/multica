@@ -288,3 +288,30 @@ describe("chat store — applied draft-restore ledger", () => {
     expect(store.getState().appliedDraftRestoreIds[0]).toBe("r-1");
   });
 });
+
+describe("chat store — quick actions preference", () => {
+  it("defaults ON when no preference is stored", () => {
+    const store = createChatStore({ storage: memStorage() });
+    expect(store.getState().quickActionsEnabled).toBe(true);
+  });
+
+  it("honours an explicit stored 'false' preference (opt-out)", () => {
+    const storage = memStorage();
+    storage.setItem("multica:chat:quickActionsEnabled", "false");
+    const store = createChatStore({ storage });
+    expect(store.getState().quickActionsEnabled).toBe(false);
+  });
+
+  it("persists toggles through the setter", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+
+    store.getState().setQuickActionsEnabled(false);
+    expect(store.getState().quickActionsEnabled).toBe(false);
+    expect(storage.getItem("multica:chat:quickActionsEnabled")).toBe("false");
+
+    store.getState().setQuickActionsEnabled(true);
+    expect(store.getState().quickActionsEnabled).toBe(true);
+    expect(storage.getItem("multica:chat:quickActionsEnabled")).toBe("true");
+  });
+});

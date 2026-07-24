@@ -54,6 +54,7 @@ export function ChatPage() {
   const isMobile = useIsMobile();
 
   const c = useChatController({ isActive: true });
+  const quickActionsEnabled = useChatStore((s) => s.quickActionsEnabled);
   const urlSession = searchParams.get("session") || null;
   const urlAgent = searchParams.get("agent") || null;
 
@@ -235,7 +236,9 @@ export function ChatPage() {
           hasOlderMessages={c.hasOlderMessages}
           isFetchingOlderMessages={c.isFetchingOlderMessages}
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
-          onQuickAction={(action) => c.handleSend(action.prompt)}
+          onQuickAction={
+            quickActionsEnabled ? (action) => c.handleSend(action.prompt) : undefined
+          }
           quickActionsDisabled={
             !!c.pendingTaskId || c.isSessionArchived || c.isAgentArchived || c.noAgent
           }

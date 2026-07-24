@@ -105,6 +105,10 @@ type TaskCompletedPayload struct {
 	TaskID string `json:"task_id"`
 	PRURL  string `json:"pr_url,omitempty"`
 	Output string `json:"output,omitempty"`
+	// QuickActionsRaw is the unparsed output of the daemon's chat suggestion
+	// pass (expected: a JSON array of ChatQuickAction). Parsed leniently by
+	// the chat completion path; absent on non-chat tasks and older daemons.
+	QuickActionsRaw string `json:"quick_actions_raw,omitempty"`
 }
 
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)

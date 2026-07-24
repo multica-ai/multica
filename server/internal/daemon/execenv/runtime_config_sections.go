@@ -322,8 +322,12 @@ func writeWorkflowHeader(b *strings.Builder) {
 	b.WriteString("### Workflow\n\n")
 }
 
-// writeWorkflowChat emits the chat-mode workflow.
-func writeWorkflowChat(b *strings.Builder, ctx TaskContextForEnv) {
+// writeWorkflowChat emits the chat-mode workflow. Follow-up quick actions are
+// deliberately NOT taught here: the daemon generates them in a dedicated
+// post-completion suggestion pass (chat_suggest.go), because an optional
+// formatting instruction in this brief proved unreliable across providers and
+// long conversations.
+func writeWorkflowChat(b *strings.Builder) {
 	b.WriteString("**You are in chat mode.** A user is messaging you directly in a chat window.\n\n")
 	b.WriteString("- Respond conversationally and helpfully to the user's message\n")
 	b.WriteString("- You have full access to the `multica` CLI to look up issues, workspace info, members, agents, etc.\n")
@@ -332,14 +336,6 @@ func writeWorkflowChat(b *strings.Builder, ctx TaskContextForEnv) {
 	b.WriteString("- If asked to perform actions (create issues, update status, etc.), use the appropriate CLI commands\n")
 	b.WriteString("- If the task requires code changes, use `multica repo checkout <url>` to get the code first. Use `--ref <branch-or-sha>` when you need an exact revision\n")
 	b.WriteString("- Keep responses concise and direct\n\n")
-	if ctx.ChatChannelType == "" {
-		b.WriteString("### Quick Actions\n\n")
-		b.WriteString("When useful, offer 1–3 concise follow-ups after your complete answer by appending exactly one trailing block in this format:\n\n")
-		b.WriteString("```quick-actions\n")
-		b.WriteString("[{\"label\":\"Short visible label\",\"prompt\":\"Complete prompt sent when selected\",\"primary\":true}]\n")
-		b.WriteString("```\n\n")
-		b.WriteString("The block is hidden from the transcript. Put no text after it, keep labels short, make each prompt self-contained, and mark at most one action primary. Omit the block when no follow-up would genuinely help.\n\n")
-	}
 }
 
 // writeWorkflowQuickCreate emits the quick-create workflow's hard
@@ -624,7 +620,7 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 	writeWorkflowHeader(&b)
 	switch kind {
 	case kindChat:
-		writeWorkflowChat(&b, ctx)
+		writeWorkflowChat(&b)
 	case kindQuickCreate:
 		writeWorkflowQuickCreate(&b)
 	case kindAutopilotRunOnly:

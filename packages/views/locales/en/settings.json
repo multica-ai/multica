@@ -97,7 +97,10 @@
   "chat": {
     "floating_title": "Floating window",
     "floating_label": "Floating chat window",
-    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab."
+    "floating_hint": "Show the floating chat button in the corner of every page. Off by default — turn it on to summon chat anywhere; when off, Chat lives only in this tab.",
+    "quick_actions_title": "Suggested follow-ups",
+    "quick_actions_label": "Show suggested follow-ups",
+    "quick_actions_hint": "Show up to three suggested next actions under agent replies. Turn off to hide them."
   },
   "issue": {
     "description": "Choose which fields each create dialog keeps on its toolbar. Hidden fields stay available from the ⋯ menu and reappear while they hold a value.",

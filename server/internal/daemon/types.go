@@ -253,4 +253,8 @@ type TaskResult struct {
 	EnvRoot       string           `json:"-"`                    // env root dir for writing GC metadata (not sent to server)
 	FailureReason string           `json:"-"`                    // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
 	Usage         []TaskUsageEntry `json:"usage,omitempty"`      // per-model token usage
+	// QuickActionsRaw is the unparsed output of the chat suggestion pass,
+	// forwarded verbatim on the complete callback. The server parses it
+	// leniently; empty means no suggestions for this turn.
+	QuickActionsRaw string `json:"-"`
 }

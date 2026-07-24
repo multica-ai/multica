@@ -150,24 +150,20 @@ func TestChannelDisplayName(t *testing.T) {
 	}
 }
 
-func TestQuickActionsInstructionsOnlyReachDirectChat(t *testing.T) {
+// Quick actions moved to the daemon's dedicated post-completion suggestion
+// pass; the brief must no longer teach the in-band footer syntax to anyone —
+// a taught agent would emit footers the transcript then has to strip.
+func TestQuickActionsInstructionsAbsentFromAllChatBriefs(t *testing.T) {
 	t.Parallel()
-	direct := buildMetaSkillContent("claude", TaskContextForEnv{
-		ChatSessionID: "c-1", AgentName: "Eve", AgentID: "eve-1",
-	})
-	for _, want := range []string{"### Quick Actions", "```quick-actions", "Complete prompt sent when selected"} {
-		if !strings.Contains(direct, want) {
-			t.Fatalf("direct-chat brief is missing %q", want)
-		}
+	contexts := []TaskContextForEnv{
+		{ChatSessionID: "c-1", AgentName: "Eve", AgentID: "eve-1"},
+		{ChatSessionID: "c-1", ChatChannelType: ChannelTypeSlack, AgentName: "Eve", AgentID: "eve-1"},
+		{ChatSessionID: "c-1", ChatChannelType: ChannelTypeFeishu, AgentName: "Eve", AgentID: "eve-1"},
 	}
-
-	for _, channelType := range []string{ChannelTypeSlack, ChannelTypeFeishu} {
-		channel := buildMetaSkillContent("claude", TaskContextForEnv{
-			ChatSessionID: "c-1", ChatChannelType: channelType,
-			AgentName: "Eve", AgentID: "eve-1",
-		})
-		if strings.Contains(channel, "```quick-actions") || strings.Contains(channel, "### Quick Actions") {
-			t.Fatalf("%s brief must not advertise direct-chat quick actions", channelType)
+	for _, ctx := range contexts {
+		brief := buildMetaSkillContent("claude", ctx)
+		if strings.Contains(brief, "```quick-actions") || strings.Contains(brief, "### Quick Actions") {
+			t.Fatalf("brief (channel=%q) must not teach the in-band quick-actions syntax", ctx.ChatChannelType)
 		}
 	}
 }

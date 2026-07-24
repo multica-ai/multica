@@ -124,14 +124,15 @@ const (
 // reportTerminalTask gives the durable outbox one insertion point without
 // revisiting every task exit when it is added.
 type terminalTaskReport struct {
-	kind          terminalTaskReportKind
-	taskID        string
-	output        string
-	branchName    string
-	errorMessage  string
-	sessionID     string
-	workDir       string
-	failureReason string
+	kind            terminalTaskReportKind
+	taskID          string
+	output          string
+	branchName      string
+	errorMessage    string
+	sessionID       string
+	workDir         string
+	failureReason   string
+	quickActionsRaw string
 }
 
 type executionEnvironmentCommand func() ([]string, error)
@@ -3481,12 +3482,13 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 	case "completed":
 		taskLog.Info("task completed", "status", result.Status)
 		err := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:       terminalTaskReportComplete,
-			taskID:     taskID,
-			output:     result.Comment,
-			branchName: result.BranchName,
-			sessionID:  result.SessionID,
-			workDir:    result.WorkDir,
+			kind:            terminalTaskReportComplete,
+			taskID:          taskID,
+			output:          result.Comment,
+			branchName:      result.BranchName,
+			sessionID:       result.SessionID,
+			workDir:         result.WorkDir,
+			quickActionsRaw: result.QuickActionsRaw,
 		})
 		if err == nil {
 			return
@@ -3570,7 +3572,7 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 
 	switch report.kind {
 	case terminalTaskReportComplete:
-		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir)
+		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.quickActionsRaw)
 	case terminalTaskReportFail:
 		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.failureReason)
 	default:
@@ -4667,6 +4669,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"agent_error", result.Error,
 	)
 
+	// Follow-up suggestion pass for direct (non-channel) chat turns: one extra
+	// resumed provider turn whose only job is emitting the quick-actions JSON.
+	// Runs before the terminal report so the raw output rides the completion
+	// payload and its tokens land in this task's usage entries. Skipped for
+	// channel-backed sessions (no pill surface), empty replies (the no_response
+	// contract owns those), and poisoned outputs (blocked path).
+	quickActionsRaw := ""
+	if result.Status == "completed" && task.ChatSessionID != "" && task.ChatChannelType == "" &&
+		result.SessionID != "" && strings.TrimSpace(result.Output) != "" {
+		if _, poisoned := classifyPoisonedOutput(result.Output); !poisoned {
+			var suggestUsage map[string]agent.TokenUsage
+			quickActionsRaw, suggestUsage = d.runChatSuggestPass(ctx, backend, execOpts, result.SessionID, taskLog)
+			result.Usage = mergeUsage(result.Usage, suggestUsage)
+		}
+	}
+
 	// Convert agent usage map to task usage entries.
 	var usageEntries []TaskUsageEntry
 	for model, u := range result.Usage {
@@ -4722,12 +4740,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			}, nil
 		}
 		return TaskResult{
-			Status:    "completed",
-			Comment:   result.Output,
-			SessionID: result.SessionID,
-			WorkDir:   env.WorkDir,
-			EnvRoot:   env.RootDir,
-			Usage:     usageEntries,
+			Status:          "completed",
+			Comment:         result.Output,
+			SessionID:       result.SessionID,
+			WorkDir:         env.WorkDir,
+			EnvRoot:         env.RootDir,
+			Usage:           usageEntries,
+			QuickActionsRaw: quickActionsRaw,
 		}, nil
 	case "timeout":
 		// Surface session_id/work_dir so the chat resume pointer is kept
