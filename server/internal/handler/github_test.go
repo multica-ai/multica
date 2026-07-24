@@ -44,6 +44,11 @@ func TestExtractIdentifiers(t *testing.T) {
 			want: []string{"MUL-82", "MUL-1510", "ABC-7"},
 		},
 		{
+			name: "long_custom_prefix",
+			in:   []string{"Fix CODEAGENCYBE-42", "", ""},
+			want: []string{"CODEAGENCYBE-42"},
+		},
+		{
 			name: "dedupe_across_fields",
 			in:   []string{"MUL-1", "MUL-1 again", "mul-1/branch"},
 			want: []string{"MUL-1"},
@@ -1093,6 +1098,36 @@ func firePRWebhook(t *testing.T, secret string, installationID int64, prNumber i
 	}
 }
 
+func fireIssueCommentWebhook(t *testing.T, secret string, installationID int64, repo string, prNumber int32, body string) {
+	t.Helper()
+	payload := map[string]any{
+		"action": "created",
+		"issue": map[string]any{
+			"number":       prNumber,
+			"pull_request": map[string]any{"url": fmt.Sprintf("https://api.github.com/repos/acme/%s/pulls/%d", repo, prNumber)},
+		},
+		"comment": map[string]any{"body": body},
+		"repository": map[string]any{
+			"name":  repo,
+			"owner": map[string]any{"login": "acme"},
+		},
+		"installation": map[string]any{"id": installationID},
+	}
+	raw, _ := json.Marshal(payload)
+	mac := hmac.New(sha256.New, []byte(secret))
+	mac.Write(raw)
+	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
+	req.Header.Set("X-GitHub-Event", "issue_comment")
+	req.Header.Set("X-Hub-Signature-256", sig)
+	testHandler.HandleGitHubWebhook(rec, req)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("issue_comment webhook pr=%d: expected 202, got %d (%s)", prNumber, rec.Code, rec.Body.String())
+	}
+}
+
 func TestWebhook_CloseKeywordRemovedBeforeMergeDoesNotClose(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("handler test fixture not initialized (no DB?)")
@@ -1273,6 +1308,55 @@ func TestWebhook_LinkOnlySiblingMergeAfterCloseKeywordPR(t *testing.T) {
 	}
 	if got.Status != "done" {
 		t.Errorf("after both PRs merged (A with close_intent, B link-only): status = %q, want done", got.Status)
+	}
+}
+
+func TestWebhook_PullRequest_LongCustomPrefixLinksPR(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const secret = "long-prefix-link-secret"
+	setWorkspaceIssuePrefixForTest(t, "CODEAGENCYBE")
+	created, installationID := setupPRTestIssue(t, ctx, secret)
+
+	firePRWebhook(t, secret, installationID, 101, "Fix "+created.Identifier, "", "fix/long-prefix", "opened")
+
+	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected long custom prefix %q to link PR, got %d rows", created.Identifier, len(rows))
+	}
+}
+
+func TestWebhook_IssueCommentOnPullRequestLinksExistingPR(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const secret = "issue-comment-link-secret"
+	created, installationID := setupPRTestIssue(t, ctx, secret)
+
+	firePRWebhook(t, secret, installationID, 102, "Unrelated cleanup", "", "fix/unrelated", "opened")
+	if rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID)); err != nil {
+		t.Fatalf("ListPullRequestsByIssue before comment: %v", err)
+	} else if len(rows) != 0 {
+		t.Fatalf("expected no linked PR before comment reference, got %d rows", len(rows))
+	}
+
+	fireIssueCommentWebhook(t, secret, installationID, "widget", 102, "Connecting this PR to "+created.Identifier)
+
+	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+	if err != nil {
+		t.Fatalf("ListPullRequestsByIssue after comment: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected PR comment reference to link the PR, got %d rows", len(rows))
+	}
+	if rows[0].PrNumber != 102 {
+		t.Errorf("linked PR number = %d, want 102", rows[0].PrNumber)
 	}
 }
 
