@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -320,19 +321,26 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	patName := fmt.Sprintf("CLI (%s)", hostname)
 	expiresInDays := 90
 
-	var patResp struct {
-		Token string `json:"token"`
-	}
-	err = client.PostJSON(ctx, "/api/tokens", map[string]any{
+	raw, err := client.PostJSONRaw(ctx, "/api/tokens", map[string]any{
 		"name":            patName,
 		"expires_in_days": expiresInDays,
-	}, &patResp)
+	})
 	if err != nil {
 		return cli.WithUserMessage("Sign-in did not complete: the server could not issue an access token for the CLI. Run `multica login` again.", err)
 	}
 
+	patToken, err := parseAccessTokenResponse(raw)
+	if err != nil {
+		return cli.WithUserMessage(
+			"Sign-in did not complete: the server returned an unexpected response when issuing an access token "+
+				"(this can happen when a reverse proxy rewrites the POST /api/tokens request into a GET). "+
+				"Check your reverse proxy configuration and run `multica login` again.",
+			err,
+		)
+	}
+
 	// Verify the PAT works.
-	patClient := cli.NewAPIClient(serverURL, "", patResp.Token)
+	patClient := cli.NewAPIClient(serverURL, "", patToken)
 	var me struct {
 		Name  string `json:"name"`
 		Email string `json:"email"`
@@ -346,7 +354,7 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	cfg.WorkspaceID = ""
-	cfg.Token = patResp.Token
+	cfg.Token = patToken
 	cfg.ServerURL = serverURL
 	cfg.AppURL = appURL
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
@@ -355,6 +363,29 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 
 	fmt.Fprintf(os.Stderr, "Authenticated as %s (%s)\nToken saved to config.\n", me.Name, me.Email)
 	return nil
+}
+
+// parseAccessTokenResponse extracts the token field from a POST /api/tokens
+// response. The endpoint normally returns an object like {"token": "mul_..."},
+// but a misconfigured self-hosted reverse proxy (nginx/Traefik/Cloudflare) can
+// rewrite the POST into a GET against the token-list endpoint, which returns an
+// array. Decoding such a payload directly into a struct fails with an opaque
+// "json: cannot unmarshal array into Go value of type struct { Token string }".
+// Decode defensively so the caller can surface an actionable error instead.
+func parseAccessTokenResponse(raw []byte) (string, error) {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return "", fmt.Errorf("access token response is not a JSON object")
+	}
+	field, ok := obj["token"]
+	if !ok {
+		return "", fmt.Errorf("access token response did not contain a %q field", "token")
+	}
+	var token string
+	if err := json.Unmarshal(field, &token); err != nil || token == "" {
+		return "", fmt.Errorf("access token response contained an empty or invalid %q field", "token")
+	}
+	return token, nil
 }
 
 func runningInSSHSession() bool {

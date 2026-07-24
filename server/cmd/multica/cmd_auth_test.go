@@ -394,3 +394,61 @@ func TestValidateLoginTokenPrefix(t *testing.T) {
 		}
 	}
 }
+
+// TestParseAccessTokenResponse pins the defensive decode for the POST
+// /api/tokens response added for #3177: a misconfigured self-hosted reverse
+// proxy can rewrite the POST into a GET against the token-list endpoint, which
+// returns an array and used to fail with an opaque
+// "json: cannot unmarshal array into Go value of type struct { Token string }".
+func TestParseAccessTokenResponse(t *testing.T) {
+	t.Run("object with token", func(t *testing.T) {
+		token, err := parseAccessTokenResponse([]byte(`{"token":"mul_abc123"}`))
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if token != "mul_abc123" {
+			t.Errorf("expected mul_abc123, got %q", token)
+		}
+	})
+
+	t.Run("array surfaces an actionable error", func(t *testing.T) {
+		_, err := parseAccessTokenResponse([]byte(`[{"id":"1","name":"x"}]`))
+		if err == nil {
+			t.Fatal("expected error for array response, got nil")
+		}
+		if !strings.Contains(err.Error(), "not a JSON object") {
+			t.Errorf("expected 'not a JSON object' error, got %q", err.Error())
+		}
+	})
+
+	t.Run("missing token field", func(t *testing.T) {
+		_, err := parseAccessTokenResponse([]byte(`{"id":"1","name":"x"}`))
+		if err == nil {
+			t.Fatal("expected error for missing token, got nil")
+		}
+		if !strings.Contains(err.Error(), "did not contain") {
+			t.Errorf("expected 'did not contain' error, got %q", err.Error())
+		}
+	})
+
+	t.Run("empty token", func(t *testing.T) {
+		_, err := parseAccessTokenResponse([]byte(`{"token":""}`))
+		if err == nil {
+			t.Fatal("expected error for empty token, got nil")
+		}
+	})
+
+	t.Run("empty body", func(t *testing.T) {
+		_, err := parseAccessTokenResponse([]byte(``))
+		if err == nil {
+			t.Fatal("expected error for empty body, got nil")
+		}
+	})
+
+	t.Run("non-json body", func(t *testing.T) {
+		_, err := parseAccessTokenResponse([]byte(`not json`))
+		if err == nil {
+			t.Fatal("expected error for non-json body, got nil")
+		}
+	})
+}

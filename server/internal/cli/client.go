@@ -341,6 +341,39 @@ func (c *APIClient) PostJSON(ctx context.Context, path string, body any, out any
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+// PostJSONRaw performs a POST request with a JSON body and returns the raw
+// response body without decoding it. It is intended for endpoints whose
+// response shape may vary — for example, when a self-hosted reverse proxy
+// rewrites POST /api/tokens into a GET against the list endpoint, the server
+// returns an array instead of the expected object and a direct struct decode
+// fails with an opaque "cannot unmarshal array" error. Callers can inspect the
+// raw payload and surface an actionable error instead.
+func (c *APIClient) PostJSONRaw(ctx context.Context, path string, body any) ([]byte, error) {
+	data, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, bytes.NewReader(data))
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	c.setHeaders(req)
+
+	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, newHTTPError(http.MethodPost, path, resp)
+	}
+	return io.ReadAll(resp.Body)
+}
+
 // PutJSON performs a PUT request with a JSON body.
 func (c *APIClient) PutJSON(ctx context.Context, path string, body any, out any) error {
 	data, err := json.Marshal(body)
