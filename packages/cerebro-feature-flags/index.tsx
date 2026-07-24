@@ -1,6 +1,7 @@
 export {
   useFeatureFlag,
   useFeatureFlagsQuery,
+  useWorkspaceEffectiveFlag,
   useSetFeatureFlagMutation,
   useSetWorkspaceFeatureFlagMutation,
 } from "./api";
@@ -9,6 +10,7 @@ export {
   useFlagValue,
   useFlagLocked,
   useWorkspaceFlagValue,
+  resolveWorkspaceFlag,
 } from "./store";
 export {
   CEREBRO_FLAG_DEFAULTS,

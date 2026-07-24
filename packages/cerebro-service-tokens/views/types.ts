@@ -16,11 +16,8 @@ import { z } from "zod";
  */
 export const SERVICE_TOKEN_SCOPES = [
   "skills:read",
-  "skills:write",
   "agents:read",
-  "agents:write",
   "issues:read",
-  "issues:write",
 ] as const;
 
 export type ServiceTokenScope = (typeof SERVICE_TOKEN_SCOPES)[number];

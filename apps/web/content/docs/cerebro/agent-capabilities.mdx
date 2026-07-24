@@ -1,0 +1,30 @@
+---
+title: Agent Capabilities
+description: See what an agent can access, what needs approval, and what is blocked.
+---
+
+The **Capabilities** tab is the current access summary for an agent. It combines configured access with what the selected runtime can actually provide.
+
+## Open the Capabilities tab
+
+1. Open **Agents**.
+2. Select an agent.
+3. Open **Capabilities**.
+
+The page groups access into **Skills**, **Tools**, **Repos**, **Connections**, **Credentials**, secrets, observed access, and runtime limits.
+
+## Read the status
+
+- Green means the agent is allowed to use the capability.
+- Amber means a person must approve the action.
+- Red means the capability is blocked.
+- Unknown means Multica could not verify the source. It does not mean that access was granted.
+
+The runtime availability summary separates access that is verified on the current runtime from access that is only declared. This helps identify a tool that is permitted in policy but unavailable in practice.
+
+## Compare configured and observed access
+
+**Observed access** shows what the agent actually used during the displayed period. A difference between configured and observed access is highlighted as drift so an administrator can investigate it.
+
+The same effective capability data is available to authorized agents through the CLI and MCP. This keeps the human view and the agent view aligned.
+

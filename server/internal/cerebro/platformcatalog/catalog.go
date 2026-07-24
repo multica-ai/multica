@@ -1278,6 +1278,14 @@ var excluded = map[string]string{
 	"POST /api/cerebro/share-inboxes/":       "self_only — caller's own iOS share inboxes (FIR-3545)",
 	"DELETE /api/cerebro/share-inboxes/{id}": "self_only — caller's own iOS share inboxes (FIR-3545)",
 
+	// AI Impact configuration is owner/admin-only in aiimpact.CanConfigure.
+	// These human-admin routes are not wired to the tool-policy engine.
+	"POST /api/cerebro/ai-impact/functions":                             "admin_only — workspace owner/admin configures AI Impact functions",
+	"POST /api/cerebro/ai-impact/metrics":                               "admin_only — workspace owner/admin configures AI Impact metrics",
+	"POST /api/cerebro/ai-impact/metrics/{metricId}/observations":       "admin_only — workspace owner/admin appends AI Impact evidence",
+	"POST /api/cerebro/ai-impact/operating-loops":                       "admin_only — workspace owner/admin configures AI Impact operating loops",
+	"POST /api/cerebro/ai-impact/project-bindings":                      "admin_only — workspace owner/admin configures AI Impact project bindings",
+
 	// cerebro dictation — one-shot audio→text proxy; self-authenticates via the
 	// workspace token, persists no governable state, no agent tool equivalent.
 	"POST /api/workspaces/{id}/cerebro/dictation/transcribe": "transcription-proxy — stateless audio→text, self-authenticates via workspace token, persists no governable state (FIR-1637)",
@@ -1374,7 +1382,6 @@ var excluded = map[string]string{
 	// Neither route is an agent tool governed by the platform capability table.
 	"POST /api/service-tokens/":       "admin_only — human owner/admin creates a scoped service credential; RequireWorkspaceRole enforces management access",
 	"DELETE /api/service-tokens/{id}": "admin_only — human owner/admin revokes a scoped service credential; RequireWorkspaceRole enforces management access",
-	"POST /api/service/issues":        "service-token-scope — RequireScope(issues:write) is the route's authorization boundary",
 
 	// pre-auth — establishes or clears identity, or a signed external webhook;
 	// there is no authenticated actor yet to gate on.

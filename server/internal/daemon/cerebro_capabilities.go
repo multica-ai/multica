@@ -67,7 +67,7 @@ func probeClaudeTools(executable string) ([]string, error) {
 		}
 		tools := make([]string, 0, len(init.Tools))
 		for _, tool := range init.Tools {
-			if tool = strings.TrimSpace(tool); tool != "" && !strings.HasPrefix(tool, "mcp__") {
+			if tool = strings.TrimSpace(tool); tool != "" {
 				tools = append(tools, tool)
 			}
 		}

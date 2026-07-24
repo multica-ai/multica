@@ -124,7 +124,15 @@ func (c *RuntimeClient) Asset(ctx context.Context, assetPath, rawQuery string) (
 		return RuntimeAsset{}, errRuntimeUnavailable
 	}
 	headers := make(http.Header)
-	for _, name := range []string{"Cache-Control", "Content-Security-Policy", "Content-Type"} {
+	for _, name := range []string{
+		"Cache-Control",
+		"Content-Security-Policy",
+		"Content-Type",
+		"Access-Control-Allow-Origin",
+		"Access-Control-Allow-Credentials",
+		"Access-Control-Allow-Methods",
+		"Access-Control-Allow-Headers",
+	} {
 		if value := response.Header.Get(name); value != "" {
 			headers.Set(name, value)
 		}

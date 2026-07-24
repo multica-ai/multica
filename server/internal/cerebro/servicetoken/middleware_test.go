@@ -2,10 +2,13 @@ package servicetoken
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -14,15 +17,35 @@ import (
 
 // fakeStore is an in-memory Store so these tests need no database.
 type fakeStore struct {
-	byHash map[string]Token
-	audits []AuditEvent
+	byHash         map[string]Token
+	audits         []AuditEvent
+	enabled        bool
+	featureErr     error
+	appendAuditErr error
 }
 
-func newFakeStore() *fakeStore { return &fakeStore{byHash: map[string]Token{}} }
+func newFakeStore() *fakeStore {
+	return &fakeStore{byHash: map[string]Token{}, enabled: true}
+}
 
 func (f *fakeStore) Create(_ context.Context, p CreateParams) (Token, error) {
-	t := Token{ID: "tok-" + p.Name, WorkspaceID: p.WorkspaceID, Name: p.Name, TokenPrefix: p.TokenPrefix, Scopes: p.Scopes, CreatedBy: p.CreatedBy}
+	t := Token{
+		ID:          "tok-" + p.Name,
+		WorkspaceID: p.WorkspaceID,
+		Name:        p.Name,
+		TokenPrefix: p.TokenPrefix,
+		Scopes:      p.Scopes,
+		ExpiresAt:   p.ExpiresAt,
+		CreatedBy:   p.CreatedBy,
+	}
 	f.byHash[p.TokenHash] = t
+	f.audits = append(f.audits, AuditEvent{
+		TokenID:     t.ID,
+		WorkspaceID: t.WorkspaceID,
+		Event:       "issued",
+		ActorUserID: p.CreatedBy,
+		Detail:      p.AuditDetail,
+	})
 	return t, nil
 }
 func (f *fakeStore) GetByHash(_ context.Context, hash string) (Token, error) {
@@ -31,6 +54,9 @@ func (f *fakeStore) GetByHash(_ context.Context, hash string) (Token, error) {
 		return Token{}, errNoRows
 	}
 	return t, nil
+}
+func (f *fakeStore) FeatureEnabled(_ context.Context, _ string) (bool, error) {
+	return f.enabled, f.featureErr
 }
 func (f *fakeStore) Touch(_ context.Context, _ string) error { return nil }
 func (f *fakeStore) ListByWorkspace(_ context.Context, ws string) ([]Token, error) {
@@ -42,16 +68,25 @@ func (f *fakeStore) ListByWorkspace(_ context.Context, ws string) ([]Token, erro
 	}
 	return out, nil
 }
-func (f *fakeStore) Revoke(_ context.Context, id, ws string) (Token, error) {
+func (f *fakeStore) Revoke(_ context.Context, id, ws, actorUserID string) (Token, error) {
 	for h, t := range f.byHash {
 		if t.ID == id && t.WorkspaceID == ws {
 			delete(f.byHash, h)
+			f.audits = append(f.audits, AuditEvent{
+				TokenID:     t.ID,
+				WorkspaceID: t.WorkspaceID,
+				Event:       "revoked",
+				ActorUserID: actorUserID,
+			})
 			return t, nil
 		}
 	}
 	return Token{}, errNoRows
 }
 func (f *fakeStore) AppendAudit(_ context.Context, e AuditEvent) error {
+	if f.appendAuditErr != nil {
+		return f.appendAuditErr
+	}
 	f.audits = append(f.audits, e)
 	return nil
 }
@@ -70,6 +105,7 @@ func seedToken(t *testing.T, f *fakeStore, workspaceID string, scopes ...string)
 		Name:        "test",
 		TokenPrefix: tokenPrefix(raw),
 		Scopes:      scopes,
+		ExpiresAt:   ptrTime(time.Now().Add(time.Hour)),
 	}
 	return raw
 }
@@ -95,7 +131,6 @@ func buildRouter() http.Handler {
 	ok := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
 	r.With(RequireScope(ScopeSkillsRead)).Get("/api/service/skills", ok)
 	r.With(RequireScope(ScopeIssuesRead)).Get("/api/service/issues", ok)
-	r.With(RequireScope(ScopeIssuesWrite)).Post("/api/service/issues", ok)
 	r.Get("/api/issues", ok) // a non-service (human) route
 	return r
 }
@@ -125,8 +160,8 @@ func TestServiceToken_ReadOnly_ReadSucceeds_WriteRejected(t *testing.T) {
 	if code := do(t, h, http.MethodGet, "/api/service/skills", raw); code != http.StatusOK {
 		t.Fatalf("skills:read token on read route: got %d, want 200", code)
 	}
-	if code := do(t, h, http.MethodPost, "/api/service/issues", raw); code != http.StatusForbidden {
-		t.Fatalf("skills:read token on write route: got %d, want 403", code)
+	if code := do(t, h, http.MethodPost, "/api/service/issues", raw); code != http.StatusMethodNotAllowed {
+		t.Fatalf("skills:read token on write route: got %d, want 405", code)
 	}
 	// It must also be rejected on a read route for a DIFFERENT resource it was
 	// not scoped to — scopes isolate per host, not just read-vs-write.
@@ -149,16 +184,67 @@ func TestServiceToken_FailsClosedOutsideServicePrefix(t *testing.T) {
 	}
 }
 
-func TestServiceToken_WriteScopeGrantsWrite(t *testing.T) {
+func TestServiceToken_LegacyWriteScopeCannotGrantWrite(t *testing.T) {
 	f := newFakeStore()
 	SetAuthenticator(NewTokenService(f))
 	t.Cleanup(func() { SetAuthenticator(nil) })
 
-	raw := seedToken(t, f, "ws-1", ScopeIssuesWrite)
+	raw := seedToken(t, f, "ws-1", "issues:write")
 	h := buildRouter()
 
-	if code := do(t, h, http.MethodPost, "/api/service/issues", raw); code != http.StatusOK {
-		t.Fatalf("issues:write token on write route: got %d, want 200", code)
+	if code := do(t, h, http.MethodPost, "/api/service/issues", raw); code != http.StatusMethodNotAllowed {
+		t.Fatalf("legacy issues:write token on write route: got %d, want 405", code)
+	}
+}
+
+func TestServiceToken_FeatureDisabledRejectsExistingToken(t *testing.T) {
+	f := newFakeStore()
+	f.enabled = false
+	SetAuthenticator(NewTokenService(f))
+	t.Cleanup(func() { SetAuthenticator(nil) })
+
+	raw := seedToken(t, f, "ws-1", ScopeSkillsRead)
+	if code := do(t, buildRouter(), http.MethodGet, "/api/service/skills", raw); code != http.StatusUnauthorized {
+		t.Fatalf("disabled feature: got %d, want 401", code)
+	}
+	if len(f.audits) != 0 {
+		t.Fatalf("disabled feature wrote %d audit rows, want 0", len(f.audits))
+	}
+}
+
+func TestServiceToken_EachUseWritesDurableAudit(t *testing.T) {
+	f := newFakeStore()
+	SetAuthenticator(NewTokenService(f))
+	t.Cleanup(func() { SetAuthenticator(nil) })
+
+	raw := seedToken(t, f, "ws-1", ScopeSkillsRead)
+	h := buildRouter()
+	for i := 0; i < 2; i++ {
+		if code := do(t, h, http.MethodGet, "/api/service/skills", raw); code != http.StatusOK {
+			t.Fatalf("use %d: got %d, want 200", i+1, code)
+		}
+	}
+	if len(f.audits) != 2 || f.audits[0].Event != "used" || f.audits[1].Event != "used" {
+		t.Fatalf("audits = %#v, want one durable used row per request", f.audits)
+	}
+	var detail map[string]string
+	if err := json.Unmarshal(f.audits[0].Detail, &detail); err != nil {
+		t.Fatalf("audit detail: %v", err)
+	}
+	if detail["method"] != http.MethodGet || detail["path"] != "/api/service/skills" {
+		t.Fatalf("audit detail = %#v", detail)
+	}
+}
+
+func TestServiceToken_AuditFailureRejectsUse(t *testing.T) {
+	f := newFakeStore()
+	f.appendAuditErr = errors.New("audit unavailable")
+	SetAuthenticator(NewTokenService(f))
+	t.Cleanup(func() { SetAuthenticator(nil) })
+
+	raw := seedToken(t, f, "ws-1", ScopeSkillsRead)
+	if code := do(t, buildRouter(), http.MethodGet, "/api/service/skills", raw); code != http.StatusUnauthorized {
+		t.Fatalf("audit failure: got %d, want 401", code)
 	}
 }
 
@@ -208,3 +294,5 @@ func TestServiceToken_RevokeThenAuthenticate(t *testing.T) {
 		t.Fatalf("post-revoke: got %d, want 401", code)
 	}
 }
+
+func ptrTime(v time.Time) *time.Time { return &v }

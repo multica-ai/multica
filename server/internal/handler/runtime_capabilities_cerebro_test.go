@@ -27,14 +27,14 @@ func TestNormalizedRuntimeCapabilities_BackfillsStaleCodexSnapshot(t *testing.T)
 		t.Fatalf("codex secret bindings were not backfilled: %v", secrets)
 	}
 	hooks := anyStringSlice(caps["hooks"])
-	if !containsString(hooks, "OnTaskStart") || !containsString(hooks, "OnTaskEnd") {
+	if !containsString(hooks, "PreToolUse") || !containsString(hooks, "PostToolUse") {
 		t.Fatalf("codex hooks were not backfilled: %v", hooks)
 	}
 	if got, want := anyStringSlice(caps["tool_protocols"]), []string{"mcp_stdio"}; !equalStringSlices(got, want) {
 		t.Fatalf("tool_protocols: got %v, want %v", got, want)
 	}
 	if got := caps["supports_ask"]; got != false {
-		t.Fatalf("supports_ask: got %v, want false", got)
+		t.Fatalf("supports_ask: got %v, want fail-closed false for a stale snapshot", got)
 	}
 }
 

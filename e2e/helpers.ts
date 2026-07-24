@@ -25,10 +25,19 @@ export async function loginAsDefault(page: Page): Promise<string> {
   await page.addInitScript((t) => {
     localStorage.setItem("multica_token", t);
   }, token);
-  await page.goto(`/${workspace.slug}/issues`, { waitUntil: "commit" });
-  await page.waitForURL("**/issues", { timeout: 15000 });
-  await page.waitForLoadState("domcontentloaded");
-  await expect(page.getByRole("heading", { name: "Issues" })).toBeVisible({ timeout: 15000 });
+
+  // Exercise the real localhost login surface before entering the authenticated
+  // workspace. Login deliberately does not redirect an already-injected token,
+  // so navigate onward only after the page itself has rendered successfully.
+  const destination = `/${workspace.slug}/issues`;
+  await page.goto("/login", { waitUntil: "domcontentloaded" });
+  await expect(page.getByText("Sign in to Multica", { exact: true })).toBeVisible({
+    timeout: 15000,
+  });
+  await page.goto(destination, { waitUntil: "domcontentloaded" });
+  await expect(page.getByText("Agents", { exact: true }).first()).toBeVisible({
+    timeout: 15000,
+  });
   return workspace.slug;
 }
 

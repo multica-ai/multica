@@ -75,6 +75,10 @@ func TestAllergenFormatterIsAnInstallablePublishedBuiltin(t *testing.T) {
 		!strings.Contains(frontend, "window.location.pathname") {
 		t.Fatal("Allergen Formatter must derive its installed app identity from the runtime URL")
 	}
+	index := string(allergenFormatterBundleFiles()[1].Content)
+	if !strings.Contains(index, `crossorigin="use-credentials"`) {
+		t.Fatal("Allergen Formatter must load its module graph with the authenticated opaque-frame CORS contract")
+	}
 	for _, safeguard := range []string{
 		`String.fromCharCode(96).repeat(3)`,
 		`Array.isArray(result.formatted_ingredients)`,

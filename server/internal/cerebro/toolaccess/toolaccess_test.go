@@ -56,6 +56,18 @@ func TestDescriptorForCapabilityUsesCanonicalKeyAndScanSource(t *testing.T) {
 	}
 }
 
+func TestDescriptorForCapabilityTreatsDirectRuntimeMCPAsMCP(t *testing.T) {
+	desc := DescriptorForCapability(capabilityregistry.View{
+		Key: "mcp__github__create_issue", Title: "create_issue", Source: "runtime_report",
+	})
+	if desc.ToolKey != "mcp__github__create_issue" || desc.Source != "mcp" {
+		t.Fatalf("unexpected direct MCP descriptor: %#v", desc)
+	}
+	if len(desc.Protocols) != 2 || desc.Protocols[0] != "mcp_stdio" {
+		t.Fatalf("direct MCP tool must require an MCP protocol: %#v", desc)
+	}
+}
+
 func TestRuntimeProtocolsCloudFallback(t *testing.T) {
 	got := RuntimeProtocols("cloud", "firtal-gateway", nil)
 	if len(got.RuntimeProtocols) != 1 || got.RuntimeProtocols[0] != "native_tool_loop" || !got.SupportsAsk {

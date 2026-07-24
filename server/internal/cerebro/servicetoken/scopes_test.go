@@ -20,6 +20,14 @@ func TestNormalizeScopes(t *testing.T) {
 		}
 	})
 
+	t.Run("rejects every write scope", func(t *testing.T) {
+		for _, scope := range []string{"skills:write", "agents:write", "issues:write"} {
+			if _, err := NormalizeScopes([]string{scope}); err == nil {
+				t.Fatalf("expected %s to be rejected", scope)
+			}
+		}
+	})
+
 	t.Run("rejects empty set", func(t *testing.T) {
 		if _, err := NormalizeScopes([]string{"  ", ""}); err == nil {
 			t.Fatal("expected error for empty scope set, got nil")

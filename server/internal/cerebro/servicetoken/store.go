@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -34,11 +35,10 @@ type CreateParams struct {
 	Scopes      []string
 	ExpiresAt   *time.Time
 	CreatedBy   string
+	AuditDetail []byte
 }
 
-// AuditEvent is a lifecycle event: "issued" or "revoked". (Per-request "use"
-// is recorded on the token's last_used_at column, matching the PAT
-// precedent, to avoid flooding the audit table.)
+// AuditEvent is a durable lifecycle or use event.
 type AuditEvent struct {
 	TokenID     string
 	WorkspaceID string
@@ -52,19 +52,25 @@ type AuditEvent struct {
 type Store interface {
 	Create(ctx context.Context, p CreateParams) (Token, error)
 	GetByHash(ctx context.Context, tokenHash string) (Token, error)
+	FeatureEnabled(ctx context.Context, workspaceID string) (bool, error)
 	Touch(ctx context.Context, tokenID string) error
 	ListByWorkspace(ctx context.Context, workspaceID string) ([]Token, error)
-	Revoke(ctx context.Context, tokenID, workspaceID string) (Token, error)
+	Revoke(ctx context.Context, tokenID, workspaceID, actorUserID string) (Token, error)
 	AppendAudit(ctx context.Context, e AuditEvent) error
+}
+
+type workspaceFlagReader interface {
+	ListCerebroWorkspaceFeatureFlags(ctx context.Context, workspaceID pgtype.UUID) ([]cerebrodb.ListCerebroWorkspaceFeatureFlagsRow, error)
 }
 
 // cerebroStore adapts the sqlc-generated cerebrodb.Queries to Store.
 type cerebroStore struct {
-	q *cerebrodb.Queries
+	q     *cerebrodb.Queries
+	flags workspaceFlagReader
 }
 
 // NewStore returns a Store backed by the cerebro sqlc queries.
-func NewStore(q *cerebrodb.Queries) Store { return &cerebroStore{q: q} }
+func NewStore(q *cerebrodb.Queries) Store { return &cerebroStore{q: q, flags: q} }
 
 func (s *cerebroStore) Create(ctx context.Context, p CreateParams) (Token, error) {
 	scopesJSON, err := marshalScopes(p.Scopes)
@@ -79,11 +85,24 @@ func (s *cerebroStore) Create(ctx context.Context, p CreateParams) (Token, error
 		Scopes:      scopesJSON,
 		ExpiresAt:   timePtrToTs(p.ExpiresAt),
 		CreatedBy:   uuidOrNil(p.CreatedBy),
+		AuditDetail: p.AuditDetail,
 	})
 	if err != nil {
 		return Token{}, err
 	}
-	return rowToToken(row)
+	return rowToToken(cerebrodb.CerebroServiceToken{
+		ID:          row.ID,
+		WorkspaceID: row.WorkspaceID,
+		Name:        row.Name,
+		TokenHash:   row.TokenHash,
+		TokenPrefix: row.TokenPrefix,
+		Scopes:      row.Scopes,
+		ExpiresAt:   row.ExpiresAt,
+		LastUsedAt:  row.LastUsedAt,
+		Revoked:     row.Revoked,
+		CreatedBy:   row.CreatedBy,
+		CreatedAt:   row.CreatedAt,
+	})
 }
 
 func (s *cerebroStore) GetByHash(ctx context.Context, tokenHash string) (Token, error) {
@@ -92,6 +111,22 @@ func (s *cerebroStore) GetByHash(ctx context.Context, tokenHash string) (Token, 
 		return Token{}, err
 	}
 	return rowToToken(row)
+}
+
+func (s *cerebroStore) FeatureEnabled(ctx context.Context, workspaceID string) (bool, error) {
+	if s.flags == nil {
+		return false, ErrNotConfigured
+	}
+	rows, err := s.flags.ListCerebroWorkspaceFeatureFlags(ctx, toUUID(workspaceID))
+	if err != nil {
+		return false, err
+	}
+	for _, row := range rows {
+		if row.FlagKey == FlagKey {
+			return row.Enabled, nil
+		}
+	}
+	return DefaultEnabled, nil
 }
 
 func (s *cerebroStore) Touch(ctx context.Context, tokenID string) error {
@@ -114,15 +149,28 @@ func (s *cerebroStore) ListByWorkspace(ctx context.Context, workspaceID string) 
 	return out, nil
 }
 
-func (s *cerebroStore) Revoke(ctx context.Context, tokenID, workspaceID string) (Token, error) {
+func (s *cerebroStore) Revoke(ctx context.Context, tokenID, workspaceID, actorUserID string) (Token, error) {
 	row, err := s.q.RevokeCerebroServiceToken(ctx, cerebrodb.RevokeCerebroServiceTokenParams{
-		ID:          toUUID(tokenID),
+		TokenID:     toUUID(tokenID),
 		WorkspaceID: toUUID(workspaceID),
+		ActorUserID: uuidOrNil(actorUserID),
 	})
 	if err != nil {
 		return Token{}, err
 	}
-	return rowToToken(row)
+	return rowToToken(cerebrodb.CerebroServiceToken{
+		ID:          row.ID,
+		WorkspaceID: row.WorkspaceID,
+		Name:        row.Name,
+		TokenHash:   row.TokenHash,
+		TokenPrefix: row.TokenPrefix,
+		Scopes:      row.Scopes,
+		ExpiresAt:   row.ExpiresAt,
+		LastUsedAt:  row.LastUsedAt,
+		Revoked:     row.Revoked,
+		CreatedBy:   row.CreatedBy,
+		CreatedAt:   row.CreatedAt,
+	})
 }
 
 func (s *cerebroStore) AppendAudit(ctx context.Context, e AuditEvent) error {

@@ -105,6 +105,21 @@ beforeEach(() => {
 });
 
 describe("ServiceTokensSection", () => {
+  it("offers only read scopes and mandatory expiry choices", async () => {
+    render(<ServiceTokensSection />);
+
+    expect(await screen.findByRole("button", { name: "skills:read" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "agents:read" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "issues:read" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /:write$/ })).not.toBeInTheDocument();
+    expect(screen.queryByText(/no expiry/i)).not.toBeInTheDocument();
+  });
+
+  it("shows an empty state before the first service token", async () => {
+    render(<ServiceTokensSection />);
+    expect(await screen.findByText("No service tokens yet.")).toBeInTheDocument();
+  });
+
   it("shows an owner/admin-only note and never lists tokens for non-managers", async () => {
     roleHolder.role = "member";
     render(<ServiceTokensSection />);

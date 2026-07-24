@@ -39,7 +39,8 @@ func AuthBranch(w http.ResponseWriter, r *http.Request, next http.Handler, rawTo
 		writeError(w, http.StatusUnauthorized, "invalid token")
 		return
 	}
-	id, err := authenticator.Authenticate(r.Context(), rawToken)
+	auditCtx := withAuditRequest(r.Context(), r.Method, r.URL.Path)
+	id, err := authenticator.Authenticate(auditCtx, rawToken)
 	if err != nil {
 		slog.Warn("auth: invalid service token", "path", r.URL.Path, "error", err)
 		writeError(w, http.StatusUnauthorized, "invalid token")
@@ -61,13 +62,7 @@ func AuthBranch(w http.ResponseWriter, r *http.Request, next http.Handler, rawTo
 	r.Header.Set("X-Workspace-ID", id.WorkspaceID)
 	r.Header.Set("X-Service-Token-ID", id.TokenID)
 	r.Header.Set("X-Actor-Source", ActorSource)
-	// Attribution-only: the minting user for writes performed via this token.
-	// Deliberately NOT X-User-ID — a service token never authenticates AS the
-	// minter; this header is read solely by the /api/service write handlers.
 	r.Header.Del("X-Service-Token-Created-By")
-	if id.CreatedBy != "" {
-		r.Header.Set("X-Service-Token-Created-By", id.CreatedBy)
-	}
 
 	next.ServeHTTP(w, r.WithContext(withScopes(r.Context(), id.Scopes)))
 }
