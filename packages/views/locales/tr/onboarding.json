@@ -1,0 +1,377 @@
+{
+  "step_header": {
+    "step_of": "Adım {{current}} / {{total}}"
+  },
+  "welcome": {
+    "wordmark": "Multica'ya hoş geldiniz",
+    "headline_line1": "AI ekip arkadaşlarınız,",
+    "headline_line2": "tek",
+    "headline_emphasis": "çalışma alanında.",
+    "lede": "Onlara işi bir iş arkadaşınıza atar gibi atayın; işi alır, durumu günceller ve bitince yorum bırakırlar.",
+    "lede_web": "Desktop çalışma ortamını içinde getirir; kurulacak bir şey yok. Kendi CLI'ınızı bağlamak için web'de devam edin.",
+    "lede_desktop": "Sonunda gerçek bir ajan ilk issue'nuza yanıt veriyor olacak.",
+    "download_desktop": "Desktop'ı indir",
+    "continue_on_web": "Web'de devam et",
+    "start_exploring": "Keşfetmeye başla",
+    "skip_existing": "Bunu daha önce yaptım",
+    "illustration_caption": "Her issue, her thread, her karar; ekibiniz ve ajanlarınız tarafından paylaşılır.",
+    "illustration": {
+      "card1_actor_name": "Siz",
+      "card1_actor_initial": "S",
+      "card1_body_prefix": " kısa bir lansman yazısı taslağı hazırlayabilir misin? ",
+      "card1_body_suffix": " görüşme bulgularından yararlan.",
+      "card1_mention_content": "@Content Ajan",
+      "card1_mention_research": "@Research Ajan",
+      "card2_actor_name": "Content Ajan",
+      "card2_body": "Hallediyorum. Research'ün alıntılarını çekip \"zaman tasarrufu\" açısı etrafında taslak hazırlıyorum…",
+      "card3_actor_name": "Research Ajan",
+      "card3_body": "Bu haftaki kullanıcı görüşmeleri özetlendi: 12 görüşme, 4 tekrar eden tema, 3 öne çıkan alıntı.",
+      "card3_timestamp": "15 dk önce",
+      "card4_actor_name": "Review Ajan",
+      "card4_body": "Pazartesi taslağını inceledim; tonla ilgili 4 not bıraktım. Yenisi için bekliyorum.",
+      "card5_actor_name": "Coding Ajan",
+      "card5_body_prefix": "Export özelliğini ship ettim; ",
+      "card5_body_suffix": " işaretlemişti. Preview link'i PR'da.",
+      "card5_mention_you": "@siz",
+      "card5_timestamp": "az önce"
+    }
+  },
+  "common": {
+    "back": "Geri",
+    "continue": "Devam et",
+    "skip": "Atla",
+    "cancel": "İptal"
+  },
+  "questions": {
+    "eyebrow_about_you": "Hakkınızda",
+    "source": {
+      "question": "Multica'yı nereden duydunuz?",
+      "friends_colleagues": "Arkadaşlar veya iş arkadaşları",
+      "search": "Google / arama",
+      "social_x": "X / Twitter",
+      "social_linkedin": "LinkedIn",
+      "social_youtube": "YouTube",
+      "social_github": "GitHub",
+      "social_misc": "Diğer sosyal medya",
+      "blog_newsletter": "Blog / newsletter",
+      "ai_assistant": "ChatGPT / Claude / Cursor",
+      "from_work": "İş yerinde",
+      "event_conference": "Konferans / meetup",
+      "dont_remember": "Hatırlamıyorum",
+      "other": "Diğer",
+      "other_placeholder": "örn. dinlediğim bir podcast"
+    },
+    "role": {
+      "question": "Sizi en iyi hangisi tanımlar?",
+      "engineer": "Engineer / developer",
+      "product": "Product manager",
+      "designer": "Designer",
+      "founder": "Founder / exec",
+      "marketing": "Marketing / growth",
+      "writer": "Writer / content",
+      "research": "Researcher / analyst",
+      "ops": "Operations / proje mgmt",
+      "student": "Öğrenci / kişisel kullanım",
+      "other": "Diğer",
+      "other_placeholder": "örn. öğretmen, support lead"
+    },
+    "use_case": {
+      "question": "Multica'yı ne için kullanmak istiyorsunuz?",
+      "ship_code": "AI ajanlarıyla kod ship etmek",
+      "manage_team": "Ekibimin task'lerini yönetmek",
+      "personal_tasks": "Kendi task'lerimi düzenlemek",
+      "plan_research": "Planlamak, fikir üretmek, araştırmak",
+      "write_publish": "Yazmak, düzenlemek, yayınlamak",
+      "automate_ops": "Operasyonları ve workflow'ları otomatikleştirmek",
+      "evaluate": "Sadece keşfediyorum",
+      "other": "Diğer",
+      "other_placeholder": "örn. çalışma grubu koordinasyonu"
+    }
+  },
+  "option_card": {
+    "other_label": "Diğer",
+    "other_aria": "Başka bir şey açıklayın"
+  },
+  "step_question": {
+    "hint_pick": "Devam etmek için birini seçin; söylemek istemiyorsanız atlayabilirsiniz.",
+    "hint_continue": "İyi görünüyor. Hazır olduğunuzda Devam et'e basın."
+  },
+  "runtime_aside": {
+    "what_eyebrow": "Ajan çalışma ortamı nedir?",
+    "what_prefix": "Bağladığınız \"bilgisayar\", içeride ",
+    "what_term": "ajan çalışma ortamı",
+    "what_suffix": " dediğimiz şeydir: bilgisayarda arka planda çalışan ve bir AI coding tool ile eşleştirilmiş küçük bir süreç; Claude Code, Codex vb. Bir tool, bir ajan çalışma ortamı. Ajanınızın aldığı task'leri gerçekten çalıştıran şey ajan çalışma ortamıdır.",
+    "good_eyebrow": "Bilmekte fayda var",
+    "swap_title": "İstediğiniz zaman değiştirin",
+    "swap_body": "Her ajanın çalışma ortamını yalnızca bir ayardır. İstediğiniz zaman değiştirebilirsiniz.",
+    "add_more_title": "Daha sonra daha fazlasını ekleyin",
+    "add_more_body": "Bir ekip arkadaşı için başka bir bilgisayar veya her ajan için özel bir bilgisayar bağlayabilirsiniz.",
+    "learn_more": "Ajan çalışma ortamlarıı hakkında bilgi al →"
+  },
+  "cli_install": {
+    "copy_aria": "Kopyala",
+    "intro": "Ajanınızı çalıştırmak için bu bilgisayarda bir ajan çalışma ortamına (Claude Code, Codex, Cursor, …) ihtiyacınız olacak. Sunucularda ve remote dev box'larda da çalışır.",
+    "step1_label": "Multica CLI'ı kurun",
+    "step2_label": "Daemon'ı başlatın"
+  },
+  "cloud_waitlist": {
+    "intro_main": "Cloud çalışma ortamları henüz yayında değil. E-postanızı bırakın, yayına alındıklarında size ulaşalım.",
+    "intro_warning": "Bilgi: ajanlar çalışma ortamı olmadan task çalıştıramaz; şimdi Atla'ya basarsanız, geri dönüp bir çalışma ortamı kurana kadar çalışma alanınız salt okunur olur.",
+    "email_label": "E-posta",
+    "email_placeholder": "siz@work.com",
+    "reason_label": "Neden cloud?",
+    "optional": "İsteğe bağlı",
+    "reason_placeholder": "örn. ajanların 7/24 çalışmasını istiyoruz veya ekibim farklı cihazlarda çalışıyor.",
+    "join": "Bekleme listesine katıl",
+    "on_list": "Listedesiniz",
+    "success_toast": "Listedesiniz. Cloud çalışma ortamları yayına alındığında e-posta göndereceğiz.",
+    "failed_toast": "Bekleme listesine katılınamadı"
+  },
+  "first_issue": {
+    "error_title": "Bir şeyler ters gitti",
+    "retry": "Tekrar dene",
+    "retry_failed": "Tekrar deneme başarısız",
+    "finishing": "Tamamlanıyor",
+    "opening": "Neredeyse bitti; çalışma alanınız açılıyor."
+  },
+  "step_agent": {
+    "eyebrow": "İlk ajanınız",
+    "headline": "İlk ekip arkadaşınızla tanışın.",
+    "lede_prefix": "Yanıtlarınız bir ",
+    "lede_suffix": " işaret ediyor. Dört seçenekten size uyanı seçin; her template ilk issue'sunu almaya hazır gelir. Talimatlarını daha sonra ajan ayarları sayfasından yeniden düzenleyebilirsiniz.",
+    "footer_hint": "Başlamak için bir ajan yeterli. Daha sonra sidebar'dan yenilerini ekleyin.",
+    "create_action": "{{name}} oluştur",
+    "create_failed": "Ajan oluşturulamadı",
+    "recommended_badge": "Önerilen",
+    "templates": {
+      "coding": {
+        "label": "Coding Ajan",
+        "blurb": "Kod yazar, refactor eder ve ship eder. Repo'nuzu okur.",
+        "instructions": "Bir product team'de Coding Ajan olarak çalışıyorsunuz. Coding issue'larını alın: özellikleri implement edin, bug'ları düzeltin, test yazın ve pull request açın. Başlamadan önce repository'yi okuyun, mevcut code convention'ları izleyin ve diff'leri odaklı tutun. Acceptance criteria belirsiz olduğunda açıklama isteyin."
+      },
+      "planning": {
+        "label": "Planning Ajan",
+        "blurb": "İşi parçalara ayırır, spec taslakları çıkarır, panoyu düzenli tutar.",
+        "instructions": "Bir Planning Ajan olarak çalışıyorsunuz. Dağınık fikirleri ve açık issue'ları kapsamı belirli, çalışmaya hazır işlere dönüştürün: alt task'lere bölün, acceptance criteria yazın, owner ve sıralama önerin. Hız yerine netliği tercih edin. Eksik bağlam nedeniyle bloklandıysanız tahmin etmek yerine tek ve spesifik bir soru sorun."
+      },
+      "writing": {
+        "label": "Writing Ajan",
+        "blurb": "Taslak hazırlar, özetler, araştırır. Uzun format için uygundur.",
+        "instructions": "Bir Writing Ajan olarak çalışıyorsunuz. Doküman taslakları hazırlayın, uzun içerikleri özetleyin ve gerektiğinde web'de konu araştırın. Çıktınızı outline olarak değil, okuyucunun doğrudan kullanabileceği tamamlanmış metin olarak yapılandırın. Kaynaklardan yararlandığınızda alıntı verin. Issue'da kullanıcının belirlediği tona uyun."
+      },
+      "assistant": {
+        "label": "Assistant",
+        "blurb": "Genel amaçlı. Task belirsiz olduğunda iyi varsayılan.",
+        "instructions": "Genel amaçlı bir ekip arkadaşısınız. Hafif coding, yazı, araştırma, planlama gibi çeşitli task'leri ele alın ve kapsam konusunda pragmatik kalın. Task belirsiz olduğunda işe dalmadan önce bir netleştirme sorusu sorun. Kapsamlı çıktılar yerine kısa ve faydalı çıktıları varsayılan alın."
+      }
+    },
+    "about_eyebrow": "Ajan nedir?",
+    "about_headline": "Çalışma alanınızde yaşayan bir AI ekip arkadaşı.",
+    "about_body": "Ajanlar her assignee picker'da diğer iş arkadaşları gibi görünür; tek fark, verdiğiniz çalışma ortamı üzerinde 7/24 çalışabilmeleridir.",
+    "ways_eyebrow": "Bir ajan ile çalışma yolları",
+    "way_assign_title": "Bir issue atayın",
+    "way_assign_body": "Task'i alır ve thread'de geri bildirim verir.",
+    "way_mention_title": "Yorumda @mention edin",
+    "way_mention_body": "Hızlı bir görüş için onu konuşmaya dahil edin.",
+    "way_chat_title": "Bire bir chat",
+    "way_chat_body": "Issue oluşturmadan hızlı sorular sorun.",
+    "way_autopilot_title": "Autopilot'a alın",
+    "way_autopilot_body": "Günlük triage, haftalık özet, aylık audit; zamanlanmış şekilde.",
+    "add_more_hint": "İstediğiniz zaman daha fazla ajan ekleyin. Uzmanlaşmış küçük bir ajan ekibi, her işi yapan tek bir ajandan daha iyidir.",
+    "docs_link": "İlk ajanınızı oluşturma →"
+  },
+  "welcome_after_onboarding": {
+    "loading_helper": "Helper'ınız hazırlanıyor…",
+    "error_title": "Kurulum tamamlanamadı",
+    "error_generic": "Bir şeyler ters gitti. Tekrar deneyin.",
+    "retry": "Tekrar dene",
+    "dismiss_error": "Kapat",
+    "error_close": "Kapat",
+    "user_context_heading": "Hakkımda",
+    "user_context_role_label": "Rol",
+    "user_context_use_case_label": "Multica ile yapmak istediğim şey",
+    "runtime": {
+      "greeting": "Merhaba, Multica'ya hoş geldiniz",
+      "subtitle": "İlk Ajan assistant'ınızım.",
+      "capabilities": "Multica'yı nasıl kullanacağınızla ilgili bana her şeyi sorabilirsiniz. Çalışma alanınızde iş de yaptırabilirsiniz: issue oluşturma, cron task'leri kurma, yeni ajanlar oluşturma…",
+      "section_label": "Başlamak için bir veya daha fazla task seçin:",
+      "assign_empty": "Bir veya daha fazla seçin",
+      "assign_count": "{{count}} task'i bana ata →",
+      "assign_count_plural": "{{count}} task'i bana ata →",
+      "cards": {
+        "intro": {
+          "subtitle": "Multica'nın ne olduğunu ve neler yapabildiğini 1-2 paragrafta açıklayayım."
+        },
+        "tour": {
+          "subtitle": "Issue, ajan, ekip ve autopilot'un birlikte nasıl çalıştığını göstereyim."
+        },
+        "welcome_page": {
+          "subtitle": "Rolünüze göre uyarlanmış, kopyalayıp tarayıcıda açmaya hazır tek dosyalık bir HTML sunum hazırlayayım."
+        }
+      },
+      "success": {
+        "title": "Her şey hazır!",
+        "subtitle": "Bekleyin; {{ajanName}} işin üzerinde ☕",
+        "tip_inbox": "İlerleme olduğunda Gelen Kutunuzda göreceksiniz.",
+        "tip_chat": "Canlı chat ister misiniz? Sağ alttaki chat balonuna tıklayın.",
+        "got_it": "Anladım →"
+      }
+    },
+    "skip": {
+      "loading": "Çalışma alanınız kuruluyor…",
+      "title": "Multica'ya hoş geldiniz!",
+      "subtitle": "Sonraki adımda size yardımcı olması için iki task ekledik.",
+      "got_it": "Anladım",
+      "status_in_progress": "In progress",
+      "status_todo": "Yapılacak",
+      "cards": {
+        "install_runtime": {
+          "title": "Bir çalışma ortamı bağlayın",
+          "subtitle": "Ajanları online hale getirmek için Codex veya Kimi kurun."
+        },
+        "create_agent": {
+          "title": "İlk ajanınızı oluşturun",
+          "subtitle": "Bir çalışma ortamı online olduğunda ilk Multica ajanınızı oluşturun."
+        }
+      }
+    }
+  },
+  "step_workspace": {
+    "eyebrow_first": "İlk çalışma alanınız",
+    "eyebrow_resume": "Kaldığınız yerden devam edin veya yeniden başlayın",
+    "headline_first": "Çalışma alanınızi adlandırın.",
+    "headline_resume": "{{name}} ile devam edin veya başka bir tane başlatın.",
+    "lede_first": "Çalışma alanı; issue'larınızın, ajanlarınızın ve projelerinizin yaşadığı yerdir. Ekip arkadaşlarınızı davet edebilir veya daha sonra daha fazla çalışma alanı açabilirsiniz.",
+    "lede_resume": "Mevcut çalışma alanınızle kuruluma devam edin veya yanında yeni bir tane oluşturun; istediğiniz sayıda çalışma alanına ait olabilirsiniz.",
+    "name_label": "Çalışma alanı adı",
+    "name_placeholder": "Acme Inc, Lab'im, Yan projeler…",
+    "url_label": "URL",
+    "slug_placeholder": "acme",
+    "issue_prefix_label": "Issue prefix'i",
+    "issue_prefix_prefix": "Issue'lar şöyle görünür: ",
+    "issue_prefix_suffix": ". Bunu daha sonra ayarlardan değiştirebilirsiniz.",
+    "create_new_title": "Yeni çalışma alanı oluştur",
+    "create_new_subtitle": "Sıfırdan başlayın; işinizin farklı bir tarafı için ayrı bir alan.",
+    "hint_opening": "{{name}} açılıyor.",
+    "hint_creating": "{{name}} oluşturuluyor.",
+    "hint_creating_pending": "{{name}} oluşturuluyor…",
+    "hint_creating_fallback": "çalışma alanınız",
+    "hint_name_first": "Oluşturmak için çalışma alanınızi adlandırın.",
+    "hint_pick": "Çalışma alanınızi seçin veya yeni bir tane başlatın.",
+    "cta_open": "{{name}} aç",
+    "cta_create_named": "{{name}} oluştur",
+    "cta_create_workspace": "Çalışma alanı oluştur",
+    "cta_creating": "Oluşturuluyor…",
+    "slug_format_error": "Yalnızca küçük harfler, sayılar ve tireler",
+    "slug_taken_error": "Bu çalışma alanı URL'si zaten alınmış.",
+    "slug_reserved_error": "Bu çalışma alanı URL'si ayrılmış ve kullanılamaz.",
+    "slug_conflict_toast": "Farklı bir çalışma alanı URL'si seçin",
+    "create_failed_toast": "Çalışma alanı oluşturulamadı",
+    "side_create_eyebrow": "Çalışma alanı içinde neler bulunur",
+    "side_existing_eyebrow": "Çalışma alanınız",
+    "side_things_eyebrow": "Burada yapacaklarınız",
+    "side_next_eyebrow": "Sırada ne var",
+    "side_preview_name": "Çalışma alanınız",
+    "side_preview_slug": "çalışma alanı",
+    "perk_assign": "Issue'ları ajanlara bir ekip arkadaşınıza atar gibi atayın",
+    "perk_chat": "Issue oluşturmadan herhangi bir ajan ile chat yapın",
+    "perk_invite": "Ekip arkadaşlarınızı davet edin; yalnızca bu çalışma alanını görürler",
+    "perk_switch": "Sol üstten istediğiniz zaman diğer çalışma alanlare geçin",
+    "next_runtime": "Ajanlarınızın çalışabileceği bir yer olması için bilgisayar bağlayın",
+    "next_agent": "Bağlı çalışma ortamınızdan Multica Helper oluşturun",
+    "next_starter": "Sonraki adımınız için bir onboarding issue'su açın",
+    "preview": {
+      "inbox_label": "Gelen Kutusu",
+      "inbox_meta": "bildirimleriniz",
+      "issues_label": "Issues",
+      "issues_meta": "paylaşılan task pano",
+      "agents_label": "Ajanlar",
+      "agents_meta": "AI ekip arkadaşlarınız",
+      "projects_label": "Projeler",
+      "projects_meta": "ilgili issue'ları gruplayın",
+      "autopilot_label": "Autopilot",
+      "autopilot_meta": "zamanlanmış otomasyon",
+      "runtimes_label": "Çalışma ortamları",
+      "runtimes_meta": "ajanların çalıştığı yer",
+      "skills_label": "Skills",
+      "skills_meta": "yeniden kullanılabilir playbook'lar",
+      "more_label": "Ve daha fazlası",
+      "more_meta": "ve daha fazlası"
+    },
+    "creation_disabled_eyebrow": "Çalışma alanı oluşturma devre dışı",
+    "creation_disabled_headline": "Yöneticinizden bir davet isteyin.",
+    "creation_disabled_lede": "Bu Multica örneği yeni çalışma alanlarının oluşturulmasına izin vermiyor. Bir yönetici sizi bir çalışma alanına davet ettiğinde, daveti kabul edin ve devam etmek için sayfayı yenileyin.",
+    "creation_disabled_logout": "Çıkış yap",
+    "creation_disabled_eyebrow_resume": "Çalışma alanınız",
+    "creation_disabled_headline_resume": "{{name}} ile devam edin.",
+    "creation_disabled_lede_resume": "Bu örnekte çalışma alanı oluşturma devre dışı, bu yüzden mevcut çalışma alanınıza devam edeceksiniz."
+  },
+  "step_runtime": {
+    "scanning_headline": "Bu bilgisayar bağlanıyor…",
+    "scanning_lede_prefix": "Ajanınız zaten sahip olduğunuz bir AI coding tool üzerinden çalışır; örneğin ",
+    "scanning_lede_suffix": " ve diğerleri. Bu bilgisayarda kurulu olanları kontrol ediyoruz.",
+    "found_headline": "Bu bilgisayar bağlı. Bir ajan çalışma ortamı seçin.",
+    "found_lede": "Bu bilgisayarda bulduğumuz ajan çalışma ortamlarıı bunlar. İlk ajanınız için birini seçin; daha sonra değiştirebilir veya daha fazlasını ekleyebilirsiniz.",
+    "runtime_count_one": "{{count}} ajan çalışma ortamı",
+    "runtime_count_other": "{{count}} ajan çalışma ortamı",
+    "status_all_online": "hepsi online",
+    "status_none_online": "hiçbiri online değil",
+    "status_n_online": "{{count}} online",
+    "online_label": "online",
+    "offline_label": "offline",
+    "empty_headline": "Bu bilgisayarda henüz ajan çalışma ortamı bulunamadı.",
+    "empty_lede_prefix": "Ajan çalışma ortamı, bağlandığımız bir AI coding tool'dur; örneğin ",
+    "empty_lede_suffix": ". Birini kurup yenileyin veya aşağıdan bir yol seçin.",
+    "empty_skip_title": "Şimdilik atla",
+    "empty_skip_subtitle": "Çalışma alanınıze salt okunur modda girin. Bu bilgisayarda ajan çalışma ortamı bağlanana kadar ajanınız task çalıştıramaz; ama yine de gezinebilir, planlayabilir ve ekip arkadaşlarınızı davet edebilirsiniz.",
+    "empty_skip_action": "Atla",
+    "empty_waitlist_title": "Cloud bilgisayar kullan",
+    "empty_waitlist_subtitle": "Sizin için cloud'da bir bilgisayar çalıştıracağız. Henüz yayında değil.",
+    "empty_waitlist_action": "Yakında",
+    "skip": "Şimdilik atla",
+    "refresh": "Yenile",
+    "refreshing": "Yenileniyor…",
+    "hint_selected": "Seçildi: {{name}}",
+    "hint_pick": "Devam etmek için yukarıdan bir ajan çalışma ortamı seçin.",
+    "hint_waiting": "İlk sonuç bekleniyor…",
+    "hint_skip_or_refresh": "Bir tane kurduktan sonra yenileyin veya çalışma alanınıza girmek için atlayın.",
+    "start_exploring": "Keşfetmeye başla"
+  },
+  "step_platform": {
+    "eyebrow": "Bilgisayar bağlayın",
+    "headline": "Ajanınızı çalıştırmak için bir bilgisayar bağlayın.",
+    "lede": "Ajanınız Multica'ya bağladığınız gerçek bir bilgisayarda çalışır. Bir bilgisayarı nasıl bağlamak istediğinizi seçin.",
+    "hint_default": "Bağlantı yöntemini seçin veya bilgisayarı daha sonra bağlamak için atlayın.",
+    "hint_downloaded": "Download sayfasında kurulumu tamamlayın, sonra bu sekmeye geri dönün.",
+    "download_title": "Bu bilgisayarı kullan",
+    "download_title_after": "Download sayfası açılıyor…",
+    "download_subtitle": "Bu bilgisayarı bağlamak için desktop uygulamamızı kurun. Sıfır kurulum; sonraki sayfada platformunuzu seçin.",
+    "download_subtitle_after": "Yeni sekmede açıldı. Oradan installer'ınızı seçin, sonra kurulumu desktop'ta tamamlayın.",
+    "download_button": "İndir",
+    "cli_title": "Terminalden bağlan",
+    "cli_subtitle": "Bir sunucu, remote dev box veya herhangi bir headless bilgisayar bağlayın. Terminal gerekir.",
+    "cli_action": "Adımları göster",
+    "cloud_title": "Cloud bilgisayar kullan",
+    "cloud_subtitle": "Sizin için cloud'da bir bilgisayar çalıştıracağız. Henüz yayında değil.",
+    "cloud_action": "Yakında",
+    "cli_dialog_title": "Terminalden bağlan",
+    "cli_dialog_description": "Desktop ile aynı bağlantı, terminalden kurulur. Sunucular, remote dev box'lar veya herhangi bir headless bilgisayar için kullanın.",
+    "cli_dialog_pick_hint": "Yukarıdan bir bilgisayar seçin.",
+    "cli_dialog_connect": "Bağlan ve devam et",
+    "runtimes_connected_one": "{{count}} bilgisayar bağlı",
+    "runtimes_connected_other": "{{count}} bilgisayar bağlı",
+    "live_listening": "Canlı · Bilgisayarınız bekleniyor",
+    "stage_normal_prefix": "Yukarıdaki komutu çalıştırın. ",
+    "stage_normal_suffix": " tarayıcı oturum açmayı bitirir bitirmez bilgisayarınız burada otomatik görünür (genelde 10-30 saniye).",
+    "stage_midway_prefix": "Hala dinleniyor. ",
+    "stage_midway_suffix": " tarafından açılan tarayıcı sekmesini tamamladığınızdan emin olun; bilgisayarınız bağlanmadan önce oturum açmayı onaylamanız gerekir.",
+    "stage_slow_prefix": "Normalden uzun sürüyor. Hata var mı diye ",
+    "stage_slow_suffix": " çalıştırdığınız terminali kontrol edin.",
+    "stage_stalled_prefix": "Henüz bir şey gelmiyor. Terminal size uygun değilse ",
+    "stage_stalled_term": "Desktop",
+    "stage_stalled_suffix": " daha sorunsuz yoldur; tek tıkla bu bilgisayar bağlanır. Bu dialog'u kapatıp Desktop'ı seçin veya devam etmek için Atla'ya basın."
+  },
+  "errors": {
+    "skip_failed": "Onboarding tamamlanamadı"
+  }
+}

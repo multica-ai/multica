@@ -1,0 +1,145 @@
+---
+title: Oturum açma ve kayıt yapılandırması
+description: E-posta + doğrulama kodu ile oturum açmayı, Google OAuth'u, kayıt izin listelerini ve yerel test kodlarını yapılandırın.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+import { Mermaid } from "@/components/mermaid";
+
+Multica iki oturum açma yöntemi destekler: **e-posta + doğrulama kodu** (varsayılan) ve **Google OAuth** (isteğe bağlı). Başarılı oturum açmada sunucu 30 gün ömürlü bir JWT cookie verir. Bu sayfa her yöntemin nasıl yapılandırılacağını, kimlerin kayıt olabileceğini nasıl kısıtlayacağınızı ve self-hosted dağıtımlardaki en büyük tuzağı açıklar.
+
+Aşağıda geçen ortam değişkenlerinin listesi için [Ortam değişkenleri](/environment-variables), token kullanımı ve yaşam döngüsü ayrıntıları için [Kimlik doğrulama ve token'lar](/auth-tokens) sayfasına bakın.
+
+## E-posta + doğrulama kodu ile oturum açma nasıl çalışır
+
+Kullanıcı oturum açma sayfasına e-posta girer → sunucu 6 haneli kod gönderir → kullanıcı kodu girer → sunucu doğrular → JWT cookie verilir. Standart akış. İki gönderim arka ucu desteklenir; dağıtımınıza uygun olanı seçin:
+
+### Seçenek A: Resend (bulut / public internet dağıtımları için önerilir)
+
+1. Bir [Resend](https://resend.com/) hesabı oluşturun ve alan adınızı doğrulayın
+2. Bir API anahtarı oluşturun
+3. Ortam değişkenlerini ayarlayın:
+
+    ```bash
+    RESEND_API_KEY=re_xxxxxxxxxxxxxxxx
+    RESEND_FROM_EMAIL=noreply@yourdomain.com  # must be a domain verified in Resend
+    ```
+
+4. Sunucuyu yeniden başlatın
+
+### Seçenek B: SMTP relay (self-hosted / on-premise dağıtımlar için)
+
+Dağıtım `api.resend.com` adresine erişemiyorsa veya zaten dahili bir mail relay'iniz varsa (Exchange, Postfix, on-prem SendGrid vb.) bunu kullanın. İkisi de ayarlıysa `SMTP_HOST`, `RESEND_API_KEY` değerine göre önceliklidir.
+
+```bash
+SMTP_HOST=smtp.internal.example.com
+SMTP_PORT=587                  # default 25; use 587 for STARTTLS submission
+SMTP_USERNAME=multica          # leave empty for unauthenticated relay
+SMTP_PASSWORD=...
+SMTP_TLS_INSECURE=false        # set true only for self-signed / private CA
+RESEND_FROM_EMAIL=noreply@yourdomain.com  # reused as the From: header
+```
+
+Sunucu desteklediğini ilan ettiğinde STARTTLS otomatik olarak yükseltilir. Port 465 (SMTPS / implicit TLS) şu anda **desteklenmez**; port 25 veya 587 kullanın.
+
+**Hiçbirini ayarlamazsanız ne olur**: sunucu hata vermez, ancak **gönderilmesi gereken her e-posta yalnızca sunucunun stdout çıktısına yazılır**. Yerel geliştirme için kullanışlıdır (kodu loglardan kopyalayın); production ortamında kara deliktir.
+
+## Sabit yerel test kodları
+
+<Callout type="warning">
+**Public erişilebilir bir instance üzerinde sabit doğrulama kodu etkinleştirmeyin.**
+
+Production dışı instance'ların varsayılan olarak `888888` kabul ettiği eski davranış kaldırıldı. Açıkça yapılandırmadığınız sürece `888888` yazmak diğer yanlış kodlar gibi değerlendirilir.
+
+E-posta arka ucu yapılandırılmamış yerel geliştirme (Resend yok, SMTP yok) sunucu loglarında yazdırılan üretilmiş kodu kullanmalıdır. Deterministic yerel/private otomasyona ihtiyacınız varsa `MULTICA_DEV_VERIFICATION_CODE` değerini `888888` gibi 6 haneli bir değere ayarlayın ve `APP_ENV` değerini production dışında tutun:
+
+```bash
+APP_ENV=development
+MULTICA_DEV_VERIFICATION_CODE=888888
+```
+
+Bu kısa yol `APP_ENV=production` olduğunda yok sayılır.
+</Callout>
+
+Production dağıtımları `MULTICA_DEV_VERIFICATION_CODE` değerini boş bırakmalı ve `APP_ENV=production` ayarlamalıdır. `make selfhost` / `docker-compose.selfhost.yml` ile dağıtıyorsanız `APP_ENV` varsayılan olarak `production` olur.
+
+## Google OAuth yapılandırması
+
+İsteğe bağlıdır. Olmadan yalnızca e-posta + doğrulama kodu kullanılabilir; ayarlarsanız oturum açma sayfasına "Sign in with Google" butonu eklenir.
+
+1. [Google Cloud Console](https://console.cloud.google.com/) içinde bir OAuth 2.0 client oluşturun
+2. **Authorized redirect URIs** değerini Multica frontend adresiniz + `/auth/callback` olarak ayarlayın, örneğin:
+
+    ```text
+    https://multica.yourdomain.com/auth/callback
+    ```
+
+3. Client ID ve client secret elinizde olduğunda üç ortam değişkenini ayarlayın:
+
+    ```bash
+    GOOGLE_CLIENT_ID=xxxxx.apps.googleusercontent.com
+    GOOGLE_CLIENT_SECRET=GOCSPX-xxxxxxxxxxxxxxx
+    GOOGLE_REDIRECT_URI=https://multica.yourdomain.com/auth/callback
+    ```
+
+4. Sunucuyu yeniden başlatın.
+
+**Çalışma zamanında etkili olur**: frontend bu ayarları çalışma zamanında `/api/config` üzerinden okur. Değiştirdikten sonra sunucuyu yeniden başlatın; frontend yeni değerleri rebuild veya redeploy olmadan alır.
+
+<Callout type="warning">
+**Redirect URI hem Google Console içinde hem de `GOOGLE_REDIRECT_URI` değerinde birebir aynı olmalıdır**; protokol (`http` vs `https`), sondaki slash ve port dahil. Herhangi bir uyumsuzlukta Google tüm OAuth akışını reddeder; kullanıcıya gösterilen hata `redirect_uri_mismatch` olur.
+</Callout>
+
+## Kimlerin kayıt olabileceğini kısıtlama
+
+Üç ortam değişkeni önceliğe göre birleşir:
+
+<Mermaid chart={`
+graph TD
+    Start[New user first sign-in] --> A{Email in<br/>ALLOWED_EMAILS?}
+    A -- Yes --> Allow[Allow signup]
+    A -- No --> B{Domain in<br/>ALLOWED_EMAIL_DOMAINS?}
+    B -- Yes --> Allow
+    B -- No --> C{Any allowlist<br/>non-empty?}
+    C -- Yes --> Block[Reject]
+    C -- No --> D{ALLOW_SIGNUP<br/>= true?}
+    D -- Yes --> Allow
+    D -- No --> Block
+`} />
+
+**Mevcut kullanıcılar her zaman tekrar oturum açabilir**; kayıt izin listesi geri dönen kullanıcılara değil, yalnızca **ilk kayıt** işlemine uygulanır.
+
+- **`ALLOWED_EMAILS`** (en yüksek öncelik) — açık e-posta izin listesi, virgülle ayrılmış. **Boş değilse yalnızca listelenen e-postalar kayıt olabilir.**
+- **`ALLOWED_EMAIL_DOMAINS`** — alan adı izin listesi, virgülle ayrılmış (örneğin `company.io,partner.com`).
+- **`ALLOW_SIGNUP`** — ana anahtar, varsayılan `true`. Kaydı tamamen devre dışı bırakmak için `false` yapın.
+
+<Callout type="warning">
+**Üç katman OR değil, AND semantiğindedir.** Yaygın yanlış sezgi, `ALLOWED_EMAIL_DOMAINS=company.io` + `ALLOW_SIGNUP=true` değerlerinin "company.io ve diğer herkese izin ver" anlamına geldiğidir. **Gelmez**. Herhangi bir katmanda boş olmayan değer varsa **eşleşmeyen e-postalar doğrudan reddedilir**; `ALLOW_SIGNUP=true` bunu geçersiz kılmaz.
+
+Gerçekten "herkese izin vermek" için üç değişkeni de boş bırakın (veya `ALLOW_SIGNUP=true` tutun).
+</Callout>
+
+**Tipik yapılandırmalar**:
+
+| Goal | Configuration |
+|---|---|
+| Yalnızca dahili, `company.io` çalışanları | `ALLOWED_EMAIL_DOMAINS=company.io` |
+| Dahili + birkaç dış işbirlikçi | `ALLOWED_EMAIL_DOMAINS=company.io` + işbirlikçi adresleri `ALLOWED_EMAILS` içine eklenir |
+| Self-serve kaydı tamamen kapat, yalnızca davet | `ALLOW_SIGNUP=false` |
+| Açık kayıt (production için önerilmez) | Üçü de boş |
+
+## Kayıt kapalıyken yine de insanları davet edebilir misiniz?
+
+**Yalnızca zaten Multica hesabı olan kişileri.** Daveti kabul etmek kayıt izin listesini kontrol etmez; davetli zaten kayıt olduysa (örneğin başka bir çalışma alanında), davet bağlantısına tıklayıp oturum açarak kabul edebilir.
+
+**Ama hiç kayıt olmamış kişiler davetle kurtarılamaz.** Kabul etmeden önce oturum açmaları gerekir ve oturum açmanın ilk adımı (doğrulama kodu istemek) kayıt izin listesi kontrolünden geçer. `ALLOW_SIGNUP=false` ise veya e-postaları `ALLOWED_EMAILS` / `ALLOWED_EMAIL_DOMAINS` içinde değilse **kaydı tamamlayamazlar** ve bu nedenle daveti kabul edemezler.
+
+Henüz kayıt olmamış harici bir işbirlikçiyi davet etmek için: e-postasını geçici olarak `ALLOWED_EMAILS` içine ekleyin, kayıt olup daveti kabul etmesini bekleyin, ardından girdiyi kaldırın.
+
+Davetleri oluşturma ve kullanma için [Üyeler ve roller](/members-roles) sayfasına bakın.
+
+## Sonraki
+
+- [Ortam değişkenleri](/environment-variables) — bu sayfada kullanılan her değişkenin tam tanımı
+- [Kimlik doğrulama ve token'lar](/auth-tokens) — JWT / PAT / daemon token kategorileri ve kullanımı
+- [Sorun giderme](/troubleshooting) — doğrulama kodu gelmedi, OAuth `redirect_uri_mismatch`, kayıt reddedildi

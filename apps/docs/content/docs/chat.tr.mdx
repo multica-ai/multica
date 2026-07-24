@@ -1,0 +1,63 @@
+---
+title: Chat
+description: Herhangi bir issue dışında bir ajanla bire bir konuşma; tamamen yalıtılmıştır. Ajan issue'ları göremez veya değiştiremez, konuşmayı başka kimse göremez.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+**Chat, siz ve bir [ajan](/agents) arasında bire bir konuşmadır**; [issue](/issues) panosunun dışına çıkar. Ajan hiçbir issue görmez ve hiçbir issue'yu değiştiremez; tüm konuşma **tamamen özeldir** (admin'ler dahil [çalışma alanı](/workspaces) içindeki başka kimse göremez). Bir yaklaşıma dair ajanla konuşmaya, beyin fırtınasına veya herhangi bir issue'ya ait olmayan bir soru sormaya uygundur.
+
+## Neden sadece ajana @-mention yapmayalım?
+
+[@-mention](/mentioning-agents), **ajanı issue bağlamının içine çeker**; ajan issue açıklamasını ve tüm geçmiş yorumları okur, issue'yu değiştirebilir. Chat bunu tersine çevirir: **sizi issue'nun dışına çıkarır**. Ajan yalnızca bu tek konuşmayı görür, hiçbir issue'dan haberdar değildir ve bir issue'yu değiştirmek için giriş noktası yoktur.
+
+İki pratik kural:
+
+- Belirli bir issue'nun bağlamına dayalı geri bildirim istiyorsunuz → [@-mention](/mentioning-agents)
+- Herhangi bir issue ile ilgisiz bir konuyu tartışmak istiyorsunuz (veya tartışmayı başka kimsenin görmesini istemiyorsunuz) → Chat
+
+## Konuşma başlatma
+
+Kenar çubuğundan **Chat**'i açın, bir ajan seçin ve yeni bir konuşma başlatın. Arayüz herhangi bir mesajlaşma uygulaması gibidir: mesaj gönderirsiniz, ajan yanıtlar. Her mesaj arka planda bir çalıştırma tetikler (kuyruğa alınmış bir `task`), bu yüzden yanıtlar birkaç saniye sürebilir.
+
+## Ajan chat içinde ne yapabilir ve ne yapamaz
+
+Ajanlar konuşma içinde **tamamen yalıtılmış** modda çalışır.
+
+**Yapabilir:**
+
+- Mevcut mesajınızdaki soruları yanıtlayabilir
+- Yapılandırılmış [skills](/skills) ve MCP'yi kullanabilir
+- Kendi çalışma dizininde dosya okuyup yazabilir
+- Issue bağlamı gerektirmeyen `multica` CLI komutlarını çağırabilir (örneğin temel çalışma alanı bilgilerini sorgulama)
+
+**Yapamaz:**
+
+- **Herhangi bir issue göremez**; ajanın aldığı prompt'ta issue ID'leri yoktur ve `multica issue list` gibi komutlar boş döner
+- **Herhangi bir issue'yu değiştiremez**; issue bağlamı olmadan API çağrıları izin kontrolleriyle engellenir
+- **Başka konuşmaları göremez**; konuşmalar tamamen izoledir
+- **Kimseye veya herhangi bir ajana @-mention yapamaz**; chat, başkalarını bilgilendirecek yolu olmayan özel bir alandır
+
+## Çok turlu bağlam nasıl korunur
+
+Chat, çok turlu bağlamı **provider oturum sürdürme** ile korur. Ajan ilk yanıtında bir provider oturumu kurar (örneğin Claude oturumu) ve session ID saklanır. Sonraki mesajda task dispatch bu ID'yi geri verir; böylece ajan her seferinde geçmişi yeniden okumadan **kaldığı yerden devam eder**.
+
+**Bir tur başarısız olursa** Multica, session ID kurmuş önceki görevi bulur (o görev başarılı veya başarısız olmuş olabilir) ve resume etmeyi dener; ortadaki tek bir hata tüm konuşmanın belleğini düşürmez.
+
+Not: her provider oturum sürdürmeyi gerçekten uygulamaz; destek durumu için bkz. [**Providers Matrix**](/providers).
+
+## Konuşmayı arşivleme
+
+Artık görmek istemediğiniz konuşmalar arşivlenebilir; konuşma listesinde sağ tıklayın veya detay sayfasındaki "Archive" düğmesini kullanın. Arşivledikten sonra:
+
+- Konuşma aktif listeden kaybolur ("Archived" görünümünde hâlâ bulabilirsiniz)
+- Geçmiş mesajlar, session ID ve çalışma dizini korunur; hiçbir şey silinmez
+
+<Callout type="warning">
+**Arşivledikten sonra "restore" düğmesi yoktur.** Şu anda arşivlenmiş bir konuşmayı tekrar aktif hale getiren giriş noktası yok. Konuya daha sonra devam etmek isterseniz yeni bir konuşma başlatmanız gerekir. Arşivlenmiş konuşmadaki içeriği tekrar görmek için "Archived" görünümünü açıp geçmişi okuyun.
+</Callout>
+
+## Sonraki
+
+- [**Autopilots**](/autopilots) — ajanların zamanlamayla otomatik çalışmaya başlamasını sağlayın
+- [**Issue'ları ajanlara atama**](/assigning-issues) — konuyu issue panosuna geri taşıyın

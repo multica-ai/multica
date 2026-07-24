@@ -1,0 +1,82 @@
+---
+title: Mobile app (iOS)
+description: Açık kaynak Multica iOS app'ini kendi iPhone'unuzda nasıl build edersiniz; henüz App Store yok.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica'nın iOS client'ı açık kaynaktır ve web, desktop ve backend ile birlikte [main repo](https://github.com/multica-ai/multica) içinde yaşar. Henüz App Store'da değildir; bu değişene kadar iPhone'unda kullanmak isteyen herkes source'tan build eder. İlk build yaklaşık 10–20 dakika, sonrakiler yaklaşık 2 dakika sürer ve [multica.ai](https://multica.ai) ile aynı backend'e konuşur; bu yüzden mevcut hesabınız doğrudan çalışır.
+
+<Callout type="info">
+Bu sayfa **kişisel kullanım** içindir. App geliştiricileri repo içindeki [`apps/mobile/README.md`](https://github.com/multica-ai/multica/blob/main/apps/mobile/README.md) dosyasını okumalıdır; dev / staging varyantlarını ve tüm script matrisini kapsar.
+</Callout>
+
+## Gerekenler
+
+- Xcode kurulu bir **Mac** (App Store'dan ücretsiz).
+- Xcode → Settings → Accounts altında eklenmiş ücretsiz bir **Apple ID**. Ücretli Apple Developer Program hesabı isteğe bağlıdır ve yalnızca 7 günlük imzalama penceresini 1 yıla uzatır; aşağıdaki [7-day limit](#7-day-signing-limit) bölümüne bakın.
+- USB kabloyla bağlı, [Developer Mode etkin](https://docs.expo.dev/guides/ios-developer-mode/) bir **iPhone** (Settings → Privacy & Security → Developer Mode).
+- Multica kaynak kodu checkout edilmiş olmalı:
+
+  ```bash
+  git clone https://github.com/multica-ai/multica.git
+  cd multica
+  pnpm install
+  ```
+
+Bu listede eksik bir şey varsa Expo'nun [Set up your environment](https://docs.expo.dev/get-started/set-up-your-environment/) rehberinden geçin (**Development build → iOS Device** seçin). Repo checkout dışındaki her şey için canonical kurulum rehberi budur.
+
+## Build etme
+
+Tek komut:
+
+```bash
+pnpm ios:mobile:device:prod:release
+```
+
+Xcode build'i Apple ID'nizin otomatik sahip olduğu "Personal Team" ile imzalar. Bu team, herhangi bir Apple ID ile Xcode'a ilk kez giriş yaptığınızda sessizce oluşturulur; kurduğunuzu hatırlamasanız bile vardır. Bu bir **Release build**'dir: Metro bağımlılığı yok, splash → app, App Store kurulumu gibi.
+
+İlk build CocoaPods indirir ve React Native'i source'tan compile eder; 10–20 dakika bekleyin. Sonraki build'ler Xcode cache'ini yeniden kullanır.
+
+Tipik yol için hepsi bu. İmzalama başarısız olursa [Troubleshooting](#troubleshooting) bölümüne atlayın.
+
+## 7 günlük imzalama limiti
+
+Ücretsiz Apple ID build'leri **7 gün** imzalar. Sonrasında app iPhone'unuzda açılmayı reddeder ve "untrusted developer" hatası gösterir. Mac'inize tekrar bağlayın ve yeniden imzalamak için aynı komutu tekrar çalıştırın; veriniz app içinde değil backend'de yaşadığı için yerinde kalır.
+
+Bunu uzatmanın tek yolu bir **Apple Developer Program hesabıdır** ([developer.apple.com](https://developer.apple.com) üzerinden $99/yr). İmzalama yenilemeler arasında 1 yıl geçerli olur ve TestFlight ile başka cihazlara da dağıtabilirsiniz.
+
+## Güncelleme
+
+Henüz auto-update yok. Multica codebase ilerlediğinde pull edip yeniden build edin:
+
+```bash
+git pull
+pnpm install
+pnpm ios:mobile:device:prod:release
+```
+
+Sonraki build'ler hızlıdır çünkü Xcode native compile cache'ini kullanır.
+
+## Neden henüz App Store yok
+
+iOS app hâlâ hızlı değişiyor; ekip şu anda App Store review cycle'ları yerine ship-and-iterate tercih ediyor. Tam App Store release'inden önce en olası sonraki adım TestFlight beta'dır. O zamana kadar yukarıdaki self-build yolu Multica'yı iOS'ta kullanmanın tek yoludur.
+
+TestFlight açıldığında haber almak isterseniz [GitHub repo](https://github.com/multica-ai/multica)'yu watch edin.
+
+## Troubleshooting
+
+**"No matching provisioning profiles found"** — Xcode varsayılan bundle id `ai.multica.mobile` değerini Apple ID'nizle imzalamayı reddeder. Nadir, ama biri Apple developer portal'da bu prefix'i kaydettiyse olur. Kontrol ettiğiniz herhangi bir reverse-domain seçin (`com.yourname.multica` uygundur), export edin ve yeniden çalıştırın:
+
+```bash
+export EXPO_BUNDLE_IDENTIFIER_PROD=com.yourname.multica
+pnpm ios:mobile:device:prod:release
+```
+
+ID'nin bir anlamı olması gerekmez; Apple için başka team'ler tarafından claim edilmemiş olması yeterlidir.
+
+**"Could not launch &lt;app&gt;" / "Untrusted Developer"** — ya 7 günlük limite takıldınız (build'i yeniden çalıştırın) ya da iPhone'unuzda developer profile'a elle güvenmeniz gerekiyor: Settings → General → VPN & Device Management → Apple ID'nize dokunun → Trust.
+
+**Build `Pod install` üzerinde takılıyor veya sonsuza kadar compile ediyor** — ilk build gerçekten 10–20 dakika sürer çünkü CocoaPods bağımlılıkları indirir ve Xcode React Native'i source'tan compile eder. Sonraki build'ler çok daha hızlıdır.
+
+**App backend'e ulaşamıyor** — `apps/mobile/.env.production` değiştirilmemiş mi kontrol edin (içinde `EXPO_PUBLIC_API_URL=https://api.multica.ai` gelir). Değiştirdiyseniz `git checkout apps/mobile/.env.production` ile geri alın.

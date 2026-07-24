@@ -1,0 +1,75 @@
+{
+  "title": "Faturalandırma (test sayfası)",
+  "subtitle": "multica-cloud'un /api/v1/billing/* uçlarına doğrudan geçiş. Bitmiş bir arayüz değil — proxy + Stripe akışını doğrulayabilmek için tüm uç noktaların tek sayfada toplanmış hali.",
+  "endpoints": {
+    "balance": "GET /api/cloud-billing/balance",
+    "transactions": "GET /api/cloud-billing/transactions",
+    "batches": "GET /api/cloud-billing/batches",
+    "topups": "GET /api/cloud-billing/topups",
+    "buy": "GET /price-tiers · POST /checkout-sessions · POST /portal-sessions"
+  },
+  "balance": {
+    "title": "Bakiye",
+    "credits_suffix": "kredi",
+    "meta": "ham micro: {{micro}} · sahip: {{owner}}… · güncellendi {{updated}}"
+  },
+  "buy": {
+    "title": "Kredi al / Faturalandırmayı yönet",
+    "no_tiers": "Tanımlı fiyat kademesi yok. Cloud'da muhtemelen Stripe anahtarı ayarlı değil — ödeme 503 dönecek.",
+    "tier_money_to_credits": "{{money}} → {{credits}} kredi",
+    "tier_bonus": " + {{credits}} bonus",
+    "tier_bonus_with_expiry": " + {{credits}} bonus ({{expiry}})",
+    "tier_id": "id: {{id}}",
+    "open_portal": "Stripe Faturalandırma Portalını Aç",
+    "portal_hint": "Henüz ödeme yapmamış kullanıcılar için 400 beklenen bir durumdur (Stripe müşteri kaydı yok).",
+    "toast_no_url": "Cloud ödeme URL'si döndürmedi",
+    "toast_checkout_failed": "Ödeme başarısız",
+    "toast_no_portal_url": "Portal URL'si döndürülmedi",
+    "toast_portal_failed": "Portal başarısız"
+  },
+  "checkout": {
+    "session_label": "Ödeme oturumu {{prefix}}…",
+    "loading": "Sipariş durumu yükleniyor…",
+    "fetch_failed": "Durum alınamadı: {{error}}",
+    "fetch_failed_unknown": "bilinmeyen hata",
+    "final_status": "Son durum: {{status}}",
+    "polling_status": "Durum sorgulanıyor… mevcut: {{status}}",
+    "status_unknown": "bilinmiyor",
+    "label_order": "Sipariş",
+    "label_tier": "Kademe",
+    "label_charged": "Tahsil edilen",
+    "charged_value": "{{money}} · {{credits}} kredi",
+    "charged_with_bonus": "{{money}} · {{credits}} kredi + {{bonus}} bonus",
+    "clear_url": "URL'den temizle"
+  },
+  "transactions": {
+    "title": "İşlemler",
+    "empty": "Henüz işlem yok.",
+    "credits_value": "{{value}} kredi",
+    "row_meta": "{{date}} · sonraki bakiye: {{balance}} kredi · ref: {{ref}}",
+    "ref_empty": "—"
+  },
+  "batches": {
+    "title": "Kredi paketleri",
+    "empty": "Henüz paket yok.",
+    "remaining_over_total": "{{remaining}} / {{total}} kredi",
+    "id_suffix": "{{id}}…",
+    "consumed": "Kullanılan: {{value}} kredi",
+    "expires_suffix": " · son kullanım {{value}}",
+    "never_expires_suffix": " · süresiz"
+  },
+  "topups": {
+    "title": "Yükleme siparişleri",
+    "empty": "Henüz yükleme siparişi yok.",
+    "amount_to_credits": "{{money}} → {{credits}} kredi",
+    "amount_to_credits_with_bonus": "{{money}} → {{credits}} kredi + {{bonus}} bonus",
+    "row_meta": "{{date}} · stripe: {{checkout}}",
+    "stripe_empty": "—"
+  },
+  "shared": {
+    "request_failed": "İstek başarısız",
+    "refresh": "Yenile",
+    "paging": "sayfa {{page}} / {{totalPages}} · toplam {{total}}",
+    "date_dash": "—"
+  }
+}

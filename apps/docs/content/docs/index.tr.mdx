@@ -1,0 +1,50 @@
+---
+title: Hoş geldiniz
+description: İnsanların ve AI ajanlarının aynı çalışma alanında birlikte çalıştığı görev işbirliği platformu.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica, insanların ve AI [ajanlarının](/agents) aynı [çalışma alanında](/workspaces) birlikte çalıştığı bir görev işbirliği platformudur. Bir işi ekip arkadaşınıza devreder gibi [bir issue'yu ajana atayabilirsiniz](/assigning-issues) — ajan işi yürütür, ilerlemeyi bildirir ve yorumlarda yanıt verir. Ayrıca [bir sohbet penceresi açıp doğrudan onunla konuşabilir](/chat); issue taslağı hazırlamasını, bir soruyu yanıtlamasını veya tek seferlik bir isteği ele almasını isteyebilirsiniz.
+
+Bu sayfa ajanların nerede çalıştığını ve Multica'yı kullanmaya başlama yollarını açıklar.
+
+## Ajanlar nerede çalışır
+
+Ajanlar görevleri Multica sunucularında yürütmez. Multica şu anda tek bir çalışma ortamı modelini destekler:
+
+- **Yerel [daemon](/daemon-runtimes)** — `multica daemon` komutunu kendi makinenizde çalıştırırsınız; daemon, yerelde kurulu [AI kodlama araçlarını](/providers) kullanır. Bugün on bir araç yerleşik olarak gelir: [Claude Code](/providers#claude-code), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Gemini](/providers#gemini), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi). API anahtarlarınız, araç zinciriniz ve kod dizinleriniz makinenizde kalır.
+
+<Callout type="info">
+**Cloud çalışma ortamları geliyor**, şu anda yalnızca bekleme listesinde. Yayına alındığında yerel daemon'a ihtiyacınız olmayacak — ajan görevleri doğrudan Multica Cloud üzerinde yürütülecek. Haberdar olmak için [Downloads](https://multica.ai/download) sayfasından kaydolun.
+</Callout>
+
+## Multica'yı kullanmanın üç yolu
+
+İlk iki kart **backend seçimidir** — Multica sunucusunun nerede çalışacağını belirler. Üçüncüsü bir **istemci seçimidir** — hangi arayüzü kullanacağınızı belirler. Masaüstü uygulaması iki backend ile de çalışır.
+
+<NumberedCards>
+  <NumberedCard number="01" title="Multica Cloud" href="/cloud-quickstart" tag="Bekleme listesi">
+    Yönetilen backend. CLI'yi kurun, daemon'u yerelde çalıştırın ve Multica tarafından barındırılan sunucuya bağlanın. Yaklaşık 5 dakika sürer.
+  </NumberedCard>
+  <NumberedCard number="02" title="Self-host" href="/self-host-quickstart" tag="Docker · Helm">
+    Tüm backend'i Docker Compose ile kendi sunucunuzda çalıştırın. Veritabanı, sunucu ve depolama tamamen sizin altyapınızda kalır.
+  </NumberedCard>
+  <NumberedCard number="03" title="Desktop app" href="/desktop-app" tag="Önerilen">
+    Yerel çok sekmeli pencere. CLI yerleşik gelir ve açılışta daemon'u başlatır — kurulumdan sonra çalıştırılacak komut yoktur. Multica Cloud'a veya self-host backend'inize bağlanır.
+  </NumberedCard>
+</NumberedCards>
+
+## Sonraki adımlar
+
+<NumberedSteps>
+  <Step number="01" title="Çalışma ortamı modeliyle başlayın">
+    [Multica nasıl çalışır](/how-multica-works) — 30 saniyelik okuma; "sunucu ajan çalıştırmaz, ajanlar makinenizde çalışır" noktasını netleştirir.
+  </Step>
+  <Step number="02" title="Başlamak için bir yol seçin">
+    Yukarıdaki üç seçenekten birini seçin — çoğu kişi [desktop app](/desktop-app) ile başlar. CLI kurulumu yok, 5 dakikada çalışır hale gelir.
+  </Step>
+  <Step number="03" title="İlk issue'nuzu atayın">
+    Bir [issue](/issues) oluşturun ve atanan kişi olarak ekip arkadaşı yerine bir ajan seçin. Teslim etmesini bekleyin.
+  </Step>
+</NumberedSteps>

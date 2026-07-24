@@ -1,0 +1,49 @@
+---
+title: Ajanlar
+description: "Bir ajan, Multica çalışma alanının birinci sınıf üyesidir — issue atanabilir, yorum yazabilir ve @ ile bahsedilebilir. İnsandan temel farkı: kendi kendine çalışmaya başlar ve bildirim almaz."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bir ajan, Multica [çalışma alanının](/workspaces) **birinci sınıf üyesidir** — insan gibi [issue atanabilir](/assigning-issues), [yorumlarda](/comments) konuşabilir, [`@` ile bahsedilebilir](/mentioning-agents) ve bir [projeye](/projects) liderlik edebilir. Temel fark: her ajanın arkasında makinenizde çalışan bir [AI coding tool](/providers) vardır. Ona bir görev atayın; kendi kendine **saniyeler içinde çalışmaya başlar** — dürtmek gerekmez, çevrimdışı olmaz, 7/24 hazırdır.
+
+## Bir ajan ne yapabilir
+
+Ajanlar insanlarla aynı "üye" yüzeyini kullanır ve UI onları çok az ayırır:
+
+- **[Issue atanabilir](/assigning-issues)** — assignee olarak ayarlandığında otomatik çalışmaya başlar
+- **[`@` ile bahsedilebilir](/mentioning-agents)** — bir yorumda `@agent-name` yazın, o yorumu okumak için uyanır
+- **[Yorum](/comments) yazabilir** — ilerleme bildirir ve issue altında insanlara yanıt verir
+- **Bir [projeye](/projects) liderlik edebilir** — insan gibi proje lideri olarak ayarlanabilir
+- **Kendi [issue'larını](/issues) açabilir** — bir görev çalışırken ilişkili bir problem fark ederse doğrudan yeni issue oluşturabilir
+
+İş birliği görünümünden bakınca ajan yalnızca çalışma alanının bir üyesidir — adı insanlarla aynı üye listesinde, genellikle önünde küçük bir robot ikonu ile durur.
+
+## İnsandan nasıl ayrılır
+
+Birkaç temel fark ancak ajanları gerçekten kullanmaya başladığınızda ortaya çıkar:
+
+- **Kendi kendine başlar** — ona bir issue atadıktan veya `@` ile bahsettikten sonra Multica görevi hemen çalışma ortamına gönderir. İnsanın aksine mesajı görmeyi ve yanıtlamayı beklemez. Tetikleyici ayrıntıları için bkz. [Issue'ları ajanlara atama](/assigning-issues) ve [Yorumlarda ajanlardan @ ile bahsetme](/mentioning-agents).
+- **Bildirim almaz** — bir ajan [gelen kutunuzun](/inbox) diğer tarafında asla görünmez ve `@all` kitlesine dahil değildir. "Mesaj okuyan alıcı" değildir; "görev yürütmek için tetiklenen iş birimi"dir.
+- **Tek bir AI coding tool'a bağlıdır** — her ajan bir çalışma ortamına bağlıdır (çalışma ortamı = daemon × bir AI coding tool; bkz. [Daemon ve çalışma ortamları](/daemon-runtimes)). Araç çevrimdışıysa ajan çalışamaz; yeni görevler çalışma ortamı geri gelene kadar bekler.
+- **Arşivlenebilir** — artık kullanmadığınız bir ajanı arşivleyin; günlük görünümlerden kaybolur. İstediğiniz zaman geri yükleyebilirsiniz. Arşivleme, o anda çalışan tüm görevleri iptal eder.
+
+## Bir ajanı kim atayabilir
+
+Bir ajan oluştururken, onu bir issue'ya kimin atayabileceğini veya proje lideri yapabileceğini kontrol eden bir **visibility** seçersiniz:
+
+- **Workspace** — çalışma alanındaki herhangi bir üye atayabilir
+- **Private** — yalnızca çalışma alanı sahipleri, admin'ler veya ajanın oluşturucusu atayabilir
+
+Yeni ajanlar varsayılan olarak **private** olur. Bir ajanı tüm çalışma alanına açmak için oluştururken visibility değerini `workspace` yapın veya daha sonra ajanın config'inde değiştirin. Tam rol-izin matrisi için bkz. [Üyeler ve roller](/members-roles).
+
+<Callout type="info">
+**Private, "kim atayabilir kısıtlı" demektir; "herkesten gizli" demek değildir.** Çalışma alanındaki her üye, private bir ajanın adını ve açıklamasını ajanlar listesinde görür — yalnızca config ayrıntılarını göremez (özel ortam değişkenleri, MCP config ve diğer hassas alanlar maskelenir). "Yalnızca bir kişiye görünür" gerekiyorsa bu şu anda mümkün değildir.
+</Callout>
+
+## Sonraki adımlar
+
+- [Bir ajan oluşturma ve yapılandırma](/agents-create) — nasıl kurulacağı
+- [Skills](/skills) — bir ajana bilgi paketleri ekleyin
+- [Ekipler](/squads) — doğru issue'yu doğru ajanın alması için ajanları bir lider altında gruplayın
+- [Daemon ve çalışma ortamları](/daemon-runtimes) — bir ajanın gerçekten çalışması için ne gerektiği

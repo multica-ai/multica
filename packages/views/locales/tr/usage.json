@@ -1,0 +1,58 @@
+{
+  "title": "Kullanım",
+  "subtitle": "Bu çalışma alanı genelinde token harcaması ve ajan etkinliği.",
+  "filter": {
+    "project_label": "Proje",
+    "all_projects": "Tüm projeler",
+    "period_label": "Dönem"
+  },
+  "kpi": {
+    "cost_label": "Maliyet · {{days}}G",
+    "tokens_label": "Tokenlar · {{days}}G",
+    "tokens_hint": "Girdi {{input}} · Çıktı {{output}}",
+    "run_time_label": "Çalışma süresi · {{days}}G",
+    "run_time_hint": "{{tasks}} görev genelinde",
+    "tasks_label": "Görevler · {{days}}G",
+    "tasks_hint": "{{failed}} başarısız"
+  },
+  "dim": {
+    "label": "Boyut",
+    "daily": "Günlük",
+    "weekly": "Haftalık"
+  },
+  "daily": {
+    "title_cost": "Günlük maliyet",
+    "title_tokens": "Günlük tokenlar",
+    "title_time": "Günlük çalışma süresi",
+    "title_tasks": "Günlük görevler",
+    "metric_cost": "Maliyet",
+    "metric_tokens": "Tokenlar",
+    "metric_time": "Süre",
+    "metric_tasks": "Görevler",
+    "no_data": "Bu aralıkta kullanım yok."
+  },
+  "weekly": {
+    "title_cost": "Haftalık maliyet",
+    "title_tokens": "Haftalık tokenlar",
+    "title_time": "Haftalık çalışma süresi",
+    "title_tasks": "Haftalık görevler",
+    "partial_label": "{{range}} (kısmi · {{covered}} / 7 gün)"
+  },
+  "leaderboard": {
+    "title": "Liderlik tablosu",
+    "caption": "{{count}} ajan",
+    "header_agent": "Ajan",
+    "header_tokens": "Tokenlar",
+    "header_cost": "Maliyet",
+    "header_time": "Süre",
+    "header_tasks": "Görevler",
+    "no_data": "Bu aralıkta ajan etkinliği yok."
+  },
+  "empty": {
+    "title": "Henüz kullanım yok",
+    "body": "Ajanlar burada görev çalıştırmaya başladığında token harcamaları ve çalışma süreleri bu görünümde gösterilecek."
+  },
+  "duration": {
+    "less_than_minute": "<1d"
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "save": "Kaydet",
+  "cancel": "İptal",
+  "delete": "Sil",
+  "confirm": "Onayla",
+  "loading": "Yükleniyor...",
+  "time": {
+    "just_now": "az önce",
+    "minutes_ago": "{{count}} dk önce",
+    "hours_ago": "{{count}} sa önce",
+    "days_ago": "{{count}} gün önce"
+  }
+}

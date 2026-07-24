@@ -1,0 +1,151 @@
+---
+title: Autopilots
+description: Ajanların cron zamanlamasıyla, inbound webhook ile veya UI/CLI üzerinden bir kez elle çalışmaya başlamasını sağlayın.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Autopilots, [ajanların](/agents) **zamanlamayla otomatik çalışmaya başlamasını** sağlar. Bir cron ifadesi ve saat dilimi yapılandırırsınız; Multica siz hiçbir şey tetiklemeden kendi başına bir [`task`](/tasks) dispatch eder. Periyodik kontroller, yinelenen raporlar ve gece temizlik işleri için uygundur; işin "kalıcı talimat" biçimidir. Diğer üç tetikleme yolu ([atama](/assigning-issues), [@-mention](/mentioning-agents) ve [chat](/chat); bunlarda işi siz başlatırsınız) ile karşılaştırıldığında Autopilots'ın temel farkı **zaman odaklı** olmasıdır.
+
+## Autopilot yapılandırma
+
+Çalışma alanının **Autopilot** sayfasında yeni bir autopilot oluşturun. Şunları ayarlarsınız:
+
+- **Name** — görünen ad
+- **Agent** — çalıştırmanın dispatch edileceği kişi
+- **Priority** — ürettiği `task` tarafından devralınır (issue önceliğiyle aynı semantik)
+- **Description / prompt** — ajanın her çalıştırmada aldığı iş açıklaması
+- **Execution mode** — aşağıya bakın
+- **Triggers** — en az bir `schedule` (cron + timezone) veya `webhook`
+
+## Yürütme modu seçme
+
+Bir autopilot'ın iki yürütme modu vardır. **"create issue" modu ile başlayın.**
+
+- **Create issue mode** (`create_issue`) — varsayılan, **önerilir**. Her tetikleyici önce çalışma alanında bir issue oluşturur (başlık şu anda tek bir placeholder destekler: `{{date}}`; UTC tarihi `YYYY-MM-DD` formatında ekler. Diğer tüm `{{...}}` token'ları oluşturma sırasında reddedilir, böylece yazım hatası issue başlıklarınıza literal string olarak sessizce düşmez), sonra issue'yu normal atama akışıyla ajana atar. Tüm iş, elle atanmış issue ile aynı geçmiş, yorum ve durumla issue panosuna düşer.
+- **Run-only mode** (`run_only`) — issue oluşturmayı atlar ve doğrudan bir `task` kuyruğa alır. Çalıştırma panoda görünmez; yalnızca autopilot'ın run history'sinde görebilirsiniz.
+
+## Zamanlamayla çalıştırma
+
+Her autopilot en az bir `schedule` tetikleyicisine ihtiyaç duyar. Cron **standart 5 alanlı formatı** kullanır (dakika saat gün ay haftanın günü) ve minimum granülerlik **1 dakikadır** (saniye yok). Timezone IANA formatındadır (örneğin `Asia/Shanghai`) ve cron ifadesinin hangi saat diliminde yorumlanacağını belirler.
+
+Birkaç örnek:
+
+- `0 9 * * 1-5`, `Asia/Shanghai` — hafta içi Pekin saatiyle 9 AM
+- `*/30 * * * *`, `UTC` — her 30 dakikada bir
+- `0 3 * * *`, `UTC` — her gün 3 AM UTC
+
+Multica sunucusu zamanı gelen tetikleyicileri her **30 saniyede** bir tarar; **gerçek tetiklenme zamanı 30 saniyeye kadar gecikebilir**, saniye hassasiyetinde değildir. Sunucu bir tetiklenme zamanı boyunca yeniden başlatılırsa başlangıçta kaçırılan tetikleyicileri yakalar (hiçbir şey kaybolmaz ama hemen tetiklenirler).
+
+## Bir kez elle tetikleme
+
+Bir autopilot'ta hata ayıklarken cron beklememek için elle tetikleyin:
+
+- UI: autopilot detay sayfasında "Run now"a tıklayın
+- CLI:
+
+```bash
+multica autopilot trigger <autopilot-id>
+```
+
+Elle tetikleme, `schedule` tetikleyicisiyle tamamen aynı yürütme akışından geçer; yalnızca run kaydındaki `source` alanı `manual` olarak işaretlenir.
+
+## Webhook'tan tetikleme
+
+Autopilots inbound HTTP webhook'larla da tetiklenebilir. Autopilot detay sayfasında bir **Webhook** tetikleyicisi ekleyin; Multica şu biçimde benzersiz bir URL üretir:
+
+```
+https://<your-multica-host>/api/webhooks/autopilots/awt_…
+```
+
+Bu URL'ye herhangi bir JSON POST edin; Multica `source = webhook` ile bir run kaydeder, gövdeyi run'ın `trigger_payload` alanında saklar ve ajanı schedule tetikleyicisiyle aynı şekilde dispatch eder.
+
+```bash
+curl -X POST "$MULTICA_WEBHOOK_URL" \
+  -H "Content-Type: application/json" \
+  -d '{"event":"demo.received","eventPayload":{"message":"hello"}}'
+```
+
+**Create issue mode** içinde inbound payload yeni issue'nun açıklamasına eklenir; böylece ajan bunu inline okuyabilir. **Run-only mode** içinde payload, daemon'un ajana verdiği run bağlamının parçasıdır.
+
+### Payload şekli
+
+Kendi zarfınızı gönderebilirsiniz:
+
+```json
+{ "event": "github.pull_request.opened", "eventPayload": { } }
+```
+
+…veya herhangi bir JSON nesnesi/dizisi. Multica bunu iç zarfına normalize eder:
+
+```json
+{
+  "event": "<inferred>",
+  "eventPayload": <your body>,
+  "request": { "receivedAt": "<rfc3339>", "contentType": "application/json" }
+}
+```
+
+`event` alanı sağlamadığınızda Multica bunu yaygın header ve gövde alanlarından çıkarır (`X-GitHub-Event` + body `action`, `X-Gitlab-Event`, `X-Event-Type`, body `event`/`type`/`action`). Hiçbiri eşleşmezse event `webhook.received` olur.
+
+GitHub veya benzeri kaynakları yapılandırırken content type'ı `application/json` yapın; form-encoded webhook payload'ları kabul edilmez.
+
+### URL bir bearer secret'tır
+
+Üretilen URL **kimlik bilgisidir**. Ona sahip olan herkes autopilot'ı tetikleyebilir. Token gibi davranın:
+
+- **Public issue thread'lerine, ekran görüntülerine veya chat geçmişine yapıştırmayın.**
+- **Sızarsa rotate edin**; tetikleyici satırında "Rotate URL"a tıklayın veya `multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>` çalıştırın. Eski URL hemen çalışmayı bırakır.
+- Güçlü kaynak doğrulaması gerektiren kaynaklar için per-trigger HMAC signature verification'ı bekleyin; bu v1 URL yalnızca bearer'dır.
+- Autopilot'ı görüntüleyebilen çalışma alanı üyeleri şimdilik webhook URL'lerini okuyabilir; rol bazlı daha sıkı secret görünürlüğü takip işidir.
+
+### Status-code semantiği
+
+Multica normal no-op sonuçları için `status` alanıyla `200 OK` döndürür; böylece provider'ınızın webhook-retry mekanizması URL'yi sürekli zorlamaz:
+
+- `{"status":"accepted","run_id":"…","autopilot_id":"…","trigger_id":"…"}` — bir run dispatch edildi.
+- `{"status":"skipped","run_id":"…","reason":"agent runtime is offline at dispatch time"}` — atananın çalışma ortamı offline; `skipped` run olarak kaydedildi.
+- `{"status":"ignored","reason":"trigger_disabled"}` — tetikleyici disabled.
+- `{"status":"ignored","reason":"autopilot_paused"}` — autopilot paused.
+- `{"status":"ignored","reason":"autopilot_archived"}` — autopilot archived.
+
+2xx olmayan yanıtlar gerçek hataları kapsar:
+
+- `400` — geçersiz JSON, scalar body veya boş body.
+- `404` — bilinmeyen token (`{"error":"webhook not found"}`).
+- `413` — payload 256 KiB sınırını aştı.
+- `429` — token başına rate limit aşıldı (varsayılan 60 req/min).
+
+### Self-hosted: public URL'nizi yapılandırma
+
+Sunucuda `MULTICA_PUBLIC_URL` ayarlandığında (ör. `https://multica.example.com`), tetikleyici yanıtı mutlak bir `webhook_url` içerir ve UI kopyalamaya hazır bir URL gösterir. Yoksa UI URL'yi istemcinin API origin'inden oluşturur; bu desktop ve same-origin web için uygundur, ancak özel self-hosted reverse proxy'ler için uygun olmayabilir. Multica, yanlış yapılandırılmış bir reverse proxy'nin sunucuyu saldırgan kontrolündeki host'a giden webhook URL'leri üretmeye kandıramaması için public host'u bilerek `Host` / `X-Forwarded-Host` header'larından türetmez.
+
+## Run history görüntüleme
+
+Her tetikleyici, autopilot detay sayfasındaki "History" sekmesinde görünen bir **run kaydı** üretir:
+
+- Trigger source (`schedule` / `manual` / `webhook`)
+- Başlangıç zamanı, tamamlanma zamanı
+- Status (`issue_created` / `running` / `completed` / `failed` / `skipped`)
+- Bağlı issue (create issue mode) veya `task` (run-only mode)
+- Failure reason (başarısız veya skipped ise)
+
+## Bir autopilot başarısız olduğunda ne olur
+
+<Callout type="warning">
+**Autopilot hataları otomatik yeniden denenmez ve gelen kutusu bildirimi göndermez.** Hata, run history'de `failed` kaydı bırakır; assign veya @-mention gibi sistem düzeyinde yeniden kuyruğa alma yoktur ve kimseye bildirim gitmez. Autopilot periyodikse **bir sonraki cron tetiklenmesi yeni bir run başlatır**, ancak başarısız iş otomatik yeniden çalıştırılmaz.
+
+Autopilot önemliyse kendi izlemenizi tasarlayın; örneğin ajanın başarıda yorum yazmasını sağlayın ve eksik yorumları fark ederek hataları yakalayın.
+</Callout>
+
+Neden otomatik yeniden deneme yok: autopilot'lar zaten periyodiktir, bu yüzden sistem düzeyinde yeniden deneme eklemek sıradaki planlı çalıştırmanın üstüne biner ve çift yürütmeler oluşturur. Zamanlamayı tamamen cron'a bırakmak akışı temiz tutar.
+
+## Henüz mevcut olmayanlar
+
+**API-kind tetikleyiciler bağlı değil.** Tetikleyici şeması bir `api` kind ayırır, ancak bunu çalıştıran ingress route yoktur; UI mevcut satırlar için Deprecated rozeti gösterir ve copy/rotate kolaylığı sunmaz. Per-trigger HMAC signature verification, IP allowlist'leri ve provider'a özel event preset'leri takip işleri olarak izlenir; v1 URL'ler yalnızca bearer'dır.
+
+## Sonraki
+
+- [**Issue'ları ajanlara atama**](/assigning-issues) — bir issue'nun tek seferlik olarak ajana devri
+- [**Yorumlarda ajanlara @-mention yapma**](/mentioning-agents) — bir yorumdan ajanın bakmasını sağlama
+- [**Chat**](/chat) — herhangi bir issue dışında bire bir konuşma

@@ -1,0 +1,41 @@
+{
+  "nav": {
+    "inbox": "Gelen Kutusu",
+    "my_issues": "Issue'larım",
+    "issues": "Issue'lar",
+    "projects": "Projeler",
+    "autopilots": "Autopilot",
+    "agents": "Ajanlar",
+    "squads": "Ekipler",
+    "usage": "Kullanım",
+    "runtimes": "Çalışma ortamları",
+    "skills": "Skill'ler",
+    "settings": "Ayarlar"
+  },
+  "help": {
+    "trigger": "Yardım",
+    "docs": "Dokümanlar",
+    "changelog": "Değişiklikler",
+    "feedback": "Geri bildirim"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Çalışma alanı yükleniyor…",
+    "loading_named_prefix": "Yükleniyor"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Sabitlemeyi kaldır",
+    "workspaces_label": "Çalışma alanları",
+    "create_workspace": "Çalışma alanı oluştur",
+    "pending_invitations_label": "Bekleyen davetler",
+    "invitation_workspace_fallback": "Çalışma alanı",
+    "invitation_join": "Katıl",
+    "invitation_decline": "Reddet",
+    "log_out": "Çıkış yap",
+    "new_issue": "Yeni issue",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Sabitlenenler",
+    "workspace_group": "Çalışma alanı",
+    "configure_group": "Yapılandır",
+    "unread_overflow": "99+"
+  }
+}

@@ -1,0 +1,80 @@
+---
+title: "Kimlik doğrulama ve token'lar"
+description: "Multica'da üç tür token vardır: tarayıcı, CLI ve daemon için birer tane. Hangisini ne zaman kullanmalı."
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica'da her bağlam için bir token olmak üzere üç tür token vardır: tarayıcı Web UI, komut satırı ve script'ler, daemon. Üçü de aynı sizi temsil eder, ancak kapsamları ve ömürleri farklıdır.
+
+## Üç token
+
+| Token | Format | Where it's used | Lifetime |
+|---|---|---|---|
+| **JWT cookie** | `multica_auth` cookie (HttpOnly) | Web tarayıcısı | 30 gün |
+| **Personal access token (PAT)** | `mul_` ile başlar | CLI, script'ler, doğrudan API çağrıları | Varsayılan olarak süresiz; API üzerinden oluştururken `expires_in_days` geçebilirsiniz |
+| **Daemon token** | `mdt_` ile başlar | Daemon-sunucu iletişimi | Daemon tarafından yönetilir |
+
+Günlük kullanımda doğrudan yalnızca ilk ikisine dokunursunuz. **[Daemon](/daemon-runtimes) token** `multica daemon login` tarafından otomatik oluşturulur ve yenilenir; düşünmeniz gerekmez.
+
+## Her token neye erişebilir
+
+| API route | JWT cookie | PAT | Daemon token |
+|---|---|---|---|
+| `/api/user/*` (user-level actions) | ✓ | ✓ | ✗ |
+| `/api/workspaces/:id/*` (workspace-level) | ✓ | ✓ | ✗ |
+| `/api/daemon/*` (daemon-only) | ✗ | ✓ | ✓ |
+| WebSocket `/ws` (real-time push) | ✓ (cookie) | ✓ (authenticates via first message) | ✗ |
+
+**PAT neredeyse her şeye erişebilir**; "tam sizi" temsil eder. Daemon token yalnızca daemon'ın ihtiyaç duyduğu şeyleri yapabilir: görevleri almak ve sonuçları bildirmek.
+
+**İkisi de `/api/daemon/*` erişebilir, ancak kapsamları farklıdır.** PAT **tüm kullanıcıyı** temsil eder; kimlik doğrulandıktan sonra ait olduğunuz her çalışma alanını görebilir. Daemon token oluşturulduğu anda tek bir çalışma alanına sabitlenir ve yalnızca o çalışma alanındaki kaynaklara dokunabilir. Production ortamında daemon'ınızı daemon token ile çalıştırın; PAT kullanma kısa yolunu kullanmayın, yoksa daemon'a gerekenden çok daha fazla yetki vermiş olursunuz.
+
+## Oturum açma
+
+### E-posta + doğrulama kodu
+
+1. E-postanızı girin; sunucu 6 haneli kod gönderir.
+2. Kodu girin; sunucu JWT cookie verir (tarayıcı) veya PAT ile değiştirir (CLI).
+
+<Callout type="warning">
+**Self-hosting operatörleri, dikkat**: public dağıtımlarda `MULTICA_DEV_VERIFICATION_CODE` değerini boş bırakın. Sabit yerel test kodunu etkinleştirirseniz, kod isteyebilen herkes `APP_ENV` production değilken bu değerle oturum açabilir. [Self-host auth yapılandırması](/auth-setup) sayfasına bakın.
+</Callout>
+
+### Google OAuth
+
+**Sign in with Google** butonuna tıklayın ve standart OAuth callback akışından geçin. Self-hosting için `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET` ve redirect URI yapılandırılmış olmalıdır; [Self-host auth yapılandırması](/auth-setup) sayfasına bakın.
+
+## PAT oluşturma, görüntüleme ve revoke etme
+
+PAT **oluşturmanın** iki yolu vardır:
+
+- **Web UI**: Settings → Personal Access Tokens → New token
+- **CLI**: Yerel PAT yoksa `multica login` otomatik olarak bir tane oluşturur
+
+<Callout type="warning">
+**Tam PAT oluşturulduğunda tam olarak bir kez gösterilir.** Dialog'u yeniledikten veya kapattıktan sonra tekrar göremezsiniz.
+
+Multica veritabanında PAT'nin yalnızca hash'ini saklar; sunucu bile orijinali geri alamaz. Hemen kopyalayıp kaydedin. Kaybederseniz tek seçeneğiniz revoke edip yeni bir tane oluşturmaktır.
+</Callout>
+
+Mevcut PAT'leri **görüntüleme** (ad, oluşturulma zamanı, son kullanım zamanı; tam token **değil**) Settings → Personal Access Tokens altında bulunur.
+
+PAT **revoke etme**: listede Revoke'a tıklayın. Revocation hemen etkili olur; bu PAT ile yapılan sonraki istek 401 ile reddedilir.
+
+## Çıkış yapmak yalnızca yerel token'ı siler
+
+`multica auth logout` çalıştırdığınızda veya Web UI'da çıkış yaptığınızda:
+
+- **Yerel token temizlenir** — CLI PAT'yi `~/.multica/config.json` dosyasından kaldırır; tarayıcı cookie'yi siler.
+- **PAT sunucuda hâlâ geçerlidir** — biri siz çıkış yapmadan önce PAT'nizi aldıysa (örneğin başka bir makineye kopyalayarak) **kullanmaya devam edebilir**.
+
+<Callout type="warning">
+**PAT'nizin sızdığından şüpheleniyorsanız yalnızca çıkış yapmayın.** Settings → Personal Access Tokens'a gidin ve token'ı **revoke** edin. Yalnızca revocation sızmış token'ı anında geçersiz kılar.
+</Callout>
+
+## Sonraki adımlar
+
+- [CLI komut referansı](/cli) — her CLI komutu için kimlik doğrulama otomatiktir
+- [Self-host auth yapılandırması](/auth-setup) — self-hosting sırasında e-posta, OAuth ve kayıt izin listeleri nasıl yapılandırılır
+- [Daemon ve çalışma ortamları](/daemon-runtimes) — daemon token'ın nereden geldiği

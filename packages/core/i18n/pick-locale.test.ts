@@ -22,6 +22,7 @@ describe("matchLocale", () => {
     expect(matchLocale(["zh-Hans"])).toBe("zh-Hans");
     expect(matchLocale(["ko"])).toBe("ko");
     expect(matchLocale(["ja"])).toBe("ja");
+    expect(matchLocale(["tr"])).toBe("tr");
     expect(matchLocale(["en"])).toBe("en");
   });
 
@@ -30,6 +31,7 @@ describe("matchLocale", () => {
     expect(matchLocale(["zh-Hans-CN"])).toBe("zh-Hans");
     expect(matchLocale(["ko-KR"])).toBe("ko");
     expect(matchLocale(["ja-JP"])).toBe("ja");
+    expect(matchLocale(["tr-TR"])).toBe("tr");
   });
 
   it("falls back to DEFAULT_LOCALE when no candidate matches", () => {

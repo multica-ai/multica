@@ -1,0 +1,132 @@
+{
+  "fab": {
+    "running": "Multica çalışıyor...",
+    "unread_one": "{{count}} okunmamış sohbet",
+    "unread_other": "{{count}} okunmamış sohbet",
+    "default": "Multica'ya sor"
+  },
+  "input": {
+    "placeholder_no_agent": "Sohbete başlamak için bir ajan oluşturun",
+    "placeholder_archived": "Bu oturum arşivlendi",
+    "placeholder_named": "{{name}} için yapılacakları yazın…",
+    "placeholder_default": "Ne yapmam gerektiğini yazın…",
+    "send_tooltip": "Gönder",
+    "stop_tooltip": "Durdur"
+  },
+  "message_list": {
+    "show_details": "Detayları göster",
+    "replied_in": "{{elapsed}} içinde yanıtladı",
+    "failed_after": "{{elapsed}} sonra başarısız oldu",
+    "task_failed_fallback": "Task başarısız oldu",
+    "tools_one": "{{count}} araç",
+    "tools_other": "{{count}} araç",
+    "tool_result_named": "{{tool}} sonucu: ",
+    "tool_result_unnamed": "sonuç: ",
+    "process_steps_one": "{{count}} adım",
+    "process_steps_other": "{{count}} adım",
+    "copy_action": "Kopyala",
+    "copied_toast": "Kopyalandı",
+    "copy_failed_toast": "Kopyalanamadı"
+  },
+  "session_history": {
+    "untitled": "Başlıksız",
+    "time": {
+      "just_now": "az önce",
+      "minutes": "{{count}} dk önce",
+      "hours": "{{count}} sa önce",
+      "days": "{{count}} g önce"
+    },
+    "row_delete_aria": "Sohbet oturumunu sil",
+    "row_rename_aria": "Sohbet oturumunu yeniden adlandır",
+    "row_stop_aria": "Geçerli çalıştırmayı durdur",
+    "stop_action": "Durdur",
+    "row_subtitle": {
+      "working": "Çalışıyor",
+      "completed": "Tamamlandı",
+      "new_reply": "Yeni yanıt"
+    },
+    "stop_dialog": {
+      "title": "Bu çalıştırma durdurulsun mu?",
+      "description_with_title": "Bu, \"{{title}}\" içindeki geçerli ajan task'ını iptal eder. Kısmi çıktı chat'te kalır.",
+      "description_default": "Bu, geçerli ajan task'ını iptal eder. Kısmi çıktı chat'te kalır.",
+      "cancel": "Çalışmaya devam et",
+      "confirm": "Çalıştırmayı durdur",
+      "confirming": "Durduruluyor..."
+    },
+    "delete_dialog": {
+      "title": "Sohbet oturumunu sil",
+      "description_with_title": "\"{{title}}\" ve mesajları kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+      "description_default": "Bu sohbet oturumu ve mesajları kalıcı olarak silinecek. Bu işlem geri alınamaz.",
+      "cancel": "İptal",
+      "confirm": "Sil",
+      "confirming": "Siliniyor..."
+    }
+  },
+  "window": {
+    "new_chat_tooltip": "Yeni sohbet",
+    "restore_tooltip": "Geri yükle",
+    "expand_tooltip": "Genişlet",
+    "minimize_tooltip": "Küçült",
+    "another_running": "Başka bir sohbet çalışıyor",
+    "another_unread": "Başka bir sohbette okunmamış yanıtlar var",
+    "running": "Çalışıyor",
+    "unread": "Okunmamış",
+    "no_previous": "Önceki sohbet yok",
+    "untitled": "Yeni sohbet",
+    "my_agents": "Ajanlarım",
+    "others": "Diğerleri",
+    "no_agents": "Ajan yok",
+    "history_group": "Sohbet geçmişi"
+  },
+  "empty_state": {
+    "first_time_title": "Ajanlarınızla sohbet edin",
+    "first_time_intro": "✨ Çalışma alanınızi bilirler —",
+    "first_time_pillars": "issue'lar, projeler, skill'ler",
+    "first_time_pillars_suffix": ".",
+    "first_time_actions": "Özet isteyin, gününüzü planlayın veya hızlı bir task devredin.",
+    "returning_title_named": "Merhaba, ben {{name}}",
+    "returning_title_default": "Multica'ya hoş geldiniz",
+    "returning_subtitle": "Şunu sormayı deneyin"
+  },
+  "starter_prompts": {
+    "list_open": "Açık task'larımı önceliğe göre listele",
+    "summarize_today": "Bugün yaptıklarımı özetle",
+    "plan_next": "Sırada ne üzerinde çalışacağımı planla"
+  },
+  "context_anchor": {
+    "tooltip_disabled": "Bu sayfada Multica ile paylaşılacak bir şey yok",
+    "tooltip_off": "Multica'ya ne görüntülediğinizi bildirin",
+    "tooltip_on_issue": "Multica {{etiket}} görüntülediğinizi biliyor · Kapatmak için tıklayın",
+    "tooltip_on_project": "Multica \"{{etiket}}\" projesini görüntülediğinizi biliyor · Kapatmak için tıklayın",
+    "card_tooltip_issue_with_subtitle": "Multica {{etiket}} görüntülediğinizi biliyor — {{subtitle}}",
+    "card_tooltip_issue": "Multica {{etiket}} görüntülediğinizi biliyor",
+    "card_tooltip_project": "Multica \"{{etiket}}\" projesini görüntülediğinizi biliyor",
+    "aria_stop": "Geçerli sayfayı paylaşmayı durdur",
+    "aria_start": "Geçerli sayfayı Multica ile paylaş"
+  },
+  "no_agent_banner": "Sohbete başlamak için bir ajan gerekir.",
+  "offline_banner": {
+    "fallback_name": "ajan",
+    "unstable": "{{name}} bağlantısı kararsız — yanıtlar gecikebilir.",
+    "offline": "{{name}} çevrimdışı — mesajınız geri döndüğünde iletilecek."
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "Çevrimdışı",
+      "reconnecting": "Yeniden bağlanıyor",
+      "queued": "Sırada",
+      "waiting_local_directory": "Yerel dizin bekleniyor",
+      "starting_up": "Başlatılıyor",
+      "thinking": "Düşünüyor",
+      "typing": "Yazıyor"
+    },
+    "tools": {
+      "running_command": "Komut çalıştırıyor",
+      "reading_files": "Dosyaları okuyor",
+      "searching_code": "Kodda arıyor",
+      "making_edits": "Düzenleme yapıyor",
+      "searching_web": "Web'de arıyor",
+      "fallback": "Çalışıyor"
+    }
+  }
+}

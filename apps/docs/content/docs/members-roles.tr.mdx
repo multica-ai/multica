@@ -1,0 +1,60 @@
+---
+title: Üyeler ve roller
+description: Üç çalışma alanı rolünün — owner, admin, member — neler yapabildiği ve insanları nasıl davet edeceğiniz.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bir [çalışma alanındaki](/workspaces) herkesin bir rolü vardır ve rol ne yapabileceklerini belirler. Multica'da üç rol vardır: **owner** (çalışma alanının sahibi), **admin** ve **member**. Günlük işlerin çoğu — [issue](/issues) oluşturma, [yorum](/comments) yazma, [ajan](/agents) kullanma — üç rol için de açıktır. **Farklar ekip yönetimi etrafında toplanır.**
+
+## İzinlere hızlı bakış
+
+Aşağıdaki tablo ekip yönetimi eylemleri arasındaki en önemli farkları listeler:
+
+| Action | owner | admin | member |
+|---|---|---|---|
+| Yeni admin veya member davet et | ✓ | ✓ | ✗ |
+| **Yeni owner davet et** | ✓ | ✗ | ✗ |
+| Admin veya member rolünü düşür / kaldır | ✓ | ✓ | ✗ |
+| **Başka bir owner'ın rolünü düşür / kaldır** | ✓ | ✗ | ✗ |
+| Çalışma alanını sil | ✓ | ✗ | ✗ |
+
+**Members kimseyi davet edemez** — davet etme admin seviyesi bir izindir. **Birini owner yapabilen yalnızca owner'lardır** — admin'ler member veya diğer admin'leri yükseltip düşürebilir, ancak yeni owner oluşturamaz. Benzer şekilde admin'ler member veya diğer admin'leri kaldırabilir ama **mevcut owner'lara dokunamaz**. Amaç, en yüksek seviyenin yalnızca o seviyeye zaten sahip biri tarafından verilebilmesini sağlamaktır — izinler yukarı sızmaz.
+
+<Callout type="info">
+Ajan görünürlüğü iki çeşittir: "workspace" ve "private." Private ajanlar issue'lara yalnızca owner ve admin'ler tarafından atanabilir — bu, belirli bir kişi grubuna yönelik yapılandırmaları korur. Bkz. [Agents](/agents).
+</Callout>
+
+## Yeni üye davet etme
+
+Multica yeni üyeleri email ile davet eder:
+
+1. Çalışma alanı ayarları sayfasında **Invite member**'a tıklayın, email'i girin ve bir rol seçin.
+2. Multica benzersiz bağlantı içeren bir davet email'i gönderir.
+3. Alıcı bağlantıya tıklar, giriş yapar (veya kaydolur) ve çalışma alanına katılmak için **daveti kabul eder**.
+
+Davet edilen email'in **önceden Multica'ya kayıtlı olması gerekmez** — hesap yoksa davet kabul edildiğinde bir hesap oluşturulur.
+
+Davet email'i iletilemezse (yanlış adres, mail servisi aksaması), davet kaydı yine saklanır; email'i çalışma alanı ayarlarından yeniden gönderebilir veya davet bağlantısını başka bir kanaldan paylaşabilirsiniz.
+
+Davetler **7 gün geçerlidir**. Sonrasında bağlantıya tıklanınca "expired" mesajı görünür ve davet eden kişinin yeni bir davet göndermesi gerekir.
+
+## Her zaman en az bir owner
+
+Her çalışma alanında **her zaman en az bir owner olmalıdır**. Bu kısıt iki işlemi otomatik olarak engeller:
+
+- Son owner kendi rolünü düşüremez.
+- Diğer owner'lar veya admin'ler son owner'ı kaldıramaz.
+
+<Callout type="warning">
+Son owner sizseniz ve ekipten ayrılmak üzereyseniz, **önce owner rolünü başka bir üyeye devredin**, sonra ayrılmayı veya çalışma alanını devretmeyi deneyin. Aksi halde işlem reddedilir.
+</Callout>
+
+## Üye kaldırma
+
+Owner ve admin'ler çalışma alanından diğer üyeleri kaldırabilir. Kaldırılan üye erişimini hemen kaybeder; oluşturduğu issue'lar, yorumlar ve diğer içerikler çalışma alanında kalır.
+
+## Sonraki
+
+- [Issues and projects](/issues) — üyelerin üzerinde çalıştığı şeyler
+- [Comments and mentions](/comments) — issue altında işbirliği

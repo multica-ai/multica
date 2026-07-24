@@ -1,0 +1,127 @@
+---
+title: Bir ajan oluşturma ve yapılandırma
+description: Ajan oluşturmak için gereken minimum alanlar ve tüm isteğe bağlı ayarlar — sistem talimatları, ortam değişkenleri, visibility, eşzamanlılık limiti ve arşivleme.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Bir [ajan](/agents) oluşturmak için yalnızca iki şey gerekir: **bir ad** ve **bir [AI coding tool](/providers) seçimi**. Geri kalan her şey isteğe bağlıdır — sistem talimatları, model, ortam değişkenleri, CLI argümanları, visibility, eşzamanlılık limiti — varsayılanlar gayet iyi çalışır. Önce çalıştırın, sonra ayarlayın; her alan herhangi bir zamanda değiştirilebilir.
+
+## Ajan oluşturma
+
+Ön koşul: makinenizde en az bir desteklenen [AI coding tool](/providers) kurulu (Claude Code, Codex vb.) ve çalışan bir [daemon](/daemon-runtimes) var. Henüz bu noktada değilseniz [Cloud quickstart](/cloud-quickstart) veya [Self-host quickstart](/self-host-quickstart) ile başlayın.
+
+Bunlar hazır olduğunda çalışma alanınızdaki **Agents** sayfasına gidip **+ New** düğmesine tıklayın veya CLI'ı kullanın:
+
+```bash
+multica agent create
+```
+
+Formda yalnızca iki zorunlu alan vardır: **name** (çalışma alanı içinde benzersiz) ve **runtime** (= bir AI coding tool seçin). Diğer tüm alanlar aşağıda bölüm bölüm anlatılır.
+
+## Bir AI coding tool seçme
+
+Her çalışma ortamı belirli bir AI coding tool tarafından desteklenir. Multica bunlardan 11 tanesini destekler. En yaygın seçenekler:
+
+| Tool | Good for |
+|---|---|
+| **Claude Code** | Anthropic'in resmi aracı, en eksiksiz özellik seti; **en iyi ilk tercih** |
+| **Codex** | OpenAI, ana akım alternatif |
+| **Cursor** | Cursor editör ekosistemindeki kullanıcılar |
+| **Copilot** | GitHub hesap haklarından yararlanan ekipler |
+| **Gemini** | Google ekosistemindeki kullanıcılar |
+
+Diğer altısı (Hermes, Kimi, Kiro CLI, OpenCode, Pi, OpenClaw) ve her aracın tam yetenek matrisi (session resume, MCP, skill injection path, model selection) [AI coding tools karşılaştırması](/providers) içinde ele alınır.
+
+## Sistem talimatları yazma
+
+**Sistem talimatları** (`instructions`) her görevin başına eklenir; ajana hangi rolü oynadığını ve hangi kurallara uyması gerektiğini söyler:
+
+```text
+You're a frontend code-review agent. When an issue comes in, read the diff first. Focus only on:
+- Styling issues (tailwind class names, box model)
+- Accessibility (a11y)
+Don't change code — leave suggestions in a comment.
+```
+
+Boş bırakıldığında (varsayılan), ajan altındaki AI coding tool'un native davranışını ekstra kısıt olmadan kullanır.
+
+## Model seçme
+
+Çoğu AI coding tool model seçimini destekler (örneğin Claude Code, Sonnet ve Opus arasında seçim yapmanıza izin verir). Boş bırakın, aracın kendi varsayılanı kullanılır; açıkça birini seçin, o çalışır. Her aracın desteklediği modeller [AI coding tools karşılaştırması](/providers) içinde listelenir.
+
+Modeli değiştirmek **yalnızca yeni görevlere uygulanır**. Zaten dispatch edilmiş görevler, dispatch anında kilitlenen modelle devam eder.
+
+## Özel ortam değişkenleri (custom_env)
+
+**Özel ortam değişkenleri** (`custom_env`), görev yürütme anında ekstra env var enjekte etmenizi sağlar — tipik kullanımlar API key'leri veya upstream endpoint değiştirmektir:
+
+```
+ANTHROPIC_API_KEY = sk-...
+ANTHROPIC_BASE_URL = https://my-proxy.example.com
+```
+
+Sistem açısından kritik değişkenler override edilemez: `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `CODEX_HOME` ve `MULTICA_*` ile başlayan tüm key'ler daemon tarafından sessizce yok sayılır (warn log ile — hata yok).
+
+<Callout type="warning">
+**`custom_env` içindeki değerler Multica'nın server veritabanında plaintext olarak saklanır.** Oluşturucu olmayanlar ve çalışma alanı admin'i olmayanlar değerleri göremez (API `****` döndürür), ama bu değerler veritabanı yedeklerinde ve DB audit'lerinde hâlâ görünür.
+
+**`custom_env` içine yüksek değerli secret koymayın** (production veritabanı parolaları, root seviye token'lar vb.). Ajanlar için **özel, sınırlı kapsamlı kimlik bilgileri** kullanın (salt okunur API key'leri, tek kapsamlı PAT'ler) ve düzenli olarak rotate edin.
+</Callout>
+
+## Özel CLI argümanları (custom_args)
+
+**Özel CLI argümanları** (`custom_args`), AI coding tool'un komut satırına tek tek eklenen bir string array'dir:
+
+```json
+["--max-turns", "100", "--append-system-prompt", "always respond in Chinese"]
+```
+
+Son komut şöyle çıkar:
+
+```bash
+claude --model <model> --max-turns 100 --append-system-prompt "always respond in Chinese" [...]
+```
+
+Argümanlar shell üzerinden değil, olduğu gibi geçirilir (injection riski yok); ancak belirli bir flag'in tanınıp tanınmadığı AI coding tool'un kendisine bağlıdır — araçlar burada ciddi şekilde farklılaşır.
+
+<Callout type="tip">
+`custom_env` ve `custom_args` için sert limit yoktur, ama pratikte **her birini 10 girdinin altında tutun**. Fazlası komut satırını uzatır, başlangıcı yavaşlatır ve bakımı zorlaştırır.
+</Callout>
+
+## Visibility
+
+- **Workspace** (`workspace`) — çalışma alanındaki herhangi bir üye atayabilir
+- **Private** (`private`) — yalnızca çalışma alanı sahipleri, admin'ler veya ajanın oluşturucusu atayabilir
+
+Yeni ajanlar varsayılan olarak `private` olur.
+
+**Private gizli demek değildir** — her üye private bir ajanın adını ve açıklamasını listede görür; yalnızca hassas config alanlarını göremez (`custom_env` değerleri ve MCP config maskelenir). Tam anlamı için bkz. [Agents → Who can assign an agent](/agents#who-can-assign-an-agent).
+
+## Eşzamanlılık limiti
+
+**Eşzamanlılık limiti** (`max_concurrent_tasks`), bu ajanın aynı anda paralel olarak kaç görev çalıştırabileceğini kontrol eder. Varsayılan **6**'dır. Limite takılan yeni görevler kuyruğa girer — reddedilmez.
+
+Bu, iki katmanlı limitin yalnızca "ajan katmanı"dır — daemon'ın kendisi daha geniş bir limit uygular (varsayılan 20) ve hangisi daha darsa o geçerli olur. Ayrıntılar için bkz. [Daemon ve çalışma ortamları → Paralel kaç görev çalışabilir](/daemon-runtimes#how-many-tasks-can-run-in-parallel).
+
+Bu değeri değiştirmek **zaten çalışan görevleri iptal etmez** — yalnızca sıradaki alınacak göreve uygulanır.
+
+## Alan uzmanlığı ekleme: Skills
+
+Oluşturulan bir ajana **Skills** eklenebilir — görev yürütme anında AI coding tool'a otomatik verilen **bilgi paketleri** (`SKILL.md` + destek dosyaları). Yeni bir skill oluşturabilir, GitHub veya ClawHub'dan içe aktarabilir ya da makinenizdeki mevcut bir skill dizininden tarayabilirsiniz. Bkz. [Skills](/skills).
+
+## Arşivleme ve geri yükleme
+
+Artık kullanmadığınız ajanlar **arşivlenebilir** — günlük görünümlerden kaybolurlar, ama geçmiş verileri (çalıştırılan görevler, yazılan yorumlar) tamamen korunur. Onları tekrar çalıştırmak için istediğiniz zaman **geri yükleyin**.
+
+<Callout type="warning">
+**Arşivleme, ajana ait tamamlanmamış tüm görevleri hemen iptal eder** — çalışan, dispatch edilmiş ve kuyruktaki görevlerin tamamı `cancelled` olarak işaretlenir ve devam etmez. Devam eden önemli bir göreviniz varsa arşivlemeden önce bitmesini bekleyin.
+</Callout>
+
+Arşivlenmiş ajanlara yeni görev atanamaz.
+
+## Sonraki adımlar
+
+- [Skills](/skills) — bir ajana bilgi paketleri ekleyin
+- [AI coding tools karşılaştırması](/providers) — 11 aracın tamamında tam yetenek matrisi
+- [Issue'ları ajanlara atama](/assigning-issues) — yeni ajanınızı çalıştırın

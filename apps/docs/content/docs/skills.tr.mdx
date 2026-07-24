@@ -1,0 +1,67 @@
+---
+title: Skills
+description: Bir ajana "bilgi paketleri" ekleyin — Anthropic Agent Skills açık standardıyla uyumludur.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Skill, bir [ajan](/agents) için **bilgi paketidir** — ajana "bu tür bir görevle karşılaştığında böyle düşün ve böyle hareket et" diyen bir `SKILL.md` ve isteğe bağlı destek dosyaları (script'ler, config'ler, referans şablonlar). Multica, [Anthropic Agent Skills](https://agentskills.io) açık standardını benimser; bu yüzden Anthropic'in resmi deposundan, ClawHub'dan veya skills.sh'den gelen uyumlu herhangi bir Skill doğrudan içe aktarılabilir.
+
+## Workspace skills ve local skills
+
+Multica iki skill kaynağını destekler:
+
+- **Workspace skill** — Multica'nın cloud'unda saklanır. Bir ajana eklendiğinde görev yürütme anında daemon'ınıza sync edilir. Bu, **bir ekip içinde skill paylaşmanın standart yoludur**.
+- **Local skill** — makinenizdeki bir dizinde yaşar (her AI coding tool'un geleneksel bir varsayılan yolu vardır, örn. Claude Code'un `~/.claude/skills/` dizini). İsteğiniz üzerine [daemon](/daemon-runtimes) makinenizi tarar ve çalışma alanına hangilerini getireceğinizi siz seçersiniz.
+
+Çoğu zaman **workspace skills** istersiniz: bir kez içe aktarın, her takım arkadaşınızın ajanı kullanabilsin. Local skills, önce yerelde test etmek istediğinizde veya içerik hassas yerel materyal içerdiğinde uygundur.
+
+## Skill içe aktarma
+
+Workspace skills dört kaynaktan gelir:
+
+- **New** — `SKILL.md` ve ilgili dosyaları doğrudan UI içinde yazın
+- **From GitHub** — bir repo URL'si yapıştırın (örn. `https://github.com/owner/repo/tree/main/skills/my-skill`); Multica `SKILL.md` dosyasını ve o dizindeki her dosyayı çeker
+- **From ClawHub** — [ClawHub](https://clawhub.io) public marketplace'te arayıp version seçimiyle içe aktarın
+- **From local** — daemon makinenizdeki skill dizinlerini tarar; çalışma alanına hangilerini getireceğinizi siz seçersiniz
+
+Hem tekil dosyalar hem de tüm skill paketleri için boyut limitleri vardır (GitHub'dan içe aktarırken tek dosya limiti yaklaşık 1 MB). Tam kurallar içe aktarma dialog'unda görünür — aşılması hata döndürür.
+
+## Bir ajana ekleme
+
+İçe aktarıldıktan sonra bir skill'in etkili olması için **belirli bir ajana eklenmesi** gerekir. Bir ajana birden çok skill eklenebilir ve bir skill birden çok ajana eklenebilir.
+
+Eklendikten sonra ajan, bir sonraki görev başlatışında skill'lerini alır — her AI coding tool'un kendi skill discovery yolu vardır (Claude Code `.claude/skills/` kullanır, Cursor `.cursor/skills/` kullanır vb.) ve Multica dosyaları otomatik olarak doğru yere koyar. **Ancak üç araç (Gemini, Hermes, OpenClaw) şu anda generic fallback yolu `.agent_context/skills/` kullanır — bu araçların o yoldan skill'leri gerçekten okuyup okumadığı aracın kendisine bağlıdır.** Tam yol eşlemesi ve native-discovery ile fallback ayrımı [AI coding tools karşılaştırması → Where skill files go](/providers#where-skill-files-go) içinde yer alır.
+
+Bir skill'in içeriğini düzenledikten sonra **yalnızca yeni oluşturulan görevler yeni sürümü alır** — zaten çalışan görevler eski skill ile devam eder.
+
+## Üçüncü taraf skill güvenliği
+
+GitHub veya ClawHub'dan içe aktarılan Skills, script ve çalıştırılabilir içerik barındırabilir. Multica bunları **imzalamaz, audit etmez veya sandbox'a almaz** — skill içerikleri ilgili AI coding tool'a olduğu gibi verilir; aracın bunları çalıştırılabilir sayıp saymaması aracın kendisine bağlıdır.
+
+<Callout type="warning">
+**Üçüncü taraf bir skill'i içe aktarmadan önce `SKILL.md` dosyasını ve onunla gelen her dosyayı inceleyin.**
+
+Şubat 2026'da yaşanan "ClawHavoc" olayı — popüler bir skill paketine yerleştirilen kötü amaçlı talimatlar etkilenen kullanıcıların API key'lerini çaldı. ClawHub o zamandan beri VirusTotal taraması ekledi, ancak **otomatik taramalar kendi incelemenizin yerine geçmez**.
+
+**Yalnızca güvendiğiniz kaynaklardan içe aktarın.** Hassas veri içeren projelerde yalnızca kendiniz yazdığınız local skills kullanmayı düşünün.
+</Callout>
+
+## Skills ve MCP
+
+İkisi de bir ajanın yapabileceklerini artırır, ama farklı yönlerde:
+
+- **Skill** = yapılandırılmış bir **bilgi paketi** (statik içerik + talimatlar). Ajan bir skill'i okuyarak "X problemini gördüğümde şöyle düşünmeli ve şunu yapmalıyım" öğrenir.
+- **MCP** (Model Context Protocol) = bir **araç kanalı**. Ajan, harici servislere (veritabanları, dosya sistemleri, üçüncü taraf API'ler) bağlanmak ve onları **çağırmak** için MCP kullanır.
+
+İkisi birbirini tamamlar. Bugün Multica'da MCP desteğini **gerçekten yalnızca Claude Code kullanır** — diğer araçlar MCP config alır ama fiilen kullanmaz. Ayrı bir MCP bölümü sonraki bir sürümde gelecek.
+
+---
+
+Artık ajanın ne olduğunu, nasıl oluşturulacağını ve skill'lerin nasıl ekleneceğini biliyorsunuz. Sıradaki soru: **gerçekte nerede çalışır ve ajanım neden bazen takılı kalır?** Sonraki bölüm yürütme mimarisini ele alır — daemon'lar, çalışma ortamları ve görevlerin birlikte nasıl çalıştığı.
+
+## Sonraki adımlar
+
+- [Daemon ve çalışma ortamları](/daemon-runtimes) — ajanların gerçekte nerede çalıştığı ve online/offline ayrımını nasıl anlayacağınız
+- [Görevleri yürütme](/tasks) — tek bir "ajan çalışma oturumu"nun tam yaşam döngüsü
+- [AI coding tools karşılaştırması](/providers) — 11 aracın tamamının tam karşılaştırması (her birinin skill injection path'i dahil)

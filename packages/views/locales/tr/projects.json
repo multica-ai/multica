@@ -1,0 +1,120 @@
+{
+  "page": {
+    "title": "Projeler",
+    "new_project": "Yeni proje",
+    "empty": "Henüz proje yok",
+    "create_first": "İlk projenizi oluşturun",
+    "view_compact": "Kompakt",
+    "view_comfortable": "Rahat",
+    "search_placeholder": "Proje ara...",
+    "no_search_results": "Aramanızla eşleşen sonuç yok"
+  },
+  "table": {
+    "name": "Ad",
+    "priority": "Öncelik",
+    "status": "Durum",
+    "progress": "İlerleme",
+    "lead": "Lead",
+    "created": "Oluşturuldu"
+  },
+  "status": {
+    "planned": "Planlandı",
+    "in_progress": "Devam ediyor",
+    "paused": "Duraklatıldı",
+    "completed": "Tamamlandı",
+    "cancelled": "İptal edildi"
+  },
+  "priority": {
+    "urgent": "Acil",
+    "high": "Yüksek",
+    "medium": "Orta",
+    "low": "Düşük",
+    "none": "Öncelik yok"
+  },
+  "lead": {
+    "no_lead": "Lead yok",
+    "assign_placeholder": "Lead ata...",
+    "members_group": "Üyeler",
+    "agents_group": "Ajanlar",
+    "no_results": "Sonuç yok"
+  },
+  "relative_date": {
+    "today": "Bugün",
+    "one_day_ago": "1 gün önce",
+    "days_ago": "{{count}} gün önce",
+    "months_ago": "{{count}} ay önce"
+  },
+  "detail": {
+    "not_found": "Proje bulunamadı",
+    "breadcrumb_fallback": "Projeler",
+    "title_placeholder": "Proje başlığı",
+    "icon_tooltip": "İkonu değiştir",
+    "pin_tooltip": "Kenar çubuğuna sabitle",
+    "unpin_tooltip": "Kenar çubuğundan kaldır",
+    "sidebar_tooltip": "Kenar çubuğunu aç/kapat",
+    "copy_link": "Bağlantıyı kopyala",
+    "delete_action": "Proje sil",
+    "section_properties": "Özellikler",
+    "section_progress": "İlerleme",
+    "section_description": "Açıklama",
+    "description_placeholder": "Açıklama ekle...",
+    "empty_issues_title": "Bağlı issue yok",
+    "empty_issues_hint": "Yeni bir issue oluşturun veya mevcut issue'ları bu projeye atayın.",
+    "empty_issues_new_button": "Yeni Issue",
+    "no_issues_yet": "Henüz issue yok",
+    "toast_link_copied": "Bağlantı kopyalandı",
+    "toast_project_deleted": "Proje silindi",
+    "toast_move_issue_failed": "Issue taşınamadı"
+  },
+  "resources": {
+    "section_header": "Kaynaklar",
+    "empty": "Eklenmiş kaynak yok.",
+    "add_button": "Kaynak ekle",
+    "popover_title": "GitHub repo bağla",
+    "repos_search_placeholder": "Repo ara...",
+    "repos_search_empty": "Aramanızla eşleşen repo yok.",
+    "attached_badge": "bağlı",
+    "remove_tooltip": "Kaldır",
+    "url_placeholder": "https://github.com/owner/repo veya git@github.com:owner/repo.git",
+    "url_submit": "Ekle",
+    "toast_attached": "Repository bağlandı",
+    "toast_attach_failed": "Bağlanamadı",
+    "toast_removed": "Kaynak kaldırıldı",
+    "toast_remove_failed": "Kaynak kaldırılamadı",
+    "add_local_directory_button": "Yerel dizin ekle",
+    "local_daemon_offline_hint": "Bu makinedeki bir dizini bağlamak için yerel daemon'ı başlatın.",
+    "local_daemon_already_attached_hint": "Bu makinede zaten bağlı bir yerel dizin var. Başka bir tane eklemeden önce onu kaldırın.",
+    "local_rename_tooltip": "Yeniden adlandır",
+    "local_rename_label": "Yerel dizin etiketi",
+    "local_no_daemon_tooltip": "Yerel daemon henüz bir ID bildirmiyor — ajan bu dizini açamaz.",
+    "local_other_machine_tooltip": "Yalnızca bu dizini kaydeden makinede kullanılabilir.",
+    "chat_hint_prefix": "Ajan yerinde çalışacak:",
+    "toast_local_attached": "Yerel dizin bağlandı",
+    "toast_local_renamed": "Yeniden adlandırıldı",
+    "toast_local_rename_failed": "Yeniden adlandırılamadı",
+    "toast_local_pick_failed": "Dizin seçilemedi",
+    "toast_local_already_attached": "Bu dizin bu makinedeki projeye zaten bağlı.",
+    "toast_local_daemon_already_attached": "Bu makinede bu projeye zaten bağlı bir yerel dizin var. Başka bir tane eklemeden önce onu kaldırın.",
+    "toast_local_daemon_not_running": "Yerel daemon çalışmıyor.",
+    "local_validate_not_absolute": "Mutlak bir yol seçin.",
+    "local_validate_not_found": "Yol mevcut değil.",
+    "local_validate_not_a_directory": "Yol bir dizin değil.",
+    "local_validate_not_readable": "Dizin okunabilir değil.",
+    "local_validate_not_writable": "Dizin yazılabilir değil.",
+    "local_validate_unsupported": "Yerel dizinler yalnızca masaüstü uygulamasında seçilebilir."
+  },
+  "delete_dialog": {
+    "title": "Proje sil",
+    "description": "Bu proje silinecek. Issue'lar silinmez ancak bağlantıları kaldırılır.",
+    "confirm": "Sil",
+    "cancel": "İptal"
+  },
+  "picker": {
+    "no_project": "Proje yok",
+    "remove": "Projeden kaldır",
+    "empty": "Henüz proje yok"
+  },
+  "chip": {
+    "fallback_label": "Proje"
+  }
+}
