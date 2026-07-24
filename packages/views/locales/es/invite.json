@@ -1,0 +1,54 @@
+{
+  "header": {
+    "back": "Volver",
+    "log_out": "Cerrar sesión"
+  },
+  "not_found": {
+    "title": "Invitación no encontrada",
+    "description": "Esta invitación puede haber expirado, sido revocada, o no pertenece a tu cuenta.",
+    "go_to_dashboard": "Ir al panel"
+  },
+  "accepted": {
+    "title": "¡Te uniste a {{workspace_name}}!",
+    "redirecting": "Redirigiendo al workspace..."
+  },
+  "declined": {
+    "title": "Invitación rechazada",
+    "description": "No serás agregado a este workspace.",
+    "go_to_dashboard": "Ir al panel"
+  },
+  "main": {
+    "join_title": "Unirse a {{workspace_name}}",
+    "fallback_workspace_name": "workspace",
+    "invited_role_admin": "te invitó a unirte como administrador.",
+    "invited_role_member": "te invitó a unirte como miembro.",
+    "already_handled_accepted": "Esta invitación ya fue aceptada.",
+    "already_handled_declined": "Esta invitación ya fue rechazada.",
+    "expired": "Esta invitación expiró.",
+    "decline": "Rechazar",
+    "declining": "Rechazando...",
+    "accept": "Aceptar y unirse",
+    "joining": "Uniéndose..."
+  },
+  "errors": {
+    "accept_failed": "Falló al aceptar la invitación",
+    "decline_failed": "Falló al rechazar la invitación"
+  },
+  "batch": {
+    "log_out": "Cerrar sesión",
+    "empty_title": "No hay invitaciones pendientes",
+    "empty_hint": "Continuá para configurar tu propio workspace.",
+    "empty_continue": "Continuar a la configuración",
+    "title": "Fuiste invitado",
+    "subtitle": "Elegí los workspaces a los que querés unirte. Siempre podés manejar el resto después desde la sidebar.",
+    "submit_skip": "Saltar y configurar mi propio workspace",
+    "submit_join_one": "Unirse a 1 workspace",
+    "submit_join_other": "Unirse a {{count}} workspaces",
+    "joining": "Uniéndose...",
+    "error_generic": "Falló al procesar las invitaciones. Intentá de nuevo.",
+    "row_workspace_fallback": "Workspace",
+    "row_inviter_fallback": "Alguien",
+    "row_invited_admin": "{{inviter}} te invitó como administrador",
+    "row_invited_member": "{{inviter}} te invitó como miembro"
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "title": "Buscar",
+  "description": "Buscar páginas, issues, proyectos y miembros",
+  "placeholder": "Escribí un comando o buscá...",
+  "groups": {
+    "pages": "Páginas",
+    "commands": "Comandos",
+    "members": "Miembros",
+    "projects": "Proyectos",
+    "issues": "Issues",
+    "recent": "Recientes"
+  },
+  "pages": {
+    "inbox": "Bandeja de entrada",
+    "my_issues": "Mis Issues",
+    "issues": "Issues",
+    "projects": "Proyectos",
+    "agents": "Agents",
+    "runtimes": "Runtimes",
+    "skills": "Skills",
+    "settings": "Configuración"
+  },
+  "commands": {
+    "current_theme_aria": "Tema actual",
+    "new_issue": "Nuevo Issue",
+    "new_project": "Nuevo Proyecto",
+    "copy_issue_link": "Copiar enlace del Issue",
+    "copy_identifier": "Copiar Identificador ({{identifier}})",
+    "switch_to_light": "Cambiar a Tema Claro",
+    "switch_to_dark": "Cambiar a Tema Oscuro",
+    "use_system_theme": "Usar Tema del Sistema"
+  },
+  "toast": {
+    "link_copied": "Enlace copiado",
+    "copied_identifier": "Copiado {{identifier}}"
+  },
+  "empty": {
+    "no_results": "No se encontraron resultados.",
+    "type_to_search": "Escribí para buscar issues y proyectos"
+  },
+  "trigger": {
+    "label": "Buscar..."
+  }
+}

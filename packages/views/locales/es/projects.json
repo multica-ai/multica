@@ -1,0 +1,97 @@
+{
+  "page": {
+    "title": "Proyectos",
+    "new_project": "Nuevo proyecto",
+    "empty": "Sin proyectos aún",
+    "create_first": "Creá tu primer proyecto",
+    "view_compact": "Compacto",
+    "view_comfortable": "Cómodo",
+    "search_placeholder": "Buscar proyectos...",
+    "no_search_results": "Ningún resultado coincide con la búsqueda"
+  },
+  "table": {
+    "name": "Nombre",
+    "priority": "Prioridad",
+    "status": "Estado",
+    "progress": "Progreso",
+    "lead": "Líder",
+    "created": "Creado"
+  },
+  "status": {
+    "planned": "Planificado",
+    "in_progress": "En progreso",
+    "paused": "Pausado",
+    "completed": "Completado",
+    "cancelled": "Cancelado"
+  },
+  "priority": {
+    "urgent": "Urgente",
+    "high": "Alta",
+    "medium": "Media",
+    "low": "Baja",
+    "none": "Sin prioridad"
+  },
+  "lead": {
+    "no_lead": "Sin líder",
+    "assign_placeholder": "Asignar líder...",
+    "members_group": "Miembros",
+    "agents_group": "Agentes",
+    "no_results": "Sin resultados"
+  },
+  "relative_date": {
+    "today": "Hoy",
+    "one_day_ago": "hace 1d",
+    "days_ago": "hace {{count}}d",
+    "months_ago": "hace {{count}}m"
+  },
+  "detail": {
+    "not_found": "Proyecto no encontrado",
+    "breadcrumb_fallback": "Proyectos",
+    "title_placeholder": "Título del proyecto",
+    "icon_tooltip": "Cambiar ícono",
+    "pin_tooltip": "Fijar en sidebar",
+    "unpin_tooltip": "Desfijar del sidebar",
+    "sidebar_tooltip": "Alternar sidebar",
+    "copy_link": "Copiar link",
+    "delete_action": "Eliminar proyecto",
+    "section_properties": "Propiedades",
+    "section_progress": "Progreso",
+    "section_description": "Descripción",
+    "description_placeholder": "Agregar descripción...",
+    "empty_issues_title": "Sin issues vinculados",
+    "empty_issues_hint": "Creá un nuevo issue o asigná existentes a este proyecto.",
+    "empty_issues_new_button": "Nuevo Issue",
+    "no_issues_yet": "Sin issues aún",
+    "toast_link_copied": "Link copiado",
+    "toast_project_deleted": "Proyecto eliminado",
+    "toast_move_issue_failed": "Error al mover issue"
+  },
+  "resources": {
+    "section_header": "Recursos",
+    "empty": "Sin recursos adjuntos.",
+    "add_button": "Agregar recurso",
+    "popover_title": "Adjuntar un repo de GitHub",
+    "attached_badge": "adjunto",
+    "remove_tooltip": "Eliminar",
+    "url_placeholder": "https://github.com/owner/repo o git@github.com:owner/repo.git",
+    "url_submit": "Agregar",
+    "toast_attached": "Repositorio adjuntado",
+    "toast_attach_failed": "Error al adjuntar",
+    "toast_removed": "Recurso eliminado",
+    "toast_remove_failed": "Error al eliminar recurso"
+  },
+  "delete_dialog": {
+    "title": "Eliminar proyecto",
+    "description": "Esto eliminará el proyecto. Los issues no se eliminarán pero se desvincularán.",
+    "confirm": "Eliminar",
+    "cancel": "Cancelar"
+  },
+  "picker": {
+    "no_project": "Sin proyecto",
+    "remove": "Remover del proyecto",
+    "empty": "Sin proyectos aún"
+  },
+  "chip": {
+    "fallback_label": "Proyecto"
+  }
+}
