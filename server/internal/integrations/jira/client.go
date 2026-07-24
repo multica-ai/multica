@@ -22,6 +22,11 @@ var ErrUnauthorized = errors.New("jira: credentials unauthorized")
 // either the issue key does not exist or the token cannot see the project.
 var ErrIssueNotFound = errors.New("jira: issue not found")
 
+// ErrBadRequest is returned when the site answers 400 — for SearchIssues
+// that almost always means the JQL failed to parse. Callers surface it as a
+// user-fixable error distinct from transport failures.
+var ErrBadRequest = errors.New("jira: bad request")
+
 // Account is the minimal identity returned by ValidateCredentials
 // (GET /rest/api/2/myself).
 type Account struct {
@@ -39,7 +44,19 @@ type Issue struct {
 	Description string
 	Status      string
 	Priority    string
+	// Assignee identity, populated by SearchIssues (webhook enrichment via
+	// GetIssue does not need it — the webhook payload carries its own).
+	AssigneeAccountID   string
+	AssigneeDisplayName string
 }
+
+// searchPageSize is the per-request page size for SearchIssues; searchMaxCap
+// bounds the total issues one search will return regardless of the caller's
+// maxResults, keeping a single manual sync from mirroring an unbounded JQL.
+const (
+	searchPageSize = 50
+	searchMaxCap   = 100
+)
 
 // Client is the seam the handlers depend on; tests substitute a mock so no
 // real Jira site is ever contacted from the test suite.
@@ -51,6 +68,11 @@ type Client interface {
 	// GetIssue fetches an issue by key for enrichment. Maps 404 to
 	// ErrIssueNotFound and 401/403 to ErrUnauthorized.
 	GetIssue(ctx context.Context, baseURL, email, token, key string) (Issue, error)
+	// SearchIssues runs a JQL query and returns up to maxResults issues
+	// (capped at 100 regardless), paginating as needed. Maps 401/403 to
+	// ErrUnauthorized. Powers the pull-based sync for users who cannot
+	// register webhooks on the Jira site.
+	SearchIssues(ctx context.Context, baseURL, email, token, jql string, maxResults int) ([]Issue, error)
 }
 
 // HTTPClient is the production Client. The zero value is not usable; call
@@ -133,6 +155,85 @@ func (c *HTTPClient) GetIssue(ctx context.Context, baseURL, email, token, key st
 	}, nil
 }
 
+// SearchIssues calls GET /rest/api/2/search?jql=... with basic auth,
+// following startAt pagination until maxResults (capped at searchMaxCap)
+// issues are collected or the site reports no more results. The v2 search
+// endpoint is served by both Jira Cloud and Data Center and returns the
+// description as a plain string (DescriptionText handles ADF defensively).
+func (c *HTTPClient) SearchIssues(ctx context.Context, baseURL, email, token, jql string, maxResults int) ([]Issue, error) {
+	if maxResults <= 0 || maxResults > searchMaxCap {
+		maxResults = searchMaxCap
+	}
+	out := make([]Issue, 0, searchPageSize)
+	for startAt := 0; len(out) < maxResults; {
+		pageSize := searchPageSize
+		if remaining := maxResults - len(out); remaining < pageSize {
+			pageSize = remaining
+		}
+		q := url.Values{}
+		q.Set("jql", jql)
+		q.Set("startAt", fmt.Sprintf("%d", startAt))
+		q.Set("maxResults", fmt.Sprintf("%d", pageSize))
+		q.Set("fields", "summary,description,status,priority,assignee")
+		body, err := c.get(ctx, baseURL, email, token, "/rest/api/2/search?"+q.Encode())
+		if err != nil {
+			return nil, err
+		}
+		var page struct {
+			StartAt    int `json:"startAt"`
+			MaxResults int `json:"maxResults"`
+			Total      int `json:"total"`
+			Issues     []struct {
+				ID     string `json:"id"`
+				Key    string `json:"key"`
+				Fields struct {
+					Summary     string          `json:"summary"`
+					Description json.RawMessage `json:"description"`
+					Status      struct {
+						Name string `json:"name"`
+					} `json:"status"`
+					Priority struct {
+						Name string `json:"name"`
+					} `json:"priority"`
+					Assignee struct {
+						AccountID   string `json:"accountId"`
+						Name        string `json:"name"` // Data Center
+						DisplayName string `json:"displayName"`
+					} `json:"assignee"`
+				} `json:"fields"`
+			} `json:"issues"`
+		}
+		if err := json.Unmarshal(body, &page); err != nil {
+			return nil, fmt.Errorf("jira: decode search: %w", err)
+		}
+		for _, d := range page.Issues {
+			accountID := d.Fields.Assignee.AccountID
+			if accountID == "" {
+				accountID = d.Fields.Assignee.Name
+			}
+			out = append(out, Issue{
+				ID:                  d.ID,
+				Key:                 d.Key,
+				Summary:             d.Fields.Summary,
+				Description:         DescriptionText(d.Fields.Description),
+				Status:              d.Fields.Status.Name,
+				Priority:            d.Fields.Priority.Name,
+				AssigneeAccountID:   accountID,
+				AssigneeDisplayName: d.Fields.Assignee.DisplayName,
+			})
+			if len(out) >= maxResults {
+				break
+			}
+		}
+		startAt += len(page.Issues)
+		// Stop when the page came back short or the site says we've seen all.
+		if len(page.Issues) == 0 || startAt >= page.Total {
+			break
+		}
+	}
+	return out, nil
+}
+
 func (c *HTTPClient) get(ctx context.Context, baseURL, email, token, path string) ([]byte, error) {
 	endpoint := NormalizeBaseURL(baseURL) + path
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
@@ -161,6 +262,9 @@ func (c *HTTPClient) get(ctx context.Context, baseURL, email, token, path string
 		return nil, ErrUnauthorized
 	case resp.StatusCode == http.StatusNotFound:
 		return nil, ErrIssueNotFound
+	case resp.StatusCode == http.StatusBadRequest:
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("%w: %s", ErrBadRequest, strings.TrimSpace(string(b)))
 	case resp.StatusCode < 200 || resp.StatusCode >= 300:
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		return nil, fmt.Errorf("jira: GET %s: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(b)))

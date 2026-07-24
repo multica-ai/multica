@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -232,5 +233,105 @@ func TestHTTPClientGetIssue(t *testing.T) {
 
 	if _, err := c.GetIssue(context.Background(), srv.URL, "e", "t", "NOPE-1"); !errors.Is(err, ErrIssueNotFound) {
 		t.Errorf("missing issue: err = %v, want ErrIssueNotFound", err)
+	}
+}
+
+func TestHTTPClientSearchIssues(t *testing.T) {
+	// 3 matching issues served in pages, so pagination is exercised.
+	total := 3
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/rest/api/2/search" {
+			t.Errorf("unexpected path %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("jql"); got != "assignee = currentUser()" {
+			t.Errorf("jql = %q", got)
+		}
+		startAt := 0
+		fmt.Sscanf(r.URL.Query().Get("startAt"), "%d", &startAt)
+		pageSize := 2 // server-side clamp below the client's requested page size
+		issues := []map[string]any{}
+		for i := startAt; i < total && len(issues) < pageSize; i++ {
+			issues = append(issues, map[string]any{
+				"id": fmt.Sprintf("100%d", i), "key": fmt.Sprintf("PROJ-%d", i+1),
+				"fields": map[string]any{
+					"summary":     fmt.Sprintf("Task %d", i+1),
+					"description": "details",
+					"status":      map[string]string{"name": "To Do"},
+					"priority":    map[string]string{"name": "Medium"},
+					"assignee":    map[string]string{"accountId": "abc", "displayName": "Ada"},
+				},
+			})
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"startAt": startAt, "maxResults": pageSize, "total": total, "issues": issues,
+		})
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(srv.Client())
+	got, err := c.SearchIssues(context.Background(), srv.URL, "e", "t", "assignee = currentUser()", 100)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if len(got) != total {
+		t.Fatalf("len = %d, want %d", len(got), total)
+	}
+	if got[0].Key != "PROJ-1" || got[2].Key != "PROJ-3" {
+		t.Errorf("bad keys: %+v", got)
+	}
+	if got[0].Summary != "Task 1" || got[0].Description != "details" ||
+		got[0].AssigneeAccountID != "abc" || got[0].AssigneeDisplayName != "Ada" {
+		t.Errorf("bad issue: %+v", got[0])
+	}
+}
+
+func TestHTTPClientSearchIssuesRespectsMaxResults(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		startAt := 0
+		fmt.Sscanf(r.URL.Query().Get("startAt"), "%d", &startAt)
+		pageSize := 0
+		fmt.Sscanf(r.URL.Query().Get("maxResults"), "%d", &pageSize)
+		issues := []map[string]any{}
+		for i := startAt; len(issues) < pageSize; i++ { // pretend an endless result set
+			issues = append(issues, map[string]any{
+				"id": fmt.Sprintf("1%04d", i), "key": fmt.Sprintf("BIG-%d", i+1),
+				"fields": map[string]any{"summary": "x"},
+			})
+		}
+		json.NewEncoder(w).Encode(map[string]any{
+			"startAt": startAt, "maxResults": pageSize, "total": 10000, "issues": issues,
+		})
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(srv.Client())
+	got, err := c.SearchIssues(context.Background(), srv.URL, "e", "t", "project = BIG", 7)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if len(got) != 7 {
+		t.Errorf("len = %d, want 7 (caller maxResults)", len(got))
+	}
+
+	// A zero/oversized maxResults is clamped to the hard cap of 100.
+	got, err = c.SearchIssues(context.Background(), srv.URL, "e", "t", "project = BIG", 0)
+	if err != nil {
+		t.Fatalf("SearchIssues: %v", err)
+	}
+	if len(got) != 100 {
+		t.Errorf("len = %d, want 100 (hard cap)", len(got))
+	}
+}
+
+func TestHTTPClientSearchIssuesBadJQL(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{"errorMessages": []string{"bad jql"}})
+	}))
+	defer srv.Close()
+
+	c := NewHTTPClient(srv.Client())
+	if _, err := c.SearchIssues(context.Background(), srv.URL, "e", "t", "nonsense ===", 10); !errors.Is(err, ErrBadRequest) {
+		t.Errorf("bad jql: err = %v, want ErrBadRequest", err)
 	}
 }
