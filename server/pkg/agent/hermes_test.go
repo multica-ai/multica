@@ -1570,12 +1570,19 @@ func TestHermesProviderErrorSnifferBoundedBuffer(t *testing.T) {
 	}
 }
 
-// TestHermesProviderErrorSnifferIgnoresEchoedInfoRecords guards the
-// regression in GitHub multica#5862: Hermes emits conversation and tool
-// records to stderr at `[INFO] root:` level. Those records are data, not
-// provider errors, but embedded documentation, code, or tool output can
-// contain both a terminal marker and an "Error:" fragment. The sniffer
-// must ignore the complete INFO record regardless of its size or payload.
+// TestHermesProviderErrorSnifferIgnoresEchoedInfoRecords guards pollution
+// failures from GitHub multica#5862.
+//
+// Pollution failure ≠ real provider failure:
+//   - real failure: Hermes/provider crashes; no successful final reply.
+//   - pollution failure: Hermes already produced a correct final reply /
+//     completed the requested work, then Multica suddenly flips the same
+//     run to failed because an `[INFO] root:` conversation/tool echo on
+//     stderr embedded error-looking tokens (Error:, KeyError:, ❌, ...).
+//
+// These fixtures model the pollution class. The sniffer must ignore the
+// full INFO record, and a completed run with a successful final reply
+// must stay completed.
 func TestHermesProviderErrorSnifferIgnoresEchoedInfoRecords(t *testing.T) {
 	t.Parallel()
 
@@ -1623,14 +1630,20 @@ func TestHermesProviderErrorSnifferIgnoresEchoedInfoRecords(t *testing.T) {
 				t.Errorf("echoed INFO record must not set terminal failure, got %d bytes: %q", len(msg), firstNRunes(msg, 100))
 			}
 
-			status, errStr := promoteACPResultOnProviderError("completed", "", "Done. The requested work completed successfully.", s)
+			// Simulate the observed pollution timing: a successful final
+			// reply already exists, then promotion consults the sniffer.
+			successfulFinalReply := "Done. The requested work completed successfully."
+			status, errStr := promoteACPResultOnProviderError("completed", "", successfulFinalReply, s)
 			if status != "completed" {
-				t.Errorf("completed run flipped to %q (error=%q); regression of multica#5862", status, firstNRunes(errStr, 100))
+				t.Errorf("pollution: successful final reply was present, but status flipped to %q (error=%q)", status, firstNRunes(errStr, 100))
 			}
 		})
 	}
 }
 
+// TestHermesProviderErrorSnifferStillCapturesErrorRootRecords is the
+// control for real failures: genuine `[ERROR] root:` provider records
+// must still be terminal. Pollution handling must not swallow those.
 func TestHermesProviderErrorSnifferStillCapturesErrorRootRecords(t *testing.T) {
 	t.Parallel()
 
@@ -1642,7 +1655,7 @@ func TestHermesProviderErrorSnifferStillCapturesErrorRootRecords(t *testing.T) {
 
 	msg := s.terminalMessage()
 	if !strings.Contains(msg, "HTTP 429") {
-		t.Fatalf("expected genuine ERROR root record to remain terminal, got %q", msg)
+		t.Fatalf("real error: expected genuine ERROR root record to remain terminal, got %q", msg)
 	}
 }
 

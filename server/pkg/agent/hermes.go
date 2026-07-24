@@ -2116,9 +2116,11 @@ var acpAgentOutputTerminalRe = regexp.MustCompile(`API call failed after \d+ ret
 const acpMaxErrorLines = 8
 
 // acpHermesInfoRootRe matches Python logging records where Hermes echoes
-// conversation and tool data to stderr. The payload may itself contain
-// arbitrary error examples, terminal markers, or provider-looking text;
-// it is INFO data and must never participate in provider-error matching.
+// conversation and tool data to stderr. These are pollution sources, not
+// real provider errors: the agent may already have produced a successful
+// final reply while the payload still embeds documentation/code/tool text
+// that looks like an error. INFO data must never participate in
+// provider-error matching.
 var acpHermesInfoRootRe = regexp.MustCompile(
 	`^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:,[0-9]+)? \[INFO\] root:`,
 )
