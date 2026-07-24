@@ -51,6 +51,9 @@
   },
   "questions": {
     "eyebrow_about_you": "Over jou",
+    "about_you": {
+      "question": "Vertel ons wat over jezelf."
+    },
     "source": {
       "question": "Hoe heb je over Multica gehoord?",
       "friends_colleagues": "Vrienden of collega's",

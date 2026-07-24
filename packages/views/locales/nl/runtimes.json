@@ -413,6 +413,8 @@
     "unmapped_notice_other": "{{count}} modellen hebben geen onderhouden prijs — hun tokens worden uitgesloten van de kostentotalen.",
     "custom_pricing": {
       "open_button": "Aangepaste prijzen instellen",
+      "edit_button": "Aangepaste prijzen bewerken",
+      "active_notice": "Sommige modellen in deze periode worden met je aangepaste tarieven beprijsd.",
       "title": "Aangepaste modelprijzen",
       "description": "Voer tarieven per miljoen tokens in zodat we modellen kunnen beprijzen waarvoor we geen onderhouden tarief leveren. Lokaal op deze machine opgeslagen.",
       "empty": "Er heeft nu geen model een aangepaste prijs nodig.",

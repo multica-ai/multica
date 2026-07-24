@@ -22,7 +22,12 @@
     "send_blocked_toast": "Bericht niet verzonden — je hebt geen toestemming meer om deze agent te gebruiken",
     "attachment_bind_failed_toast": "Bericht verzonden, maar bestanden zijn niet bijgevoegd. Probeer het zo meteen opnieuw.",
     "add_tooltip": "Toevoegen",
-    "upload_file": "Afbeelding of bestanden"
+    "upload_file": "Afbeelding of bestanden",
+    "project_context": "Projectcontext",
+    "change_project_context": "Projectcontext wijzigen",
+    "remove_project_context": "Projectcontext verwijderen",
+    "no_projects": "Nog geen projects",
+    "project_context_unsupported": "Projectbeschrijving wordt niet toegepast — de daemon van deze agent heeft een upgrade nodig"
   },
   "message_list": {
     "show_details": "Details tonen",
