@@ -2214,11 +2214,19 @@ func TestPrepareCodexHomeReportsMissingModelCatalogPath(t *testing.T) {
 // parser rejects them with `missing field path`. prepareCodexHome must drop
 // every `[[skills.config]]` entry while copying the user's config.toml so
 // the per-task home stays parseable.
-func TestPrepareCodexHomeStripsSkillsConfigEntries(t *testing.T) {
+func TestPrepareCodexHomeSanitizesMarketplaceAndSkillConfig(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
 	sharedConfig := `model = "o3"
+
+[marketplaces.claude-plugins-official]
+last_updated = "2026-07-17T03:11:33Z"
+source_type = "git"
+source = "https://github.com/anthropics/claude-plugins-official.git"
+
+[plugins."superpowers@claude-plugins-official"]
+enabled = true
 
 [[skills.config]]
 path = "/Users/x/SKILL.md"
@@ -2233,6 +2241,13 @@ model = "o3"
 `
 	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(sharedConfig), 0o644); err != nil {
 		t.Fatalf("write shared config.toml: %v", err)
+	}
+	pluginSkill := filepath.Join(sharedHome, "plugins", "cache", "claude-plugins-official", "superpowers", "1.0.0", "skills", "brainstorming", "SKILL.md")
+	if err := os.MkdirAll(filepath.Dir(pluginSkill), 0o755); err != nil {
+		t.Fatalf("create shared plugin cache: %v", err)
+	}
+	if err := os.WriteFile(pluginSkill, []byte("Use when brainstorming."), 0o644); err != nil {
+		t.Fatalf("write shared plugin skill: %v", err)
 	}
 	t.Setenv("CODEX_HOME", sharedHome)
 
@@ -2252,11 +2267,31 @@ model = "o3"
 	if strings.Contains(tomlStr, "superpowers:brainstorming") {
 		t.Errorf("per-task config.toml should not retain plugin skill names, got:\n%s", tomlStr)
 	}
+	if strings.Contains(tomlStr, "[marketplaces.") {
+		t.Errorf("per-task config.toml should not inherit marketplace entries, got:\n%s", tomlStr)
+	}
+	if !strings.Contains(tomlStr, `[plugins."superpowers@claude-plugins-official"]`) {
+		t.Errorf("per-task config.toml should preserve installed plugin registry entries, got:\n%s", tomlStr)
+	}
+	pluginData, err := os.ReadFile(filepath.Join(codexHome, "plugins", "cache", "claude-plugins-official", "superpowers", "1.0.0", "skills", "brainstorming", "SKILL.md"))
+	if err != nil {
+		t.Fatalf("preserved plugin registry must retain access to shared plugin cache: %v", err)
+	}
+	if string(pluginData) != "Use when brainstorming." {
+		t.Errorf("shared plugin cache content = %q", pluginData)
+	}
 	if !strings.Contains(tomlStr, `model = "o3"`) {
 		t.Errorf("top-level keys should be preserved, got:\n%s", tomlStr)
 	}
 	if !strings.Contains(tomlStr, "[profiles.default]") {
 		t.Errorf("unrelated tables should be preserved, got:\n%s", tomlStr)
+	}
+	sharedData, err := os.ReadFile(filepath.Join(sharedHome, "config.toml"))
+	if err != nil {
+		t.Fatalf("read shared config.toml: %v", err)
+	}
+	if string(sharedData) != sharedConfig {
+		t.Errorf("shared config.toml must remain unchanged, got:\n%s", sharedData)
 	}
 }
 

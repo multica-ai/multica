@@ -241,12 +241,15 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 			}
 		}
 	}
-	// Drop `[[skills.config]]` entries inherited from the user's
+	// Drop user-level skill config and marketplace update sources inherited from
 	// ~/.codex/config.toml. Codex Desktop writes plugin-backed skills with a
 	// `name` and no `path`, which the CLI's stricter TOML parser rejects with
-	// `missing field path` and bails out of `thread/start`. Multica writes the
-	// agent's active skills directly to `codex-home/skills/`, so the
-	// user-level registry is redundant here. See codex_skill_strip.go.
+	// `missing field path` and bails out of `thread/start`. Marketplace entries
+	// also trigger redundant git refreshes in every isolated task home. Multica
+	// writes the agent's active skills directly to `codex-home/skills/`. Keep
+	// `[plugins.*]` so installed plugins still load from the exposed shared
+	// plugin cache, but do not let tasks update marketplaces. See
+	// codex_skill_strip.go.
 	if err := sanitizeCopiedCodexConfig(filepath.Join(codexHome, "config.toml")); err != nil {
 		logger.Warn("execenv: codex-home sanitize config failed", "error", err)
 	}
