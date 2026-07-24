@@ -68,6 +68,13 @@ type PrepareParams struct {
 	// substituted. Used by the local_directory project_resource flow
 	// (MUL-2663). When set, the envRoot/workdir directory is not created.
 	LocalWorkDir string
+	// Isolate (VWO-367) applies only with LocalWorkDir set. When true the agent
+	// does NOT edit LocalWorkDir in place; instead a per-task git worktree is cut
+	// from LocalWorkDir's repository into envRoot/workdir (own working tree +
+	// index), so concurrent tasks on one checkout don't share an index or a
+	// sidecar dir. Default false preserves the in-place local_directory contract
+	// general operators rely on (ADR-0019).
+	Isolate bool
 	// HermesSourceHome is the shared Hermes home the per-task overlay is seeded
 	// from — resolved by the daemon via execenv.ResolveHermesProfile so it honors
 	// the agent's custom_env HERMES_HOME and any -p/--profile or sticky selection.
@@ -194,10 +201,18 @@ type Environment struct {
 	// project_resource, it is the user's path instead. See LocalDirectory.
 	WorkDir string
 	// LocalDirectory is true when WorkDir points at a user-supplied path
-	// outside RootDir (the local_directory flow). Callers that key behavior
-	// on "may I remove WorkDir as scratch?" must check this — for example
-	// the GC loop never deletes the user's directory.
+	// outside RootDir (the in-place local_directory flow). Callers that key
+	// behavior on "may I remove WorkDir as scratch?" must check this — for
+	// example the GC loop never deletes the user's directory. It is FALSE for an
+	// isolated local_directory task: there WorkDir is envRoot/workdir (a per-task
+	// worktree the daemon owns and may remove), and IsolatedWorktree is set.
 	LocalDirectory bool
+	// IsolatedWorktree is set (VWO-367) when this is an isolated local_directory
+	// task: WorkDir is a per-task git worktree cut from the user's checkout. The
+	// caller must call its Remove on teardown so the worktree registry entry and
+	// per-task branch are reclaimed (deferred cleanup for the graceful path; GC /
+	// the next task's opportunistic prune for the crash path).
+	IsolatedWorktree *IsolatedLocalWorktree
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
 	// ClaudeSettingsPath is a task-local --settings JSON file that applies
@@ -292,9 +307,17 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// envRoot.
 	workDir := filepath.Join(envRoot, "workdir")
 	scratchDirs := []string{filepath.Join(envRoot, "output"), filepath.Join(envRoot, "logs")}
-	if params.LocalWorkDir == "" {
+	isolate := params.LocalWorkDir != "" && params.Isolate
+	switch {
+	case params.LocalWorkDir == "":
+		// Standard flow: synthesise envRoot/workdir.
 		scratchDirs = append(scratchDirs, workDir)
-	} else {
+	case isolate:
+		// VWO-367 isolated local_directory: workDir is envRoot/workdir, but a git
+		// worktree (created below, after scratch dirs exist) rather than an empty
+		// dir. Do NOT pre-create it — `git worktree add` must create the path.
+	default:
+		// In-place local_directory: the agent edits the user's path directly.
 		workDir = params.LocalWorkDir
 	}
 	for _, dir := range scratchDirs {
@@ -306,8 +329,18 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	env := &Environment{
 		RootDir:        envRoot,
 		WorkDir:        workDir,
-		LocalDirectory: params.LocalWorkDir != "",
+		LocalDirectory: params.LocalWorkDir != "" && !isolate,
 		logger:         logger,
+	}
+
+	// Cut the per-task worktree before any sidecar/context files are written, so
+	// writeContextFiles lands them inside the isolated worktree.
+	if isolate {
+		wt, err := PrepareIsolatedLocalWorktree(params.LocalWorkDir, workDir, params.TaskID, logger)
+		if err != nil {
+			return nil, fmt.Errorf("execenv: isolate local_directory: %w", err)
+		}
+		env.IsolatedWorktree = wt
 	}
 
 	// Write context files into workdir (skills go to provider-native paths).
@@ -847,6 +880,14 @@ func ReadManagedEnvProvenance(envRoot string) (*ManagedEnvProvenance, error) {
 func (env *Environment) Cleanup(removeAll bool) error {
 	if env == nil {
 		return nil
+	}
+
+	// VWO-367: reclaim an isolated per-task worktree through git before any
+	// RemoveAll, so we never leave a dangling `git worktree` registry entry that
+	// a plain directory delete would. Idempotent and safe to call more than once
+	// (the deferred cleanup in runTask may already have removed it).
+	if env.IsolatedWorktree != nil {
+		env.IsolatedWorktree.Remove(env.logger)
 	}
 
 	if env.LocalDirectory {
