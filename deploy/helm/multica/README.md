@@ -118,6 +118,9 @@ must react to out-of-band Secret changes.
 
 Existing CloudFront and local-upload values remain available in `values.yaml`.
 `extraEnv` covers any application variable not modeled directly.
+Connection-pool variables are omitted by default so `pool_max_conns` and
+`pool_min_conns` in `DATABASE_URL` keep their precedence. Set the corresponding
+chart values only when an environment-variable override is intended.
 
 ### SMTP
 
@@ -125,7 +128,8 @@ Set `backend.config.smtp.host`, `port`, `fromEmail`, `tls`, `tlsInsecure`, and
 `ehloName`. They map to `SMTP_HOST`, `SMTP_PORT`, `SMTP_FROM_EMAIL`, `SMTP_TLS`,
 `SMTP_TLS_INSECURE`, and `SMTP_EHLO_NAME`. Keep `SMTP_USERNAME` and
 `SMTP_PASSWORD` in `existingSecret` or another Secret referenced by
-`extraEnvFrom`.
+`extraEnvFrom`. The defaults preserve the application behavior: port 25 and
+automatic STARTTLS or implicit TLS detection when `tls` is empty.
 
 ### Redis and rate limiting
 
@@ -211,6 +215,10 @@ to the existing Gateway supplied in `httpRoute.parentRefs`. Component
 verbatim for filters, timeouts, or advanced routing. Common and component
 annotations merge with the same precedence as Ingress. Set `ingress.enabled=false`
 when HTTPRoute is the only desired entrypoint.
+
+When frontend and backend use the same Gateway listener and default catch-all
+rules, configure distinct hostnames. The chart rejects two hostname-less routes
+or duplicate hostnames because they would compete for the same requests.
 
 ```yaml
 ingress:

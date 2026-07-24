@@ -14,8 +14,12 @@ data:
   CORS_ALLOWED_ORIGINS: {{ .Values.backend.config.corsAllowedOrigins | quote }}
   ALLOWED_ORIGINS: {{ .Values.backend.config.allowedOrigins | quote }}
   COOKIE_DOMAIN: {{ .Values.backend.config.cookieDomain | quote }}
+  {{- if ne .Values.backend.config.databaseMaxConns nil }}
   DATABASE_MAX_CONNS: {{ .Values.backend.config.databaseMaxConns | quote }}
+  {{- end }}
+  {{- if ne .Values.backend.config.databaseMinConns nil }}
   DATABASE_MIN_CONNS: {{ .Values.backend.config.databaseMinConns | quote }}
+  {{- end }}
   LOG_LEVEL: {{ .Values.backend.config.logLevel | quote }}
   METRICS_ADDR: {{ .Values.backend.config.metricsAddr | quote }}
   ANALYTICS_DISABLED: {{ .Values.backend.config.analyticsDisabled | quote }}

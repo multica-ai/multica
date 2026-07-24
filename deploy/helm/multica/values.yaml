@@ -87,8 +87,10 @@ backend:
     corsAllowedOrigins: ""
     allowedOrigins: ""
     cookieDomain: ""
-    databaseMaxConns: 25
-    databaseMinConns: 5
+    # null preserves pool_max_conns and pool_min_conns from DATABASE_URL.
+    # Set these explicitly to override the connection-string values.
+    databaseMaxConns: null
+    databaseMinConns: null
     logLevel: info
     metricsAddr: ""
     analyticsDisabled: true
@@ -104,9 +106,10 @@ backend:
     googleRedirectUri: http://multica.dev.lan/auth/callback
     smtp:
       host: ""
-      port: 587
+      # Defaults match the application when SMTP_PORT and SMTP_TLS are unset.
+      port: 25
       fromEmail: ""
-      tls: starttls
+      tls: ""
       tlsInsecure: false
       ehloName: ""
     redis:

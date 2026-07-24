@@ -3,6 +3,16 @@
 {{- $backendAnnotations := mergeOverwrite (deepCopy (default dict .Values.httpRoute.annotations)) (default dict .Values.httpRoute.backend.annotations) -}}
 {{- $frontendParentRefs := default .Values.httpRoute.parentRefs .Values.httpRoute.frontend.parentRefs -}}
 {{- $backendParentRefs := default .Values.httpRoute.parentRefs .Values.httpRoute.backend.parentRefs -}}
+{{- if and .Values.httpRoute.frontend.enabled .Values.httpRoute.backend.enabled (deepEqual $frontendParentRefs $backendParentRefs) (empty .Values.httpRoute.frontend.rules) (empty .Values.httpRoute.backend.rules) -}}
+  {{- if and (empty .Values.httpRoute.frontend.hostnames) (empty .Values.httpRoute.backend.hostnames) -}}
+    {{- fail "httpRoute frontend and backend cannot both use catch-all hostnames with default rules on the same parentRefs; configure distinct hostnames, custom rules, or component parentRefs" -}}
+  {{- end -}}
+  {{- range $hostname := .Values.httpRoute.frontend.hostnames -}}
+    {{- if has $hostname $.Values.httpRoute.backend.hostnames -}}
+      {{- fail (printf "httpRoute frontend and backend cannot both use hostname %q with default rules on the same parentRefs" $hostname) -}}
+    {{- end -}}
+  {{- end -}}
+{{- end -}}
 {{- if .Values.httpRoute.frontend.enabled }}
 apiVersion: gateway.networking.k8s.io/v1
 kind: HTTPRoute

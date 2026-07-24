@@ -489,8 +489,6 @@
         "corsAllowedOrigins",
         "allowedOrigins",
         "cookieDomain",
-        "databaseMaxConns",
-        "databaseMinConns",
         "logLevel",
         "metricsAddr",
         "analyticsDisabled",
@@ -523,8 +521,8 @@
         "corsAllowedOrigins": { "type": "string" },
         "allowedOrigins": { "type": "string" },
         "cookieDomain": { "type": "string" },
-        "databaseMaxConns": { "type": "integer", "minimum": 0 },
-        "databaseMinConns": { "type": "integer", "minimum": 0 },
+        "databaseMaxConns": { "type": ["integer", "null"], "minimum": 0 },
+        "databaseMinConns": { "type": ["integer", "null"], "minimum": 0 },
         "logLevel": {
           "type": "string",
           "enum": ["debug", "info", "warn", "error"]
