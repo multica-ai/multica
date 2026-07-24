@@ -287,6 +287,34 @@ afterEach(() => {
 });
 
 describe("AgentTranscriptDialog", () => {
+  it("shows the terminal error when a failed run recorded no events or result", () => {
+    const error = JSON.stringify({
+      error: {
+        message: "Invalid value: 'max'. Supported values are none, minimal, low, medium, high, and xhigh.",
+        type: "invalid_request_error",
+        param: "reasoning.effort",
+        code: "invalid_value",
+      },
+    });
+
+    renderDialog([], {
+      task: {
+        ...baseTask,
+        status: "failed",
+        result: null,
+        error,
+        failure_reason: "api_invalid_request",
+      },
+    });
+
+    expect(
+      screen.getByText(
+        "Invalid value: 'max'. Supported values are none, minimal, low, medium, high, and xhigh. · reasoning.effort",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/"code": "invalid_value"/)).toBeInTheDocument();
+  });
+
   it("explains unavailable live events for an empty Antigravity transcript", async () => {
     vi.mocked(api.listRuntimes).mockResolvedValue([runtimeFor("antigravity")]);
 
