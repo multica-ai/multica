@@ -7,31 +7,49 @@ const mockQuickCreateIssue = vi.hoisted(() => vi.fn());
 const mockSetLastActor = vi.hoisted(() => vi.fn());
 const mockSetLastProjectId = vi.hoisted(() => vi.fn());
 const mockSetQuickCreateFieldVisible = vi.hoisted(() => vi.fn());
-const mockSetPrompt = vi.hoisted(() => vi.fn());
-const mockClearPrompt = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const mockUploadWithToast = vi.hoisted(() => vi.fn());
 const mockNavigationPush = vi.hoisted(() => vi.fn());
-const mockSetIssueDraft = vi.hoisted(() => vi.fn());
+const mockSetShared = vi.hoisted(() => vi.fn());
+const mockSetManual = vi.hoisted(() => vi.fn());
+const mockSetAgent = vi.hoisted(() => vi.fn());
+const mockSetActiveMode = vi.hoisted(() => vi.fn());
+const mockClearDraft = vi.hoisted(() => vi.fn());
 
-const mockIssueDraftStore = {
-  draft: {
+const emptyIssueDraft = () => ({
+  shared: {
+    projectId: undefined as string | undefined,
+    priority: "none" as "none" | "low" | "medium" | "high" | "urgent",
+    dueDate: null as string | null,
+    attachments: [] as Array<{ id: string }>,
+  },
+  manual: {
     title: "",
     description: "",
     status: "todo" as const,
-    priority: "none" as const,
+    startDate: null as string | null,
     assigneeType: undefined as "agent" | "squad" | "member" | undefined,
     assigneeId: undefined as string | undefined,
-    projectId: undefined as string | undefined,
-    startDate: null as string | null,
-    dueDate: null as string | null,
     labelIds: [] as string[],
     propertyValues: {} as Record<string, string | number | boolean | string[]>,
-    attachments: [],
   },
-  setDraft: mockSetIssueDraft,
+  agent: {
+    prompt: "",
+    actorType: undefined as "agent" | "squad" | undefined,
+    actorId: undefined as string | undefined,
+  },
+  activeMode: "agent" as "agent" | "manual",
+});
+
+const mockIssueDraftStore = {
+  draft: emptyIssueDraft(),
+  setShared: mockSetShared,
+  setManual: mockSetManual,
+  setAgent: mockSetAgent,
+  setActiveMode: mockSetActiveMode,
+  clearDraft: mockClearDraft,
 };
 
 const mockQuickCreateStore = {
@@ -40,9 +58,6 @@ const mockQuickCreateStore = {
   setLastActor: mockSetLastActor,
   lastProjectId: null as string | null,
   setLastProjectId: mockSetLastProjectId,
-  prompt: "Persisted draft prompt",
-  setPrompt: mockSetPrompt,
-  clearPrompt: mockClearPrompt,
   keepOpen: false,
   setKeepOpen: mockSetKeepOpen,
 };
@@ -222,6 +237,11 @@ vi.mock("../editor", async () => {
   const uploadGate = await vi.importActual<typeof import("../editor/use-upload-gate")>(
     "../editor/use-upload-gate",
   );
+  // Real composer submit contract — pure React, no network. Drives the
+  // single-flight + upload-gate semantics against the mocked editor/api.
+  const composer = await vi.importActual<typeof import("../editor/use-composer-submit")>(
+    "../editor/use-composer-submit",
+  );
   const ContentEditor = forwardRef(({ defaultValue, onUpdate, onSubmit, onUploadFile, onUploadingChange, placeholder }: any, ref: any) => {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
@@ -280,6 +300,7 @@ vi.mock("../editor", async () => {
 
   return {
     ...uploadGate,
+    ...composer,
     useEditorUpload: () => ({
       uploadWithToast: mockUploadWithToast,
       upload: vi.fn(),
@@ -395,24 +416,21 @@ describe("AgentCreatePanel", () => {
     mockQuickCreateStore.lastActorId = null;
     mockQuickCreateStore.lastProjectId = null;
     mockCreateSettingsStore.quickCreateFields = ["project"];
-    mockQuickCreateStore.prompt = "Persisted draft prompt";
     mockQuickCreateStore.keepOpen = false;
-    mockIssueDraftStore.draft = {
-      title: "",
-      description: "",
-      status: "todo",
-      priority: "none",
-      assigneeType: undefined,
-      assigneeId: undefined,
-      projectId: undefined,
-      startDate: null,
-      dueDate: null,
-      labelIds: [],
-      propertyValues: {},
-      attachments: [],
-    };
-    mockSetIssueDraft.mockImplementation((patch: Partial<typeof mockIssueDraftStore.draft>) => {
-      mockIssueDraftStore.draft = { ...mockIssueDraftStore.draft, ...patch };
+    mockIssueDraftStore.draft = emptyIssueDraft();
+    // The prompt now lives in the unified draft's agent slot.
+    mockIssueDraftStore.draft.agent.prompt = "Persisted draft prompt";
+    mockSetShared.mockImplementation((patch: Partial<typeof mockIssueDraftStore.draft.shared>) => {
+      mockIssueDraftStore.draft.shared = { ...mockIssueDraftStore.draft.shared, ...patch };
+    });
+    mockSetManual.mockImplementation((patch: Partial<typeof mockIssueDraftStore.draft.manual>) => {
+      mockIssueDraftStore.draft.manual = { ...mockIssueDraftStore.draft.manual, ...patch };
+    });
+    mockSetAgent.mockImplementation((patch: Partial<typeof mockIssueDraftStore.draft.agent>) => {
+      mockIssueDraftStore.draft.agent = { ...mockIssueDraftStore.draft.agent, ...patch };
+    });
+    mockClearDraft.mockImplementation(() => {
+      mockIssueDraftStore.draft = emptyIssueDraft();
     });
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
@@ -469,10 +487,11 @@ describe("AgentCreatePanel", () => {
     await user.click(screen.getByTestId("priority-picker"));
     await user.click(screen.getByTestId("due-date-picker"));
 
-    expect(mockIssueDraftStore.draft).toEqual(
+    expect(mockIssueDraftStore.draft.agent).toEqual(
+      expect.objectContaining({ actorType: "squad", actorId: "squad-1" }),
+    );
+    expect(mockIssueDraftStore.draft.shared).toEqual(
       expect.objectContaining({
-        assigneeType: "squad",
-        assigneeId: "squad-1",
         projectId: "proj-1",
         priority: "high",
         dueDate: "2026-08-01",
@@ -503,7 +522,7 @@ describe("AgentCreatePanel", () => {
 
     await user.clear(editor);
     await user.type(editor, "New agent prompt");
-    expect(mockSetPrompt).toHaveBeenLastCalledWith("New agent prompt");
+    expect(mockSetAgent).toHaveBeenLastCalledWith({ prompt: "New agent prompt" });
 
     await user.click(screen.getByRole("button", { name: /^Create$/i }));
 
@@ -519,14 +538,8 @@ describe("AgentCreatePanel", () => {
     // No project picked → persisted project preference is cleared so the
     // store stays in sync with the actual outgoing request.
     expect(mockSetLastProjectId).toHaveBeenCalledWith(null);
-    expect(mockSetIssueDraft).toHaveBeenLastCalledWith({
-      assigneeType: undefined,
-      assigneeId: undefined,
-      projectId: undefined,
-      priority: "none",
-      dueDate: null,
-    });
-    expect(mockClearPrompt).toHaveBeenCalled();
+    // A successful create ends the whole unified draft.
+    expect(mockClearDraft).toHaveBeenCalled();
     expect(mockSetLastMode).toHaveBeenCalledWith("agent");
     expect(onClose).toHaveBeenCalled();
   });
@@ -563,7 +576,7 @@ describe("AgentCreatePanel", () => {
     fireEvent.change(editor, { target: { value: "Half-typed request" } });
     await user.click(screen.getByRole("button", { name: "Customize fields..." }));
 
-    expect(mockSetPrompt).toHaveBeenLastCalledWith("Half-typed request");
+    expect(mockSetAgent).toHaveBeenLastCalledWith({ prompt: "Half-typed request" });
     expect(onClose).toHaveBeenCalled();
     expect(mockNavigationPush).toHaveBeenCalledWith("/ws-test/settings?tab=issue");
   });

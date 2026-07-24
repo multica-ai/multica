@@ -10,6 +10,7 @@ import {
   useFileDropZone,
   FileDropOverlay,
   useUploadGate,
+  useComposerSubmit,
 } from "../../editor";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { ChatAddMenu } from "./chat-add-menu";
@@ -187,7 +188,6 @@ export function ChatInput({
   const addInputDraftAttachment = useChatStore((s) => s.addInputDraftAttachment);
   const clearInputDraft = useChatStore((s) => s.clearInputDraft);
   const [isEmpty, setIsEmpty] = useState(!inputDraft.trim());
-  const [isSubmitting, setIsSubmitting] = useState(false);
   // `isEmpty` tracks the LIVE editor, which the persisted draft lags by a
   // debounce, so the send affordance cannot be derived from `inputDraft` alone.
   // But `isEmpty` is never re-derived when the composer switches draft slots
@@ -386,113 +386,101 @@ export function ChatInput({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
 
-  const handleSend = async () => {
-    const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
-    if (!content || isRunning || isSubmitting || disabled || noAgent) {
-      logger.debug("input.send skipped", {
-        emptyContent: !content,
-        isRunning,
-        isSubmitting,
-        disabled,
-        noAgent,
-      });
-      return;
-    }
-    // Block the send while any file is still uploading. If we let it
-    // through the attachment id is not yet in uploadMapRef (the upload
-    // resolves later) and the attachment would only end up bound to the
-    // session, not the message — the agent then can't `multica attachment
-    // download <id>` the file. The SubmitButton is also disabled in this
-    // state via `uploading`, but Mod+Enter bypasses the button so we
-    // still gate here.
-    if (uploadGate.isBlocked()) {
-      logger.debug("input.send skipped: uploads in flight");
-      return;
-    }
-    // The editor is still holding a DIFFERENT draft's document than the one
-    // selected — an upload pinned it and the adopt below has not run yet. The
-    // upload gate above covers most of that window, but not the sliver between
-    // the upload's final dispatch (node gone) and the re-render that adopts:
-    // React flushes that state update on a scheduler task, so a click can land
-    // first. Sending here would post the source draft's text into the selected
-    // session and then clear the wrong draft.
-    if (editorDraftKeyRef.current !== draftKey) {
-      logger.debug("input.send skipped: composer still holds another draft", {
-        loaded: editorDraftKeyRef.current,
-        selected: draftKey,
-      });
-      return;
-    }
-    // Only send attachment IDs for uploads still present in the content.
-    // Edits / deletions that remove the markdown URL also drop the binding.
-    const activeIds: string[] = [];
-    for (const [url, id] of uploadMapRef.current) {
-      if (content.includes(url)) activeIds.push(id);
-    }
-    for (const attachment of draftAttachments) {
-      if (isAttachmentReferenced(content, attachment)) activeIds.push(attachment.id);
-    }
-    const uniqueActiveIds = Array.from(new Set(activeIds));
-    // Capture draft key BEFORE onSend — creating a new session mutates
-    // activeSessionId synchronously, so reading it after onSend would point
-    // at the new session and leave the old draft orphaned.
-    const keyAtSend = draftKey;
-    let committed = false;
-    const commitInput = (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => {
-      if (committed) return;
-      committed = true;
-      // `clearEditor === false` means the owner sent fire-and-forget while the
-      // user had already navigated to another session. The editor instance is
-      // shared across sessions, so it now shows (and the user may be typing
-      // into) a DIFFERENT draft — clearing it or blurring would wipe that
-      // visible input. Only scrub the editor when the user is still on the
-      // session they sent from.
-      if (options?.clearEditor !== false) {
-        editorRef.current?.clearContent();
-        // Drop focus so the caret doesn't keep blinking under the StatusPill /
-        // streaming reply that's about to take over the user's attention. The
-        // input is also `disabled` once isRunning flips, and a focused-but-
-        // disabled editor reads as a stale cursor. We deliberately don't auto-
-        // refocus on completion — that would interrupt the user if they're
-        // selecting text from the assistant reply; one click to refocus is
-        // a fair price for not stealing focus mid-action.
-        editorRef.current?.blur();
-        setIsEmpty(true);
+  // The unified await-then-render send contract (MUL-5181). `useComposerSubmit`
+  // owns the six-step pessimistic submit — empty-guard, synchronous single-flight
+  // (a ref, so a double Mod+Enter in one tick cannot slip past a render-behind
+  // state boolean and double-send), the submit-time upload re-check, and the
+  // `submitting` lock/spinner. The chat-specific work — the loaded-draft guard,
+  // attachment-id resolution, and the owner-driven `commitInput` handoff — stays
+  // here in `onSubmit`, which receives the already-normalized content.
+  const { submitting, submit } = useComposerSubmit({
+    editorRef,
+    uploadGate,
+    onSubmit: async (content: string): Promise<boolean> => {
+      // These states disable the SubmitButton, but Mod+Enter bypasses it — so a
+      // read-only or busy composer must still refuse the keyboard path.
+      if (isRunning || disabled || noAgent) {
+        logger.debug("input.send skipped", { isRunning, disabled, noAgent });
+        return false;
       }
-      // The sent draft's data is cleared regardless — the message is on its
-      // way, so its persisted draft must not resurface.
-      clearInputDraft(keyAtSend);
-      for (const key of options?.extraDraftKeys ?? []) {
-        if (key !== keyAtSend) clearInputDraft(key);
+      // The editor is still holding a DIFFERENT draft's document than the one
+      // selected — an upload pinned it and the adopt below has not run yet. The
+      // upload gate (re-checked inside useComposerSubmit) covers most of that
+      // window, but not the sliver between the upload's final dispatch (node
+      // gone) and the re-render that adopts: React flushes that state update on a
+      // scheduler task, so a submit can land first. Sending here would post the
+      // source draft's text into the selected session and then clear the wrong
+      // draft.
+      if (editorDraftKeyRef.current !== draftKey) {
+        logger.debug("input.send skipped: composer still holds another draft", {
+          loaded: editorDraftKeyRef.current,
+          selected: draftKey,
+        });
+        return false;
       }
-      uploadMapRef.current.clear();
-      setIsSubmitting(false);
-    };
-    logger.info("input.send", {
-      contentLength: content.length,
-      draftKey: keyAtSend,
-      attachmentCount: uniqueActiveIds.length,
-    });
-    setIsSubmitting(true);
-    let accepted: void | boolean;
-    try {
-      accepted = await onSend(
+      // Only send attachment IDs for uploads still present in the content.
+      // Edits / deletions that remove the markdown URL also drop the binding.
+      const activeIds: string[] = [];
+      for (const [url, id] of uploadMapRef.current) {
+        if (content.includes(url)) activeIds.push(id);
+      }
+      for (const attachment of draftAttachments) {
+        if (isAttachmentReferenced(content, attachment)) activeIds.push(attachment.id);
+      }
+      const uniqueActiveIds = Array.from(new Set(activeIds));
+      // Capture draft key BEFORE onSend — creating a new session mutates
+      // activeSessionId synchronously, so reading it after onSend would point
+      // at the new session and leave the old draft orphaned.
+      const keyAtSend = draftKey;
+      let committed = false;
+      const commitInput = (options?: { extraDraftKeys?: string[]; clearEditor?: boolean }) => {
+        if (committed) return;
+        committed = true;
+        // `clearEditor === false` means the owner sent fire-and-forget while the
+        // user had already navigated to another session. The editor instance is
+        // shared across sessions, so it now shows (and the user may be typing
+        // into) a DIFFERENT draft — clearing it or blurring would wipe that
+        // visible input. Only scrub the editor when the user is still on the
+        // session they sent from.
+        if (options?.clearEditor !== false) {
+          editorRef.current?.clearContent();
+          // Drop focus so the caret doesn't keep blinking under the StatusPill /
+          // streaming reply that's about to take over the user's attention. The
+          // input is also `disabled` once isRunning flips, and a focused-but-
+          // disabled editor reads as a stale cursor. We deliberately don't auto-
+          // refocus on completion — that would interrupt the user if they're
+          // selecting text from the assistant reply; one click to refocus is
+          // a fair price for not stealing focus mid-action.
+          editorRef.current?.blur();
+          setIsEmpty(true);
+        }
+        // The sent draft's data is cleared regardless — the message is on its
+        // way, so its persisted draft must not resurface.
+        clearInputDraft(keyAtSend);
+        for (const key of options?.extraDraftKeys ?? []) {
+          if (key !== keyAtSend) clearInputDraft(key);
+        }
+        uploadMapRef.current.clear();
+      };
+      logger.info("input.send", {
+        contentLength: content.length,
+        draftKey: keyAtSend,
+        attachmentCount: uniqueActiveIds.length,
+      });
+      const accepted = await onSend(
         content,
         uniqueActiveIds.length > 0 ? uniqueActiveIds : undefined,
         commitInput,
         draftAttachments.filter((attachment) => uniqueActiveIds.includes(attachment.id)),
       );
-    } catch (err) {
-      logger.warn("input.send failed", err);
-      if (!committed) setIsSubmitting(false);
-      return;
-    }
-    if (accepted === false) {
-      if (!committed) setIsSubmitting(false);
-      return;
-    }
-    if (!committed) commitInput();
-  };
+      // Owner rejected the send (or threw, which useComposerSubmit also treats
+      // as a rejection): the draft was never committed, so it stays put for
+      // retry. Only a commit — here or by the owner — clears it.
+      if (accepted === false) return false;
+      if (!committed) commitInput();
+      return true;
+    },
+  });
 
   const placeholder = noAgent
     ? t(($) => $.input.placeholder_no_agent)
@@ -512,7 +500,7 @@ export function ChatInput({
     !!onProjectChange &&
     !disabled &&
     !noAgent &&
-    !isSubmitting &&
+    !submitting &&
     !isProjectUpdating;
   const selectedProject = projects.find((project) => project.id === projectId);
 
@@ -600,7 +588,7 @@ export function ChatInput({
               // upload's own completion dispatch.
               commitDraft(editorDraftKeyRef.current, md);
             }}
-            onSubmit={handleSend}
+            onSubmit={submit}
             onUploadFile={uploadEnabled ? handleUpload : undefined}
             onUploadingChange={uploadGate.onUploadingChange}
             attachments={draftAttachments}
@@ -635,9 +623,9 @@ export function ChatInput({
         )}
         <div className="absolute bottom-1 right-1.5 flex items-center gap-1">
           <SubmitButton
-            onClick={handleSend}
-            disabled={hasNothingToSend || isSubmitting || !!disabled || !!noAgent}
-            loading={isSubmitting}
+            onClick={submit}
+            disabled={hasNothingToSend || submitting || !!disabled || !!noAgent}
+            loading={submitting}
             busy={uploadGate.uploading}
             running={isRunning}
             onStop={onStop}

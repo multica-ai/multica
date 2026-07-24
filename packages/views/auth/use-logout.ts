@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { clearWorkspaceStorage, defaultStorage } from "@multica/core/platform";
+import { resetAllRegisteredDrafts } from "@multica/core/drafts/cleanup-registry";
 import { paths } from "@multica/core/paths";
 import type { Workspace } from "@multica/core/types";
 import { useNavigation } from "../navigation";
@@ -37,6 +38,15 @@ export function useLogout() {
     for (const ws of cachedWorkspaces) {
       clearWorkspaceStorage(defaultStorage, ws.slug);
     }
+
+    // Reset draft stores' in-memory state regardless of the workspace list.
+    // A client-side navigation to /login does not reload the page, so the
+    // Zustand draft singletons keep the previous user's draft in memory even
+    // after their persisted keys are removed; a subsequent login on the same
+    // tab would surface it. This runs unconditionally because the cached
+    // workspace list can be empty/stale, in which case the per-slug storage
+    // clear above is a no-op but memory must still be wiped.
+    resetAllRegisteredDrafts();
 
     // Clear the last-workspace-slug cookie. Otherwise on a shared device
     // the next user gets redirected by the proxy to the previous user's

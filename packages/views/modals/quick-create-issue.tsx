@@ -52,7 +52,6 @@ import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import {
   contentReferencesAttachment,
   type Agent,
-  type Attachment,
   type IssuePriority,
   type Squad,
 } from "@multica/core/types";
@@ -76,6 +75,7 @@ import {
   FileDropOverlay,
   useUploadGate,
   useEditorUpload,
+  useComposerSubmit,
 } from "../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useT } from "../i18n";
@@ -164,14 +164,18 @@ export function AgentCreatePanel({
   const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
   const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
   const visibleFields = useIssueCreateSettingsStore((s) => s.quickCreateFields);
-  const promptDraft = useQuickCreateStore((s) => s.prompt);
-  const setPrompt = useQuickCreateStore((s) => s.setPrompt);
-  const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
-  const selectionDraft = useIssueDraftStore((s) => s.draft);
-  const setSelectionDraft = useIssueDraftStore((s) => s.setDraft);
+  // The agent draft (prompt + actor) and the shared fields (project, priority,
+  // due date, attachments) live in the unified issue-create draft, so a switch
+  // to/from the manual form preserves them.
+  const draft = useIssueDraftStore((s) => s.draft);
+  const setShared = useIssueDraftStore((s) => s.setShared);
+  const setManual = useIssueDraftStore((s) => s.setManual);
+  const setAgent = useIssueDraftStore((s) => s.setAgent);
+  const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
+  const clearDraft = useIssueDraftStore((s) => s.clearDraft);
 
   // Resolve a candidate actor against the currently-visible agents / squads.
   // Returns null when the candidate doesn't exist in this workspace right
@@ -196,20 +200,14 @@ export function AgentCreatePanel({
 
   const seedActor = useCallback((): ActorSelection | null => {
     // Caller-provided seed wins (e.g. shell pre-seeds with `agent_id` /
-    // `squad_id`), then the unfinished draft, the last successful pick, and
-    // finally the first visible agent.
+    // `squad_id`), then the persisted agent draft, the last successful pick,
+    // and finally the first visible agent.
     const dataAgent = data?.agent_id as string | undefined;
     const dataSquad = data?.squad_id as string | undefined;
     return (
       resolveActor("agent", dataAgent) ||
       resolveActor("squad", dataSquad) ||
-      resolveActor(
-        selectionDraft.assigneeType === "agent" ||
-          selectionDraft.assigneeType === "squad"
-          ? selectionDraft.assigneeType
-          : null,
-        selectionDraft.assigneeId,
-      ) ||
+      resolveActor(draft.agent.actorType, draft.agent.actorId) ||
       resolveActor(lastActorType, lastActorId) ||
       (visibleAgents[0]
         ? ({ type: "agent", id: visibleAgents[0].id } as const)
@@ -219,8 +217,8 @@ export function AgentCreatePanel({
     resolveActor,
     data?.agent_id,
     data?.squad_id,
-    selectionDraft.assigneeType,
-    selectionDraft.assigneeId,
+    draft.agent.actorType,
+    draft.agent.actorId,
     lastActorType,
     lastActorId,
     visibleAgents,
@@ -247,21 +245,21 @@ export function AgentCreatePanel({
     return visibleSquads.find((s) => s.id === actor.id);
   }, [actor, visibleSquads]);
 
-  // Unfinished selections live in the shared issue draft. Last-successful
+  // Unfinished selections live in the shared issue-create draft. Last-successful
   // actor/project values remain separate fallbacks, so closing a draft never
   // overwrites the defaults established by an actual create.
   const [projectId, setProjectId] = useState<string | null>(() => {
     const seed =
       (data?.project_id as string | undefined) ??
-      selectionDraft.projectId ??
+      draft.shared.projectId ??
       lastProjectId;
     return seed ?? null;
   });
   const [priority, setPriority] = useState<IssuePriority>(
-    (data?.priority as IssuePriority | undefined) ?? selectionDraft.priority,
+    (data?.priority as IssuePriority | undefined) ?? draft.shared.priority,
   );
   const [dueDate, setDueDate] = useState<string | null>(
-    (data?.due_date as string | undefined) ?? selectionDraft.dueDate,
+    (data?.due_date as string | undefined) ?? draft.shared.dueDate,
   );
   const [fieldPickerOpen, setFieldPickerOpen] = useState<QuickCreateField | null>(null);
 
@@ -285,19 +283,25 @@ export function AgentCreatePanel({
     if (!projectsLoaded || projectId === null) return;
     if (projects.some((p) => p.id === projectId)) return;
     setProjectId(null);
-    if (selectionDraft.projectId === projectId) {
-      setSelectionDraft({ projectId: undefined });
+    if (draft.shared.projectId === projectId) {
+      setShared({ projectId: undefined });
     }
     if (lastProjectId === projectId) setLastProjectId(null);
   }, [
     projectsLoaded,
     projects,
     projectId,
-    selectionDraft.projectId,
+    draft.shared.projectId,
     lastProjectId,
-    setSelectionDraft,
+    setShared,
     setLastProjectId,
   ]);
+
+  // Mark the persisted draft's active mode so a later reopen and any reader of
+  // the unified draft know which form is being edited.
+  useEffect(() => {
+    setActiveMode("agent");
+  }, [setActiveMode]);
 
   // Daemon CLI version gate. The agent-create flow needs the runtime's
   // bundled multica CLI to be ≥ MIN_QUICK_CREATE_CLI_VERSION; older
@@ -331,20 +335,18 @@ export function AgentCreatePanel({
     baseVersionCheck.state !== "ok" ||
     (usesExplicitFields && fieldVersionCheck.state !== "ok");
 
-  const initialPrompt = (data?.prompt as string) || promptDraft;
+  const initialPrompt = draft.agent.prompt || (data?.prompt as string) || "";
   // The editor is uncontrolled — we read the latest markdown via the ref at
   // submit/switch time. `hasContent` mirrors emptiness so the Create button
   // can disable correctly without a controlled-input rerender on every keystroke.
   const editorRef = useRef<ContentEditorRef>(null);
   const [hasContent, setHasContent] = useState(initialPrompt.trim().length > 0);
-  const [submitting, setSubmitting] = useState(false);
-  // See create-issue's handleSubmit: `submitting` state can't gate two presses
-  // landing in the same tick, and ⌘+Enter makes that trivial to hit.
-  const submittingRef = useRef(false);
   const [justSent, setJustSent] = useState(false);
   const [sentCount, setSentCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
+  // Uploaded attachments live in the shared draft so they survive a dialog
+  // close (and a mode switch) the same way manual-mode uploads do.
+  const pendingAttachments = draft.shared.attachments;
 
   // Image paste/drop support: route uploads through the same helper Advanced
   // uses, so users can paste screenshots straight into the prompt and the
@@ -357,12 +359,15 @@ export function AgentCreatePanel({
   const handleUploadFile = useCallback(async (file: File) => {
     const result = await uploadWithToast(file);
     if (result) {
-      setPendingAttachments((prev) =>
-        prev.some((a) => a.id === result.id) ? prev : [...prev, result],
-      );
+      const current = useIssueDraftStore.getState().draft.shared.attachments ?? [];
+      if (!current.some((a) => a.id === result.id)) {
+        // Persist only durable fields — `download_url` is a short-lived signed
+        // URL minted for this response; render/download paths re-resolve it.
+        setShared({ attachments: [...current, { ...result, download_url: "" }] });
+      }
     }
     return result;
-  }, [uploadWithToast]);
+  }, [uploadWithToast, setShared]);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -375,54 +380,87 @@ export function AgentCreatePanel({
     return () => cancelAnimationFrame(id);
   }, []);
 
-  const submit = async () => {
-    const md = editorRef.current?.getMarkdown()?.trim() ?? "";
-    if (!md || !actor || submittingRef.current || versionBlocked) return;
-    // Submit-time re-read of the queue. Blocking here is what guarantees
-    // `getMarkdown()`'s blob-url strip never erases a pasted/dropped image
-    // whose attachment id hasn't reached `pendingAttachments` yet — the
-    // rendered button state is a frame behind and ⌘+Enter skips it anyway.
-    if (uploadGate.isBlocked()) return;
-    const activeAttachmentIds = pendingAttachments
-      .filter((a) => contentReferencesAttachment(md, a))
-      .map((a) => a.id);
-    submittingRef.current = true;
-    setSubmitting(true);
-    setError(null);
-    try {
-      await api.quickCreateIssue({
-        ...(actor.type === "agent"
-          ? { agent_id: actor.id }
-          : { squad_id: actor.id }),
-        prompt: md,
-        project_id: projectId ?? undefined,
-        ...(priority !== "none" ? { priority } : {}),
-        ...(dueDate ? { due_date: dueDate } : {}),
-        parent_issue_id: parentIssueId,
-        ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
-      });
-      setLastActor(actor.type, actor.id);
-      setLastProjectId(projectId);
-      // A successful create ends this draft. Keep last-successful actor and
-      // project preferences above, but clear the unfinished selections so a
-      // future draft does not inherit priority or due date accidentally.
-      setSelectionDraft({
-        assigneeType: undefined,
-        assigneeId: undefined,
-        projectId: undefined,
-        priority: "none",
-        dueDate: null,
-      });
-      clearPrompt();
-      setLastMode("agent");
-      toast.success(t(($) => $.create_issue.agent.toast_sent), {
-        duration: 4000,
-      });
+  // Agent create runs through the shared await-then-render composer contract
+  // (single-flight ref, submit-time upload re-check, lock+spin, await→boolean,
+  // clear only on acceptance). The prompt IS the editor content, so this maps
+  // onto the hook directly.
+  const composer = useComposerSubmit({
+    editorRef,
+    uploadGate,
+    onSubmit: async (md): Promise<boolean> => {
+      // The button already disables on !actor / versionBlocked, but the
+      // ⌘+Enter path bypasses it — re-guard here and keep the draft in place.
+      if (!actor || versionBlocked) return false;
+      const activeAttachmentIds = pendingAttachments
+        .filter((a) => contentReferencesAttachment(md, a))
+        .map((a) => a.id);
+      setError(null);
+      try {
+        await api.quickCreateIssue({
+          ...(actor.type === "agent"
+            ? { agent_id: actor.id }
+            : { squad_id: actor.id }),
+          prompt: md,
+          project_id: projectId ?? undefined,
+          ...(priority !== "none" ? { priority } : {}),
+          ...(dueDate ? { due_date: dueDate } : {}),
+          parent_issue_id: parentIssueId,
+          ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
+        });
+        setLastActor(actor.type, actor.id);
+        setLastProjectId(projectId);
+        setLastMode("agent");
+        toast.success(t(($) => $.create_issue.agent.toast_sent), {
+          duration: 4000,
+        });
+        return true;
+      } catch (e) {
+        // Server returns 422 with { code, ... } for the structured rejection
+        // paths the modal cares about. Surface the reason in-modal so the
+        // user can switch to a live agent / upgrade their daemon without
+        // leaving the flow.
+        if (e instanceof ApiError && e.body && typeof e.body === "object") {
+          const body = e.body as {
+            code?: string;
+            reason?: string;
+            current_version?: string;
+            min_version?: string;
+          };
+          if (body.code === "agent_unavailable") {
+            setError(body.reason || t(($) => $.create_issue.agent.error_agent_unavailable_fallback));
+            return false;
+          }
+          if (body.code === "daemon_version_unsupported") {
+            // Race fallback: the picker pre-check should normally catch this,
+            // but a runtime can silently re-register with an older CLI between
+            // pre-check and submit. Same wording as the inline notice for
+            // consistency.
+            const cur = body.current_version || "unknown";
+            setError(
+              t(($) => $.create_issue.agent.error_daemon_version, {
+                current: cur,
+                min: body.min_version || versionCheck.min,
+              }),
+            );
+            return false;
+          }
+        }
+        setError(
+          e instanceof Error && e.message
+            ? e.message
+            : t(($) => $.create_issue.agent.error_unknown),
+        );
+        return false;
+      }
+    },
+    onAccepted: () => {
+      // A successful create ends this whole draft (shared + manual + agent);
+      // last-successful actor/project preferences were saved above.
+      clearDraft();
       if (keepOpen) {
-        // Stay open for continuous creation — clear the editor so the
-        // user can immediately type the next prompt.
+        // Stay open for continuous creation — clear the editor so the user can
+        // immediately type the next prompt.
         editorRef.current?.clearContent();
-        setPendingAttachments([]);
         setHasContent(false);
         setSentCount((c) => c + 1);
         setJustSent(true);
@@ -431,78 +469,38 @@ export function AgentCreatePanel({
       } else {
         onClose();
       }
-    } catch (e) {
-      // Server returns 422 with { code, ... } for the structured rejection
-      // paths the modal cares about. Surface the reason in-modal so the
-      // user can switch to a live agent / upgrade their daemon without
-      // leaving the flow.
-      if (e instanceof ApiError && e.body && typeof e.body === "object") {
-        const body = e.body as {
-          code?: string;
-          reason?: string;
-          current_version?: string;
-          min_version?: string;
-        };
-        if (body.code === "agent_unavailable") {
-          setError(body.reason || t(($) => $.create_issue.agent.error_agent_unavailable_fallback));
-          setSubmitting(false);
-          return;
-        }
-        if (body.code === "daemon_version_unsupported") {
-          // Race fallback: the picker pre-check should normally catch this,
-          // but a runtime can silently re-register with an older CLI between
-          // pre-check and submit. Same wording as the inline notice for
-          // consistency.
-          const cur = body.current_version || "unknown";
-          setError(
-            t(($) => $.create_issue.agent.error_daemon_version, {
-              current: cur,
-              min: body.min_version || versionCheck.min,
-            }),
-          );
-          setSubmitting(false);
-          return;
-        }
-      }
-      setError(
-        e instanceof Error && e.message
-          ? e.message
-          : t(($) => $.create_issue.agent.error_unknown),
-      );
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
-    }
+    },
+  });
+  const submit = () => {
+    void composer.submit();
   };
+  const submitting = composer.submitting;
 
-  // Switch to the manual form, carrying what the user typed over as the
-  // description (markdown, including any pasted images) so they don't lose
-  // their work. The picked actor (agent or squad) becomes the default
-  // assignee candidate (still editable). We seed the shared issue-draft
-  // store directly because the manual panel reads its initial values from
-  // there. Persist the mode flip so the next `c` lands in manual.
+  // Switch to the manual form WITHOUT destroying the agent draft. The agent
+  // slot (prompt + actor) is left untouched so a later manual→agent flip
+  // restores it verbatim. Project / priority / due date already live in the
+  // shared slot and carry across for free. Two one-time assist-inits run only
+  // when the manual slot is still empty: seed the description from the prompt
+  // and the assignee from the picked actor. The parent-issue context is not
+  // persisted (a per-invocation intent) so it rides the carry channel.
   const switchToManual = () => {
-    // The prompt is serialized into the manual draft here; mid-upload that
-    // body has already lost the pending image (see switchToAgent).
+    // The prompt is copied into the manual description on assist-init; mid-upload
+    // that body has already lost the pending image (see switchToAgent).
     if (uploadGate.isBlocked()) return;
-    const md = editorRef.current?.getMarkdown() ?? "";
-    useIssueDraftStore.getState().setDraft({
-      description: md,
-      ...(actor
-        ? { assigneeType: actor.type, assigneeId: actor.id }
-        : {}),
-    });
+    // Commit the shared fields to the draft so the manual panel reads them from
+    // there — local state can hold a value seeded from `data` that was never
+    // written through a picker.
+    setShared({ projectId: projectId ?? undefined, priority, dueDate });
+    if (!draft.manual.description.trim()) {
+      const md = editorRef.current?.getMarkdown() ?? "";
+      if (md) setManual({ description: md });
+    }
+    if (!draft.manual.assigneeId && actor) {
+      setManual({ assigneeType: actor.type, assigneeId: actor.id });
+    }
     setLastMode("manual");
-    // Hand the picked project and the parent-issue context to the manual
-    // panel through the same `data` channel that already carries agent_id /
-    // parent_issue_id. The manual panel reads these on mount; this preserves
-    // the user's selection (and the sub-issue intent seeded by
-    // openCreateSubIssue) across the mode flip without piping a third store
-    // through.
+    setActiveMode("manual");
     const carry: Record<string, unknown> = {};
-    if (projectId) carry.project_id = projectId;
-    if (priority !== "none") carry.priority = priority;
-    if (dueDate) carry.due_date = dueDate;
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
@@ -512,7 +510,7 @@ export function AgentCreatePanel({
   // before leaving so what the user typed survives the round-trip, then
   // close — the dialog would otherwise linger over the settings page.
   const openFieldSettings = () => {
-    setPrompt(editorRef.current?.getMarkdown() ?? "");
+    setAgent({ prompt: editorRef.current?.getMarkdown() ?? "" });
     onClose();
     navigation.push(`${workspacePaths.settings()}?tab=issue`);
   };
@@ -567,7 +565,7 @@ export function AgentCreatePanel({
             selectedSquad={selectedSquad}
             onPick={(next) => {
               setActor(next);
-              setSelectionDraft({ assigneeType: next.type, assigneeId: next.id });
+              setAgent({ actorType: next.type, actorId: next.id });
               setError(null);
             }}
             t={t}
@@ -602,7 +600,7 @@ export function AgentCreatePanel({
             placeholder={t(($) => $.create_issue.agent.prompt_placeholder)}
             onUpdate={(md) => {
               setHasContent(md.trim().length > 0);
-              setPrompt(md);
+              setAgent({ prompt: md });
             }}
             onUploadFile={handleUploadFile}
             onUploadingChange={uploadGate.onUploadingChange}
@@ -636,7 +634,7 @@ export function AgentCreatePanel({
               onUpdate={(u) => {
                 const next = u.project_id ?? null;
                 setProjectId(next);
-                setSelectionDraft({ projectId: next ?? undefined });
+                setShared({ projectId: next ?? undefined });
               }}
               triggerRender={<PillButton />}
               align="start"
@@ -652,7 +650,7 @@ export function AgentCreatePanel({
               onUpdate={(updates) => {
                 if (updates.priority) {
                   setPriority(updates.priority);
-                  setSelectionDraft({ priority: updates.priority });
+                  setShared({ priority: updates.priority });
                 }
               }}
               triggerRender={<PillButton />}
@@ -669,7 +667,7 @@ export function AgentCreatePanel({
               onUpdate={(updates) => {
                 const next = updates.due_date ?? null;
                 setDueDate(next);
-                setSelectionDraft({ dueDate: next });
+                setShared({ dueDate: next });
               }}
               triggerRender={<PillButton />}
               align="start"

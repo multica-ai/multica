@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { StorageAdapter } from "../types";
 import type { Attachment } from "../types/attachment";
 import { getCurrentSlug, registerForWorkspaceRehydration } from "../platform/workspace-storage";
+import { registerDraftCleanup } from "../drafts/cleanup-registry";
 import { createLogger } from "../logger";
 
 const logger = createLogger("chat.store");
@@ -529,6 +530,34 @@ export function createChatStore(options: ChatStoreOptions) {
       set({ isExpanded: expanded });
     },
   }));
+
+  // Self-register the chat draft persist keys so logout / workspace-delete
+  // clear them like every other draft store (previously leaked — the chat
+  // drafts, their attachments, and the applied-restore ledger survived a
+  // client-side logout into the next login on the same tab). All are
+  // workspace-scoped (persisted through `wsKey`, i.e. `${base}:${slug}`), and
+  // each entry resets only its own in-memory slice. The server-less restore
+  // queue is registered too so its recoverable text does not outlive the user.
+  registerDraftCleanup({
+    storageKey: DRAFTS_KEY,
+    workspaceScoped: true,
+    resetInMemory: () => store.setState({ inputDrafts: {} }),
+  });
+  registerDraftCleanup({
+    storageKey: DRAFT_ATTACHMENTS_KEY,
+    workspaceScoped: true,
+    resetInMemory: () => store.setState({ inputDraftAttachments: {} }),
+  });
+  registerDraftCleanup({
+    storageKey: APPLIED_RESTORES_KEY,
+    workspaceScoped: true,
+    resetInMemory: () => store.setState({ appliedDraftRestoreIds: [] }),
+  });
+  registerDraftCleanup({
+    storageKey: PENDING_SEND_RESTORES_KEY,
+    workspaceScoped: true,
+    resetInMemory: () => store.setState({ pendingSendRestores: {} }),
+  });
 
   registerForWorkspaceRehydration(() => {
     const nextSession = storage.getItem(wsKey(SESSION_STORAGE_KEY));

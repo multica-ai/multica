@@ -2,16 +2,16 @@
 
 import { useRef, useState, useCallback, useEffect } from "react";
 import { cn } from "@multica/ui/lib/utils";
-import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useEditorUpload } from "../../editor";
+import { ContentEditor, type ContentEditorRef, useFileDropZone, FileDropOverlay, useLazyEditor, useUploadGate, useComposerSubmit } from "../../editor";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
-import type { Attachment } from "@multica/core/types";
-import { contentReferencesAttachment } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
+import { useCommentUploads } from "./use-comment-uploads";
+import { ComposerUploadChips } from "./composer-upload-chips";
 
 interface CommentInputProps {
   issueId: string;
@@ -39,22 +39,25 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   );
   const [content, setContent] = useState(initialDraft ?? "");
   const [isEmpty, setIsEmpty] = useState(() => !initialDraft?.trim());
-  const [submitting, setSubmitting] = useState(false);
   const [suppressedAgentIds, setSuppressedAgentIds] = useState<Set<string>>(() => new Set());
   const triggerPreview = useCommentTriggerPreview({ issueId, content });
-  // Attachments uploaded in this composer session. Drives both:
-  //  - submit-time `attachment_ids` payload (filtered to URLs still in markdown)
-  //  - the editor's AttachmentDownloadProvider, so file-card Eye buttons can
-  //    resolve text/code/markdown previews that require the attachment id.
-  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
-  const { uploadWithToast } = useEditorUpload();
+  // Uploads for this composer session (MUL-5181). Owned by the module-level
+  // coordinator and persisted in the draft store, so closing/scrolling the
+  // composer away no longer drops an in-flight upload — its result lands in the
+  // draft. `attachments` (completed rows) drives both the submit `attachment_ids`
+  // payload and the editor's AttachmentDownloadProvider; `uploads` drives the
+  // status chips (uploading / failed / interrupted).
+  const { uploads, attachments: pendingAttachments, handleUpload, removeUpload } =
+    useCommentUploads(draftKey, { issueId });
 
   // Readonly-first: the composer renders as a same-looking static shell until
   // the user shows intent (click / keyboard / file drop). An unsent draft is
   // standing intent — mount the real editor immediately so the draft is
   // visible and editable, exactly like the pre-lazy behavior.
   const lazy = useLazyEditor({
-    initialActive: !!initialDraft?.trim(),
+    initialActive:
+      !!initialDraft?.trim() ||
+      useCommentDraftStore.getState().getUploads(draftKey).length > 0,
     editorRef,
   });
   const { isDragOver, dropZoneProps } = useFileDropZone({
@@ -84,14 +87,6 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     };
   }, [draftKey, setDraft]);
 
-  const handleUpload = useCallback(async (file: File) => {
-    const result = await uploadWithToast(file, { issueId });
-    if (result) {
-      setPendingAttachments((prev) => [...prev, result]);
-    }
-    return result;
-  }, [uploadWithToast, issueId]);
-
   useEffect(() => {
     setSuppressedAgentIds(new Set());
   }, [issueId]);
@@ -113,47 +108,37 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     });
   }, []);
 
-  const handleSubmit = async () => {
-    const content = editorRef.current?.getMarkdown()?.replace(/(\n\s*)+$/, "").trim();
-    if (!content || submitting) return;
-    // Re-read the queue here rather than trusting the button's disabled prop:
-    // Cmd+Enter never touches the button, and a click can land in the same
-    // tick an upload starts.
-    if (uploadGate.isBlocked()) return;
-    // Track every attachment whose stable download URL OR legacy
-    // storage URL is referenced in the markdown body. Both shapes
-    // can appear in the same comment during the MUL-3130 rollout —
-    // see contentReferencesAttachment for the rationale.
-    const activeIds = pendingAttachments
-      .filter((a) => contentReferencesAttachment(content, a))
-      .map((a) => a.id);
-    const suppressAgentIds = triggerPreview.agents
-      .filter((agent) => suppressedAgentIds.has(agent.id))
-      .map((agent) => agent.id);
-    // Pessimistic submit: keep the text in place (the editor is locked and the
-    // button spins via `submitting`) until the server actually accepts it, then
-    // clear. Clearing only on success means a slow send no longer looks like
-    // "comment posted but the box is still full", and a failed send keeps the
-    // draft instead of silently dropping it.
-    setSubmitting(true);
-    try {
-      const ok = await onSubmit(
+  // Await-then-render send (MUL-5181): the shared hook reads the markdown,
+  // guards empty/in-flight, re-checks the upload gate, locks + spins via
+  // `submitting`, and clears only once the server accepts — a failed send keeps
+  // the draft instead of silently dropping it.
+  const { submitting, submit } = useComposerSubmit({
+    editorRef,
+    uploadGate,
+    onSubmit: (content) => {
+      // The draft is the source of truth (MUL-5181): bind every completed
+      // upload, whether it landed inline in the body or survived a close as a
+      // standalone attachment. Non-referenced rows render as attachment cards
+      // for the recipient, exactly like the existing standalone-attachment path.
+      const activeIds = pendingAttachments.map((a) => a.id);
+      const suppressAgentIds = triggerPreview.agents
+        .filter((agent) => suppressedAgentIds.has(agent.id))
+        .map((agent) => agent.id);
+      return onSubmit(
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
       );
-      if (ok) {
-        editorRef.current?.clearContent();
-        setContent("");
-        setIsEmpty(true);
-        setSuppressedAgentIds(new Set());
-        setPendingAttachments([]);
-        clearDraft(draftKey);
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    },
+    onAccepted: () => {
+      editorRef.current?.clearContent();
+      setContent("");
+      setIsEmpty(true);
+      setSuppressedAgentIds(new Set());
+      // clearDraft drops both content and attachments for this key.
+      clearDraft(draftKey);
+    },
+  });
 
   return (
     <div
@@ -187,10 +172,11 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
             setIsEmpty(!md.trim());
             // Debounced upstream (debounceMs=100). Persist on every tick so a
             // reload or scroll-out-of-viewport restores work to the keystroke.
-            if (md.trim().length > 0) setDraft(draftKey, md);
-            else clearDraft(draftKey);
+            // setDraft keeps any pending attachments and drops the entry only
+            // when text AND attachments are both empty.
+            setDraft(draftKey, md);
           }}
-          onSubmit={handleSubmit}
+          onSubmit={submit}
           onUploadFile={handleUpload}
           onUploadingChange={uploadGate.onUploadingChange}
           debounceMs={100}
@@ -200,6 +186,9 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           slashCommandMode="command"
         />
       </div>
+      )}
+      {uploads.some((u) => u.status !== "uploaded") && (
+        <ComposerUploadChips uploads={uploads} onRemove={removeUpload} className="px-3 pb-1" />
       )}
       {/* Static shell — visually clones the empty single-line composer.
           Real editor mounts (hidden) on first intent; shell stays visible
@@ -243,7 +232,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           onSelect={(file) => lazy.uploadOrQueue([file])}
         />
         <SubmitButton
-          onClick={handleSubmit}
+          onClick={submit}
           disabled={isEmpty}
           loading={submitting}
           busy={uploadGate.uploading}

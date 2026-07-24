@@ -3,21 +3,29 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
+import type { Attachment } from "@multica/core/types";
 import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
 import { renderWithI18n } from "../../test/i18n";
 import { CommentInput } from "./comment-input";
 import { ReplyInput } from "./reply-input";
 
+// Uploads now flow through the module-level coordinator, which calls
+// `api.uploadFile(file, ctx, signal)` (MUL-5181). Tests drive uploads by
+// mocking that call directly rather than the old `uploadWithToast` hook.
+const apiUploadFile = vi.hoisted(() => vi.fn());
 const uploadWithToast = vi.hoisted(() => vi.fn());
 const editorDefaultValues = vi.hoisted(() => ({
   values: [] as Array<string | undefined>,
 }));
 
 vi.mock("@multica/core/api", () => ({
-  api: {},
+  api: { uploadFile: apiUploadFile },
 }));
 
-vi.mock("@multica/core/hooks/use-file-upload", () => ({
+vi.mock("@multica/core/hooks/use-file-upload", async () => ({
+  ...(await vi.importActual<typeof import("@multica/core/hooks/use-file-upload")>(
+    "@multica/core/hooks/use-file-upload",
+  )),
   useFileUpload: () => ({ uploadWithToast }),
 }));
 
@@ -39,6 +47,11 @@ vi.mock("../../editor", async () => ({
   // `hasActiveUploads` / `onUploadingChange` below.
   ...(await vi.importActual<typeof import("../../editor/use-upload-gate")>(
     "../../editor/use-upload-gate",
+  )),
+  // Real await-then-render submit contract (pure React) — the composers now
+  // delegate their send handler to it.
+  ...(await vi.importActual<typeof import("../../editor/use-composer-submit")>(
+    "../../editor/use-composer-submit",
   )),
   useEditorUpload: () => ({ uploadWithToast, upload: vi.fn(), uploading: false }),
   useFileDropZone: () => ({
@@ -177,6 +190,7 @@ function getSubmitButton(container: HTMLElement): HTMLButtonElement {
 
 beforeEach(() => {
   uploadWithToast.mockReset();
+  apiUploadFile.mockReset();
   localStorage.clear();
   useCommentComposerStore.setState({ sticky: true });
   // The draft store is a module singleton — a draft left by a previous test
@@ -328,11 +342,31 @@ describe("comment composers", () => {
 // MUL-4808 — posting mid-upload strips the pending image's blob URL out of the
 // body and binds no attachment id, so the comment lands without the file.
 describe("comment composers — upload submit gate", () => {
-  /** Start an upload that stays in flight until the returned resolver runs. */
+  const uploadAttachment = (id: string, url: string) =>
+    ({
+      id,
+      url,
+      download_url: url,
+      markdown_url: url,
+      filename: `${id}.png`,
+      content_type: "image/png",
+      size_bytes: 1,
+    }) as unknown as Attachment;
+
+  /**
+   * Start an upload that stays in flight until the returned resolver runs. The
+   * coordinator calls `api.uploadFile`, so this controls THAT promise: resolve
+   * it with an attachment (success) or reject it (failure).
+   */
   function startPendingUpload(container: HTMLElement, filename = "slow.png") {
-    let release!: (result: UploadResult | null) => void;
-    uploadWithToast.mockImplementationOnce(
-      () => new Promise<UploadResult | null>((resolve) => { release = resolve; }),
+    let resolveUpload!: (att: Attachment) => void;
+    let rejectUpload!: (err: Error) => void;
+    apiUploadFile.mockImplementationOnce(
+      () =>
+        new Promise<Attachment>((resolve, reject) => {
+          resolveUpload = resolve;
+          rejectUpload = reject;
+        }),
     );
     // FileUploadButton's visible control is a button that clicks a hidden
     // input; the input is what carries the selection.
@@ -341,11 +375,11 @@ describe("comment composers — upload submit gate", () => {
     fireEvent.change(input, {
       target: { files: [new File(["x"], filename, { type: "image/png" })] },
     });
-    return { release: (result: UploadResult | null) => release(result) };
+    return {
+      resolve: (att: Attachment) => resolveUpload(att),
+      fail: () => rejectUpload(new Error("upload failed")),
+    };
   }
-
-  const uploadResult = (id: string, url: string) =>
-    ({ id, url, filename: `${id}.png`, link: url, markdownLink: url }) as unknown as UploadResult;
 
   it("disables send while an upload is in flight and re-enables once it settles", async () => {
     const { container } = renderCommentInput();
@@ -359,7 +393,7 @@ describe("comment composers — upload submit gate", () => {
     expect(getSubmitButton(container)).toHaveAttribute("aria-busy", "true");
 
     await act(async () => {
-      pending.release(uploadResult("att-1", "https://cdn.example/att-1.png"));
+      pending.resolve(uploadAttachment("att-1", "https://cdn.example/att-1.png"));
     });
 
     await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
@@ -382,7 +416,7 @@ describe("comment composers — upload submit gate", () => {
     expect(onSubmit).not.toHaveBeenCalled();
 
     await act(async () => {
-      pending.release(uploadResult("att-1", "https://cdn.example/att-1.png"));
+      pending.resolve(uploadAttachment("att-1", "https://cdn.example/att-1.png"));
     });
 
     fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
@@ -401,12 +435,12 @@ describe("comment composers — upload submit gate", () => {
 
     // First one lands — the second is still in flight, so send must stay shut.
     await act(async () => {
-      first.release(uploadResult("att-a", "https://cdn.example/att-a.png"));
+      first.resolve(uploadAttachment("att-a", "https://cdn.example/att-a.png"));
     });
     expect(getSubmitButton(container)).toBeDisabled();
 
     await act(async () => {
-      second.release(uploadResult("att-b", "https://cdn.example/att-b.png"));
+      second.resolve(uploadAttachment("att-b", "https://cdn.example/att-b.png"));
     });
     await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
   });
@@ -422,7 +456,7 @@ describe("comment composers — upload submit gate", () => {
     // uploadWithToast reports the failure and resolves null — the placeholder
     // is dropped and the body never referenced it, so submit must come back.
     await act(async () => {
-      pending.release(null);
+      pending.fail();
     });
     await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());
   });
@@ -434,7 +468,7 @@ describe("comment composers — upload submit gate", () => {
 
     const pending = startPendingUpload(container);
     await act(async () => {
-      pending.release(uploadResult("att-9", "https://cdn.example/att-9.png"));
+      pending.resolve(uploadAttachment("att-9", "https://cdn.example/att-9.png"));
     });
 
     await waitFor(() => expect(getSubmitButton(container)).not.toBeDisabled());

@@ -13,6 +13,10 @@ import { useRealtimeSync, type RealtimeSyncStores } from "./use-realtime-sync";
 vi.mock("../platform/workspace-storage", () => ({
   getCurrentWsId: () => "ws-1",
   getCurrentSlug: () => "test-ws",
+  // Draft stores are now loaded transitively (storage-cleanup → register-all-drafts)
+  // so their persist wiring must resolve against this mock.
+  createWorkspaceAwareStorage: (adapter: unknown) => adapter,
+  registerForWorkspaceRehydration: () => {},
 }));
 
 vi.mock("../paths", () => ({

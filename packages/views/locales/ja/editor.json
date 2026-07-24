@@ -74,7 +74,11 @@
   },
   "upload": {
     "failed": "{{filename}} をアップロードできませんでした: {{reason}}",
-    "in_progress": "アップロード中…"
+    "in_progress": "アップロード中…",
+    "interrupted": "アップロードが中断されました—ファイルは保存されていません。もう一度添付してください。",
+    "remove": "削除",
+    "uploading_label": "{{filename}} をアップロード中…",
+    "failed_label": "{{filename}} をアップロードできませんでした"
   },
   "title_editor": {
     "title_aria_label": "タイトル"

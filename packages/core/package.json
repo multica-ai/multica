@@ -113,6 +113,8 @@
     "./constants/*": "./constants/*.ts",
     "./feature-flags": "./feature-flags/index.ts",
     "./platform": "./platform/index.ts",
+    "./drafts": "./drafts/index.ts",
+    "./drafts/*": "./drafts/*.ts",
     "./shortcuts": "./shortcuts/index.ts",
     "./analytics": "./analytics/index.ts",
     "./client-usage": "./client-usage/index.ts",
