@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issueguard"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -3635,10 +3636,19 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							WorkspaceID: issue.WorkspaceID,
 						})
 						if updateErr != nil {
-							slog.Warn("handle failed tasks: reset stuck issue failed",
-								"issue_id", issueKey,
-								"error", updateErr,
-							)
+							if conflict, ok := issueguard.ParentStateConflictFrom(updateErr); ok {
+								slog.Warn("handle failed tasks: reset rejected by parent-state constraint",
+									"issue_id", issueKey,
+									"workspace_id", workspaceID,
+									"parent_issue_id", conflict.ParentIssueID,
+									"conflict_code", conflict.Code,
+								)
+							} else {
+								slog.Warn("handle failed tasks: reset stuck issue failed",
+									"issue_id", issueKey,
+									"error", updateErr,
+								)
+							}
 						} else {
 							// This direct reset bypasses the HTTP UpdateIssue
 							// handler that normally emits issue:updated, so emit
