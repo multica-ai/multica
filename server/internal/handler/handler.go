@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
+	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -246,7 +247,14 @@ type Handler struct {
 	// error rather than silently storing plaintext. Wired in
 	// cmd/server/router.go after New.
 	VCSSecretBox *secretbox.Box
-	cfg          Config
+	// PRRefresh drives the GitHub API snapshot pipeline for PR cards (MUL-5265):
+	// webhook / page-visit / TTL triggers → authenticated GraphQL fetch →
+	// head-SHA-guarded atomic snapshot write. Always non-nil, but inert (every
+	// trigger is a no-op) when GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY are unset,
+	// so the feature degrades cleanly on deployments without a private key.
+	// Wired in cmd/server/router.go after New.
+	PRRefresh *ghsnapshot.Manager
+	cfg       Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {
@@ -318,6 +326,18 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		cfg: cfg,
 	}
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
+
+	// GitHub API snapshot pipeline for PR cards (MUL-5265). Built
+	// unconditionally but inert (every trigger no-ops) when the App private key
+	// is unconfigured, so the feature degrades cleanly. main.go calls
+	// h.PRRefresh.Start(ctx) to launch its worker pool + TTL sweeper.
+	ghClient, err := ghsnapshot.NewClientFromEnv()
+	if err != nil {
+		// Malformed key is operator-actionable; the pipeline stays disabled.
+		slog.Warn("github: PR snapshot pipeline disabled (invalid App private key)", "err", err)
+	}
+	h.PRRefresh = ghsnapshot.NewManager(ghClient, queries, txStarter, h.broadcastPRSnapshotApplied)
+
 	return h
 }
 

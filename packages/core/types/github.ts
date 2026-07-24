@@ -2,14 +2,43 @@ export type GitHubPullRequestState = "open" | "closed" | "merged" | "draft";
 
 /** Aggregated CI status for a PR's current head SHA, computed server-side from
  * the latest check_suite per app. `null` when no completed suite has been seen
- * yet (e.g. PR just opened, or repository has no CI configured). */
+ * yet (e.g. PR just opened, or repository has no CI configured).
+ *
+ * Legacy compat field kept for backend drift; the current PR card derives CI
+ * status from `checks_rollup` + counts instead. */
 export type GitHubPullRequestChecksConclusion = "passed" | "failed" | "pending";
 
-/** Raw mirror of GitHub's `mergeable_state`. The UI only surfaces `clean` and
- * `dirty`; the other values (`blocked`, `behind`, `unstable`, `unknown`,
- * `has_hooks`, `draft`) round-trip but render as unknown to avoid asserting
- * "conflicts" for blocking reasons that aren't actual conflicts. */
+/** Raw mirror of GitHub's legacy `mergeable_state`. Superseded by the
+ * `mergeable` + `merge_state_status` snapshot pair; kept optional for backend
+ * drift only. */
 export type GitHubMergeableState = string;
+
+/** GitHub's `mergeable` verdict — answers ONLY "is there a conflict". `unknown`
+ * is a normal transient value (GitHub computes it lazily); it must render as
+ * neither "conflict" nor "ready". */
+export type GitHubPullRequestMergeable = "mergeable" | "conflicting" | "unknown";
+
+/** GitHub's `mergeStateStatus`. "Ready to merge" is asserted ONLY from `clean`
+ * (which folds in required checks + branch protection); the other values are
+ * surfaced faithfully and never inferred into a ready/mergeable claim. */
+export type GitHubPullRequestMergeStateStatus =
+  | "clean"
+  | "dirty"
+  | "blocked"
+  | "behind"
+  | "unstable"
+  | "draft"
+  | "has_hooks"
+  | "unknown";
+
+/** GitHub's overall CI rollup verdict (`statusCheckRollup.state`). `null`/absent
+ * means NO checks have been reported yet — it must never render as passed. */
+export type GitHubPullRequestChecksRollup =
+  | "success"
+  | "failure"
+  | "pending"
+  | "error"
+  | "expected";
 
 export interface GitHubInstallation {
   id: string;
@@ -44,14 +73,35 @@ export interface GitHubPullRequest {
   closed_at: string | null;
   pr_created_at: string;
   pr_updated_at: string;
-  /** Optional; older backends omit this field. */
-  mergeable_state?: GitHubMergeableState | null;
-  /** Optional; older backends omit this field. */
-  checks_conclusion?: GitHubPullRequestChecksConclusion | null;
-  /** Per-suite counts that feed the segmented progress bar. Older backends
-   * omit these; treat absence as 0 (the card renders only when sum > 0). */
+  /** Conflict verdict from the GitHub API snapshot. Answers ONLY
+   * "is there a conflict"; older backends omit it. */
+  mergeable?: GitHubPullRequestMergeable | null;
+  /** GitHub's `mergeStateStatus` from the snapshot. Source of the "Ready to
+   * merge" claim (only when `clean`); older backends omit it. */
+  merge_state_status?: GitHubPullRequestMergeStateStatus | null;
+  /** GitHub's overall CI rollup verdict from the snapshot. `null`/absent means
+   * NO checks yet — never treat absence as passed. */
+  checks_rollup?: GitHubPullRequestChecksRollup | null;
+  /** Check counts from the snapshot. Older backends omit these; treat absence
+   * as 0. `checks_total` is 0 when no checks have been reported. */
+  checks_total?: number;
   checks_passed?: number;
   checks_failed?: number;
+  checks_running?: number;
+  /** Names of the currently failing checks, for the "…failed · a, b" summary.
+   * Older backends omit it; treat absence as an empty list. */
+  failed_check_names?: string[];
+  /** True when the shown snapshot is stale (GitHub outage / revoked key). The
+   * card greys out both status elements and shows the snapshot age. */
+  snapshot_stale?: boolean;
+  /** RFC3339 timestamp of when the snapshot was fetched, for the stale hint. */
+  snapshot_fetched_at?: string | null;
+  /** Legacy mirror of GitHub's `mergeable_state`. Optional; superseded by
+   * `mergeable` + `merge_state_status`. */
+  mergeable_state?: GitHubMergeableState | null;
+  /** Legacy aggregated CI conclusion. Optional; superseded by `checks_rollup`. */
+  checks_conclusion?: GitHubPullRequestChecksConclusion | null;
+  /** Legacy pending-suite count. Optional; superseded by `checks_running`. */
   checks_pending?: number;
   /** Diff stats from GitHub's `pull_request` payload. Older backends omit
    * these fields; we treat 0/0/0 as "unknown" and hide the stats row. */

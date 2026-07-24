@@ -1,86 +1,122 @@
-import type { GitHubPullRequest } from "../types";
+import type {
+  GitHubPullRequestChecksRollup,
+  GitHubPullRequestMergeable,
+  GitHubPullRequestMergeStateStatus,
+} from "../types";
 
-// Status kinds rendered in the PR sidebar row's detail line. Order in the
-// pass-through table matters — the first matching rule wins. The order is
-// chosen so terminal PR states (closed / merged) short-circuit before any
-// transient CI/conflict signal, since those signals are no longer actionable
-// on a terminal PR.
+// The PR sidebar row surfaces TWO independent facts, each tri-state and each
+// sourced from the GitHub API snapshot:
 //
-// Priority (high → low):
-//   1. closed (not merged)        → status_closed
-//   2. merged                     → status_merged
-//   3. mergeable_state = "dirty"  → status_conflicts
-//   4. any failed suite           → status_checks_failed
-//   5. any pending suite          → status_checks_pending
-//   6. any passed suite           → status_checks_passed
-//   7. no suite + mergeable=clean → status_ready
-//   8. otherwise                  → status_unknown
+//   1. CI status      — derived from `checks_rollup` (primary) + counts.
+//   2. Mergeability   — derived from `mergeable` + `merge_state_status`.
 //
-// Note: this table is the single source of truth for the sidebar PR row. The
-// older row-with-badges implementation used a separate "hide status row for
-// terminal PRs" branch — the current row renders
-// with status_closed / status_merged text, never falling through to a
-// conflicts / checks line on a terminal PR. Keep this priority order in sync
-// with the i18n keys `pull_request_card_status_*` and with the progress-strip
-// derivation in `derivePullRequestProgressSegments` (terminal kinds get a
-// solid bar; the rest map onto the per-suite counts).
-export type PullRequestStatusKind =
-  | "closed"
-  | "merged"
-  | "conflicts"
-  | "checks_failed"
-  | "checks_pending"
-  | "checks_passed"
-  | "ready"
-  | "unknown";
+// The two are intentionally decoupled: a PR can have failing checks AND a merge
+// conflict, and both must show. Neither element is derived from the other, and
+// neither is shown for terminal PRs (merged / closed) — the row's leading state
+// icon already conveys terminal state; the caller applies that gate.
+//
+// Every input field is optional because older backends omit the snapshot
+// fields; each rule defaults defensively (`?? 0`, `?? []`, explicit `=== "..."`
+// checks) so an absent field never fabricates a positive verdict.
 
-export interface PullRequestStatusInput {
-  state: GitHubPullRequest["state"];
-  mergeable_state?: string | null;
-  checks_failed?: number;
-  checks_pending?: number;
+// ---------------------------------------------------------------------------
+// CI status
+// ---------------------------------------------------------------------------
+
+// Discriminated union for the CI element. `none` is a first-class state ("no
+// checks yet") that must never be rendered as passed/green.
+export type PullRequestChecksStatus =
+  | { kind: "failed"; failed: number; total: number; names: string[] }
+  | { kind: "pending"; passed: number; total: number; running: number }
+  | { kind: "passed"; total: number }
+  | { kind: "none" };
+
+export interface PullRequestChecksInput {
+  checks_rollup?: GitHubPullRequestChecksRollup | null;
+  checks_total?: number;
   checks_passed?: number;
+  checks_failed?: number;
+  checks_running?: number;
+  failed_check_names?: string[];
 }
 
-export function derivePullRequestStatusKind(input: PullRequestStatusInput): PullRequestStatusKind {
-  if (input.state === "closed") return "closed";
-  if (input.state === "merged") return "merged";
-  if (input.mergeable_state === "dirty") return "conflicts";
-  if ((input.checks_failed ?? 0) > 0) return "checks_failed";
-  if ((input.checks_pending ?? 0) > 0) return "checks_pending";
-  if ((input.checks_passed ?? 0) > 0) return "checks_passed";
-  if (input.mergeable_state === "clean") return "ready";
-  return "unknown";
-}
-
-export interface PullRequestProgressSegment {
-  kind: "failed" | "pending" | "passed";
-  ratio: number;
-}
-
-// Segmented progress bar input. Returns null when:
-//   - the PR is terminal (closed/merged) — the card paints a solid bar
-//     in a state-specific color, no segmentation needed;
-//   - no check_suite has been observed (total === 0) — the card hides
-//     the bar entirely.
-// Otherwise emits the segments left-to-right: failed → pending → passed.
-// "Failure first" is intentional: problems should be visible before signal
-// that everything is fine.
-export function derivePullRequestProgressSegments(
-  input: PullRequestStatusInput,
-): PullRequestProgressSegment[] | null {
-  if (input.state === "closed" || input.state === "merged") return null;
-  const failed = input.checks_failed ?? 0;
-  const pending = input.checks_pending ?? 0;
+// Priority (high → low):
+//   1. rollup failure/error OR any failed count → failed
+//   2. rollup pending/expected                  → pending
+//   3. rollup success                           → passed
+//   4. otherwise (rollup null/absent)           → none  ("no checks yet")
+//
+// Failure trusts the count as well as the rollup so a known failure is surfaced
+// even if the rollup verdict lags; "passed" requires an explicit `success`
+// rollup so an absent snapshot is never mistaken for a green build.
+export function deriveChecksStatus(input: PullRequestChecksInput): PullRequestChecksStatus {
+  const rollup = input.checks_rollup ?? null;
+  const total = input.checks_total ?? 0;
   const passed = input.checks_passed ?? 0;
-  const total = failed + pending + passed;
-  if (total === 0) return null;
-  const segments: PullRequestProgressSegment[] = [];
-  if (failed > 0) segments.push({ kind: "failed", ratio: failed / total });
-  if (pending > 0) segments.push({ kind: "pending", ratio: pending / total });
-  if (passed > 0) segments.push({ kind: "passed", ratio: passed / total });
-  return segments;
+  const failed = input.checks_failed ?? 0;
+  const running = input.checks_running ?? 0;
+  const names = input.failed_check_names ?? [];
+
+  if (rollup === "failure" || rollup === "error" || failed > 0) {
+    return { kind: "failed", failed, total, names };
+  }
+  if (rollup === "pending" || rollup === "expected") {
+    return { kind: "pending", passed, total, running };
+  }
+  if (rollup === "success") {
+    return { kind: "passed", total };
+  }
+  return { kind: "none" };
 }
+
+// ---------------------------------------------------------------------------
+// Mergeability
+// ---------------------------------------------------------------------------
+
+// Discriminated union for the mergeability element. `none` renders nothing:
+// when GitHub has not decided (mergeable unknown/null and no decisive
+// merge_state_status) the card asserts neither "conflict" nor "ready".
+export type PullRequestMergeStatus =
+  | { kind: "conflicting" }
+  | { kind: "ready" }
+  | { kind: "blocked" }
+  | { kind: "behind" }
+  | { kind: "unstable" }
+  | { kind: "has_hooks" }
+  | { kind: "none" };
+
+export interface PullRequestMergeInput {
+  mergeable?: GitHubPullRequestMergeable | null;
+  merge_state_status?: GitHubPullRequestMergeStateStatus | null;
+}
+
+// Priority (high → low):
+//   1. mergeable conflicting OR merge_state dirty → conflicting
+//   2. merge_state clean                          → ready
+//   3. merge_state blocked/behind/unstable/hooks  → that faithful label
+//   4. otherwise                                  → none  (render nothing)
+//
+// `mergeable` answers only "is there a conflict"; `merge_state_status === dirty`
+// is GitHub's other view of the same fact (an unmergeable conflict), so both
+// map to `conflicting`. "Ready" is asserted ONLY from `clean` — never inferred
+// from `mergeable === "mergeable"`, which does not account for required checks
+// or branch protection.
+export function deriveMergeStatus(input: PullRequestMergeInput): PullRequestMergeStatus {
+  const mergeable = input.mergeable ?? null;
+  const mergeState = input.merge_state_status ?? null;
+
+  if (mergeable === "conflicting" || mergeState === "dirty") return { kind: "conflicting" };
+  if (mergeState === "clean") return { kind: "ready" };
+  if (mergeState === "blocked") return { kind: "blocked" };
+  if (mergeState === "behind") return { kind: "behind" };
+  if (mergeState === "unstable") return { kind: "unstable" };
+  if (mergeState === "has_hooks") return { kind: "has_hooks" };
+  return { kind: "none" };
+}
+
+// ---------------------------------------------------------------------------
+// Diff stats
+// ---------------------------------------------------------------------------
 
 export interface PullRequestStatsInput {
   additions?: number;

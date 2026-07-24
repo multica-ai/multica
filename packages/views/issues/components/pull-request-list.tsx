@@ -4,7 +4,9 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   CheckCircle2,
+  Circle,
   CircleDashed,
+  CircleSlash,
   GitMerge,
   GitPullRequest,
   GitPullRequestArrow,
@@ -15,19 +17,15 @@ import {
 } from "lucide-react";
 import {
   issuePullRequestsOptions,
-  derivePullRequestStatusKind,
-  derivePullRequestProgressSegments,
+  deriveChecksStatus,
+  deriveMergeStatus,
   shouldShowPullRequestStats,
-  type PullRequestStatusKind,
-  type PullRequestProgressSegment,
+  type PullRequestChecksStatus,
+  type PullRequestMergeStatus,
 } from "@multica/core/github";
-import type {
-  GitHubPullRequest,
-  GitHubPullRequestChecksConclusion,
-  GitHubPullRequestState,
-} from "@multica/core/types";
+import type { GitHubPullRequest, GitHubPullRequestState } from "@multica/core/types";
 import { cn } from "@multica/ui/lib/utils";
-import { useT } from "../../i18n";
+import { useT, useTimeAgo } from "../../i18n";
 
 type IssuesT = ReturnType<typeof useT<"issues">>["t"];
 
@@ -43,15 +41,6 @@ const STATE_ICON: Record<
   draft: { icon: GitPullRequestDraft, className: "text-muted-foreground" },
   merged: { icon: GitMerge, className: "text-violet-600 dark:text-violet-400" },
   closed: { icon: GitPullRequestClosed, className: "text-rose-600 dark:text-rose-400" },
-};
-
-const CHECKS_ICON: Record<
-  GitHubPullRequestChecksConclusion,
-  { icon: React.ComponentType<{ className?: string }>; className: string }
-> = {
-  passed: { icon: CheckCircle2, className: "text-emerald-600 dark:text-emerald-400" },
-  failed: { icon: XCircle, className: "text-rose-600 dark:text-rose-400" },
-  pending: { icon: CircleDashed, className: "text-amber-600 dark:text-amber-400" },
 };
 
 export function PullRequestList({ issueId }: { issueId: string }) {
@@ -108,26 +97,7 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
   const { t } = useT("issues");
   const cfg = STATE_ICON[pr.state] ?? { icon: GitPullRequest, className: "" };
   const StateIcon = cfg.icon;
-  const kind = derivePullRequestStatusKind({
-    state: pr.state,
-    mergeable_state: pr.mergeable_state,
-    checks_failed: pr.checks_failed,
-    checks_pending: pr.checks_pending,
-    checks_passed: pr.checks_passed,
-  });
-  const segments = derivePullRequestProgressSegments({
-    state: pr.state,
-    checks_failed: pr.checks_failed,
-    checks_pending: pr.checks_pending,
-    checks_passed: pr.checks_passed,
-  });
-  const showStats = shouldShowPullRequestStats({
-    additions: pr.additions,
-    deletions: pr.deletions,
-    changed_files: pr.changed_files,
-  });
-  const statusText = useStatusText(kind);
-  const draftPrefix = pr.state === "draft";
+  const isDraft = pr.state === "draft";
   const stateLabel = getStateLabel(pr.state, t);
 
   return (
@@ -138,7 +108,7 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
       rel="noreferrer noopener"
       className={cn(
         "flex items-start gap-2 rounded-md px-2 py-1.5 -mx-2 hover:bg-accent/50 transition-colors group",
-        draftPrefix ? "opacity-80" : null,
+        isDraft ? "opacity-80" : null,
       )}
     >
       <StateIcon className={cn("h-3.5 w-3.5 mt-0.5 shrink-0", cfg.className)} />
@@ -150,55 +120,45 @@ function PullRequestRow({ pr }: { pr: GitHubPullRequest }) {
           {pr.repo_owner}/{pr.repo_name}#{pr.number} · {stateLabel}
           {pr.author_login ? ` · @${pr.author_login}` : null}
         </p>
-        <PullRequestRowDetails
-          pr={pr}
-          segments={segments}
-          showStats={showStats}
-          statusText={
-            draftPrefix
-              ? t(($) => $.detail.pull_request_card_draft_prefix, { status: statusText })
-              : statusText
-          }
-          statusKind={kind}
-        />
+        <PullRequestRowDetails pr={pr} />
       </div>
     </a>
   );
 }
 
-function PullRequestRowDetails({
-  pr,
-  segments,
-  showStats,
-  statusText,
-  statusKind,
-}: {
-  pr: GitHubPullRequest;
-  segments: PullRequestProgressSegment[] | null;
-  showStats: boolean;
-  statusText: string;
-  statusKind: PullRequestStatusKind;
-}) {
+function PullRequestRowDetails({ pr }: { pr: GitHubPullRequest }) {
   const { t } = useT("issues");
-  const checksBadge = getChecksBadge(pr, t);
-  const conflictsBadge = getConflictsBadge(pr, t);
-  const isTerminal = statusKind === "closed" || statusKind === "merged";
-  const showChecksBadge =
-    !isTerminal &&
-    !!checksBadge &&
-    statusKind !== "checks_failed" &&
-    statusKind !== "checks_pending" &&
-    statusKind !== "checks_passed";
-  const showConflictsBadge =
-    !isTerminal && !!conflictsBadge && statusKind !== "conflicts" && statusKind !== "ready";
+  const timeAgo = useTimeAgo();
+
+  const showStats = shouldShowPullRequestStats({
+    additions: pr.additions,
+    deletions: pr.deletions,
+    changed_files: pr.changed_files,
+  });
+
+  // Neither status element is shown for terminal PRs — the leading state icon
+  // already conveys merged / closed, and CI / mergeability are no longer
+  // actionable there.
+  const isTerminal = pr.state === "merged" || pr.state === "closed";
+  const checksBadge = isTerminal ? null : getChecksBadge(deriveChecksStatus(pr), t);
+  const mergeBadge = isTerminal ? null : getMergeBadge(deriveMergeStatus(pr), t);
+
+  // A stale snapshot (GitHub outage / revoked key) greys out both elements and
+  // annotates them with the snapshot age instead of hiding the last-known data.
+  const stale = !isTerminal && pr.snapshot_stale === true;
+  const staleTitle = stale
+    ? pr.snapshot_fetched_at
+      ? t(($) => $.detail.pull_request_snapshot_stale, { time: timeAgo(pr.snapshot_fetched_at) })
+      : t(($) => $.detail.pull_request_snapshot_stale_unknown)
+    : undefined;
+
+  if (!showStats && !checksBadge && !mergeBadge) return null;
 
   return (
     <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[11px] text-muted-foreground">
       {showStats ? <PullRequestStats pr={pr} /> : null}
-      <PullRequestProgressStrip segments={segments} />
-      <span className="truncate">{statusText}</span>
-      {showChecksBadge ? <PullRequestBadge badge={checksBadge} /> : null}
-      {showConflictsBadge ? <PullRequestBadge badge={conflictsBadge} /> : null}
+      {checksBadge ? <PullRequestBadge badge={checksBadge} stale={stale} title={staleTitle} /> : null}
+      {mergeBadge ? <PullRequestBadge badge={mergeBadge} stale={stale} title={staleTitle} /> : null}
     </div>
   );
 }
@@ -219,89 +179,137 @@ function PullRequestStats({ pr }: { pr: GitHubPullRequest }) {
   );
 }
 
-function PullRequestProgressStrip({
-  segments,
-}: {
-  segments: PullRequestProgressSegment[] | null;
-}) {
-  if (!segments) return null;
-  return (
-    <span className="flex h-1 w-12 shrink-0 overflow-hidden rounded-full bg-muted" aria-hidden="true">
-      {segments.map((seg) => (
-        <span
-          key={seg.kind}
-          className={cn(
-            "h-full block",
-            seg.kind === "failed" && "bg-rose-500 dark:bg-rose-400",
-            seg.kind === "pending" && "bg-amber-500 dark:bg-amber-400",
-            seg.kind === "passed" && "bg-emerald-500 dark:bg-emerald-400",
-          )}
-          style={{ width: `${seg.ratio * 100}%` }}
-        />
-      ))}
-    </span>
-  );
-}
-
 interface PullRequestBadgeConfig {
   icon: React.ComponentType<{ className?: string }>;
   label: string;
   className: string;
 }
 
-function PullRequestBadge({ badge }: { badge: PullRequestBadgeConfig }) {
+function PullRequestBadge({
+  badge,
+  stale,
+  title,
+}: {
+  badge: PullRequestBadgeConfig;
+  stale?: boolean;
+  title?: string;
+}) {
   const Icon = badge.icon;
   return (
-    <span className="inline-flex items-center gap-1">
+    <span
+      className={cn("inline-flex items-center gap-1", stale ? "opacity-60" : null)}
+      title={title}
+    >
       <Icon className={cn("h-3 w-3", badge.className)} />
       {badge.label}
     </span>
   );
 }
 
-function getConflictsBadge(
-  pr: GitHubPullRequest,
-  t: IssuesT,
-): PullRequestBadgeConfig | null {
-  const mergeable = pr.mergeable_state ?? null;
-  return mergeable === "dirty"
-    ? {
-        icon: TriangleAlert,
-        label: t(($) => $.detail.pull_request_conflicts_dirty),
+// CI element. Always returns a config for non-terminal PRs — including the
+// "no checks yet" state, which renders muted and MUST NOT read as passed/green.
+function getChecksBadge(status: PullRequestChecksStatus, t: IssuesT): PullRequestBadgeConfig {
+  switch (status.kind) {
+    case "failed":
+      return {
+        icon: XCircle,
         className: "text-rose-600 dark:text-rose-400",
-      }
-    : mergeable === "clean"
-      ? {
-          icon: CheckCircle2,
-          label: t(($) => $.detail.pull_request_conflicts_clean),
-          className: "text-emerald-600 dark:text-emerald-400",
-        }
-      : null;
+        label: checksFailedLabel(status, t),
+      };
+    case "pending":
+      return {
+        icon: CircleDashed,
+        className: "text-amber-600 dark:text-amber-400",
+        label: t(($) => $.detail.pull_request_checks_running, {
+          passed: status.passed,
+          total: status.total,
+          running: status.running,
+        }),
+      };
+    case "passed":
+      return {
+        icon: CheckCircle2,
+        className: "text-emerald-600 dark:text-emerald-400",
+        label: t(($) => $.detail.pull_request_checks_all_passed, { total: status.total }),
+      };
+    case "none":
+      return {
+        icon: Circle,
+        className: "text-muted-foreground",
+        label: t(($) => $.detail.pull_request_checks_none),
+      };
+  }
 }
 
-function getChecksBadge(
-  pr: GitHubPullRequest,
-  t: IssuesT,
-): PullRequestBadgeConfig | null {
-  const checks = pr.checks_conclusion ?? null;
-  return checks && CHECKS_ICON[checks]
-    ? {
-        icon: CHECKS_ICON[checks].icon,
-        className: CHECKS_ICON[checks].className,
-        label:
-          checks === "passed"
-            ? t(($) => $.detail.pull_request_checks_passed)
-            : checks === "failed"
-              ? t(($) => $.detail.pull_request_checks_failed)
-              : t(($) => $.detail.pull_request_checks_pending),
-      }
-    : null;
-}
-
-function getStateLabel(
-  state: GitHubPullRequestState,
+function checksFailedLabel(
+  status: Extract<PullRequestChecksStatus, { kind: "failed" }>,
   t: IssuesT,
 ): string {
+  const shown = status.names.slice(0, 2);
+  if (shown.length === 0) {
+    return t(($) => $.detail.pull_request_checks_failed_count, {
+      failed: status.failed,
+      total: status.total,
+    });
+  }
+  const remaining = status.names.length - shown.length;
+  const parts = [...shown];
+  if (remaining > 0) {
+    parts.push(t(($) => $.detail.pull_request_checks_more, { count: remaining }));
+  }
+  return t(($) => $.detail.pull_request_checks_failed_named, {
+    failed: status.failed,
+    total: status.total,
+    names: parts.join(", "),
+  });
+}
+
+// Mergeability element. Returns null for the "none" state — when GitHub has not
+// decided, the card asserts neither "conflict" nor "ready".
+function getMergeBadge(status: PullRequestMergeStatus, t: IssuesT): PullRequestBadgeConfig | null {
+  switch (status.kind) {
+    case "conflicting":
+      return {
+        icon: TriangleAlert,
+        className: "text-amber-600 dark:text-amber-400",
+        label: t(($) => $.detail.pull_request_merge_conflicting),
+      };
+    case "ready":
+      return {
+        icon: CheckCircle2,
+        className: "text-emerald-600 dark:text-emerald-400",
+        label: t(($) => $.detail.pull_request_merge_ready),
+      };
+    case "blocked":
+      return {
+        icon: CircleSlash,
+        className: "text-muted-foreground",
+        label: t(($) => $.detail.pull_request_merge_blocked),
+      };
+    case "behind":
+      return {
+        icon: CircleSlash,
+        className: "text-muted-foreground",
+        label: t(($) => $.detail.pull_request_merge_behind),
+      };
+    case "unstable":
+      return {
+        icon: CircleSlash,
+        className: "text-muted-foreground",
+        label: t(($) => $.detail.pull_request_merge_unstable),
+      };
+    case "has_hooks":
+      return {
+        icon: CircleSlash,
+        className: "text-muted-foreground",
+        label: t(($) => $.detail.pull_request_merge_has_hooks),
+      };
+    case "none":
+      return null;
+  }
+}
+
+function getStateLabel(state: GitHubPullRequestState, t: IssuesT): string {
   return state === "open"
     ? t(($) => $.detail.pull_request_state_open)
     : state === "draft"
@@ -311,26 +319,4 @@ function getStateLabel(
         : state === "closed"
           ? t(($) => $.detail.pull_request_state_closed)
           : state;
-}
-
-function useStatusText(kind: PullRequestStatusKind): string {
-  const { t } = useT("issues");
-  switch (kind) {
-    case "closed":
-      return t(($) => $.detail.pull_request_card_status_closed);
-    case "merged":
-      return t(($) => $.detail.pull_request_card_status_merged);
-    case "conflicts":
-      return t(($) => $.detail.pull_request_card_status_conflicts);
-    case "checks_failed":
-      return t(($) => $.detail.pull_request_card_status_checks_failed);
-    case "checks_pending":
-      return t(($) => $.detail.pull_request_card_status_checks_pending);
-    case "checks_passed":
-      return t(($) => $.detail.pull_request_card_status_checks_passed);
-    case "ready":
-      return t(($) => $.detail.pull_request_card_status_ready);
-    case "unknown":
-      return t(($) => $.detail.pull_request_card_status_unknown);
-  }
 }
