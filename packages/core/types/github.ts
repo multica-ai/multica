@@ -19,7 +19,9 @@ export interface GitHubInstallation {
    * integrations (see `ListGitHubInstallationsResponse.can_manage`). */
   installation_id?: number;
   account_login: string;
-  account_type: "User" | "Organization";
+  /** Kept as a string for forward compatibility with future GitHub account
+   * types. UI consumers must handle unknown values explicitly. */
+  account_type: string;
   account_avatar_url: string | null;
   created_at: string;
   /** Display name of the workspace member who connected this installation.

@@ -420,23 +420,48 @@ func (q *Queries) ListGitHubInstallationsByInstallationID(ctx context.Context, i
 
 const listGitHubInstallationsByWorkspace = `-- name: ListGitHubInstallationsByWorkspace :many
 
-SELECT id, workspace_id, installation_id, account_login, account_type, account_avatar_url, connected_by_id, created_at, updated_at FROM github_installation
-WHERE workspace_id = $1
-ORDER BY created_at ASC
+SELECT
+    gi.id,
+    gi.workspace_id,
+    gi.installation_id,
+    gi.account_login,
+    gi.account_type,
+    gi.account_avatar_url,
+    gi.connected_by_id,
+    gi.created_at,
+    gi.updated_at,
+    u.name AS connected_by
+FROM github_installation gi
+LEFT JOIN "user" u ON u.id = gi.connected_by_id
+WHERE gi.workspace_id = $1
+ORDER BY gi.created_at ASC
 `
+
+type ListGitHubInstallationsByWorkspaceRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	InstallationID   int64              `json:"installation_id"`
+	AccountLogin     string             `json:"account_login"`
+	AccountType      string             `json:"account_type"`
+	AccountAvatarUrl pgtype.Text        `json:"account_avatar_url"`
+	ConnectedByID    pgtype.UUID        `json:"connected_by_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	ConnectedBy      pgtype.Text        `json:"connected_by"`
+}
 
 // =====================
 // GitHub Installation
 // =====================
-func (q *Queries) ListGitHubInstallationsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]GithubInstallation, error) {
+func (q *Queries) ListGitHubInstallationsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListGitHubInstallationsByWorkspaceRow, error) {
 	rows, err := q.db.Query(ctx, listGitHubInstallationsByWorkspace, workspaceID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []GithubInstallation{}
+	items := []ListGitHubInstallationsByWorkspaceRow{}
 	for rows.Next() {
-		var i GithubInstallation
+		var i ListGitHubInstallationsByWorkspaceRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -447,6 +472,7 @@ func (q *Queries) ListGitHubInstallationsByWorkspace(ctx context.Context, worksp
 			&i.ConnectedByID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.ConnectedBy,
 		); err != nil {
 			return nil, err
 		}

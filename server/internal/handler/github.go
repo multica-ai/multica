@@ -51,6 +51,7 @@ type GitHubInstallationResponse struct {
 	AccountLogin     string  `json:"account_login"`
 	AccountType      string  `json:"account_type"`
 	AccountAvatarURL *string `json:"account_avatar_url"`
+	ConnectedBy      *string `json:"connected_by,omitempty"`
 	CreatedAt        string  `json:"created_at"`
 }
 
@@ -107,6 +108,20 @@ func githubInstallationToResponse(i db.GithubInstallation) GitHubInstallationRes
 		AccountLogin:     i.AccountLogin,
 		AccountType:      i.AccountType,
 		AccountAvatarURL: textToPtr(i.AccountAvatarUrl),
+		CreatedAt:        timestampToString(i.CreatedAt),
+	}
+}
+
+func listedGitHubInstallationToResponse(i db.ListGitHubInstallationsByWorkspaceRow) GitHubInstallationResponse {
+	instID := i.InstallationID
+	return GitHubInstallationResponse{
+		ID:               uuidToString(i.ID),
+		WorkspaceID:      uuidToString(i.WorkspaceID),
+		InstallationID:   &instID,
+		AccountLogin:     i.AccountLogin,
+		AccountType:      i.AccountType,
+		AccountAvatarURL: textToPtr(i.AccountAvatarUrl),
+		ConnectedBy:      textToPtr(i.ConnectedBy),
 		CreatedAt:        timestampToString(i.CreatedAt),
 	}
 }
@@ -518,7 +533,7 @@ func (h *Handler) ListGitHubInstallations(w http.ResponseWriter, r *http.Request
 	}
 	out := make([]GitHubInstallationResponse, 0, len(rows))
 	for _, row := range rows {
-		resp := githubInstallationToResponse(row)
+		resp := listedGitHubInstallationToResponse(row)
 		if !canManage {
 			resp.InstallationID = nil
 		}

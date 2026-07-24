@@ -20,6 +20,8 @@ import {
   InboxItemListSchema,
   InboxUnreadSummarySchema,
   IssueTriggerPreviewSchema,
+  ListGitHubInstallationsResponseSchema,
+  EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
   SearchProjectsResponseSchema,
@@ -33,6 +35,39 @@ import {
   UserSchema,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
+
+describe("ListGitHubInstallationsResponseSchema", () => {
+  const installation = {
+    id: "installation-1",
+    workspace_id: "workspace-1",
+    installation_id: 42,
+    account_login: "octocat",
+    account_type: "User",
+    account_avatar_url: null,
+    created_at: "2026-07-18T00:00:00Z",
+  };
+
+  it("preserves a future account type so the UI can render an explicit fallback", () => {
+    const parsed = ListGitHubInstallationsResponseSchema.parse({
+      installations: [{ ...installation, account_type: "Enterprise" }],
+      configured: true,
+      can_manage: true,
+    });
+
+    expect(parsed.installations[0]?.account_type).toBe("Enterprise");
+  });
+
+  it("falls back to an empty safe response for malformed installation arrays", () => {
+    expect(
+      parseWithFallback(
+        { installations: "not-an-array", configured: true, can_manage: true },
+        ListGitHubInstallationsResponseSchema,
+        EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
+        { endpoint: "GET /api/workspaces/:id/github/installations" },
+      ),
+    ).toEqual(EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE);
+  });
+});
 
 const baseIssue = {
   id: "11111111-1111-1111-1111-111111111111",

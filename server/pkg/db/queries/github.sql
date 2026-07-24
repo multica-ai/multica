@@ -3,9 +3,21 @@
 -- =====================
 
 -- name: ListGitHubInstallationsByWorkspace :many
-SELECT * FROM github_installation
-WHERE workspace_id = $1
-ORDER BY created_at ASC;
+SELECT
+    gi.id,
+    gi.workspace_id,
+    gi.installation_id,
+    gi.account_login,
+    gi.account_type,
+    gi.account_avatar_url,
+    gi.connected_by_id,
+    gi.created_at,
+    gi.updated_at,
+    u.name AS connected_by
+FROM github_installation gi
+LEFT JOIN "user" u ON u.id = gi.connected_by_id
+WHERE gi.workspace_id = $1
+ORDER BY gi.created_at ASC;
 
 -- name: ListGitHubInstallationsByInstallationID :many
 -- One installation_id can be bound to several workspaces; webhook routing lists

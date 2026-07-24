@@ -31,6 +31,7 @@ import type {
   IssueTableGroupsResponse,
   IssueTableRowsResponse,
   ListIssuesResponse,
+  ListGitHubInstallationsResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
   NotificationPreferenceResponse,
@@ -44,6 +45,31 @@ import type {
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
+
+export const GitHubInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  installation_id: z.number().optional(),
+  account_login: z.string(),
+  // Keep server enums lenient so an installed desktop client can render an
+  // explicit unknown label when GitHub adds a new account type.
+  account_type: z.string(),
+  account_avatar_url: z.string().nullable().optional().default(null),
+  connected_by: z.string().optional(),
+  created_at: z.string(),
+}).loose();
+
+export const ListGitHubInstallationsResponseSchema = z.object({
+  installations: z.array(GitHubInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  can_manage: z.boolean().optional().default(false),
+}).loose();
+
+export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsResponse = {
+  installations: [],
+  configured: false,
+  can_manage: false,
+};
 
 // Label responses are consumed by settings tables and resource pickers. Keep
 // the resource type lenient so newer server scopes do not break older clients,
