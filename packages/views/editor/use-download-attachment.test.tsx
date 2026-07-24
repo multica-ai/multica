@@ -5,12 +5,17 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 // outside-of-scope vars, but vi.hoisted runs before the import graph.
 const getAttachmentMock = vi.hoisted(() => vi.fn());
 const getBaseUrlMock = vi.hoisted(() => vi.fn(() => ""));
+const getAuthorizationHeaderMock = vi.hoisted(() => vi.fn<() => string | null>(() => null));
 const useWorkspaceSlugMock = vi.hoisted(() =>
   vi.fn<() => string | null>(() => "acme"),
 );
 
 vi.mock("@multica/core/api", () => ({
-  api: { getAttachment: getAttachmentMock, getBaseUrl: getBaseUrlMock },
+  api: {
+    getAttachment: getAttachmentMock,
+    getBaseUrl: getBaseUrlMock,
+    getAuthorizationHeader: getAuthorizationHeaderMock,
+  },
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -37,6 +42,7 @@ beforeEach(() => {
   // a non-empty base (desktop standalone, server-relative download URL)
   // overrides via getBaseUrlMock.mockReturnValue(...).
   getBaseUrlMock.mockReturnValue("");
+  getAuthorizationHeaderMock.mockReturnValue(null);
   useWorkspaceSlugMock.mockReturnValue("acme");
 });
 
@@ -265,6 +271,58 @@ describe("useDownloadAttachment (desktop)", () => {
     expect(downloadURL).toHaveBeenCalledWith(
       "https://api.example.test/api/attachments/att-1/download",
     );
+  });
+
+  it("passes bearer auth for a stable same-origin API download", async () => {
+    const downloadURL = vi.fn();
+    (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
+      downloadURL,
+    };
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    getAuthorizationHeaderMock.mockReturnValue("Bearer jwt-desktop");
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "11111111-2222-3333-4444-555555555555",
+      url: "/uploads/report.html",
+      download_url:
+        "/api/attachments/11111111-2222-3333-4444-555555555555/download",
+      filename: "report.html",
+    });
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("11111111-2222-3333-4444-555555555555");
+    });
+
+    expect(downloadURL).toHaveBeenCalledWith(
+      "https://api.example.test/api/attachments/11111111-2222-3333-4444-555555555555/download",
+      { authorization: "Bearer jwt-desktop" },
+    );
+  });
+
+  it("never passes bearer auth to an off-origin attachment-shaped URL", async () => {
+    const downloadURL = vi.fn();
+    (window as unknown as { desktopAPI: { downloadURL: typeof downloadURL } }).desktopAPI = {
+      downloadURL,
+    };
+    getBaseUrlMock.mockReturnValue("https://api.example.test");
+    getAuthorizationHeaderMock.mockReturnValue("Bearer jwt-desktop");
+    const foreignURL =
+      "https://cdn.example.test/api/attachments/11111111-2222-3333-4444-555555555555/download";
+    getAttachmentMock.mockResolvedValueOnce({
+      id: "11111111-2222-3333-4444-555555555555",
+      url: foreignURL,
+      download_url: foreignURL,
+      filename: "report.html",
+    });
+
+    const { result } = renderHook(() => useDownloadAttachment());
+
+    await act(async () => {
+      await result.current("11111111-2222-3333-4444-555555555555");
+    });
+
+    expect(downloadURL).toHaveBeenCalledWith(foreignURL);
   });
 
   it("trims a trailing slash on the API base when resolving a relative download_url", async () => {

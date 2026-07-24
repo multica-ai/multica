@@ -530,6 +530,16 @@ describe("ApiClient notification preferences", () => {
 });
 
 describe("ApiClient", () => {
+  it("exposes bearer auth only while a token is set", () => {
+    const client = new ApiClient("https://api.example.test");
+
+    expect(client.getAuthorizationHeader()).toBeNull();
+    client.setToken("jwt-token");
+    expect(client.getAuthorizationHeader()).toBe("Bearer jwt-token");
+    client.setToken(null);
+    expect(client.getAuthorizationHeader()).toBeNull();
+  });
+
   it("preserves HTTP status on failed requests", async () => {
     vi.stubGlobal(
       "fetch",

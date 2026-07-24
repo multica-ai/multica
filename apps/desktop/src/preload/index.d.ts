@@ -44,7 +44,10 @@ interface DesktopAPI {
   openExternal: (url: string) => Promise<void>;
   /** Download a file by URL through Electron's native download system.
    *  Shows a native save dialog. On non-desktop platforms this is undefined. */
-  downloadURL: (url: string) => Promise<void>;
+  downloadURL: (
+    url: string,
+    options?: { authorization?: string },
+  ) => Promise<void>;
   /** Hide macOS traffic lights for full-screen modals; restore when false. */
   setImmersiveMode: (immersive: boolean) => Promise<void>;
   /** Show a native OS notification for a new inbox item. */

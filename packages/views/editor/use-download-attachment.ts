@@ -4,11 +4,19 @@ import { useCallback } from "react";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useWorkspaceSlug } from "@multica/core/paths";
+import { attachmentIdFromDownloadURL } from "@multica/core/types";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT } from "../i18n";
 
+interface DesktopDownloadOptions {
+  authorization?: string;
+}
+
 interface DesktopBridge {
-  downloadURL?: (u: string) => Promise<void> | void;
+  downloadURL?: (
+    u: string,
+    options?: DesktopDownloadOptions,
+  ) => Promise<void> | void;
 }
 
 function attachmentDownloadEndpoint(
@@ -45,6 +53,25 @@ function hasDesktopDownloadBridge(): boolean {
   if (typeof window === "undefined") return false;
   const bridge = (window as unknown as { desktopAPI?: DesktopBridge }).desktopAPI;
   return Boolean(bridge?.downloadURL);
+}
+
+function desktopAttachmentAuthorization(downloadURL: string): string | undefined {
+  try {
+    const apiBase = new URL(api.getBaseUrl());
+    const target = new URL(downloadURL);
+    if (target.username || target.password) return undefined;
+    if (target.origin !== apiBase.origin) return undefined;
+
+    const basePath = apiBase.pathname.replace(/\/+$/, "");
+    if (!target.pathname.startsWith(`${basePath}/api/attachments/`)) {
+      return undefined;
+    }
+    const relativePath = target.pathname.slice(basePath.length);
+    if (!attachmentIdFromDownloadURL(relativePath)) return undefined;
+    return api.getAuthorizationHeader() ?? undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
@@ -93,7 +120,12 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
           const bridge = (
             window as unknown as { desktopAPI?: DesktopBridge }
           ).desktopAPI;
-          await bridge!.downloadURL!(downloadUrl);
+          const authorization = desktopAttachmentAuthorization(downloadUrl);
+          if (authorization) {
+            await bridge!.downloadURL!(downloadUrl, { authorization });
+          } else {
+            await bridge!.downloadURL!(downloadUrl);
+          }
         } catch {
           failed();
         }
