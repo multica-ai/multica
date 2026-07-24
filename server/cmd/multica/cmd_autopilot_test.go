@@ -473,3 +473,90 @@ func TestUUIDRegexp(t *testing.T) {
 		}
 	}
 }
+
+func TestSummarizeRun(t *testing.T) {
+	long := strings.Repeat("a", 200)
+	truncated := strings.Repeat("a", runSummaryMaxLen) + "…"
+
+	cases := []struct {
+		name string
+		run  map[string]any
+		want string
+	}{
+		{
+			name: "completed run_only shows agent output",
+			run:  map[string]any{"result": map[string]any{"output": "Built feature X, opened PR #123"}},
+			want: "Built feature X, opened PR #123",
+		},
+		{
+			name: "truncates long output to runSummaryMaxLen runes",
+			run:  map[string]any{"result": map[string]any{"output": long}},
+			want: truncated,
+		},
+		{
+			name: "failed run shows failure_reason",
+			run:  map[string]any{"status": "failed", "failure_reason": "task failed: provider timeout"},
+			want: "task failed: provider timeout",
+		},
+		{
+			name: "output preferred over failure_reason",
+			run: map[string]any{
+				"result":         map[string]any{"output": "ok"},
+				"failure_reason": "stale reason",
+			},
+			want: "ok",
+		},
+		{
+			name: "create_issue run has no summary",
+			run:  map[string]any{"status": "completed", "issue_id": "iss-1"},
+			want: "",
+		},
+		{
+			name: "empty output falls back to failure_reason",
+			run: map[string]any{
+				"result":         map[string]any{"output": ""},
+				"failure_reason": "err",
+			},
+			want: "err",
+		},
+		{
+			name: "result without output field falls back to failure_reason",
+			run: map[string]any{
+				"result":         map[string]any{"pr_url": "https://x"},
+				"failure_reason": "err",
+			},
+			want: "err",
+		},
+		{
+			name: "non-object result does not crash and falls back",
+			run: map[string]any{
+				"result":         "raw string",
+				"failure_reason": "err",
+			},
+			want: "err",
+		},
+		{
+			name: "collapses newlines and tabs into single spaces",
+			run:  map[string]any{"result": map[string]any{"output": "line1\nline2\tindented"}},
+			want: "line1 line2 indented",
+		},
+		{
+			name: "trims surrounding whitespace",
+			run:  map[string]any{"result": map[string]any{"output": "   trimmed   "}},
+			want: "trimmed",
+		},
+		{
+			name: "skipped run shows failure_reason",
+			run:  map[string]any{"status": "skipped", "failure_reason": "concurrency_cap"},
+			want: "concurrency_cap",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := summarizeRun(tc.run); got != tc.want {
+				t.Fatalf("summarizeRun() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
