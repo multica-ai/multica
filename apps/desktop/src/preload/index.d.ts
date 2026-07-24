@@ -1,5 +1,8 @@
 import { ElectronAPI } from "@electron-toolkit/preload";
-import type { RuntimeConfigResult } from "../shared/runtime-config";
+import type {
+  DesktopServersState,
+  RuntimeConfigResult,
+} from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
@@ -29,6 +32,35 @@ interface DesktopAPI {
   onSystemLocaleChanged: (callback: (locale: string) => void) => () => void;
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig: RuntimeConfigResult;
+  /** List saved Multica backends and the active selection. */
+  listServers: () => Promise<
+    { ok: true; servers: DesktopServersState } | { ok: false; error: string }
+  >;
+  /** Add or update a saved backend profile without switching. */
+  upsertServer: (input: {
+    id?: string;
+    name: string;
+    apiUrl: string;
+    wsUrl?: string;
+    appUrl?: string;
+  }) => Promise<
+    { ok: true; servers: DesktopServersState } | { ok: false; error: string }
+  >;
+  /** Remove a saved backend (cannot remove the last one). */
+  removeServer: (
+    serverId: string,
+  ) => Promise<
+    { ok: true; servers: DesktopServersState } | { ok: false; error: string }
+  >;
+  /** Switch the active backend; caller reloads after restoring session. */
+  switchServer: (serverId: string) => Promise<
+    | {
+        ok: true;
+        config: { schemaVersion: 1; apiUrl: string; wsUrl: string; appUrl: string };
+        servers: DesktopServersState;
+      }
+    | { ok: false; error: string }
+  >;
   /** Main tabbed window or a dedicated issue-only window. */
   windowContext: DesktopWindowContext;
   /** Read + clear any freeze/crash breadcrumb from a previous session, so the

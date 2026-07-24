@@ -67,9 +67,19 @@ Grab the installer for your platform from the [Multica downloads page](https://m
 On first launch you'll need to sign in — the same email + verification code flow as the web app. Once you're in, Desktop syncs your workspace list automatically.
 
 <Callout type="info">
-**Desktop defaults to Multica Cloud, but can be pointed at a self-hosted instance with a local config file.** There is still no in-app "connect to self-host" picker. Desktop reads `~/.multica/desktop.json` before the renderer starts; if the file is missing, it uses the Cloud defaults.
+**Desktop defaults to Multica Cloud and supports configuring and switching multiple backends in the app** (Cloud, personal self-host, company instance, and so on).
 
-Minimal self-host config:
+### In-app switching (recommended)
+
+1. Open **Settings → Account → Servers**
+2. Click **Add server** and enter a display name plus API URL
+3. Click **Switch** in the list, or use the server menu on the login screen
+
+Login tokens are stored per API host, so switching back to a server you already signed into does not require re-entering credentials. Switching reloads the app window and retargets the daemon at the chosen backend.
+
+### Config file (still supported)
+
+Desktop still reads `~/.multica/desktop.json` on boot. Minimal single-server config:
 
 ```json
 {
@@ -78,18 +88,31 @@ Minimal self-host config:
 }
 ```
 
-`apiUrl` is required and must use `http` or `https`. Desktop derives `wsUrl` as `/ws` on the same origin (`wss` for `https`, `ws` for `http`) and derives `appUrl` from the API origin. If your deployment uses different origins, set them explicitly:
+Multi-server example (same shape the UI writes; top-level `apiUrl` is the active backend so older Desktop builds keep working):
 
 ```json
 {
   "schemaVersion": 1,
-  "apiUrl": "https://api.your-domain",
-  "wsUrl": "wss://api.your-domain/ws",
-  "appUrl": "https://your-domain"
+  "apiUrl": "http://127.0.0.1:28443",
+  "activeServerId": "personal",
+  "servers": [
+    {
+      "id": "cloud",
+      "name": "Multica Cloud",
+      "apiUrl": "https://api.multica.ai"
+    },
+    {
+      "id": "personal",
+      "name": "Personal",
+      "apiUrl": "http://127.0.0.1:28443"
+    }
+  ]
 }
 ```
 
-If `desktop.json` exists but is invalid, Desktop fails closed and shows a blocking config error instead of silently falling back to Cloud. For development builds, `VITE_API_URL` / `VITE_WS_URL` / `VITE_APP_URL` still take precedence during `electron-vite dev`. Runtime Desktop self-host configuration was implemented for [issue #1371](https://github.com/multica-ai/multica/issues/1371).
+`apiUrl` must use `http` or `https`. Desktop derives `wsUrl` (`/ws` on the same origin) and `appUrl`; set them explicitly for split-origin deploys.
+
+If `desktop.json` exists but is invalid, Desktop fails closed with a blocking config error instead of silently falling back to Cloud. Dev builds still prefer `VITE_API_URL` / `VITE_WS_URL` / `VITE_APP_URL` during `electron-vite dev`, and the UI cannot switch servers there. See [issue #1371](https://github.com/multica-ai/multica/issues/1371) and [issue #5132](https://github.com/multica-ai/multica/issues/5132).
 </Callout>
 
 ## Windows Defender flags Multica as a virus

@@ -1,6 +1,9 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
-import type { RuntimeConfigResult } from "../shared/runtime-config";
+import type {
+  DesktopServersState,
+  RuntimeConfigResult,
+} from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
 import type {
   ManualUpdateCheckResult,
@@ -117,6 +120,39 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
+  /** List saved Multica backends (Cloud + self-host) and the active one. */
+  listServers: (): Promise<
+    { ok: true; servers: DesktopServersState } | { ok: false; error: string }
+  > => ipcRenderer.invoke("runtime-config:list-servers"),
+  /** Add or update a saved backend profile. Does not switch active. */
+  upsertServer: (input: {
+    id?: string;
+    name: string;
+    apiUrl: string;
+    wsUrl?: string;
+    appUrl?: string;
+  }): Promise<
+    | { ok: true; servers: DesktopServersState }
+    | { ok: false; error: string }
+  > => ipcRenderer.invoke("runtime-config:upsert-server", input),
+  /** Remove a saved backend. Refuses to remove the last entry. */
+  removeServer: (
+    serverId: string,
+  ): Promise<
+    | { ok: true; servers: DesktopServersState }
+    | { ok: false; error: string }
+  > => ipcRenderer.invoke("runtime-config:remove-server", serverId),
+  /** Switch the active backend. Caller should snapshot session + reload. */
+  switchServer: (
+    serverId: string,
+  ): Promise<
+    | {
+        ok: true;
+        config: { schemaVersion: 1; apiUrl: string; wsUrl: string; appUrl: string };
+        servers: DesktopServersState;
+      }
+    | { ok: false; error: string }
+  > => ipcRenderer.invoke("runtime-config:switch-server", serverId),
   /** Identifies whether this renderer owns the main tabbed window or a
    *  dedicated issue window, parsed from validated launch arguments. */
   windowContext,

@@ -23,6 +23,8 @@ import {
 import { TabBar } from "./tab-bar";
 import { TabContent } from "./tab-content";
 import { WindowOverlay } from "./window-overlay";
+import { useEnvironmentHint } from "@/hooks/use-environment-hint";
+import { useEnvironmentWindowTitle } from "@/hooks/use-environment-window-title";
 
 const TOP_BAR_HEIGHT_CLASS = "h-12";
 const WINDOW_TOOLBAR_CLEARANCE = 184;
@@ -209,6 +211,10 @@ export function DesktopShell() {
   useInternalLinkHandler();
   useNativeNavigationGestures();
 
+  // Non-Cloud multi-server cue: sidebar subtitle + OS window title suffix.
+  const environmentHint = useEnvironmentHint();
+  useEnvironmentWindowTitle(environmentHint);
+
   // Reactive read of current workspace slug from the platform singleton.
   // On first mount, slug is null until WorkspaceRouteLayout (inside the tab
   // router) sets it. Once set, the sidebar and other shell-level components
@@ -231,7 +237,14 @@ export function DesktopShell() {
           <SidebarProvider className="flex-1 bg-app-shell">
             {slug && <GlobalShortcuts />}
             {slug && <WindowToolbar />}
-            {slug && <AppSidebar topSlot={<SidebarTopSpacer />} searchSlot={<SearchTrigger />} />}
+            {slug && (
+              <AppSidebar
+                topSlot={<SidebarTopSpacer />}
+                searchSlot={<SearchTrigger />}
+                environmentHint={environmentHint?.name ?? null}
+                environmentHintTitle={environmentHint?.apiUrl ?? null}
+              />
+            )}
             {/* Right side: header + content container */}
             <div className="flex flex-1 min-w-0 flex-col">
               <MainTopBar />

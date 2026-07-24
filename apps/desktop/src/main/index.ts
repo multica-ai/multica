@@ -13,8 +13,14 @@ import { handleAppShortcut } from "./keyboard-shortcuts";
 import { installNavigationGestures } from "./navigation-gestures";
 import { installNavigationGuard } from "./navigation-guard";
 import { getAppVersion } from "./app-version";
-import { loadRuntimeConfig } from "./runtime-config-loader";
-import type { RuntimeConfigResult } from "../shared/runtime-config";
+import { loadRuntimeConfig, saveDesktopServersState } from "./runtime-config-loader";
+import {
+  removeServerProfile,
+  switchActiveServer,
+  upsertServerProfile,
+  type DesktopServersState,
+  type RuntimeConfigResult,
+} from "../shared/runtime-config";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
   sanitizeRendererRouteContext,
@@ -723,6 +729,102 @@ if (!gotTheLock) {
     ipcMain.on("runtime-config:get", (event) => {
       event.returnValue = runtimeConfigResult;
     });
+
+    // Multi-server management: list / upsert / remove / switch. Mutations
+    // rewrite ~/.multica/desktop.json and update the in-memory result so the
+    // next renderer reload (or sync get) sees the new active endpoints.
+    ipcMain.handle("runtime-config:list-servers", () => {
+      if (!runtimeConfigResult.ok) {
+        return { ok: false as const, error: runtimeConfigResult.error.message };
+      }
+      return { ok: true as const, servers: runtimeConfigResult.servers };
+    });
+
+    ipcMain.handle(
+      "runtime-config:upsert-server",
+      async (_event, input: unknown) => {
+        return mutateServers((servers) => {
+          if (!input || typeof input !== "object" || Array.isArray(input)) {
+            throw new Error("Invalid server payload");
+          }
+          const body = input as Record<string, unknown>;
+          return upsertServerProfile(servers, {
+            id: typeof body.id === "string" ? body.id : undefined,
+            name: typeof body.name === "string" ? body.name : "",
+            apiUrl: typeof body.apiUrl === "string" ? body.apiUrl : "",
+            wsUrl: typeof body.wsUrl === "string" ? body.wsUrl : undefined,
+            appUrl: typeof body.appUrl === "string" ? body.appUrl : undefined,
+          });
+        });
+      },
+    );
+
+    ipcMain.handle(
+      "runtime-config:remove-server",
+      async (_event, serverId: unknown) => {
+        if (typeof serverId !== "string" || !serverId.trim()) {
+          return { ok: false as const, error: "serverId is required" };
+        }
+        return mutateServers((servers) => removeServerProfile(servers, serverId.trim()));
+      },
+    );
+
+    ipcMain.handle(
+      "runtime-config:switch-server",
+      async (_event, serverId: unknown) => {
+        if (typeof serverId !== "string" || !serverId.trim()) {
+          return { ok: false as const, error: "serverId is required" };
+        }
+        const result = await mutateServers((servers) =>
+          switchActiveServer(servers, serverId.trim()),
+        );
+        if (result.ok) {
+          // Dedicated issue windows pin workspace/issue identity from the
+          // previous backend; close them so they cannot show stale data.
+          for (const window of [...issueWindows]) {
+            if (!window.isDestroyed()) window.close();
+          }
+        }
+        return result;
+      },
+    );
+
+    async function mutateServers(
+      mutator: (servers: DesktopServersState) => DesktopServersState,
+    ): Promise<
+      | {
+          ok: true;
+          config: { schemaVersion: 1; apiUrl: string; wsUrl: string; appUrl: string };
+          servers: DesktopServersState;
+        }
+      | { ok: false; error: string }
+    > {
+      if (!runtimeConfigResult.ok) {
+        return { ok: false, error: runtimeConfigResult.error.message };
+      }
+      if (!runtimeConfigResult.servers.editable) {
+        return {
+          ok: false,
+          error:
+            "Server switching is only available in packaged Desktop builds. Dev mode uses VITE_API_URL.",
+        };
+      }
+      try {
+        const nextServers = mutator(runtimeConfigResult.servers);
+        const saved = await saveDesktopServersState({ servers: nextServers });
+        runtimeConfigResult = {
+          ok: true,
+          config: saved.config,
+          servers: saved.servers,
+        };
+        return { ok: true, config: saved.config, servers: saved.servers };
+      } catch (err) {
+        return {
+          ok: false,
+          error: err instanceof Error ? err.message : String(err),
+        };
+      }
+    }
 
     ipcMain.on(RENDERER_ROUTE_CONTEXT_CHANNEL, (event, context: unknown) => {
       if (!BrowserWindow.fromWebContents(event.sender)) return;
