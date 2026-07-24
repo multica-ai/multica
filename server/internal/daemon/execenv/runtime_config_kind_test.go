@@ -262,6 +262,16 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 		"run the work synchronously instead",
 		"Never background-and-yield",
 		"foreground tool call that blocks",
+		// MUL-5274: an explicitly requested persistent local service is a
+		// completed handoff, not unfinished run-owned work. Pin the narrow
+		// exception and its readiness / cleanup / honesty requirements.
+		"persistent service handoff",
+		"running service itself is the requested deliverable",
+		"stdio redirected to durable logs",
+		"PID/profile",
+		"verify readiness before replying",
+		"survival as best-effort, not guaranteed",
+		"does not cover tests, builds, CI polling",
 		"only to work owned by the current run",
 		"GitHub Actions after a successful push",
 		"Do not wait for them by default",

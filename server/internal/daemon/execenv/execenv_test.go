@@ -988,6 +988,15 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				// no follow-up wakeup. These pins forbid that shape.
 				"Never background-and-yield",
 				"foreground tool call that blocks",
+				// MUL-5274: persistent local services are allowed only as
+				// an explicit, verified handoff with a cleanup handle.
+				"persistent service handoff",
+				"running service itself is the requested deliverable",
+				"stdio redirected to durable logs",
+				"PID/profile",
+				"verify readiness before replying",
+				"survival as best-effort, not guaranteed",
+				"does not cover tests, builds, CI polling",
 				"only to work owned by the current run",
 				"GitHub Actions after a successful push",
 				"Do not wait for them by default",
