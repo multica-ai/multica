@@ -24,6 +24,7 @@ import type {
   ChatDonePayload,
   ChatMessage,
   ChatPendingTask,
+  ChatQuickActionsPayload,
   ChatSession,
   ChatSessionDeletedPayload,
   TaskMessagePayload,
@@ -152,6 +153,42 @@ export function applyChatDoneToCache(
   // Clear in-flight pointer in the same tick so StatusPill unmounts and
   // the AssistantMessage owns the rendering.
   qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+}
+
+/**
+ * Apply a `chat:quick_actions` supplement to the messages cache.
+ *
+ * The daemon generates quick actions in a background pass AFTER the turn
+ * finishes, so they arrive on their own event well after `chat:done` already
+ * invalidated + refetched the messages list (which came back with none). With
+ * `staleTime: Infinity` nothing refetches again, so without this patch an
+ * active mobile session would never render async-generated quick actions until
+ * a manual pull-to-refresh or refocus.
+ *
+ * Patch the identified assistant message's `quick_actions` in place. The
+ * payload's list is already server-validated, so — like web — this only
+ * patches; no invalidate (mobile's cellular "patch over invalidate" rule). An
+ * empty/missing list is terminal ("no suggestions this turn") and a no-op:
+ * the message already renders no chips.
+ *
+ * Mirrors web's `applyChatQuickActionsToCache` in
+ * packages/core/realtime/use-realtime-sync.ts. Mobile has a single flat
+ * messages cache and no pending-placeholder marker, so it patches only that
+ * one cache.
+ */
+export function applyChatQuickActionsToCache(
+  qc: QueryClient,
+  payload: ChatQuickActionsPayload,
+) {
+  const actions = payload.quick_actions ?? [];
+  if (actions.length === 0) return;
+  qc.setQueryData<ChatMessage[]>(
+    chatKeys.messages(payload.chat_session_id),
+    (old) =>
+      old?.map((m) =>
+        m.id === payload.message_id ? { ...m, quick_actions: actions } : m,
+      ),
+  );
 }
 
 // =====================================================

@@ -9,6 +9,8 @@
  * Events handled:
  *   - chat:message              → invalidate messages + pendingTask
  *   - chat:done                 → patch messages inline + clear pendingTask
+ *   - chat:quick_actions        → patch the async quick-actions supplement
+ *                                  onto the assistant message
  *   - task:queued / dispatch    → seed / promote pendingTask
  *   - task:cancelled            → clear pendingTask
  *   - task:completed            → no-op for messages (chat:done already
@@ -28,6 +30,7 @@ import { useWSSubscriptions } from "@/lib/use-ws-subscriptions";
 import {
   appendTaskMessage,
   applyChatDoneToCache,
+  applyChatQuickActionsToCache,
   clearPendingTask,
   promotePendingTaskToRunning,
   seedPendingTaskFromQueued,
@@ -63,6 +66,13 @@ export function useChatSessionRealtime(
         ws.on("chat:done", (payload) => {
           if (!isMine(payload)) return;
           applyChatDoneToCache(qc, payload);
+        }),
+        // The daemon's background suggestion pass lands here, after chat:done
+        // already refetched an actions-less message list. Patch the actions in
+        // directly — staleTime is Infinity, so nothing would refetch them.
+        ws.on("chat:quick_actions", (payload) => {
+          if (!isMine(payload)) return;
+          applyChatQuickActionsToCache(qc, payload);
         }),
         ws.on("task:queued", (payload) => {
           if (!isMine(payload)) return;

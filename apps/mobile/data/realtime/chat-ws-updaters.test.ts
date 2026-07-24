@@ -1,13 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import type { ChatDonePayload, ChatMessage } from "@multica/core/types";
+import type {
+  ChatDonePayload,
+  ChatMessage,
+  ChatQuickActionsPayload,
+} from "@multica/core/types";
 
 // chat-ws-updaters imports chatKeys from data/queries/chat, which transitively
 // imports the native fetch client. Mock it so the Node test never loads RN
 // modules — chatKeys itself is a pure key factory and needs nothing from api.
 vi.mock("@/data/api", () => ({ api: {} }));
 
-import { applyChatDoneToCache } from "./chat-ws-updaters";
+import {
+  applyChatDoneToCache,
+  applyChatQuickActionsToCache,
+} from "./chat-ws-updaters";
 import { chatKeys } from "@/data/queries/chat";
 
 const SESSION = "session-1";
@@ -90,5 +97,71 @@ describe("applyChatDoneToCache", () => {
     applyChatDoneToCache(qc, donePayload());
 
     expect(qc.getQueryData<ChatMessage[]>(chatKeys.messages(SESSION))).toHaveLength(1);
+  });
+});
+
+function assistantMsg(over: Partial<ChatMessage> = {}): ChatMessage {
+  return {
+    id: "msg-1",
+    chat_session_id: SESSION,
+    role: "assistant",
+    content: "here is the plan",
+    task_id: "task-1",
+    created_at: "2026-07-09T00:00:00Z",
+    ...over,
+  };
+}
+
+function quickActionsPayload(
+  over: Partial<ChatQuickActionsPayload> = {},
+): ChatQuickActionsPayload {
+  return {
+    chat_session_id: SESSION,
+    task_id: "task-1",
+    message_id: "msg-1",
+    quick_actions: [
+      { label: "Draft it", prompt: "Draft the complete plan", primary: true },
+    ],
+    ...over,
+  };
+}
+
+describe("applyChatQuickActionsToCache", () => {
+  it("patches the async supplement onto the targeted assistant message", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), [assistantMsg()]);
+
+    applyChatQuickActionsToCache(qc, quickActionsPayload());
+
+    expect(
+      qc.getQueryData<ChatMessage[]>(chatKeys.messages(SESSION))?.[0]?.quick_actions,
+    ).toEqual([
+      { label: "Draft it", prompt: "Draft the complete plan", primary: true },
+    ]);
+  });
+
+  it("only patches the message whose id matches, leaving others untouched", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), [
+      assistantMsg({ id: "msg-0", content: "earlier turn" }),
+      assistantMsg(),
+    ]);
+
+    applyChatQuickActionsToCache(qc, quickActionsPayload());
+
+    const msgs = qc.getQueryData<ChatMessage[]>(chatKeys.messages(SESSION));
+    expect(msgs?.[0]?.quick_actions).toBeUndefined();
+    expect(msgs?.[1]?.quick_actions).toHaveLength(1);
+  });
+
+  it("empty supplement is a terminal no-op (no chips added)", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), [assistantMsg()]);
+
+    applyChatQuickActionsToCache(qc, quickActionsPayload({ quick_actions: [] }));
+
+    expect(
+      qc.getQueryData<ChatMessage[]>(chatKeys.messages(SESSION))?.[0]?.quick_actions,
+    ).toBeUndefined();
   });
 });
