@@ -13,6 +13,8 @@ import {
 import { useIsMobile } from "@multica/ui/hooks/use-mobile";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useChatStore } from "@multica/core/chat";
+import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
+import { useQuery } from "@tanstack/react-query";
 import type { Agent, ChatSession } from "@multica/core/types";
 import { PageHeader } from "../layout/page-header";
 import { useNavigation } from "../navigation";
@@ -55,6 +57,9 @@ export function ChatPage() {
 
   const c = useChatController({ isActive: true });
   const quickActionsEnabled = useChatStore((s) => s.quickActionsEnabled);
+  const { data: quickActionsPending = null } = useQuery(
+    chatQuickActionsPendingOptions(c.activeSessionId ?? ""),
+  );
   const urlSession = searchParams.get("session") || null;
   const urlAgent = searchParams.get("agent") || null;
 
@@ -241,6 +246,9 @@ export function ChatPage() {
           }
           quickActionsDisabled={
             !!c.pendingTaskId || c.isSessionArchived || c.isAgentArchived || c.noAgent
+          }
+          quickActionsPendingMessageId={
+            quickActionsEnabled ? quickActionsPending?.message_id ?? null : null
           }
         />
       ) : (

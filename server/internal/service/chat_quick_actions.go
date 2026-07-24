@@ -1,10 +1,19 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
+
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
 const (
@@ -171,4 +180,83 @@ func truncateChatQuickAction(value string, maxRunes int) string {
 		return value
 	}
 	return string(runes[:maxRunes-1]) + "…"
+}
+
+// chatQuickActionsPending decides whether the chat:done broadcast should tell
+// clients to expect a chat:quick_actions supplement: the daemon declared one
+// on the complete callback, an ordinary assistant message was written, and no
+// actions are attached yet (an in-band fallback already delivered would make
+// a placeholder pointless).
+func chatQuickActionsPending(result []byte, msg *db.ChatMessage) bool {
+	var payload protocol.TaskCompletedPayload
+	_ = json.Unmarshal(result, &payload)
+	if !payload.QuickActionsPending || msg == nil {
+		return false
+	}
+	if msg.MessageKind != protocol.ChatMessageKindMessage {
+		return false
+	}
+	var existing []protocol.ChatQuickAction
+	_ = json.Unmarshal(msg.QuickActions, &existing)
+	return len(existing) == 0
+}
+
+// SupplementChatQuickActions attaches the daemon suggestion pass's output to
+// the completed turn's assistant message and broadcasts chat:quick_actions.
+// Best-effort semantics: an unparseable or empty result still broadcasts the
+// row's current (usually empty) actions so pending placeholders resolve. A
+// turn that never wrote an assistant row (no_response, channel empty-drop)
+// returns silently — no client is waiting in that case, because the pending
+// flag is only ever raised for a written ordinary message.
+func (s *TaskService) SupplementChatQuickActions(ctx context.Context, task db.AgentTaskQueue, raw string) error {
+	if !task.ChatSessionID.Valid {
+		return nil
+	}
+	actions := parseChatQuickActionsOutput(raw)
+	for i := range actions {
+		actions[i].Label = redact.Text(actions[i].Label)
+		actions[i].Prompt = redact.Text(actions[i].Prompt)
+	}
+
+	var msg db.ChatMessage
+	var err error
+	if len(actions) > 0 {
+		encoded, marshalErr := json.Marshal(actions)
+		if marshalErr != nil {
+			return fmt.Errorf("marshal chat quick actions: %w", marshalErr)
+		}
+		msg, err = s.Queries.SetChatMessageQuickActionsByTask(ctx, db.SetChatMessageQuickActionsByTaskParams{
+			TaskID:       task.ID,
+			QuickActions: encoded,
+		})
+	} else {
+		msg, err = s.Queries.GetChatMessageByTaskAssistant(ctx, task.ID)
+	}
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("attach chat quick actions: %w", err)
+	}
+
+	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
+	if workspaceID == "" {
+		return nil
+	}
+	payload := protocol.ChatQuickActionsPayload{
+		ChatSessionID: util.UUIDToString(task.ChatSessionID),
+		TaskID:        util.UUIDToString(task.ID),
+		MessageID:     util.UUIDToString(msg.ID),
+		QuickActions:  []protocol.ChatQuickAction{},
+	}
+	_ = json.Unmarshal(msg.QuickActions, &payload.QuickActions)
+	s.Bus.Publish(events.Event{
+		Type:          protocol.EventChatQuickActions,
+		WorkspaceID:   workspaceID,
+		ActorType:     "system",
+		ActorID:       "",
+		ChatSessionID: util.UUIDToString(task.ChatSessionID),
+		Payload:       payload,
+	})
+	return nil
 }

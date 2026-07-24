@@ -27,6 +27,16 @@ export interface ChatQuickAction {
   primary?: boolean;
 }
 
+/**
+ * Client-only marker (never persisted, never fetched) that the identified
+ * turn's quick-actions supplement is still in flight — drives the pill
+ * skeleton between chat:done and chat:quick_actions.
+ */
+export interface ChatQuickActionsPendingState {
+  message_id: string;
+  task_id: string;
+}
+
 /** Preview of a session's most recent message, for the IM-style list. */
 export interface ChatLastMessage {
   content: string;

@@ -445,11 +445,11 @@ func TestCompleteTask_ChannelEmptyOutputWritesNoRow(t *testing.T) {
 	}
 }
 
-// TestCompleteTask_ChatQuickActionsFromSuggestPass: the daemon suggestion-pass
-// payload (quick_actions_raw) is the authoritative source — it wins over an
-// in-band footer, is parsed leniently (code fences tolerated), and the footer
-// is still stripped from the visible reply.
-func TestCompleteTask_ChatQuickActionsFromSuggestPass(t *testing.T) {
+// TestCompleteTask_ChatQuickActionsSupplement covers the two-step delivery:
+// the complete callback declares pending, then the supplement endpoint's
+// leniently-parsed payload lands on the same assistant row (overwriting an
+// in-band fallback, which the strip still removes from the visible reply).
+func TestCompleteTask_ChatQuickActionsSupplement(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -460,16 +460,13 @@ func TestCompleteTask_ChatQuickActionsFromSuggestPass(t *testing.T) {
 
 	output := "Main reply.\n\n```quick-actions\n" +
 		`[{"label":"From footer","prompt":"in-band fallback"}]` + "\n```"
-	req := TaskCompleteRequest{
-		Output: output,
-		QuickActionsRaw: "```json\n" +
-			`[{"label":"From pass","prompt":"suggested prompt","primary":true}]` + "\n```",
-	}
+	req := TaskCompleteRequest{Output: output, QuickActionsPending: true}
 	result, err := json.Marshal(req)
 	if err != nil {
 		t.Fatalf("marshal complete request: %v", err)
 	}
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), result, "", ""); err != nil {
+	task, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(taskID), result, "", "")
+	if err != nil {
 		t.Fatalf("complete task: %v", err)
 	}
 
@@ -480,11 +477,31 @@ func TestCompleteTask_ChatQuickActionsFromSuggestPass(t *testing.T) {
 	if rows[0].Content != "Main reply." {
 		t.Fatalf("footer must still be stripped from content, got %q", rows[0].Content)
 	}
+
+	raw := "```json\n" + `[{"label":"From pass","prompt":"suggested prompt","primary":true}]` + "\n```"
+	if err := testHandler.TaskService.SupplementChatQuickActions(ctx, *task, raw); err != nil {
+		t.Fatalf("supplement quick actions: %v", err)
+	}
+	rows = assistantRows(t, ctx, sessionID)
 	var actions []protocol.ChatQuickAction
 	if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
 		t.Fatalf("decode quick actions: %v", err)
 	}
 	if len(actions) != 1 || actions[0].Label != "From pass" || !actions[0].Primary {
-		t.Fatalf("suggest-pass actions must win over the in-band footer, got %+v", actions)
+		t.Fatalf("supplement must overwrite the in-band fallback, got %+v", actions)
+	}
+
+	// An empty supplement must not clobber existing actions (it only resolves
+	// the pending placeholder client-side).
+	if err := testHandler.TaskService.SupplementChatQuickActions(ctx, *task, ""); err != nil {
+		t.Fatalf("empty supplement: %v", err)
+	}
+	rows = assistantRows(t, ctx, sessionID)
+	actions = nil
+	if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
+		t.Fatalf("decode quick actions after empty supplement: %v", err)
+	}
+	if len(actions) != 1 || actions[0].Label != "From pass" {
+		t.Fatalf("empty supplement must keep existing actions, got %+v", actions)
 	}
 }

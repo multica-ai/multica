@@ -47,6 +47,7 @@ import {
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
 import { useChatStore } from "@multica/core/chat";
+import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useChatDraftRestore } from "./use-chat-draft-restore";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
@@ -137,6 +138,9 @@ export function ChatWindow() {
   const isOpen = useChatStore((s) => s.isOpen);
   const quickActionsEnabled = useChatStore((s) => s.quickActionsEnabled);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
+  const { data: quickActionsPending = null } = useQuery(
+    chatQuickActionsPendingOptions(activeSessionId ?? ""),
+  );
   const selectedAgentId = useChatStore((s) => s.selectedAgentId);
   const setOpen = useChatStore((s) => s.setOpen);
   const setActiveSession = useChatStore((s) => s.setActiveSession);
@@ -805,6 +809,9 @@ export function ChatWindow() {
           }
           quickActionsDisabled={
             !!pendingTaskId || isSessionArchived || isAgentArchived || noAgent
+          }
+          quickActionsPendingMessageId={
+            quickActionsEnabled ? quickActionsPending?.message_id ?? null : null
           }
         />
       ) : (

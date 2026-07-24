@@ -45,7 +45,8 @@
     "copy_action": "コピー",
     "copied_toast": "コピーしました",
     "copy_failed_toast": "コピーに失敗しました",
-    "loading_older": "古いメッセージを読み込み中…"
+    "loading_older": "古いメッセージを読み込み中…",
+    "quick_actions_heading": "フォローアップ質問"
   },
   "session_history": {
     "untitled": "無題",

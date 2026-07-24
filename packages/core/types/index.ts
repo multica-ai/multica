@@ -92,6 +92,7 @@ export type {
   ChatPinnedAgent,
   ChatMessage,
   ChatQuickAction,
+  ChatQuickActionsPendingState,
   ChatMessagesPage,
   ChatPendingTask,
   PendingChatTaskItem,

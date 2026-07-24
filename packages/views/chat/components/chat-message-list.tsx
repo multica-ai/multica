@@ -68,6 +68,12 @@ interface ChatMessageListProps {
   /** Send the full hidden prompt behind an assistant follow-up chip. */
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
   quickActionsDisabled?: boolean;
+  /**
+   * Message currently awaiting its quick-actions supplement (client-only
+   * marker raised by chat:done) — renders pill skeletons under that reply
+   * until chat:quick_actions resolves it.
+   */
+  quickActionsPendingMessageId?: string | null;
 }
 
 // ─── Virtuoso chrome ─────────────────────────────────────────────────────
@@ -128,16 +134,21 @@ function ChatListHeader({ context }: { context?: ChatListContext }) {
 // The Footer now carries only the status pill — task chrome, not content. The
 // live timeline moved into a real row so it can keep its identity when the
 // task completes (see ChatRenderItem).
+//
+// The container always renders (even with no pill) so the list keeps a
+// constant bottom inset: without it the last row's own py-2 was the only gap
+// between the final reply (and its follow-up pills) and the composer.
 function ChatListFooter({ context }: { context?: ChatListContext }) {
-  if (!context) return null;
-  if (!context.showStatusPill || !context.pendingTask) return null;
+  const showPill = !!context?.showStatusPill && !!context?.pendingTask;
   return (
-    <div className="mx-auto w-full max-w-4xl px-5 pb-4 space-y-4">
-      <TaskStatusPill
-        pendingTask={context.pendingTask}
-        taskMessages={context.liveTaskMessages ?? []}
-        availability={context.availability}
-      />
+    <div className="mx-auto w-full max-w-4xl px-5 pb-10 space-y-4">
+      {showPill && context?.pendingTask ? (
+        <TaskStatusPill
+          pendingTask={context.pendingTask}
+          taskMessages={context.liveTaskMessages ?? []}
+          availability={context.availability}
+        />
+      ) : null}
     </div>
   );
 }
@@ -158,6 +169,7 @@ export function ChatMessageList({
   transformContent,
   onQuickAction,
   quickActionsDisabled = false,
+  quickActionsPendingMessageId = null,
 }: ChatMessageListProps) {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
@@ -270,6 +282,7 @@ export function ChatMessageList({
               transformContent={transformContent}
               onQuickAction={onQuickAction}
               quickActionsDisabled={quickActionsDisabled}
+              quickActionsPendingMessageId={quickActionsPendingMessageId}
             />
           </div>
         )}
@@ -320,12 +333,14 @@ const MessageBubble = memo(function MessageBubble({
   transformContent,
   onQuickAction,
   quickActionsDisabled,
+  quickActionsPendingMessageId,
 }: {
   item: ChatRenderItem;
   isPending: boolean;
   transformContent?: (content: string) => string;
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
   quickActionsDisabled: boolean;
+  quickActionsPendingMessageId: string | null;
 }) {
   // The live row and the persisted assistant row both land here under one key,
   // and both render <AssistantMessage> — same component type, same position —
@@ -377,6 +392,7 @@ const MessageBubble = memo(function MessageBubble({
       transformContent={transformContent}
       onQuickAction={onQuickAction}
       quickActionsDisabled={quickActionsDisabled}
+      quickActionsPending={quickActionsPendingMessageId === message.id}
     />
   );
 });
@@ -405,6 +421,7 @@ function AssistantMessage({
   transformContent,
   onQuickAction,
   quickActionsDisabled,
+  quickActionsPending = false,
 }: {
   taskId: string | null;
   message?: ChatMessage;
@@ -412,6 +429,7 @@ function AssistantMessage({
   transformContent?: (content: string) => string;
   onQuickAction?: (action: ChatQuickAction) => void | Promise<unknown>;
   quickActionsDisabled: boolean;
+  quickActionsPending?: boolean;
 }) {
   const canFetchTaskMessages = isTaskMessageTaskId(taskId);
 
@@ -482,18 +500,20 @@ function AssistantMessage({
             attachments={message.attachments}
             content={message.content}
           />
-          {onQuickAction && (message.quick_actions?.length ?? 0) > 0 && (
-            <QuickActions
-              actions={message.quick_actions ?? []}
-              disabled={quickActionsDisabled || isPending}
-              onSelect={onQuickAction}
-            />
-          )}
           <MessageFooter
             message={message}
             timeline={timeline}
             isPending={isPending}
           />
+          {onQuickAction && (message.quick_actions?.length ?? 0) > 0 ? (
+            <QuickActions
+              actions={message.quick_actions ?? []}
+              disabled={quickActionsDisabled || isPending}
+              onSelect={onQuickAction}
+            />
+          ) : onQuickAction && quickActionsPending ? (
+            <QuickActionsSkeleton />
+          ) : null}
         </>
       )}
     </div>
@@ -542,21 +562,78 @@ function QuickActions({
   };
 
   return (
-    <div className="flex flex-wrap gap-2 pt-1" aria-label="Suggested follow-ups">
-      {actions.slice(0, 3).map((action, index) => (
-        <Button
-          key={`${action.label}-${index}`}
-          type="button"
-          variant={action.primary ? "brandSubtle" : "outline"}
-          size="sm"
-          className="max-w-full rounded-full px-3"
-          disabled={blocked}
-          onClick={() => void handleSelect(action)}
-        >
-          <span className="truncate">{action.label}</span>
-          {action.primary ? <ArrowUpRight aria-hidden="true" /> : null}
-        </Button>
-      ))}
+    <div className="mt-2 border-t border-border/40 pt-2 animate-in fade-in slide-in-from-bottom-1 duration-300">
+      <div className="flex flex-wrap items-center gap-2" aria-label="Suggested follow-ups">
+        <QuickActionsHeading />
+        {actions.slice(0, 3).map((action, index) => (
+          // The whole pill previews its hidden prompt on hover: clicking
+          // sends a message the user has never seen, in their name — the
+          // tooltip flips that from commit-then-learn to learn-then-commit.
+          <Tooltip key={`${action.label}-${index}`}>
+            <TooltipTrigger
+              render={
+                <Button
+                  type="button"
+                  variant={action.primary ? "brandSubtle" : "outline"}
+                  size="sm"
+                  className="max-w-full rounded-full px-3"
+                  disabled={blocked}
+                  onClick={() => void handleSelect(action)}
+                />
+              }
+            >
+              <span className="truncate">{action.label}</span>
+              {action.primary ? <ArrowUpRight aria-hidden="true" /> : null}
+            </TooltipTrigger>
+            <TooltipContent side="top" className="max-w-sm whitespace-pre-wrap break-words">
+              {action.prompt}
+            </TooltipContent>
+          </Tooltip>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Light inline prefix label for the follow-up pill row — the row sits below
+// the reply footer ("Replied in Xs · Copy") behind a faint top border, so
+// the pills read as a labelled next-steps strip, not part of the reply body.
+// shrink-0 keeps the label whole at the row start when narrow widths wrap
+// the pills.
+function QuickActionsHeading() {
+  const { t } = useT("chat");
+  return (
+    <span className="shrink-0 text-xs text-muted-foreground">
+      {t(($) => $.message_list.quick_actions_heading)}
+    </span>
+  );
+}
+
+// How long the pill skeleton waits for the chat:quick_actions supplement
+// before giving up. The daemon abandons its pass at 20s and always sends a
+// resolving supplement on success/empty — this only covers a daemon that
+// died or an event lost to a reconnect window.
+const QUICK_ACTIONS_SKELETON_TIMEOUT_MS = 30_000;
+
+// Pill-shaped placeholders shown between chat:done (which declared a pending
+// supplement) and chat:quick_actions. Widths are staggered so the row reads
+// as "buttons coming", not a loading bar. aria-hidden: nothing actionable to
+// announce yet.
+function QuickActionsSkeleton() {
+  const [expired, setExpired] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setExpired(true), QUICK_ACTIONS_SKELETON_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, []);
+  if (expired) return null;
+  return (
+    <div className="mt-2 border-t border-border/40 pt-2 animate-in fade-in duration-300">
+      <div className="flex flex-wrap items-center gap-2" aria-hidden="true">
+        <QuickActionsHeading />
+        <Skeleton className="h-8 w-24 rounded-full" />
+        <Skeleton className="h-8 w-32 rounded-full" />
+        <Skeleton className="h-8 w-28 rounded-full" />
+      </div>
     </div>
   );
 }

@@ -2733,7 +2733,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		// The assistant outcome row (message / no_response) and any attachment
 		// binding were written inside the completion transaction above by
 		// writeChatCompletionOutcome. Broadcast chat:done AFTER commit.
-		s.broadcastChatDone(ctx, task, chatAssistantMsg)
+		s.broadcastChatDone(ctx, task, chatAssistantMsg, chatQuickActionsPending(result, chatAssistantMsg))
 	}
 
 	// Reconcile agent status
@@ -2782,17 +2782,11 @@ func (s *TaskService) writeChatCompletionOutcome(ctx context.Context, qtx *db.Qu
 	// fell outside the strip gate and leaked the raw footer into its content;
 	// channel outputs never carry the syntax, so the split is a no-op there.
 	//
-	// Suggestion source order: the daemon suggestion pass (QuickActionsRaw)
-	// is authoritative; the stripped in-band footer is the fallback for older
-	// daemons and pre-upgrade provider sessions that still emit it.
-	body, inBandActions := splitChatQuickActions(body)
-	quickActions := parseChatQuickActionsOutput(payload.QuickActionsRaw)
-	if len(quickActions) == 0 {
-		// Also reached when the suggest pass deliberately returned "[]" while a
-		// pre-upgrade session appended a stale footer: transitional, harmless
-		// (footer actions passed the same sanitize contract).
-		quickActions = inBandActions
-	}
+	// New daemons deliver suggestions out-of-band AFTER this callback (the
+	// chat:quick_actions supplement, see SupplementChatQuickActions); the
+	// stripped in-band footer stays as the source for older daemons and
+	// pre-upgrade provider sessions that still emit it.
+	body, quickActions := splitChatQuickActions(body)
 	for i := range quickActions {
 		quickActions[i].Label = redact.Text(quickActions[i].Label)
 		quickActions[i].Prompt = redact.Text(quickActions[i].Prompt)
@@ -4085,14 +4079,15 @@ func (s *TaskService) ResolveTaskWorkspaceID(ctx context.Context, task db.AgentT
 	return ""
 }
 
-func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQueue, msg *db.ChatMessage) {
+func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQueue, msg *db.ChatMessage, quickActionsPending bool) {
 	workspaceID := s.ResolveTaskWorkspaceID(ctx, task)
 	if workspaceID == "" {
 		return
 	}
 	payload := protocol.ChatDonePayload{
-		ChatSessionID: util.UUIDToString(task.ChatSessionID),
-		TaskID:        util.UUIDToString(task.ID),
+		ChatSessionID:       util.UUIDToString(task.ChatSessionID),
+		TaskID:              util.UUIDToString(task.ID),
+		QuickActionsPending: quickActionsPending,
 	}
 	if msg != nil {
 		payload.MessageID = util.UUIDToString(msg.ID)

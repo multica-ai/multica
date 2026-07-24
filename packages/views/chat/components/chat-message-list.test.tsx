@@ -256,3 +256,50 @@ describe("ChatMessageList quick actions", () => {
     expect(await screen.findByRole("button", { name: "Continue" })).toBeDisabled();
   });
 });
+
+describe("ChatMessageList quick actions skeleton", () => {
+  const assistantMessage = {
+    id: "assistant-1",
+    chat_session_id: "session-1",
+    role: "assistant" as const,
+    content: "The plan is ready.",
+    task_id: null,
+    created_at: "2026-07-22T00:00:00Z",
+  };
+
+  it("renders pill skeletons for the message awaiting its supplement", () => {
+    const qc = new QueryClient();
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[assistantMessage]}
+            pendingTask={null}
+            availability="online"
+            onQuickAction={vi.fn()}
+            quickActionsPendingMessageId="assistant-1"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    expect(container.querySelectorAll(".rounded-full[aria-hidden] , [aria-hidden] .rounded-full").length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: /suggested/i })).toBeNull();
+  });
+
+  it("shows no skeleton for other messages or without onQuickAction", () => {
+    const qc = new QueryClient();
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={qc}>
+          <ChatMessageList
+            messages={[assistantMessage]}
+            pendingTask={null}
+            availability="online"
+            quickActionsPendingMessageId="assistant-1"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+    expect(container.querySelector("[aria-hidden] .rounded-full")).toBeNull();
+  });
+});

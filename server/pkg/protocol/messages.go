@@ -105,10 +105,23 @@ type TaskCompletedPayload struct {
 	TaskID string `json:"task_id"`
 	PRURL  string `json:"pr_url,omitempty"`
 	Output string `json:"output,omitempty"`
-	// QuickActionsRaw is the unparsed output of the daemon's chat suggestion
-	// pass (expected: a JSON array of ChatQuickAction). Parsed leniently by
-	// the chat completion path; absent on non-chat tasks and older daemons.
-	QuickActionsRaw string `json:"quick_actions_raw,omitempty"`
+	// QuickActionsPending declares that this daemon will follow up with a
+	// quick-actions supplement for this chat turn (the suggestion pass runs
+	// in the background after this callback). Per-turn capability signal:
+	// absent on non-chat tasks, skipped turns, and older daemons — so a
+	// false/missing flag means clients must not wait for suggestions.
+	QuickActionsPending bool `json:"quick_actions_pending,omitempty"`
+}
+
+// ChatQuickActionsPayload supplements one completed chat turn with the
+// sanitized follow-up actions from the daemon's suggestion pass. An empty
+// QuickActions list is a meaningful terminal state — it resolves the
+// pending skeleton with "no suggestions this turn".
+type ChatQuickActionsPayload struct {
+	ChatSessionID string            `json:"chat_session_id"`
+	TaskID        string            `json:"task_id"`
+	MessageID     string            `json:"message_id"`
+	QuickActions  []ChatQuickAction `json:"quick_actions"`
 }
 
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)
@@ -181,6 +194,10 @@ type ChatDonePayload struct {
 	CreatedAt     string            `json:"created_at,omitempty"`
 	MessageKind   string            `json:"message_kind,omitempty"`
 	QuickActions  []ChatQuickAction `json:"quick_actions,omitempty"`
+	// QuickActionsPending tells clients a chat:quick_actions supplement will
+	// follow for this turn (render a placeholder). Never true when
+	// QuickActions is already populated.
+	QuickActionsPending bool `json:"quick_actions_pending,omitempty"`
 }
 
 // Outcome values carried by ChatCancelFinalizedPayload.

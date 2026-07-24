@@ -56,6 +56,7 @@ export type WSEventType =
   | "issue_reaction:removed"
   | "chat:message"
   | "chat:done"
+  | "chat:quick_actions"
   | "chat:cancel_finalized"
   | "chat:session_read"
   | "chat:session_deleted"
@@ -378,6 +379,24 @@ export interface ChatDonePayload {
   message_kind?: import("./chat").ChatMessageKind;
   /** Server-validated follow-ups attached to the persisted assistant reply. */
   quick_actions?: import("./chat").ChatQuickAction[];
+  /**
+   * The daemon will follow up with a chat:quick_actions supplement for this
+   * turn — render a placeholder. Never true alongside populated
+   * quick_actions; absent on older servers/daemons.
+   */
+  quick_actions_pending?: boolean;
+}
+
+/**
+ * chat:quick_actions — supplements a finished turn with the follow-up
+ * suggestions from the daemon's background pass. An empty list is terminal:
+ * "no suggestions this turn", resolve any placeholder.
+ */
+export interface ChatQuickActionsPayload {
+  chat_session_id: string;
+  task_id: string;
+  message_id: string;
+  quick_actions?: import("./chat").ChatQuickAction[];
 }
 
 /**
@@ -509,6 +528,7 @@ export interface WSEventPayloadMap {
   "activity:created": ActivityCreatedPayload;
   "chat:message": ChatMessageEventPayload;
   "chat:done": ChatDonePayload;
+  "chat:quick_actions": ChatQuickActionsPayload;
   "chat:cancel_finalized": ChatCancelFinalizedPayload;
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;

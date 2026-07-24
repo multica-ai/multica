@@ -85,6 +85,8 @@ import type {
   TaskFailedPayload,
   TaskCancelledPayload,
   ChatDonePayload,
+  ChatQuickActionsPayload,
+  ChatQuickActionsPendingState,
   ChatCancelFinalizedPayload,
   ChatMessage,
   ChatPendingTask,
@@ -167,10 +169,64 @@ export function applyChatDoneToCache(
   }
   // Replacement is in the messages list now; safe to drop pending.
   qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+  // Raise/clear the quick-actions placeholder marker. Kept OUTSIDE the
+  // message caches deliberately: the authoritative refetch below replaces
+  // those, and a flag stored on the message would vanish with it. Explicit
+  // `=== true` — older servers omit the field entirely.
+  qc.setQueryData<ChatQuickActionsPendingState | null>(
+    chatKeys.quickActionsPending(sessionId),
+    payload.quick_actions_pending === true && messageId
+      ? { message_id: messageId, task_id: taskId }
+      : null,
+  );
   // Authoritative refetch reconciles redaction / migrations / clients
   // that took the fallback branch above.
   invalidateChatMessageQueries(qc, sessionId);
   qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+}
+
+/**
+ * Apply a chat:quick_actions supplement: patch the identified assistant
+ * message's quick_actions in both message caches and resolve the pending
+ * placeholder. An empty/missing list is terminal ("no suggestions this
+ * turn") — the placeholder still resolves.
+ */
+export function applyChatQuickActionsToCache(
+  qc: QueryClient,
+  payload: ChatQuickActionsPayload,
+) {
+  const sessionId = payload.chat_session_id;
+  const actions = payload.quick_actions ?? [];
+  const patch = (m: ChatMessage): ChatMessage =>
+    m.id === payload.message_id ? { ...m, quick_actions: actions } : m;
+  if (actions.length > 0) {
+    qc.setQueryData<ChatMessage[] | undefined>(
+      chatKeys.messages(sessionId),
+      (old) => old?.map(patch),
+    );
+    qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
+      chatKeys.messagesPage(sessionId),
+      (old) =>
+        old
+          ? {
+              ...old,
+              pages: old.pages.map((page) => ({
+                ...page,
+                messages: page.messages.map(patch),
+              })),
+            }
+          : old,
+    );
+  }
+  // Resolve the marker only when it belongs to THIS message: a late
+  // supplement for turn N must not clear the marker turn N+1's chat:done
+  // just raised (near-unreachable — the daemon cancels stale passes — but
+  // the guard costs one comparison).
+  qc.setQueryData<ChatQuickActionsPendingState | null>(
+    chatKeys.quickActionsPending(sessionId),
+    (current) =>
+      current && current.message_id !== payload.message_id ? current : null,
+  );
 }
 
 function patchLatestChatMessagePage(
@@ -771,7 +827,7 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:cancel_finalized", "chat:session_read",
+      "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
       "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
@@ -1172,6 +1228,19 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
+    // Late quick-actions supplement from the daemon's background suggestion
+    // pass — patches the finished turn's message in place; no invalidate
+    // needed (the payload is authoritative and tiny).
+    const unsubChatQuickActions = ws.on("chat:quick_actions", (p) => {
+      const payload = p as ChatQuickActionsPayload;
+      chatWsLogger.info("chat:quick_actions (global)", {
+        task_id: payload.task_id,
+        chat_session_id: payload.chat_session_id,
+        count: payload.quick_actions?.length ?? 0,
+      });
+      applyChatQuickActionsToCache(qc, payload);
+    });
+
     // Deferred cancellation outcome (#5219): the server settles the
     // empty/non-empty judgment only after the daemon's transcript flush, so
     // this event arrives seconds after the cancel HTTP response — nothing
@@ -1407,6 +1476,7 @@ export function useRealtimeSync(
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();
+      unsubChatQuickActions();
       unsubChatCancelFinalized();
       unsubTaskQueued();
       unsubTaskDispatch();

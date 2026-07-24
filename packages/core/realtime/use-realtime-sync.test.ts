@@ -19,6 +19,7 @@ import type {
 import {
   applyChatCancelFinalizedToCache,
   applyChatDoneToCache,
+  applyChatQuickActionsToCache,
   applyChatSessionUpdatedToCache,
   applyWorkspaceUpdatedToCache,
   handleInboxNew,
@@ -865,5 +866,88 @@ describe("handleInboxNew", () => {
     await handleInboxNew(qc, inboxItem());
 
     expect(webBanners).toHaveLength(0);
+  });
+});
+
+describe("chat quick-actions supplement flow", () => {
+  const pendingMarkerKey = chatKeys.quickActionsPending(sessionId);
+
+  it("chat:done raises the pending marker when the daemon declared a supplement", () => {
+    const qc = createQueryClient();
+    qc.setQueryData<ChatMessage[]>(messagesKey, [userMessage()]);
+    applyChatDoneToCache(qc, donePayload({ quick_actions_pending: true }));
+    expect(qc.getQueryData(pendingMarkerKey)).toEqual({
+      message_id: "msg-assistant",
+      task_id: taskId,
+    });
+  });
+
+  it("chat:done clears the marker when no supplement was declared (older daemons)", () => {
+    const qc = createQueryClient();
+    qc.setQueryData(pendingMarkerKey, { message_id: "stale", task_id: "old" });
+    qc.setQueryData<ChatMessage[]>(messagesKey, [userMessage()]);
+    applyChatDoneToCache(qc, donePayload());
+    expect(qc.getQueryData(pendingMarkerKey)).toBeNull();
+  });
+
+  it("chat:quick_actions patches the message in both caches and resolves the marker", () => {
+    const qc = createQueryClient();
+    const assistant: ChatMessage = {
+      id: "msg-assistant",
+      chat_session_id: sessionId,
+      role: "assistant",
+      content: "done",
+      task_id: taskId,
+      created_at: "2026-05-13T05:00:02Z",
+    };
+    qc.setQueryData<ChatMessage[]>(messagesKey, [userMessage(), assistant]);
+    qc.setQueryData<InfiniteData<ChatMessagesPage>>(chatKeys.messagesPage(sessionId), {
+      pages: [{ messages: [assistant], limit: 50, has_more: false, next_cursor: null }],
+      pageParams: [null],
+    });
+    qc.setQueryData(pendingMarkerKey, { message_id: "msg-assistant", task_id: taskId });
+
+    const actions = [{ label: "Next", prompt: "Do the next thing", primary: true }];
+    applyChatQuickActionsToCache(qc, {
+      chat_session_id: sessionId,
+      task_id: taskId,
+      message_id: "msg-assistant",
+      quick_actions: actions,
+    });
+
+    const messages = qc.getQueryData<ChatMessage[]>(messagesKey);
+    expect(messages?.at(-1)?.quick_actions).toEqual(actions);
+    const pages = qc.getQueryData<InfiniteData<ChatMessagesPage>>(
+      chatKeys.messagesPage(sessionId),
+    );
+    expect(pages?.pages[0]?.messages[0]?.quick_actions).toEqual(actions);
+    expect(qc.getQueryData(pendingMarkerKey)).toBeNull();
+  });
+
+  it("an empty supplement resolves the marker without touching messages", () => {
+    const qc = createQueryClient();
+    const assistant: ChatMessage = {
+      id: "msg-assistant",
+      chat_session_id: sessionId,
+      role: "assistant",
+      content: "done",
+      task_id: taskId,
+      created_at: "2026-05-13T05:00:02Z",
+      quick_actions: [{ label: "Keep", prompt: "Keep me" }],
+    };
+    qc.setQueryData<ChatMessage[]>(messagesKey, [assistant]);
+    qc.setQueryData(pendingMarkerKey, { message_id: "msg-assistant", task_id: taskId });
+
+    applyChatQuickActionsToCache(qc, {
+      chat_session_id: sessionId,
+      task_id: taskId,
+      message_id: "msg-assistant",
+      quick_actions: [],
+    });
+
+    expect(qc.getQueryData<ChatMessage[]>(messagesKey)?.[0]?.quick_actions).toEqual([
+      { label: "Keep", prompt: "Keep me" },
+    ]);
+    expect(qc.getQueryData(pendingMarkerKey)).toBeNull();
   });
 });
