@@ -1082,16 +1082,20 @@ WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
 ORDER BY priority DESC, created_at ASC;
 
 -- name: ListQueuedClaimCandidatesByRuntime :many
--- Returns rows the runtime can attempt to claim. Status is restricted to
--- 'queued' (in contrast to ListPendingTasksByRuntime which also includes
--- 'dispatched') because dispatched rows are by definition already owned
--- and cannot be re-claimed — including them in the candidate list pads
--- the result with rows that always lose the per-(issue, agent) race in
--- ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
--- runtime is busy on a long-running task. Backed by the partial index
--- idx_agent_task_queue_claim_candidates so the warm path is cheap.
+-- Returns one queued representative per agent on the runtime. The service uses
+-- these rows only to decide which agents should be attempted; ClaimAgentTask
+-- re-selects the exact runnable task while enforcing capacity and serialization.
+-- Collapsing here keeps a team/squad leader with a large queue from forcing the
+-- claim endpoint to read every queued row before it can dispatch work.
 SELECT * FROM agent_task_queue
-WHERE runtime_id = $1 AND status = 'queued'
+WHERE id IN (
+    SELECT id FROM (
+        SELECT DISTINCT ON (agent_id) id, priority, created_at
+        FROM agent_task_queue
+        WHERE runtime_id = $1 AND status = 'queued'
+        ORDER BY agent_id, priority DESC, created_at ASC
+    ) candidates
+)
 ORDER BY priority DESC, created_at ASC;
 
 -- name: PromoteDueDeferredTasksForRuntime :many
@@ -1103,18 +1107,20 @@ WHERE runtime_id = @runtime_id
 RETURNING *;
 
 -- name: ListQueuedClaimCandidatesByRuntimes :many
--- Batch variant of ListQueuedClaimCandidatesByRuntime (MUL-4257): returns
--- queued claim candidates across every runtime_id in the input set in ONE round
--- trip, so a daemon can list candidates for all of its runtimes with a single
--- query instead of one per runtime. Ordering matches the singular query
--- (priority, then FIFO) so the batch claim loop keeps the same fairness. The
--- runtime_id filter is served by the partial index
--- idx_agent_task_queue_claim_candidates; the cross-runtime ORDER BY still needs
--- a sort step (each runtime's slice is index-ordered, but merging several
--- runtimes' rows into one priority/FIFO order is not). The per-machine
--- candidate set is small, so this is cheap in practice.
+-- Batch variant of ListQueuedClaimCandidatesByRuntime (MUL-4257): returns one
+-- queued representative per (runtime, agent) across the input set. This keeps
+-- the request bounded by active agents rather than queued tasks, while still
+-- preserving runtime-level empty-cache bookkeeping and global priority/FIFO
+-- ordering among the representatives.
 SELECT * FROM agent_task_queue
-WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND status = 'queued'
+WHERE id IN (
+    SELECT id FROM (
+        SELECT DISTINCT ON (runtime_id, agent_id) id, priority, created_at
+        FROM agent_task_queue
+        WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND status = 'queued'
+        ORDER BY runtime_id, agent_id, priority DESC, created_at ASC
+    ) candidates
+)
 ORDER BY priority DESC, created_at ASC;
 
 -- name: PromoteDueDeferredTasksForRuntimes :many
