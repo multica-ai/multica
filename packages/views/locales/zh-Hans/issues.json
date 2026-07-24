@@ -443,6 +443,7 @@
     "retry_task_aria": "重试 task",
     "retry_failed": "重试 task 失败",
     "retry_blocked": "未重试——你没有该智能体的使用权限",
+    "retry_success": "已重试 task",
     "transcript_tooltip": "查看记录",
     "cancel_failed": "取消 task 失败",
     "trigger_retry": "重试",
