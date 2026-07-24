@@ -21,6 +21,7 @@ import {
   Folder,
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
+  ListCollapse,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -33,19 +34,32 @@ import {
   DropdownMenuSeparator,
   DropdownMenuCheckboxItem,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
+import { RichContent } from "../../rich-content";
 import { api } from "@multica/core/api";
 import {
   useTranscriptViewStore,
+  type TranscriptDetailDensity,
   type TranscriptFilterKey,
   type TranscriptSortDirection,
 } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
+import {
+  traceEventDefaultExpanded,
+  traceEventHasDetail,
+  traceEventKind,
+  traceEventLabel,
+  traceEventSummary,
+  traceEventSummaryIsMono,
+} from "./trace-event-presenter";
 import { useT } from "../../i18n";
+import "./task-transcript.css";
 
 interface AgentTranscriptDialogProps {
   open: boolean;
@@ -93,81 +107,13 @@ const colorClasses: Record<EventColor, { bg: string; bgActive: string; label: st
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-function getEventLabel(item: TimelineItem): string {
-  switch (item.type) {
-    case "text":
-      return "Agent";
-    case "thinking":
-      return "Thinking";
-    case "tool_use":
-      return item.tool ?? "Tool";
-    case "tool_result":
-      return item.tool ? `${item.tool}` : "Result";
-    case "error":
-      return "Error";
-    default:
-      return "Event";
-  }
-}
+// Presentation rules (kind/label/summary/default expansion) live in the pure
+// trace-event-presenter module; only view-plumbing helpers remain here.
 
 function getItemFilterKey(item: TimelineItem): TranscriptFilterKey {
   return item.tool && (item.type === "tool_use" || item.type === "tool_result")
     ? `tool:${item.tool}`
     : item.type;
-}
-
-function getEventSummary(item: TimelineItem): string {
-  switch (item.type) {
-    case "text":
-      return item.content?.split("\n").find((l) => l.trim().length > 0) ?? "";
-    case "thinking":
-      return item.content?.slice(0, 200) ?? "";
-    case "tool_use": {
-      if (!item.input) return "";
-      const inp = item.input as Record<string, string>;
-      if (inp.query) return inp.query;
-      if (inp.file_path) return shortenPath(inp.file_path);
-      if (inp.path) return shortenPath(inp.path);
-      if (inp.pattern) return inp.pattern;
-      if (inp.description) return String(inp.description);
-      if (inp.command) {
-        const cmd = String(inp.command);
-        return cmd.length > 120 ? cmd.slice(0, 120) + "..." : cmd;
-      }
-      if (inp.prompt) {
-        const p = String(inp.prompt);
-        return p.length > 120 ? p.slice(0, 120) + "..." : p;
-      }
-      if (inp.skill) return String(inp.skill);
-      for (const v of Object.values(inp)) {
-        if (typeof v === "string" && v.length > 0 && v.length < 120) return v;
-      }
-      return "";
-    }
-    case "tool_result":
-      return item.output?.slice(0, 200) ?? "";
-    case "error":
-      return item.content ?? "";
-    default:
-      return "";
-  }
-}
-
-function hasEventDetail(item: TimelineItem): boolean {
-  return (
-    (item.type === "tool_use" && !!item.input && Object.keys(item.input).length > 0) ||
-    (item.type === "tool_result" && !!item.output && item.output.length > 0) ||
-    (item.type === "thinking" && !!item.content && item.content.length > 0) ||
-    (item.type === "text" && !!item.content && item.content.length > 0) ||
-    (item.type === "error" && !!item.content && item.content.length > 0)
-  );
-}
-
-function shortenPath(p: string): string {
-  const parts = p.split("/");
-  if (parts.length <= 3) return p;
-  return ".../" + parts.slice(-2).join("/");
 }
 
 function formatDuration(start: string, end: string): string {
@@ -185,14 +131,6 @@ function formatElapsedMs(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${minutes}m ${secs}s`;
-}
-
-function formatEventForClipboard(item: TimelineItem): string {
-  const label = getEventLabel(item);
-  const summary = getEventSummary(item);
-  const date = item.created_at ? new Date(item.created_at) : null;
-  const timestamp = date && !Number.isNaN(date.getTime()) ? `[${date.toISOString()}] ` : "";
-  return `${timestamp}[${label}] ${summary}`;
 }
 
 // ─── Main dialog ────────────────────────────────────────────────────────────
@@ -224,7 +162,10 @@ export function AgentTranscriptDialog({
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
   const [sessionFilterKeys, setSessionFilterKeys] = useState<TranscriptFilterKey[]>([]);
-  const [expandedSeqs, setExpandedSeqs] = useState<Set<number>>(() => new Set());
+  // Row-level expand overrides. A row the user toggled follows the toggle; any
+  // other row follows the density preference (see traceEventDefaultExpanded).
+  // Switching density or task resets the overrides wholesale.
+  const [rowOverrides, setRowOverrides] = useState<Map<number, boolean>>(() => new Map());
   const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
   const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
   const preserveFilters = useTranscriptViewStore((s) => s.preserveFilters);
@@ -233,17 +174,18 @@ export function AgentTranscriptDialog({
   const setPersistedFilterKeys = useTranscriptViewStore((s) => s.setSelectedFilterKeys);
   const togglePersistedFilterKey = useTranscriptViewStore((s) => s.toggleFilterKey);
   const clearPersistedFilterKeys = useTranscriptViewStore((s) => s.clearFilterKeys);
-  const defaultExpanded = useTranscriptViewStore((s) => s.defaultExpanded);
-  const setDefaultExpanded = useTranscriptViewStore((s) => s.setDefaultExpanded);
+  const density = useTranscriptViewStore((s) => s.density);
+  const setDensity = useTranscriptViewStore((s) => s.setDensity);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
-  const autoExpandedSeqsRef = useRef<Set<number>>(new Set());
-  const initializedTaskRef = useRef<string | null>(null);
-  const previousDefaultExpandedRef = useRef(defaultExpanded);
   const selectedFilterKeys = preserveFilters ? persistedFilterKeys : sessionFilterKeys;
+
+  useEffect(() => {
+    setRowOverrides(new Map());
+  }, [task.id, density]);
 
   // Derive filter options from each item:
   //   tool_use / tool_result → filter value = tool, display = "tool:Bash"
-  //   other types → display from getEventLabel
+  //   other types → display from traceEventLabel
   const filterOptions = useMemo(() => {
     const options = new Map<string, string>();
     for (const item of items) {
@@ -252,7 +194,7 @@ export function AgentTranscriptDialog({
         if (!options.has(key)) options.set(key, key);
       } else {
         if (!options.has(key)) {
-          options.set(key, getEventLabel(item));
+          options.set(key, traceEventLabel(item));
         }
       }
     }
@@ -300,37 +242,6 @@ export function AgentTranscriptDialog({
   const firstItemIndex =
     sortDirection === "newest_first" ? 1_000_000 - displayItems.length : 0;
   const listEpoch = `${task.id}:${sortDirection}:${activeFilterKeys.join(",")}`;
-
-  const detailSeqs = useMemo(
-    () => displayItems.filter(hasEventDetail).map((item) => item.seq),
-    [displayItems],
-  );
-
-  const allVisibleDetailsExpanded =
-    detailSeqs.length > 0 && detailSeqs.every((seq) => expandedSeqs.has(seq));
-
-  useEffect(() => {
-    const switchedDefaultOn =
-      defaultExpanded && previousDefaultExpandedRef.current !== defaultExpanded;
-    previousDefaultExpandedRef.current = defaultExpanded;
-
-    if (initializedTaskRef.current !== task.id || switchedDefaultOn) {
-      initializedTaskRef.current = task.id;
-      autoExpandedSeqsRef.current = new Set(defaultExpanded ? detailSeqs : []);
-      setExpandedSeqs(defaultExpanded ? new Set(detailSeqs) : new Set());
-      return;
-    }
-
-    if (!defaultExpanded) return;
-
-    const unseen = detailSeqs.filter((seq) => !autoExpandedSeqsRef.current.has(seq));
-    if (unseen.length === 0) return;
-
-    for (const seq of unseen) {
-      autoExpandedSeqsRef.current.add(seq);
-    }
-    setExpandedSeqs((prev) => new Set([...prev, ...unseen]));
-  }, [task.id, defaultExpanded, detailSeqs]);
 
   // Toggling direction is a manual user action; jump the scroll container back
   // to the top so the newest end of the timeline (per the chosen direction) is
@@ -401,7 +312,11 @@ export function AgentTranscriptDialog({
 
   const handleCopyAll = useCallback(() => {
     const text = displayItems
-      .map(formatEventForClipboard)
+      .map((item) => {
+        const label = traceEventLabel(item);
+        const summary = traceEventSummary(item);
+        return `[${label}] ${summary}`;
+      })
       .join("\n");
     void copyText(text).then((ok) => {
       if (!ok) return;
@@ -450,28 +365,10 @@ export function AgentTranscriptDialog({
     [persistedFilterKeys, sessionFilterKeys, setPersistedFilterKeys, setPreserveFilters],
   );
 
-  const handleToggleVisibleExpanded = useCallback(() => {
-    for (const seq of detailSeqs) {
-      autoExpandedSeqsRef.current.add(seq);
-    }
-    setExpandedSeqs((prev) => {
-      if (allVisibleDetailsExpanded) {
-        const next = new Set(prev);
-        for (const seq of detailSeqs) {
-          next.delete(seq);
-        }
-        return next;
-      }
-      return new Set([...prev, ...detailSeqs]);
-    });
-  }, [allVisibleDetailsExpanded, detailSeqs]);
-
   const handleRowExpandedChange = useCallback((seq: number, expanded: boolean) => {
-    autoExpandedSeqsRef.current.add(seq);
-    setExpandedSeqs((prev) => {
-      const next = new Set(prev);
-      if (expanded) next.add(seq);
-      else next.delete(seq);
+    setRowOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(seq, expanded);
       return next;
     });
   }, []);
@@ -542,29 +439,45 @@ export function AgentTranscriptDialog({
             <AttributionBadge attribution={task.attribution} className="shrink-0" />
 
             <div className="flex w-full max-w-full flex-wrap items-center justify-end gap-1 sm:ml-auto sm:w-auto">
-              {detailSeqs.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleToggleVisibleExpanded}
-                  aria-label={
-                    allVisibleDetailsExpanded
-                      ? t(($) => $.transcript.collapse_visible)
-                      : t(($) => $.transcript.expand_visible)
-                  }
-                  className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  <ChevronRight
-                    className={cn(
-                      "h-3 w-3 transition-transform",
-                      !allVisibleDetailsExpanded && "rotate-90",
-                    )}
-                  />
-                  <span className="hidden sm:inline">
-                    {allVisibleDetailsExpanded
-                      ? t(($) => $.transcript.collapse_visible)
-                      : t(($) => $.transcript.expand_visible)}
-                  </span>
-                </button>
+              {items.length > 0 && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger
+                    aria-label={t(($) => $.transcript.density_label)}
+                    className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <ListCollapse className="h-3 w-3" />
+                    <span className="hidden sm:inline">
+                      {density === "smart"
+                        ? t(($) => $.transcript.density_smart)
+                        : density === "expanded"
+                          ? t(($) => $.transcript.density_expanded)
+                          : t(($) => $.transcript.density_collapsed)}
+                    </span>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-64">
+                    <DropdownMenuRadioGroup
+                      value={density}
+                      onValueChange={(value) => setDensity(value as TranscriptDetailDensity)}
+                    >
+                      {(
+                        [
+                          ["smart", t(($) => $.transcript.density_smart), t(($) => $.transcript.density_smart_desc)],
+                          ["expanded", t(($) => $.transcript.density_expanded), t(($) => $.transcript.density_expanded_desc)],
+                          ["collapsed", t(($) => $.transcript.density_collapsed), t(($) => $.transcript.density_collapsed_desc)],
+                        ] as const
+                      ).map(([value, name, description]) => (
+                        <DropdownMenuRadioItem key={value} value={value} className="items-start">
+                          <span className="flex min-w-0 flex-col gap-0.5">
+                            <span>{name}</span>
+                            <span className="text-[11px] leading-snug text-muted-foreground">
+                              {description}
+                            </span>
+                          </span>
+                        </DropdownMenuRadioItem>
+                      ))}
+                    </DropdownMenuRadioGroup>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               )}
               {items.length > 1 && (
                 <SortDirectionToggle
@@ -612,12 +525,6 @@ export function AgentTranscriptDialog({
                       onCheckedChange={(checked) => handlePreserveFiltersChange(checked === true)}
                     >
                       {t(($) => $.transcript.preserve_filters)}
-                    </DropdownMenuCheckboxItem>
-                    <DropdownMenuCheckboxItem
-                      checked={defaultExpanded}
-                      onCheckedChange={(checked) => setDefaultExpanded(checked === true)}
-                    >
-                      {t(($) => $.transcript.default_expanded)}
                     </DropdownMenuCheckboxItem>
                     {selectedFilterKeys.length > 0 && (
                       <>
@@ -783,7 +690,9 @@ export function AgentTranscriptDialog({
                 <TranscriptEventRow
                   item={item}
                   isSelected={selectedSeq === item.seq}
-                  expanded={expandedSeqs.has(item.seq)}
+                  expanded={
+                    rowOverrides.get(item.seq) ?? traceEventDefaultExpanded(item, density)
+                  }
                   onExpandedChange={(expanded) => handleRowExpandedChange(item.seq, expanded)}
                 />
               )}
@@ -913,11 +822,11 @@ function TimelineBar({
             )}
             style={{ width: `${Math.max(widthPercent, 0.5)}%` }}
             onClick={() => onSegmentClick(items[seg.startIdx]!.seq)}
-            title={`${getEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
+            title={`${traceEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
           >
             <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 pointer-events-none">
               <div className="rounded bg-popover border px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-nowrap">
-                {getEventLabel(items[seg.startIdx]!)}
+                {traceEventLabel(items[seg.startIdx]!)}
                 {seg.count > 1 && <span className="text-muted-foreground ml-1">+{seg.count - 1}</span>}
               </div>
             </div>
@@ -943,21 +852,29 @@ const TranscriptEventRow = ({
   expanded,
   onExpandedChange,
 }: TranscriptEventRowProps) => {
+  const { t } = useT("agents");
+  const kind = traceEventKind(item);
   const color = getEventColor(item);
-  const label = getEventLabel(item);
-  const summary = getEventSummary(item);
+  const label = traceEventLabel(item);
+  const summary = traceEventSummary(item);
   const date = useMemo(
     () => (item.created_at ? new Date(item.created_at) : null),
     [item.created_at],
   );
 
-  const hasDetail = hasEventDetail(item);
+  const hasDetail = traceEventHasDetail(item);
+  // Prose kinds swap the one-line summary for the full body in place when
+  // expanded (no box). Tool kinds keep the summary line and reveal the
+  // params/output surface below it.
+  const isProse = kind !== "tool_use" && kind !== "tool_result";
+  const showInlineBody = isProse && hasDetail && expanded;
 
   return (
     <div
       className={cn(
         "group transition-colors",
         isSelected && "bg-accent/50",
+        kind === "error" && "bg-destructive/5",
       )}
     >
       <Collapsible open={expanded} onOpenChange={onExpandedChange}>
@@ -974,27 +891,63 @@ const TranscriptEventRow = ({
             {label}
           </span>
 
-          {/* Summary */}
-          <CollapsibleTrigger
-            className={cn(
-              "flex-1 text-left text-xs min-w-0 py-0.5 transition-colors",
-              hasDetail ? "cursor-pointer hover:text-foreground" : "cursor-default",
-              item.type === "error" ? "text-destructive" : "text-muted-foreground",
-            )}
-            disabled={!hasDetail}
-          >
-            <div className="flex items-start gap-1.5">
-              {hasDetail && (
-                <ChevronRight
-                  className={cn(
-                    "h-3 w-3 shrink-0 mt-0.5 text-muted-foreground/50 transition-transform",
-                    expanded && "rotate-90",
-                  )}
-                />
-              )}
-              <span className="truncate">{summary || "(empty)"}</span>
+          {showInlineBody ? (
+            <div className="flex flex-1 items-start gap-1.5 min-w-0">
+              <CollapsibleTrigger
+                aria-label={label}
+                className="shrink-0 mt-0.5 cursor-pointer rounded p-0.5 text-muted-foreground/50 transition-colors hover:text-foreground"
+              >
+                <ChevronRight className="h-3 w-3 rotate-90 transition-transform" />
+              </CollapsibleTrigger>
+              <div className="flex-1 min-w-0">
+                {kind === "agent" ? (
+                  <RichContent
+                    content={item.content ?? ""}
+                    density="compact"
+                    className="transcript-prose"
+                  />
+                ) : (
+                  <div
+                    className={cn(
+                      "whitespace-pre-wrap break-words text-xs leading-relaxed",
+                      kind === "error" ? "text-destructive" : "text-muted-foreground",
+                    )}
+                  >
+                    {item.content ?? ""}
+                  </div>
+                )}
+              </div>
             </div>
-          </CollapsibleTrigger>
+          ) : (
+            <CollapsibleTrigger
+              className={cn(
+                "flex-1 text-left text-xs min-w-0 py-0.5 transition-colors",
+                hasDetail ? "cursor-pointer hover:text-foreground" : "cursor-default",
+                kind === "error" ? "text-destructive" : "text-muted-foreground",
+              )}
+              disabled={!hasDetail}
+            >
+              <div className="flex items-start gap-1.5">
+                {hasDetail && (
+                  <ChevronRight
+                    className={cn(
+                      "h-3 w-3 shrink-0 mt-0.5 text-muted-foreground/50 transition-transform",
+                      expanded && "rotate-90",
+                    )}
+                  />
+                )}
+                <span
+                  className={cn(
+                    "truncate",
+                    traceEventSummaryIsMono(kind) && summary && "font-mono text-[11px]",
+                    !summary && "text-muted-foreground/60",
+                  )}
+                >
+                  {summary || t(($) => $.transcript.no_output)}
+                </span>
+              </div>
+            </CollapsibleTrigger>
+          )}
 
           {/* Seq number / index */}
           <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1">
@@ -1013,12 +966,23 @@ const TranscriptEventRow = ({
           )}
         </div>
 
-        {/* Expanded detail */}
-        {hasDetail && (
+        {/* Expanded params/output for tool kinds — a quiet, borderless surface
+            aligned to the content column. */}
+        {!isProse && hasDetail && (
           <CollapsibleContent>
             <div className="px-4 pb-3">
-              <div className="ml-[72px] rounded bg-muted/40 border">
-                <EventDetailContent item={item} />
+              <div className="ml-[72px] rounded-md bg-muted/40">
+                <ToolDetailSurface
+                  text={
+                    kind === "tool_use"
+                      ? redactSecrets(JSON.stringify(item.input ?? {}, null, 2))
+                      : item.output
+                        ? item.output.length > 4000
+                          ? redactSecrets(item.output.slice(0, 4000)) + "\n... (truncated)"
+                          : redactSecrets(item.output)
+                        : ""
+                  }
+                />
               </div>
             </div>
           </CollapsibleContent>
@@ -1028,45 +992,39 @@ const TranscriptEventRow = ({
   );
 };
 
-// ─── Event detail content ───────────────────────────────────────────────────
+// ─── Tool detail surface ────────────────────────────────────────────────────
 
-function EventDetailContent({ item }: { item: TimelineItem }) {
-  switch (item.type) {
-    case "tool_use":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
-          {item.input ? redactSecrets(JSON.stringify(item.input, null, 2)) : ""}
-        </pre>
-      );
-    case "tool_result":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
-          {item.output
-            ? item.output.length > 4000
-              ? redactSecrets(item.output.slice(0, 4000)) + "\n... (truncated)"
-              : redactSecrets(item.output)
-            : ""}
-        </pre>
-      );
-    case "thinking":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
-          {item.content ?? ""}
-        </pre>
-      );
-    case "text":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
-          {item.content ?? ""}
-        </pre>
-      );
-    case "error":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-destructive whitespace-pre-wrap break-words">
-          {item.content ?? ""}
-        </pre>
-      );
-    default:
-      return null;
-  }
+/**
+ * Long content fades out behind a "show all" affordance instead of trapping a
+ * nested scrollbar inside the virtualized list.
+ */
+function ToolDetailSurface({ text }: { text: string }) {
+  const { t } = useT("agents");
+  const [showAll, setShowAll] = useState(false);
+  const isLong = text.length > 1600 || text.split("\n").length > 14;
+
+  return (
+    <div className="relative">
+      <pre
+        className={cn(
+          "p-3 font-mono text-[11px] text-muted-foreground whitespace-pre-wrap break-all",
+          isLong && !showAll && "max-h-52 overflow-hidden",
+        )}
+      >
+        {text}
+      </pre>
+      {isLong && !showAll && (
+        <div className="absolute inset-x-0 bottom-0 flex h-12 items-end justify-center rounded-b-md bg-gradient-to-b from-transparent to-background">
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="mb-1.5 rounded px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            {t(($) => $.transcript.show_all)}
+          </button>
+        </div>
+      )}
+    </div>
+  );
 }
+

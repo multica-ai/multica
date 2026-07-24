@@ -667,10 +667,16 @@
     "sort_label": "정렬",
     "sort_chronological": "오래된 순",
     "sort_newest_first": "최신 순",
-    "expand_visible": "표시 항목 펼치기",
-    "collapse_visible": "표시 항목 접기",
     "preserve_filters": "필터 유지",
-    "default_expanded": "기본으로 세부 정보 펼치기"
+    "density_label": "펼치기 방식",
+    "density_smart": "스마트",
+    "density_smart_desc": "응답과 오류는 바로 읽을 수 있고, 사고와 도구 과정은 접힌 상태로 유지됩니다",
+    "density_expanded": "모두 펼치기",
+    "density_expanded_desc": "각 행의 전체 매개변수와 출력을 펼쳐 단계별 검토에 사용",
+    "density_collapsed": "모두 접기",
+    "density_collapsed_desc": "이벤트당 한 줄, 가장 간결한 보기",
+    "no_output": "출력 없음",
+    "show_all": "모두 보기"
   },
   "task_failure": {
     "agent_error": "에이전트 실행 오류",

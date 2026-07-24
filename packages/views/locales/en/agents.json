@@ -779,10 +779,16 @@
     "sort_label": "Sort",
     "sort_chronological": "Oldest first",
     "sort_newest_first": "Newest first",
-    "expand_visible": "Expand visible",
-    "collapse_visible": "Collapse visible",
     "preserve_filters": "Preserve filters",
-    "default_expanded": "Open details by default"
+    "density_label": "Expand mode",
+    "density_smart": "Smart",
+    "density_smart_desc": "Replies and errors read in place; thinking and tool steps stay folded",
+    "density_expanded": "Expand all",
+    "density_expanded_desc": "Every row's full params and output, for step-by-step review",
+    "density_collapsed": "Collapse all",
+    "density_collapsed_desc": "One line per event — the most compact scan",
+    "no_output": "No output",
+    "show_all": "Show all"
   },
   "task_failure": {
     "agent_error": "Agent execution error",

@@ -659,10 +659,16 @@
     "sort_label": "並び替え",
     "sort_chronological": "古い順",
     "sort_newest_first": "新しい順",
-    "expand_visible": "表示中を展開",
-    "collapse_visible": "表示中を折りたたむ",
     "preserve_filters": "フィルターを保持",
-    "default_expanded": "詳細をデフォルトで展開"
+    "density_label": "展開モード",
+    "density_smart": "スマート",
+    "density_smart_desc": "回答とエラーはそのまま読め、思考とツールの過程は折りたたまれます",
+    "density_expanded": "すべて展開",
+    "density_expanded_desc": "各行のパラメータと出力を完全に展開し、逐次レビューに",
+    "density_collapsed": "すべて折りたたむ",
+    "density_collapsed_desc": "1 行 1 イベントの最もコンパクトな表示",
+    "no_output": "出力なし",
+    "show_all": "すべて表示"
   },
   "task_failure": {
     "agent_error": "エージェント実行エラー",

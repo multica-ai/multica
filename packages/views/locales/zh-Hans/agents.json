@@ -763,10 +763,16 @@
     "sort_label": "排序",
     "sort_chronological": "时间顺序",
     "sort_newest_first": "最新在前",
-    "expand_visible": "展开当前可见项",
-    "collapse_visible": "收起当前可见项",
     "preserve_filters": "保留筛选",
-    "default_expanded": "默认展开详情"
+    "density_label": "展开方式",
+    "density_smart": "智能",
+    "density_smart_desc": "汇报与错误直接可读，思考和工具过程保持折叠",
+    "density_expanded": "全部展开",
+    "density_expanded_desc": "展开每一行的完整参数与输出，逐条审阅用",
+    "density_collapsed": "全部收起",
+    "density_collapsed_desc": "一行一事件，最紧凑的扫读视图",
+    "no_output": "无输出",
+    "show_all": "显示全部"
   },
   "task_failure": {
     "agent_error": "智能体执行出错",
