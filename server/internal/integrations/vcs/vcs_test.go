@@ -227,7 +227,11 @@ func TestNormalizeGitLabTime(t *testing.T) {
 		{"", ""},
 		{"2017-09-20 08:31:45 UTC", "2017-09-20T08:31:45Z"},
 		{"2017-09-20T08:31:45Z", "2017-09-20T08:31:45Z"},
-		{"2017-09-20T08:31:45.123Z", "2017-09-20T08:31:45Z"},
+		// Sub-second precision is preserved (RFC3339Nano output) so two events in
+		// the same wall-clock second still order correctly under the monotonic
+		// guards; a zero fraction still formats without a decimal part.
+		{"2017-09-20T08:31:45.123Z", "2017-09-20T08:31:45.123Z"},
+		{"2017-09-20 08:31:45.123456 UTC", "2017-09-20T08:31:45.123456Z"},
 		{"not a time", ""},
 	}
 	for _, c := range cases {

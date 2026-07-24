@@ -108,6 +108,9 @@ func (gitlabProvider) ParsePullRequest(body []byte) (PullRequestEvent, error) {
 // and skewing PR list ordering. Normalizing here keeps the fix inside the
 // provider adapter, matching the package's "providers contribute only what
 // differs" design rather than teaching the shared parser a GitLab dialect.
+// Output uses RFC3339Nano to preserve any sub-second precision GitLab sends, so
+// two events within the same wall-clock second still order correctly under the
+// monotonic guards (the shared time.RFC3339 parser accepts the fractional part).
 // Unrecognized input returns "" so the handler falls back to ingestion time.
 func normalizeGitLabTime(s string) string {
 	if s == "" {
@@ -121,7 +124,7 @@ func normalizeGitLabTime(s string) string {
 		"2006-01-02 15:04:05.999999 MST",
 	} {
 		if t, err := time.Parse(layout, s); err == nil {
-			return t.UTC().Format(time.RFC3339)
+			return t.UTC().Format(time.RFC3339Nano)
 		}
 	}
 	return ""
