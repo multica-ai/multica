@@ -40,6 +40,21 @@ const (
 	DropReasonDuplicate           DropReason = "duplicate"
 	DropReasonRevokedInstallation DropReason = "revoked_installation"
 	DropReasonInvalidEvent        DropReason = "invalid_event"
+	// DropReasonMediaFetchFailed: the message carried media the pipeline
+	// tried but could not fetch/stage (download failed, over limits, or a
+	// disallowed type). Nothing was appended; the claim is released so a
+	// provider redelivery may retry — the condition is potentially transient.
+	DropReasonMediaFetchFailed DropReason = "media_fetch_failed"
+	// DropReasonMediaUnsupported: the message carried media but the channel
+	// has no inbound-media seam at all (object storage unconfigured). Unlike
+	// media_fetch_failed this is a PERMANENT capability gap, so the replier
+	// tells the user images aren't supported here rather than asking them to
+	// resend (which no resend could satisfy).
+	DropReasonMediaUnsupported DropReason = "media_unsupported"
+	// DropReasonUnsupportedKind: a bound member sent a message kind the
+	// bot cannot read (audio/video/file/unknown). Refused with a
+	// capability notice instead of silently appending an empty turn.
+	DropReasonUnsupportedKind DropReason = "unsupported_message_kind"
 )
 
 // Result is the typed verdict the Router produces for one inbound message,
@@ -57,6 +72,27 @@ type Result struct {
 	IssueNumber     int32
 	IssueIdentifier string
 	IssueTitle      string
+	// IssueQueued reports the /issue command was accepted onto the
+	// quick-create path: a background task authors the issue and the result
+	// is posted back into this conversation. Only set for channels carrying
+	// the QuickCreate seam; direct-create channels populate IssueID/… instead.
+	IssueQueued bool
+	// IssueUsage reports a bare /issue with no usable prompt even after the
+	// binder's previous-message fallback: nothing was enqueued.
+	IssueUsage bool
+	// IssueQueueFailed reports the quick-create enqueue failed after the user
+	// turn was already durable; the replier posts an internal-error notice and
+	// the user retries by re-sending the command.
+	IssueQueueFailed bool
+	// RunScheduled reports whether this ingest scheduled an agent run. A run
+	// eventually clears the typing indicator, so the Router only shows it when
+	// this is true; a bare fresh-session reset (/new) schedules none.
+	RunScheduled bool
+	// FreshReset reports that this ingest was a bare fresh-session reset (a lone
+	// "/new"): the session was rotated but no prompt was recorded and no run
+	// scheduled. The replier posts a short confirmation for it so the reset is
+	// not silent (which reads as "the bot is broken").
+	FreshReset bool
 }
 
 // ResolvedInstallation is the channel-agnostic installation context the Router
@@ -95,6 +131,18 @@ type AppendParams struct {
 	InstallationID pgtype.UUID
 	Message        channel.InboundMessage
 	ClaimToken     pgtype.UUID
+	// WorkspaceID scopes the attachment rows created from Staged media.
+	// The Router fills it from the resolved installation.
+	WorkspaceID pgtype.UUID
+	// Staged is the message's media, already fetched and persisted to
+	// object storage by the MediaIngester seam. The binder creates the
+	// attachment rows for it inside its append transaction.
+	Staged []StagedMedia
+	// MediaChatBind is true when the attachments belong to this chat turn
+	// (bind chat_session_id + chat_message_id). False for /issue turns:
+	// their attachments ride the quick-create task onto the issue instead,
+	// keeping the rows clear of the chat cascade.
+	MediaChatBind bool
 }
 
 // AppendResult reports what AppendMessage decided.
@@ -104,9 +152,16 @@ type AppendResult struct {
 	// DedupMarked is true when AppendMessage finalized the dedup claim in its
 	// own tx; the Router then skips the post-pipeline finalize.
 	DedupMarked bool
+	// AttachmentIDs are the attachment rows created for Staged media in
+	// this append, in Staged order. /issue turns thread them into the
+	// quick-create task.
+	AttachmentIDs []pgtype.UUID
 }
 
-// IssueCommand is the parsed /issue command.
+// IssueCommand is the parsed /issue command. Title/Description come from the
+// image-stripped command text; the direct-create path files them straight,
+// while the quick-create path ignores them and builds its prompt from the
+// turn's own composed body (see quickCreatePrompt).
 type IssueCommand struct {
 	Title       string
 	Description string
@@ -204,12 +259,64 @@ type ResolverSet struct {
 	Replier      OutboundReplier
 	Typing       TypingNotifier
 	OriginType   string
+	// QuickCreate switches /issue from the synchronous direct-create path to
+	// the quick-create path (background agent authors the issue; the result is
+	// posted back into the conversation). Optional: nil keeps direct-create.
+	//
+	// CONTRACT: a channel that sets QuickCreate must keep its binder's
+	// AppendInput.CommandText identical to InboundMessage.Text. The Router
+	// pre-parses msg.Text to decide attachment chat-binding while the binder
+	// parses CommandText to decide whether the quick-create branch runs; the
+	// two decisions must be made over the same text (DingTalk satisfies this;
+	// Lark's CommandText differs from Text, so it must not enable QuickCreate
+	// without reconciling the two).
+	QuickCreate QuickCreator
+	// Media fetches inbound media referenced by PendingMedia. Optional:
+	// nil means the channel has no inbound media support and messages
+	// carrying PendingMedia are refused as media_fetch_failed.
+	Media MediaIngester
+	// RefuseUnsupportedKinds makes the Router refuse audio/video/file/unknown
+	// turns with a capability notice (DropReasonUnsupportedKind) after the
+	// identity gate, instead of appending them as an empty turn. Opt-in per
+	// channel: a channel enables it only when its Replier renders the refusal
+	// (DingTalk). Channels that leave it false keep their prior behavior —
+	// those kinds flow through unchanged — so enabling the seam on one channel
+	// never silently drops another's messages.
+	RefuseUnsupportedKinds bool
+	// Attachments removes attachment rows the Router staged for an /issue turn
+	// that ultimately produced no issue (empty prompt or enqueue failure), so
+	// the rows do not dangle bound to neither a chat nor an issue. Optional:
+	// nil skips row cleanup (the staged storage objects are still discarded via
+	// Media.Discard).
+	Attachments AttachmentDiscarder
+}
+
+// AttachmentDiscarder deletes attachment rows by id within a workspace. It is
+// the cleanup counterpart to MediaIngester.Discard (which removes the staged
+// storage objects): together they undo an /issue turn's media when the issue is
+// never created. *db.Queries-backed adapters satisfy it. Best-effort — failures
+// are logged, never surfaced.
+type AttachmentDiscarder interface {
+	DiscardAttachments(ctx context.Context, workspaceID pgtype.UUID, ids []pgtype.UUID)
 }
 
 // IssueCreator is the narrow subset of service.IssueService the Router needs
 // for the /issue command. Shared across platforms.
 type IssueCreator interface {
 	Create(ctx context.Context, p service.IssueCreateParams, opts service.IssueCreateOpts) (service.IssueCreateResult, error)
+}
+
+// QuickCreator enqueues a chat-originated quick-create task.
+// *service.TaskService satisfies it. attachmentIDs are the inbound-media
+// attachment rows the created issue should carry (nil for text-only turns).
+type QuickCreator interface {
+	EnqueueQuickCreateChatTask(ctx context.Context, workspaceID, requesterID, agentID pgtype.UUID, prompt string, chatSessionID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error)
+}
+
+// MessageAppender writes the transcript rows the Router itself authors (the
+// quick-create acknowledgement / failure notes). *db.Queries satisfies it.
+type MessageAppender interface {
+	CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error)
 }
 
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to

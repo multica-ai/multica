@@ -375,7 +375,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	filename := id.String() + path.Ext(header.Filename)
 	var key string
 	if workspaceID != "" {
-		key = "workspaces/" + workspaceID + "/" + filename
+		key = storage.WorkspaceObjectKey(workspaceID, filename)
 	} else {
 		key = "users/" + userID + "/" + filename
 	}

@@ -32,9 +32,10 @@ type Router struct {
 	mu   sync.RWMutex
 	sets map[channel.Type]ResolverSet
 
-	issues IssueCreator
-	tasks  TaskEnqueuer
-	reader SessionReader
+	issues   IssueCreator
+	tasks    TaskEnqueuer
+	reader   SessionReader
+	messages MessageAppender
 
 	batcher *pendingBatcher
 
@@ -54,6 +55,9 @@ type RouterConfig struct {
 	// under the platform ACK deadline (Lark: 3s). Defaults to 2.5s.
 	ReplyTimeout time.Duration
 	Logger       *slog.Logger
+	// Messages writes the Router-authored transcript rows (quick-create ack /
+	// failure notes). Wire *db.Queries; nil skips the appends (tests).
+	Messages MessageAppender
 }
 
 // NewRouter builds a Router around the shared (platform-agnostic) services:
@@ -72,6 +76,7 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		issues:       issues,
 		tasks:        tasks,
 		reader:       reader,
+		messages:     cfg.Messages,
 		replyTimeout: cfg.ReplyTimeout,
 		logger:       cfg.Logger,
 		pendingFresh: make(map[string]bool),
@@ -142,8 +147,10 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 	)
 
 	// Typing indicator on ingest, detached so the reaction HTTP call never
-	// blocks the connector ACK path.
-	if res.Outcome == OutcomeIngested && set.Typing != nil {
+	// blocks the connector ACK path. Only shown when a run was actually
+	// scheduled: a bare fresh-session reset (/new) schedules none, so nothing
+	// would ever clear the indicator — don't show it in the first place.
+	if res.Outcome == OutcomeIngested && res.RunScheduled && set.Typing != nil {
 		go func() {
 			tctx, cancel := context.WithTimeout(context.Background(), r.replyTimeout)
 			defer cancel()
@@ -242,6 +249,29 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}
 	}
 
+	// 4.5 Unsupported message kinds (audio/video/file/unknown): the sender is
+	//     a bound member asking the bot something it cannot read. Refuse with
+	//     a capability notice instead of silently appending an empty turn; no
+	//     session is created or touched. Opt-in per channel (set.Replier must
+	//     render the refusal): channels that do not enable it keep ingesting
+	//     these kinds as before, so this gate never silently drops their turns.
+	if set.RefuseUnsupportedKinds {
+		switch msg.Type {
+		case channel.MsgTypeAudio, channel.MsgTypeVideo, channel.MsgTypeFile, channel.MsgTypeUnknown:
+			return r.drop(ctx, set, msg, inst.ID, DropReasonUnsupportedKind), finalizeMark, nil
+		}
+	}
+
+	// 4.6 Media the adapter could not turn into downloadable references (an
+	//     over-quota image the platform stripped, a malformed/codeless media
+	//     callback). Refuse as media_fetch_failed now that identity/membership
+	//     have passed — a bound member gets the "couldn't process the image"
+	//     notice, an unbound sender already got the binding prompt at step 4.
+	//     No download was ever possible, so no session is created or touched.
+	if msg.MediaUnreadable {
+		return r.drop(ctx, set, msg, inst.ID, DropReasonMediaFetchFailed), finalizeMark, nil
+	}
+
 	// 5. Resolve the chat_session. Group sessions are created by the INSTALLER
 	//    (stable workspace identity that won't churn with group membership);
 	//    p2p sessions by the sole human sender.
@@ -259,15 +289,86 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		return Result{}, finalizeRelease, fmt.Errorf("ensure chat session: %w", err)
 	}
 
-	// 6. Append message + in-tx dedup Mark — the durable transition point.
+	// 6. A bare fresh-session command (a lone "/new" with no user prompt of its
+	//    own) is a pure reset: EnsureSession has already rotated to a brand-new
+	//    session (step 5) and there is no user prompt to record. Appending would
+	//    write a blank user message at the head of the fresh transcript, and
+	//    scheduling a run would invoke the agent with no input, so do neither —
+	//    only mark the dedup row (out-of-band, via finalizeMark) so the reset is
+	//    not reprocessed. This is safe only because a channel that emits BareFresh
+	//    also maps its fresh-session command to EnsureSessionInput.Fresh, so the
+	//    session was already rotated to a brand-new chat_session at INGEST before
+	//    this check. BareFresh is set by the adapter from the user's OWN typed
+	//    text — never from the enriched Text, which may carry injected group
+	//    context (see channel.InboundMessage).
+	if msg.BareFresh {
+		return Result{
+			Outcome:        OutcomeIngested,
+			InstallationID: inst.ID,
+			ChatSessionID:  sessionID,
+			Sender:         msg.Source.SenderID,
+			FreshReset:     true,
+		}, finalizeMark, nil
+	}
+
+	// 6.5 Fetch pending media through the per-channel seam. Runs only after
+	//     dedup + identity + membership + session so a stranger's (or
+	//     replayed) image costs zero downloads. All-or-nothing: on failure
+	//     nothing is appended and the claim is released so a provider
+	//     redelivery may retry (the user re-sending is a fresh MessageID).
+	var staged []StagedMedia
+	if len(msg.PendingMedia) > 0 {
+		if set.Media == nil {
+			// The channel has no inbound-media support (storage unconfigured):
+			// a permanent capability gap, not a transient fetch failure. Refuse
+			// as media_unsupported so the replier says images aren't supported
+			// here — never "download failed, send them again", which no resend
+			// can satisfy. Mark (like the other permanent refusals) so a
+			// redelivery does not re-run the whole pipeline to refuse again.
+			return r.drop(ctx, set, msg, inst.ID, DropReasonMediaUnsupported), finalizeMark, nil
+		}
+		staged, err = set.Media.Ingest(ctx, IngestParams{
+			Installation: inst,
+			WorkspaceID:  inst.WorkspaceID,
+			Media:        msg.PendingMedia,
+		})
+		if err != nil {
+			r.logger.Warn("channel router: media ingest failed",
+				"event_id", msg.EventID, "err", err.Error())
+			return r.drop(ctx, set, msg, inst.ID, DropReasonMediaFetchFailed), finalizeRelease, nil
+		}
+	}
+	// An /issue turn's attachments ride the quick-create task onto the issue;
+	// binding them to the chat as well would tie their lifetime to the chat
+	// session's ON DELETE CASCADE.
+	//
+	// CONTRACT: this pre-parse of msg.Text must agree with the binder's own
+	// ParseIssueCommand over AppendInput.CommandText (which decides whether the
+	// quick-create branch actually runs). A channel that enables QuickCreate
+	// must therefore feed the SAME text to both, i.e. keep CommandText == Text
+	// (see ResolverSet.QuickCreate). If they diverge, attachments can end up
+	// chat-bound on an /issue turn (double ownership) or unbound on a non-issue
+	// turn (dangling rows).
+	_, isIssueTurn := ParseIssueCommand(msg.Text)
+	mediaChatBind := !(isIssueTurn && set.QuickCreate != nil)
+
+	// 7. Append message + in-tx dedup Mark — the durable transition point.
 	appendRes, err := set.Session.AppendMessage(ctx, AppendParams{
 		SessionID:      sessionID,
 		Sender:         identity.UserID,
 		InstallationID: inst.ID,
 		Message:        msg,
 		ClaimToken:     claimToken,
+		WorkspaceID:    inst.WorkspaceID,
+		Staged:         staged,
+		MediaChatBind:  mediaChatBind,
 	})
 	if err != nil {
+		// The staged objects have no attachment rows yet — the rolled-back tx
+		// never committed them — so they would be orphans; discard.
+		if len(staged) > 0 && set.Media != nil {
+			set.Media.Discard(ctx, staged)
+		}
 		if errors.Is(err, ErrClaimLost) {
 			return Result{}, finalizeNone, err
 		}
@@ -289,9 +390,17 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		Sender:         msg.Source.SenderID,
 	}
 
-	// 7. /issue command, if present. chat_message is already durable; all
+	// 8. /issue command, if present. chat_message is already durable; all
 	//    error returns from here signal finalizeNone (or the defensive Mark).
+	//    Channels carrying the QuickCreate seam divert to the quick-create
+	//    path and schedule no chat run — the queued ack is the turn's reply.
+	if appendRes.IssueCommand != nil && set.QuickCreate != nil {
+		prompt := quickCreatePrompt(msg, staged)
+		r.handleQuickCreate(ctx, set, inst, identity.UserID, sessionID, prompt, appendRes.AttachmentIDs, &res)
+		return res, postAppendFinalize, nil
+	}
 	if appendRes.IssueCommand != nil {
+		// Direct-create path for channels without the QuickCreate seam.
 		issueRes, err := r.createIssue(ctx, inst, set.OriginType, identity.UserID, sessionID, *appendRes.IssueCommand)
 		if err != nil {
 			return Result{}, postAppendFinalize, fmt.Errorf("create issue from command: %w", err)
@@ -306,12 +415,13 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}
 	}
 
-	// 8. Debounce the run trigger. The synchronous outcome is OutcomeIngested
+	// 9. Debounce the run trigger. The synchronous outcome is OutcomeIngested
 	//    with no TaskID — the task row is created at flush. identity.UserID is
 	//    THIS message's sender (the task initiator), deliberately not the
 	//    session creator (group sessions are creator=installer). Latest sender
 	//    in a window wins (MUL-2645).
 	r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
+	res.RunScheduled = true
 	return res, postAppendFinalize, nil
 }
 

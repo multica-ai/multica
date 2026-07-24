@@ -165,9 +165,16 @@ type ChatDonePayload struct {
 	TaskID        string `json:"task_id"`
 	MessageID     string `json:"message_id,omitempty"`
 	Content       string `json:"content,omitempty"`
-	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
-	CreatedAt     string `json:"created_at,omitempty"`
-	MessageKind   string `json:"message_kind,omitempty"`
+	// ReplyText is the channel-deliverable reply: the text the agent emitted
+	// after its last tool call — the final block the web timeline renders
+	// below the collapsed process fold (narrower than web Copy, which also
+	// joins in the preface block). Content keeps the full accumulated output
+	// (interim narration included) for transcript-shaped consumers; IM
+	// outbounds must prefer ReplyText and only fall back to Content.
+	ReplyText   string `json:"reply_text,omitempty"`
+	ElapsedMs   int64  `json:"elapsed_ms,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	MessageKind string `json:"message_kind,omitempty"`
 }
 
 // Outcome values carried by ChatCancelFinalizedPayload.
@@ -207,6 +214,16 @@ type ChatCancelFinalizedPayload struct {
 	MessageKind string `json:"message_kind,omitempty"`
 	CreatedAt   string `json:"created_at,omitempty"`
 	ElapsedMs   int64  `json:"elapsed_ms,omitempty"`
+}
+
+// QuickCreateDonePayload is broadcast when a chat-originated quick-create task
+// finishes (success or failure). Content is the ready-to-post reply text; the
+// channel outbound (DingTalk today) delivers it into the conversation the
+// /issue command came from.
+type QuickCreateDonePayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	TaskID        string `json:"task_id,omitempty"`
+	Content       string `json:"content,omitempty"`
 }
 
 // ChatSessionReadPayload is broadcast when the creator marks a session as read.

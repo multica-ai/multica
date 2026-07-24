@@ -19,6 +19,15 @@ type Storage interface {
 	GetReader(ctx context.Context, key string) (io.ReadCloser, error)
 }
 
+// WorkspaceObjectKey builds the canonical object key for a workspace-scoped
+// attachment: "workspaces/<workspaceID>/<filename>". It is the single source of
+// truth for the layout so the web upload handler and the inbound-media
+// ingesters cannot drift apart (a prefix-based listing/cleanup relies on both
+// producing the same shape).
+func WorkspaceObjectKey(workspaceID, filename string) string {
+	return "workspaces/" + workspaceID + "/" + filename
+}
+
 type Presigner interface {
 	PresignGet(ctx context.Context, key string, ttl time.Duration) (string, error)
 }

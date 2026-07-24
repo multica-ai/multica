@@ -191,18 +191,18 @@ describe("IntegrationsTab", () => {
   it("lets a non-admin agent owner bind Lark but keeps Slack admin-only", () => {
     // The agent's owner (user-1) is only a plain workspace member. Lark
     // authorizes the agent owner (canManageAgent), so the Lark bind entry
-    // renders and receives owner_id; Slack's routes stay admin-only, so it
-    // shows the read-only note instead of a CTA (MUL-4213).
+    // renders and receives owner_id; Slack's and DingTalk's routes stay
+    // admin-only, so each shows the read-only note instead of a CTA (MUL-4213).
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     renderTab(<IntegrationsTab agent={agent} />);
     const larkButton = screen.getByTestId("lark-bind-button");
     expect(larkButton.getAttribute("data-agent-id")).toBe("agent-1");
     expect(larkButton.getAttribute("data-agent-owner-id")).toBe("user-1");
     expect(screen.queryByTestId("slack-bind-button")).toBeNull();
-    // The Slack section falls back to the shared members note.
+    // The Slack and DingTalk sections each fall back to the shared members note.
     expect(
-      screen.getByText(/Only workspace owners and admins can connect an agent/i),
-    ).toBeTruthy();
+      screen.getAllByText(/Only workspace owners and admins can connect an agent/i),
+    ).toHaveLength(2);
   });
 
   it("renders the bind entry (not coming-soon) when installs are unavailable but the agent is already bound", () => {

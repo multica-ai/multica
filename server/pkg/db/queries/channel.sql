@@ -430,9 +430,11 @@ RETURNING *;
 
 -- name: GetChannelChatSessionBinding :one
 -- Lookup-by-channel-chat: the inbound dispatcher finds the existing
--- chat_session before deciding whether to create one.
+-- chat_session before deciding whether to create one. Scoped to the ACTIVE
+-- binding — /new supersedes the current row and inserts a fresh one, so a chat
+-- may carry retained inactive rows alongside its single active binding.
 SELECT * FROM channel_chat_session_binding
-WHERE installation_id = $1 AND channel_chat_id = $2;
+WHERE installation_id = $1 AND channel_chat_id = $2 AND active;
 
 -- name: GetChannelChatSessionBindingBySession :one
 -- Reverse lookup for the outbound patcher: given a chat_session_id, find
@@ -450,6 +452,18 @@ UPDATE channel_chat_session_binding
 SET last_message_id = sqlc.narg('last_message_id'),
     last_thread_id  = sqlc.narg('last_thread_id')
 WHERE chat_session_id = $1;
+
+-- name: SupersedeChannelChatSessionBinding :exec
+-- Mark the current active binding for a chat inactive so /new can insert a
+-- brand-new active binding under the same isolation key. The superseded row is
+-- retained (not moved or deleted) so a still-in-flight reply on the old
+-- chat_session stays reverse-resolvable (GetChannelChatSessionBindingBySession)
+-- to this chat instead of being silently dropped.
+UPDATE channel_chat_session_binding
+SET active = false
+WHERE installation_id = sqlc.arg('installation_id')
+  AND channel_chat_id = sqlc.arg('channel_chat_id')
+  AND active;
 
 -- name: DeleteChannelChatSessionBindingBySession :exec
 -- Application-layer integrity (replaces the old chat_session-FK ON DELETE

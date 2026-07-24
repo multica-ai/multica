@@ -26,6 +26,7 @@ import {
 import { githubKeys } from "../github/queries";
 import { larkKeys } from "../lark/queries";
 import { slackKeys } from "../slack/queries";
+import { dingtalkKeys } from "../dingtalk/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -686,6 +687,10 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: slackKeys.installations(wsId) });
       },
+      dingtalk_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: dingtalkKeys.installations(wsId) });
+      },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all
         // PR queries — the open issue detail page will refetch its own list.
@@ -774,7 +779,8 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:cancel_finalized", "chat:session_read",
+      "chat:message", "chat:done", "chat:cancel_finalized", "quick_create:done",
+      "chat:session_read",
       "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
@@ -1193,6 +1199,21 @@ export function useRealtimeSync(
       }
     });
 
+    // quick_create:done fires when a chat-originated /issue quick-create task
+    // finishes: the server appended the outcome to the session transcript
+    // without a chat run, so no chat:message / chat:done follows. Refetch the
+    // transcript and the session lists (unread badge) like chat:message does;
+    // there is no pending chat task to clear.
+    const unsubQuickCreateDone = ws.on("quick_create:done", (p) => {
+      const payload = p as { chat_session_id: string };
+      if (!payload.chat_session_id) return;
+      chatWsLogger.info("quick_create:done (global)", {
+        chat_session_id: payload.chat_session_id,
+      });
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
+      invalidateSessionLists();
+    });
+
     // Chat task lifecycle writethrough: keep `chatKeys.pendingTask(sessionId)`
     // synchronized with the server state machine via setQueryData rather than
     // invalidate-refetch. Same pattern as task:message — the WS payload
@@ -1411,6 +1432,7 @@ export function useRealtimeSync(
       unsubChatMessage();
       unsubChatDone();
       unsubChatCancelFinalized();
+      unsubQuickCreateDone();
       unsubTaskQueued();
       unsubTaskDispatch();
       unsubTaskRunning();

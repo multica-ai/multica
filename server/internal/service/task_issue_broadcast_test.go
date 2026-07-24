@@ -117,3 +117,68 @@ func TestBroadcastIssueUpdated_NoStatusChange(t *testing.T) {
 		t.Errorf("expected status_changed=false, got %v", payload["status_changed"])
 	}
 }
+
+// TestBroadcastTaskFailedEvent pins the task:failed payload contract the
+// channel outbounds rely on: `error` mirrors the transcript's failure message
+// and is omitted while an auto-retry is pending (the transcript suppresses the
+// failure then too — the retry reports its own outcome), so error-present
+// means deliverable and subscribers stay consistent with the web chat panel
+// without retry logic of their own.
+func TestBroadcastTaskFailedEvent_CarriesErrorAndRetryPending(t *testing.T) {
+	pool := newTaskClaimRacePool(t)
+	ctx := context.Background()
+	_, _, agentID, sessionID := createQuickCreateReplyFixture(t, ctx, pool)
+
+	bus := events.New()
+	var got []events.Event
+	bus.Subscribe(protocol.EventTaskFailed, func(e events.Event) { got = append(got, e) })
+
+	svc := &TaskService{Queries: db.New(pool), Bus: bus}
+	task := db.AgentTaskQueue{
+		ID:            testUUID(11),
+		AgentID:       util.MustParseUUID(agentID),
+		ChatSessionID: util.MustParseUUID(sessionID),
+		Status:        "failed",
+	}
+	svc.broadcastTaskFailedEvent(ctx, task, "task timed out", "timeout", false)
+	svc.broadcastTaskFailedEvent(ctx, task, "task timed out", "timeout", true)
+
+	if len(got) != 2 {
+		t.Fatalf("events = %d, want 2", len(got))
+	}
+
+	terminal, ok := got[0].Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload is not map[string]any: %T", got[0].Payload)
+	}
+	if terminal["error"] != "task timed out" {
+		t.Errorf("error = %v, want %q", terminal["error"], "task timed out")
+	}
+	if terminal["retry_pending"] != false {
+		t.Errorf("retry_pending = %v, want false", terminal["retry_pending"])
+	}
+	if terminal["failure_reason"] != "timeout" {
+		t.Errorf("failure_reason = %v, want %q", terminal["failure_reason"], "timeout")
+	}
+	if terminal["chat_session_id"] != sessionID {
+		t.Errorf("chat_session_id = %v, want %q", terminal["chat_session_id"], sessionID)
+	}
+	// Envelope scope hints let subscribers route without digging the payload.
+	if got[0].ChatSessionID != sessionID {
+		t.Errorf("envelope ChatSessionID = %q, want %q", got[0].ChatSessionID, sessionID)
+	}
+	if got[0].TaskID != util.UUIDToString(task.ID) {
+		t.Errorf("envelope TaskID = %q, want %q", got[0].TaskID, util.UUIDToString(task.ID))
+	}
+
+	retrying, ok := got[1].Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("payload is not map[string]any: %T", got[1].Payload)
+	}
+	if _, present := retrying["error"]; present {
+		t.Errorf("error = %v, want omitted while a retry is pending", retrying["error"])
+	}
+	if retrying["retry_pending"] != true {
+		t.Errorf("retry_pending = %v, want true", retrying["retry_pending"])
+	}
+}

@@ -77,22 +77,29 @@ type Source struct {
 	ThreadID string
 }
 
-// MediaRef references a media attachment that the adapter has ALREADY
-// persisted to object storage before the message reaches the core. The
-// core never holds raw bytes — only this reference — so the envelope
-// stays small and platform-neutral.
-type MediaRef struct {
-	// Type is the normalized media kind (image / file / audio / video).
-	Type MsgType
-	// StorageKey locates the persisted object in Multica object storage.
-	StorageKey string
-	// Filename is the original display name, when the platform supplies
-	// one.
-	Filename string
-	// MimeType is the content type, when known.
-	MimeType string
-	// SizeBytes is the object size in bytes, or 0 when unknown.
-	SizeBytes int64
+// Segment is one ordered piece of an inbound message: a text run or a
+// reference into PendingMedia. A segment is a text run when Text is
+// non-empty; otherwise MediaIdx references PendingMedia (adapters skip
+// empty text runs, so the discriminator is unambiguous). The ordering is
+// how a mixed text-and-image message keeps its interleaving all the way
+// into the stored transcript.
+type Segment struct {
+	Text     string
+	MediaIdx int
+}
+
+// PendingMedia is a lightweight, not-yet-fetched media reference. The
+// adapter must NOT download anything itself: fetching happens behind the
+// engine's MediaIngester seam, after dedup/identity/membership have
+// passed, so a stranger's or replayed message never costs a download.
+type PendingMedia struct {
+	// Kind is the normalized media kind (MsgTypeImage only for now).
+	Kind MsgType
+	// Ref is the provider's download handle (DingTalk: downloadCode).
+	Ref string
+	// Alt is a secondary handle usable when Ref fails (DingTalk:
+	// pictureDownloadCode), optional.
+	Alt string
 }
 
 // ReplyCtx describes the message an inbound message quotes / replies to.
@@ -124,13 +131,18 @@ type InboundMessage struct {
 	// Type is the normalized message kind.
 	Type MsgType
 
-	// Text is the human-readable content, flattened by the adapter. For
-	// non-text messages it may be empty or a short placeholder; the media
-	// itself is in MediaRefs.
+	// Text is the human-readable content, flattened by the adapter (the
+	// concatenated text runs for a mixed message). For pure-media messages
+	// it may be empty.
 	Text string
 
-	// MediaRefs are the attachments, already persisted to object storage.
-	MediaRefs []MediaRef
+	// Segments is the ordered text/media interleaving for mixed messages.
+	// Empty means the whole content is Text (plain-text fast path).
+	Segments []Segment
+
+	// PendingMedia are the not-yet-fetched media references, indexed by
+	// Segment.MediaIdx.
+	PendingMedia []PendingMedia
 
 	// ReplyTo is the quoted/replied-to context, or nil.
 	ReplyTo *ReplyCtx
@@ -148,6 +160,24 @@ type InboundMessage struct {
 	// affordance). The adapter normalizes its platform-specific trigger
 	// into this boolean; the core only reads the flag.
 	ForceFresh bool
+
+	// BareFresh is true when ForceFresh was triggered by a fresh-session
+	// command carrying NO user prompt of its own (a lone "/new"). The core
+	// uses it to short-circuit a pure reset — rotate the session, skip the
+	// empty append and agent run. The adapter MUST derive it from the user's
+	// OWN typed text (before any enrichment), because Text may carry adapter-
+	// injected context (e.g. Lark's group <recent_context>) that would make a
+	// naive "Text is empty" check wrong.
+	BareFresh bool
+
+	// MediaUnreadable is set by an adapter when the platform delivered media
+	// the adapter cannot turn into downloadable references — an over-quota
+	// image whose payload the platform stripped, or a malformed/codeless media
+	// callback. The core refuses it as media_fetch_failed AFTER the identity
+	// gate, so a bound member gets the "couldn't process the image" notice and
+	// an unbound sender still gets the binding prompt — instead of the adapter
+	// dropping it silently before either can be decided.
+	MediaUnreadable bool
 
 	// Raw is the untouched platform payload. Adapters stash platform-
 	// specific fields here (Lark raw msg_type / parent_id / root_id /

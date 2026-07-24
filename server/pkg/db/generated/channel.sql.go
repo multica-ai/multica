@@ -198,7 +198,7 @@ INSERT INTO channel_chat_session_binding (
 ) VALUES (
     $1, $2, $3, $4, $5, $6
 )
-RETURNING id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at
+RETURNING id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, active
 `
 
 type CreateChannelChatSessionBindingParams struct {
@@ -240,6 +240,7 @@ func (q *Queries) CreateChannelChatSessionBinding(ctx context.Context, arg Creat
 		&i.LastThreadID,
 		&i.Config,
 		&i.CreatedAt,
+		&i.Active,
 	)
 	return i, err
 }
@@ -557,8 +558,8 @@ func (q *Queries) FindReusableChannelUserBinding(ctx context.Context, arg FindRe
 }
 
 const getChannelChatSessionBinding = `-- name: GetChannelChatSessionBinding :one
-SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at FROM channel_chat_session_binding
-WHERE installation_id = $1 AND channel_chat_id = $2
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, active FROM channel_chat_session_binding
+WHERE installation_id = $1 AND channel_chat_id = $2 AND active
 `
 
 type GetChannelChatSessionBindingParams struct {
@@ -567,7 +568,9 @@ type GetChannelChatSessionBindingParams struct {
 }
 
 // Lookup-by-channel-chat: the inbound dispatcher finds the existing
-// chat_session before deciding whether to create one.
+// chat_session before deciding whether to create one. Scoped to the ACTIVE
+// binding — /new supersedes the current row and inserts a fresh one, so a chat
+// may carry retained inactive rows alongside its single active binding.
 func (q *Queries) GetChannelChatSessionBinding(ctx context.Context, arg GetChannelChatSessionBindingParams) (ChannelChatSessionBinding, error) {
 	row := q.db.QueryRow(ctx, getChannelChatSessionBinding, arg.InstallationID, arg.ChannelChatID)
 	var i ChannelChatSessionBinding
@@ -582,12 +585,13 @@ func (q *Queries) GetChannelChatSessionBinding(ctx context.Context, arg GetChann
 		&i.LastThreadID,
 		&i.Config,
 		&i.CreatedAt,
+		&i.Active,
 	)
 	return i, err
 }
 
 const getChannelChatSessionBindingBySession = `-- name: GetChannelChatSessionBindingBySession :one
-SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at FROM channel_chat_session_binding
+SELECT id, chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, last_message_id, last_thread_id, config, created_at, active FROM channel_chat_session_binding
 WHERE chat_session_id = $1
   AND channel_type = $2
 `
@@ -615,6 +619,7 @@ func (q *Queries) GetChannelChatSessionBindingBySession(ctx context.Context, arg
 		&i.LastThreadID,
 		&i.Config,
 		&i.CreatedAt,
+		&i.Active,
 	)
 	return i, err
 }
@@ -1302,6 +1307,29 @@ type SetChannelInstallationStatusParams struct {
 
 func (q *Queries) SetChannelInstallationStatus(ctx context.Context, arg SetChannelInstallationStatusParams) error {
 	_, err := q.db.Exec(ctx, setChannelInstallationStatus, arg.ID, arg.Status)
+	return err
+}
+
+const supersedeChannelChatSessionBinding = `-- name: SupersedeChannelChatSessionBinding :exec
+UPDATE channel_chat_session_binding
+SET active = false
+WHERE installation_id = $1
+  AND channel_chat_id = $2
+  AND active
+`
+
+type SupersedeChannelChatSessionBindingParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ChannelChatID  string      `json:"channel_chat_id"`
+}
+
+// Mark the current active binding for a chat inactive so /new can insert a
+// brand-new active binding under the same isolation key. The superseded row is
+// retained (not moved or deleted) so a still-in-flight reply on the old
+// chat_session stays reverse-resolvable (GetChannelChatSessionBindingBySession)
+// to this chat instead of being silently dropped.
+func (q *Queries) SupersedeChannelChatSessionBinding(ctx context.Context, arg SupersedeChannelChatSessionBindingParams) error {
+	_, err := q.db.Exec(ctx, supersedeChannelChatSessionBinding, arg.InstallationID, arg.ChannelChatID)
 	return err
 }
 

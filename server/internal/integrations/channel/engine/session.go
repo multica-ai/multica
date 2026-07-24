@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -41,11 +42,14 @@ type SessionQueries interface {
 	LockWorkspaceForChatSessionCreate(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	CreateChatSession(ctx context.Context, arg db.CreateChatSessionParams) (db.ChatSession, error)
 	CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error)
+	SupersedeChannelChatSessionBinding(ctx context.Context, arg db.SupersedeChannelChatSessionBindingParams) error
 	CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error)
 	TouchChatSession(ctx context.Context, id pgtype.UUID) error
 	GetMostRecentUserChatMessage(ctx context.Context, chatSessionID pgtype.UUID) (db.ChatMessage, error)
 	UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error
 	MarkChannelInboundDedupProcessed(ctx context.Context, arg db.MarkChannelInboundDedupProcessedParams) (int64, error)
+	CreateAttachment(ctx context.Context, arg db.CreateAttachmentParams) (db.Attachment, error)
+	LinkAttachmentsToChatMessage(ctx context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error)
 }
 
 // dbSessionQueries adapts *db.Queries to SessionQueries — the only purpose is
@@ -68,6 +72,9 @@ func (a dbSessionQueries) CreateChatSession(ctx context.Context, arg db.CreateCh
 func (a dbSessionQueries) CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error) {
 	return a.q.CreateChannelChatSessionBinding(ctx, arg)
 }
+func (a dbSessionQueries) SupersedeChannelChatSessionBinding(ctx context.Context, arg db.SupersedeChannelChatSessionBindingParams) error {
+	return a.q.SupersedeChannelChatSessionBinding(ctx, arg)
+}
 func (a dbSessionQueries) CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	return a.q.CreateChatMessage(ctx, arg)
 }
@@ -82,6 +89,12 @@ func (a dbSessionQueries) UpdateChannelChatSessionBindingReplyTarget(ctx context
 }
 func (a dbSessionQueries) MarkChannelInboundDedupProcessed(ctx context.Context, arg db.MarkChannelInboundDedupProcessedParams) (int64, error) {
 	return a.q.MarkChannelInboundDedupProcessed(ctx, arg)
+}
+func (a dbSessionQueries) CreateAttachment(ctx context.Context, arg db.CreateAttachmentParams) (db.Attachment, error) {
+	return a.q.CreateAttachment(ctx, arg)
+}
+func (a dbSessionQueries) LinkAttachmentsToChatMessage(ctx context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error) {
+	return a.q.LinkAttachmentsToChatMessage(ctx, arg)
 }
 
 // SessionTitles are the per-platform display titles a freshly created
@@ -153,6 +166,15 @@ type EnsureSessionInput struct {
 	BindingKey     string
 	BindingConfig  []byte
 	ChatType       channel.ChatType
+	// Title is the display title for a NEWLY created session (first contact or a
+	// Fresh rotation). Empty falls back to the platform SessionTitles; the adapter
+	// seeds it from the first message so a channel chat reads like a web chat.
+	Title string
+	// Fresh asks EnsureSession to rotate an EXISTING binding onto a brand-new
+	// chat_session (the /new command): a fresh transcript with no resume, still
+	// reachable under the same isolation key. No-op on first contact (there is no
+	// prior session to rotate away from).
+	Fresh bool
 }
 
 // EnsureSession returns the chat_session.id bound to (installation, BindingKey),
@@ -165,6 +187,9 @@ func (s *ChatSession) EnsureSession(ctx context.Context, in EnsureSessionInput) 
 
 	existing, err := s.q.GetChannelChatSessionBinding(ctx, lookup)
 	if err == nil {
+		if in.Fresh {
+			return s.rebindFreshSession(ctx, in)
+		}
 		return existing.ChatSessionID, nil
 	}
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -204,29 +229,89 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 		WorkspaceID: in.WorkspaceID,
 		AgentID:     in.AgentID,
 		CreatorID:   in.Sender,
-		Title:       s.titles.forType(in.ChatType),
+		Title:       s.sessionTitle(in),
 	})
 	if err != nil {
 		return pgtype.UUID{}, fmt.Errorf("create chat session: %w", err)
 	}
-	bindingConfig := in.BindingConfig
-	if len(bindingConfig) == 0 {
-		bindingConfig = []byte("{}")
-	}
-	if _, err := qtx.CreateChannelChatSessionBinding(ctx, db.CreateChannelChatSessionBindingParams{
-		ChatSessionID:  session.ID,
-		InstallationID: in.InstallationID,
-		ChannelType:    string(s.channelType),
-		ChannelChatID:  in.BindingKey,
-		ChatType:       string(in.ChatType),
-		Config:         bindingConfig,
-	}); err != nil {
+	// Return the raw insert error (unwrapped) so EnsureSession can detect the
+	// first-contact race via isUniqueViolation and re-read the winner's row.
+	if err := s.insertBinding(ctx, qtx, session.ID, in); err != nil {
 		return pgtype.UUID{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return pgtype.UUID{}, fmt.Errorf("commit: %w", err)
 	}
 	return session.ID, nil
+}
+
+// insertBinding creates the channel_chat_session_binding row for a session. The
+// config column is NOT NULL, so an empty BindingConfig defaults to "{}".
+func (s *ChatSession) insertBinding(ctx context.Context, qtx SessionQueries, sessionID pgtype.UUID, in EnsureSessionInput) error {
+	bindingConfig := in.BindingConfig
+	if len(bindingConfig) == 0 {
+		bindingConfig = []byte("{}")
+	}
+	_, err := qtx.CreateChannelChatSessionBinding(ctx, db.CreateChannelChatSessionBindingParams{
+		ChatSessionID:  sessionID,
+		InstallationID: in.InstallationID,
+		ChannelType:    string(s.channelType),
+		ChannelChatID:  in.BindingKey,
+		ChatType:       string(in.ChatType),
+		Config:         bindingConfig,
+	})
+	return err
+}
+
+// rebindFreshSession creates a brand-new chat_session and rotates the
+// (installation, BindingKey) chat onto it, in one transaction. The old session
+// is left intact (its transcript stays in Multica), and — crucially — so is its
+// binding row: rather than repoint the single row (which would orphan the
+// outbound reverse-lookup of any still-in-flight reply on the old session), the
+// current binding is superseded (marked inactive, retained) and a fresh active
+// binding is inserted. The next message resumes nothing and the chat reads as
+// freshly started, while a late completion on the old session can still reach
+// this chat.
+func (s *ChatSession) rebindFreshSession(ctx context.Context, in EnsureSessionInput) (pgtype.UUID, error) {
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.q.WithTx(tx)
+
+	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
+		WorkspaceID: in.WorkspaceID,
+		AgentID:     in.AgentID,
+		CreatorID:   in.Sender,
+		Title:       s.sessionTitle(in),
+	})
+	if err != nil {
+		return pgtype.UUID{}, fmt.Errorf("create fresh chat session: %w", err)
+	}
+	if err := qtx.SupersedeChannelChatSessionBinding(ctx, db.SupersedeChannelChatSessionBindingParams{
+		InstallationID: in.InstallationID,
+		ChannelChatID:  in.BindingKey,
+	}); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("supersede chat session binding: %w", err)
+	}
+	if err := s.insertBinding(ctx, qtx, session.ID, in); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("bind fresh chat session: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return pgtype.UUID{}, fmt.Errorf("commit: %w", err)
+	}
+	return session.ID, nil
+}
+
+// sessionTitle is the title for a newly created session: the adapter-seeded
+// Title (the first message, mirroring a web chat) when present, else the
+// platform's default wording.
+func (s *ChatSession) sessionTitle(in EnsureSessionInput) string {
+	if t := strings.TrimSpace(in.Title); t != "" {
+		return t
+	}
+	return s.titles.forType(in.ChatType)
 }
 
 // AppendInput is the channel-agnostic input for AppendUserMessage. Body is the
@@ -249,6 +334,23 @@ type AppendInput struct {
 	MessageID      string
 	ThreadID       string
 	ClaimToken     pgtype.UUID
+	// WorkspaceID scopes the attachment rows created from Staged.
+	WorkspaceID pgtype.UUID
+	// Staged is the message's media, already persisted to object storage;
+	// each entry becomes an attachment row inside this method's tx so the
+	// rows and the chat_message commit atomically.
+	Staged []StagedMedia
+	// MediaChatBind binds the attachment rows to the chat session+message.
+	// False for /issue turns, whose attachments ride the quick-create task
+	// onto the issue and must not die with the chat session's cascade.
+	MediaChatBind bool
+	// SkipPreviousFallback disables the bare-/issue previous-message fallback
+	// for this turn. Quick-create channels (DingTalk) set it: they build the
+	// prompt from the turn's own content, so a lone "/issue" must ask the user
+	// what to file rather than silently adopting the previous message (which
+	// could be an unrelated image). Direct-create channels (Feishu/Slack) leave
+	// it false and keep the fallback, which supplies the title createIssue needs.
+	SkipPreviousFallback bool
 }
 
 // AppendUserMessage writes the user message into the chat_session (touching it
@@ -271,7 +373,7 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 		commandSource = in.Body
 	}
 	cmd, _ := ParseIssueCommand(commandSource)
-	if cmd != nil && cmd.Title == "" {
+	if cmd != nil && cmd.Title == "" && !in.SkipPreviousFallback {
 		prev, err := qtx.GetMostRecentUserChatMessage(ctx, in.SessionID)
 		if err == nil {
 			cmd.Title = titleFromPreviousMessage(prev.Content)
@@ -280,15 +382,53 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 		}
 	}
 
-	if _, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+	msgRow, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
 		ChatSessionID: in.SessionID,
 		Role:          "user",
 		Content:       in.Body,
-	}); err != nil {
+	})
+	if err != nil {
 		return AppendResult{}, fmt.Errorf("create chat message: %w", err)
 	}
 	if err := qtx.TouchChatSession(ctx, in.SessionID); err != nil {
 		return AppendResult{}, fmt.Errorf("touch chat session: %w", err)
+	}
+
+	// Attachment rows for staged media commit atomically with the message.
+	// The objects themselves are already in storage; a rollback here leaves
+	// orphans the Router discards best-effort.
+	var attachmentIDs []pgtype.UUID
+	for _, sm := range in.Staged {
+		params := db.CreateAttachmentParams{
+			ID:           sm.ID,
+			WorkspaceID:  in.WorkspaceID,
+			UploaderType: "member",
+			UploaderID:   in.Sender,
+			Filename:     sm.Filename,
+			Url:          sm.URL,
+			ContentType:  sm.ContentType,
+			SizeBytes:    sm.SizeBytes,
+		}
+		if in.MediaChatBind {
+			params.ChatSessionID = in.SessionID
+		}
+		att, err := qtx.CreateAttachment(ctx, params)
+		if err != nil {
+			return AppendResult{}, fmt.Errorf("create attachment: %w", err)
+		}
+		attachmentIDs = append(attachmentIDs, att.ID)
+	}
+	if in.MediaChatBind && len(attachmentIDs) > 0 {
+		if _, err := qtx.LinkAttachmentsToChatMessage(ctx, db.LinkAttachmentsToChatMessageParams{
+			ChatMessageID: msgRow.ID,
+			ChatSessionID: in.SessionID,
+			WorkspaceID:   in.WorkspaceID,
+			UploaderType:  "member",
+			UploaderID:    in.Sender,
+			AttachmentIds: attachmentIDs,
+		}); err != nil {
+			return AppendResult{}, fmt.Errorf("link attachments: %w", err)
+		}
 	}
 
 	// Record the latest trigger so the decoupled outbound patcher can thread
@@ -324,7 +464,7 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	if err := tx.Commit(ctx); err != nil {
 		return AppendResult{}, fmt.Errorf("commit: %w", err)
 	}
-	return AppendResult{IssueCommand: cmd, DedupMarked: markedInTx}, nil
+	return AppendResult{IssueCommand: cmd, DedupMarked: markedInTx, AttachmentIDs: attachmentIDs}, nil
 }
 
 func isUniqueViolation(err error) bool {

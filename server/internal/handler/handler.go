@@ -23,6 +23,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
+	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -221,6 +222,15 @@ type Handler struct {
 	// unless Slack is configured; GetChatChannelHistory then reports "no channel
 	// integration". A future platform satisfies the same reader interface.
 	SlackHistory ChatChannelHistoryReader
+	// DingTalkInstall owns the bring-your-own-app DingTalk install lifecycle
+	// (register pasted AppKey/AppSecret / list / revoke) and the at-rest
+	// encryption of each robot's AppSecret (MUL-3666 mirror). Nil unless
+	// MULTICA_DINGTALK_SECRET_KEY is set.
+	DingTalkInstall *dingtalk.InstallService
+	// DingTalkBindingTokens mints/redeems the user-binding tokens behind the
+	// "link your DingTalk account" prompt. Nil unless DingTalk is configured
+	// (MULTICA_DINGTALK_SECRET_KEY set).
+	DingTalkBindingTokens *dingtalk.BindingTokenService
 	// LLM is the basic LLM API layer (MUL-4238): a thin wrapper over the
 	// OpenAI Go SDK backing server-internal one-shot LLM helpers such as chat
 	// title generation. The generic passthrough endpoints were removed in
