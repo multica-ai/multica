@@ -5,6 +5,369 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient server Table query", () => {
+  it("posts the canonical query to the group and branch endpoints", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            query_fingerprint: "sha256:query",
+            total: 1001,
+            groups: [
+              {
+                key: "status:todo",
+                value: { kind: "status", status: "todo" },
+                count: 1001,
+              },
+            ],
+            next_cursor: null,
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            query_fingerprint: "sha256:query",
+            group_key: "status:todo",
+            parent_id: null,
+            total: 0,
+            rows: [],
+            branch_total: 0,
+            next_cursor: "next-page",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            query_fingerprint: "sha256:query",
+            total: 1001,
+            facets: [
+              {
+                kind: "status",
+                values: [
+                  { key: "todo", count: 501 },
+                  { key: "done", count: 500 },
+                ],
+              },
+            ],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const query = {
+      scope: { kind: "workspace" as const },
+      filters: { priorities: ["high" as const] },
+      sort: { field: "title" as const, direction: "asc" as const },
+    };
+
+    await expect(
+      client.listIssueTableGroups({
+        query,
+        group: { kind: "status" },
+        page: { limit: 100, cursor: null },
+      }),
+    ).resolves.toMatchObject({ total: 1001, groups: [{ count: 1001 }] });
+    await expect(
+      client.listIssueTableRows({
+        query,
+        group: { kind: "status" },
+        group_key: "status:todo",
+        hierarchy: { enabled: true },
+        parent_id: null,
+        page: { limit: 50, cursor: null },
+      }),
+    ).resolves.toMatchObject({ branch_total: 0, next_cursor: "next-page" });
+    await expect(
+      client.listIssueTableFacets({
+        query,
+        facets: [{ kind: "status" }],
+      }),
+    ).resolves.toMatchObject({
+      total: 1001,
+      facets: [{ values: [{ key: "todo", count: 501 }, { key: "done", count: 500 }] }],
+    });
+
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.example.test/api/issues/table/groups",
+      "https://api.example.test/api/issues/table/rows",
+      "https://api.example.test/api/issues/table/facets",
+    ]);
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      body: expect.stringContaining('"kind":"status"'),
+    });
+  });
+
+  it("falls back safely when Table responses are malformed", async () => {
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ total: "not-a-number" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const query = {
+      scope: { kind: "workspace" as const },
+      filters: {},
+      sort: { field: "position" as const, direction: "asc" as const },
+    };
+
+    await expect(
+      client.listIssueTableGroups({
+        query,
+        group: { kind: "status" },
+        page: { limit: 100, cursor: null },
+      }),
+    ).resolves.toEqual({
+      query_fingerprint: "",
+      total: 0,
+      groups: [],
+      next_cursor: null,
+    });
+    await expect(
+      client.listIssueTableRows({
+        query,
+        group: { kind: "none" },
+        group_key: null,
+        hierarchy: { enabled: true },
+        parent_id: null,
+        page: { limit: 50, cursor: null },
+      }),
+    ).resolves.toEqual({
+      query_fingerprint: "",
+      group_key: null,
+      parent_id: null,
+      total: 0,
+      rows: [],
+      branch_total: 0,
+      next_cursor: null,
+    });
+    await expect(
+      client.listIssueTableFacets({
+        query,
+        facets: [{ kind: "status" }],
+      }),
+    ).resolves.toEqual({
+      query_fingerprint: "",
+      total: 0,
+      facets: [],
+    });
+  });
+
+  it("preserves future Table status and actor enum values", async () => {
+    const responses = [
+      {
+        query_fingerprint: "sha256:future-status",
+        total: 1,
+        groups: [
+          {
+            key: "status:paused",
+            value: { kind: "status", status: "paused" },
+            count: 1,
+          },
+        ],
+        next_cursor: null,
+      },
+      {
+        query_fingerprint: "sha256:future-actor",
+        total: 1,
+        groups: [
+          {
+            key: "service:bot-1",
+            value: {
+              kind: "assignee",
+              actor: { type: "service", id: "bot-1" },
+            },
+            count: 1,
+          },
+        ],
+        next_cursor: null,
+      },
+    ];
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(responses.shift()), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    const query = {
+      scope: { kind: "workspace" as const },
+      filters: {},
+      sort: { field: "position" as const, direction: "asc" as const },
+    };
+
+    await expect(
+      client.listIssueTableGroups({ query, group: { kind: "status" } }),
+    ).resolves.toMatchObject({
+      total: 1,
+      groups: [{ value: { kind: "status", status: "paused" } }],
+    });
+    await expect(
+      client.listIssueTableGroups({ query, group: { kind: "assignee" } }),
+    ).resolves.toMatchObject({
+      total: 1,
+      groups: [
+        { value: { kind: "assignee", actor: { type: "service", id: "bot-1" } } },
+      ],
+    });
+  });
+
+  it("parses compound lane descriptors and posts the additive union", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          query_fingerprint: "sha256:compound",
+          total: 2,
+          groups: [
+            {
+              key: "parent:parent-1",
+              value: {
+                kind: "parent",
+                parent_id: "parent-1",
+                parent: {
+                  id: "parent-1",
+                  number: 10,
+                  identifier: "MUL-10",
+                  title: "Parent",
+                  status: "todo",
+                },
+                value_state: "value",
+              },
+              count: 2,
+              secondary_groups: [
+                {
+                  key: "compound:opaque:status:todo",
+                  value: { kind: "status", status: "todo" },
+                  count: 2,
+                },
+              ],
+            },
+          ],
+          next_cursor: null,
+        }),
+        { status: 200, headers: { "Content-Type": "application/json" } },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+    const query = {
+      scope: { kind: "workspace" as const },
+      filters: {},
+      sort: { field: "position" as const, direction: "asc" as const },
+    };
+
+    await expect(
+      client.listIssueTableGroups({
+        query,
+        group: {
+          kind: "compound",
+          primary: "parent",
+          secondary: "status",
+          secondary_values: ["todo"],
+        },
+      }),
+    ).resolves.toMatchObject({
+      groups: [
+        {
+          value: { kind: "parent", parent: { title: "Parent" } },
+          secondary_groups: [
+            { value: { kind: "status", status: "todo" }, count: 2 },
+          ],
+        },
+      ],
+    });
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      body: expect.stringContaining(
+        '"kind":"compound","primary":"parent","secondary":"status","secondary_values":["todo"]',
+      ),
+    });
+  });
+});
+
+describe("ApiClient issue move intent", () => {
+  it("posts relative anchors without a client-authored position", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ id: "issue-1", position: 15 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await client.moveIssue("issue-1", {
+      status: "in_progress",
+      before_id: "issue-0",
+      after_id: "issue-2",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/api/issues/issue-1/move",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          status: "in_progress",
+          before_id: "issue-0",
+          after_id: "issue-2",
+        }),
+      }),
+    );
+  });
+});
+
+describe("ApiClient workspace working agents", () => {
+  it("supports an optional source-type filter", async () => {
+    const payload = [
+      {
+        id: "agent-1",
+        name: "Agent 1",
+        avatar_url: null,
+        running_task_count: 2,
+        issue_ids: ["issue-1"],
+      },
+    ];
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify(payload), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.getWorkspaceWorkingAgents("issue", "assigned"),
+    ).resolves.toEqual(payload);
+    await expect(
+      client.getWorkspaceWorkingAgents("issue"),
+    ).resolves.toEqual(payload);
+    await expect(client.getWorkspaceWorkingAgents()).resolves.toEqual(payload);
+    expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.example.test/api/working-agents?type=issue&scope=mine&relation=assigned",
+      "https://api.example.test/api/working-agents?type=issue",
+      "https://api.example.test/api/working-agents",
+    ]);
+  });
+});
+
 describe("ApiClient label response schemas", () => {
   it("falls back safely for malformed label catalog, label, and resource responses", async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
@@ -41,6 +404,64 @@ describe("ApiClient label response schemas", () => {
     ).resolves.toEqual({ labels: [] });
 
     expect(fetchMock).toHaveBeenCalledTimes(10);
+  });
+});
+
+describe("ApiClient agent builder runtime switch", () => {
+  it("PATCHes the session runtime endpoint and returns the runtime the server bound", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ runtime_id: "runtime-b" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
+    ).resolves.toEqual({ runtime_id: "runtime-b" });
+
+    const call = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(call[0]).toContain("/api/agent-builder/sessions/session-1/runtime");
+    expect(call[1].method).toBe("PATCH");
+    expect(JSON.parse(String(call[1].body))).toEqual({ runtime_id: "runtime-b" });
+  });
+
+  it("falls back to the requested runtime id for a malformed success body", async () => {
+    // A 2xx means the rebind committed onto the runtime we asked for, so the
+    // fallback must say so. Reporting "unknown" here would leave the picker on
+    // the old runtime while the conversation executes on the new one — the very
+    // split this endpoint exists to close.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ runtime_id: 42 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
+    ).resolves.toEqual({ runtime_id: "runtime-b" });
+  });
+
+  it("rejects without a fallback when the switch is refused", async () => {
+    // 409 (a reply in flight) means nothing was committed, so the caller must
+    // see a rejection and keep the old runtime selected.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: "stop the current reply before switching runtime" }), {
+        status: 409,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
+    ).rejects.toBeInstanceOf(ApiError);
   });
 });
 

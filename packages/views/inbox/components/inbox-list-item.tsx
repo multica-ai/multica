@@ -1,6 +1,9 @@
 "use client";
 
 import { StatusIcon } from "../../issues/components";
+import {
+  IssueAgentActivityIndicator,
+} from "../../issues/components/issue-agent-activity-indicator";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { Archive, ArchiveRestore } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
@@ -53,6 +56,7 @@ export function InboxListItem({
   const actionLabel = isArchivedView
     ? t(($) => $.list.unarchive_tooltip)
     : t(($) => $.list.archive_tooltip);
+  const actorType = item.actor_type ?? item.recipient_type;
 
   return (
     <button
@@ -63,7 +67,7 @@ export function InboxListItem({
       }`}
     >
       <ActorAvatar
-        actorType={item.actor_type ?? item.recipient_type}
+        actorType={actorType}
         actorId={item.actor_id ?? item.recipient_id}
         size="lg"
         enableHoverCard
@@ -109,9 +113,22 @@ export function InboxListItem({
           <p className={`min-w-0 overflow-hidden text-ellipsis whitespace-nowrap text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
             <InboxDetailLabel item={item} />
           </p>
-          <span className={`shrink-0 text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
-            {timeAgo(item.created_at)}
-          </span>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {/* Badge only, no hover card (MUL-5189). "An agent is on this"
+                is worth showing while triaging; the card behind it adds only
+                elapsed time, which does not change whether you open the row.
+                The row already carries the ActorAvatar hover card on the
+                left, so a second popup here was mostly noise. */}
+            {item.issue_id && (
+              <IssueAgentActivityIndicator
+                issueId={item.issue_id}
+                hoverCard={false}
+              />
+            )}
+            <span className={`text-xs ${showUnread ? "text-muted-foreground" : "text-muted-foreground/60"}`}>
+              {timeAgo(item.created_at)}
+            </span>
+          </div>
         </div>
       </div>
     </button>

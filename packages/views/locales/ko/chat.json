@@ -21,7 +21,12 @@
     "send_blocked_toast": "메시지가 전송되지 않았습니다 — 이 에이전트를 사용할 권한이 없습니다",
     "attachment_bind_failed_toast": "메시지는 보냈지만 파일이 첨부되지 않았습니다. 잠시 후 다시 시도해 주세요.",
     "add_tooltip": "추가",
-    "upload_file": "이미지 또는 파일"
+    "upload_file": "이미지 또는 파일",
+    "project_context": "프로젝트 컨텍스트",
+    "change_project_context": "프로젝트 컨텍스트 변경",
+    "remove_project_context": "프로젝트 컨텍스트 제거",
+    "no_projects": "아직 프로젝트가 없습니다",
+    "project_context_unsupported": "프로젝트 설명이 적용되지 않습니다 — 이 에이전트의 데몬 업그레이드가 필요합니다"
   },
   "message_list": {
     "show_details": "세부 정보 보기",

@@ -446,6 +446,8 @@ func TestCursorStepFinishParsing(t *testing.T) {
 	t.Parallel()
 
 	part := cursorStepFinishPart{}
+	// The trailing "cost" key is ignored: cursor-agent does not report per-step
+	// cost, and unknown keys must not break token parsing.
 	data := `{"tokens":{"input":500,"output":200,"cache":{"read":100}},"cost":0.01}`
 	if err := json.Unmarshal([]byte(data), &part); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -708,5 +710,134 @@ func TestCursorStreamEventUnmarshalLegacyUsage(t *testing.T) {
 	u := usage["gpt-5"]
 	if u.InputTokens != 800 || u.OutputTokens != 400 || u.CacheReadTokens != 200 || u.CacheWriteTokens != 100 {
 		t.Fatalf("accumulated usage = %+v, want input=800 output=400 cache_read=200 cache_write=100", u)
+	}
+}
+
+func TestCursorThinkingStreamForwardsDeltasAndSeparatesBlocks(t *testing.T) {
+	t.Parallel()
+
+	var stream cursorThinkingStream
+	if got := stream.delta("first "); got != "first " {
+		t.Fatalf("first delta = %q, want %q", got, "first ")
+	}
+	if got := stream.delta("block"); got != "block" {
+		t.Fatalf("mid-block delta = %q, want %q", got, "block")
+	}
+	stream.complete()
+	// A new block must not be glued onto the previous one: the daemon
+	// concatenates every thinking message into one transcript entry.
+	if got := stream.delta("second block"); got != "\n\nsecond block" {
+		t.Fatalf("first delta of next block = %q, want %q", got, "\n\nsecond block")
+	}
+	stream.complete()
+}
+
+func TestCursorThinkingStreamDropsEmptyDeltas(t *testing.T) {
+	t.Parallel()
+
+	var stream cursorThinkingStream
+	if got := stream.delta(""); got != "" {
+		t.Fatalf("empty delta = %q, want empty", got)
+	}
+	// An empty delta must not open a block, so the first real fragment is still
+	// treated as the very first content (no leading separator).
+	if got := stream.delta("real"); got != "real" {
+		t.Fatalf("first real delta = %q, want %q", got, "real")
+	}
+}
+
+func TestParseCursorToolCall(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		event      string
+		wantName   string
+		wantCallID string
+		wantArg    string
+		wantResult string
+	}{
+		{
+			name: "started names the tool from the nested key",
+			event: `{"type":"tool_call","subtype":"started",
+				"call_id":"call-1\nfc_9",
+				"tool_call":{"readToolCall":{"args":{"path":"/tmp/a.txt"}},"toolCallId":"call-1\nfc_9"}}`,
+			wantName:   "read",
+			wantCallID: "call-1",
+			wantArg:    "/tmp/a.txt",
+		},
+		{
+			name: "completed carries the tool result payload",
+			event: `{"type":"tool_call","subtype":"completed",
+				"call_id":"call-2",
+				"tool_call":{"shellToolCall":{"args":{"path":"x"},"result":{"success":{"exitCode":0}}}}}`,
+			wantName:   "shell",
+			wantCallID: "call-2",
+			wantArg:    "x",
+			wantResult: `{"success":{"exitCode":0}}`,
+		},
+		{
+			name: "call id falls back to the nested tool call id",
+			event: `{"type":"tool_call","subtype":"started",
+				"tool_call":{"editToolCall":{"args":{"path":"y"}},"toolCallId":"call-3\nfc_1"}}`,
+			wantName:   "edit",
+			wantCallID: "call-3",
+			wantArg:    "y",
+		},
+		{
+			name: "unknown payload still yields a pairable call id",
+			event: `{"type":"tool_call","subtype":"started","call_id":"call-4",
+				"tool_call":{"toolCallId":"call-4","startedAtMs":"1"}}`,
+			wantCallID: "call-4",
+		},
+		{
+			name:       "missing tool_call object degrades to the top-level id",
+			event:      `{"type":"tool_call","subtype":"completed","call_id":"call-5"}`,
+			wantCallID: "call-5",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			var evt cursorStreamEvent
+			if err := json.Unmarshal([]byte(tt.event), &evt); err != nil {
+				t.Fatalf("unmarshal event: %v", err)
+			}
+			call := parseCursorToolCall(&evt)
+			if call.Name != tt.wantName {
+				t.Errorf("Name = %q, want %q", call.Name, tt.wantName)
+			}
+			if call.CallID != tt.wantCallID {
+				t.Errorf("CallID = %q, want %q", call.CallID, tt.wantCallID)
+			}
+			if tt.wantArg != "" && call.Input["path"] != tt.wantArg {
+				t.Errorf("Input[path] = %v, want %q", call.Input["path"], tt.wantArg)
+			}
+			if call.Result != tt.wantResult {
+				t.Errorf("Result = %q, want %q", call.Result, tt.wantResult)
+			}
+		})
+	}
+}
+
+func TestCursorToolPayloadKeyIsDeterministic(t *testing.T) {
+	t.Parallel()
+
+	envelope := map[string]json.RawMessage{
+		"toolCallId":     json.RawMessage(`"call-1"`),
+		"startedAtMs":    json.RawMessage(`"1"`),
+		"shellToolCall":  json.RawMessage(`{}`),
+		"readToolCall":   json.RawMessage(`{}`),
+		"ToolCall":       json.RawMessage(`{}`),
+		"someOtherField": json.RawMessage(`{}`),
+	}
+	for i := 0; i < 20; i++ {
+		if got := cursorToolPayloadKey(envelope); got != "readToolCall" {
+			t.Fatalf("iteration %d: key = %q, want readToolCall", i, got)
+		}
+	}
+	if got := cursorToolPayloadKey(map[string]json.RawMessage{"toolCallId": json.RawMessage(`"x"`)}); got != "" {
+		t.Fatalf("key without a tool payload = %q, want empty", got)
 	}
 }

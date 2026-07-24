@@ -45,12 +45,15 @@
   },
   "source_backfill": {
     "eyebrow": "顺便问一句",
-    "lede": "我们注意到你之前没有勾选这一项——花一秒补一下，能帮我们更了解像你一样的用户。完成后立刻回到你正在做的事。",
+    "lede": "一个小问题——能帮我们更了解像你一样的用户。答完立刻回到你正在做的事。",
     "submit": "提交",
     "hint_ready": "看起来不错，准备好就点提交。"
   },
   "questions": {
     "eyebrow_about_you": "关于你",
+    "about_you": {
+      "question": "简单介绍一下你自己。"
+    },
     "source": {
       "question": "你是从哪里了解到 Multica 的？",
       "friends_colleagues": "朋友或同事",

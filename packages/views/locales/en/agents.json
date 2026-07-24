@@ -161,7 +161,7 @@
     "section_profile": "Profile",
     "section_profile_hint": "Manage how this agent appears across the workspace.",
     "section_execution": "Execution",
-    "section_execution_hint": "Choose the runtime, model, reasoning level, and parallel task limit.",
+    "section_execution_hint": "Choose the runtime, model, reasoning level, speed, and parallel task limit.",
     "section_access": "Access",
     "section_access_hint": "Control who can run this agent and use its connected capabilities.",
     "section_properties": "Properties",
@@ -172,6 +172,7 @@
     "prop_runtime": "Runtime",
     "prop_model": "Model",
     "prop_thinking": "Thinking",
+    "prop_speed": "Speed",
     "prop_visibility": "Visibility",
     "prop_concurrency": "Concurrency",
     "prop_owner": "Owner",
@@ -231,7 +232,11 @@
     "thinking_default": "Follow CLI config",
     "thinking_tooltip": "Thinking · {{value}}",
     "thinking_clear": "Follow CLI config",
-    "thinking_clear_title": "Clear the override and let the local CLI config (claude/codex) decide the reasoning level"
+    "thinking_clear_title": "Clear the override and let the local CLI config (claude/codex) decide the reasoning level",
+    "service_tier_default": "Runtime default",
+    "service_tier_tooltip": "Speed · {{value}}",
+    "service_tier_clear": "Runtime default",
+    "service_tier_clear_title": "Clear the speed override and let the local Codex configuration decide"
   },
   "model_dropdown": {
     "label": "Model",
@@ -337,6 +342,9 @@
       "start_failed": "Could not start Agent Builder.",
       "send_failed": "Could not send your message.",
       "stop_failed": "Could not stop the current generation.",
+      "switch_runtime_failed": "Could not switch runtime. The conversation is still running on the previous one.",
+      "switch_runtime_pending": "Stop the current reply to switch runtime.",
+      "switch_runtime_success": "Runtime switched. Your draft is kept and the conversation continues on the new runtime with a fresh model session.",
       "chat_title": "Agent Builder",
       "chat_hint": "Shape the requirements through conversation and refine the configuration beside it.",
       "runtime_online": "Runtime online",
@@ -357,6 +365,7 @@
     "create_and_add": "Create & add to squad",
     "creating": "Creating agent…",
     "create_failed": "Could not create the agent.",
+    "name_conflict": "An agent with this name already exists.",
     "created": "{{name}} was created"
   },
   "create_dialog": {

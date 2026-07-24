@@ -202,6 +202,7 @@
         "replicas",
         "revisionHistoryLimit",
         "strategy",
+        "config",
         "compatibility",
         "extraVolumes",
         "extraVolumeMounts",
@@ -220,6 +221,17 @@
         "replicas": { "type": "integer", "minimum": 0 },
         "revisionHistoryLimit": { "type": "integer", "minimum": 0 },
         "strategy": { "$ref": "#/definitions/deploymentStrategy" },
+        "config": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["remoteApiUrl", "docsUrl", "publicApiUrl", "publicWsUrl"],
+          "properties": {
+            "remoteApiUrl": { "type": "string" },
+            "docsUrl": { "type": "string" },
+            "publicApiUrl": { "type": "string" },
+            "publicWsUrl": { "type": "string" }
+          }
+        },
         "compatibility": {
           "type": "object",
           "additionalProperties": false,

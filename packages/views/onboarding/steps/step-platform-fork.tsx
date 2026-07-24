@@ -14,6 +14,7 @@ import {
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
 import type { AgentRuntime } from "@multica/core/types";
+import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "../components/step-header";
 import { RuntimeAsidePanel } from "../components/runtime-aside-panel";
@@ -187,7 +188,9 @@ export function StepPlatformFork({
         onSelect={picker.setSelectedId}
         hasRuntimes={picker.hasRuntimes}
         canConnect={picker.selected !== null}
-        selectedName={picker.selected?.name ?? null}
+        selectedName={
+          picker.selected ? runtimeDisplayLabel(picker.selected) : null
+        }
         cliInstructions={cliInstructions}
       />
     </div>

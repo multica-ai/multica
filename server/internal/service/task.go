@@ -668,12 +668,14 @@ func (s *TaskService) captureTaskCancelled(ctx context.Context, task db.AgentTas
 	}
 }
 
-func (s *TaskService) CaptureTaskUsage(ctx context.Context, task db.AgentTaskQueue, provider, model string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) {
+// costUSDTicks is the provider's own price for this usage in 1e-10 USD, or 0
+// when it reported none — the metrics layer prefers it over its rate table.
+func (s *TaskService) CaptureTaskUsage(ctx context.Context, task db.AgentTaskQueue, provider, model string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUSDTicks int64) {
 	if s.Metrics == nil {
 		return
 	}
 	source, runtimeMode, _ := s.taskMetricsContext(ctx, task)
-	s.Metrics.RecordLLMUsage(source, runtimeMode, provider, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens)
+	s.Metrics.RecordLLMUsage(source, runtimeMode, provider, model, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUSDTicks)
 }
 
 func (s *TaskService) CaptureQueuedExpiredTasks(ctx context.Context, tasks []db.AgentTaskQueue) {
@@ -1499,7 +1501,8 @@ type DirectChatSendResult struct {
 //
 // The caller must have already gated the session and preflighted the agent
 // (archived / no-runtime), passing the loaded agent in; this method trusts those
-// checks and does no further agent validation.
+// permission checks. It does NOT trust the agent's runtime_id: that field is
+// re-read inside the transaction (see below).
 func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.ChatSession, agent db.Agent, initiatorUserID pgtype.UUID, content string, attachmentIDs []pgtype.UUID, uploaderType string, uploaderID pgtype.UUID) (*DirectChatSendResult, error) {
 	// Build the per-task Composio overlay before the transaction — it can do
 	// network I/O and must not run with a DB transaction open.
@@ -1519,9 +1522,28 @@ func (s *TaskService) SendDirectChatMessage(ctx context.Context, session db.Chat
 
 	var out DirectChatSendResult
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		// Serialise this send against a concurrent runtime rebind of the same
+		// session (MUL-5163). The lock must be taken first and the agent re-read
+		// under it: the runtime_id the caller loaded can already be stale by the
+		// time we get here, and a send blocked behind a rebind would otherwise
+		// resume and stamp its task with the runtime the switch just moved away
+		// from — leaving the user with a "switched" confirmation and a reply
+		// running on the old runtime. Locking chat_session first also matches the
+		// delete path's lock order, so the two cannot deadlock.
+		if _, err := qtx.LockChatSessionForRuntimeBind(ctx, session.ID); err != nil {
+			return fmt.Errorf("lock chat session: %w", err)
+		}
+		carrier, err := qtx.GetAgent(ctx, session.AgentID)
+		if err != nil {
+			return fmt.Errorf("reload chat agent: %w", err)
+		}
+		if !carrier.RuntimeID.Valid {
+			return ErrChatTaskAgentNoRuntime
+		}
+
 		task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
 			AgentID:              session.AgentID,
-			RuntimeID:            agent.RuntimeID,
+			RuntimeID:            carrier.RuntimeID,
 			Priority:             2, // medium priority for chat; matches EnqueueChatTask
 			ChatSessionID:        session.ID,
 			InitiatorUserID:      initiatorUserID,

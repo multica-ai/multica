@@ -15,11 +15,11 @@ pod security settings, and optional Prometheus Operator resources.
 - Gateway API CRDs, a controller, and an existing Gateway only when HTTPRoute is enabled.
 
 The chart creates one ServiceAccount and ConfigMap; backend and frontend
-Deployments and Services; two Ingress objects when enabled; and the frontend
-compatibility Service named `backend`. It conditionally creates PostgreSQL and
+Deployments and Services; and two Ingress objects when enabled. It conditionally
+creates the frontend compatibility Service named `backend`, PostgreSQL and
 uploads PVCs, the bundled PostgreSQL Deployment and Service, NetworkPolicies,
-PodDisruptionBudgets, a metrics Service, ServiceMonitor, and PrometheusRule.
-It can also create separate frontend and backend HTTPRoutes.
+PodDisruptionBudgets, a metrics Service, ServiceMonitor, and PrometheusRule. It
+can also create separate frontend and backend HTTPRoutes.
 
 ## Secrets
 
@@ -270,10 +270,11 @@ helm upgrade multica ./deploy/helm/multica \
   --wait --atomic
 ```
 
-The default frontend image requires the compatibility Service named `backend`.
-Because that name is not release-prefixed, install only one chart release per
-namespace. Set `frontend.compatibility.backendAlias=false` only for a frontend
-image built with a different backend URL.
+Current frontend images read `frontend.config.remoteApiUrl` at runtime and do
+not require the compatibility Service named `backend`. Enable
+`frontend.compatibility.backendAlias` only for legacy images that baked
+`REMOTE_API_URL=http://backend:8080`. Because that Service name is not
+release-prefixed, enabling it limits the namespace to one chart release.
 
 For workspace bootstrap, first deploy with
 `backend.config.disableWorkspaceCreation=false`, sign in and create the main

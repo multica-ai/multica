@@ -250,6 +250,65 @@ func TestPrepareWithProjectResources(t *testing.T) {
 	}
 }
 
+func TestChatProjectContextInjectedIntoRuntimeBrief(t *testing.T) {
+	t.Parallel()
+
+	ctx := TaskContextForEnv{
+		ChatSessionID:      "chat-project-context",
+		ProjectID:          "22222222-3333-4444-5555-666666666666",
+		ProjectTitle:       "Project Beta",
+		ProjectDescription: "Use the beta repository and follow the beta rollout plan.",
+		ProjectResources: []ProjectResourceForEnv{
+			{
+				ID:           "33333333-4444-5555-6666-777777777777",
+				ResourceType: "github_repo",
+				ResourceRef:  json.RawMessage(`{"url":"https://github.com/org/beta"}`),
+			},
+		},
+	}
+
+	for _, tc := range []struct {
+		provider string
+		filename string
+	}{
+		{provider: "claude", filename: "CLAUDE.md"},
+		{provider: "codex", filename: "AGENTS.md"},
+	} {
+		tc := tc
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			dir := t.TempDir()
+			if _, err := InjectRuntimeConfig(dir, tc.provider, ctx); err != nil {
+				t.Fatalf("InjectRuntimeConfig: %v", err)
+			}
+			content, err := os.ReadFile(filepath.Join(dir, tc.filename))
+			if err != nil {
+				t.Fatalf("read %s: %v", tc.filename, err)
+			}
+			s := string(content)
+			for _, want := range []string{
+				"## Project Context",
+				"Project Beta",
+				"Use the beta repository and follow the beta rollout plan.",
+				"https://github.com/org/beta",
+			} {
+				if !strings.Contains(s, want) {
+					t.Errorf("%s missing chat project context %q", tc.filename, want)
+				}
+			}
+			for _, banned := range []string{
+				"This issue belongs to",
+				"## Issue Metadata",
+				"## Sub-issue Creation",
+			} {
+				if strings.Contains(s, banned) {
+					t.Errorf("%s chat brief contains issue-only text %q", tc.filename, banned)
+				}
+			}
+		})
+	}
+}
+
 // When the issue's project has its own github_repo resources, those should be
 // the only repos rendered in the meta-skill — workspace-level repos must not
 // leak into the agent prompt to avoid confusing it about which repo to use.
@@ -929,13 +988,38 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				// no follow-up wakeup. These pins forbid that shape.
 				"Never background-and-yield",
 				"foreground tool call that blocks",
-				"gh run watch",
+				"only to work owned by the current run",
+				"GitHub Actions after a successful push",
+				"Do not wait for them by default",
+				// MUL-5223: the conceptual boundary above was read as
+				// compatible with `gh pr checks --watch` (a blocking
+				// foreground call) whenever the repo required green CI to
+				// merge. These pins name the banned tool shapes, deny
+				// merge requirements as acceptance criteria, and supply
+				// the replacement hand-off phrasing.
+				"do NOT run `gh pr checks --watch`",
+				"any sleep / retry loop that polls check status",
+				"NOT your delivery acceptance criteria",
+				"CI running: <PR link>",
+				// The ban must stay scoped: an explicitly requested CI
+				// result is still reachable, and the section must name
+				// the one executable way to collect it. Without these
+				// pins the ban could be re-absolutised and the exception
+				// would become unfollowable.
+				"unless the explicit exception below applies",
+				"The one exception",
+				"ONE foreground blocking call (`gh pr checks <pr> --watch`)",
 				"running in the background so you can keep working",
 				"standing by",
 			} {
 				if !strings.Contains(s, want) {
 					t.Errorf("%s missing background task safety text %q\n---\n%s", tc.file, want, s)
 				}
+			}
+			// `gh run watch` may only appear as a banned command, never as
+			// the section's example of how to wait properly.
+			if strings.Contains(s, "e.g. `gh run watch`") {
+				t.Errorf("%s should not suggest waiting for external GitHub CI\n---\n%s", tc.file, s)
 			}
 		})
 	}

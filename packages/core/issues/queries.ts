@@ -9,6 +9,11 @@ import type {
   GroupedIssuesResponse,
   Issue,
   IssueStatus,
+  IssueTableFacetsRequest,
+  IssueTableGroupSpec,
+  IssueTableGroupsRequest,
+  IssueTableQuerySpec,
+  IssueTableRowsRequest,
   ListGroupedIssuesParams,
   ListIssuesParams,
   ListIssuesCache,
@@ -47,6 +52,31 @@ export const issueKeys = {
     filter: IssueFlatFilter,
     sort?: IssueSortParam,
   ) => [...issueKeys.flatAll(wsId), "export", scope, filter, sort ?? {}] as const,
+  tableAll: (wsId: string) => [...issueKeys.all(wsId), "table-query"] as const,
+  tableGroups: (
+    wsId: string,
+    query: IssueTableQuerySpec,
+    group: IssueTableGroupsRequest["group"],
+  ) => [...issueKeys.tableAll(wsId), "groups", query, group] as const,
+  tableFacets: (
+    wsId: string,
+    request: IssueTableFacetsRequest,
+  ) => [...issueKeys.tableAll(wsId), "facets", request] as const,
+  tableRows: (
+    wsId: string,
+    query: IssueTableQuerySpec,
+    group: IssueTableGroupSpec,
+    groupKey: string | null,
+    hierarchy: boolean,
+    parentId: string | null,
+  ) => [
+    ...issueKeys.tableAll(wsId),
+    "rows",
+    query,
+    group,
+    groupKey,
+    { hierarchy, parentId },
+  ] as const,
   assigneeGroupsAll: (wsId: string) =>
     [...issueKeys.all(wsId), "assignee-groups"] as const,
   assigneeGroups: (wsId: string, filter: AssigneeGroupedIssuesFilter) =>
@@ -376,6 +406,69 @@ export function issueFlatListOptions(
       return loaded < lastPage.total ? loaded : undefined;
     },
     placeholderData: keepPreviousData,
+  });
+}
+
+export function issueTableGroupsOptions(
+  wsId: string,
+  query: IssueTableQuerySpec,
+  group: IssueTableGroupsRequest["group"],
+) {
+  return infiniteQueryOptions({
+    queryKey: issueKeys.tableGroups(wsId, query, group),
+    initialPageParam: null as string | null,
+    queryFn: ({ pageParam }) =>
+      api.listIssueTableGroups({
+        query,
+        group,
+        page: { limit: 100, cursor: pageParam },
+    }),
+    getNextPageParam: (lastPage) => lastPage.next_cursor ?? undefined,
+    placeholderData: keepPreviousData,
+    retry: false,
+  });
+}
+
+/** One independently-addressable Table branch page.
+ *
+ * Table keeps every cursor page under its own query key so a refreshed head
+ * can detach stale tail cursors before their responses land. Keep the request,
+ * key shape, transition placeholder, and retry policy together here — the
+ * dynamic branch graph in views should not duplicate this API contract. */
+export function issueTableRowPageOptions(
+  wsId: string,
+  request: IssueTableRowsRequest,
+) {
+  const cursor = request.page?.cursor ?? null;
+  return queryOptions({
+    queryKey: [
+      ...issueKeys.tableRows(
+        wsId,
+        request.query,
+        request.group,
+        request.group_key,
+        request.hierarchy.enabled,
+        request.parent_id,
+      ),
+      "page",
+      cursor,
+    ] as const,
+    queryFn: () => api.listIssueTableRows(request),
+    placeholderData: keepPreviousData,
+    retry: false,
+    // Dynamic useQueries observers can detach/reinstall as sibling branches
+    // enter the viewport. An errored page stays errored until explicit Retry.
+    refetchOnMount: false,
+  });
+}
+
+export function issueTableFacetsOptions(
+  wsId: string,
+  request: IssueTableFacetsRequest,
+) {
+  return queryOptions({
+    queryKey: issueKeys.tableFacets(wsId, request),
+    queryFn: () => api.listIssueTableFacets(request),
   });
 }
 

@@ -240,8 +240,8 @@ func projectClaudeLevels(superset []string, allow map[string]bool) []ThinkingLev
 
 // ── Codex ────────────────────────────────────────────────────────────
 //
-// `codex debug models --bundled` is the structured discovery hook for both
-// the visible model catalog and each model's reasoning catalog. OpenAI added
+// `codex debug models --bundled` is the structured discovery hook for the
+// visible model catalog, each model's reasoning catalog, and service tiers. OpenAI added
 // the command and `--bundled` flag together in Codex 0.122.0 (openai/codex
 // #18625). Older versions, failed invocations, and malformed/empty payloads
 // use codexStaticModels so the picker remains usable.
@@ -261,7 +261,7 @@ func projectClaudeLevels(superset []string, allow map[string]bool) []ThinkingLev
 // need for validation.
 //
 // The static fallback deliberately mirrors a recently verified bundled
-// catalog, including thinking metadata, rather than guessing model IDs.
+// model/thinking catalog. It does not guess service-tier availability.
 
 // codexEffortLabel is the human display string for each Codex effort
 // value, matching Codex's own TUI (`Extra high`, `Minimal`, …) so
@@ -292,10 +292,17 @@ type codexDebugModel struct {
 	Visibility              string                     `json:"visibility"`
 	DefaultReasoningLevel   string                     `json:"default_reasoning_level"`
 	SupportedReasoningLevel []codexDebugReasoningLevel `json:"supported_reasoning_levels"`
+	ServiceTiers            []codexDebugServiceTier    `json:"service_tiers"`
 }
 
 type codexDebugReasoningLevel struct {
 	Effort      string `json:"effort"`
+	Description string `json:"description"`
+}
+
+type codexDebugServiceTier struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
 	Description string `json:"description"`
 }
 
@@ -367,16 +374,36 @@ func parseCodexModelCatalog(raw []byte) ([]Model, error) {
 			label = m.Slug
 		}
 		models = append(models, Model{
-			ID:       m.Slug,
-			Label:    label,
-			Provider: "openai",
-			Thinking: codexThinkingFromDebugModel(m),
+			ID:           m.Slug,
+			Label:        label,
+			Provider:     "openai",
+			Thinking:     codexThinkingFromDebugModel(m),
+			ServiceTiers: codexServiceTiersFromDebugModel(m),
 		})
 	}
 	if len(models) > 0 {
 		models[0].Default = true
 	}
 	return models, nil
+}
+
+func codexServiceTiersFromDebugModel(m codexDebugModel) []ModelServiceTier {
+	tiers := make([]ModelServiceTier, 0, len(m.ServiceTiers))
+	for _, tier := range m.ServiceTiers {
+		if tier.ID == "" {
+			continue
+		}
+		name := tier.Name
+		if name == "" {
+			name = tier.ID
+		}
+		tiers = append(tiers, ModelServiceTier{
+			ID:          tier.ID,
+			Name:        name,
+			Description: tier.Description,
+		})
+	}
+	return tiers
 }
 
 func codexThinkingFromDebugModel(m codexDebugModel) *ModelThinking {
@@ -625,6 +652,35 @@ func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, mo
 	return false, nil
 }
 
+// ValidateServiceTier reports whether value is advertised by the current
+// Codex catalog for the explicit model. An empty value is always valid and
+// means "inherit runtime configuration". An empty Codex model fails closed:
+// its effective model comes from config.toml and may not support the tier.
+func ValidateServiceTier(ctx context.Context, providerType, executablePath, model, value string) (bool, error) {
+	if value == "" {
+		return true, nil
+	}
+	if providerType != "codex" || model == "" {
+		return false, nil
+	}
+	models, err := ListModels(ctx, providerType, executablePath)
+	if err != nil {
+		return false, err
+	}
+	for _, m := range models {
+		if m.ID != model {
+			continue
+		}
+		for _, tier := range m.ServiceTiers {
+			if tier.ID == value {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
+	return false, nil
+}
+
 func anyModelSupportsThinkingValue(models []Model, value string) bool {
 	for _, m := range models {
 		if m.Thinking == nil {
@@ -696,6 +752,17 @@ func IsKnownThinkingValue(providerType, value string) bool {
 		return false
 	}
 	return enum[value]
+}
+
+// IsKnownServiceTier is the server-side literal gate. The exact per-model
+// catalog lives on the daemon host, so Codex accepts safe future catalog IDs
+// here and ValidateServiceTier performs the execution-time compatibility
+// check. Other providers do not currently expose service tiers.
+func IsKnownServiceTier(providerType, value string) bool {
+	if value == "" {
+		return true
+	}
+	return providerType == "codex" && isValidDynamicThinkingValue(value)
 }
 
 func isValidDynamicThinkingValue(value string) bool {

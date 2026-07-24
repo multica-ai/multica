@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -55,7 +56,11 @@ type GitHubInstallationResponse struct {
 }
 
 type GitHubPullRequestResponse struct {
-	ID              string  `json:"id"`
+	ID string `json:"id"`
+	// Provider is the Git provider this PR was mirrored from: "github", "forgejo",
+	// "gitea", or "gitlab". The frontend uses it to pick the host icon and
+	// label (e.g. GitLab "merge request").
+	Provider        string  `json:"provider"`
 	WorkspaceID     string  `json:"workspace_id"`
 	RepoOwner       string  `json:"repo_owner"`
 	RepoName        string  `json:"repo_name"`
@@ -127,6 +132,7 @@ func githubInstallationToBroadcast(i db.GithubInstallation) GitHubInstallationRe
 func githubPullRequestToResponse(p db.GithubPullRequest) GitHubPullRequestResponse {
 	return GitHubPullRequestResponse{
 		ID:              uuidToString(p.ID),
+		Provider:        "github",
 		WorkspaceID:     uuidToString(p.WorkspaceID),
 		RepoOwner:       p.RepoOwner,
 		RepoName:        p.RepoName,
@@ -155,6 +161,7 @@ func githubPullRequestToResponse(p db.GithubPullRequest) GitHubPullRequestRespon
 func issuePullRequestRowToResponse(p db.ListPullRequestsByIssueRow) GitHubPullRequestResponse {
 	return GitHubPullRequestResponse{
 		ID:               uuidToString(p.ID),
+		Provider:         "github",
 		WorkspaceID:      uuidToString(p.WorkspaceID),
 		RepoOwner:        p.RepoOwner,
 		RepoName:         p.RepoName,
@@ -571,6 +578,21 @@ func (h *Handler) ListPullRequestsForIssue(w http.ResponseWriter, r *http.Reques
 	for _, row := range rows {
 		out = append(out, issuePullRequestRowToResponse(row))
 	}
+	// PRs from token-based providers (Forgejo / Gitea / GitLab) share the same
+	// card list. They live in their own provider-tagged tables, so they merge
+	// in here mapped to the same response shape; the combined list is re-sorted
+	// newest-first.
+	vcsRows, err := h.Queries.ListVCSPullRequestsByIssue(r.Context(), issue.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list pull requests")
+		return
+	}
+	for _, row := range vcsRows {
+		out = append(out, vcsPullRequestRowToResponse(row))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		return out[i].PRCreatedAt > out[j].PRCreatedAt
+	})
 	writeJSON(w, http.StatusOK, map[string]any{"pull_requests": out})
 }
 
@@ -976,7 +998,10 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 				if issue.Status == "done" || issue.Status == "cancelled" {
 					continue
 				}
-				counts, err := h.Queries.GetIssuePullRequestCloseAggregate(ctx, issue.ID)
+				// Combined across providers: an issue may also carry a still-open
+				// self-hosted VCS PR, which must block auto-advance here just as
+				// an open GitHub PR blocks it on the VCS webhook path.
+				counts, err := h.Queries.GetIssueCombinedPullRequestCloseAggregate(ctx, issue.ID)
 				if err != nil {
 					slog.Warn("github: count linked pr states failed", "err", err, "issue_id", uuidToString(issue.ID))
 					continue

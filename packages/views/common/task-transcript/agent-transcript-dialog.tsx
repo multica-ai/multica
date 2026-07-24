@@ -42,6 +42,7 @@ import {
   type TranscriptSortDirection,
 } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
+import { runtimeDisplayName } from "@multica/core/runtimes";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
 import { useT } from "../../i18n";
@@ -184,6 +185,14 @@ function formatElapsedMs(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${minutes}m ${secs}s`;
+}
+
+function formatEventForClipboard(item: TimelineItem): string {
+  const label = getEventLabel(item);
+  const summary = getEventSummary(item);
+  const date = item.created_at ? new Date(item.created_at) : null;
+  const timestamp = date && !Number.isNaN(date.getTime()) ? `[${date.toISOString()}] ` : "";
+  return `${timestamp}[${label}] ${summary}`;
 }
 
 // ─── Main dialog ────────────────────────────────────────────────────────────
@@ -362,11 +371,7 @@ export function AgentTranscriptDialog({
 
   const handleCopyAll = useCallback(() => {
     const text = displayItems
-      .map((item) => {
-        const label = getEventLabel(item);
-        const summary = getEventSummary(item);
-        return `[${label}] ${summary}`;
-      })
+      .map(formatEventForClipboard)
       .join("\n");
     void copyText(text).then((ok) => {
       if (!ok) return;
@@ -628,7 +633,7 @@ export function AgentTranscriptDialog({
               <MetadataChip
                 icon={runtimeInfo.runtime_mode === "cloud" ? <Cloud className="h-3 w-3" /> : <Monitor className="h-3 w-3" />}
               >
-                {runtimeInfo.name}
+                {runtimeDisplayName(runtimeInfo)}
                 <span className="text-muted-foreground/60 ml-0.5">({runtimeInfo.runtime_mode})</span>
               </MetadataChip>
             )}

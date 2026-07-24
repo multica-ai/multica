@@ -26,8 +26,9 @@ All notable changes to the Multica Helm chart are documented in this file.
 ### Compatibility
 
 - Default values continue to render without additional configuration.
-- Bundled PostgreSQL, local uploads, Ingress, and the frontend compatibility
-  Service named `backend` remain enabled by default.
+- Bundled PostgreSQL, local uploads, and Ingress remain enabled by default; the
+  frontend compatibility Service named `backend` remains available for legacy
+  images.
 - NetworkPolicy, PodDisruptionBudget, ServiceMonitor, metrics port, HTTPRoute,
   additional environment variables, additional volumes, and security contexts
   remain opt-in.

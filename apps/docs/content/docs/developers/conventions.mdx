@@ -68,6 +68,17 @@ If logic appears in both apps, it MUST be extracted to a shared package. There a
 - Enums: prefer string literal unions; reserve `enum` for runtime-iterable cases.
 - TanStack Query keys: factory functions in `<feature>/queries.ts`, e.g. `issueKeys.detail(id)`.
 
+### Runtime display names
+
+`AgentRuntime.name` is the daemon's raw technical name (e.g. `Codex (host)`); the user's alias lives in `custom_name`. User-visible copy must never render `runtime.name` directly — use the shared helpers so aliases and provider stay consistent (MUL-5248, #5260):
+
+- Standalone runtime label (lists, chips, confirm dialogs, document titles): `runtimeDisplayLabel(runtime)` → alias + provider, falling back to the daemon name.
+- When a provider icon/text already sits beside it: `runtimeDisplayName(runtime)` → alias only, no duplicated provider.
+- Inside a machine group: machine header uses `machine.title`, child rows use `runtimeRowLabel(runtime, machine.title)`.
+- Runtime selectors group by machine via `buildRuntimeMachines`; do not build a flat list of raw names.
+
+Raw `runtime.name` is allowed only for internal identity — hostname parsing, grouping, search haystacks, and protocol payloads — never for JSX text, i18n params, `<Select>` labels, or window titles.
+
 ### Issue keys
 
 Every issue has a human-readable key like `MUL-123`: workspace `issue_prefix` (uppercase letters and digits, typically 3 chars, max 10) + sequence number. Workspace admins can change the prefix in Settings → General; changing it renumbers every existing issue, so external references that embed the old prefix (PR titles, branch names, links in docs and chat) stop resolving.

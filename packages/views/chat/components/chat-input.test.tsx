@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useRef, useImperativeHandle } from "react";
+import { cloneElement, forwardRef, useEffect, useRef, useImperativeHandle } from "react";
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import { act, render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -142,6 +142,33 @@ vi.mock("../../editor", async () => ({
       />
     );
   }),
+}));
+
+vi.mock("../../projects/components/project-picker", () => ({
+  ProjectPicker: ({
+    projectId,
+    onUpdate,
+    triggerRender,
+    disabled,
+  }: {
+    projectId: string;
+    onUpdate: (updates: { project_id: string | null }) => void;
+    triggerRender: React.ReactElement<{
+      onClick?: () => void;
+      children?: React.ReactNode;
+      "data-project-picker-disabled"?: string;
+    }>;
+    disabled?: boolean;
+  }) =>
+    // Surface the `disabled` prop ChatInput passes so a test can assert the
+    // shared picker (and thus its keyboard clear control) is locked mid-send.
+    // The real keyboard-inertness of that control is covered against the real
+    // ProjectPicker in project-picker.test.tsx.
+    cloneElement(triggerRender, {
+      onClick: () => onUpdate({ project_id: null }),
+      children: projectId,
+      "data-project-picker-disabled": disabled ? "true" : "false",
+    }),
 }));
 
 // Mock chat store with an in-memory implementation that supports both
@@ -369,6 +396,154 @@ describe("ChatInput @ context wiring", () => {
 
     expect(editorProps.last?.mentionMode).toBe("context");
     expect(editorProps.last?.mentionContextItems).toBe(contextItems);
+  });
+});
+
+describe("ChatInput project context", () => {
+  type ChatProject = NonNullable<
+    React.ComponentProps<typeof ChatInput>["projects"]
+  >[number];
+  const sampleProject: ChatProject = {
+    id: "project-alpha",
+    workspace_id: "ws-1",
+    title: "Project Alpha",
+    description: null,
+    icon: "📘",
+    status: "planned",
+    priority: "none",
+    lead_type: null,
+    lead_id: null,
+    start_date: null,
+    due_date: null,
+    created_at: new Date(0).toISOString(),
+    updated_at: new Date(0).toISOString(),
+    issue_count: 0,
+    done_count: 0,
+    resource_count: 0,
+  };
+
+  it("warns next to the chip when the agent's daemon cannot apply the project description", () => {
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange: vi.fn(),
+      projectContextUnsupported: true,
+    });
+
+    expect(
+      screen.getByText(
+        "Project description won't apply — this agent's daemon needs an upgrade",
+      ),
+    ).toBeInTheDocument();
+    // Soft gate: the warning must not lock the control.
+    expect(
+      screen.getByRole("button", { name: "Change project context" }),
+    ).not.toBeDisabled();
+  });
+
+  it("shows no daemon warning when support is current or unknown", () => {
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange: vi.fn(),
+    });
+
+    expect(
+      screen.queryByText(
+        "Project description won't apply — this agent's daemon needs an upgrade",
+      ),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the selected project chip and forwards context changes", () => {
+    const onProjectChange = vi.fn();
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Change project context" }));
+
+    expect(onProjectChange).toHaveBeenCalledWith(null);
+  });
+
+  it("allows removing project context while the agent is running", () => {
+    const onProjectChange = vi.fn();
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange,
+      isRunning: true,
+    });
+
+    const projectControl = screen.getByRole("button", {
+      name: "Change project context",
+    });
+    expect(projectControl).not.toBeDisabled();
+    fireEvent.click(projectControl);
+    expect(onProjectChange).toHaveBeenCalledWith(null);
+  });
+
+  it("locks the project control while a send is in flight so a mid-send switch cannot retarget the session", async () => {
+    // A brand-new chat creates its session row lazily during send, bound to
+    // the project selected at click time. If the user could switch project
+    // while that create is in flight, the session would be created against the
+    // old project while the UI already shows the new one — the agent would
+    // then receive a project/repo context the user no longer intends
+    // (MUL-5150). The control must stay locked for the whole send, not only
+    // once the agent is running.
+    let resolveSend: (accepted: boolean) => void;
+    const sendPromise = new Promise<boolean>((res) => {
+      resolveSend = res;
+    });
+    const onSend = vi.fn<ChatInputOnSend>(() => sendPromise);
+    const onProjectChange = vi.fn();
+    renderInput({
+      projects: [sampleProject],
+      projectId: "project-alpha",
+      onProjectChange,
+      onSend,
+    });
+
+    // Interactive before send starts.
+    expect(
+      screen.getByRole("button", { name: "Change project context" }),
+    ).not.toBeDisabled();
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "slow network" },
+    });
+    let sendBtn: HTMLElement;
+    await waitFor(() => {
+      const buttons = screen.getAllByRole("button");
+      sendBtn = buttons[buttons.length - 1]!;
+      expect(sendBtn).not.toBeDisabled();
+    });
+    fireEvent.click(sendBtn!);
+
+    // Send pending → project control locked; a click cannot fire a change.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Change project context" }),
+      ).toBeDisabled(),
+    );
+    // ChatInput also propagates the lock to the shared ProjectPicker so its
+    // internal clear button (a keyboard-reachable path the wrapper's
+    // pointer-events-none does not cover) is disabled too. The clear control's
+    // keyboard-inertness itself is covered against the real ProjectPicker in
+    // project-picker.test.tsx.
+    expect(
+      screen.getByRole("button", { name: "Change project context" }),
+    ).toHaveAttribute("data-project-picker-disabled", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Change project context" }));
+    expect(onProjectChange).not.toHaveBeenCalled();
+
+    // Resolve the pending send so the promise doesn't dangle past the test.
+    await act(async () => {
+      resolveSend!(true);
+      await sendPromise;
+    });
   });
 });
 

@@ -153,7 +153,7 @@
     "section_profile": "프로필",
     "section_profile_hint": "워크스페이스에서 이 에이전트가 표시되는 방식을 관리합니다.",
     "section_execution": "실행 설정",
-    "section_execution_hint": "런타임, 모델, 추론 수준과 병렬 작업 한도를 설정합니다.",
+    "section_execution_hint": "런타임, 모델, 추론 수준, 속도와 병렬 작업 한도를 설정합니다.",
     "section_access": "접근 권한",
     "section_access_hint": "이 에이전트와 연결된 기능을 사용할 수 있는 대상을 관리합니다.",
     "section_properties": "속성",
@@ -164,6 +164,7 @@
     "prop_runtime": "런타임",
     "prop_model": "모델",
     "prop_thinking": "추론",
+    "prop_speed": "속도",
     "prop_visibility": "공개 범위",
     "prop_concurrency": "동시 실행",
     "prop_owner": "소유자",
@@ -222,7 +223,11 @@
     "thinking_default": "CLI 설정 따르기",
     "thinking_tooltip": "추론 · {{value}}",
     "thinking_clear": "CLI 설정 따르기",
-    "thinking_clear_title": "재정의를 지우고 추론 수준을 로컬 CLI 설정(claude/codex)에 맡깁니다"
+    "thinking_clear_title": "재정의를 지우고 추론 수준을 로컬 CLI 설정(claude/codex)에 맡깁니다",
+    "service_tier_default": "런타임 기본값",
+    "service_tier_tooltip": "속도 · {{value}}",
+    "service_tier_clear": "런타임 기본값",
+    "service_tier_clear_title": "속도 재정의를 지우고 로컬 Codex 설정에 맡깁니다"
   },
   "model_dropdown": {
     "label": "모델",
@@ -765,6 +770,9 @@
       "start_failed": "Agent Builder를 시작하지 못했습니다.",
       "send_failed": "메시지를 보내지 못했습니다.",
       "stop_failed": "현재 생성을 중지하지 못했습니다.",
+      "switch_runtime_failed": "런타임을 전환하지 못했습니다. 대화는 이전 런타임에서 계속 실행됩니다.",
+      "switch_runtime_pending": "현재 답변을 중지하면 런타임을 전환할 수 있습니다.",
+      "switch_runtime_success": "런타임을 전환했습니다. 설정 초안은 유지되며, 이후 대화는 새 런타임에서 새로운 모델 세션으로 이어집니다.",
       "chat_title": "Agent Builder",
       "chat_hint": "대화로 요구 사항을 정리하고 옆의 설정을 다듬으세요.",
       "runtime_online": "런타임 온라인",
@@ -785,6 +793,7 @@
     "create_and_add": "만들고 스쿼드에 추가",
     "creating": "에이전트 만드는 중…",
     "create_failed": "에이전트를 만들지 못했습니다.",
+    "name_conflict": "같은 이름의 에이전트가 이미 있습니다.",
     "created": "{{name}}을(를) 만들었습니다"
   },
   "actions": {

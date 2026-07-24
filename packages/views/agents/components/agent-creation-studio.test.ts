@@ -1,12 +1,17 @@
 import { createElement } from "react";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import { ApiError } from "@multica/core/api";
 import {
+  AgentNameField,
   ModeChooser,
+  StudioFooter,
   buildInvocationTargets,
+  classifyAgentCreateError,
   decodeBuilderInput,
   deriveDuplicateAccess,
   encodeBuilderInput,
+  getAgentCreationScreenKey,
   mergeBuilderDraft,
   parseBuilderDraft,
   pickBuilderRestore,
@@ -28,6 +33,14 @@ vi.mock("../../i18n", () => ({
             blank: { title: string; description: string };
             ai: { title: string; description: string };
           };
+          create_and_open: string;
+          create_and_add: string;
+          creating: string;
+          name_conflict: string;
+        };
+        create_dialog: {
+          name_label: string;
+          name_placeholder: string;
         };
       }) => string,
     ) =>
@@ -48,10 +61,124 @@ vi.mock("../../i18n", () => ({
               description: "Describe the outcome you want.",
             },
           },
+          create_and_open: "Create and open",
+          create_and_add: "Create and add",
+          creating: "Creating…",
+          name_conflict: "An agent with this name already exists.",
+        },
+        create_dialog: {
+          name_label: "Name",
+          name_placeholder: "Agent name",
         },
       }),
   }),
 }));
+
+describe("Agent creation studio screen keys", () => {
+  it("groups configuration modes and separates the AI setup and builder", () => {
+    expect(getAgentCreationScreenKey("blank", "")).toBe("configure");
+    expect(getAgentCreationScreenKey("template", "")).toBe("configure");
+    expect(getAgentCreationScreenKey("ai", "")).toBe("ai-setup");
+    expect(getAgentCreationScreenKey("ai", "session-1")).toBe("ai-builder");
+  });
+});
+
+describe("Agent creation errors", () => {
+  it("classifies a conflict as a name error", () => {
+    expect(
+      classifyAgentCreateError(
+        new ApiError("An agent with this name already exists", 409, "Conflict"),
+        "Could not create the agent.",
+        "This localized name is already in use.",
+      ),
+    ).toEqual({
+      nameError: "This localized name is already in use.",
+      formError: null,
+    });
+  });
+
+  it("classifies a network error as a form error", () => {
+    expect(
+      classifyAgentCreateError(
+        new Error("Network request failed"),
+        "Could not create the agent.",
+        "An agent with this name already exists.",
+      ),
+    ).toEqual({
+      nameError: null,
+      formError: "Network request failed",
+    });
+  });
+
+  it("renders a name error directly below the name input", () => {
+    const onChange = vi.fn();
+    render(
+      createElement(AgentNameField, {
+        name: "Existing agent",
+        error: "An agent with this name already exists",
+        onChange,
+      }),
+    );
+
+    const input = screen.getByRole("textbox", { name: "Name" });
+    const error = screen.getByText("An agent with this name already exists");
+    expect(input).toHaveAttribute("aria-invalid", "true");
+    expect(input).toHaveAttribute("aria-describedby", error.id);
+    expect(error).not.toHaveAttribute("role");
+    expect(
+      input.compareDocumentPosition(error) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    fireEvent.change(input, { target: { value: "New agent" } });
+    expect(onChange).toHaveBeenCalledWith("New agent");
+  });
+
+  it("focuses and selects the name input when a name error appears", () => {
+    const onChange = vi.fn();
+    const view = render(
+      createElement(AgentNameField, {
+        name: "Existing agent",
+        error: null,
+        onChange,
+      }),
+    );
+
+    const input = screen.getByRole("textbox", { name: "Name" });
+    expect(input).not.toHaveFocus();
+
+    view.rerender(
+      createElement(AgentNameField, {
+        name: "Existing agent",
+        error: "An agent with this name already exists",
+        onChange,
+      }),
+    );
+
+    expect(input).toHaveFocus();
+    expect(input).toHaveValue("Existing agent");
+    expect(input).toHaveProperty("selectionStart", 0);
+    expect(input).toHaveProperty("selectionEnd", "Existing agent".length);
+  });
+
+  it("renders a generic error on the left side of the sticky footer", () => {
+    render(
+      createElement(StudioFooter, {
+        canCreate: true,
+        creating: false,
+        squad: false,
+        error: "Network request failed",
+        onCreate: vi.fn(),
+      }),
+    );
+
+    const error = screen.getByRole("alert");
+    const button = screen.getByRole("button", { name: "Create and open" });
+    expect(error.parentElement).toBe(button.parentElement);
+    expect(
+      error.compareDocumentPosition(button) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+});
 
 const draft = (): AgentDraft => ({
   name: "Old name",

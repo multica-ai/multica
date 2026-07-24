@@ -193,15 +193,22 @@ func (q questionnaireAnswers) useCaseResolved() bool {
 }
 
 // questionnaireSchemaVersion is the schema this handler understands.
-// `complete()` and the funnel event are scoped to this version so a
+// `complete()` and the funnel events are scoped to this version so a
 // future v3 row can't be silently mis-counted against v2 semantics.
 const questionnaireSchemaVersion = 2
 
+// complete covers the IN-FLOW questionnaire only: role + use_case.
+// Source moved out of the onboarding flow (MUL-5159) — it is collected
+// later by the workspace backfill prompt, and its resolution is
+// tracked by the separate `onboarding_source_submitted` emission in
+// PatchOnboarding. Requiring source here would stall the funnel's
+// "questionnaire submitted" step for days (or forever, for users who
+// never see the backfill prompt).
 func (q questionnaireAnswers) complete() bool {
 	if q.Version != questionnaireSchemaVersion {
 		return false
 	}
-	return q.sourceResolved() && q.roleResolved() && q.useCaseResolved()
+	return q.roleResolved() && q.useCaseResolved()
 }
 
 // PatchOnboarding persists the user's questionnaire answers. The
@@ -210,9 +217,12 @@ func (q questionnaireAnswers) complete() bool {
 // onboarding entry starts at Welcome.
 //
 // Emits `onboarding_questionnaire_submitted` exactly once per user:
-// the first PATCH that transitions the answers from "at least one
-// slot empty" to "all three filled". Revisions past that point don't
-// re-emit — the funnel counts users, not edits.
+// the first PATCH that transitions role + use_case from "at least one
+// slot empty" to "both resolved". Emits `onboarding_source_submitted`
+// exactly once on the source slot's own unresolved → resolved
+// transition, which normally happens later via the workspace backfill
+// prompt. Revisions past those points don't re-emit — the funnel
+// counts users, not edits.
 func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -277,6 +287,22 @@ func (h *Handler) PatchOnboarding(w http.ResponseWriter, r *http.Request) {
 			after.SourceOther != "",
 			after.RoleOther != "",
 			after.UseCaseOther != "",
+		))
+	}
+
+	// Source resolves on its own timeline — typically days after the
+	// in-flow questionnaire, via the workspace backfill prompt (it can
+	// no longer resolve in-flow). Emit on the unresolved → resolved
+	// transition so the backfill prompt's answer/decline rate shows up
+	// in Grafana; the transition check keeps the emission
+	// once-per-user, mirroring the questionnaire event above.
+	if after.Version == questionnaireSchemaVersion &&
+		after.sourceResolved() && !before.sourceResolved() {
+		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.OnboardingSourceSubmitted(
+			userID,
+			[]string(after.Source),
+			after.SourceSkipped,
+			after.SourceOther != "",
 		))
 	}
 

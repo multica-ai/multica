@@ -28,10 +28,11 @@ import (
 // default, which is always closer to what the user's account /
 // environment actually supports than a static guess here.
 type Model struct {
-	ID       string `json:"id"`
-	Label    string `json:"label"`
-	Provider string `json:"provider,omitempty"`
-	Default  bool   `json:"default,omitempty"`
+	ID           string             `json:"id"`
+	Label        string             `json:"label"`
+	Provider     string             `json:"provider,omitempty"`
+	Default      bool               `json:"default,omitempty"`
+	ServiceTiers []ModelServiceTier `json:"service_tiers,omitempty"`
 	// Thinking advertises the runtime's reasoning/effort catalog for this
 	// model. nil means the runtime/model has no thinking-level control
 	// (or the daemon couldn't discover one); the UI hides its picker. The
@@ -39,6 +40,15 @@ type Model struct {
 	// per-model and Claude's `--effort` superset has known per-model gaps
 	// (`xhigh` is Opus-only, `max` is session-only). See MUL-2339.
 	Thinking *ModelThinking `json:"thinking,omitempty"`
+}
+
+// ModelServiceTier is one runtime-native execution tier advertised for a
+// model. ID is sent back to the provider protocol unchanged; Name and
+// Description are display copy owned by the runtime catalog.
+type ModelServiceTier struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // ModelThinking carries the per-model reasoning/effort catalog
@@ -320,7 +330,9 @@ func claudeStaticModels() []Model {
 // sync with the visible entries in the newest locally verified bundled
 // catalog, plus still-common models from older Codex releases. Each entry
 // carries its own reasoning catalog so old/offline CLIs retain the same model
-// + thinking picker contract as dynamic discovery.
+// + thinking picker contract as dynamic discovery. Service tiers are
+// intentionally NOT guessed here: they are runtime/version/account-sensitive,
+// so a discovery failure hides the speed picker and fails the override closed.
 func codexStaticModels() []Model {
 	// `Default` here is NOT a user-facing "default model" badge — the picker
 	// stopped rendering that (Multica follows the CLI config when the model is
@@ -821,9 +833,10 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 
 // discoverKimiModels spins up a throwaway `kimi acp` process and
 // drives the same minimal ACP handshake as Hermes to surface the
-// model catalog advertised by Kimi's `session/new` response. Kimi's
-// ACPServer.new_session returns a `models` block of the same shape
-// (`availableModels`/`currentModelId`) so the parsing path is shared.
+// model catalog advertised by Kimi's `session/new` response. Kimi
+// ≤0.28 returns a `models` block (`availableModels`/`currentModelId`);
+// 0.29 moved the same catalog into `configOptions` (MUL-5239). The
+// shared parser accepts both, so the discovery path stays identical.
 //
 // Failure modes (kimi missing, not logged in, config error) all
 // return an empty list so the UI falls back to manual entry.
@@ -922,8 +935,9 @@ type acpDiscoveryProvider struct {
 // discoverACPModels runs the ACP handshake for any agent CLI that
 // implements the standard `initialize` + `session/new` flow and
 // advertises its model catalog in the response under
-// `models.availableModels` / `models.currentModelId`. Provider-specific
-// `launchArgs` select ACP mode (e.g. `acp` vs `--acp`).
+// `models.availableModels` / `models.currentModelId`, or under the
+// newer `configOptions` list. Provider-specific `launchArgs` select
+// ACP mode (e.g. `acp` vs `--acp`).
 func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
 	fail := func(stage string, err error) ([]Model, error) {
 		if p.strictErrors {
@@ -1074,6 +1088,18 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 		return fail("session/new", err)
 	}
 	models := parseACPSessionNewModels(sessionResult)
+	if len(models) == 0 {
+		// session/new succeeded but carried no catalog we recognise. This
+		// is what upstream schema drift looks like from here (MUL-5239:
+		// kimi 0.29 moved the catalog from `models` to `configOptions`),
+		// and without this line it is indistinguishable from "the CLI
+		// really has no models". Log the top-level keys only — never the
+		// response body, which carries session ids and account-shaped data.
+		slog.Debug("ACP model discovery found no models in session/new response",
+			"binary", executablePath,
+			"result_keys", strings.Join(acpResultTopLevelKeys(sessionResult), ","),
+		)
+	}
 	if models == nil {
 		return fail("session/new model parsing", fmt.Errorf("response contained no model catalog"))
 	}
@@ -1084,8 +1110,8 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 }
 
 // parseACPSessionNewModels extracts the model catalog from an ACP
-// `session/new` response. Both Hermes and Kimi (and any other ACP
-// agent that follows the standard schema) emit:
+// `session/new` response. Hermes and older Kimi (and any other ACP
+// agent that follows that schema) emit:
 //
 //	{
 //	  "sessionId": "...",
@@ -1096,6 +1122,12 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 //	    "currentModelId": "..."
 //	  }
 //	}
+//
+// Newer agents advertise the same catalog through the ACP
+// `configOptions` list instead — see parseACPConfigOptionModels. Both
+// shapes are accepted: the `models` block wins when present, and
+// `configOptions` is consulted only when it yields nothing, so no
+// existing provider changes behaviour.
 //
 // Returns nil (not an empty slice) when the payload is missing so
 // the caller can distinguish "parsed with no models" (valid but
@@ -1137,19 +1169,125 @@ func parseACPSessionNewModels(raw json.RawMessage) []Model {
 			continue
 		}
 		seen[modelID] = true
-		label := acpModelLabel(m.Name, modelID)
-		provider := ""
-		if idx := strings.Index(modelID, ":"); idx > 0 {
-			provider = modelID[:idx]
-		}
-		models = append(models, Model{
-			ID:       modelID,
-			Label:    label,
-			Provider: provider,
-			Default:  modelID == currentModelID,
-		})
+		models = append(models, acpModelEntry(modelID, m.Name, currentModelID))
+	}
+	if len(models) > 0 {
+		return models
+	}
+	if fromConfig := parseACPConfigOptionModels(raw); len(fromConfig) > 0 {
+		return fromConfig
 	}
 	return models
+}
+
+// parseACPConfigOptionModels extracts the model catalog from the ACP
+// `configOptions` list returned by `session/new`. Kimi Code 0.29 dropped
+// the top-level `models` block in favour of this shape (MUL-5239):
+//
+//	{
+//	  "sessionId": "...",
+//	  "configOptions": [
+//	    {
+//	      "type": "select", "id": "model", "name": "Model", "category": "model",
+//	      "currentValue": "kimi-code/k3",
+//	      "options": [
+//	        {"value": "kimi-code/k3", "name": "K3"},
+//	        {"value": "kimi-code/kimi-for-coding", "name": "K2.7 Coding"}
+//	      ]
+//	    },
+//	    {"id": "thinking", "category": "thought_level", ...}
+//	  ]
+//	}
+//
+// A config option counts as the model picker when its `id` or `category`
+// is "model" (case-insensitive). Every other option — thinking level in
+// particular — is deliberately ignored: those are separate product
+// surfaces, and mapping them into the model dropdown would offer values
+// `session/set_model` cannot honour. `currentValue` marks the default.
+//
+// Returns nil when no model option is present, so the caller can keep
+// whatever the `models` block produced.
+func parseACPConfigOptionModels(raw json.RawMessage) []Model {
+	type acpConfigChoice struct {
+		Value string `json:"value"`
+		Name  string `json:"name"`
+	}
+	type acpConfigOption struct {
+		ID                string            `json:"id"`
+		Category          string            `json:"category"`
+		CurrentValue      string            `json:"currentValue"`
+		CurrentValueSnake string            `json:"current_value"`
+		Options           []acpConfigChoice `json:"options"`
+	}
+	var resp struct {
+		ConfigOptions      []acpConfigOption `json:"configOptions"`
+		ConfigOptionsSnake []acpConfigOption `json:"config_options"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil
+	}
+	configOptions := resp.ConfigOptions
+	if len(configOptions) == 0 {
+		configOptions = resp.ConfigOptionsSnake
+	}
+	for _, opt := range configOptions {
+		if !strings.EqualFold(strings.TrimSpace(opt.ID), "model") &&
+			!strings.EqualFold(strings.TrimSpace(opt.Category), "model") {
+			continue
+		}
+		currentValue := strings.TrimSpace(opt.CurrentValue)
+		if currentValue == "" {
+			currentValue = strings.TrimSpace(opt.CurrentValueSnake)
+		}
+		models := make([]Model, 0, len(opt.Options))
+		seen := map[string]bool{}
+		for _, choice := range opt.Options {
+			modelID := strings.TrimSpace(choice.Value)
+			if modelID == "" || seen[modelID] {
+				continue
+			}
+			seen[modelID] = true
+			models = append(models, acpModelEntry(modelID, choice.Name, currentValue))
+		}
+		if len(models) > 0 {
+			return models
+		}
+	}
+	return nil
+}
+
+// acpModelEntry builds one dropdown entry from an ACP-advertised model id
+// and its display name. Provider is derived from the `provider:model` form
+// only — ids like kimi's `kimi-code/k3` carry no colon and stay ungrouped,
+// which matches how the UI renders a flat catalog.
+func acpModelEntry(modelID, name, currentModelID string) Model {
+	provider := ""
+	if idx := strings.Index(modelID, ":"); idx > 0 {
+		provider = modelID[:idx]
+	}
+	return Model{
+		ID:       modelID,
+		Label:    acpModelLabel(name, modelID),
+		Provider: provider,
+		Default:  modelID == currentModelID,
+	}
+}
+
+// acpResultTopLevelKeys returns the sorted top-level object keys of an ACP
+// result. Keys only, never values: enough to tell `configOptions` drift from
+// a genuinely empty catalog in daemon.log without logging session ids or any
+// other content from the upstream response.
+func acpResultTopLevelKeys(raw json.RawMessage) []string {
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &obj); err != nil {
+		return nil
+	}
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 func acpModelLabel(name, modelID string) string {
