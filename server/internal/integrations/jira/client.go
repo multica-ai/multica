@@ -155,35 +155,38 @@ func (c *HTTPClient) GetIssue(ctx context.Context, baseURL, email, token, key st
 	}, nil
 }
 
-// SearchIssues calls GET /rest/api/2/search?jql=... with basic auth,
-// following startAt pagination until maxResults (capped at searchMaxCap)
-// issues are collected or the site reports no more results. The v2 search
-// endpoint is served by both Jira Cloud and Data Center and returns the
-// description as a plain string (DescriptionText handles ADF defensively).
+// SearchIssues calls GET /rest/api/3/search/jql?jql=... with basic auth,
+// following nextPageToken (cursor) pagination until maxResults (capped at
+// searchMaxCap) issues are collected or the site reports the last page. This
+// is the Jira Cloud "enhanced JQL" endpoint that replaced the removed
+// offset-based /rest/api/2/search. `fields` must be requested explicitly, and
+// descriptions come back as ADF JSON (DescriptionText flattens defensively).
 func (c *HTTPClient) SearchIssues(ctx context.Context, baseURL, email, token, jql string, maxResults int) ([]Issue, error) {
 	if maxResults <= 0 || maxResults > searchMaxCap {
 		maxResults = searchMaxCap
 	}
 	out := make([]Issue, 0, searchPageSize)
-	for startAt := 0; len(out) < maxResults; {
+	nextPageToken := ""
+	for len(out) < maxResults {
 		pageSize := searchPageSize
 		if remaining := maxResults - len(out); remaining < pageSize {
 			pageSize = remaining
 		}
 		q := url.Values{}
 		q.Set("jql", jql)
-		q.Set("startAt", fmt.Sprintf("%d", startAt))
 		q.Set("maxResults", fmt.Sprintf("%d", pageSize))
 		q.Set("fields", "summary,description,status,priority,assignee")
-		body, err := c.get(ctx, baseURL, email, token, "/rest/api/2/search?"+q.Encode())
+		if nextPageToken != "" {
+			q.Set("nextPageToken", nextPageToken)
+		}
+		body, err := c.get(ctx, baseURL, email, token, "/rest/api/3/search/jql?"+q.Encode())
 		if err != nil {
 			return nil, err
 		}
 		var page struct {
-			StartAt    int `json:"startAt"`
-			MaxResults int `json:"maxResults"`
-			Total      int `json:"total"`
-			Issues     []struct {
+			NextPageToken string `json:"nextPageToken"`
+			IsLast        bool   `json:"isLast"`
+			Issues        []struct {
 				ID     string `json:"id"`
 				Key    string `json:"key"`
 				Fields struct {
@@ -225,9 +228,10 @@ func (c *HTTPClient) SearchIssues(ctx context.Context, baseURL, email, token, jq
 				break
 			}
 		}
-		startAt += len(page.Issues)
-		// Stop when the page came back short or the site says we've seen all.
-		if len(page.Issues) == 0 || startAt >= page.Total {
+		nextPageToken = page.NextPageToken
+		// The enhanced endpoint omits nextPageToken (and/or sets isLast) on the
+		// final page; stop there or if the page came back empty.
+		if len(page.Issues) == 0 || page.IsLast || nextPageToken == "" {
 			break
 		}
 	}

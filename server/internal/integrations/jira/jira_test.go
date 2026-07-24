@@ -240,14 +240,16 @@ func TestHTTPClientSearchIssues(t *testing.T) {
 	// 3 matching issues served in pages, so pagination is exercised.
 	total := 3
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/rest/api/2/search" {
+		if r.URL.Path != "/rest/api/3/search/jql" {
 			t.Errorf("unexpected path %s", r.URL.Path)
 		}
 		if got := r.URL.Query().Get("jql"); got != "assignee = currentUser()" {
 			t.Errorf("jql = %q", got)
 		}
 		startAt := 0
-		fmt.Sscanf(r.URL.Query().Get("startAt"), "%d", &startAt)
+		if tok := r.URL.Query().Get("nextPageToken"); tok != "" {
+			fmt.Sscanf(tok, "%d", &startAt)
+		}
 		pageSize := 2 // server-side clamp below the client's requested page size
 		issues := []map[string]any{}
 		for i := startAt; i < total && len(issues) < pageSize; i++ {
@@ -262,8 +264,12 @@ func TestHTTPClientSearchIssues(t *testing.T) {
 				},
 			})
 		}
+		next := ""
+		if startAt+len(issues) < total {
+			next = fmt.Sprintf("%d", startAt+len(issues))
+		}
 		json.NewEncoder(w).Encode(map[string]any{
-			"startAt": startAt, "maxResults": pageSize, "total": total, "issues": issues,
+			"issues": issues, "nextPageToken": next, "isLast": next == "",
 		})
 	}))
 	defer srv.Close()
@@ -288,7 +294,9 @@ func TestHTTPClientSearchIssues(t *testing.T) {
 func TestHTTPClientSearchIssuesRespectsMaxResults(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		startAt := 0
-		fmt.Sscanf(r.URL.Query().Get("startAt"), "%d", &startAt)
+		if tok := r.URL.Query().Get("nextPageToken"); tok != "" {
+			fmt.Sscanf(tok, "%d", &startAt)
+		}
 		pageSize := 0
 		fmt.Sscanf(r.URL.Query().Get("maxResults"), "%d", &pageSize)
 		issues := []map[string]any{}
@@ -299,7 +307,8 @@ func TestHTTPClientSearchIssuesRespectsMaxResults(t *testing.T) {
 			})
 		}
 		json.NewEncoder(w).Encode(map[string]any{
-			"startAt": startAt, "maxResults": pageSize, "total": 10000, "issues": issues,
+			// Always advertise another page so the client stops only at maxResults.
+			"issues": issues, "nextPageToken": fmt.Sprintf("%d", startAt+pageSize),
 		})
 	}))
 	defer srv.Close()
