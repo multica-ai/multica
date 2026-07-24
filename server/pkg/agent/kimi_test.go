@@ -335,3 +335,147 @@ func TestKimiResumeIncludesMcpServers(t *testing.T) {
 		t.Fatalf("session/resume.mcpServers: got %v, want one entry named fetch", servers)
 	}
 }
+
+// fakeKimiPoisonedHistoryScript mimics the kimi CLI when asked to resume a
+// session whose conversation history contains an empty assistant message. The
+// adapter emits the "provider.api_error: 400 … role 'assistant' must not be
+// empty" line to stderr and returns a completed (end_turn) JSON-RPC response —
+// matching the real kimi adapter behaviour that prompted MUL-5154.
+func fakeKimiPoisonedHistoryScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/resume"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_poison"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' "error: failed to run prompt: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty" >&2
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKimiBackendPoisonedHistorySetsResumeRejected verifies that when the kimi
+// backend receives the "assistant must not be empty" 400 error while resuming
+// a session, it sets ResumeRejected=true so the daemon clears the broken
+// session pointer and starts fresh on the next task.
+func TestKimiBackendPoisonedHistorySetsResumeRejected(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiPoisonedHistoryScript()))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: "ses_poison",
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed for poisoned history, got %q", result.Status)
+		}
+		if !result.ResumeRejected {
+			t.Error("expected ResumeRejected=true so the daemon clears the broken session")
+		}
+		if !strings.Contains(result.Error, "must not be empty") {
+			t.Errorf("expected error to mention the poisoned-history detail, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// TestKimiBackendPoisonedHistoryFreshRunNoResumeRejected verifies that when
+// the same poisoned-history error occurs on a FRESH run (ResumeSessionID==""),
+// ResumeRejected must stay false. A fresh run cannot inherit a broken history,
+// so flagging it would incorrectly prevent the next task from resuming a good
+// session.
+func TestKimiBackendPoisonedHistoryFreshRunNoResumeRejected(t *testing.T) {
+	t.Parallel()
+
+	// Re-use the same fake script; the difference is no ResumeSessionID in opts.
+	// The script only handles session/resume, so without it the session/new path
+	// runs but the fake exits early — that's fine, we only care about the flag.
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	// Use a script that emits the poisoned error without needing a resume request.
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fresh"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '%s\n' "error: failed to run prompt: provider.api_error: 400 the message at position 1 with role 'assistant' must not be empty" >&2
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("kimi", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// No ResumeSessionID — fresh run.
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q", result.Status)
+		}
+		if result.ResumeRejected {
+			t.Error("ResumeRejected must be false on a fresh run (no ResumeSessionID)")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}

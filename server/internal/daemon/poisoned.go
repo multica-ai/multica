@@ -93,25 +93,40 @@ func classifyPoisonedOutput(output string) (string, bool) {
 // next task on the issue starts a fresh session instead of permanently
 // inheriting the bad state.
 //
-// Match shape: the Claude Code SDK and similar backends surface upstream
-// API failures verbatim, e.g.
+// Two recognised shapes:
 //
-//	API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Could not process image"},"request_id":"..."}
+//  1. Anthropic/Claude style — Claude Code surfaces upstream API failures
+//     verbatim with the numeric status code and error type, e.g.
 //
-// Matching on both "400" and "invalid_request_error" keeps the classifier
-// narrow: 429 rate-limits, 5xx overloads, and tool-shaped errors are
-// transient and SHOULD resume on retry.
+//     API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"Could not process image"},...}
+//
+//     Matching on both "400" and "invalid_request_error" keeps it narrow:
+//     429 rate-limits, 5xx overloads, and tool-shaped errors are transient.
+//
+//  2. Kimi style — the Kimi ACP adapter strips the numeric status code before
+//     the error surfaces (acpProviderErrorSniffer.messageLocked), leaving:
+//
+//     kimi provider error: the message at position N with role 'assistant' must not be empty
+//
+//     This "assistant message must not be empty" pattern indicates the same
+//     permanently poisoned history: resuming replays the same bad message in
+//     the same position. Matching on both "role 'assistant'" and "must not be
+//     empty" keeps it specific to this API contract.
 func classifyPoisonedError(errMsg string) (string, bool) {
 	if errMsg == "" {
 		return "", false
 	}
 	lowered := strings.ToLower(errMsg)
-	// Both markers must be present: "400" alone is too generic (a tool
-	// could surface a 400 from anywhere) and "invalid_request_error"
-	// alone could in theory appear in non-poisoning contexts. The
-	// combination is the canonical Anthropic error shape and indicates
-	// the request body — i.e. the conversation history — is the problem.
+	// Anthropic/Claude: "400" + "invalid_request_error" is the canonical
+	// poisoned-conversation fingerprint. Both must appear; "400" alone is too
+	// generic (a tool could surface it), and "invalid_request_error" alone
+	// could theoretically appear in benign contexts.
 	if strings.Contains(lowered, "invalid_request_error") && strings.Contains(lowered, "400") {
+		return FailureReasonAPIInvalidRequest, true
+	}
+	// Kimi: the status code is stripped by the sniffer's messageLocked path,
+	// so match on the precise error text instead.
+	if strings.Contains(lowered, "role 'assistant'") && strings.Contains(lowered, "must not be empty") {
 		return FailureReasonAPIInvalidRequest, true
 	}
 	return "", false
