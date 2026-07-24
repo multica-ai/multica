@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/url"
 	"os/exec"
 	"strings"
 	"sync"
@@ -877,16 +878,115 @@ func TestTargetForResolvesWarehouseUnderItsBasePath(t *testing.T) {
 	}
 }
 
-func TestTargetForResolvesDataCatalogOnItsPrivateHost(t *testing.T) {
-	target, err := TargetFor("data-catalog")
-	if err != nil {
-		t.Fatalf("TargetFor(data-catalog) failed: %v", err)
+func TestTargetForResolvesRoleAwareDataCatalogChecks(t *testing.T) {
+	tests := []struct {
+		name        string
+		host        string
+		path        string
+		access      bool
+		idKey       string
+		secretKey   string
+		navigate    string
+		wantMarkers []string
+	}{
+		{
+			name: "data-catalog", host: "atlas.firtal.com", path: "/",
+			access: true, idKey: "ADMIN_CF_ACCESS_CLIENT_ID", secretKey: "ADMIN_CF_ACCESS_CLIENT_SECRET",
+			navigate: "Permissions", wantMarkers: []string{"Permissions", "Roles", "Assignments"},
+		},
+		{
+			name: "data-catalog-reader", host: "atlas.firtal.com", path: "/",
+			access: true, idKey: "READER_CF_ACCESS_CLIENT_ID", secretKey: "READER_CF_ACCESS_CLIENT_SECRET",
+			wantMarkers: []string{"Atlas Graph Health"},
+		},
+		{
+			name: "data-catalog-reader-permissions", host: "atlas.firtal.com", path: "/permissions",
+			access: true, idKey: "READER_CF_ACCESS_CLIENT_ID", secretKey: "READER_CF_ACCESS_CLIENT_SECRET",
+			wantMarkers: []string{"No access"},
+		},
+		{
+			name: "data-catalog-unknown", host: "data-catalog.internal:3000", path: "/",
+			wantMarkers: []string{"No access", "All services healthy"},
+		},
 	}
-	if target.Host() != "data-catalog.internal:3000" {
-		t.Fatalf("host = %q, want data-catalog.internal:3000", target.Host())
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			target, err := TargetFor(test.name)
+			if err != nil {
+				t.Fatalf("TargetFor(%s) failed: %v", test.name, err)
+			}
+			parsed, _ := url.Parse(target.URL)
+			if target.Host() != test.host || parsed.Path != test.path {
+				t.Fatalf("target = %q%s, want %q%s", target.Host(), parsed.Path, test.host, test.path)
+			}
+			if target.AccessHeaders != test.access {
+				t.Fatalf("AccessHeaders = %t, want %t", target.AccessHeaders, test.access)
+			}
+			if target.AccessClientIDKey != test.idKey || target.AccessClientSecretKey != test.secretKey {
+				t.Fatalf("access keys = %q/%q, want %q/%q", target.AccessClientIDKey, target.AccessClientSecretKey, test.idKey, test.secretKey)
+			}
+			if target.NavigateLinkName != test.navigate {
+				t.Fatalf("navigate = %q, want %q", target.NavigateLinkName, test.navigate)
+			}
+			if strings.Join(target.ExpectedText, "|") != strings.Join(test.wantMarkers, "|") {
+				t.Fatalf("markers = %v, want %v", target.ExpectedText, test.wantMarkers)
+			}
+			if target.UsernameSelector != "" || target.PasswordSelector != "" {
+				t.Fatal("data-catalog service-token targets must not request a form login")
+			}
+		})
 	}
-	if target.Vault != "" || target.SessionCookie {
-		t.Fatal("data-catalog must not request credentials: the private host carries no app login")
+}
+
+type dataCatalogAccessCommander struct {
+	calls []commandCall
+}
+
+func (c *dataCatalogAccessCommander) Run(_ context.Context, stdin string, args ...string) ([]byte, error) {
+	c.calls = append(c.calls, commandCall{args: append([]string(nil), args...), stdin: stdin})
+	switch {
+	case len(args) > 0 && args[len(args)-1] == "snapshot":
+		return []byte("Atlas Graph Health\n"), nil
+	case len(args) > 0 && args[len(args)-1] == "url":
+		return []byte("https://atlas.firtal.com/\n"), nil
+	case len(args) > 0 && args[len(args)-1] == "errors":
+		return []byte("[]\n"), nil
+	}
+	return nil, nil
+}
+
+func (c *dataCatalogAccessCommander) CaptureScreenshot(_ context.Context, args ...string) ([]byte, error) {
+	c.calls = append(c.calls, commandCall{args: append([]string(nil), args...)})
+	return append([]byte(nil), pngSignature...), nil
+}
+
+func TestVerifyUsesAccessOnlyDataCatalogCredentialWithoutFormLogin(t *testing.T) {
+	commander := &dataCatalogAccessCommander{}
+	credential := Credential{AccessClientID: "reader.access", AccessClientSecret: "reader-secret"}
+
+	if _, err := testRunner(commander).Verify(context.Background(), "data-catalog-reader", credential); err != nil {
+		t.Fatalf("Verify failed: %v", err)
+	}
+
+	batchCalls := 0
+	for _, call := range commander.calls {
+		joined := strings.Join(call.args, " ")
+		if strings.HasSuffix(joined, "batch") {
+			batchCalls++
+			if !strings.Contains(call.stdin, "reader.access") || !strings.Contains(call.stdin, "reader-secret") {
+				t.Fatalf("access batch did not carry both service-token headers: %s", call.stdin)
+			}
+		}
+		if strings.Contains(joined, "reader.access") || strings.Contains(joined, "reader-secret") {
+			t.Fatalf("access credential leaked into argv: %s", joined)
+		}
+		if strings.Contains(call.stdin, "\"fill\"") {
+			t.Fatalf("access-only target attempted a form login: %s", call.stdin)
+		}
+	}
+	if batchCalls != 1 {
+		t.Fatalf("batch calls = %d, want one access-header navigation", batchCalls)
 	}
 }
 
