@@ -3,6 +3,8 @@ package execenv
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -216,7 +218,7 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 		src := filepath.Join(sharedHome, name)
 		dst := filepath.Join(codexHome, name)
 		if err := ensureSymlink(src, dst); err != nil {
-			logger.Warn("execenv: codex-home symlink failed", "file", name, "error", err)
+			return errors.New("provision codex auth file failed")
 		}
 	}
 
@@ -225,6 +227,9 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	// per-task home is tracking the shared ~/.codex/auth.json or has drifted
 	// into a stale local copy.
 	logCodexAuthState(filepath.Join(codexHome, "auth.json"), logger)
+	if err := validateCodexAuthDestination(sharedHome, filepath.Join(codexHome, "auth.json")); err != nil {
+		return err
+	}
 
 	// Sync isolated files from the shared source. Track the config.toml sync
 	// outcome specifically: on Windows a failed sync makes the per-task config
@@ -322,14 +327,84 @@ func resolveSharedCodexHome() string {
 	if v := os.Getenv("CODEX_HOME"); v != "" {
 		abs, err := filepath.Abs(v)
 		if err == nil {
+			if isManagedCodexHome(abs) {
+				return defaultCodexHome()
+			}
 			return abs
 		}
 	}
+	return defaultCodexHome()
+}
+
+func defaultCodexHome() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return filepath.Join(os.TempDir(), ".codex") // last resort fallback
 	}
 	return filepath.Join(home, ".codex")
+}
+
+func isManagedCodexHome(path string) bool {
+	if filepath.Base(path) != "codex-home" {
+		return false
+	}
+	for dir := filepath.Dir(path); ; dir = filepath.Dir(dir) {
+		data, err := os.ReadFile(filepath.Join(dir, TaskContextMarkerRelPath))
+		if err == nil {
+			var marker taskContextMarkerFile
+			return json.Unmarshal(data, &marker) == nil && marker.ManagedBy == TaskContextMarkerManagedBy
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return false
+		}
+	}
+}
+
+func isReadableRegularFile(path string) bool {
+	fi, err := os.Stat(path)
+	if err != nil || !fi.Mode().IsRegular() {
+		return false
+	}
+	f, err := os.Open(path)
+	if err != nil {
+		return false
+	}
+	return f.Close() == nil
+}
+
+func codexFileAuthRequired(sharedHome string) bool {
+	if strings.TrimSpace(os.Getenv("OPENAI_API_KEY")) != "" {
+		return false
+	}
+	data, err := os.ReadFile(filepath.Join(sharedHome, "config.toml"))
+	if err != nil {
+		return true
+	}
+	var cfg struct {
+		ModelProvider  string `toml:"model_provider"`
+		ModelProviders map[string]struct {
+			EnvKey string `toml:"env_key"`
+		} `toml:"model_providers"`
+	}
+	if toml.Unmarshal(data, &cfg) != nil || cfg.ModelProvider == "" {
+		return true
+	}
+	provider, ok := cfg.ModelProviders[cfg.ModelProvider]
+	return !ok || provider.EnvKey == "" || strings.TrimSpace(os.Getenv(provider.EnvKey)) == ""
+}
+
+func validateCodexAuthDestination(sharedHome, destination string) error {
+	if !codexFileAuthRequired(sharedHome) {
+		return nil
+	}
+	if !isReadableRegularFile(filepath.Join(sharedHome, "auth.json")) {
+		return errors.New("codex file authentication requires readable durable source auth.json")
+	}
+	if !isReadableRegularFile(destination) {
+		return errors.New("codex file authentication requires readable provisioned auth.json")
+	}
+	return nil
 }
 
 // codexSessionStateGlobs are the session-derived SQLite state Codex builds

@@ -2166,6 +2166,7 @@ func TestPrepareCodexHomeCopiesRelativeModelCatalog(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_catalog_json = "cc-switch-model-catalog.json"`), 0o644); err != nil {
 		t.Fatalf("write shared config.toml: %v", err)
 	}
@@ -2192,6 +2193,7 @@ func TestPrepareCodexHomeReportsMissingModelCatalogPath(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(`model_catalog_json = "missing-catalog.json"`), 0o644); err != nil {
 		t.Fatalf("write shared config.toml: %v", err)
 	}
@@ -2218,6 +2220,7 @@ func TestPrepareCodexHomeStripsSkillsConfigEntries(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	sharedConfig := `model = "o3"
 
 [[skills.config]]
@@ -2265,6 +2268,7 @@ func TestPrepareCodexHomeSkipsMissingFiles(t *testing.T) {
 
 	// Empty shared home — no files to seed.
 	sharedHome := t.TempDir()
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	codexHome := filepath.Join(t.TempDir(), "codex-home")
@@ -2374,6 +2378,7 @@ func TestPrepareCodexHome_RefreshesStaleCopiedConfigOnReuse(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	oldConfig := `model_provider = "old-provider"
 
 [model_providers.old-provider]
@@ -2481,6 +2486,7 @@ func TestPrepareCodexHome_DropsCopiedConfigWhenSharedSourceRemoved(t *testing.T)
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	oldConfig := `model_provider = "old-provider"
 
 [model_providers.old-provider]
@@ -3185,6 +3191,7 @@ func TestPrepareCodexHomeEnsuresNetworkAccess(t *testing.T) {
 
 	// Empty shared home — no config.toml to copy.
 	sharedHome := t.TempDir()
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	codexHome := filepath.Join(t.TempDir(), "codex-home")
@@ -3211,6 +3218,7 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	t.Setenv("CODEX_HOME", sharedHome)
 
 	workspacesRoot := t.TempDir()
@@ -3254,6 +3262,7 @@ func TestReuseRestoresCodexHome(t *testing.T) {
 }
 
 func TestReuseRestoresCodexPluginCache(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
@@ -3584,6 +3593,7 @@ func TestReuseInvalidatesUnboundLegacyModelsCache(t *testing.T) {
 }
 
 func TestReuseWritesMissingCodexWorkspaceSkills(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
@@ -3638,6 +3648,7 @@ func TestReuseWritesMissingCodexWorkspaceSkills(t *testing.T) {
 }
 
 func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
@@ -3701,6 +3712,7 @@ func TestReuseUpdatesCodexWorkspaceSkills(t *testing.T) {
 // inside a Multica task, despite the daemon redirecting CODEX_HOME to a
 // per-task directory.
 func TestPrepareCodexSeedsUserSkills(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
@@ -3766,6 +3778,7 @@ func TestPrepareCodexSeedsUserSkills(t *testing.T) {
 // skill, the workspace version fully replaces the user version (rather than
 // leaving stale user files lingering).
 func TestPrepareCodexWorkspaceSkillBeatsUserSkillOnConflict(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
@@ -3818,6 +3831,7 @@ func TestPrepareCodexWorkspaceSkillBeatsUserSkillOnConflict(t *testing.T) {
 // when ~/.codex/skills doesn't exist, the seed step is a no-op and Prepare
 // still succeeds.
 func TestPrepareCodexNoUserSkillsDir(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
@@ -3845,6 +3859,7 @@ func TestPrepareCodexNoUserSkillsDir(t *testing.T) {
 // installer directory. The per-task home must end up with a real copy, not
 // a dangling symlink that points outside the task root.
 func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink semantics differ on Windows; covered by Unix path")
 	}
@@ -3902,6 +3917,7 @@ func TestPrepareCodexResolvesUserSkillSymlinks(t *testing.T) {
 // TestReuseSeedsUserSkillUpdates ensures that user-skill edits between two
 // runs of the same task (the Reuse path) propagate into the per-task home.
 func TestReuseSeedsUserSkillUpdates(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
@@ -3954,6 +3970,7 @@ func TestReuseSeedsUserSkillUpdates(t *testing.T) {
 // with a workspace skill `Writing`, the user-version support files must not
 // linger under the workspace skill's directory.
 func TestReuseClearsUserSkillResidueOnWorkspaceConflict(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()
@@ -4015,6 +4032,7 @@ func TestReuseClearsUserSkillResidueOnWorkspaceConflict(t *testing.T) {
 // per-task home on Reuse — otherwise users would still see deleted skills
 // surface to the codex CLI.
 func TestReuseClearsRemovedUserSkill(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "test-key")
 	// Cannot use t.Parallel() with t.Setenv.
 
 	sharedHome := t.TempDir()

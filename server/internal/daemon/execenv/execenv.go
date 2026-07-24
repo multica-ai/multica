@@ -578,6 +578,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		env.TaskHome = taskHome
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task.AgentID, params.Task.IssueID), WritableRoots: writableRoots, CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
+			return nil
 		} else {
 			env.CodexHome = codexHome
 			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
