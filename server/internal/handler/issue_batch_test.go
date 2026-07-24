@@ -383,6 +383,26 @@ func TestBatchChildDoneCrossStage_Cancelled(t *testing.T) {
 	}
 }
 
+func TestBatchChildAttention_OneCommentOneWake(t *testing.T) {
+	fx := newStagedBatchFixture(t)
+
+	batchSetStatus(t, []string{fx.stage1[0].ID, fx.stage1[1].ID}, "blocked")
+
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("expected exactly 1 attention comment on parent, got %d", got)
+	}
+	content, _, _, _ := systemCommentOn(t, fx.parent.ID)
+	if !strings.Contains(content, "needs attention after a batch update") {
+		t.Errorf("expected batch attention handoff, got: %s", content)
+	}
+	if !strings.Contains(content, "is blocked") {
+		t.Errorf("expected blocked status in handoff, got: %s", content)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, fx.agentID); got != 1 {
+		t.Fatalf("expected exactly 1 pending parent task, got %d", got)
+	}
+}
+
 // TestBatchChildDoneClosesLowerStageOnly — when a batch finishes only the lower
 // stage (a later stage still has open children), the parent must be told Stage 1
 // is complete AND accurately pointed at Stage 2 as next. Guards against

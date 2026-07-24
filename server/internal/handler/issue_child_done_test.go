@@ -378,6 +378,96 @@ func TestChildDoneSkippedWhenParentMember(t *testing.T) {
 	}
 }
 
+func TestChildAttentionInReviewWakesParentAgent(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT id FROM agent WHERE workspace_id = $1 AND name = $2`,
+		testWorkspaceID, "Handler Test Agent",
+	).Scan(&agentID); err != nil {
+		t.Fatalf("locate test agent: %v", err)
+	}
+	setIssueAssigneeDirect(t, fx.parent.ID, "agent", agentID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM agent_task_queue WHERE issue_id = $1`, fx.parent.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "A sub-issue needs attention") {
+		t.Errorf("expected child attention handoff, got: %s", content)
+	}
+	if !strings.Contains(content, "is in review") {
+		t.Errorf("expected in-review status in handoff, got: %s", content)
+	}
+	if !strings.Contains(content, "mention://issue/"+fx.child.ID) {
+		t.Errorf("expected child issue mention in handoff, got: %s", content)
+	}
+	if !strings.Contains(content, "mention://agent/"+agentID) {
+		t.Errorf("expected parent agent mention in handoff, got: %s", content)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
+		t.Fatalf("expected 1 pending parent task for in-review child, got %d", got)
+	}
+
+	updateChildStatus(t, fx.child.ID, "in_review")
+	if got := countSystemCommentsOn(t, fx.parent.ID); got != 1 {
+		t.Fatalf("same-status save must not duplicate attention comments, got %d", got)
+	}
+	if got := countPendingTasksForAgent(t, fx.parent.ID, agentID); got != 1 {
+		t.Fatalf("same-status save must not duplicate parent tasks, got %d", got)
+	}
+}
+
+func TestChildAttentionBlockedNotifiesParentMember(t *testing.T) {
+	fx := newChildDoneFixture(t, "in_progress")
+	memberID := createPermissionTestMember(t, "child-attention-owner@multica.test")
+
+	setIssueAssigneeDirect(t, fx.parent.ID, "member", memberID)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM inbox_item WHERE issue_id IN ($1, $2)`, fx.parent.ID, fx.child.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "blocked")
+
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "is blocked") {
+		t.Errorf("expected blocked status in handoff, got: %s", content)
+	}
+	if strings.Contains(content, "mention://member/") {
+		t.Errorf("system handoff should not inject a member mention, got: %s", content)
+	}
+
+	var notifType, severity, issueID, body string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT type, severity, issue_id::text, body
+		  FROM inbox_item
+		 WHERE recipient_type = 'member'
+		   AND recipient_id = $1
+		   AND issue_id = $2
+		 ORDER BY created_at DESC
+		 LIMIT 1
+	`, memberID, fx.child.ID).Scan(&notifType, &severity, &issueID, &body); err != nil {
+		t.Fatalf("read parent member inbox: %v", err)
+	}
+	if notifType != "status_changed" {
+		t.Errorf("inbox type = %q, want status_changed", notifType)
+	}
+	if severity != "action_required" {
+		t.Errorf("inbox severity = %q, want action_required", severity)
+	}
+	if issueID != fx.child.ID {
+		t.Errorf("inbox should point to child issue %s, got %s", fx.child.ID, issueID)
+	}
+	if !strings.Contains(body, "needs attention") {
+		t.Errorf("expected action body, got %q", body)
+	}
+}
+
 // TestChildDoneMentionsParentAssignee_Squad verifies the squad branch: the
 // system comment carries a `mention://squad/<id>` link and the squad
 // leader receives a leader-role task. Reuses the squad fixture helper from
