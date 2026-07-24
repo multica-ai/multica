@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -271,6 +272,53 @@ func TestCodebuddyExecuteSurfacesStderr(t *testing.T) {
 	}
 }
 
+func TestCodebuddyExecuteFailsLoudlyOnAsyncLaunchedToolResult(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "codebuddy")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`printf '%s\n' '{"type":"system","session_id":"sess-cb-async"}'` + "\n" +
+		`printf '%s\n' '{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"call-async","content":{"status":"async_launched","message":"background task launched"}}]}}'` + "\n" +
+		`printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id":"sess-cb-async","result":"parent turn completed early"}'` + "\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	b := &codebuddyBackend{cfg: Config{ExecutablePath: fakePath, Logger: slog.Default()}}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	session, err := b.Execute(ctx, "launch async work", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if !strings.Contains(result.Error, "async background task") {
+			t.Fatalf("expected async background task error, got %q", result.Error)
+		}
+		if result.SessionID != "sess-cb-async" {
+			t.Fatalf("expected session id sess-cb-async, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 func TestWriteCodebuddyInput(t *testing.T) {
 	t.Parallel()
 
@@ -472,5 +520,80 @@ func TestCodebuddyHandleUserToolResult(t *testing.T) {
 		}
 	default:
 		t.Fatal("expected message on channel")
+	}
+}
+
+func TestCodebuddyHandleControlRequestForcesBackgroundToolsForeground(t *testing.T) {
+	t.Parallel()
+
+	b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
+
+	var written bytes.Buffer
+
+	msg := codebuddySDKMessage{
+		Type:      "control_request",
+		RequestID: "req-42",
+		Request: mustMarshal(t, codebuddyControlRequestPayload{
+			Subtype:  "tool_use",
+			ToolName: "Agent",
+			Input: mustMarshal(t, map[string]any{
+				"description":       "investigate in parallel",
+				"run_in_background": true,
+			}),
+		}),
+	}
+
+	b.handleControlRequest(msg, &written)
+
+	var resp map[string]any
+	if err := json.Unmarshal(bytes.TrimSpace(written.Bytes()), &resp); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	respInner := resp["response"].(map[string]any)
+	innerResp := respInner["response"].(map[string]any)
+	updatedInput := innerResp["updatedInput"].(map[string]any)
+	if updatedInput["run_in_background"] != false {
+		t.Fatalf("expected run_in_background=false, got %v", updatedInput["run_in_background"])
+	}
+	if updatedInput["description"] != "investigate in parallel" {
+		t.Fatalf("expected original input to be preserved, got %v", updatedInput["description"])
+	}
+}
+
+func TestCodebuddyHandleUserDetectsAsyncLaunchedToolResult(t *testing.T) {
+	t.Parallel()
+
+	b := &codebuddyBackend{cfg: Config{Logger: slog.Default()}}
+	ch := make(chan Message, 10)
+
+	msg := codebuddySDKMessage{
+		Type: "user",
+		Message: mustMarshal(t, codebuddyMessageContent{
+			Role: "user",
+			Content: []codebuddyContentBlock{
+				{
+					Type:      "tool_result",
+					ToolUseID: "call-async",
+					Content: mustMarshal(t, map[string]any{
+						"status":  "async_launched",
+						"message": "background task launched",
+					}),
+				},
+			},
+		}),
+	}
+
+	if !b.handleUser(msg, ch) {
+		t.Fatal("expected async_launched tool result to be detected")
+	}
+
+	select {
+	case m := <-ch:
+		if m.Type != MessageToolResult || m.CallID != "call-async" {
+			t.Fatalf("unexpected message: %+v", m)
+		}
+	default:
+		t.Fatal("expected tool result message on channel")
 	}
 }
