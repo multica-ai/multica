@@ -377,7 +377,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// per-attempt warnings followed by a successful retry stay
 		// "completed".
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
-		if finalStatus == "failed" && providerErr.isPoisonedHistory() {
+		// Guard on ResumeSessionID: only a resume can inherit a poisoned
+		// history; a fresh run cannot reproduce this failure deterministically.
+		if finalStatus == "failed" && opts.ResumeSessionID != "" && providerErr.isPoisonedHistory() {
 			resumeRejected = true
 		}
 

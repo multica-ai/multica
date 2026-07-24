@@ -1967,7 +1967,7 @@ func TestACPProviderErrorSnifferKimiRateLimitNotTerminal(t *testing.T) {
 func TestACPProviderErrorSnifferPoisonedHistory(t *testing.T) {
 	t.Parallel()
 
-	// Exact pattern from the field: 400 + role + must not be empty.
+	// Exact pattern from the field: 400 + role 'assistant' + must not be empty.
 	s := newACPProviderErrorSniffer("kimi")
 	s.Write([]byte("error: failed to run prompt: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty\n"))
 
@@ -1981,6 +1981,14 @@ func TestACPProviderErrorSnifferPoisonedHistory(t *testing.T) {
 	s2.Write([]byte("error: failed to run prompt: provider.api_error: 400 invalid model specified\n"))
 	if s2.isPoisonedHistory() {
 		t.Error("plain 400 without role/must-not-be-empty should not be classified as poisoned history")
+	}
+
+	// A 400 that mentions "role" but not specifically "role 'assistant'" must
+	// not match — the check was tightened to avoid false positives.
+	s3 := newACPProviderErrorSniffer("kimi")
+	s3.Write([]byte("error: failed to run prompt: provider.api_error: 400 the message at position 7 with role 'user' must not be empty\n"))
+	if s3.isPoisonedHistory() {
+		t.Error("400 with role 'user' (not 'assistant') should not be classified as poisoned history")
 	}
 }
 

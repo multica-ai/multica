@@ -603,7 +603,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// will fail on every resume. Signal the daemon to drop the old
 		// session so it can retry fresh via the tools==0 gate instead of
 		// re-submitting the broken transcript indefinitely.
-		if finalStatus == "failed" && providerErr.isPoisonedHistory() {
+		// Guard on ResumeSessionID so a fresh run that somehow sees the
+		// same error fingerprint is not incorrectly flagged.
+		if finalStatus == "failed" && opts.ResumeSessionID != "" && providerErr.isPoisonedHistory() {
 			resumeRejected = true
 		}
 
@@ -2270,7 +2272,7 @@ func (s *acpProviderErrorSniffer) isPoisonedHistory() bool {
 	}
 	for _, line := range s.lines {
 		if strings.Contains(line, "provider.api_error: 400") &&
-			strings.Contains(line, "role") &&
+			strings.Contains(line, "role 'assistant'") &&
 			strings.Contains(line, "must not be empty") {
 			return true
 		}

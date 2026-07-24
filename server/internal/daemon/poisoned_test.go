@@ -157,6 +157,31 @@ func TestClassifyPoisonedError(t *testing.T) {
 			errMsg: "claude execution timeout after 10m",
 			wantOK: false,
 		},
+		{
+			// Kimi poisoned history: acpProviderErrorSniffer.messageLocked strips
+			// the "provider.api_error: 400" prefix, so the numeric status code is
+			// absent in the stored error. The "role 'assistant' … must not be
+			// empty" fingerprint is specific enough to serve as the classifier.
+			name:       "kimi assistant-empty poisoned history (stripped format)",
+			errMsg:     "kimi provider error: the message at position 43 with role 'assistant' must not be empty",
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// Variant with a different position number — ensure the classifier
+			// doesn't hard-code the position.
+			name:       "kimi assistant-empty poisoned history (different position)",
+			errMsg:     "kimi provider error: the message at position 7 with role 'assistant' must not be empty",
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// A generic "must not be empty" without "role 'assistant'" must NOT
+			// be classified — too likely to appear in benign tool errors.
+			name:   "must-not-be-empty without role assistant is not poisoning",
+			errMsg: "validation error: field must not be empty",
+			wantOK: false,
+		},
 	}
 
 	for _, tc := range cases {
