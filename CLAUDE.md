@@ -225,24 +225,6 @@ pnpm exec playwright test
 make check
 ```
 
-For one Vitest file, always invoke Vitest directly from the repository root
-with this argv shape:
-
-```text
-["pnpm", "--filter", "<workspace-name>", "exec", "vitest", "run", "<package-relative-test-file>"]
-```
-
-For example:
-
-```bash
-pnpm --filter @multica/views exec vitest run common/task-transcript/agent-transcript-dialog.test.tsx
-```
-
-Confirm that the test file exists before running the command. Do not use
-`pnpm --filter <workspace-name> test -- <test-file>` for a focused run: the
-extra package-script layer can prevent Vitest from receiving the file filter
-and run the entire workspace suite.
-
 Do not claim verification passed unless you ran it. If you skip checks because the change is docs-only or the user asked not to run them, say so.
 
 ## Commits and Releases

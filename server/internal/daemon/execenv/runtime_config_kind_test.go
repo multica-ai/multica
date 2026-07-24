@@ -111,6 +111,10 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 			kindCommentTriggered: true, kindAssignmentTriggered: true,
 			kindAutopilotRunOnly: true, kindChat: true,
 		}},
+		{"## Focused Test Safety", map[taskKind]bool{
+			kindCommentTriggered: true, kindAssignmentTriggered: true,
+			kindAutopilotRunOnly: true, kindChat: true,
+		}},
 		{"## Issue Metadata", issueKinds},
 		{"## Instruction Precedence", map[taskKind]bool{kindAssignmentTriggered: true}},
 		{"## Sub-issue Creation", issueKinds},
@@ -148,6 +152,35 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 			if !want && present {
 				t.Errorf("kind=%d: heading %q should NOT be in slim brief (matrix gating regression)", kind, c.heading)
 			}
+		}
+	}
+}
+
+// TestFocusedTestSafetySlimHardPins locks the system-level focused-test
+// fallback into every generated runtime brief. Repository-specific commands
+// still win, but an agent without them must not guess the package-script
+// separator shape that caused MUL-5261.
+func TestFocusedTestSafetySlimHardPins(t *testing.T) {
+	t.Parallel()
+
+	out := buildMetaSkillContent("claude", TaskContextForEnv{
+		IssueID: "i-1", TriggerCommentID: "tc-1",
+		AgentName: "Eve", AgentID: "eve-1",
+	})
+
+	for _, want := range []string{
+		"## Focused Test Safety",
+		"repository-provided agent instructions or a dedicated focused-test script first",
+		"verify that the target file exists",
+		"identify its owning package, package manager, and test runner",
+		"Do not guess how wrappers forward `--`",
+		"one stable argv shape for the same runner",
+		"pnpm --filter <workspace> exec vitest run <package-relative-test-file>",
+		"Do not use `pnpm --filter <workspace> test -- <test-file>`",
+		"confirm the discovery count is exactly one",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("slim Focused Test Safety missing hard pin %q\n---\n%s", want, out)
 		}
 	}
 }
