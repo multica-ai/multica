@@ -20,7 +20,7 @@
 -- Workspace DB rules (CLAUDE.md + MUL-4332 §4): NO foreign key, NO cascade —
 -- every UUID association is validated in the application layer. Secondary and
 -- unique indexes are added in their own single-statement CONCURRENTLY
--- migrations (223–227), never inline, so index builds never take an ACCESS
+-- migrations (225–229), never inline, so index builds never take an ACCESS
 -- EXCLUSIVE lock during deploy.
 
 -- Monotonic dispatch / drain boundary. `seq` orders events for stable scanning
