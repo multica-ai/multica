@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, forwardRef } from "react";
+import { Virtuoso, type VirtuosoHandle, type Components } from "react-virtuoso";
 import {
   Bot,
   ChevronRight,
@@ -196,6 +197,16 @@ function formatEventForClipboard(item: TimelineItem): string {
 
 // ─── Main dialog ────────────────────────────────────────────────────────────
 
+// Virtuoso mounts rows as direct children of its List element; carry the
+// divider styling the plain list container used to provide. Defined at module
+// scope — an inline `components` object would remount the list every render.
+const VirtuosoList = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  function VirtuosoList(props, ref) {
+    return <div ref={ref} {...props} className="divide-y" />;
+  },
+);
+const LIST_COMPONENTS: Components<TimelineItem> = { List: VirtuosoList };
+
 export function AgentTranscriptDialog({
   open,
   onOpenChange,
@@ -224,8 +235,7 @@ export function AgentTranscriptDialog({
   const clearPersistedFilterKeys = useTranscriptViewStore((s) => s.clearFilterKeys);
   const defaultExpanded = useTranscriptViewStore((s) => s.defaultExpanded);
   const setDefaultExpanded = useTranscriptViewStore((s) => s.setDefaultExpanded);
-  const eventRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const autoExpandedSeqsRef = useRef<Set<number>>(new Set());
   const initializedTaskRef = useRef<string | null>(null);
   const previousDefaultExpandedRef = useRef(defaultExpanded);
@@ -315,7 +325,7 @@ export function AgentTranscriptDialog({
     (dir: typeof sortDirection) => {
       if (dir === sortDirection) return;
       setSortDirection(dir);
-      scrollContainerRef.current?.scrollTo({ top: 0 });
+      virtuosoRef.current?.scrollTo({ top: 0 });
     },
     [sortDirection, setSortDirection],
   );
@@ -352,10 +362,17 @@ export function AgentTranscriptDialog({
     return () => clearInterval(interval);
   }, [isLive, task.started_at, task.dispatched_at]);
 
-  const handleSegmentClick = useCallback((seq: number) => {
-    setSelectedSeq(seq);
-    eventRefs.current.get(seq)?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, []);
+  // Rows are virtualized, so an off-screen target is not in the DOM;
+  // navigate by index instead of a node ref.
+  const handleSegmentClick = useCallback(
+    (seq: number) => {
+      setSelectedSeq(seq);
+      const index = displayItems.findIndex((item) => item.seq === seq);
+      if (index < 0) return;
+      virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "smooth" });
+    },
+    [displayItems],
+  );
 
   // Copy all events as text. Use the displayed order so users get the same
   // sequence they see on screen — matters when sort is set to newest-first.
@@ -719,10 +736,7 @@ export function AgentTranscriptDialog({
         )}
 
         {/* ── Event list ─────────────────────────────────────────── */}
-        <div
-          ref={scrollContainerRef}
-          className="flex-1 overflow-y-auto min-h-0"
-        >
+        <div className="flex-1 min-h-0">
           {displayItems.length === 0 ? (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
               {isAntigravityLiveEmpty ? (
@@ -740,21 +754,24 @@ export function AgentTranscriptDialog({
               )}
             </div>
           ) : (
-            <div className="divide-y">
-              {displayItems.map((item) => (
+            // Virtualized so a multi-thousand-event run mounts a bounded number
+            // of DOM rows (#5733). Rows expand/collapse to variable heights;
+            // Virtuoso re-measures them via ResizeObserver.
+            <Virtuoso
+              ref={virtuosoRef}
+              style={{ height: "100%" }}
+              data={displayItems}
+              computeItemKey={(_, item) => item.seq}
+              components={LIST_COMPONENTS}
+              itemContent={(_, item) => (
                 <TranscriptEventRow
-                  key={item.seq}
-                  ref={(el) => {
-                    if (el) eventRefs.current.set(item.seq, el);
-                    else eventRefs.current.delete(item.seq);
-                  }}
                   item={item}
                   isSelected={selectedSeq === item.seq}
                   expanded={expandedSeqs.has(item.seq)}
                   onExpandedChange={(expanded) => handleRowExpandedChange(item.seq, expanded)}
                 />
-              ))}
-            </div>
+              )}
+            />
           )}
         </div>
       </DialogContent>
@@ -905,12 +922,11 @@ interface TranscriptEventRowProps {
 }
 
 const TranscriptEventRow = ({
-  ref,
   item,
   isSelected,
   expanded,
   onExpandedChange,
-}: TranscriptEventRowProps & { ref?: React.Ref<HTMLDivElement> }) => {
+}: TranscriptEventRowProps) => {
   const color = getEventColor(item);
   const label = getEventLabel(item);
   const summary = getEventSummary(item);
@@ -923,7 +939,6 @@ const TranscriptEventRow = ({
 
   return (
     <div
-      ref={ref}
       className={cn(
         "group transition-colors",
         isSelected && "bg-accent/50",

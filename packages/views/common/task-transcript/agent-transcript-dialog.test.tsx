@@ -23,6 +23,26 @@ vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: copyTextMock,
 }));
 
+// Real react-virtuoso renders no data rows under jsdom's zero-height viewport,
+// so stub it with a flat render to make rows visible to these tests.
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: ({
+    data,
+    itemContent,
+    computeItemKey,
+  }: {
+    data: TimelineItem[];
+    itemContent: (i: number, item: TimelineItem) => ReactNode;
+    computeItemKey: (i: number, item: TimelineItem) => number;
+  }) => (
+    <div>
+      {data.map((item, i) => (
+        <div key={computeItemKey(i, item)}>{itemContent(i, item)}</div>
+      ))}
+    </div>
+  ),
+}));
+
 vi.mock("../actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));
