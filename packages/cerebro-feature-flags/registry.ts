@@ -272,6 +272,9 @@ export type CerebroFlagKey =
   // TECH-3761: sub-toggle of cerebro_comment_target_guard. Exempt an agent from
   // the recipient requirement when it already has an active wakeup on the issue.
   | "cerebro_comment_target_guard_wakeup_exempt"
+  // FIR-3308: reject an agent comment that promises the agent will carry on
+  // while no wakeup is scheduled to deliver it. Independent of the target guard.
+  | "cerebro_comment_no_unbacked_promise"
   // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
   | "cerebro_agent_trigger_permissions"
   // FIR-3091 slice 5: surface the web_fetch host allow/deny list inside the unified
@@ -717,6 +720,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // recipient requirement — the wakeup is the follow-up action, so the comment
   // need not also tag a human. Off keeps the base guard's behaviour unchanged.
   cerebro_comment_target_guard_wakeup_exempt: false,
+  // FIR-3308: OFF by default. When on, an agent comment that says the agent
+  // itself will continue — while it has no active wakeup on the issue — is
+  // rejected with a message telling it to schedule the wakeup first or to state
+  // a delivered result instead. Independent of cerebro_comment_target_guard.
+  // Members are never affected. Off restores the prior behaviour.
+  cerebro_comment_no_unbacked_promise: false,
   // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
   cerebro_agent_trigger_permissions: false,
   // FIR-3091 slice 5: OFF by default. When on, the web_fetch host list moves
