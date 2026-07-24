@@ -958,6 +958,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/vcs/connections/{connectionId}", h.DeleteVCSConnection)
 					// Jira connect / disconnect (admin-only).
 					r.Post("/jira/connections", h.ConnectJira)
+					// Pull-based sync — for Jira accounts that cannot register
+					// webhooks. Admin-gated like the other Jira mutations.
+					r.Post("/jira/connections/{connectionId}/sync", h.SyncJiraConnection)
 					r.Delete("/jira/connections/{connectionId}", h.DeleteJiraConnection)
 				})
 

@@ -222,6 +222,91 @@ func (h *Handler) ConnectJira(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// defaultJiraSyncJQL is applied when a connection has no stored JQL: pull
+// the issues assigned to the account whose API token is stored.
+const defaultJiraSyncJQL = "assignee = currentUser()"
+
+// jiraSyncMaxIssues caps how many issues one manual sync will pull.
+const jiraSyncMaxIssues = 100
+
+// JiraSyncResponse summarizes one pull-based sync run.
+type JiraSyncResponse struct {
+	Created int `json:"created"`
+	Updated int `json:"updated"`
+	// Total is how many Jira issues the JQL search returned (created +
+	// updated + skipped).
+	Total int `json:"total"`
+}
+
+// SyncJiraConnection (POST /workspaces/{id}/jira/connections/{connectionId}/sync)
+// pulls issues from the Jira site via JQL search and runs the same
+// create-or-sync path the webhook uses for each result. This is the
+// import route for users who cannot register webhooks on the Jira site
+// (webhooks need Jira admin rights; the REST search only needs the stored
+// API token). Admin-gated like the other Jira mutations.
+func (h *Handler) SyncJiraConnection(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	connUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "connectionId"), "connection id")
+	if !ok {
+		return
+	}
+	if !h.isJiraConfigured() {
+		writeError(w, http.StatusServiceUnavailable, "jira integration not configured (MULTICA_JIRA_SECRET_KEY unset)")
+		return
+	}
+	conn, err := h.Queries.GetJiraConnectionByID(r.Context(), connUUID)
+	if err != nil || uuidToString(conn.WorkspaceID) != uuidToString(wsUUID) {
+		writeError(w, http.StatusNotFound, "jira connection not found")
+		return
+	}
+
+	token, err := h.openJiraSecret(conn.ApiTokenEncrypted)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to decrypt api token")
+		return
+	}
+	jql := strings.TrimSpace(conn.Jql.String)
+	if jql == "" {
+		jql = defaultJiraSyncJQL
+	}
+
+	issues, err := h.JiraClient.SearchIssues(r.Context(), conn.BaseUrl, conn.AccountEmail, token, jql, jiraSyncMaxIssues)
+	if err != nil {
+		switch {
+		case errors.Is(err, jira.ErrUnauthorized):
+			writeError(w, http.StatusBadRequest, "jira rejected the stored credentials; reconnect the site")
+		case errors.Is(err, jira.ErrBadRequest):
+			writeError(w, http.StatusBadRequest, "jira rejected the JQL query")
+		default:
+			writeError(w, http.StatusBadGateway, "could not reach the jira site")
+		}
+		return
+	}
+
+	var resp JiraSyncResponse
+	resp.Total = len(issues)
+	for _, issue := range issues {
+		ev := jira.IssueEvent{
+			Kind:        jira.EventIssueUpdated,
+			IssueID:     issue.ID,
+			IssueKey:    issue.Key,
+			Summary:     issue.Summary,
+			Description: issue.Description,
+		}
+		switch h.syncJiraIssue(r.Context(), conn, ev) {
+		case jiraSyncCreated:
+			resp.Created++
+		case jiraSyncUpdated:
+			resp.Updated++
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
 // GetJiraConnection (GET /workspaces/{id}/jira/connections/{connectionId}).
 func (h *Handler) GetJiraConnection(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "id")

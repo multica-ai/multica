@@ -18,10 +18,12 @@ import (
 // mockJiraClient satisfies jira.Client without any network access; tests
 // must never contact a real Jira site.
 type mockJiraClient struct {
-	account jira.Account
-	issues  map[string]jira.Issue
-	err     error
-	calls   int
+	account       jira.Account
+	issues        map[string]jira.Issue
+	searchResults []jira.Issue
+	err           error
+	calls         int
+	lastJQL       string
 }
 
 func (m *mockJiraClient) ValidateCredentials(_ context.Context, _, _, _ string) (jira.Account, error) {
@@ -38,6 +40,15 @@ func (m *mockJiraClient) GetIssue(_ context.Context, _, _, _, key string) (jira.
 		return issue, nil
 	}
 	return jira.Issue{}, jira.ErrIssueNotFound
+}
+
+func (m *mockJiraClient) SearchIssues(_ context.Context, _, _, _, jql string, _ int) ([]jira.Issue, error) {
+	m.calls++
+	m.lastJQL = jql
+	if m.err != nil {
+		return nil, m.err
+	}
+	return m.searchResults, nil
 }
 
 func withJiraBox(t *testing.T) *secretbox.Box {

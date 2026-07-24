@@ -76,15 +76,27 @@ func (h *Handler) HandleJiraWebhook(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusAccepted)
 }
 
+// jiraSyncOutcome reports what syncJiraIssue did with one Jira issue. The
+// webhook path ignores it; the pull-based sync endpoint aggregates outcomes
+// into its {created, updated} summary.
+type jiraSyncOutcome int
+
+const (
+	jiraSyncSkipped jiraSyncOutcome = iota // missing data or a non-fatal failure
+	jiraSyncCreated
+	jiraSyncUpdated
+)
+
 // syncJiraIssue creates or syncs the Multica issue mirrored from a Jira
-// issue. First delivery for a Jira issue key creates the Multica issue and
-// records the link; subsequent deliveries update the mirrored title and
-// description. Thin payloads (no summary) are enriched via the Jira REST
-// client using the connection's stored API token.
-func (h *Handler) syncJiraIssue(ctx context.Context, conn db.JiraConnection, ev jira.IssueEvent) {
+// issue. It is the single create-or-sync path shared by the webhook handler
+// and the pull-based sync endpoint. First sighting of a Jira issue key
+// creates the Multica issue and records the link; subsequent sightings
+// update the mirrored title and description. Thin payloads (no summary) are
+// enriched via the Jira REST client using the connection's stored API token.
+func (h *Handler) syncJiraIssue(ctx context.Context, conn db.JiraConnection, ev jira.IssueEvent) jiraSyncOutcome {
 	if ev.IssueKey == "" {
 		slog.Warn("jira: issue event missing key")
-		return
+		return jiraSyncSkipped
 	}
 
 	// Enrich a thin payload before mirroring. Some Jira webhook
@@ -94,12 +106,12 @@ func (h *Handler) syncJiraIssue(ctx context.Context, conn db.JiraConnection, ev 
 		token, err := h.openJiraSecret(conn.ApiTokenEncrypted)
 		if err != nil {
 			slog.Error("jira: decrypt api token failed", "err", err)
-			return
+			return jiraSyncSkipped
 		}
 		issue, err := h.JiraClient.GetIssue(ctx, conn.BaseUrl, conn.AccountEmail, token, ev.IssueKey)
 		if err != nil {
 			slog.Warn("jira: enrich issue failed", "key", ev.IssueKey, "err", err)
-			return
+			return jiraSyncSkipped
 		}
 		ev.Summary = issue.Summary
 		if ev.Description == "" {
@@ -111,7 +123,7 @@ func (h *Handler) syncJiraIssue(ctx context.Context, conn db.JiraConnection, ev 
 	}
 	if ev.Summary == "" {
 		slog.Warn("jira: issue has no summary after enrichment", "key", ev.IssueKey)
-		return
+		return jiraSyncSkipped
 	}
 
 	workspaceID := uuidToString(conn.WorkspaceID)
@@ -135,20 +147,21 @@ func (h *Handler) syncJiraIssue(ctx context.Context, conn db.JiraConnection, ev 
 			// deletion was a user decision this webhook must not undo).
 			slog.Warn("jira: sync mirrored issue failed", "key", ev.IssueKey, "err", err)
 			h.touchJiraIssueLink(ctx, conn, ev, link.MulticaIssueID, "error")
-			return
+			return jiraSyncSkipped
 		}
 		h.touchJiraIssueLink(ctx, conn, ev, issue.ID, "synced")
 		prefix := h.getIssuePrefix(ctx, conn.WorkspaceID)
 		h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", map[string]any{
 			"issue": issueToResponse(issue, prefix),
 		})
+		return jiraSyncUpdated
 	case errors.Is(err, pgx.ErrNoRows):
 		// First delivery for this Jira issue → create the mirrored issue.
 		// The connecting admin is the creator (issue.creator_id is NOT NULL
 		// and webhooks carry no Multica actor).
 		if !conn.ConnectedByID.Valid {
 			slog.Warn("jira: connection has no connected_by user; cannot create mirrored issue", "key", ev.IssueKey)
-			return
+			return jiraSyncSkipped
 		}
 		res, err := h.IssueService.Create(ctx, service.IssueCreateParams{
 			WorkspaceID:    conn.WorkspaceID,
@@ -164,11 +177,13 @@ func (h *Handler) syncJiraIssue(ctx context.Context, conn db.JiraConnection, ev 
 		}, service.IssueCreateOpts{Platform: "jira"})
 		if err != nil {
 			slog.Warn("jira: create mirrored issue failed", "key", ev.IssueKey, "err", err)
-			return
+			return jiraSyncSkipped
 		}
 		h.touchJiraIssueLink(ctx, conn, ev, res.Issue.ID, "synced")
+		return jiraSyncCreated
 	default:
 		slog.Warn("jira: lookup issue link failed", "key", ev.IssueKey, "err", err)
+		return jiraSyncSkipped
 	}
 }
 
