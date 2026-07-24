@@ -560,6 +560,62 @@ func TestHTTPClient_SendMarkdownCard_HappyPath(t *testing.T) {
 	}
 }
 
+func TestHTTPClient_SendMarkdownCard_DowngradesMarkdownTables(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok_md", 7200)
+	fake.stubSend(
+		map[string]any{
+			"code": 0,
+			"msg":  "ok",
+			"data": map[string]string{"message_id": "om_md_1"},
+		},
+		func(r *http.Request, body map[string]string) {
+			var card map[string]any
+			if err := json.Unmarshal([]byte(body["content"]), &card); err != nil {
+				t.Fatalf("content is not valid card JSON: %v", err)
+			}
+			bodyDoc, _ := card["body"].(map[string]any)
+			elements, _ := bodyDoc["elements"].([]any)
+			el, _ := elements[0].(map[string]any)
+			got, _ := el["content"].(string)
+			if !strings.Contains(got, "```text\n| Col A | Col B |\n| --- | --- |\n| 1 | 2 |\n```") {
+				t.Fatalf("markdown table should be downgraded to a text code block, got:\n%s", got)
+			}
+		},
+	)
+
+	c := newTestClient(fake, time.Now)
+	_, err := c.SendMarkdownCard(context.Background(), SendMarkdownCardParams{
+		InstallationID: testCreds(),
+		ChatID:         ChatID("oc_chat_42"),
+		Markdown:       "Before\n\n| Col A | Col B |\n| --- | --- |\n| 1 | 2 |\n\nAfter",
+	})
+	if err != nil {
+		t.Fatalf("send markdown card: %v", err)
+	}
+}
+
+func TestDowngradeMarkdownTablesForLarkLeavesFencedCodeAlone(t *testing.T) {
+	in := "```md\n| already | code |\n| --- | --- |\n```\n\n| A | B |\n| --- | --- |\n| 1 | 2 |"
+	got := downgradeMarkdownTablesForLark(in)
+
+	if strings.Count(got, "```text") != 1 {
+		t.Fatalf("expected exactly one downgraded table block, got:\n%s", got)
+	}
+	if !strings.Contains(got, "```md\n| already | code |\n| --- | --- |\n```") {
+		t.Fatalf("existing fenced code block should stay unchanged, got:\n%s", got)
+	}
+}
+
+func TestDowngradeMarkdownTablesForLarkHandlesTablesWithoutOuterPipes(t *testing.T) {
+	in := "Before\n\nCol A | Col B\n--- | ---\n1 | 2\n\nAfter"
+	got := downgradeMarkdownTablesForLark(in)
+
+	if !strings.Contains(got, "```text\nCol A | Col B\n--- | ---\n1 | 2\n```") {
+		t.Fatalf("markdown table without outer pipes should be downgraded to a text code block, got:\n%s", got)
+	}
+}
+
 // TestHTTPClient_SendTextMessage_EncodesSpecialCharacters guards the
 // inner JSON envelope's escaping. Lark's spec is "content MUST be a
 // JSON-encoded string", which means newlines and quotes have to be
@@ -1109,8 +1165,8 @@ func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 			"code": 0,
 			"msg":  "ok",
 			"bot": map[string]any{
-				"open_id":   "ou_bot_42",
-				"app_name":  "PersonalAgent",
+				"open_id":    "ou_bot_42",
+				"app_name":   "PersonalAgent",
 				"avatar_url": "https://example/avatar.png",
 			},
 		})
