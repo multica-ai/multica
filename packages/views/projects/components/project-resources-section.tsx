@@ -44,6 +44,7 @@ import {
   type ValidateLocalDirectoryResult,
 } from "../../platform";
 import { useT } from "../../i18n";
+import { githubShortLabel } from "../../common/github-url";
 
 // Project Resources sidebar section.
 //
@@ -385,41 +386,6 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
       )}
     </div>
   );
-}
-
-// For GitHub URLs, return "owner/repo" so truncated display labels stay
-// meaningful when URLs share a long prefix. Handles:
-//   https://github.com/owner/repo[/...]
-//   ssh://git@github.com/owner/repo.git
-//   git@github.com:owner/repo.git   (scp shorthand)
-// .git suffix is stripped in all cases. When the resulting label is still
-// long, middle-truncation keeps the distinguishing tail visible (fixing the
-// case where many repos share a long common prefix).
-function githubShortLabel(url: string): string {
-  // scp shorthand — new URL() throws on these so match before the try block.
-  const scpMatch = url.match(/^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/);
-  if (scpMatch) return midTruncate(`${scpMatch[1]}/${scpMatch[2]}`);
-  try {
-    const u = new URL(url);
-    if (u.hostname === "github.com") {
-      const parts = u.pathname.split("/").filter(Boolean);
-      const [owner, repo] = parts;
-      if (owner && repo) return midTruncate(`${owner}/${repo.replace(/\.git$/, "")}`);
-    }
-  } catch {
-    // not a parseable URL — fall through and return as-is
-  }
-  return url;
-}
-
-// Middle-truncate a string to at most maxLen characters, preserving both the
-// leading and trailing portions. The trailing portion is what distinguishes
-// repos that share a long common prefix (e.g. customer-alpha vs customer-beta).
-function midTruncate(s: string, maxLen = 40): string {
-  if (s.length <= maxLen) return s;
-  const tail = Math.floor((maxLen - 1) / 2);
-  const head = maxLen - 1 - tail;
-  return `${s.slice(0, head)}…${s.slice(-tail)}`;
 }
 
 interface ResourceRowProps {
