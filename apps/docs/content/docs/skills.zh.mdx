@@ -33,6 +33,10 @@ Multica 支持两种 Skill 来源：
 
 单个文件和整个 Skill 包都有容量上限（从 GitHub 导入时单文件上限约 1 MB）。精确规则会在导入界面里提示——超过时会报错。
 
+<Callout type="info">
+Multica 维护了官方 [`multica-cli`](https://github.com/multica-ai/multica-cli) skill，供 Claude Code、Codex、Cursor 等本地 agent 使用。它会教 agent 如何安全地通过已认证的 `multica` CLI 操作 Multica，包括 issue 评论、metadata、PR、mention 和状态变更的副作用。可用 GitHub 地址 `https://github.com/multica-ai/multica-cli/tree/main/skills/multica-cli` 导入，也可以直接从该仓库安装到本地编程工具。
+</Callout>
+
 ## 挂到智能体
 
 Skill 导入后需要**挂载到具体的智能体**才会生效。一个智能体能挂多个 Skill，一个 Skill 也能挂到多个智能体。
