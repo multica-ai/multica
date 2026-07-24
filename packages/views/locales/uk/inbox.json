@@ -1,0 +1,78 @@
+{
+  "page": {
+    "title": "Вхідні",
+    "back": "Вхідні"
+  },
+  "menu": {
+    "mark_all_read": "Позначити все як прочитане",
+    "archive_all": "Архівувати все",
+    "archive_all_read": "Архівувати всі прочитані",
+    "archive_completed": "Архівувати завершені"
+  },
+  "list": {
+    "empty": "Немає сповіщень",
+    "mark_done_tooltip": "Позначити як виконане",
+    "archive_tooltip": "Архівувати",
+    "time": {
+      "just_now": "щойно",
+      "minutes": "{{count}} хв",
+      "hours": "{{count}} год",
+      "days": "{{count}} дн"
+    },
+    "archived_title": "Архів",
+    "archived_empty": "Немає архівованих сповіщень",
+    "unarchive_tooltip": "Розархівувати"
+  },
+  "detail": {
+    "select_prompt": "Виберіть сповіщення, щоб переглянути деталі",
+    "empty": "Ваші вхідні порожні",
+    "original_input": "Початковий запит",
+    "edit_advanced": "Редагувати як розширену форму",
+    "archive": "Архівувати",
+    "unarchive": "Розархівувати"
+  },
+  "types": {
+    "issue_assigned": "Призначено",
+    "issue_subscribed": "Підписано",
+    "unassigned": "Знято призначення",
+    "assignee_changed": "Змінено виконавця",
+    "status_changed": "Змінено статус",
+    "priority_changed": "Змінено пріоритет",
+    "start_date_changed": "Змінено дату початку",
+    "due_date_changed": "Змінено дедлайн",
+    "new_comment": "Новий коментар",
+    "mentioned": "Згадано",
+    "review_requested": "Запитано рев’ю",
+    "task_completed": "Завдання завершено",
+    "task_failed": "Завдання не вдалося",
+    "agent_blocked": "Агент заблокований",
+    "agent_completed": "Агент завершив роботу",
+    "reaction_added": "Реакція",
+    "quick_create_done": "Створено з агентом",
+    "quick_create_failed": "Не вдалося створити з агентом"
+  },
+  "labels": {
+    "set_status_to": "Встановлено статус",
+    "set_priority_to": "Встановлено пріоритет",
+    "assigned_to": "Призначено: {{name}}",
+    "removed_assignee": "Виконавця знято",
+    "set_start_date_to": "Встановлено дату початку: {{date}}",
+    "removed_start_date": "Дату початку видалено",
+    "set_due_date_to": "Встановлено дедлайн: {{date}}",
+    "removed_due_date": "Дедлайн видалено",
+    "reacted_to_comment": "Реакція {{emoji}} на ваш коментар",
+    "created_with_agent": "Створено з агентом: {{identifier}}",
+    "failed_with_detail": "Помилка: {{detail}}"
+  },
+  "errors": {
+    "mark_read_failed": "Не вдалося позначити як прочитане",
+    "archive_failed": "Не вдалося архівувати",
+    "mark_done_failed": "Не вдалося позначити як виконане",
+    "mark_all_read_failed": "Не вдалося позначити все як прочитане",
+    "archive_all_failed": "Не вдалося архівувати все",
+    "archive_all_read_failed": "Не вдалося архівувати прочитані",
+    "archive_completed_failed": "Не вдалося архівувати завершені",
+    "unarchive_failed": "Не вдалося розархівувати",
+    "archived_load_failed": "Не вдалося завантажити архівовані сповіщення"
+  }
+}

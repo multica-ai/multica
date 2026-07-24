@@ -1,0 +1,328 @@
+{
+  "page": {
+    "title": "Навички",
+    "tagline": "Інструкції, які може використовувати будь-який агент у цьому робочому просторі.",
+    "learn_more": "Дізнатися більше →",
+    "new_skill": "Нова навичка",
+    "search_placeholder": "Пошук навичок…",
+    "scopes": {
+      "all": { "label": "Усі", "description": "Усі навички в цьому робочому просторі" },
+      "used": { "label": "Використовуються", "description": "Навички, призначені принаймні одному агенту" },
+      "unused": { "label": "Не використовуються", "description": "Навички, не призначені жодному агенту" },
+      "mine": { "label": "Створені мною", "description": "Навички, які ви створили" }
+    },
+    "empty": {
+      "title": "Навичок поки немає",
+      "description": "Створіть першу навичку, імпортуйте за URL або скопіюйте з підключеного рантайму — і кожен агент у робочому просторі зможе її використовувати."
+    },
+    "no_matches": {
+      "title": "Нічого не знайдено",
+      "with_query": "Немає навичок за запитом \"{{query}}\"{{filterSuffix}}.",
+      "with_query_filter_suffix": " у цьому фільтрі",
+      "filter_only": "Немає навичок, що відповідають цьому фільтру.",
+      "try_different": " Спробуйте інший запит."
+    },
+    "intro_banner": {
+      "title": "Спільне для вашого робочого простору.",
+      "body": "Будь-хто може створити навичку, імпортувати за URL або скопіювати з локального рантайму — і кожен агент зможе її використовувати.",
+      "highlight": "Навички локального рантайму залишаються приватними, доки ви не скопіюєте їх сюди."
+    },
+    "list_error": {
+      "title": "Не вдалося завантажити навички",
+      "fallback": "Сталася помилка під час отримання списку навичок.",
+      "retry": "Спробувати ще раз"
+    },
+    "supporting_data_warning": "Частину даних робочого простору не вдалося завантажити. Автор, назви рантаймів або права на редагування можуть відображатися неповно."
+  },
+  "table": {
+    "name": "Назва",
+    "created_by": "Додано",
+    "used_by": "Використовується",
+    "source": "Джерело",
+    "updated": "Оновлено",
+    "created": "Створено",
+    "lock_tooltip": "Лише читання — редагувати може тільки автор або адміністратор",
+    "unused": "— не використовується",
+    "by_creator": "від {{name}}",
+    "source_manual": "Створено вручну",
+    "source_runtime_named": "З {{name}}",
+    "source_runtime_provider": "З рантайму {{provider}}",
+    "source_runtime_unknown": "З рантайму",
+    "source_clawhub": "З ClawHub",
+    "source_skills_sh": "Зі Skills.sh",
+    "source_github": "З GitHub"
+  },
+  "actions": {
+    "row_menu": "Дії",
+    "add_to_agent": "Додати агенту",
+    "my_agents": "Мої агенти",
+    "other_agents": "Інші агенти",
+    "no_agents": "Немає доступних агентів",
+    "search_placeholder": "Пошук агентів…",
+    "no_agents_match": "Немає агентів за вашим запитом.",
+    "has_partial": "Додано {{owned}}/{{total}}",
+    "added_toast": "Додано агенту {{name}}",
+    "add_failed_toast": "Не вдалося додати навичку",
+    "delete": "Видалити",
+    "selected": "Вибрано: {{count}}",
+    "clear_selection": "Скасувати вибір",
+    "delete_no_permission": "Серед вибраного є навички, які може видалити лише їхній автор або адміністратор",
+    "delete_dialog_title_one": "Видалити {{count}} навичку?",
+    "delete_dialog_title_few": "Видалити {{count}} навички?",
+    "delete_dialog_title_many": "Видалити {{count}} навичок?",
+    "delete_dialog_title_other": "Видалити {{count}} навички?",
+    "delete_dialog_desc_one": "Вибрану навичку буде остаточно видалено та прибрано в усіх агентів.",
+    "delete_dialog_desc_few": "{{count}} вибрані навички буде остаточно видалено та прибрано в усіх агентів.",
+    "delete_dialog_desc_many": "{{count}} вибраних навичок буде остаточно видалено та прибрано в усіх агентів.",
+    "delete_dialog_desc_other": "{{count}} вибраної навички буде остаточно видалено та прибрано в усіх агентів.",
+    "deleted_toast_one": "Видалено {{count}} навичку",
+    "deleted_toast_few": "Видалено {{count}} навички",
+    "deleted_toast_many": "Видалено {{count}} навичок",
+    "deleted_toast_other": "Видалено {{count}} навички",
+    "delete_failed_toast": "Не вдалося видалити навички",
+    "add_dialog_description": "Виберіть агентів, які мають отримати вибрані навички.",
+    "cancel": "Скасувати",
+    "add_confirm": "Додати ({{num}})",
+    "adding": "Додавання...",
+    "added_multi_toast_one": "Додано {{count}} агенту",
+    "added_multi_toast_few": "Додано {{count}} агентам",
+    "added_multi_toast_many": "Додано {{count}} агентам",
+    "added_multi_toast_other": "Додано {{count}} агента"
+  },
+  "toolbar": {
+    "result_count_title": "Навички за фільтром / усі навички",
+    "filter_label": "Фільтр",
+    "filter_active_count_one": "{{count}} фільтр",
+    "filter_active_count_few": "{{count}} фільтри",
+    "filter_active_count_many": "{{count}} фільтрів",
+    "filter_active_count_other": "{{count}} фільтра",
+    "clear_filters": "Скинути фільтри",
+    "section_usage": "Використання",
+    "display": "Відображення",
+    "sort_by": "Сортувати за",
+    "direction_asc": "За зростанням",
+    "direction_desc": "За спаданням",
+    "section_columns": "Стовпці"
+  },
+  "detail": {
+    "all_skills": "Усі навички",
+    "read_only": "Лише читання",
+    "delete_aria": "Видалити навичку",
+    "delete_tooltip": "Видалити навичку",
+    "supporting_data_warning": "Частину даних робочого простору не вдалося завантажити. Автор, назви рантаймів або права на редагування можуть відображатися неповно до наступного оновлення.",
+    "files_label": "Файли · {{count}}",
+    "add_file_aria": "Додати файл",
+    "add_file_tooltip": "Додати файл",
+    "delete_file": "Видалити файл",
+    "name_aria": "Назва навички",
+    "name_placeholder": "skill-name",
+    "description_label": "Опис",
+    "description_placeholder": "Одне речення про те, коли агенту слід використовувати цю навичку…",
+    "subline": {
+      "origin_runtime_named": "Локальний рантайм · {{name}}",
+      "origin_runtime_provider": "Локальний рантайм · {{provider}}",
+      "origin_runtime_unknown": "Локальний рантайм",
+      "origin_clawhub": "Імпортовано · ClawHub",
+      "origin_skills_sh": "Імпортовано · Skills.sh",
+      "origin_github": "Імпортовано · GitHub",
+      "origin_workspace": "Робочий простір",
+      "updated_label": "Оновлено {{when}}",
+      "by_creator": "від {{name}}"
+    },
+    "conflict_banner": {
+      "title": "Хтось інший оновив цю навичку",
+      "body": "Ваші правки збережено. Натисніть «Відхилити», щоб підтягнути чужі зміни, або «Зберегти», щоб перезаписати."
+    },
+    "save_bar": {
+      "unsaved": "Незбережені зміни — під час збереження активну навичку буде перезаписано",
+      "discard": "Відхилити",
+      "save": "Зберегти зміни",
+      "saving": "Збереження…"
+    },
+    "sidebar": {
+      "metadata": "Метадані",
+      "created": "Створено",
+      "updated": "Оновлено",
+      "created_by": "Автор",
+      "files": "Файли",
+      "id": "ID",
+      "origin": "Походження",
+      "used_by_one": "Використовує {{count}} агент",
+      "used_by_few": "Використовують {{count}} агенти",
+      "used_by_many": "Використовують {{count}} агентів",
+      "used_by_other": "Використовує {{count}} агента",
+      "permissions": "Права доступу",
+      "permissions_owner": "Ви можете редагувати та видаляти цю навичку. Зміни набудуть чинності під час наступного запуску агента.",
+      "permissions_locked_creator": "Редагувати цю навичку може лише автор ({{name}}) або адміністратор робочого простору.",
+      "permissions_locked": "Редагувати цю навичку може лише автор або адміністратор робочого простору.",
+      "used_by_empty": "Поки не призначено жодному агенту. Відкрийте вкладку «Навички» агента, щоб призначити."
+    },
+    "origin_card": {
+      "imported_runtime": "Імпортовано з локального рантайму",
+      "imported_clawhub": "Імпортовано з ClawHub",
+      "imported_skills_sh": "Імпортовано зі Skills.sh",
+      "imported_github": "Імпортовано з GitHub",
+      "provider": "провайдер · {{provider}}"
+    },
+    "not_found": {
+      "title": "Навичку не знайдено",
+      "fallback": "Цю навичку могли видалити, або ви втратили доступ.",
+      "back": "Назад до навичок"
+    },
+    "toast_saved": "Навичку збережено",
+    "toast_save_failed": "Не вдалося зберегти навичку",
+    "toast_deleted": "Навичку видалено",
+    "toast_delete_failed": "Не вдалося видалити навичку",
+    "delete_dialog": {
+      "title": "Видалити навичку?",
+      "description_with_agents_one": "\"{{name}}\" буде остаточно видалено та прибрано в {{count}} агента, який зараз її використовує.",
+      "description_with_agents_few": "\"{{name}}\" буде остаточно видалено та прибрано в {{count}} агентів, які зараз її використовують.",
+      "description_with_agents_many": "\"{{name}}\" буде остаточно видалено та прибрано в {{count}} агентів, які зараз її використовують.",
+      "description_with_agents_other": "\"{{name}}\" буде остаточно видалено та прибрано в {{count}} агента, які зараз її використовують.",
+      "description_no_agents": "\"{{name}}\" буде остаточно видалено та прибрано в усіх агентів.",
+      "warning": "Цю дію не можна скасувати.",
+      "cancel": "Скасувати",
+      "confirm": "Видалити назавжди",
+      "deleting": "Видалення…"
+    },
+    "add_file": {
+      "placeholder": "templates/review.md",
+      "add": "Додати",
+      "cancel": "Скасувати",
+      "errors": {
+        "empty": "Шлях не може бути порожнім.",
+        "absolute": "Абсолютні шляхи не дозволені.",
+        "double_dot": "Шлях не може містити \"..\".",
+        "reserved": "SKILL.md зарезервовано для головного файлу.",
+        "exists": "Файл за цим шляхом уже існує."
+      }
+    }
+  },
+  "create": {
+    "back": "Назад",
+    "back_aria": "Назад до вибору способу",
+    "close": "Закрити",
+    "close_aria": "Закрити",
+    "method": {
+      "chooser": {
+        "title": "Нова навичка",
+        "desc": "Виберіть, як ви хочете додати навичку до цього робочого простору."
+      },
+      "manual": {
+        "title": "Створити вручну",
+        "desc": "Напишіть новий SKILL.md з нуля."
+      },
+      "url": {
+        "title": "Імпортувати за URL",
+        "desc": "Отримайте опубліковану навичку за URL. Файли завантажуються на сервері."
+      },
+      "runtime": {
+        "title": "Скопіювати з рантайму",
+        "desc": "Проскануйте локальний рантайм і перенесіть одну з його навичок з диска в цей робочий простір."
+      }
+    },
+    "method_card": {
+      "manual_title": "Створити вручну",
+      "manual_desc": "Почніть із порожнього SKILL.md і напишіть власні інструкції.",
+      "url_title": "Імпортувати за URL",
+      "url_desc": "Завантажте опубліковану навичку з ClawHub або Skills.sh.",
+      "runtime_title": "Скопіювати з рантайму",
+      "runtime_desc": "Перенесіть навичку, вже встановлену у вашому локальному рантаймі."
+    },
+    "manual": {
+      "name_label": "Назва",
+      "name_placeholder": "напр. review-helper",
+      "name_hint": "Має бути унікальною в межах робочого простору.",
+      "description_label": "Опис",
+      "description_placeholder": "Одне речення про те, коли призначати цю навичку агенту.",
+      "name_conflict_hint": " Спробуйте іншу назву та надішліть знову.",
+      "fallback_error": "Не вдалося створити навичку",
+      "cancel": "Скасувати",
+      "submit": "Створити навичку",
+      "submitting": "Створення…",
+      "toast_created": "Навичку створено"
+    },
+    "url": {
+      "url_label": "URL навички",
+      "supported_sources": "Підтримувані джерела",
+      "import": "Імпортувати",
+      "importing": "Імпортування…",
+      "importing_clawhub": "Імпортування з ClawHub…",
+      "importing_skills_sh": "Імпортування зі Skills.sh…",
+      "importing_github": "Імпортування з GitHub…",
+      "name_conflict_hint": " Назва імпортованої навички вже існує — видаліть наявну перед повторною спробою.",
+      "fallback_error": "Не вдалося імпортувати",
+      "cancel": "Скасувати",
+      "toast_imported": "Навичку імпортовано"
+    }
+  },
+  "runtime_import": {
+    "runtime_label": "Рантайм",
+    "runtime_placeholder": "Виберіть локальний рантайм",
+    "no_local_runtimes_title": "Немає доступних локальних рантаймів",
+    "no_local_runtimes_hint": "Підключіть локальний рантайм, щоб переглядати та імпортувати його локальні навички.",
+    "choose_runtime": "Виберіть рантайм, щоб продовжити",
+    "must_be_online": "Рантайм має бути онлайн, щоб переглядати локальні навички.",
+    "load_failed": "Не вдалося завантажити локальні навички рантайму",
+    "not_supported": "Цей провайдер рантайму поки не надає перелік локальних навичок.",
+    "no_skills_title": "Локальних навичок не знайдено",
+    "no_skills_hint": "У цьому рантаймі поки немає доступних для виявлення локальних навичок.",
+    "search_placeholder": "Пошук локальних навичок",
+    "no_search_results_title": "Немає відповідних локальних навичок",
+    "no_search_results_hint": "Немає локальних навичок за запитом \"{{query}}\".",
+    "ignored_files_hint": "Символьні посилання, нечитабельні файли, завеликі файли та дуже великі пакети ігноруються під час імпорту.",
+    "ready": "Готово до імпорту",
+    "into_workspace": "у цей робочий простір.",
+    "select_skill": "Виберіть навичку, щоб продовжити.",
+    "import_button": "Імпортувати в робочий простір",
+    "importing": "Імпортування…",
+    "skill_files_one": "{{count}} файл",
+    "skill_files_few": "{{count}} файли",
+    "skill_files_many": "{{count}} файлів",
+    "skill_files_other": "{{count}} файлу",
+    "skill_name_label": "Назва навички в робочому просторі",
+    "skill_description_label": "Опис",
+    "skill_description_placeholder": "Необов'язково — опишіть, коли агенту слід використовувати цю навичку.",
+    "toast_imported": "Навичку імпортовано",
+    "toast_import_failed": "Не вдалося імпортувати навичку",
+    "select_all": "Вибрати всі ({{count}})",
+    "bulk_ready": "Вибрано навичок: {{count}}",
+    "bulk_import_button": "Імпортувати навички ({{count}})",
+    "bulk_progress": "Імпортування {{completed}} / {{total}}…",
+    "bulk_cancel_button": "Скасувати",
+    "bulk_complete_hint": "Імпорт завершено.",
+    "bulk_cancelled_hint": "Імпорт скасовано.",
+    "bulk_done_button": "Готово",
+    "bulk_summary_created": "Створено",
+    "bulk_summary_updated": "Оновлено",
+    "bulk_summary_conflicts": "Конфлікти",
+    "bulk_summary_skipped": "Пропущено",
+    "bulk_summary_failed": "Не вдалося",
+    "conflict_single_title": "Навичка з такою назвою вже існує",
+    "conflict_bulk_title": "Потрібне рішення щодо {{count}} навичок",
+    "conflict_hint": "Виберіть: перезаписати наявну навичку робочого простору, імпортувати з новою назвою або пропустити.",
+    "conflict_locked_creator": "Цю навичку створив(-ла) {{creator}}. Перезаписати її через локальний імпорт може лише автор; якщо потрібно змінити — редагуйте на сторінці навички.",
+    "conflict_locked": "Перезаписати цю навичку через локальний імпорт може лише автор; якщо потрібно змінити — редагуйте на сторінці навички.",
+    "conflict_overwrite": "Перезаписати",
+    "conflict_rename": "Перейменувати",
+    "conflict_skip": "Пропустити",
+    "conflict_cancel": "Скасувати",
+    "conflict_overwrite_all": "Перезаписати всі",
+    "conflict_skip_all": "Пропустити всі",
+    "conflict_rename_label": "Нова назва навички",
+    "conflict_footer": "Очікують рішення: {{count}} конфліктів.",
+    "conflict_apply_button": "Застосувати рішення",
+    "conflict_missing_resolution": "Виберіть, як розв'язати цей конфлікт.",
+    "conflict_name_still_exists": "Така назва вже існує. Виберіть іншу назву або пропустіть."
+  },
+  "file_tree": {
+    "no_files": "Немає файлів"
+  },
+  "file_viewer": {
+    "edit_tooltip": "Редагувати",
+    "preview_tooltip": "Попередній перегляд",
+    "no_content": "*Поки немає вмісту*",
+    "markdown_placeholder": "Пишіть вміст у markdown...",
+    "raw_placeholder": "Вміст файлу..."
+  }
+}

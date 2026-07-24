@@ -1,0 +1,111 @@
+{
+  "page": {
+    "title": "Скводи",
+    "new_button": "Новий сквод",
+    "empty_no_squads": "Скводів поки немає. Створіть перший, щоб почати.",
+    "empty_no_match": "Жоден сквод не відповідає вашим фільтрам.",
+    "table": {
+      "name": "Сквод",
+      "leader": "Лідер",
+      "members": "Учасники",
+      "creator": "Створив",
+      "created": "Створено"
+    },
+    "no_matches": "Немає відповідних скводів",
+    "row_menu": "Дії зі скводом",
+    "archive_action": "Архівувати"
+  },
+  "inspector": {
+    "details_section": "Деталі",
+    "archive_button": "Архівувати"
+  },
+  "archive_dialog": {
+    "title": "Архівувати цей сквод?",
+    "description": "«{{name}}» буде архівовано. Задачі, наразі призначені цьому скводу, буде передано його лідерові. Цю дію не можна скасувати — створіть новий сквод, якщо маршрутизація знадобиться знову.",
+    "cancel": "Скасувати",
+    "confirm": "Архівувати",
+    "archiving": "Архівування…",
+    "success": "Сквод архівовано"
+  },
+  "name_editor": {
+    "cancel": "Скасувати"
+  },
+  "add_member_dialog": {
+    "title": "Додати учасника",
+    "description": "Додайте учасника робочого простору або агента до цього сквода.",
+    "label_member": "Учасник",
+    "label_role": "Роль",
+    "label_optional": "(необов'язково)",
+    "placeholder_role_inline": "Додати роль…",
+    "cancel": "Скасувати"
+  },
+  "description_dialog": {
+    "title": "Редагувати опис",
+    "placeholder_empty": "Додати опис",
+    "cancel": "Скасувати"
+  },
+  "discard_changes_dialog": {
+    "title": "Відхилити незбережені зміни?",
+    "description": "На цій вкладці є незбережені зміни. Перемикання вкладок скасує їх.",
+    "keep_editing": "Продовжити редагування",
+    "discard_button": "Відхилити"
+  },
+  "members_tab": {
+    "section_title": "Учасники",
+    "section_count_one": "{{count}} учасник у цьому скводі",
+    "section_count_few": "{{count}} учасники в цьому скводі",
+    "section_count_many": "{{count}} учасників у цьому скводі",
+    "section_count_other": "{{count}} учасника в цьому скводі",
+    "add_member_button": "Додати учасника",
+    "create_agent_button": "Створити агента",
+    "leader_chip": "Лідер",
+    "view_agent_tooltip": "Відкрити деталі агента",
+    "make_leader_tooltip": "Зробити лідером сквода",
+    "remove_member_tooltip": "Вилучити зі сквода",
+    "status_working": "Працює",
+    "status_idle": "Очікує",
+    "status_offline": "Офлайн",
+    "status_unstable": "Нестабільний",
+    "status_archived": "Архівований",
+    "issue_status_blocked": "заблоковано",
+    "active_issue_more": "і ще {{count}}",
+    "last_active_label": "остання активність {{time}}"
+  },
+  "profile_card": {
+    "unavailable": "Сквод недоступний",
+    "detail_link": "Деталі →",
+    "archived": "Архівовано",
+    "member_count_one": "{{count}} учасник",
+    "member_count_few": "{{count}} учасники",
+    "member_count_many": "{{count}} учасників",
+    "member_count_other": "{{count}} учасника",
+    "members_section": "Учасники",
+    "more_members_one": "+ще {{count}}",
+    "more_members_few": "+ще {{count}}",
+    "more_members_many": "+ще {{count}}",
+    "more_members_other": "+ще {{count}}"
+  },
+  "instructions_tab": {
+    "description": "Інструкції сквода додаються до промпта агента-лідера щоразу, коли він працює над задачею, призначеною цьому скводу. Використовуйте їх, щоб дати лідерові загальні настанови сквода, робочі домовленості або контекст, якого лідер має дотримуватися в кожній задачі.",
+    "unsaved_changes": "Незбережені зміни",
+    "save_button": "Зберегти"
+  },
+  "scope": {
+    "mine": "Мої",
+    "all": "Усі"
+  },
+  "toolbar": {
+    "display": "Відображення",
+    "sort_by": "Сортувати за",
+    "direction_asc": "За зростанням",
+    "direction_desc": "За спаданням",
+    "section_columns": "Стовпці",
+    "result_count_title": "Відповідні скводи / всі скводи",
+    "filter_label": "Фільтр",
+    "filter_active_count_one": "{{count}} фільтр",
+    "filter_active_count_few": "{{count}} фільтри",
+    "filter_active_count_many": "{{count}} фільтрів",
+    "filter_active_count_other": "{{count}} фільтра",
+    "clear_filters": "Очистити фільтри"
+  }
+}

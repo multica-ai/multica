@@ -1,0 +1,47 @@
+{
+  "page": {
+    "breadcrumb": "Мої задачі",
+    "workspace_fallback": "Робочий простір",
+    "empty_title": "Вам не призначено жодної задачі",
+    "empty_description": "Задачі, які ви створюєте або які вам призначені, з’являться тут."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Усі",
+      "all_description": "Призначені мені, створені мною або пов’язані з моїми агентами та сквадами",
+      "assigned_label": "Призначені",
+      "assigned_description": "Задачі, призначені мені",
+      "created_label": "Створені",
+      "created_description": "Задачі, які я створив",
+      "agents_label": "Мої агенти та скводи",
+      "agents_description": "Задачі, призначені моїм агентам"
+    },
+    "filter_button": "Фільтр",
+    "filter_status": "Статус",
+    "filter_priority": "Пріоритет",
+    "issue_count_one": "{{count}} задача",
+    "issue_count_few": "{{count}} задачі",
+    "issue_count_many": "{{count}} задач",
+    "issue_count_other": "{{count}} задачі",
+    "reset_filters": "Скинути всі фільтри",
+    "display_settings": "Налаштування відображення",
+    "grouping": "Групування",
+    "group_status": "Статус",
+    "group_assignee": "Виконавець",
+    "ordering": "Сортування",
+    "ascending": "За зростанням",
+    "descending": "За спаданням",
+    "card_properties": "Властивості картки",
+    "view_board": "Дошка",
+    "view_list": "Список",
+    "view_swimlane": "Доріжки",
+    "view_label": "Вигляд",
+    "view_board_short": "Дошка",
+    "view_list_short": "Список",
+    "view_swimlane_short": "Доріжки",
+    "sort_manual": "Вручну"
+  },
+  "errors": {
+    "move_failed": "Не вдалося перемістити задачу"
+  }
+}

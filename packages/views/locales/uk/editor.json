@@ -1,0 +1,109 @@
+{
+  "bubble_menu": {
+    "bold": "Жирний",
+    "italic": "Курсив",
+    "strikethrough": "Закреслений",
+    "code": "Код",
+    "highlight": "Виділення",
+    "link": "Посилання",
+    "list": "Список",
+    "task_list": "Список завдань",
+    "quote": "Цитата",
+    "url_aria_label": "URL",
+    "heading_dropdown": {
+      "text": "Текст",
+      "normal_text": "Звичайний текст",
+      "heading_1": "Заголовок 1",
+      "heading_2": "Заголовок 2",
+      "heading_3": "Заголовок 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Маркований список",
+      "ordered_list": "Нумерований список",
+      "task_list": "Список завдань"
+    },
+    "sub_issue": {
+      "tooltip": "Створити підзадачу з виділеного",
+      "created": "Створено {{identifier}}",
+      "create_failed": "Не вдалося створити підзадачу"
+    }
+  },
+  "image": {
+    "view": "Переглянути зображення",
+    "download": "Завантажити",
+    "copy_link": "Копіювати посилання",
+    "delete": "Видалити",
+    "link_copied": "Посилання скопійовано",
+    "copy_link_failed": "Не вдалося скопіювати посилання"
+  },
+  "attachment": {
+    "download_failed": "Не вдалося отримати посилання для завантаження. Спробуйте ще раз за хвилину.",
+    "preview": "Попередній перегляд",
+    "preview_loading": "Завантаження перегляду…",
+    "preview_failed": "Не вдалося завантажити перегляд",
+    "preview_too_large": "Файл завеликий для перегляду. Будь ласка, завантажте його.",
+    "preview_unsupported": "Цей тип файлу не підтримує попередній перегляд.",
+    "close": "Закрити",
+    "open_in_new_tab": "Відкрити в новій вкладці",
+    "remove": "Видалити вкладення"
+  },
+  "link_hover": {
+    "copy_link": "Копіювати посилання",
+    "open_link": "Відкрити посилання",
+    "link_copied": "Посилання скопійовано",
+    "copy_failed": "Не вдалося скопіювати"
+  },
+  "mention": {
+    "group_users": "Користувачі",
+    "group_issues": "Задачі",
+    "all_members": "Усі учасники",
+    "searching": "Пошук...",
+    "no_results": "Нічого не знайдено",
+    "group_current": "Поточна сторінка",
+    "group_recent": "Нещодавно переглянуті",
+    "group_search": "Результати пошуку"
+  },
+  "slash_command": {
+    "no_skills_configured": "Навички не налаштовано",
+    "no_results": "Немає відповідних навичок",
+    "commands": {
+      "note": "Додати нотатку — не запускає жодних агентів"
+    }
+  },
+  "code_block": {
+    "copy_code": "Копіювати код",
+    "show_preview": "Показати перегляд",
+    "show_source": "Показати вихідний код",
+    "fullscreen": "На весь екран"
+  },
+  "file_card": {
+    "uploading": "Завантаження {{filename}}"
+  },
+  "upload": {
+    "failed": "Не вдалося завантажити {{filename}}: {{reason}}",
+    "in_progress": "Завантаження…"
+  },
+  "title_editor": {
+    "title_aria_label": "Заголовок"
+  },
+  "mermaid": {
+    "render_error": "Не вдалося відобразити діаграму Mermaid.",
+    "rendering": "Відображення діаграми…",
+    "viewer_title": "Діаграма",
+    "canvas_label": "Полотно діаграми. Перетягуйте для переміщення, прокручуйте для масштабування.",
+    "open_viewer": "Відкрити переглядач діаграм",
+    "close_viewer": "Закрити",
+    "copy_source": "Копіювати код діаграми",
+    "show_source": "Показати код",
+    "show_diagram": "Показати діаграму",
+    "zoom_in": "Збільшити",
+    "zoom_out": "Зменшити",
+    "zoom_fit": "Вписати у вікно",
+    "zoom_actual": "Фактичний розмір",
+    "reset_view": "Скинути вигляд",
+    "export": "Експорт",
+    "export_png": "Завантажити PNG",
+    "export_svg": "Завантажити SVG",
+    "export_source": "Завантажити .mmd"
+  }
+}
