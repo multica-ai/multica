@@ -714,6 +714,12 @@ func TestCodexFirstTurnProgressActivity(t *testing.T) {
 		{activity: "", want: false},
 		{activity: "status:running", want: false},
 		{activity: "error:retry", want: false},
+		// Codex 0.145 echoes the submitted prompt as userMessage items before
+		// it has connected to the responses backend. Those echoes prove only
+		// that app-server accepted local input; they are not agent progress
+		// and must not disable the first-turn no-progress watchdog.
+		{activity: "item/started:userMessage:user-1", want: false},
+		{activity: "item/completed:userMessage:user-1", want: false},
 		{activity: "error", want: true},
 		{activity: "text", want: true},
 		{activity: "tool-use:exec_command", want: true},
@@ -2762,6 +2768,61 @@ func TestCodexExecuteFirstTurnNoProgressSurfacesDiagnostics(t *testing.T) {
 		if !strings.Contains(result.Error, want) {
 			t.Fatalf("expected error to contain %q, got %q", want, result.Error)
 		}
+	}
+}
+
+func TestCodexExecuteCatalogRefreshRetryAfterUserMessageEcho(t *testing.T) {
+	// Not t.Parallel(): this test shrinks the process cleanup grace globally.
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	codexGracefulShutdownTimeoutNanos.Store(int64(100 * time.Millisecond))
+	t.Cleanup(func() { codexGracefulShutdownTimeoutNanos.Store(0) })
+
+	// Regression fixture for the observed codex-cli 0.145 sequence:
+	// app-server accepts the turn, echoes the submitted user message, reports
+	// retrying transport errors, and never produces agent output. The local
+	// echo must not suppress the catalog-refresh retry contract above.
+	fakePath := writeFakeCodexAppServer(t, ""+
+		`DIR="$(dirname "$0")"`+"\n"+
+		`ATTEMPT=$(cat "$DIR/attempts" 2>/dev/null || echo 0)`+"\n"+
+		`ATTEMPT=$((ATTEMPT+1))`+"\n"+
+		`echo "$ATTEMPT" > "$DIR/attempts"`+"\n"+
+		`read line`+"\n"+
+		`echo '{"jsonrpc":"2.0","id":1,"result":{}}'`+"\n"+
+		`read line`+"\n"+
+		`read line`+"\n"+
+		`if [ "$ATTEMPT" = "1" ]; then`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-echo-stuck"}}}'`+"\n"+
+		`  read line`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-echo-stuck","turn":{"id":"turn-echo-stuck"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-echo-stuck","item":{"type":"userMessage","id":"user-echo"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-echo-stuck","item":{"type":"userMessage","id":"user-echo"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"error","params":{"threadId":"thr-echo-stuck","error":{"message":"Reconnecting... 2/5"},"willRetry":true}}'`+"\n"+
+		`  echo 'ERROR codex_models_manager::manager: failed to refresh available models: timeout waiting for child process to exit' >&2`+"\n"+
+		`  sleep 2`+"\n"+
+		`else`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":2,"result":{"thread":{"id":"thr-echo-recovered"}}}'`+"\n"+
+		`  read line`+"\n"+
+		`  echo '{"jsonrpc":"2.0","id":3,"result":{}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-echo-recovered","turn":{"id":"turn-echo-recovered"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-echo-recovered","item":{"type":"agentMessage","id":"msg-recovered","text":"Recovered after echo"}}}'`+"\n"+
+		`  echo '{"jsonrpc":"2.0","method":"turn/completed","params":{"threadId":"thr-echo-recovered","turn":{"id":"turn-echo-recovered","status":"completed"}}}'`+"\n"+
+		`fi`+"\n")
+
+	result := executeFakeCodex(t, fakePath, ExecOptions{
+		Timeout:                   10 * time.Second,
+		SemanticInactivityTimeout: 100 * time.Millisecond,
+	})
+	if result.Status != "completed" {
+		t.Fatalf("user-message echo must not suppress catalog retry: status=%q error=%q", result.Status, result.Error)
+	}
+	if result.Output != "Recovered after echo" {
+		t.Fatalf("expected output from the recovered attempt, got %q", result.Output)
+	}
+	if result.SessionID != "thr-echo-recovered" {
+		t.Fatalf("expected the recovered thread id, got %q", result.SessionID)
 	}
 }
 

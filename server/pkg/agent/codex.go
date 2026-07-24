@@ -1725,7 +1725,16 @@ func codexFirstTurnNoProgressTimeout(semanticInactivityTimeout time.Duration) ti
 }
 
 func isCodexFirstTurnProgressActivity(activity string) bool {
-	return activity != "" && activity != "status:running" && activity != "error:retry"
+	if activity == "" || activity == "status:running" || activity == "error:retry" {
+		return false
+	}
+	// Codex 0.145 emits item/started + item/completed for the submitted
+	// userMessage before it has connected to the responses backend. That is
+	// only a local input echo: treating it as agent progress disables the
+	// first-turn watchdog and turns a model-catalog/network failure into a
+	// long, silent reconnect loop.
+	parts := strings.SplitN(activity, ":", 3)
+	return len(parts) < 2 || !strings.HasPrefix(parts[0], "item/") || parts[1] != "userMessage"
 }
 
 func buildCodexTimeoutDiagnosticError(diag codexTimeoutDiagnostic, stderrTail string) string {
@@ -2524,7 +2533,7 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	item, _ := params["item"].(map[string]any)
 	itemType, _ := item["type"].(string)
 	itemID, _ := item["id"].(string)
-	if isCodexItemProgressActivity(method) && c.onSemanticActivity != nil {
+	if isCodexItemProgressActivity(method, itemType) && c.onSemanticActivity != nil {
 		c.onSemanticActivity(describeCodexItemProgressActivity(method, itemType, itemID))
 	}
 	if item == nil {
@@ -2586,8 +2595,11 @@ func (c *codexClient) handleItemNotification(method string, params map[string]an
 	}
 }
 
-func isCodexItemProgressActivity(method string) bool {
-	return strings.HasPrefix(method, "item/")
+func isCodexItemProgressActivity(method, itemType string) bool {
+	// userMessage notifications acknowledge local input only. They do not
+	// prove the provider connection is healthy and must not reset either the
+	// semantic-inactivity timer or the first-turn no-progress watchdog.
+	return strings.HasPrefix(method, "item/") && itemType != "userMessage"
 }
 
 func describeCodexItemProgressActivity(method, itemType, itemID string) string {
