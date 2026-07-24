@@ -11,6 +11,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/admission"
 	"github.com/multica-ai/multica/server/internal/automation"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -52,10 +53,14 @@ type HookWithRevision struct {
 type HookService struct {
 	Queries   *db.Queries
 	TxStarter TxStarter
+	// Bus fans a fired action's issue transition out to the realtime / activity /
+	// inbox / subscriber / autopilot listeners, best-effort, after the action
+	// commits (MUL-4332 review a′). Nil in tests that only assert database state.
+	Bus *events.Bus
 }
 
-func NewHookService(q *db.Queries, tx TxStarter) *HookService {
-	return &HookService{Queries: q, TxStarter: tx}
+func NewHookService(q *db.Queries, tx TxStarter, bus *events.Bus) *HookService {
+	return &HookService{Queries: q, TxStarter: tx, Bus: bus}
 }
 
 // CreateHook validates the spec (shape + workspace-scoped, principal-gated

@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/automation"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -22,6 +23,7 @@ import (
 type matcherFixture struct {
 	svc     *HookService
 	pool    *pgxpool.Pool
+	bus     *events.Bus
 	ws      string
 	userID  string
 	issueID string
@@ -31,9 +33,11 @@ func newMatcherFixture(t *testing.T) matcherFixture {
 	t.Helper()
 	pool := newTaskClaimRacePool(t) // skips if no DB
 	ws, userID, _, issueID := seedAttributionFixture(t, pool)
+	bus := events.New()
 	return matcherFixture{
-		svc:     NewHookService(db.New(pool), pool),
+		svc:     NewHookService(db.New(pool), pool, bus),
 		pool:    pool,
+		bus:     bus,
 		ws:      ws,
 		userID:  userID,
 		issueID: issueID,

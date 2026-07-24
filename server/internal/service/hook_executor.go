@@ -13,8 +13,10 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/automation"
 	"github.com/multica-ai/multica/server/internal/domainevent"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // The Event Hooks executor (MUL-4332 PR3 §7.2). It leases `queued` executions the
@@ -202,7 +204,8 @@ func (s *HookService) executionActions(ctx context.Context, exec db.HookExecutio
 func (s *HookService) runAction(ctx context.Context, exec db.HookExecution, lease pgtype.UUID, action automation.ActionSpec, index int) error {
 	effectKey := effectKeyFor(exec.ID, index)
 
-	return domainevent.WriteInTx(ctx, s.TxStarter, s.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+	var post *IssueTransition
+	err := domainevent.WriteInTx(ctx, s.TxStarter, s.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
 		// Ownership, fail-closed, before any write.
 		owned, err := qtx.GetOwnedHookExecution(ctx, db.GetOwnedHookExecutionParams{ID: exec.ID, LeaseToken: lease})
 		if err != nil {
@@ -258,10 +261,11 @@ func (s *HookService) runAction(ctx context.Context, exec db.HookExecution, leas
 			}
 		}
 
-		events, outputType, outputID, err := s.performAction(ctx, qtx, owned, action, index)
+		events, outputType, outputID, transition, err := s.performAction(ctx, qtx, owned, action, index)
 		if err != nil {
 			return nil, err
 		}
+		post = transition
 
 		if _, err := qtx.MarkHookActionEffectSucceeded(ctx, db.MarkHookActionEffectSucceededParams{
 			EffectKey:  effectKey,
@@ -274,6 +278,36 @@ func (s *HookService) runAction(ctx context.Context, exec db.HookExecution, leas
 			return nil, err
 		}
 		return events, nil
+	})
+	if err != nil {
+		return err
+	}
+	// Post-commit, best-effort: drive the same realtime / activity / inbox /
+	// subscriber / autopilot fanout an equivalent status change from the UI drives.
+	// It is best-effort by design — the client refetch self-heals realtime, and a
+	// dropped activity/inbox row is acceptable (review a′). A crash between the
+	// action commit and here loses the publish; on replay the succeeded effect skips
+	// the action, so it is not re-published. The DURABLE reactions Elon gated
+	// execution on (assignee enqueue, Autopilot sync) are NOT this best-effort
+	// publish and land in a following slice.
+	if post != nil {
+		s.publishIssueTransition(*post)
+	}
+	return nil
+}
+
+// publishIssueTransition fans a committed status change out to the issue:updated
+// listeners. Nil Bus (unit tests asserting only database state) is a no-op.
+func (s *HookService) publishIssueTransition(tr IssueTransition) {
+	if s.Bus == nil {
+		return
+	}
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: util.UUIDToString(tr.After.WorkspaceID),
+		ActorType:   tr.ActorType,
+		ActorID:     tr.ActorID,
+		Payload:     tr.Payload,
 	})
 }
 
@@ -372,62 +406,61 @@ func (s *HookService) notifyAdminsHookPaused(ctx context.Context, qtx *db.Querie
 
 // performAction dispatches one action. It returns the domain events the action
 // produced, which the caller commits in the same transaction, plus the effect output.
-func (s *HookService) performAction(ctx context.Context, qtx *db.Queries, exec db.HookExecution, action automation.ActionSpec, index int) ([]domainevent.Event, string, pgtype.UUID, error) {
+func (s *HookService) performAction(ctx context.Context, qtx *db.Queries, exec db.HookExecution, action automation.ActionSpec, index int) ([]domainevent.Event, string, pgtype.UUID, *IssueTransition, error) {
 	switch action.Type {
 	case automation.ActionSetIssueStatus:
 		return s.actionSetIssueStatus(ctx, qtx, exec, action, index)
 	default:
 		// Reached only for an action this slice does not implement yet. Terminal
 		// rather than retried, so it cannot loop on the backoff ladder.
-		return nil, "", pgtype.UUID{}, skipAction(skipActionUnsupported,
+		return nil, "", pgtype.UUID{}, nil, skipAction(skipActionUnsupported,
 			"action %q is not implemented by this executor slice", action.Type)
 	}
 }
 
-// actionSetIssueStatus writes the target status and emits the resulting
-// issue.status_changed event in the caller's transaction, so the fact and its event
-// commit together exactly as every other domain write does.
-func (s *HookService) actionSetIssueStatus(ctx context.Context, qtx *db.Queries, exec db.HookExecution, action automation.ActionSpec, index int) ([]domainevent.Event, string, pgtype.UUID, error) {
+// actionSetIssueStatus routes the change through the shared applyIssueStatusChangeInTx
+// command, so the executor writes the status, emits the causation-stamped
+// issue.status_changed event and builds the typed payload EXACTLY as a manual change
+// does — no parallel copy of the write. The returned transition, if the status moved,
+// is published post-commit by runAction so the change also drives the realtime /
+// activity / inbox / subscriber / autopilot fanout.
+func (s *HookService) actionSetIssueStatus(ctx context.Context, qtx *db.Queries, exec db.HookExecution, action automation.ActionSpec, index int) ([]domainevent.Event, string, pgtype.UUID, *IssueTransition, error) {
 	issueID, err := util.ParseUUID(action.IssueID)
 	if err != nil {
-		return nil, "", pgtype.UUID{}, skipAction(skipTargetUnavailable, "issue_id %q is not a uuid", action.IssueID)
+		return nil, "", pgtype.UUID{}, nil, skipAction(skipTargetUnavailable, "issue_id %q is not a uuid", action.IssueID)
 	}
-	// Workspace-scoped, so an action can never reach across tenants (§8).
-	before, err := qtx.LockIssueRowForUpdate(ctx, db.LockIssueRowForUpdateParams{ID: issueID, WorkspaceID: exec.WorkspaceID})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return nil, "", pgtype.UUID{}, skipAction(skipTargetUnavailable,
-				"issue %s is not in this workspace", action.IssueID)
-		}
-		return nil, "", pgtype.UUID{}, err
-	}
-	updated, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-		ID: issueID, WorkspaceID: exec.WorkspaceID, Status: action.Status,
-	})
-	if err != nil {
-		return nil, "", pgtype.UUID{}, err
-	}
-	// A no-op transition is a successful action that emits nothing, matching every
-	// other status write in the codebase.
-	if before.Status == updated.Status {
-		return nil, "issue", issueID, nil
-	}
-
-	evt := domainevent.IssueStatusChanged(exec.WorkspaceID, issueID,
-		domainevent.ActorFrom("hook", exec.HookID),
-		domainevent.IssueStatusChangedPayload{From: before.Status, To: updated.Status})
-	// The reaction stays in its originating chain and records what caused it, so the
-	// depth guard can see how deep this chain has run.
-	evt.CorrelationID = exec.CorrelationID
-	evt.CausationExecutionID = exec.ID
-	evt.CausationActionIndex = pgtype.Int4{Int32: int32(index), Valid: true}
+	// The reaction sits one hop deeper in the source event's causal chain so the
+	// depth guard can see the chain grow.
 	hop, err := s.sourceHopCount(ctx, qtx, exec.EventID)
 	if err != nil {
-		return nil, "", pgtype.UUID{}, err
+		return nil, "", pgtype.UUID{}, nil, err
 	}
-	evt.HopCount = hop + 1
+	prefix := issuePrefixInTx(ctx, qtx, exec.WorkspaceID)
 
-	return []domainevent.Event{evt}, "issue", issueID, nil
+	tr, evts, err := applyIssueStatusChangeInTx(ctx, qtx, prefix, IssueStatusChange{
+		IssueID:     issueID,
+		WorkspaceID: exec.WorkspaceID,
+		ToStatus:    action.Status,
+		Actor:       domainevent.HookActor(exec.HookID),
+		Causation: IssueChangeCausation{
+			CorrelationID: exec.CorrelationID,
+			ExecutionID:   exec.ID,
+			ActionIndex:   pgtype.Int4{Int32: int32(index), Valid: true},
+			HopCount:      hop + 1,
+		},
+	})
+	if err != nil {
+		if errors.Is(err, ErrIssueNotInWorkspace) {
+			return nil, "", pgtype.UUID{}, nil, skipAction(skipTargetUnavailable,
+				"issue %s is not in this workspace", action.IssueID)
+		}
+		return nil, "", pgtype.UUID{}, nil, err
+	}
+	var post *IssueTransition
+	if tr.Changed {
+		post = &tr
+	}
+	return evts, "issue", issueID, post, nil
 }
 
 // sourceHopCount reads the depth of the event that produced this execution, so the

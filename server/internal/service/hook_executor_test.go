@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,10 +11,13 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/automation"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // seedQueuedExecution creates the hook + revision + source event + `queued`
@@ -720,4 +724,87 @@ func (f matcherFixture) sleepBeforeEffectInsert(t *testing.T, execID string, sec
 		f.pool.Exec(bg, fmt.Sprintf("DROP TRIGGER IF EXISTS %s ON hook_action_effect", quoteIdent(name)))
 		f.pool.Exec(bg, fmt.Sprintf("DROP FUNCTION IF EXISTS %s()", quoteIdent(fn)))
 	})
+}
+
+// The executor now routes set_issue_status through the shared
+// applyIssueStatusChangeInTx command and publishes the resulting transition, so an
+// automated status change drives the same realtime / activity / inbox fanout a
+// manual change does — closing the gap where the executor wrote the status but fired
+// none of its side effects. This captures the published issue:updated event and
+// asserts it is the typed, side-effect-bearing payload.
+func TestExecutorPublishesIssueTransition(t *testing.T) {
+	f := newMatcherFixture(t)
+	ctx := context.Background()
+	f.setIssueStatus(t, "todo")
+
+	var published []events.Event
+	var mu sync.Mutex
+	f.bus.SubscribeAll(func(e events.Event) {
+		mu.Lock()
+		defer mu.Unlock()
+		published = append(published, e)
+	})
+
+	_, _, event := f.seedQueuedExecution(t, f.setIssueStatusAction("done"))
+	if _, err := f.svc.ClaimAndRun(ctx, 5); err != nil {
+		t.Fatalf("claim and run: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	var updated *events.Event
+	for i := range published {
+		if published[i].Type == protocol.EventIssueUpdated {
+			updated = &published[i]
+		}
+	}
+	if updated == nil {
+		t.Fatal("executor did not publish an issue:updated event for the status change")
+	}
+	payload, ok := updated.Payload.(issueevent.IssueUpdatedPayload)
+	if !ok {
+		t.Fatalf("published payload is not the typed contract: %T", updated.Payload)
+	}
+	if !payload.TriggerSideEffects {
+		t.Error("published payload must trigger side effects — an authoritative automated change")
+	}
+	if !payload.StatusChanged || payload.PrevStatus != "todo" || payload.Snapshot.Status != "done" {
+		t.Errorf("payload diff wrong: StatusChanged=%v prev=%q now=%q",
+			payload.StatusChanged, payload.PrevStatus, payload.Snapshot.Status)
+	}
+	if updated.ActorType != "hook" {
+		t.Errorf("actor type = %q, want hook", updated.ActorType)
+	}
+	_ = event
+}
+
+// A no-op transition (target already in the requested status) fires the action
+// successfully but publishes nothing, matching every other status write.
+func TestExecutorNoOpStatusChangePublishesNothing(t *testing.T) {
+	f := newMatcherFixture(t)
+	ctx := context.Background()
+	f.setIssueStatus(t, "done") // already the action's target
+
+	var count int
+	var mu sync.Mutex
+	f.bus.SubscribeAll(func(e events.Event) {
+		if e.Type == protocol.EventIssueUpdated {
+			mu.Lock()
+			count++
+			mu.Unlock()
+		}
+	})
+
+	_, execID, _ := f.seedQueuedExecution(t, f.setIssueStatusAction("done"))
+	if _, err := f.svc.ClaimAndRun(ctx, 5); err != nil {
+		t.Fatalf("claim and run: %v", err)
+	}
+	if s := f.execState(t, execID); s.status != hookExecSucceeded {
+		t.Errorf("no-op action should still succeed, got %q", s.status)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if count != 0 {
+		t.Errorf("a no-op status change published %d issue:updated events, want 0", count)
+	}
 }

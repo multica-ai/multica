@@ -4139,9 +4139,10 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 // subscriber listeners skip it, preserving the deliberate scope of the
 // realtime-staleness fix (#4648 / MUL-3782). Before MUL-4332 review a′ that skip
 // was implicit — the listeners type-asserted handler.IssueResponse and a plain map
-// fell through — which is exactly the fragile fork the typed contract replaces. The
-// `issue` wire representation stays issueToMap so this path's client payload is
-// unchanged.
+// fell through — which is exactly the fragile fork the typed contract replaces. On
+// the wire the `issue` sub-object is unchanged (still issueToMap); the top-level
+// changed/prev fields the typed struct always emits are a backward-compatible
+// addition, not a strict key-set match with the old sparse map.
 func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
 	prefix := s.getIssuePrefix(issue.WorkspaceID)
 	before := issue
