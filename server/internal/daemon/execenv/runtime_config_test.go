@@ -2109,3 +2109,85 @@ func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing
 		}
 	}
 }
+
+func TestReadPriorAgentName(t *testing.T) {
+	t.Parallel()
+
+	writeWithAgentName := func(t *testing.T, dir, name string) {
+		t.Helper()
+		ctx := TaskContextForEnv{
+			IssueID:   "00000000-0000-0000-0000-000000000001",
+			AgentName: name,
+		}
+		if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+			t.Fatalf("InjectRuntimeConfig: %v", err)
+		}
+	}
+
+	t.Run("reads name from injected CLAUDE.md", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		writeWithAgentName(t, dir, "Backend Builder")
+		if got := ReadPriorAgentName(dir, "claude"); got != "Backend Builder" {
+			t.Fatalf("got %q, want %q", got, "Backend Builder")
+		}
+	})
+
+	t.Run("reads name with ID suffix present", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		ctx := TaskContextForEnv{
+			IssueID:   "00000000-0000-0000-0000-000000000001",
+			AgentName: "Reviewer",
+			AgentID:   "de53a53c-3d5e-4829-bf82-10dd35ce4858",
+		}
+		if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+			t.Fatalf("InjectRuntimeConfig: %v", err)
+		}
+		if got := ReadPriorAgentName(dir, "claude"); got != "Reviewer" {
+			t.Fatalf("got %q, want %q", got, "Reviewer")
+		}
+	})
+
+	t.Run("no file returns empty", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		if got := ReadPriorAgentName(dir, "claude"); got != "" {
+			t.Fatalf("got %q, want empty", got)
+		}
+	})
+
+	t.Run("file without marker block returns empty", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "CLAUDE.md"), []byte("# My CLAUDE.md\nSome content.\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if got := ReadPriorAgentName(dir, "claude"); got != "" {
+			t.Fatalf("got %q, want empty", got)
+		}
+	})
+
+	t.Run("marker block without agent identity returns empty", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		ctx := TaskContextForEnv{
+			IssueID: "00000000-0000-0000-0000-000000000001",
+			// AgentName intentionally empty — no identity section will be written
+		}
+		if _, err := InjectRuntimeConfig(dir, "claude", ctx); err != nil {
+			t.Fatalf("InjectRuntimeConfig: %v", err)
+		}
+		if got := ReadPriorAgentName(dir, "claude"); got != "" {
+			t.Fatalf("got %q, want empty (no agent name in config)", got)
+		}
+	})
+
+	t.Run("unknown provider returns empty", func(t *testing.T) {
+		t.Parallel()
+		dir := t.TempDir()
+		if got := ReadPriorAgentName(dir, "unknown-provider"); got != "" {
+			t.Fatalf("got %q, want empty", got)
+		}
+	})
+}
