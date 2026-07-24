@@ -1,5 +1,5 @@
 // FIR-3765 — the Workpad panel groups a plan's steps by markdown-heading phases
-// and offers an "Alle / <phase>" filter. A plan with fewer than two named
+// and offers an "All / <phase>" filter. A plan with fewer than two named
 // phases renders flat, with no filter, exactly as before.
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
@@ -62,7 +62,7 @@ describe("WorkpadPanel phase filter", () => {
     planRef.value = { id: "p1", title: "Plan", body: MULTI };
     render(<WorkpadPanel issueId="issue-1" />);
 
-    expect(screen.getByRole("button", { name: "Alle" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "All" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fase 1: Byg" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fase 2: Test" })).toBeTruthy();
 
@@ -86,7 +86,7 @@ describe("WorkpadPanel phase filter", () => {
     render(<WorkpadPanel issueId="issue-1" />);
 
     expect(screen.queryByRole("group", { name: "Filter plan by phase" })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Alle" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "All" })).toBeNull();
     expect(screen.getByText("Step one")).toBeTruthy();
     expect(screen.getByText("Step two")).toBeTruthy();
   });

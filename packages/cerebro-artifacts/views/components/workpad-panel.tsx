@@ -106,7 +106,7 @@ function PhaseChip({
 //
 // FIR-3765 — when the plan groups its steps under markdown headings (phases),
 // the panel renders them as phase blocks and shows a filter so a long plan can
-// be viewed as "Alle" or one phase at a time. A plan with fewer than two named
+// be viewed as "All" or one phase at a time. A plan with fewer than two named
 // phases renders as a single flat list, exactly as before.
 export function WorkpadPanel({ issueId, className }: { issueId: string; className?: string }) {
   const enabled = useFeatureFlag("cerebro_workpad");
@@ -206,7 +206,7 @@ export function WorkpadPanel({ issueId, className }: { issueId: string; classNam
           className="mt-2 flex flex-wrap items-center gap-1"
         >
           <PhaseChip
-            label="Alle"
+            label="All"
             active={selected === ALL}
             onClick={() => setSelected(ALL)}
           />
