@@ -17,7 +17,7 @@
 -- rows below in a single atomic statement). The inline UNIQUE / PRIMARY KEY
 -- constraints stay — they back the ON CONFLICT upsert targets in vcs.sql.
 -- Secondary indexes live in follow-up single-statement CREATE INDEX
--- CONCURRENTLY migrations (214-218), which cannot share a file with these
+-- CONCURRENTLY migrations (217-221), which cannot share a file with these
 -- CREATE TABLEs.
 
 CREATE TABLE IF NOT EXISTS vcs_connection (
