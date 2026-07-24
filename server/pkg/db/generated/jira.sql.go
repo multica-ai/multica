@@ -40,7 +40,7 @@ func (q *Queries) DeleteJiraConnection(ctx context.Context, arg DeleteJiraConnec
 }
 
 const getJiraConnectionByID = `-- name: GetJiraConnectionByID :one
-SELECT id, workspace_id, base_url, account_email, api_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at FROM jira_connection
+SELECT id, workspace_id, base_url, account_email, api_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, jql FROM jira_connection
 WHERE id = $1
 `
 
@@ -57,6 +57,7 @@ func (q *Queries) GetJiraConnectionByID(ctx context.Context, id pgtype.UUID) (Ji
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Jql,
 	)
 	return i, err
 }
@@ -95,7 +96,7 @@ func (q *Queries) GetJiraIssueLink(ctx context.Context, arg GetJiraIssueLinkPara
 
 const listJiraConnectionsByWorkspace = `-- name: ListJiraConnectionsByWorkspace :many
 
-SELECT id, workspace_id, base_url, account_email, api_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at FROM jira_connection
+SELECT id, workspace_id, base_url, account_email, api_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, jql FROM jira_connection
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -122,6 +123,7 @@ func (q *Queries) ListJiraConnectionsByWorkspace(ctx context.Context, workspaceI
 			&i.ConnectedByID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Jql,
 		); err != nil {
 			return nil, err
 		}
@@ -195,17 +197,18 @@ func (q *Queries) SyncIssueFromJira(ctx context.Context, arg SyncIssueFromJiraPa
 const upsertJiraConnection = `-- name: UpsertJiraConnection :one
 INSERT INTO jira_connection (
     workspace_id, base_url, account_email,
-    api_token_encrypted, webhook_secret_encrypted, connected_by_id
+    api_token_encrypted, webhook_secret_encrypted, connected_by_id, jql
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5, $6, $7
 )
 ON CONFLICT (workspace_id, base_url) DO UPDATE SET
     account_email            = EXCLUDED.account_email,
     api_token_encrypted      = EXCLUDED.api_token_encrypted,
     webhook_secret_encrypted = EXCLUDED.webhook_secret_encrypted,
     connected_by_id          = EXCLUDED.connected_by_id,
+    jql                      = EXCLUDED.jql,
     updated_at               = now()
-RETURNING id, workspace_id, base_url, account_email, api_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at
+RETURNING id, workspace_id, base_url, account_email, api_token_encrypted, webhook_secret_encrypted, connected_by_id, created_at, updated_at, jql
 `
 
 type UpsertJiraConnectionParams struct {
@@ -215,6 +218,7 @@ type UpsertJiraConnectionParams struct {
 	ApiTokenEncrypted      string      `json:"api_token_encrypted"`
 	WebhookSecretEncrypted string      `json:"webhook_secret_encrypted"`
 	ConnectedByID          pgtype.UUID `json:"connected_by_id"`
+	Jql                    pgtype.Text `json:"jql"`
 }
 
 // Reconnecting the same site rotates the stored token/secret and identity in
@@ -227,6 +231,7 @@ func (q *Queries) UpsertJiraConnection(ctx context.Context, arg UpsertJiraConnec
 		arg.ApiTokenEncrypted,
 		arg.WebhookSecretEncrypted,
 		arg.ConnectedByID,
+		arg.Jql,
 	)
 	var i JiraConnection
 	err := row.Scan(
@@ -239,6 +244,7 @@ func (q *Queries) UpsertJiraConnection(ctx context.Context, arg UpsertJiraConnec
 		&i.ConnectedByID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Jql,
 	)
 	return i, err
 }

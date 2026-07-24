@@ -28,7 +28,10 @@ type JiraConnectionResponse struct {
 	AccountEmail string `json:"account_email"`
 	WebhookURL   string `json:"webhook_url"`
 	WebhookPath  string `json:"webhook_path"`
-	CreatedAt    string `json:"created_at"`
+	// JQL filter used by the pull-based sync. Empty means the default
+	// `assignee = currentUser()` is applied at sync time.
+	JQL       string `json:"jql"`
+	CreatedAt string `json:"created_at"`
 }
 
 // JiraConnectResponse embeds the stored connection plus the one-time
@@ -67,6 +70,7 @@ func (h *Handler) jiraConnectionToResponse(c db.JiraConnection) JiraConnectionRe
 		AccountEmail: c.AccountEmail,
 		WebhookURL:   h.jiraWebhookURL(id),
 		WebhookPath:  h.jiraWebhookPath(id),
+		JQL:          c.Jql.String,
 		CreatedAt:    timestampToString(c.CreatedAt),
 	}
 }
@@ -128,6 +132,9 @@ type connectJiraRequest struct {
 	BaseURL      string `json:"base_url"`
 	AccountEmail string `json:"account_email"`
 	APIToken     string `json:"api_token"`
+	// Optional JQL filter for the pull-based sync; empty falls back to
+	// `assignee = currentUser()` at sync time.
+	JQL string `json:"jql"`
 }
 
 // ConnectJira (POST /workspaces/{id}/jira/connections) validates the supplied
@@ -200,6 +207,7 @@ func (h *Handler) ConnectJira(w http.ResponseWriter, r *http.Request) {
 		ApiTokenEncrypted:      tokenEnc,
 		WebhookSecretEncrypted: secretEnc,
 		ConnectedByID:          connectedBy,
+		Jql:                    ptrToText(strPtrOrNil(strings.TrimSpace(req.JQL))),
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to save connection")

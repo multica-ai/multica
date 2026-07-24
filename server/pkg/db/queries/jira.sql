@@ -16,15 +16,16 @@ WHERE id = $1;
 -- place rather than creating a duplicate row (mirrors UpsertVCSConnection).
 INSERT INTO jira_connection (
     workspace_id, base_url, account_email,
-    api_token_encrypted, webhook_secret_encrypted, connected_by_id
+    api_token_encrypted, webhook_secret_encrypted, connected_by_id, jql
 ) VALUES (
-    $1, $2, $3, $4, $5, sqlc.narg('connected_by_id')
+    $1, $2, $3, $4, $5, sqlc.narg('connected_by_id'), sqlc.narg('jql')
 )
 ON CONFLICT (workspace_id, base_url) DO UPDATE SET
     account_email            = EXCLUDED.account_email,
     api_token_encrypted      = EXCLUDED.api_token_encrypted,
     webhook_secret_encrypted = EXCLUDED.webhook_secret_encrypted,
     connected_by_id          = EXCLUDED.connected_by_id,
+    jql                      = EXCLUDED.jql,
     updated_at               = now()
 RETURNING *;
 
