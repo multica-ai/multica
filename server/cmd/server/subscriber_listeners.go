@@ -30,8 +30,15 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 		// Subscribe the creator
 		addSubscriber(bus, queries, e.WorkspaceID, issue.ID, issue.CreatorType, issue.CreatorID, "creator")
 
-		// Subscribe the assignee if exists and different from creator
+		// Subscribe the assignee if exists and different from creator.
+		// Skip squad assignees — the squad leader is dispatched via
+		// EnqueueTaskForSquadLeader (service/autopilot.go), and
+		// issue_subscriber.user_type is CHECK-constrained to
+		// ('member','agent') so a squad row would only log noise
+		// (cf. the author_type=='system' gate in the comment:created
+		// listener, MUL-2538).
 		if issue.AssigneeType != nil && issue.AssigneeID != nil &&
+			*issue.AssigneeType != "squad" &&
 			!(*issue.AssigneeType == issue.CreatorType && *issue.AssigneeID == issue.CreatorID) {
 			addSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
 		}
@@ -55,9 +62,10 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 
-		// Subscribe new assignee if assignee changed
+		// Subscribe new assignee if assignee changed. Skip squad assignees
+		// (see issue:created listener above for rationale).
 		if assigneeChanged, _ := payload["assignee_changed"].(bool); assigneeChanged {
-			if issue.AssigneeType != nil && issue.AssigneeID != nil {
+			if issue.AssigneeType != nil && issue.AssigneeID != nil && *issue.AssigneeType != "squad" {
 				addSubscriber(bus, queries, e.WorkspaceID, issue.ID, *issue.AssigneeType, *issue.AssigneeID, "assignee")
 			}
 		}

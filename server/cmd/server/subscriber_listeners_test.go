@@ -60,6 +60,34 @@ func cleanupTestUser(t *testing.T, email string) {
 	testPool.Exec(context.Background(), `DELETE FROM "user" WHERE email = $1`, email)
 }
 
+// createTestSquad inserts a squad led by a workspace agent and returns its
+// UUID string. Mirrors the INSERT shape used in
+// server/internal/handler/squad_assign_trigger_test.go.
+func createTestSquad(t *testing.T, workspaceID, creatorID, name string) string {
+	t.Helper()
+	ctx := context.Background()
+	var leaderID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1
+	`, workspaceID).Scan(&leaderID); err != nil {
+		t.Fatalf("load fixture agent for squad leader: %v", err)
+	}
+	var squadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, $2, '', $3, $4)
+		RETURNING id
+	`, workspaceID, name, leaderID, creatorID).Scan(&squadID); err != nil {
+		t.Fatalf("createTestSquad: %v", err)
+	}
+	return squadID
+}
+
+func cleanupTestSquad(t *testing.T, squadID string) {
+	t.Helper()
+	testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+}
+
 func isSubscribed(t *testing.T, queries *db.Queries, issueID, userType, userID string) bool {
 	t.Helper()
 	subscribed, err := queries.IsIssueSubscriber(context.Background(), db.IsIssueSubscriberParams{
@@ -414,4 +442,106 @@ func TestParseUUIDConsistency(t *testing.T) {
 		}
 	}()
 	_ = parseUUID("")
+}
+
+// TestSubscriberIssueCreated_SquadAssigneeNotSubscribed guards the fix for
+// the squad-assignee CHECK-constraint noise: when an issue is created with
+// assignee_type='squad', the subscriber listener must NOT call
+// AddIssueSubscriber with user_type='squad' (which the DB rejects with
+// SQLSTATE 23514 — cf. the author_type='system' gate for MUL-2538). The
+// squad leader is dispatched via EnqueueTaskForSquadLeader instead, so a
+// subscriber row is both impossible and redundant.
+//
+// Same caveat as TestSubscriberSystemCommentDoesNotSubscribe: the behavioral
+// assertion (no squad row) holds either way because the insert fails, but
+// the test pins the invariant and will fail loudly if anyone widens the
+// issue_subscriber.user_type CHECK to include 'squad' without also revisiting
+// this listener.
+func TestSubscriberIssueCreated_SquadAssigneeNotSubscribed(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	squadID := createTestSquad(t, testWorkspaceID, testUserID, "Subscriber Squad (created)")
+	t.Cleanup(func() { cleanupTestSquad(t, squadID) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	assigneeType := "squad"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueCreated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:           issueID,
+				WorkspaceID:  testWorkspaceID,
+				Title:        "squad-assigned at creation",
+				Status:       "todo",
+				Priority:     "medium",
+				CreatorType:  "member",
+				CreatorID:    testUserID,
+				AssigneeType: &assigneeType,
+				AssigneeID:   &squadID,
+			},
+		},
+	})
+
+	// Creator is the only subscriber — the squad assignee must not produce
+	// a second row (nor a failed insert logged at error level).
+	if isSubscribed(t, queries, issueID, "squad", squadID) {
+		t.Fatal("squad assignee must not be subscribed as user_type='squad'")
+	}
+	if count := subscriberCount(t, queries, issueID); count != 1 {
+		t.Fatalf("expected 1 subscriber (creator only) for squad-assigned issue, got %d", count)
+	}
+	if !isSubscribed(t, queries, issueID, "member", testUserID) {
+		t.Fatal("creator must still be subscribed on a squad-assigned issue")
+	}
+}
+
+// TestSubscriberIssueUpdated_SquadAssigneeNotSubscribed is the issue:updated
+// analog: reassigning an issue to a squad must not try to insert a squad
+// subscriber row.
+func TestSubscriberIssueUpdated_SquadAssigneeNotSubscribed(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+	registerSubscriberListeners(bus, queries)
+
+	squadID := createTestSquad(t, testWorkspaceID, testUserID, "Subscriber Squad (updated)")
+	t.Cleanup(func() { cleanupTestSquad(t, squadID) })
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	assigneeType := "squad"
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueUpdated,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"issue": handler.IssueResponse{
+				ID:           issueID,
+				WorkspaceID:  testWorkspaceID,
+				Title:        "reassigned to squad",
+				Status:       "todo",
+				Priority:     "medium",
+				CreatorType:  "member",
+				CreatorID:    testUserID,
+				AssigneeType: &assigneeType,
+				AssigneeID:   &squadID,
+			},
+			"assignee_changed": true,
+		},
+	})
+
+	if isSubscribed(t, queries, issueID, "squad", squadID) {
+		t.Fatal("squad assignee must not be subscribed as user_type='squad' after reassignment")
+	}
+	if count := subscriberCount(t, queries, issueID); count != 0 {
+		t.Fatalf("expected 0 subscribers when only a squad assignee change fired, got %d", count)
+	}
 }
