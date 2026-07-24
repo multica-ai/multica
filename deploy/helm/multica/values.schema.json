@@ -126,6 +126,7 @@
         "readinessProbe",
         "livenessProbe",
         "metrics",
+        "service",
         "nodeSelector",
         "affinity",
         "tolerations",
@@ -186,6 +187,7 @@
             "servicePort": { "$ref": "#/definitions/port" }
           }
         },
+        "service": { "$ref": "#/definitions/serviceMetadata" },
         "nodeSelector": { "$ref": "#/definitions/stringMap" },
         "affinity": { "$ref": "#/definitions/freeObject" },
         "tolerations": { "$ref": "#/definitions/objectArray" },
@@ -204,6 +206,7 @@
         "strategy",
         "config",
         "compatibility",
+        "service",
         "extraVolumes",
         "extraVolumeMounts",
         "podSecurityContext",
@@ -240,6 +243,7 @@
             "backendAlias": { "type": "boolean" }
           }
         },
+        "service": { "$ref": "#/definitions/serviceMetadata" },
         "extraVolumes": { "$ref": "#/definitions/objectArray" },
         "extraVolumeMounts": { "$ref": "#/definitions/objectArray" },
         "podSecurityContext": { "$ref": "#/definitions/freeObject" },
@@ -382,6 +386,15 @@
     }
   },
   "definitions": {
+    "serviceMetadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["labels", "annotations"],
+      "properties": {
+        "labels": { "$ref": "#/definitions/stringMap" },
+        "annotations": { "$ref": "#/definitions/stringMap" }
+      }
+    },
     "nonEmptyString": {
       "type": "string",
       "minLength": 1

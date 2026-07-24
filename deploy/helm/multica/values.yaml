@@ -173,6 +173,9 @@ backend:
     enabled: false
     containerPort: 9090
     servicePort: 9090
+  service:
+    labels: {}
+    annotations: {}
   nodeSelector: {}
   affinity: {}
   tolerations: []
@@ -207,6 +210,9 @@ frontend:
     # Because that name is unprefixed, only ONE such release can run per
     # namespace. Keep false for current images.
     backendAlias: false
+  service:
+    labels: {}
+    annotations: {}
   extraVolumes: []
   extraVolumeMounts: []
   podSecurityContext: {}
