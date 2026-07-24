@@ -2430,6 +2430,25 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	}
 }
 
+// modelDiscoveryExecutable resolves the binary to probe for a runtime's model
+// catalog. A custom runtime profile (e.g. a `pi` fork registered with a
+// different command_name) must be discovered through its own resolved command —
+// the same one task execution launches — not the family-default
+// Agents[provider] entry, which may expose a different catalog or not be
+// installed on this host at all (#4482). Built-in runtimes, and custom profiles
+// whose command was never resolved on this host, fall back to the family-default
+// agent path. Returns ok=false when neither resolves, so handleModelList can
+// report the existing "no agent configured" failure.
+func (d *Daemon) modelDiscoveryExecutable(rt Runtime) (string, bool) {
+	if spec, ok := d.customProfileLaunchForRuntime(rt.ID); ok {
+		return spec.path, true
+	}
+	if entry, ok := d.cfg.Agents[rt.Provider]; ok {
+		return entry.Path, true
+	}
+	return "", false
+}
+
 // handleModelList resolves the provider's supported models (via static
 // catalog or by shelling out to the agent CLI) and reports the result
 // back to the server. Model discovery failures are reported as empty
@@ -2446,10 +2465,16 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		})
 		return
 	}
-	// Self-heal a pinned executable path an in-place upgrade deleted (MUL-4486).
-	entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
+	executablePath := entry.Path
+	if spec, ok := d.customProfileLaunchForRuntime(rt.ID); ok {
+		executablePath = spec.path
+	} else {
+		// Self-heal a pinned executable path an in-place upgrade deleted (MUL-4486).
+		entry, _ = d.resolveAgentEntry(ctx, rt.Provider, entry)
+		executablePath = entry.Path
+	}
 
-	models, err := agent.ListModels(ctx, rt.Provider, entry.Path)
+	models, err := agent.ListModels(ctx, rt.Provider, executablePath)
 	if err != nil {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
