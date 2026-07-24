@@ -337,6 +337,8 @@ export function ProviderLogo({
       return <GrokLogo className={className} />;
     case "qwen":
       return <QwenLogo className={className} />;
+    case "devin":
+      return <Monitor className={className} />;
     default:
       return <Monitor className={className} />;
   }

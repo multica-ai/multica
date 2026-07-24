@@ -180,6 +180,11 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
 		return []Model{}, nil
+	case "devin":
+		// Devin manages model selection through its own configuration and does
+		// not implement the ACP session/set_model RPC. An empty catalog keeps
+		// the runtime picker available without advertising unsupported models.
+		return []Model{}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
@@ -198,14 +203,15 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 // `session/set_model` RPC before each prompt; Claude / Codex / Cursor /
 // Gemini / Copilot / Kimi / Kiro / OpenCode / OpenClaw / Pi / Antigravity
 // pass it via flag or session config (Antigravity gained `--model` in agy
-// 1.0.6 — MUL-3125).
+// 1.0.6 — MUL-3125). Devin is the exception: its ACP server does not expose
+// session/set_model, so its model is managed by the Devin CLI.
 //
 // The hook is retained — rather than inlining `true` at the call sites — so
 // a future model-less runtime can opt out in one place, which makes the UI
 // render a disabled "Managed by runtime" picker instead of an empty
 // dropdown plus a silently-ignored manual-entry field.
 func ModelSelectionSupported(providerType string) bool {
-	return true
+	return providerType != "devin"
 }
 
 // ModelKnownIncompatibleWithProvider reports whether a saved model is a known

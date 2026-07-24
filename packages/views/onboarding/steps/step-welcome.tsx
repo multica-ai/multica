@@ -282,7 +282,8 @@ type ProviderName =
   | "qoder"
   | "pi"
   | "copilot"
-  | "cursor";
+  | "cursor"
+  | "devin";
 
 type ActivityActor =
   | { kind: "user"; name: string; initial: string }

@@ -43,6 +43,19 @@ func TestListModelsQwenUsesRuntimeDefaultAndManualEntry(t *testing.T) {
 	}
 }
 
+func TestListModelsDevinUsesRuntimeManagedModel(t *testing.T) {
+	got, err := ListModels(context.Background(), "devin", "")
+	if err != nil {
+		t.Fatalf("ListModels(devin) error: %v", err)
+	}
+	if len(got) != 0 {
+		t.Fatalf("ListModels(devin) = %+v, want no runtime-managed catalog", got)
+	}
+	if ModelSelectionSupported("devin") {
+		t.Fatal("devin must not advertise model selection without session/set_model support")
+	}
+}
+
 func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	// Copilot uses dynamic ACP discovery, but with no `copilot`
 	// binary on PATH (the discovery LookPath fails) it must fall
