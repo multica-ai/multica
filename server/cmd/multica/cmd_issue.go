@@ -442,6 +442,8 @@ func init() {
 	issueListCmd.Flags().String("assignee-id", "", "Filter by assignee UUID — member, agent, or squad (mutually exclusive with --assignee)")
 	issueListCmd.Flags().String("project", "", "Filter by project ID")
 	issueListCmd.Flags().StringSlice("metadata", nil, "Filter by metadata key=value (repeatable; combined with AND). Value is JSON-parsed: 'true'/'false' → bool, numbers → number, otherwise string. Wrap as '\"42\"' to force a string when the value would otherwise sniff as a number.")
+	issueListCmd.Flags().String("overlaps-start", "", "Filter issues whose start/due date range overlaps this start date (YYYY-MM-DD; requires --overlaps-end)")
+	issueListCmd.Flags().String("overlaps-end", "", "Filter issues whose start/due date range overlaps this end date (YYYY-MM-DD; requires --overlaps-start)")
 	issueListCmd.Flags().Int("limit", 50, "Maximum number of issues to return")
 	issueListCmd.Flags().Int("offset", 0, "Number of issues to skip (for pagination)")
 	issueListCmd.Flags().String("sort", "", "Sort column: position (default, manual board order), title, created_at, start_date, due_date, priority")
@@ -621,6 +623,16 @@ func runIssueList(cmd *cobra.Command, _ []string) error {
 		}
 		params.Set("metadata", filter)
 	}
+	overlapsStart, _ := cmd.Flags().GetString("overlaps-start")
+	overlapsEnd, _ := cmd.Flags().GetString("overlaps-end")
+	if overlapsStart != "" || overlapsEnd != "" {
+		if overlapsStart == "" || overlapsEnd == "" {
+			return fmt.Errorf("--overlaps-start and --overlaps-end are required together")
+		}
+		params.Set("schedule_start", overlapsStart)
+		params.Set("schedule_end", overlapsEnd)
+	}
+
 	sortVal, _ := cmd.Flags().GetString("sort")
 	if sortVal != "" {
 		valid := false

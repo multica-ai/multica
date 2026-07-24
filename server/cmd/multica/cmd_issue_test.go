@@ -443,6 +443,60 @@ func newIssueCreateTestCmd() *cobra.Command {
 	return cmd
 }
 
+func newIssueListTestCmd() *cobra.Command {
+	cmd := &cobra.Command{Use: "list"}
+	cmd.Flags().String("output", "table", "")
+	cmd.Flags().Bool("full-id", false, "")
+	cmd.Flags().String("status", "", "")
+	cmd.Flags().String("priority", "", "")
+	cmd.Flags().String("assignee", "", "")
+	cmd.Flags().String("assignee-id", "", "")
+	cmd.Flags().String("project", "", "")
+	cmd.Flags().StringSlice("metadata", nil, "")
+	cmd.Flags().String("overlaps-start", "", "")
+	cmd.Flags().String("overlaps-end", "", "")
+	cmd.Flags().Int("limit", 50, "")
+	cmd.Flags().Int("offset", 0, "")
+	cmd.Flags().String("sort", "", "")
+	cmd.Flags().String("direction", "", "")
+	return cmd
+}
+
+func TestRunIssueListSendsScheduleOverlapFilters(t *testing.T) {
+	var gotQuery url.Values
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/api/issues" {
+			http.NotFound(w, r)
+			return
+		}
+		gotQuery = r.URL.Query()
+		json.NewEncoder(w).Encode(map[string]any{
+			"issues": []any{},
+			"total":  0,
+		})
+	}))
+	defer srv.Close()
+
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+	t.Setenv("MULTICA_TOKEN", "test-token")
+
+	cmd := newIssueListTestCmd()
+	_ = cmd.Flags().Set("output", "json")
+	_ = cmd.Flags().Set("overlaps-start", "2026-06-08")
+	_ = cmd.Flags().Set("overlaps-end", "2026-06-14")
+
+	if err := runIssueList(cmd, nil); err != nil {
+		t.Fatalf("runIssueList: %v", err)
+	}
+	if got := gotQuery.Get("schedule_start"); got != "2026-06-08" {
+		t.Fatalf("schedule_start = %q, want 2026-06-08", got)
+	}
+	if got := gotQuery.Get("schedule_end"); got != "2026-06-14" {
+		t.Fatalf("schedule_end = %q, want 2026-06-14", got)
+	}
+}
+
 func TestRunIssueCreateSendsAllowDuplicate(t *testing.T) {
 	var body map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -2817,23 +2871,6 @@ func newIssueUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("parent", "", "")
 	cmd.Flags().Float64("position", 0, "")
 	cmd.Flags().String("output", "json", "")
-	return cmd
-}
-
-func newIssueListTestCmd() *cobra.Command {
-	cmd := &cobra.Command{Use: "list"}
-	cmd.Flags().String("output", "table", "")
-	cmd.Flags().Bool("full-id", false, "")
-	cmd.Flags().String("status", "", "")
-	cmd.Flags().String("priority", "", "")
-	cmd.Flags().String("assignee", "", "")
-	cmd.Flags().String("assignee-id", "", "")
-	cmd.Flags().String("project", "", "")
-	cmd.Flags().StringSlice("metadata", nil, "")
-	cmd.Flags().Int("limit", 50, "")
-	cmd.Flags().Int("offset", 0, "")
-	cmd.Flags().String("sort", "", "")
-	cmd.Flags().String("direction", "", "")
 	return cmd
 }
 
