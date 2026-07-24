@@ -103,6 +103,34 @@ func TestClaudeStaticModelsExposesSonnet5(t *testing.T) {
 	}
 }
 
+func TestClaudeStaticModelsExposesOpenAIGPTSeries(t *testing.T) {
+	models := claudeStaticModels()
+	ids := map[string]Model{}
+	defaults := 0
+	for _, m := range models {
+		ids[m.ID] = m
+		if m.Default {
+			defaults++
+		}
+	}
+
+	for _, want := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"} {
+		got, ok := ids[want]
+		if !ok {
+			t.Fatalf("missing Claude Code GPT model %q in: %+v", want, models)
+		}
+		if got.Provider != "openai" {
+			t.Errorf("Claude Code GPT model %q provider = %q, want openai", want, got.Provider)
+		}
+		if got.Default {
+			t.Errorf("Claude Code GPT model %q must not become the default: %+v", want, got)
+		}
+	}
+	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
+		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
+	}
+}
+
 func TestCodexStaticModelsMatchVerifiedFallbackCatalog(t *testing.T) {
 	// This fallback is used for Codex <0.122.0 and whenever dynamic bundled
 	// discovery fails. Keep the latest verified visible models plus 5.3 Codex
@@ -170,6 +198,12 @@ func TestModelKnownIncompatibleWithProvider(t *testing.T) {
 			name:     "codex model is compatible with codex",
 			provider: "codex",
 			model:    "gpt-5.5",
+			want:     false,
+		},
+		{
+			name:     "openai gpt model is compatible with claude",
+			provider: "claude",
+			model:    "gpt-5.6-sol",
 			want:     false,
 		},
 		{
@@ -586,6 +620,26 @@ bareword
 	}
 }
 
+func TestParsePiModelsJSON(t *testing.T) {
+	input := `{"models":[{"provider":"openai-codex","id":"gpt-5.6-sol","selector":"openai-codex/gpt-5.6-sol","name":"GPT-5.6-Sol","thinking":["low","medium","high","xhigh","max"]},{"provider":"openai-codex","id":"gpt-5.6-sol","selector":"openai-codex/gpt-5.6-sol","name":"duplicate"},{"provider":"openai","id":"gpt-5.5","name":"GPT-5.5","thinking":["low","high","low"]}]}`
+	models := parsePiModelsJSON(input)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "openai-codex/gpt-5.6-sol" || models[0].Label != "GPT-5.6-Sol" || models[0].Provider != "openai-codex" {
+		t.Errorf("unexpected first JSON model: %+v", models[0])
+	}
+	if models[0].Thinking == nil || len(models[0].Thinking.SupportedLevels) != 5 || models[0].Thinking.SupportedLevels[4].Value != "max" {
+		t.Errorf("unexpected first JSON thinking levels: %+v", models[0].Thinking)
+	}
+	if models[1].ID != "openai/gpt-5.5" || models[1].Label != "GPT-5.5" || models[1].Provider != "openai" {
+		t.Errorf("unexpected second JSON model: %+v", models[1])
+	}
+	if models[1].Thinking == nil || len(models[1].Thinking.SupportedLevels) != 2 || models[1].Thinking.SupportedLevels[1].Value != "high" {
+		t.Errorf("unexpected second JSON thinking levels: %+v", models[1].Thinking)
+	}
+}
+
 func TestParsePiModelsTableFormat(t *testing.T) {
 	input := `provider             model                   context  max-out  thinking  images
 bailian-coding-plan  glm-4.7                 202.8K   16.4K    no        no
@@ -612,6 +666,13 @@ bareword-only-line
 	// the legacy `provider:model` form gets colon→slash normalization.
 	if models[3].ID != "opencode/claude-sonnet-4-6:exp" || models[3].Provider != "opencode" {
 		t.Errorf("expected ':' inside table-format model name to be preserved: %+v", models[3])
+	}
+}
+
+func TestParsePiModelsSkipsUnsupportedFlagDiagnostics(t *testing.T) {
+	input := "Error: unknown flag: --list-models\nRun `omp --help` for available flags.\n"
+	if models := parsePiModels(input); len(models) != 0 {
+		t.Fatalf("unsupported-flag diagnostics must not become models, got %+v", models)
 	}
 }
 
@@ -962,6 +1023,38 @@ func TestParseHermesSessionNewModelsMissingField(t *testing.T) {
 func TestParseHermesSessionNewModelsGarbage(t *testing.T) {
 	if got := parseACPSessionNewModels([]byte("not json")); got != nil {
 		t.Errorf("expected nil for non-JSON, got %+v", got)
+	}
+}
+
+func TestExpandHermesGPTCatalogAndThinking(t *testing.T) {
+	models := []Model{{ID: "gpt-5.6-sol", Label: "GPT-5.6-Sol", Default: true}}
+	models = expandHermesGPTCatalog(models)
+	annotateHermesThinking(models)
+
+	byID := map[string]Model{}
+	for _, model := range models {
+		byID[model.ID] = model
+	}
+	for _, id := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"} {
+		model, ok := byID[id]
+		if !ok {
+			t.Errorf("missing Hermes GPT model %q: %+v", id, models)
+			continue
+		}
+		if model.Thinking == nil || !hasThinkingLevel(model.Thinking, "xhigh") || !hasThinkingLevel(model.Thinking, "max") {
+			t.Errorf("Hermes model %q missing effort catalog: %+v", id, model.Thinking)
+		}
+	}
+	if !byID["gpt-5.6-sol"].Default {
+		t.Error("current Hermes model must remain default")
+	}
+}
+
+func TestExpandHermesCatalogLeavesNonGPTDiscoveryAlone(t *testing.T) {
+	models := []Model{{ID: "nous:moonshotai/kimi-k2.6", Label: "Kimi K2.6", Default: true}}
+	got := expandHermesGPTCatalog(models)
+	if len(got) != 1 || got[0].ID != models[0].ID {
+		t.Errorf("non-GPT Hermes catalog changed: %+v", got)
 	}
 }
 

@@ -3997,6 +3997,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
+	thinkingLevel := ""
+	if task.Agent != nil {
+		thinkingLevel = task.Agent.ThinkingLevel
+	}
 	var agentEnvOverrides map[string]string
 	var agentCustomArgs []string
 	if task.Agent != nil {
@@ -4056,6 +4060,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
+			HermesThinkingLevel:   thinkingLevel,
 			Task:                  taskCtx,
 		}, d.logger)
 	}
@@ -4076,6 +4081,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			HermesSourceHome:      hermesSourceHome,
 			HermesSourceMustExist: hermesSourceMustExist,
 			HermesEnv:             hermesEnv,
+			HermesThinkingLevel:   thinkingLevel,
 			Task:                  taskCtx,
 		}
 		if localAssignment != nil {
@@ -4336,10 +4342,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if model == "" {
 		model = entry.Model
 	}
-	thinkingLevel := ""
-	if task.Agent != nil {
-		thinkingLevel = task.Agent.ThinkingLevel
-	}
+	// thinkingLevel was captured before execenv preparation so Hermes can write
+	// the same persisted value into its task-local config overlay.
 	// Per-model guard: the server validates the literal token against the
 	// provider's enum, but per-model gaps (Claude's `xhigh` on a non-Opus
 	// model, Codex's per-model `supported_reasoning_levels`) only resolve

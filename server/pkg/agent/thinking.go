@@ -102,6 +102,14 @@ var claudeEffortLabel = map[string]string{
 // Update this map when Anthropic publishes a new model that does not
 // support `xhigh` / `max`.
 var claudeModelEffortAllow = map[string]map[string]bool{
+	// Multica deployments can route OpenAI GPT models through Claude Code.
+	// Keep the GPT rows inside Claude Code's advertised --effort vocabulary:
+	// current Claude Code exposes low/medium/high/xhigh/max, not Codex's
+	// `ultra`, so advertising ultra here would make launches fail.
+	"gpt-5.6-sol":   {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
+	"gpt-5.6-terra": {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
+	"gpt-5.6-luna":  {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
+	"gpt-5.5":       {"low": true, "medium": true, "high": true, "xhigh": true},
 	// Opus is the only model that publicly supports xhigh; the help
 	// list still includes it for Sonnet / Haiku so we filter here.
 	"claude-opus-4-8":           {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
@@ -578,6 +586,13 @@ func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, mo
 	if value == "" {
 		return true, nil
 	}
+	// Hermes exposes one provider-wide /reasoning vocabulary rather than
+	// per-model effort metadata in its ACP model catalog. Validate against the
+	// same fixed enum used by persistence so the daemon does not discard a valid
+	// saved level before building the task-local Hermes config.
+	if providerType == "hermes" {
+		return IsKnownThinkingValue(providerType, value), nil
+	}
 	// Codex empty-model fail-closed (see doc comment). Checked before
 	// ListModels so the outcome is deterministic even when discovery would
 	// error — an errored lookup makes the daemon pass the level through, which
@@ -602,7 +617,7 @@ func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, mo
 			}
 		}
 		if target == "" {
-			if providerType == "opencode" {
+			if providerType == "opencode" || providerType == "pi" {
 				return anyModelSupportsThinkingValue(models, value), nil
 			}
 			return false, nil
@@ -665,6 +680,30 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"medium": true,
 		"high":   true,
 		"xhigh":  true,
+	},
+	// Oh My Pi v17 exposes `--thinking` with this fixed value set.
+	"pi": {
+		"off":     true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
+		"auto":    true,
+	},
+	// Hermes Agent's /reasoning command and ACP runtime accept this fixed
+	// provider-wide vocabulary. The ACP backend forwards the selected token in
+	// session/new so each managed session gets an isolated effort override.
+	"hermes": {
+		"none":    true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
+		"ultra":   true,
 	},
 	// Grok 4.5's documented --effort levels. It cannot disable reasoning and
 	// does not accept none, minimal, or xhigh.

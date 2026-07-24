@@ -354,20 +354,11 @@ func hermesProfileDir(root, name string) (home string, mustExist bool, err error
 // described above. The daemon exports the given path as HERMES_HOME on the
 // hermes subprocess so the CLI discovers the bound skills natively.
 //
-// Callers gate this on the agent having skills bound; it is a full rebuild each
-// time (mirror reconciled, config re-derived, bound skills rewritten) so a Reuse
-// after a skill/config change lands cleanly. It fails CLOSED: if the mirror, the
-// derived config, or the bound skills can't be established the whole overlay is
-// unusable, so the error propagates and the caller must not start Hermes against
-// a half-built home.
-// sourceHome is the shared home to seed from (resolved by the daemon via
-// ResolveHermesProfile, honoring the agent's HERMES_HOME/profile); empty
-// falls back to the platform default. sourceMustExist fails closed when the
-// source home is absent — set for an explicitly named profile so a typo doesn't
-// silently seed from an empty dir and drop the user's auth/config. env is the
-// sanitized effective env used to expand ${VAR} in external_dirs so it matches
-// what the Hermes child sees.
-func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, workspaceSkills []SkillContextForEnv, env map[string]string, logger *slog.Logger) error {
+// Callers gate this on the agent having bound skills or a Multica-managed
+// thinking level. It is a full rebuild each time so reuse observes skill,
+// config, and reasoning changes. reasoningEffort is written only to the
+// task-local derived config; the shared Hermes home is never mutated.
+func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, workspaceSkills []SkillContextForEnv, env map[string]string, reasoningEffort string, logger *slog.Logger) error {
 	sharedHome := strings.TrimSpace(sourceHome)
 	if sharedHome == "" {
 		sharedHome = platformDefaultHermesHome()
@@ -398,7 +389,7 @@ func prepareHermesHome(hermesHome, sourceHome string, sourceMustExist bool, work
 	if err := mirrorSharedHermesHome(sharedHome, hermesHome, logger); err != nil {
 		return fmt.Errorf("mirror shared hermes home: %w", err)
 	}
-	if err := writeDerivedHermesConfig(sharedHome, hermesHome, env, logger); err != nil {
+	if err := writeDerivedHermesConfig(sharedHome, hermesHome, env, reasoningEffort, logger); err != nil {
 		return fmt.Errorf("derive hermes config: %w", err)
 	}
 	if err := writeDerivedHermesEnv(sharedHome, hermesHome); err != nil {
@@ -599,15 +590,12 @@ func linkSharedHermesEntry(src, dst string) error {
 }
 
 // writeDerivedHermesConfig writes the task-local config.yaml: the user's config
-// with `skills.external_dirs` set to their existing external dirs plus the shared
-// ~/.hermes/skills, all as absolute paths. When the user has no config we still
-// write a minimal one so their global skills stay reachable via the external
-// root. If the config can't be parsed we copy it verbatim so auth/model settings
-// survive — the bound skills still load from the task-local skills/ dir, which is
-// the point of the fix; only the user's global skills would be missing. The file
-// is written 0600 (it can hold inline api_key secrets) via atomic replace, so
-// reuse also repairs a prior file's permissions.
-func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]string, logger *slog.Logger) error {
+// with `skills.external_dirs` normalized and an optional
+// `agent.reasoning_effort` override. The effort is scoped to this managed task;
+// the shared config is never modified. If the source config is malformed we
+// fail closed when an effort override is required, because copying it verbatim
+// would silently run at a different effort than the persisted agent setting.
+func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]string, reasoningEffort string, logger *slog.Logger) error {
 	srcConfig := filepath.Join(sharedHome, "config.yaml")
 	dstConfig := filepath.Join(hermesHome, "config.yaml")
 
@@ -620,11 +608,15 @@ func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]stri
 		if err := setHermesExternalDirs(doc, computeHermesExternalDirs(sharedHome, nil, env)); err != nil {
 			return err
 		}
+		setHermesReasoningEffort(doc, reasoningEffort)
 		return marshalYAMLToFile(doc, dstConfig)
 	}
 
 	var doc yaml.Node
 	if err := yaml.Unmarshal(data, &doc); err != nil {
+		if reasoningEffort != "" {
+			return fmt.Errorf("parse shared config for reasoning override: %w", err)
+		}
 		logger.Warn("execenv: hermes-home config parse failed; copying verbatim", "error", err)
 		return writeFileAtomic(dstConfig, data, 0o600)
 	}
@@ -637,7 +629,27 @@ func writeDerivedHermesConfig(sharedHome, hermesHome string, env map[string]stri
 	// Supermemory/Hindsight/etc. bank isn't shared across managed tasks; the
 	// built-in per-task memories/ dir is already isolated above.
 	disableHermesMemoryProvider(&doc)
+	setHermesReasoningEffort(&doc, reasoningEffort)
 	return marshalYAMLToFile(&doc, dstConfig)
+}
+
+// setHermesReasoningEffort applies the runtime-native Hermes effort token.
+// Empty preserves the source config's default; non-empty replaces only the
+// task-local derived value.
+func setHermesReasoningEffort(doc *yaml.Node, value string) {
+	if value == "" {
+		return
+	}
+	top := yamlDocumentRoot(doc)
+	if top == nil {
+		return
+	}
+	agent := yamlMapValue(top, "agent")
+	if agent == nil || agent.Kind != yaml.MappingNode {
+		agent = &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+		yamlSetMapValue(top, "agent", agent)
+	}
+	yamlSetMapValue(agent, "reasoning_effort", &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value})
 }
 
 // disableHermesMemoryProvider forces skills-adjacent `memory.provider` to empty

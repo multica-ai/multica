@@ -126,7 +126,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		})
 	case "hermes":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
-			return discoverHermesModels(ctx, executablePath)
+			models, err := discoverHermesModels(ctx, executablePath)
+			if err != nil {
+				return nil, err
+			}
+			models = expandHermesGPTCatalog(models)
+			annotateHermesThinking(models)
+			return models, nil
 		})
 	case "kimi":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
@@ -301,6 +307,10 @@ func claudeStaticModels() []Model {
 	return []Model{
 		{ID: "claude-sonnet-5", Label: "Claude Sonnet 5", Provider: "anthropic"},
 		{ID: "claude-sonnet-4-6", Label: "Claude Sonnet 4.6", Provider: "anthropic", Default: true},
+		{ID: "gpt-5.6-sol", Label: "GPT-5.6-Sol", Provider: "openai"},
+		{ID: "gpt-5.6-terra", Label: "GPT-5.6-Terra", Provider: "openai"},
+		{ID: "gpt-5.6-luna", Label: "GPT-5.6-Luna", Provider: "openai"},
+		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai"},
 		{ID: "claude-fable-5", Label: "Claude Fable 5", Provider: "anthropic"},
 		{ID: "claude-opus-4-8", Label: "Claude Opus 4.8", Provider: "anthropic"},
 		{ID: "claude-opus-4-7", Label: "Claude Opus 4.7", Provider: "anthropic"},
@@ -681,9 +691,10 @@ func openCodeThinkingLevelsFromVariants(variants map[string]opencodeModelVariant
 	return levels
 }
 
-// discoverPiModels runs `pi --list-models` and parses its output.
-// Older pi versions print the list to stderr; newer versions use
-// stdout. We capture both and parse whichever is non-empty.
+// discoverPiModels runs `pi models --json` and falls back to the older
+// `pi --list-models` shape. Pi v17 removed --list-models in favor of the
+// models subcommand; preferring JSON keeps GPT rows and provider selectors
+// exact instead of scraping the box-drawing table.
 func discoverPiModels(ctx context.Context, executablePath string) ([]Model, error) {
 	if executablePath == "" {
 		executablePath = "pi"
@@ -691,27 +702,122 @@ func discoverPiModels(ctx context.Context, executablePath string) ([]Model, erro
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return []Model{}, nil
 	}
-	// Newer pi fetches its catalog from each configured provider over the
-	// network, so discovery time scales with provider count — a multi-provider
-	// setup measured ~4.6-4.8s, right at the old 5s cap. When jitter pushed it
-	// over, the daemon killed the command before it printed anything and the
-	// model picker came back empty while the runtime stayed online. 15s matches
-	// the opencode discovery cap (see #3729, same class as #3627).
-	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+
+	if text, ok := runPiModelCatalogCommand(ctx, executablePath, "models", "--json"); ok {
+		if models := parsePiModelsJSON(text); len(models) > 0 {
+			return models, nil
+		}
+	}
+	if text, ok := runPiModelCatalogCommand(ctx, executablePath, "--list-models"); ok {
+		return parsePiModels(text), nil
+	}
+	return []Model{}, nil
+}
+
+func runPiModelCatalogCommand(ctx context.Context, executablePath string, args ...string) (string, bool) {
+	// `pi models --json` fetches/loads every configured provider catalog. On
+	// this workstation it takes ~17s, so the old 15s cap killed discovery just
+	// before GPT rows printed. Keep this bounded, but above normal cold-cache
+	// latency.
+	runCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, executablePath, "--list-models")
+
+	cmd := exec.CommandContext(runCtx, executablePath, args...)
 	hideAgentWindow(cmd)
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
 	stdout, err := cmd.Output()
 	if err != nil && len(stdout) == 0 && stderr.Len() == 0 {
-		return []Model{}, nil
+		return "", false
 	}
 	text := string(stdout)
 	if strings.TrimSpace(text) == "" {
 		text = stderr.String()
 	}
-	return parsePiModels(text), nil
+	if strings.TrimSpace(text) == "" {
+		return "", false
+	}
+	return text, true
+}
+
+func parsePiModelsJSON(output string) []Model {
+	var payload struct {
+		Models []struct {
+			Provider string   `json:"provider"`
+			ID       string   `json:"id"`
+			Selector string   `json:"selector"`
+			Name     string   `json:"name"`
+			Thinking []string `json:"thinking"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal([]byte(output), &payload); err != nil {
+		return nil
+	}
+	models := make([]Model, 0, len(payload.Models))
+	seen := map[string]bool{}
+	for _, row := range payload.Models {
+		id := strings.TrimSpace(row.Selector)
+		if id == "" {
+			provider := strings.TrimSpace(row.Provider)
+			modelID := strings.TrimSpace(row.ID)
+			if provider != "" && modelID != "" {
+				id = provider + "/" + modelID
+			} else {
+				id = modelID
+			}
+		}
+		if slash := strings.Index(id, "/"); slash <= 0 || slash == len(id)-1 {
+			continue
+		}
+		if seen[id] {
+			continue
+		}
+		seen[id] = true
+		label := strings.TrimSpace(row.Name)
+		if label == "" {
+			label = id
+		}
+		provider := strings.TrimSpace(row.Provider)
+		if provider == "" {
+			provider = id[:strings.Index(id, "/")]
+		}
+		models = append(models, Model{ID: id, Label: label, Provider: provider, Thinking: piThinkingFromValues(row.Thinking)})
+	}
+	return models
+}
+
+func piThinkingFromValues(values []string) *ModelThinking {
+	if len(values) == 0 {
+		return nil
+	}
+	labels := map[string]string{
+		"off":     "Off",
+		"minimal": "Minimal",
+		"low":     "Low",
+		"medium":  "Medium",
+		"high":    "High",
+		"xhigh":   "Extra high",
+		"max":     "Max",
+		"auto":    "Auto",
+	}
+	levels := make([]ThinkingLevel, 0, len(values))
+	seen := map[string]bool{}
+	for _, raw := range values {
+		value := strings.TrimSpace(raw)
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		label, ok := labels[value]
+		if !ok {
+			label = strings.Title(strings.ReplaceAll(value, "-", " ")) //nolint:staticcheck
+		}
+		levels = append(levels, ThinkingLevel{Value: value, Label: label})
+	}
+	if len(levels) == 0 {
+		return nil
+	}
+	return &ModelThinking{SupportedLevels: levels}
 }
 
 // parsePiModels accepts the `pi --list-models` output. Pi historically
@@ -792,7 +898,8 @@ func isPiDiscoveryNoise(line string) bool {
 	}
 	return strings.HasPrefix(lower, "warning:") ||
 		strings.HasPrefix(lower, "error:") ||
-		strings.HasPrefix(lower, "info:")
+		strings.HasPrefix(lower, "info:") ||
+		strings.HasPrefix(lower, "run ")
 }
 
 // discoverHermesModels spins up a throwaway `hermes acp` process,
@@ -812,6 +919,60 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 		extraEnv:     []string{"HERMES_YOLO_MODE=1"},
 		tmpdirPrefix: "multica-hermes-discovery-",
 	})
+}
+
+var hermesThinkingLevels = []ThinkingLevel{
+	{Value: "none", Label: "None", Description: "Disable model reasoning"},
+	{Value: "minimal", Label: "Minimal", Description: "Use the lightest available reasoning"},
+	{Value: "low", Label: "Low"},
+	{Value: "medium", Label: "Medium"},
+	{Value: "high", Label: "High"},
+	{Value: "xhigh", Label: "Extra high"},
+	{Value: "max", Label: "Max"},
+	{Value: "ultra", Label: "Ultra"},
+}
+
+// annotateHermesThinking attaches Hermes' provider-wide /reasoning vocabulary
+// to every discovered model. Hermes ACP does not publish per-model effort
+// metadata, but the runtime accepts these tokens and resolves model-specific
+// compatibility itself.
+func annotateHermesThinking(models []Model) {
+	for i := range models {
+		levels := append([]ThinkingLevel(nil), hermesThinkingLevels...)
+		models[i].Thinking = &ModelThinking{SupportedLevels: levels, DefaultLevel: "medium"}
+	}
+}
+
+// expandHermesGPTCatalog repairs the sparse catalog returned by Hermes when a
+// custom OpenAI-compatible provider has no curated model list: ACP then reports
+// only its current GPT model. Multica already knows the selectable GPT family
+// and Hermes' session/set_model passes these IDs through verbatim. Do not expand
+// non-GPT catalogs; those remain authoritative runtime discoveries.
+func expandHermesGPTCatalog(models []Model) []Model {
+	if len(models) != 1 || !strings.HasPrefix(models[0].ID, "gpt-") {
+		return models
+	}
+	current := models[0].ID
+	fallback := []Model{
+		{ID: "gpt-5.6-sol", Label: "GPT-5.6-Sol", Provider: "openai"},
+		{ID: "gpt-5.6-terra", Label: "GPT-5.6-Terra", Provider: "openai"},
+		{ID: "gpt-5.6-luna", Label: "GPT-5.6-Luna", Provider: "openai"},
+		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai"},
+		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
+		{ID: "gpt-5.4-mini", Label: "GPT-5.4-Mini", Provider: "openai"},
+		{ID: "gpt-5.3-codex-spark", Label: "GPT-5.3-Codex-Spark", Provider: "openai"},
+	}
+	seen := map[string]bool{}
+	out := make([]Model, 0, len(fallback)+1)
+	for _, model := range fallback {
+		model.Default = model.ID == current
+		seen[model.ID] = true
+		out = append(out, model)
+	}
+	if !seen[current] {
+		out = append([]Model{models[0]}, out...)
+	}
+	return out
 }
 
 // discoverKimiModels spins up a throwaway `kimi acp` process and

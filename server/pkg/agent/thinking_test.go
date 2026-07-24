@@ -113,6 +113,26 @@ func TestProjectClaudeLevels_PerModelSubset(t *testing.T) {
 	if !reflect.DeepEqual(values, superset) {
 		t.Fatalf("projectClaudeLevels for Opus: got %v, want %v", values, superset)
 	}
+	// GPT 5.6 keeps Claude Code's current max-capable subset, while GPT 5.5
+	// intentionally stops at xhigh to mirror the GPT catalog without exposing
+	// a level the model row should not advertise.
+	got = projectClaudeLevels(superset, claudeModelEffortAllow["gpt-5.6-sol"])
+	values = values[:0]
+	for _, lvl := range got {
+		values = append(values, lvl.Value)
+	}
+	if !reflect.DeepEqual(values, superset) {
+		t.Fatalf("projectClaudeLevels for GPT-5.6-Sol: got %v, want %v", values, superset)
+	}
+	got = projectClaudeLevels(superset, claudeModelEffortAllow["gpt-5.5"])
+	values = values[:0]
+	for _, lvl := range got {
+		values = append(values, lvl.Value)
+	}
+	want = []string{"low", "medium", "high", "xhigh"}
+	if !reflect.DeepEqual(values, want) {
+		t.Fatalf("projectClaudeLevels for GPT-5.5: got %v, want %v", values, want)
+	}
 }
 
 // ── Codex discovery argv ────────────────────────────────────────────
@@ -448,8 +468,25 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"opencode", "fast-mode", true},  // custom opencode.json variant names are valid
 		{"opencode", ".hidden", false},   // reject suspicious / malformed names server-side
 		{"opencode", "bad value", false}, // spaces are not valid variant names
+		{"pi", "", true},
+		{"pi", "off", true},
+		{"pi", "minimal", true},
+		{"pi", "high", true},
+		{"pi", "xhigh", true},
+		{"pi", "max", true},
+		{"pi", "auto", true},
+		{"pi", "none", false},
+		{"pi", "ultra", false},
 		{"hermes", "", true},
-		{"hermes", "low", false}, // hermes has no thinking concept
+		{"hermes", "none", true},
+		{"hermes", "minimal", true},
+		{"hermes", "low", true},
+		{"hermes", "medium", true},
+		{"hermes", "high", true},
+		{"hermes", "xhigh", true},
+		{"hermes", "max", true},
+		{"hermes", "ultra", true},
+		{"hermes", "bogus", false},
 		{"grok", "", true},
 		{"grok", "low", true},
 		{"grok", "medium", true},
@@ -480,6 +517,26 @@ func TestCodexAdvertisedLevelsArePersistable(t *testing.T) {
 			t.Errorf("Codex advertises effort %q but IsKnownThinkingValue rejects it; "+
 				"keep the dynamic Codex token gate compatible so it can be saved", effort)
 		}
+	}
+}
+
+func TestValidateThinkingLevelHermesProviderWide(t *testing.T) {
+	t.Parallel()
+	for _, level := range []string{"none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"} {
+		got, err := ValidateThinkingLevel(context.Background(), "hermes", "/nonexistent/hermes", "", level)
+		if err != nil {
+			t.Fatalf("ValidateThinkingLevel(hermes, %q): %v", level, err)
+		}
+		if !got {
+			t.Errorf("ValidateThinkingLevel(hermes, %q) = false", level)
+		}
+	}
+	got, err := ValidateThinkingLevel(context.Background(), "hermes", "/nonexistent/hermes", "", "bogus")
+	if err != nil {
+		t.Fatalf("ValidateThinkingLevel(hermes, bogus): %v", err)
+	}
+	if got {
+		t.Error("ValidateThinkingLevel(hermes, bogus) = true")
 	}
 }
 

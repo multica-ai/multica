@@ -79,6 +79,25 @@ const CODEX_DEFAULT_MODEL: RuntimeModel = {
   },
 };
 
+const HERMES_MODEL: RuntimeModel = {
+  id: "gpt-5.6-sol",
+  label: "GPT-5.6 Sol",
+  default: true,
+  thinking: {
+    supported_levels: [
+      { value: "none", label: "None" },
+      { value: "minimal", label: "Minimal" },
+      { value: "low", label: "Low" },
+      { value: "medium", label: "Medium" },
+      { value: "high", label: "High" },
+      { value: "xhigh", label: "Extra high" },
+      { value: "max", label: "Max" },
+      { value: "ultra", label: "Ultra" },
+    ],
+    default_level: "medium",
+  },
+};
+
 function listResult(models: RuntimeModel[]): RuntimeModelListRequest {
   return {
     id: "req-1",
@@ -268,4 +287,15 @@ describe("ThinkingPropRow", () => {
     // CLAUDE_MODEL (Default) advertises Low/Medium/High — the picker shows them.
     expect((await screen.findAllByText("Follow CLI config")).length).toBeGreaterThan(0);
   });
+  it("shows Hermes effort choices for the runtime default model", async () => {
+    mockInitiateListModels.mockResolvedValue(listResult([HERMES_MODEL]));
+    mockGetListModelsResult.mockResolvedValue(listResult([HERMES_MODEL]));
+    renderRow({ provider: "hermes", model: "", value: "" });
+
+    await screen.findByText("Thinking");
+    fireEvent.click(screen.getByRole("button"));
+    expect(await screen.findByText("Extra high")).toBeInTheDocument();
+    expect(await screen.findByText("Max")).toBeInTheDocument();
+  });
+
 });

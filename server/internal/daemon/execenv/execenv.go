@@ -81,7 +81,11 @@ type PrepareParams struct {
 	// blocklisted keys) used to expand ${VAR} in Hermes external_dirs so it
 	// matches what the Hermes child process actually sees. Only used for hermes.
 	HermesEnv map[string]string
-	Task      TaskContextForEnv // context data for writing files
+	// HermesThinkingLevel is the agent's persisted reasoning effort. A non-empty
+	// value forces a task-local HERMES_HOME even without bound skills so the
+	// override stays session-scoped and never mutates the user's config.yaml.
+	HermesThinkingLevel string
+	Task                TaskContextForEnv // context data for writing files
 }
 
 // TaskContextForEnv is the subset of task context used for writing context files.
@@ -352,15 +356,13 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CodexHome = codexHome
 	}
 
-	// For Hermes, redirect HERMES_HOME to a per-task compatibility overlay ONLY
-	// when the agent has skills bound. A skill-less Hermes task keeps the user's
-	// real home and its original behavior untouched. The overlay makes the bound
-	// skills visible — Hermes discovers skills only from its home, so the old
-	// .agent_context/skills/ fallback was never read (issue #5242). See
-	// hermes_home.go.
-	if params.Provider == "hermes" && len(params.Task.AgentSkills) > 0 {
+	// Hermes needs a task-local HERMES_HOME whenever Multica injects skills or a
+	// reasoning effort. The latter is written to agent.reasoning_effort in the
+	// derived config so ACP-created AIAgent instances consume the persisted
+	// thinking_level without changing the user's shared Hermes configuration.
+	if params.Provider == "hermes" && (len(params.Task.AgentSkills) > 0 || params.HermesThinkingLevel != "") {
 		hermesHome := filepath.Join(envRoot, "hermes-home")
-		if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
+		if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesThinkingLevel, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
 		}
 		env.HermesHome = hermesHome
@@ -452,6 +454,7 @@ type ReuseParams struct {
 	HermesSourceHome      string
 	HermesSourceMustExist bool
 	HermesEnv             map[string]string
+	HermesThinkingLevel   string
 	Task                  TaskContextForEnv // refreshed context files / skills
 }
 
@@ -565,20 +568,12 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		}
 	}
 
-	// Refresh (or tear down) the per-task HERMES_HOME on reuse. With skills
-	// bound, rebuild the overlay so an added/removed/edited skill and the
-	// mirrored home/config track the user's current ~/.hermes/ before the next
-	// hermes process starts. With no skills bound, drop the redirect entirely so
-	// the task reverts to the user's real home — matching a fresh Prepare for a
-	// skill-less agent.
+	// Refresh (or tear down) the per-task HERMES_HOME on reuse. Skills and a
+	// Multica-managed reasoning effort both require the isolated overlay.
 	if params.Provider == "hermes" && env.RootDir != "" {
 		hermesHome := filepath.Join(env.RootDir, "hermes-home")
-		if len(params.Task.AgentSkills) > 0 {
-			if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
-				// Fail closed: a half-built overlay must not run. Returning nil
-				// makes the daemon fall back to a fresh Prepare, whose error
-				// then blocks dispatch rather than silently dropping the bound
-				// skill.
+		if len(params.Task.AgentSkills) > 0 || params.HermesThinkingLevel != "" {
+			if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesThinkingLevel, logger); err != nil {
 				logger.Warn("execenv: refresh hermes-home failed; forcing fresh prepare", "error", err)
 				return nil
 			}
