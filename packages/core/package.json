@@ -97,6 +97,8 @@
     "./composio/queries": "./composio/queries.ts",
     "./slack": "./slack/index.ts",
     "./slack/queries": "./slack/queries.ts",
+    "./wecom": "./wecom/index.ts",
+    "./wecom/queries": "./wecom/queries.ts",
     "./feedback": "./feedback/index.ts",
     "./feedback/mutations": "./feedback/mutations.ts",
     "./realtime": "./realtime/index.ts",

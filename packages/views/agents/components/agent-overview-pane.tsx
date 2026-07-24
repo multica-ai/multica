@@ -13,6 +13,7 @@ import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
+import { wecomInstallationsOptions } from "@multica/core/wecom";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -171,9 +172,15 @@ export function AgentOverviewPane({
     ...slackInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: wecomListing } = useQuery({
+    ...wecomInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
 
   const integrationsConfigured =
-    larkListing?.configured === true || slackListing?.configured === true;
+    larkListing?.configured === true ||
+    slackListing?.configured === true ||
+    wecomListing?.configured === true;
 
   const visibleCapabilityTabs = useMemo(() => {
     const showMcp = runtime

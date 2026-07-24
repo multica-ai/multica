@@ -503,6 +503,48 @@ func (q *Queries) DeleteChannelUserBindingsByWorkspaceMember(ctx context.Context
 	return err
 }
 
+const findChannelBindingForMember = `-- name: FindChannelBindingForMember :one
+SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
+JOIN channel_installation ci ON ci.id = b.installation_id
+WHERE b.workspace_id = $1
+  AND b.multica_user_id = $2
+  AND b.channel_type = $3
+  AND ci.status = 'active'
+ORDER BY b.bound_at DESC
+LIMIT 1
+`
+
+type FindChannelBindingForMemberParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ChannelType   string      `json:"channel_type"`
+}
+
+// Outbound notification lookup: given a Multica member and a channel_type,
+// return the (installation, channel_user_id) that outbound push should
+// target. The wecom smart-bot inbox-notification path uses this to decide
+// whether to deliver via the bot at all — no row means "unbound member,
+// fall back to the legacy path (TOF/RTX)".
+//
+// If a member has bound multiple installations of the same channel_type in
+// one workspace (multi-bot org), the most-recently-bound wins — matches
+// FindReusableChannelUserBinding's tiebreak so the two lookups agree.
+func (q *Queries) FindChannelBindingForMember(ctx context.Context, arg FindChannelBindingForMemberParams) (ChannelUserBinding, error) {
+	row := q.db.QueryRow(ctx, findChannelBindingForMember, arg.WorkspaceID, arg.MulticaUserID, arg.ChannelType)
+	var i ChannelUserBinding
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.MulticaUserID,
+		&i.InstallationID,
+		&i.ChannelType,
+		&i.ChannelUserID,
+		&i.Config,
+		&i.BoundAt,
+	)
+	return i, err
+}
+
 const findReusableChannelUserBinding = `-- name: FindReusableChannelUserBinding :one
 SELECT b.id, b.workspace_id, b.multica_user_id, b.installation_id, b.channel_type, b.channel_user_id, b.config, b.bound_at FROM channel_user_binding b
 JOIN channel_installation ci ON ci.id = b.installation_id

@@ -160,6 +160,12 @@ export type {
   RedeemSlackBindingTokenResponse,
 } from "./slack";
 export type {
+  WecomInstallation,
+  ListWecomInstallationsResponse,
+  RegisterWecomBYORequest,
+  RedeemWecomBindingTokenResponse,
+} from "./wecom";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,

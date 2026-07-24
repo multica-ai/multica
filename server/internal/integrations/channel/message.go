@@ -149,6 +149,17 @@ type InboundMessage struct {
 	// into this boolean; the core only reads the flag.
 	ForceFresh bool
 
+	// SkipAgentRun asks the core to persist this message + create any
+	// engine-side artefacts (issue from /issue command, session binding
+	// row) but NOT to trigger an agent run afterwards. Set by an adapter
+	// when the message is a pure control command whose only meaningful
+	// effect is the artefact (wecom uses it for standalone /issue
+	// invocations, where an agent reply would just quote the command back
+	// as "I don't know this slash command"). Left unset by adapters where
+	// the current cross-platform behaviour — /issue triggers the agent as
+	// a normal chat turn — should be preserved (Feishu, Slack today).
+	SkipAgentRun bool
+
 	// Raw is the untouched platform payload. Adapters stash platform-
 	// specific fields here (Lark raw msg_type / parent_id / root_id /
 	// mention arrays, …) and read them back only inside the adapter. The
