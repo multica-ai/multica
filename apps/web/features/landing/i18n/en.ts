@@ -311,8 +311,10 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Runtime aliases now show consistently everywhere across the app.",
           "GitHub links in your projects now show a clear owner/repo label.",
           "Chat now warns you when your machine's agent service is too old for project context.",
+          "Loading more issues now shows a 'Loading…' label, and columns tell you when you've reached the end.",
         ],
         fixes: [
+          "Scrolling to load more issues in Board and List no longer flashes the full-page skeleton.",
           "Resumed Grok sessions no longer show up as $0, and billing matches what xAI charged.",
           "Agent creation errors now stay visible so you can see what went wrong.",
           "In Lark group chats, replies now stay on the right topic's context.",
