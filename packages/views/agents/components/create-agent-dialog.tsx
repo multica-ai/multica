@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Globe, Lock, Users } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { ModelDropdown } from "./model-dropdown";
@@ -43,6 +43,31 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { CharCounter } from "./char-counter";
 import { useT } from "../../i18n";
+
+const DEFAULT_QUEUED_TIMEOUT_MINUTES = 120;
+
+function queuedTimeoutMinutesFromTemplate(template?: Agent | null): number {
+  const seconds = template?.queued_ttl_seconds;
+  if (typeof seconds === "number" && seconds > 0) {
+    return Math.round(seconds / 60);
+  }
+  return DEFAULT_QUEUED_TIMEOUT_MINUTES;
+}
+
+function positiveQueuedTimeoutSeconds(template?: Agent | null): number | null {
+  const seconds = template?.queued_ttl_seconds;
+  return typeof seconds === "number" && seconds > 0 ? seconds : null;
+}
+
+function parseQueuedTimeoutMinutes(value: string): number | null {
+  const trimmed = value.trim();
+  if (trimmed === "") return 0;
+  const minutes = Number(trimmed);
+  if (!Number.isFinite(minutes) || !Number.isInteger(minutes) || minutes < 0) {
+    return null;
+  }
+  return minutes;
+}
 
 export function CreateAgentDialog({
   runtimes,
@@ -140,6 +165,17 @@ export function CreateAgentDialog({
     }));
 
   const [model, setModel] = useState(template?.model ?? "");
+  const duplicateQueuedTimeoutSeconds = positiveQueuedTimeoutSeconds(template);
+  const duplicateQueuedTimeoutNeedsNotice =
+    duplicateQueuedTimeoutSeconds != null && duplicateQueuedTimeoutSeconds % 60 !== 0;
+  const [queuedTimeoutMinutes, setQueuedTimeoutMinutes] = useState(() =>
+    duplicateQueuedTimeoutNeedsNotice
+      ? ""
+      : String(queuedTimeoutMinutesFromTemplate(template)),
+  );
+  const [queuedTimeoutEdited, setQueuedTimeoutEdited] = useState(false);
+  const [queuedTimeoutError, setQueuedTimeoutError] = useState<string | null>(null);
+  const queuedTimeoutInputRef = useRef<HTMLInputElement | null>(null);
   const [instructions, setInstructions] = useState(template?.instructions ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(template?.avatar_url ?? null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(
@@ -220,10 +256,29 @@ export function CreateAgentDialog({
 
     try {
       const trimmedInstructions = instructions.trim();
+      const queuedTimeout = parseQueuedTimeoutMinutes(queuedTimeoutMinutes);
+      if (queuedTimeout == null) {
+        const error = t(($) => $.create_dialog.queued_timeout_invalid_toast);
+        setQueuedTimeoutError(error);
+        toast.error(error);
+        queuedTimeoutInputRef.current?.focus();
+        setCreating(false);
+        return;
+      }
+      setQueuedTimeoutError(null);
+      const queuedTimeoutSeconds =
+        isDuplicate &&
+        duplicateQueuedTimeoutSeconds != null &&
+        !queuedTimeoutEdited
+          ? duplicateQueuedTimeoutSeconds
+          : queuedTimeout > 0
+            ? queuedTimeout * 60
+            : 0;
       const data: CreateAgentRequest = {
         name: name.trim(),
         description: description.trim(),
         runtime_id: selectedRuntime.id,
+        queued_ttl_seconds: queuedTimeoutSeconds,
         model: model.trim() || undefined,
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
@@ -291,6 +346,19 @@ export function CreateAgentDialog({
   const headerTitle = isDuplicate
     ? t(($) => $.create_dialog.title_duplicate)
     : t(($) => $.create_dialog.title_create);
+  const queuedTimeoutHelperId = "create-agent-queued-timeout-helper";
+  const queuedTimeoutNoticeId = "create-agent-queued-timeout-notice";
+  const queuedTimeoutErrorId = "create-agent-queued-timeout-error";
+  const queuedTimeoutInputId = "create-agent-queued-timeout-input";
+  const queuedTimeoutUsesPreservedValueNotice =
+    isDuplicate && duplicateQueuedTimeoutNeedsNotice && !queuedTimeoutEdited;
+  const queuedTimeoutDescribedBy = [
+    queuedTimeoutUsesPreservedValueNotice ? queuedTimeoutNoticeId : null,
+    queuedTimeoutHelperId,
+    queuedTimeoutError ? queuedTimeoutErrorId : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
@@ -437,6 +505,58 @@ export function CreateAgentDialog({
               onChange={setModel}
               disabled={!selectedRuntime}
             />
+
+            <div>
+              <Label
+                htmlFor={queuedTimeoutInputId}
+                className="text-xs text-muted-foreground"
+              >
+                {t(($) => $.pickers.wait_timeout_input_label)}
+              </Label>
+              <Input
+                id={queuedTimeoutInputId}
+                ref={queuedTimeoutInputRef}
+                type="number"
+                min={0}
+                step={1}
+                value={queuedTimeoutMinutes}
+                onChange={(e) => {
+                  setQueuedTimeoutMinutes(e.target.value);
+                  setQueuedTimeoutEdited(true);
+                  if (queuedTimeoutError) setQueuedTimeoutError(null);
+                }}
+                aria-invalid={queuedTimeoutError ? "true" : "false"}
+                aria-describedby={queuedTimeoutDescribedBy || undefined}
+                className="mt-1"
+              />
+              {queuedTimeoutUsesPreservedValueNotice ? (
+                <p
+                  id={queuedTimeoutNoticeId}
+                  className="mt-1 text-xs text-muted-foreground"
+                >
+                  {t(($) => $.create_dialog.queued_timeout_preserve_exact_notice, {
+                    seconds: duplicateQueuedTimeoutSeconds!,
+                  })}
+                </p>
+              ) : null}
+              <p
+                id={queuedTimeoutHelperId}
+                className="mt-1 text-xs text-muted-foreground"
+              >
+                {queuedTimeoutUsesPreservedValueNotice
+                  ? t(($) => $.create_dialog.queued_timeout_preserve_exact_helper)
+                  : t(($) => $.pickers.wait_timeout_helper)}
+              </p>
+              {queuedTimeoutError ? (
+                <p
+                  id={queuedTimeoutErrorId}
+                  role="alert"
+                  className="mt-1 text-xs text-destructive"
+                >
+                  {queuedTimeoutError}
+                </p>
+              ) : null}
+            </div>
 
             {/* --- Optional sections (instructions / skills) ---
                 Collapsed by default so quick-create stays fast.

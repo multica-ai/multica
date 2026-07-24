@@ -28,15 +28,15 @@ INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
-    service_tier,
-    composio_toolkit_allowlist, permission_mode
+    service_tier, composio_toolkit_allowlist, permission_mode, queued_ttl_seconds
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
     $17,
     sqlc.narg('composio_toolkit_allowlist')::text[],
-    COALESCE(sqlc.narg('permission_mode'), 'private')
+    COALESCE(sqlc.narg('permission_mode'), 'private'),
+    sqlc.narg('queued_ttl_seconds')
 )
 RETURNING *;
 
@@ -114,6 +114,7 @@ UPDATE agent SET
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
     service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
+    queued_ttl_seconds = COALESCE(sqlc.narg('queued_ttl_seconds'), queued_ttl_seconds),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
@@ -146,6 +147,11 @@ RETURNING *;
 
 -- name: ClearAgentMcpConfig :one
 UPDATE agent SET mcp_config = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentQueuedTTLSeconds :one
+UPDATE agent SET queued_ttl_seconds = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -867,12 +873,24 @@ RETURNING *;
 -- the DB when the backlog is large — the sweeper drains the rest on
 -- subsequent ticks.
 WITH victims AS (
-    SELECT id FROM agent_task_queue
-    WHERE status = 'queued'
-      AND created_at < now() - make_interval(secs => @ttl_secs::double precision)
-    ORDER BY created_at ASC
+    SELECT t.id, t.agent_id
+    FROM agent_task_queue t
+    JOIN agent a ON a.id = t.agent_id
+    WHERE t.status = 'queued'
+      AND t.created_at < now() - make_interval(
+        secs => COALESCE(
+            CASE
+                WHEN a.queued_ttl_seconds > 0
+                    AND a.queued_ttl_seconds::text <> 'NaN'
+                    AND a.queued_ttl_seconds NOT IN ('Infinity'::double precision, '-Infinity'::double precision)
+                THEN a.queued_ttl_seconds
+            END,
+            @ttl_secs::double precision
+        )
+      )
+    ORDER BY t.created_at ASC
     LIMIT @max_per_tick::int
-    FOR UPDATE SKIP LOCKED
+    FOR UPDATE OF t SKIP LOCKED
 )
 UPDATE agent_task_queue t
 SET status = 'failed',
@@ -881,9 +899,20 @@ SET status = 'failed',
     failure_reason = 'queued_expired',
     prepare_lease_expires_at = NULL
 FROM victims v
+JOIN agent a ON a.id = v.agent_id
 WHERE t.id = v.id
   AND t.status = 'queued'
-  AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision)
+  AND t.created_at < now() - make_interval(
+    secs => COALESCE(
+        CASE
+            WHEN a.queued_ttl_seconds > 0
+                AND a.queued_ttl_seconds::text <> 'NaN'
+                AND a.queued_ttl_seconds NOT IN ('Infinity'::double precision, '-Infinity'::double precision)
+            THEN a.queued_ttl_seconds
+        END,
+        @ttl_secs::double precision
+    )
+  )
 RETURNING t.*;
 
 -- name: CancelAgentTask :one

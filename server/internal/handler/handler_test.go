@@ -53,6 +53,12 @@ func TestMain(m *testing.M) {
 		os.Exit(0)
 	}
 
+	if err := ensureHandlerTestSchema(ctx, pool); err != nil {
+		fmt.Printf("Failed to reconcile handler test schema: %v\n", err)
+		pool.Close()
+		os.Exit(1)
+	}
+
 	queries := db.New(pool)
 	hub := realtime.NewHub()
 	go hub.Run()
@@ -87,6 +93,52 @@ func TestMain(m *testing.M) {
 	}
 	pool.Close()
 	os.Exit(code)
+}
+
+func ensureHandlerTestSchema(ctx context.Context, pool *pgxpool.Pool) error {
+	if _, err := pool.Exec(ctx, `
+		ALTER TABLE agent ADD COLUMN IF NOT EXISTS queued_ttl_seconds DOUBLE PRECISION;
+
+		CREATE TABLE IF NOT EXISTS user_scm_integration (
+			id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+			user_id uuid NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,
+			platform text NOT NULL,
+			base_url text NOT NULL,
+			username text NOT NULL,
+			email text NOT NULL,
+			credential_ciphertext bytea,
+			credential_generated_by_service boolean NOT NULL DEFAULT false,
+			credential_last_updated_at timestamptz,
+			created_at timestamptz NOT NULL DEFAULT now(),
+			updated_at timestamptz NOT NULL DEFAULT now(),
+			UNIQUE (user_id, platform)
+		);
+
+		DO $$
+		BEGIN
+			IF NOT EXISTS (
+				SELECT 1
+				FROM pg_constraint
+				WHERE conrelid = 'agent'::regclass
+				  AND conname = 'agent_queued_ttl_seconds_valid'
+			) THEN
+				ALTER TABLE agent
+					ADD CONSTRAINT agent_queued_ttl_seconds_valid
+					CHECK (
+						queued_ttl_seconds IS NULL
+						OR (
+							queued_ttl_seconds > 0
+							AND queued_ttl_seconds::text <> 'NaN'
+							AND queued_ttl_seconds NOT IN ('Infinity'::double precision, '-Infinity'::double precision)
+						)
+					);
+			END IF;
+		END $$;
+	`); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func setupHandlerTestFixture(ctx context.Context, pool *pgxpool.Pool) (string, string, error) {
@@ -255,6 +307,17 @@ func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string 
 	})
 
 	return agentID
+}
+
+func fetchAgentQueuedTTLSeconds(t *testing.T, agentID string) pgtype.Float8 {
+	t.Helper()
+
+	var queuedTTL pgtype.Float8
+	if err := testPool.QueryRow(context.Background(), `SELECT queued_ttl_seconds FROM agent WHERE id = $1`, agentID).Scan(&queuedTTL); err != nil {
+		t.Fatalf("failed to load agent queued_ttl_seconds: %v", err)
+	}
+
+	return queuedTTL
 }
 
 // createHandlerTestTaskForAgent seeds a running agent_task_queue row for the

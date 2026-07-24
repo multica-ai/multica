@@ -106,6 +106,16 @@ This is only the "agent layer" of a two-tier limit — the daemon itself enforce
 
 Changing this value **does not cancel tasks already running** — it only applies to the next task about to be picked up.
 
+## Queue wait timeout
+
+**Queue wait timeout** controls how long a task is allowed to sit in `queued` before Multica marks it failed with `timeout`. For new agents, the create dialog defaults to **120 minutes**.
+
+- Leave it as-is to give the agent its own 120-minute wait budget
+- Set a different positive integer number of minutes to override that budget per agent
+- Leave it blank or set it to `0` to fall back to the system default instead
+
+This setting only affects **waiting in queue**. Once the daemon has picked the task up and the AI coding tool has started, the normal dispatch/runtime watchdogs take over. See [Tasks](/tasks#what-happens-when-a-task-times-out).
+
 ## Attaching domain expertise: Skills
 
 A created agent can have **Skills** attached — **knowledge packs** (`SKILL.md` + supporting files) automatically delivered to the AI coding tool at task execution time. You can create a new skill, import from GitHub or ClawHub, or scan one from an existing skill directory on your machine. See [Skills](/skills).
