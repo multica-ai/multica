@@ -125,12 +125,33 @@ WHERE issue.id = $1
 RETURNING *;
 
 -- name: UpdateIssueStatus :one
--- Workspace_id in the WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
+-- Internal Category-alias transition (failed-task reset, PR merge, stuck-issue
+-- sweep). Workspace_id in the WHERE clause is a SQL-layer tenant guard; see
+-- DeleteIssue.
+--
+-- $2 is a token: a Category alias (backlog/todo/in_progress/done/cancelled) or a
+-- legacy alias (in_review/blocked). A Category alias MUST resolve to the
+-- workspace's CURRENT default status in that Category — which may be a custom
+-- status an admin promoted — not the built-in by system_key; otherwise these
+-- paths silently bypass the configured workflow (MUL-4809 §3.1). Legacy aliases
+-- resolve to the built-in carrying that system_key. Both status_id and the
+-- legacy `status` projection are written from the SAME resolved row, in one
+-- atomic statement, and only ever an ACTIVE status. An unseeded workspace
+-- resolves to nothing → status_id stays NULL and the bare token is kept.
+WITH resolved AS (
+    SELECT s.id, COALESCE(s.system_key, s.category) AS token
+    FROM issue_status s
+    WHERE s.workspace_id = $3 AND s.archived_at IS NULL
+      AND CASE
+        WHEN $2 IN ('backlog', 'todo', 'in_progress', 'done', 'cancelled')
+          THEN s.category = $2 AND s.is_default
+        ELSE s.system_key = $2
+      END
+    LIMIT 1
+)
 UPDATE issue SET
-    status = $2,
-    -- Phase 2 double-write (MUL-4809): mirror the legacy status into status_id
-    -- via its built-in system_key (scoped to the same workspace guard).
-    status_id = (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = $3 AND system_key = $2),
+    status = COALESCE((SELECT token FROM resolved), $2),
+    status_id = (SELECT id FROM resolved),
     updated_at = now()
 WHERE issue.id = $1 AND issue.workspace_id = $3
 RETURNING *;
@@ -214,17 +235,37 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 FROM issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
-  AND (sqlc.narg('status_id')::uuid IS NULL OR i.status_id = sqlc.narg('status_id'))
+  -- The three status predicates carry the same status_id IS NULL compat arm the
+  -- dynamic ListIssues path uses (statusCatalogMatchSQL / statusCategoryMatchSQL).
+  -- A workspace that upgraded before the one-shot backfill still has rows with
+  -- status_id IS NULL; without this arm they vanish from open_only status
+  -- filters, reading as data loss. Only a selected BUILT-IN claims a legacy row
+  -- (system_key is 1:1 with the token); a custom status id never matches a NULL
+  -- legacy row (MUL-4809).
+  AND (sqlc.narg('status_id')::uuid IS NULL OR i.status_id = sqlc.narg('status_id')
+        OR (i.status_id IS NULL AND i.status = (
+              SELECT s.system_key FROM issue_status s
+               WHERE s.id = sqlc.narg('status_id') AND s.workspace_id = i.workspace_id
+                 AND s.system_key IS NOT NULL)))
   -- status_ids (MUL-4809): multi-select by catalog id — one board column per
   -- status, and multi-select filter chips. OR within the field.
-  AND (sqlc.narg('status_ids')::uuid[] IS NULL OR i.status_id = ANY(sqlc.narg('status_ids')::uuid[]))
+  AND (sqlc.narg('status_ids')::uuid[] IS NULL OR i.status_id = ANY(sqlc.narg('status_ids')::uuid[])
+        OR (i.status_id IS NULL AND i.status = ANY(
+              SELECT s.system_key FROM issue_status s
+               WHERE s.id = ANY(sqlc.narg('status_ids')::uuid[]) AND s.workspace_id = i.workspace_id
+                 AND s.system_key IS NOT NULL)))
   -- status_category (MUL-4809): match issues whose status_id resolves to the
   -- given Category, scoped to the same workspace (no FK). Mirrors the EXISTS
-  -- predicate the dynamic ListIssues/ListGroupedIssues paths build.
+  -- predicate the dynamic ListIssues/ListGroupedIssues paths build, plus the
+  -- NULL-row arm: a legacy row is classified by projecting its token
+  -- (in_review / blocked -> in_progress; else itself) to a Category.
   AND (sqlc.narg('status_category')::text IS NULL OR EXISTS (
         SELECT 1 FROM issue_status s
          WHERE s.id = i.status_id AND s.workspace_id = i.workspace_id
-           AND s.category = sqlc.narg('status_category')::text))
+           AND s.category = sqlc.narg('status_category')::text)
+        OR (i.status_id IS NULL AND
+              CASE WHEN i.status IN ('in_review', 'blocked') THEN 'in_progress' ELSE i.status END
+                = sqlc.narg('status_category')::text))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))

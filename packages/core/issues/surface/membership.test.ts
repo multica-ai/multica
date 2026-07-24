@@ -131,6 +131,18 @@ describe("issueChangedDims", () => {
     expect(issueChangedDims({ project_id: "p2" }, base).project).toBe(true);
   });
 
+  it("treats a status_id change as a status change (MUL-4809)", () => {
+    // The StatusPicker sends status_id, and two custom statuses in one Category
+    // share the legacy `status` token. Keying only off `status` missed the move
+    // and left the issue in its old column after settle.
+    const base = makeIssue({ status: "in_progress", status_id: "cat-a" });
+    expect(issueChangedDims({ status_id: "cat-b" }, base).status).toBe(true);
+    // Same status_id written back is not a change.
+    expect(issueChangedDims({ status_id: "cat-a" }, base).status).toBe(false);
+    // Without a base, any written status_id counts as changed (conservative).
+    expect(issueChangedDims({ status_id: "cat-b" }).status).toBe(true);
+  });
+
   it("ignores non-membership fields", () => {
     expect(issueChangedDims({ title: "x", position: 9 })).toEqual({
       assignee: false,

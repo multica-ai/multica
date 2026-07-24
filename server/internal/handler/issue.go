@@ -3800,6 +3800,15 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
+		// Hydrate the resolved catalog view onto the published payload, exactly
+		// like single UpdateIssue. Without this the batch issue:updated event
+		// carries no status_id / status_detail, so a client that moved an issue
+		// between two custom statuses in the same Category (legacy `status`
+		// unchanged) keeps rendering the old name/icon/color until an unrelated
+		// event or manual refresh — a deterministic cache dirty read (MUL-4809).
+		hydrated := []IssueResponse{resp}
+		h.hydrateStatusDetails(r.Context(), issue.WorkspaceID, hydrated)
+		resp = hydrated[0]
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&

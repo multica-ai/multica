@@ -322,22 +322,33 @@ func (q *Queries) ListWorkspaceIssueStatuses(ctx context.Context, arg ListWorksp
 }
 
 const reassignIssuesStatus = `-- name: ReassignIssuesStatus :exec
-UPDATE issue SET status_id = $1::uuid, updated_at = now()
-WHERE workspace_id = $2::uuid
-  AND status_id = $3::uuid
+UPDATE issue AS i
+SET status_id = t.id,
+    status = COALESCE(t.system_key, t.category),
+    updated_at = now()
+FROM issue_status t
+WHERE i.workspace_id = $1::uuid
+  AND i.status_id = $2::uuid
+  AND t.id = $3::uuid
+  AND t.workspace_id = $1::uuid
 `
 
 type ReassignIssuesStatusParams struct {
-	ToStatusID   pgtype.UUID `json:"to_status_id"`
 	WorkspaceID  pgtype.UUID `json:"workspace_id"`
 	FromStatusID pgtype.UUID `json:"from_status_id"`
+	ToStatusID   pgtype.UUID `json:"to_status_id"`
 }
 
-// Move every issue off one status onto another during archive migration. The
-// handler guarantees both are the same Category, so the legacy `status`
-// projection (Category for custom statuses) is unchanged and is left as-is.
+// Move every issue off one status onto another during archive migration.
+// Rewrites BOTH status_id AND the legacy `status` projection from the TARGET
+// row, so the double-write stays consistent (MUL-4809 §6.1). Same-Category is
+// NOT enough to leave `status` alone: a custom in_progress status projects to
+// `in_progress`, but the built-in In Review / Blocked in that same Category keep
+// their own token, so migrating custom → In Review must move `status` to
+// `in_review` in lockstep with status_id. COALESCE(system_key, category) is
+// exactly LegacyStatusToken (built-ins keep their key, custom project to Category).
 func (q *Queries) ReassignIssuesStatus(ctx context.Context, arg ReassignIssuesStatusParams) error {
-	_, err := q.db.Exec(ctx, reassignIssuesStatus, arg.ToStatusID, arg.WorkspaceID, arg.FromStatusID)
+	_, err := q.db.Exec(ctx, reassignIssuesStatus, arg.WorkspaceID, arg.FromStatusID, arg.ToStatusID)
 	return err
 }
 

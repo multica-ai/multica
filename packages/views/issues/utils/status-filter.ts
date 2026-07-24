@@ -88,9 +88,36 @@ export function resolveStatusFilterTokens(
 }
 
 /**
- * Client-side predicate mirroring the server's `status_ids` facet. Falls back to
- * the legacy token comparison for issues that have no `status_id` yet (an
- * unseeded workspace, or a server predating the catalog).
+ * Project a selection onto the legacy status tokens a NULL-`status_id` row can
+ * carry (MUL-4809). A pre-catalog row (upgraded before the one-shot backfill)
+ * only ever holds one of the 7 legacy tokens, so ONLY a selected BUILT-IN
+ * contributes, via its system_key — a custom status id must not claim such a
+ * row, because the row was never in that custom status. A raw legacy token left
+ * by an older build is kept as-is.
+ */
+export function selectionToLegacyTokens(
+  selection: string[],
+  catalog: IssueStatusDefinition[],
+): string[] {
+  const tokens = new Set<string>();
+  for (const entry of selection) {
+    const status = catalog.find((s) => s.id === entry);
+    if (status) {
+      if (status.system_key) tokens.add(status.system_key);
+      continue; // custom status: contributes nothing to a legacy NULL row
+    }
+    // Not a catalog id. A real legacy token maps to a NULL row; a catalog-id
+    // shape is the catalog simply not being loaded yet — it can't match a token.
+    if (!CATALOG_ID_SHAPE.test(entry)) tokens.add(entry);
+  }
+  return [...tokens];
+}
+
+/**
+ * Client-side predicate mirroring the server's status filter, including the
+ * `status_id IS NULL` compat arm (statusCatalogMatchSQL). A row with a status_id
+ * matches by exact catalog id; a NULL-status_id row matches only when a selected
+ * BUILT-IN owns its legacy token.
  */
 export function issueMatchesStatusFilter(
   issue: Pick<Issue, "status" | "status_id">,
@@ -104,5 +131,5 @@ export function issueMatchesStatusFilter(
     // is in flight — fall through to the legacy comparison below.
     if (ids.length > 0) return ids.includes(issue.status_id);
   }
-  return selection.includes(issue.status);
+  return selectionToLegacyTokens(selection, catalog).includes(issue.status);
 }

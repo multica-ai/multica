@@ -149,9 +149,20 @@ RETURNING *;
 SELECT COUNT(*) FROM issue WHERE workspace_id = $1 AND status_id = $2;
 
 -- name: ReassignIssuesStatus :exec
--- Move every issue off one status onto another during archive migration. The
--- handler guarantees both are the same Category, so the legacy `status`
--- projection (Category for custom statuses) is unchanged and is left as-is.
-UPDATE issue SET status_id = sqlc.arg('to_status_id')::uuid, updated_at = now()
-WHERE workspace_id = sqlc.arg('workspace_id')::uuid
-  AND status_id = sqlc.arg('from_status_id')::uuid;
+-- Move every issue off one status onto another during archive migration.
+-- Rewrites BOTH status_id AND the legacy `status` projection from the TARGET
+-- row, so the double-write stays consistent (MUL-4809 §6.1). Same-Category is
+-- NOT enough to leave `status` alone: a custom in_progress status projects to
+-- `in_progress`, but the built-in In Review / Blocked in that same Category keep
+-- their own token, so migrating custom → In Review must move `status` to
+-- `in_review` in lockstep with status_id. COALESCE(system_key, category) is
+-- exactly LegacyStatusToken (built-ins keep their key, custom project to Category).
+UPDATE issue AS i
+SET status_id = t.id,
+    status = COALESCE(t.system_key, t.category),
+    updated_at = now()
+FROM issue_status t
+WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND i.status_id = sqlc.arg('from_status_id')::uuid
+  AND t.id = sqlc.arg('to_status_id')::uuid
+  AND t.workspace_id = sqlc.arg('workspace_id')::uuid;

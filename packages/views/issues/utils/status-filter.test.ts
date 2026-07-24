@@ -3,6 +3,7 @@ import type { Issue, IssueStatusDefinition } from "@multica/core/types";
 import {
   issueMatchesStatusFilter,
   resolveStatusFilterIds,
+  selectionToLegacyTokens,
   resolveStatusFilterTokens,
 } from "./status-filter";
 
@@ -108,6 +109,42 @@ describe("issueMatchesStatusFilter", () => {
   it("does not hide everything while the catalog is still loading", () => {
     // Catalog empty => ids resolve to nothing; the legacy comparison still runs.
     expect(issueMatchesStatusFilter({ status: "todo", status_id: TODO.id }, ["todo"], [])).toBe(true);
+  });
+
+  it("matches a NULL-status_id row when a BUILT-IN is selected by catalog id", () => {
+    // A workspace upgraded before backfill: the row carries only the legacy
+    // token. Selecting the built-in Todo (a catalog UUID) must still find it —
+    // the fix for the open_only/status-filter data-loss regression (MUL-4809).
+    const legacy: Pick<Issue, "status" | "status_id"> = { status: "todo", status_id: null };
+    expect(issueMatchesStatusFilter(legacy, [TODO.id], CATALOG)).toBe(true);
+    expect(issueMatchesStatusFilter(legacy, [REVIEW.id], CATALOG)).toBe(false);
+  });
+
+  it("does NOT let a custom status id claim a legacy NULL row", () => {
+    // The NULL row was never in the custom status, so a custom-only selection
+    // must not match it — even though they share the in_progress Category.
+    const legacy: Pick<Issue, "status" | "status_id"> = {
+      status: "in_progress",
+      status_id: null,
+    };
+    expect(issueMatchesStatusFilter(legacy, [CUSTOM.id], CATALOG)).toBe(false);
+  });
+});
+
+describe("selectionToLegacyTokens", () => {
+  it("maps a built-in catalog id to its system_key", () => {
+    expect(selectionToLegacyTokens([TODO.id], CATALOG)).toEqual(["todo"]);
+  });
+  it("keeps a raw legacy token", () => {
+    expect(selectionToLegacyTokens(["in_review"], CATALOG)).toEqual(["in_review"]);
+  });
+  it("drops a custom status id (a NULL legacy row was never in it)", () => {
+    expect(selectionToLegacyTokens([CUSTOM.id], CATALOG)).toEqual([]);
+  });
+  it("drops a catalog-id shape while the catalog is unloaded", () => {
+    expect(
+      selectionToLegacyTokens(["11111111-1111-4111-8111-111111111111"], []),
+    ).toEqual([]);
   });
 });
 
