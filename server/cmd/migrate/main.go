@@ -51,27 +51,27 @@ type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 var preMigrationHooks = map[string]preMigrationHook{
 	"103_drop_legacy_daily_rollups":                         runTaskUsageHourlyHook,
 	"198_agent_task_attribution_strict_constraint_validate": runAttributionStrictHook,
-	"222_agent_task_retry_of_unique":                        runRetryOfUniqueIndexHook,
+	"233_agent_task_retry_of_unique":                        runRetryOfUniqueIndexHook,
 }
 
-// retryOfUniqueIndexName is the unique index migration 212 builds; CreateRetryTask's
+// retryOfUniqueIndexName is the unique index migration 233 builds; CreateRetryTask's
 // ON CONFLICT (retry_of_task_id) resolves against it.
 const retryOfUniqueIndexName = "idx_agent_task_retry_of_task_id_unique"
 
-// runRetryOfUniqueIndexHook makes migration 212 safe to (re)run (MUL-4809 §4.1 P0-2).
-// 212 builds a UNIQUE index CONCURRENTLY on agent_task_queue.retry_of_task_id, and the
+// runRetryOfUniqueIndexHook makes migration 233 safe to (re)run (MUL-4809 §4.1 P0-2).
+// 233 builds a UNIQUE index CONCURRENTLY on agent_task_queue.retry_of_task_id, and the
 // correctness of CreateRetryTask's idempotent ON CONFLICT depends on that index existing
 // AND being valid. Two real PostgreSQL behaviours make a naive build unsafe:
 //
-//  1. Nothing constrained the column before 212, so pre-existing duplicate
+//  1. Nothing constrained the column before 233, so pre-existing duplicate
 //     retry_of_task_id rows make the concurrent build fail — and it leaves an INVALID
 //     index (indisvalid=false) behind.
 //  2. Re-running `CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS` then finds that
 //     invalid index, reports "already exists" and SUCCEEDS, so the runner would record
-//     212 as applied while every auto-retry still fails with 42P10 (no unique or
+//     233 as applied while every auto-retry still fails with 42P10 (no unique or
 //     exclusion constraint matching the ON CONFLICT specification).
 //
-// This hook runs before every attempt at 212 — a migration that fails is never recorded,
+// This hook runs before every attempt at 233 — a migration that fails is never recorded,
 // so the next `migrate up` retries hook + migration. It drops a leftover INVALID index so
 // the rebuild starts clean, and hard-fails on pre-existing duplicates instead of letting a
 // silently-unenforced index through.
@@ -84,13 +84,13 @@ func runRetryOfUniqueIndexHook(ctx context.Context, pool *pgxpool.Pool) error {
 			(SELECT NOT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass($1)),
 			false
 		)`, retryOfUniqueIndexName).Scan(&invalid); err != nil {
-		return fmt.Errorf("retry_of unique pre-212 hook: inspect index: %w", err)
+		return fmt.Errorf("retry_of unique pre-233 hook: inspect index: %w", err)
 	}
 	if invalid {
 		// An invalid index is never used to answer queries and cannot satisfy ON CONFLICT,
 		// so dropping it is safe; the migration rebuilds it CONCURRENTLY right after.
 		if _, err := pool.Exec(ctx, `DROP INDEX IF EXISTS `+retryOfUniqueIndexName); err != nil {
-			return fmt.Errorf("retry_of unique pre-212 hook: drop invalid index: %w", err)
+			return fmt.Errorf("retry_of unique pre-233 hook: drop invalid index: %w", err)
 		}
 		slog.Warn("dropped leftover invalid unique index before rebuild", "index", retryOfUniqueIndexName)
 	}
@@ -105,10 +105,10 @@ func runRetryOfUniqueIndexHook(ctx context.Context, pool *pgxpool.Pool) error {
 			HAVING count(*) > 1
 			LIMIT 100
 		) d`).Scan(&dupes); err != nil {
-		return fmt.Errorf("retry_of unique pre-212 hook: duplicate scan: %w", err)
+		return fmt.Errorf("retry_of unique pre-233 hook: duplicate scan: %w", err)
 	}
 	if dupes > 0 {
-		return fmt.Errorf("retry_of unique pre-212 hook: %d parent task(s) have more than one "+
+		return fmt.Errorf("retry_of unique pre-233 hook: %d parent task(s) have more than one "+
 			"system-retry successor, so the unique index on agent_task_queue.retry_of_task_id "+
 			"cannot be built. Keep the earliest successor per retry_of_task_id, delete the rest, "+
 			"then re-run `migrate up`", dupes)
