@@ -142,6 +142,7 @@ import type {
   ListJiraConnectionsResponse,
   ConnectJiraRequest,
   ConnectJiraResponse,
+  SyncJiraConnectionResponse,
   ListLarkInstallationsResponse,
   BeginLarkInstallResponse,
   LarkInstallStatusResponse,
@@ -2861,6 +2862,16 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${workspaceId}/jira/connections`, {
       method: "POST",
       body: JSON.stringify(body),
+    });
+  }
+
+  /** Pull-based sync: import/refresh issues matching the connection's JQL. */
+  async syncJiraConnection(
+    workspaceId: string,
+    connectionId: string,
+  ): Promise<SyncJiraConnectionResponse> {
+    return this.fetch(`/api/workspaces/${workspaceId}/jira/connections/${connectionId}/sync`, {
+      method: "POST",
     });
   }
 

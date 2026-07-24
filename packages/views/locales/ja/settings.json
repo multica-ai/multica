@@ -490,10 +490,14 @@
     "form_token_label": "API トークン",
     "form_token_placeholder": "API トークン",
     "form_token_hint": "Atlassian アカウント設定で API トークンを作成してください(id.atlassian.com、セキュリティ、API トークン)。",
+    "form_jql_label": "JQL フィルター（任意）",
+    "form_jql_hint": "「今すぐ同期」はこの JQL に一致する課題をインポートします。空欄の場合は、接続したアカウントに割り当てられた課題をインポートします。",
     "connect": "接続",
     "connecting": "接続中...",
     "disconnect": "接続解除",
     "disconnecting": "解除中...",
+    "sync_now": "今すぐ同期",
+    "syncing": "同期中...",
     "not_configured": "このサーバーでは Jira 連携が設定されていません。管理者に次の設定を依頼してください:",
     "contact_admin": "ワークスペースの管理者に Jira サイトの接続を依頼してください。",
     "webhook_setup_title": "Jira で設定を完了",
@@ -513,7 +517,9 @@
     "toast_connected": "Jira サイトを接続しました",
     "toast_connect_failed": "Jira に接続できませんでした",
     "toast_disconnected": "Jira サイトの接続を解除しました",
-    "toast_disconnect_failed": "接続を解除できませんでした"
+    "toast_disconnect_failed": "接続を解除できませんでした",
+    "toast_sync_summary": "同期完了: 作成 {{created}} 件、更新 {{updated}} 件",
+    "toast_sync_failed": "同期に失敗しました"
   },
   "lark": {
     "section_title": "Lark",

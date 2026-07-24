@@ -16,6 +16,9 @@ export interface JiraConnection {
    * the server has no public URL configured; the UI then prefixes `webhook_path`. */
   webhook_url: string;
   webhook_path: string;
+  /** JQL filter used by the pull-based sync. Empty means the server default
+   * `assignee = currentUser()` is applied at sync time. */
+  jql: string;
   created_at: string;
 }
 
@@ -32,6 +35,17 @@ export interface ConnectJiraRequest {
   base_url: string;
   account_email: string;
   api_token: string;
+  /** Optional JQL filter for the pull-based sync. */
+  jql?: string;
+}
+
+/** Summary returned by POST .../jira/connections/{id}/sync — the pull-based
+ * import for accounts that cannot register Jira webhooks. */
+export interface SyncJiraConnectionResponse {
+  created: number;
+  updated: number;
+  /** How many Jira issues the JQL search returned (created + updated + skipped). */
+  total: number;
 }
 
 export interface ConnectJiraResponse extends JiraConnection {

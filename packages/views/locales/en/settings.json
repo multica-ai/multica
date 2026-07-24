@@ -498,10 +498,14 @@
     "form_token_label": "API token",
     "form_token_placeholder": "API token",
     "form_token_hint": "Create an API token in your Atlassian account settings (id.atlassian.com, Security, API tokens).",
+    "form_jql_label": "JQL filter (optional)",
+    "form_jql_hint": "Sync now imports issues matching this JQL. Leave empty to import issues assigned to the connected account.",
     "connect": "Connect",
     "connecting": "Connecting...",
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting...",
+    "sync_now": "Sync now",
+    "syncing": "Syncing...",
     "not_configured": "Jira integration is not configured on this server. Ask an administrator to set",
     "contact_admin": "Ask a workspace admin to connect a Jira site.",
     "webhook_setup_title": "Finish setup in Jira",
@@ -521,7 +525,9 @@
     "toast_connected": "Jira site connected",
     "toast_connect_failed": "Could not connect to Jira",
     "toast_disconnected": "Jira site disconnected",
-    "toast_disconnect_failed": "Could not disconnect"
+    "toast_disconnect_failed": "Could not disconnect",
+    "toast_sync_summary": "Sync complete: {{created}} created, {{updated}} updated",
+    "toast_sync_failed": "Sync failed"
   },
   "lark": {
     "section_title": "Lark",

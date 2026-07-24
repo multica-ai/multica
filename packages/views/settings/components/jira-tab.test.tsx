@@ -10,6 +10,7 @@ import enSettings from "../../locales/en/settings.json";
 
 const mockConnectJira = vi.hoisted(() => vi.fn());
 const mockDeleteJiraConnection = vi.hoisted(() => vi.fn());
+const mockSyncJiraConnection = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
@@ -23,6 +24,7 @@ const connectionsRef = vi.hoisted(() => ({
       account_email: string;
       webhook_url: string;
       webhook_path: string;
+      jql: string;
       created_at: string;
     }[],
     configured: true,
@@ -44,6 +46,12 @@ vi.mock("@multica/core/jira", () => ({
   jiraConnectionsOptions: () => ({ queryKey: ["jira", "workspace-1", "connections"] }),
 }));
 
+// Only issueKeys is used by the tab; mocking keeps the heavy issues barrel
+// (stores, mutations, ws-updaters) out of this jsdom suite.
+vi.mock("@multica/core/issues", () => ({
+  issueKeys: { all: (wsId: string) => ["issues", wsId] as const },
+}));
+
 vi.mock("@multica/core/api", () => {
   class ApiError extends Error {
     readonly status: number;
@@ -60,6 +68,7 @@ vi.mock("@multica/core/api", () => {
     api: {
       connectJira: mockConnectJira,
       deleteJiraConnection: mockDeleteJiraConnection,
+      syncJiraConnection: mockSyncJiraConnection,
     },
   };
 });
@@ -94,6 +103,7 @@ const CONNECTION = {
   account_email: "ops@acme.dev",
   webhook_url: "https://multica.example.com/api/webhooks/jira/conn-1",
   webhook_path: "/api/webhooks/jira/conn-1",
+  jql: "",
   created_at: "2026-01-01T00:00:00Z",
 };
 
@@ -169,6 +179,7 @@ describe("Settings JiraTab", () => {
       base_url: "https://acme.atlassian.net",
       account_email: "ops@acme.dev",
       api_token: "tok-123",
+      jql: "",
     });
     expect(
       screen.getByText("Copy the secret now. It is shown only once and cannot be retrieved later."),
@@ -210,6 +221,75 @@ describe("Settings JiraTab", () => {
         screen.getByText("Could not reach the Jira site. Check the URL and try again."),
       ).toBeInTheDocument();
     });
+  });
+
+  it("passes the optional JQL filter through on connect", async () => {
+    const user = userEvent.setup();
+    mockConnectJira.mockResolvedValue({ ...CONNECTION, webhook_secret: "s" });
+
+    renderTab();
+    await fillConnectForm(user);
+    await user.type(screen.getByLabelText("JQL filter (optional)"), "project = OPS");
+    await user.click(screen.getByRole("button", { name: "Connect" }));
+
+    await waitFor(() => {
+      expect(mockConnectJira).toHaveBeenCalledWith("workspace-1", {
+        base_url: "https://acme.atlassian.net",
+        account_email: "ops@acme.dev",
+        api_token: "tok-123",
+        jql: "project = OPS",
+      });
+    });
+  });
+
+  it("syncs a connection and toasts the created/updated summary", async () => {
+    const user = userEvent.setup();
+    connectionsRef.current.connections = [CONNECTION];
+    let resolveSync!: (v: { created: number; updated: number; total: number }) => void;
+    mockSyncJiraConnection.mockImplementation(
+      () => new Promise((resolve) => (resolveSync = resolve)),
+    );
+
+    renderTab();
+    await user.click(screen.getByRole("button", { name: "Sync now" }));
+
+    // In-flight: spinner label shows and the button is disabled.
+    const syncing = await screen.findByRole("button", { name: "Syncing..." });
+    expect(syncing).toBeDisabled();
+
+    resolveSync({ created: 3, updated: 2, total: 6 });
+    await waitFor(() => {
+      expect(mockToastSuccess).toHaveBeenCalledWith("Sync complete: 3 created, 2 updated");
+    });
+    expect(mockSyncJiraConnection).toHaveBeenCalledWith("workspace-1", "conn-1");
+    // Pulled issues must appear in the issue lists.
+    expect(mockInvalidate).toHaveBeenCalledWith({ queryKey: ["issues", "workspace-1"] });
+    expect(screen.getByRole("button", { name: "Sync now" })).toBeEnabled();
+  });
+
+  it("toasts an error when the sync fails", async () => {
+    const user = userEvent.setup();
+    connectionsRef.current.connections = [CONNECTION];
+    mockSyncJiraConnection.mockRejectedValue(
+      new ApiError("jira rejected the JQL query", 400, "Bad Request"),
+    );
+
+    renderTab();
+    await user.click(screen.getByRole("button", { name: "Sync now" }));
+
+    await waitFor(() => {
+      expect(mockToastError).toHaveBeenCalledWith("jira rejected the JQL query");
+    });
+    expect(mockToastSuccess).not.toHaveBeenCalled();
+  });
+
+  it("hides the sync action from non-admins", () => {
+    connectionsRef.current.connections = [CONNECTION];
+    connectionsRef.current.can_manage = false;
+
+    renderTab();
+
+    expect(screen.queryByRole("button", { name: "Sync now" })).toBeNull();
   });
 
   it("disconnects after confirming the dialog", async () => {

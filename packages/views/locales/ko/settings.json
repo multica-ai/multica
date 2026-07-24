@@ -490,10 +490,14 @@
     "form_token_label": "API 토큰",
     "form_token_placeholder": "API 토큰",
     "form_token_hint": "Atlassian 계정 설정에서 API 토큰을 생성하세요 (id.atlassian.com, 보안, API 토큰).",
+    "form_jql_label": "JQL 필터(선택 사항)",
+    "form_jql_hint": "지금 동기화하면 이 JQL과 일치하는 이슈를 가져옵니다. 비워 두면 연결된 계정에 할당된 이슈를 가져옵니다.",
     "connect": "연결",
     "connecting": "연결 중...",
     "disconnect": "연결 해제",
     "disconnecting": "해제 중...",
+    "sync_now": "지금 동기화",
+    "syncing": "동기화 중...",
     "not_configured": "이 서버에는 Jira 통합이 구성되어 있지 않습니다. 관리자에게 다음 설정을 요청하세요:",
     "contact_admin": "워크스페이스 관리자에게 Jira 사이트 연결을 요청하세요.",
     "webhook_setup_title": "Jira에서 설정 완료",
@@ -513,7 +517,9 @@
     "toast_connected": "Jira 사이트가 연결되었습니다",
     "toast_connect_failed": "Jira에 연결할 수 없습니다",
     "toast_disconnected": "Jira 사이트 연결이 해제되었습니다",
-    "toast_disconnect_failed": "연결을 해제할 수 없습니다"
+    "toast_disconnect_failed": "연결을 해제할 수 없습니다",
+    "toast_sync_summary": "동기화 완료: {{created}}개 생성, {{updated}}개 업데이트",
+    "toast_sync_failed": "동기화 실패"
   },
   "repositories": {
     "section_title": "저장소",
