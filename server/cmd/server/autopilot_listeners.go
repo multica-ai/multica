@@ -5,7 +5,7 @@ import (
 	"log/slog"
 
 	"github.com/multica-ai/multica/server/internal/events"
-	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -18,18 +18,11 @@ func registerAutopilotListeners(bus *events.Bus, svc *service.AutopilotService) 
 	// When an issue with origin_type='autopilot' reaches a terminal status,
 	// update the corresponding autopilot run.
 	bus.Subscribe(protocol.EventIssueUpdated, func(e events.Event) {
-		payload, ok := e.Payload.(map[string]any)
-		if !ok {
+		payload, ok := e.Payload.(issueevent.IssueUpdatedPayload)
+		if !ok || !payload.TriggerSideEffects || !payload.StatusChanged {
 			return
 		}
-		statusChanged, _ := payload["status_changed"].(bool)
-		if !statusChanged {
-			return
-		}
-		issue, ok := payload["issue"].(handler.IssueResponse)
-		if !ok {
-			return
-		}
+		issue := payload.Snapshot
 		// Only handle statuses that finalize an autopilot run.
 		if issue.Status != "done" && issue.Status != "in_review" && issue.Status != "cancelled" && issue.Status != "blocked" {
 			return

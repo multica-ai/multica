@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/domainevent"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -2793,43 +2794,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
 		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 	statusChanged := req.Status != nil && prevIssue.Status != issue.Status
-	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
-	// project_changed gates the client's per-project issue-list refetch the way
-	// status/assignee flags gate theirs. Without it the client must diff
-	// project_id against its own cache, which breaks once an optimistic local
-	// move has overwritten the cached value (MUL-3669 / #4548).
-	projectChanged := req.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
-	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
-	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
-	prevStartDate := dateToPtr(prevIssue.StartDate)
-	startDateChanged := prevStartDate != resp.StartDate && (prevStartDate == nil) != (resp.StartDate == nil) ||
-		(prevStartDate != nil && resp.StartDate != nil && *prevStartDate != *resp.StartDate)
-	prevDueDate := dateToPtr(prevIssue.DueDate)
-	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
-		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
-
+	// One typed payload, its diff computed purely from the locked before/after
+	// pre-image, shared by every issue:updated producer (MUL-4332 review a′). This
+	// is an authoritative user change, so it fires the full side effects.
 	// actorType / actorID were resolved above (shared with the domain events).
-	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
-		"issue":               resp,
-		"assignee_changed":    assigneeChanged,
-		"status_changed":      statusChanged,
-		"priority_changed":    priorityChanged,
-		"project_changed":     projectChanged,
-		"start_date_changed":  startDateChanged,
-		"due_date_changed":    dueDateChanged,
-		"description_changed": descriptionChanged,
-		"title_changed":       titleChanged,
-		"prev_title":          prevIssue.Title,
-		"prev_assignee_type":  textToPtr(prevIssue.AssigneeType),
-		"prev_assignee_id":    uuidToPtr(prevIssue.AssigneeID),
-		"prev_status":         prevIssue.Status,
-		"prev_priority":       prevIssue.Priority,
-		"prev_start_date":     prevStartDate,
-		"prev_due_date":       prevDueDate,
-		"prev_description":    textToPtr(prevIssue.Description),
-		"creator_type":        prevIssue.CreatorType,
-		"creator_id":          uuidToString(prevIssue.CreatorID),
-	})
+	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID,
+		issueevent.Build(prevIssue, issue, resp, true))
 
 	// Reconcile the task queue. Whether this write starts an agent run — and
 	// for whom (agent assignee or squad leader) — is decided by the single
@@ -3398,19 +3368,18 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
 
+		statusChanged := prevIssue.Status != issue.Status
+		// assigneeChanged feeds the shared enqueue predicate below; the payload's
+		// own assignee diff is computed independently by issueevent.Build.
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
-		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
-		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
-		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 
-		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
-			"issue":            resp,
-			"assignee_changed": assigneeChanged,
-			"status_changed":   statusChanged,
-			"priority_changed": priorityChanged,
-			"project_changed":  projectChanged,
-		})
+		// The SAME typed payload the single-update path emits, so a batch status
+		// change carries prev_status and the full changed/prev field set instead of
+		// the reduced four-key map that made its activity-log entries read from: ""
+		// (MUL-4332 review a′). Diff is computed from the locked before/after.
+		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID,
+			issueevent.Build(prevIssue, issue, resp, true))
 
 		// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —
 		// mirrors UpdateIssue. See that handler for the rationale.

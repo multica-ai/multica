@@ -6,6 +6,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -267,8 +268,8 @@ func TestNotification_StatusChanged(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID, // actor is the creator
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:          issueID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "status test issue",
@@ -277,9 +278,10 @@ func TestNotification_StatusChanged(t *testing.T) {
 				CreatorType: "member",
 				CreatorID:   testUserID,
 			},
-			"assignee_changed": false,
-			"status_changed":   true,
-			"prev_status":      "todo",
+			AssigneeChanged:    false,
+			StatusChanged:      true,
+			PrevStatus:         "todo",
+			TriggerSideEffects: true,
 		},
 	})
 
@@ -351,8 +353,8 @@ func TestNotification_StatusChanged_Muted(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:          issueID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "muted status test issue",
@@ -361,9 +363,10 @@ func TestNotification_StatusChanged_Muted(t *testing.T) {
 				CreatorType: "member",
 				CreatorID:   testUserID,
 			},
-			"assignee_changed": false,
-			"status_changed":   true,
-			"prev_status":      "todo",
+			AssigneeChanged:    false,
+			StatusChanged:      true,
+			PrevStatus:         "todo",
+			TriggerSideEffects: true,
 		},
 	})
 
@@ -585,8 +588,8 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID, // actor is the creator
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:           issueID,
 				WorkspaceID:  testWorkspaceID,
 				Title:        "assignee change issue",
@@ -597,10 +600,11 @@ func TestNotification_AssigneeChanged(t *testing.T) {
 				AssigneeType: &newAssigneeType,
 				AssigneeID:   &newAssigneeID,
 			},
-			"assignee_changed":   true,
-			"status_changed":     false,
-			"prev_assignee_type": &oldAssigneeType,
-			"prev_assignee_id":   &oldAssigneeID,
+			AssigneeChanged:    true,
+			StatusChanged:      false,
+			PrevAssigneeType:   &oldAssigneeType,
+			PrevAssigneeID:     &oldAssigneeID,
+			TriggerSideEffects: true,
 		},
 	})
 
@@ -752,8 +756,8 @@ func TestNotification_PriorityChanged(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:          issueID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "priority test issue",
@@ -762,10 +766,11 @@ func TestNotification_PriorityChanged(t *testing.T) {
 				CreatorType: "member",
 				CreatorID:   testUserID,
 			},
-			"assignee_changed": false,
-			"status_changed":   false,
-			"priority_changed": true,
-			"prev_priority":    "medium",
+			AssigneeChanged:    false,
+			StatusChanged:      false,
+			PriorityChanged:    true,
+			PrevPriority:       "medium",
+			TriggerSideEffects: true,
 		},
 	})
 
@@ -818,8 +823,8 @@ func TestNotification_DueDateChanged(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:          issueID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "due date test issue",
@@ -829,9 +834,10 @@ func TestNotification_DueDateChanged(t *testing.T) {
 				CreatorID:   testUserID,
 				DueDate:     &dueDate,
 			},
-			"assignee_changed": false,
-			"status_changed":   false,
-			"due_date_changed": true,
+			AssigneeChanged:    false,
+			StatusChanged:      false,
+			DueDateChanged:     true,
+			TriggerSideEffects: true,
 		},
 	})
 
@@ -879,8 +885,8 @@ func TestNotification_StartDateChanged(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:          issueID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "start date test issue",
@@ -890,9 +896,10 @@ func TestNotification_StartDateChanged(t *testing.T) {
 				CreatorID:   testUserID,
 				StartDate:   &startDate,
 			},
-			"assignee_changed":   false,
-			"status_changed":     false,
-			"start_date_changed": true,
+			AssigneeChanged:    false,
+			StatusChanged:      false,
+			StartDateChanged:   true,
+			TriggerSideEffects: true,
 		},
 	})
 
@@ -944,8 +951,8 @@ func TestNotification_ParentBubble_StatusChanged(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:          subID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "sub-issue status bubble",
@@ -954,9 +961,10 @@ func TestNotification_ParentBubble_StatusChanged(t *testing.T) {
 				CreatorType: "member",
 				CreatorID:   testUserID,
 			},
-			"assignee_changed": false,
-			"status_changed":   true,
-			"prev_status":      "in_progress",
+			AssigneeChanged:    false,
+			StatusChanged:      true,
+			PrevStatus:         "in_progress",
+			TriggerSideEffects: true,
 		},
 	})
 
@@ -1056,8 +1064,8 @@ func TestNotification_ParentBubble_PriorityChangeSuppressed(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:          subID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "sub-issue priority bubble",
@@ -1066,10 +1074,11 @@ func TestNotification_ParentBubble_PriorityChangeSuppressed(t *testing.T) {
 				CreatorType: "member",
 				CreatorID:   testUserID,
 			},
-			"assignee_changed": false,
-			"status_changed":   false,
-			"priority_changed": true,
-			"prev_priority":    "medium",
+			AssigneeChanged:    false,
+			StatusChanged:      false,
+			PriorityChanged:    true,
+			PrevPriority:       "medium",
+			TriggerSideEffects: true,
 		},
 	})
 
@@ -1114,8 +1123,8 @@ func publishStatusChange(bus *events.Bus, issueID, newStatus, prevStatus string)
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:          issueID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "task_failed dismiss test",
@@ -1124,9 +1133,10 @@ func publishStatusChange(bus *events.Bus, issueID, newStatus, prevStatus string)
 				CreatorType: "member",
 				CreatorID:   testUserID,
 			},
-			"assignee_changed": false,
-			"status_changed":   true,
-			"prev_status":      prevStatus,
+			AssigneeChanged:    false,
+			StatusChanged:      true,
+			PrevStatus:         prevStatus,
+			TriggerSideEffects: true,
 		},
 	})
 }

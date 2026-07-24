@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/domainevent"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -4133,26 +4134,24 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 // issue's status before the write so the client can gate that reconcile on
 // status_changed.
 //
-// The `issue` payload is a map (issueToMap), which the workspace WS fanout
-// (listeners.go SubscribeAll) marshals and broadcasts as-is — that is what
-// drives the UI reconcile. Note this does NOT cover the full HTTP UpdateIssue
-// side effects: the activity-log and inbox listeners type-assert `issue` to a
-// handler.IssueResponse and skip a map, so a background status reset does not
-// emit status-change activity / notifications. That is intentional for the
-// realtime-staleness fix (#4648 / MUL-3782); folding those side effects in
-// would mean unifying the payload type and is left as a follow-up.
+// This is a background status reset, NOT an authoritative user action, so it is
+// realtime-only: TriggerSideEffects is false, so the activity / inbox / autopilot /
+// subscriber listeners skip it, preserving the deliberate scope of the
+// realtime-staleness fix (#4648 / MUL-3782). Before MUL-4332 review a′ that skip
+// was implicit — the listeners type-asserted handler.IssueResponse and a plain map
+// fell through — which is exactly the fragile fork the typed contract replaces. The
+// `issue` wire representation stays issueToMap so this path's client payload is
+// unchanged.
 func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
 	prefix := s.getIssuePrefix(issue.WorkspaceID)
+	before := issue
+	before.Status = prevStatus
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
 		ActorType:   "system",
 		ActorID:     "",
-		Payload: map[string]any{
-			"issue":          issueToMap(issue, prefix),
-			"status_changed": prevStatus != issue.Status,
-			"prev_status":    prevStatus,
-		},
+		Payload:     issueevent.Build(before, issue, issueToMap(issue, prefix), false),
 	})
 }
 

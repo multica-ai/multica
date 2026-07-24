@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -64,19 +65,24 @@ func TestBroadcastIssueUpdated_EmitsStatusChange(t *testing.T) {
 		t.Fatalf("workspace mismatch: got %q want %q", e.WorkspaceID, util.UUIDToString(issue.WorkspaceID))
 	}
 
-	payload, ok := e.Payload.(map[string]any)
+	payload, ok := e.Payload.(issueevent.IssueUpdatedPayload)
 	if !ok {
-		t.Fatalf("payload is not map[string]any: %T", e.Payload)
+		t.Fatalf("payload is not issueevent.IssueUpdatedPayload: %T", e.Payload)
 	}
-	if payload["status_changed"] != true {
-		t.Errorf("expected status_changed=true, got %v", payload["status_changed"])
+	if !payload.StatusChanged {
+		t.Errorf("expected StatusChanged=true, got false")
 	}
-	if payload["prev_status"] != "in_progress" {
-		t.Errorf("expected prev_status=in_progress, got %v", payload["prev_status"])
+	if payload.PrevStatus != "in_progress" {
+		t.Errorf("expected PrevStatus=in_progress, got %v", payload.PrevStatus)
 	}
-	issueMap, ok := payload["issue"].(map[string]any)
+	// A background reset is realtime-only: the side-effect listeners must skip it.
+	if payload.TriggerSideEffects {
+		t.Error("a background status reset must not trigger activity / inbox side effects")
+	}
+	// The client wire keeps the issueToMap representation unchanged.
+	issueMap, ok := payload.Issue.(map[string]any)
 	if !ok {
-		t.Fatalf("issue payload is not map[string]any: %T", payload["issue"])
+		t.Fatalf("issue payload is not map[string]any: %T", payload.Issue)
 	}
 	if issueMap["status"] != "todo" {
 		t.Errorf("expected issue.status=todo, got %v", issueMap["status"])
@@ -109,11 +115,11 @@ func TestBroadcastIssueUpdated_NoStatusChange(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected exactly 1 published event, got %d", len(got))
 	}
-	payload, ok := got[0].Payload.(map[string]any)
+	payload, ok := got[0].Payload.(issueevent.IssueUpdatedPayload)
 	if !ok {
-		t.Fatalf("payload is not map[string]any: %T", got[0].Payload)
+		t.Fatalf("payload is not issueevent.IssueUpdatedPayload: %T", got[0].Payload)
 	}
-	if payload["status_changed"] != false {
-		t.Errorf("expected status_changed=false, got %v", payload["status_changed"])
+	if payload.StatusChanged {
+		t.Errorf("expected StatusChanged=false, got true")
 	}
 }

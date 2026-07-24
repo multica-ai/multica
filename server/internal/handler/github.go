@@ -24,6 +24,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/domainevent"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1417,14 +1418,11 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)
-	h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", map[string]any{
-		"issue":          resp,
-		"status_changed": true,
-		"prev_status":    before.Status,
-		"creator_type":   before.CreatorType,
-		"creator_id":     uuidToString(before.CreatorID),
-		"source":         "github_pr_merged",
-	})
+	// The shared typed payload (MUL-4332 review a′). A merged PR is an authoritative
+	// system change, so it fires the full side effects, as it did before.
+	payload := issueevent.Build(before, updated, resp, true)
+	payload.Source = "github_pr_merged"
+	h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", payload)
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
