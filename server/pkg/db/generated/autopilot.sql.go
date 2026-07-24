@@ -92,16 +92,37 @@ func (q *Queries) ArchiveAutopilot(ctx context.Context, id pgtype.UUID) error {
 	return err
 }
 
+const countActiveAutopilotRuns = `-- name: CountActiveAutopilotRuns :one
+SELECT count(*)::bigint FROM autopilot_run
+WHERE autopilot_id = $1
+  AND status IN ('issue_created', 'running')
+`
+
+// In-flight run count for the per-autopilot concurrency cap (WS-750). Counts
+// runs that are still working: issue_created (issue created, downstream agent
+// task not yet terminal) and running (run_only task queued/active). Terminal
+// statuses (completed/failed/skipped) are excluded so the cap reflects actual
+// outstanding work, not history. Matches the idx_autopilot_run_status partial
+// index so the count is index-only.
+func (q *Queries) CountActiveAutopilotRuns(ctx context.Context, autopilotID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveAutopilotRuns, autopilotID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const createAutopilot = `-- name: CreateAutopilot :one
 INSERT INTO autopilot (
     workspace_id, title, description, assignee_type, assignee_id,
     status, execution_mode, issue_title_template, project_id,
+    max_concurrent_runs,
     created_by_type, created_by_id
 ) VALUES (
     $1, $2, $9, $3, $4,
     $5, $6, $10, $11,
+    $12,
     $7, $8
-) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id
+) RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, max_concurrent_runs
 `
 
 type CreateAutopilotParams struct {
@@ -116,6 +137,7 @@ type CreateAutopilotParams struct {
 	Description        pgtype.Text `json:"description"`
 	IssueTitleTemplate pgtype.Text `json:"issue_title_template"`
 	ProjectID          pgtype.UUID `json:"project_id"`
+	MaxConcurrentRuns  pgtype.Int4 `json:"max_concurrent_runs"`
 }
 
 func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams) (Autopilot, error) {
@@ -131,6 +153,7 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		arg.Description,
 		arg.IssueTitleTemplate,
 		arg.ProjectID,
+		arg.MaxConcurrentRuns,
 	)
 	var i Autopilot
 	err := row.Scan(
@@ -149,6 +172,7 @@ func (q *Queries) CreateAutopilot(ctx context.Context, arg CreateAutopilotParams
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.MaxConcurrentRuns,
 	)
 	return i, err
 }
@@ -546,7 +570,7 @@ func (q *Queries) GetActiveAutopilotRuleVersion(ctx context.Context, arg GetActi
 }
 
 const getAutopilot = `-- name: GetAutopilot :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, max_concurrent_runs FROM autopilot
 WHERE id = $1
 `
 
@@ -569,12 +593,13 @@ func (q *Queries) GetAutopilot(ctx context.Context, id pgtype.UUID) (Autopilot, 
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.MaxConcurrentRuns,
 	)
 	return i, err
 }
 
 const getAutopilotInWorkspace = `-- name: GetAutopilotInWorkspace :one
-SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id FROM autopilot
+SELECT id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, max_concurrent_runs FROM autopilot
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -602,6 +627,7 @@ func (q *Queries) GetAutopilotInWorkspace(ctx context.Context, arg GetAutopilotI
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.MaxConcurrentRuns,
 	)
 	return i, err
 }
@@ -1116,7 +1142,7 @@ func (q *Queries) ListAutopilotTriggers(ctx context.Context, autopilotID pgtype.
 const listAutopilots = `-- name: ListAutopilots :many
 
 SELECT
-  a.id, a.workspace_id, a.title, a.description, a.assignee_id, a.status, a.execution_mode, a.issue_title_template, a.created_by_type, a.created_by_id, a.last_run_at, a.created_at, a.updated_at, a.assignee_type, a.project_id,
+  a.id, a.workspace_id, a.title, a.description, a.assignee_id, a.status, a.execution_mode, a.issue_title_template, a.created_by_type, a.created_by_id, a.last_run_at, a.created_at, a.updated_at, a.assignee_type, a.project_id, a.max_concurrent_runs,
   (
     SELECT array_agg(DISTINCT t.kind ORDER BY t.kind)
     FROM autopilot_trigger t
@@ -1189,6 +1215,7 @@ func (q *Queries) ListAutopilots(ctx context.Context, arg ListAutopilotsParams) 
 			&i.Autopilot.UpdatedAt,
 			&i.Autopilot.AssigneeType,
 			&i.Autopilot.ProjectID,
+			&i.Autopilot.MaxConcurrentRuns,
 			&i.TriggerKinds,
 			&i.NextRunAt,
 			&i.LastRunStatus,
@@ -1556,7 +1583,7 @@ const systemPauseAutopilot = `-- name: SystemPauseAutopilot :one
 UPDATE autopilot
 SET status = 'paused', updated_at = now()
 WHERE id = $1 AND status = 'active'
-RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, max_concurrent_runs
 `
 
 // Atomically pauses an autopilot only if it is currently active. Returns no
@@ -1582,6 +1609,7 @@ func (q *Queries) SystemPauseAutopilot(ctx context.Context, id pgtype.UUID) (Aut
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.MaxConcurrentRuns,
 	)
 	return i, err
 }
@@ -1612,9 +1640,10 @@ UPDATE autopilot SET
     execution_mode = COALESCE($7, execution_mode),
     issue_title_template = $8,
     project_id = $9,
+    max_concurrent_runs = $10,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id
+RETURNING id, workspace_id, title, description, assignee_id, status, execution_mode, issue_title_template, created_by_type, created_by_id, last_run_at, created_at, updated_at, assignee_type, project_id, max_concurrent_runs
 `
 
 type UpdateAutopilotParams struct {
@@ -1627,6 +1656,7 @@ type UpdateAutopilotParams struct {
 	ExecutionMode      pgtype.Text `json:"execution_mode"`
 	IssueTitleTemplate pgtype.Text `json:"issue_title_template"`
 	ProjectID          pgtype.UUID `json:"project_id"`
+	MaxConcurrentRuns  pgtype.Int4 `json:"max_concurrent_runs"`
 }
 
 func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams) (Autopilot, error) {
@@ -1640,6 +1670,7 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		arg.ExecutionMode,
 		arg.IssueTitleTemplate,
 		arg.ProjectID,
+		arg.MaxConcurrentRuns,
 	)
 	var i Autopilot
 	err := row.Scan(
@@ -1658,6 +1689,7 @@ func (q *Queries) UpdateAutopilot(ctx context.Context, arg UpdateAutopilotParams
 		&i.UpdatedAt,
 		&i.AssigneeType,
 		&i.ProjectID,
+		&i.MaxConcurrentRuns,
 	)
 	return i, err
 }
