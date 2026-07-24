@@ -71,6 +71,9 @@ const (
 	DefaultGCArtifactTTL                  = 12 * time.Hour      // 12h — drop regenerable artifacts on completed but still-open issues
 	DefaultGCCodexSessionTTL              = 14 * 24 * time.Hour // 14 days — reclaim per-issue Codex session stores untouched this long
 	DefaultAutoUpdateCheckInterval        = 6 * time.Hour       // how often the daemon polls GitHub for a newer CLI release
+	DefaultDiskWarningGiB                 = 20
+	DefaultDiskCriticalGiB                = 15
+	DefaultDiskRecoveryGiB                = 20
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -96,6 +99,9 @@ type Config struct {
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
+	DiskWarningGiB                 int                   // allow claims but warn below this free-space threshold on macOS (default: 20)
+	DiskCriticalGiB                int                   // park new claims below this free-space threshold on macOS (default: 15)
+	DiskRecoveryGiB                int                   // resume claims after a critical state at or above this threshold (default: 20)
 	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval                     time.Duration         // how often the GC loop runs (default: 2h)
 	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
@@ -450,6 +456,21 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if overrides.MaxConcurrentTasks > 0 {
 		maxConcurrentTasks = overrides.MaxConcurrentTasks
 	}
+	diskWarningGiB, err := intFromEnv("MULTICA_DISK_WARNING_GIB", DefaultDiskWarningGiB)
+	if err != nil {
+		return Config{}, err
+	}
+	diskCriticalGiB, err := intFromEnv("MULTICA_DISK_CRITICAL_GIB", DefaultDiskCriticalGiB)
+	if err != nil {
+		return Config{}, err
+	}
+	diskRecoveryGiB, err := intFromEnv("MULTICA_DISK_RECOVERY_GIB", DefaultDiskRecoveryGiB)
+	if err != nil {
+		return Config{}, err
+	}
+	if diskCriticalGiB <= 0 || diskWarningGiB <= diskCriticalGiB || diskRecoveryGiB < diskWarningGiB {
+		return Config{}, fmt.Errorf("invalid disk thresholds: require 0 < MULTICA_DISK_CRITICAL_GIB < MULTICA_DISK_WARNING_GIB <= MULTICA_DISK_RECOVERY_GIB")
+	}
 
 	// Profile
 	profile := overrides.Profile
@@ -591,6 +612,9 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		AutoUpdateCheckInterval:        autoUpdateInterval,
 		HealthPort:                     healthPort,
 		MaxConcurrentTasks:             maxConcurrentTasks,
+		DiskWarningGiB:                 diskWarningGiB,
+		DiskCriticalGiB:                diskCriticalGiB,
+		DiskRecoveryGiB:                diskRecoveryGiB,
 		PollInterval:                   pollInterval,
 		HeartbeatInterval:              heartbeatInterval,
 		AgentTimeout:                   agentTimeout,

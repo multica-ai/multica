@@ -320,10 +320,23 @@ type Daemon struct {
 	pauseClaims    bool // when true, the batch poller skips claiming
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
-	activeEnvRootsMu   sync.Mutex
-	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
-	activeEnvRoots     map[string]int  // env root path -> reference count (handles reuse paths marked twice)
-	deletingEnvRoots   map[string]bool // env roots reserved by GC; new tasks wait until the mutation finishes
+	activeEnvRootsMu       sync.Mutex
+	workspacesRootIdentity string
+	activeEnvRootsChanged  chan struct{}   // closed and replaced when an in-flight env-root GC mutation finishes
+	activeEnvRoots         map[string]int  // env root path -> reference count (handles reuse paths marked twice)
+	deletingEnvRoots       map[string]bool // env roots reserved by GC; new tasks wait until the mutation finishes
+	// Test hooks for deterministic GC failure/race coverage. Nil in production.
+	activeEnvRootWaitHook func(string)
+	renameEnvRootHook     func(string, string) error
+	removeEnvRootHook     func(string) error
+	envRootQuarantineHook func(string) // test-only: runs after WorkspacesRoot is opened, before rename
+	envRootPreOpenHook    func(string) // test-only: runs after reservation, before a filesystem root is opened
+	gcBeforeApplyHook     func(string) // test-only: runs after decision, before reservation
+	gcAfterExpectedHook   func(string) // test-only: runs after pinned identity read, before key creation
+	gcAfterReserveHook    func(string) // test-only: runs after reservation, before mutation
+	gcCycleRoot           *os.Root     // pinned for the synchronous runGC cycle
+	artifactCleanupHook   func(string) // test-only: runs while the artifact-cleanup reservation is held
+	artifactRemoveHook    func(string) // test-only: runs after artifact inspection, before fd-relative removal
 
 	activeCodexStoresMu   sync.Mutex
 	activeCodexStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
@@ -353,6 +366,7 @@ type Daemon struct {
 	// the production default; zero-valued test daemons fall back to the same
 	// default in effectiveTaskPrepareTimeout.
 	taskPrepareTimeout time.Duration
+	diskPreflight      *diskPreflight
 	// runUpdateFn executes the brew-or-download upgrade. Set to d.runUpdate by
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
@@ -400,11 +414,15 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		workspaceChanges:          newWorkspaceChangeSignal(),
 		wsRPC:                     newWSRPCClient(wsRPCResponseGrace),
 	}
-	d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
+	d.activeEnvRootsChanged = make(chan struct{})
 	d.activeCodexStoresCond = sync.NewCond(&d.activeCodexStoresMu)
 	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
+	if runtime.GOOS == "darwin" && cfg.WorkspacesRoot != "" &&
+		cfg.DiskWarningGiB > 0 && cfg.DiskCriticalGiB > 0 && cfg.DiskRecoveryGiB > 0 {
+		d.diskPreflight = newDiskPreflight(cfg, logger)
+	}
 	return d
 }
 
@@ -2968,6 +2986,12 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			}
 			continue
 		}
+		if d.diskPreflight != nil && !d.diskPreflight.allowTaskClaim() {
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
 
 		// Acquire at least one slot (blocking briefly), then grab any other free
 		// slots so a single batch claim can fill them all.
@@ -3260,37 +3284,11 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		defer localRelease()
 	}
 
-	// Hold a process-wide active-root guard for the rest of this task so
-	// the GC loop never sees a window where the env root has neither the
-	// in-process guard nor .gc_meta.json (issue #3999 race B). runTask
-	// installs its own ref-counted mark/unmark internally; without this
-	// outer guard the inner unmark fires when runTask returns, leaving
-	// the directory protected only by the 72h orphan TTL through
-	// reportTaskResult and execenv.WriteGCMeta below. markActiveEnvRoot
-	// is reference-counted, so the duplicate marks runTask installs are
-	// correctly nested within these.
-	predictedEnvRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
-	if predictedEnvRoot != "" {
-		d.markActiveEnvRoot(predictedEnvRoot)
-		defer d.unmarkActiveEnvRoot(predictedEnvRoot)
-	}
-	if task.PriorWorkDir != "" {
-		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != predictedEnvRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
-		}
-	}
-
-	// Create a cancellable context so we can interrupt the running agent
-	// when the server signals the task should stop — either the task reached
-	// a terminal state (completed/failed/cancelled) or the task row is
-	// deleted (404).
+	// Start server-side cancellation polling before any potentially blocking
+	// env-root claim so a cancelled/deleted task can release its slot even when
+	// GC is stalled in a same-root filesystem mutation.
 	runCtx, runCancel := context.WithCancel(ctx)
 	defer runCancel()
-
-	// Poll interval is d.cancelPollInterval (5s in production, reduced in tests
-	// via direct field override). Guard against zero so a misconfigured daemon
-	// doesn't panic time.NewTicker.
 	pollInterval := d.cancelPollInterval
 	if pollInterval == 0 {
 		pollInterval = 5 * time.Second
@@ -3303,6 +3301,33 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		case <-runCtx.Done():
 		}
 	}()
+
+	// Hold a process-wide active-root guard for the rest of this task so
+	// the GC loop never sees a window where the env root has neither the
+	// in-process guard nor .gc_meta.json (issue #3999 race B). runTask
+	// installs its own ref-counted mark/unmark internally; without this
+	// outer guard the inner unmark fires when runTask returns, leaving
+	// the directory protected only by the 72h orphan TTL through
+	// reportTaskResult and execenv.WriteGCMeta below. markActiveEnvRoot
+	// is reference-counted, so the duplicate marks runTask installs are
+	// correctly nested within these.
+	predictedEnvRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
+	if predictedEnvRoot != "" {
+		release, ok := d.markActiveEnvRoot(runCtx, predictedEnvRoot)
+		if !ok {
+			return
+		}
+		defer release()
+	}
+	if task.PriorWorkDir != "" {
+		if priorRoot := filepath.Dir(task.PriorWorkDir); priorRoot != "" && priorRoot != predictedEnvRoot {
+			release, ok := d.markActiveEnvRoot(runCtx, priorRoot)
+			if !ok {
+				return
+			}
+			defer release()
+		}
+	}
 
 	result, err := d.runner.run(runCtx, task, provider, slot, taskLog)
 
@@ -3713,18 +3738,19 @@ func providerNeedsInlineSystemPrompt(provider string) bool {
 	}
 }
 
-// gateResumeToReusedWorkdir clears the task's prior session unless the task
-// runs in the exact workdir the session was recorded against, and reports
-// whether that workdir was reused. CLI backends key their session stores to
-// the cwd (Claude Code looks sessions up under ~/.claude/projects/<encoded-cwd>/),
+// gateResumeToReusedWorkdir clears the task's prior session unless the caller
+// has object-bound proof that the environment was reused and it runs in the
+// exact workdir the session was recorded against. CLI backends key their
+// session stores to the cwd (Claude Code looks sessions up under
+// ~/.claude/projects/<encoded-cwd>/),
 // so a session id from a different workdir can never resolve: the CLI exits
 // within a second and the run fails before doing any work — permanently,
 // because the failed run records no session and the next claim serves the
 // same stale pointer again. This fires whenever the prior workdir no longer
 // exists (GC'd after the issue went done, daemon reinstall, manual cleanup)
 // and execenv.Reuse fell back to a fresh Prepare (GitHub #3854).
-func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, envWorkDir string, taskLog *slog.Logger) bool {
-	reused := task.PriorWorkDir != "" && envWorkDir == task.PriorWorkDir
+func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, envWorkDir string, envWasReused bool, taskLog *slog.Logger) bool {
+	reused := envWasReused && task.PriorWorkDir != "" && envWorkDir == task.PriorWorkDir
 	if !reused && task.PriorSessionID != "" {
 		taskLog.Info("dropping prior session: workdir not reused, per-cwd session cannot resolve",
 			"session_id", task.PriorSessionID,
@@ -3761,16 +3787,28 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 	if task.PriorWorkDir == "" || localAssignment != nil {
 		return false
 	}
+	rawRoot, rootAbsErr := filepath.Abs(workspacesRoot)
+	rawWorkdir, workdirAbsErr := filepath.Abs(task.PriorWorkDir)
+	if rootAbsErr != nil || workdirAbsErr != nil {
+		return false
+	}
+	rawRel, err := filepath.Rel(rawRoot, rawWorkdir)
+	if err != nil || !filepath.IsLocal(rawRel) {
+		return false
+	}
 	if !task.IsLeaderTask {
 		return true
 	}
-
 	root, err := filepath.EvalSymlinks(workspacesRoot)
 	if err != nil {
 		return false
 	}
 	workdir, err := filepath.EvalSymlinks(task.PriorWorkDir)
 	if err != nil {
+		return false
+	}
+	resolvedRel, err := filepath.Rel(root, workdir)
+	if err != nil || !filepath.IsLocal(resolvedRel) || filepath.Clean(rawRel) != filepath.Clean(resolvedRel) {
 		return false
 	}
 	info, err := os.Stat(workdir)
@@ -4181,18 +4219,27 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// predicted root for a fresh Prepare and the prior root for Reuse — they
 	// usually differ (Reuse keeps the original task's directory).
 	predictedRoot := execenv.PredictRootDir(d.cfg.WorkspacesRoot, task.WorkspaceID, task.ID)
-	d.markActiveEnvRoot(predictedRoot)
-	defer d.unmarkActiveEnvRoot(predictedRoot)
+	releasePredicted, ok := d.markActiveEnvRoot(ctx, predictedRoot)
+	if !ok {
+		return TaskResult{}, ctx.Err()
+	}
+	defer releasePredicted()
+	var priorRootIdentity os.FileInfo
 	if task.PriorWorkDir != "" {
 		priorRoot := filepath.Dir(task.PriorWorkDir)
+		priorRootIdentity, _ = os.Stat(priorRoot)
 		if priorRoot != predictedRoot {
-			d.markActiveEnvRoot(priorRoot)
-			defer d.unmarkActiveEnvRoot(priorRoot)
+			releasePrior, ok := d.markActiveEnvRoot(ctx, priorRoot)
+			if !ok {
+				return TaskResult{}, ctx.Err()
+			}
+			defer releasePrior()
 		}
 	}
 
 	// Try to reuse the workdir from a previous task on the same (agent, issue) pair.
 	var env *execenv.Environment
+	envWasReused := false
 	// For a built-in codex task, use the version paired with the resolved path
 	// so an in-place upgrade can't leave the sandbox policy on the old version
 	// (MUL-4486). A custom codex runtime skips the self-heal, so resolvedVersion
@@ -4303,7 +4350,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			defer d.unmarkActiveCodexStore(store)
 		}
 	}
-	if shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
+	if task.PriorWorkDir != "" && d.envRootPreOpenHook != nil {
+		d.envRootPreOpenHook(filepath.Dir(task.PriorWorkDir))
+	}
+	priorIdentityMatches := false
+	if priorRootIdentity != nil {
+		currentPrior, statErr := os.Stat(filepath.Dir(task.PriorWorkDir))
+		priorIdentityMatches = statErr == nil && os.SameFile(priorRootIdentity, currentPrior)
+	}
+	if priorIdentityMatches &&
+		canonicalPathIdentity(d.cfg.WorkspacesRoot) == d.workspacesRootIdentity &&
+		shouldReusePriorWorkdir(task, localAssignment, d.cfg.WorkspacesRoot) {
 		var err error
 		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
 			WorkspacesRoot:        d.cfg.WorkspacesRoot,
@@ -4325,6 +4382,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("reuse execution environment: %w", err)
 		}
+		envWasReused = env != nil
 	}
 	if env == nil {
 		var err error
@@ -4354,11 +4412,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 		}
 	}
-	// Belt-and-suspenders: also mark whatever root we ended up with, in case
-	// future changes diverge from PredictRootDir.
-	if env.RootDir != predictedRoot && env.RootDir != "" {
-		d.markActiveEnvRoot(env.RootDir)
-		defer d.unmarkActiveEnvRoot(env.RootDir)
+	// Acquire a second lease after Prepare/Reuse even when the pathname equals
+	// predictedRoot. The pre-Prepare lease protects the immutable logical name;
+	// this post-Prepare lease adds the created object's canonical alias key.
+	// Together they close a symlink-ancestor retarget between prediction and
+	// mkdir, while still covering future divergence from PredictRootDir.
+	if env.RootDir != "" {
+		preparedIdentity, identityErr := d.statEnvRootThroughPinnedWorkspace(env.RootDir)
+		if identityErr != nil {
+			return TaskResult{}, fmt.Errorf("prove prepared env root identity: %w", identityErr)
+		}
+		releaseActual, ok := d.markActiveEnvRoot(ctx, env.RootDir)
+		if !ok {
+			return TaskResult{}, ctx.Err()
+		}
+		defer releaseActual()
+		currentIdentity, identityErr := d.statEnvRootThroughPinnedWorkspace(env.RootDir)
+		if identityErr != nil || !os.SameFile(preparedIdentity, currentIdentity) {
+			return TaskResult{}, fmt.Errorf("prepared env root identity changed while acquiring lease")
+		}
 	}
 	taskTempDir, err := ensureTaskTempDir(env.RootDir, task.WorkspaceID, task.ID)
 	if err != nil {
@@ -4390,7 +4462,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
-	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
+	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, envWasReused, taskLog)
 	// A reused workdir is necessary but not sufficient for a Codex resume: the
 	// prior thread's rollout must actually be present in this task's CODEX_HOME
 	// sessions (MUL-4424 isolates them). Drop the resume before the brief is
@@ -5500,39 +5572,61 @@ func convertProjectResourcesForEnv(resources []ProjectResourceData) []execenv.Pr
 // markActiveEnvRoot records that a task is currently using the given env root,
 // so the GC loop won't reclaim its artifacts mid-execution. Calls are
 // reference-counted so a reuse path marked twice (predicted + prior) only
-// becomes inactive after both unmark calls.
-func (d *Daemon) markActiveEnvRoot(envRoot string) {
+// becomes inactive after both leases are released.
+// markActiveEnvRoot waits for an in-flight mutation without making task
+// cancellation depend on filesystem progress. It returns false when ctx is
+// cancelled before the root can be claimed. The returned lease closes over the
+// exact canonical key acquired here, so pathname retargeting cannot release a
+// different root.
+func (d *Daemon) markActiveEnvRoot(ctx context.Context, envRoot string) (release func(), ok bool) {
 	if envRoot == "" {
-		return
+		return func() {}, true
 	}
+	keys := envRootLeaseKeys(envRoot)
 	d.activeEnvRootsMu.Lock()
-	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
-	for d.deletingEnvRoots[envRoot] {
-		d.activeEnvRootsCond.Wait()
+	if d.workspacesRootIdentity == "" && len(d.activeEnvRoots) == 0 && len(d.deletingEnvRoots) == 0 {
+		d.workspacesRootIdentity = canonicalPathIdentity(d.cfg.WorkspacesRoot)
 	}
-	d.activeEnvRoots[envRoot]++
-}
-
-func (d *Daemon) unmarkActiveEnvRoot(envRoot string) {
-	if envRoot == "" {
-		return
+	for anyEnvRootKeySet(d.deletingEnvRoots, keys) {
+		if d.activeEnvRootWaitHook != nil {
+			d.activeEnvRootWaitHook(envRoot)
+		}
+		changed := d.activeEnvRootsChanged
+		d.activeEnvRootsMu.Unlock()
+		select {
+		case <-ctx.Done():
+			return nil, false
+		case <-changed:
+		}
+		d.activeEnvRootsMu.Lock()
 	}
-	d.activeEnvRootsMu.Lock()
-	defer d.activeEnvRootsMu.Unlock()
-	d.ensureActiveEnvRootStateLocked()
-	if d.activeEnvRoots[envRoot] <= 1 {
-		delete(d.activeEnvRoots, envRoot)
-		return
+	for _, key := range keys {
+		d.activeEnvRoots[key]++
 	}
-	d.activeEnvRoots[envRoot]--
+	d.activeEnvRootsMu.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			d.activeEnvRootsMu.Lock()
+			defer d.activeEnvRootsMu.Unlock()
+			for _, key := range keys {
+				if d.activeEnvRoots[key] <= 1 {
+					delete(d.activeEnvRoots, key)
+					continue
+				}
+				d.activeEnvRoots[key]--
+			}
+		})
+	}, true
 }
 
 func (d *Daemon) isActiveEnvRoot(envRoot string) bool {
+	keys := envRootLeaseKeys(envRoot)
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
-	return d.activeEnvRoots[envRoot] > 0
+	return anyEnvRootKeyCounted(d.activeEnvRoots, keys)
 }
 
 func (d *Daemon) ensureActiveEnvRootStateLocked() {
@@ -5542,9 +5636,109 @@ func (d *Daemon) ensureActiveEnvRootStateLocked() {
 	if d.deletingEnvRoots == nil {
 		d.deletingEnvRoots = make(map[string]bool)
 	}
-	if d.activeEnvRootsCond == nil {
-		d.activeEnvRootsCond = sync.NewCond(&d.activeEnvRootsMu)
+	if d.activeEnvRootsChanged == nil {
+		d.activeEnvRootsChanged = make(chan struct{})
 	}
+}
+
+// canonicalPathIdentity returns one guard key for lexical and symlink aliases.
+// For not-yet-created predicted roots it resolves the nearest existing
+// ancestor and appends the missing suffix.
+func canonicalPathIdentity(path string) string {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return filepath.Clean(path)
+	}
+	current := filepath.Clean(abs)
+	var suffix []string
+	for {
+		resolved, resolveErr := filepath.EvalSymlinks(current)
+		if resolveErr == nil {
+			for i := len(suffix) - 1; i >= 0; i-- {
+				resolved = filepath.Join(resolved, suffix[i])
+			}
+			resolved = filepath.Clean(resolved)
+			if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+				resolved = strings.ToLower(resolved)
+			}
+			return resolved
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			return filepath.Clean(abs)
+		}
+		suffix = append(suffix, filepath.Base(current))
+		current = parent
+	}
+}
+
+// envRootLeaseKeys binds both names that must contend:
+//   - logical: the immutable configured pathname, stable across mkdir and
+//     symlink-ancestor retargeting;
+//   - object: the current canonical target, so a real path and symlink alias
+//     to the same object cannot bypass each other.
+//
+// Neither key contains mutable stat fields. Holding both closes the gap where
+// choosing only a logical key misses aliases, while choosing only a resolved
+// key changes after retarget.
+func envRootLeaseKeys(path string) []string {
+	logical := filepath.Clean(path)
+	if abs, err := filepath.Abs(path); err == nil {
+		logical = filepath.Clean(abs)
+	}
+	if runtime.GOOS == "darwin" || runtime.GOOS == "windows" {
+		logical = strings.ToLower(logical)
+	}
+	logical = "logical:" + logical
+	object := "object:" + canonicalPathIdentity(path)
+	return []string{logical, object}
+}
+
+func anyEnvRootKeySet(values map[string]bool, keys []string) bool {
+	for _, key := range keys {
+		if values[key] {
+			return true
+		}
+	}
+	return false
+}
+
+func anyEnvRootKeyCounted(values map[string]int, keys []string) bool {
+	for _, key := range keys {
+		if values[key] > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+func (d *Daemon) statEnvRootThroughPinnedWorkspace(envRoot string) (os.FileInfo, error) {
+	rel, err := filepath.Rel(d.cfg.WorkspacesRoot, envRoot)
+	if err != nil || !isContainedRelativePath(rel) {
+		return nil, fmt.Errorf("env root is outside workspaces root")
+	}
+	root, err := os.OpenRoot(d.cfg.WorkspacesRoot)
+	if err != nil {
+		return nil, err
+	}
+	defer root.Close()
+	info, err := root.Stat(rel)
+	if err != nil {
+		return nil, err
+	}
+	if !info.IsDir() {
+		return nil, fmt.Errorf("env root is not a directory")
+	}
+	pathInfo, err := os.Stat(envRoot)
+	if err != nil || !os.SameFile(info, pathInfo) {
+		return nil, fmt.Errorf("env root pathname does not match pinned object")
+	}
+	return info, nil
+}
+
+type envRootGCLease struct {
+	release  func()
+	expected os.FileInfo
 }
 
 // reserveEnvRootForGC atomically confirms that no live task is using envRoot
@@ -5553,22 +5747,57 @@ func (d *Daemon) ensureActiveEnvRootStateLocked() {
 // the active task and skips, or task startup waits for the mutation to finish
 // and recreates/uses the post-GC environment.
 func (d *Daemon) reserveEnvRootForGC(envRoot string) (release func(), ok bool) {
-	if envRoot == "" {
+	lease, ok := d.reserveEnvRootForGCIdentity(envRoot)
+	if !ok {
 		return nil, false
 	}
+	return lease.release, true
+}
+
+func (d *Daemon) reserveEnvRootForGCIdentity(envRoot string) (envRootGCLease, bool) {
+	if envRoot == "" {
+		return envRootGCLease{}, false
+	}
+	var expected os.FileInfo
+	var err error
+	if d.gcCycleRoot != nil {
+		rel, relErr := filepath.Rel(d.cfg.WorkspacesRoot, envRoot)
+		if relErr != nil || !isContainedRelativePath(rel) {
+			return envRootGCLease{}, false
+		}
+		expected, err = d.gcCycleRoot.Stat(rel)
+	} else {
+		expected, err = os.Stat(envRoot)
+	}
+	if err != nil || !expected.IsDir() {
+		return envRootGCLease{}, false
+	}
+	if d.gcAfterExpectedHook != nil {
+		d.gcAfterExpectedHook(envRoot)
+	}
+	keys := envRootLeaseKeys(envRoot)
 	d.activeEnvRootsMu.Lock()
 	defer d.activeEnvRootsMu.Unlock()
 	d.ensureActiveEnvRootStateLocked()
-	if d.activeEnvRoots[envRoot] > 0 || d.deletingEnvRoots[envRoot] {
-		return nil, false
+	if anyEnvRootKeyCounted(d.activeEnvRoots, keys) || anyEnvRootKeySet(d.deletingEnvRoots, keys) {
+		return envRootGCLease{}, false
 	}
-	d.deletingEnvRoots[envRoot] = true
-	return func() {
+	for _, key := range keys {
+		d.deletingEnvRoots[key] = true
+	}
+	if d.gcAfterReserveHook != nil {
+		d.gcAfterReserveHook(envRoot)
+	}
+	release := func() {
 		d.activeEnvRootsMu.Lock()
-		delete(d.deletingEnvRoots, envRoot)
-		d.activeEnvRootsCond.Broadcast()
+		for _, key := range keys {
+			delete(d.deletingEnvRoots, key)
+		}
+		close(d.activeEnvRootsChanged)
+		d.activeEnvRootsChanged = make(chan struct{})
 		d.activeEnvRootsMu.Unlock()
-	}, true
+	}
+	return envRootGCLease{release: release, expected: expected}, true
 }
 
 // markActiveCodexStore records that a task is about to use the given per-issue
