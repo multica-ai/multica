@@ -15,9 +15,12 @@ vi.mock("../i18n", () => ({
 }));
 
 const editorRef = vi.hoisted<{ current: unknown }>(() => ({ current: null }));
+const editorAttributes = vi.hoisted<{ current: Record<string, string> }>(() => ({ current: {} }));
 
 vi.mock("@tiptap/react", () => ({
-  useEditor: () => {
+  useEditor: (options: { editorProps?: { attributes?: Record<string, string> } }) => {
+    editorAttributes.current = options.editorProps?.attributes ?? {};
+
     if (!editorRef.current) {
       editorRef.current = {
         get isFocused() {
@@ -36,7 +39,10 @@ vi.mock("@tiptap/react", () => ({
     }
     return editorRef.current;
   },
-  EditorContent: () => <div data-testid="editor-content" />,
+  EditorContent: () => {
+    const { class: className, ...attributes } = editorAttributes.current;
+    return <div data-testid="editor-content" className={className} {...attributes} />;
+  },
 }));
 
 import { createShortcutChord } from "@multica/core/shortcuts";
@@ -49,6 +55,24 @@ describe("TitleEditor", () => {
     editorState.isDestroyed = false;
     editorState.text = "";
     editorRef.current = null;
+    editorAttributes.current = {};
+  });
+
+  it("marks the editor as required when requested", () => {
+    const { getByRole, rerender } = render(
+      <TitleEditor placeholder="Autopilot name" required />,
+    );
+
+    expect(getByRole("textbox", { name: "Autopilot name" })).toHaveAttribute(
+      "aria-required",
+      "true",
+    );
+
+    rerender(<TitleEditor placeholder="Autopilot name" />);
+    expect(getByRole("textbox", { name: "Autopilot name" })).toHaveAttribute(
+      "aria-required",
+      "false",
+    );
   });
 
   it("syncs editor content when defaultValue changes externally and editor is unfocused", () => {
