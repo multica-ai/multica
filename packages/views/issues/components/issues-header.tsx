@@ -1,29 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import {
-  ArrowDown,
-  ArrowUp,
-  CalendarDays,
-  ChartGantt,
-  ChevronDown,
-  CircleDot,
-  Columns3,
-  Filter,
-  FolderKanban,
-  FolderMinus,
-  List,
-  Rows3,
-  SignalHigh,
-  SlidersHorizontal,
-  X,
-  Tag,
-  Table2,
-  User,
-  UserMinus,
-  UserPen,
-  Waves,
-} from "lucide-react";
+import { Archive, ArrowDown, ArrowUp, CalendarDays, ChartGantt, ChevronDown, CircleDot, Columns3, Filter, FolderKanban, FolderMinus, List, Rows3, SignalHigh, SlidersHorizontal, Tag, Table2, User, UserMinus, UserPen, Waves, X } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import {
@@ -1026,6 +1004,9 @@ export function IssueDisplayControls({
   });
   const hasActiveFilters = activeFilterCount > 0;
 
+  const archivedCount = counts.status.get("archived") ?? 0;
+  const showArchivedChip = archivedCount > 0;
+
   const SORT_LABEL_KEY: Record<typeof SORT_OPTIONS[number]["value"], "sort_manual" | "sort_status" | "sort_priority" | "sort_start_date" | "sort_due_date" | "sort_created" | "sort_updated" | "sort_title"> = {
     position: "sort_manual",
     status: "sort_status",
@@ -1410,6 +1391,32 @@ export function IssueDisplayControls({
             />
             <TooltipContent side="bottom">
               {t(($) => $.filters.reset)}
+            </TooltipContent>
+          </Tooltip>
+        )}
+
+        {showArchivedChip && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-7 gap-1.5 text-caption text-muted-foreground"
+                  aria-label={t(($) => $.archived.chip_aria, { count: archivedCount })}
+                  onClick={() => act.setStatusFilters(["archived"])}
+                  autoFocus
+                >
+                  <Archive className="size-3.5" />
+                  <span className="hidden md:inline">
+                    {t(($) => $.archived.view_archived)}
+                  </span>
+                  <span className="tabular-nums">{archivedCount}</span>
+                </Button>
+              }
+            />
+            <TooltipContent side="bottom">
+              {t(($) => $.archived.chip_aria, { count: archivedCount })}
             </TooltipContent>
           </Tooltip>
         )}

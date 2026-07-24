@@ -13,7 +13,8 @@
     "in_review": "审核中",
     "done": "已完成",
     "blocked": "已阻塞",
-    "cancelled": "已取消"
+    "cancelled": "已取消",
+    "archived": "已归档"
   },
   "priority": {
     "urgent": "紧急",
@@ -178,7 +179,7 @@
     "zoom_day": "日",
     "zoom_week": "周",
     "zoom_month": "月",
-    "show_completed": "显示已完成",
+    "show_closed": "显示已关闭",
     "empty": "暂无已排期的 issue — 给任意 issue 设置开始或截止日期，即可显示在时间轴上。",
     "inverted_dates_warning": "开始日期晚于截止日期 — 已按区间最小/最大端绘制。"
   },
@@ -205,6 +206,14 @@
     },
     "search_placeholder": "搜索 issue...",
     "search_empty": "没有匹配的 issue。"
+  },
+  "archived": {
+    "view_archived": "查看已归档",
+    "chip_aria_other": "{{count}} 个已归档 issue",
+    "empty_state_hint_other": "{{count}} 个已归档 issue 被隐藏 — 点击查看已归档以显示。",
+    "toast_archived": "已归档",
+    "toast_view_archived": "查看已归档",
+    "toast_error": "归档 issue 失败"
   },
   "list": {
     "empty_status": "无 issue",

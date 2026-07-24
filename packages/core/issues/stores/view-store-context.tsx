@@ -33,3 +33,8 @@ export function useViewStoreApi(): StoreApi<IssueViewState> {
     throw new Error("useViewStoreApi must be used within ViewStoreProvider");
   return store;
 }
+
+/** Optional variant for hooks that may run outside a view-store provider. */
+export function useViewStoreApiOptional(): StoreApi<IssueViewState> | null {
+  return use(ViewStoreContext);
+}

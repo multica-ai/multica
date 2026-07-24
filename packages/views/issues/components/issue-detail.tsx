@@ -103,6 +103,7 @@ import { useRestoredScrollOffset, useRestoredScrollRef } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
 
 import { ProgressRing } from "./progress-ring";
+import { formatProgressText } from "./child-progress";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { useT } from "../../i18n";
 import { useIssueDetailScrollRestore } from "../hooks/use-issue-detail-scroll-restore";
@@ -597,7 +598,7 @@ function SubIssueRow({
 }: {
   child: Issue;
   /** The sub-issue's OWN children progress (it can itself be a parent). */
-  childProgress?: { done: number; total: number };
+  childProgress?: { done: number; total: number; archived?: number };
   /** User-level display preference: which built-in fields the row shows. */
   rowProps: SubIssueRowProperties;
   /** Workspace custom properties the user opted into showing on rows. */
@@ -738,7 +739,7 @@ function SubIssueRow({
                   size={11}
                 />
                 <span className="text-micro text-muted-foreground tabular-nums font-medium">
-                  {childProgress.done}/{childProgress.total}
+                  {formatProgressText(childProgress)}
                 </span>
               </span>
             )}
@@ -2453,6 +2454,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           )}
           {childIssues.length > 0 && (() => {
             const doneCount = childIssues.filter((c) => c.status === "done").length;
+            const archivedCount = childIssues.filter((c) => c.status === "archived").length;
             return (
               // Provider hosts the shared right-click actions menu the rows
               // delegate to (one singleton menu, not one per row).
@@ -2476,7 +2478,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5">
                     <ProgressRing done={doneCount} total={childIssues.length} size={11} />
                     <span className="text-micro text-muted-foreground tabular-nums font-medium">
-                      {doneCount}/{childIssues.length}
+                      {archivedCount > 0
+                        ? `${doneCount}/${childIssues.length} done · ${archivedCount} archived`
+                        : `${doneCount}/${childIssues.length}`}
                     </span>
                   </div>
                   {/* issue.id, not the route param — the endpoint takes a

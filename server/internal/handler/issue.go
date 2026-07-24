@@ -1489,6 +1489,11 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(statuses)))
 	}
 
+	includeArchived := r.URL.Query().Get("include_archived") == "true"
+	if !includeArchived {
+		where = append(where, "i.status <> 'archived'")
+	}
+
 	priorities := splitCommaParam(r.URL.Query().Get("priorities"))
 	if len(priorities) == 0 {
 		priorities = splitCommaParam(r.URL.Query().Get("priority"))
@@ -2035,6 +2040,7 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID string `json:"parent_issue_id"`
 		Total         int64  `json:"total"`
 		Done          int64  `json:"done"`
+		Archived      int64  `json:"archived"`
 	}
 	resp := make([]progressEntry, len(rows))
 	for i, row := range rows {
@@ -2042,6 +2048,7 @@ func (h *Handler) ChildIssueProgress(w http.ResponseWriter, r *http.Request) {
 			ParentIssueID: uuidToString(row.ParentIssueID),
 			Total:         row.Total,
 			Done:          row.Done,
+			Archived:      row.Archived,
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{

@@ -353,7 +353,8 @@ GROUP BY assignee_type, assignee_id;
 -- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done
+       COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done,
+       COUNT(*) FILTER (WHERE status = 'archived')::bigint AS archived
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL

@@ -13,7 +13,8 @@
     "in_review": "レビュー中",
     "done": "完了",
     "blocked": "ブロック中",
-    "cancelled": "キャンセル済み"
+    "cancelled": "キャンセル済み",
+    "archived": "アーカイブ済み"
   },
   "priority": {
     "urgent": "緊急",
@@ -178,7 +179,7 @@
     "zoom_day": "日",
     "zoom_week": "週",
     "zoom_month": "月",
-    "show_completed": "完了済みを表示",
+    "show_closed": "クローズ済みを表示",
     "empty": "スケジュールされたイシューがまだありません。いずれかのイシューに開始日または期限を設定すると、タイムラインに表示されます。",
     "inverted_dates_warning": "開始日が期限より後になっています。バーは早い日付から遅い日付まで表示されます。"
   },
@@ -205,6 +206,14 @@
     },
     "search_placeholder": "イシューを検索...",
     "search_empty": "検索条件に一致するイシューがありません。"
+  },
+  "archived": {
+    "view_archived": "アーカイブを表示",
+    "chip_aria_other": "{{count}} 件のアーカイブ済みイシュー",
+    "empty_state_hint_other": "{{count}} 件のアーカイブ済みイシューが非表示です — アーカイブを表示をクリックしてください。",
+    "toast_archived": "アーカイブしました",
+    "toast_view_archived": "アーカイブを表示",
+    "toast_error": "イシューをアーカイブできませんでした"
   },
   "list": {
     "empty_status": "イシューなし",

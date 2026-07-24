@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Eye, MoreHorizontal } from "lucide-react";
 import type { IssueStatus } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -10,6 +11,7 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useViewStoreApi } from "@multica/core/issues/stores/view-store-context";
+import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { StatusIcon } from "./status-icon";
 import { useT } from "../../i18n";
 
@@ -31,6 +33,10 @@ export function HiddenColumnsPanel({
   renderRow: (status: IssueStatus) => React.ReactNode;
 }) {
   const { t } = useT("issues");
+  const boardStatuses = useMemo(
+    () => hiddenStatuses.filter((s) => BOARD_STATUSES.includes(s)),
+    [hiddenStatuses],
+  );
   return (
     <div className="flex w-[240px] shrink-0 flex-col">
       <div className="mb-2 flex items-center gap-2 px-1">
@@ -39,7 +45,7 @@ export function HiddenColumnsPanel({
         </span>
       </div>
       <div className="flex-1 space-y-0.5">
-        {hiddenStatuses.map((status) => renderRow(status))}
+        {boardStatuses.map((status) => renderRow(status))}
       </div>
     </div>
   );

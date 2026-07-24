@@ -25,10 +25,12 @@ import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 
-export interface ChildProgress {
-  done: number;
-  total: number;
-}
+// ChildProgress + formatProgressText live in ./child-progress (a leaf module
+// with no action-menu imports) so table/board surfaces can format progress
+// without eagerly loading this row component's dependency chain. Re-exported
+// here for backward compatibility.
+export { formatProgressText, type ChildProgress } from "./child-progress";
+import { formatProgressText, type ChildProgress } from "./child-progress";
 
 function formatDate(date: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
@@ -117,7 +119,7 @@ function ListRowContent({
               <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5">
                 <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
                 <span className="text-micro text-muted-foreground tabular-nums font-medium">
-                  {childProgress!.done}/{childProgress!.total}
+                  {formatProgressText(childProgress)}
                 </span>
               </span>
             )}

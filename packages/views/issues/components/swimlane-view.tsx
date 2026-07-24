@@ -44,7 +44,7 @@ import {
   DropdownMenuItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { sortIssues } from "../utils/sort";
-import { ALL_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
+import { ALL_STATUSES, BOARD_STATUSES, STATUS_CONFIG } from "@multica/core/issues/config";
 import { DraggableBoardCard, BoardCardContent } from "./board-card";
 import { StatusIcon } from "./status-icon";
 import { Button } from "@multica/ui/components/ui/button";
@@ -604,7 +604,7 @@ function SwimLaneViewImpl({
   issues,
   unfilteredIssues,
   activeFilters: activeFiltersProp,
-  visibleStatuses = ALL_STATUSES,
+  visibleStatuses = BOARD_STATUSES,
   hiddenStatuses = [],
   onMoveIssue,
   childProgressMap = EMPTY_PROGRESS_MAP,
@@ -695,11 +695,15 @@ function SwimLaneViewImpl({
     [myIssuesScope, myIssuesFilter],
   );
 
-  // Re-impose canonical status order (ALL_STATUSES) on whatever the controller
-  // marked visible, so columns — including `cancelled`, ordered last — render
-  // in lifecycle order.
+  // Re-impose canonical status order (BOARD_STATUSES by default, ALL_STATUSES
+  // when an explicit filter is active) so archived only renders when the user
+  // filtered for it (KTD4/R7).
   const sortedStatuses = useMemo(
-    () => ALL_STATUSES.filter((s) => visibleStatuses.includes(s)),
+    () =>
+      (visibleStatuses.length > 0 && visibleStatuses.includes("archived")
+        ? ALL_STATUSES
+        : BOARD_STATUSES
+      ).filter((s) => visibleStatuses.includes(s)),
     [visibleStatuses],
   );
 

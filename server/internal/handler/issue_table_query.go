@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -421,6 +422,9 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 	}
 	if len(spec.Filters.Statuses) > 0 {
 		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(sortedUniqueStrings(spec.Filters.Statuses))))
+	}
+	if !slices.Contains(spec.Filters.Statuses, "archived") {
+		where = append(where, "i.status <> 'archived'")
 	}
 	for _, priority := range spec.Filters.Priorities {
 		if !issueTableContainsString(validIssuePriorities, priority) {

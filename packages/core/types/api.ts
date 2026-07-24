@@ -133,6 +133,12 @@ export interface ListIssuesParams {
    */
   ids?: string[];
   /**
+   * Surface archived rows. Defaults to false; the only status fetch that should
+   * set this is an explicit `archived` status request (board/list otherwise hide
+   * archived by default).
+   */
+  include_archived?: boolean;
+  /**
    * Widen the assignee filter to issues where the user is the *indirect*
    * assignee — assignee is one of the user's owned agents, or a squad that
    * involves the user (human member / leader-via-owned-agent / agent member

@@ -14,7 +14,8 @@ import (
 const childIssueProgress = `-- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done
+       COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done,
+       COUNT(*) FILTER (WHERE status = 'archived')::bigint AS archived
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL
@@ -25,6 +26,7 @@ type ChildIssueProgressRow struct {
 	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
 	Total         int64       `json:"total"`
 	Done          int64       `json:"done"`
+	Archived      int64       `json:"archived"`
 }
 
 func (q *Queries) ChildIssueProgress(ctx context.Context, workspaceID pgtype.UUID) ([]ChildIssueProgressRow, error) {
@@ -36,7 +38,12 @@ func (q *Queries) ChildIssueProgress(ctx context.Context, workspaceID pgtype.UUI
 	items := []ChildIssueProgressRow{}
 	for rows.Next() {
 		var i ChildIssueProgressRow
-		if err := rows.Scan(&i.ParentIssueID, &i.Total, &i.Done); err != nil {
+		if err := rows.Scan(
+			&i.ParentIssueID,
+			&i.Total,
+			&i.Done,
+			&i.Archived,
+		); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
