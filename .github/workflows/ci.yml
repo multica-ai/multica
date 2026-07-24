@@ -121,6 +121,95 @@ jobs:
         # exclude @multica/mobile.
         run: pnpm exec turbo build typecheck lint test --filter='!@multica/docs' --filter='!@multica/mobile'
 
+  helm:
+    runs-on: ubuntu-latest
+    env:
+      CHART_DIR: deploy/helm/multica
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.1"
+
+      - name: Install kubeconform
+        run: |
+          go install github.com/yannh/kubeconform/cmd/kubeconform@v0.8.0
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Lint chart
+        run: helm lint "$CHART_DIR"
+
+      - name: Test upgrade-compatible defaults
+        run: |
+          helm template multica "$CHART_DIR" --namespace multica > /tmp/multica-default.yaml
+          kubeconform -strict -summary /tmp/multica-default.yaml
+          if grep -q '^  DATABASE_MAX_CONNS:' /tmp/multica-default.yaml; then
+            echo "DATABASE_MAX_CONNS must be omitted by default"
+            exit 1
+          fi
+          if grep -q '^  DATABASE_MIN_CONNS:' /tmp/multica-default.yaml; then
+            echo "DATABASE_MIN_CONNS must be omitted by default"
+            exit 1
+          fi
+          grep -q '^  SMTP_PORT: "25"$' /tmp/multica-default.yaml
+          grep -q '^  SMTP_TLS: ""$' /tmp/multica-default.yaml
+
+      - name: Test production features
+        run: |
+          helm template multica "$CHART_DIR" \
+            --namespace multica \
+            --set postgres.external.enabled=true \
+            --set backend.uploads.persistence.enabled=false \
+            --set backend.config.databaseMaxConns=25 \
+            --set backend.config.databaseMinConns=5 \
+            --set backend.config.smtp.port=587 \
+            --set backend.config.smtp.tls=starttls \
+            --set backend.metrics.enabled=true \
+            --set monitoring.serviceMonitor.enabled=true \
+            --set networkPolicy.enabled=true \
+            --set backend.podDisruptionBudget.enabled=true \
+            --set frontend.podDisruptionBudget.enabled=true \
+            --set serviceAccount.create=false \
+            --set serviceAccount.name=multica \
+            --set frontend.compatibility.backendAlias=false \
+            > /tmp/multica-production.yaml
+          grep -q '^  DATABASE_MAX_CONNS: "25"$' /tmp/multica-production.yaml
+          grep -q '^  DATABASE_MIN_CONNS: "5"$' /tmp/multica-production.yaml
+          grep -q '^  SMTP_PORT: "587"$' /tmp/multica-production.yaml
+          grep -q '^  SMTP_TLS: "starttls"$' /tmp/multica-production.yaml
+          kubeconform -strict -summary \
+            -skip ServiceMonitor,PrometheusRule \
+            /tmp/multica-production.yaml
+
+      - name: Test Gateway API routes
+        run: |
+          if helm template multica "$CHART_DIR" \
+            --namespace multica \
+            --set ingress.enabled=false \
+            --set httpRoute.enabled=true \
+            --set 'httpRoute.parentRefs[0].name=traefik' \
+            > /tmp/multica-gateway-ambiguous.yaml 2> /tmp/multica-gateway-error.txt; then
+            echo "ambiguous catch-all HTTPRoutes must fail"
+            exit 1
+          fi
+          grep -q 'cannot both use catch-all hostnames' /tmp/multica-gateway-error.txt
+          helm template multica "$CHART_DIR" \
+            --namespace multica \
+            --set ingress.enabled=false \
+            --set httpRoute.enabled=true \
+            --set 'httpRoute.parentRefs[0].name=traefik' \
+            --set-string 'httpRoute.frontend.hostnames[0]=multica.example.com' \
+            --set-string 'httpRoute.backend.hostnames[0]=api.multica.example.com' \
+            > /tmp/multica-gateway.yaml
+          test "$(grep -c '^kind: HTTPRoute$' /tmp/multica-gateway.yaml)" -eq 2
+          kubeconform -strict -summary -skip HTTPRoute /tmp/multica-gateway.yaml
+
   backend:
     runs-on: ubuntu-latest
     services:
