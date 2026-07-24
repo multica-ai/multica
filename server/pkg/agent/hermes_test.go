@@ -1674,8 +1674,13 @@ func TestHermesProviderErrorSnifferIgnoresMultiLineInfoRecords(t *testing.T) {
 		"}\n"
 
 	s := newACPProviderErrorSniffer("hermes")
-	if _, err := s.Write([]byte(record)); err != nil {
-		t.Fatalf("Write: %v", err)
+	for _, physicalLine := range strings.SplitAfter(record, "\n") {
+		if physicalLine == "" {
+			continue
+		}
+		if _, err := s.Write([]byte(physicalLine)); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
 	}
 	if msg := s.message(); msg != "" {
 		t.Errorf("multi-line INFO echo must not be captured, got %q", firstNRunes(msg, 120))
@@ -1708,6 +1713,43 @@ func TestHermesProviderErrorSnifferErrorRecordAfterInfoRecord(t *testing.T) {
 	msg := s.terminalMessage()
 	if !strings.Contains(msg, "HTTP 429") {
 		t.Fatalf("real ERROR record after an INFO echo must stay terminal, got %q", msg)
+	}
+}
+
+// TestHermesProviderErrorSnifferRealErrorsAfterSingleLineInfo guards record
+// boundaries around INFO echoes. A complete single-line INFO record must not
+// make a following bare provider-error block or a non-root logger record look
+// like an INFO continuation.
+func TestHermesProviderErrorSnifferRealErrorsAfterSingleLineInfo(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		stream string
+	}{
+		{
+			name: "bare provider error",
+			stream: "2026-07-24 10:09:00 [INFO] root: {\"message\":\"ordinary echo with an unmatched { in quoted text\"}\n" +
+				"❌ API call failed after 3 retries: RateLimitError [HTTP 429]\n" +
+				"📝 Error: HTTP 429 rate limit exceeded\n",
+		},
+		{
+			name: "non-root error logger",
+			stream: "2026-07-24 10:09:00 [INFO] root: {\"message\":\"ordinary echo\"}\n" +
+				"2026-07-24 10:09:01 [ERROR] acp_adapter.server: ❌ API call failed after 3 retries: HTTP 429 rate limit exceeded\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newACPProviderErrorSniffer("hermes")
+			if _, err := s.Write([]byte(tt.stream)); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			if msg := s.terminalMessage(); !strings.Contains(msg, "HTTP 429") {
+				t.Fatalf("real provider error after a single-line INFO record was swallowed, got %q", msg)
+			}
+		})
 	}
 }
 

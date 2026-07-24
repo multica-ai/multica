@@ -2085,12 +2085,13 @@ type acpProviderErrorSniffer struct {
 	lines    []string // captured error lines, bounded
 	seen     map[string]bool
 	terminal bool // sticky: at least one line matched acpTerminalErrorRe
-	// skipEcho is true while the sniffer is inside a Python INFO/DEBUG
-	// root-logger record (see acpEchoLogLevels): its first physical line
-	// carried an echo-level prefix, so this line and its prefix-less
-	// continuation lines are conversation/tool data to skip, until the
-	// next record prefix arrives. Persisted across Write calls.
-	skipEcho bool
+	// echoJSON tracks an incomplete structured payload from a Python
+	// INFO/DEBUG root-logger record. The JSON scanner state is persisted
+	// across Write calls so only actual payload continuations are skipped.
+	echoJSON     bool
+	echoDepth    int
+	echoInString bool
+	echoEscaped  bool
 }
 
 // acpErrorHeaderRe matches the first line of an API-error block.
@@ -2122,13 +2123,12 @@ var acpAgentOutputTerminalRe = regexp.MustCompile(`API call failed after \d+ ret
 const acpMaxErrorLines = 8
 
 // acpLogRecordPrefixRe matches the start of a Python `logging` record that
-// Hermes writes to stderr: "YYYY-MM-DD HH:MM:SS[,mmm] [LEVEL] root: ...".
-// Capture group 1 is the level. A physical line WITHOUT this prefix is a
-// continuation line of the record above it: Hermes echoes multi-line
-// conversation / tool JSON whose embedded newlines split one logical record
-// across several physical lines (GitHub multica#5862).
+// Hermes writes to stderr: "YYYY-MM-DD HH:MM:SS[,mmm] [LEVEL] logger: ...".
+// Capture groups are level, logger, and payload. Matching every logger is
+// important because a non-root ERROR record also ends a preceding root INFO
+// record and must remain visible to the provider-error matchers.
 var acpLogRecordPrefixRe = regexp.MustCompile(
-	`^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:,[0-9]+)? \[([A-Z]+)\] root:`,
+	`^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:,[0-9]+)? \[([A-Z]+)\] ([A-Za-z0-9_.-]+):\s*(.*)$`,
 )
 
 // acpEchoLogLevels are the Python root-logger levels Hermes uses purely to
@@ -2174,25 +2174,39 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 	complete = string(data[:nl])
 	s.remains = append(s.remains[:0], data[nl+1:]...)
 
-	for _, line := range strings.Split(complete, "\n") {
-		line = strings.TrimSpace(line)
+	for _, rawLine := range strings.Split(complete, "\n") {
+		rawLine = strings.TrimSuffix(rawLine, "\r")
+		line := strings.TrimSpace(rawLine)
 		if line == "" {
 			continue
 		}
-		// Track Python root-logger records so conversation/tool echoes
-		// never reach the error matchers. A line carrying a record prefix
-		// starts a new record: INFO/DEBUG records are data (skip them and
-		// their continuation lines); ERROR/WARNING/CRITICAL records are
-		// real diagnostics. A line WITHOUT a prefix is a continuation of
-		// the record above it and inherits that record's skip state —
-		// this is what stops a multi-line INFO echo whose inner JSON
-		// embeds "❌"/"Error:" from flipping a completed run to failed
+		// INFO/DEBUG root records are conversation/tool echoes and never
+		// reach the error matchers. When their payload is structured JSON,
+		// track brace depth across physical lines and skip only until that
+		// JSON closes. A complete single-line echo therefore cannot hide a
+		// following bare provider error. Any Python logger prefix also
+		// starts a new record, so non-root ERROR diagnostics remain visible
 		// (GitHub multica#5862).
 		if m := acpLogRecordPrefixRe.FindStringSubmatch(line); m != nil {
-			s.skipEcho = acpEchoLogLevels[m[1]]
-		}
-		if s.skipEcho {
-			continue
+			s.resetEchoJSON()
+			if acpEchoLogLevels[m[1]] && m[2] == "root" {
+				s.startEchoJSON(m[3])
+				continue
+			}
+		} else if s.echoJSON {
+			// A strong, unindented provider-error header is a new bare
+			// error block even if a malformed echo never closed. Indented
+			// error-looking text remains part of the structured echo.
+			indented := rawLine[0] == ' ' || rawLine[0] == '\t'
+			bareError := strings.HasPrefix(line, "⚠️") ||
+				strings.HasPrefix(line, "❌") ||
+				strings.HasPrefix(line, "[ERROR]")
+			if !s.echoInString && !indented && bareError && acpErrorHeaderRe.MatchString(line) {
+				s.resetEchoJSON()
+			} else {
+				s.consumeEchoJSON(rawLine)
+				continue
+			}
 		}
 		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line)) {
 			continue
@@ -2210,6 +2224,55 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 		}
 	}
 	return len(p), nil
+}
+
+func (s *acpProviderErrorSniffer) startEchoJSON(payload string) {
+	payload = strings.TrimSpace(payload)
+	if payload == "" || (payload[0] != '{' && payload[0] != '[') {
+		return
+	}
+	s.echoJSON = true
+	s.consumeEchoJSON(payload)
+}
+
+// consumeEchoJSON tracks only structural JSON bytes. It avoids buffering
+// arbitrary conversation/tool payloads while still recognizing their exact
+// multi-line boundary, including braces inside quoted strings.
+func (s *acpProviderErrorSniffer) consumeEchoJSON(fragment string) {
+	for i := 0; i < len(fragment); i++ {
+		switch {
+		case s.echoEscaped:
+			s.echoEscaped = false
+		case s.echoInString:
+			switch fragment[i] {
+			case '\\':
+				s.echoEscaped = true
+			case '"':
+				s.echoInString = false
+			}
+		default:
+			switch fragment[i] {
+			case '"':
+				s.echoInString = true
+			case '{', '[':
+				s.echoDepth++
+			case '}', ']':
+				if s.echoDepth > 0 {
+					s.echoDepth--
+				}
+			}
+		}
+	}
+	if s.echoDepth == 0 {
+		s.resetEchoJSON()
+	}
+}
+
+func (s *acpProviderErrorSniffer) resetEchoJSON() {
+	s.echoJSON = false
+	s.echoDepth = 0
+	s.echoInString = false
+	s.echoEscaped = false
 }
 
 // message returns a single-line summary suitable for the task
