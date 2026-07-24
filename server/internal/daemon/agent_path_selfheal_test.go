@@ -6,7 +6,6 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"strings"
 	"testing"
 )
 
@@ -22,14 +21,22 @@ func newSelfHealTestDaemon() *Daemon {
 }
 
 // stubDetectVersionFromPath makes detectAgentVersion report the version encoded
-// in an installVersionedCodex path (…/codex/<ver>/bin/codex), so a heal to a
-// v2 directory "detects" v2. checkAgentMinVersion is intentionally left as the
-// real agent.CheckMinVersion so the min-version gate is exercised for real.
+// in an installVersionedCodex path (…/codex/<ver>/bin/codex). The stable
+// command entry is now a symlink, so the stub follows it to the versioned
+// binary before extracting the directory-encoded version string.
+// checkAgentMinVersion is intentionally left as the real agent.CheckMinVersion
+// so the min-version gate is exercised for real.
 func stubDetectVersionFromPath(t *testing.T) {
 	t.Helper()
 	orig := detectAgentVersion
 	detectAgentVersion = func(_ context.Context, path string) (string, error) {
-		return filepath.Base(filepath.Dir(filepath.Dir(path))), nil
+		// Follow stable-name symlink → versioned binary, then read version
+		// from the directory layout (…/codex/<ver>/bin/codex).
+		real, err := filepath.EvalSymlinks(path)
+		if err != nil {
+			real = path
+		}
+		return filepath.Base(filepath.Dir(filepath.Dir(real))), nil
 	}
 	t.Cleanup(func() { detectAgentVersion = orig })
 }
@@ -65,12 +72,12 @@ func installVersionedCodex(t *testing.T, root, version, stableBin string) string
 	return canonicalExecutablePath(link)
 }
 
-// TestResolveAgentEntry_SelfHealsAfterInPlaceUpgrade reproduces MUL-4486: a
-// version manager upgrades codex in place, deleting the versioned directory the
-// daemon pinned at startup and repointing the stable command name at the new
-// version. resolveAgentEntry must re-resolve the pinned path AND return the
-// matching version, so the caller keys downstream policy off the binary that
-// will actually run.
+// TestResolveAgentEntry_SelfHealsAfterInPlaceUpgrade reproduces MUL-4486: the
+// daemon pins the stable-symlink path at startup (MUL-5683 fix means we store
+// the symlink, not the versioned target). When the user switches package
+// managers and the old stable path is gone, resolveAgentEntry must re-resolve
+// via PATH and return the new stable path paired with its detected version, so
+// callers can key policy off the binary that will actually run.
 func TestResolveAgentEntry_SelfHealsAfterInPlaceUpgrade(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink/exec-bit layout is POSIX-specific")
@@ -78,17 +85,18 @@ func TestResolveAgentEntry_SelfHealsAfterInPlaceUpgrade(t *testing.T) {
 	stubDetectVersionFromPath(t)
 
 	root := t.TempDir()
-	stableBin := filepath.Join(root, "bin") // the stable "/opt/homebrew/bin" analogue
-	t.Setenv("PATH", stableBin)
+	// Two independent stable-bin directories simulate switching package manager
+	// (e.g. Homebrew → npm): the daemon pinned the old stable symlink at
+	// startup; after the switch, only the new stable bin is on PATH.
+	stableBin1 := filepath.Join(root, "bin1")
+	stableBin2 := filepath.Join(root, "bin2")
+	t.Setenv("PATH", stableBin1)
 	// Pin resolution to the daemon's own PATH: an unsupported shell disables the
 	// login-shell fallback so the test can't accidentally resolve a real codex
 	// installed on the host running it.
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
 
-	v1 := installVersionedCodex(t, root, "0.144.1", stableBin)
-	if !strings.Contains(v1, "0.144.1") {
-		t.Fatalf("pinned path %q does not point into the v1 versioned dir", v1)
-	}
+	v1 := installVersionedCodex(t, root, "0.144.1", stableBin1)
 
 	d := newSelfHealTestDaemon()
 	d.setAgentVersion("codex", "0.144.1") // the version detected for v1 at startup
@@ -101,14 +109,16 @@ func TestResolveAgentEntry_SelfHealsAfterInPlaceUpgrade(t *testing.T) {
 		t.Fatalf("live pinned path/version rewritten: got (%q, %q), want (%q, %q)", got.Path, ver, v1, "0.144.1")
 	}
 
-	// In-place upgrade: drop the v1 tree and repoint the stable symlink at v2.
-	if err := os.RemoveAll(filepath.Join(root, "Caskroom", "codex", "0.144.1")); err != nil {
-		t.Fatalf("remove v1 tree: %v", err)
+	// Package-manager switch: old stable bin is entirely removed. The new
+	// version lives at a different stable location (stableBin2).
+	if err := os.RemoveAll(stableBin1); err != nil {
+		t.Fatalf("remove stableBin1: %v", err)
 	}
 	if agentExecutablePresent(v1) {
-		t.Fatalf("v1 path still present after removing its tree: %q", v1)
+		t.Fatalf("v1 path still present after removing stableBin1: %q", v1)
 	}
-	v2 := installVersionedCodex(t, root, "0.144.3", stableBin)
+	v2 := installVersionedCodex(t, root, "0.144.3", stableBin2)
+	t.Setenv("PATH", stableBin2) // daemon now sees only the new stable location
 
 	got, ver := d.resolveAgentEntry(ctx, "codex", entry)
 	if got.Path != v2 {
@@ -117,8 +127,8 @@ func TestResolveAgentEntry_SelfHealsAfterInPlaceUpgrade(t *testing.T) {
 	if !agentExecutablePresent(got.Path) {
 		t.Fatalf("self-healed path is not runnable: %q", got.Path)
 	}
-	// Must-fix (MUL-4486 review): the version returned is paired with the healed
-	// path, and the shared version cache moved with it too.
+	// The version returned is paired with the healed path, and the shared
+	// version cache moved with it too.
 	if ver != "0.144.3" {
 		t.Fatalf("returned version not paired with healed path: got %q, want %q", ver, "0.144.3")
 	}
@@ -196,20 +206,24 @@ func TestResolveAgentEntry_ReturnsVersionPairedWithCachedPath(t *testing.T) {
 	stubDetectVersionFromPath(t)
 
 	root := t.TempDir()
-	stableBin := filepath.Join(root, "bin")
-	t.Setenv("PATH", stableBin)
+	stableBin1 := filepath.Join(root, "bin1")
+	stableBin2 := filepath.Join(root, "bin2")
+	t.Setenv("PATH", stableBin1)
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
 
-	v1 := installVersionedCodex(t, root, "0.144.1", stableBin)
+	v1 := installVersionedCodex(t, root, "0.144.1", stableBin1)
 	d := newSelfHealTestDaemon()
 	d.setAgentVersion("codex", "0.144.1")
 	entry := AgentEntry{Path: v1, Command: "codex"}
 	ctx := context.Background()
 
-	if err := os.RemoveAll(filepath.Join(root, "Caskroom", "codex", "0.144.1")); err != nil {
-		t.Fatalf("remove v1 tree: %v", err)
+	// Simulate package-manager switch: old stable location removed entirely,
+	// new version at a different stable location.
+	if err := os.RemoveAll(stableBin1); err != nil {
+		t.Fatalf("remove stableBin1: %v", err)
 	}
-	v2 := installVersionedCodex(t, root, "0.144.3", stableBin)
+	v2 := installVersionedCodex(t, root, "0.144.3", stableBin2)
+	t.Setenv("PATH", stableBin2)
 
 	// First call heals and caches {v2, 0.144.3}.
 	if got, ver := d.resolveAgentEntry(ctx, "codex", entry); got.Path != v2 || ver != "0.144.3" {
@@ -230,13 +244,12 @@ func TestResolveAgentEntry_ReturnsVersionPairedWithCachedPath(t *testing.T) {
 }
 
 // TestResolveAgentEntry_HealedPathWinsOverReappearingPinnedPath covers the
-// follow-up edge from the third-round review: after a self-heal to v2, if the
-// originally pinned v1 path reappears on disk (a downgrade / reinstall that
-// recreates the old versioned directory) while the healed v2 binary is still
+// follow-up edge from the third-round review: after a self-heal to v2 (a new
+// stable location), if the originally pinned v1 path reappears on disk (e.g.
+// a reinstall at the old stable location) while the healed v2 binary is still
 // present, resolveAgentEntry must keep returning the healed {v2, its version}
-// pair. Returning the reappeared v1 path here would pair the old binary with
-// the healed v2 version — the mismatched {old path, new version} the review
-// flagged.
+// pair. Reverting to v1 would pair the old binary with the healed v2 version —
+// the mismatched {old path, new version} the review flagged.
 func TestResolveAgentEntry_HealedPathWinsOverReappearingPinnedPath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("symlink/exec-bit layout is POSIX-specific")
@@ -244,27 +257,29 @@ func TestResolveAgentEntry_HealedPathWinsOverReappearingPinnedPath(t *testing.T)
 	stubDetectVersionFromPath(t)
 
 	root := t.TempDir()
-	stableBin := filepath.Join(root, "bin")
-	t.Setenv("PATH", stableBin)
+	stableBin1 := filepath.Join(root, "bin1")
+	stableBin2 := filepath.Join(root, "bin2")
+	t.Setenv("PATH", stableBin1)
 	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
 
-	v1 := installVersionedCodex(t, root, "0.144.1", stableBin)
+	v1 := installVersionedCodex(t, root, "0.144.1", stableBin1)
 	d := newSelfHealTestDaemon()
 	d.setAgentVersion("codex", "0.144.1")
 	entry := AgentEntry{Path: v1, Command: "codex"}
 	ctx := context.Background()
 
-	// In-place upgrade: drop v1, repoint the stable symlink at v2, and heal.
-	if err := os.RemoveAll(filepath.Join(root, "Caskroom", "codex", "0.144.1")); err != nil {
-		t.Fatalf("remove v1 tree: %v", err)
+	// Package-manager switch: remove old stable location, install v2 at new one.
+	if err := os.RemoveAll(stableBin1); err != nil {
+		t.Fatalf("remove stableBin1: %v", err)
 	}
-	v2 := installVersionedCodex(t, root, "0.144.3", stableBin)
+	v2 := installVersionedCodex(t, root, "0.144.3", stableBin2)
+	t.Setenv("PATH", stableBin2)
 	if got, ver := d.resolveAgentEntry(ctx, "codex", entry); got.Path != v2 || ver != "0.144.3" {
 		t.Fatalf("initial heal wrong: got (%q, %q), want (%q, %q)", got.Path, ver, v2, "0.144.3")
 	}
 
-	// The originally pinned v1 path reappears (a reinstall recreating the old
-	// versioned dir) while the healed v2 binary is still present on disk.
+	// The originally pinned v1 path reappears (reinstall at the old location)
+	// while the healed v2 binary is still present on disk.
 	writeExecStub(t, v1)
 	if !agentExecutablePresent(v1) {
 		t.Fatalf("v1 path should be runnable again after reinstall: %q", v1)
