@@ -1027,7 +1027,7 @@ func TestParseHermesSessionNewModelsGarbage(t *testing.T) {
 }
 
 func TestExpandHermesGPTCatalogAndThinking(t *testing.T) {
-	models := []Model{{ID: "gpt-5.6-sol", Label: "GPT-5.6-Sol", Default: true}}
+	models := []Model{{ID: "custom:gpt-5.6-sol", Label: "GPT-5.6-Sol", Provider: "custom", Default: true}}
 	models = expandHermesGPTCatalog(models)
 	annotateHermesThinking(models)
 
@@ -1035,7 +1035,8 @@ func TestExpandHermesGPTCatalogAndThinking(t *testing.T) {
 	for _, model := range models {
 		byID[model.ID] = model
 	}
-	for _, id := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"} {
+	for _, bareID := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex-spark"} {
+		id := "custom:" + bareID
 		model, ok := byID[id]
 		if !ok {
 			t.Errorf("missing Hermes GPT model %q: %+v", id, models)
@@ -1045,7 +1046,7 @@ func TestExpandHermesGPTCatalogAndThinking(t *testing.T) {
 			t.Errorf("Hermes model %q missing effort catalog: %+v", id, model.Thinking)
 		}
 	}
-	if !byID["gpt-5.6-sol"].Default {
+	if !byID["custom:gpt-5.6-sol"].Default {
 		t.Error("current Hermes model must remain default")
 	}
 }

@@ -945,32 +945,37 @@ func annotateHermesThinking(models []Model) {
 
 // expandHermesGPTCatalog repairs the sparse catalog returned by Hermes when a
 // custom OpenAI-compatible provider has no curated model list: ACP then reports
-// only its current GPT model. Multica already knows the selectable GPT family
-// and Hermes' session/set_model passes these IDs through verbatim. Do not expand
-// non-GPT catalogs; those remain authoritative runtime discoveries.
+// only its current GPT model, commonly qualified as `custom:gpt-*`. Preserve
+// that provider prefix because session/set_model expects the exact ACP ID.
 func expandHermesGPTCatalog(models []Model) []Model {
-	if len(models) != 1 || !strings.HasPrefix(models[0].ID, "gpt-") {
+	if len(models) != 1 {
 		return models
 	}
 	current := models[0].ID
+	prefix := ""
+	bareCurrent := current
+	if idx := strings.Index(current, ":"); idx > 0 {
+		prefix = current[:idx+1]
+		bareCurrent = current[idx+1:]
+	}
+	if !strings.HasPrefix(bareCurrent, "gpt-") {
+		return models
+	}
 	fallback := []Model{
-		{ID: "gpt-5.6-sol", Label: "GPT-5.6-Sol", Provider: "openai"},
-		{ID: "gpt-5.6-terra", Label: "GPT-5.6-Terra", Provider: "openai"},
-		{ID: "gpt-5.6-luna", Label: "GPT-5.6-Luna", Provider: "openai"},
-		{ID: "gpt-5.5", Label: "GPT-5.5", Provider: "openai"},
-		{ID: "gpt-5.4", Label: "GPT-5.4", Provider: "openai"},
-		{ID: "gpt-5.4-mini", Label: "GPT-5.4-Mini", Provider: "openai"},
-		{ID: "gpt-5.3-codex-spark", Label: "GPT-5.3-Codex-Spark", Provider: "openai"},
+		{ID: "gpt-5.6-sol", Label: "GPT-5.6-Sol"},
+		{ID: "gpt-5.6-terra", Label: "GPT-5.6-Terra"},
+		{ID: "gpt-5.6-luna", Label: "GPT-5.6-Luna"},
+		{ID: "gpt-5.5", Label: "GPT-5.5"},
+		{ID: "gpt-5.4", Label: "GPT-5.4"},
+		{ID: "gpt-5.4-mini", Label: "GPT-5.4-Mini"},
+		{ID: "gpt-5.3-codex-spark", Label: "GPT-5.3-Codex-Spark"},
 	}
-	seen := map[string]bool{}
-	out := make([]Model, 0, len(fallback)+1)
+	out := make([]Model, 0, len(fallback))
 	for _, model := range fallback {
+		model.ID = prefix + model.ID
+		model.Provider = strings.TrimSuffix(prefix, ":")
 		model.Default = model.ID == current
-		seen[model.ID] = true
 		out = append(out, model)
-	}
-	if !seen[current] {
-		out = append([]Model{models[0]}, out...)
 	}
 	return out
 }
