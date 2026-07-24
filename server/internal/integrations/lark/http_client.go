@@ -60,6 +60,11 @@ const (
 	// open.feishu.cn/document/server-docs/api-call-guide/server-error-codes.
 	codeTokenExpired = 99991663
 	codeTokenInvalid = 99991664
+
+	// codeMessageAuditRejected means Lark definitively rejected an outbound
+	// message during content auditing. No message was delivered, so callers
+	// may safely retry after removing the rejected content.
+	codeMessageAuditRejected = 230028
 )
 
 // HTTPClientConfig configures the production Lark HTTP APIClient.
@@ -920,6 +925,17 @@ func (c *httpAPIClient) doJSON(ctx context.Context, baseURL, method, path, token
 		return fmt.Errorf("read body: %w", err)
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		var apiResp struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+		}
+		if err := json.Unmarshal(rawBody, &apiResp); err == nil && apiResp.Code != 0 {
+			return &APIError{
+				HTTPStatus: resp.StatusCode,
+				Code:       apiResp.Code,
+				Msg:        apiResp.Msg,
+			}
+		}
 		return fmt.Errorf("http %d: %s", resp.StatusCode, truncate(string(rawBody), 512))
 	}
 	if out != nil && len(rawBody) > 0 {
@@ -934,22 +950,26 @@ func isTokenError(code int) bool {
 	return code == codeTokenExpired || code == codeTokenInvalid
 }
 
-// APIError is a structured Lark business error: the request reached
-// Lark, returned HTTP 200, but Lark rejected it with a non-zero
-// `code`. This is distinct from the transport-level errors doJSON
-// surfaces (network failure, 5xx, timeout), which are returned as
-// plain wrapped errors. The distinction matters for the threaded-reply
-// fallback: a business code is definitive ("nothing was sent, and here
-// is exactly why"), whereas a transport error is ambiguous ("the
-// message may or may not have been delivered") and must NOT trigger a
-// chat-level retry that could duplicate or leak the reply.
+// APIError is a structured Lark business error: the request reached Lark and
+// Lark rejected it with a non-zero code. Lark usually returns business errors
+// in an HTTP 200 response, but some IM content-audit errors arrive as HTTP 400;
+// HTTPStatus preserves that distinction without losing the Lark code. This is
+// distinct from transport-level errors (network failure, unstructured 5xx,
+// timeout), which remain plain wrapped errors.
 type APIError struct {
-	Op   string
-	Code int
-	Msg  string
+	Op         string
+	HTTPStatus int
+	Code       int
+	Msg        string
 }
 
 func (e *APIError) Error() string {
+	if e.HTTPStatus != 0 {
+		if e.Op == "" {
+			return fmt.Sprintf("lark http client: http %d code=%d msg=%q", e.HTTPStatus, e.Code, e.Msg)
+		}
+		return fmt.Sprintf("lark http client: %s: http %d code=%d msg=%q", e.Op, e.HTTPStatus, e.Code, e.Msg)
+	}
 	return fmt.Sprintf("lark http client: %s: code=%d msg=%q", e.Op, e.Code, e.Msg)
 }
 
@@ -972,17 +992,30 @@ var threadReplyUnsupportedCodes = map[int]struct{}{
 	230111: {}, // cannot reply to a self-destructing message
 }
 
-// isThreadReplyUnsupported reports whether err is a Lark APIError whose
-// code means the threaded reply cannot land on this target. Only such
-// errors are safe to retry at the chat level. Transport errors and
-// other business codes return false.
-func isThreadReplyUnsupported(err error) bool {
+func larkErrorCode(err error) (int, bool) {
 	var apiErr *APIError
 	if errors.As(err, &apiErr) {
-		_, ok := threadReplyUnsupportedCodes[apiErr.Code]
-		return ok
+		return apiErr.Code, true
 	}
-	return false
+	return 0, false
+}
+
+func isMessageAuditRejected(err error) bool {
+	code, ok := larkErrorCode(err)
+	return ok && code == codeMessageAuditRejected
+}
+
+// isThreadReplyUnsupported reports whether err is a Lark APIError whose code
+// means the threaded reply cannot land on this target. Only such errors are
+// safe to retry at the chat level. Transport errors and other business codes
+// return false.
+func isThreadReplyUnsupported(err error) bool {
+	code, ok := larkErrorCode(err)
+	if !ok {
+		return false
+	}
+	_, ok = threadReplyUnsupportedCodes[code]
+	return ok
 }
 
 func truncate(s string, n int) string {
