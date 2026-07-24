@@ -3329,8 +3329,40 @@
       "exempt": "read-only — wraps GET /api/workspaces/{id}/tool-policy"
     },
     {
+      "id": "permissions roles archive",
+      "gate": "via:DELETE /api/roles/{id}"
+    },
+    {
+      "id": "permissions roles assign",
+      "gate": "via:POST /api/roles/{id}/assignments"
+    },
+    {
+      "id": "permissions roles create",
+      "gate": "via:POST /api/workspaces/{id}/roles"
+    },
+    {
+      "id": "permissions roles list",
+      "exempt": "read-only — wraps GET /api/workspaces/{id}/roles"
+    },
+    {
+      "id": "permissions roles show",
+      "exempt": "read-only — wraps GET /api/roles/{id} and GET /api/roles/{id}/assignments"
+    },
+    {
+      "id": "permissions roles unassign",
+      "gate": "via:DELETE /api/roles/{id}/assignments/{subjectType}/{subjectId}"
+    },
+    {
+      "id": "permissions roles update",
+      "gate": "via:PATCH /api/roles/{id}"
+    },
+    {
       "id": "permissions set",
       "gate": "via:PUT /api/workspaces/{id}/tool-policy"
+    },
+    {
+      "id": "permissions task",
+      "exempt": "read-only — wraps GET /api/tasks/{taskId}/access"
     },
     {
       "id": "project create",

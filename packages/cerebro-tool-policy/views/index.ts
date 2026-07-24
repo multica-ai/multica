@@ -55,6 +55,7 @@ export {
   type ScopeConfig,
 } from "./data-source-scope";
 export { PermissionDetailPage } from "./permission-detail-page";
+export { PermissionRoles } from "./permission-roles";
 export { permissionDetailPath } from "./permission-detail-path";
 export {
   getPermissionHolders,

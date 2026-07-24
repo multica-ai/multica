@@ -99,8 +99,34 @@ export class TestApiClient {
       key: string;
       permission: string;
       allowed?: boolean;
+      available?: boolean;
+      enforced?: boolean;
       callable?: boolean;
+      verified?: boolean;
+      availability?: {
+        level: string;
+        proven: boolean;
+        reason: string;
+      };
     }>;
+    availability?: {
+      runtime_type: string;
+      status: string;
+      verified: number;
+      discovered: number;
+      declared: number;
+      unproven: number;
+    };
+    observed_access?: {
+      status: string;
+      drift_count: number;
+      tools: Array<{
+        name: string;
+        permission: string;
+        status: string;
+        drift: boolean;
+      }>;
+    };
   }> {
     const res = await this.authedFetch(`/api/agents/${agentId}/capabilities`);
     if (!res.ok) {
@@ -305,15 +331,20 @@ export class TestApiClient {
     }
 
     // The /api/me/starter-content/{import,dismiss} HTTP routes were removed
-    // with the starter-content kit (see migration 095). The dialog only
-    // surfaces when user.starter_content_state IS NULL, so we mark the test
-    // user directly in the DB to suppress it without depending on a removed
-    // endpoint.
+    // with the starter-content kit (see migration 095). Mark every workspace
+    // prompt terminal for the shared test user: starter content is dismissed,
+    // and the delayed source-attribution backfill is explicitly skipped so it
+    // cannot intercept unrelated E2E interactions after a page has settled.
     const client = new pg.Client(DATABASE_URL);
     await client.connect();
     try {
       await client.query(
-        `UPDATE "user" SET starter_content_state = 'dismissed' WHERE id = $1 AND starter_content_state IS NULL`,
+        `UPDATE "user"
+            SET starter_content_state = COALESCE(starter_content_state, 'dismissed'),
+                onboarding_questionnaire =
+                  COALESCE(onboarding_questionnaire, '{}'::jsonb)
+                  || '{"source_skipped": true}'::jsonb
+          WHERE id = $1`,
         [this.userId],
       );
     } finally {

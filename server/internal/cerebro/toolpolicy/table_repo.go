@@ -122,7 +122,15 @@ func (s *Store) appendRepoRows(ctx context.Context, in TableQuery, groupIDs []pg
 					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 				}
 			}
-			row.Effective = Resolve(Input{Settings: row.Layers, Base: in.Base})
+			row.Effective, err = s.resolveTableResourcePermission(
+				ctx, in, row.ToolKey, row.ResourcePattern, row.Layers, in.Base,
+			)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"toolpolicy: resolve repo permission %q on %q: %w",
+					row.ToolKey, row.ResourcePattern, err,
+				)
+			}
 			out = append(out, row)
 		}
 	}

@@ -1402,7 +1402,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Approval inbox",
     group: "permissions",
     description:
-      "Enable the approval inbox at /:workspace/approvals — when the permission engine returns needs_approval, the ask lands here for a human to approve, reject, or delegate, with an audit trail per decision. Owner/admin only. FIR-2131.",
+      "Enable the approval inbox at /:workspace/approvals — when the permission engine returns needs_approval, the ask lands here for a human to approve, reject, or delegate, with an audit trail per decision. Owner/admin only. The inbox remains visible whenever Tool approval enforcement is on, so an Ask can never wait without a human decision path. FIR-2131, FIR-3388.",
   },
   {
     key: "cerebro_move_comment_to_subissue",
@@ -1880,7 +1880,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Tool approval enforcement",
     group: "permissions",
     description:
-      "When on, tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off keeps Ask blocked without opening an inbox request. Allow / Ask / Block access is always enforced from Settings → Permissions. FIR-3403.",
+      "When on, tools marked Ask route to the approval inbox and block until a human approves or rejects. The inbox navigation, inline cards and live updates stay visible while this gate is on, even if the separate inbox presentation flag is off. Turning this off keeps Ask blocked without opening an inbox request. Allow / Ask / Block access is always enforced from Settings → Permissions. FIR-3403, FIR-3388.",
   },
   // FIR-1914: firtal_registry per-agent access summary in the system prompt.
   {

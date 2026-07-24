@@ -86,6 +86,8 @@ describe("AgentCapabilitiesSchema availability", () => {
       runtime_type: "firtal_gateway",
       status: "known",
       verified: 1,
+      discovered: 0,
+      declared: 0,
       unproven: 0,
     });
   });
@@ -119,6 +121,8 @@ describe("AgentCapabilitiesSchema availability", () => {
       runtime_type: "",
       status: "unknown",
       verified: 0,
+      discovered: 0,
+      declared: 0,
       unproven: 0,
     });
   });

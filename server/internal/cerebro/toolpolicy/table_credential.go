@@ -193,7 +193,15 @@ func (s *Store) appendCredentialRows(ctx context.Context, in TableQuery, groupID
 					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 				}
 			}
-			row.Effective = Resolve(Input{Settings: row.Layers, Base: in.Base})
+			row.Effective, err = s.resolveTableResourcePermission(
+				ctx, in, row.ToolKey, row.ResourcePattern, row.Layers, in.Base,
+			)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"toolpolicy: resolve credential permission %q on %q: %w",
+					row.ToolKey, row.ResourcePattern, err,
+				)
+			}
 			out = append(out, row)
 		}
 	}
