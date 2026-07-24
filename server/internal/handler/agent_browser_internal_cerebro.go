@@ -26,6 +26,33 @@ type internalBrowserVerifyRequest struct {
 	Async bool   `json:"async,omitempty"`
 }
 
+func loadInternalBrowserVaultCredential(
+	ctx context.Context,
+	secrets PersonalBrowserSecretReader,
+	workspaceID pgtype.UUID,
+	target internalbrowserqa.Target,
+) (internalbrowserqa.Credential, error) {
+	credential := internalbrowserqa.Credential{}
+	var err error
+	if target.UsernameSelector != "" {
+		credential.Username, err = secrets.RevealCredential(ctx, workspaceID, target.Vault, "USERNAME")
+		// A code-login target has no password: it signs in with the staging
+		// master code instead, so that key replaces PASSWORD entirely.
+		if err == nil && target.CodeSelector != "" {
+			credential.LoginCode, err = secrets.RevealCredential(ctx, workspaceID, target.Vault, "LOGIN_CODE")
+		} else if err == nil {
+			credential.Password, err = secrets.RevealCredential(ctx, workspaceID, target.Vault, "PASSWORD")
+		}
+	}
+	if err == nil && target.AccessHeaders {
+		credential.AccessClientID, err = secrets.RevealCredential(ctx, workspaceID, target.Vault, target.AccessClientIDKey)
+		if err == nil {
+			credential.AccessClientSecret, err = secrets.RevealCredential(ctx, workspaceID, target.Vault, target.AccessClientSecretKey)
+		}
+	}
+	return credential, err
+}
+
 func (h *Handler) VerifyInternalAgentBrowser(w http.ResponseWriter, r *http.Request) {
 	if r.Header.Get("X-Actor-Source") != "task_token" {
 		writeError(w, http.StatusForbidden, "internal browser verification is agent-only")
@@ -70,20 +97,10 @@ func (h *Handler) VerifyInternalAgentBrowser(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusServiceUnavailable, "Agent Vault provisioning is not configured")
 			return
 		}
-		credential.Username, err = h.PersonalBrowserSecrets.RevealCredential(r.Context(), wsID, target.Vault, "USERNAME")
-		// A code-login target has no password: it signs in with the staging
-		// master code instead, so that key replaces PASSWORD entirely.
-		if err == nil && target.CodeSelector != "" {
-			credential.LoginCode, err = h.PersonalBrowserSecrets.RevealCredential(r.Context(), wsID, target.Vault, "LOGIN_CODE")
-		} else if err == nil {
-			credential.Password, err = h.PersonalBrowserSecrets.RevealCredential(r.Context(), wsID, target.Vault, "PASSWORD")
-		}
-		if err == nil && target.AccessHeaders {
-			credential.AccessClientID, err = h.PersonalBrowserSecrets.RevealCredential(r.Context(), wsID, target.Vault, "CF_ACCESS_CLIENT_ID")
-			if err == nil {
-				credential.AccessClientSecret, err = h.PersonalBrowserSecrets.RevealCredential(r.Context(), wsID, target.Vault, "CF_ACCESS_CLIENT_SECRET")
-			}
-		}
+		vaultCredential, loadErr := loadInternalBrowserVaultCredential(r.Context(), h.PersonalBrowserSecrets, wsID, target)
+		err = loadErr
+		vaultCredential.SessionToken = credential.SessionToken
+		credential = vaultCredential
 		if err != nil {
 			h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "deny", "credential unavailable")
 			writeError(w, http.StatusBadGateway, "credential unavailable")
