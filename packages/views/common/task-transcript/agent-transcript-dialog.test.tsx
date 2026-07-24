@@ -408,11 +408,13 @@ describe("AgentTranscriptDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
 
+    // Full body (not the truncated summary) with the RFC 3339 prefix, events
+    // separated by a blank line.
     expect(copyTextMock).toHaveBeenCalledWith(
       [
-        "[2026-06-08T00:00:00.000Z] [Agent] Agent summary",
+        "[2026-06-08T00:00:00.000Z] [Agent] Agent summary\nAgent hidden detail",
         "[2026-06-08T08:00:05.123Z] [Thinking] Thinking summary",
-      ].join("\n"),
+      ].join("\n\n"),
     );
   });
 
@@ -434,7 +436,7 @@ describe("AgentTranscriptDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
 
     expect(copyTextMock).toHaveBeenCalledWith(
-      ["[Agent] Missing timestamp", "[Error] Invalid timestamp"].join("\n"),
+      ["[Agent] Missing timestamp", "[Error] Invalid timestamp"].join("\n\n"),
     );
   });
 });

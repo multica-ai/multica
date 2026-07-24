@@ -147,7 +147,8 @@ export function traceEventSummary(event: TraceEvent): string {
 /**
  * Full, untruncated text for "copy all" — the complete body, not the one-line
  * summary. Tool calls copy their full input JSON; results and prose copy their
- * whole content. Callers apply secret redaction on the result.
+ * whole content. An RFC 3339 timestamp prefixes the line when the event has a
+ * valid `created_at` (#5873). Callers apply secret redaction on the result.
  */
 export function traceEventCopyText(event: TraceEvent): string {
   const label = traceEventLabel(event);
@@ -162,7 +163,9 @@ export function traceEventCopyText(event: TraceEvent): string {
     default:
       body = event.content ?? "";
   }
-  return body ? `[${label}] ${body}` : `[${label}]`;
+  const date = event.created_at ? new Date(event.created_at) : null;
+  const timestamp = date && !Number.isNaN(date.getTime()) ? `[${date.toISOString()}] ` : "";
+  return body ? `${timestamp}[${label}] ${body}` : `${timestamp}[${label}]`;
 }
 
 export function traceEventHasDetail(event: TraceEvent): boolean {
