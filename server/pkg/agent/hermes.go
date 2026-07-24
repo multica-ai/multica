@@ -2115,6 +2115,22 @@ var acpAgentOutputTerminalRe = regexp.MustCompile(`API call failed after \d+ ret
 
 const acpMaxErrorLines = 8
 
+// acpMaxErrorLineLen bounds how long a single stderr line may be to
+// still be considered for provider-error matching. Genuine ACP
+// provider-error lines are short (an error header plus a one-line
+// "Error: ..." detail — see TestHermesProviderErrorSniffer, ~150
+// bytes). Hermes, however, echoes whole conversation / tool-result
+// records to stderr at `[INFO] root:` level as a *single physical
+// line* tens of KB long; when that echoed content happens to embed
+// unrelated skill-doc substrings — a bare "❌" bullet plus an
+// "Error:" / "KeyError:" fragment far apart on the same line — it
+// satisfies both the capture filter and the terminal condition and
+// flips a completed run to failed (GitHub multica#5862). Skipping
+// over-long lines keeps echoed conversation content out of the
+// sniffer entirely while still admitting every real provider-error
+// line.
+const acpMaxErrorLineLen = 4096
+
 // newACPProviderErrorSniffer returns a sniffer that tags its messages
 // with the given provider name (e.g. "hermes", "kimi") so failure
 // strings make it obvious which runtime produced the error.
@@ -2143,6 +2159,16 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 	for _, line := range strings.Split(complete, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
+			continue
+		}
+		// Hermes echoes whole conversation / tool-result records to
+		// stderr as a single oversized line. Such a line is never a
+		// real provider-error line, but its unrelated embedded tokens
+		// (a "❌" bullet plus an "Error:" fragment) would otherwise
+		// satisfy both the capture filter and the terminal condition
+		// and flip a completed run to failed (GitHub multica#5862).
+		// Skip anything longer than a real error line can plausibly be.
+		if len(line) > acpMaxErrorLineLen {
 			continue
 		}
 		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line)) {

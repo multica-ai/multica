@@ -1570,6 +1570,61 @@ func TestHermesProviderErrorSnifferBoundedBuffer(t *testing.T) {
 	}
 }
 
+// TestHermesProviderErrorSnifferIgnoresOversizedEchoedLine guards the
+// regression in GitHub multica#5862: Hermes echoes whole conversation /
+// tool-result records to stderr at `[INFO] root:` level as a *single
+// physical line*. When that echoed content happens to embed unrelated
+// skill-doc substrings — a bare "❌" bullet (matches acpTerminalErrorRe)
+// and an "Error:" / "KeyError:" fragment (matches acpErrorDetailRe) far
+// apart on the same line — the per-line sniffer used to treat the whole
+// line as a terminal provider error and flip a completed run to failed.
+// A genuine provider-error line is short; a conversation echo is tens of
+// KB. The sniffer must skip lines longer than acpMaxErrorLineLen so
+// echoed content can never be mistaken for an error.
+func TestHermesProviderErrorSnifferIgnoresOversizedEchoedLine(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+
+	// One physical line: a Hermes INFO log echoing a tool result whose
+	// body embeds skill-doc content carrying both trigger tokens.
+	var b strings.Builder
+	b.WriteString(`2026-07-24 10:08:59 [INFO] root: {"message": {"role": "tool", "content": "`)
+	b.WriteString("# \u274c 旧方法：不加 type:pv 过滤，UV 偏高 ~18% ")
+	b.WriteString(strings.Repeat("skill documentation body ... ", 500))
+	b.WriteString("| RUM V2 返回 `KeyError: 'series'` | 代码需兼容 ")
+	b.WriteString(`"}}`)
+	line := b.String()
+	if len(line) < acpMaxErrorLineLen {
+		t.Fatalf("test line is %d bytes, below the cap %d; not exercising the guard", len(line), acpMaxErrorLineLen)
+	}
+	if _, err := s.Write([]byte(line + "\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if msg := s.message(); msg != "" {
+		t.Errorf("oversized echoed line must not be captured as a provider error, got %d bytes: %q", len(msg), firstNRunes(msg, 100))
+	}
+	if msg := s.terminalMessage(); msg != "" {
+		t.Errorf("oversized echoed line must not set terminal failure, got %d bytes: %q", len(msg), firstNRunes(msg, 100))
+	}
+
+	// End-to-end: a completed run with real output must stay completed.
+	status, errStr := promoteACPResultOnProviderError("completed", "", "Done. Notification sent and comment posted.", s)
+	if status != "completed" {
+		t.Errorf("completed run flipped to %q (error=%q); regression of multica#5862", status, firstNRunes(errStr, 100))
+	}
+}
+
+// firstNRunes returns at most n runes of s, for bounded error output.
+func firstNRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
 func fakeHermesACPUsageWithDefaultModelScript() string {
 	return `#!/bin/sh
 while IFS= read -r line; do
