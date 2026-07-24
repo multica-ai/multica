@@ -1,0 +1,169 @@
+package jira
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+)
+
+// ErrUnauthorized is returned when the Jira site rejects the email/API-token
+// pair (HTTP 401/403). Callers surface it as a connect-time validation
+// failure distinct from transport errors. Mirrors vcs.ErrUnauthorized.
+var ErrUnauthorized = errors.New("jira: credentials unauthorized")
+
+// ErrIssueNotFound is returned by GetIssue when the site answers 404 —
+// either the issue key does not exist or the token cannot see the project.
+var ErrIssueNotFound = errors.New("jira: issue not found")
+
+// Account is the minimal identity returned by ValidateCredentials
+// (GET /rest/api/2/myself).
+type Account struct {
+	AccountID   string
+	DisplayName string
+	Email       string
+}
+
+// Issue is the minimal Jira issue shape PR 1 needs for enrichment: enough to
+// create or sync the mirrored Multica issue when a webhook payload is thin.
+type Issue struct {
+	ID          string
+	Key         string
+	Summary     string
+	Description string
+	Status      string
+	Priority    string
+}
+
+// Client is the seam the handlers depend on; tests substitute a mock so no
+// real Jira site is ever contacted from the test suite.
+type Client interface {
+	// ValidateCredentials confirms the email + API token work against
+	// baseURL and returns the authenticated account. Maps 401/403 to
+	// ErrUnauthorized.
+	ValidateCredentials(ctx context.Context, baseURL, email, token string) (Account, error)
+	// GetIssue fetches an issue by key for enrichment. Maps 404 to
+	// ErrIssueNotFound and 401/403 to ErrUnauthorized.
+	GetIssue(ctx context.Context, baseURL, email, token, key string) (Issue, error)
+}
+
+// HTTPClient is the production Client. The zero value is not usable; call
+// NewHTTPClient. HTTPDoer is injectable for tests that want to exercise this
+// implementation without a network (handler tests normally mock Client
+// itself instead).
+type HTTPClient struct {
+	do interface {
+		Do(*http.Request) (*http.Response, error)
+	}
+}
+
+// NewHTTPClient returns the production Jira REST client. A nil doer uses a
+// 15s-timeout http.Client (mirrors the vcs package's shared client).
+func NewHTTPClient(doer *http.Client) *HTTPClient {
+	if doer == nil {
+		doer = &http.Client{Timeout: 15 * time.Second}
+	}
+	return &HTTPClient{do: doer}
+}
+
+// ValidateCredentials calls GET /rest/api/2/myself with basic auth. The v2
+// path is served by both Jira Cloud and Data Center.
+func (c *HTTPClient) ValidateCredentials(ctx context.Context, baseURL, email, token string) (Account, error) {
+	body, err := c.get(ctx, baseURL, email, token, "/rest/api/2/myself")
+	if err != nil {
+		return Account{}, err
+	}
+	var u struct {
+		AccountID    string `json:"accountId"`
+		DisplayName  string `json:"displayName"`
+		EmailAddress string `json:"emailAddress"`
+		Name         string `json:"name"` // Data Center has name, no accountId
+	}
+	if err := json.Unmarshal(body, &u); err != nil {
+		return Account{}, fmt.Errorf("jira: decode myself: %w", err)
+	}
+	accountID := u.AccountID
+	if accountID == "" {
+		accountID = u.Name
+	}
+	if accountID == "" && u.DisplayName == "" {
+		return Account{}, errors.New("jira: myself response missing identity")
+	}
+	return Account{AccountID: accountID, DisplayName: u.DisplayName, Email: u.EmailAddress}, nil
+}
+
+// GetIssue calls GET /rest/api/2/issue/{key}. The v2 API returns the
+// description as a plain string on Data Center and Cloud alike (v3 returns
+// ADF); DescriptionText handles both defensively.
+func (c *HTTPClient) GetIssue(ctx context.Context, baseURL, email, token, key string) (Issue, error) {
+	body, err := c.get(ctx, baseURL, email, token, "/rest/api/2/issue/"+url.PathEscape(key))
+	if err != nil {
+		return Issue{}, err
+	}
+	var d struct {
+		ID     string `json:"id"`
+		Key    string `json:"key"`
+		Fields struct {
+			Summary     string          `json:"summary"`
+			Description json.RawMessage `json:"description"`
+			Status      struct {
+				Name string `json:"name"`
+			} `json:"status"`
+			Priority struct {
+				Name string `json:"name"`
+			} `json:"priority"`
+		} `json:"fields"`
+	}
+	if err := json.Unmarshal(body, &d); err != nil {
+		return Issue{}, fmt.Errorf("jira: decode issue: %w", err)
+	}
+	return Issue{
+		ID:          d.ID,
+		Key:         d.Key,
+		Summary:     d.Fields.Summary,
+		Description: DescriptionText(d.Fields.Description),
+		Status:      d.Fields.Status.Name,
+		Priority:    d.Fields.Priority.Name,
+	}, nil
+}
+
+func (c *HTTPClient) get(ctx context.Context, baseURL, email, token, path string) ([]byte, error) {
+	endpoint := NormalizeBaseURL(baseURL) + path
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return nil, fmt.Errorf("jira: build request: %w", err)
+	}
+	req.SetBasicAuth(email, token)
+	req.Header.Set("Accept", "application/json")
+
+	resp, err := c.do.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("jira: request: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch {
+	case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		// Log the upstream status + body snippet so a bad token (401) is
+		// distinguishable from an insufficient-permission token (403)
+		// without leaking the secret into the HTTP response.
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		slog.Warn("jira: request rejected",
+			"endpoint", endpoint,
+			"status", resp.StatusCode,
+			"body", strings.TrimSpace(string(b)))
+		return nil, ErrUnauthorized
+	case resp.StatusCode == http.StatusNotFound:
+		return nil, ErrIssueNotFound
+	case resp.StatusCode < 200 || resp.StatusCode >= 300:
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("jira: GET %s: status %d: %s", path, resp.StatusCode, strings.TrimSpace(string(b)))
+	}
+	return io.ReadAll(io.LimitReader(resp.Body, 10<<20))
+}
