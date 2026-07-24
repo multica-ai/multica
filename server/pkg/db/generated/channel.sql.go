@@ -1014,6 +1014,62 @@ func (q *Queries) ListChannelInstallationsByWorkspace(ctx context.Context, arg L
 	return items, nil
 }
 
+const listChannelUserBindingsForClaim = `-- name: ListChannelUserBindingsForClaim :many
+SELECT id, workspace_id, multica_user_id, installation_id, channel_type, channel_user_id, config, bound_at FROM channel_user_binding
+WHERE workspace_id = $1
+  AND installation_id = $2
+  AND channel_type = $3
+  AND multica_user_id = $4
+ORDER BY bound_at DESC, id DESC
+LIMIT 2
+`
+
+type ListChannelUserBindingsForClaimParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ChannelType    string      `json:"channel_type"`
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
+}
+
+// Reverse lookup used only when building a daemon claim for a direct-human
+// channel task. A provider-native user id is installation-scoped, so every
+// dimension is pinned here. LIMIT 2 lets the caller distinguish the expected
+// single binding from an ambiguous multi-binding without loading an unbounded
+// result set. The claim path re-checks live workspace membership separately.
+func (q *Queries) ListChannelUserBindingsForClaim(ctx context.Context, arg ListChannelUserBindingsForClaimParams) ([]ChannelUserBinding, error) {
+	rows, err := q.db.Query(ctx, listChannelUserBindingsForClaim,
+		arg.WorkspaceID,
+		arg.InstallationID,
+		arg.ChannelType,
+		arg.MulticaUserID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ChannelUserBinding{}
+	for rows.Next() {
+		var i ChannelUserBinding
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.MulticaUserID,
+			&i.InstallationID,
+			&i.ChannelType,
+			&i.ChannelUserID,
+			&i.Config,
+			&i.BoundAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const markChannelInboundDedupProcessed = `-- name: MarkChannelInboundDedupProcessed :execrows
 UPDATE channel_inbound_message_dedup
 SET processed_at = now()
