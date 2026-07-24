@@ -45,7 +45,7 @@ UPDATE comment SET
 WHERE comment.id IN (SELECT id FROM descendants)
   AND comment.id <> $1
   AND comment.resolved_at IS NOT NULL
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash
 `
 
 type ClearOtherThreadResolutionsParams struct {
@@ -88,6 +88,8 @@ func (q *Queries) ClearOtherThreadResolutions(ctx context.Context, arg ClearOthe
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
+			&i.IdempotencyKey,
+			&i.IdempotencyHash,
 		); err != nil {
 			return nil, err
 		}
@@ -163,7 +165,7 @@ WITH touched_issue AS (
 INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id)
 SELECT ti.id, ti.workspace_id, $1, $2, $3, $4, $5, $6
 FROM touched_issue ti
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash
 `
 
 type CreateCommentParams struct {
@@ -220,6 +222,108 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.IdempotencyKey,
+		&i.IdempotencyHash,
+	)
+	return i, err
+}
+
+const createCommentIdempotent = `-- name: CreateCommentIdempotent :one
+WITH candidate_issue AS (
+    SELECT id, workspace_id FROM issue
+    WHERE issue.id = $1 AND issue.workspace_id = $2
+), inserted AS (
+    INSERT INTO comment (
+        issue_id, workspace_id, author_type, author_id, content, type, parent_id,
+        source_task_id, idempotency_key, idempotency_hash
+    )
+    SELECT ci.id, ci.workspace_id, $3, $4,
+           $5, $6, $7,
+           $8, $9,
+           $10
+    FROM candidate_issue ci
+    ON CONFLICT (workspace_id, author_type, author_id, idempotency_key)
+        WHERE idempotency_key IS NOT NULL
+        DO NOTHING
+    RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash
+), touched_issue AS (
+    UPDATE issue SET updated_at = now()
+    WHERE issue.id = (SELECT issue_id FROM inserted)
+    RETURNING issue.id
+)
+SELECT inserted.id, inserted.issue_id, inserted.author_type, inserted.author_id, inserted.content, inserted.type, inserted.created_at, inserted.updated_at, inserted.parent_id, inserted.workspace_id, inserted.resolved_at, inserted.resolved_by_type, inserted.resolved_by_id, inserted.source_task_id, inserted.idempotency_key, inserted.idempotency_hash FROM inserted
+JOIN touched_issue ON touched_issue.id = inserted.issue_id
+`
+
+type CreateCommentIdempotentParams struct {
+	IssueID         pgtype.UUID `json:"issue_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	AuthorType      string      `json:"author_type"`
+	AuthorID        pgtype.UUID `json:"author_id"`
+	Content         string      `json:"content"`
+	Type            string      `json:"type"`
+	ParentID        pgtype.UUID `json:"parent_id"`
+	SourceTaskID    pgtype.UUID `json:"source_task_id"`
+	IdempotencyKey  pgtype.Text `json:"idempotency_key"`
+	IdempotencyHash []byte      `json:"idempotency_hash"`
+}
+
+type CreateCommentIdempotentRow struct {
+	ID              pgtype.UUID        `json:"id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	AuthorType      string             `json:"author_type"`
+	AuthorID        pgtype.UUID        `json:"author_id"`
+	Content         string             `json:"content"`
+	Type            string             `json:"type"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ParentID        pgtype.UUID        `json:"parent_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt      pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType  pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID    pgtype.UUID        `json:"resolved_by_id"`
+	SourceTaskID    pgtype.UUID        `json:"source_task_id"`
+	IdempotencyKey  pgtype.Text        `json:"idempotency_key"`
+	IdempotencyHash []byte             `json:"idempotency_hash"`
+}
+
+// The unique partial index claims an idempotency key for one actor. A losing
+// concurrent delivery returns no row; its caller then loads the winner in a
+// fresh statement, whose READ COMMITTED snapshot can see the committed row.
+// Side effects are deliberately outside this query and run only when this
+// INSERT returns a row. The issue activity timestamp also advances only for
+// the winning insert, not for a deduplicated retry.
+func (q *Queries) CreateCommentIdempotent(ctx context.Context, arg CreateCommentIdempotentParams) (CreateCommentIdempotentRow, error) {
+	row := q.db.QueryRow(ctx, createCommentIdempotent,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.AuthorType,
+		arg.AuthorID,
+		arg.Content,
+		arg.Type,
+		arg.ParentID,
+		arg.SourceTaskID,
+		arg.IdempotencyKey,
+		arg.IdempotencyHash,
+	)
+	var i CreateCommentIdempotentRow
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+		&i.IdempotencyKey,
+		&i.IdempotencyHash,
 	)
 	return i, err
 }
@@ -240,7 +344,7 @@ func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) er
 }
 
 const getComment = `-- name: GetComment :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash FROM comment
 WHERE id = $1
 `
 
@@ -262,12 +366,58 @@ func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, erro
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.IdempotencyKey,
+		&i.IdempotencyHash,
+	)
+	return i, err
+}
+
+const getCommentByIdempotencyKey = `-- name: GetCommentByIdempotencyKey :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash FROM comment
+WHERE workspace_id = $1
+  AND author_type = $2
+  AND author_id = $3
+  AND idempotency_key = $4
+`
+
+type GetCommentByIdempotencyKeyParams struct {
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	AuthorType     string      `json:"author_type"`
+	AuthorID       pgtype.UUID `json:"author_id"`
+	IdempotencyKey pgtype.Text `json:"idempotency_key"`
+}
+
+func (q *Queries) GetCommentByIdempotencyKey(ctx context.Context, arg GetCommentByIdempotencyKeyParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, getCommentByIdempotencyKey,
+		arg.WorkspaceID,
+		arg.AuthorType,
+		arg.AuthorID,
+		arg.IdempotencyKey,
+	)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+		&i.IdempotencyKey,
+		&i.IdempotencyHash,
 	)
 	return i, err
 }
 
 const getCommentInWorkspace = `-- name: GetCommentInWorkspace :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash FROM comment
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -294,12 +444,14 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.IdempotencyKey,
+		&i.IdempotencyHash,
 	)
 	return i, err
 }
 
 const getLatestMemberCommentForIssueSince = `-- name: GetLatestMemberCommentForIssueSince :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash FROM comment
 WHERE issue_id = $1
   AND author_type = 'member'
   AND created_at > $2
@@ -339,6 +491,8 @@ func (q *Queries) GetLatestMemberCommentForIssueSince(ctx context.Context, arg G
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.IdempotencyKey,
+		&i.IdempotencyHash,
 	)
 	return i, err
 }
@@ -353,7 +507,7 @@ WITH RECURSIVE root_of AS (
     FROM comment p
     JOIN root_of r ON p.id = r.parent_id
 )
-SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id FROM comment c
+SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.idempotency_key, c.idempotency_hash FROM comment c
 WHERE c.id = (SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1)
 `
 
@@ -385,6 +539,8 @@ func (q *Queries) GetThreadRoot(ctx context.Context, arg GetThreadRootParams) (C
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.IdempotencyKey,
+		&i.IdempotencyHash,
 	)
 	return i, err
 }
@@ -433,7 +589,7 @@ func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepli
 }
 
 const listCommentsForIssue = `-- name: ListCommentsForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash FROM comment
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC, id ASC
 LIMIT $3
@@ -472,6 +628,8 @@ func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForI
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
+			&i.IdempotencyKey,
+			&i.IdempotencyHash,
 		); err != nil {
 			return nil, err
 		}
@@ -484,7 +642,7 @@ func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForI
 }
 
 const listCommentsSinceForIssue = `-- name: ListCommentsSinceForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash FROM comment
 WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
 ORDER BY created_at ASC, id ASC
 LIMIT $4
@@ -528,6 +686,8 @@ func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListComment
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
+			&i.IdempotencyKey,
+			&i.IdempotencyHash,
 		); err != nil {
 			return nil, err
 		}
@@ -680,7 +840,7 @@ func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg List
 }
 
 const listReconcilableCommentsForIssueSince = `-- name: ListReconcilableCommentsForIssueSince :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash FROM comment
 WHERE issue_id = $1
   AND author_type IN ('member', 'agent')
   AND (
@@ -747,6 +907,8 @@ func (q *Queries) ListReconcilableCommentsForIssueSince(ctx context.Context, arg
 			&i.ResolvedByType,
 			&i.ResolvedByID,
 			&i.SourceTaskID,
+			&i.IdempotencyKey,
+			&i.IdempotencyHash,
 		); err != nil {
 			return nil, err
 		}
@@ -1235,7 +1397,7 @@ UPDATE comment SET
     resolved_by_id = COALESCE(resolved_by_id, $3),
     updated_at = CASE WHEN resolved_at IS NULL THEN now() ELSE updated_at END
 WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash
 `
 
 type ResolveCommentParams struct {
@@ -1264,6 +1426,8 @@ func (q *Queries) ResolveComment(ctx context.Context, arg ResolveCommentParams) 
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.IdempotencyKey,
+		&i.IdempotencyHash,
 	)
 	return i, err
 }
@@ -1275,7 +1439,7 @@ UPDATE comment SET
     resolved_by_id = NULL,
     updated_at = CASE WHEN resolved_at IS NOT NULL THEN now() ELSE updated_at END
 WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash
 `
 
 // Idempotent: a no-op clear (already unresolved) just returns the row.
@@ -1297,6 +1461,8 @@ func (q *Queries) UnresolveComment(ctx context.Context, id pgtype.UUID) (Comment
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.IdempotencyKey,
+		&i.IdempotencyHash,
 	)
 	return i, err
 }
@@ -1307,7 +1473,7 @@ UPDATE comment SET
     source_task_id = $3,
     updated_at = now()
 WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, idempotency_key, idempotency_hash
 `
 
 type UpdateCommentParams struct {
@@ -1334,6 +1500,8 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (C
 		&i.ResolvedByType,
 		&i.ResolvedByID,
 		&i.SourceTaskID,
+		&i.IdempotencyKey,
+		&i.IdempotencyHash,
 	)
 	return i, err
 }

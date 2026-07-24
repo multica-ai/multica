@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS comment_author_idempotency_key_idx;
