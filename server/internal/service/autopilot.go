@@ -998,6 +998,18 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 	}
 }
 
+// ReconcileRecoveredIssueRuns repairs create_issue runs whose durable issue
+// reached a success status after a temporary blocked workflow gate, but whose
+// issue:updated event was missed. The SQL predicate preserves real execution
+// failures and the original blocked reason while recording recovered_at.
+func (s *AutopilotService) ReconcileRecoveredIssueRuns(ctx context.Context, autopilotID pgtype.UUID) ([]db.AutopilotRun, error) {
+	runs, err := s.Queries.ReconcileRecoveredIssueRuns(ctx, autopilotID)
+	if err != nil {
+		return nil, fmt.Errorf("reconcile recovered issue runs: %w", err)
+	}
+	return runs, nil
+}
+
 // SyncRunFromTask updates the autopilot run when a run_only task completes or fails.
 func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTaskQueue) {
 	if !task.AutopilotRunID.Valid {

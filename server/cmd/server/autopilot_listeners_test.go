@@ -127,10 +127,11 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 // issue_created with exactly one issue task that carries no autopilot_run_id
 // (so it must be reached via the issue_id lookup, not SyncRunFromTask).
 type linkedIssueAutopilotFixture struct {
-	taskSvc *service.TaskService
-	queries *db.Queries
-	run     *db.AutopilotRun
-	taskID  pgtype.UUID
+	taskSvc      *service.TaskService
+	autopilotSvc *service.AutopilotService
+	queries      *db.Queries
+	run          *db.AutopilotRun
+	taskID       pgtype.UUID
 }
 
 // dispatchCreateIssueAutopilot creates an active create_issue autopilot,
@@ -199,7 +200,75 @@ func dispatchCreateIssueAutopilot(t *testing.T, title string) linkedIssueAutopil
 		t.Fatalf("expected pre-failure run status issue_created, got %q", run.Status)
 	}
 
-	return linkedIssueAutopilotFixture{taskSvc: taskSvc, queries: queries, run: run, taskID: tasks[0].ID}
+	return linkedIssueAutopilotFixture{taskSvc: taskSvc, autopilotSvc: autopilotSvc, queries: queries, run: run, taskID: tasks[0].ID}
+}
+
+func TestAutopilotCreateIssueBlockedThenDoneRecoversRun(t *testing.T) {
+	ctx := context.Background()
+	f := dispatchCreateIssueAutopilot(t, "Create-issue blocked recovery")
+
+	issue, err := f.queries.GetIssue(ctx, f.run.IssueID)
+	if err != nil {
+		t.Fatalf("GetIssue: %v", err)
+	}
+	issue.Status = "blocked"
+	f.autopilotSvc.SyncRunFromIssue(ctx, issue)
+
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET status = 'todo' WHERE id = $1`, issue.ID); err != nil {
+		t.Fatalf("reopen issue: %v", err)
+	}
+	issue.Status = "todo"
+	f.autopilotSvc.SyncRunFromIssue(ctx, issue)
+
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET status = 'done' WHERE id = $1`, issue.ID); err != nil {
+		t.Fatalf("mark issue done without listener event: %v", err)
+	}
+	if _, err := f.autopilotSvc.ReconcileRecoveredIssueRuns(ctx, f.run.AutopilotID); err != nil {
+		t.Fatalf("ReconcileRecoveredIssueRuns: %v", err)
+	}
+
+	updatedRun, err := f.queries.GetAutopilotRun(ctx, f.run.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotRun: %v", err)
+	}
+	if updatedRun.Status != "completed" {
+		t.Fatalf("expected recovered run status completed, got %q", updatedRun.Status)
+	}
+	if !updatedRun.RecoveredAt.Valid {
+		t.Fatal("expected recovered_at to record blocked recovery")
+	}
+	if !updatedRun.FailureReason.Valid || updatedRun.FailureReason.String != "issue blocked" {
+		t.Fatalf("expected historical blocked reason to remain observable, got %+v", updatedRun.FailureReason)
+	}
+}
+
+func TestAutopilotCreateIssueExecutionFailureIsNotRecoveredByDoneIssue(t *testing.T) {
+	ctx := context.Background()
+	f := dispatchCreateIssueAutopilot(t, "Create-issue execution failure")
+
+	if _, err := f.queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
+		ID:            f.run.ID,
+		FailureReason: pgtype.Text{String: "task expired in queue", Valid: true},
+	}); err != nil {
+		t.Fatalf("UpdateAutopilotRunFailed: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET status = 'done' WHERE id = $1`, f.run.IssueID); err != nil {
+		t.Fatalf("mark issue done: %v", err)
+	}
+	if _, err := f.autopilotSvc.ReconcileRecoveredIssueRuns(ctx, f.run.AutopilotID); err != nil {
+		t.Fatalf("ReconcileRecoveredIssueRuns: %v", err)
+	}
+
+	updatedRun, err := f.queries.GetAutopilotRun(ctx, f.run.ID)
+	if err != nil {
+		t.Fatalf("GetAutopilotRun: %v", err)
+	}
+	if updatedRun.Status != "failed" {
+		t.Fatalf("expected execution failure to remain failed, got %q", updatedRun.Status)
+	}
+	if updatedRun.RecoveredAt.Valid {
+		t.Fatal("execution failure must not be marked recovered")
+	}
 }
 
 // runTaskWithBudget marks the issue task dispatched with the given attempt

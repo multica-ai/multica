@@ -113,6 +113,10 @@ func runAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *e
 // tickAutopilotFailureMonitor performs a single sweep: query candidates,
 // attempt to pause each, and emit notifications + WS events on success.
 func tickAutopilotFailureMonitor(ctx context.Context, queries *db.Queries, bus *events.Bus, cfg failureMonitorConfig) {
+	if _, err := queries.ReconcileAllRecoveredIssueRuns(ctx); err != nil {
+		slog.Warn("autopilot failure monitor: failed to reconcile recovered runs", "error", err)
+		return
+	}
 	since := time.Now().Add(-cfg.Lookback)
 	candidates, err := queries.SelectAutopilotsExceedingFailureThreshold(
 		ctx,
