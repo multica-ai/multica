@@ -56,6 +56,20 @@ type TaskService struct {
 	// succeeds; the concrete type is *composio.Service.
 	Composio ComposioOverlayBuilder
 
+	// ReconcileTerminal replays comment triggers a run did NOT deliver, once
+	// the task has freshly left the active set through a path that should allow
+	// subsequent work (complete / fail / user-cancel / sweeper fail / orphan
+	// recovery). The comment-routing logic lives in the handler layer, so this
+	// is an injected seam (like Composio / Wakeup): the handler wires it to its
+	// reconcileCommentsOnCompletion in New, and main.go wires the sweeper's
+	// TaskService to the same method. Nil is valid and disables replay — and it
+	// is deliberately left nil on the bulk-cleanup paths (issue delete,
+	// comment edit/delete re-routing, agent "cancel all") which must NOT enqueue
+	// replacement work. The callee is itself a no-op for tasks without a valid
+	// issue / agent / creation timestamp, and loop-safe (created_at anchor +
+	// delivered-set exclusion), so double invocation cannot duplicate a run.
+	ReconcileTerminal TerminalTaskReconciler
+
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
 	analyticsContextOrder []string
@@ -84,6 +98,23 @@ type ComposioOverlayBuilder interface {
 
 type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
+}
+
+// TerminalTaskReconciler replays any comment triggers a task did NOT deliver
+// after it leaves the active set on a path that should allow subsequent work.
+// It is the single shared post-terminal entry point the handler and the
+// background/sweeper paths both funnel through (see TaskService.ReconcileTerminal).
+type TerminalTaskReconciler func(ctx context.Context, task *db.AgentTaskQueue)
+
+// reconcileTerminal invokes the injected post-terminal reconciler when one is
+// wired. It is called only after a successful terminal transition and, on the
+// fail paths, only after the auto-retry child has been created — so an
+// undelivered comment merges into that queued retry instead of spawning a
+// duplicate run.
+func (s *TaskService) reconcileTerminal(ctx context.Context, task *db.AgentTaskQueue) {
+	if s.ReconcileTerminal != nil {
+		s.ReconcileTerminal(ctx, task)
+	}
 }
 
 // triggerSummaryMaxLen caps the snapshot length so the row stays cheap to
@@ -1730,6 +1761,15 @@ type CancelTaskOptions struct {
 	// stays synchronous, because the cancel response is their only chance to get
 	// the prompt back. See protocol.AppCapabilityChatDraftRestoreV1.
 	ClientSupportsDraftRestore bool
+	// ReconcileDeferredComments replays comment triggers this run did not deliver
+	// after the cancel (#5278). Set ONLY by the genuine user-facing cancels (the
+	// issue-scoped daemon cancel and CancelTaskByUser) — the run is over and a
+	// deferred @agent hand-off must survive. It is deliberately left false on the
+	// internal claim-time hard-fail cancels (workspace-isolation / missing runtime
+	// owner / stale-plan repair in daemon.go): those reject a claim before the run
+	// starts and must NOT enqueue replacement agent work, which would otherwise
+	// re-dispatch into the same failure and loop.
+	ReconcileDeferredComments bool
 }
 
 // CancelTask cancels a single task by ID. It broadcasts a task:cancelled event
@@ -1757,6 +1797,16 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 		if err != nil {
 			return nil, fmt.Errorf("cancel task: %w", err)
 		}
+		// The task was already terminal when this call arrived. If this is a
+		// retry of a callback that committed the cancel but crashed before
+		// reconciling, re-enter reconciliation so the deferred comment survives.
+		// Guard on status: CancelAgentTask returns ErrNoRows for ANY non-active
+		// task (completed and failed included), so only reconcile when the task
+		// really was cancelled — not when a stale cancel races a concurrent
+		// complete/fail that already ran its own reconcileTerminal.
+		if opts.ReconcileDeferredComments && existing.Status == "cancelled" {
+			s.reconcileTerminal(ctx, &existing)
+		}
 		return &CancelTaskResult{Task: existing}, nil
 	}
 	if err != nil {
@@ -1773,6 +1823,18 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 	// Broadcast cancellation as a task:failed event so frontends clear the live card
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
 	s.NotifyTaskFinished(task)
+
+	// A user-facing single-task cancel is terminal with no auto-retry, so replay
+	// any comment deferred while this run held the active slot. Gated on the
+	// caller's intent (opts.ReconcileDeferredComments): the internal claim-time
+	// hard-fail cancels leave it false so a rejected claim never enqueues
+	// replacement work. No-op anyway for chat-only tasks (no issue), and reached
+	// only after a real cancel — an already-finalized task returned early above.
+	// The bulk cancels — issue delete, comment edit/delete re-routing, agent
+	// "cancel all" — never route through this method.
+	if opts.ReconcileDeferredComments {
+		s.reconcileTerminal(ctx, &task)
+	}
 
 	return &CancelTaskResult{
 		Task:                 task,
@@ -2664,6 +2726,12 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 					"current_status", existing.Status,
 					"agent_id", util.UUIDToString(existing.AgentID),
 				)
+				// Recover a missed reconciliation: if this is a retry of a
+				// callback that committed the completion but crashed before
+				// reconciling, re-enter reconciliation so no deferred comment
+				// is stranded. reconcileTerminal is idempotent — a comment
+				// already in a queued task's plan is not duplicated.
+				s.reconcileTerminal(ctx, &existing)
 				return &existing, nil
 			}
 			slog.Warn("complete task failed",
@@ -2763,6 +2831,11 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	// Broadcast
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
+
+	// Replay any comment that landed while this run was busy and was deferred to
+	// completion-time reconciliation (MUL-4195 / MUL-4304). Shared with the fail
+	// / cancel terminal paths via the injected reconciler.
+	s.reconcileTerminal(ctx, &task)
 
 	return &task, nil
 }
@@ -3040,6 +3113,11 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 					"current_status", existing.Status,
 					"agent_id", util.UUIDToString(existing.AgentID),
 				)
+				// Recover a missed reconciliation: if this is a retry of a
+				// callback that committed the failure but crashed before
+				// reconciling, re-enter reconciliation so no deferred comment
+				// is stranded. reconcileTerminal is idempotent.
+				s.reconcileTerminal(ctx, &existing)
 				return &existing, nil
 			}
 			slog.Warn("fail task failed",
@@ -3062,12 +3140,22 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	slog.Warn("task failed", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(task.IssueID), "error", errMsg, "failure_reason", failureReason)
 	s.captureTaskFailed(ctx, task)
 
-	// The auto-retry child (if any) was created inside the transaction above so
-	// no newer chat task could jump ahead of it. Surface it now: broadcast
-	// queued first, then notify the daemon — see EnqueueTaskForIssue for the
-	// ordering rationale. A deferred child (backoff armed via fire_at) is NOT
-	// queued yet: PromoteDueDeferredTasksForRuntime emits its queued event and
-	// daemon wakeup when fire_at arrives, so announcing it here would be wrong.
+	// Replay any comment dropped while this run was in flight before waking the
+	// daemon. The auto-retry child (if any) was created inside the transaction
+	// above and is still queued — no daemon has seen it yet. Reconciling first
+	// merges an undelivered comment into that queued child instead of racing
+	// with the daemon claim that NotifyTaskEnqueued triggers below. With no
+	// retry child it earns one fresh follow-up. Idempotent re-callbacks returned
+	// early above and never reach here, so a missed reconciliation is recovered
+	// on the next retry of this callback (see early-exit path above).
+	s.reconcileTerminal(ctx, &task)
+
+	// Announce the retry child now that reconciliation has settled its plan.
+	// Broadcast queued first, then notify the daemon — see EnqueueTaskForIssue
+	// for the ordering rationale. A deferred child (backoff armed via fire_at)
+	// is NOT queued yet: PromoteDueDeferredTasksForRuntime emits its queued
+	// event and daemon wakeup when fire_at arrives, so announcing it here would
+	// be wrong.
 	if retried != nil {
 		slog.Info("task auto-retry enqueued",
 			"parent_task_id", util.UUIDToString(task.ID),
@@ -3330,14 +3418,11 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 		"max_attempts", child.MaxAttempts,
 		"status", child.Status,
 	)
-	// A queued child transitions ∅ → queued (same as EnqueueTaskFor*): broadcast
-	// queued first, then notify the daemon — see EnqueueTaskForIssue for ordering
-	// rationale. A deferred child (backoff armed) stays inert until
-	// PromoteDueDeferredTasksForRuntime fires its queued event + wakeup.
-	if child.Status == "queued" {
-		s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, child)
-		s.NotifyTaskEnqueued(ctx, child)
-	}
+	// Announcement (broadcast + NotifyTaskEnqueued) is deliberately deferred to
+	// the caller. HandleFailedTasks must reconcile dropped comment triggers into
+	// the queued child BEFORE the daemon learns about it — if we announced here
+	// the daemon could claim (queued → dispatched) before reconciliation, and
+	// MergeCommentIntoPendingTask would silently skip the already-dispatched row.
 	return &child, nil
 }
 
@@ -3598,13 +3683,28 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	retried := 0
 
 	for _, t := range tasks {
-		// Auto-retry first so the issue stays in_progress rather than
-		// flapping todo → in_progress within a tick.
-		if child, _ := s.MaybeRetryFailedTask(ctx, t); child != nil {
+		// Create the retry child first (without announcing it) so the issue stays
+		// in_progress rather than flapping todo → in_progress within a tick.
+		child, _ := s.MaybeRetryFailedTask(ctx, t)
+		if child != nil {
 			retried++
 			if t.IssueID.Valid {
 				retriedIssues[util.UUIDToString(t.IssueID)] = true
 			}
+		}
+
+		// Reconcile BEFORE announcing the retry child. MaybeRetryFailedTask no
+		// longer broadcasts or calls NotifyTaskEnqueued — that deferred the daemon
+		// wakeup to here, so we can safely merge any dropped comment into the
+		// queued row while it is still unclaimed.
+		s.reconcileTerminal(ctx, &t)
+
+		// Announce the retry child now that its comment plan is settled. A
+		// deferred child (fire_at set) stays inert until
+		// PromoteDueDeferredTasksForRuntime fires its queued event.
+		if child != nil && child.Status == "queued" {
+			s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, *child)
+			s.NotifyTaskEnqueued(ctx, *child)
 		}
 
 		failureReason := "agent_error"

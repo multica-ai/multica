@@ -1346,6 +1346,9 @@ func (h *Handler) CancelTaskByUser(w http.ResponseWriter, r *http.Request) {
 
 	cancelled, err := h.TaskService.CancelTaskWithResult(r.Context(), taskUUID, service.CancelTaskOptions{
 		ClientSupportsDraftRestore: requestHasClientCapability(r, protocol.AppCapabilityChatDraftRestoreV1),
+		// User-initiated cancel: replay any @agent hand-off deferred while this
+		// run held the active slot (#5278). No-op for chat-only tasks.
+		ReconcileDeferredComments: true,
 	})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())

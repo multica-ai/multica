@@ -300,6 +300,11 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		cfg: cfg,
 	}
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
+	// Wire the shared post-terminal comment reconciler so the service-layer
+	// terminal transitions (complete / fail / cancel / sweeper fail) replay
+	// undelivered comment triggers. The sweeper's own TaskService is wired to
+	// the same method in cmd/server (it is a separate instance from this one).
+	h.TaskService.ReconcileTerminal = h.ReconcileTerminalTask
 	return h
 }
 
