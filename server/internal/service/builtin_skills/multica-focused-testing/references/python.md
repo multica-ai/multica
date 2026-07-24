@@ -17,6 +17,17 @@ A single case uses its pytest node id:
 ["python", "-m", "pytest", "path/to/test_file.py::TestClass::test_name"]
 ```
 
-Use pytest collection output when available to verify the node ids before
-executing. Do not assume a unittest, Django, or custom runner accepts pytest
-selectors; use the detected runner's own syntax.
+Verify the node id before executing:
+
+```text
+["python", "-m", "pytest", "--collect-only", "-q", "path/to/test_file.py::TestClass::test_name"]
+```
+
+Parameterized cases add their generated id in brackets; copy it from collection
+output instead of guessing it. Do not assume a unittest, Django, or custom
+runner accepts pytest selectors; use the detected runner's own syntax.
+
+## Official documentation
+
+- pytest invocation, node ids, `python -m pytest`, and `--collect-only`:
+  https://docs.pytest.org/en/stable/how-to/usage.html

@@ -572,32 +572,50 @@ func TestFocusedTestingSkillUsesStackSpecificProgressiveDisclosure(t *testing.T)
 	references := map[string][]string{
 		"references/javascript-typescript.md": {
 			`["pnpm", "--filter", "<workspace>", "exec", "vitest", "run", "<package-relative-test-file>"]`,
+			`["pnpm", "--filter", "<workspace>", "exec", "vitest", "list", "<package-relative-test-file>", "--filesOnly"]`,
 			`["pnpm", "--filter", "<workspace>", "test", "--", "<test-file>"]`,
-			"require exactly one discovered test file",
+			"exactly one discovered test file",
+			"https://pnpm.io/cli/exec",
+			"https://vitest.dev/guide/cli",
 		},
 		"references/go.md": {
 			`["go", "test", "./path/to/package", "-run", "^TestName$", "-count=1"]`,
+			`["go", "test", "./path/to/package", "-list", "^TestName$"]`,
 			"not reliably by\nrunning one `_test.go` file in isolation",
+			"https://pkg.go.dev/cmd/go#hdr-Testing_flags",
 		},
 		"references/python.md": {
 			`["python", "-m", "pytest", "path/to/test_file.py::TestClass::test_name"]`,
-			"Use pytest collection output",
+			`["python", "-m", "pytest", "--collect-only", "-q", "path/to/test_file.py::TestClass::test_name"]`,
+			"https://docs.pytest.org/en/stable/how-to/usage.html",
 		},
 		"references/rust.md": {
 			`["cargo", "test", "-p", "<package>", "--test", "<integration-target>"]`,
+			`["cargo", "test", "-p", "<package>", "--test", "<integration-target>", "--", "<full-test-path>", "--exact"]`,
 			"the separator is required",
+			"`harness = false`",
+			"https://doc.rust-lang.org/rustc/tests/",
 		},
 		"references/jvm.md": {
 			`["./gradlew", ":module:test", "--tests", "package.ClassName.methodName"]`,
 			`["./mvnw", "-pl", "module", "-Dtest=ClassName#methodName", "test"]`,
+			"JUnit 4.x and TestNG",
+			"https://docs.gradle.org/current/userguide/java_testing.html#test_filtering",
+			"https://maven.apache.org/surefire/maven-surefire-plugin/examples/single-test.html",
 		},
 		"references/dotnet.md": {
 			`["dotnet", "test", "path/to/project.csproj", "--filter", "FullyQualifiedName=Namespace.ClassName.MethodName"]`,
-			"Filter properties and operators vary by test adapter",
+			`["dotnet", "test", "path/to/project.csproj", "--list-tests", "--filter", "FullyQualifiedName=Namespace.ClassName.MethodName"]`,
+			"Do not reuse that argv for MTP",
+			"https://learn.microsoft.com/en-us/dotnet/core/tools/dotnet-test-mtp",
 		},
 		"references/ruby.md": {
 			`["bundle", "exec", "rspec", "spec/path/to/example_spec.rb"]`,
+			`["bundle", "exec", "rspec", "spec/path/to/example_spec.rb:<line>"]`,
+			`["bin/rails", "test", "test/models/user_test.rb:<line>"]`,
 			"Do not apply RSpec syntax to Minitest",
+			"https://bundler.io/man/bundle-exec.1.html",
+			"https://guides.rubyonrails.org/testing.html#the-rails-test-runner",
 		},
 	}
 	for path, mustContain := range references {
