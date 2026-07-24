@@ -16,7 +16,6 @@ import {
   XCircle,
 } from "lucide-react";
 import type {
-  AgentRuntime,
   RuntimeLocalSkillImportConflict,
   RuntimeLocalSkillSummary,
   Skill,
@@ -24,6 +23,7 @@ import type {
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  runtimeDisplayLabel,
   runtimeListOptions,
   runtimeLocalSkillsKeys,
   runtimeLocalSkillsOptions,
@@ -44,7 +44,9 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
@@ -56,6 +58,11 @@ import {
 } from "@multica/ui/lib/motion";
 import { useT } from "../../i18n";
 import { HighlightText } from "../../search/highlight-text";
+import { ProviderLogo } from "../../runtimes/components/provider-logo";
+import {
+  buildRuntimeMachines,
+  runtimeRowLabel,
+} from "../../runtimes/components/runtime-machines";
 import { isNameConflictError } from "../lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -108,10 +115,6 @@ const INITIAL_BULK_STATE: BulkImportState = {
  * See also maxLocalSkillImportBatch in server/internal/handler/daemon.go.
  */
 const IMPORT_CONCURRENCY = 10;
-
-function runtimeLabel(runtime: AgentRuntime): string {
-  return `${runtime.name} (${runtime.provider})`;
-}
 
 function defaultRenameName(name: string): string {
   return `${name} copy`;
@@ -522,6 +525,19 @@ export function RuntimeLocalSkillImportPanel({
           (userId == null || r.owner_id === userId),
       ),
     [runtimes, userId],
+  );
+
+  // Group the local runtimes by machine so the picker reads as
+  // "machine → provider/runtime" (alias-aware) instead of a flat list of
+  // raw daemon names (MUL-5248). Reuses the same source of truth as the
+  // agent runtime picker.
+  const runtimeMachines = useMemo(
+    () =>
+      buildRuntimeMachines(localRuntimes, {
+        now: Date.now(),
+        currentUserId: userId,
+      }),
+    [localRuntimes, userId],
   );
 
   const [selectedRuntimeId, setSelectedRuntimeId] = useState<string>("");
@@ -1250,21 +1266,42 @@ export function RuntimeLocalSkillImportPanel({
           <Select
             items={localRuntimes.map((runtime) => ({
               value: runtime.id,
-              label: runtimeLabel(runtime),
+              label: runtimeDisplayLabel(runtime),
             }))}
             value={selectedRuntimeId}
             onValueChange={(v) => v && setSelectedRuntimeId(v)}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder={t(($) => $.runtime_import.runtime_placeholder)}>
-                {selectedRuntime ? runtimeLabel(selectedRuntime) : null}
+                {selectedRuntime ? (
+                  <>
+                    <ProviderLogo
+                      provider={selectedRuntime.provider}
+                      className="h-4 w-4 shrink-0"
+                    />
+                    <span className="truncate">
+                      {runtimeDisplayLabel(selectedRuntime)}
+                    </span>
+                  </>
+                ) : null}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {localRuntimes.map((r) => (
-                <SelectItem key={r.id} value={r.id}>
-                  {runtimeLabel(r)}
-                </SelectItem>
+              {runtimeMachines.map((machine) => (
+                <SelectGroup key={machine.id}>
+                  <SelectLabel>{machine.title}</SelectLabel>
+                  {machine.runtimes.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      <ProviderLogo
+                        provider={r.provider}
+                        className="h-4 w-4 shrink-0"
+                      />
+                      <span className="truncate">
+                        {runtimeRowLabel(r, machine.title)}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               ))}
             </SelectContent>
           </Select>
@@ -1274,7 +1311,7 @@ export function RuntimeLocalSkillImportPanel({
           <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
             <HardDrive className="h-3.5 w-3.5 shrink-0" />
             <span className="min-w-0 flex-1 truncate">
-              {runtimeLabel(selectedRuntime)}
+              {runtimeDisplayLabel(selectedRuntime)}
             </span>
             <Badge
               variant={

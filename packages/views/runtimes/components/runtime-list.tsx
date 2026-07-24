@@ -62,7 +62,7 @@ import {
   computeCostInWindow,
   pctChange,
 } from "../utils";
-import { splitRuntimeName } from "./runtime-machines";
+import { runtimeRowLabel } from "./runtime-machines";
 import {
   customRuntimeRegistrationFailure,
   isDisabledCustomRuntime,
@@ -185,8 +185,21 @@ export function buildWorkloadIndex(
 // Cells
 // ---------------------------------------------------------------------------
 
-function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
-  const { base: baseName } = splitRuntimeName(runtime.name);
+function RuntimeNameCell({
+  runtime,
+  machineTitle,
+}: {
+  runtime: AgentRuntime;
+  /**
+   * The containing machine's title. Lets a per-runtime alias surface here
+   * while a machine-level rename (shared by every runtime on the daemon)
+   * collapses to the provider base so it isn't repeated on every row
+   * (MUL-5248). Omitted when the row has no machine context (orphan custom
+   * runtime profiles), where any alias is shown verbatim.
+   */
+  machineTitle?: string;
+}) {
+  const label = runtimeRowLabel(runtime, machineTitle ?? "");
   return (
     <ListGridCell className="gap-2">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center">
@@ -194,7 +207,7 @@ function RuntimeNameCell({ runtime }: { runtime: AgentRuntime }) {
       </div>
       <div className="flex min-w-0 flex-1 items-center gap-1.5">
         <span className="block min-w-0 shrink truncate text-sm font-medium">
-          {baseName}
+          {label}
         </span>
         <RuntimeKindBadge runtime={runtime} />
         <PendingRuntimeBadge runtime={runtime} />
@@ -615,11 +628,18 @@ export function RuntimeList({
   runtimes,
   now,
   runtimeHref,
+  machineTitle,
 }: {
   runtimes: AgentRuntime[];
   now: number;
   /** Machine-detail pages keep runtime settings nested under the machine. */
   runtimeHref?: (runtimeId: string) => string;
+  /**
+   * The containing machine's title, when this list renders the runtimes of a
+   * single machine. Used so a machine-level alias doesn't repeat on every row
+   * while a per-runtime alias still shows (MUL-5248).
+   */
+  machineTitle?: string;
 }) {
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
@@ -734,7 +754,7 @@ export function RuntimeList({
                   )
                 : {})}
             >
-              <RuntimeNameCell runtime={row.runtime} />
+              <RuntimeNameCell runtime={row.runtime} machineTitle={machineTitle} />
               <HealthCell
                 runtime={row.runtime}
                 workload={row.workload}

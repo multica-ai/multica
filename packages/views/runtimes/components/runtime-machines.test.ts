@@ -4,6 +4,7 @@ import {
   buildRuntimeMachines,
   filterRuntimeMachines,
   runtimeMachineCounts,
+  runtimeRowLabel,
   sharedCustomName,
   splitRuntimeName,
 } from "./runtime-machines";
@@ -402,5 +403,36 @@ describe("sharedCustomName", () => {
       ]),
     ).toBeNull();
     expect(sharedCustomName([])).toBeNull();
+  });
+});
+
+describe("runtimeRowLabel", () => {
+  it("falls back to the provider base when no alias is set", () => {
+    expect(
+      runtimeRowLabel(
+        makeRuntime({ name: "Codex (dev.local)", custom_name: null }),
+        "dev.local",
+      ),
+    ).toBe("Codex");
+  });
+
+  it("collapses a machine-level alias (shared with the title) to the base", () => {
+    // A machine rename stamps the same custom_name on every runtime, so the
+    // title already shows it — repeating it per row would be noise.
+    expect(
+      runtimeRowLabel(
+        makeRuntime({ name: "Codex (dev.local)", custom_name: "Dev Box" }),
+        "Dev Box",
+      ),
+    ).toBe("Codex");
+  });
+
+  it("shows a per-runtime alias that differs from the machine title", () => {
+    expect(
+      runtimeRowLabel(
+        makeRuntime({ name: "Codex (dev.local)", custom_name: "just this one" }),
+        "Dev Box",
+      ),
+    ).toBe("just this one");
   });
 });
