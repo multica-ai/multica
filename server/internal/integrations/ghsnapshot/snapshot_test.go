@@ -3,6 +3,7 @@ package ghsnapshot
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,14 @@ func graphqlServer(t *testing.T, queryFn func(vars map[string]any) string) *http
 		_ = json.Unmarshal(body, &req)
 		_, _ = w.Write([]byte(`{"data":` + queryFn(req.Variables) + `}`))
 	}))
+}
+
+func graphqlSnapshotPage(head string, hasNext bool, endCursor string) string {
+	return fmt.Sprintf(`{"repository":{"pullRequest":{
+		"headRefOid":%q,"mergeable":"MERGEABLE","mergeStateStatus":"CLEAN",
+		"commits":{"nodes":[{"commit":{"statusCheckRollup":{"state":"PENDING","contexts":{
+			"pageInfo":{"hasNextPage":%t,"endCursor":%q},"nodes":[]
+		}}}}]}}}}`, head, hasNext, endCursor)
 }
 
 // TestFetchPRSnapshotPaginatesContexts is the acceptance-criterion-2 test:
@@ -85,6 +94,51 @@ func TestFetchPRSnapshotPaginatesContexts(t *testing.T) {
 	}
 	if snap.Decided() {
 		t.Fatal("snapshot with an in-progress run must be undecided")
+	}
+}
+
+func TestFetchPRSnapshotRejectsHeadChangeDuringPagination(t *testing.T) {
+	calls := 0
+	srv := graphqlServer(t, func(vars map[string]any) string {
+		calls++
+		if calls == 1 {
+			return graphqlSnapshotPage("shaA", true, "CUR2")
+		}
+		return graphqlSnapshotPage("shaB", false, "")
+	})
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	snap, err := FetchPRSnapshot(context.Background(), c, 1, "o", "r", 5)
+	if err == nil || !strings.Contains(err.Error(), "head changed during pagination") {
+		t.Fatalf("FetchPRSnapshot error = %v, want head-change rejection", err)
+	}
+	if snap != nil {
+		t.Fatalf("head-change response returned partial snapshot: %+v", snap)
+	}
+	if calls != 2 {
+		t.Fatalf("GraphQL calls = %d, want 2", calls)
+	}
+}
+
+func TestFetchPRSnapshotRejectsPaginationBeyondLimit(t *testing.T) {
+	calls := 0
+	srv := graphqlServer(t, func(vars map[string]any) string {
+		calls++
+		return graphqlSnapshotPage("shaA", true, fmt.Sprintf("CUR%d", calls))
+	})
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	snap, err := FetchPRSnapshot(context.Background(), c, 1, "o", "r", 5)
+	if err == nil || !strings.Contains(err.Error(), "pagination exceeds page limit") {
+		t.Fatalf("FetchPRSnapshot error = %v, want page-limit rejection", err)
+	}
+	if snap != nil {
+		t.Fatalf("page-limit response returned truncated snapshot: %+v", snap)
+	}
+	if calls != maxSnapshotContextPages {
+		t.Fatalf("GraphQL calls = %d, want %d", calls, maxSnapshotContextPages)
 	}
 }
 

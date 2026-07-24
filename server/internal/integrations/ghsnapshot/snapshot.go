@@ -131,6 +131,8 @@ type graphqlPRData struct {
 	} `json:"repository"`
 }
 
+const maxSnapshotContextPages = 100
+
 // FetchPRSnapshot runs prSnapshotQuery, paginating statusCheckRollup.contexts
 // to completion, and returns the normalized snapshot. A nil rollup yields
 // HasChecks=false with no contexts.
@@ -142,7 +144,7 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 	cursor := ""
 	// Guard against a pathological cursor loop; 100 pages = 10k contexts, far
 	// beyond any real PR.
-	for page := 0; page < 100; page++ {
+	for page := 0; page < maxSnapshotContextPages; page++ {
 		vars := map[string]any{"owner": owner, "repo": repo, "number": number}
 		if cursor != "" {
 			vars["cursor"] = cursor
@@ -165,11 +167,19 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 			snap.HeadSHA = pr.HeadRefOid
 			snap.Mergeable = pr.Mergeable
 			snap.MergeStateStatus = pr.MergeStateStatus
+		} else if pr.HeadRefOid != snap.HeadSHA {
+			// Every page re-reads the PR's latest commit. If a synchronize
+			// event advances the head while pagination is in progress, mixing
+			// those pages would label new-head contexts as the old head.
+			return nil, errors.New("ghsnapshot: pull request head changed during pagination")
 		}
 		rollup := pr.rollup()
 		if rollup == nil {
 			// statusCheckRollup is null → no checks yet. Nothing to paginate.
-			break
+			if page > 0 {
+				return nil, errors.New("ghsnapshot: check rollup changed during pagination")
+			}
+			return snap, nil
 		}
 		snap.HasChecks = true
 		snap.RollupState = rollup.State
@@ -178,12 +188,19 @@ func FetchPRSnapshot(ctx context.Context, c *Client, installationID int64, owner
 				snap.Contexts = append(snap.Contexts, cc)
 			}
 		}
-		if !rollup.Contexts.PageInfo.HasNextPage || rollup.Contexts.PageInfo.EndCursor == "" {
-			break
+		if !rollup.Contexts.PageInfo.HasNextPage {
+			return snap, nil
 		}
-		cursor = rollup.Contexts.PageInfo.EndCursor
+		nextCursor := rollup.Contexts.PageInfo.EndCursor
+		if nextCursor == "" || nextCursor == cursor {
+			return nil, errors.New("ghsnapshot: invalid check-context pagination cursor")
+		}
+		if page == maxSnapshotContextPages-1 {
+			return nil, errors.New("ghsnapshot: check-context pagination exceeds page limit")
+		}
+		cursor = nextCursor
 	}
-	return snap, nil
+	return nil, errors.New("ghsnapshot: check-context pagination exceeds page limit")
 }
 
 // normalizeNode flattens one GraphQL union node (CheckRun or StatusContext)

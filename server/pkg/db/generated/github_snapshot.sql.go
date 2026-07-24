@@ -199,21 +199,50 @@ func (q *Queries) ListGitHubPRRowsByAddress(ctx context.Context, arg ListGitHubP
 	return items, nil
 }
 
-const listStaleOpenGitHubPRs = `-- name: ListStaleOpenGitHubPRs :many
-SELECT DISTINCT installation_id, repo_owner, repo_name, pr_number
-FROM github_pull_request
-WHERE state IN ('open', 'draft')
-  AND (snapshot_fetched_at IS NULL OR snapshot_fetched_at < $1)
-ORDER BY installation_id, repo_owner, repo_name, pr_number
-LIMIT $2
+const listStaleUndecidedGitHubPRs = `-- name: ListStaleUndecidedGitHubPRs :many
+WITH candidates AS (
+    SELECT installation_id, repo_owner, repo_name, pr_number
+    FROM github_pull_request AS pr
+    WHERE state IN ('open', 'draft')
+      AND (snapshot_fetched_at IS NULL OR snapshot_fetched_at < $6)
+      AND (
+          snapshot_fetched_at IS NULL
+          OR api_mergeable IS NULL
+          OR api_mergeable = 'UNKNOWN'
+          OR checks_rollup_state IN ('PENDING', 'EXPECTED')
+          OR EXISTS (
+              SELECT 1
+              FROM github_pull_request_check_run AS cr
+              WHERE cr.pr_id = pr.id AND cr.status <> 'completed'
+          )
+      )
+    GROUP BY installation_id, repo_owner, repo_name, pr_number
+)
+SELECT installation_id, repo_owner, repo_name, pr_number
+FROM candidates
+ORDER BY (
+    ROW(installation_id, repo_owner, repo_name, pr_number) >
+    ROW(
+        $1::BIGINT,
+        $2::TEXT,
+        $3::TEXT,
+        $4::INTEGER
+    )
+) DESC,
+installation_id, repo_owner, repo_name, pr_number
+LIMIT $5
 `
 
-type ListStaleOpenGitHubPRsParams struct {
-	OlderThan pgtype.Timestamptz `json:"older_than"`
-	MaxRows   int32              `json:"max_rows"`
+type ListStaleUndecidedGitHubPRsParams struct {
+	AfterInstallationID int64              `json:"after_installation_id"`
+	AfterRepoOwner      string             `json:"after_repo_owner"`
+	AfterRepoName       string             `json:"after_repo_name"`
+	AfterPrNumber       int32              `json:"after_pr_number"`
+	MaxRows             int32              `json:"max_rows"`
+	OlderThan           pgtype.Timestamptz `json:"older_than"`
 }
 
-type ListStaleOpenGitHubPRsRow struct {
+type ListStaleUndecidedGitHubPRsRow struct {
 	InstallationID int64  `json:"installation_id"`
 	RepoOwner      string `json:"repo_owner"`
 	RepoName       string `json:"repo_name"`
@@ -221,20 +250,27 @@ type ListStaleOpenGitHubPRsRow struct {
 }
 
 // TTL / safety-net sweep source. Returns distinct addresses of open/draft PRs
-// whose snapshot is missing or older than the TTL cutoff. Bounded by LIMIT so
-// one sweep can never fan out unbounded. Open PRs whose base branch advanced
-// (a conflict-producing event that emits NO pull_request webhook on this PR)
-// are recovered here without needing Contents:read. Merged/closed PRs are
-// excluded — a settled PR leaves the refresh set.
-func (q *Queries) ListStaleOpenGitHubPRs(ctx context.Context, arg ListStaleOpenGitHubPRsParams) ([]ListStaleOpenGitHubPRsRow, error) {
-	rows, err := q.db.Query(ctx, listStaleOpenGitHubPRs, arg.OlderThan, arg.MaxRows)
+// whose snapshot is both stale and undecided. A decided snapshot leaves the
+// periodic refresh set; later webhook or view activity can still refresh it.
+// The caller advances an address cursor after each bounded batch. Rows after
+// the cursor sort first, followed by a wrap to the start, so even perpetually
+// failing addresses cannot pin the same first LIMIT rows forever.
+func (q *Queries) ListStaleUndecidedGitHubPRs(ctx context.Context, arg ListStaleUndecidedGitHubPRsParams) ([]ListStaleUndecidedGitHubPRsRow, error) {
+	rows, err := q.db.Query(ctx, listStaleUndecidedGitHubPRs,
+		arg.AfterInstallationID,
+		arg.AfterRepoOwner,
+		arg.AfterRepoName,
+		arg.AfterPrNumber,
+		arg.MaxRows,
+		arg.OlderThan,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListStaleOpenGitHubPRsRow{}
+	items := []ListStaleUndecidedGitHubPRsRow{}
 	for rows.Next() {
-		var i ListStaleOpenGitHubPRsRow
+		var i ListStaleUndecidedGitHubPRsRow
 		if err := rows.Scan(
 			&i.InstallationID,
 			&i.RepoOwner,

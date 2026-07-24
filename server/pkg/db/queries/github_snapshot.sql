@@ -43,18 +43,43 @@ INSERT INTO github_pull_request_check_run (
     $1, $2, $3, $4, $5, sqlc.narg('conclusion'), sqlc.narg('details_url'), $6
 );
 
--- name: ListStaleOpenGitHubPRs :many
+-- name: ListStaleUndecidedGitHubPRs :many
 -- TTL / safety-net sweep source. Returns distinct addresses of open/draft PRs
--- whose snapshot is missing or older than the TTL cutoff. Bounded by LIMIT so
--- one sweep can never fan out unbounded. Open PRs whose base branch advanced
--- (a conflict-producing event that emits NO pull_request webhook on this PR)
--- are recovered here without needing Contents:read. Merged/closed PRs are
--- excluded — a settled PR leaves the refresh set.
-SELECT DISTINCT installation_id, repo_owner, repo_name, pr_number
-FROM github_pull_request
-WHERE state IN ('open', 'draft')
-  AND (snapshot_fetched_at IS NULL OR snapshot_fetched_at < sqlc.arg('older_than'))
-ORDER BY installation_id, repo_owner, repo_name, pr_number
+-- whose snapshot is both stale and undecided. A decided snapshot leaves the
+-- periodic refresh set; later webhook or view activity can still refresh it.
+-- The caller advances an address cursor after each bounded batch. Rows after
+-- the cursor sort first, followed by a wrap to the start, so even perpetually
+-- failing addresses cannot pin the same first LIMIT rows forever.
+WITH candidates AS (
+    SELECT installation_id, repo_owner, repo_name, pr_number
+    FROM github_pull_request AS pr
+    WHERE state IN ('open', 'draft')
+      AND (snapshot_fetched_at IS NULL OR snapshot_fetched_at < sqlc.arg('older_than'))
+      AND (
+          snapshot_fetched_at IS NULL
+          OR api_mergeable IS NULL
+          OR api_mergeable = 'UNKNOWN'
+          OR checks_rollup_state IN ('PENDING', 'EXPECTED')
+          OR EXISTS (
+              SELECT 1
+              FROM github_pull_request_check_run AS cr
+              WHERE cr.pr_id = pr.id AND cr.status <> 'completed'
+          )
+      )
+    GROUP BY installation_id, repo_owner, repo_name, pr_number
+)
+SELECT installation_id, repo_owner, repo_name, pr_number
+FROM candidates
+ORDER BY (
+    ROW(installation_id, repo_owner, repo_name, pr_number) >
+    ROW(
+        sqlc.arg('after_installation_id')::BIGINT,
+        sqlc.arg('after_repo_owner')::TEXT,
+        sqlc.arg('after_repo_name')::TEXT,
+        sqlc.arg('after_pr_number')::INTEGER
+    )
+) DESC,
+installation_id, repo_owner, repo_name, pr_number
 LIMIT sqlc.arg('max_rows');
 
 -- name: ListGitHubPRNumbersByHeadSHA :many

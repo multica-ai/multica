@@ -63,14 +63,18 @@ func randHex(t *testing.T) string {
 }
 
 func seedPR(t *testing.T, pool *pgxpool.Pool, q *db.Queries, headSHA string) db.GithubPullRequest {
+	return seedPRAt(t, pool, q, 987654, "r", 4242, headSHA)
+}
+
+func seedPRAt(t *testing.T, pool *pgxpool.Pool, q *db.Queries, installationID int64, repoName string, prNumber int32, headSHA string) db.GithubPullRequest {
 	t.Helper()
 	ts := pgtype.Timestamptz{Time: time.Unix(1_700_000_000, 0), Valid: true}
 	pr, err := q.UpsertGitHubPullRequest(context.Background(), db.UpsertGitHubPullRequestParams{
 		WorkspaceID:    seedWorkspace(t, pool),
-		InstallationID: 987654,
+		InstallationID: installationID,
 		RepoOwner:      "o",
-		RepoName:       "r",
-		PrNumber:       4242,
+		RepoName:       repoName,
+		PrNumber:       prNumber,
 		Title:          "t",
 		State:          "open",
 		HtmlUrl:        "http://x",
@@ -92,6 +96,105 @@ func checkRunCount(t *testing.T, pool *pgxpool.Pool, prID pgtype.UUID) int {
 		t.Fatal(err)
 	}
 	return n
+}
+
+func TestListStaleUndecidedGitHubPRsExcludesDecidedAndRotatesCursor(t *testing.T) {
+	pool := testDBPool(t)
+	defer pool.Close()
+	q := db.New(pool)
+	ctx := context.Background()
+	now := time.Unix(1_700_010_000, 0)
+
+	settled := seedPRAt(t, pool, q, 111, "settled", 1, "S")
+	oldest := seedPRAt(t, pool, q, 111, "oldest", 2, "O")
+	running := seedPRAt(t, pool, q, 222, "running", 3, "R")
+	newer := seedPRAt(t, pool, q, 222, "newer", 4, "N")
+	prs := []db.GithubPullRequest{settled, oldest, running, newer}
+	t.Cleanup(func() {
+		for _, pr := range prs {
+			_, _ = pool.Exec(context.Background(), `DELETE FROM github_pull_request_check_run WHERE pr_id=$1`, pr.ID)
+			_, _ = pool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id=$1`, pr.ID)
+		}
+	})
+
+	setSnapshot := func(pr db.GithubPullRequest, fetchedAt time.Time, mergeable, rollup string) {
+		t.Helper()
+		if _, err := pool.Exec(ctx, `
+			UPDATE github_pull_request
+			SET snapshot_head_sha=head_sha, snapshot_fetched_at=$2,
+			    api_mergeable=$3, checks_rollup_state=$4
+			WHERE id=$1`,
+			pr.ID, fetchedAt, mergeable, rollup); err != nil {
+			t.Fatal(err)
+		}
+	}
+	setSnapshot(settled, now.Add(-time.Hour), "MERGEABLE", "SUCCESS")
+	setSnapshot(oldest, now.Add(-40*time.Minute), "UNKNOWN", "PENDING")
+	setSnapshot(running, now.Add(-30*time.Minute), "MERGEABLE", "SUCCESS")
+	setSnapshot(newer, now.Add(-20*time.Minute), "MERGEABLE", "PENDING")
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO github_pull_request_check_run
+		    (pr_id, head_sha, ordinal, name, status, is_status_context)
+		VALUES ($1, 'R', 0, 'backend', 'in_progress', false)`,
+		running.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	rows, err := q.ListStaleUndecidedGitHubPRs(ctx, db.ListStaleUndecidedGitHubPRsParams{
+		OlderThan:           tsFromTime(now.Add(-10 * time.Minute)),
+		AfterInstallationID: 0,
+		AfterRepoOwner:      "",
+		AfterRepoName:       "",
+		AfterPrNumber:       0,
+		MaxRows:             10,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotRepos := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		gotRepos[row.RepoName] = true
+	}
+	if gotRepos["settled"] {
+		t.Fatal("decided snapshot remained in the periodic TTL sweep")
+	}
+	for _, repo := range []string{"oldest", "running", "newer"} {
+		if !gotRepos[repo] {
+			t.Fatalf("undecided repo %q missing from TTL sweep: %+v", repo, rows)
+		}
+	}
+
+	first, err := q.ListStaleUndecidedGitHubPRs(ctx, db.ListStaleUndecidedGitHubPRsParams{
+		OlderThan:           tsFromTime(now.Add(-10 * time.Minute)),
+		AfterInstallationID: 0,
+		AfterRepoOwner:      "",
+		AfterRepoName:       "",
+		AfterPrNumber:       0,
+		MaxRows:             1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first) != 1 || first[0].RepoName != "oldest" {
+		t.Fatalf("first bounded sweep = %+v, want first address", first)
+	}
+
+	// Advance from the last returned address without changing its stale data.
+	// Even a perpetually failing first address cannot pin the LIMIT forever.
+	second, err := q.ListStaleUndecidedGitHubPRs(ctx, db.ListStaleUndecidedGitHubPRsParams{
+		OlderThan:           tsFromTime(now.Add(-10 * time.Minute)),
+		AfterInstallationID: first[0].InstallationID,
+		AfterRepoOwner:      first[0].RepoOwner,
+		AfterRepoName:       first[0].RepoName,
+		AfterPrNumber:       first[0].PrNumber,
+		MaxRows:             1,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second) != 1 || second[0].RepoName != "newer" {
+		t.Fatalf("second bounded sweep = %+v, want next address", second)
+	}
 }
 
 // TestApplySnapshotHeadSHAGuard is the acceptance-criterion-1 regression: a slow

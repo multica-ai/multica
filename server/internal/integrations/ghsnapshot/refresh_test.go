@@ -71,9 +71,8 @@ func TestMaybeEnqueueOnViewRespectsTTL(t *testing.T) {
 	}
 }
 
-// TestProcessRateLimitedSetsPause proves a rate-limited fetch pauses only that
-// installation until Retry-After elapses (acceptance criterion 3) and writes
-// nothing.
+// TestProcessRateLimitedSetsPause proves a rate-limited fetch records a pause
+// only for that installation (acceptance criterion 3) and writes nothing.
 func TestProcessRateLimitedSetsPause(t *testing.T) {
 	m := NewManager(enabledClient(t), nil, nil, nil)
 	now := time.Unix(20000, 0)
@@ -92,6 +91,48 @@ func TestProcessRateLimitedSetsPause(t *testing.T) {
 
 	if got := m.rateUntil[1]; !got.Equal(now.Add(90 * time.Second)) {
 		t.Fatalf("rateUntil = %v, want %v", got, now.Add(90*time.Second))
+	}
+}
+
+func TestRateLimitedInstallationDoesNotOccupyWorkers(t *testing.T) {
+	m := NewManager(enabledClient(t), nil, nil, nil)
+	m.concurrency = 12
+	m.sweepInterval = time.Hour
+	m.jitter = func() time.Duration { return 0 }
+	m.extendRateLimit(1, 2*time.Second)
+
+	limitedFetched := make(chan struct{}, 1)
+	otherFetched := make(chan struct{}, 1)
+	m.fetch = func(_ context.Context, _ *Client, installationID int64, _ string, _ string, _ int32) (*PRSnapshot, error) {
+		switch installationID {
+		case 1:
+			limitedFetched <- struct{}{}
+		case 2:
+			otherFetched <- struct{}{}
+		}
+		return nil, errors.New("stop after fetch")
+	}
+
+	// Fill an entire worker pool with addresses from the paused installation,
+	// then queue an unrelated tenant behind them.
+	for number := int32(1); number <= int32(m.concurrency); number++ {
+		m.Enqueue(1, "o", "r", number)
+	}
+	m.Enqueue(2, "o", "r", 1)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	m.Start(ctx)
+
+	select {
+	case <-otherFetched:
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("rate-limited installation occupied the global worker pool")
+	}
+	select {
+	case <-limitedFetched:
+		t.Fatal("paused installation fetched before Retry-After")
+	default:
 	}
 }
 

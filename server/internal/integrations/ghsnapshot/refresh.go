@@ -73,6 +73,10 @@ type Manager struct {
 	inFlight map[address]bool
 	trailing map[address]bool // one event that arrived while active; replay once after the current fetch
 	attempts map[address]int  // chase attempts for the current undecided window
+	// Last address returned by the bounded TTL sweep. The query starts after
+	// this cursor and wraps, preventing a fixed first page from starving later
+	// installations when early addresses repeatedly fail.
+	sweepAfter address
 	// Secondary rate limits are scoped to the installation whose token incurred
 	// them. One customer must never pause every other installation.
 	rateUntil map[int64]time.Time
@@ -188,6 +192,13 @@ func (m *Manager) worker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case addr := <-m.queue:
+			// A rate-limited installation waits outside the worker pool. Keep
+			// the address active while a timer owns it, so events continue to
+			// coalesce without letting one tenant occupy every global worker.
+			if pause := m.rateLimitPause(addr.InstallationID); pause > 0 {
+				m.deferActive(ctx, addr, pause)
+				continue
+			}
 			m.mu.Lock()
 			m.inFlight[addr] = true
 			m.mu.Unlock()
@@ -198,14 +209,8 @@ func (m *Manager) worker(ctx context.Context) {
 }
 
 func (m *Manager) process(ctx context.Context, addr address) {
-	// Installation-scoped secondary-rate-limit pause + per-request jitter to
-	// smooth bursts.
-	pause := m.rateLimitPause(addr.InstallationID)
-	if pause > 0 {
-		if !sleepCtx(ctx, pause) {
-			return
-		}
-	}
+	// Per-request jitter smooths bursts. Installation-scoped rate-limit waits
+	// are handled before this point so they never consume a worker slot.
 	if j := m.jitter(); j > 0 {
 		if !sleepCtx(ctx, j) {
 			return
@@ -276,7 +281,16 @@ func (m *Manager) process(ctx context.Context, addr address) {
 func (m *Manager) rateLimitPause(installationID int64) time.Duration {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.rateUntil[installationID].Sub(m.now())
+	until, ok := m.rateUntil[installationID]
+	if !ok {
+		return 0
+	}
+	pause := until.Sub(m.now())
+	if pause <= 0 {
+		delete(m.rateUntil, installationID)
+		return 0
+	}
+	return pause
 }
 
 func (m *Manager) extendRateLimit(installationID int64, retryAfter time.Duration) {
@@ -286,6 +300,32 @@ func (m *Manager) extendRateLimit(installationID int64, retryAfter time.Duration
 	if until.After(m.rateUntil[installationID]) {
 		m.rateUntil[installationID] = until
 	}
+}
+
+// deferActive returns a rate-limited address to the queue after delay without
+// holding a worker. The active marker remains set while the timer owns the
+// address, so duplicate triggers still coalesce into the scheduled fetch.
+func (m *Manager) deferActive(ctx context.Context, addr address, delay time.Duration) {
+	time.AfterFunc(delay, func() {
+		if ctx.Err() != nil {
+			m.release(addr)
+			return
+		}
+		select {
+		case m.queue <- addr:
+		default:
+			m.release(addr)
+			slog.Warn("ghsnapshot: refresh queue full, dropping rate-limited enqueue")
+		}
+	})
+}
+
+func (m *Manager) release(addr address) {
+	m.mu.Lock()
+	delete(m.active, addr)
+	delete(m.inFlight, addr)
+	delete(m.trailing, addr)
+	m.mu.Unlock()
 }
 
 // finish releases an address after a worker completes it, or turns the single
@@ -419,18 +459,37 @@ func (m *Manager) sweepLoop(ctx context.Context) {
 	}
 }
 
-// sweepOnce enqueues a refresh for every open PR whose snapshot is missing or
-// older than the sweep TTL. Bounded by sweepMaxRows. This is the safety net for
-// base-branch changes that produce no pull_request webhook on this PR, and for
-// any webhook that was dropped during a deploy.
+// sweepOnce enqueues a refresh for every open PR whose snapshot is both stale
+// and undecided. Bounded by sweepMaxRows. This is the safety net for an
+// undecided PR whose base branch changes without a pull_request webhook, and
+// for any webhook that was dropped during a deploy.
 func (m *Manager) sweepOnce(ctx context.Context) {
-	rows, err := m.queries.ListStaleOpenGitHubPRs(ctx, db.ListStaleOpenGitHubPRsParams{
-		OlderThan: tsFromTime(m.now().Add(-m.sweepTTL)),
-		MaxRows:   m.sweepMaxRows,
+	m.mu.Lock()
+	after := m.sweepAfter
+	m.mu.Unlock()
+
+	rows, err := m.queries.ListStaleUndecidedGitHubPRs(ctx, db.ListStaleUndecidedGitHubPRsParams{
+		OlderThan:           tsFromTime(m.now().Add(-m.sweepTTL)),
+		AfterInstallationID: after.InstallationID,
+		AfterRepoOwner:      after.Owner,
+		AfterRepoName:       after.Repo,
+		AfterPrNumber:       after.Number,
+		MaxRows:             m.sweepMaxRows,
 	})
 	if err != nil {
 		slog.Warn("ghsnapshot: sweep query failed", "err", err.Error())
 		return
+	}
+	if len(rows) > 0 {
+		last := rows[len(rows)-1]
+		m.mu.Lock()
+		m.sweepAfter = address{
+			InstallationID: last.InstallationID,
+			Owner:          last.RepoOwner,
+			Repo:           last.RepoName,
+			Number:         last.PrNumber,
+		}
+		m.mu.Unlock()
 	}
 	for _, r := range rows {
 		m.Enqueue(r.InstallationID, r.RepoOwner, r.RepoName, r.PrNumber)
