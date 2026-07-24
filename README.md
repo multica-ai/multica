@@ -67,7 +67,12 @@ Multica manages the full agent lifecycle: from task assignment to execution moni
 
 ## Quick Install
 
-### macOS / Linux (Homebrew - recommended)
+<details open>
+<summary><b>macOS / Linux</b></summary>
+
+<br/>
+
+### Homebrew (recommended)
 
 ```bash
 brew install multica-ai/tap/multica
@@ -75,19 +80,13 @@ brew install multica-ai/tap/multica
 
 Use `brew upgrade multica-ai/tap/multica` to keep the CLI current.
 
-### macOS / Linux (install script)
+### Install script
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
 ```
 
 Use this if Homebrew is not available. The script installs the Multica CLI on macOS and Linux by using Homebrew when it is on `PATH`, otherwise it downloads the binary directly.
-
-### Windows (PowerShell)
-
-```powershell
-irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
-```
 
 Then configure, authenticate, and start the daemon in one command:
 
@@ -104,6 +103,36 @@ multica setup          # Connect to Multica Cloud, log in, start daemon
 >
 > This pulls the official Multica images from GHCR (latest stable by default). Requires Docker. See the [Self-Hosting Guide](SELF_HOSTING.md) for details.
 > If the selected GHCR tag has not been published yet, fall back to `make selfhost-build` from a checkout.
+
+</details>
+
+<details>
+<summary><b>Windows (PowerShell)</b></summary>
+
+<br/>
+
+### PowerShell
+
+```powershell
+irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+```
+
+Then configure, authenticate, and start the daemon in one command:
+
+```powershell
+multica setup          # Connect to Multica Cloud, log in, start daemon
+```
+
+> **Self-hosting?** Set the `MULTICA_MODE` environment variable to `with-server` before running the installer to deploy a full Multica server on your machine:
+>
+> ```powershell
+> $env:MULTICA_MODE="with-server"; irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+> multica setup self-host
+> ```
+>
+> This pulls the official Multica images from GHCR (latest stable by default). Requires Docker. See the [Self-Hosting Guide](SELF_HOSTING.md) for details.
+
+</details>
 
 ---
 
