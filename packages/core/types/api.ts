@@ -202,6 +202,10 @@ export interface ListGroupedIssuesParams {
   properties?: Record<string, string[]>;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
+  /** Surface archived rows. Defaults to false so the default list/board
+   *  payload never carries archived rows unless the caller explicitly opts in
+   *  (R11). Independent of any other filter. */
+  include_archived?: boolean;
   creator_filters?: IssueActorRef[];
   project_ids?: string[];
   include_no_project?: boolean;

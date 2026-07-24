@@ -2477,10 +2477,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   </button>
                   <div className="inline-flex items-center gap-1.5 rounded-full bg-muted/60 px-2 py-0.5">
                     <ProgressRing done={doneCount} total={childIssues.length} size={11} />
-                    <span className="text-micro text-muted-foreground tabular-nums font-medium">
-                      {archivedCount > 0
-                        ? `${doneCount}/${childIssues.length} done · ${archivedCount} archived`
-                        : `${doneCount}/${childIssues.length}`}
+<span className="text-micro text-muted-foreground tabular-nums font-medium">
+                      {formatProgressText({ done: doneCount, total: childIssues.length, archived: archivedCount })}
                     </span>
                   </div>
                   {/* issue.id, not the route param — the endpoint takes a

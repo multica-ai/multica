@@ -780,7 +780,7 @@ export function childIssueProgressOptions(wsId: string) {
         map.set(entry.parent_issue_id, {
           done: entry.done,
           total: entry.total,
-          archived: (entry as { archived?: number }).archived ?? 0,
+          archived: entry.archived,
         });
       }
       return map;
