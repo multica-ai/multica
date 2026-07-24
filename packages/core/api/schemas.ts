@@ -20,6 +20,7 @@ import type {
   CreateBillingPortalSessionResponse,
   CronPreviewResponse,
   GroupedIssuesResponse,
+  GitHubConnectResponse,
   InboxItem,
   InboxWorkspaceUnread,
   Label,
@@ -31,6 +32,8 @@ import type {
   IssueTableGroupsResponse,
   IssueTableRowsResponse,
   ListIssuesResponse,
+  ListGitHubInstallationsResponse,
+  ListGitHubRepositoriesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
   NotificationPreferenceResponse,
@@ -44,6 +47,63 @@ import type {
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
+
+export const GitHubInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  installation_id: z.number().optional(),
+  account_login: z.string(),
+  account_type: z.string(),
+  account_avatar_url: z.string().nullable(),
+  created_at: z.string(),
+  connected_by: z.string().optional(),
+}).loose();
+
+export const ListGitHubInstallationsResponseSchema = z.object({
+  installations: z.array(GitHubInstallationSchema).default([]),
+  configured: z.boolean().optional().default(false),
+  repository_browse_configured: z.boolean().optional().default(false),
+  can_manage: z.boolean().optional().default(false),
+}).loose();
+
+export const EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE: ListGitHubInstallationsResponse = {
+  installations: [],
+  configured: false,
+  repository_browse_configured: false,
+  can_manage: false,
+};
+
+export const GitHubConnectResponseSchema = z.object({
+  url: z.string().optional(),
+  configured: z.boolean().optional().default(false),
+}).loose();
+
+export const EMPTY_GITHUB_CONNECT_RESPONSE: GitHubConnectResponse = {
+  configured: false,
+};
+
+export const GitHubRepositorySchema = z.object({
+  id: z.number(),
+  full_name: z.string(),
+  html_url: z.string(),
+  clone_url: z.string(),
+  description: z.string().nullable(),
+  private: z.boolean(),
+  archived: z.boolean(),
+  default_branch: z.string(),
+}).loose();
+
+export const ListGitHubRepositoriesResponseSchema = z.object({
+  repositories: z.array(GitHubRepositorySchema).default([]),
+  total_count: z.number().optional().default(0),
+  next_page: z.number().nullable().optional().default(null),
+}).loose();
+
+export const EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE: ListGitHubRepositoriesResponse = {
+  repositories: [],
+  total_count: 0,
+  next_page: null,
+};
 
 // Label responses are consumed by settings tables and resource pickers. Keep
 // the resource type lenient so newer server scopes do not break older clients,

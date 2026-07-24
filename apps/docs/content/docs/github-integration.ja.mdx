@@ -126,7 +126,7 @@ GITHUB_APP_PRIVATE_KEY=<BEGIN/END 行を含む完全な PEM ブロック>
 - Settings の `Connect GitHub` が**無効**になり、「not configured」のヒントが表示されます。
 - `/api/webhooks/github` エンドポイントが **`503 github webhooks not configured`** を返します — Multica は secret なしでイベントを処理することを拒否し、すべての署名を黙って有効として扱うことはありません。
 
-`GITHUB_APP_ID` と `GITHUB_APP_PRIVATE_KEY` は**任意**です。これらを設定すると、setup コールバックが GitHub の App 認証された `/app/installations/{id}` エンドポイントを呼び出して、インストール時点で実際の組織名やユーザー名を取得できます。設定しない場合、接続カードには一時的に `Connected to unknown` と表示され、GitHub から `installation.created` webhook が届くと（通常は数秒以内に）Multica が行を更新し、リアルタイムブロードキャストを発行するため、開いている Settings タブは手動更新なしで反映されます。秘密鍵は App 設定ページの **Private keys → Generate a private key** で生成し、PEM ブロック全体（`-----BEGIN/END RSA PRIVATE KEY-----` の行を含む）を改行を保ったまま env 変数に貼り付けてください。
+`GITHUB_APP_ID` と `GITHUB_APP_PRIVATE_KEY` は webhook 処理には**任意**ですが、Settings → Repositories → GitHub から選択する機能には**必須**です。サーバーはこれらを使って短命の installation token を発行してリポジトリを一覧し、setup コールバックもインストール時に実際の組織名やユーザー名を取得します。設定しない場合、リポジトリ参照は無効になり、接続カードには一時的に `Connected to unknown` と表示されます。GitHub から `installation.created` webhook が届くと（通常は数秒以内）、Multica が行を更新し、リアルタイムブロードキャストを発行するため、開いている Settings タブは手動更新なしで反映されます。秘密鍵は App 設定ページの **Private keys → Generate a private key** で生成し、PEM ブロック全体（`-----BEGIN/END RSA PRIVATE KEY-----` の行を含む）を改行を保ったまま env 変数に貼り付けてください。
 
 `FRONTEND_ORIGIN` も設定されている必要があります（どのプロダクションのセルフホストでもすでに設定されています）。インストール後、setup コールバックがユーザーを `<FRONTEND_ORIGIN>/settings?tab=github` に戻します。
 

@@ -256,8 +256,8 @@ multica config set auto_update_check_interval 12h
 |---|---|---|
 | `GITHUB_APP_SLUG` | 空 | 你的 GitHub App slug（`https://github.com/apps/<slug>` 的尾部）。Settings → GitHub 里安装按钮的跳转 URL 用它拼 |
 | `GITHUB_WEBHOOK_SECRET` | 空 | 你在 GitHub App 上设置的 Webhook secret。每条 `pull_request` / `installation` delivery 都用它做 HMAC-SHA256 校验；同一个值也用作 setup 回调里 state token 的签名密钥 |
-| `GITHUB_APP_ID` | 空 | 可选。App 设置页上的数字 App ID。配合 `GITHUB_APP_PRIVATE_KEY` 使用，让 setup 回调在安装那一刻直接从 GitHub 取到关联账号名 |
-| `GITHUB_APP_PRIVATE_KEY` | 空 | 可选。App RSA 私钥的完整 PEM 块（包含 `-----BEGIN/END-----` 两行，保留换行）。用于签发 GitHub App 鉴权 REST 调用所需的短效 JWT |
+| `GITHUB_APP_ID` | 空 | webhook 可不配；Settings → Repositories → 从 GitHub 选择必须配置。与 `GITHUB_APP_PRIVATE_KEY` 配合完成 App 鉴权 REST 调用 |
+| `GITHUB_APP_PRIVATE_KEY` | 空 | webhook 可不配；浏览仓库必须配置。App RSA 私钥的完整 PEM 块（包含 `-----BEGIN/END-----` 两行，保留换行），用于签发短效 App JWT |
 
 **任一必填变量未设时：**
 
@@ -267,6 +267,7 @@ multica config set auto_update_check_interval 12h
 **可选 `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` 未设时：**
 
 - 安装完成后，连接卡片会先短暂显示 `已连接到 unknown`。等 GitHub 的 `installation.created` webhook 到达（通常几秒内），Multica 会把 row 刷成真实的组织/用户名，并通过 realtime 推送让正在打开的 Settings → GitHub 页面无需手动刷新即可更新。
+- Settings → Repositories → 从 GitHub 选择会被禁用，因为服务端无法签发列出仓库所需的 installation token。
 
 **注意：** `GITHUB_WEBHOOK_SECRET` 同时被复用为 install 流程里 state token 的签名密钥，所以运维只需要维护一个 secret。它**不是** GitHub App 的 *Client* secret——Client secret 是 OAuth 用的，和本集成无关。完整配置流程见 [GitHub 集成 → Self-Host 配置](/github-integration#self-host-配置)。
 

@@ -251,8 +251,8 @@ multica config set auto_update_check_interval 12h
 |---|---|---|
 | `GITHUB_APP_SLUG` | 空 | GitHub App の slug（`https://github.com/apps/<slug>` の末尾部分）。設定 → GitHub のインストールボタン URL を構成します |
 | `GITHUB_WEBHOOK_SECRET` | 空 | GitHub App に設定した Webhook secret。すべての `pull_request` / `installation` delivery の HMAC-SHA256 検証に使われ、setup コールバックの state token の HMAC キーとしても使われます |
-| `GITHUB_APP_ID` | 空 | 任意。App 設定ページに表示される数値の App ID。`GITHUB_APP_PRIVATE_KEY` と併せて設定すると、setup コールバックがインストール時点で GitHub から連携先のアカウント名を取得できます |
-| `GITHUB_APP_PRIVATE_KEY` | 空 | 任意。App の RSA 秘密鍵の完全な PEM ブロック（`-----BEGIN/END-----` 行を含み、改行を保ったまま）。GitHub の App 認証 REST 呼び出しに必要な短命 JWT の発行に使われます |
+| `GITHUB_APP_ID` | 空 | webhook には任意。Settings → Repositories → GitHub から選択する機能には必須です。`GITHUB_APP_PRIVATE_KEY` と併せて App 認証 REST 呼び出しに使います |
+| `GITHUB_APP_PRIVATE_KEY` | 空 | webhook には任意。リポジトリ参照には必須です。App の RSA 秘密鍵の完全な PEM ブロック（`-----BEGIN/END-----` 行を含み、改行を保持）で、短命の App JWT 発行に使います |
 
 **いずれかの必須変数が設定されていない場合の動作:**
 
@@ -262,6 +262,7 @@ multica config set auto_update_check_interval 12h
 **任意の `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` が設定されていない場合の動作:**
 
 - インストール直後、接続カードには一時的に `Connected to unknown` と表示されます。GitHub から `installation.created` webhook が届くと（通常は数秒以内）、Multica は行を実際の組織名/ユーザー名に更新し、リアルタイムブロードキャストを発行するため、開いている Settings → GitHub タブは手動更新なしで反映されます。
+- サーバーがリポジトリ一覧に必要な installation token を発行できないため、Settings → Repositories → GitHub から選択する機能は無効になります。
 
 **注:** `GITHUB_WEBHOOK_SECRET` はインストールフローの state token の署名キーとして再利用されるため、運用者は secret を 1 つだけ管理すればよいです。これは GitHub App の *Client* secret では**ありません** — Client secret は OAuth 関連であり、この連携では使われません。完全な手順は [GitHub 連携 → セルフホストのセットアップ](/github-integration#self-host-setup)を参照してください。
 

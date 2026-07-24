@@ -134,6 +134,7 @@ import type {
   NotificationPreferences,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
+  ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
   ListVCSConnectionsResponse,
   ConnectVCSRequest,
@@ -282,6 +283,12 @@ import {
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_RESOURCE_LABELS_RESPONSE,
+  GitHubConnectResponseSchema,
+  ListGitHubInstallationsResponseSchema,
+  ListGitHubRepositoriesResponseSchema,
+  EMPTY_GITHUB_CONNECT_RESPONSE,
+  EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
+  EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
 } from "./schemas";
 
 /** Identifies the calling client to the server.
@@ -2787,12 +2794,54 @@ export class ApiClient {
   }
 
   // GitHub integration
-  async getGitHubConnectURL(workspaceId: string): Promise<GitHubConnectResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/github/connect`);
+  async getGitHubConnectURL(
+    workspaceId: string,
+    returnTo?: "github" | "repositories",
+  ): Promise<GitHubConnectResponse> {
+    const search = new URLSearchParams();
+    if (returnTo) search.set("return_to", returnTo);
+    const suffix = search.size > 0 ? `?${search.toString()}` : "";
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/github/connect${suffix}`,
+    );
+    return parseWithFallback(
+      raw,
+      GitHubConnectResponseSchema,
+      EMPTY_GITHUB_CONNECT_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/github/connect" },
+    );
   }
 
   async listGitHubInstallations(workspaceId: string): Promise<ListGitHubInstallationsResponse> {
-    return this.fetch(`/api/workspaces/${workspaceId}/github/installations`);
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/github/installations`,
+    );
+    return parseWithFallback(
+      raw,
+      ListGitHubInstallationsResponseSchema,
+      EMPTY_LIST_GITHUB_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/github/installations" },
+    );
+  }
+
+  async listGitHubInstallationRepositories(
+    workspaceId: string,
+    installationId: string,
+    params: { page?: number; per_page?: number } = {},
+  ): Promise<ListGitHubRepositoriesResponse> {
+    const search = new URLSearchParams();
+    if (params.page !== undefined) search.set("page", String(params.page));
+    if (params.per_page !== undefined) search.set("per_page", String(params.per_page));
+    const suffix = search.size > 0 ? `?${search.toString()}` : "";
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/github/installations/${installationId}/repositories${suffix}`,
+    );
+    return parseWithFallback(
+      raw,
+      ListGitHubRepositoriesResponseSchema,
+      EMPTY_LIST_GITHUB_REPOSITORIES_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/github/installations/:installationId/repositories" },
+    );
   }
 
   async deleteGitHubInstallation(workspaceId: string, installationId: string): Promise<void> {
