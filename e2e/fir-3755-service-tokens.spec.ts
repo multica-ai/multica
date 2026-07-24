@@ -16,7 +16,11 @@ const FLAG_HYDRATION_TIMEOUT_MS = 30_000;
 test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and revoke", async ({
   page,
 }) => {
-  test.setTimeout(180_000);
+  // This single contract intentionally drives the complete service-token
+  // lifecycle. A loaded CI worker can spend close to three minutes before the
+  // final disable/re-enable/revoke assertions, so leave enough time for those
+  // assertions to use their own bounded waits.
+  test.setTimeout(300_000);
   const api = await createTestApi();
   const workspaceId = api.getWorkspaceId();
   if (!workspaceId) throw new Error("E2E workspace was not resolved");
