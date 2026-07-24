@@ -5,12 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"path/filepath"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/storage"
 )
 
 // This file is the Feishu ResolverSet: the platform-specific implementations
@@ -44,11 +47,12 @@ func larkMsgFromRaw(msg channel.InboundMessage) (InboundMessage, error) {
 // shared session service, audit logger, and (optional) outbound replier +
 // typing indicator. Feishu is just another consumer of the channel-agnostic
 // engine.ChatSession — there is no Feishu-specific session implementation.
-func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager) engine.ResolverSet {
+func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager, media MessageResourceDownloader, creds CredentialsResolver, objectStore storage.Storage) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &feishuInstallationResolver{store: store},
 		Identity:     &feishuIdentityResolver{store: store},
 		Dedup:        &feishuDeduper{store: store},
+		Media:        &feishuMediaResolver{media: media, creds: creds, storage: objectStore},
 		Session:      &feishuSessionBinder{session: session},
 		Audit:        &feishuAuditor{audit: audit},
 		OriginType:   originFeishuChat,
@@ -60,6 +64,69 @@ func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audi
 		set.Typing = &feishuTypingNotifier{mgr: typing}
 	}
 	return set
+}
+
+type feishuMediaResolver struct {
+	media   MessageResourceDownloader
+	creds   CredentialsResolver
+	storage storage.Storage
+}
+
+func (r *feishuMediaResolver) Resolve(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage) (channel.InboundMessage, func(context.Context), error) {
+	if msg.Type != channel.MsgTypeImage {
+		return msg, nil, nil
+	}
+	lm, err := larkMsgFromRaw(msg)
+	if err != nil {
+		return msg, nil, err
+	}
+	var body struct {
+		ImageKey string `json:"image_key"`
+	}
+	if err := json.Unmarshal([]byte(lm.RawContent), &body); err != nil || body.ImageKey == "" {
+		return msg, nil, errors.New("lark: image message missing image_key")
+	}
+	larkInst, ok := inst.Platform.(Installation)
+	if !ok {
+		return msg, nil, errors.New("lark: resolved installation has invalid platform data")
+	}
+	if r.creds == nil || r.media == nil || r.storage == nil {
+		return msg, nil, errors.New("lark: image media dependencies not configured")
+	}
+	secret, err := r.creds.DecryptAppSecret(larkInst)
+	if err != nil {
+		return msg, nil, fmt.Errorf("decrypt app_secret: %w", err)
+	}
+	resource, err := r.media.DownloadMessageResource(ctx, InstallationCredentials{
+		AppID: larkInst.AppID, AppSecret: secret, TenantKey: larkInst.TenantKey.String,
+		Region: RegionOrDefault(larkInst.Region),
+	}, lm.MessageID, body.ImageKey, "image")
+	if err != nil {
+		return msg, nil, fmt.Errorf("download image resource: %w", err)
+	}
+	id, err := uuid.NewV7()
+	if err != nil {
+		return msg, nil, fmt.Errorf("generate image attachment id: %w", err)
+	}
+	ext := filepath.Ext(resource.Filename)
+	if ext == "" {
+		ext = ".png"
+	}
+	filename := resource.Filename
+	if filename == "" {
+		filename = "feishu-image" + ext
+	}
+	key := "channel-inbound/" + id.String() + ext
+	link, err := r.storage.Upload(ctx, key, resource.Data, resource.ContentType, filename)
+	if err != nil {
+		return msg, func(cleanupCtx context.Context) { r.storage.Delete(cleanupCtx, key) },
+			fmt.Errorf("persist image resource: %w", err)
+	}
+	msg.MediaRefs = []channel.MediaRef{{
+		Type: channel.MsgTypeImage, StorageKey: key, URL: link, Filename: filename,
+		MimeType: resource.ContentType, SizeBytes: int64(len(resource.Data)),
+	}}
+	return msg, func(cleanupCtx context.Context) { r.storage.Delete(cleanupCtx, key) }, nil
 }
 
 // ---- installation routing ----
@@ -209,12 +276,14 @@ func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.Append
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
 		SessionID:      p.SessionID,
 		Sender:         p.Sender,
+		WorkspaceID:    p.WorkspaceID,
 		InstallationID: p.InstallationID,
 		Body:           p.Message.Text,
 		CommandText:    lm.CommandBody,
 		MessageID:      p.Message.MessageID,
 		ThreadID:       p.Message.Source.ThreadID,
 		ClaimToken:     p.ClaimToken,
+		MediaRefs:      p.Message.MediaRefs,
 	})
 }
 

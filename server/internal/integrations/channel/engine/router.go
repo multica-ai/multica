@@ -38,8 +38,10 @@ type Router struct {
 
 	batcher *pendingBatcher
 
-	replyTimeout time.Duration
-	replyWg      sync.WaitGroup
+	replyTimeout   time.Duration
+	mediaTimeout   time.Duration
+	cleanupTimeout time.Duration
+	replyWg        sync.WaitGroup
 
 	logger *slog.Logger
 
@@ -53,7 +55,14 @@ type RouterConfig struct {
 	// call. It runs off the connector ACK path, so it must stay strictly
 	// under the platform ACK deadline (Lark: 3s). Defaults to 2.5s.
 	ReplyTimeout time.Duration
-	Logger       *slog.Logger
+	// MediaTimeout bounds platform download + object-storage upload while the
+	// connector is waiting to ACK. Defaults to 750ms, reserving most of
+	// Lark's 3s budget for enrichment, DB work, and the ACK write.
+	MediaTimeout time.Duration
+	// CleanupTimeout independently bounds best-effort deletion of media that
+	// was uploaded but could not be linked. Defaults to 500ms.
+	CleanupTimeout time.Duration
+	Logger         *slog.Logger
 }
 
 // NewRouter builds a Router around the shared (platform-agnostic) services:
@@ -64,17 +73,25 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 	if cfg.ReplyTimeout == 0 {
 		cfg.ReplyTimeout = 2500 * time.Millisecond
 	}
+	if cfg.MediaTimeout == 0 {
+		cfg.MediaTimeout = 750 * time.Millisecond
+	}
+	if cfg.CleanupTimeout == 0 {
+		cfg.CleanupTimeout = 500 * time.Millisecond
+	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
 	return &Router{
-		sets:         make(map[channel.Type]ResolverSet),
-		issues:       issues,
-		tasks:        tasks,
-		reader:       reader,
-		replyTimeout: cfg.ReplyTimeout,
-		logger:       cfg.Logger,
-		pendingFresh: make(map[string]bool),
+		sets:           make(map[channel.Type]ResolverSet),
+		issues:         issues,
+		tasks:          tasks,
+		reader:         reader,
+		replyTimeout:   cfg.ReplyTimeout,
+		mediaTimeout:   cfg.MediaTimeout,
+		cleanupTimeout: cfg.CleanupTimeout,
+		logger:         cfg.Logger,
+		pendingFresh:   make(map[string]bool),
 	}
 }
 
@@ -242,7 +259,38 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}
 	}
 
-	// 5. Resolve the chat_session. Group sessions are created by the INSTALLER
+	// 5. Resolve platform media only after dedup, group filtering, and sender
+	//    authorization have accepted the event. If any later pre-commit step
+	//    fails, remove objects created here so no unlinked media remains.
+	cleanupMedia := func(context.Context) {}
+	if set.Media != nil {
+		mediaCtx, cancelMedia := context.WithTimeout(ctx, r.mediaTimeout)
+		resolved, cleanup, mediaErr := set.Media.Resolve(mediaCtx, inst, msg)
+		cancelMedia()
+		if cleanup != nil {
+			cleanupMedia = cleanup
+		}
+		if mediaErr != nil {
+			r.logger.Warn("channel router: media resolution failed; ingesting placeholder",
+				"channel_type", string(msg.Source.ChannelType),
+				"event_id", msg.EventID,
+				"message_id", msg.MessageID,
+				"error", mediaErr,
+			)
+			r.cleanupMedia(cleanupMedia)
+			cleanupMedia = func(context.Context) {}
+		} else {
+			msg = resolved
+		}
+	}
+	mediaCommitted := false
+	defer func() {
+		if !mediaCommitted {
+			r.cleanupMedia(cleanupMedia)
+		}
+	}()
+
+	// 6. Resolve the chat_session. Group sessions are created by the INSTALLER
 	//    (stable workspace identity that won't churn with group membership);
 	//    p2p sessions by the sole human sender.
 	sessionCreator := identity.UserID
@@ -259,11 +307,12 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		return Result{}, finalizeRelease, fmt.Errorf("ensure chat session: %w", err)
 	}
 
-	// 6. Append message + in-tx dedup Mark — the durable transition point.
+	// 7. Append message + in-tx dedup Mark — the durable transition point.
 	appendRes, err := set.Session.AppendMessage(ctx, AppendParams{
 		SessionID:      sessionID,
 		Sender:         identity.UserID,
 		InstallationID: inst.ID,
+		WorkspaceID:    inst.WorkspaceID,
 		Message:        msg,
 		ClaimToken:     claimToken,
 	})
@@ -273,6 +322,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}
 		return Result{}, finalizeRelease, fmt.Errorf("append user message: %w", err)
 	}
+	mediaCommitted = true
 
 	// Post-append paths must NOT Release (chat_message + Mark already
 	// committed). Mark-again is a no-op, so finalizeNone — unless the binder
@@ -289,7 +339,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		Sender:         msg.Source.SenderID,
 	}
 
-	// 7. /issue command, if present. chat_message is already durable; all
+	// 8. /issue command, if present. chat_message is already durable; all
 	//    error returns from here signal finalizeNone (or the defensive Mark).
 	if appendRes.IssueCommand != nil {
 		issueRes, err := r.createIssue(ctx, inst, set.OriginType, identity.UserID, sessionID, *appendRes.IssueCommand)
@@ -306,13 +356,22 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		}
 	}
 
-	// 8. Debounce the run trigger. The synchronous outcome is OutcomeIngested
+	// 9. Debounce the run trigger. The synchronous outcome is OutcomeIngested
 	//    with no TaskID — the task row is created at flush. identity.UserID is
 	//    THIS message's sender (the task initiator), deliberately not the
 	//    session creator (group sessions are creator=installer). Latest sender
 	//    in a window wins (MUL-2645).
 	r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
 	return res, postAppendFinalize, nil
+}
+
+func (r *Router) cleanupMedia(cleanup func(context.Context)) {
+	if cleanup == nil {
+		return
+	}
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), r.cleanupTimeout)
+	defer cancel()
+	cleanup(cleanupCtx)
 }
 
 // scheduleRun hands the per-session run trigger to the debouncer (or fires it

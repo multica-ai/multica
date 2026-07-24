@@ -30,6 +30,66 @@ type fakeIdentity struct {
 	err error
 }
 
+type fakeMedia struct {
+	resolveCalls int
+	cleanupCalls int
+	err          error
+	block        bool
+	cleanupOnErr bool
+}
+
+func (f *fakeMedia) Resolve(ctx context.Context, _ ResolvedInstallation, msg channel.InboundMessage) (channel.InboundMessage, func(context.Context), error) {
+	f.resolveCalls++
+	if f.err != nil {
+		var cleanup func(context.Context)
+		if f.cleanupOnErr {
+			cleanup = func(context.Context) { f.cleanupCalls++ }
+		}
+		return msg, cleanup, f.err
+	}
+	if f.block {
+		<-ctx.Done()
+		return msg, func(context.Context) { f.cleanupCalls++ }, ctx.Err()
+	}
+	msg.MediaRefs = []channel.MediaRef{{Type: channel.MsgTypeImage, StorageKey: "channel-inbound/image.png"}}
+	return msg, func(context.Context) { f.cleanupCalls++ }, nil
+}
+
+func TestRouter_MediaTimeoutIngestsPlaceholder(t *testing.T) {
+	h := newHarness(t)
+	h.router.mediaTimeout = 10 * time.Millisecond
+	h.media.block = true
+	msg := p2pMessage(t)
+	msg.Text = "[Image]"
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("media timeout must fail open, got %v", err)
+	}
+	if h.dedup.releases() != 0 || h.dedup.marks() != 0 {
+		t.Fatalf("in-tx Mark must stand without Release; marks=%d releases=%d", h.dedup.marks(), h.dedup.releases())
+	}
+	if h.binder.lastAppend.Message.Text != "[Image]" || len(h.binder.lastAppend.Message.MediaRefs) != 0 {
+		t.Fatalf("placeholder append = %+v", h.binder.lastAppend.Message)
+	}
+	if h.media.cleanupCalls != 1 {
+		t.Fatalf("partial media must be cleaned once, got %d", h.media.cleanupCalls)
+	}
+}
+
+func TestRouter_MediaErrorCleansPartialUploadAndIngests(t *testing.T) {
+	h := newHarness(t)
+	h.media.err = errors.New("upload interrupted")
+	h.media.cleanupOnErr = true
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("media failure must fail open, got %v", err)
+	}
+	if h.media.cleanupCalls != 1 {
+		t.Fatalf("partial upload cleanup calls = %d, want 1", h.media.cleanupCalls)
+	}
+	if h.binder.lastAppend.Message.MessageID == "" || len(h.binder.lastAppend.Message.MediaRefs) != 0 {
+		t.Fatalf("original message was not appended without media: %+v", h.binder.lastAppend.Message)
+	}
+}
+
 func (f *fakeIdentity) ResolveSender(_ context.Context, _ ResolvedInstallation, _ channel.InboundMessage) (ResolvedIdentity, error) {
 	return f.id, f.err
 }
@@ -217,6 +277,7 @@ type harness struct {
 	inst    *fakeInstaller
 	ident   *fakeIdentity
 	dedup   *fakeDedup
+	media   *fakeMedia
 	binder  *fakeBinder
 	audit   *fakeAuditor
 	replier *fakeReplier
@@ -232,6 +293,7 @@ func newHarness(t *testing.T) *harness {
 		inst:    &fakeInstaller{inst: activeResolved(t)},
 		ident:   &fakeIdentity{id: ResolvedIdentity{UserID: uuidFromString(t, "44444444-4444-4444-4444-444444444444")}},
 		dedup:   &fakeDedup{token: uuidFromString(t, "55555555-5555-5555-5555-555555555555")},
+		media:   &fakeMedia{},
 		binder:  &fakeBinder{ensureID: uuidFromString(t, "66666666-6666-6666-6666-666666666666"), appendResult: AppendResult{DedupMarked: true}},
 		audit:   &fakeAuditor{},
 		replier: &fakeReplier{},
@@ -245,6 +307,7 @@ func newHarness(t *testing.T) *harness {
 		Installation: h.inst,
 		Identity:     h.ident,
 		Dedup:        h.dedup,
+		Media:        h.media,
 		Session:      h.binder,
 		Audit:        h.audit,
 		Replier:      h.replier,
@@ -297,6 +360,9 @@ func TestRouter_Duplicate_Drops(t *testing.T) {
 	if r, _ := h.audit.last(); r != DropReasonDuplicate {
 		t.Fatalf("expected duplicate, got %q", r)
 	}
+	if h.media.resolveCalls != 0 {
+		t.Fatalf("duplicate must not resolve media")
+	}
 }
 
 func TestRouter_GroupNotAddressed_Drops(t *testing.T) {
@@ -313,6 +379,9 @@ func TestRouter_GroupNotAddressed_Drops(t *testing.T) {
 	if h.dedup.marks() != 1 {
 		t.Fatalf("group-filter drop must finalize Mark (1), got %d", h.dedup.marks())
 	}
+	if h.media.resolveCalls != 0 {
+		t.Fatalf("unaddressed group message must not resolve media")
+	}
 }
 
 func TestRouter_UnboundSender_NeedsBinding(t *testing.T) {
@@ -326,6 +395,9 @@ func TestRouter_UnboundSender_NeedsBinding(t *testing.T) {
 	}
 	if h.dedup.marks() != 1 {
 		t.Fatalf("unbound drop must finalize Mark, got %d", h.dedup.marks())
+	}
+	if h.media.resolveCalls != 0 {
+		t.Fatalf("unbound sender must not resolve media")
 	}
 	if !waitFor(time.Second, func() bool {
 		for _, r := range h.replier.calls() {
@@ -348,6 +420,9 @@ func TestRouter_NonMember_Drops(t *testing.T) {
 	if r, _ := h.audit.last(); r != DropReasonNonWorkspaceMember {
 		t.Fatalf("expected non_workspace_member, got %q", r)
 	}
+	if h.media.resolveCalls != 0 {
+		t.Fatalf("non-member must not resolve media")
+	}
 }
 
 func TestRouter_EnsureSessionError_Releases(t *testing.T) {
@@ -359,6 +434,20 @@ func TestRouter_EnsureSessionError_Releases(t *testing.T) {
 	}
 	if h.dedup.releases() != 1 {
 		t.Fatalf("ensure-session error must Release the claim (1), got %d", h.dedup.releases())
+	}
+	if h.media.resolveCalls != 1 || h.media.cleanupCalls != 1 {
+		t.Fatalf("ensure failure must clean resolved media; resolve=%d cleanup=%d", h.media.resolveCalls, h.media.cleanupCalls)
+	}
+}
+
+func TestRouter_AppendErrorCleansResolvedMedia(t *testing.T) {
+	h := newHarness(t)
+	h.binder.appendErr = errors.New("link attachment failed")
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err == nil {
+		t.Fatal("append error must surface")
+	}
+	if h.media.resolveCalls != 1 || h.media.cleanupCalls != 1 {
+		t.Fatalf("append failure must clean resolved media; resolve=%d cleanup=%d", h.media.resolveCalls, h.media.cleanupCalls)
 	}
 }
 
@@ -374,6 +463,9 @@ func TestRouter_Ingested_InTxMark_FinalizeNone(t *testing.T) {
 	}
 	if h.dedup.releases() != 0 {
 		t.Fatalf("a durable ingest must not Release, got %d", h.dedup.releases())
+	}
+	if h.media.resolveCalls != 1 || h.media.cleanupCalls != 0 {
+		t.Fatalf("successful ingest must retain resolved media; resolve=%d cleanup=%d", h.media.resolveCalls, h.media.cleanupCalls)
 	}
 	if !h.tasks.wasCalled() {
 		t.Fatalf("ingest must trigger a chat run (inline, no batcher)")

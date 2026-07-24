@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
+	"io"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -14,14 +16,59 @@ import (
 // SendTextMessage — the single method feishuChannel.Send calls.
 type fakeSender struct {
 	APIClient
-	last  SendTextParams
-	msgID string
+	last     SendTextParams
+	msgID    string
+	resource MessageResource
 }
 
 func (f *fakeSender) SendTextMessage(_ context.Context, p SendTextParams) (string, error) {
 	f.last = p
 	return f.msgID, nil
 }
+
+func (f *fakeSender) DownloadMessageResource(context.Context, InstallationCredentials, string, string, string) (MessageResource, error) {
+	return f.resource, nil
+}
+
+type fakeMediaStorage struct {
+	key, contentType, filename string
+	data                       []byte
+	deleted                    []string
+	uploadErr                  error
+}
+
+func (s *fakeMediaStorage) Upload(_ context.Context, key string, data []byte, contentType, filename string) (string, error) {
+	s.key, s.data, s.contentType, s.filename = key, data, contentType, filename
+	if s.uploadErr != nil {
+		return "", s.uploadErr
+	}
+	return "/uploads/" + key, nil
+}
+
+func TestFeishuMediaResolverUploadErrorReturnsCleanup(t *testing.T) {
+	api := &fakeSender{resource: MessageResource{
+		Data: []byte("png"), Filename: "screen.png", ContentType: "image/png",
+	}}
+	store := &fakeMediaStorage{uploadErr: errors.New("upload interrupted")}
+	lm := InboundMessage{MessageID: "om_image", RawContent: `{"image_key":"img_key"}`}
+	raw, _ := json.Marshal(lm)
+	resolver := &feishuMediaResolver{media: api, creds: fakeCreds{secret: "secret"}, storage: store}
+	_, cleanup, err := resolver.Resolve(context.Background(), engine.ResolvedInstallation{
+		Platform: Installation{AppID: "cli", Region: "feishu"},
+	}, channel.InboundMessage{Type: channel.MsgTypeImage, Raw: raw})
+	if err == nil || cleanup == nil {
+		t.Fatalf("Resolve error=%v cleanup=%v, want both", err, cleanup != nil)
+	}
+	cleanup(context.Background())
+	if len(store.deleted) != 1 || store.deleted[0] != store.key {
+		t.Fatalf("cleanup deleted = %v, uploaded key = %q", store.deleted, store.key)
+	}
+}
+func (s *fakeMediaStorage) Delete(_ context.Context, key string)                   { s.deleted = append(s.deleted, key) }
+func (*fakeMediaStorage) DeleteKeys(context.Context, []string)                     {}
+func (*fakeMediaStorage) KeyFromURL(raw string) string                             { return raw }
+func (*fakeMediaStorage) CdnDomain() string                                        { return "" }
+func (*fakeMediaStorage) GetReader(context.Context, string) (io.ReadCloser, error) { return nil, nil }
 
 type fakeCreds struct{ secret string }
 
@@ -99,6 +146,33 @@ func TestFeishuChannel_Capabilities(t *testing.T) {
 	}
 	if caps.Has(channel.CapVoice) {
 		t.Fatalf("Feishu adapter does not declare voice")
+	}
+}
+
+func TestFeishuChannel_AttachImagePersistsMediaRef(t *testing.T) {
+	api := &fakeSender{resource: MessageResource{
+		Data: []byte("png"), Filename: "screen.png", ContentType: "image/png",
+	}}
+	store := &fakeMediaStorage{}
+	lm := InboundMessage{MessageID: "om_image", RawContent: `{"image_key":"img_key"}`}
+	raw, _ := json.Marshal(lm)
+	resolver := &feishuMediaResolver{media: api, creds: fakeCreds{secret: "secret"}, storage: store}
+	msg, cleanup, err := resolver.Resolve(context.Background(), engine.ResolvedInstallation{
+		Platform: Installation{AppID: "cli", Region: "feishu"},
+	}, channel.InboundMessage{Type: channel.MsgTypeImage, Raw: raw})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(msg.MediaRefs) != 1 || msg.MediaRefs[0].URL == "" ||
+		msg.MediaRefs[0].Filename != "screen.png" || msg.MediaRefs[0].MimeType != "image/png" {
+		t.Fatalf("MediaRefs = %+v", msg.MediaRefs)
+	}
+	if string(store.data) != "png" || store.contentType != "image/png" {
+		t.Fatalf("stored data=%q contentType=%q", store.data, store.contentType)
+	}
+	cleanup(context.Background())
+	if len(store.deleted) != 1 || store.deleted[0] != msg.MediaRefs[0].StorageKey {
+		t.Fatalf("cleanup deleted = %v", store.deleted)
 	}
 }
 
@@ -186,6 +260,23 @@ func TestChannelMessageFromLark_NormalizesAndStashesRaw(t *testing.T) {
 	}
 	if got.AppID != "cli" || got.CommandBody != "/issue do it" || got.MessageType != "post" {
 		t.Fatalf("raw round-trip lost platform fields: %+v", got)
+	}
+}
+
+func TestChannelMessageFromLark_ImageKeepsPlaceholder(t *testing.T) {
+	cm := channelMessageFromLark(InboundMessage{
+		MessageID:   "om_image",
+		ChatID:      "oc",
+		ChatType:    ChatTypeP2P,
+		Body:        "[Image]",
+		MessageType: "image",
+	})
+
+	if cm.Type != channel.MsgTypeImage {
+		t.Fatalf("image must normalize to image, got %q", cm.Type)
+	}
+	if cm.Text != "[Image]" {
+		t.Fatalf("image placeholder lost during normalization: %q", cm.Text)
 	}
 }
 

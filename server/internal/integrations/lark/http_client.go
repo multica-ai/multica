@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -51,7 +52,8 @@ const (
 	// defaultRequestTimeout is the per-call HTTP timeout. Lark's API
 	// is normally well under 1s; we leave headroom for cross-region
 	// latency from a self-hosted Multica deployment to feishu.cn.
-	defaultRequestTimeout = 10 * time.Second
+	defaultRequestTimeout         = 10 * time.Second
+	defaultMaxResourceBytes int64 = 10 << 20
 
 	// Lark's "invalid tenant_access_token" / "tenant_access_token
 	// expired" error codes. When we see either, drop the cached token
@@ -86,6 +88,10 @@ type HTTPClientConfig struct {
 	// Logger receives warnings about Lark error codes. Nil uses
 	// slog.Default().
 	Logger *slog.Logger
+
+	// MaxResourceBytes caps message-resource downloads before they enter
+	// object storage. Zero defaults to the same 100 MB ceiling as uploads.
+	MaxResourceBytes int64
 }
 
 func (c HTTPClientConfig) withDefaults() HTTPClientConfig {
@@ -104,6 +110,9 @@ func (c HTTPClientConfig) withDefaults() HTTPClientConfig {
 	}
 	if c.Logger == nil {
 		c.Logger = slog.Default()
+	}
+	if c.MaxResourceBytes <= 0 {
+		c.MaxResourceBytes = defaultMaxResourceBytes
 	}
 	return c
 }
@@ -737,6 +746,66 @@ func (c *httpAPIClient) DeleteMessageReaction(ctx context.Context, p DeleteReact
 		return fmt.Errorf("lark http client: delete message reaction: code=%d msg=%q", resp.Code, resp.Msg)
 	}
 	return nil
+}
+
+func (c *httpAPIClient) DownloadMessageResource(ctx context.Context, creds InstallationCredentials, messageID, fileKey, resourceType string) (MessageResource, error) {
+	if messageID == "" || fileKey == "" {
+		return MessageResource{}, errors.New("lark http client: missing message_id or file_key")
+	}
+	if resourceType != "image" && resourceType != "file" {
+		return MessageResource{}, fmt.Errorf("lark http client: unsupported resource type %q", resourceType)
+	}
+	token, err := c.tenantAccessToken(ctx, creds)
+	if err != nil {
+		return MessageResource{}, err
+	}
+	q := url.Values{}
+	q.Set("type", resourceType)
+	path := "/open-apis/im/v1/messages/" + url.PathEscape(messageID) +
+		"/resources/" + url.PathEscape(fileKey) + "?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.resolveBaseURL(creds)+path, nil)
+	if err != nil {
+		return MessageResource{}, fmt.Errorf("lark http client: download resource: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := c.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return MessageResource{}, fmt.Errorf("lark http client: download resource: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 513))
+		return MessageResource{}, fmt.Errorf("lark http client: download resource: http %d: %s", resp.StatusCode, truncate(string(raw), 512))
+	}
+	data, err := io.ReadAll(io.LimitReader(resp.Body, c.cfg.MaxResourceBytes+1))
+	if err != nil {
+		return MessageResource{}, fmt.Errorf("lark http client: download resource: read body: %w", err)
+	}
+	if int64(len(data)) > c.cfg.MaxResourceBytes {
+		return MessageResource{}, fmt.Errorf("lark http client: download resource exceeds %d bytes", c.cfg.MaxResourceBytes)
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if strings.HasPrefix(strings.ToLower(contentType), "application/json") {
+		var businessErr struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+		}
+		if err := json.Unmarshal(data, &businessErr); err != nil {
+			return MessageResource{}, fmt.Errorf("lark http client: download resource: decode JSON response: %w", err)
+		}
+		if businessErr.Code != 0 {
+			if isTokenError(businessErr.Code) {
+				c.invalidateToken(creds.AppID)
+			}
+			return MessageResource{}, &APIError{Op: "download resource", Code: businessErr.Code, Msg: businessErr.Msg}
+		}
+		return MessageResource{}, errors.New("lark http client: download resource returned JSON instead of media")
+	}
+	filename := ""
+	if _, params, err := mime.ParseMediaType(resp.Header.Get("Content-Disposition")); err == nil {
+		filename = params["filename"]
+	}
+	return MessageResource{Data: data, Filename: filename, ContentType: contentType}, nil
 }
 
 // BatchGetUsers resolves user open_ids to display names via
