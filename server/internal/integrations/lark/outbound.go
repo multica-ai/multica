@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -24,7 +26,12 @@ const (
 	CardStatusStreaming CardStatus = "streaming"
 	CardStatusFinal     CardStatus = "final"
 	CardStatusError     CardStatus = "error"
+
+	larkEmailRedactionPlaceholder = "[邮箱已隐藏]"
+	larkContentAuditFallbackText  = "回复包含飞书无法发送的敏感信息。请移除邮箱等内容后重试，或在 Multica 中查看完整回复。"
 )
+
+var larkEmailAddressPattern = regexp.MustCompile(`(?i)\b[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,63}\b`)
 
 // CardKind enumerates the small set of card variants the patcher
 // renders. The Renderer is plug-replaceable so the on-wire card
@@ -269,10 +276,11 @@ func (p *Patcher) handleEvent(e events.Event) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := p.processEvent(ctx, e); err != nil {
+		taskID, chatSessionID, _ := taskAndSessionFromEvent(e)
 		p.cfg.Logger.Warn("lark patcher: event handling failed",
 			"event_type", e.Type,
-			"task_id", e.TaskID,
-			"chat_session_id", e.ChatSessionID,
+			"task_id", util.UUIDToString(taskID),
+			"chat_session_id", util.UUIDToString(chatSessionID),
 			"error", err,
 		)
 	}
@@ -336,7 +344,7 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 
 	switch e.Type {
 	case protocol.EventChatDone:
-		return p.sendChatReply(ctx, creds, binding, e.Payload)
+		return p.sendChatReply(ctx, creds, binding, taskID, e.Payload)
 	case protocol.EventTaskFailed:
 		return p.fail(ctx, creds, binding, taskID, agentName, e.Payload)
 	}
@@ -365,11 +373,53 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 // the task without producing visible output, which only happens for
 // edge cases like a chat task that just acknowledged a system event;
 // not emitting a message there is the right product call.
-func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, payload any) error {
+func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, taskID pgtype.UUID, payload any) error {
 	content := chatDoneContent(payload)
 	if content == "" {
 		return nil
 	}
+
+	err := p.sendChatContent(ctx, creds, binding, content)
+	if err == nil {
+		return nil
+	}
+	if !isMessageAuditRejected(err) {
+		return err
+	}
+
+	taskIDString := util.UUIDToString(taskID)
+	sanitized, changed := sanitizeLarkAuditContent(content)
+	p.cfg.Logger.Warn("lark reply rejected by content audit",
+		"task_id", taskIDString,
+		"audit_code", codeMessageAuditRejected,
+		"sanitized", changed,
+	)
+	if changed {
+		retryErr := p.sendChatContent(ctx, creds, binding, sanitized)
+		if retryErr == nil {
+			p.cfg.Logger.Info("lark reply delivered after content redaction",
+				"task_id", taskIDString,
+				"audit_code", codeMessageAuditRejected,
+			)
+			return nil
+		}
+		if !isMessageAuditRejected(retryErr) {
+			return fmt.Errorf("send redacted Lark reply: %w", retryErr)
+		}
+		err = retryErr
+	}
+
+	if fallbackErr := p.sendChatContent(ctx, creds, binding, larkContentAuditFallbackText); fallbackErr != nil {
+		return fmt.Errorf("send content-audit fallback after %v: %w", err, fallbackErr)
+	}
+	p.cfg.Logger.Warn("lark content-audit fallback delivered",
+		"task_id", taskIDString,
+		"audit_code", codeMessageAuditRejected,
+	)
+	return nil
+}
+
+func (p *Patcher) sendChatContent(ctx context.Context, creds InstallationCredentials, binding ChatSessionBinding, content string) error {
 	target := threadReplyTarget(binding)
 	if containsMarkdown(content) {
 		return sendWithThreadFallback(p.cfg.Logger, "send markdown card", target, func(t ReplyTarget) error {
@@ -391,6 +441,11 @@ func (p *Patcher) sendChatReply(ctx context.Context, creds InstallationCredentia
 		})
 		return err
 	})
+}
+
+func sanitizeLarkAuditContent(content string) (string, bool) {
+	sanitized := larkEmailAddressPattern.ReplaceAllString(content, larkEmailRedactionPlaceholder)
+	return sanitized, sanitized != content
 }
 
 // outboundChatID recovers the real Lark chat id from the chat binding. The

@@ -1109,8 +1109,8 @@ func TestHTTPClient_GetBotInfo_HappyPath(t *testing.T) {
 			"code": 0,
 			"msg":  "ok",
 			"bot": map[string]any{
-				"open_id":   "ou_bot_42",
-				"app_name":  "PersonalAgent",
+				"open_id":    "ou_bot_42",
+				"app_name":   "PersonalAgent",
 				"avatar_url": "https://example/avatar.png",
 			},
 		})
@@ -1231,6 +1231,43 @@ func TestHTTPClient_BadHTTPStatus(t *testing.T) {
 	})
 	if err == nil || !strings.Contains(err.Error(), "http 500") {
 		t.Errorf("want http 500 surfaced, got %v", err)
+	}
+}
+
+func TestHTTPClient_BadHTTPStatusWithLarkCodeReturnsTypedAPIError(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		fake.sendN.Add(1)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		writeJSON(w, map[string]any{
+			"code": codeMessageAuditRejected,
+			"msg":  "The messages do NOT pass the audit, ext=contain sensitive data: EMAIL_ADDRESS",
+		})
+	})
+
+	c := newTestClient(fake, time.Now)
+	_, err := c.SendMarkdownCard(context.Background(), SendMarkdownCardParams{
+		InstallationID: testCreds(),
+		ChatID:         ChatID("oc"),
+		Markdown:       "# Result\n\nperson@example.com",
+	})
+	if err == nil {
+		t.Fatal("want content audit error")
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("want *APIError, got %T (%v)", err, err)
+	}
+	if apiErr.HTTPStatus != http.StatusBadRequest {
+		t.Errorf("HTTPStatus = %d, want %d", apiErr.HTTPStatus, http.StatusBadRequest)
+	}
+	if apiErr.Code != codeMessageAuditRejected {
+		t.Errorf("Code = %d, want %d", apiErr.Code, codeMessageAuditRejected)
+	}
+	if !isMessageAuditRejected(err) {
+		t.Errorf("expected content audit classifier to recognize %v", err)
 	}
 }
 

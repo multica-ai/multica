@@ -81,8 +81,10 @@ type fakeAPIClient struct {
 	patchErr       error
 	textSendErr    error
 	textSendReturn string
+	textSendErrs   []error
 	mdCardErr      error
 	mdCardReturn   string
+	mdCardErrs     []error
 	bindingSent    []BindingPromptParams
 	// threadReplyErr, when non-nil, is returned by the three send
 	// methods whenever the call carries a thread ReplyTarget, while the
@@ -125,6 +127,11 @@ func (f *fakeAPIClient) SendTextMessage(ctx context.Context, p SendTextParams) (
 	if f.threadReplyErr != nil && p.ReplyTarget.IsSet() {
 		return "", f.threadReplyErr
 	}
+	if len(f.textSendErrs) > 0 {
+		err := f.textSendErrs[0]
+		f.textSendErrs = f.textSendErrs[1:]
+		return f.textSendReturn, err
+	}
 	return f.textSendReturn, f.textSendErr
 }
 func (f *fakeAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCardParams) (string, error) {
@@ -133,6 +140,11 @@ func (f *fakeAPIClient) SendMarkdownCard(ctx context.Context, p SendMarkdownCard
 	f.mdCardSent = append(f.mdCardSent, p)
 	if f.threadReplyErr != nil && p.ReplyTarget.IsSet() {
 		return "", f.threadReplyErr
+	}
+	if len(f.mdCardErrs) > 0 {
+		err := f.mdCardErrs[0]
+		f.mdCardErrs = f.mdCardErrs[1:]
+		return f.mdCardReturn, err
 	}
 	return f.mdCardReturn, f.mdCardErr
 }
@@ -268,6 +280,203 @@ func TestPatcherRoutesMarkdownReplyToCard(t *testing.T) {
 	}
 	if len(api.sent) != 0 || len(api.patched) != 0 {
 		t.Errorf("ChatDone must NOT use legacy card paths; sent=%d patched=%d", len(api.sent), len(api.patched))
+	}
+}
+
+func TestPatcherRetriesAuditedMarkdownWithEmailRedacted(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee454545-ee45-ee45-ee45-eeeeeeeeeeee")
+	api.mdCardErrs = []error{
+		&APIError{HTTPStatus: 400, Code: codeMessageAuditRejected, Msg: "contain sensitive data: EMAIL_ADDRESS"},
+		nil,
+	}
+
+	body := "# Identity\n\nEmail: person@example.com"
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: protocol.ChatDonePayload{
+			TaskID:        uuidString(taskID),
+			ChatSessionID: uuidString(q.binding.ChatSessionID),
+			Content:       body,
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.mdCardSent) != 2 {
+		t.Fatalf("expected original and sanitized markdown attempts; got %d", len(api.mdCardSent))
+	}
+	if api.mdCardSent[0].Markdown != body {
+		t.Errorf("first attempt must preserve the original body; got %q", api.mdCardSent[0].Markdown)
+	}
+	if strings.Contains(api.mdCardSent[1].Markdown, "person@example.com") {
+		t.Errorf("sanitized retry leaked the email: %q", api.mdCardSent[1].Markdown)
+	}
+	if !strings.Contains(api.mdCardSent[1].Markdown, larkEmailRedactionPlaceholder) {
+		t.Errorf("sanitized retry missing placeholder: %q", api.mdCardSent[1].Markdown)
+	}
+	if len(api.textSent) != 0 {
+		t.Errorf("successful sanitized retry must not also send fallback text; got %d", len(api.textSent))
+	}
+}
+
+func TestPatcherRetriesAuditedPlainTextWithEmailRedacted(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee464646-ee46-ee46-ee46-eeeeeeeeeeee")
+	api.textSendErrs = []error{
+		&APIError{HTTPStatus: 400, Code: codeMessageAuditRejected, Msg: "contain sensitive data: EMAIL_ADDRESS"},
+		nil,
+	}
+
+	body := "Contact person@example.com for details."
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: protocol.ChatDonePayload{
+			TaskID:        uuidString(taskID),
+			ChatSessionID: uuidString(q.binding.ChatSessionID),
+			Content:       body,
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 2 {
+		t.Fatalf("expected original and sanitized text attempts; got %d", len(api.textSent))
+	}
+	if api.textSent[0].Text != body {
+		t.Errorf("first attempt must preserve the original body; got %q", api.textSent[0].Text)
+	}
+	if strings.Contains(api.textSent[1].Text, "person@example.com") {
+		t.Errorf("sanitized retry leaked the email: %q", api.textSent[1].Text)
+	}
+	if !strings.Contains(api.textSent[1].Text, larkEmailRedactionPlaceholder) {
+		t.Errorf("sanitized retry missing placeholder: %q", api.textSent[1].Text)
+	}
+}
+
+func TestPatcherSendsFallbackWhenSanitizedRetryIsAlsoAudited(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee494949-ee49-ee49-ee49-eeeeeeeeeeee")
+	api.mdCardErrs = []error{
+		&APIError{HTTPStatus: 400, Code: codeMessageAuditRejected, Msg: "contain sensitive data: EMAIL_ADDRESS"},
+		&APIError{HTTPStatus: 400, Code: codeMessageAuditRejected, Msg: "content audit rejected"},
+	}
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: protocol.ChatDonePayload{
+			TaskID:        uuidString(taskID),
+			ChatSessionID: uuidString(q.binding.ChatSessionID),
+			Content:       "# Identity\n\nEmail: person@example.com",
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.mdCardSent) != 2 {
+		t.Fatalf("expected original and sanitized markdown attempts; got %d", len(api.mdCardSent))
+	}
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one safe fallback after both markdown attempts were audited; got %d", len(api.textSent))
+	}
+	if api.textSent[0].Text != larkContentAuditFallbackText {
+		t.Errorf("fallback text = %q, want %q", api.textSent[0].Text, larkContentAuditFallbackText)
+	}
+}
+
+func TestPatcherPreservesThreadTargetWhenRetryingAuditedMarkdown(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee505050-ee50-ee50-ee50-eeeeeeeeeeee")
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic", Valid: true}
+	api.mdCardErrs = []error{
+		&APIError{HTTPStatus: 400, Code: codeMessageAuditRejected, Msg: "contain sensitive data: EMAIL_ADDRESS"},
+		nil,
+	}
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: protocol.ChatDonePayload{
+			TaskID:        uuidString(taskID),
+			ChatSessionID: uuidString(q.binding.ChatSessionID),
+			Content:       "# Identity\n\nEmail: person@example.com",
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.mdCardSent) != 2 {
+		t.Fatalf("expected original and sanitized markdown attempts; got %d", len(api.mdCardSent))
+	}
+	for i, sent := range api.mdCardSent {
+		if sent.ReplyTarget.MessageID != "om_trigger" || !sent.ReplyTarget.InThread {
+			t.Errorf("attempt %d lost thread target: %+v", i+1, sent.ReplyTarget)
+		}
+	}
+}
+
+func TestPatcherSendsSafeFallbackWhenAuditContentCannotBeSanitized(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee474747-ee47-ee47-ee47-eeeeeeeeeeee")
+	api.mdCardErrs = []error{
+		&APIError{HTTPStatus: 400, Code: codeMessageAuditRejected, Msg: "content audit rejected"},
+	}
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: protocol.ChatDonePayload{
+			TaskID:        uuidString(taskID),
+			ChatSessionID: uuidString(q.binding.ChatSessionID),
+			Content:       "# Result\n\nContent rejected for an unknown audit reason.",
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.mdCardSent) != 1 {
+		t.Fatalf("unrecognized audit content must not retry the original card; got %d attempts", len(api.mdCardSent))
+	}
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one safe fallback text message; got %d", len(api.textSent))
+	}
+	if api.textSent[0].Text != larkContentAuditFallbackText {
+		t.Errorf("fallback text = %q, want %q", api.textSent[0].Text, larkContentAuditFallbackText)
+	}
+}
+
+func TestPatcherDoesNotRetryAmbiguousMarkdownFailure(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee484848-ee48-ee48-ee48-eeeeeeeeeeee")
+	api.mdCardErrs = []error{errors.New("transport timeout")}
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: protocol.ChatDonePayload{
+			TaskID:        uuidString(taskID),
+			ChatSessionID: uuidString(q.binding.ChatSessionID),
+			Content:       "# Result\n\nperson@example.com",
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.mdCardSent) != 1 {
+		t.Fatalf("ambiguous failures must not retry; got %d attempts", len(api.mdCardSent))
+	}
+	if len(api.textSent) != 0 {
+		t.Errorf("ambiguous failures must not send a fallback that could duplicate delivery; got %d", len(api.textSent))
 	}
 }
 
