@@ -55,6 +55,26 @@ export function workpadProgress(items: WorkpadItem[]): WorkpadProgress {
   return { done: items.filter((i) => i.done).length, total: items.length };
 }
 
+// phaseStatus maps a phase's progress to an issue-style status so the panel can
+// show the same circular status icon per phase (FIR-3765): no steps done →
+// "todo", some done → "in_progress", all done → "done". An empty phase reads as
+// "todo". The literal union is assignable to the app's IssueStatus, so the
+// shared StatusIcon renders it with the standard status colours.
+export function phaseStatus({
+  done,
+  total,
+}: WorkpadProgress): "todo" | "in_progress" | "done" {
+  if (total > 0 && done >= total) return "done";
+  if (done > 0) return "in_progress";
+  return "todo";
+}
+
+// phaseComplete reports whether every step in a phase is done — used to collapse
+// finished phases by default so a long plan opens on the work that remains.
+export function phaseComplete(progress: WorkpadProgress): boolean {
+  return progress.total > 0 && progress.done >= progress.total;
+}
+
 // A phase groups consecutive checklist steps under a markdown heading, so a long
 // plan reads as a handful of phases instead of one flat 17-step wall. `title` is
 // null for steps that appear before the first heading (an ungrouped preamble).

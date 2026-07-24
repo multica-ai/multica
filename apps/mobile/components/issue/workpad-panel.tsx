@@ -13,14 +13,20 @@
  *
  * Mobile-only divergence: the whole panel is collapsible (a plan can be long
  * and the issue screen is short), controlled by local `open` state with a
- * Pressable header — the required extra state per the UI rules. Web has no
- * collapse (it sits in a wide sidebar-less column).
+ * Pressable header — the required extra state per the UI rules.
+ *
+ * FIR-3765 (variant A): a phase renders as a collapsible section headed by the
+ * shared StatusIcon reflecting the phase's own progress (todo / in-progress /
+ * done). Completed phases start collapsed; tapping a header folds it. No phase
+ * filter — mirrors web's packages/cerebro-artifacts/views/components/
+ * workpad-panel.tsx.
  */
 import { useState } from "react";
 import { Pressable, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import { Text } from "@/components/ui/text";
+import { StatusIcon } from "@/components/ui/status-icon";
 import { issuePlanOptions } from "@/data/queries/artifacts";
 import { useWorkpadEnabled } from "@/data/queries/feature-flags";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -31,11 +37,11 @@ import {
   parseWorkpadPhases,
   namedPhases,
   workpadProgress,
+  phaseStatus,
+  phaseComplete,
   type WorkpadItem,
   type WorkpadPhase,
 } from "@/lib/workpad";
-
-const ALL = "__all__";
 
 function StepRow({ item }: { item: WorkpadItem }) {
   const { colorScheme } = useColorScheme();
@@ -60,57 +66,61 @@ function StepRow({ item }: { item: WorkpadItem }) {
   );
 }
 
-function PhaseBlock({ phase }: { phase: WorkpadPhase }) {
-  const { done, total } = workpadProgress(phase.items);
+// PhaseSection — a named phase as a collapsible section: a status icon for the
+// phase's own progress, its title, count, and its steps when expanded.
+function PhaseSection({
+  phase,
+  open,
+  onToggle,
+}: {
+  phase: WorkpadPhase;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const { colorScheme } = useColorScheme();
+  const mutedFg = THEME[colorScheme].mutedForeground;
+  const progress = workpadProgress(phase.items);
   return (
     <View className="gap-1.5">
-      {phase.title !== null && (
-        <View className="flex-row items-center gap-2">
-          <Text className="text-xs font-semibold text-muted-foreground">
-            {phase.title}
-          </Text>
-          <Text className="text-xs text-muted-foreground">
-            {done}/{total}
-          </Text>
+      <Pressable
+        onPress={onToggle}
+        accessibilityRole="button"
+        accessibilityLabel={phase.title ?? undefined}
+        accessibilityState={{ expanded: open }}
+        className="flex-row items-center gap-2 active:opacity-70"
+      >
+        <Ionicons
+          name={open ? "chevron-down" : "chevron-forward"}
+          size={14}
+          color={mutedFg}
+        />
+        <StatusIcon status={phaseStatus(progress)} size={14} />
+        <Text className="flex-1 text-sm font-medium" numberOfLines={1}>
+          {phase.title}
+        </Text>
+        <Text className="text-xs text-muted-foreground">
+          {progress.done}/{progress.total}
+        </Text>
+      </Pressable>
+      {open && (
+        <View className="gap-1.5 pl-6">
+          {phase.items.map((item, i) => (
+            <StepRow key={i} item={item} />
+          ))}
         </View>
       )}
-      <View className="gap-1.5">
-        {phase.items.map((item, i) => (
-          <StepRow key={i} item={item} />
-        ))}
-      </View>
     </View>
   );
 }
 
-function PhaseChip({
-  label,
-  active,
-  onPress,
-}: {
-  label: string;
-  active: boolean;
-  onPress: () => void;
-}) {
+// StepGroup renders a run of steps with no header (the ungrouped preamble).
+function StepGroup({ items }: { items: WorkpadItem[] }) {
   return (
-    <Pressable
-      onPress={onPress}
-      accessibilityRole="button"
-      accessibilityState={{ selected: active }}
-      className={cn(
-        "rounded-full border px-2.5 py-1 active:opacity-70",
-        active ? "border-transparent bg-primary" : "border-border",
-      )}
-    >
-      <Text
-        className={cn(
-          "text-xs",
-          active ? "text-primary-foreground" : "text-muted-foreground",
-        )}
-      >
-        {label}
-      </Text>
-    </Pressable>
+    <View className="gap-1.5">
+      {items.map((item, i) => (
+        <StepRow key={i} item={item} />
+      ))}
+    </View>
   );
 }
 
@@ -118,7 +128,8 @@ export function WorkpadPanel({ issueId }: { issueId: string }) {
   const enabled = useWorkpadEnabled();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const [open, setOpen] = useState(true);
-  const [selected, setSelected] = useState<string>(ALL);
+  // Per-phase open overrides (keyed by title); default is collapsed-when-complete.
+  const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
   const { colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
 
@@ -132,15 +143,7 @@ export function WorkpadPanel({ issueId }: { issueId: string }) {
   const phases = parseWorkpadPhases(plan.body);
   const items = phases.flatMap((p) => p.items);
   const { done, total } = workpadProgress(items);
-  const named = namedPhases(phases);
-  const showSelector = named.length >= 2;
-  // Filter to the selected phase (by title); fall back to all phases when the
-  // selection is stale (the plan changed and the title no longer exists).
-  const filtered =
-    showSelector && selected !== ALL
-      ? phases.filter((p) => p.title === selected)
-      : phases;
-  const visible = filtered.length > 0 ? filtered : phases;
+  const showPhases = namedPhases(phases).length >= 2;
 
   return (
     <View className="mx-3 mb-2 rounded-lg border border-border bg-muted/40 px-3 py-2">
@@ -174,34 +177,34 @@ export function WorkpadPanel({ issueId }: { issueId: string }) {
             </Text>
           ) : null}
 
-          {showSelector && (
-            <View className="flex-row flex-wrap items-center gap-1.5">
-              <PhaseChip
-                label="All"
-                active={selected === ALL}
-                onPress={() => setSelected(ALL)}
-              />
-              {named.map((p) => (
-                <PhaseChip
-                  key={p.title as string}
-                  label={p.title as string}
-                  active={selected === p.title}
-                  onPress={() => setSelected(p.title as string)}
-                />
-              ))}
-            </View>
-          )}
-
           {total === 0 ? (
             <Text className="text-xs text-muted-foreground">
               The plan has no steps yet.
             </Text>
-          ) : (
-            <View className="gap-3">
-              {visible.map((phase, i) => (
-                <PhaseBlock key={phase.title ?? `__lead__${i}`} phase={phase} />
-              ))}
+          ) : showPhases ? (
+            <View className="gap-2">
+              {phases.map((phase, i) => {
+                if (phase.title === null) {
+                  return <StepGroup key={`__lead__${i}`} items={phase.items} />;
+                }
+                const complete = phaseComplete(workpadProgress(phase.items));
+                const title = phase.title;
+                const phaseOpen =
+                  title in openOverrides ? openOverrides[title] : !complete;
+                return (
+                  <PhaseSection
+                    key={title}
+                    phase={phase}
+                    open={phaseOpen}
+                    onToggle={() =>
+                      setOpenOverrides((o) => ({ ...o, [title]: !phaseOpen }))
+                    }
+                  />
+                );
+              })}
             </View>
+          ) : (
+            <StepGroup items={items} />
           )}
         </View>
       )}
