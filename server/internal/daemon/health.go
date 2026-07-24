@@ -32,6 +32,7 @@ type HealthResponse struct {
 	ServerURL       string            `json:"server_url"`
 	CLIVersion      string            `json:"cli_version"`
 	ActiveTaskCount int64             `json:"active_task_count"`
+	Draining        bool              `json:"draining"`
 	Agents          []string          `json:"agents"`
 	Workspaces      []healthWorkspace `json:"workspaces"`
 }
@@ -103,6 +104,7 @@ func (d *Daemon) healthHandler(startedAt time.Time) http.HandlerFunc {
 			ServerURL:       d.cfg.ServerBaseURL,
 			CLIVersion:      d.cfg.CLIVersion,
 			ActiveTaskCount: d.activeTasks.Load(),
+			Draining:        d.isDraining(),
 			Agents:          agents,
 			Workspaces:      wsList,
 		}
@@ -134,12 +136,71 @@ func (d *Daemon) shutdownHandler() http.HandlerFunc {
 	}
 }
 
+// drainShutdownHandler pauses new claims and waits for work already accepted
+// by the daemon to finish before cancelling its root context. This is a
+// dedicated endpoint rather than a /shutdown query parameter so a newer CLI
+// fails safely with 404 against an older daemon instead of having the old
+// handler ignore the parameter and perform an immediate shutdown.
+func (d *Daemon) drainShutdownHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		if !d.tryBeginDrain() {
+			http.Error(w, "another operation is already pausing task claims", http.StatusConflict)
+			return
+		}
+		keepBarrier := false
+		defer func() {
+			if !keepBarrier {
+				d.releaseDrain()
+			}
+		}()
+
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-r.Context().Done():
+				return
+			default:
+			}
+			if d.drainIdle() {
+				break
+			}
+			select {
+			case <-r.Context().Done():
+				return
+			case <-ticker.C:
+			}
+		}
+		// Give a client cancellation that raced the final idle observation one
+		// last chance to release the barrier rather than stop the daemon.
+		select {
+		case <-r.Context().Done():
+			return
+		default:
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "drained"}); err != nil {
+			return
+		}
+		keepBarrier = true
+		if d.cancelFunc != nil {
+			go d.cancelFunc()
+		}
+	}
+}
+
 // serveHealth runs the health HTTP server on the given listener.
 // Blocks until ctx is cancelled.
 func (d *Daemon) serveHealth(ctx context.Context, ln net.Listener, startedAt time.Time) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/health", d.healthHandler(startedAt))
 	mux.HandleFunc("/shutdown", d.shutdownHandler())
+	mux.HandleFunc("/shutdown/drain", d.drainShutdownHandler())
 	mux.HandleFunc("/repo/checkout", d.repoCheckoutHandler())
 
 	srv := &http.Server{Handler: mux}

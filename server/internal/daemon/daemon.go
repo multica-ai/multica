@@ -216,6 +216,14 @@ type repoCacheBackend interface {
 	CreateWorktree(params repocache.WorktreeParams) (*repocache.WorktreeResult, error)
 }
 
+type claimBarrierOwner uint8
+
+const (
+	claimBarrierNone claimBarrierOwner = iota
+	claimBarrierDrain
+	claimBarrierUpdate
+)
+
 // Daemon is the local agent runtime that polls for and executes tasks.
 type Daemon struct {
 	cfg        Config
@@ -300,25 +308,20 @@ type Daemon struct {
 	cancelFunc    context.CancelFunc // set by Run(); called by triggerRestart
 	rootCtx       context.Context    // set by Run(); used by long-running recoveries that must survive per-runtime ctx cancellation
 	restartBinary string             // non-empty after a successful update; path to the new binary
-	updating      atomic.Bool        // prevents concurrent update attempts
 	activeTasks   atomic.Int64       // number of tasks currently in handleTask; exposed via /health
 	ready         atomic.Bool        // false until preflight completes; gates /health status (starting -> running)
 
-	// claimMu guards pauseClaims and claimsInFlight. It is held only for the
-	// microseconds it takes to make a decision; ClaimTask itself runs without
-	// the lock so a slow per-runtime claim cannot stall auto-update or any
-	// other poller.
+	// claimMu guards claimBarrierOwner and claimsInFlight. It is held only for
+	// the microseconds it takes to make a decision; ClaimTask itself runs
+	// without the lock so a slow per-runtime claim cannot stall lifecycle work.
 	//
-	// The pair is the auto-update path's barrier against the issue's
-	// requirement that "升级过程中如果有 task 进来，会延后升级而不是中断 task":
-	// runRuntimePoller refuses to call ClaimTask while pauseClaims is set, and
-	// tryAutoUpdate refuses to flip pauseClaims while any poller is mid-claim
-	// or any task is in handleTask. Together that closes the fetch-then-claim
-	// race where a new task slipping in during the release-metadata fetch
-	// would be cancelled by triggerRestart's root-ctx cancel.
-	claimMu        sync.Mutex
-	pauseClaims    bool // when true, the batch poller skips claiming
-	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
+	// One explicit owner coordinates manual drain, periodic auto-update, and
+	// heartbeat-triggered update. Any non-none owner pauses new claims, and
+	// owner-checked release prevents one operation from clearing another's
+	// barrier.
+	claimMu           sync.Mutex
+	claimBarrierOwner claimBarrierOwner
+	claimsInFlight    int // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
 	activeEnvRootsMu   sync.Mutex
 	activeEnvRootsCond *sync.Cond      // signalled when an in-flight env-root GC mutation finishes
@@ -2679,12 +2682,19 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		return
 	}
 
-	// Prevent concurrent update attempts.
-	if !d.updating.CompareAndSwap(false, true) {
-		d.logger.Warn("update already in progress, ignoring", "runtime_id", runtimeID, "update_id", update.ID)
+	// Claim the same lifecycle owner used by drain and periodic auto-update.
+	// A skipped heartbeat update remains pending server-side and will be
+	// offered again; barrier contention is not an update failure.
+	if !d.tryBeginUpdate(false) {
+		d.logger.Warn("update deferred: another lifecycle operation owns the claim barrier", "runtime_id", runtimeID, "update_id", update.ID)
 		return
 	}
-	defer d.updating.Store(false)
+	keepBarrier := false
+	defer func() {
+		if !keepBarrier {
+			d.releaseUpdate()
+		}
+	}()
 
 	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", update.ID, "target_version", update.TargetVersion)
 
@@ -2711,13 +2721,14 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 
 	// Trigger daemon restart with the new binary.
 	d.triggerRestart()
+	keepBarrier = d.RestartBinary() != ""
 }
 
 // runUpdate executes the brew-or-download upgrade against targetVersion and
 // returns the human-readable output (always populated, even on failure when
 // brew gives us a useful diagnostic). The caller is responsible for the
-// `updating` CAS guard and for reporting status back to the server / triggering
-// the restart — extracted so the server-triggered path (handleUpdate) and the
+// lifecycle owner and for reporting status back to the server / triggering the
+// restart — extracted so the server-triggered path (handleUpdate) and the
 // auto-update poller (autoUpdateLoop) share the exact same execution body.
 func (d *Daemon) runUpdate(targetVersion string) (string, error) {
 	if cli.IsBrewInstall() {
@@ -2793,14 +2804,14 @@ func (d *Daemon) reportUpdateResultWithRetry(ctx context.Context, runtimeID, upd
 }
 
 // tryEnterClaim records the intent to call ClaimTask. Returns true if the
-// caller may proceed, false if the auto-update barrier is in effect. Every
+// caller may proceed, false if a lifecycle barrier is in effect. Every
 // successful call MUST be paired with an exitClaim() on every exit path —
 // either right after a failed/empty claim, or via the handleTask goroutine's
 // defer once the task is handed off.
 func (d *Daemon) tryEnterClaim() bool {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	if d.pauseClaims {
+	if d.claimBarrierOwner != claimBarrierNone {
 		return false
 	}
 	d.claimsInFlight++
@@ -2814,31 +2825,77 @@ func (d *Daemon) exitClaim() {
 	d.claimsInFlight--
 }
 
-// trySetClaimBarrier atomically pauses new ClaimTask calls if the daemon is
-// fully idle (no claims in flight, no tasks running). Returns true if the
-// caller now holds the barrier and must release it with releaseClaimBarrier
-// on every non-restart exit path; false if the daemon is busy and the caller
-// should defer to the next tick. Used by tryAutoUpdate to close the race
-// where a task slips in between the cheap pre-fetch idle check and the
-// actual upgrade kick-off.
-func (d *Daemon) trySetClaimBarrier() bool {
-	d.claimMu.Lock()
-	defer d.claimMu.Unlock()
-	if d.claimsInFlight > 0 || d.activeTasks.Load() > 0 {
+// tryAcquireClaimBarrier atomically assigns the claim barrier to owner. When
+// requireIdle is true, it also rejects claims in flight and active tasks.
+func (d *Daemon) tryAcquireClaimBarrier(owner claimBarrierOwner, requireIdle bool) bool {
+	if owner == claimBarrierNone {
 		return false
 	}
-	d.pauseClaims = true
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	if d.claimBarrierOwner != claimBarrierNone {
+		return false
+	}
+	if requireIdle && (d.claimsInFlight > 0 || d.activeTasks.Load() > 0) {
+		return false
+	}
+	d.claimBarrierOwner = owner
 	return true
 }
 
-// releaseClaimBarrier clears the auto-update claim barrier so pollers may
-// resume claiming. Called on failure paths only — a successful upgrade leaves
-// the barrier set because triggerRestart is about to take the process down
-// and clearing it would open a window for new claims during shutdown.
-func (d *Daemon) releaseClaimBarrier() {
+// releaseClaimBarrier clears the barrier only when the caller still owns it.
+// A mismatched release is a no-op so one lifecycle path cannot resume claims
+// underneath another.
+func (d *Daemon) releaseClaimBarrier(owner claimBarrierOwner) {
 	d.claimMu.Lock()
 	defer d.claimMu.Unlock()
-	d.pauseClaims = false
+	if d.claimBarrierOwner == owner {
+		d.claimBarrierOwner = claimBarrierNone
+	}
+}
+
+func (d *Daemon) claimBarrierOwnedBy(owner claimBarrierOwner) bool {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	return d.claimBarrierOwner == owner
+}
+
+// tryBeginDrain atomically pauses new claims for a client-owned drain
+// shutdown. Unlike the auto-update barrier, an active task or in-flight claim
+// is expected here: the drain waits for both to finish naturally. A false
+// return means another drain or auto-update already owns the claim pause.
+func (d *Daemon) tryBeginDrain() bool {
+	return d.tryAcquireClaimBarrier(claimBarrierDrain, false)
+}
+
+// drainIdle reports whether every claim that entered before the drain barrier
+// has completed its handoff and every resulting task has finished. The batch
+// poller increments activeTasks before exitClaim, so observing both values at
+// zero under claimMu cannot miss a task between the two counters.
+func (d *Daemon) drainIdle() bool {
+	d.claimMu.Lock()
+	defer d.claimMu.Unlock()
+	return d.claimBarrierOwner == claimBarrierDrain && d.claimsInFlight == 0 && d.activeTasks.Load() == 0
+}
+
+func (d *Daemon) releaseDrain() {
+	d.releaseClaimBarrier(claimBarrierDrain)
+}
+
+func (d *Daemon) isDraining() bool {
+	return d.claimBarrierOwnedBy(claimBarrierDrain)
+}
+
+func (d *Daemon) tryBeginUpdate(requireIdle bool) bool {
+	return d.tryAcquireClaimBarrier(claimBarrierUpdate, requireIdle)
+}
+
+func (d *Daemon) releaseUpdate() {
+	d.releaseClaimBarrier(claimBarrierUpdate)
+}
+
+func (d *Daemon) isUpdating() bool {
+	return d.claimBarrierOwnedBy(claimBarrierUpdate)
 }
 
 // triggerRestart initiates a graceful daemon restart after a successful CLI update.

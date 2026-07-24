@@ -53,6 +53,9 @@ func TestHealthHandlerReportsCLIVersionAndActiveTaskCount(t *testing.T) {
 	if got, want := raw["active_task_count"], float64(3); got != want {
 		t.Errorf("active_task_count key: got %v, want %v", got, want)
 	}
+	if got, want := raw["draining"], false; got != want {
+		t.Errorf("draining key: got %v, want %v", got, want)
+	}
 	if got, want := raw["status"], "running"; got != want {
 		t.Errorf("status key: got %v, want %q", got, want)
 	}
@@ -155,6 +158,157 @@ func TestShutdownHandlerPostCancelsDaemonContext(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("daemon context was not cancelled after POST /shutdown")
 	}
+}
+
+func TestShutdownHandlerDrainWaitsForActiveTasks(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &Daemon{cancelFunc: cancel}
+	d.activeTasks.Store(1)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/shutdown/drain", nil)
+	done := make(chan struct{})
+	go func() {
+		d.drainShutdownHandler().ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	waitForDrainState(t, d, true)
+	if d.tryEnterClaim() {
+		d.exitClaim()
+		t.Fatal("new claims must be paused while a drain shutdown is pending")
+	}
+	select {
+	case <-ctx.Done():
+		t.Fatal("drain shutdown cancelled the daemon while a task was active")
+	default:
+	}
+
+	d.activeTasks.Add(-1)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("drain shutdown did not finish after active tasks reached zero")
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+	select {
+	case <-ctx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("daemon context was not cancelled after the drain completed")
+	}
+}
+
+func TestShutdownHandlerDrainCoversClaimToActiveHandoff(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	d := &Daemon{cancelFunc: cancel}
+	if !d.tryEnterClaim() {
+		t.Fatal("initial claim should enter before the drain barrier")
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/shutdown/drain", nil)
+	done := make(chan struct{})
+	go func() {
+		d.drainShutdownHandler().ServeHTTP(rec, req)
+		close(done)
+	}()
+	waitForDrainState(t, d, true)
+
+	// Mirror runBatchPoller's handoff invariant: activeTasks is incremented
+	// before the in-flight claim is released. The drain must observe the task,
+	// not a transient zero between the two counters.
+	d.activeTasks.Add(1)
+	d.exitClaim()
+	select {
+	case <-ctx.Done():
+		t.Fatal("drain shutdown cancelled during the claim-to-active handoff")
+	case <-time.After(30 * time.Millisecond):
+	}
+
+	d.activeTasks.Add(-1)
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("drain shutdown did not finish after the handed-off task completed")
+	}
+}
+
+func TestShutdownHandlerDrainCancellationResumesClaims(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{}
+	d.activeTasks.Store(1)
+	reqCtx, cancelRequest := context.WithCancel(context.Background())
+	req := httptest.NewRequest(http.MethodPost, "/shutdown/drain", nil).WithContext(reqCtx)
+	rec := httptest.NewRecorder()
+	done := make(chan struct{})
+	go func() {
+		d.drainShutdownHandler().ServeHTTP(rec, req)
+		close(done)
+	}()
+
+	waitForDrainState(t, d, true)
+	cancelRequest()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("drain request did not stop after client cancellation")
+	}
+	waitForDrainState(t, d, false)
+	if !d.tryEnterClaim() {
+		t.Fatal("claims did not resume after the drain requester disconnected")
+	}
+	d.exitClaim()
+}
+
+func TestShutdownHandlerRejectsConcurrentDrain(t *testing.T) {
+	t.Parallel()
+
+	d := &Daemon{}
+	d.activeTasks.Store(1)
+	firstCtx, cancelFirst := context.WithCancel(context.Background())
+	firstDone := make(chan struct{})
+	go func() {
+		d.drainShutdownHandler().ServeHTTP(
+			httptest.NewRecorder(),
+			httptest.NewRequest(http.MethodPost, "/shutdown/drain", nil).WithContext(firstCtx),
+		)
+		close(firstDone)
+	}()
+	waitForDrainState(t, d, true)
+
+	rec := httptest.NewRecorder()
+	d.drainShutdownHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/shutdown/drain", nil))
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("concurrent drain status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+
+	cancelFirst()
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first drain did not stop after cancellation")
+	}
+}
+
+func waitForDrainState(t *testing.T, d *Daemon, want bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if d.isDraining() == want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("draining did not become %v", want)
 }
 
 func TestShutdownHandlerRejectsNonPost(t *testing.T) {

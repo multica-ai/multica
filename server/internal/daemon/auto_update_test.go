@@ -41,7 +41,9 @@ func withStubRelease(t *testing.T, release *cli.GitHubRelease, err error) {
 
 func TestTryAutoUpdate_SkipsWhenUpdating(t *testing.T) {
 	d, restartCalls := newAutoUpdateTestDaemon(t, "v0.1.13")
-	d.updating.Store(true)
+	if !d.tryBeginUpdate(false) {
+		t.Fatal("failed to acquire update owner for test setup")
+	}
 	withStubRelease(t, &cli.GitHubRelease{TagName: "v0.1.14"}, nil)
 
 	d.tryAutoUpdate(context.Background())
@@ -61,15 +63,15 @@ func TestTryAutoUpdate_SkipsWhenTasksRunning(t *testing.T) {
 	if restartCalls.Load() != 0 {
 		t.Fatalf("triggerRestart fired with active tasks; auto-update must defer")
 	}
-	if d.updating.Load() {
-		t.Fatalf("updating flag should not have been claimed while tasks were running")
+	if d.isUpdating() {
+		t.Fatalf("update owner should not have been acquired while tasks were running")
 	}
 }
 
 // TestTryAutoUpdate_DefersWhenClaimInFlightAtBarrier covers the race the
 // review flagged: cheap pre-fetch idle check passes (activeTasks == 0), then
 // during the release fetch a poller decides to claim and bumps
-// claimsInFlight. trySetClaimBarrier must observe that and defer rather than
+// claimsInFlight. tryBeginUpdate must observe that and defer rather than
 // proceed into runUpdate (which would lead to a triggerRestart cancelling
 // the just-claimed task mid-run).
 func TestTryAutoUpdate_DefersWhenClaimInFlightAtBarrier(t *testing.T) {
@@ -83,16 +85,17 @@ func TestTryAutoUpdate_DefersWhenClaimInFlightAtBarrier(t *testing.T) {
 	if restartCalls.Load() != 0 {
 		t.Fatalf("triggerRestart fired despite a claim being in flight at the barrier")
 	}
-	if d.updating.Load() {
-		t.Fatalf("updating flag must be released after a deferred upgrade so the next tick can retry")
+	if d.isUpdating() {
+		t.Fatalf("update owner must be released after a deferred upgrade so the next tick can retry")
 	}
-	if d.pauseClaims {
-		t.Fatalf("pauseClaims must be cleared after a deferred upgrade")
+	if !d.tryEnterClaim() {
+		t.Fatal("claims must remain enabled after a deferred upgrade")
 	}
+	d.exitClaim()
 }
 
 // TestTryAutoUpdate_HoldsBarrierAcrossRestart asserts the success path leaves
-// pauseClaims set: process exit is imminent and clearing the barrier would
+// update ownership held: process exit is imminent and clearing the barrier would
 // open a window for a poller to claim a task that the imminent restart is
 // about to cancel.
 func TestTryAutoUpdate_HoldsBarrierAcrossRestart(t *testing.T) {
@@ -105,13 +108,13 @@ func TestTryAutoUpdate_HoldsBarrierAcrossRestart(t *testing.T) {
 	if restartCalls.Load() != 1 {
 		t.Fatalf("triggerRestart fired %d times, want 1", restartCalls.Load())
 	}
-	if !d.pauseClaims {
-		t.Fatalf("pauseClaims must remain set across the restart kick; got cleared")
+	if !d.isUpdating() {
+		t.Fatalf("update ownership must remain held across the restart kick; got cleared")
 	}
 }
 
 // TestTryAutoUpdate_ReleasesBarrierOnUpgradeFailure asserts the failure path
-// clears pauseClaims so the daemon can keep claiming tasks normally and
+// clears update ownership so the daemon can keep claiming tasks normally and
 // retry the upgrade on the next tick.
 func TestTryAutoUpdate_ReleasesBarrierOnUpgradeFailure(t *testing.T) {
 	d, restartCalls := newAutoUpdateTestDaemon(t, "v0.1.13")
@@ -125,13 +128,13 @@ func TestTryAutoUpdate_ReleasesBarrierOnUpgradeFailure(t *testing.T) {
 	if restartCalls.Load() != 0 {
 		t.Fatalf("triggerRestart fired despite upgrade failure")
 	}
-	if d.pauseClaims {
-		t.Fatalf("pauseClaims must be cleared after a failed upgrade so pollers resume claiming")
+	if d.isUpdating() {
+		t.Fatalf("update ownership must be cleared after a failed upgrade so pollers resume claiming")
 	}
 }
 
 // TestTryEnterClaim_RespectsBarrier asserts the poller-side helper returns
-// false while pauseClaims is held and that pairs of enter/exit balance the
+// false while a lifecycle owner is held and that pairs of enter/exit balance the
 // counter so a later barrier set sees idle.
 func TestTryEnterClaim_RespectsBarrier(t *testing.T) {
 	d := &Daemon{}
@@ -144,15 +147,27 @@ func TestTryEnterClaim_RespectsBarrier(t *testing.T) {
 		t.Fatalf("claimsInFlight not balanced: %d", d.claimsInFlight)
 	}
 
-	if !d.trySetClaimBarrier() {
-		t.Fatal("trySetClaimBarrier should succeed when idle")
+	if !d.tryBeginUpdate(true) {
+		t.Fatal("tryBeginUpdate should acquire the barrier when idle")
 	}
 	if d.tryEnterClaim() {
 		t.Fatal("tryEnterClaim must refuse while barrier is held")
 	}
-	d.releaseClaimBarrier()
+	d.releaseUpdate()
+	if !d.tryBeginDrain() {
+		t.Fatal("tryBeginDrain should acquire an idle claim barrier")
+	}
+	if d.tryBeginUpdate(true) {
+		t.Fatal("auto-update must not steal a manual drain barrier")
+	}
+	d.releaseUpdate()
+	if d.tryEnterClaim() {
+		d.exitClaim()
+		t.Fatal("a mismatched update release must not clear the drain barrier")
+	}
+	d.releaseDrain()
 	if !d.tryEnterClaim() {
-		t.Fatal("tryEnterClaim should succeed after barrier release")
+		t.Fatal("tryEnterClaim should succeed after barriers are released")
 	}
 	d.exitClaim()
 }
@@ -197,8 +212,8 @@ func TestTryAutoUpdate_RunsUpgradeAndRestartsOnNewer(t *testing.T) {
 	if restartCalls.Load() != 1 {
 		t.Fatalf("triggerRestart fired %d times, want 1", restartCalls.Load())
 	}
-	if !d.updating.Load() {
-		t.Fatalf("updating flag should remain set across the restart kick; got cleared")
+	if !d.isUpdating() {
+		t.Fatalf("update owner should remain held across the restart kick; got cleared")
 	}
 }
 
@@ -215,8 +230,8 @@ func TestTryAutoUpdate_DoesNotRestartOnUpgradeFailure(t *testing.T) {
 	if restartCalls.Load() != 0 {
 		t.Fatalf("triggerRestart fired despite upgrade failure")
 	}
-	if d.updating.Load() {
-		t.Fatalf("updating flag must be released after a failed upgrade so the next tick can retry")
+	if d.isUpdating() {
+		t.Fatalf("update owner must be released after a failed upgrade so the next tick can retry")
 	}
 }
 
