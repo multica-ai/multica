@@ -192,7 +192,7 @@ export function applyChatDoneToCache(
  * placeholder. An empty/missing list is terminal ("no suggestions this
  * turn") — the placeholder still resolves.
  */
-export function applyChatQuickActionsToCache(
+export async function applyChatQuickActionsToCache(
   qc: QueryClient,
   payload: ChatQuickActionsPayload,
 ) {
@@ -201,6 +201,17 @@ export function applyChatQuickActionsToCache(
   const patch = (m: ChatMessage): ChatMessage =>
     m.id === payload.message_id ? { ...m, quick_actions: actions } : m;
   if (actions.length > 0) {
+    // chat:done's invalidate may still have a messages refetch in flight that
+    // read the assistant row BEFORE the daemon persisted these actions. Cancel
+    // it first so its actions-less response can't land after — and overwrite —
+    // the patch below. Both message caches are staleTime: Infinity, so such an
+    // overwrite would never self-heal (MUL-5149 stale-refetch race). Cancelling
+    // before setQueryData is required: cancelQueries reverts to the pre-fetch
+    // state, so patching first would be undone by the revert.
+    await Promise.all([
+      qc.cancelQueries({ queryKey: chatKeys.messages(sessionId) }),
+      qc.cancelQueries({ queryKey: chatKeys.messagesPage(sessionId) }),
+    ]);
     qc.setQueryData<ChatMessage[] | undefined>(
       chatKeys.messages(sessionId),
       (old) => old?.map(patch),
@@ -1248,7 +1259,7 @@ export function useRealtimeSync(
         chat_session_id: payload.chat_session_id,
         count: payload.quick_actions?.length ?? 0,
       });
-      applyChatQuickActionsToCache(qc, payload);
+      void applyChatQuickActionsToCache(qc, payload);
     });
 
     // Deferred cancellation outcome (#5219): the server settles the

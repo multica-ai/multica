@@ -72,7 +72,7 @@ export function useChatSessionRealtime(
         // directly — staleTime is Infinity, so nothing would refetch them.
         ws.on("chat:quick_actions", (payload) => {
           if (!isMine(payload)) return;
-          applyChatQuickActionsToCache(qc, payload);
+          void applyChatQuickActionsToCache(qc, payload);
         }),
         ws.on("task:queued", (payload) => {
           if (!isMine(payload)) return;

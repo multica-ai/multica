@@ -176,12 +176,22 @@ export function applyChatDoneToCache(
  * messages cache and no pending-placeholder marker, so it patches only that
  * one cache.
  */
-export function applyChatQuickActionsToCache(
+export async function applyChatQuickActionsToCache(
   qc: QueryClient,
   payload: ChatQuickActionsPayload,
 ) {
   const actions = payload.quick_actions ?? [];
   if (actions.length === 0) return;
+  // chat:done's invalidate may still have a messages refetch in flight that
+  // read the assistant row BEFORE the daemon persisted these actions. Cancel it
+  // first so its actions-less response can't land after — and overwrite — the
+  // patch below. The messages query is staleTime: Infinity, so such an overwrite
+  // would never self-heal (MUL-5149 stale-refetch race). Cancel before
+  // setQueryData: cancelQueries reverts to the pre-fetch state, so patching
+  // first would be undone by the revert.
+  await qc.cancelQueries({
+    queryKey: chatKeys.messages(payload.chat_session_id),
+  });
   qc.setQueryData<ChatMessage[]>(
     chatKeys.messages(payload.chat_session_id),
     (old) =>

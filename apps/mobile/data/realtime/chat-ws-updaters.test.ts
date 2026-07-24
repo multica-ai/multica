@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import type {
   ChatDonePayload,
   ChatMessage,
@@ -127,11 +127,11 @@ function quickActionsPayload(
 }
 
 describe("applyChatQuickActionsToCache", () => {
-  it("patches the async supplement onto the targeted assistant message", () => {
+  it("patches the async supplement onto the targeted assistant message", async () => {
     const qc = new QueryClient();
     qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), [assistantMsg()]);
 
-    applyChatQuickActionsToCache(qc, quickActionsPayload());
+    await applyChatQuickActionsToCache(qc, quickActionsPayload());
 
     expect(
       qc.getQueryData<ChatMessage[]>(chatKeys.messages(SESSION))?.[0]?.quick_actions,
@@ -140,28 +140,79 @@ describe("applyChatQuickActionsToCache", () => {
     ]);
   });
 
-  it("only patches the message whose id matches, leaving others untouched", () => {
+  it("only patches the message whose id matches, leaving others untouched", async () => {
     const qc = new QueryClient();
     qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), [
       assistantMsg({ id: "msg-0", content: "earlier turn" }),
       assistantMsg(),
     ]);
 
-    applyChatQuickActionsToCache(qc, quickActionsPayload());
+    await applyChatQuickActionsToCache(qc, quickActionsPayload());
 
     const msgs = qc.getQueryData<ChatMessage[]>(chatKeys.messages(SESSION));
     expect(msgs?.[0]?.quick_actions).toBeUndefined();
     expect(msgs?.[1]?.quick_actions).toHaveLength(1);
   });
 
-  it("empty supplement is a terminal no-op (no chips added)", () => {
+  it("empty supplement is a terminal no-op (no chips added)", async () => {
     const qc = new QueryClient();
     qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), [assistantMsg()]);
 
-    applyChatQuickActionsToCache(qc, quickActionsPayload({ quick_actions: [] }));
+    await applyChatQuickActionsToCache(qc, quickActionsPayload({ quick_actions: [] }));
 
     expect(
       qc.getQueryData<ChatMessage[]>(chatKeys.messages(SESSION))?.[0]?.quick_actions,
     ).toBeUndefined();
+  });
+
+  // Regression (MUL-5149): the chat:done invalidate can leave a messages
+  // refetch in flight that read the row before the actions were persisted. If
+  // it resolves AFTER the supplement patch, it must not overwrite the patched
+  // actions — the supplement cancels the in-flight refetch first. staleTime is
+  // Infinity, so an overwrite would be permanent.
+  it("a stale chat:done refetch resolving after the supplement cannot overwrite it", async () => {
+    const qc = new QueryClient();
+    // Settled post-chat:done state: assistant present, no actions yet.
+    const staleRows = [assistantMsg()];
+    qc.setQueryData<ChatMessage[]>(chatKeys.messages(SESSION), staleRows);
+
+    // An active observer (a mounted chat screen) whose refetch we hold open, so
+    // it is genuinely in flight when the supplement lands.
+    let releaseRefetch: ((rows: ChatMessage[]) => void) | undefined;
+    const observer = new QueryObserver<ChatMessage[]>(qc, {
+      queryKey: chatKeys.messages(SESSION),
+      queryFn: () =>
+        new Promise<ChatMessage[]>((resolve) => {
+          releaseRefetch = resolve;
+        }),
+      staleTime: Infinity,
+      gcTime: Infinity,
+      retry: false,
+    });
+    const unsub = observer.subscribe(() => {});
+
+    // chat:done's invalidate kicks off the refetch (not awaited — it is held).
+    void qc.invalidateQueries({ queryKey: chatKeys.messages(SESSION) });
+    await vi.waitFor(() => {
+      expect(qc.getQueryState(chatKeys.messages(SESSION))?.fetchStatus).toBe(
+        "fetching",
+      );
+      expect(typeof releaseRefetch).toBe("function");
+    });
+
+    await applyChatQuickActionsToCache(qc, quickActionsPayload());
+
+    // The now-cancelled refetch finally resolves with the actions-less rows.
+    releaseRefetch?.(staleRows);
+    await vi.waitFor(() => {
+      expect(qc.getQueryState(chatKeys.messages(SESSION))?.fetchStatus).toBe("idle");
+    });
+
+    expect(
+      qc.getQueryData<ChatMessage[]>(chatKeys.messages(SESSION))?.[0]?.quick_actions,
+    ).toEqual([
+      { label: "Draft it", prompt: "Draft the complete plan", primary: true },
+    ]);
+    unsub();
   });
 });

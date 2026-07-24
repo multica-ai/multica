@@ -1,4 +1,8 @@
-import { QueryClient, type InfiniteData } from "@tanstack/react-query";
+import {
+  QueryClient,
+  QueryObserver,
+  type InfiniteData,
+} from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
@@ -905,7 +909,7 @@ describe("chat quick-actions supplement flow", () => {
     expect(qc.getQueryData(pendingMarkerKey)).toBeNull();
   });
 
-  it("chat:quick_actions patches the message in both caches and resolves the marker", () => {
+  it("chat:quick_actions patches the message in both caches and resolves the marker", async () => {
     const qc = createQueryClient();
     const assistant: ChatMessage = {
       id: "msg-assistant",
@@ -923,7 +927,7 @@ describe("chat quick-actions supplement flow", () => {
     qc.setQueryData(pendingMarkerKey, { message_id: "msg-assistant", task_id: taskId });
 
     const actions = [{ label: "Next", prompt: "Do the next thing", primary: true }];
-    applyChatQuickActionsToCache(qc, {
+    await applyChatQuickActionsToCache(qc, {
       chat_session_id: sessionId,
       task_id: taskId,
       message_id: "msg-assistant",
@@ -939,7 +943,7 @@ describe("chat quick-actions supplement flow", () => {
     expect(qc.getQueryData(pendingMarkerKey)).toBeNull();
   });
 
-  it("an empty supplement resolves the marker without touching messages", () => {
+  it("an empty supplement resolves the marker without touching messages", async () => {
     const qc = createQueryClient();
     const assistant: ChatMessage = {
       id: "msg-assistant",
@@ -953,7 +957,7 @@ describe("chat quick-actions supplement flow", () => {
     qc.setQueryData<ChatMessage[]>(messagesKey, [assistant]);
     qc.setQueryData(pendingMarkerKey, { message_id: "msg-assistant", task_id: taskId });
 
-    applyChatQuickActionsToCache(qc, {
+    await applyChatQuickActionsToCache(qc, {
       chat_session_id: sessionId,
       task_id: taskId,
       message_id: "msg-assistant",
@@ -964,5 +968,66 @@ describe("chat quick-actions supplement flow", () => {
       { label: "Keep", prompt: "Keep me" },
     ]);
     expect(qc.getQueryData(pendingMarkerKey)).toBeNull();
+  });
+
+  // Regression (MUL-5149): the chat:done invalidate can leave a messages refetch
+  // in flight that read the row before the actions were persisted. If that
+  // refetch resolves AFTER the chat:quick_actions patch, it must not overwrite
+  // the freshly-patched actions — the supplement cancels the in-flight refetch
+  // first. staleTime: Infinity means an overwrite would be permanent.
+  it("a stale chat:done refetch resolving after the supplement cannot overwrite it", async () => {
+    const qc = createQueryClient();
+    const assistant: ChatMessage = {
+      id: "msg-assistant",
+      chat_session_id: sessionId,
+      role: "assistant",
+      content: "done",
+      task_id: taskId,
+      created_at: "2026-05-13T05:00:02Z",
+    };
+    // Settled post-chat:done state: assistant present, no actions yet.
+    const staleRows = [userMessage(), assistant];
+    qc.setQueryData<ChatMessage[]>(messagesKey, staleRows);
+
+    // An active observer (a mounted chat screen) whose refetch we hold open, so
+    // it is genuinely in flight when the supplement lands.
+    let releaseRefetch: ((rows: ChatMessage[]) => void) | undefined;
+    const observer = new QueryObserver<ChatMessage[]>(qc, {
+      queryKey: messagesKey,
+      queryFn: () =>
+        new Promise<ChatMessage[]>((resolve) => {
+          releaseRefetch = resolve;
+        }),
+      staleTime: Infinity,
+      gcTime: Infinity,
+      retry: false,
+    });
+    const unsub = observer.subscribe(() => {});
+
+    // chat:done's invalidate kicks off the refetch (not awaited — it is held).
+    void qc.invalidateQueries({ queryKey: messagesKey });
+    await vi.waitFor(() => {
+      expect(qc.getQueryState(messagesKey)?.fetchStatus).toBe("fetching");
+      expect(typeof releaseRefetch).toBe("function");
+    });
+
+    const actions = [{ label: "Next", prompt: "Do the next thing", primary: true }];
+    await applyChatQuickActionsToCache(qc, {
+      chat_session_id: sessionId,
+      task_id: taskId,
+      message_id: "msg-assistant",
+      quick_actions: actions,
+    });
+
+    // The now-cancelled refetch finally resolves with the actions-less rows.
+    releaseRefetch?.(staleRows);
+    await vi.waitFor(() => {
+      expect(qc.getQueryState(messagesKey)?.fetchStatus).toBe("idle");
+    });
+
+    expect(qc.getQueryData<ChatMessage[]>(messagesKey)?.at(-1)?.quick_actions).toEqual(
+      actions,
+    );
+    unsub();
   });
 });
