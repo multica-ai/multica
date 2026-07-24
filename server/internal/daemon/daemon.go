@@ -3727,6 +3727,33 @@ func gateResumeToReusedWorkdir(task *Task, taskCtx *execenv.TaskContextForEnv, e
 	return reused
 }
 
+// gateResumeToSameAgentName drops the prior session when the reused workdir's
+// existing runtime config records a different agent name than the current task.
+// This prevents a renamed agent from resuming a session whose conversation
+// history was established under the old identity — which can cause the agent to
+// misidentify itself even though CLAUDE.md is updated before launch (MUL-5736).
+// No-op when there is nothing to resume, no current agent name, or when the
+// prior name cannot be read (e.g. fresh workdir, legacy config without the
+// identity section). Unlike gateResumeToReusedWorkdir, this does not set
+// PriorSessionResumeUnavailable: the rename is intentional, so starting fresh
+// is expected behaviour rather than a loss the agent must disclose.
+func gateResumeToSameAgentName(task *Task, taskCtx *execenv.TaskContextForEnv, provider, workDir string, taskLog *slog.Logger) {
+	if task.PriorSessionID == "" || taskCtx.AgentName == "" {
+		return
+	}
+	priorName := execenv.ReadPriorAgentName(workDir, provider)
+	if priorName == "" || priorName == taskCtx.AgentName {
+		return
+	}
+	taskLog.Warn("dropping prior session: agent identity changed since last run",
+		"session_id", task.PriorSessionID,
+		"prior_name", priorName,
+		"current_name", taskCtx.AgentName,
+	)
+	task.PriorSessionID = ""
+	taskCtx.PriorSessionResumed = false
+}
+
 // shouldReusePriorWorkdir keeps the local_directory lock invariant without
 // forcing every squad-leader follow-up onto a fresh provider session. Worker
 // tasks already expose their current local-directory assignment, so their
@@ -4385,6 +4412,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// conversation Codex will silently restart from scratch.
 	if reused {
 		gateCodexResumeToRolloutPresence(&task, &taskCtx, provider, env.CodexHome, taskLog)
+		// Check for agent rename BEFORE overwriting CLAUDE.md — we need to
+		// read the old identity while it is still on disk (MUL-5736).
+		gateResumeToSameAgentName(&task, &taskCtx, provider, env.WorkDir, taskLog)
 	}
 
 	// Inject runtime-specific config (meta skill) so the agent discovers .agent_context/.
