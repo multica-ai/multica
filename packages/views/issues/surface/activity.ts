@@ -54,6 +54,26 @@ export function selectIssueTasks(
   return { running, queued };
 }
 
+/**
+ * Multi-issue variant of `selectIssueTasks`: one slice covering a set of
+ * issues (a parent's sub-issues). Same structural-sharing contract — pass a
+ * stable Set and keep the wrapping select's identity stable upstream so
+ * unrelated snapshot changes don't re-render the subscriber.
+ */
+export function selectIssuesTasks(
+  snapshot: readonly AgentTask[],
+  issueIds: ReadonlySet<string>,
+): IssueTaskGroups {
+  const running: AgentTask[] = [];
+  const queued: AgentTask[] = [];
+  for (const task of snapshot) {
+    if (!task.issue_id || !issueIds.has(task.issue_id)) continue;
+    if (task.status === "running") running.push(task);
+    else if (isQueuedTaskStatus(task.status)) queued.push(task);
+  }
+  return { running, queued };
+}
+
 export function deriveIssueSurfaceActivity(
   tasks: readonly AgentTask[],
 ): IssueSurfaceActivity {
