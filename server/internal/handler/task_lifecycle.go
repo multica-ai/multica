@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -13,27 +15,170 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// RecoverOrphanedTasks is called by the daemon at startup for each runtime
-// it owns. It atomically fails any dispatched/running tasks the server still
-// believes belong to that runtime — those are the tasks the previous daemon
-// process was running when it died — and triggers MaybeRetryFailedTask for
-// each so the user sees a fresh attempt instead of a permanently stuck row.
+// orphanRecoveryBatchSize bounds how many orphaned tasks one recover-orphans
+// PAGE fails (MUL-4332 review point 2). Registration upserts the runtime back to
+// `online`, so the every-tick offline sweep will NOT reap anything this call leaves
+// behind (review round 3, point 1); the daemon therefore drains all pages via the
+// keyset cursor rather than relying on a follow-up sweep. This bound only caps the
+// lock hold and event volume per page.
+const orphanRecoveryBatchSize = 500
+
+// maxServerOrphanDrainPages bounds the server-side drain loop used for legacy
+// clients (see RecoverOrphanedTasks). Each page fails up to orphanRecoveryBatchSize
+// (500) rows, so this covers ~500k orphaned rows in one request — far beyond any
+// real restart. It is purely a backstop so a pathological backlog can never hold
+// one HTTP request open forever; any residual is reclaimed on the next
+// registration. It mirrors the daemon client's own maxRecoverOrphanPages backstop.
+const maxServerOrphanDrainPages = 1000
+
+// RecoverOrphansRequest is the optional body of POST recover-orphans.
 //
-// This is the targeted fix for "issue stuck at in_progress when daemon
-// restarts mid-task": the runtime heartbeat sweeper takes up to 75s + the
-// in-process task timeout (2.5h) to notice such tasks; the daemon itself
-// knows the moment it comes back up, so we let it report orphan recovery.
+// Paginate is the client's capability signal (MUL-4332 review round 4, point 2):
+// a current daemon sets it true and drives the drain itself, threading the keyset
+// cursor across calls. A legacy daemon predates paging — it POSTs `{}` (or an empty
+// body) exactly once and ignores the response — so Paginate is absent/false and the
+// server must instead drain every page itself, or orphans past the first page leak
+// on a re-registered (now `online`) runtime that the offline sweep won't reap.
+//
+// Cursor* is threaded back by a paginating client for each subsequent page. Both
+// fields move together — a partial cursor is rejected.
+type RecoverOrphansRequest struct {
+	Paginate        bool   `json:"paginate,omitempty"`
+	CursorCreatedAt string `json:"cursor_created_at,omitempty"`
+	CursorID        string `json:"cursor_id,omitempty"`
+}
+
+// RecoverOrphansResponse reports one page of recovery. HasMore + NextCursor* let the
+// daemon drain the runtime's orphans across pages; NextCursor* advances over every
+// candidate this page locked (failed OR skipped-poison), so a page of poison at the
+// front cannot pin the drain — the next page steps past it (review round 3, point 1).
+type RecoverOrphansResponse struct {
+	Orphaned            int    `json:"orphaned"`
+	Retried             int    `json:"retried"`
+	Skipped             int    `json:"skipped"`
+	HasMore             bool   `json:"has_more"`
+	NextCursorCreatedAt string `json:"next_cursor_created_at,omitempty"`
+	NextCursorID        string `json:"next_cursor_id,omitempty"`
+}
+
+// RecoverOrphanedTasks is called by the daemon at startup for each runtime it owns.
+// It atomically fails a bounded page of the dispatched/running tasks the server
+// still believes belong to that runtime — those the previous daemon process was
+// running when it died — emitting each row's task.failed event in the same
+// transaction, then runs the shared post-failure pipeline (auto-retry, issue
+// rollback, reconcile). The daemon calls it repeatedly, threading the keyset cursor,
+// until HasMore is false.
+//
+// This is the targeted fix for "issue stuck at in_progress when daemon restarts
+// mid-task": the runtime heartbeat sweeper takes up to 75s + the in-process task
+// timeout (2.5h) to notice such tasks; the daemon knows the moment it comes back up.
+// Because registration flips the runtime back online, the offline sweep will not
+// catch a row beyond this page (review round 3, point 1) — hence the cursor-driven
+// drain instead of a single capped call.
 func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 	runtimeID := chi.URLParam(r, "runtimeId")
 	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
 		return
 	}
 
-	rows, err := h.Queries.RecoverOrphanedTasksForRuntime(r.Context(), parseUUID(runtimeID))
-	if err != nil {
-		slog.Warn("recover-orphans failed", "runtime_id", runtimeID, "error", err)
-		writeError(w, http.StatusInternalServerError, "recover orphans failed")
+	// Optional keyset cursor: absent on the first page, threaded back by the daemon
+	// for each subsequent page.
+	var req RecoverOrphansRequest
+	if r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+	}
+	afterCreatedAt, afterID, ok := parseOrphanCursor(w, req)
+	if !ok {
 		return
+	}
+
+	runtimeUUID := parseUUID(runtimeID)
+
+	// A capability-aware client (req.Paginate) drives the drain itself: fail exactly
+	// one page and hand back the cursor for it to continue. A legacy client — which
+	// POSTs {} once and ignores the body — cannot page, so the server drains every
+	// page itself in bounded per-page transactions; otherwise 501+ orphans on a
+	// re-registered (now `online`) runtime leak permanently (MUL-4332 review round 4,
+	// point 2). Both modes share recoverOrphansPage, so the per-page fact ⇔ event and
+	// poison-isolation semantics are identical.
+	if req.Paginate {
+		resp, _, _, err := h.recoverOrphansPage(r.Context(), runtimeUUID, runtimeID, afterCreatedAt, afterID)
+		if err != nil {
+			slog.Warn("recover-orphans failed", "runtime_id", runtimeID, "error", err)
+			writeError(w, http.StatusInternalServerError, "recover orphans failed")
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+		return
+	}
+
+	// Legacy single-shot client: drain all pages server-side. A partial cursor is
+	// already rejected above, so a legacy client always starts from the first page
+	// (both cursor components NULL).
+	var agg RecoverOrphansResponse
+	cursorCreatedAt, cursorID := afterCreatedAt, afterID
+	for page := 0; page < maxServerOrphanDrainPages; page++ {
+		resp, nextCreatedAt, nextID, err := h.recoverOrphansPage(r.Context(), runtimeUUID, runtimeID, cursorCreatedAt, cursorID)
+		if err != nil {
+			slog.Warn("recover-orphans failed", "runtime_id", runtimeID, "error", err)
+			writeError(w, http.StatusInternalServerError, "recover orphans failed")
+			return
+		}
+		agg.Orphaned += resp.Orphaned
+		agg.Retried += resp.Retried
+		agg.Skipped += resp.Skipped
+		if !resp.HasMore {
+			break
+		}
+		cursorCreatedAt, cursorID = nextCreatedAt, nextID
+	}
+	// The legacy client ignores the body, but return an accurate, explicitly
+	// non-paged (has_more=false) aggregate for logs and proxies.
+	writeJSON(w, http.StatusOK, agg)
+}
+
+// recoverOrphansPage fails one bounded page of the runtime's orphaned tasks and
+// runs the shared post-failure pipeline. It returns the page result plus the raw
+// keyset cursor of the last candidate (for the server-side legacy drain to thread
+// without re-parsing its own RFC3339 string). The cursor advances over EVERY
+// candidate the page locked — failed OR skipped-poison — so neither a paginating
+// client nor the server-side drain can be pinned by a page of poison at the front.
+func (h *Handler) recoverOrphansPage(
+	ctx context.Context,
+	runtimeUUID pgtype.UUID,
+	runtimeID string,
+	afterCreatedAt pgtype.Timestamptz,
+	afterID pgtype.UUID,
+) (RecoverOrphansResponse, pgtype.Timestamptz, pgtype.UUID, error) {
+	// Select one page of the runtime's orphaned tasks and fail the resolvable ones
+	// with their task.failed events atomically (MUL-4332 review point 2), so
+	// recovery converges onto the outbox like the runtime sweepers and an
+	// unresolvable poison row cannot block the rest. We capture the raw candidate
+	// page (before poison isolation drops rows) to compute has_more and the cursor.
+	var candidates []db.AgentTaskQueue
+	rows, err := h.TaskService.FailBulkTasksWithEvents(ctx,
+		func(qtx *db.Queries) ([]db.AgentTaskQueue, error) {
+			c, e := qtx.SelectOrphanedTasksForRuntime(ctx, db.SelectOrphanedTasksForRuntimeParams{
+				RuntimeID:      runtimeUUID,
+				AfterCreatedAt: afterCreatedAt,
+				AfterID:        afterID,
+				MaxPerTick:     orphanRecoveryBatchSize,
+			})
+			candidates = c
+			return c, e
+		},
+		func(qtx *db.Queries, ids []pgtype.UUID) ([]db.AgentTaskQueue, error) {
+			return qtx.FailAgentTasksByIDs(ctx, db.FailAgentTasksByIDsParams{
+				Ids:           ids,
+				Error:         pgtype.Text{String: "daemon restarted while task was in flight", Valid: true},
+				FailureReason: pgtype.Text{String: "runtime_recovery", Valid: true},
+			})
+		})
+	if err != nil {
+		return RecoverOrphansResponse{}, pgtype.Timestamptz{}, pgtype.UUID{}, err
 	}
 
 	// Funnel through the shared post-failure pipeline so we get the same
@@ -41,20 +186,63 @@ func (h *Handler) RecoverOrphanedTasks(w http.ResponseWriter, r *http.Request) {
 	// behaviour as the runtime sweeper. This was previously a fast-path
 	// that bypassed those side effects, leaving the UI stale when no retry
 	// was created (max_attempts exhausted, autopilot, non-retryable reason).
-	retried := h.TaskService.HandleFailedTasks(r.Context(), rows)
+	retried := h.TaskService.HandleFailedTasks(ctx, rows)
 
-	if len(rows) > 0 {
-		slog.Info("recover-orphans completed",
+	// A full candidate page means there may be more behind it. The cursor advances
+	// over the LAST candidate we locked (failed or skipped), so the next page never
+	// re-selects this page — including any poison rows left un-failed at the front.
+	resp := RecoverOrphansResponse{
+		Orphaned: len(rows),
+		Retried:  retried,
+		Skipped:  len(candidates) - len(rows),
+		HasMore:  len(candidates) == orphanRecoveryBatchSize,
+	}
+	var nextCreatedAt pgtype.Timestamptz
+	var nextID pgtype.UUID
+	if resp.HasMore && len(candidates) > 0 {
+		last := candidates[len(candidates)-1]
+		nextCreatedAt = last.CreatedAt
+		nextID = last.ID
+		resp.NextCursorCreatedAt = last.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
+		resp.NextCursorID = uuidToString(last.ID)
+	}
+
+	if len(candidates) > 0 {
+		slog.Info("recover-orphans page",
 			"runtime_id", runtimeID,
-			"orphaned", len(rows),
+			"candidates", len(candidates),
+			"orphaned", resp.Orphaned,
+			"skipped", resp.Skipped,
 			"retried", retried,
+			"has_more", resp.HasMore,
 		)
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{
-		"orphaned": len(rows),
-		"retried":  retried,
-	})
+	return resp, nextCreatedAt, nextID, nil
+}
+
+// parseOrphanCursor turns the optional (cursor_created_at, cursor_id) request pair
+// into keyset params. Neither present → the first page (both NULL). Both present →
+// the keyset. Exactly one present is a malformed cursor and is rejected, so a bad
+// client can never silently restart the drain from the beginning (an infinite loop).
+func parseOrphanCursor(w http.ResponseWriter, req RecoverOrphansRequest) (pgtype.Timestamptz, pgtype.UUID, bool) {
+	if req.CursorCreatedAt == "" && req.CursorID == "" {
+		return pgtype.Timestamptz{}, pgtype.UUID{}, true
+	}
+	if req.CursorCreatedAt == "" || req.CursorID == "" {
+		writeError(w, http.StatusBadRequest, "cursor_created_at and cursor_id must be set together")
+		return pgtype.Timestamptz{}, pgtype.UUID{}, false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, req.CursorCreatedAt)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid cursor_created_at")
+		return pgtype.Timestamptz{}, pgtype.UUID{}, false
+	}
+	id, ok := parseUUIDOrBadRequest(w, req.CursorID, "cursor_id")
+	if !ok {
+		return pgtype.Timestamptz{}, pgtype.UUID{}, false
+	}
+	return pgtype.Timestamptz{Time: ts, Valid: true}, id, true
 }
 
 // PinTaskSession lets the daemon persist the agent's session_id and

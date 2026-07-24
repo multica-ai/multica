@@ -16,8 +16,10 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
+	"github.com/multica-ai/multica/server/internal/domainevent"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -2651,6 +2653,25 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 			}
 			chatAssistantMsg = msg
 		}
+
+		// Transactional outbox (MUL-4332): emit task.completed atomically with
+		// the status flip. The status CAS above makes this exactly-once — a
+		// replayed callback finds the task already terminal and never re-emits.
+		// Fail-closed on workspace resolution (review point 4): if the workspace
+		// is unresolvable we error out and roll the completion back rather than
+		// commit the fact without its event.
+		wsID := s.resolveTaskWorkspaceForEvent(ctx, qtx, t)
+		if !wsID.Valid {
+			return fmt.Errorf("task.completed event: unresolvable workspace for task %s", util.UUIDToString(t.ID))
+		}
+		evt := domainevent.TaskCompleted(wsID, t.ID, domainevent.AgentActor(t.AgentID),
+			domainevent.TaskCompletedPayload{
+				IssueID: util.UUIDToString(t.IssueID),
+				AgentID: util.UUIDToString(t.AgentID),
+			})
+		if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
+			return fmt.Errorf("write task.completed event: %w", err)
+		}
 		return nil
 	}); err != nil {
 		// When parallel agents race, a task may already be completed,
@@ -3030,6 +3051,27 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 				return fmt.Errorf("create retry task: %w", cerr)
 			}
 			retried = &child
+		}
+
+		// Transactional outbox (MUL-4332): emit task.failed atomically with the
+		// fail (and any retry child). retry_eligible is the atomically-decidable
+		// eligibility predicate — NOT a promise a child was created — computed from
+		// the just-failed row so it matches the bulk paths exactly; here a child is
+		// in fact created in this same tx when eligible. The status CAS makes it
+		// exactly-once. Fail-closed on workspace resolution (review point 4).
+		wsID := s.resolveTaskWorkspaceForEvent(ctx, qtx, t)
+		if !wsID.Valid {
+			return fmt.Errorf("task.failed event: unresolvable workspace for task %s", util.UUIDToString(t.ID))
+		}
+		evt := domainevent.TaskFailed(wsID, t.ID, domainevent.AgentActor(t.AgentID),
+			domainevent.TaskFailedPayload{
+				IssueID:       util.UUIDToString(t.IssueID),
+				AgentID:       util.UUIDToString(t.AgentID),
+				RetryEligible: retryEligible(failureReason, t),
+				ErrorCode:     failureReason,
+			})
+		if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
+			return fmt.Errorf("write task.failed event: %w", err)
 		}
 		return nil
 	}); err != nil {
@@ -3629,23 +3671,61 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 							"error", checkErr,
 						)
 					} else if !hasActive {
-						updatedIssue, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-							ID:          t.IssueID,
-							Status:      "todo",
-							WorkspaceID: issue.WorkspaceID,
+						var updatedIssue db.Issue
+						var didReset bool
+						// Transactional outbox (MUL-4332): the stuck-issue reset bypasses the
+						// HTTP UpdateIssue path, so emit issue.status_changed atomically here.
+						updateErr := domainevent.WriteInTx(ctx, s.TxStarter, s.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+							// Re-decide the reset UNDER the row lock (review point 4). The
+							// in_progress + no-active-task check that gated this branch was read
+							// outside the tx, so within the window a user could have moved the
+							// issue to done, or a fresh task could have been claimed. Only a
+							// still-in_progress issue with still no active task is reset — a
+							// user-completed issue must never be silently reopened. `from` then
+							// always reflects the true edge (also review point 3).
+							before, bErr := qtx.LockIssueRowForUpdate(ctx, db.LockIssueRowForUpdateParams{
+								ID:          t.IssueID,
+								WorkspaceID: issue.WorkspaceID,
+							})
+							if bErr != nil {
+								return nil, bErr
+							}
+							if before.Status != "in_progress" {
+								return nil, nil
+							}
+							stillActive, aErr := qtx.HasActiveTaskForIssue(ctx, t.IssueID)
+							if aErr != nil {
+								return nil, aErr
+							}
+							if stillActive {
+								return nil, nil
+							}
+							u, uErr := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+								ID:          t.IssueID,
+								Status:      "todo",
+								WorkspaceID: issue.WorkspaceID,
+							})
+							if uErr != nil {
+								return nil, uErr
+							}
+							updatedIssue = u
+							didReset = true
+							return []domainevent.Event{domainevent.IssueStatusChanged(u.WorkspaceID, u.ID, domainevent.SystemActor(),
+								domainevent.IssueStatusChangedPayload{From: before.Status, To: u.Status})}, nil
 						})
 						if updateErr != nil {
 							slog.Warn("handle failed tasks: reset stuck issue failed",
 								"issue_id", issueKey,
 								"error", updateErr,
 							)
-						} else {
+						} else if didReset {
 							// This direct reset bypasses the HTTP UpdateIssue
 							// handler that normally emits issue:updated, so emit
 							// it here too. Without it the board / status-filter
 							// caches keep showing the issue as in_progress until
-							// the next write touches it (#4648 / MUL-3782).
-							s.broadcastIssueUpdated(updatedIssue, issue.Status)
+							// the next write touches it (#4648 / MUL-3782). The reset
+							// only fires from in_progress, so that is the true prev.
+							s.broadcastIssueUpdated(updatedIssue, "in_progress")
 						}
 					}
 				}
@@ -3683,6 +3763,152 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 // runInTx executes fn inside a single DB transaction. If TxStarter is nil
 // (e.g. some tests construct TaskService directly), fn runs against the
 // regular Queries handle without transactional guarantees.
+// resolveTaskWorkspaceForEvent resolves a task's workspace for stamping a task
+// domain event (agent_task_queue carries no workspace column). It reads on the
+// passed qtx so the lookup stays in the caller's transaction, and walks the
+// task's stable attribution — issue, chat session, autopilot run, quick-create
+// context — before finally falling back to the owning agent. This mirrors
+// ResolveTaskWorkspaceID's chain but tx-scoped and with the agent fallback that
+// resolver lacks. An invalid return means genuinely unresolvable; the caller
+// treats that as fail-closed (review point 4): it errors out and rolls the whole
+// terminal transition back rather than committing a fact with no event.
+func (s *TaskService) resolveTaskWorkspaceForEvent(ctx context.Context, qtx *db.Queries, task db.AgentTaskQueue) pgtype.UUID {
+	if task.IssueID.Valid {
+		if issue, err := qtx.GetIssue(ctx, task.IssueID); err == nil {
+			return issue.WorkspaceID
+		}
+	}
+	if task.ChatSessionID.Valid {
+		if cs, err := qtx.GetChatSession(ctx, task.ChatSessionID); err == nil {
+			return cs.WorkspaceID
+		}
+	}
+	if task.AutopilotRunID.Valid {
+		if run, err := qtx.GetAutopilotRun(ctx, task.AutopilotRunID); err == nil {
+			if ap, err := qtx.GetAutopilot(ctx, run.AutopilotID); err == nil {
+				return ap.WorkspaceID
+			}
+		}
+	}
+	if qc, ok := s.parseQuickCreateContext(task); ok {
+		if ws, err := util.ParseUUID(qc.WorkspaceID); err == nil && ws.Valid {
+			return ws
+		}
+	}
+	if task.AgentID.Valid {
+		if agent, err := qtx.GetAgent(ctx, task.AgentID); err == nil {
+			return agent.WorkspaceID
+		}
+	}
+	return pgtype.UUID{}
+}
+
+// FailBulkTasksWithEvents is the poison-isolated bulk fail path (MUL-4332 review
+// points 2 & 3). Rather than one condition-scoped UPDATE that fails every match
+// in a single statement — where one corrupt row rolls back the whole batch and
+// an unbounded match can lock a huge span — it runs, in ONE transaction:
+//
+//  1. selectFn row-locks a BOUNDED candidate batch (FOR UPDATE SKIP LOCKED +
+//     LIMIT), so the lock hold is short and we never contend with a daemon's
+//     claim path;
+//  2. each candidate's workspace is resolved on the same tx. A task whose
+//     workspace is genuinely unresolvable (corrupt / orphaned historical row)
+//     is EXCLUDED and logged — it can never have a valid event, so failing it
+//     would strand a fact without one; skipping it fail-closed keeps the healthy
+//     tasks in the batch unblocked (review point 2);
+//  3. failFn fails only the resolvable id set;
+//  4. one task.failed event is written per failed row, atomically with the fail.
+//
+// The actor is the platform (SystemActor): these are sweeper / orphan-recovery
+// paths, not an agent action — the agent is already carried in the payload
+// (review point 3). retry_eligible is the same atomically-decidable predicate
+// HandleFailedTasks uses to gate the post-commit auto-retry, committed in this
+// transaction. It reports eligibility only: on these paths the retry child is
+// created best-effort AFTER commit, so the event never promises a fresh attempt
+// will actually arrive (review point 3, third round).
+//
+// A transient event/commit failure rolls back only the CURRENT batch (no fact is
+// ever committed without its event), so the next sweep tick simply re-selects and
+// retries — every caller runs on a fixed cadence.
+func (s *TaskService) FailBulkTasksWithEvents(
+	ctx context.Context,
+	selectFn func(qtx *db.Queries) ([]db.AgentTaskQueue, error),
+	failFn func(qtx *db.Queries, ids []pgtype.UUID) ([]db.AgentTaskQueue, error),
+) ([]db.AgentTaskQueue, error) {
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("begin tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+
+	candidates, err := selectFn(qtx)
+	if err != nil {
+		return nil, err
+	}
+	if len(candidates) == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit tx: %w", err)
+		}
+		return nil, nil
+	}
+
+	ids := make([]pgtype.UUID, 0, len(candidates))
+	wsByID := make(map[string]pgtype.UUID, len(candidates))
+	for _, t := range candidates {
+		wsID := s.resolveTaskWorkspaceForEvent(ctx, qtx, t)
+		if !wsID.Valid {
+			// Fail-closed but ISOLATED: a task with no resolvable workspace can
+			// have no valid event, so skip it (leaving it for ops to reap) instead
+			// of aborting the batch and stranding every healthy task with it.
+			slog.Warn("bulk fail: skipping task with unresolvable workspace",
+				"task_id", util.UUIDToString(t.ID),
+				"agent_id", util.UUIDToString(t.AgentID))
+			continue
+		}
+		ids = append(ids, t.ID)
+		wsByID[util.UUIDToString(t.ID)] = wsID
+	}
+	if len(ids) == 0 {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit tx: %w", err)
+		}
+		return nil, nil
+	}
+
+	failed, err := failFn(qtx, ids)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range failed {
+		wsID, ok := wsByID[util.UUIDToString(t.ID)]
+		if !ok || !wsID.Valid {
+			// Defensive: failFn returned a row we never resolved. Impossible in one
+			// tx (ids came from wsByID), but fail-closed rather than emit an event
+			// with no workspace.
+			return nil, fmt.Errorf("task.failed event: unresolved workspace for task %s", util.UUIDToString(t.ID))
+		}
+		reason := ""
+		if t.FailureReason.Valid {
+			reason = t.FailureReason.String
+		}
+		evt := domainevent.TaskFailed(wsID, t.ID, domainevent.SystemActor(),
+			domainevent.TaskFailedPayload{
+				IssueID:       util.UUIDToString(t.IssueID),
+				AgentID:       util.UUIDToString(t.AgentID),
+				RetryEligible: retryEligible(reason, t),
+				ErrorCode:     reason,
+			})
+		if _, err := domainevent.Write(ctx, qtx, evt); err != nil {
+			return nil, err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("commit tx: %w", err)
+	}
+	return failed, nil
+}
+
 func (s *TaskService) runInTx(ctx context.Context, fn func(*db.Queries) error) error {
 	if s.TxStarter == nil {
 		return fn(s.Queries)
@@ -4106,26 +4332,25 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 // issue's status before the write so the client can gate that reconcile on
 // status_changed.
 //
-// The `issue` payload is a map (issueToMap), which the workspace WS fanout
-// (listeners.go SubscribeAll) marshals and broadcasts as-is — that is what
-// drives the UI reconcile. Note this does NOT cover the full HTTP UpdateIssue
-// side effects: the activity-log and inbox listeners type-assert `issue` to a
-// handler.IssueResponse and skip a map, so a background status reset does not
-// emit status-change activity / notifications. That is intentional for the
-// realtime-staleness fix (#4648 / MUL-3782); folding those side effects in
-// would mean unifying the payload type and is left as a follow-up.
+// This is a background status reset, NOT an authoritative user action, so it is
+// realtime-only: TriggerSideEffects is false, so the activity / inbox / autopilot /
+// subscriber listeners skip it, preserving the deliberate scope of the
+// realtime-staleness fix (#4648 / MUL-3782). Before MUL-4332 review a′ that skip
+// was implicit — the listeners type-asserted handler.IssueResponse and a plain map
+// fell through — which is exactly the fragile fork the typed contract replaces. On
+// the wire the `issue` sub-object is unchanged (still issueToMap); the top-level
+// changed/prev fields the typed struct always emits are a backward-compatible
+// addition, not a strict key-set match with the old sparse map.
 func (s *TaskService) broadcastIssueUpdated(issue db.Issue, prevStatus string) {
 	prefix := s.getIssuePrefix(issue.WorkspaceID)
+	before := issue
+	before.Status = prevStatus
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventIssueUpdated,
 		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
 		ActorType:   "system",
 		ActorID:     "",
-		Payload: map[string]any{
-			"issue":          issueToMap(issue, prefix),
-			"status_changed": prevStatus != issue.Status,
-			"prev_status":    prevStatus,
-		},
+		Payload:     issueevent.Build(before, issue, issueToMap(issue, prefix), false),
 	})
 }
 
@@ -4158,17 +4383,32 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			rootComment = &root
 		}
 	}
-	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:      issueID,
-		WorkspaceID:  issue.WorkspaceID,
-		AuthorType:   "agent",
-		AuthorID:     agentID,
-		Content:      content,
-		Type:         commentType,
-		ParentID:     parentID,
-		SourceTaskID: sourceTaskID,
-	})
-	if err != nil {
+	// Transactional outbox (MUL-4332 review point 2): the agent runtime comment
+	// and its comment.created event commit in one transaction.
+	var comment db.Comment
+	if err := domainevent.WriteInTx(ctx, s.TxStarter, s.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+		created, cErr := qtx.CreateComment(ctx, db.CreateCommentParams{
+			IssueID:      issueID,
+			WorkspaceID:  issue.WorkspaceID,
+			AuthorType:   "agent",
+			AuthorID:     agentID,
+			Content:      content,
+			Type:         commentType,
+			ParentID:     parentID,
+			SourceTaskID: sourceTaskID,
+		})
+		if cErr != nil {
+			return nil, cErr
+		}
+		comment = created
+		return []domainevent.Event{domainevent.CommentCreated(created.WorkspaceID, created.ID, domainevent.AgentActor(agentID),
+			domainevent.CommentCreatedPayload{
+				IssueID:    util.UUIDToString(created.IssueID),
+				AuthorType: "agent",
+				AuthorID:   util.UUIDToString(agentID),
+				ParentID:   util.UUIDToString(parentID),
+			})}, nil
+	}); err != nil {
 		return
 	}
 	s.CancelDeferredEscalationsForIssueAgent(ctx, issueID, agentID)

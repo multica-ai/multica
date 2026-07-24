@@ -31,6 +31,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/domainevent"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -278,6 +279,12 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
 			return
 		}
+		// Transactional outbox (MUL-4332): onboarding issue.created.
+		if _, err := domainevent.Write(r.Context(), qtx, domainevent.IssueCreatedFromRow(issue)); err != nil {
+			slog.Warn("bootstrap onboarding (shim): write issue.created event failed", append(logger.RequestAttrs(r), "error", err)...)
+			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+			return
+		}
 		issueCreated = true
 	}
 
@@ -433,6 +440,12 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 		})
 		if err != nil {
 			slog.Warn("bootstrap no-runtime onboarding (shim): create issue failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", req.WorkspaceID)...)
+			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
+			return
+		}
+		// Transactional outbox (MUL-4332): onboarding issue.created.
+		if _, err := domainevent.Write(r.Context(), qtx, domainevent.IssueCreatedFromRow(issue)); err != nil {
+			slog.Warn("bootstrap no-runtime onboarding (shim): write issue.created event failed", append(logger.RequestAttrs(r), "error", err)...)
 			writeError(w, http.StatusInternalServerError, "failed to create onboarding issue")
 			return
 		}

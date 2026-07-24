@@ -6,6 +6,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -219,8 +220,8 @@ func TestSubscriberIssueUpdated_AssigneeChanged(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:           issueID,
 				WorkspaceID:  testWorkspaceID,
 				Title:        "test issue",
@@ -231,7 +232,8 @@ func TestSubscriberIssueUpdated_AssigneeChanged(t *testing.T) {
 				AssigneeType: &assigneeType,
 				AssigneeID:   &assigneeID,
 			},
-			"assignee_changed": true,
+			AssigneeChanged:    true,
+			TriggerSideEffects: true,
 		},
 	})
 
@@ -254,8 +256,8 @@ func TestSubscriberIssueUpdated_NoAssigneeChange(t *testing.T) {
 		WorkspaceID: testWorkspaceID,
 		ActorType:   "member",
 		ActorID:     testUserID,
-		Payload: map[string]any{
-			"issue": handler.IssueResponse{
+		Payload: issueevent.IssueUpdatedPayload{
+			Snapshot: issueevent.IssueSnapshot{
 				ID:          issueID,
 				WorkspaceID: testWorkspaceID,
 				Title:       "test issue",
@@ -264,8 +266,9 @@ func TestSubscriberIssueUpdated_NoAssigneeChange(t *testing.T) {
 				CreatorType: "member",
 				CreatorID:   testUserID,
 			},
-			"assignee_changed": false,
-			"status_changed":   true,
+			AssigneeChanged:    false,
+			StatusChanged:      true,
+			TriggerSideEffects: true,
 		},
 	})
 

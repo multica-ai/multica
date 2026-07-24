@@ -24,6 +24,8 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/domainevent"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1440,34 +1442,66 @@ func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtyp
 }
 
 func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, workspaceID string) {
-	updated, err := h.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-		ID:          issue.ID,
-		Status:      "done",
-		WorkspaceID: issue.WorkspaceID,
-	})
-	if err != nil {
+	// Transactional outbox (MUL-4332): a merged PR closing an issue is one of the
+	// most common status transitions to `done`, so emit issue.status_changed
+	// atomically with the status flip — but only on a real transition (an
+	// already-done issue produces no event).
+	var updated db.Issue
+	var before db.Issue
+	if err := domainevent.WriteInTx(ctx, h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+		// Lock + read the authoritative row so the event `from` is correct
+		// even if another writer moved the issue concurrently (review point 3).
+		locked, err := qtx.LockIssueRowForUpdate(ctx, db.LockIssueRowForUpdateParams{
+			ID:          issue.ID,
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		before = locked
+		u, err := qtx.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:          issue.ID,
+			Status:      "done",
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		updated = u
+		if before.Status == u.Status {
+			return nil, nil
+		}
+		return []domainevent.Event{domainevent.IssueStatusChanged(u.WorkspaceID, u.ID, domainevent.SystemActor(),
+			domainevent.IssueStatusChangedPayload{From: before.Status, To: u.Status})}, nil
+	}); err != nil {
 		slog.Warn("github: advance issue to done failed", "err", err)
 		return
 	}
 
+	// A merged PR can land for an issue that is already `done` — a duplicate
+	// webhook, or a concurrent path that won the race. The locked pre-image tells
+	// us whether THIS call actually transitioned it. On a no-op we already emitted
+	// no domain event; the parent notification and realtime status_changed must
+	// be suppressed on the SAME condition, else a no-op re-drives the child-done
+	// comment / trigger and a spurious "issue updated" (review point 4).
+	if before.Status == updated.Status {
+		return
+	}
+
 	// Fire the platform parent-notification path on the same transition the
-	// HTTP UpdateIssue / BatchUpdateIssues paths use. A merged PR is one of
-	// the most common ways a sub-issue actually reaches `done`, and skipping
-	// it here would leave the parent silent for the dominant completion path.
-	// notifyParentOfChildDone re-checks every guard (prev != done, parent
-	// exists, parent not terminal), so calling it unconditionally is safe.
-	h.notifyParentOfChildDone(ctx, issue, updated)
+	// HTTP UpdateIssue / BatchUpdateIssues paths use, driven by the locked
+	// pre-image. A merged PR is one of the most common ways a sub-issue actually
+	// reaches `done`. notifyParentOfChildDone re-checks every guard (prev != done,
+	// parent exists, parent not terminal).
+	h.notifyParentOfChildDone(ctx, before, updated)
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)
-	h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", map[string]any{
-		"issue":          resp,
-		"status_changed": true,
-		"prev_status":    issue.Status,
-		"creator_type":   issue.CreatorType,
-		"creator_id":     uuidToString(issue.CreatorID),
-		"source":         "github_pr_merged",
-	})
+	// The shared typed payload (MUL-4332 review a′). A merged PR is an authoritative
+	// system change, so it fires the full side effects, as it did before.
+	payload := issueevent.Build(before, updated, resp, true)
+	payload.Source = "github_pr_merged"
+	h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", payload)
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────

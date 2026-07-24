@@ -1292,6 +1292,31 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Event Hooks (MUL-4332) - automation rules CRUD. Every handler
+			// additionally gates on the automation_event_hooks feature flag
+			// (default off), so this surface is invisible until enabled.
+			r.Route("/api/hooks", func(r chi.Router) {
+				r.Get("/", h.ListHooks)
+				r.Post("/", h.CreateHook)
+				// Read-only debug surface (PR3, decision 2A): evaluate a candidate
+				// spec or a stored hook against a historical event without executing
+				// anything. chi matches these static routes before the /{id} param.
+				r.Post("/dry-run", h.DryRunHook)
+				r.Post("/explain", h.ExplainHook)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetHook)
+					r.Patch("/", h.UpdateHook)
+					r.Delete("/", h.DeleteHook)
+					r.Post("/enable", h.EnableHook)
+					r.Post("/disable", h.DisableHook)
+					r.Get("/executions", h.ListHookExecutions)
+				})
+			})
+
+			// Event Hooks correlation-chain read (PR3, decision 2A), gated on the
+			// same automation_event_hooks flag inside the handler.
+			r.Get("/api/events", h.ListEventsByCorrelation)
+
 			// Dashboard — workspace-wide token + run-time rollups for the
 			// "/{slug}/dashboard" page. Optional ?project_id filter scopes
 			// the rollup to a single project.

@@ -175,6 +175,16 @@ type Attachment struct {
 	TaskID        pgtype.UUID        `json:"task_id"`
 }
 
+// Durable row-lockable automation state, not an audit log. No foreign keys.
+type AutomationState struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	StateKind   string             `json:"state_kind"`
+	StateKey    string             `json:"state_key"`
+	State       []byte             `json:"state"`
+	Version     int64              `json:"version"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Autopilot struct {
 	ID                 pgtype.UUID        `json:"id"`
 	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
@@ -475,6 +485,31 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+// Transactional-outbox domain event log (MUL-4332 §4.1). One row per committed domain fact, written in the same tx as the fact. Source of truth for the hooks engine; no FK, no cascade, app-layer integrity. dispatch_* columns are the single-consumer outbox lease consumed by the PR3 matcher.
+type DomainEvent struct {
+	ID                   pgtype.UUID        `json:"id"`
+	Seq                  int64              `json:"seq"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	Type                 string             `json:"type"`
+	SchemaVersion        int32              `json:"schema_version"`
+	SubjectType          string             `json:"subject_type"`
+	SubjectID            pgtype.UUID        `json:"subject_id"`
+	ActorType            string             `json:"actor_type"`
+	ActorID              pgtype.UUID        `json:"actor_id"`
+	Payload              []byte             `json:"payload"`
+	CorrelationID        pgtype.UUID        `json:"correlation_id"`
+	CausationExecutionID pgtype.UUID        `json:"causation_execution_id"`
+	CausationActionIndex pgtype.Int4        `json:"causation_action_index"`
+	HopCount             int32              `json:"hop_count"`
+	DispatchStatus       string             `json:"dispatch_status"`
+	Attempts             int32              `json:"attempts"`
+	AvailableAt          pgtype.Timestamptz `json:"available_at"`
+	LeaseToken           pgtype.UUID        `json:"lease_token"`
+	LeaseExpiresAt       pgtype.Timestamptz `json:"lease_expires_at"`
+	DispatchedAt         pgtype.Timestamptz `json:"dispatched_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -570,6 +605,85 @@ type GithubPullRequestCheckSuite struct {
 	Conclusion pgtype.Text        `json:"conclusion"`
 	Status     string             `json:"status"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+// Event Hooks stable identity and lifecycle owner. No foreign keys; application validates all associations.
+type Hook struct {
+	ID                           pgtype.UUID        `json:"id"`
+	WorkspaceID                  pgtype.UUID        `json:"workspace_id"`
+	Name                         string             `json:"name"`
+	Enabled                      bool               `json:"enabled"`
+	ActiveRevisionID             pgtype.UUID        `json:"active_revision_id"`
+	ScopeType                    string             `json:"scope_type"`
+	ScopeID                      pgtype.UUID        `json:"scope_id"`
+	RetireAfterEventSeq          pgtype.Int8        `json:"retire_after_event_seq"`
+	Origin                       string             `json:"origin"`
+	SystemKey                    pgtype.Text        `json:"system_key"`
+	SystemVersion                pgtype.Int4        `json:"system_version"`
+	CreatorActorType             string             `json:"creator_actor_type"`
+	CreatorActorID               pgtype.UUID        `json:"creator_actor_id"`
+	AuthorizationPrincipalUserID pgtype.UUID        `json:"authorization_principal_user_id"`
+	DisabledReason               pgtype.Text        `json:"disabled_reason"`
+	CreatedAt                    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                    pgtype.Timestamptz `json:"updated_at"`
+	ArchivedAt                   pgtype.Timestamptz `json:"archived_at"`
+}
+
+// One durable idempotency record per hook execution action. No foreign keys.
+type HookActionEffect struct {
+	ID            pgtype.UUID        `json:"id"`
+	EffectKey     string             `json:"effect_key"`
+	ExecutionID   pgtype.UUID        `json:"execution_id"`
+	ActionIndex   int32              `json:"action_index"`
+	ActionType    string             `json:"action_type"`
+	Status        string             `json:"status"`
+	ResolvedInput []byte             `json:"resolved_input"`
+	OutputType    pgtype.Text        `json:"output_type"`
+	OutputID      pgtype.UUID        `json:"output_id"`
+	Attempts      int32              `json:"attempts"`
+	ErrorCode     pgtype.Text        `json:"error_code"`
+	Error         pgtype.Text        `json:"error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	CompletedAt   pgtype.Timestamptz `json:"completed_at"`
+}
+
+// Durable matcher/executor trace with revision pinning. No foreign keys; application validates all associations.
+type HookExecution struct {
+	ID                 pgtype.UUID        `json:"id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	HookID             pgtype.UUID        `json:"hook_id"`
+	HookRevisionID     pgtype.UUID        `json:"hook_revision_id"`
+	EventID            pgtype.UUID        `json:"event_id"`
+	CorrelationID      pgtype.UUID        `json:"correlation_id"`
+	Status             string             `json:"status"`
+	SkipReason         pgtype.Text        `json:"skip_reason"`
+	MatchSnapshot      []byte             `json:"match_snapshot"`
+	ConditionSnapshot  []byte             `json:"condition_snapshot"`
+	CurrentActionIndex int32              `json:"current_action_index"`
+	Attempts           int32              `json:"attempts"`
+	NextAttemptAt      pgtype.Timestamptz `json:"next_attempt_at"`
+	LeaseToken         pgtype.UUID        `json:"lease_token"`
+	LeaseExpiresAt     pgtype.Timestamptz `json:"lease_expires_at"`
+	ErrorCode          pgtype.Text        `json:"error_code"`
+	Error              pgtype.Text        `json:"error"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	StartedAt          pgtype.Timestamptz `json:"started_at"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+}
+
+// Immutable Event Hooks configuration revisions. No foreign keys; application validates hook ownership.
+type HookRevision struct {
+	ID            pgtype.UUID        `json:"id"`
+	HookID        pgtype.UUID        `json:"hook_id"`
+	Revision      int32              `json:"revision"`
+	EventType     string             `json:"event_type"`
+	Match         []byte             `json:"match"`
+	Conditions    []byte             `json:"conditions"`
+	FireMode      string             `json:"fire_mode"`
+	Actions       []byte             `json:"actions"`
+	CreatedByType string             `json:"created_by_type"`
+	CreatedByID   pgtype.UUID        `json:"created_by_id"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type InboxItem struct {

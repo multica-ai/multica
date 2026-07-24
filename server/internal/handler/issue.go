@@ -18,6 +18,8 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/domainevent"
+	"github.com/multica-ai/multica/server/internal/issueevent"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -2878,18 +2880,105 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Which of the remaining bare-narg columns this request actually targeted.
+	// An untouched one is rebuilt from the locked row inside the tx (review
+	// point 1) so a concurrent writer's change is never silently rolled back.
+	_, touchedStartDate := rawFields["start_date"]
+	_, touchedDueDate := rawFields["due_date"]
+	_, touchedParent := rawFields["parent_issue_id"]
+	_, touchedProject := rawFields["project_id"]
+	_, touchedStage := rawFields["stage"]
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
 		return
 	}
 
-	issue, err := h.Queries.UpdateIssue(r.Context(), params)
+	// Resolve the acting identity once, up here, so the transactional-outbox
+	// events below and the realtime publish further down share one actor.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	actorUUID, _ := util.ParseUUID(actorID)
+	eventActor := domainevent.ActorFrom(actorType, actorUUID)
+
+	// Transactional outbox (MUL-4332): commit the issue update and any derived
+	// status_changed / assigned event in one transaction, so a crash can never
+	// separate the fact from its event. The pre-image is read under a row lock
+	// INSIDE the tx (not from the pre-tx prevIssue snapshot), so concurrent
+	// transitions serialize and each records the true edge (review point 3), and
+	// every untouched nullable column is rebuilt from it (review point 1).
+	var issue db.Issue
+	var before db.Issue
+	err = domainevent.WriteInTx(r.Context(), h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+		locked, err := qtx.LockIssueRowForUpdate(r.Context(), db.LockIssueRowForUpdateParams{
+			ID:          prevIssue.ID,
+			WorkspaceID: prevIssue.WorkspaceID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		before = locked
+
+		// Rebuild every bare-narg column this request did NOT target from the
+		// locked row, so an unrelated update never clobbers a field a concurrent
+		// writer just changed (review point 1). assignee_type/id move together
+		// because validateAssigneePair validated them as a pair above.
+		if !touchedType && !touchedID {
+			params.AssigneeType = before.AssigneeType
+			params.AssigneeID = before.AssigneeID
+		}
+		if !touchedStartDate {
+			params.StartDate = before.StartDate
+		}
+		if !touchedDueDate {
+			params.DueDate = before.DueDate
+		}
+		if !touchedParent {
+			params.ParentIssueID = before.ParentIssueID
+		}
+		if !touchedProject {
+			params.ProjectID = before.ProjectID
+		}
+		if !touchedStage {
+			params.Stage = before.Stage
+		}
+
+		updated, err := qtx.UpdateIssue(r.Context(), params)
+		if err != nil {
+			return nil, err
+		}
+		issue = updated
+
+		var events []domainevent.Event
+		if before.Status != updated.Status {
+			events = append(events, domainevent.IssueStatusChanged(updated.WorkspaceID, updated.ID, eventActor,
+				domainevent.IssueStatusChangedPayload{From: before.Status, To: updated.Status}))
+		}
+		// Only emit assigned when the request actually targeted the assignee, so
+		// an unrelated field update never surfaces a spurious assignment; `from`
+		// still comes from the locked row.
+		if (touchedType || touchedID) &&
+			(before.AssigneeType.String != updated.AssigneeType.String || uuidToString(before.AssigneeID) != uuidToString(updated.AssigneeID)) {
+			events = append(events, domainevent.IssueAssigned(updated.WorkspaceID, updated.ID, eventActor,
+				domainevent.IssueAssignedPayload{
+					FromAssigneeType: before.AssigneeType.String,
+					FromAssigneeID:   uuidToString(before.AssigneeID),
+					ToAssigneeType:   updated.AssigneeType.String,
+					ToAssigneeID:     uuidToString(updated.AssigneeID),
+				}))
+		}
+		return events, nil
+	})
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
 	}
+	// The locked pre-image is the authoritative prev-state: drive every
+	// post-commit side effect (realtime publish, enqueue predicate, parent
+	// notify) from the transition that TRULY happened rather than the pre-tx
+	// snapshot, which a concurrent writer may have already superseded (review
+	// point 4).
+	prevIssue = before
 
 	if len(attachmentIDs) > 0 {
 		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
@@ -2902,45 +2991,12 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	assigneeChanged := (req.AssigneeType != nil || req.AssigneeID != nil) &&
 		(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
 	statusChanged := req.Status != nil && prevIssue.Status != issue.Status
-	priorityChanged := req.Priority != nil && prevIssue.Priority != issue.Priority
-	// project_changed gates the client's per-project issue-list refetch the way
-	// status/assignee flags gate theirs. Without it the client must diff
-	// project_id against its own cache, which breaks once an optimistic local
-	// move has overwritten the cached value (MUL-3669 / #4548).
-	projectChanged := req.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
-	descriptionChanged := req.Description != nil && textToPtr(prevIssue.Description) != resp.Description
-	titleChanged := req.Title != nil && prevIssue.Title != issue.Title
-	prevStartDate := dateToPtr(prevIssue.StartDate)
-	startDateChanged := prevStartDate != resp.StartDate && (prevStartDate == nil) != (resp.StartDate == nil) ||
-		(prevStartDate != nil && resp.StartDate != nil && *prevStartDate != *resp.StartDate)
-	prevDueDate := dateToPtr(prevIssue.DueDate)
-	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
-		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
-
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-
-	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
-		"issue":               resp,
-		"assignee_changed":    assigneeChanged,
-		"status_changed":      statusChanged,
-		"priority_changed":    priorityChanged,
-		"project_changed":     projectChanged,
-		"start_date_changed":  startDateChanged,
-		"due_date_changed":    dueDateChanged,
-		"description_changed": descriptionChanged,
-		"title_changed":       titleChanged,
-		"prev_title":          prevIssue.Title,
-		"prev_assignee_type":  textToPtr(prevIssue.AssigneeType),
-		"prev_assignee_id":    uuidToPtr(prevIssue.AssigneeID),
-		"prev_status":         prevIssue.Status,
-		"prev_priority":       prevIssue.Priority,
-		"prev_start_date":     prevStartDate,
-		"prev_due_date":       prevDueDate,
-		"prev_description":    textToPtr(prevIssue.Description),
-		"creator_type":        prevIssue.CreatorType,
-		"creator_id":          uuidToString(prevIssue.CreatorID),
-	})
+	// One typed payload, its diff computed purely from the locked before/after
+	// pre-image, shared by every issue:updated producer (MUL-4332 review a′). This
+	// is an authoritative user change, so it fires the full side effects.
+	// actorType / actorID were resolved above (shared with the domain events).
+	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID,
+		issueevent.Build(prevIssue, issue, resp, true))
 
 	// Reconcile the task queue. Whether this write starts an agent run — and
 	// for whom (agent assignee or squad leader) — is decided by the single
@@ -3426,30 +3482,101 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 		}
+		// Untouched bare-narg columns are rebuilt from the locked row inside the
+		// tx (review point 1) so an unrelated field is never rolled back.
+		_, batchTouchedStartDate := rawUpdates["start_date"]
+		_, batchTouchedDueDate := rawUpdates["due_date"]
+		_, batchTouchedParent := rawUpdates["parent_issue_id"]
+		_, batchTouchedProject := rawUpdates["project_id"]
+		_, batchTouchedStage := rawUpdates["stage"]
 
-		issue, err := h.Queries.UpdateIssue(r.Context(), params)
-		if err != nil {
-			slog.Warn("batch update issue failed", "issue_id", issueID, "error", err)
+		actorType, actorID := h.resolveActor(r, userID, workspaceID)
+		batchActorUUID, _ := util.ParseUUID(actorID)
+		batchEventActor := domainevent.ActorFrom(actorType, batchActorUUID)
+
+		// Transactional outbox (MUL-4332): each row's update and its derived
+		// status_changed / assigned events commit atomically, per issue. `from`
+		// is read under a row lock inside the tx so concurrent transitions record
+		// the true edge (review point 3).
+		var issue db.Issue
+		var before db.Issue
+		if writeErr := domainevent.WriteInTx(r.Context(), h.TxStarter, h.Queries, func(qtx *db.Queries) ([]domainevent.Event, error) {
+			locked, err := qtx.LockIssueRowForUpdate(r.Context(), db.LockIssueRowForUpdateParams{
+				ID:          prevIssue.ID,
+				WorkspaceID: prevIssue.WorkspaceID,
+			})
+			if err != nil {
+				return nil, err
+			}
+			before = locked
+
+			// Rebuild every untouched bare-narg column from the locked row so a
+			// concurrent writer's change is never silently rolled back (review
+			// point 1). See UpdateIssue for the assignee-pair rationale.
+			if !batchTouchedType && !batchTouchedID {
+				params.AssigneeType = before.AssigneeType
+				params.AssigneeID = before.AssigneeID
+			}
+			if !batchTouchedStartDate {
+				params.StartDate = before.StartDate
+			}
+			if !batchTouchedDueDate {
+				params.DueDate = before.DueDate
+			}
+			if !batchTouchedParent {
+				params.ParentIssueID = before.ParentIssueID
+			}
+			if !batchTouchedProject {
+				params.ProjectID = before.ProjectID
+			}
+			if !batchTouchedStage {
+				params.Stage = before.Stage
+			}
+
+			updatedIssue, err := qtx.UpdateIssue(r.Context(), params)
+			if err != nil {
+				return nil, err
+			}
+			issue = updatedIssue
+			var events []domainevent.Event
+			if before.Status != updatedIssue.Status {
+				events = append(events, domainevent.IssueStatusChanged(updatedIssue.WorkspaceID, updatedIssue.ID, batchEventActor,
+					domainevent.IssueStatusChangedPayload{From: before.Status, To: updatedIssue.Status}))
+			}
+			if (batchTouchedType || batchTouchedID) &&
+				(before.AssigneeType.String != updatedIssue.AssigneeType.String || uuidToString(before.AssigneeID) != uuidToString(updatedIssue.AssigneeID)) {
+				events = append(events, domainevent.IssueAssigned(updatedIssue.WorkspaceID, updatedIssue.ID, batchEventActor,
+					domainevent.IssueAssignedPayload{
+						FromAssigneeType: before.AssigneeType.String,
+						FromAssigneeID:   uuidToString(before.AssigneeID),
+						ToAssigneeType:   updatedIssue.AssigneeType.String,
+						ToAssigneeID:     uuidToString(updatedIssue.AssigneeID),
+					}))
+			}
+			return events, nil
+		}); writeErr != nil {
+			slog.Warn("batch update issue failed", "issue_id", issueID, "error", writeErr)
 			continue
 		}
+		// Drive every post-commit side effect from the locked pre-image, the
+		// transition that truly happened, not the pre-tx snapshot (review point 4).
+		prevIssue = before
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
+		statusChanged := prevIssue.Status != issue.Status
+		// assigneeChanged feeds the shared enqueue predicate below; the payload's
+		// own assignee diff is computed independently by issueevent.Build.
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
 			(prevIssue.AssigneeType.String != issue.AssigneeType.String || uuidToString(prevIssue.AssigneeID) != uuidToString(issue.AssigneeID))
-		statusChanged := req.Updates.Status != nil && prevIssue.Status != issue.Status
-		priorityChanged := req.Updates.Priority != nil && prevIssue.Priority != issue.Priority
-		projectChanged := req.Updates.ProjectID != nil && uuidToString(prevIssue.ProjectID) != uuidToString(issue.ProjectID)
 
-		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
-			"issue":            resp,
-			"assignee_changed": assigneeChanged,
-			"status_changed":   statusChanged,
-			"priority_changed": priorityChanged,
-			"project_changed":  projectChanged,
-		})
+		// The SAME typed payload the single-update path emits, so a batch status
+		// change carries prev_status and the full changed/prev field set instead of
+		// the reduced four-key map that made its activity-log entries read from: ""
+		// (MUL-4332 review a′). Diff is computed from the locked before/after.
+		h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID,
+			issueevent.Build(prevIssue, issue, resp, true))
 
 		// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —
 		// mirrors UpdateIssue. See that handler for the rationale.

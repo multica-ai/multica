@@ -389,3 +389,21 @@ UPDATE issue
 SET first_executed_at = now()
 WHERE id = $1 AND first_executed_at IS NULL
 RETURNING id, workspace_id, creator_type, creator_id, first_executed_at;
+
+-- name: LockIssueRowForUpdate :one
+-- Row-locks an issue and returns its full authoritative row for both a
+-- concurrency-safe update and domain-event emission (MUL-4332 review points 3 &
+-- 1). Callers read this INSIDE the update transaction, immediately before
+-- UpdateIssue/UpdateIssueStatus. Two purposes:
+--   1. The event's `from` (status/assignee) reflects the truly-current row
+--      rather than a pre-tx snapshot, so concurrent transitions serialize on
+--      the lock and each records the correct edge instead of a stale `from`.
+--   2. UpdateIssue writes the nullable columns (assignee, dates, parent,
+--      project, stage) as bare narg — an untouched field carries whatever the
+--      caller pre-filled. Pre-filling from a pre-tx snapshot lets a concurrent
+--      writer's change be silently rolled back; callers instead rebuild every
+--      untouched field from THIS locked row so an unrelated update never clobbers
+--      a field it did not intend to change.
+SELECT * FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;

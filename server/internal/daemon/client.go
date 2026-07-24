@@ -423,11 +423,57 @@ func (c *Client) PinTaskSession(ctx context.Context, taskID, sessionID, workDir 
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/session", taskID), body, nil)
 }
 
-// RecoverOrphans tells the server to fail any dispatched/running tasks the
-// previous daemon process for this runtime left behind. The server will
-// auto-retry eligible tasks.
+// maxRecoverOrphanPages bounds the drain loop below. Each page fails up to
+// orphanRecoveryBatchSize (500) rows, so this covers ~500k orphaned rows per
+// registration — far beyond any real restart. It is purely a backstop so a buggy
+// server response (has_more stuck true) can never spin forever; any residual is
+// reclaimed by the next registration.
+const maxRecoverOrphanPages = 1000
+
+// RecoverOrphans tells the server to fail any dispatched/running tasks the previous
+// daemon process for this runtime left behind, and to auto-retry the eligible ones.
+//
+// It DRAINS the runtime's orphans across pages (MUL-4332 review round 3, point 1):
+// registration has already upserted the runtime back to `online`, so the server's
+// every-tick offline sweep will not reap anything a single capped call leaves
+// behind. We therefore loop, threading the server's keyset cursor, until the server
+// reports no more pages. The cursor advances over poison (unresolvable) rows the
+// server skips, so a page of poison at the front cannot stall the drain.
 func (c *Client) RecoverOrphans(ctx context.Context, runtimeID string) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/recover-orphans", runtimeID), map[string]any{}, nil)
+	path := fmt.Sprintf("/api/daemon/runtimes/%s/recover-orphans", runtimeID)
+	// paginate:true is our capability signal (MUL-4332 review round 4, point 2): it
+	// tells the server this client will drive the drain itself, so the server hands
+	// back one page at a time. A server that predates the flag ignores it and does
+	// its own single-shot recovery (handled via io.EOF below); a legacy daemon that
+	// lacks the flag is drained entirely server-side.
+	body := map[string]any{"paginate": true}
+	for page := 0; page < maxRecoverOrphanPages; page++ {
+		var resp struct {
+			HasMore             bool   `json:"has_more"`
+			NextCursorCreatedAt string `json:"next_cursor_created_at"`
+			NextCursorID        string `json:"next_cursor_id"`
+		}
+		if err := c.postJSON(ctx, path, body, &resp); err != nil {
+			// An empty 200 body (an older server that predates paging, or a proxy)
+			// decodes to io.EOF. Treat it as a single non-paged recovery: there is
+			// no cursor to continue with, so stop cleanly rather than erroring.
+			if errors.Is(err, io.EOF) {
+				return nil
+			}
+			return err
+		}
+		// Stop on the last page, or defensively if the server signalled more but
+		// gave us no cursor to advance (never expected — avoids re-draining page 0).
+		if !resp.HasMore || resp.NextCursorCreatedAt == "" || resp.NextCursorID == "" {
+			return nil
+		}
+		body = map[string]any{
+			"paginate":          true,
+			"cursor_created_at": resp.NextCursorCreatedAt,
+			"cursor_id":         resp.NextCursorID,
+		}
+	}
+	return nil
 }
 
 // GetTaskStatus returns the current status of a task. Used by the daemon to

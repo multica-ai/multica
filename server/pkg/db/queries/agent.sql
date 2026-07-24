@@ -767,25 +767,61 @@ SET session_id = COALESCE(sqlc.narg('session_id'), session_id),
     work_dir  = COALESCE(sqlc.narg('work_dir'), work_dir)
 WHERE id = $1 AND status IN ('dispatched', 'running');
 
--- name: RecoverOrphanedTasksForRuntime :many
--- Called by the daemon at startup. Atomically fails any dispatched/running/
--- waiting_local_directory task that the prior incarnation of this runtime
--- owned but did not finalize. Returns the failed rows so callers can hand
--- them to the auto-retry path. waiting_local_directory rows are included
--- because the daemon holding the path lock is the same process that just
--- died — without us, the row would sit waiting forever.
-UPDATE agent_task_queue
-SET status = 'failed',
-    completed_at = now(),
-    error = 'daemon restarted while task was in flight',
-    failure_reason = 'runtime_recovery',
-    wait_reason = NULL,
-    prepare_lease_expires_at = NULL
-WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
-RETURNING *;
+-- name: SelectOrphanedTasksForRuntime :many
+-- Called by the daemon at startup. Selects (and row-locks) up to @max_per_tick
+-- dispatched/running/waiting_local_directory tasks that the prior incarnation of
+-- this runtime owned but did not finalize. waiting_local_directory rows are
+-- included because the daemon holding the path lock is the same process that
+-- just died — without us, the row would sit waiting forever.
+--
+-- Candidate half of the MUL-4332 poison-isolated fail path (review point 2): the
+-- caller resolves each task's workspace, fails only the resolvable set via
+-- FailAgentTasksByIDs and emits its task.failed event in the SAME transaction.
+-- The LIMIT bounds the lock hold.
+--
+-- Plain FOR UPDATE (NOT SKIP LOCKED — review round 4, point 1). Unlike the
+-- sweepers, which re-scan from the start every tick so a skipped row is simply
+-- retried next tick, this query pages forward with a keyset cursor that advances
+-- permanently past whatever a page returned. If SKIP LOCKED silently dropped an
+-- older orphan that happened to be briefly locked (a sweep, a stale-dispatch
+-- reclaim), the cursor — filled by the newer rows behind it — would step past that
+-- older row and NO later page could ever select it again; the runtime is already
+-- back `online`, so the offline sweep won't reap it either, and it leaks forever.
+-- Plain FOR UPDATE instead WAITS for the lock and, once it releases, re-checks the
+-- row against the WHERE (Postgres EvalPlanQual): still dispatched/running →
+-- included on this page; already failed by whoever held the lock → correctly
+-- excluded. The bounded page size keeps that wait short, and recovery only races
+-- short sweeper/reclaim transactions (both SKIP LOCKED, so they never wait — no
+-- deadlock cycle is possible).
+--
+-- Keyset cursor (MUL-4332 review round 3, point 1): the registration path upserts
+-- the runtime back to `online`, so the every-tick offline sweep will NOT reap an
+-- orphan the daemon leaves past this page — the recovery must therefore drain
+-- itself. Callers page by (created_at, id) via @after_created_at / @after_id (NULL
+-- on the first page) and repeat until a short page. Because the cursor advances
+-- over EVERY returned candidate — including a poison (unresolvable-workspace) row
+-- the caller skips rather than fails — a page full of poison at the front can no
+-- longer pin the drain in place: the next page steps past it to the healthy rows
+-- behind it. (A plain re-select of the oldest rows would loop on the poison
+-- forever.) Ordering matches the keyset so pages are stable and non-overlapping.
+SELECT * FROM agent_task_queue
+WHERE runtime_id = @runtime_id AND status IN ('dispatched', 'running', 'waiting_local_directory')
+  AND (
+    sqlc.narg('after_created_at')::timestamptz IS NULL
+    OR created_at > sqlc.narg('after_created_at')::timestamptz
+    OR (created_at = sqlc.narg('after_created_at')::timestamptz AND id > sqlc.narg('after_id')::uuid)
+  )
+ORDER BY created_at ASC, id ASC
+LIMIT @max_per_tick::int
+FOR UPDATE;
 
--- name: FailStaleTasks :many
--- Fails tasks stuck in dispatched/running beyond the given thresholds.
+-- name: SelectStaleTasksToFail :many
+-- Selects (and row-locks) up to @max_per_tick tasks stuck in dispatched/running
+-- beyond the given thresholds. Candidate half of the MUL-4332 poison-isolated
+-- fail path (review point 2): the caller resolves each task's workspace, fails
+-- only the resolvable set via FailAgentTasksByIDs and emits its task.failed event
+-- in the SAME transaction. FOR UPDATE SKIP LOCKED keeps the backstop off rows a
+-- daemon is actively claiming; the LIMIT bounds the lock hold.
 --
 -- Each branch pairs a wall-clock deadline with a task-appropriate liveness
 -- signal, so the sweeper only kills tasks whose owning daemon is no longer
@@ -807,8 +843,9 @@ RETURNING *;
 --     server-side wall clock must not shadow that with a coarser cap.
 --
 -- The daemon-dead case is the primary responsibility of `sweepStaleRuntimes`
--- (which mixes DB `last_seen_at` with the Redis LivenessStore and calls
--- `FailTasksForOfflineRuntimes` in the same tick). The wall-clock branch
+-- (which mixes DB `last_seen_at` with the Redis LivenessStore and fails
+-- offline-runtime tasks via SelectTasksForOfflineRuntimes in the same tick).
+-- The wall-clock branch
 -- here is a defensive backstop for pathological cases where a runtime row
 -- somehow retains status='online' with a stale DB heartbeat for longer than
 -- the wall clock allows.
@@ -820,12 +857,9 @@ RETURNING *;
 -- waiting_local_directory rows are intentionally excluded: the daemon owns
 -- the wait (with its own ctx-driven timeout) and a legitimate queue ahead
 -- of this task can exceed the dispatch / running timeouts without being
--- "stuck". If the daemon dies, RecoverOrphanedTasksForRuntime reclaims
+-- "stuck". If the daemon dies, SelectOrphanedTasksForRuntime reclaims
 -- those rows at restart.
-UPDATE agent_task_queue
-SET status = 'failed', completed_at = now(), error = 'task timed out',
-    failure_reason = 'timeout',
-    prepare_lease_expires_at = NULL
+SELECT * FROM agent_task_queue
 WHERE (
     status = 'dispatched'
     AND dispatched_at < now() - make_interval(secs => @dispatch_timeout_secs::double precision)
@@ -841,50 +875,50 @@ WHERE (
         AND r.last_seen_at >= now() - make_interval(secs => @runtime_stale_secs::double precision)
     )
   )
-RETURNING *;
+ORDER BY started_at ASC NULLS FIRST, dispatched_at ASC NULLS FIRST
+LIMIT @max_per_tick::int
+FOR UPDATE SKIP LOCKED;
 
--- name: ExpireStaleQueuedTasks :many
--- Fails tasks that have been sitting in 'queued' for longer than the TTL.
--- This is the cleanup arm of the MUL-1899 "queued backlog" fix: even with the
--- new dispatch-time admission gate that refuses to enqueue when the runtime
--- is offline, we still need to drain the historical 87k+ doomed rows and
--- handle edge cases where a runtime goes offline AFTER a task is already
--- queued (the admission check protects new enqueues, not in-flight queue
--- depth).
+-- name: SelectExpiredQueuedTasks :many
+-- Selects (and row-locks) up to @max_per_tick tasks sitting in 'queued' past the
+-- TTL — the cleanup arm of the MUL-1899 "queued backlog" fix (drains the
+-- historical 87k+ doomed rows and catches the case where a runtime goes offline
+-- AFTER a task is already queued).
 --
--- Concurrency safety: the daemon's claim path may race with this sweeper to
--- transition the same row out of 'queued'. We protect against that two
--- ways:
---   1. The CTE selects victims with FOR UPDATE SKIP LOCKED so a row that is
---      currently being claimed (or otherwise locked) is skipped — no lock
---      contention with the dispatch path, and we won't queue up behind it.
---   2. The outer UPDATE re-checks status='queued' AND the TTL predicate at
---      apply time. If a daemon claimed the row between selection and update
---      (e.g. lock released after the claim transaction commits), the row is
---      already 'dispatched'/'running' and the WHERE clause filters it out
---      so we cannot clobber an in-flight task.
--- Capped via LIMIT inside the CTE so a single sweep tick cannot monopolise
--- the DB when the backlog is large — the sweeper drains the rest on
--- subsequent ticks.
-WITH victims AS (
-    SELECT id FROM agent_task_queue
-    WHERE status = 'queued'
-      AND created_at < now() - make_interval(secs => @ttl_secs::double precision)
-    ORDER BY created_at ASC
-    LIMIT @max_per_tick::int
-    FOR UPDATE SKIP LOCKED
-)
-UPDATE agent_task_queue t
+-- Candidate half of the MUL-4332 poison-isolated fail path (review point 2): the
+-- caller resolves each task's workspace, fails only the resolvable set via
+-- FailAgentTasksByIDs and emits its task.failed event in the SAME transaction.
+-- FOR UPDATE SKIP LOCKED skips rows a daemon is currently claiming, so we never
+-- contend with the dispatch path or clobber an in-flight task; because the fail
+-- runs in this same transaction the locked rows cannot transition out of 'queued'
+-- underneath us. The LIMIT bounds the lock hold; the rest drain on later ticks.
+SELECT * FROM agent_task_queue
+WHERE status = 'queued'
+  AND created_at < now() - make_interval(secs => @ttl_secs::double precision)
+ORDER BY created_at ASC
+LIMIT @max_per_tick::int
+FOR UPDATE SKIP LOCKED;
+
+-- name: FailAgentTasksByIDs :many
+-- Fails a specific, already-resolved set of tasks by id — the terminal half of
+-- the MUL-4332 poison-isolated bulk fail (review point 2). The caller has just
+-- selected these ids with SelectStaleTasksToFail / SelectExpiredQueuedTasks /
+-- SelectTasksForOfflineRuntimes / SelectOrphanedTasksForRuntime FOR UPDATE in
+-- the SAME transaction, so the rows are locked and cannot have transitioned;
+-- the status guard is a defensive backstop that keeps this idempotent if the id
+-- set is ever reused. @error / @failure_reason are supplied per sweeper. Both
+-- wait_reason and prepare_lease_expires_at are cleared (clearing a NULL is a
+-- no-op) so this one query serves every bulk-fail caller.
+UPDATE agent_task_queue
 SET status = 'failed',
     completed_at = now(),
-    error = 'task expired in queue',
-    failure_reason = 'queued_expired',
+    error = @error,
+    failure_reason = @failure_reason,
+    wait_reason = NULL,
     prepare_lease_expires_at = NULL
-FROM victims v
-WHERE t.id = v.id
-  AND t.status = 'queued'
-  AND t.created_at < now() - make_interval(secs => @ttl_secs::double precision)
-RETURNING t.*;
+WHERE id = ANY(@ids::uuid[])
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+RETURNING *;
 
 -- name: CancelAgentTask :one
 UPDATE agent_task_queue
