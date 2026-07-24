@@ -2,6 +2,8 @@ import type { NextConfig } from "next";
 import { config } from "dotenv";
 import { resolve } from "path";
 import {
+  resolveDevDocsUrl,
+  resolveDevRemoteApiUrl,
   resolveDocsUrl,
   resolveRemoteApiUrl,
 } from "./config/runtime-urls";
@@ -12,8 +14,15 @@ import { createMDX } from "fumadocs-mdx/next";
 // when the Next.js server runs instead of baking these URLs at build time.
 config({ path: resolve(__dirname, "../../.env") });
 
-const remoteApiUrl = resolveRemoteApiUrl(process.env);
-const docsUrl = resolveDocsUrl(process.env);
+// `next dev` falls back to the conventional localhost upstreams; builds use
+// the strict resolvers so prebuilt images keep unset upstreams unproxied.
+const isDev = process.env.NODE_ENV === "development";
+const remoteApiUrl = isDev
+  ? resolveDevRemoteApiUrl(process.env)
+  : resolveRemoteApiUrl(process.env);
+const docsUrl = isDev
+  ? resolveDevDocsUrl(process.env)
+  : resolveDocsUrl(process.env);
 
 // Parse hostnames from CORS_ALLOWED_ORIGINS so that Next.js dev server
 // allows cross-origin HMR / webpack requests (e.g. from Tailscale IPs).

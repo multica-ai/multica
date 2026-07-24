@@ -37,6 +37,21 @@ export function resolveDocsUrl(env: RuntimeEnv): string | undefined {
   return cleanHttpUrl(env.DOCS_URL);
 }
 
+// Dev-only fallbacks: `next dev` runs on a developer machine, where the
+// conventional localhost backend/docs ports are safe to assume when nothing
+// is configured. Builds and the runtime proxy keep the strict resolvers so a
+// prebuilt image never guesses an origin (#4787).
+export function resolveDevRemoteApiUrl(env: RuntimeEnv): string {
+  const configured = resolveRemoteApiUrl(env);
+  if (configured) return configured;
+  const backendPort = env.BACKEND_PORT?.trim() || "8080";
+  return `http://localhost:${backendPort}`;
+}
+
+export function resolveDevDocsUrl(env: RuntimeEnv): string {
+  return resolveDocsUrl(env) ?? "http://localhost:4000";
+}
+
 export function resolveBrowserApiBaseUrl(env: RuntimeEnv): string | undefined {
   return cleanUrl(env.NEXT_PUBLIC_API_URL);
 }

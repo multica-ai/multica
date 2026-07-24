@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   resolveBrowserApiBaseUrl,
   resolveBrowserWsUrl,
+  resolveDevDocsUrl,
+  resolveDevRemoteApiUrl,
   resolveDocsUrl,
   resolveRemoteApiUrl,
   runtimeRewriteDestination,
@@ -181,5 +183,30 @@ describe("runtimeRewriteDestination", () => {
         REMOTE_API_URL: "http://backend:8080",
       }),
     ).toBe("http://backend:8080/ws");
+  });
+});
+
+describe("dev-only fallbacks", () => {
+  it("falls back to the conventional local backend port", () => {
+    expect(resolveDevRemoteApiUrl({})).toBe("http://localhost:8080");
+  });
+
+  it("honors BACKEND_PORT for the dev backend fallback", () => {
+    expect(resolveDevRemoteApiUrl({ BACKEND_PORT: "19080" })).toBe(
+      "http://localhost:19080",
+    );
+  });
+
+  it("prefers configured origins over the dev fallbacks", () => {
+    expect(
+      resolveDevRemoteApiUrl({ REMOTE_API_URL: "http://backend:8080" }),
+    ).toBe("http://backend:8080");
+    expect(resolveDevDocsUrl({ DOCS_URL: "http://docs:4000" })).toBe(
+      "http://docs:4000",
+    );
+  });
+
+  it("falls back to the local docs port", () => {
+    expect(resolveDevDocsUrl({})).toBe("http://localhost:4000");
   });
 });
