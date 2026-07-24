@@ -518,6 +518,102 @@ func TestProjectsAndResourcesSkillCoversDurableContext(t *testing.T) {
 	}
 }
 
+func TestFocusedTestingSkillUsesStackSpecificProgressiveDisclosure(t *testing.T) {
+	skill, ok := findSkill(t, "multica-focused-testing")
+	if !ok {
+		return
+	}
+	fm, body, _ := splitFrontmatter(skill.Content)
+
+	description := fm["description"]
+	for _, want := range []string{
+		"focused or targeted test",
+		"any user repository",
+		"Detect the repository's stack and runner first",
+		"Not for an explicitly requested full-suite run",
+	} {
+		if !strings.Contains(description, want) {
+			t.Errorf("focused-testing description missing trigger text %q", want)
+		}
+	}
+
+	for _, want := range []string{
+		"repository Agent configuration",
+		"dedicated repository script",
+		"runner-native focused selector",
+		"Do not guess whether a wrapper",
+		"forwards separators or positional arguments",
+		"Never impose\n`expected_file_count=1`",
+		"read exactly the matching reference",
+		"Do not borrow a template from another stack",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("focused-testing skill missing stack-neutral rule %q", want)
+		}
+	}
+
+	// Concrete runner commands belong behind one-level-deep references. The
+	// body is loaded for every focused-test task; keeping templates out of it
+	// prevents a Go/Python/Rust repository from inheriting frontend noise.
+	for _, runnerSpecific := range []string{
+		"pnpm --filter",
+		"go test",
+		"python -m pytest",
+		"cargo test",
+		"./gradlew",
+		"dotnet test",
+		"bundle exec rspec",
+	} {
+		if strings.Contains(body, runnerSpecific) {
+			t.Errorf("focused-testing body must stay stack-neutral; found %q", runnerSpecific)
+		}
+	}
+
+	references := map[string][]string{
+		"references/javascript-typescript.md": {
+			`["pnpm", "--filter", "<workspace>", "exec", "vitest", "run", "<package-relative-test-file>"]`,
+			`["pnpm", "--filter", "<workspace>", "test", "--", "<test-file>"]`,
+			"require exactly one discovered test file",
+		},
+		"references/go.md": {
+			`["go", "test", "./path/to/package", "-run", "^TestName$", "-count=1"]`,
+			"not reliably by\nrunning one `_test.go` file in isolation",
+		},
+		"references/python.md": {
+			`["python", "-m", "pytest", "path/to/test_file.py::TestClass::test_name"]`,
+			"Use pytest collection output",
+		},
+		"references/rust.md": {
+			`["cargo", "test", "-p", "<package>", "--test", "<integration-target>"]`,
+			"the separator is required",
+		},
+		"references/jvm.md": {
+			`["./gradlew", ":module:test", "--tests", "package.ClassName.methodName"]`,
+			`["./mvnw", "-pl", "module", "-Dtest=ClassName#methodName", "test"]`,
+		},
+		"references/dotnet.md": {
+			`["dotnet", "test", "path/to/project.csproj", "--filter", "FullyQualifiedName=Namespace.ClassName.MethodName"]`,
+			"Filter properties and operators vary by test adapter",
+		},
+		"references/ruby.md": {
+			`["bundle", "exec", "rspec", "spec/path/to/example_spec.rb"]`,
+			"Do not apply RSpec syntax to Minitest",
+		},
+	}
+	for path, mustContain := range references {
+		content, ok := skillFileContent(skill, path)
+		if !ok {
+			t.Errorf("focused-testing skill missing supporting file %s", path)
+			continue
+		}
+		for _, want := range mustContain {
+			if !strings.Contains(content, want) {
+				t.Errorf("%s missing %q", path, want)
+			}
+		}
+	}
+}
+
 func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
 	t.Helper()
 	for _, s := range loadBuiltinSkills() {
@@ -527,6 +623,15 @@ func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
 	}
 	t.Errorf("built-in skill %q not found", name)
 	return AgentSkillData{}, false
+}
+
+func skillFileContent(skill AgentSkillData, path string) (string, bool) {
+	for _, f := range skill.Files {
+		if f.Path == path {
+			return f.Content, true
+		}
+	}
+	return "", false
 }
 
 func skillHasFile(skill AgentSkillData, path string) bool {

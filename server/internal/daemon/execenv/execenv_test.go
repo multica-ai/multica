@@ -1025,46 +1025,6 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 	}
 }
 
-func TestInjectRuntimeConfigFocusedTestSafetyProviderAgnostic(t *testing.T) {
-	t.Parallel()
-
-	providers := []struct {
-		name string
-		file string
-	}{
-		{"claude", "CLAUDE.md"},
-		{"codex", "AGENTS.md"},
-		{"opencode", "AGENTS.md"},
-		{"hermes", "AGENTS.md"},
-	}
-
-	for _, tc := range providers {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			dir := t.TempDir()
-			if _, err := InjectRuntimeConfig(dir, tc.name, TaskContextForEnv{IssueID: "issue-1"}); err != nil {
-				t.Fatalf("InjectRuntimeConfig failed: %v", err)
-			}
-			data, err := os.ReadFile(filepath.Join(dir, tc.file))
-			if err != nil {
-				t.Fatalf("read %s: %v", tc.file, err)
-			}
-			s := string(data)
-			for _, want := range []string{
-				"## Focused Test Safety",
-				"repository-provided agent instructions or a dedicated focused-test script first",
-				"pnpm --filter <workspace> exec vitest run <package-relative-test-file>",
-				"Do not use `pnpm --filter <workspace> test -- <test-file>`",
-			} {
-				if !strings.Contains(s, want) {
-					t.Errorf("%s missing focused test safety text %q\n---\n%s", tc.file, want, s)
-				}
-			}
-		})
-	}
-}
-
 func TestInjectRuntimeConfigAvailableCommandsCoreOnly(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

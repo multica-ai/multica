@@ -88,22 +88,6 @@ func writeBackgroundTaskSafetySlim(b *strings.Builder) {
 	b.WriteString("- Never end a turn with a \"standing by\" / \"I'll report back when X finishes\" message — that becomes your final output and the task ends.\n\n")
 }
 
-// writeFocusedTestSafety emits provider-agnostic guidance for one-file test
-// runs. Repository-authored commands remain the source of truth; the fallback
-// rules prevent agents from guessing how a package-manager script forwards
-// separators to its test runner. The section is injected into every
-// code-capable task kind so it protects user repositories, not only Multica's
-// own repository instructions.
-func writeFocusedTestSafety(b *strings.Builder) {
-	b.WriteString("## Focused Test Safety\n\n")
-	b.WriteString("When validation targets one test file:\n\n")
-	b.WriteString("- Use repository-provided agent instructions or a dedicated focused-test script first. Do not replace a known repository command with an inferred one.\n")
-	b.WriteString("- Before executing, verify that the target file exists and identify its owning package, package manager, and test runner from repository configuration. Do not guess how wrappers forward `--` or positional arguments.\n")
-	b.WriteString("- Prefer a direct runner invocation and keep the test path as one distinct argument. Use one stable argv shape for the same runner throughout the task.\n")
-	b.WriteString("- For pnpm + Vitest from a repository root, use `pnpm --filter <workspace> exec vitest run <package-relative-test-file>`. Do not use `pnpm --filter <workspace> test -- <test-file>` for a focused run: the separator can reach Vitest and cause the whole workspace suite to run.\n")
-	b.WriteString("- When the runner supports list, collect, or dry-run mode, use it to confirm the discovery count is exactly one before the full run. If execution unexpectedly discovers additional files, stop and correct the command before relying on the result.\n\n")
-}
-
 // writeAgentIdentity emits the Agent Identity heading and (optionally) the
 // agent's instructions body.
 func writeAgentIdentity(b *strings.Builder, ctx TaskContextForEnv) {
@@ -641,7 +625,6 @@ func writeOutput(b *strings.Builder, kind taskKind, ctx TaskContextForEnv) {
 //	Available Commands    |   full  |  full  |   full    |   minimal    | full
 //	Comment Formatting    |    ✓    |   ✓    |     —     |      —       |  —
 //	Repositories          |    △    |   △    |     △     |      —       |  △
-//	Focused Test Safety   |    ✓    |   ✓    |     ✓     |      —       |  ✓
 //	Project Context       |    △    |   △    |     △     |      △       |  △
 //	Issue Metadata        |    ✓    |   ✓    |     —     |      —       |  —
 //	Instruction Precedence|    —    |   ✓    |     —     |      —       |  —
@@ -680,7 +663,6 @@ func buildMetaSkillContentSlim(provider string, ctx TaskContextForEnv) string {
 
 	if kind != kindQuickCreate {
 		writeRepositories(&b, ctx)
-		writeFocusedTestSafety(&b)
 	}
 
 	writeProjectContext(&b, ctx)
