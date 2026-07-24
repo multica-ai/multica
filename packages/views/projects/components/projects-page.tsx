@@ -848,7 +848,8 @@ export function ProjectsPage() {
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase();
     const filtered = projects.filter((p) => {
-      if (q && !p.title.toLowerCase().includes(q) && !matchesPinyin(p.title, q)) {
+      const title = p.title ?? "";
+      if (q && !title.toLowerCase().includes(q) && !matchesPinyin(title, q)) {
         return false;
       }
       if (filters.statuses.length && !filters.statuses.includes(p.status)) return false;

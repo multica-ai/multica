@@ -197,8 +197,14 @@ export function ProjectDetail({ projectId }: { projectId: string }) {
   const [leadOpen, setLeadOpen] = useState(false);
   const [leadFilter, setLeadFilter] = useState("");
   const leadQuery = leadFilter.toLowerCase();
-  const filteredMembers = members.filter((m) => m.name.toLowerCase().includes(leadQuery) || matchesPinyin(m.name, leadQuery));
-  const filteredAgents = agents.filter((a) => !a.archived_at && (a.name.toLowerCase().includes(leadQuery) || matchesPinyin(a.name, leadQuery)));
+  const filteredMembers = members.filter((m) => {
+    const name = m.name ?? "";
+    return name.toLowerCase().includes(leadQuery) || matchesPinyin(name, leadQuery);
+  });
+  const filteredAgents = agents.filter((a) => {
+    const name = a.name ?? "";
+    return !a.archived_at && (name.toLowerCase().includes(leadQuery) || matchesPinyin(name, leadQuery));
+  });
 
   const handleUpdateField = useCallback(
     (data: Parameters<typeof updateProject.mutate>[0] extends { id: string } & infer R ? R : never) => {

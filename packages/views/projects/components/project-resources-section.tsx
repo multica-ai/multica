@@ -45,6 +45,13 @@ import {
 } from "../../platform";
 import { useT } from "../../i18n";
 
+type WorkspaceRepoLike = { url?: string | null } | string | null | undefined;
+
+function repoUrl(repo: WorkspaceRepoLike): string {
+  if (typeof repo === "string") return repo;
+  return repo?.url ?? "";
+}
+
 // Project Resources sidebar section.
 //
 // Type-dispatched at the row + add-flow level. Add a new resource_type by:
@@ -108,7 +115,7 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
 
   const repoQuery = repoSearch.trim().toLowerCase();
   const filteredRepos =
-    workspace?.repos?.filter((repo) => repo.url.toLowerCase().includes(repoQuery)) ?? [];
+    workspace?.repos?.filter((repo) => repoUrl(repo).toLowerCase().includes(repoQuery)) ?? [];
 
   const handleAttach = async (url: string) => {
     try {
@@ -305,19 +312,21 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                       </p>
                     )}
                     {filteredRepos.map((repo) => {
-                      const isAttached = attachedUrls.has(repo.url);
+                      const url = repoUrl(repo);
+                      if (!url) return null;
+                      const isAttached = attachedUrls.has(url);
                       const isDisabled = isAttached || createResource.isPending;
                       return (
                         // Use aria-disabled instead of the native `disabled` attribute so
                         // hover events still reach the tooltip trigger on attached rows
                         // (browsers suppress pointer events on disabled form controls).
                         <button
-                          key={repo.url}
+                          key={url}
                           type="button"
                           aria-disabled={isDisabled}
                           onClick={async () => {
                             if (isDisabled) return;
-                            await handleAttach(repo.url);
+                            await handleAttach(url);
                             setAddOpen(false);
                           }}
                           className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs text-left hover:bg-accent transition-colors aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:hover:bg-transparent"
@@ -326,10 +335,10 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
                           <Tooltip>
                             <TooltipTrigger
                               render={
-                                <span className="truncate flex-1">{repo.url}</span>
+                                <span className="truncate flex-1">{url}</span>
                               }
                             />
-                            <TooltipContent side="top">{repo.url}</TooltipContent>
+                            <TooltipContent side="top">{url}</TooltipContent>
                           </Tooltip>
                           {isAttached && (
                             <span className="text-[10px] text-muted-foreground">
