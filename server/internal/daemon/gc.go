@@ -129,6 +129,11 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 			continue
 		}
 		meta, metaErr := execenv.ReadGCMeta(taskDir)
+		if !isManagedGCEnvRoot(filepath.Base(wsDir), taskDir, meta, metaErr) {
+			d.logger.Warn("gc: skipping unmanaged workspace directory", "dir", taskDir)
+			stats.skipped++
+			continue
+		}
 		if metaErr == nil && meta.Kind == execenv.GCKindIssue && strings.TrimSpace(meta.IssueID) != "" {
 			issueCandidates = append(issueCandidates, issueGCCandidate{taskDir: taskDir, meta: meta})
 			continue
@@ -281,6 +286,13 @@ const (
 // Dispatches on meta.Kind so chat / autopilot / quick-create tasks each
 // follow the parent record that actually governs their lifecycle.
 func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcAction {
+	workspaceID := filepath.Base(filepath.Dir(taskDir))
+	meta, err := execenv.ReadGCMeta(taskDir)
+	if !isManagedGCEnvRoot(workspaceID, taskDir, meta, err) {
+		d.logger.Warn("gc: skipping unmanaged workspace directory", "dir", taskDir)
+		return gcActionSkip
+	}
+
 	// A task currently running on this env root must never be reclaimed —
 	// not even on the done/cancelled or orphan-404 paths. A re-dispatched or
 	// still-running task can reuse the prior workdir of an already-done issue
@@ -291,7 +303,6 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 		return gcActionSkip
 	}
 
-	meta, err := execenv.ReadGCMeta(taskDir)
 	if err != nil {
 		return d.orphanByMTime(taskDir, "no meta")
 	}
@@ -331,6 +342,67 @@ func (d *Daemon) applyLocalDirectoryGCOverride(meta *execenv.GCMeta, action gcAc
 	default:
 		return action
 	}
+}
+
+// isManagedGCEnvRoot is the ownership boundary for destructive workspace GC.
+// A directory is eligible only when the daemon can prove it owns the env root:
+//
+//   - completion-time GC metadata matches the containing workspace;
+//   - Prepare-time managed-env provenance matches the workspace; or
+//   - a pre-provenance env uses the historical 8-hex task name and contains
+//     the standard workdir/output/logs directory layout.
+//
+// The explicit Output reservation is defense in depth for the shared durable
+// output path. Unknown directories fail closed and are left for an operator to
+// inspect instead of falling through to the mtime-based orphan deletion path.
+func isManagedGCEnvRoot(workspaceID, taskDir string, meta *execenv.GCMeta, metaErr error) bool {
+	if filepath.Base(taskDir) == "Output" {
+		return false
+	}
+
+	metaMatches := metaErr == nil && meta != nil && strings.TrimSpace(meta.WorkspaceID) == workspaceID
+	// A readable ownership record that names a different workspace is an
+	// explicit contradiction, not a reason to fall through to a weaker proof.
+	if metaErr == nil && meta != nil && !metaMatches {
+		return false
+	}
+
+	prov, provErr := execenv.ReadManagedEnvProvenance(taskDir)
+	if provErr == nil && prov != nil {
+		if strings.TrimSpace(prov.WorkspaceID) != workspaceID {
+			return false
+		}
+		return true
+	}
+
+	if metaMatches {
+		return true
+	}
+
+	if !isLegacyTaskDirName(filepath.Base(taskDir)) {
+		return false
+	}
+
+	for _, sub := range []string{"workdir", "output", "logs"} {
+		info, err := os.Stat(filepath.Join(taskDir, sub))
+		if err != nil || !info.IsDir() {
+			return false
+		}
+	}
+	return true
+}
+
+func isLegacyTaskDirName(name string) bool {
+	if len(name) != 8 {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		b := name[i]
+		if !((b >= '0' && b <= '9') || (b >= 'a' && b <= 'f') || (b >= 'A' && b <= 'F')) {
+			return false
+		}
+	}
+	return true
 }
 
 // shouldCleanTaskDirForKind runs the per-Kind dispatch without applying the
