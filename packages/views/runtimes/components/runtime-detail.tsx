@@ -46,6 +46,7 @@ import { UpdateSection } from "./update-section";
 import { UsageSection } from "./usage-section";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
+import type { RuntimeProfileDeleteTarget } from "./delete-runtime-profile-dialog";
 import { useT } from "../../i18n";
 
 function getCliVersion(metadata: Record<string, unknown>): string | null {
@@ -74,6 +75,10 @@ function shortDaemonId(id: string | null): string | null {
   if (!id) return null;
   if (id.length <= 10) return id;
   return `${id.slice(0, 6)}··${id.slice(-2)}`;
+}
+
+function runtimeFallbackName(runtime: AgentRuntime): string {
+  return runtime.name;
 }
 
 // 30s tick keeps derived runtime health honest as time-based windows
@@ -126,8 +131,16 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
     ? profiles.find((p) => p.id === runtime.profile_id) ?? null
     : null;
   const isCustomRuntime = !!runtime.profile_id;
+  const deleteProfileTarget: RuntimeProfileDeleteTarget | null =
+    isCustomRuntime && runtime.profile_id
+      ? {
+          id: runtime.profile_id,
+          display_name:
+            runtimeProfile?.display_name ?? runtimeFallbackName(runtime),
+        }
+      : null;
   const canDelete = isCustomRuntime
-    ? isAdmin && !!runtimeProfile
+    ? isAdmin
     : canEditRuntime;
 
   const servingAgents = agents.filter(
@@ -208,11 +221,11 @@ export function RuntimeDetail({ runtime }: { runtime: AgentRuntime }) {
         </div>
       </div>
 
-      {isCustomRuntime && runtimeProfile ? (
+      {deleteProfileTarget ? (
         <DeleteRuntimeProfileDialog
           open={deleteOpen}
           onOpenChange={setDeleteOpen}
-          profile={runtimeProfile}
+          profile={deleteProfileTarget}
           wsId={wsId}
           onDeleted={handleProfileDeleted}
         />

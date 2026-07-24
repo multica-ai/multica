@@ -252,6 +252,7 @@
     "cli_managed_badge": "デスクトップ",
     "row_actions_aria": "行の操作",
     "delete_action": "削除",
+    "delete_profile_action": "ワークスペースから削除",
     "delete_permission_hint": "ランタイムの所有者とワークスペース管理者のみが、このランタイムを削除できます",
     "delete_admin_hint": "ランタイムの所有者とワークスペース管理者のみが、ランタイムを削除できます。",
     "badge_builtin": "組み込み",

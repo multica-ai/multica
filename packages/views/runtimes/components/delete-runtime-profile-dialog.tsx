@@ -15,6 +15,11 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { useT } from "../../i18n";
 
+export type RuntimeProfileDeleteTarget = Pick<
+  RuntimeProfile,
+  "id" | "display_name"
+>;
+
 // Confirmation dialog for deleting a custom runtime profile. The server
 // refuses with a 409 when agents are still bound to the profile; we surface
 // that refusal inline (and keep the dialog open) instead of dumping a raw
@@ -28,7 +33,7 @@ export function DeleteRuntimeProfileDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  profile: RuntimeProfile;
+  profile: RuntimeProfileDeleteTarget;
   wsId: string;
   onDeleted: () => void;
 }) {

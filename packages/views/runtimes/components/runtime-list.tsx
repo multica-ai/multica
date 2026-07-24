@@ -55,6 +55,7 @@ import { ProviderLogo } from "./provider-logo";
 import { HealthIcon, useHealthLabel } from "./shared";
 import { DeleteRuntimeDialog } from "./delete-runtime-dialog";
 import { DeleteRuntimeProfileDialog } from "./delete-runtime-profile-dialog";
+import type { RuntimeProfileDeleteTarget } from "./delete-runtime-profile-dialog";
 import {
   computeCostInWindow,
   formatLastSeen,
@@ -134,6 +135,10 @@ const EMPTY_WORKLOAD: RuntimeWorkload = {
   runningCount: 0,
   queuedCount: 0,
 };
+
+function runtimeFallbackName(runtime: AgentRuntime): string {
+  return runtime.name;
+}
 
 export interface RuntimeRow {
   runtime: AgentRuntime;
@@ -503,6 +508,13 @@ export function RuntimeRowMenu({
   const { t } = useT("runtimes");
   const [deleteOpen, setDeleteOpen] = useState(false);
   const isCustomRuntime = !!runtime.profile_id;
+  const deleteProfileTarget: RuntimeProfileDeleteTarget | null =
+    isCustomRuntime && runtime.profile_id
+      ? {
+          id: runtime.profile_id,
+          display_name: profile?.display_name ?? runtimeFallbackName(runtime),
+        }
+      : null;
   // Delete is currently the only row action; if the row can't run it, drop
   // the kebab entirely so the column doesn't render an empty popover. We
   // used to also hide it for self-healing runtimes (live local daemon
@@ -535,16 +547,18 @@ export function RuntimeRowMenu({
             onClick={() => setDeleteOpen(true)}
             title={t(($) => $.list.delete_permission_hint)}
           >
-            <Trash2 className="h-3.5 w-3.5" />
-            {t(($) => $.list.delete_action)}
+            <Trash2 aria-hidden="true" className="h-3.5 w-3.5" />
+            {isCustomRuntime
+              ? t(($) => $.list.delete_profile_action)
+              : t(($) => $.list.delete_action)}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      {isCustomRuntime && profile ? (
+      {deleteProfileTarget ? (
         <DeleteRuntimeProfileDialog
           open={deleteOpen}
           onOpenChange={setDeleteOpen}
-          profile={profile}
+          profile={deleteProfileTarget}
           wsId={wsId}
           onDeleted={() => setDeleteOpen(false)}
         />
@@ -643,11 +657,10 @@ export function RuntimeList({
           ? memberById.get(runtime.owner_id) ?? null
           : null,
         workload: workloadIndex.get(runtime.id) ?? EMPTY_WORKLOAD,
-        canDelete:
-          !isPendingCustomRuntime(runtime) &&
-          (isCustomRuntime
-            ? isAdmin && !!profile
-            : isAdmin || (!!user && runtime.owner_id === user.id)),
+        canDelete: isCustomRuntime
+          ? isAdmin
+          : !isPendingCustomRuntime(runtime) &&
+            (isAdmin || (!!user && runtime.owner_id === user.id)),
       };
     });
   }, [runtimes, profileById, memberById, workloadIndex, isAdmin, user]);

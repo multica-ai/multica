@@ -2,7 +2,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -12,6 +12,8 @@ import enAgents from "../../locales/en/agents.json";
 const TEST_RESOURCES = {
   en: { common: enCommon, runtimes: enRuntimes, agents: enAgents },
 };
+
+const mockDeleteRuntimeProfile = vi.hoisted(() => vi.fn());
 
 // Stub the workspace queries the columns reach into. None of them feed the
 // row menu directly, but `createRuntimeColumns` wires CliCell + CostCell
@@ -42,9 +44,9 @@ vi.mock("@multica/core/runtimes", () => ({
   runtimeProfileListOptions: () => ({ kind: "runtime-profiles" }),
   parseRuntimeProfileBoundConflict: () => null,
   useDeleteRuntimeProfile: () => ({
-    mutate: vi.fn(),
+    mutate: mockDeleteRuntimeProfile,
     isPending: false,
-    mutateAsync: vi.fn(),
+    mutateAsync: (...args: unknown[]) => mockDeleteRuntimeProfile(...args),
   }),
 }));
 
@@ -194,6 +196,36 @@ describe("runtime list row menu", () => {
       ),
     );
     expect(screen.getByLabelText("Row actions")).toBeInTheDocument();
+  });
+
+  it("keeps delete available for a custom runtime when the profile row is missing", async () => {
+    renderActionsCell(
+      makeRow(
+        makeRuntime({
+          runtime_mode: "local",
+          name: "Custom Cursor",
+          provider: "cursor",
+          profile_id: "profile-missing",
+        }),
+        true,
+        null,
+      ),
+    );
+
+    fireEvent.click(screen.getByLabelText("Row actions"));
+    expect(screen.queryByText("Edit custom runtime")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("Delete from workspace"));
+
+    expect(
+      screen.getByRole("heading", { name: "Delete custom runtime?" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Custom Cursor/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+
+    await waitFor(() =>
+      expect(mockDeleteRuntimeProfile).toHaveBeenCalledWith("profile-missing"),
+    );
   });
 
   it("hides the kebab menu when the caller lacks delete permission", () => {

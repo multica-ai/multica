@@ -252,6 +252,7 @@
     "cli_managed_badge": "데스크톱",
     "row_actions_aria": "행 작업",
     "delete_action": "삭제",
+    "delete_profile_action": "워크스페이스에서 삭제",
     "delete_permission_hint": "런타임 소유자와 워크스페이스 관리자만 이 런타임을 삭제할 수 있습니다",
     "delete_admin_hint": "런타임 소유자와 워크스페이스 관리자만 런타임을 삭제할 수 있습니다.",
     "badge_builtin": "기본 제공",

@@ -268,6 +268,35 @@ describe("RuntimeDetail visibility section", () => {
     );
   });
 
+  it("uses the profile delete endpoint for custom runtimes even when the profile lookup is missing", async () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "owner", name: "Me" },
+    ];
+    mockQueryData.profiles = [];
+
+    renderDetail(
+      makeRuntime({
+        name: "Custom Cursor",
+        owner_id: "someone-else",
+        provider: "cursor",
+        profile_id: "profile-missing",
+      }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: /Delete runtime/i }));
+    expect(
+      screen.getByRole("heading", { name: "Delete custom runtime?" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/Delete "Custom Cursor"/),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    await waitFor(() =>
+      expect(mockDeleteRuntimeProfile).toHaveBeenCalledWith("profile-missing"),
+    );
+  });
+
   it("hides custom runtime delete for non-admin runtime owners", () => {
     const profile = makeProfile();
     mockQueryData.profiles = [profile];
