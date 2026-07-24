@@ -130,6 +130,7 @@
     "load_more_failed_retry": "Loading more failed — Retry",
     "load_more": "Load more",
     "loading_branch": "Loading…",
+    "no_more": "No more",
     "value_unavailable": "Unavailable value",
     "group_property_unavailable": "The grouped property is no longer available. Grouping was cleared.",
     "hierarchy": "Hierarchy",

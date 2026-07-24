@@ -128,6 +128,7 @@
     "load_more_failed_retry": "추가 항목을 불러오지 못했습니다 — 다시 시도",
     "load_more": "더 불러오기",
     "loading_branch": "불러오는 중…",
+    "no_more": "더 이상 없음",
     "value_unavailable": "사용할 수 없는 값",
     "group_property_unavailable": "그룹화에 사용한 속성을 더 이상 사용할 수 없어 그룹화를 해제했습니다.",
     "hierarchy": "계층",

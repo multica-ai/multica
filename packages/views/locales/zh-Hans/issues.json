@@ -128,6 +128,7 @@
     "load_more_failed_retry": "加载更多失败——重试",
     "load_more": "加载更多",
     "loading_branch": "加载中…",
+    "no_more": "没有更多了",
     "value_unavailable": "不可用的值",
     "group_property_unavailable": "用于分组的属性已不可用，分组已清除。",
     "hierarchy": "层级",
