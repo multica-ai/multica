@@ -44,7 +44,7 @@ func larkMsgFromRaw(msg channel.InboundMessage) (InboundMessage, error) {
 // shared session service, audit logger, and (optional) outbound replier +
 // typing indicator. Feishu is just another consumer of the channel-agnostic
 // engine.ChatSession — there is no Feishu-specific session implementation.
-func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager) engine.ResolverSet {
+func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager, media engine.MediaResolver) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &feishuInstallationResolver{store: store},
 		Identity:     &feishuIdentityResolver{store: store},
@@ -58,6 +58,9 @@ func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audi
 	}
 	if typing != nil {
 		set.Typing = &feishuTypingNotifier{mgr: typing}
+	}
+	if media != nil {
+		set.Media = media
 	}
 	return set
 }
@@ -157,6 +160,7 @@ func (r *feishuDeduper) Release(ctx context.Context, installationID pgtype.UUID,
 type chatSession interface {
 	EnsureSession(ctx context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error)
 	AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error)
+	BindMediaRefs(ctx context.Context, in engine.BindMediaInput) error
 }
 
 type feishuSessionBinder struct{ session chatSession }
@@ -207,14 +211,25 @@ func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.Append
 		return engine.AppendResult{}, err
 	}
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
-		SessionID:      p.SessionID,
-		Sender:         p.Sender,
-		InstallationID: p.InstallationID,
-		Body:           p.Message.Text,
-		CommandText:    lm.CommandBody,
-		MessageID:      p.Message.MessageID,
-		ThreadID:       p.Message.Source.ThreadID,
-		ClaimToken:     p.ClaimToken,
+		SessionID:         p.SessionID,
+		Sender:            p.Sender,
+		InstallationID:    p.InstallationID,
+		Body:              p.Message.Text,
+		CommandText:       lm.CommandBody,
+		MessageID:         p.Message.MessageID,
+		ThreadID:          p.Message.Source.ThreadID,
+		ClaimToken:        p.ClaimToken,
+		MediaPendingSeconds: p.MediaPendingSeconds,
+	})
+}
+
+func (r *feishuSessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) error {
+	return r.session.BindMediaRefs(ctx, engine.BindMediaInput{
+		MessageID:   p.MessageID,
+		SessionID:   p.SessionID,
+		WorkspaceID: p.WorkspaceID,
+		Sender:      p.Sender,
+		MediaRefs:   p.MediaRefs,
 	})
 }
 

@@ -1266,3 +1266,88 @@ func TestEnqueueChatTaskStampsChatEvidence(t *testing.T) {
 		t.Errorf("trigger_evidence_ref_id = %s, want chat session %s", util.UUIDToString(evidenceRef), chatSessionID)
 	}
 }
+
+func TestEnqueueChatTaskDefersForChannelMediaAndPromotesWhenReady(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+
+	var chatSessionID, priorMessageID, messageID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id)
+		VALUES ($1, $2, $3) RETURNING id`, workspaceID, agentID, userID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("seed chat session: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, chatSessionID)
+	})
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content)
+		VALUES ($1, 'user', 'first') RETURNING id`, chatSessionID).Scan(&priorMessageID); err != nil {
+		t.Fatalf("seed prior message: %v", err)
+	}
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	priorTask, err := svc.EnqueueChatTask(ctx, db.ChatSession{
+		ID:      util.MustParseUUID(chatSessionID),
+		AgentID: util.MustParseUUID(agentID),
+	}, util.MustParseUUID(userID), false)
+	if err != nil {
+		t.Fatalf("enqueue prior chat task: %v", err)
+	}
+	deadline := time.Now().Add(time.Minute)
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO chat_message (chat_session_id, role, content, channel_media_pending_until)
+		VALUES ($1, 'user', '[Image]', $2) RETURNING id`, chatSessionID, deadline).Scan(&messageID); err != nil {
+		t.Fatalf("seed pending media message: %v", err)
+	}
+
+	task, err := svc.EnqueueChatTask(ctx, db.ChatSession{
+		ID:      util.MustParseUUID(chatSessionID),
+		AgentID: util.MustParseUUID(agentID),
+	}, util.MustParseUUID(userID), false)
+	if err != nil {
+		t.Fatalf("EnqueueChatTask: %v", err)
+	}
+	if task.Status != "deferred" || !task.FireAt.Valid {
+		t.Fatalf("task = status %q fire_at %v, want durable deferred task", task.Status, task.FireAt)
+	}
+	if !task.ChatInputTaskID.Valid || task.ChatInputTaskID.Bytes != task.ID.Bytes {
+		t.Fatalf("task input owner = %s, want self %s", util.UUIDToString(task.ChatInputTaskID), util.UUIDToString(task.ID))
+	}
+	if task.FireAt.Time.Before(deadline.Add(-time.Second)) || task.FireAt.Time.After(deadline.Add(time.Second)) {
+		t.Fatalf("task fire_at = %v, want media deadline %v", task.FireAt.Time, deadline)
+	}
+	var linkedTaskID pgtype.UUID
+	if err := pool.QueryRow(ctx, `SELECT task_id FROM chat_message WHERE id = $1`, messageID).Scan(&linkedTaskID); err != nil {
+		t.Fatalf("load sealed media message: %v", err)
+	}
+	if !linkedTaskID.Valid || linkedTaskID.Bytes != task.ID.Bytes {
+		t.Fatalf("message task_id = %s, want %s", util.UUIDToString(linkedTaskID), util.UUIDToString(task.ID))
+	}
+	if err := pool.QueryRow(ctx, `SELECT task_id FROM chat_message WHERE id = $1`, priorMessageID).Scan(&linkedTaskID); err != nil {
+		t.Fatalf("load prior sealed message: %v", err)
+	}
+	if !linkedTaskID.Valid || linkedTaskID.Bytes != priorTask.ID.Bytes {
+		t.Fatalf("prior message task_id = %s, want unchanged owner %s", util.UUIDToString(linkedTaskID), util.UUIDToString(priorTask.ID))
+	}
+
+	if err := q.ClearChatMessageChannelMediaPending(ctx, db.ClearChatMessageChannelMediaPendingParams{
+		ID:            util.MustParseUUID(messageID),
+		ChatSessionID: util.MustParseUUID(chatSessionID),
+	}); err != nil {
+		t.Fatalf("clear pending media: %v", err)
+	}
+	if err := svc.PromoteChannelChatTasksIfMediaReady(ctx, util.MustParseUUID(chatSessionID)); err != nil {
+		t.Fatalf("PromoteChannelChatTasksIfMediaReady: %v", err)
+	}
+	var status string
+	var fireAt pgtype.Timestamptz
+	if err := pool.QueryRow(ctx, `SELECT status, fire_at FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&status, &fireAt); err != nil {
+		t.Fatalf("load promoted task: %v", err)
+	}
+	if status != "queued" || fireAt.Valid {
+		t.Fatalf("promoted task = status %q fire_at %v, want queued with no deadline", status, fireAt)
+	}
+}

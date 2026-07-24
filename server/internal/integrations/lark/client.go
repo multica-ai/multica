@@ -3,6 +3,7 @@ package lark
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 )
 
@@ -96,6 +97,12 @@ type APIClient interface {
 	// adapter: flattening and block assembly are the enricher's job.
 	ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error)
 
+	// DownloadMessageResource downloads one binary resource attached to a
+	// message via GET /open-apis/im/v1/messages/{message_id}/resources/{file_key}.
+	// Type is the Open Platform resource class ("image" for image_key,
+	// "file" for file_key-backed video/file/audio).
+	DownloadMessageResource(ctx context.Context, creds InstallationCredentials, p DownloadResourceParams) (DownloadedResource, error)
+
 	// BatchGetUsers resolves a set of user open_ids to their display names
 	// via GET /open-apis/contact/v3/users/batch. The enricher uses it to
 	// label recent-context / quoted / forwarded speakers (and the sender
@@ -134,6 +141,26 @@ type ListMessagesParams struct {
 	// message's time so the prefetch is anchored to the @-mention moment
 	// rather than whatever is newest by the time the fetch runs.
 	EndTime int64
+}
+
+type DownloadResourceParams struct {
+	MessageID string
+	FileKey   string
+	Type      string
+}
+
+type DownloadedResource struct {
+	Data        []byte
+	ContentType string
+	Filename    string
+	SizeBytes   int64
+}
+
+type DownloadedResourceStream struct {
+	Body        io.ReadCloser
+	ContentType string
+	Filename    string
+	SizeBytes   int64
 }
 
 // LarkMessage is the normalized slice of an IM v1 message item the
@@ -381,6 +408,11 @@ func (s *stubAPIClient) GetMessage(ctx context.Context, creds InstallationCreden
 func (s *stubAPIClient) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
 	s.log.Warn("lark stub client: ListChatMessages called", "chat_id", string(p.ChatID))
 	return nil, ErrAPIClientNotConfigured
+}
+
+func (s *stubAPIClient) DownloadMessageResource(ctx context.Context, creds InstallationCredentials, p DownloadResourceParams) (DownloadedResource, error) {
+	s.log.Warn("lark stub client: DownloadMessageResource called", "message_id", p.MessageID)
+	return DownloadedResource{}, ErrAPIClientNotConfigured
 }
 
 func (s *stubAPIClient) BatchGetUsers(ctx context.Context, creds InstallationCredentials, openIDs []string) (map[string]string, error) {

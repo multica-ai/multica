@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -239,16 +240,29 @@ func (s *S3Storage) PresignGetWithContentDisposition(ctx context.Context, key st
 
 // Delete removes an object from S3. Errors are logged but not fatal.
 func (s *S3Storage) Delete(ctx context.Context, key string) {
+	if err := s.DeleteObject(ctx, key); err != nil {
+		slog.Error("s3 DeleteObject failed", "key", key, "error", err)
+	}
+}
+
+// DeleteObject is Delete with the error surfaced — the media reconciler needs
+// it to keep the ledger row and schedule a retry instead of assuming success.
+func (s *S3Storage) DeleteObject(ctx context.Context, key string) error {
 	if key == "" {
-		return
+		return nil
 	}
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 	})
-	if err != nil {
-		slog.Error("s3 DeleteObject failed", "key", key, "error", err)
-	}
+	return err
+}
+
+// ObjectURL returns the URL a successful Upload/UploadStream of key would
+// return. It is a pure function of configuration, so the media intent ledger
+// can persist the URL BEFORE the upload for the durable reference check.
+func (s *S3Storage) ObjectURL(key string) string {
+	return s.uploadedURL(key)
 }
 
 // DeleteKeys removes multiple objects from S3. Best-effort, errors are logged.
@@ -267,6 +281,34 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		ContentDisposition: aws.String(ContentDisposition(contentType, filename)),
 		CacheControl:       aws.String("max-age=432000,public"),
 		StorageClass:       s.storageClass(),
+	})
+	if err != nil {
+		return "", fmt.Errorf("s3 PutObject: %w", err)
+	}
+	return s.uploadedURL(key), nil
+}
+
+func (s *S3Storage) UploadStream(ctx context.Context, key string, data io.Reader, sizeBytes int64, contentType string, filename string) (string, error) {
+	if sizeBytes <= 0 {
+		return "", fmt.Errorf("s3 PutObject: content length is required for streaming upload")
+	}
+	input := &s3.PutObjectInput{
+		Bucket:             aws.String(s.bucket),
+		Key:                aws.String(key),
+		Body:               data,
+		ContentLength:      aws.Int64(sizeBytes),
+		ContentType:        aws.String(contentType),
+		ContentDisposition: aws.String(ContentDisposition(contentType, filename)),
+		CacheControl:       aws.String("max-age=432000,public"),
+		StorageClass:       s.storageClass(),
+	}
+	_, err := s.client.PutObject(ctx, input, func(opts *s3.Options) {
+		// A non-seekable stream cannot be rewound for SigV4 payload hashing.
+		// S3 supports UNSIGNED-PAYLOAD for authenticated requests. Avoid the
+		// optional trailing-checksum path as well: it requires another rewind
+		// or aws-chunked framing that S3-compatible backends handle unevenly.
+		opts.APIOptions = append(opts.APIOptions, v4.SwapComputePayloadSHA256ForUnsignedPayloadMiddleware)
+		opts.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 	})
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)

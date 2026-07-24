@@ -80,6 +80,9 @@ func (f *enricherFakeClient) BatchGetUsers(ctx context.Context, creds Installati
 	}
 	return out, nil
 }
+func (f *enricherFakeClient) DownloadMessageResource(context.Context, InstallationCredentials, DownloadResourceParams) (DownloadedResource, error) {
+	return DownloadedResource{}, nil
+}
 
 // Unused-by-enricher methods — present only to satisfy APIClient.
 func (f *enricherFakeClient) SendInteractiveCard(context.Context, SendCardParams) (string, error) {

@@ -35,14 +35,20 @@ func (fakeTxStarter) Begin(context.Context) (pgx.Tx, error) { return fakeTx{}, n
 
 // fakeSessionQueries is an in-memory SessionQueries for unit tests.
 type fakeSessionQueries struct {
-	bindings        map[string]pgtype.UUID
-	nextSession     byte
-	createdSessions int
-	messages        []string
-	touched         int
-	replyTargets    int
-	lockedWorkspace int    // count of LockWorkspaceForChatSessionCreate calls
-	lastConfig      []byte // config of the most recent CreateChannelChatSessionBinding
+	bindings            map[string]pgtype.UUID
+	nextSession         byte
+	createdSessions     int
+	messages            []string
+	messageID           pgtype.UUID
+	lastCreate          db.CreateChatMessageParams
+	touched             int
+	replyTargets        int
+	lockedWorkspace     int    // count of LockWorkspaceForChatSessionCreate calls
+	lastConfig          []byte // config of the most recent CreateChannelChatSessionBinding
+	attachments         []db.CreateAttachmentParams
+	linked              db.LinkAttachmentsToChatMessageParams
+	mediaCleared        int
+	reconcilerOwnedKeys map[string]bool
 
 	prevMessage      *string // GetMostRecentUserChatMessage result; nil → ErrNoRows
 	markRows         int64   // MarkChannelInboundDedupProcessed result
@@ -51,7 +57,7 @@ type fakeSessionQueries struct {
 }
 
 func newFake() *fakeSessionQueries {
-	return &fakeSessionQueries{bindings: map[string]pgtype.UUID{}, markRows: 1}
+	return &fakeSessionQueries{bindings: map[string]pgtype.UUID{}, markRows: 1, messageID: uid(42)}
 }
 
 func bindKey(inst pgtype.UUID, chat string) string { return fmt.Sprintf("%x|%s", inst.Bytes, chat) }
@@ -89,7 +95,36 @@ func (f *fakeSessionQueries) CreateChannelChatSessionBinding(_ context.Context, 
 
 func (f *fakeSessionQueries) CreateChatMessage(_ context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	f.messages = append(f.messages, arg.Content)
-	return db.ChatMessage{}, nil
+	f.lastCreate = arg
+	return db.ChatMessage{ID: f.messageID}, nil
+}
+
+func (f *fakeSessionQueries) ClearChatMessageChannelMediaPending(context.Context, db.ClearChatMessageChannelMediaPendingParams) error {
+	f.mediaCleared++
+	return nil
+}
+
+func (f *fakeSessionQueries) CreateAttachment(_ context.Context, arg db.CreateAttachmentParams) (db.Attachment, error) {
+	f.attachments = append(f.attachments, arg)
+	return db.Attachment{ID: arg.ID}, nil
+}
+
+func (f *fakeSessionQueries) LinkAttachmentsToChatMessage(_ context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error) {
+	f.linked = arg
+	return append([]pgtype.UUID(nil), arg.AttachmentIds...), nil
+}
+
+func (f *fakeSessionQueries) ClaimChannelMediaPendingObjectsForBind(_ context.Context, arg db.ClaimChannelMediaPendingObjectsForBindParams) ([]string, error) {
+	if f.reconcilerOwnedKeys == nil {
+		return append([]string(nil), arg.StorageKeys...), nil
+	}
+	var claimed []string
+	for _, k := range arg.StorageKeys {
+		if !f.reconcilerOwnedKeys[k] {
+			claimed = append(claimed, k)
+		}
+	}
+	return claimed, nil
 }
 
 func (f *fakeSessionQueries) TouchChatSession(context.Context, pgtype.UUID) error {
@@ -283,6 +318,65 @@ func TestAppendUserMessage_CommandTextOverridesEnrichedBody(t *testing.T) {
 	// The stored message is still the full (enriched) body.
 	if f.messages[0] != "> quoted context from another message\n/issue Real intent" {
 		t.Errorf("stored body should be the enriched Body: %q", f.messages[0])
+	}
+}
+
+func TestBindMediaRefs_CreatesAndLinksChatAttachments(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	res, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1),
+		Sender:    uid(7),
+		Body:      "[Image]",
+		MessageID: "om_image",
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if res.IssueCommand != nil {
+		t.Fatalf("media placeholder must not parse as /issue: %+v", res.IssueCommand)
+	}
+	if res.MessageID != f.messageID {
+		t.Fatalf("message id = %v, want %v", res.MessageID, f.messageID)
+	}
+	if !f.lastCreate.ChannelIngested.Valid || !f.lastCreate.ChannelIngested.Bool {
+		t.Fatalf("channel append must stamp channel_ingested, got %+v", f.lastCreate.ChannelIngested)
+	}
+	err = s.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID:   res.MessageID,
+		SessionID:   uid(1),
+		WorkspaceID: uid(9),
+		Sender:      uid(7),
+		MediaRefs: []channel.MediaRef{
+			{
+				Type:       channel.MsgTypeImage,
+				StorageKey: "lark/cli/img.png",
+				StorageURL: "https://cdn.example.test/lark/cli/img.png",
+				Filename:   "screenshot.png",
+				MimeType:   "image/png",
+				SizeBytes:  3,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+	if len(f.attachments) != 1 {
+		t.Fatalf("attachments created = %d, want 1", len(f.attachments))
+	}
+	att := f.attachments[0]
+	if att.WorkspaceID != uid(9) || att.ChatSessionID != uid(1) || att.UploaderType != "member" || att.UploaderID != uid(7) {
+		t.Fatalf("attachment ownership/session wrong: %+v", att)
+	}
+	if att.Filename != "screenshot.png" || att.Url != "https://cdn.example.test/lark/cli/img.png" ||
+		att.ContentType != "image/png" || att.SizeBytes != 3 {
+		t.Fatalf("attachment metadata wrong: %+v", att)
+	}
+	if f.linked.ChatMessageID != res.MessageID || f.linked.ChatSessionID != uid(1) || f.linked.WorkspaceID != uid(9) {
+		t.Fatalf("link params wrong: %+v", f.linked)
+	}
+	if len(f.linked.AttachmentIds) != 1 || f.linked.AttachmentIds[0] != att.ID {
+		t.Fatalf("linked ids = %+v, want attachment id %v", f.linked.AttachmentIds, att.ID)
 	}
 }
 

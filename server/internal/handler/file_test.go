@@ -74,7 +74,14 @@ func (m *mockStorage) Delete(_ context.Context, key string) {
 	defer m.mu.Unlock()
 	delete(m.files, key)
 }
+func (m *mockStorage) DeleteObject(ctx context.Context, key string) error {
+	m.Delete(ctx, key)
+	return nil
+}
 func (m *mockStorage) DeleteKeys(_ context.Context, _ []string) {}
+func (m *mockStorage) ObjectURL(key string) string {
+	return "https://cdn.example.com/" + key
+}
 func (m *mockStorage) KeyFromURL(rawURL string) string {
 	for _, prefix := range []string{
 		"https://cdn.example.com/",

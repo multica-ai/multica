@@ -105,18 +105,36 @@ func (s *LocalStorage) GetReader(ctx context.Context, key string) (io.ReadCloser
 }
 
 func (s *LocalStorage) Delete(ctx context.Context, key string) {
+	if err := s.DeleteObject(ctx, key); err != nil {
+		slog.Error("local storage Delete failed", "key", key, "error", err)
+	}
+}
+
+// DeleteObject is Delete with the error surfaced — the media reconciler needs
+// it to keep the ledger row and schedule a retry instead of assuming success.
+// A missing file is success (the delete is idempotent).
+func (s *LocalStorage) DeleteObject(_ context.Context, key string) error {
 	if key == "" {
-		return
+		return nil
 	}
 	filePath := filepath.Join(s.uploadDir, key)
-	if err := os.Remove(filePath); err != nil {
-		if !os.IsNotExist(err) {
-			slog.Error("local storage Delete failed", "key", key, "error", err)
-		}
+	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
+		return err
 	}
 	if err := os.Remove(filePath + metaSuffix); err != nil && !os.IsNotExist(err) {
-		slog.Error("local storage meta Delete failed", "key", key, "error", err)
+		return err
 	}
+	return nil
+}
+
+// ObjectURL returns the URL a successful Upload/UploadStream of key would
+// return — a pure function of configuration, so the media intent ledger can
+// persist it BEFORE the upload.
+func (s *LocalStorage) ObjectURL(key string) string {
+	if s.baseURL != "" {
+		return fmt.Sprintf("%s/uploads/%s", s.baseURL, key)
+	}
+	return fmt.Sprintf("/uploads/%s", key)
 }
 
 func (s *LocalStorage) DeleteKeys(ctx context.Context, keys []string) {
@@ -152,6 +170,36 @@ func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, cont
 	return fmt.Sprintf("/uploads/%s", key), nil
 }
 
+func (s *LocalStorage) UploadStream(ctx context.Context, key string, data io.Reader, _ int64, contentType string, filename string) (string, error) {
+	dest := filepath.Join(s.uploadDir, key)
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return "", fmt.Errorf("local storage MkdirAll: %w", err)
+	}
+	f, err := os.Create(dest)
+	if err != nil {
+		return "", fmt.Errorf("local storage Create: %w", err)
+	}
+	if _, err := io.Copy(f, data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(dest)
+		return "", fmt.Errorf("local storage stream copy: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(dest)
+		return "", fmt.Errorf("local storage Close: %w", err)
+	}
+	if filename != "" {
+		body, _ := json.Marshal(localMeta{Filename: filename, ContentType: contentType})
+		if err := os.WriteFile(dest+metaSuffix, body, 0644); err != nil {
+			slog.Error("local storage meta write failed", "key", key, "error", err)
+		}
+	}
+
+	if s.baseURL != "" {
+		return fmt.Sprintf("%s/uploads/%s", s.baseURL, key), nil
+	}
+	return fmt.Sprintf("/uploads/%s", key), nil
+}
 func (s *LocalStorage) GetFilePath(key string) string {
 	return filepath.Join(s.uploadDir, key)
 }

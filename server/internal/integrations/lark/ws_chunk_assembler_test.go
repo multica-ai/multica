@@ -181,11 +181,11 @@ func TestChunkAssemblerRejectsBadInputs(t *testing.T) {
 func TestParseChunkHeaders(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
-		name       string
-		headers    []FrameHeader
-		wantSum    int
-		wantSeq    int
-		wantMsgID  string
+		name      string
+		headers   []FrameHeader
+		wantSum   int
+		wantSeq   int
+		wantMsgID string
 	}{
 		{
 			name:    "all present",

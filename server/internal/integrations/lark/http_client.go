@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -33,6 +34,11 @@ import (
 // honoring Lark's `expire` field minus a safety margin so callers
 // never present a token that's about to lapse mid-flight.
 
+// DefaultResourceDownloadTimeout is the default cap on one message-resource
+// download. Exported so the channel-media settle invariant test can assert
+// the reconciler's settle delay dwarfs every pipeline budget.
+const DefaultResourceDownloadTimeout = 45 * time.Second
+
 const (
 	// defaultLarkBaseURL is the mainland 飞书 open-platform host. It is the
 	// fallback host for an installation whose region is feishu (or unset);
@@ -52,6 +58,18 @@ const (
 	// is normally well under 1s; we leave headroom for cross-region
 	// latency from a self-hosted Multica deployment to feishu.cn.
 	defaultRequestTimeout = 10 * time.Second
+
+	// defaultResourceDownloadTimeout is intentionally longer than normal
+	// OpenAPI calls because message videos are binary transfers, not JSON
+	// RPCs. Keep it below the inbound dedup stale-claim window (60s), so a
+	// slow download does not invite a second replica to reclaim the same
+	// message before this one can append and mark it processed.
+	defaultResourceDownloadTimeout = DefaultResourceDownloadTimeout
+
+	// Feishu caps message resources at 100 MiB. Keep the local transport guard
+	// aligned with that contract; detached media processing keeps large
+	// transfers off the connector ACK path.
+	maxMessageResourceBytes = 100 << 20
 
 	// Lark's "invalid tenant_access_token" / "tenant_access_token
 	// expired" error codes. When we see either, drop the cached token
@@ -80,6 +98,15 @@ type HTTPClientConfig struct {
 	// defaultRequestTimeout.
 	HTTPClient *http.Client
 
+	// ResourceHTTPClient is used only for message resource downloads. It
+	// deliberately does not share HTTPClient's shorter timeout: image/video
+	// resource transfers are bounded by ResourceDownloadTimeout instead.
+	ResourceHTTPClient *http.Client
+
+	// ResourceDownloadTimeout caps a single message resource download. Zero
+	// defaults to defaultResourceDownloadTimeout.
+	ResourceDownloadTimeout time.Duration
+
 	// Now is overridable for deterministic token-expiry tests.
 	Now func() time.Time
 
@@ -98,6 +125,12 @@ func (c HTTPClientConfig) withDefaults() HTTPClientConfig {
 	c.BaseURL = strings.TrimRight(c.BaseURL, "/")
 	if c.HTTPClient == nil {
 		c.HTTPClient = &http.Client{Timeout: defaultRequestTimeout}
+	}
+	if c.ResourceDownloadTimeout == 0 {
+		c.ResourceDownloadTimeout = defaultResourceDownloadTimeout
+	}
+	if c.ResourceHTTPClient == nil {
+		c.ResourceHTTPClient = &http.Client{Timeout: c.ResourceDownloadTimeout}
 	}
 	if c.Now == nil {
 		c.Now = time.Now
@@ -652,6 +685,195 @@ func (c *httpAPIClient) ListChatMessages(ctx context.Context, creds Installation
 		out = append(out, it.normalize())
 	}
 	return out, nil
+}
+
+// DownloadMessageResource obtains a binary message resource (image, video,
+// file, audio) from Lark/Feishu. Business errors are still represented as
+// JSON with a code/msg body on some failures, so JSON-looking responses are
+// checked before being treated as resource bytes.
+func (c *httpAPIClient) DownloadMessageResource(ctx context.Context, creds InstallationCredentials, p DownloadResourceParams) (DownloadedResource, error) {
+	stream, err := c.DownloadMessageResourceStream(ctx, creds, p)
+	if err != nil {
+		return DownloadedResource{}, err
+	}
+	defer stream.Body.Close()
+	rawBody, err := io.ReadAll(stream.Body)
+	if err != nil {
+		return DownloadedResource{}, fmt.Errorf("lark http client: download resource: read body: %w", err)
+	}
+	sizeBytes := stream.SizeBytes
+	if sizeBytes == 0 {
+		sizeBytes = int64(len(rawBody))
+	}
+	return DownloadedResource{
+		Data:        rawBody,
+		ContentType: stream.ContentType,
+		Filename:    stream.Filename,
+		SizeBytes:   sizeBytes,
+	}, nil
+}
+
+func (c *httpAPIClient) DownloadMessageResourceStream(ctx context.Context, creds InstallationCredentials, p DownloadResourceParams) (DownloadedResourceStream, error) {
+	if p.MessageID == "" {
+		return DownloadedResourceStream{}, errors.New("lark http client: missing message_id")
+	}
+	if p.FileKey == "" {
+		return DownloadedResourceStream{}, errors.New("lark http client: missing file_key")
+	}
+	token, err := c.tenantAccessToken(ctx, creds)
+	if err != nil {
+		return DownloadedResourceStream{}, err
+	}
+	q := url.Values{}
+	if p.Type != "" {
+		q.Set("type", p.Type)
+	}
+	path := "/open-apis/im/v1/messages/" + url.PathEscape(p.MessageID) + "/resources/" + url.PathEscape(p.FileKey)
+	if encoded := q.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+
+	downloadCtx := ctx
+	var cancel context.CancelFunc
+	if c.cfg.ResourceDownloadTimeout > 0 {
+		downloadCtx, cancel = context.WithTimeout(ctx, c.cfg.ResourceDownloadTimeout)
+	}
+	req, err := http.NewRequestWithContext(downloadCtx, http.MethodGet, c.resolveBaseURL(creds)+path, nil)
+	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
+		return DownloadedResourceStream{}, fmt.Errorf("lark http client: download resource: new request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := c.cfg.ResourceHTTPClient.Do(req)
+	if err != nil {
+		if cancel != nil {
+			cancel()
+		}
+		return DownloadedResourceStream{}, fmt.Errorf("lark http client: download resource: http do: %w", err)
+	}
+	closeWithCancel := func() {
+		resp.Body.Close()
+		if cancel != nil {
+			cancel()
+		}
+	}
+	if resp.ContentLength > maxMessageResourceBytes {
+		closeWithCancel()
+		return DownloadedResourceStream{}, fmt.Errorf("lark http client: download resource: resource exceeds %d bytes", maxMessageResourceBytes)
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		rawBody, readErr := readMessageResourceErrorBody(resp.Body)
+		closeWithCancel()
+		if readErr != nil {
+			return DownloadedResourceStream{}, readErr
+		}
+		return DownloadedResourceStream{}, fmt.Errorf("lark http client: download resource: http %d: %s", resp.StatusCode, truncate(string(rawBody), 512))
+	}
+	contentType := resp.Header.Get("Content-Type")
+	if strings.Contains(strings.ToLower(contentType), "json") {
+		rawBody, readErr := readMessageResourceErrorBody(resp.Body)
+		closeWithCancel()
+		if readErr != nil {
+			return DownloadedResourceStream{}, readErr
+		}
+		var apiResp struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+		}
+		if err := json.Unmarshal(rawBody, &apiResp); err == nil && apiResp.Code != 0 {
+			if isTokenError(apiResp.Code) {
+				c.invalidateToken(creds.AppID)
+			}
+			return DownloadedResourceStream{}, &APIError{Op: "download resource", Code: apiResp.Code, Msg: apiResp.Msg}
+		}
+		return DownloadedResourceStream{
+			Body:        cancelOnClose(io.NopCloser(bytes.NewReader(rawBody)), cancel),
+			ContentType: contentType,
+			Filename:    filenameFromContentDisposition(resp.Header.Get("Content-Disposition")),
+			SizeBytes:   int64(len(rawBody)),
+		}, nil
+	}
+	if contentType == "" {
+		contentType = "application/octet-stream"
+	}
+	sizeBytes := resp.ContentLength
+	if sizeBytes < 0 {
+		sizeBytes = 0
+	}
+	return DownloadedResourceStream{
+		Body:        cancelOnClose(&maxBytesReadCloser{r: resp.Body, remaining: maxMessageResourceBytes}, cancel),
+		ContentType: contentType,
+		Filename:    filenameFromContentDisposition(resp.Header.Get("Content-Disposition")),
+		SizeBytes:   sizeBytes,
+	}, nil
+}
+
+func readMessageResourceErrorBody(body io.Reader) ([]byte, error) {
+	rawBody, err := io.ReadAll(io.LimitReader(body, maxMessageResourceBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("lark http client: download resource: read body: %w", err)
+	}
+	if len(rawBody) > maxMessageResourceBytes {
+		return nil, fmt.Errorf("lark http client: download resource: resource exceeds %d bytes", maxMessageResourceBytes)
+	}
+	return rawBody, nil
+}
+
+type maxBytesReadCloser struct {
+	r         io.ReadCloser
+	remaining int64
+}
+
+func (r *maxBytesReadCloser) Read(p []byte) (int, error) {
+	if r.remaining > 0 {
+		if int64(len(p)) > r.remaining {
+			p = p[:r.remaining]
+		}
+		n, err := r.r.Read(p)
+		r.remaining -= int64(n)
+		return n, err
+	}
+	var one [1]byte
+	n, err := r.r.Read(one[:])
+	if n > 0 {
+		return 0, fmt.Errorf("lark http client: download resource: resource exceeds %d bytes", maxMessageResourceBytes)
+	}
+	return 0, err
+}
+
+func (r *maxBytesReadCloser) Close() error {
+	return r.r.Close()
+}
+
+type cancelReadCloser struct {
+	io.ReadCloser
+	cancel context.CancelFunc
+}
+
+func cancelOnClose(body io.ReadCloser, cancel context.CancelFunc) io.ReadCloser {
+	if cancel == nil {
+		return body
+	}
+	return &cancelReadCloser{ReadCloser: body, cancel: cancel}
+}
+
+func (r *cancelReadCloser) Close() error {
+	err := r.ReadCloser.Close()
+	r.cancel()
+	return err
+}
+
+func filenameFromContentDisposition(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	_, params, err := mime.ParseMediaType(raw)
+	if err != nil {
+		return ""
+	}
+	return params["filename"]
 }
 
 // larkBatchGetUsersMaxIDs is Lark's hard cap on user_ids per

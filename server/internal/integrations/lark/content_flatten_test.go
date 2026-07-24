@@ -83,6 +83,7 @@ func TestFlattenContent_DispatchByType(t *testing.T) {
 		{"file", "file", `{"file_key":"f"}`, "[File]"},
 		{"audio", "audio", `{"file_key":"f"}`, "[Audio]"},
 		{"media", "media", `{"file_key":"f"}`, "[Video]"},
+		{"video", "video", `{"file_key":"f"}`, "[Video]"},
 		{"sticker", "sticker", `{"file_key":"f"}`, "[Sticker]"},
 		{"interactive", "interactive", `{"title":"t"}`, "[interactive card]"},
 		{"share_chat", "share_chat", `{"chat_id":"oc"}`, "[Shared Chat]"},

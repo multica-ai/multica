@@ -90,6 +90,9 @@ func (s *stubAPIClientWithRecorder) GetMessage(ctx context.Context, creds Instal
 func (s *stubAPIClientWithRecorder) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
 	return nil, nil
 }
+func (s *stubAPIClientWithRecorder) DownloadMessageResource(ctx context.Context, creds InstallationCredentials, p DownloadResourceParams) (DownloadedResource, error) {
+	return DownloadedResource{}, nil
+}
 func (s *stubAPIClientWithRecorder) BatchGetUsers(ctx context.Context, creds InstallationCredentials, openIDs []string) (map[string]string, error) {
 	return nil, nil
 }

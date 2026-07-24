@@ -485,11 +485,11 @@ func TestRegistrationClient_Poll_DomainSwitchOnFeishuTenant(t *testing.T) {
 // gate flips on only one side.
 func TestRegistrationClient_Poll_NoSwitchWhenAlreadyOnMatchingHost(t *testing.T) {
 	cases := []struct {
-		name        string
-		brand       string
-		begunOn     string
-		feishuHost  string
-		larkHost    string
+		name       string
+		brand      string
+		begunOn    string
+		feishuHost string
+		larkHost   string
 	}{
 		{
 			name:       "lark brand on lark host is a no-op",

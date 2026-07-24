@@ -2,6 +2,9 @@ package storage
 
 import (
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
@@ -11,6 +14,67 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
+
+func TestS3StorageUploadStreamUsesFixedLengthRequest(t *testing.T) {
+	type observedRequest struct {
+		contentLength int64
+		decodedLength string
+		encoding      string
+		transfer      []string
+		body          string
+	}
+	observed := make(chan observedRequest, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("read request body: %v", err)
+		}
+		observed <- observedRequest{
+			contentLength: r.ContentLength,
+			decodedLength: r.Header.Get("X-Amz-Decoded-Content-Length"),
+			encoding:      r.Header.Get("Content-Encoding"),
+			transfer:      append([]string(nil), r.TransferEncoding...),
+			body:          string(body),
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(server.Close)
+
+	client := s3.New(s3.Options{
+		Region:       "us-east-1",
+		Credentials:  aws.NewCredentialsCache(credentials.NewStaticCredentialsProvider("AKID", "SECRET", "")),
+		BaseEndpoint: aws.String(server.URL),
+		UsePathStyle: true,
+	})
+	store := &S3Storage{
+		client:       client,
+		bucket:       "test-bucket",
+		region:       "us-east-1",
+		endpointURL:  server.URL,
+		usePathStyle: true,
+	}
+	payload := "streamed payload"
+	nonSeekable := io.LimitReader(strings.NewReader(payload), int64(len(payload)))
+	if _, err := store.UploadStream(context.Background(), "uploads/media.bin", nonSeekable, int64(len(payload)), "application/octet-stream", "media.bin"); err != nil {
+		t.Fatalf("UploadStream: %v", err)
+	}
+
+	got := <-observed
+	if got.contentLength != int64(len(payload)) || len(got.transfer) != 0 {
+		t.Fatalf("request is not a fixed-length upload: content_length=%d decoded_length=%q encoding=%q transfer=%v",
+			got.contentLength, got.decodedLength, got.encoding, got.transfer)
+	}
+	if got.body != payload {
+		t.Fatalf("request body = %q, want %q", got.body, payload)
+	}
+}
+
+func TestS3StorageUploadStreamRejectsUnknownLength(t *testing.T) {
+	store := &S3Storage{}
+	if _, err := store.UploadStream(context.Background(), "uploads/media.bin", strings.NewReader("payload"), 0, "application/octet-stream", "media.bin"); err == nil {
+		t.Fatal("UploadStream accepted an unknown content length")
+	}
+}
 
 func TestS3StorageKeyFromURL_CustomEndpointPreservesNestedKey(t *testing.T) {
 	s := &S3Storage{

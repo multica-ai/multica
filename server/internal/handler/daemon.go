@@ -2166,16 +2166,19 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				}
 			}
 			// Resolve the user-message input batch for this run. A task-owned
-			// direct-chat task (chat_input_task_id set, MUL-4351) reads exactly
-			// the user messages tagged with its own input owner, so a message
-			// that arrived after this turn was sealed can never be absorbed here.
-			// Legacy and channel (Slack/Lark) tasks carry a NULL owner and keep
-			// the trailing-message selector — the run of user messages after the
-			// last assistant row, which also covers a debounced burst (MUL-2968:
-			// "看上海天气" then "还有青岛" must both be delivered) — so a rolling
-			// deploy never replays their history. Attachments are collected per
-			// included message so the agent can `multica attachment download <id>`
-			// (the inline markdown URL is signed + 30-min expiring on the CDN).
+			// task (chat_input_task_id set) reads exactly the user messages
+			// tagged with its own input owner, so a message that arrived after
+			// this turn was sealed can never be absorbed here. Direct-chat
+			// tasks have owned their single message since MUL-4351; channel
+			// (Slack/Lark) tasks now seal their trailing batch at enqueue too.
+			// Only legacy tasks created before that deploy carry a NULL owner
+			// and keep the trailing-message selector — the run of user messages
+			// after the last assistant row, which also covers a debounced burst
+			// (MUL-2968: "看上海天气" then "还有青岛" must both be delivered) —
+			// so a rolling deploy never replays their history. Attachments are
+			// collected per included message so the agent can
+			// `multica attachment download <id>` (the inline markdown URL is
+			// signed + 30-min expiring on the CDN).
 			var unanswered []db.ChatMessage
 			var inputLoadErr error
 			if task.ChatInputTaskID.Valid {
@@ -2708,6 +2711,9 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 // these, not just the latest. Every completed or failed run writes an
 // assistant row, so the anchor advances one turn at a time; the result is the
 // whole slice on the first turn and exactly the new message(s) thereafter.
+// Legacy channel tasks also stop at the first unexpired media marker so an old
+// run cannot consume a placeholder that has not been bound yet. New channel
+// tasks use task-owned input batches and do not depend on this fallback.
 func trailingUserMessages(msgs []db.ChatMessage) []db.ChatMessage {
 	start := 0
 	for i := len(msgs) - 1; i >= 0; i-- {
@@ -2716,7 +2722,15 @@ func trailingUserMessages(msgs []db.ChatMessage) []db.ChatMessage {
 			break
 		}
 	}
-	return msgs[start:]
+	msgs = msgs[start:]
+	now := time.Now()
+	for i := range msgs {
+		pending := msgs[i].ChannelMediaPendingUntil
+		if pending.Valid && pending.Time.After(now) {
+			return msgs[:i]
+		}
+	}
+	return msgs
 }
 
 // ListPendingTasksByRuntime returns queued/dispatched tasks for a runtime.
