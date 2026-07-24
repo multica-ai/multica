@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ListChecks, ExternalLink } from "lucide-react";
+import { ListChecks, ExternalLink, ChevronRight } from "lucide-react";
 import {
   artifactsByIssueOptions,
   planVersionsOptions,
@@ -10,6 +10,8 @@ import {
   parseWorkpadPhases,
   namedPhases,
   workpadProgress,
+  phaseStatus,
+  phaseComplete,
   type WorkpadItem,
   type WorkpadPhase,
 } from "@multica/cerebro-artifacts/core";
@@ -17,10 +19,9 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "@multica/views/navigation";
+import { StatusIcon } from "@multica/views/issues/components";
 import { cn } from "@multica/ui/lib/utils";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
-
-const ALL = "__all__";
 
 // StepList renders one flat run of checklist steps.
 function StepList({ items }: { items: WorkpadItem[] }) {
@@ -48,52 +49,48 @@ function StepList({ items }: { items: WorkpadItem[] }) {
   );
 }
 
-// PhaseBlock renders one phase: its heading (with per-phase progress) followed
-// by its steps. A null-title phase (steps before the first heading) renders
-// just the steps, with no heading.
-function PhaseBlock({ phase }: { phase: WorkpadPhase }) {
-  const { done, total } = workpadProgress(phase.items);
+// PhaseSection renders one named phase as a collapsible row: a status icon that
+// reflects the phase's own progress (todo / in-progress / done), the phase
+// title, and its step count, followed by its steps when expanded. Clicking the
+// header toggles the steps — a long plan folds down to a handful of phase rows.
+function PhaseSection({
+  phase,
+  open,
+  onToggle,
+}: {
+  phase: WorkpadPhase;
+  open: boolean;
+  onToggle: () => void;
+}) {
+  const progress = workpadProgress(phase.items);
   return (
     <div className="flex flex-col gap-1.5">
-      {phase.title !== null && (
-        <div className="flex items-center gap-2">
-          <span className="text-xs font-semibold text-muted-foreground">
-            {phase.title}
-          </span>
-          <span className="text-xs tabular-nums text-muted-foreground/70">
-            {done}/{total}
-          </span>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={open}
+        className="group -mx-1 flex items-center gap-2 rounded-sm px-1 py-0.5 text-left hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        <ChevronRight
+          className={cn(
+            "size-3.5 shrink-0 text-muted-foreground transition-transform",
+            open && "rotate-90",
+          )}
+        />
+        <StatusIcon status={phaseStatus(progress)} className="size-3.5" />
+        <span className="min-w-0 truncate text-sm font-medium">
+          {phase.title}
+        </span>
+        <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
+          {progress.done}/{progress.total}
+        </span>
+      </button>
+      {open && (
+        <div className="pl-6">
+          <StepList items={phase.items} />
         </div>
       )}
-      <StepList items={phase.items} />
     </div>
-  );
-}
-
-// PhaseChip is a small pill used to pick which phase the panel shows.
-function PhaseChip({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "rounded-full border px-2 py-0.5 text-xs transition-colors focus:outline-none focus:ring-2 focus:ring-ring",
-        active
-          ? "border-transparent bg-primary text-primary-foreground"
-          : "border-border text-muted-foreground hover:bg-muted",
-      )}
-    >
-      {label}
-    </button>
   );
 }
 
@@ -105,15 +102,19 @@ function PhaseChip({
 // cerebro_workpad feature flag.
 //
 // FIR-3765 — when the plan groups its steps under markdown headings (phases),
-// the panel renders them as phase blocks and shows a filter so a long plan can
-// be viewed as "All" or one phase at a time. A plan with fewer than two named
-// phases renders as a single flat list, exactly as before.
+// each phase renders as a collapsible section headed by a status icon that
+// reflects the phase's own progress (todo / in-progress / done). Completed
+// phases start collapsed so a long plan opens on the work that remains; the
+// user can fold any phase in or out. A plan with fewer than two named phases
+// renders as a single flat list, exactly as before.
 export function WorkpadPanel({ issueId, className }: { issueId: string; className?: string }) {
   const enabled = useFeatureFlag("cerebro_workpad");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const router = useNavigation();
-  const [selected, setSelected] = useState<string>(ALL);
+  // Per-phase open overrides (keyed by title). A phase not present here uses its
+  // default: collapsed when complete, expanded otherwise.
+  const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
 
   const { data } = useQuery({
     ...artifactsByIssueOptions(wsId, issueId),
@@ -137,15 +138,7 @@ export function WorkpadPanel({ issueId, className }: { issueId: string; classNam
   const { done, total } = workpadProgress(items);
   const versionCount = versions?.length ?? 0;
 
-  const named = namedPhases(phases);
-  const showSelector = named.length >= 2;
-  // Filter to the selected phase (by title); fall back to all phases when the
-  // selection is stale (e.g. the plan changed and the title no longer exists).
-  const filtered =
-    showSelector && selected !== ALL
-      ? phases.filter((p) => p.title === selected)
-      : phases;
-  const visible = filtered.length > 0 ? filtered : phases;
+  const showPhases = namedPhases(phases).length >= 2;
 
   const openPlan = () => {
     const path = paths.documentDetail(plan.id);
@@ -199,37 +192,35 @@ export function WorkpadPanel({ issueId, className }: { issueId: string; classNam
         )}
       </p>
 
-      {showSelector && (
-        <div
-          role="group"
-          aria-label="Filter plan by phase"
-          className="mt-2 flex flex-wrap items-center gap-1"
-        >
-          <PhaseChip
-            label="All"
-            active={selected === ALL}
-            onClick={() => setSelected(ALL)}
-          />
-          {named.map((p) => (
-            <PhaseChip
-              key={p.title as string}
-              label={p.title as string}
-              active={selected === p.title}
-              onClick={() => setSelected(p.title as string)}
-            />
-          ))}
-        </div>
-      )}
-
       {total === 0 ? (
         <p className="mt-2 text-xs text-muted-foreground">
           The plan has no steps yet.
         </p>
+      ) : showPhases ? (
+        <div className="mt-2 flex flex-col gap-2">
+          {phases.map((phase, i) => {
+            if (phase.title === null) {
+              return <StepList key={`__lead__${i}`} items={phase.items} />;
+            }
+            const complete = phaseComplete(workpadProgress(phase.items));
+            const title = phase.title;
+            const override = openOverrides[title];
+            const open = override === undefined ? !complete : override;
+            return (
+              <PhaseSection
+                key={title}
+                phase={phase}
+                open={open}
+                onToggle={() =>
+                  setOpenOverrides((o) => ({ ...o, [title]: !open }))
+                }
+              />
+            );
+          })}
+        </div>
       ) : (
-        <div className="mt-2 flex flex-col gap-3">
-          {visible.map((phase, i) => (
-            <PhaseBlock key={phase.title ?? `__lead__${i}`} phase={phase} />
-          ))}
+        <div className="mt-2">
+          <StepList items={items} />
         </div>
       )}
     </div>
