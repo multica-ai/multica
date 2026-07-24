@@ -294,7 +294,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
-        version: "0.5.0",
+        version: "0.4.10",
         date: "2026-07-24",
         title: "支持自托管 Git 服务，Chat 更懂你的项目",
         changes: [],

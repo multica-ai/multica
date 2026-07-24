@@ -270,7 +270,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
-          version: "0.5.0",
+          version: "0.4.10",
           date: "2026-07-24",
           title: "セルフホスト Git サービス対応、プロジェクトを理解する Chat",
           changes: [],

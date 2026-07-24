@@ -269,7 +269,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
-          version: "0.5.0",
+          version: "0.4.10",
           date: "2026-07-24",
           title: "셀프호스트 Git 서비스 지원, 프로젝트를 이해하는 Chat",
           changes: [],

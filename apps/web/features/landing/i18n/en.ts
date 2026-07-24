@@ -294,7 +294,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
-        version: "0.5.0",
+        version: "0.4.10",
         date: "2026-07-24",
         title: "Self-hosted Git providers and project-aware Chat",
         changes: [],
