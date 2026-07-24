@@ -72,8 +72,11 @@ export {
   selectIssuePlan,
   parseWorkpadChecklist,
   workpadProgress,
+  parseWorkpadPhases,
+  namedPhases,
   type WorkpadItem,
   type WorkpadProgress,
+  type WorkpadPhase,
 } from "./workpad";
 export {
   PlanVersionSchema,

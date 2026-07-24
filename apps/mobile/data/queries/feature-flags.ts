@@ -38,6 +38,10 @@ const FLAG_DEFAULTS: Record<string, boolean> = {
   cerebro_comment_reminders: true,
   // FIR-31: per-reply cost badge + accumulated session-cost chip in chat.
   cerebro_chat_message_cost: true,
+  // FIR-3765: the Workpad plan panel on the issue screen. Default-off, matching
+  // web's registry.ts (`cerebro_workpad: false`) — the panel only appears where
+  // the workspace has turned the flag on.
+  cerebro_workpad: false,
 };
 
 /**
@@ -89,6 +93,24 @@ export function useChatMessageCostEnabled(): boolean {
   if (!data) return FLAG_DEFAULTS.cerebro_chat_message_cost;
   return resolveFlag(
     "cerebro_chat_message_cost",
+    data.overrides,
+    data.workspace_overrides,
+    data.locked,
+  );
+}
+
+/**
+ * Whether the Workpad plan panel is shown on the issue screen. Default-OFF,
+ * matching web's `cerebro_workpad`. While the flags query is loading the panel
+ * stays hidden (opt-in semantics), so it never flashes in for a workspace that
+ * has not enabled it.
+ */
+export function useWorkpadEnabled(): boolean {
+  const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { data } = useQuery(featureFlagsOptions(wsId));
+  if (!data) return FLAG_DEFAULTS.cerebro_workpad;
+  return resolveFlag(
+    "cerebro_workpad",
     data.overrides,
     data.workspace_overrides,
     data.locked,

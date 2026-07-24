@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 )
 
@@ -172,4 +173,117 @@ func TestCardBriefSurfaceParity(t *testing.T) {
 				tool, cardRow.Effective.Setting, briefEff.Setting)
 		}
 	}
+}
+
+// TestTableGeneralGateSurfaceParityWithMemberOverride pins the production
+// configuration that TestCardBriefSurfaceParity deliberately does not cover:
+// the member-override flag is ON. The Settings > Permissions table and the
+// call-time general gate must use the same openable resolution mode: a User
+// Allow opens a Workspace Deny, while a User Deny remains the ceiling even
+// when the Agent says Allow.
+func TestTableGeneralGateSurfaceParityWithMemberOverride(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	agent, user := uuidByte(31), tpTestUserID
+	const tool = "web_fetch"
+	addCap(t, s, tool, "Fetch web page", "Network", "builtin")
+
+	if err := s.q.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: tpTestWorkspaceID,
+		FlagKey:     FlagMemberOverride,
+		Enabled:     true,
+	}); err != nil {
+		t.Fatalf("enable member override: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = s.q.DeleteCerebroWorkspaceFeatureFlag(context.Background(), cerebrodb.DeleteCerebroWorkspaceFeatureFlagParams{
+			WorkspaceID: tpTestWorkspaceID,
+			FlagKey:     FlagMemberOverride,
+		})
+	})
+
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     tool,
+		Layer:       LayerWorkspace,
+		SubjectID:   tpTestWorkspaceID,
+		Setting:     SettingDeny,
+	}); err != nil {
+		t.Fatalf("set workspace deny: %v", err)
+	}
+	assertParity := func(want Setting) {
+		t.Helper()
+		rows, err := s.Table(ctx, TableQuery{
+			WorkspaceID: tpTestWorkspaceID,
+			AgentID:     agent,
+			UserID:      user,
+			Base:        SettingAllow,
+		})
+		if err != nil {
+			t.Fatalf("table: %v", err)
+		}
+		row, ok := findRow(rows, tool)
+		if !ok {
+			t.Fatalf("table is missing %q", tool)
+		}
+		gate, err := s.ResolveGeneral(ctx, Query{
+			WorkspaceID: tpTestWorkspaceID,
+			ToolKey:     tool,
+			AgentID:     agent,
+			UserID:      user,
+			Base:        SettingAllow,
+		}, s.MemberOverrideEnabled(ctx, tpTestWorkspaceID))
+		if err != nil {
+			t.Fatalf("general gate: %v", err)
+		}
+		if row.Effective.Setting != want || gate.Setting != want {
+			t.Fatalf("table=%q gate=%q, want %q", row.Effective.Setting, gate.Setting, want)
+		}
+		if row.Effective.Setting != gate.Setting {
+			t.Fatalf("surface drift: Settings table=%q call-time gate=%q", row.Effective.Setting, gate.Setting)
+		}
+	}
+
+	// Workspace Deny applies while the member inherits it.
+	assertParity(SettingDeny)
+
+	// Workspace Deny is a default in openable mode, so the member's own User
+	// Allow opens it. Both the Settings table and the call-time gate must agree.
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     tool,
+		Layer:       LayerUser,
+		SubjectID:   user,
+		Setting:     SettingAllow,
+	}); err != nil {
+		t.Fatalf("set user allow: %v", err)
+	}
+	assertParity(SettingAllow)
+
+	// An Agent Allow does not change the member-opened verdict.
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     tool,
+		Layer:       LayerAgent,
+		SubjectID:   agent,
+		Setting:     SettingAllow,
+	}); err != nil {
+		t.Fatalf("set agent allow: %v", err)
+	}
+	assertParity(SettingAllow)
+
+	// A member's own User Deny remains the ceiling and blocks that Agent Allow.
+	if _, err := s.Set(ctx, SetParams{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     tool,
+		Layer:       LayerUser,
+		SubjectID:   user,
+		Setting:     SettingDeny,
+	}); err != nil {
+		t.Fatalf("set user deny: %v", err)
+	}
+	assertParity(SettingDeny)
 }

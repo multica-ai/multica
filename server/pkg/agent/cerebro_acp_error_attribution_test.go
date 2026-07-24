@@ -22,6 +22,14 @@ const toolResultLine = `terminal result - **output:** Error: write file: open ar
 // against the upstream LLM after exhausting its retries.
 const terminalProviderLine = `❌ API call failed after 3 retries: HTTP 429: Provider returned error`
 
+// noteNotFoundToolLine is the stderr hermes emitted at 20:09 on the same
+// production run (issue 6af63422): the agent's read-note tool got a 404
+// because the note id did not exist. Like the write-file failure, it is
+// ordinary run output the agent recovers from — its "returned 404" wording
+// carries no "HTTP <code>" token and no ⚠️/❌ banner, so it must not be
+// captured as a provider error and must not turn the run red.
+const noteNotFoundToolLine = `terminal result - **output:** Error: read note: GET /api/notes/019f8341-e3f6-7db7-88a2-e52c41f8f25a returned 404: {"error":"note not found"}", "exit_code": 1, "error": null}`
+
 // TestSnifferReportsTerminalErrorNotFirstSeen pins the user-visible
 // symptom: the failure message must name the error that actually ended
 // the run, not the oldest line the sniffer happened to capture.
@@ -58,6 +66,30 @@ func TestSnifferIgnoresTerminalToolOutput(t *testing.T) {
 
 	if msg := s.message(); msg != "" {
 		t.Errorf("a failing terminal command was captured as a provider error: %q", msg)
+	}
+}
+
+// TestSnifferIgnoresNoteNotFound404 pins the exact case Jesper reported:
+// a read-note tool that got a 404 ("note not found") must not become the
+// cause of a failed run. It is a recoverable tool error, not a provider
+// failure, and neither message() nor promoteACPResultOnProviderError may
+// flip a completed run to failed on the strength of it.
+func TestSnifferIgnoresNoteNotFound404(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	if _, err := s.Write([]byte(noteNotFoundToolLine + "\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if msg := s.message(); msg != "" {
+		t.Errorf("a 404 note-not-found tool error was captured as a provider error: %q", msg)
+	}
+
+	// The run completed with real output; the 404 line must not promote it.
+	status, errMsg := promoteACPResultOnProviderError("completed", "", "done writing the diagram", s)
+	if status != "completed" {
+		t.Errorf("run flipped to %q on a recoverable 404 (error=%q); expected it to stay completed", status, errMsg)
 	}
 }
 

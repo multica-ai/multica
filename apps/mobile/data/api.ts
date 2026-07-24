@@ -121,8 +121,11 @@ import {
   EMPTY_TASK_MESSAGE_LIST,
   UserSchema,
   WorkspaceListSchema,
+  WorkpadArtifactListSchema,
+  EMPTY_WORKPAD_ARTIFACTS,
 } from "./schemas";
 import type { FeatureFlagsResponse } from "./schemas";
+import type { WorkpadArtifact } from "@/lib/workpad";
 import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
 import { parseWithFallback } from "@/lib/parse-response";
@@ -674,6 +677,21 @@ class ApiClient {
       TimelineEntriesSchema,
       EMPTY_TIMELINE_ENTRIES,
       { ...opts, endpoint: "GET /api/issues/:id/timeline" },
+    );
+  }
+
+  // GET /api/issues/:id/artifacts — the documents coupled to an issue. The
+  // Workpad panel (FIR-3765) reads this to find the issue's `kind:"plan"`
+  // artifact and render its phased checklist above the composer.
+  async listArtifactsByIssue(
+    issueId: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<WorkpadArtifact[]> {
+    return this.fetchValidated(
+      `/api/issues/${issueId}/artifacts`,
+      WorkpadArtifactListSchema,
+      EMPTY_WORKPAD_ARTIFACTS,
+      { ...opts, endpoint: "GET /api/issues/:id/artifacts" },
     );
   }
 

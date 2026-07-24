@@ -4,6 +4,8 @@ import {
   selectIssuePlan,
   parseWorkpadChecklist,
   workpadProgress,
+  parseWorkpadPhases,
+  namedPhases,
 } from "./workpad";
 
 function artifact(over: Partial<Artifact>): Artifact {
@@ -86,5 +88,61 @@ describe("workpadProgress", () => {
       done: 2,
       total: 3,
     });
+  });
+});
+
+describe("parseWorkpadPhases", () => {
+  it("returns [] for empty body", () => {
+    expect(parseWorkpadPhases("")).toEqual([]);
+    expect(parseWorkpadPhases(null)).toEqual([]);
+  });
+
+  it("groups steps under their headings and drops the title-only heading", () => {
+    const body = [
+      "# Plan",
+      "## Fase 1: Byg",
+      "- [ ] a",
+      "- [x] b",
+      "## Fase 2: Test",
+      "- [ ] c",
+    ].join("\n");
+    expect(parseWorkpadPhases(body)).toEqual([
+      { title: "Fase 1: Byg", items: [{ text: "a", done: false }, { text: "b", done: true }] },
+      { title: "Fase 2: Test", items: [{ text: "c", done: false }] },
+    ]);
+  });
+
+  it("keeps steps before the first heading as a leading null-title phase", () => {
+    const body = ["- [ ] setup", "## Fase 1", "- [ ] a"].join("\n");
+    expect(parseWorkpadPhases(body)).toEqual([
+      { title: null, items: [{ text: "setup", done: false }] },
+      { title: "Fase 1", items: [{ text: "a", done: false }] },
+    ]);
+  });
+
+  it("returns one null-title phase for a flat plan with no headings", () => {
+    const phases = parseWorkpadPhases("- [ ] a\n- [x] b");
+    expect(phases).toEqual([
+      { title: null, items: [{ text: "a", done: false }, { text: "b", done: true }] },
+    ]);
+  });
+
+  it("preserves flat step order (flatMap equals parseWorkpadChecklist)", () => {
+    const body = "## One\n- [ ] a\n## Two\n- [x] b\n- [ ] c";
+    const flat = parseWorkpadPhases(body).flatMap((p) => p.items);
+    expect(flat).toEqual(parseWorkpadChecklist(body));
+  });
+
+  it("handles headings of any level and CRLF endings", () => {
+    expect(parseWorkpadPhases("### Deep\r\n- [ ] a")).toEqual([
+      { title: "Deep", items: [{ text: "a", done: false }] },
+    ]);
+  });
+});
+
+describe("namedPhases", () => {
+  it("keeps only titled phases", () => {
+    const phases = parseWorkpadPhases("- [ ] pre\n## A\n- [ ] a\n## B\n- [ ] b");
+    expect(namedPhases(phases).map((p) => p.title)).toEqual(["A", "B"]);
   });
 });

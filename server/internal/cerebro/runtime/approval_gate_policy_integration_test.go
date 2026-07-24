@@ -29,6 +29,7 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -245,6 +246,79 @@ func TestGateToolPolicy_DenyBlocksRealToolCall(t *testing.T) {
 	if ap.intakes != 0 {
 		t.Fatalf("deny must not create an approval ask, got %d", ap.intakes)
 	}
+}
+
+func TestGateToolPolicy_MemberOverrideProductionSemantics(t *testing.T) {
+	ctx := context.Background()
+	const tool = "web_fetch"
+
+	setMemberOverride := func(t *testing.T, e *FirtalGatewayExecutor) {
+		t.Helper()
+		if err := e.cerebro.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+			WorkspaceID: runtimeAccountTestWSID,
+			FlagKey:     toolpolicy.FlagMemberOverride,
+			Enabled:     true,
+		}); err != nil {
+			t.Fatalf("enable member override: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = runtimeAccountTestPool.Exec(context.Background(),
+				`DELETE FROM cerebro_feature_flags WHERE workspace_id = $1 AND flag_key = $2`,
+				runtimeAccountTestWSID, toolpolicy.FlagMemberOverride)
+			_, _ = runtimeAccountTestPool.Exec(context.Background(),
+				`DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND tool_key = $2`,
+				runtimeAccountTestWSID, tool)
+		})
+	}
+
+	t.Run("workspace deny is opened by explicit agent allow", func(t *testing.T) {
+		e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
+		setMemberOverride(t, e)
+		store := toolpolicy.NewStore(runtimeAccountTestPool)
+		if _, err := store.Set(ctx, toolpolicy.SetParams{
+			WorkspaceID: runtimeAccountTestWSID,
+			ToolKey:     tool,
+			Layer:       toolpolicy.LayerWorkspace,
+			SubjectID:   runtimeAccountTestWSID,
+			Setting:     toolpolicy.SettingDeny,
+		}); err != nil {
+			t.Fatalf("set workspace deny: %v", err)
+		}
+		setAgentToolPolicy(t, agentID, tool, toolpolicy.SettingAllow)
+
+		allowed, reason := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, tool, nil, policyTestRegistry(tool), GatewayRequestMeta{
+			TriggerUserID: util.UUIDToString(runtimeAccountTestUserID),
+		})
+		if !allowed {
+			t.Fatalf("agent Allow did not open workspace-default Deny: %s", reason)
+		}
+	})
+
+	t.Run("member deny blocks explicit agent allow", func(t *testing.T) {
+		e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
+		setMemberOverride(t, e)
+		store := toolpolicy.NewStore(runtimeAccountTestPool)
+		setAgentToolPolicy(t, agentID, tool, toolpolicy.SettingAllow)
+		if _, err := store.Set(ctx, toolpolicy.SetParams{
+			WorkspaceID: runtimeAccountTestWSID,
+			ToolKey:     tool,
+			Layer:       toolpolicy.LayerUser,
+			SubjectID:   runtimeAccountTestUserID,
+			Setting:     toolpolicy.SettingDeny,
+		}); err != nil {
+			t.Fatalf("set member deny: %v", err)
+		}
+
+		allowed, reason := e.guardToolCall(ctx, agentID, runtimeAccountTestWSID, tool, nil, policyTestRegistry(tool), GatewayRequestMeta{
+			TriggerUserID: util.UUIDToString(runtimeAccountTestUserID),
+		})
+		if allowed {
+			t.Fatal("member Deny must block even when the agent has Allow")
+		}
+		if reason == "" {
+			t.Fatal("blocked call must explain the member ceiling")
+		}
+	})
 }
 
 // TestGateToolPolicy_ExpiredRoleBindingIsRejectedAtCallTime proves the live
