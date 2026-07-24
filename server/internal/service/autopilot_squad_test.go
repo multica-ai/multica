@@ -59,6 +59,24 @@ func TestFormatAdmissionReason(t *testing.T) {
 	}
 }
 
+func TestIsRetryableRuntimeAdmission(t *testing.T) {
+	tests := []struct {
+		reason string
+		want   bool
+	}{
+		{"agent runtime is offline at dispatch time", true},
+		{"agent runtime is stale at dispatch time", true},
+		{"squad leader runtime is offline at dispatch time", true},
+		{"assignee agent has no runtime bound", false},
+		{"assignee agent is archived", false},
+	}
+	for _, tc := range tests {
+		if got := isRetryableRuntimeAdmission(tc.reason); got != tc.want {
+			t.Errorf("isRetryableRuntimeAdmission(%q)=%v want %v", tc.reason, got, tc.want)
+		}
+	}
+}
+
 // errDispatchSkipped must be distinguishable via errors.As from a wrapped
 // fmt.Errorf, otherwise DispatchAutopilot's failure-vs-skip switch will treat
 // it as a generic failure and the manual-trigger handler will 500. Locks in
