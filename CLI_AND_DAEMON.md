@@ -464,6 +464,9 @@ multica issue comment add <issue-id> --content "Looks good, merging now"
 # Reply to a specific comment
 multica issue comment add <issue-id> --parent <comment-id> --content "Thanks!"
 
+# Intentionally start a new top-level thread from a comment-triggered task
+multica issue comment add <issue-id> --new-thread --content "Decision for the issue timeline"
+
 # Delete a comment
 multica issue comment delete <comment-id>
 ```
