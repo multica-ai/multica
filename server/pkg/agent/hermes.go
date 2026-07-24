@@ -2115,6 +2115,14 @@ var acpAgentOutputTerminalRe = regexp.MustCompile(`API call failed after \d+ ret
 
 const acpMaxErrorLines = 8
 
+// acpHermesInfoRootRe matches Python logging records where Hermes echoes
+// conversation and tool data to stderr. The payload may itself contain
+// arbitrary error examples, terminal markers, or provider-looking text;
+// it is INFO data and must never participate in provider-error matching.
+var acpHermesInfoRootRe = regexp.MustCompile(
+	`^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:,[0-9]+)? \[INFO\] root:`,
+)
+
 // acpMaxErrorLineLen bounds how long a single stderr line may be to
 // still be considered for provider-error matching. Genuine ACP
 // provider-error lines are short (an error header plus a one-line
@@ -2126,9 +2134,8 @@ const acpMaxErrorLines = 8
 // "Error:" / "KeyError:" fragment far apart on the same line — it
 // satisfies both the capture filter and the terminal condition and
 // flips a completed run to failed (GitHub multica#5862). Skipping
-// over-long lines keeps echoed conversation content out of the
-// sniffer entirely while still admitting every real provider-error
-// line.
+// known INFO records above is the primary guard; this length bound is
+// defense in depth for oversized echoes with an unknown log prefix.
 const acpMaxErrorLineLen = 4096
 
 // newACPProviderErrorSniffer returns a sniffer that tags its messages
@@ -2161,13 +2168,16 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 		if line == "" {
 			continue
 		}
+		// Hermes emits conversation and tool records to stderr through
+		// Python's root logger. Their payload is arbitrary data, not a
+		// provider error, even when it contains strings such as "❌",
+		// "Error:", "HTTP 429", or "API call failed".
+		if acpHermesInfoRootRe.MatchString(line) {
+			continue
+		}
 		// Hermes echoes whole conversation / tool-result records to
-		// stderr as a single oversized line. Such a line is never a
-		// real provider-error line, but its unrelated embedded tokens
-		// (a "❌" bullet plus an "Error:" fragment) would otherwise
-		// satisfy both the capture filter and the terminal condition
-		// and flip a completed run to failed (GitHub multica#5862).
-		// Skip anything longer than a real error line can plausibly be.
+		// stderr as a single line. Keep a length guard as a fallback
+		// for an oversized echo whose logger prefix changes.
 		if len(line) > acpMaxErrorLineLen {
 			continue
 		}
