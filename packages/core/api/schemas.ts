@@ -1514,6 +1514,18 @@ export const EMPTY_USER: User = {
   updated_at: "",
 };
 
+// Response schema for POST /api/me/onboarding/no-runtime-complete. The user
+// must prove the onboarding gate can open, and both issues need usable ids for
+// the one-shot workspace welcome signal.
+export const CompleteOnboardingNoRuntimeResponseSchema = z
+  .object({
+    user: UserSchema.extend({ onboarded_at: z.string().min(1) }),
+    workspace_id: z.string().min(1),
+    install_issue: IssueSchema.extend({ id: z.string().min(1) }),
+    agent_guide_issue: IssueSchema.extend({ id: z.string().min(1) }),
+  })
+  .loose();
+
 // ---------------------------------------------------------------------------
 // Cross-workspace unread inbox summary (`/api/inbox/unread-summary` GET).
 // One entry per workspace the user belongs to that has unread items; the

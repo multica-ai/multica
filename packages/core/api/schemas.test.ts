@@ -23,6 +23,7 @@ import {
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
   SearchProjectsResponseSchema,
+  CompleteOnboardingNoRuntimeResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -145,6 +146,61 @@ describe("IssueSchema (via ListIssuesResponseSchema)", () => {
     };
     const parsed = ListIssuesResponseSchema.parse(payload);
     expect(parsed.issues[0]?.properties).toEqual({ "def-2": "opt-a" });
+  });
+});
+
+describe("CompleteOnboardingNoRuntimeResponseSchema", () => {
+  const seedResponse = {
+    user: {
+      id: "user-1",
+      name: "Ada",
+      email: "ada@example.com",
+      onboarded_at: "2026-01-01T00:00:00Z",
+    },
+    workspace_id: "ws-1",
+    install_issue: { ...baseIssue, creator_type: "system", creator_id: "00000000-0000-0000-0000-000000000000" },
+    agent_guide_issue: { ...baseIssue, id: "22222222-2222-2222-2222-222222222222", creator_type: "system" },
+  };
+
+  it("accepts the completed user and system-attributed bundle", () => {
+    const parsed = CompleteOnboardingNoRuntimeResponseSchema.parse(seedResponse);
+    expect(parsed.user.onboarded_at).toBe("2026-01-01T00:00:00Z");
+    expect(parsed.install_issue.id).toBe(baseIssue.id);
+    expect(parsed.install_issue.creator_type).toBe("system");
+    expect(parsed.agent_guide_issue.id).toBe("22222222-2222-2222-2222-222222222222");
+  });
+
+  it("rejects a bundle whose install issue has no usable id (malformed response)", () => {
+    const malformed = {
+      ...seedResponse,
+      install_issue: { ...seedResponse.install_issue, id: "" },
+    };
+    expect(CompleteOnboardingNoRuntimeResponseSchema.safeParse(malformed).success).toBe(false);
+    // parseWithFallback degrades to the caller's fallback (null) — the
+    // client method turns that into a rejection instead of navigating
+    // into an issue that does not exist.
+    const parsed = parseWithFallback(malformed, CompleteOnboardingNoRuntimeResponseSchema, null, {
+      endpoint: "POST /api/me/onboarding/no-runtime-complete",
+    });
+    expect(parsed).toBeNull();
+  });
+
+  it("rejects a body missing the agent_guide_issue entirely", () => {
+    const { agent_guide_issue: _omit, ...malformed } = seedResponse;
+    expect(CompleteOnboardingNoRuntimeResponseSchema.safeParse(malformed).success).toBe(false);
+  });
+
+  it("rejects a body missing the refreshed user", () => {
+    const { user: _omit, ...malformed } = seedResponse;
+    expect(CompleteOnboardingNoRuntimeResponseSchema.safeParse(malformed).success).toBe(false);
+  });
+
+  it("rejects a user whose onboarding gate is still closed", () => {
+    const malformed = {
+      ...seedResponse,
+      user: { ...seedResponse.user, onboarded_at: null },
+    };
+    expect(CompleteOnboardingNoRuntimeResponseSchema.safeParse(malformed).success).toBe(false);
   });
 });
 

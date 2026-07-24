@@ -546,6 +546,72 @@ func TestSubscriberSystemCommentDoesNotSubscribe(t *testing.T) {
 	}
 }
 
+// TestNotification_SystemReactionSkipsInbox guards the platform-attribution
+// sentinel boundary. The zero UUID stored on a system issue or comment is not
+// an inbox recipient and must never be passed to notifyDirect.
+func TestNotification_SystemReactionSkipsInbox(t *testing.T) {
+	queries := db.New(testPool)
+	bus := newNotificationBus(t, queries)
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() {
+		cleanupInboxForIssue(t, issueID)
+		cleanupTestIssue(t, issueID)
+	})
+
+	var inboxEvents []events.Event
+	bus.Subscribe(protocol.EventInboxNew, func(e events.Event) {
+		inboxEvents = append(inboxEvents, e)
+	})
+
+	bus.Publish(events.Event{
+		Type:        protocol.EventIssueReactionAdded,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"reaction": handler.IssueReactionResponse{
+				Emoji: "🎉",
+			},
+			"creator_type": "system",
+			"creator_id":   "00000000-0000-0000-0000-000000000000",
+			"issue_id":     issueID,
+			"issue_title":  "system issue reaction",
+			"issue_status": "in_progress",
+		},
+	})
+	bus.Publish(events.Event{
+		Type:        protocol.EventReactionAdded,
+		WorkspaceID: testWorkspaceID,
+		ActorType:   "member",
+		ActorID:     testUserID,
+		Payload: map[string]any{
+			"reaction": handler.ReactionResponse{
+				Emoji: "🎉",
+			},
+			"comment_author_type": "system",
+			"comment_author_id":   "00000000-0000-0000-0000-000000000000",
+			"comment_id":          "00000000-0000-0000-0000-000000000001",
+			"issue_id":            issueID,
+			"issue_title":         "system comment reaction",
+			"issue_status":        "in_progress",
+		},
+	})
+
+	if len(inboxEvents) != 0 {
+		t.Fatalf("expected no inbox events for system creator, got %d", len(inboxEvents))
+	}
+	var count int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT count(*) FROM inbox_item WHERE issue_id = $1`, issueID,
+	).Scan(&count); err != nil {
+		t.Fatalf("count inbox rows: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected no inbox rows for system creator, got %d", count)
+	}
+}
+
 // TestNotification_AssigneeChanged verifies the full assignee change flow:
 // - New assignee gets "issue_assigned" (Direct)
 // - Old assignee gets "unassigned" (Direct)

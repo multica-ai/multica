@@ -1,3 +1,5 @@
+import type { Issue, User } from "../types";
+
 export type OnboardingStep =
   | "welcome"
   | "about_you"
@@ -16,6 +18,25 @@ export type OnboardingCompletionPath =
   | "cloud_waitlist"
   | "skip_existing"
   | "invite_accept";
+
+export type OnboardingContentLocale = "en" | "zh" | "ko" | "ja";
+
+export interface CompleteOnboardingNoRuntimeRequest {
+  workspace_id: string;
+  locale: OnboardingContentLocale;
+}
+
+/**
+ * Atomic skip-runtime completion result. The refreshed user has
+ * `onboarded_at` set, while both issues are system-attributed and assigned to
+ * the calling member.
+ */
+export interface CompleteOnboardingNoRuntimeResult {
+  user: User;
+  workspace_id: string;
+  install_issue: Issue;
+  agent_guide_issue: Issue;
+}
 
 export type Source =
   | "friends_colleagues"

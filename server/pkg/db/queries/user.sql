@@ -2,6 +2,13 @@
 SELECT * FROM "user"
 WHERE id = $1;
 
+-- name: GetUserForUpdate :one
+-- Serializes onboarding completion so a retry cannot race a second seed
+-- transaction for the same user.
+SELECT * FROM "user"
+WHERE id = $1
+FOR UPDATE;
+
 -- name: GetUserByEmail :one
 SELECT * FROM "user"
 WHERE email = $1;

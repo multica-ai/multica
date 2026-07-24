@@ -27,8 +27,14 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 			return
 		}
 
-		// Subscribe the creator
-		addSubscriber(bus, queries, e.WorkspaceID, issue.ID, issue.CreatorType, issue.CreatorID, "creator")
+		// Subscribe the creator. Platform-created issues (creator_type
+		// 'system', e.g. the onboarding no-runtime seed, MUL-5118) skip
+		// this: issue_subscriber.user_type is constrained to
+		// ('member','agent') and the platform has no inbox to read —
+		// same boundary as the system-comment guard below.
+		if issue.CreatorType != "system" {
+			addSubscriber(bus, queries, e.WorkspaceID, issue.ID, issue.CreatorType, issue.CreatorID, "creator")
+		}
 
 		// Subscribe the assignee if exists and different from creator
 		if issue.AssigneeType != nil && issue.AssigneeID != nil &&

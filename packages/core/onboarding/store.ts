@@ -1,7 +1,12 @@
 import { api } from "../api";
 import { useAuthStore } from "../auth";
 import { setPersonProperties } from "../analytics";
-import type { OnboardingCompletionPath, QuestionnaireAnswers } from "./types";
+import type {
+  CompleteOnboardingNoRuntimeResult,
+  OnboardingCompletionPath,
+  OnboardingContentLocale,
+  QuestionnaireAnswers,
+} from "./types";
 
 /**
  * Persist questionnaire answers (one or more slots at a time — each
@@ -45,11 +50,9 @@ export async function saveQuestionnaire(
  * gate sees the updated user — most importantly the workspace layout
  * hard gate that redirects un-onboarded users back to /onboarding.
  *
- * v3 contract: this is the ONLY mechanism that flips `onboarded_at`
- * from the frontend. All Helper-agent / starter-issue creation is now
- * done by the welcome hook in the workspace shell using generic
- * `createAgent` / `createIssue` calls, AFTER this call has returned
- * and the user has been navigated into the workspace.
+ * Runtime-connected and legacy exits use this mechanism. The no-runtime exit
+ * uses `completeOnboardingNoRuntime`, which combines the same gate transition
+ * with its server-owned starter bundle.
  *
  * `completionPath` is the client's view of which Step-3 exit the user
  * took; the server funnel-splits `onboarding_completed` on this value.
@@ -65,6 +68,23 @@ export async function completeOnboarding(
       : undefined,
   );
   await useAuthStore.getState().refreshMe();
+}
+
+/**
+ * Finalize the no-runtime exit and create its platform-authored starter bundle
+ * in one server transaction. The client supplies only an allowlisted locale;
+ * persisted issue/comment content is owned by the server.
+ */
+export async function completeOnboardingNoRuntime(
+  workspaceId: string,
+  locale: OnboardingContentLocale,
+): Promise<CompleteOnboardingNoRuntimeResult> {
+  const result = await api.completeOnboardingNoRuntime({
+    workspace_id: workspaceId,
+    locale,
+  });
+  useAuthStore.getState().setUser(result.user);
+  return result;
 }
 
 /**

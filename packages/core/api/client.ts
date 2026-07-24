@@ -162,7 +162,11 @@ import type {
   BillingCheckoutSessionStatus,
   CreateBillingPortalSessionResponse,
 } from "../types";
-import type { OnboardingCompletionPath } from "../onboarding/types";
+import type {
+  OnboardingCompletionPath,
+  CompleteOnboardingNoRuntimeRequest,
+  CompleteOnboardingNoRuntimeResult,
+} from "../onboarding/types";
 import type { CreateFeedbackResponse, FeedbackKind } from "../feedback/types";
 import type {
   CloudRuntimeNode,
@@ -281,6 +285,7 @@ import {
   EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
   IssuePullRequestsResponseSchema,
   ResourceLabelsResponseSchema,
+  CompleteOnboardingNoRuntimeResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
   EMPTY_RESOURCE_LABELS_RESPONSE,
@@ -570,6 +575,33 @@ export class ApiClient {
     return parseWithFallback(raw, UserSchema, EMPTY_USER, {
       endpoint: "POST /api/me/onboarding/cloud-waitlist",
     });
+  }
+
+  /**
+   * Atomically finish the skip-runtime path and create the server-owned,
+   * platform-attributed starter bundle. Throws on a malformed response because
+   * the caller synchronizes auth state and navigates using the returned ids.
+   */
+  async completeOnboardingNoRuntime(
+    payload: CompleteOnboardingNoRuntimeRequest,
+  ): Promise<CompleteOnboardingNoRuntimeResult> {
+    const raw = await this.fetch<unknown>(
+      "/api/me/onboarding/no-runtime-complete",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    );
+    const bundle = parseWithFallback<CompleteOnboardingNoRuntimeResult | null>(
+      raw,
+      CompleteOnboardingNoRuntimeResponseSchema,
+      null,
+      { endpoint: "POST /api/me/onboarding/no-runtime-complete" },
+    );
+    if (!bundle) {
+      throw new Error();
+    }
+    return bundle;
   }
 
   async patchOnboarding(payload: {

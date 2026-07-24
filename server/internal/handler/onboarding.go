@@ -36,10 +36,10 @@ const (
 // → OnboardingPathUnknown so legacy clients still complete cleanly, just
 // without a funnel-ready label.
 //
-// `workspace_id` is retained for analytics enrichment; the v2 code path
-// used it to seed an install-runtime issue inside the same transaction,
-// but in v3 every workspace-content seeding lives in the frontend
-// welcome hook (see packages/views/workspace/welcome-after-onboarding.tsx).
+// `workspace_id` is retained for analytics enrichment. The runtime-connected
+// path uses this endpoint; the no-runtime path uses
+// CompleteOnboardingNoRuntime so completion and its privileged starter bundle
+// are one transaction.
 type completeOnboardingRequest struct {
 	CompletionPath string `json:"completion_path,omitempty"`
 	WorkspaceID    string `json:"workspace_id,omitempty"`
@@ -62,10 +62,9 @@ var validCompletionPaths = map[string]struct{}{
 // 200 OK (for client-side retries) but skip the event so the funnel
 // counts honest first-completion.
 //
-// V3 has no in-handler seeding side effect: workspace content (Helper
-// agent, starter issues, install-runtime guides) is created by the
-// frontend welcome hook via the generic CreateAgent / CreateIssue
-// endpoints. This handler does one thing: flip the field.
+// This handler has no workspace-content side effect. Runtime-connected setup
+// uses generic APIs after navigation; no-runtime completion has a dedicated
+// atomic handler because those starter rows are platform-authored.
 func (h *Handler) CompleteOnboarding(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {

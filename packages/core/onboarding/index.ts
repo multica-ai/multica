@@ -1,7 +1,10 @@
 export type {
   OnboardingStep,
   OnboardingCompletionPath,
+  OnboardingContentLocale,
   QuestionnaireAnswers,
+  CompleteOnboardingNoRuntimeRequest,
+  CompleteOnboardingNoRuntimeResult,
   Source,
   Role,
   UseCase,
@@ -9,6 +12,7 @@ export type {
 export {
   saveQuestionnaire,
   completeOnboarding,
+  completeOnboardingNoRuntime,
   joinCloudWaitlist,
 } from "./store";
 export { ONBOARDING_STEP_ORDER } from "./step-order";
