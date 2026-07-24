@@ -28,6 +28,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { TimelineList } from "@/components/issue/timeline-list";
 import { AgentHeaderBadge } from "@/components/issue/agent-header-badge";
 import { InlineCommentComposer } from "@/components/issue/inline-comment-composer";
+import { WorkpadPanel } from "@/components/issue/workpad-panel";
 import {
   issueDetailOptions,
   issueKeys,
@@ -203,6 +204,7 @@ export default function IssueDetail() {
             highlightCommentId={highlight}
             highlightNonce={h}
           />
+          <WorkpadPanel issueId={id} />
           <InlineCommentComposer issueId={id} />
         </View>
       )}

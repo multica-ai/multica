@@ -39,6 +39,7 @@ import type {
   Workspace,
 } from "@multica/core/types";
 import { IssueSchema } from "@multica/core/api/schemas";
+import type { WorkpadArtifact } from "@/lib/workpad";
 
 /** Upload response. Only fields mobile actually consumes — `url` to put
  *  into the markdown link, `filename` for the `[📎 name](url)` form, `id`
@@ -748,3 +749,28 @@ export const EMPTY_FEATURE_FLAGS: FeatureFlagsResponse = {
 
 // Helpers re-exported for ergonomic single-import at the call site.
 export type { Label, Project, ProjectResource };
+
+// FIR-3765 — the issue's artifacts, trimmed to the fields the Workpad panel
+// reads. `GET /api/issues/:id/artifacts` returns an array of full artifacts;
+// unknown keys are stripped and title/body coalesce to null so downstream
+// parsing never sees undefined. Mirrors web's `Artifact` (packages/core/types/
+// artifact.ts) for the subset the plan view needs.
+export const WorkpadArtifactListSchema = z
+  .array(
+    z.object({
+      id: z.string(),
+      kind: z.string().default(""),
+      title: z
+        .string()
+        .nullish()
+        .transform((v) => v ?? null),
+      body: z
+        .string()
+        .nullish()
+        .transform((v) => v ?? null),
+      updated_at: z.string().default(""),
+    }),
+  )
+  .default([]);
+
+export const EMPTY_WORKPAD_ARTIFACTS: WorkpadArtifact[] = [];
