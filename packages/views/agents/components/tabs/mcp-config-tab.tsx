@@ -13,7 +13,10 @@ import {
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { ApiError } from "@multica/core/api";
-import { runtimeCapabilitiesOptions } from "@multica/core/runtimes";
+import {
+  runtimeCapabilitiesOptions,
+  runtimeDisplayLabel,
+} from "@multica/core/runtimes";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -190,7 +193,7 @@ export function McpConfigTab({
             </h3>
             <p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">
               {t(($) => $.tab_body.mcp_config.runtime_hint, {
-                runtime: runtime?.custom_name || runtime?.name || "Runtime",
+                runtime: runtime ? runtimeDisplayLabel(runtime) : "Runtime",
               })}
             </p>
           </div>

@@ -250,23 +250,24 @@ These set a **fleet-wide default** layer of CLI flags for a backend — a conven
 
 ## GitHub integration
 
-The [GitHub PR ↔ issue integration](/github-integration) needs two variables. Set both to enable Connect GitHub in Settings and accept incoming webhooks. Two additional variables are optional but populate the connected account name on install.
+The [GitHub PR ↔ issue integration](/github-integration) needs `GITHUB_APP_SLUG` and `GITHUB_WEBHOOK_SECRET` to enable Connect GitHub in Settings and accept incoming webhooks. `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are additionally **required** for the PR card's CI status and mergeability — without them the integration still mirrors PRs and auto-links issues, but the card shows no CI or merge status.
 
 | Variable | Default | Description |
 |---|---|---|
 | `GITHUB_APP_SLUG` | empty | The slug of your GitHub App (the tail of `https://github.com/apps/<slug>`). Drives the Settings → GitHub install button URL |
 | `GITHUB_WEBHOOK_SECRET` | empty | The Webhook secret you set on the GitHub App. Used for HMAC-SHA256 verification of every `pull_request` / `installation` delivery, and as the HMAC key for the setup-callback state token |
-| `GITHUB_APP_ID` | empty | Optional. Numeric App ID from the App's settings page. Combined with `GITHUB_APP_PRIVATE_KEY`, lets the setup callback fetch the connected account name from GitHub immediately on install |
-| `GITHUB_APP_PRIVATE_KEY` | empty | Optional. Full PEM block of the App's RSA private key (including `-----BEGIN/END-----` lines, newlines preserved). Used to mint the short-lived JWT GitHub requires for App-authenticated REST calls |
+| `GITHUB_APP_ID` | empty | Numeric App ID from the App's settings page. Required (with `GITHUB_APP_PRIVATE_KEY`) for the PR card's CI status and mergeability, and to fetch the connected account name on install |
+| `GITHUB_APP_PRIVATE_KEY` | empty | Full PEM block of the App's RSA private key (including `-----BEGIN/END-----` lines, newlines preserved). Required (with `GITHUB_APP_ID`) to authenticate as the App and pull the GitHub API snapshot behind the PR card's CI status and mergeability |
 
 **Behavior when either of the required variables is unset:**
 
 - `Connect GitHub` in Settings → GitHub is **disabled** and shows a "not configured" hint to admins.
 - The `/api/webhooks/github` endpoint returns **`503 github webhooks not configured`** — Multica refuses to process events with no secret rather than treating every signature as valid.
 
-**Behavior when the optional `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` are unset:**
+**Behavior when `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` are unset:**
 
-- The connection card briefly shows `Connected to unknown` after install. Multica refreshes the row to the real org/user name as soon as GitHub delivers the `installation.created` webhook (typically within a few seconds), and broadcasts a realtime update so any open Settings → GitHub tab reflects the change without a manual refresh.
+- The PR card shows **no CI status or mergeability** — the integration degrades cleanly: PRs still mirror, and issues still auto-link and move to Done on merge.
+- The connection card also briefly shows `Connected to unknown` after install. Multica refreshes the row to the real org/user name as soon as GitHub delivers the `installation.created` webhook (typically within a few seconds), and broadcasts a realtime update so any open Settings → GitHub tab reflects the change without a manual refresh.
 
 **Note:** `GITHUB_WEBHOOK_SECRET` is reused as the signing key for the install-flow state token, so operators only need to manage one secret. It is **not** the GitHub App's *Client* secret — Client secrets are OAuth-related and not used by this integration. See [GitHub integration → Self-host setup](/github-integration#self-host-setup) for the full walkthrough.
 

@@ -5,6 +5,12 @@ import (
 	"strings"
 )
 
+// CostUSDTicksPerUSD is the scale of provider-reported costs: xAI reports
+// whole ticks of 1e-10 USD. Declared here rather than imported from pkg/agent
+// (which owns the wire-format parsing) so this package keeps no dependency on
+// the agent runtime for a physical unit; the two must stay equal.
+const CostUSDTicksPerUSD = 10_000_000_000
+
 type ModelPrice struct {
 	Provider       string
 	Model          string
@@ -51,6 +57,22 @@ var modelPrices = map[string]ModelPrice{
 	"google:gemini-3.1-pro":       {Provider: "google", Model: "gemini-3.1-pro", InputPerM: 2.00, CacheReadPerM: 0.20, CacheWritePerM: 2.00, OutputPerM: 12.00},
 	"google:gemini-2.5-pro":       {Provider: "google", Model: "gemini-2.5-pro", InputPerM: 1.25, CacheReadPerM: 0.31, CacheWritePerM: 1.25, OutputPerM: 10.00},
 	"google:gemini-2.5-flash":     {Provider: "google", Model: "gemini-2.5-flash", InputPerM: 0.30, CacheReadPerM: 0.03, CacheWritePerM: 0.30, OutputPerM: 2.50},
+	// xAI Grok (docs.x.ai/developers/pricing). Short-context tier: xAI bills
+	// a request at 2x once its prompt reaches 200K tokens, but a usage record
+	// aggregates every model call in a turn, so it cannot say which tier any
+	// individual request hit — pricing the standard tier under-estimates a
+	// long-context turn by at most 50% instead of over-estimating a short one
+	// by 100%. xAI publishes no separate cache-write rate (writes bill as
+	// normal input), so CacheWrite mirrors Input. These rows mirror
+	// packages/views/runtimes/utils.ts; keep the two tables in sync.
+	// `grok-composer-*` ships in the Grok Build catalog but is absent from the
+	// price sheet, so it stays unmapped rather than inheriting a guessed rate.
+	"xai:grok-4.5":                     {Provider: "xai", Model: "grok-4.5", InputPerM: 2.00, CacheReadPerM: 0.30, CacheWritePerM: 2.00, OutputPerM: 6.00},
+	"xai:grok-4.3":                     {Provider: "xai", Model: "grok-4.3", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
+	"xai:grok-build-0.1":               {Provider: "xai", Model: "grok-build-0.1", InputPerM: 1.00, CacheReadPerM: 0.20, CacheWritePerM: 1.00, OutputPerM: 2.00},
+	"xai:grok-4.20-multi-agent-0309":   {Provider: "xai", Model: "grok-4.20-multi-agent-0309", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
+	"xai:grok-4.20-0309-reasoning":     {Provider: "xai", Model: "grok-4.20-0309-reasoning", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
+	"xai:grok-4.20-0309-non-reasoning": {Provider: "xai", Model: "grok-4.20-0309-non-reasoning", InputPerM: 1.25, CacheReadPerM: 0.20, CacheWritePerM: 1.25, OutputPerM: 2.50},
 }
 
 var modelAliasRules = []struct {
@@ -89,6 +111,16 @@ var modelAliasRules = []struct {
 	{regexp.MustCompile(`gemini-3[.]1-pro`), "google:gemini-3.1-pro"},
 	{regexp.MustCompile(`gemini-2[.]5-pro`), "google:gemini-2.5-pro"},
 	{regexp.MustCompile(`gemini-2[.]5-flash`), "google:gemini-2.5-flash"},
+	// Anchored exact-match, dotted spelling only — same rule as the gpt-5.6
+	// rows above. The frontend resolver does not dash-normalize non-Anthropic
+	// ids, so a dashed `grok-4-5` must surface as unmapped on both sides
+	// rather than silently borrowing a tier here.
+	{regexp.MustCompile(`(^|/|:)grok-4\.5$`), "xai:grok-4.5"},
+	{regexp.MustCompile(`(^|/|:)grok-4\.3$`), "xai:grok-4.3"},
+	{regexp.MustCompile(`(^|/|:)grok-build-0\.1$`), "xai:grok-build-0.1"},
+	{regexp.MustCompile(`(^|/|:)grok-4\.20-multi-agent-0309$`), "xai:grok-4.20-multi-agent-0309"},
+	{regexp.MustCompile(`(^|/|:)grok-4\.20-0309-reasoning$`), "xai:grok-4.20-0309-reasoning"},
+	{regexp.MustCompile(`(^|/|:)grok-4\.20-0309-non-reasoning$`), "xai:grok-4.20-0309-non-reasoning"},
 }
 
 func PriceForModelAlias(model string) (ModelPrice, bool) {

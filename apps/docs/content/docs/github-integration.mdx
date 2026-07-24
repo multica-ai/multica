@@ -17,8 +17,20 @@ There is no per-issue setup. The whole flow is identifier-driven.
 | **Issue sidebar → Pull requests** | Every PR auto-linked to this issue, with title, repo, state (`Open` / `Draft` / `Merged` / `Closed`), and author. Click a row to jump to the PR on GitHub. |
 | **Webhook (background)** | On every `pull_request` event, Multica upserts the PR row, scans the PR for issue identifiers, and (re)builds the link rows. Idempotent — replaying a delivery is a no-op. |
 | **Auto-status on merge** | When a PR transitions to `merged`, every linked issue not already `Done` or `Cancelled` is moved to `Done`. The status change is timeline-logged with source `github_pr_merged`. |
+| **PR card → CI & mergeability** | For each linked PR, Multica fetches an authenticated GitHub API snapshot and mirrors its **CI status** and **mergeability** onto the card (see **What the PR card shows** below). |
 
-Only the PR itself is mirrored. Commits, branch refs without an open PR, and CI check states are **not** modeled. The integration is intentionally narrow.
+Alongside the PR's own state, the integration mirrors — for each linked PR — its **CI status** (all checks passed, N failed with the failing check names, or N running) and its **mergeability** (ready to merge, has conflicts, blocked, or behind), fetched from an authenticated GitHub API snapshot. Commits and branch refs without an open PR are still not modeled.
+
+## What the PR card shows
+
+Each linked PR's card carries two **independent** elements, each built from an authenticated GitHub API snapshot:
+
+- **CI status** — one of: **all checks passed** (with the count, e.g. `7/7`), **N failed** (naming the failing checks), or **N running** (still in progress). A PR with no checks configured yet shows neither — "no checks" is never reported as passed.
+- **Mergeability** — one of: **ready to merge** (shown only when GitHub reports the merge state is clean, i.e. no conflicts *and* branch protection satisfied), **has conflicts**, **blocked**, or **behind**.
+
+The two never mask each other — a PR can show failed checks *and* a merge conflict at the same time. Merged and closed PRs show neither; the row's own state icon already says so.
+
+The snapshot is fetched from the GitHub API and refreshed on webhook events (`pull_request`, `check_run`, `check_suite`, `status`), when you open the card, and periodically while the PR is still open and undecided. During a temporary GitHub outage the card keeps showing the last-known snapshot marked **stale** rather than going blank.
 
 ## Multiple workspaces
 
@@ -80,13 +92,13 @@ After disconnect, mirrored PR rows stay in the database so historical issue side
 
 - **Connect / disconnect** require workspace **owner or admin**. Members see the card description but no Connect button.
 - The **Pull requests** sidebar on an issue is visible to anyone who can read the issue — same permissions as the rest of issue detail.
-- The GitHub App requests **read-only** access to pull requests and metadata. Multica never pushes commits, comments, or status checks back to GitHub.
+- The GitHub App requests **read-only** access to pull requests, checks, commit statuses, and metadata. Multica never pushes commits, comments, or status checks back to GitHub — the CI status and mergeability shown on the PR card are fetched read-only, never written.
 
 ## Self-host setup
 
 If you're running Multica on Multica Cloud, the integration is already configured — skip this section.
 
-For self-host, you create one GitHub App, point it at your server, and set two environment variables. The whole flow is below.
+For self-host, you create one GitHub App, point it at your server, and set its environment variables. The whole flow is below.
 
 ### 1. Create a GitHub App
 
@@ -107,9 +119,19 @@ Fill in:
 | **Webhook URL** | `https://<api-host>/api/webhooks/github`. |
 | **Webhook secret** | Generate a long random string (e.g. `openssl rand -hex 32`). You'll paste the same value into Multica's env in step 2. |
 | **Permissions → Repository → Pull requests** | **Read-only**. |
+| **Permissions → Repository → Checks** | **Read-only** — powers the PR card's CI status. |
+| **Permissions → Repository → Commit statuses** | **Read-only** — the legacy status-context half of the CI rollup. |
 | **Permissions → Repository → Metadata** | Read-only (mandatory). |
-| **Subscribe to events** | Tick **Pull request**. |
+| **Subscribe to events** | Tick **Pull request**, **Check suite**, **Check run**, and **Status**. |
 | **Where can this GitHub App be installed?** | Your choice. `Only on this account` is fine for single-org setups. |
+
+<Callout type="warning">
+**Grant read, never write, and nothing more.** Do **not** grant **Checks: Read and write** — write access makes GitHub expect this App to report its own check runs, which leaves them stuck permanently pending. Read-only is correct. The feature also does **not** need **Actions: read** or **Contents: read** — don't add them.
+</Callout>
+
+<Callout type="warning">
+**Adding these permissions to an App that's already installed needs approval.** When you extend an existing App with Checks, Commit statuses, Check run, and Status, GitHub holds the change as a **pending permission request** — it does not take effect until each installation's owner approves it (on GitHub, under that installation's settings). Until an installation approves, the PR card stays without CI or merge status on its repos.
+</Callout>
 
 After **Create GitHub App**, note two things from the App's detail page:
 
@@ -128,18 +150,19 @@ On the API server:
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<the webhook secret you generated>
 
-# Optional but recommended — populates the connected account name on
-# install instead of waiting for the first webhook to refresh it:
+# Required for the PR card's CI status and mergeability. Without them the
+# integration still mirrors PRs and auto-links / auto-closes issues, but the
+# PR card shows no CI or merge status:
 GITHUB_APP_ID=<numeric App ID from the App's settings page>
 GITHUB_APP_PRIVATE_KEY=<full PEM block, including BEGIN/END lines>
 ```
 
-`GITHUB_APP_SLUG` and `GITHUB_WEBHOOK_SECRET` are required. If either is missing:
+`GITHUB_APP_SLUG` and `GITHUB_WEBHOOK_SECRET` are required for the integration to start at all. If either is missing:
 
 - `Connect GitHub` in Settings is **disabled** and shows a "not configured" hint.
 - The `/api/webhooks/github` endpoint returns **`503 github webhooks not configured`** — Multica refuses to process events with no secret, rather than silently treating every signature as valid.
 
-`GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are **optional**. They let the setup callback call GitHub's App-authenticated `/app/installations/{id}` endpoint to fetch the real organization or user name during install. Without them, the connection card briefly shows `Connected to unknown` until GitHub delivers the `installation.created` webhook (typically within a few seconds), at which point Multica refreshes the row and broadcasts a realtime update so any open Settings tab updates without a manual refresh. Generate the private key under **Private keys → Generate a private key** on the App's settings page; paste the full PEM block (including the `-----BEGIN/END RSA PRIVATE KEY-----` lines) into the env var, preserving newlines.
+`GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are now **required for the PR card's CI status and mergeability** — they let Multica authenticate as the App (App JWT → installation token) and pull the GitHub API snapshot each card is built from. Generate the key under **Private keys → Generate a private key** on the App's settings page; paste the full PEM block (including the `-----BEGIN/END RSA PRIVATE KEY-----` lines) into the env var, preserving newlines. Without them the integration **degrades cleanly**: PRs still mirror, issues still auto-link and move to Done on merge, and the connected account name still resolves from the `installation.created` webhook — but the PR card shows no CI or merge status.
 
 `FRONTEND_ORIGIN` must also be set (it already is for any production self-host); the setup callback bounces the user back to `<FRONTEND_ORIGIN>/settings?tab=github` after install.
 
@@ -187,12 +210,28 @@ curl -i -X POST https://<api-host>/api/webhooks/github \
 | `401 invalid signature` | Server's loaded secret is **not** what you think it is. | Confirm the env var landed in the running process (e.g. `kubectl exec` → `echo -n "$GITHUB_WEBHOOK_SECRET" | wc -c`). Re-deploy. |
 | `503 github webhooks not configured` | `GITHUB_WEBHOOK_SECRET` is empty in the process. | Set the env var, restart the API. |
 
+**Confirm the App's events and permissions.** The public App-metadata endpoint reports exactly what you granted — no auth needed:
+
+```bash
+curl -s https://api.github.com/apps/<slug>
+```
+
+- The `events` array should include `pull_request`, `check_suite`, `check_run`, and `status`.
+- The `permissions` object should include `checks: read` and `statuses: read`, alongside `pull_requests: read` and `metadata: read`.
+
+If any are missing, fix the App's **Subscribe to events** / **Permissions** — and remember that adding permissions to an already-installed App only takes effect once each installation's owner approves the pending request.
+
+**"PR card shows no CI or merge status."** The card mirrors the PR fine but never shows checks or mergeability:
+
+- Confirm `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are set in the running API process — they are what authenticate the snapshot fetch.
+- Confirm each installation has **approved the pending permission request** for Checks and Commit statuses (see the probe above).
+
 ## Limitations
 
 A few rough edges to be aware of today:
 
 - **No manual link UI yet** — the only way to link a PR is to have the identifier in its branch, title, or body.
-- **No CI / check state** — only the PR itself is mirrored. Build status, review comments, and reviewers are not surfaced in Multica.
+- **No review threads or reviewer list** — CI status and mergeability are now surfaced on the PR card (see **What the PR card shows**), but review comments, individual reviewers, and their approval state are not.
 - **No workspace-level config** for the merge → Done rule — it's a fixed default (`merged → done`, unless `cancelled`). Workspace-customizable mappings are a future addition.
 - **Multi-PR-to-one-issue is conservative on merge** — if two PRs both reference `MUL-123` and the first one merges, the issue is moved to `Done` immediately. A follow-up change to wait for all linked PRs to resolve before advancing is in progress.
 

@@ -232,6 +232,9 @@ func TestParseCodexModelCatalog(t *testing.T) {
 					{"effort": "max", "description": "Maximum"},
 					{"effort": "ultra", "description": "Delegates"},
 					{"effort": "future", "description": "New CLI value"}
+				],
+				"service_tiers": [
+					{"id": "priority", "name": "Fast", "description": "1.5x speed, increased usage"}
 				]
 			},
 			{
@@ -260,6 +263,9 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	}
 	if got[0].Thinking == nil || got[0].Thinking.DefaultLevel != "low" || !hasThinkingLevel(got[0].Thinking, "max") || !hasThinkingLevel(got[0].Thinking, "ultra") || !hasThinkingLevel(got[0].Thinking, "future") {
 		t.Errorf("unexpected per-model thinking catalog: %+v", got[0].Thinking)
+	}
+	if len(got[0].ServiceTiers) != 1 || got[0].ServiceTiers[0].ID != "priority" || got[0].ServiceTiers[0].Name != "Fast" {
+		t.Errorf("unexpected service-tier catalog: %+v", got[0].ServiceTiers)
 	}
 	if got[1].ID != "no-reasoning" || got[1].Thinking != nil {
 		t.Errorf("model without reasoning should remain selectable without a thinking picker: %+v", got[1])
@@ -776,8 +782,8 @@ func writeFakeCodexModelsBinary(t *testing.T) string {
 		"if [ \"$1\" = \"debug\" ]; then\n" +
 		"cat <<'EOF'\n" +
 		`{"models":[` +
-		`{"slug":"gpt-5.6-sol","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},` +
-		`{"slug":"gpt-5.6-terra","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}]},` +
+		`{"slug":"gpt-5.6-sol","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}],"service_tiers":[{"id":"priority","name":"Fast","description":"1.5x speed"}]},` +
+		`{"slug":"gpt-5.6-terra","default_reasoning_level":"high","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"},{"effort":"ultra"}],"service_tiers":[{"id":"priority","name":"Fast"}]},` +
 		`{"slug":"gpt-5.6-luna","default_reasoning_level":"medium","supported_reasoning_levels":[{"effort":"low"},{"effort":"medium"},{"effort":"high"},{"effort":"xhigh"},{"effort":"max"}]}` +
 		`]}` + "\n" +
 		"EOF\n" +
@@ -786,6 +792,51 @@ func writeFakeCodexModelsBinary(t *testing.T) string {
 		"echo 'codex-cli 0.144.1'\n"
 	writeTestExecutable(t, path, []byte(script))
 	return path
+}
+
+func TestValidateServiceTierCodexPerModelCatalog(t *testing.T) {
+	t.Parallel()
+	fake := writeFakeCodexModelsBinary(t)
+	for _, tc := range []struct {
+		provider string
+		model    string
+		tier     string
+		want     bool
+	}{
+		{provider: "codex", model: "gpt-5.6-sol", tier: "priority", want: true},
+		{provider: "codex", model: "gpt-5.6-luna", tier: "priority", want: false},
+		{provider: "codex", model: "", tier: "priority", want: false},
+		{provider: "claude", model: "gpt-5.6-sol", tier: "priority", want: false},
+		{provider: "codex", model: "gpt-5.6-sol", tier: "", want: true},
+	} {
+		got, err := ValidateServiceTier(context.Background(), tc.provider, fake, tc.model, tc.tier)
+		if err != nil {
+			t.Fatalf("ValidateServiceTier(%q, %q, %q): %v", tc.provider, tc.model, tc.tier, err)
+		}
+		if got != tc.want {
+			t.Errorf("ValidateServiceTier(%q, %q, %q) = %v, want %v", tc.provider, tc.model, tc.tier, got, tc.want)
+		}
+	}
+}
+
+func TestIsKnownServiceTier(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		provider string
+		value    string
+		want     bool
+	}{
+		{provider: "codex", value: "", want: true},
+		{provider: "claude", value: "", want: true},
+		{provider: "codex", value: "priority", want: true},
+		{provider: "codex", value: "future.fast", want: true},
+		{provider: "codex", value: "../priority", want: false},
+		{provider: "claude", value: "priority", want: false},
+	} {
+		if got := IsKnownServiceTier(tc.provider, tc.value); got != tc.want {
+			t.Errorf("IsKnownServiceTier(%q, %q) = %v, want %v", tc.provider, tc.value, got, tc.want)
+		}
+	}
 }
 
 // ── Cache key invalidation ───────────────────────────────────────────
@@ -978,6 +1029,30 @@ func TestApplyCodexReasoningEffort_PreservesPreExistingConfig(t *testing.T) {
 	if cfg["model_reasoning_effort"] != "high" {
 		t.Errorf("reasoning effort not injected: %+v", cfg)
 	}
+}
+
+func TestApplyCodexServiceTier_ThreePoints(t *testing.T) {
+	t.Parallel()
+	for _, tier := range []string{"", "priority", "future-fast"} {
+		t.Run(tier, func(t *testing.T) {
+			for _, params := range []map[string]any{
+				{"model": "gpt-5.6-sol", "cwd": "/work"},
+				{"threadId": "prior", "cwd": "/work"},
+				{"threadId": "thread", "input": []map[string]any{{"type": "text", "text": "hi"}}},
+			} {
+				applyCodexServiceTier(params, tier)
+				got, exists := params["serviceTier"]
+				if tier == "" {
+					if exists {
+						t.Errorf("empty tier emitted serviceTier=%v", got)
+					}
+				} else if !exists || got != tier {
+					t.Errorf("serviceTier = %v (exists=%v), want %q", got, exists, tier)
+				}
+			}
+		})
+	}
+	applyCodexServiceTier(nil, "priority")
 }
 
 // ── End-to-end: build*Args + thinking_level wiring ───────────────────

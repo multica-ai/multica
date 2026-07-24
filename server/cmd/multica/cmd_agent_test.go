@@ -1766,6 +1766,79 @@ func TestAgentCreateAndUpdateExposeThinkingLevelFlag(t *testing.T) {
 	}
 }
 
+func TestAgentServiceTierFlagsAndBodies(t *testing.T) {
+	if agentCreateCmd.Flag("service-tier") == nil {
+		t.Error("agent create must expose --service-tier")
+	}
+	if agentUpdateCmd.Flag("service-tier") == nil {
+		t.Error("agent update must expose --service-tier")
+	}
+
+	t.Run("create sends catalog id", func(t *testing.T) {
+		var gotBody map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Errorf("decode request body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "agent-123"})
+		}))
+		defer srv.Close()
+		t.Setenv("MULTICA_SERVER_URL", srv.URL)
+		t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+		t.Setenv("MULTICA_TOKEN", "test-token")
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+
+		cmd := &cobra.Command{Use: "create"}
+		cmd.Flags().String("name", "", "")
+		cmd.Flags().String("runtime-id", "", "")
+		cmd.Flags().String("service-tier", "", "")
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().String("profile", "", "")
+		_ = cmd.Flags().Set("name", "FastAgent")
+		_ = cmd.Flags().Set("runtime-id", "runtime-1")
+		_ = cmd.Flags().Set("service-tier", "priority")
+
+		if err := runAgentCreate(cmd, nil); err != nil {
+			t.Fatalf("runAgentCreate: %v", err)
+		}
+		if gotBody["service_tier"] != "priority" {
+			t.Fatalf("service_tier body = %v, want priority", gotBody["service_tier"])
+		}
+	})
+
+	t.Run("update sends explicit clear", func(t *testing.T) {
+		var gotBody map[string]any
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+				t.Errorf("decode request body: %v", err)
+			}
+			json.NewEncoder(w).Encode(map[string]any{"id": "agent-123"})
+		}))
+		defer srv.Close()
+		t.Setenv("MULTICA_SERVER_URL", srv.URL)
+		t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+		t.Setenv("MULTICA_TOKEN", "test-token")
+		t.Setenv("MULTICA_AGENT_ID", "")
+		t.Setenv("MULTICA_TASK_ID", "")
+
+		cmd := &cobra.Command{Use: "update"}
+		cmd.Flags().String("service-tier", "", "")
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().String("profile", "", "")
+		if err := cmd.Flags().Set("service-tier", ""); err != nil {
+			t.Fatal(err)
+		}
+
+		if err := runAgentUpdate(cmd, []string{"agent-123"}); err != nil {
+			t.Fatalf("runAgentUpdate: %v", err)
+		}
+		if value, ok := gotBody["service_tier"]; !ok || value != "" {
+			t.Fatalf("service_tier clear body = %v (exists=%v), want empty string", value, ok)
+		}
+	})
+}
+
 // TestAgentCreateThinkingLevelServerRejectionSurfaces proves the CLI does not
 // own thinking-level validation: a runtime whose provider has no thinking
 // concept (or an unknown literal) is rejected server-side with a 400, and that

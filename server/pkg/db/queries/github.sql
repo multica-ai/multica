@@ -130,45 +130,43 @@ SELECT * FROM github_pull_request
 WHERE workspace_id = $1 AND repo_owner = $2 AND repo_name = $3 AND pr_number = $4;
 
 -- name: ListPullRequestsByIssue :many
--- Returns the issue's linked PRs with the aggregated check-suite counts for
--- the PR's CURRENT head SHA. The `issue_prs` CTE narrows to this issue's PR
--- ids first so the per-app aggregation only touches suite rows for those
--- PRs — without that scoping the planner has to scan/aggregate every PR's
--- suites in the workspace before joining on issue. Per-app latest suite is
--- selected so a single app firing multiple suites on the same head doesn't
--- get counted N times. Late-arriving suites for an OLD head are stored but
--- excluded by the head_sha filter, so they can't override the new head's
--- pending view. reference_only links (a PR that merely mentions the issue
--- identifier in its body, with no closing keyword and no title/branch
--- reference) are filtered out — they are not working PRs for this issue.
+-- Returns the issue's linked PRs with the GitHub API snapshot (MUL-5265): the
+-- mergeability verdict, the CI rollup, and per-check counts for the PR's
+-- CURRENT snapshot head SHA. Checks are aggregated from
+-- github_pull_request_check_run — the run-level snapshot written by the API
+-- refresh pipeline — NOT the legacy suite-level webhook aggregation, which is
+-- removed. The `issue_prs` CTE narrows to this issue's PR ids first so the
+-- aggregation only touches check rows for those PRs. Rows for an OLD head are
+-- excluded by the snapshot_head_sha filter. reference_only links (a PR that
+-- merely mentions the issue identifier in its body, with no closing keyword and
+-- no title/branch reference) are filtered out — they are not working PRs.
 WITH issue_prs AS (
-    SELECT pr.id, pr.head_sha
+    SELECT pr.id, pr.snapshot_head_sha
     FROM github_pull_request pr
     JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
     WHERE ipr.issue_id = sqlc.arg('issue_id') AND NOT ipr.reference_only
 ),
-per_app_latest AS (
-    SELECT DISTINCT ON (cs.pr_id, cs.app_id)
-        cs.pr_id, cs.app_id, cs.conclusion, cs.status
-    FROM github_pull_request_check_suite cs
-    JOIN issue_prs ip ON ip.id = cs.pr_id
-    WHERE cs.head_sha = ip.head_sha AND ip.head_sha <> ''
-    ORDER BY cs.pr_id, cs.app_id, cs.updated_at DESC
-),
 checks AS (
     SELECT
-        pr_id,
+        cr.pr_id,
         COUNT(*)::bigint AS total,
-        SUM(CASE WHEN status = 'completed' AND conclusion IN
-                ('failure','cancelled','timed_out','action_required','startup_failure','stale')
+        SUM(CASE WHEN cr.status = 'completed' AND cr.conclusion IN
+                ('failure','cancelled','timed_out','action_required','startup_failure','stale','error')
             THEN 1 ELSE 0 END)::bigint AS failed,
-        SUM(CASE WHEN status = 'completed' AND conclusion IN
+        SUM(CASE WHEN cr.status = 'completed' AND cr.conclusion IN
                 ('success','neutral','skipped')
             THEN 1 ELSE 0 END)::bigint AS passed,
-        SUM(CASE WHEN status <> 'completed' OR conclusion IS NULL
-            THEN 1 ELSE 0 END)::bigint AS pending
-    FROM per_app_latest
-    GROUP BY pr_id
+        SUM(CASE WHEN cr.status <> 'completed' OR cr.conclusion IS NULL
+            THEN 1 ELSE 0 END)::bigint AS running,
+        COALESCE(
+            array_agg(cr.name) FILTER (WHERE cr.status = 'completed' AND cr.conclusion IN
+                ('failure','cancelled','timed_out','action_required','startup_failure','stale','error')),
+            '{}'
+        )::text[] AS failed_names
+    FROM github_pull_request_check_run cr
+    JOIN issue_prs ip ON ip.id = cr.pr_id
+    WHERE cr.head_sha = ip.snapshot_head_sha AND ip.snapshot_head_sha <> ''
+    GROUP BY cr.pr_id
 )
 SELECT
     pr.id, pr.workspace_id, pr.installation_id, pr.repo_owner, pr.repo_name,
@@ -176,11 +174,14 @@ SELECT
     pr.author_avatar_url, pr.merged_at, pr.closed_at, pr.pr_created_at,
     pr.pr_updated_at, pr.head_sha, pr.mergeable_state,
     pr.additions, pr.deletions, pr.changed_files,
+    pr.api_mergeable, pr.api_merge_state_status, pr.checks_rollup_state,
+    pr.snapshot_head_sha, pr.snapshot_fetched_at,
     pr.created_at, pr.updated_at,
     COALESCE(c.total, 0)::bigint   AS checks_total,
     COALESCE(c.passed, 0)::bigint  AS checks_passed,
     COALESCE(c.failed, 0)::bigint  AS checks_failed,
-    COALESCE(c.pending, 0)::bigint AS checks_pending
+    COALESCE(c.running, 0)::bigint AS checks_running,
+    COALESCE(c.failed_names, '{}')::text[] AS failed_check_names
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 LEFT JOIN checks c ON c.pr_id = pr.id
@@ -197,11 +198,26 @@ ORDER BY pr.pr_created_at DESC;
 -- newest linked PR with a head_sha when none are open. Returns no rows (empty
 -- string) when the issue has no linked PR — callers treat that as "no SHA key"
 -- and dedup on (issue_id, agent_id) alone, preserving pre-TEN-356 behavior.
-SELECT pr.head_sha
-FROM github_pull_request pr
-JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-WHERE ipr.issue_id = $1 AND pr.head_sha <> ''
-ORDER BY (pr.state IN ('open', 'draft')) DESC, pr.pr_updated_at DESC
+--
+-- Spans both GitHub and self-hosted VCS PRs: a self-hosted PR pushing a new
+-- commit must move the dedup head SHA the same way a GitHub PR does, otherwise
+-- a fresh review round could be merged away against a stale key.
+-- reference_only links are excluded on both arms, matching the PR-list and
+-- close-aggregate queries: a body-only mention is hidden from the list and the
+-- close gate, so it must not win this ORDER BY and become the review dedup head
+-- SHA either, masking the real working PR's SHA.
+SELECT head_sha FROM (
+    SELECT pr.head_sha AS head_sha, pr.state AS state, pr.pr_updated_at AS pr_updated_at
+    FROM github_pull_request pr
+    JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+    WHERE ipr.issue_id = $1 AND pr.head_sha <> '' AND NOT ipr.reference_only
+    UNION ALL
+    SELECT pr.head_sha AS head_sha, pr.state AS state, pr.pr_updated_at AS pr_updated_at
+    FROM vcs_pull_request pr
+    JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+    WHERE ipr.issue_id = $1 AND pr.head_sha <> '' AND NOT ipr.reference_only
+) combined
+ORDER BY (state IN ('open', 'draft')) DESC, pr_updated_at DESC
 LIMIT 1;
 
 -- name: ListIssueIDsForPullRequest :many
@@ -230,71 +246,6 @@ SELECT
 FROM github_pull_request pr
 JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
 WHERE ipr.issue_id = $1 AND NOT ipr.reference_only;
-
--- =====================
--- GitHub PR check suite
--- =====================
-
--- name: UpsertPullRequestCheckSuite :exec
--- Upserts a single check_suite row keyed by (pr_id, suite_id). The WHERE
--- clause on the DO UPDATE branch prevents a late-arriving older event from
--- overwriting a newer one — same-PR/same-suite ordering protection. Late
--- events targeting an old head still land here (their head_sha is stored
--- on the row); the head_sha filter in ListPullRequestsByIssue keeps them
--- out of the current aggregate.
-INSERT INTO github_pull_request_check_suite (
-    pr_id, suite_id, head_sha, app_id, conclusion, status, updated_at
-) VALUES (
-    $1, $2, $3, $4, sqlc.narg('conclusion'), $5, $6
-)
-ON CONFLICT (pr_id, suite_id) DO UPDATE SET
-    head_sha   = EXCLUDED.head_sha,
-    app_id     = EXCLUDED.app_id,
-    conclusion = EXCLUDED.conclusion,
-    status     = EXCLUDED.status,
-    updated_at = EXCLUDED.updated_at
-WHERE EXCLUDED.updated_at >= github_pull_request_check_suite.updated_at;
-
--- =====================
--- GitHub pending check_suite (out-of-order arrival stash)
--- =====================
-
--- name: UpsertPendingCheckSuite :exec
--- Stashes a check_suite event whose PR row is not yet mirrored. Replayed
--- (and deleted) by DrainPendingCheckSuitesForPR once the matching
--- `pull_request` webhook lands. ON CONFLICT keeps the newest payload
--- for the same (workspace, repo, pr_number, suite_id) — repeated
--- deliveries while the PR is still missing are idempotent. The
--- suite_updated_at guard mirrors UpsertPullRequestCheckSuite so an older
--- event arriving after a newer one cannot overwrite the newer payload.
-INSERT INTO github_pending_check_suite (
-    workspace_id, installation_id, repo_owner, repo_name, pr_number,
-    suite_id, head_sha, app_id, conclusion, status, suite_updated_at
-) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7, $8, sqlc.narg('conclusion'), $9, $10
-)
-ON CONFLICT (workspace_id, repo_owner, repo_name, pr_number, suite_id) DO UPDATE SET
-    installation_id  = EXCLUDED.installation_id,
-    head_sha         = EXCLUDED.head_sha,
-    app_id           = EXCLUDED.app_id,
-    conclusion       = EXCLUDED.conclusion,
-    status           = EXCLUDED.status,
-    suite_updated_at = EXCLUDED.suite_updated_at,
-    received_at      = now()
-WHERE EXCLUDED.suite_updated_at >= github_pending_check_suite.suite_updated_at;
-
--- name: DrainPendingCheckSuitesForPR :many
--- Atomically reads + deletes all pending suites for the given PR address.
--- Caller replays each row through UpsertPullRequestCheckSuite. RETURNING
--- gives us the payloads we need without a separate SELECT, so two parallel
--- handlers racing on the same PR can't double-apply the same row.
-DELETE FROM github_pending_check_suite
-WHERE workspace_id = $1
-  AND repo_owner   = $2
-  AND repo_name    = $3
-  AND pr_number    = $4
-RETURNING suite_id, head_sha, app_id, conclusion, status, suite_updated_at;
 
 -- =====================
 -- Issue ↔ Pull Request link

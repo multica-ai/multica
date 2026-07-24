@@ -155,17 +155,27 @@ function workspaceKeysForLabels(resourceType: "agent" | "skill", wsId: string) {
   return ["workspaces", wsId, resourceType === "agent" ? "agents" : "skills"] as const;
 }
 
+async function cancelIssueLabelMutationQueries(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+  issueId: string,
+) {
+  await Promise.all([
+    qc.cancelQueries({ queryKey: labelKeys.byIssue(wsId, issueId) }),
+    qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
+    qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
+    qc.cancelQueries({ queryKey: issueKeys.childrenAll(wsId) }),
+    qc.cancelQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) }),
+  ]);
+}
+
 export function useAttachLabel(issueId: string) {
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (labelId: string) => api.attachLabel(issueId, labelId),
     onMutate: async (labelId) => {
-      await Promise.all([
-        qc.cancelQueries({ queryKey: labelKeys.byIssue(wsId, issueId) }),
-        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
-        qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
-      ]);
+      await cancelIssueLabelMutationQueries(qc, wsId, issueId);
       const prev = qc.getQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId));
       // Only patch when we already know the current label set — otherwise
       // appending `[label]` to an empty array would wipe denormalized
@@ -235,11 +245,7 @@ export function useDetachLabel(issueId: string) {
   return useMutation({
     mutationFn: (labelId: string) => api.detachLabel(issueId, labelId),
     onMutate: async (labelId) => {
-      await Promise.all([
-        qc.cancelQueries({ queryKey: labelKeys.byIssue(wsId, issueId) }),
-        qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
-        qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
-      ]);
+      await cancelIssueLabelMutationQueries(qc, wsId, issueId);
       const prev = qc.getQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId));
       const next = prev
         ? { ...prev, labels: prev.labels.filter((l: Label) => l.id !== labelId) }

@@ -19,12 +19,34 @@ import { useT } from "../../i18n";
 
 const EMPTY_GROUPS: IssueTaskGroups = { running: [], queued: [] };
 
+// Dwell threshold before the activity card opens (MUL-5189).
+//
+// This badge is a passive cue riding on the right edge of dense scrolling
+// lists (inbox rows, issue rows, board cards), and it appears on every issue
+// an agent currently touches. Base UI's 600ms default is tuned for a hover
+// target the user aims at; here the pointer crosses the badge constantly on
+// its way to the row, the archive button, or the next row, so 600ms fires on
+// travel rather than on intent and a 288px card lands over the rows below.
+//
+// 900ms sits past casual travel but still inside a deliberate "what is it
+// doing?" pause. The header chip (issue-agent-header-chip) keeps its 150ms
+// on purpose: it is one large chip the user aims at, not a per-row cue.
+//
+// The card body is read-only — no links, no buttons — so there is no hover
+// bridge to protect and the close delay only needs to absorb pointer wobble
+// across the 4px gap.
+const OPEN_DELAY_MS = 900;
+const CLOSE_DELAY_MS = 150;
+
 interface IssueAgentActivityIndicatorProps {
   issueId: string;
   // Avatar tier. Kept very small — this is a corner-of-card cue, not a
   // primary control. Default xs (16 px) reads as a dot at typical board
   // densities while still showing the agent's face on hover-zoom.
   size?: AvatarSize;
+  // Whether hovering opens the activity card. Opt OUT where the card's only
+  // incremental information is not worth a popup (Inbox — see below).
+  hoverCard?: boolean;
 }
 
 /**
@@ -47,6 +69,14 @@ interface IssueAgentActivityIndicatorProps {
  * with status dot + duration. No link rows — the card itself is the
  * navigation target for issue detail.
  *
+ * Surfaces that only need the cue can pass `hoverCard={false}` and get the
+ * badge alone. Inbox does (MUL-5189): the badge already shows who is running
+ * and whether they are working or queued, so on a triage surface the card's
+ * only incremental fact is elapsed time — which never changes the one
+ * decision an inbox row exists to support ("do I open this?"). Issue lists
+ * and board cards keep it: monitoring work in flight is what those views are
+ * for, and elapsed time is load-bearing there.
+ *
  * Subscribes to the one shared workspace snapshot query but narrows it to
  * this issue's tasks with a `select`. React Query's structural sharing keeps
  * that selected value referentially stable when this issue's tasks are
@@ -59,6 +89,7 @@ interface IssueAgentActivityIndicatorProps {
 export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndicator({
   issueId,
   size = "xs",
+  hoverCard = true,
 }: IssueAgentActivityIndicatorProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
@@ -84,34 +115,49 @@ export const IssueAgentActivityIndicator = memo(function IssueAgentActivityIndic
   }, [groups]);
 
   if (agentIds.length === 0) return null;
-  const hoverTasks = [...groups.running, ...groups.queued];
   const isRunning = opacity === "full";
+
+  const badge = (
+    <>
+      <AgentAvatarStack
+        agentIds={agentIds}
+        size={size}
+        opacity={opacity}
+        max={3}
+      />
+      <span
+        className={cn(
+          "text-[10px] leading-none",
+          isRunning
+            ? "animate-chat-text-shimmer"
+            : "text-muted-foreground",
+        )}
+      >
+        {isRunning
+          ? t(($) => $.agent_activity.status_running)
+          : t(($) => $.agent_activity.status_queued)}
+      </span>
+    </>
+  );
+
+  if (!hoverCard) {
+    return (
+      <span className="inline-flex shrink-0 items-center gap-1">{badge}</span>
+    );
+  }
+
+  const hoverTasks = [...groups.running, ...groups.queued];
 
   return (
     <HoverCard>
       <HoverCardTrigger
+        delay={OPEN_DELAY_MS}
+        closeDelay={CLOSE_DELAY_MS}
         render={
           <span className="inline-flex shrink-0 items-center gap-1" />
         }
       >
-        <AgentAvatarStack
-          agentIds={agentIds}
-          size={size}
-          opacity={opacity}
-          max={3}
-        />
-        <span
-          className={cn(
-            "text-[10px] leading-none",
-            isRunning
-              ? "animate-chat-text-shimmer"
-              : "text-muted-foreground",
-          )}
-        >
-          {isRunning
-            ? t(($) => $.agent_activity.status_running)
-            : t(($) => $.agent_activity.status_queued)}
-        </span>
+        {badge}
       </HoverCardTrigger>
       <HoverCardContent align="end" className="w-72">
         <AgentActivityHoverContent tasks={hoverTasks} />

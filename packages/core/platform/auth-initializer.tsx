@@ -62,6 +62,8 @@ export function AuthInitializer({
           // Old servers omit this field — treat that as "creation allowed"
           // (the managed-cloud default) rather than blocking the UI.
           workspaceCreationDisabled: cfg.workspace_creation_disabled === true,
+          // Absent/false on the managed cloud and older servers → section hidden.
+          vcsIntegrationAvailable: cfg.vcs_integration_available === true,
         });
         configStore.getState().setDaemonConfig({
           daemonServerUrl: cfg.daemon_server_url,

@@ -3,34 +3,37 @@ package agent
 import (
 	"context"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strconv"
 	"strings"
 	"testing"
 )
 
-func TestListModelsStaticProviders(t *testing.T) {
-	ctx := context.Background()
-	for _, provider := range []string{"claude", "codex", "cursor"} {
-		got, err := ListModels(ctx, provider, "")
-		if err != nil {
-			t.Fatalf("ListModels(%q) error: %v", provider, err)
+func TestStaticModelCatalogsHaveValidEntries(t *testing.T) {
+	t.Parallel()
+	catalogs := map[string][]Model{
+		"claude": claudeStaticModels(),
+		"codex":  codexStaticModels(),
+		"cursor": cursorStaticModels(),
+	}
+	for provider, models := range catalogs {
+		if len(models) == 0 {
+			t.Errorf("%s static catalog returned no models", provider)
 		}
-		if len(got) == 0 {
-			t.Errorf("ListModels(%q) returned no models", provider)
-		}
-		for i, m := range got {
-			if m.ID == "" {
-				t.Errorf("ListModels(%q)[%d] has empty ID", provider, i)
+		for i, model := range models {
+			if model.ID == "" {
+				t.Errorf("%s static catalog[%d] has empty ID", provider, i)
 			}
-			if m.Label == "" {
-				t.Errorf("ListModels(%q)[%d] has empty Label", provider, i)
+			if model.Label == "" {
+				t.Errorf("%s static catalog[%d] has empty Label", provider, i)
 			}
 		}
 	}
 }
 
 func TestListModelsQwenUsesRuntimeDefaultAndManualEntry(t *testing.T) {
+	// Qwen returns its manual-entry catalog without resolving or executing a CLI.
 	got, err := ListModels(context.Background(), "qwen", "")
 	if err != nil {
 		t.Fatalf("ListModels(qwen) error: %v", err)
@@ -51,7 +54,7 @@ func TestListModelsCopilotFallsBackToStatic(t *testing.T) {
 	delete(modelCache, "copilot")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "copilot", "/nonexistent/copilot-cli")
+	got, err := ListModels(ctx, "copilot", missingAgentExecutable(t, "copilot"))
 	if err != nil {
 		t.Fatalf("ListModels(copilot) error: %v", err)
 	}
@@ -321,7 +324,7 @@ func TestListModelsHermesWithoutBinary(t *testing.T) {
 	delete(modelCache, "hermes")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "hermes", "/nonexistent/hermes")
+	got, err := ListModels(ctx, "hermes", missingAgentExecutable(t, "hermes"))
 	if err != nil {
 		t.Fatalf("ListModels(hermes) error: %v", err)
 	}
@@ -336,7 +339,7 @@ func TestListModelsKiroWithoutBinary(t *testing.T) {
 	delete(modelCache, "kiro")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "kiro", "/nonexistent/kiro-cli")
+	got, err := ListModels(ctx, "kiro", missingAgentExecutable(t, "kiro-cli"))
 	if err != nil {
 		t.Fatalf("ListModels(kiro) error: %v", err)
 	}
@@ -351,7 +354,7 @@ func TestListModelsQoderWithoutBinary(t *testing.T) {
 	delete(modelCache, "qoder")
 	modelCacheMu.Unlock()
 
-	got, err := ListModels(ctx, "qoder", "/nonexistent/qodercli")
+	got, err := ListModels(ctx, "qoder", missingAgentExecutable(t, "qodercli"))
 	if err != nil {
 		t.Fatalf("ListModels(qoder) error: %v", err)
 	}
@@ -975,6 +978,140 @@ func TestParseHermesSessionNewModelsGarbage(t *testing.T) {
 	}
 }
 
+// MUL-5239: kimi-code 0.29 dropped the `models` block and advertises the
+// same catalog through ACP `configOptions`. Without this the picker showed
+// an empty catalog for an online kimi runtime.
+func TestParseACPSessionNewModelsFromConfigOptions(t *testing.T) {
+	// Trimmed copy of a real kimi 0.29 session/new result.
+	raw := []byte(`{
+      "sessionId": "session_abc",
+      "configOptions": [
+        {
+          "type": "select",
+          "id": "model",
+          "name": "Model",
+          "category": "model",
+          "currentValue": "kimi-code/k3",
+          "options": [
+            {"value": "kimi-code/kimi-for-coding", "name": "K2.7 Coding"},
+            {"value": "kimi-code/kimi-for-coding-highspeed", "name": "K2.7 Coding Highspeed"},
+            {"value": "kimi-code/k3", "name": "K3"}
+          ]
+        },
+        {
+          "type": "select",
+          "id": "thinking",
+          "category": "thought_level",
+          "currentValue": "high",
+          "options": [
+            {"value": "low", "name": "Low"},
+            {"value": "high", "name": "High"},
+            {"value": "max", "name": "Max"}
+          ]
+        }
+      ]
+    }`)
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 3 {
+		t.Fatalf("expected 3 models from configOptions, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "kimi-code/kimi-for-coding" || models[0].Label != "K2.7 Coding" {
+		t.Errorf("unexpected first model: %+v", models[0])
+	}
+	// `kimi-code/k3` has no colon, so it must not be split into a provider
+	// group off the slash.
+	if models[2].Provider != "" {
+		t.Errorf("slash-form model id must not derive a provider: %+v", models[2])
+	}
+	if !models[2].Default {
+		t.Errorf("currentValue entry must be marked default: %+v", models[2])
+	}
+	for _, m := range models {
+		if m.ID == "low" || m.ID == "high" || m.ID == "max" {
+			t.Errorf("thinking-level option leaked into the model catalog: %+v", m)
+		}
+	}
+}
+
+// The `models` block stays authoritative: an agent emitting both shapes
+// must not have its catalog replaced by configOptions.
+func TestParseACPSessionNewModelsPrefersModelsBlockOverConfigOptions(t *testing.T) {
+	raw := []byte(`{
+      "sessionId": "session_abc",
+      "models": {
+        "availableModels": [{"modelId": "nous:anthropic/claude-opus-4.7", "name": "Opus"}],
+        "currentModelId": "nous:anthropic/claude-opus-4.7"
+      },
+      "configOptions": [
+        {"id": "model", "category": "model", "currentValue": "other/one",
+         "options": [{"value": "other/one", "name": "Other"}]}
+      ]
+    }`)
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 1 || models[0].ID != "nous:anthropic/claude-opus-4.7" {
+		t.Fatalf("models block must win over configOptions, got %+v", models)
+	}
+}
+
+func TestParseACPSessionNewModelsConfigOptionsSnakeCaseAndCategoryOnly(t *testing.T) {
+	// No `id: "model"` — the option is identified by category alone — and
+	// the response uses snake_case keys.
+	raw := []byte(`{
+      "session_id": "session_abc",
+      "config_options": [
+        {
+          "id": "primary_model",
+          "category": "MODEL",
+          "current_value": "kimi-code/k3",
+          "options": [
+            {"value": "kimi-code/k3", "name": "K3"},
+            {"value": "kimi-code/k3", "name": "duplicate"},
+            {"value": "  ", "name": "blank"},
+            {"value": "kimi-code/kimi-for-coding", "name": ""}
+          ]
+        }
+      ]
+    }`)
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models (duplicate and blank dropped), got %d: %+v", len(models), models)
+	}
+	if !models[0].Default {
+		t.Errorf("snake_case current_value should mark default: %+v", models[0])
+	}
+	if models[1].Label != "kimi-code/kimi-for-coding" {
+		t.Errorf("missing name should fall back to the model id, got %+v", models[1])
+	}
+}
+
+func TestParseACPSessionNewModelsIgnoresNonModelConfigOptions(t *testing.T) {
+	// session/new with configOptions but no model picker must still yield an
+	// empty catalog rather than inventing one from the thinking levels.
+	raw := []byte(`{
+      "sessionId": "session_abc",
+      "configOptions": [
+        {"id": "thinking", "category": "thought_level", "currentValue": "high",
+         "options": [{"value": "low", "name": "Low"}, {"value": "high", "name": "High"}]}
+      ]
+    }`)
+	if got := parseACPSessionNewModels(raw); len(got) != 0 {
+		t.Errorf("expected empty catalog, got %+v", got)
+	}
+}
+
+func TestACPResultTopLevelKeys(t *testing.T) {
+	// Diagnostic line must expose key names only — never the values that
+	// carry session ids or catalog contents.
+	keys := acpResultTopLevelKeys([]byte(`{"sessionId":"session_secret","configOptions":[],"modes":{}}`))
+	got := strings.Join(keys, ",")
+	if got != "configOptions,modes,sessionId" {
+		t.Errorf("unexpected keys: %q", got)
+	}
+	if acpResultTopLevelKeys([]byte("not json")) != nil {
+		t.Error("expected nil for non-JSON result")
+	}
+}
+
 func TestHermesModelSelectionSupported(t *testing.T) {
 	// Regression guard: hermes now supports model selection via
 	// the ACP session/set_model RPC, so the UI dropdown should
@@ -1019,7 +1156,7 @@ func TestParseAntigravityModels(t *testing.T) {
 		t.Fatalf("parseAntigravityModels len = %d, want %d (%+v)", len(got), len(want), got)
 	}
 	for i := range want {
-		if got[i] != want[i] {
+		if !reflect.DeepEqual(got[i], want[i]) {
 			t.Errorf("model[%d] = %+v, want %+v", i, got[i], want[i])
 		}
 	}

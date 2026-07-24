@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -1121,6 +1122,58 @@ func TestParseACPTokenUsageAliases(t *testing.T) {
 	}
 }
 
+// TestParseACPTokenUsageCachedInputBucketing pins when cached reads are moved
+// out of inputTokens. Persisting overlapping buckets makes the dashboard
+// charge the cached prefix at both the full input rate and the cache-read
+// rate, so the re-bucketing must fire exactly when totalTokens proves the
+// counters overlap — and never otherwise.
+func TestParseACPTokenUsageCachedInputBucketing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		raw  string
+		want TokenUsage
+	}{
+		{
+			// Grok Build: totalTokens == input + output, so the cached prefix
+			// lives inside inputTokens.
+			name: "inclusive input is reduced by cached reads",
+			raw:  `{"inputTokens":12929,"outputTokens":29,"totalTokens":12958,"cachedReadTokens":10880}`,
+			want: TokenUsage{InputTokens: 2049, OutputTokens: 29, CacheReadTokens: 10880},
+		},
+		{
+			// totalTokens == input + cached + output: the buckets are already
+			// mutually exclusive.
+			name: "exclusive buckets are left alone",
+			raw:  `{"inputTokens":100,"outputTokens":20,"totalTokens":150,"cachedReadTokens":30}`,
+			want: TokenUsage{InputTokens: 100, OutputTokens: 20, CacheReadTokens: 30},
+		},
+		{
+			// No totalTokens: nothing in the payload describes the overlap, so
+			// the counters are persisted as reported.
+			name: "missing totalTokens keeps counters as reported",
+			raw:  `{"inputTokens":100,"outputTokens":20,"cachedReadTokens":30}`,
+			want: TokenUsage{InputTokens: 100, OutputTokens: 20, CacheReadTokens: 30},
+		},
+		{
+			// Cached reads larger than input cannot be a subset of it.
+			name: "cached larger than input keeps counters as reported",
+			raw:  `{"inputTokens":10,"outputTokens":20,"totalTokens":30,"cachedReadTokens":40}`,
+			want: TokenUsage{InputTokens: 10, OutputTokens: 20, CacheReadTokens: 40},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := parseACPTokenUsage(json.RawMessage(tt.raw)); got != tt.want {
+				t.Fatalf("got %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestHermesClientHandleToolCallComplete(t *testing.T) {
 	t.Parallel()
 
@@ -1512,14 +1565,90 @@ func TestHermesClientExtractPromptResultMetaUsage(t *testing.T) {
 	if got.stopReason != "end_turn" {
 		t.Errorf("stopReason: got %q, want %q", got.stopReason, "end_turn")
 	}
-	if got.usage.InputTokens != 12929 {
-		t.Errorf("inputTokens: got %d, want 12929", got.usage.InputTokens)
+	// Grok counts the cached prefix inside inputTokens (totalTokens 12958 ==
+	// 12929 + 29), so the stored input bucket is the uncached remainder:
+	// 12929 - 10880 = 2049. Priced at xAI's grok-4.5 rates that is
+	// 2049*$2 + 10880*$0.30 + 29*$6 per 1M = $0.007536, which is exactly the
+	// costUsdTicks the same payload reports.
+	if got.usage.InputTokens != 2049 {
+		t.Errorf("inputTokens: got %d, want 2049", got.usage.InputTokens)
 	}
 	if got.usage.OutputTokens != 29 {
 		t.Errorf("outputTokens: got %d, want 29", got.usage.OutputTokens)
 	}
 	if got.usage.CacheReadTokens != 10880 {
 		t.Errorf("cacheReadTokens: got %d, want 10880", got.usage.CacheReadTokens)
+	}
+	// The turn stamps the model it billed against. A resumed session has no
+	// other source for this (session/load reports no model id), so losing it
+	// buckets the whole run under "unknown", which prices at $0.
+	if got.modelID != "grok-4.5" {
+		t.Errorf("modelID: got %q, want %q", got.modelID, "grok-4.5")
+	}
+	// xAI's own price for the turn, in ticks of 1e-10 USD. This is the only
+	// figure that carries request-level pricing rules (the ≥200K prompt
+	// surcharge); dropping it forces a rate-table guess downstream.
+	if got.usage.CostUSDTicks != 75360000 {
+		t.Errorf("costUsdTicks: got %d, want 75360000", got.usage.CostUSDTicks)
+	}
+	if usd := float64(got.usage.CostUSDTicks) / CostUSDTicksPerUSD; math.Abs(usd-0.007536) > 1e-12 {
+		t.Errorf("cost in USD: got %v, want 0.007536", usd)
+	}
+}
+
+// TestParseACPTokenUsageCostIsOptional guards the common case: almost no agent
+// reports a cost, and a zero must stay zero so the reader knows to estimate
+// rather than recording a real $0 spend.
+func TestParseACPTokenUsageCostIsOptional(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want int64
+	}{
+		{name: "camelCase", raw: `{"inputTokens":10,"costUsdTicks":4200}`, want: 4200},
+		{name: "snake_case", raw: `{"input_tokens":10,"cost_usd_ticks":4200}`, want: 4200},
+		{name: "absent", raw: `{"inputTokens":10,"outputTokens":2}`, want: 0},
+		{name: "null", raw: `{"inputTokens":10,"costUsdTicks":null}`, want: 0},
+		{name: "string number", raw: `{"inputTokens":10,"costUsdTicks":"4200"}`, want: 4200},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := parseACPTokenUsage(json.RawMessage(tc.raw)).CostUSDTicks; got != tc.want {
+				t.Errorf("CostUSDTicks: got %d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseACPModelIDFromMeta covers the shapes the `_meta` model id can
+// arrive in, and confirms a missing one degrades to empty rather than
+// inventing an attribution.
+func TestParseACPModelIDFromMeta(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "camelCase", raw: `{"modelId":"grok-4.5"}`, want: "grok-4.5"},
+		{name: "snake_case", raw: `{"model_id":"grok-4.3"}`, want: "grok-4.3"},
+		{name: "camelCase wins over snake_case", raw: `{"modelId":"grok-4.5","model_id":"grok-4.3"}`, want: "grok-4.5"},
+		{name: "whitespace trimmed", raw: `{"modelId":"  grok-4.5  "}`, want: "grok-4.5"},
+		{name: "absent", raw: `{"sessionId":"ses_1"}`, want: ""},
+		{name: "empty string", raw: `{"modelId":""}`, want: ""},
+		{name: "null meta", raw: `null`, want: ""},
+		{name: "malformed", raw: `{"modelId":`, want: ""},
+		{name: "wrong type degrades to empty", raw: `{"modelId":42}`, want: ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := parseACPModelIDFromMeta(json.RawMessage(tc.raw)); got != tc.want {
+				t.Errorf("parseACPModelIDFromMeta(%s): got %q, want %q", tc.raw, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -1714,6 +1843,242 @@ func TestHermesProviderErrorSnifferBoundedBuffer(t *testing.T) {
 	if len(s.lines) > acpMaxErrorLines {
 		t.Errorf("sniffer kept %d lines, limit is %d", len(s.lines), acpMaxErrorLines)
 	}
+}
+
+// TestHermesProviderErrorSnifferIgnoresEchoedInfoRecords guards pollution
+// failures from GitHub multica#5862.
+//
+// Pollution failure ≠ real provider failure:
+//   - real failure: Hermes/provider crashes; no successful final reply.
+//   - pollution failure: Hermes already produced a correct final reply /
+//     completed the requested work, then Multica suddenly flips the same
+//     run to failed because an `[INFO] root:` conversation/tool echo on
+//     stderr embedded error-looking tokens (Error:, KeyError:, ❌, ...).
+//
+// These fixtures model the pollution class. The sniffer must ignore the
+// full INFO record, and a completed run with a successful final reply
+// must stay completed.
+func TestHermesProviderErrorSnifferIgnoresEchoedInfoRecords(t *testing.T) {
+	t.Parallel()
+
+	oversizedDoc := `2026-07-24 10:08:59 [INFO] root: {"message":{"role":"tool","content":"` +
+		"# ❌ Deprecated approach: do not use this query. " +
+		strings.Repeat("reference documentation body ... ", 500) +
+		`The parser may return KeyError: 'series'; inspect the response shape first."}}`
+
+	tests := []struct {
+		name string
+		line string
+	}{
+		{
+			name: "oversized documentation payload",
+			line: oversizedDoc,
+		},
+		{
+			name: "short tool result payload",
+			line: `2026-07-24 10:09:00 [INFO] root: {"message":{"role":"tool","content":"# ❌ Deprecated example. KeyError: 'series' means the optional field is absent."}}`,
+		},
+		{
+			name: "short llm call payload",
+			line: `2026-07-24 10:09:01 [INFO] root: {"type":"llm_call","finish_reason":"tool_calls","arguments":"print(f\"Error: {err}\")","reasoning_content":"❌ This sample is intentionally invalid."}`,
+		},
+		{
+			name: "provider-looking text inside info payload",
+			line: `2026-07-24 10:09:02 [INFO] root: {"message":{"role":"tool","content":"Troubleshooting example: ❌ API call failed after 3 retries: HTTP 429. This is quoted documentation, not the current run."}}`,
+		},
+	}
+
+	if len(oversizedDoc) < acpMaxErrorLineLen {
+		t.Fatalf("oversized fixture is %d bytes, below the cap %d", len(oversizedDoc), acpMaxErrorLineLen)
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newACPProviderErrorSniffer("hermes")
+			if _, err := s.Write([]byte(tt.line + "\n")); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			if msg := s.message(); msg != "" {
+				t.Errorf("echoed INFO record must not be captured, got %d bytes: %q", len(msg), firstNRunes(msg, 100))
+			}
+			if msg := s.terminalMessage(); msg != "" {
+				t.Errorf("echoed INFO record must not set terminal failure, got %d bytes: %q", len(msg), firstNRunes(msg, 100))
+			}
+
+			// Simulate the observed pollution timing: a successful final
+			// reply already exists, then promotion consults the sniffer.
+			successfulFinalReply := "Done. The requested work completed successfully."
+			status, errStr := promoteACPResultOnProviderError("completed", "", successfulFinalReply, s)
+			if status != "completed" {
+				t.Errorf("pollution: successful final reply was present, but status flipped to %q (error=%q)", status, firstNRunes(errStr, 100))
+			}
+		})
+	}
+}
+
+// TestHermesProviderErrorSnifferStillCapturesErrorRootRecords is the
+// control for real failures: genuine `[ERROR] root:` provider records
+// must still be terminal. Pollution handling must not swallow those.
+func TestHermesProviderErrorSnifferStillCapturesErrorRootRecords(t *testing.T) {
+	t.Parallel()
+
+	s := newACPProviderErrorSniffer("hermes")
+	line := `2026-07-24 10:09:03 [ERROR] root: ❌ API call failed after 3 retries: HTTP 429 rate limit exceeded`
+	if _, err := s.Write([]byte(line + "\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	msg := s.terminalMessage()
+	if !strings.Contains(msg, "HTTP 429") {
+		t.Fatalf("real error: expected genuine ERROR root record to remain terminal, got %q", msg)
+	}
+}
+
+// TestHermesProviderErrorSnifferIgnoresMultiLineInfoRecords guards the
+// second pollution shape from GitHub multica#5862. Hermes echoes a
+// conversation/tool record whose JSON spans several physical lines: only
+// the first line carries the `[INFO] root:` prefix, the continuation lines
+// do not, yet they may embed both a capture token (`Error:`) and a terminal
+// token (`❌`) on the same physical line. The whole record must be skipped,
+// so a completed run with a successful final reply stays completed.
+func TestHermesProviderErrorSnifferIgnoresMultiLineInfoRecords(t *testing.T) {
+	t.Parallel()
+
+	record := "2026-07-24 10:09:00 [INFO] root: {\n" +
+		"  \"message\": {\"role\": \"tool\", \"content\": \"❌ Error: KeyError 'series' is quoted documentation, not a provider failure\"}\n" +
+		"}\n"
+
+	s := newACPProviderErrorSniffer("hermes")
+	for _, physicalLine := range strings.SplitAfter(record, "\n") {
+		if physicalLine == "" {
+			continue
+		}
+		if _, err := s.Write([]byte(physicalLine)); err != nil {
+			t.Fatalf("Write: %v", err)
+		}
+	}
+	if msg := s.message(); msg != "" {
+		t.Errorf("multi-line INFO echo must not be captured, got %q", firstNRunes(msg, 120))
+	}
+	if msg := s.terminalMessage(); msg != "" {
+		t.Errorf("multi-line INFO echo must not be terminal, got %q", firstNRunes(msg, 120))
+	}
+	status, errStr := promoteACPResultOnProviderError("completed", "", "Done. The requested work completed successfully.", s)
+	if status != "completed" {
+		t.Errorf("multi-line INFO echo flipped a completed run to %q (error=%q)", status, firstNRunes(errStr, 120))
+	}
+}
+
+// TestHermesProviderErrorSnifferErrorRecordAfterInfoRecord is the control
+// for the multi-line skip: a genuine `[ERROR] root:` record that FOLLOWS a
+// multi-line INFO echo must still be terminal. The error record's own
+// prefix ends the skipped INFO record, so real failures are not swallowed.
+func TestHermesProviderErrorSnifferErrorRecordAfterInfoRecord(t *testing.T) {
+	t.Parallel()
+
+	stream := "2026-07-24 10:09:00 [INFO] root: {\n" +
+		"  \"content\": \"❌ Error: harmless echoed documentation\"\n" +
+		"}\n" +
+		"2026-07-24 10:09:05 [ERROR] root: ❌ API call failed after 3 retries: HTTP 429 rate limit exceeded\n"
+
+	s := newACPProviderErrorSniffer("hermes")
+	if _, err := s.Write([]byte(stream)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	msg := s.terminalMessage()
+	if !strings.Contains(msg, "HTTP 429") {
+		t.Fatalf("real ERROR record after an INFO echo must stay terminal, got %q", msg)
+	}
+}
+
+// TestHermesProviderErrorSnifferRealErrorsAfterSingleLineInfo guards record
+// boundaries around INFO echoes. A complete single-line INFO record must not
+// make a following bare provider-error block or a non-root logger record look
+// like an INFO continuation.
+func TestHermesProviderErrorSnifferRealErrorsAfterSingleLineInfo(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		stream string
+	}{
+		{
+			name: "bare provider error",
+			stream: "2026-07-24 10:09:00 [INFO] root: {\"message\":\"ordinary echo with an unmatched { in quoted text\"}\n" +
+				"❌ API call failed after 3 retries: RateLimitError [HTTP 429]\n" +
+				"📝 Error: HTTP 429 rate limit exceeded\n",
+		},
+		{
+			name: "non-root error logger",
+			stream: "2026-07-24 10:09:00 [INFO] root: {\"message\":\"ordinary echo\"}\n" +
+				"2026-07-24 10:09:01 [ERROR] acp_adapter.server: ❌ API call failed after 3 retries: HTTP 429 rate limit exceeded\n",
+		},
+		{
+			name: "bare provider error after echo truncated inside string",
+			stream: "2026-07-24 10:09:00 [INFO] root: {\"message\":\"truncated echo\n" +
+				"❌ API call failed after 3 retries: RateLimitError [HTTP 429]\n" +
+				"📝 Error: HTTP 429 rate limit exceeded\n",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s := newACPProviderErrorSniffer("hermes")
+			if _, err := s.Write([]byte(tt.stream)); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			if msg := s.terminalMessage(); !strings.Contains(msg, "HTTP 429") {
+				t.Fatalf("real provider error after a single-line INFO record was swallowed, got %q", msg)
+			}
+		})
+	}
+}
+
+// TestHermesProviderErrorSnifferLongRealErrorStillFails guards the #1952
+// regression: a genuine provider failure emitted as one long line (well
+// over acpMaxErrorLineLen) with no successful output must still fail the
+// run. Length must never decide whether a line is an error. The shared
+// sniffer backs hermes/kimi/kiro/qoder/grok/traecli, so verify the
+// non-Hermes callers too, and confirm the persisted message stays bounded.
+func TestHermesProviderErrorSnifferLongRealErrorStillFails(t *testing.T) {
+	t.Parallel()
+
+	longReal := "❌ API call failed after 3 retries: BadRequestError [HTTP 400] " +
+		"Error: HTTP 400: Error code: 400 - {'detail': \"" +
+		strings.Repeat("the requested model is not supported for this account; ", 200) +
+		"\"}"
+	if len(longReal) <= acpMaxErrorLineLen {
+		t.Fatalf("fixture is %d bytes, must exceed the cap %d to exercise the path", len(longReal), acpMaxErrorLineLen)
+	}
+
+	for _, provider := range []string{"hermes", "kimi", "kiro", "qoder", "grok", "traecli"} {
+		t.Run(provider, func(t *testing.T) {
+			s := newACPProviderErrorSniffer(provider)
+			if _, err := s.Write([]byte(longReal + "\n")); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			// Empty output: no successful reply to fall back on (#1952).
+			status, errStr := promoteACPResultOnProviderError("completed", "", "", s)
+			if status != "failed" {
+				t.Fatalf("long real provider error was dropped; run stayed %q instead of failed", status)
+			}
+			if errStr == "" {
+				t.Fatal("failed run must carry a non-empty provider-error message")
+			}
+			if len(errStr) > acpMaxErrorLineLen+len("…(truncated)") {
+				t.Errorf("persisted error not bounded: %d bytes", len(errStr))
+			}
+		})
+	}
+}
+
+// firstNRunes returns at most n runes of s, for bounded error output.
+func firstNRunes(s string, n int) string {
+	r := []rune(s)
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
 }
 
 func fakeHermesACPUsageWithDefaultModelScript() string {

@@ -315,6 +315,7 @@ export function RuntimeDetailPage({
               <RuntimeList
                 runtimes={machineRuntimes}
                 now={now}
+                machineTitle={machine.title}
                 runtimeHref={(childRuntimeId) =>
                   paths.runtimeSettings(machine.id, childRuntimeId)
                 }

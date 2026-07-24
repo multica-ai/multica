@@ -28,11 +28,13 @@ INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
     instructions, custom_env, custom_args, mcp_config, model, thinking_level,
+    service_tier,
     composio_toolkit_allowlist, permission_mode
 ) VALUES (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
+    $17,
     sqlc.narg('composio_toolkit_allowlist')::text[],
     COALESCE(sqlc.narg('permission_mode'), 'private')
 )
@@ -61,6 +63,31 @@ RETURNING *;
 DELETE FROM agent
 WHERE id = $1 AND kind = 'system' AND system_key LIKE 'agent_builder:%';
 
+-- name: RebindAgentBuilderRuntime :one
+-- Re-points a builder carrier at another runtime mid-conversation. The carrier
+-- is what SendDirectChatMessage reads to stamp a chat task's runtime_id, so this
+-- UPDATE is the only thing that actually moves subsequent replies; the live-draft
+-- picker alone never did. model is reset wholesale because model ids are
+-- per-runtime — the new runtime resolves its own default instead of inheriting an
+-- id it may not serve. The kind/system_key guard mirrors DeleteSystemAgentByID so
+-- this path can never touch a user-authored agent.
+--
+-- Callers MUST hold LockChatSessionForRuntimeBind on the owning chat_session for
+-- the whole transaction, otherwise a concurrent send can stamp a task with the
+-- pre-switch runtime after the pending-task check has already passed (MUL-5163).
+--
+-- chat_session.runtime_id is deliberately left untouched: the daemon only resumes
+-- a stored provider session when chat_session.runtime_id matches the claiming
+-- task's runtime (see the chat claim path), so leaving the old pointer in place is
+-- exactly what makes the new runtime start a fresh provider session.
+UPDATE agent
+SET runtime_id = @runtime_id,
+    runtime_mode = @runtime_mode,
+    model = sqlc.narg('model'),
+    updated_at = now()
+WHERE id = @id AND kind = 'system' AND system_key LIKE 'agent_builder:%'
+RETURNING *;
+
 -- name: UpdateAgent :one
 -- composio_toolkit_allowlist is set wholesale: the API layer is responsible
 -- for normalising the request payload to either (a) the new slug list — sent
@@ -85,6 +112,7 @@ UPDATE agent SET
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
+    service_tier = COALESCE(sqlc.narg('service_tier'), service_tier),
     composio_toolkit_allowlist = COALESCE(sqlc.narg('composio_toolkit_allowlist')::text[], composio_toolkit_allowlist),
     updated_at = now()
 WHERE id = $1
@@ -106,6 +134,13 @@ RETURNING *;
 -- set the column back to NULL, so the API layer routes "user picked Default"
 -- through this dedicated query.
 UPDATE agent SET thinking_level = NULL, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClearAgentServiceTier :one
+-- Explicit NULL-clear for service_tier. COALESCE-based UpdateAgent cannot
+-- set the column back to NULL, so the API routes "Runtime default" here.
+UPDATE agent SET service_tier = NULL, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
@@ -1196,6 +1231,120 @@ SELECT t.* FROM (
     AND atq.status IN ('completed', 'failed')
   ORDER BY atq.agent_id, atq.completed_at DESC NULLS LAST
 ) t;
+
+-- name: ListWorkspaceWorkingAgents :many
+-- Workspace-level source for consumers that show currently working agents.
+-- One row per visible, user-authored agent with at least one task that has
+-- actually started running. work_type is optional (empty = every source);
+-- source-specific reads use the same precedence as computeTaskKind:
+-- chat > autopilot > issue. "issue" intentionally groups direct and
+-- comment-triggered issue work. Quick-create work is present only in the
+-- unfiltered projection because it has no source FK yet. mine_relation is
+-- optional (empty = workspace); when set it narrows issue work to the
+-- authenticated member's My Issues relation.
+SELECT
+  a.id,
+  a.name,
+  a.avatar_url,
+  COUNT(*)::int AS running_task_count,
+  COALESCE(
+    ARRAY_AGG(DISTINCT atq.issue_id ORDER BY atq.issue_id)
+      FILTER (WHERE atq.issue_id IS NOT NULL),
+    ARRAY[]::uuid[]
+  )::uuid[] AS issue_ids
+FROM agent a
+JOIN agent_task_queue atq ON atq.agent_id = a.id
+WHERE a.workspace_id = $1
+  AND a.kind = 'user'
+  AND a.archived_at IS NULL
+  AND atq.status = 'running'
+  AND (
+    @work_type::text = ''
+    OR (@work_type::text = 'chat' AND atq.chat_session_id IS NOT NULL)
+    OR (
+      @work_type::text = 'autopilot'
+      AND atq.chat_session_id IS NULL
+      AND atq.autopilot_run_id IS NOT NULL
+    )
+    OR (
+      @work_type::text = 'issue'
+      AND atq.chat_session_id IS NULL
+      AND atq.autopilot_run_id IS NULL
+      AND atq.issue_id IS NOT NULL
+    )
+  )
+  AND (
+    @mine_relation::text = ''
+    OR EXISTS (
+      SELECT 1
+      FROM issue i
+      WHERE i.id = atq.issue_id
+        AND i.workspace_id = a.workspace_id
+        AND (
+          (
+            @mine_relation::text IN ('assigned', 'any')
+            AND i.assignee_type = 'member'
+            AND i.assignee_id = @member_id::uuid
+          )
+          OR (
+            @mine_relation::text IN ('created', 'any')
+            AND i.creator_type = 'member'
+            AND i.creator_id = @member_id::uuid
+          )
+          OR (
+            @mine_relation::text IN ('involved', 'any')
+            AND (
+              (
+                i.assignee_type = 'agent'
+                AND EXISTS (
+                  SELECT 1
+                  FROM agent owned_agent
+                  WHERE owned_agent.id = i.assignee_id
+                    AND owned_agent.workspace_id = a.workspace_id
+                    AND owned_agent.owner_id = @member_id::uuid
+                )
+              )
+              OR (
+                i.assignee_type = 'squad'
+                AND EXISTS (
+                  SELECT 1
+                  FROM squad s
+                  WHERE s.id = i.assignee_id
+                    AND s.workspace_id = a.workspace_id
+                    AND (
+                      EXISTS (
+                        SELECT 1
+                        FROM squad_member sm
+                        WHERE sm.squad_id = s.id
+                          AND sm.member_type = 'member'
+                          AND sm.member_id = @member_id::uuid
+                      )
+                      OR EXISTS (
+                        SELECT 1
+                        FROM agent leader
+                        WHERE leader.id = s.leader_id
+                          AND leader.workspace_id = a.workspace_id
+                          AND leader.owner_id = @member_id::uuid
+                      )
+                      OR EXISTS (
+                        SELECT 1
+                        FROM squad_member sm
+                        JOIN agent owned_member ON owned_member.id = sm.member_id
+                        WHERE sm.squad_id = s.id
+                          AND sm.member_type = 'agent'
+                          AND owned_member.workspace_id = a.workspace_id
+                          AND owned_member.owner_id = @member_id::uuid
+                      )
+                    )
+                )
+              )
+            )
+          )
+        )
+    )
+  )
+GROUP BY a.id, a.name, a.avatar_url, a.created_at
+ORDER BY a.created_at ASC;
 
 -- name: ListTasksByIssue :many
 SELECT * FROM agent_task_queue

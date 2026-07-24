@@ -1647,6 +1647,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			McpConfig:             mcpConfig,
 			Model:                 agent.Model.String,
 			ThinkingLevel:         agent.ThinkingLevel.String,
+			ServiceTier:           agent.ServiceTier.String,
 			RuntimeConfig:         runtimeConfig,
 			DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 		}
@@ -1752,7 +1753,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					ID:          task.SquadID,
 					WorkspaceID: issue.WorkspaceID,
 				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+					// Parent-status authority is deliberately NARROWER than
+					// briefing injection. Injection is keyed off is_leader_task
+					// (see above) and therefore also fires on the MUL-3724 path,
+					// where the issue belongs to a plain agent and this squad was
+					// only @mentioned for help. Granting status ownership there
+					// would let a guest squad push someone else's in-flight issue
+					// to in_review, so we gate it on the issue actually being
+					// assigned to this squad.
+					ownsIssueStatus := issue.AssigneeType.Valid &&
+						issue.AssigneeType.String == "squad" &&
+						uuidToString(issue.AssigneeID) == uuidToString(squad.ID)
+					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus)
 					if strings.TrimSpace(resp.Agent.Instructions) == "" {
 						resp.Agent.Instructions = briefing
 					} else {
@@ -1762,6 +1774,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						"squad_id", uuidToString(squad.ID),
 						"squad_name", squad.Name,
 						"leader_agent_id", resp.Agent.ID,
+						"owns_issue_status", ownsIssueStatus,
 					)
 				}
 			}
@@ -2076,7 +2089,53 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				}
 				break
 			}
-			if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
+			// A web chat can opt into the same durable project context as an
+			// issue-bound task. Revalidate the soft reference in this workspace at
+			// claim time: a deleted/stale project degrades to workspace context and
+			// can never leak a project from another tenant.
+			var projectRepos []RepoData
+			if cs.ProjectID.Valid {
+				if project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+					ID:          cs.ProjectID,
+					WorkspaceID: cs.WorkspaceID,
+				}); err == nil {
+					resp.ProjectID = uuidToString(project.ID)
+					resp.ProjectTitle = project.Title
+					resp.ProjectDescription = project.Description.String
+					if rows := h.listProjectResourcesForProject(r.Context(), project.ID); len(rows) > 0 {
+						resources := make([]ProjectResourceData, 0, len(rows))
+						for _, row := range rows {
+							label := ""
+							if row.Label.Valid {
+								label = row.Label.String
+							}
+							ref := json.RawMessage(row.ResourceRef)
+							if len(ref) == 0 {
+								ref = json.RawMessage("{}")
+							}
+							resources = append(resources, ProjectResourceData{
+								ID:           uuidToString(row.ID),
+								ResourceType: row.ResourceType,
+								ResourceRef:  ref,
+								Label:        label,
+							})
+							if row.ResourceType == "github_repo" {
+								var payload struct {
+									URL string `json:"url"`
+									Ref string `json:"ref,omitempty"`
+								}
+								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
+									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
+								}
+							}
+						}
+						resp.ProjectResources = resources
+					}
+				}
+			}
+			if len(projectRepos) > 0 {
+				resp.Repos = projectRepos
+			} else if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
 				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
 					resp.Repos = repos
@@ -2336,7 +2395,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						ID:          squadUUID,
 						WorkspaceID: wsUUID,
 					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+						// Quick-create has no issue yet — there is no parent
+						// status to own on this turn. Once the leader opens the
+						// issue with the squad as assignee, the issue-bound
+						// claim path above grants ownership.
+						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, false)
 						if strings.TrimSpace(resp.Agent.Instructions) == "" {
 							resp.Agent.Instructions = briefing
 						} else {
@@ -3327,6 +3390,22 @@ type TaskUsagePayload struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	// CostUSDTicks is the provider's own price for this usage in 1e-10 USD.
+	// Absent or 0 from every daemon that doesn't have one (older builds, and
+	// every provider except Grok today) — stored as NULL so the reader knows
+	// to fall back to rate-table estimation rather than reading a real $0.
+	CostUSDTicks int64 `json:"cost_usd_ticks"`
+}
+
+// authoritativeCostTicks converts a reported cost into the nullable column.
+// Only a positive figure is authoritative: 0 is what a daemon that knows
+// nothing about cost sends, and storing it would claim a genuine $0 spend and
+// suppress the estimate. Negative is nonsense from a malformed report.
+func authoritativeCostTicks(ticks int64) pgtype.Int8 {
+	if ticks <= 0 {
+		return pgtype.Int8{}
+	}
+	return pgtype.Int8{Int64: ticks, Valid: true}
 }
 
 func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
@@ -3374,11 +3453,12 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			OutputTokens:     u.OutputTokens,
 			CacheReadTokens:  u.CacheReadTokens,
 			CacheWriteTokens: u.CacheWriteTokens,
+			CostUsdTicks:     authoritativeCostTicks(u.CostUSDTicks),
 		}); err != nil {
 			slog.Warn("upsert task usage failed", "task_id", taskID, "model", u.Model, "error", err)
 			continue
 		}
-		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens)
+		h.TaskService.CaptureTaskUsage(r.Context(), task, provider, u.Model, u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheWriteTokens, u.CostUSDTicks)
 
 		// Surface prompt-cache effectiveness per run so cache hit rates are
 		// observable in logs, not just queryable from runtime_usage. The ratio
@@ -3779,7 +3859,13 @@ func (h *Handler) GetIssueUsage(w http.ResponseWriter, r *http.Request) {
 		"total_output_tokens":      row.TotalOutputTokens,
 		"total_cache_read_tokens":  row.TotalCacheReadTokens,
 		"total_cache_write_tokens": row.TotalCacheWriteTokens,
-		"task_count":               row.TaskCount,
+		// Cost split — see the note on DashboardUsageDailyResponse.
+		"cost_usd_ticks":              row.TotalCostUsdTicks,
+		"uncosted_input_tokens":       row.UncostedInputTokens,
+		"uncosted_output_tokens":      row.UncostedOutputTokens,
+		"uncosted_cache_read_tokens":  row.UncostedCacheReadTokens,
+		"uncosted_cache_write_tokens": row.UncostedCacheWriteTokens,
+		"task_count":                  row.TaskCount,
 	})
 }
 

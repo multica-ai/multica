@@ -119,6 +119,13 @@ services:
       # in the database, so this single deployment-wide key is all the operator
       # needs to set here.
       MULTICA_SLACK_SECRET_KEY: ${MULTICA_SLACK_SECRET_KEY:-}
+      # Self-hosted Git provider integration (Forgejo / Gitea / GitLab). This
+      # is a self-host-only feature, so the compose file turns it on by default;
+      # the managed cloud leaves it unset (off). It still needs a valid
+      # MULTICA_VCS_SECRET_KEY below to actually work.
+      MULTICA_VCS_INTEGRATION_ENABLED: ${MULTICA_VCS_INTEGRATION_ENABLED:-true}
+      # VCS integration at-rest encryption key for token-based providers
+      MULTICA_VCS_SECRET_KEY: ${MULTICA_VCS_SECRET_KEY:-}
     restart: unless-stopped
 
   frontend:
@@ -129,6 +136,10 @@ services:
       - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
     environment:
       HOSTNAME: "0.0.0.0"
+      REMOTE_API_URL: ${REMOTE_API_URL:-http://backend:8080}
+      DOCS_URL: ${DOCS_URL:-}
+      NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
+      NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
     restart: unless-stopped
 
 volumes:

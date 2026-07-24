@@ -596,15 +596,18 @@ func (c *httpAPIClient) GetMessage(ctx context.Context, creds InstallationCreden
 // silently gets the max rather than a 400 from Lark.
 const larkListMessagesMaxPageSize = 50
 
-// ListChatMessages retrieves a bounded, recent window of messages in one
-// chat via GET /open-apis/im/v1/messages?container_id_type=chat. Where
-// GetMessage fetches a single message by id, this lists a conversation;
-// it backs the enricher's group-context prefetch. We pass
-// sort_type=ByCreateTimeDesc so the newest messages come first and a
-// small page_size captures "the last N" without paginating, keeping the
-// inbound ACK path's fan-out to a single round-trip. user_id_type=open_id
-// matches the identifiers the rest of the package keys on; body.content
-// is forwarded verbatim for the enricher's flattener to interpret.
+// ListChatMessages retrieves a bounded, recent window of messages via
+// GET /open-apis/im/v1/messages. Where GetMessage fetches a single message
+// by id, this lists a conversation; it backs the enricher's group-context
+// prefetch. The container is chat (container_id_type=chat) by default, or a
+// single Lark topic (container_id_type=thread) when p.ThreadID is set — the
+// thread container keeps a topic @-mention from seeing sibling topics that
+// share the chat_id (#5835). We pass sort_type=ByCreateTimeDesc so the
+// newest messages come first and a small page_size captures "the last N"
+// without paginating, keeping the inbound ACK path's fan-out to a single
+// round-trip. user_id_type=open_id matches the identifiers the rest of the
+// package keys on; body.content is forwarded verbatim for the enricher's
+// flattener to interpret.
 func (c *httpAPIClient) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
 	if p.ChatID == "" {
 		return nil, errors.New("lark http client: missing chat_id")
@@ -620,14 +623,24 @@ func (c *httpAPIClient) ListChatMessages(ctx context.Context, creds Installation
 		return nil, err
 	}
 	q := url.Values{}
-	q.Set("container_id_type", "chat")
-	q.Set("container_id", string(p.ChatID))
+	if p.ThreadID != "" {
+		// Topic-scoped window: only this 话题's messages, so a @-mention
+		// inside a topic never pulls sibling topics that share the chat_id
+		// (#5835). The thread container rejects end_time, so it is omitted
+		// here; the caller anchors the window to the trigger time
+		// client-side instead.
+		q.Set("container_id_type", "thread")
+		q.Set("container_id", p.ThreadID)
+	} else {
+		q.Set("container_id_type", "chat")
+		q.Set("container_id", string(p.ChatID))
+		if p.EndTime > 0 {
+			q.Set("end_time", strconv.FormatInt(p.EndTime, 10))
+		}
+	}
 	q.Set("sort_type", "ByCreateTimeDesc")
 	q.Set("page_size", strconv.Itoa(size))
 	q.Set("user_id_type", "open_id")
-	if p.EndTime > 0 {
-		q.Set("end_time", strconv.FormatInt(p.EndTime, 10))
-	}
 	path := "/open-apis/im/v1/messages?" + q.Encode()
 
 	var resp struct {
@@ -790,6 +803,7 @@ type larkRESTMessageItem struct {
 	MessageID      string `json:"message_id"`
 	RootID         string `json:"root_id"`
 	ParentID       string `json:"parent_id"`
+	ThreadID       string `json:"thread_id"`
 	UpperMessageID string `json:"upper_message_id"`
 	MsgType        string `json:"msg_type"`
 	CreateTime     string `json:"create_time"`
@@ -819,6 +833,7 @@ func (it larkRESTMessageItem) normalize() LarkMessage {
 		CreateTime:     it.CreateTime,
 		ParentID:       it.ParentID,
 		RootID:         it.RootID,
+		ThreadID:       it.ThreadID,
 		UpperMessageID: it.UpperMessageID,
 		Deleted:        it.Deleted,
 	}
