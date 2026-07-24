@@ -144,6 +144,27 @@ export function traceEventSummary(event: TraceEvent): string {
   }
 }
 
+/**
+ * Full, untruncated text for "copy all" — the complete body, not the one-line
+ * summary. Tool calls copy their full input JSON; results and prose copy their
+ * whole content. Callers apply secret redaction on the result.
+ */
+export function traceEventCopyText(event: TraceEvent): string {
+  const label = traceEventLabel(event);
+  let body: string;
+  switch (traceEventKind(event)) {
+    case "tool_use":
+      body = event.input ? JSON.stringify(event.input, null, 2) : "";
+      break;
+    case "tool_result":
+      body = event.output ?? "";
+      break;
+    default:
+      body = event.content ?? "";
+  }
+  return body ? `[${label}] ${body}` : `[${label}]`;
+}
+
 export function traceEventHasDetail(event: TraceEvent): boolean {
   switch (traceEventKind(event)) {
     case "tool_use":

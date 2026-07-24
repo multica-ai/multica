@@ -50,6 +50,7 @@ import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
 import {
+  traceEventCopyText,
   traceEventDefaultExpanded,
   traceEventHasDetail,
   traceEventKind,
@@ -365,13 +366,11 @@ export function AgentTranscriptDialog({
   }, [task.relative_work_dir]);
 
   const handleCopyAll = useCallback(() => {
+    // Copy the full body of each event (not the truncated row summary), with
+    // the same secret redaction the detail view applies.
     const text = displayItems
-      .map((item) => {
-        const label = traceEventLabel(item);
-        const summary = traceEventSummary(item);
-        return `[${label}] ${summary}`;
-      })
-      .join("\n");
+      .map((item) => redactSecrets(traceEventCopyText(item)))
+      .join("\n\n");
     void copyText(text).then((ok) => {
       if (!ok) return;
       setCopied(true);

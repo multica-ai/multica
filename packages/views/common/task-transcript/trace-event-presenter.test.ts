@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   stripShellWrapper,
+  traceEventCopyText,
   traceEventDefaultExpanded,
   traceEventHasDetail,
   traceEventKind,
@@ -70,6 +71,25 @@ describe("traceEventSummary", () => {
 
   it("retains unknown events instead of dropping them", () => {
     expect(traceEventSummary({ type: "custom", content: "payload" })).toBe("payload");
+  });
+});
+
+describe("traceEventCopyText", () => {
+  it("copies the full untruncated body, not the one-line summary", () => {
+    const longOutput = "line 1\n".repeat(60);
+    expect(traceEventCopyText({ type: "tool_result", tool: "Bash", output: longOutput })).toBe(
+      `[Bash] ${longOutput}`,
+    );
+    expect(
+      traceEventCopyText({ type: "tool_use", tool: "Bash", input: { command: "ls" } }),
+    ).toBe('[Bash] {\n  "command": "ls"\n}');
+    expect(traceEventCopyText({ type: "text", content: "full\nagent\nreply" })).toBe(
+      "[Agent] full\nagent\nreply",
+    );
+  });
+
+  it("emits a bare label when the event has no body", () => {
+    expect(traceEventCopyText({ type: "tool_use", tool: "Bash" })).toBe("[Bash]");
   });
 });
 
