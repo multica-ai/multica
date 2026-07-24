@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/sync/singleflight"
 )
 
 const (
@@ -67,6 +68,10 @@ type Client struct {
 
 	mu     sync.Mutex
 	tokens map[int64]cachedToken
+	// sf collapses concurrent token mints for the same installation into a
+	// single HTTP call, so the N workers of one installation don't each mint a
+	// token on a cold cache or a simultaneous renew.
+	sf singleflight.Group
 }
 
 type cachedToken struct {
@@ -122,17 +127,40 @@ func (c *Client) signAppJWT(now time.Time) (string, error) {
 
 // installationToken returns a cached installation access token, minting a new
 // one via POST /app/installations/{id}/access_tokens when the cache is empty or
-// within the renew skew of expiry.
+// within the renew skew of expiry. Concurrent callers for the same installation
+// are collapsed by singleflight, so a cold cache under N workers mints once.
 func (c *Client) installationToken(ctx context.Context, installationID int64) (string, error) {
-	now := c.now()
-	c.mu.Lock()
-	if t, ok := c.tokens[installationID]; ok && now.Add(tokenRenewSkew).Before(t.expiry) {
-		tok := t.token
-		c.mu.Unlock()
+	if tok, ok := c.cachedToken(installationID); ok {
 		return tok, nil
 	}
-	c.mu.Unlock()
+	v, err, _ := c.sf.Do(strconv.FormatInt(installationID, 10), func() (any, error) {
+		// A concurrent caller may have minted while we waited for the flight.
+		if tok, ok := c.cachedToken(installationID); ok {
+			return tok, nil
+		}
+		return c.mintInstallationToken(ctx, installationID)
+	})
+	if err != nil {
+		return "", err
+	}
+	return v.(string), nil
+}
 
+// cachedToken returns a cached token that is still outside the renew skew.
+func (c *Client) cachedToken(installationID int64) (string, bool) {
+	now := c.now()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if t, ok := c.tokens[installationID]; ok && now.Add(tokenRenewSkew).Before(t.expiry) {
+		return t.token, true
+	}
+	return "", false
+}
+
+// mintInstallationToken exchanges the App JWT for a fresh installation token and
+// caches it. Called under singleflight, so only one runs per installation.
+func (c *Client) mintInstallationToken(ctx context.Context, installationID int64) (string, error) {
+	now := c.now()
 	appJWT, err := c.signAppJWT(now)
 	if err != nil {
 		return "", err

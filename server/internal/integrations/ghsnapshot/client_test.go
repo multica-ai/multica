@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -60,6 +61,54 @@ func TestInstallationTokenCaches(t *testing.T) {
 	}
 	if got := atomic.LoadInt32(&mints); got != 1 {
 		t.Fatalf("minted %d times, want 1 (cache miss)", got)
+	}
+}
+
+// TestInstallationTokenSingleflight proves concurrent callers for the same
+// installation on a cold cache collapse into a single mint (Elon review nit):
+// the N workers of one installation must not each hit the token endpoint.
+func TestInstallationTokenSingleflight(t *testing.T) {
+	var mints int32
+	release := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/access_tokens") {
+			atomic.AddInt32(&mints, 1)
+			// Hold the first mint open so concurrent callers pile into the
+			// in-flight singleflight rather than serializing behind the cache.
+			<-release
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"token":"ghs_secret","expires_at":"` +
+				time.Now().Add(time.Hour).UTC().Format(time.RFC3339) + `"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+
+	c := newTestClient(t, srv.URL)
+	const n = 16
+	var wg sync.WaitGroup
+	toks := make([]string, n)
+	errs := make([]error, n)
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			toks[i], errs[i] = c.installationToken(context.Background(), 42)
+		}(i)
+	}
+	// Give every goroutine time to enter singleflight, then release the one mint.
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+	wg.Wait()
+
+	if got := atomic.LoadInt32(&mints); got != 1 {
+		t.Fatalf("minted %d times under %d concurrent callers, want 1", got, n)
+	}
+	for i := 0; i < n; i++ {
+		if errs[i] != nil || toks[i] != "ghs_secret" {
+			t.Fatalf("caller %d: token=%q err=%v", i, toks[i], errs[i])
+		}
 	}
 }
 

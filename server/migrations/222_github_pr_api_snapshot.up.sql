@@ -33,9 +33,13 @@ ALTER TABLE github_pull_request
 -- Per-check snapshot rows for a PR's current head. Replaced atomically (delete
 -- all + insert) on every successful API fetch — no incremental inference. Both
 -- GraphQL CheckRun and StatusContext contexts are normalized into this shape at
--- write time (see ghsnapshot.normalizeContext). Keyed by (pr_id, ordinal)
--- because two checks can share a name (matrix jobs, re-runs), so name is not
--- unique.
+-- write time (see ghsnapshot.normalizeContext). Rows are addressed by
+-- (pr_id, ordinal): two checks can share a name (matrix jobs, re-runs), so name
+-- is not unique. The (pr_id, ordinal) UNIQUE index is created CONCURRENTLY in
+-- the next migration (223) — no index (including a PRIMARY KEY's) may be built
+-- non-concurrently in a migration, even on a new table (see CLAUDE.md), so the
+-- table is created without a primary key and the unique index is added in its
+-- own single-statement migration.
 CREATE TABLE github_pull_request_check_run (
     pr_id             UUID    NOT NULL,
     head_sha          TEXT    NOT NULL,
@@ -50,6 +54,5 @@ CREATE TABLE github_pull_request_check_run (
     details_url       TEXT,
     -- TRUE for legacy commit-status contexts (GraphQL StatusContext), FALSE for
     -- Checks API runs (GraphQL CheckRun). Kept for display / debugging.
-    is_status_context BOOLEAN NOT NULL DEFAULT FALSE,
-    PRIMARY KEY (pr_id, ordinal)
+    is_status_context BOOLEAN NOT NULL DEFAULT FALSE
 );
