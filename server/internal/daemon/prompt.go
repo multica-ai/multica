@@ -37,6 +37,7 @@ func BuildPrompt(task Task, provider string) string {
 		b.WriteString("You were handed this issue with a handoff note. Treat it as the assigner's scoping instruction for this run; follow it before doing anything broader, and do not reply to it as if it were a comment:\n\n")
 		fmt.Fprintf(&b, "> %s\n\n", task.HandoffNote)
 	}
+	writeSelectedSkillsBlock(&b, task)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then complete it.\n", task.IssueID)
 	fmt.Fprintf(&b, "For comment history, follow the rule in your runtime workflow file (assignment-triggered tasks treat the read as mandatory). Start with `multica issue comment list %s --recent 10 --output json` to read the 10 most recently active threads, then page older threads via the stderr `Next thread cursor: ...` line and the matching `--before` / `--before-id` until you have enough history. Resolved threads come back folded — `--full` to expand. `--since <RFC3339>` is still available for incremental polling and may combine with `--recent`.\n", task.IssueID)
 	return b.String()
@@ -212,6 +213,7 @@ func buildCommentPrompt(task Task, provider string) string {
 			fmt.Fprintf(&b, "⚠️ **Squad leader no_action rule:** If you decide no action is needed, call `multica squad activity %s no_action --reason \"...\"` and EXIT. DO NOT post any comment — not even one that says \"no action needed\" or \"exiting silently\". The squad activity call records your decision; a comment is redundant noise.\n\n", task.IssueID)
 		}
 	}
+	writeSelectedSkillsBlock(&b, task)
 	fmt.Fprintf(&b, "Start by running `multica issue get %s --output json` to understand your task, then decide how to proceed.\n\n", task.IssueID)
 	// Comment-reading pointer. Warm path with new comments: issue-wide
 	// since-delta count, but steer the agent to read the triggering thread
@@ -353,37 +355,7 @@ func buildChatPrompt(task Task) string {
 		}
 		b.WriteString("\n")
 	}
-	if task.Agent != nil && len(task.Agent.Skills) > 0 {
-		refs := ExtractSlashSkills(task.ChatMessage)
-		if len(refs) > 0 {
-			agentSkills := make(map[string]string, len(task.Agent.Skills))
-			for _, s := range task.Agent.Skills {
-				agentSkills[s.ID] = s.Name
-			}
-
-			selected := make([]string, 0, len(refs))
-			seen := make(map[string]struct{}, len(refs))
-			for _, ref := range refs {
-				name, ok := agentSkills[ref.ID]
-				if !ok {
-					continue
-				}
-				if _, ok := seen[ref.ID]; ok {
-					continue
-				}
-				seen[ref.ID] = struct{}{}
-				selected = append(selected, name)
-			}
-
-			if len(selected) > 0 {
-				b.WriteString("Explicitly selected skills:\n")
-				for _, name := range selected {
-					fmt.Fprintf(&b, "- %s\n", name)
-				}
-				b.WriteString("\n")
-			}
-		}
-	}
+	writeSelectedSkillsBlock(&b, task)
 	fmt.Fprintf(&b, "User message:\n%s\n", task.ChatMessage)
 	// List attachments by id + filename so the agent can fetch them via
 	// the CLI. We deliberately do NOT inline the URL: chat attachments
@@ -416,6 +388,17 @@ func buildChatPrompt(task Task) string {
 		fmt.Fprintf(&b, "\nThis reply is delivered to %s as text. You cannot attach a file to it: `multica attachment upload` binds to a Multica chat reply, which this is not. If you produce a file, describe it in words — never write its local path as a link, and never upload it and then write as though it arrived.\n", channelDisplayName(task.ChatChannelType))
 	}
 	return b.String()
+}
+
+func writeSelectedSkillsBlock(b *strings.Builder, task Task) {
+	if len(task.SelectedSkills) == 0 {
+		return
+	}
+	b.WriteString("Explicitly selected skills:\n")
+	for _, skill := range task.SelectedSkills {
+		fmt.Fprintf(b, "- %s\n", skill.Name)
+	}
+	b.WriteString("\n")
 }
 
 // channelDisplayName renders a chat_channel_type for prompt copy. The mapping

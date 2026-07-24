@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/taskskill"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1579,6 +1580,26 @@ type claimBuildFailure struct {
 	message string
 }
 
+func resolveSelectedSkillsForTask(input string, skills []service.AgentSkillData) ([]taskskill.SelectedSkill, string) {
+	selected, err := taskskill.Resolve(input, availableTaskSkills(skills))
+	if err != nil {
+		return nil, err.Error()
+	}
+	return selected, ""
+}
+
+func availableTaskSkills(skills []service.AgentSkillData) []taskskill.AvailableSkill {
+	out := make([]taskskill.AvailableSkill, 0, len(skills))
+	for _, skill := range skills {
+		out = append(out, taskskill.AvailableSkill{
+			ID:      skill.ID,
+			Name:    skill.Name,
+			Content: skill.Content,
+		})
+	}
+	return out
+}
+
 // buildClaimedTaskResponse assembles the full daemon claim payload for a
 // single already-claimed task and computes the exact comment ids embedded in
 // it (deliveredCommentIDs). Shared by the per-runtime handler
@@ -1599,6 +1620,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if composioMCPEnabled {
 		resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(task.RuntimeConnectedApps, task.ID)
 	}
+	var materializedSkills []service.AgentSkillData
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 		var customEnv map[string]string
@@ -1652,7 +1674,8 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 		}
 		if useSkillRefs {
-			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+			bundles, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+			materializedSkills = bundles
 			agentSkillCount = len(skillRefs)
 			resp.Agent.SkillRefs = skillRefs
 		} else {
@@ -1661,6 +1684,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			builtinSkills := h.TaskService.BuiltinSkills()
 			builtinSkillCount = len(builtinSkills)
 			skills = append(skills, builtinSkills...)
+			materializedSkills = skills
 			resp.Agent.Skills = skills
 		}
 	}
@@ -1711,6 +1735,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
+			if len(resp.SelectedSkills) == 0 && resp.SkillSelectionError == "" {
+				resp.SelectedSkills, resp.SkillSelectionError = resolveSelectedSkillsForTask(issue.Description.String, materializedSkills)
+			}
 
 			// Squad-leader briefing injection: keyed off the task being a
 			// leader-task (is_leader_task) carrying a squad_id — NOT off the
@@ -1961,6 +1988,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				}
 			}
 		}
+		if resp.TriggerCommentContent != "" {
+			resp.SelectedSkills, resp.SkillSelectionError = resolveSelectedSkillsForTask(resp.TriggerCommentContent, materializedSkills)
+		}
 
 		if !supportsCoalescedComments {
 			// Legacy daemons ignore the structured coalesced fields. Fold every
@@ -2174,6 +2204,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				}
 			}
 			resp.ChatMessage = strings.Join(parts, "\n\n")
+			resp.SelectedSkills, resp.SkillSelectionError = resolveSelectedSkillsForTask(resp.ChatMessage, materializedSkills)
 
 			// Fail closed: a task-owned direct task that resolves to no user text
 			// (and is not the agent's proactive intro) must never dispatch an

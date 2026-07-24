@@ -4437,6 +4437,26 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	prompt := BuildPrompt(task, provider)
+	if task.SkillSelectionError != "" {
+		return TaskResult{
+			Status:        "blocked",
+			Comment:       "Skill selection error: " + task.SkillSelectionError,
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			FailureReason: taskfailure.ReasonAgentUnknown.String(),
+		}, nil
+	}
+	var nativeActivation bool
+	prompt, nativeActivation, err = applyNativeSkillActivation(prompt, provider, task.SelectedSkills)
+	if err != nil {
+		return TaskResult{
+			Status:        "blocked",
+			Comment:       err.Error(),
+			WorkDir:       env.WorkDir,
+			EnvRoot:       env.RootDir,
+			FailureReason: taskfailure.ReasonAgentUnknown.String(),
+		}, nil
+	}
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -4721,6 +4741,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"provider", provider,
 		"model", model,
 		"prompt_bytes", len(prompt),
+		"native_skill_activation", nativeActivation,
 		"custom_args", len(customArgs),
 		"extra_args", len(extraArgs),
 		"mcp_config", len(mcpConfig) > 0,
