@@ -146,6 +146,198 @@ func (s *AutopilotService) DispatchAutopilotManual(
 	return s.dispatchAutopilot(ctx, autopilot, triggerID, "manual", payload, pgtype.Timestamptz{}, pgtype.UUID{}, actorUserID)
 }
 
+// DispatchPlan is the projected outcome of triggering an autopilot, computed
+// without any persistent side effect (WS-749: dry-run / test-trigger mode). It
+// answers "what would happen if I triggered this now": which agent/leader
+// would run, whether it is ready, whether the admission gate would skip it
+// (and why), and - for create_issue - the rendered issue title/description,
+// or - for run_only - the task prompt.
+//
+// PlanDispatch produces this. A real dispatch resolves the same leader, runs
+// the same admission gate, and renders the same title/description/prompt, so a
+// dry run is a faithful preview of a real run - without creating an
+// autopilot_run, issue, or task.
+type DispatchPlan struct {
+	AutopilotID   string `json:"autopilot_id"`
+	ExecutionMode string `json:"execution_mode"`
+	AssigneeType  string `json:"assignee_type"`
+	// Source is the dispatch source this plan previewed (manual / webhook /
+	// schedule). Mirrors autopilot_run.source.
+	Source string `json:"source"`
+	// DryRun is always true on a DispatchPlan; it lets a caller that round-trips
+	// the JSON distinguish a plan from a real run response of the same shape.
+	DryRun bool `json:"dry_run"`
+	// Skipped reports whether the admission gate would reject the dispatch
+	// (assignee gone, archived, runtime offline for run_only, or invocation not
+	// allowed). When true the dispatch would record a `skipped` run and create
+	// no issue/task; Reason/ReasonCode explain why. create_issue with a merely
+	// offline runtime is NOT skipped (the audit-trail exception), though Ready
+	// still reports false.
+	Skipped    bool                 `json:"skipped"`
+	Reason     string               `json:"reason,omitempty"`
+	ReasonCode dispatch.ReasonCode  `json:"reason_code,omitempty"`
+	Leader     *DispatchPlanAgent   `json:"leader,omitempty"`
+	Ready      bool                 `json:"ready"`
+	ReadinessReason string         `json:"readiness_reason,omitempty"`
+	// IssueTitle is the rendered title for create_issue mode (issue-title
+	// template interpolated against the would-be run time). Empty for run_only.
+	IssueTitle string `json:"issue_title,omitempty"`
+	// IssueDescription is the rendered description for create_issue mode
+	// (autopilot description + the autopilot run system note, plus the webhook
+	// payload block when source=webhook). Empty for run_only.
+	IssueDescription string `json:"issue_description,omitempty"`
+	// TaskPrompt is the prompt that would be sent to the agent in run_only
+	// mode - the autopilot's description, which the CLI surfaces as the task
+	// prompt. Empty for create_issue.
+	TaskPrompt string `json:"task_prompt,omitempty"`
+	Trigger    DispatchPlanTrigger `json:"trigger"`
+}
+
+// DispatchPlanAgent is the resolved executing agent a dispatch would run as:
+// the assignee for assignee_type=agent, or the squad leader for
+// assignee_type=squad. Nil on the plan when the leader could not be resolved.
+type DispatchPlanAgent struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	// RuntimeID is the bound runtime (empty when the agent has no runtime).
+	RuntimeID string `json:"runtime_id,omitempty"`
+	// Archived reports whether the agent is archived_at.
+	Archived bool `json:"archived"`
+	// SquadResolved is true when the leader was resolved through a squad
+	// (assignee_type=squad) rather than being the direct assignee.
+	SquadResolved bool `json:"squad_resolved"`
+}
+
+// DispatchPlanTrigger summarizes the trigger source and payload this plan
+// previewed. Payload is the raw webhook payload bytes (omitted when nil/empty),
+// mirrored from the would-be autopilot_run.trigger_payload.
+type DispatchPlanTrigger struct {
+	Source  string          `json:"source"`
+	Payload json.RawMessage `json:"payload,omitempty"`
+}
+
+// PlanDispatch projects what a real dispatch of autopilot would do, without
+// persisting any state. It is the shared core of the dry-run / test-trigger mode
+// (WS-749): the CLI `multica autopilot trigger <id> --dry-run` flag and
+// `POST /api/autopilots/{id}/trigger?dry_run=true` both return this plan.
+//
+// It performs NO writes - no autopilot_run, no issue, no task - and is safe to
+// call for previewing a configuration. It runs the same admission gate
+// (shouldSkipDispatch), resolves the same leader (resolveAutopilotLeader),
+// checks the same runtime readiness (AgentReadiness), and renders the same
+// issue title/description (create_issue) or task prompt (run_only) that a real
+// dispatch would, so the preview matches reality.
+//
+// actorUserID carries the triggering member for a manual preview so the
+// invocation gate runs against the clicker's access (same as a real manual
+// trigger); pass an invalid UUID to preview the automation path (schedule /
+// webhook), which gates against the autopilot creator.
+func (s *AutopilotService) PlanDispatch(
+	ctx context.Context,
+	autopilot db.Autopilot,
+	triggerID pgtype.UUID,
+	source string,
+	payload []byte,
+	actorUserID pgtype.UUID,
+) (*DispatchPlan, error) {
+	plan := &DispatchPlan{
+		AutopilotID:   util.UUIDToString(autopilot.ID),
+		ExecutionMode: autopilot.ExecutionMode,
+		AssigneeType:  autopilot.AssigneeType,
+		Source:        source,
+		DryRun:        true,
+		Trigger: DispatchPlanTrigger{
+			Source:  source,
+			Payload: payloadJSON(payload),
+		},
+	}
+
+	// Admission gate: the same pre-flight check a real dispatch runs. For a
+	// manual preview actorUserID is the clicker; for an automation preview it
+	// is invalid and the gate falls back to the autopilot creator.
+	reason, code, skip := s.shouldSkipDispatch(ctx, autopilot, actorUserID)
+	plan.Skipped = skip
+	plan.Reason = reason
+	plan.ReasonCode = code
+
+	// Resolve the leader and check readiness regardless of skip outcome, so the
+	// plan names who/what is blocking even when the gate rejects the dispatch.
+	leader, squadResolved, err := s.resolveAutopilotLeader(ctx, autopilot)
+	if err == nil {
+		plan.Leader = dispatchPlanAgent(leader, squadResolved)
+		ready, readyReason, readyErr := AgentReadiness(ctx, s.Queries, leader)
+		if readyErr != nil {
+			// Transient runtime lookup error. shouldSkipDispatch fails open
+			// for this case (does not skip), so mirror that: report readiness
+			// as unknown rather than fabricating a "not ready" verdict.
+			plan.Ready = false
+			plan.ReadinessReason = "failed to load runtime"
+		} else {
+			plan.Ready = ready
+			plan.ReadinessReason = readyReason
+		}
+	}
+	// else: leader resolution failed; shouldSkipDispatch already set the skip
+	// reason/code and Leader stays nil.
+
+	// Render the projected output only when the dispatch would actually
+	// proceed (create_issue's offline-runtime audit-trail exception is NOT
+	// skipped, so it still renders).
+	if !skip {
+		s.renderDispatchPlanOutput(ctx, autopilot, triggerID, source, payload, plan)
+	}
+	return plan, nil
+}
+
+// renderDispatchPlanOutput fills in the mode-specific preview fields: the
+// rendered issue title/description for create_issue, or the task prompt for
+// run_only. Rendering uses a synthetic autopilot_run anchored at "now" so the
+// {{date}} template and the "triggered at" timestamp reflect what a real run
+// would produce - the real dispatch path renders from a just-inserted run row
+// whose TriggeredAt is the same effective "now".
+func (s *AutopilotService) renderDispatchPlanOutput(ctx context.Context, ap db.Autopilot, triggerID pgtype.UUID, source string, payload []byte, plan *DispatchPlan) {
+	now := pgtype.Timestamptz{Time: time.Now().UTC(), Valid: true}
+	synthRun := db.AutopilotRun{
+		AutopilotID:    ap.ID,
+		Source:         source,
+		TriggerPayload: payload,
+		TriggeredAt:    now,
+		CreatedAt:      now,
+	}
+	triggerTimezone := s.resolveAutopilotTriggerTimezone(ctx, triggerID)
+	switch ap.ExecutionMode {
+	case "create_issue":
+		plan.IssueTitle = s.interpolateTemplate(ap, synthRun, triggerTimezone)
+		plan.IssueDescription = s.buildIssueDescription(ap, synthRun, triggerTimezone).String
+	case "run_only":
+		// The autopilot description IS the task prompt (CLI --description is
+		// documented as "used as task prompt"). The enqueued task row's
+		// TriggerSummary is the truncated autopilot title; we surface the full
+		// description here as the prompt the agent would receive.
+		plan.TaskPrompt = ap.Description.String
+	}
+}
+
+// dispatchPlanAgent maps a resolved agent row to its plan representation.
+func dispatchPlanAgent(agent db.Agent, squadResolved bool) *DispatchPlanAgent {
+	return &DispatchPlanAgent{
+		ID:            util.UUIDToString(agent.ID),
+		Name:          agent.Name,
+		RuntimeID:     util.UUIDToString(agent.RuntimeID),
+		Archived:      agent.ArchivedAt.Valid,
+		SquadResolved: squadResolved,
+	}
+}
+
+// payloadJSON returns payload as json.RawMessage for direct JSON marshaling,
+// or nil when the payload is empty so the field omits from the response.
+func payloadJSON(payload []byte) json.RawMessage {
+	if len(payload) == 0 {
+		return nil
+	}
+	return json.RawMessage(payload)
+}
+
 // AdmitAutopilotWebhookDelivery creates or reuses the idempotent run for a
 // durable webhook delivery without executing its downstream issue/task side
 // effect. The HTTP ingress calls this synchronously so the public webhook

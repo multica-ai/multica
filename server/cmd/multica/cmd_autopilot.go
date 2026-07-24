@@ -144,6 +144,7 @@ func init() {
 	// (no flags)
 
 	// trigger (manual run)
+	autopilotTriggerCmd.Flags().Bool("dry-run", false, "Preview the dispatch plan without persisting any state (no run/issue/task rows)")
 	autopilotTriggerCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// runs
@@ -467,16 +468,45 @@ func runAutopilotTrigger(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("resolve autopilot: %w", err)
 	}
 
-	var run map[string]any
-	if err := client.PostJSON(ctx, "/api/autopilots/"+autopilotRef.ID+"/trigger", nil, &run); err != nil {
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	path := "/api/autopilots/" + autopilotRef.ID + "/trigger"
+	if dryRun {
+		path += "?dry_run=true"
+	}
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, path, nil, &result); err != nil {
 		return fmt.Errorf("trigger autopilot: %w", err)
 	}
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
-		return cli.PrintJSON(os.Stdout, run)
+		return cli.PrintJSON(os.Stdout, result)
 	}
-	fmt.Printf("Autopilot triggered: run %s (status: %s)\n", strVal(run, "id"), strVal(run, "status"))
+
+	if dryRun {
+		// Render the dispatch plan in a way that lets the user decide
+		// whether the autopilot would actually dispatch.
+		skipped, _ := result["skipped"].(bool)
+		ready, _ := result["ready"].(bool)
+		if skipped {
+			fmt.Printf("DRY RUN — would be SKIPPED: %s (%s)\n", strVal(result, "reason"), strVal(result, "reason_code"))
+		} else if !ready {
+			fmt.Printf("DRY RUN — agent NOT READY: %s\n", strVal(result, "readiness_reason"))
+		} else {
+			if t, ok := result["task_prompt"].(string); ok && t != "" {
+				fmt.Printf("DRY RUN — would run_only; prompt: %s\n", t)
+			} else {
+				fmt.Printf("DRY RUN — would create_issue: %s\n", strVal(result, "issue_title"))
+			}
+		}
+		if leader, ok := result["leader"].(map[string]any); ok {
+			fmt.Printf("Leader: %s (id=%s, runtime=%s, squad_resolved=%v)\n",
+				strVal(leader, "name"), strVal(leader, "id"), strVal(leader, "runtime_id"), strVal(leader, "squad_resolved"))
+		}
+		return nil
+	}
+	fmt.Printf("Autopilot triggered: run %s (status: %s)\n", strVal(result, "id"), strVal(result, "status"))
 	return nil
 }
 
