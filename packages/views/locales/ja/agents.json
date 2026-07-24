@@ -647,7 +647,6 @@
     "status_failed": "失敗",
     "filter": "フィルター",
     "clear_filters": "フィルターをクリア",
-    "tool_calls_other": "ツール呼び出し {{count}} 回",
     "events_other": "イベント {{count}} 件",
     "events_filtered": "イベント {{total}} 件中 {{shown}} 件",
     "copy_all": "すべてコピー",

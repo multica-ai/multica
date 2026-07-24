@@ -655,7 +655,6 @@
     "status_failed": "실패함",
     "filter": "필터",
     "clear_filters": "필터 지우기",
-    "tool_calls_other": "도구 호출 {{count}}회",
     "events_other": "이벤트 {{count}}개",
     "events_filtered": "이벤트 {{total}}개 중 {{shown}}개",
     "copy_all": "전체 복사",

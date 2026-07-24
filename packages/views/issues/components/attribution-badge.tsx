@@ -39,8 +39,10 @@ function initialsOf(name: string): string {
  *    source in a hover tooltip. Compact enough for a dense task row. Renders
  *    nothing when there's no accountable member — an avatar-only surface has
  *    nothing meaningful to show for an unattributed run.
- *  - `variant="inline"`: avatar + borderless "on behalf of <name>" text for a
- *    sentence-like identity row (transcript header). Same silence rule.
+ *  - `variant="inline"`: the bare member name (borderless, avatar optional via
+ *    `hideAvatar`) with the source in a tooltip — for a sentence-like identity
+ *    row (transcript header) where the caller supplies the label. Same silence
+ *    rule.
  *
  * Renders nothing when the task has no attribution at all (older backends) —
  * the caller should optional-chain `task.attribution`.

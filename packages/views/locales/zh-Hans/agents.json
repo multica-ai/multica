@@ -751,7 +751,6 @@
     "status_failed": "失败",
     "filter": "筛选",
     "clear_filters": "清除筛选",
-    "tool_calls_other": "{{count}} 次工具调用",
     "events_other": "{{count}} 个事件",
     "events_filtered": "{{shown}} / {{total}} 个事件",
     "copy_all": "全部复制",
