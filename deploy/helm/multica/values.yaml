@@ -124,6 +124,11 @@ backend:
     # every caller. Bootstrap the workspace with this false, then flip to
     # true so users can only join via invitation.
     disableWorkspaceCreation: false
+    # Self-host-only VCS integration (Forgejo / Gitea / GitLab). The official
+    # chart enables the product surface by default; operators must also provide
+    # MULTICA_VCS_SECRET_KEY through existingSecret before connections work.
+    # Set false to hide and reject the integration for this deployment.
+    vcsIntegrationEnabled: true
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
     s3Bucket: ""
