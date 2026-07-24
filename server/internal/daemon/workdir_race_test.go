@@ -489,8 +489,11 @@ func TestHandleTask_KeepsEnvRootActiveAcrossCompletion(t *testing.T) {
 	// isActiveEnvRoot back to false before reportTaskResult fires.
 	d.runner = taskRunnerFunc(func(_ context.Context, tk Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
 		predicted := execenv.PredictRootDir(d.cfg.WorkspacesRoot, tk.WorkspaceID, tk.ID)
-		d.markActiveEnvRoot(predicted)
-		defer d.unmarkActiveEnvRoot(predicted)
+		releaseActive, ok := d.markActiveEnvRoot(context.Background(), predicted)
+		if !ok {
+			t.Fatal("failed to mark active env root")
+		}
+		defer releaseActive()
 		return TaskResult{
 			Status:  "completed",
 			EnvRoot: predicted,
