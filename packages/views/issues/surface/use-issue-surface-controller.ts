@@ -31,6 +31,11 @@ import {
 import type { IssueScope } from "@multica/core/issues/surface/scope";
 import type { IssueDateFilter, SortField } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions } from "@multica/core/properties";
+import { issueStatusListOptions } from "@multica/core/issue-statuses";
+import {
+  resolveStatusFilterIds,
+  resolveStatusFilterTokens,
+} from "../utils/status-filter";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import type { IssueFilters } from "../utils/filter";
@@ -295,17 +300,41 @@ export function useIssueSurfaceController({
     effectiveViewMode === "swimlane";
   const usesServerFacets =
     usesTable || usesServerStatusSurface || usesServerGroupSurface;
+  // Selected statuses resolve to catalog ids (MUL-4809). A stored selection may
+  // still hold legacy tokens from an older build; resolveStatusFilterIds accepts
+  // both. When the catalog is unavailable (old server / unseeded workspace) the
+  // resolution is empty and the legacy `statuses` token facet is used instead.
+  // NOTE: the Table query spec below still filters on legacy tokens only — the
+  // catalog-keyed Table/board facet is the deferred follow-up (see PR #5505).
+  const { data: statusCatalog = [] } = useQuery(issueStatusListOptions(wsId));
+  const statusFilterIds = useMemo(
+    () => resolveStatusFilterIds(statusFilters, statusCatalog),
+    [statusFilters, statusCatalog],
+  );
+
   const serverStatuses = useMemo<IssueStatus[]>(
     () => {
+      // The selection holds catalog ids (for built-ins too), so it must be
+      // projected onto the legacy lanes before being matched against
+      // ALL_STATUSES — comparing raw ids matches nothing and the List /
+      // status-grouped Board fetch zero branches, rendering an empty surface
+      // for every status the user picks (MUL-4809). The branch queries still
+      // carry `status_ids`, so a custom status shows exactly its own rows
+      // inside its Category lane. An empty projection (catalog still loading)
+      // falls back to every lane rather than to nothing.
+      const selectedTokens = resolveStatusFilterTokens(
+        statusFilters,
+        statusCatalog,
+      );
       const visible =
-        statusFilters.length > 0
-          ? ALL_STATUSES.filter((status) => statusFilters.includes(status))
+        selectedTokens.length > 0
+          ? ALL_STATUSES.filter((status) => selectedTokens.includes(status))
           : [...ALL_STATUSES];
       return effectiveViewMode === "list"
         ? visible.filter((status) => !listCollapsedStatuses.includes(status))
         : visible;
     },
-    [effectiveViewMode, listCollapsedStatuses, statusFilters],
+    [effectiveViewMode, listCollapsedStatuses, statusCatalog, statusFilters],
   );
 
   const projectFilterState = useMemo(
@@ -378,7 +407,15 @@ export function useIssueSurfaceController({
     return {
       scope: queryScope,
       filters: {
-        ...(statusFilters.length > 0 ? { statuses: statusFilters } : {}),
+        // Prefer the catalog facet: the picker stores catalog ids, which are not
+        // legacy tokens, so sending them as `statuses` would fail validation and
+        // 400 the whole Table. Fall back to legacy tokens only when the catalog
+        // is unavailable (old server / unseeded workspace) — MUL-4809.
+        ...(statusFilterIds.length > 0
+          ? { status_ids: statusFilterIds }
+          : statusFilters.length > 0
+            ? { statuses: statusFilters as IssueStatus[] }
+            : {}),
         ...(priorityFilters.length > 0 ? { priorities: priorityFilters } : {}),
         ...(assigneeFilters.length > 0 ? { assignees: assigneeFilters } : {}),
         ...(includeNoAssignee ? { include_no_assignee: true } : {}),
@@ -418,6 +455,7 @@ export function useIssueSurfaceController({
     sort.sort_by,
     sort.sort_direction,
     statusFilters,
+    statusFilterIds,
     viewIncludeNoProject,
     viewProjectFilters,
     workingIssueIDs,
@@ -580,6 +618,8 @@ export function useIssueSurfaceController({
     ganttShowCompleted,
     sort,
     statusFilters,
+    statusFilterIds,
+    statusCatalog,
     priorityFilters,
     assigneeFilters,
     includeNoAssignee,

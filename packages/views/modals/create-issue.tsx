@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useNavigation } from "../navigation";
+import { issueStatusListOptions } from "@multica/core/issue-statuses";
 import {
   AlertTriangle,
   ArrowDown,
@@ -241,6 +242,10 @@ export function ManualCreatePanel({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
   const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
+  // The catalog row the user picked, when they picked one. Deliberately not part
+  // of the persisted draft: a resumed draft falls back to its legacy token, which
+  // the server still resolves (MUL-4809).
+  const [statusId, setStatusId] = useState<string | undefined>(undefined);
   const [priority, setPriority] = useState<IssuePriority>(
     (data?.priority as IssuePriority | undefined) ?? draft.priority,
   );
@@ -306,6 +311,7 @@ export function ManualCreatePanel({
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
+  const { data: statusCatalog = [] } = useQuery(issueStatusListOptions(wsId));
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
     enabled: !!parentIssueId,
@@ -453,7 +459,9 @@ export function ManualCreatePanel({
       const issue = await createIssueMutation.mutateAsync({
         title: title.trim(),
         description,
-        status,
+        // status_id wins when the user picked a catalog row; `status` stays as the
+        // compat projection the server also accepts.
+        ...(statusId ? { status_id: statusId } : { status }),
         priority,
         assignee_type: assigneeType,
         assignee_id: assigneeId,
@@ -846,7 +854,29 @@ export function ManualCreatePanel({
               {showField.status && (
                 <StatusPicker
                   status={status}
-                  onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
+                  statusDetail={
+                    statusCatalog.find((s) => s.id === statusId)
+                      ? {
+                          id: statusId as string,
+                          name: statusCatalog.find((s) => s.id === statusId)!.name,
+                          category: statusCatalog.find((s) => s.id === statusId)!.category,
+                          icon: statusCatalog.find((s) => s.id === statusId)!.icon,
+                          color: statusCatalog.find((s) => s.id === statusId)!.color,
+                        }
+                      : null
+                  }
+                  onUpdate={(u) => {
+                    if (u.status_id) {
+                      const row = statusCatalog.find((s) => s.id === u.status_id);
+                      setStatusId(u.status_id);
+                      // Keep the legacy token in sync for the draft + the
+                      // backlog-specific create behaviour that keys off it.
+                      if (row) updateStatus((row.system_key ?? row.category) as IssueStatus);
+                    } else if (u.status) {
+                      setStatusId(undefined);
+                      updateStatus(u.status);
+                    }
+                  }}
                   triggerRender={<PillButton />}
                   align="start"
                   open={fieldPickerOpen === "status" ? true : undefined}

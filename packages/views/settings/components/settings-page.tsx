@@ -15,6 +15,7 @@ import {
   Tags,
   Keyboard,
   ListTodo,
+  CircleDashed,
 } from "lucide-react";
 import { GitHubMark } from "./github-mark";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
@@ -35,6 +36,7 @@ import { LabsTab } from "./labs-tab";
 import { NotificationsTab } from "./notifications-tab";
 import { LabelsTab } from "./labels-tab";
 import { PropertiesTab } from "./properties-tab";
+import { StatusesTab } from "./statuses-tab";
 import { KeyboardShortcutsTab } from "./keyboard-shortcuts-tab";
 import { useT } from "../../i18n";
 
@@ -58,6 +60,7 @@ const WORKSPACE_TAB_KEYS = [
   "members",
   "labels",
   "properties",
+  "statuses",
 ] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
@@ -68,6 +71,7 @@ const WORKSPACE_TAB_VALUES = {
   members: "members",
   labels: "labels",
   properties: "properties",
+  statuses: "statuses",
 } as const;
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
@@ -78,6 +82,7 @@ const WORKSPACE_TAB_ICONS = {
   members: Users,
   labels: Tags,
   properties: SlidersHorizontal,
+  statuses: CircleDashed,
 } as const;
 
 const DEFAULT_TAB = "profile";
@@ -207,7 +212,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
 
       {/* Right content */}
       <div className="min-w-0 flex-1 md:overflow-y-auto">
-        <div className={`mx-auto w-full p-4 sm:p-6 md:p-8 ${activeTab === "labels" || activeTab === "properties" ? "max-w-5xl" : "max-w-3xl"}`}>
+        <div className={`mx-auto w-full p-4 sm:p-6 md:p-8 ${activeTab === "labels" || activeTab === "properties" || activeTab === "statuses" ? "max-w-5xl" : "max-w-3xl"}`}>
           <TabsContent value="profile"><AccountTab /></TabsContent>
           <TabsContent value="preferences"><PreferencesTab /></TabsContent>
           <TabsContent value="shortcuts"><KeyboardShortcutsTab /></TabsContent>
@@ -223,6 +228,7 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
           <TabsContent value="members"><MembersTab /></TabsContent>
           <TabsContent value="labels"><LabelsTab /></TabsContent>
           <TabsContent value="properties"><PropertiesTab /></TabsContent>
+          <TabsContent value="statuses"><StatusesTab /></TabsContent>
           {extraAccountTabs?.map((tab) => (
             <TabsContent key={tab.value} value={tab.value}>{tab.content}</TabsContent>
           ))}

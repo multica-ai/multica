@@ -85,10 +85,15 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    stage
+    stage, status_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('stage')
+    sqlc.narg('stage'),
+    -- Phase 2 double-write (MUL-4809 §6.1). status_id is supplied explicitly by
+    -- the caller, which resolved it through issuestatus.ResolveForWrite and
+    -- derived the legacy `status` above from the SAME row. NULL while the
+    -- workspace catalog is unseeded, where status stays the source of truth.
+    sqlc.narg('status_id')
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -100,6 +105,12 @@ UPDATE issue SET
     title = COALESCE(sqlc.narg('title'), title),
     description = COALESCE(sqlc.narg('description'), description),
     status = COALESCE(sqlc.narg('status'), status),
+    -- Phase 2 double-write (MUL-4809 §6.1). status_id is supplied explicitly by
+    -- the caller, which resolved it through issuestatus.Resolve and derived the
+    -- compat `status` above from the SAME row — so the pair can never disagree.
+    -- Deriving it here from system_key (as this once did) could only ever reach
+    -- the 7 built-ins and made custom statuses unreachable.
+    status_id = COALESCE(sqlc.narg('status_id'), status_id),
     priority = COALESCE(sqlc.narg('priority'), priority),
     assignee_type = sqlc.narg('assignee_type'),
     assignee_id = sqlc.narg('assignee_id'),
@@ -110,15 +121,18 @@ UPDATE issue SET
     project_id = sqlc.narg('project_id'),
     stage = sqlc.narg('stage'),
     updated_at = now()
-WHERE id = $1
+WHERE issue.id = $1
 RETURNING *;
 
 -- name: UpdateIssueStatus :one
 -- Workspace_id in the WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
 UPDATE issue SET
     status = $2,
+    -- Phase 2 double-write (MUL-4809): mirror the legacy status into status_id
+    -- via its built-in system_key (scoped to the same workspace guard).
+    status_id = (SELECT issue_status.id FROM issue_status WHERE issue_status.workspace_id = $3 AND system_key = $2),
     updated_at = now()
-WHERE id = $1 AND workspace_id = $3
+WHERE issue.id = $1 AND issue.workspace_id = $3
 RETURNING *;
 
 -- name: CreateIssueWithOrigin :one
@@ -126,10 +140,12 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, stage
+    origin_type, origin_id, stage, status_id
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage')
+    sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'),
+    -- Phase 2 double-write (MUL-4809 §6.1): see CreateIssue.
+    sqlc.narg('status_id')
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec
@@ -198,6 +214,17 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 FROM issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
+  AND (sqlc.narg('status_id')::uuid IS NULL OR i.status_id = sqlc.narg('status_id'))
+  -- status_ids (MUL-4809): multi-select by catalog id — one board column per
+  -- status, and multi-select filter chips. OR within the field.
+  AND (sqlc.narg('status_ids')::uuid[] IS NULL OR i.status_id = ANY(sqlc.narg('status_ids')::uuid[]))
+  -- status_category (MUL-4809): match issues whose status_id resolves to the
+  -- given Category, scoped to the same workspace (no FK). Mirrors the EXISTS
+  -- predicate the dynamic ListIssues/ListGroupedIssues paths build.
+  AND (sqlc.narg('status_category')::text IS NULL OR EXISTS (
+        SELECT 1 FROM issue_status s
+         WHERE s.id = i.status_id AND s.workspace_id = i.workspace_id
+           AND s.category = sqlc.narg('status_category')::text))
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
@@ -299,6 +326,23 @@ WHERE i.workspace_id = $1
              AND a.owner_id     = sqlc.narg('involves_user_id')::uuid
     ))
   );
+
+-- name: StatusDetailsByIssues :many
+-- Resolve the custom-status catalog detail for a batch of issues (MUL-4809 read
+-- side). Join each issue to the issue_status it points at via the authoritative
+-- status_id, scoped to the same workspace (no FK). Issues whose status_id is NULL
+-- (workspace catalog not seeded) simply don't appear. Archived statuses are
+-- included so an issue already on one still renders its detail.
+SELECT i.id AS issue_id,
+       s.id AS status_id,
+       s.name,
+       s.category,
+       s.icon,
+       s.color
+FROM issue i
+JOIN issue_status s ON s.id = i.status_id AND s.workspace_id = i.workspace_id
+WHERE i.workspace_id = sqlc.arg('workspace_id')::uuid
+  AND i.id = ANY(sqlc.arg('issue_ids')::uuid[]);
 
 -- name: ListChildIssues :many
 -- Order by number ASC so sub-issues display in stable creation order

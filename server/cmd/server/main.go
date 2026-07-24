@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -409,6 +410,9 @@ func main() {
 	taskSvc.Analytics = analyticsClient
 	taskSvc.Metrics = businessMetrics
 	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
+	// The background task-terminal / issue listeners consult the two-phase rollout
+	// gate (MUL-4809 §4.1 P0-3); without this they would default to legacy mode.
+	autopilotSvc.FeatureFlags = flags
 	registerAutopilotListeners(bus, autopilotSvc)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
@@ -419,6 +423,28 @@ func main() {
 	if storeRedis != nil {
 		liveness = handler.NewRedisLivenessStore(storeRedis)
 	}
+
+	// One-shot boot reconcile: seed built-in issue statuses for workspaces
+	// created before the catalog shipped (MUL-4809). Advisory-locked so a
+	// single replica does the walk during a rolling deploy; new workspaces are
+	// seeded at creation time.
+	go func() {
+		n, err := issuestatus.Backfill(sweepCtx, pool)
+		if err != nil {
+			slog.Error("issue status backfill failed", "error", err)
+			return
+		}
+		slog.Info("issue status backfill complete", "workspaces", n)
+	}()
+
+	// Periodic reconcile for task-driven autopilot runs (MUL-4809 §4.1 P0-3). When the
+	// two-phase gate is flipped on, the event bus does not replay task events that
+	// fired while it was off, so this converges any create_issue run whose dispatched
+	// task already terminated. It runs on a bounded periodic cadence (not one-shot) so
+	// a run left behind by a transient error or an unsettled retry lineage converges
+	// on a later tick. No-op while the gate is off; each tick is advisory-locked so a
+	// single replica walks during a rolling deploy.
+	go autopilotSvc.RunAutopilotReconcileLoop(sweepCtx, pool)
 
 	// Start background sweeper to mark stale runtimes as offline.
 	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)

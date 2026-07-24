@@ -565,10 +565,13 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	}
 }
 
-// TestSweepDoesNotResetIssueAlreadyInReview verifies that the sweeper only resets
-// issues that are truly stuck in in_progress — it must not clobber issues whose
-// agents already moved them forward (e.g. to in_review) before the task timed out.
-func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
+// TestSweepResetsInReviewIssueLikeInProgress verifies the §4.2 Category-uniform
+// reset: in_review belongs to the in_progress Category, so an in_review issue whose
+// task went stale (no active task) is reset to todo exactly like a literal
+// in_progress issue. This is a deliberate product-decision change from the old
+// token-specific "preserve in_review" carve-out — machine logic keys off Category,
+// not the display token (MUL-4809 §4.2 P1).
+func TestSweepResetsInReviewIssueLikeInProgress(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
@@ -630,14 +633,15 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 
 	broadcastFailedTasks(ctx, queries, nil, bus, failedTasks)
 
-	// Issue should remain in_review — the sweeper must not clobber agent progress.
+	// in_review is an in_progress-Category status, so the stuck issue is reset to
+	// todo just like a literal in_progress issue (MUL-4809 §4.2 P1).
 	var issueStatus string
 	err = testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&issueStatus)
 	if err != nil {
 		t.Fatalf("failed to query issue status: %v", err)
 	}
-	if issueStatus != "in_review" {
-		t.Fatalf("expected issue status 'in_review' to be preserved, got '%s'", issueStatus)
+	if issueStatus != "todo" {
+		t.Fatalf("expected in_review issue to be reset to 'todo', got '%s'", issueStatus)
 	}
 }
 

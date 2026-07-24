@@ -16,6 +16,7 @@ import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
 import { propertyKeys } from "../properties/queries";
+import { issueStatusKeys } from "../issue-statuses/queries";
 import {
   agentTaskSnapshotKeys,
   workspaceWorkingAgentsKeys,
@@ -503,6 +504,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
   }
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
@@ -875,6 +877,20 @@ export function useRealtimeSync(
           // Group order, supported group types, and unavailable option values
           // are derived from the property definition, not just issue rows.
           qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+        }
+      }),
+    );
+
+    // Status-catalog changes (create / rename / recolor / default / archive).
+    // Issue caches embed status_detail, so a rename or recolor changes how
+    // existing rows render and an archive can move issues to another status —
+    // refetch both trees.
+    const unsubIssueStatusChanged = ["issue_status:created", "issue_status:updated"].map((event) =>
+      ws.on(event as "issue_status:created" | "issue_status:updated", () => {
+        const wsId = getCurrentWsId();
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
+          qc.invalidateQueries({ queryKey: issueKeys.all(wsId) });
         }
       }),
     );
@@ -1390,6 +1406,7 @@ export function useRealtimeSync(
       unsubIssueMetadataChanged();
       unsubIssuePropertiesChanged();
       unsubPropertyChanged.forEach((unsub) => unsub());
+      unsubIssueStatusChanged.forEach((unsub) => unsub());
       unsubInboxNew();
       unsubCommentCreated();
       unsubCommentUpdated();

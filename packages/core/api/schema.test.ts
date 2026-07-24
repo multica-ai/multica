@@ -91,6 +91,122 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listIssues status_detail (MUL-4809)", () => {
+    // Minimal valid issue row (only the non-defaulted fields).
+    const baseIssue = {
+      id: "issue-1",
+      workspace_id: "ws-1",
+      number: 1,
+      identifier: "MUL-1",
+      title: "Test",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 1,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    };
+
+    it("parses an old-server issue that omits status_id / status_detail", async () => {
+      // Older backends predate MUL-4809 and send neither field. Must parse, not
+      // fall back, and leave the client on the legacy `status` token.
+      stubFetchJson({ issues: [baseIssue], total: 1 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+      expect(res.issues).toHaveLength(1);
+      expect(res.issues[0]?.status_id).toBeUndefined();
+      expect(res.issues[0]?.status_detail).toBeUndefined();
+      expect(res.issues[0]?.status).toBe("todo");
+    });
+
+    it("passes a well-formed status_id / status_detail through", async () => {
+      stubFetchJson({
+        issues: [
+          {
+            ...baseIssue,
+            status_id: "st-1",
+            status_detail: {
+              id: "st-1",
+              name: "In Review",
+              category: "in_progress",
+              icon: "in_review",
+              color: "success",
+            },
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+      expect(res.issues[0]?.status_id).toBe("st-1");
+      expect(res.issues[0]?.status_detail?.name).toBe("In Review");
+      expect(res.issues[0]?.status_detail?.category).toBe("in_progress");
+    });
+
+    it("degrades status_detail to null on an unknown category, keeping the issue", async () => {
+      // category is a closed 5-value set. An unknown value must fail only the
+      // status_detail field (-> null), never blank the issue or the whole list.
+      stubFetchJson({
+        issues: [
+          {
+            ...baseIssue,
+            status_id: "st-1",
+            status_detail: {
+              id: "st-1",
+              name: "Weird",
+              category: "some_future_category",
+              icon: "todo",
+              color: "warning",
+            },
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+      expect(res.issues).toHaveLength(1);
+      expect(res.issues[0]?.status).toBe("todo");
+      expect(res.issues[0]?.status_detail).toBeNull();
+    });
+
+    it("degrades a malformed status_detail to null without blanking the list (§7.3)", async () => {
+      // A wrong-typed subfield used to fail the outer IssueSchema and drop the
+      // whole batch to []. Now it degrades to just status_detail = null.
+      stubFetchJson({
+        issues: [
+          { ...baseIssue, id: "issue-1", status_detail: { id: 123, name: null } },
+          { ...baseIssue, id: "issue-2" },
+        ],
+        total: 2,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+      expect(res.issues).toHaveLength(2);
+      expect(res.issues[0]?.status_detail).toBeNull();
+      expect(res.issues[0]?.status).toBe("todo");
+    });
+
+    it("keeps null on explicit-null status_id / status_detail", async () => {
+      stubFetchJson({
+        issues: [{ ...baseIssue, status_id: null, status_detail: null }],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+      expect(res.issues).toHaveLength(1);
+      expect(res.issues[0]?.status_id).toBeNull();
+      expect(res.issues[0]?.status_detail).toBeNull();
+    });
+  });
+
   describe("createIssue", () => {
     // The create modal decides whether to run its label-attach fallback by
     // reading `labels` off the parsed response, and treats a rejection as a

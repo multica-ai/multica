@@ -17,9 +17,11 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -59,6 +61,13 @@ func TestMain(m *testing.M) {
 	bus := events.New()
 	emailSvc := service.NewEmailService()
 	testHandler = New(queries, pool, hub, bus, emailSvc, nil, nil, analytics.NoopClient{}, Config{AllowSignup: true})
+	// The autopilot handler tests assert task-driven finalization (bind + running),
+	// so enable the two-phase rollout gate for the suite (MUL-4809 §4.1 P0-3).
+	{
+		provider := featureflag.NewStaticProvider()
+		provider.Set(featureflags.AutopilotTaskDrivenRuns, featureflag.Rule{Default: true})
+		testHandler.AutopilotService.FeatureFlags = featureflag.NewService(provider)
+	}
 	// httptest.NewRequest defaults RemoteAddr to 192.0.2.1, so every webhook
 	// test in the suite shares one IP bucket. With the production default
 	// (30/min) the budget runs out partway through the suite and unrelated
@@ -1100,8 +1109,8 @@ func TestTriggerAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	if err := json.NewDecoder(w.Body).Decode(&run); err != nil {
 		t.Fatalf("decode autopilot run: %v", err)
 	}
-	if run.Status != "issue_created" {
-		t.Fatalf("run status = %q, want issue_created", run.Status)
+	if run.Status != "running" {
+		t.Fatalf("run status = %q, want running (task-bound, MUL-4809 §4.1)", run.Status)
 	}
 	if run.IssueID == nil {
 		t.Fatal("run issue_id is nil, want newly created issue")
@@ -1178,8 +1187,8 @@ func TestScheduledAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DispatchAutopilot schedule duplicate: %v", err)
 	}
-	if run == nil || run.Status != "issue_created" {
-		t.Fatalf("dispatch result = %+v, want status issue_created", run)
+	if run == nil || run.Status != "running" {
+		t.Fatalf("dispatch result = %+v, want status running (task-bound, MUL-4809 §4.1)", run)
 	}
 	newIssueID := uuidToString(run.IssueID)
 	if newIssueID == "" {
@@ -1261,8 +1270,8 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DispatchAutopilot: %v", err)
 	}
-	if run == nil || run.Status != "issue_created" {
-		t.Fatalf("dispatch result = %+v, want status issue_created", run)
+	if run == nil || run.Status != "running" {
+		t.Fatalf("dispatch result = %+v, want status running (task-bound, MUL-4809 §4.1)", run)
 	}
 
 	var creatorType, creatorID string

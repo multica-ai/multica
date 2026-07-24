@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -18,7 +19,6 @@ type mention struct {
 	Type string // "member", "agent", "issue", or "all"
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
-
 
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
@@ -78,19 +78,19 @@ var parentBubbleNotifTypes = map[string]bool{
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
-	"issue_assigned":  "assignments",
-	"unassigned":      "assignments",
-	"assignee_changed": "assignments",
-	"status_changed":  "status_changes",
-	"new_comment":     "comments",
-	"mentioned":       "comments",
-	"priority_changed": "updates",
+	"issue_assigned":     "assignments",
+	"unassigned":         "assignments",
+	"assignee_changed":   "assignments",
+	"status_changed":     "status_changes",
+	"new_comment":        "comments",
+	"mentioned":          "comments",
+	"priority_changed":   "updates",
 	"start_date_changed": "updates",
-	"due_date_changed": "updates",
-	"task_completed":  "agent_activity",
-	"task_failed":     "agent_activity",
-	"agent_blocked":   "agent_activity",
-	"agent_completed": "agent_activity",
+	"due_date_changed":   "updates",
+	"task_completed":     "agent_activity",
+	"task_failed":        "agent_activity",
+	"agent_blocked":      "agent_activity",
+	"agent_completed":    "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -140,17 +140,17 @@ func loadUserPrefs(
 	return result
 }
 
-// terminalStatusForTaskFailedDismiss is the set of issue statuses that mark
-// the issue as "the user no longer needs to triage past failures." When a
-// status change lands on one of these, any pre-existing task_failed inbox
-// rows for the issue are archived so the inbox stays a fresh-signal surface.
-// `in_review` is included because in Multica's agent flow that's the most
-// reliable "work delivered" handoff — and a status flip back to in_progress
-// will simply produce new task_failed rows that surface normally.
-var terminalStatusForTaskFailedDismiss = map[string]bool{
-	"in_review": true,
-	"done":      true,
-	"cancelled": true,
+// issueStatusDismissesTaskFailed reports whether landing on this issue status
+// should archive the issue's stale task_failed inbox rows so the inbox stays a
+// fresh-signal surface. The trigger is the terminal Category — done or cancelled —
+// where the work is finished or abandoned and past failures are no longer
+// actionable. Machine logic keys off Category, not the display token (MUL-4809
+// §4.2): in_review and blocked are ordinary in_progress states and no longer
+// dismiss failures, while a custom done/cancelled status dismisses them the same
+// as the built-ins. A later flip back to an active status simply produces new
+// task_failed rows that surface normally.
+func issueStatusDismissesTaskFailed(status string) bool {
+	return issuestatus.IsTerminalCategory(issuestatus.CategoryForStatusToken(status))
 }
 
 // archiveStaleTaskFailedInbox archives all task_failed inbox rows for the
@@ -663,11 +663,11 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 				issue.Title, "",
 				statusDetails)
 
-			// When the issue progresses past the failure (in_review / done /
-			// cancelled), retire any stale task_failed inbox rows so the
-			// inbox reflects the current state of the work, not its history.
-			// The activity log keeps the full failure history for audit.
-			if terminalStatusForTaskFailedDismiss[issue.Status] {
+			// When the issue reaches a terminal Category (done / cancelled),
+			// retire any stale task_failed inbox rows so the inbox reflects the
+			// current state of the work, not its history. The activity log keeps
+			// the full failure history for audit.
+			if issueStatusDismissesTaskFailed(issue.Status) {
 				archiveStaleTaskFailedInbox(ctx, queries, bus, e.WorkspaceID, issue.ID)
 			}
 		}

@@ -134,8 +134,69 @@
       "labs": "实验室",
       "members": "成员",
       "labels": "标签",
-      "properties": "属性"
+      "properties": "属性",
+      "statuses": "状态"
     }
+  },
+  "statuses": {
+    "title": "Issue 状态",
+    "description": "自定义此工作区的状态。每个状态都属于五个分类之一——自动化只读取分类，名称、颜色和图标仅面向人。",
+    "loading": "正在加载状态…",
+    "add": "新增状态",
+    "empty_category": "此分类下还没有状态。",
+    "categories": {
+      "backlog": {
+        "label": "待规划",
+        "hint": "尚未排期，不会自动启动 Agent。"
+      },
+      "todo": {
+        "label": "待办",
+        "hint": "进入待执行范围，指派的 Agent 从这里开始。"
+      },
+      "in_progress": {
+        "label": "进行中",
+        "hint": "正在处理，审核中与已阻塞也属于这一类。"
+      },
+      "done": {
+        "label": "已完成",
+        "hint": "已经完成。"
+      },
+      "cancelled": {
+        "label": "已取消",
+        "hint": "未完成即终止。"
+      }
+    },
+    "actions_open": "{name} 的操作",
+    "badge_default": "默认",
+    "badge_system": "内置",
+    "edit": "编辑",
+    "make_default": "设为该分类的默认状态",
+    "default_hint": "每个分类有且只有一个默认状态，设为默认会替换当前的默认状态。",
+    "archive": "归档",
+    "create_title": "新建状态",
+    "edit_title": "编辑状态",
+    "category_locked": "分类：{category} —— 创建后不可修改。如需更换，请新建状态并把 Issue 迁移过去。",
+    "field_name": "名称",
+    "name_placeholder": "例如：待验收",
+    "field_description": "描述",
+    "description_placeholder": "这个状态代表什么（可选）",
+    "field_color": "颜色",
+    "field_icon": "图标",
+    "cancel": "取消",
+    "save": "保存",
+    "create": "创建",
+    "created": "状态已创建",
+    "create_failed": "创建状态失败",
+    "updated": "状态已更新",
+    "update_failed": "更新状态失败",
+    "default_set": "{name} 已设为默认",
+    "archived": "状态已归档",
+    "archive_failed": "归档状态失败",
+    "archive_title": "归档「{name}」？",
+    "archive_description": "归档后新的 Issue 将无法再选择该状态。内置状态不能归档。",
+    "migrate_to": "将现有 Issue 迁移到",
+    "migrate_placeholder": "选择一个状态",
+    "migrate_hint": "如果仍有 Issue 使用该状态，则必须选择；只能选择同一分类下的状态。"
   },
   "properties": {
     "title": "属性",

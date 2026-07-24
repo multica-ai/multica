@@ -55,6 +55,8 @@ import {
 import { StatusIcon, PriorityIcon } from ".";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { issueStatusListOptions } from "@multica/core/issue-statuses";
+import { localizableStatusKey } from "../utils/status-label";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import { labelListOptions } from "@multica/core/labels/queries";
@@ -945,6 +947,21 @@ export function IssueDisplayControls({
   const { t } = useT("issues");
   const [tableGroupMenuOpen, setTableGroupMenuOpen] = useState(false);
   const [viewMenuOpen, setViewMenuOpen] = useState(false);
+  const displayWsId = useWorkspaceId();
+  const { data: statusCatalog = [] } = useQuery(issueStatusListOptions(displayWsId));
+  // Active statuses in Category order — the same ordering the picker uses, so a
+  // custom status sits next to the built-ins sharing its semantics. Empty means
+  // an old server or an unseeded workspace; the legacy token list is used then.
+  const statusOptions = useMemo(() => {
+    const order = ["backlog", "todo", "in_progress", "done", "cancelled"];
+    return statusCatalog
+      .filter((s) => !s.archived)
+      .slice()
+      .sort((a, b) => {
+        const byCategory = order.indexOf(a.category) - order.indexOf(b.category);
+        return byCategory !== 0 ? byCategory : a.position - b.position;
+      });
+  }, [statusCatalog]);
   const viewMode = useViewStore((s) => s.viewMode);
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
@@ -1144,27 +1161,69 @@ export function IssueDisplayControls({
                 )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-auto min-w-48">
-                {ALL_STATUSES.map((s) => {
-                  const checked = statusFilters.includes(s);
-                  const count = counts.status.get(s) ?? 0;
-                  return (
-                    <DropdownMenuCheckboxItem
-                      key={s}
-                      checked={checked}
-                      onCheckedChange={() => act.toggleStatusFilter(s)}
-                      className={FILTER_ITEM_CLASS}
-                    >
-                      <HoverCheck checked={checked} />
-                      <StatusIcon status={s} className="h-3.5 w-3.5" />
-                      {t(($) => $.status[s])}
-                      {count > 0 && (
-                        <span className="ml-auto text-xs text-muted-foreground">
-                          {t(($) => $.filters.issue_count, { count })}
-                        </span>
-                      )}
-                    </DropdownMenuCheckboxItem>
-                  );
-                })}
+                {statusOptions.length > 0
+                  ? statusOptions.map((s) => {
+                      // A selection persisted by an older build holds legacy
+                      // tokens, so a row is checked by id OR by its system_key
+                      // (MUL-4809).
+                      const checked =
+                        statusFilters.includes(s.id) ||
+                        (s.system_key != null && statusFilters.includes(s.system_key));
+                      // Counts are keyed by the legacy token, so several custom
+                      // statuses in one Category share a count; show it only for
+                      // the built-ins where it is exact.
+                      const count = s.system_key ? (counts.status.get(s.system_key) ?? 0) : 0;
+                      const localeKey = localizableStatusKey(s.system_key, s.name);
+                      return (
+                        <DropdownMenuCheckboxItem
+                          key={s.id}
+                          checked={checked}
+                          onCheckedChange={() =>
+                            act.toggleStatusFilter(
+                              checked && s.system_key != null && statusFilters.includes(s.system_key)
+                                ? s.system_key
+                                : s.id,
+                            )
+                          }
+                          className={FILTER_ITEM_CLASS}
+                        >
+                          <HoverCheck checked={checked} />
+                          <StatusIcon
+                            status={s.icon}
+                            icon={s.icon}
+                            color={s.color}
+                            className="h-3.5 w-3.5"
+                          />
+                          {localeKey ? t(($) => $.status[localeKey]) : s.name}
+                          {count > 0 && (
+                            <span className="ml-auto text-xs text-muted-foreground">
+                              {t(($) => $.filters.issue_count, { count })}
+                            </span>
+                          )}
+                        </DropdownMenuCheckboxItem>
+                      );
+                    })
+                  : ALL_STATUSES.map((s) => {
+                      const checked = statusFilters.includes(s);
+                      const count = counts.status.get(s) ?? 0;
+                      return (
+                        <DropdownMenuCheckboxItem
+                          key={s}
+                          checked={checked}
+                          onCheckedChange={() => act.toggleStatusFilter(s)}
+                          className={FILTER_ITEM_CLASS}
+                        >
+                          <HoverCheck checked={checked} />
+                          <StatusIcon status={s} className="h-3.5 w-3.5" />
+                          {t(($) => $.status[s])}
+                          {count > 0 && (
+                            <span className="ml-auto text-xs text-muted-foreground">
+                              {t(($) => $.filters.issue_count, { count })}
+                            </span>
+                          )}
+                        </DropdownMenuCheckboxItem>
+                      );
+                    })}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
