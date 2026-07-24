@@ -716,7 +716,7 @@ export function useRealtimeSync(
         // here keeps the WS-handler shape uniform; the resulting refetch
         // is cheap.) Both the list (trailing 7d slice) and the detail
         // panel read off this single cache.
-        qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
+        qc.invalidateQueries({ queryKey: agentActivityKeys.last30dAll(wsId) });
         // 30-day run count likewise increments per task lifecycle event.
         qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
         // Per-agent task list (Activity tab "Recent work"). Prefix match

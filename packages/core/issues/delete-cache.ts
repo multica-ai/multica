@@ -162,7 +162,7 @@ export function invalidateDeletedIssueDependentCaches(
   wsId: string,
 ) {
   qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
-  qc.invalidateQueries({ queryKey: agentActivityKeys.last30d(wsId) });
+  qc.invalidateQueries({ queryKey: agentActivityKeys.last30dAll(wsId) });
   qc.invalidateQueries({ queryKey: agentRunCountsKeys.last30d(wsId) });
   qc.invalidateQueries({ queryKey: agentTasksKeys.all(wsId) });
 }

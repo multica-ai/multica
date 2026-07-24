@@ -78,6 +78,35 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("getWorkspaceAgentActivity30d", () => {
+    it("falls back to an empty list when the response is malformed", async () => {
+      stubFetchJson({ buckets: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.getWorkspaceAgentActivity30d({ tz: "UTC" });
+      expect(res).toEqual([]);
+    });
+
+    it("passes the viewer tz through as a query param", async () => {
+      stubFetchJson([
+        {
+          agent_id: "a-1",
+          date: "2026-07-16",
+          task_count: 2,
+          failed_count: 1,
+        },
+      ]);
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.getWorkspaceAgentActivity30d({
+        tz: "Asia/Shanghai",
+      });
+      expect(res).toEqual([
+        { agent_id: "a-1", date: "2026-07-16", task_count: 2, failed_count: 1 },
+      ]);
+      const url = String(vi.mocked(globalThis.fetch).mock.calls[0]?.[0] ?? "");
+      expect(url).toContain("/api/agent-activity-30d?tz=Asia%2FShanghai");
+    });
+  });
+
   describe("listIssues", () => {
     it("falls back to an empty list when the response is malformed", async () => {
       // `issues` having the wrong type triggers the fallback. An object

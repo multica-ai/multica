@@ -2079,10 +2079,11 @@ func (h *Handler) ListAgentTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 // AgentActivityBucket is one day-bucketed throughput sample for the
-// Agents-list ACTIVITY sparkline. bucket_at is midnight UTC of the day.
+// Agents-list ACTIVITY sparkline. date is the calendar day (YYYY-MM-DD)
+// in the viewer's timezone (see resolveViewingTZ).
 type AgentActivityBucket struct {
 	AgentID     string `json:"agent_id"`
-	BucketAt    string `json:"bucket_at"`
+	Date        string `json:"date"`
 	TaskCount   int32  `json:"task_count"`
 	FailedCount int32  `json:"failed_count"`
 }
@@ -2250,6 +2251,9 @@ func (h *Handler) GetWorkspaceAgentRunCounts(w http.ResponseWriter, r *http.Requ
 // agent detail "Last 30 days" panel (uses all 30) — one fetch is cheaper
 // than two. Front-end fills missing days with zero; the back-end omits
 // empty buckets to keep the response small.
+//
+// Days are cut in the viewer's tz so the sparkline agrees with the
+// dashboard/runtime usage reports on which day a task belongs to.
 func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
 	member, ok := h.workspaceMember(w, r, workspaceID)
@@ -2257,7 +2261,12 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	rows, err := h.Queries.GetWorkspaceAgentActivity30d(r.Context(), parseUUID(workspaceID))
+	viewTZ := h.resolveViewingTZ(r)
+	rows, err := h.Queries.GetWorkspaceAgentActivity30d(r.Context(), db.GetWorkspaceAgentActivity30dParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Tz:          viewTZ,
+		Since:       parseSinceParamInTZ(r, 30, viewTZ),
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to get agent activity")
 		return
@@ -2278,7 +2287,7 @@ func (h *Handler) GetWorkspaceAgentActivity30d(w http.ResponseWriter, r *http.Re
 		}
 		resp = append(resp, AgentActivityBucket{
 			AgentID:     agentID,
-			BucketAt:    timestampToString(row.Bucket),
+			Date:        row.Date.Time.Format("2006-01-02"),
 			TaskCount:   row.TaskCount,
 			FailedCount: row.FailedCount,
 		})

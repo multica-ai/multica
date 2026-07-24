@@ -979,11 +979,11 @@ describe("onIssueDeleted", () => {
       [makeTask()],
     );
     qc.setQueryData<AgentActivityBucket[]>(
-      agentActivityKeys.last30d(WS_ID),
+      agentActivityKeys.last30d(WS_ID, "UTC"),
       [
         {
           agent_id: AGENT_ID,
-          bucket_at: "2025-01-01T00:00:00Z",
+          date: "2025-01-01",
           task_count: 1,
           failed_count: 0,
         },
@@ -1000,7 +1000,9 @@ describe("onIssueDeleted", () => {
     onIssueDeleted(qc, WS_ID, ISSUE_ID);
 
     expectInvalidated(qc, agentTaskSnapshotKeys.list(WS_ID));
-    expectInvalidated(qc, agentActivityKeys.last30d(WS_ID));
+    // The invalidation targets the tz-less prefix; the concrete cached
+    // query (keyed with a tz) must be caught by it.
+    expectInvalidated(qc, agentActivityKeys.last30d(WS_ID, "UTC"));
     expectInvalidated(qc, agentRunCountsKeys.last30d(WS_ID));
     expectInvalidated(qc, agentTasksKeys.detail(WS_ID, AGENT_ID));
     expect(qc.getQueryData(issueKeys.tasks(ISSUE_ID))).toBeUndefined();

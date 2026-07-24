@@ -1185,18 +1185,26 @@ GROUP BY atq.agent_id;
 -- still in flight has no completed_at and contributes nothing here — that's
 -- correct: in-flight tasks are surfaced via the live presence indicator,
 -- not the historical trend.
+--
+-- Days are cut in the caller-supplied @tz (the viewer's tz, like the
+-- dashboard/runtime usage reports) so every viewer of a workspace sees the
+-- same tasks attributed to the same calendar day. DATE_TRUNC without a zone
+-- would bucket in the session tz and make the sparkline disagree with the
+-- usage charts. @since is the viewer-local start-of-day cutoff computed by
+-- parseSinceParamInTZ; see ListDashboardUsageDaily for why it must not be
+-- re-truncated here.
 SELECT
     atq.agent_id,
-    DATE_TRUNC('day', atq.completed_at)::timestamptz AS bucket,
+    DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) AS date,
     COUNT(*)::int AS task_count,
     COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.completed_at IS NOT NULL
-  AND atq.completed_at > now() - INTERVAL '30 days'
-GROUP BY atq.agent_id, bucket
-ORDER BY atq.agent_id, bucket;
+  AND atq.completed_at >= sqlc.arg('since')
+GROUP BY atq.agent_id, date
+ORDER BY atq.agent_id, date;
 
 -- name: ListWorkspaceAgentTaskSnapshot :many
 -- Returns the tasks needed to derive each agent's current presence:

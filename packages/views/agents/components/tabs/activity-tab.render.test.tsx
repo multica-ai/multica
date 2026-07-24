@@ -18,6 +18,18 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
 }));
 
+// The auth store is a module-level singleton wired at app boot via
+// registerAuthStore(); tests stand in a minimal callable-store so the
+// component's useViewingTimezone() resolves without a real provider.
+vi.mock("@multica/core/auth", () => {
+  const state = { user: { timezone: "UTC" } };
+  const useAuthStore = (selector?: (s: typeof state) => unknown) =>
+    selector ? selector(state) : state;
+  (useAuthStore as unknown as { getState: () => typeof state }).getState =
+    () => state;
+  return { useAuthStore };
+});
+
 // api / paths are only reached from a rendered TaskRow, which never mounts in
 // the loading and empty states under test — stub them so the module graph
 // resolves without dragging in platform wiring.

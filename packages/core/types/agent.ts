@@ -186,8 +186,8 @@ export type TaskFailureReason =
 // is anchored on completed_at (a task in flight contributes nothing).
 export interface AgentActivityBucket {
   agent_id: string;
-  // ISO timestamp at midnight UTC of the day.
-  bucket_at: string;
+  // Calendar day (YYYY-MM-DD) in the viewer's timezone.
+  date: string;
   task_count: number;
   failed_count: number;
 }
