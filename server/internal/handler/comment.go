@@ -1068,6 +1068,10 @@ type commentAgentTrigger struct {
 
 type commentTriggerComputeOptions struct {
 	ExcludeTriggerCommentID pgtype.UUID
+	// AuthoringTaskID identifies the server-trusted task that produced this
+	// comment. Unlike comment.source_task_id it may belong to another issue: that
+	// distinction is required to preserve explicit child→parent self-handoffs.
+	AuthoringTaskID pgtype.UUID
 	// OriginatorUserID is the top-of-chain human user id for this trigger
 	// (MUL-3963). Only consulted for AGENT actors — canInvokeAgent judges A2A
 	// by the originator, not the immediate agent principal. Members are their
@@ -1202,6 +1206,7 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 	}
 
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
+	opts.AuthoringTaskID = h.authoringTaskIDFromRequest(r, actorType, actorID)
 	opts.OriginatorUserID = h.invokeOriginatorFromRequest(r, actorType, actorID)
 	opts.AutopilotDelegationAuthorityUserID = h.autopilotDelegationAuthorityFromRequest(r, issue, actorType, actorID)
 	triggers, targets := h.computeCommentAgentTriggers(r.Context(), issue, content, parentComment, actorType, actorID, opts)
@@ -1326,12 +1331,13 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// worker's task originator is unattributed, effectiveUser resolves to "",
 	// and the private-agent gate denies the wake (MUL-4015).
 	var sourceTaskID pgtype.UUID
+	authoringTaskID := h.authoringTaskIDFromRequest(r, authorType, authorID)
 	if authorType == "agent" {
 		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
 			taskUUID, parseErr := util.ParseUUID(taskIDHeader)
 			if parseErr == nil {
 				task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
-				if err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
+				if err == nil && task.AgentID.Valid && uuidToString(task.AgentID) == authorID && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
 					if task.TriggerCommentID.Valid {
 						if !taskCoversReplyParent(task, parentID) {
 							// Keep this error actionable for agents (MUL-4417 / GH #5266).
@@ -1433,7 +1439,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// The comment is already saved; a blocked mention must not fail the whole
 	// request. Surface the per-target outcomes so the client can show partial
 	// success instead of a silent no-op (MUL-4525 §2).
-	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, delegationAuthority, suppressAgentIDs)
+	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, delegationAuthority, authoringTaskID, suppressAgentIDs)
 
 	writeJSON(w, http.StatusCreated, resp)
 }
@@ -1461,12 +1467,13 @@ func isNoteComment(content string) bool {
 // (MUL-4525 §2): blocked mentions from resolution plus queued / coalesced /
 // deferred / blocked from enqueue. UI-suppressed triggers (the user unchecked
 // them) are removed before enqueue and produce no outcome.
-func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID, delegationAuthorityUserID string, suppressAgentIDs []pgtype.UUID) []CommentTriggerOutcome {
+func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, comment db.Comment, parentComment *db.Comment, actorType, actorID, originatorUserID, delegationAuthorityUserID string, authoringTaskID pgtype.UUID, suppressAgentIDs []pgtype.UUID) []CommentTriggerOutcome {
 	if isNoteComment(comment.Content) {
 		return nil
 	}
 	triggers, targets := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 		ExcludeTriggerCommentID:            comment.ID,
+		AuthoringTaskID:                    authoringTaskID,
 		OriginatorUserID:                   originatorUserID,
 		AutopilotDelegationAuthorityUserID: delegationAuthorityUserID,
 	})
@@ -2171,7 +2178,7 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 		return commentAgentTrigger{}, false
 	}
 	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
-		h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, squad.LeaderID, squad.ID) {
+		!h.allowsSquadWorkerToLeaderHandoff(ctx, issue.ID, squad.ID, opts.AuthoringTaskID) {
 		return commentAgentTrigger{}, false
 	}
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
@@ -2189,6 +2196,35 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 		return commentAgentTrigger{}, false
 	}
 	return commentAgentTrigger{Agent: agent, Source: commentTriggerSourceIssueAssignee, Squad: &squad, AlreadyPending: hasPending}, true
+}
+
+// allowsSquadWorkerToLeaderHandoff accepts only the exact task that authored
+// the comment. This preserves a dual-role leader's worker→leader coordination
+// resume without letting unrelated historical worker tasks disable loop safety.
+func (h *Handler) allowsSquadWorkerToLeaderHandoff(ctx context.Context, issueID, squadID, taskID pgtype.UUID) bool {
+	if !taskID.Valid {
+		return false
+	}
+	task, err := h.Queries.GetAgentTask(ctx, taskID)
+	return err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issueID) &&
+		!task.IsLeaderTask && task.SquadID.Valid && uuidToString(task.SquadID) == uuidToString(squadID)
+}
+
+// allowsExplicitSelfHandoff distinguishes intentional role/context transitions
+// from a result comment re-enqueueing its own run. Cross-issue transitions are
+// explicit-only; same-issue transitions require exact same-squad worker lineage.
+func (h *Handler) allowsExplicitSelfHandoff(ctx context.Context, issueID pgtype.UUID, squadID pgtype.UUID, taskID pgtype.UUID) bool {
+	if !taskID.Valid {
+		return false
+	}
+	task, err := h.Queries.GetAgentTask(ctx, taskID)
+	if err != nil || !task.IssueID.Valid {
+		return false
+	}
+	if uuidToString(task.IssueID) != uuidToString(issueID) {
+		return true
+	}
+	return squadID.Valid && !task.IsLeaderTask && task.SquadID.Valid && uuidToString(task.SquadID) == uuidToString(squadID)
 }
 
 func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID, opts commentTriggerComputeOptions) (bool, error) {
@@ -2214,11 +2250,9 @@ func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, a
 // mentions from the current comment and returns the runnable agent recipients.
 // Skips agents with on_mention trigger disabled, and private agents mentioned
 // by non-owner members (only the agent owner or workspace admin/owner can
-// mention a private agent). Self-mentions are intentionally allowed so an
-// agent running in one issue can explicitly enqueue itself on another (e.g.
-// a child-issue run notifying the parent issue whose assignee is the same
-// agent); runaway loops are prevented by HasPendingTaskForIssueAndAgent
-// dedupe and the natural queued/dispatched coalescing of the task queue.
+// mention a private agent). Same-context self-mentions are suppressed; an
+// explicit self-mention from a trusted task on another issue remains a valid
+// child→parent handoff.
 // Note: no issue status gate here — @mention is an explicit action and should
 // work even on done/cancelled issues (the agent can reopen the issue if needed).
 // commentMentionTarget is one EXPLICIT @agent / @squad mention and how it
@@ -2295,16 +2329,14 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				continue
 			}
 			leaderID := squad.LeaderID
-			// A2A self-suppression: the author IS this squad's leader and its
-			// most recent task on this issue was a leader/generic role (NOT a
-			// fresh same-squad worker→leader handoff), so we do not re-fire the
-			// leader from its own @mention. The outcome must reflect reality, not
+			// A2A self-suppression: the author IS this squad's leader, so we do
+			// not re-fire the leader from its own @mention. The outcome must reflect reality, not
 			// assume success (MUL-4525): `deferred` only when a real non-terminal
 			// task is still active (its reconcile covers this comment); a query
 			// failure is a non-success internal_error, never a fabricated
 			// deferred; otherwise nothing runs → self_trigger_suppressed.
 			if authorType == "agent" && authorID == uuidToString(leaderID) &&
-				h.shouldSuppressSquadLeaderSelfTrigger(ctx, issue.ID, leaderID, squad.ID) {
+				!h.allowsExplicitSelfHandoff(ctx, issue.ID, squad.ID, opts.AuthoringTaskID) {
 				active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, leaderID)
 				status, reason := decideSuppressedLeaderOutcome(active, activeErr)
 				addTarget(commentMentionTarget{TargetType: "squad", TargetID: m.ID, Status: status, ReasonCode: reason})
@@ -2345,6 +2377,16 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			continue
 		}
 		agentUUID := parseUUID(m.ID)
+		// Same-context explicit self-mentions are not new delegations: enqueueing
+		// the author again lets a result comment create an unbounded loop. A
+		// trusted task on another issue remains a supported explicit handoff.
+		if authorType == "agent" && authorID == uuidToString(agentUUID) &&
+			!h.allowsExplicitSelfHandoff(ctx, issue.ID, pgtype.UUID{}, opts.AuthoringTaskID) {
+			active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, agentUUID)
+			status, reason := decideSuppressedLeaderOutcome(active, activeErr)
+			addTarget(commentMentionTarget{TargetType: "agent", TargetID: m.ID, Status: status, ReasonCode: reason})
+			continue
+		}
 		// Load the agent scoped to the current issue's workspace. Using the
 		// bare GetAgent here would let a mention resolve to an agent in a
 		// different workspace, and the visibility check below would then be
@@ -2535,7 +2577,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		// or non-author edit left it NULL, so this fails closed rather than borrowing
 		// the old authoring run's authority.
 		delegationAuthority := h.autopilotDelegationAuthorityFromComment(r.Context(), issue, comment)
-		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), delegationAuthority, suppressAgentIDs)
+		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), delegationAuthority, h.authoringTaskIDFromRequest(r, actorType, actorID), suppressAgentIDs)
 	}
 
 	// Replace the comment attachment set when a modern client sends
@@ -2728,6 +2770,7 @@ func (h *Handler) retriggerCancelledTaskSurvivors(ctx context.Context, issue db.
 		}
 		triggers, _ := h.computeCommentAgentTriggers(ctx, issue, comment.Content, parentComment, actorType, actorID, commentTriggerComputeOptions{
 			ExcludeTriggerCommentID:            comment.ID,
+			AuthoringTaskID:                    comment.SourceTaskID,
 			OriginatorUserID:                   originatorUserID,
 			AutopilotDelegationAuthorityUserID: delegationAuthority,
 		})
