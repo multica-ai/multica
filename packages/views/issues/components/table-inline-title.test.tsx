@@ -7,6 +7,15 @@ import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 
 import type { Issue } from "@multica/core/types";
+
+// InlineTitle renders the self-contained agent-activity badge, which fetches
+// the workspace agent-task snapshot via React Query. These tests exercise
+// rename/navigation behavior only, so stub it out (same pattern as
+// inbox-list-item.test.tsx) instead of standing up query/workspace providers.
+vi.mock("./issue-agent-activity-indicator", () => ({
+  IssueAgentActivityIndicator: () => null,
+}));
+
 import { InlineTitle } from "./table-view";
 import type { IssueTableDisplayRow } from "./table-view-model";
 

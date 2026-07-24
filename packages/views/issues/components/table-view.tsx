@@ -136,6 +136,7 @@ import {
 } from "./table-view-model";
 import type { ChildProgress } from "./list-row";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 
 const SELECT_COLUMN_ID = "__select";
 const ADD_COLUMN_ID = "__add";
@@ -666,6 +667,7 @@ export function InlineTitle({
       <span className="w-16 shrink-0 text-xs text-muted-foreground">
         {row.issue.identifier}
       </span>
+      <IssueAgentActivityIndicator issueId={row.issue.id} />
       {editing ? (
         <Input
           autoFocus
