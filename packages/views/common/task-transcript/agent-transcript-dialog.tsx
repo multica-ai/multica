@@ -42,6 +42,7 @@ import {
   type TranscriptSortDirection,
 } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
+import { runtimeDisplayName } from "@multica/core/runtimes";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
 import { useT } from "../../i18n";
@@ -632,7 +633,7 @@ export function AgentTranscriptDialog({
               <MetadataChip
                 icon={runtimeInfo.runtime_mode === "cloud" ? <Cloud className="h-3 w-3" /> : <Monitor className="h-3 w-3" />}
               >
-                {runtimeInfo.name}
+                {runtimeDisplayName(runtimeInfo)}
                 <span className="text-muted-foreground/60 ml-0.5">({runtimeInfo.runtime_mode})</span>
               </MetadataChip>
             )}

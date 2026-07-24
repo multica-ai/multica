@@ -36,16 +36,30 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
-vi.mock("@multica/core/runtimes", () => ({
-  runtimeListOptions: (...args: unknown[]) => mockRuntimeListOptions(...args),
-  runtimeLocalSkillsOptions: (...args: unknown[]) =>
-    mockRuntimeLocalSkillsOptions(...args),
-  runtimeLocalSkillsKeys: {
-    forRuntime: (runtimeId: string) => ["runtimes", "local-skills", runtimeId],
-  },
-  resolveRuntimeLocalSkillImport: (...args: unknown[]) =>
-    mockResolveRuntimeLocalSkillImport(...args),
-}));
+// Spread the real module so alias helpers (runtimeDisplayLabel) and the
+// machine-grouping helpers used transitively by buildRuntimeMachines
+// (deriveRuntimeHealth) stay real; only the data/import entrypoints are mocked.
+vi.mock("@multica/core/runtimes", async () => {
+  const actual =
+    await vi.importActual<typeof import("@multica/core/runtimes")>(
+      "@multica/core/runtimes",
+    );
+  return {
+    ...actual,
+    runtimeListOptions: (...args: unknown[]) => mockRuntimeListOptions(...args),
+    runtimeLocalSkillsOptions: (...args: unknown[]) =>
+      mockRuntimeLocalSkillsOptions(...args),
+    runtimeLocalSkillsKeys: {
+      forRuntime: (runtimeId: string) => [
+        "runtimes",
+        "local-skills",
+        runtimeId,
+      ],
+    },
+    resolveRuntimeLocalSkillImport: (...args: unknown[]) =>
+      mockResolveRuntimeLocalSkillImport(...args),
+  };
+});
 
 vi.mock("sonner", () => ({
   toast: {
@@ -215,6 +229,29 @@ describe("RuntimeLocalSkillImportPanel", () => {
       },
       { timeout: 5000 },
     );
+  });
+
+  it("surfaces the runtime alias and provider in the picker, not the raw daemon name (MUL-5248)", async () => {
+    mockRuntimeListOptions.mockReturnValue({
+      queryKey: ["runtimes", "ws-1", "list"],
+      queryFn: () =>
+        Promise.resolve([{ ...MOCK_RUNTIME, custom_name: "Dev Box" }]),
+    });
+
+    renderPanel();
+
+    // The selected-runtime summary surfaces the user's alias plus the provider
+    // ("Dev Box (Claude)"). The old flat label duplicated the provider as
+    // "Claude (MacBook) (claude)" and dropped the alias entirely.
+    const labels = await screen.findAllByText(
+      "Dev Box (Claude)",
+      {},
+      { timeout: 5000 },
+    );
+    expect(labels.length).toBeGreaterThan(0);
+    expect(
+      screen.queryByText("Claude (MacBook) (claude)"),
+    ).not.toBeInTheDocument();
   });
 
   it("imports multiple skills in sequence and shows summary", async () => {

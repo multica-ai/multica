@@ -6,6 +6,7 @@ import type {
   AgentRuntime,
   MemberWithUser,
 } from "@multica/core/types";
+import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useT } from "../../i18n";
 import { VisibilityBadge } from "./visibility-badge";
@@ -62,7 +63,9 @@ export function AgentOverviewSummary({
               />
               <Server className="h-3 w-3 shrink-0 text-muted-foreground" aria-hidden="true" />
               <span className="truncate">
-                {runtime?.name ?? t(($) => $.pickers.runtime_none)}
+                {runtime
+                  ? runtimeDisplayLabel(runtime)
+                  : t(($) => $.pickers.runtime_none)}
               </span>
             </span>
           </SummaryRow>

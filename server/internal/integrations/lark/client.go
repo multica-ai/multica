@@ -83,10 +83,16 @@ type APIClient interface {
 	GetMessage(ctx context.Context, creds InstallationCredentials, messageID string) ([]LarkMessage, error)
 
 	// ListChatMessages fetches the most recent messages in a single chat
-	// via GET /open-apis/im/v1/messages?container_id_type=chat. It powers
-	// the group-context prefetch: when a user @-mentions the Bot in a busy
-	// group, the enricher pulls a bounded window of surrounding messages
-	// so the agent sees the conversation, not just the one @-ed line.
+	// via GET /open-apis/im/v1/messages. It powers the group-context
+	// prefetch: when a user @-mentions the Bot in a busy group, the
+	// enricher pulls a bounded window of surrounding messages so the agent
+	// sees the conversation, not just the one @-ed line.
+	//
+	// When p.ThreadID is set the request is scoped to a single Lark topic
+	// (话题) via container_id_type=thread, so a @-mention inside a topic
+	// only ever sees that topic's messages — sibling topics in the same
+	// chat share one chat_id but must stay isolated (#5835). Empty ThreadID
+	// keeps the chat-level container_id_type=chat window.
 	//
 	// Results come back newest-first (sort_type=ByCreateTimeDesc), capped
 	// at p.PageSize (Lark hard-caps a page at 50); the caller orders and
@@ -120,11 +126,19 @@ type APIClient interface {
 
 // ListMessagesParams selects a bounded, recent window of messages in a
 // single Lark chat for the group-context prefetch. Only the fields the
-// enricher needs today are exposed (ChatID, PageSize, EndTime);
+// enricher needs today are exposed (ChatID, ThreadID, PageSize, EndTime);
 // start_time and page_token are intentionally omitted until a caller
 // needs them.
 type ListMessagesParams struct {
 	ChatID ChatID
+	// ThreadID, when non-empty, scopes the list to a single Lark topic
+	// (话题): the client sends container_id_type=thread with the thread id
+	// as container_id instead of the chat container. This keeps a
+	// @-mention inside a topic from ever seeing sibling topics' messages
+	// (#5835). Lark's thread container does NOT accept end_time, so EndTime
+	// is ignored on this path — the caller anchors the window client-side.
+	// Empty keeps the chat-level container.
+	ThreadID string
 	// PageSize is how many of the most-recent messages to fetch. The
 	// client clamps it into Lark's valid 1..50 range.
 	PageSize int
@@ -132,7 +146,8 @@ type ListMessagesParams struct {
 	// this Unix timestamp in SECONDS (Lark's end_time is second-, not
 	// millisecond-, granularity). The enricher sets it to the trigger
 	// message's time so the prefetch is anchored to the @-mention moment
-	// rather than whatever is newest by the time the fetch runs.
+	// rather than whatever is newest by the time the fetch runs. Ignored
+	// when ThreadID is set (the thread container rejects end_time).
 	EndTime int64
 }
 
@@ -149,6 +164,7 @@ type LarkMessage struct {
 	CreateTime     string // epoch milliseconds, as Lark returns it (a string)
 	ParentID       string
 	RootID         string
+	ThreadID       string // Lark topic (话题) id; empty for messages outside a thread
 	UpperMessageID string // the merge_forward parent a child hangs under
 	Deleted        bool
 	Mentions       []LarkMessageMention
