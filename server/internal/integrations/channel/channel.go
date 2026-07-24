@@ -3,6 +3,8 @@ package channel
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // Type identifies an inbound channel platform — the discriminator the
@@ -81,8 +83,9 @@ type Channel interface {
 // the channel_type column + JSONB config of a channel_installation row
 // (MUL-3515 decision §3).
 type Config struct {
-	Type Type
-	Raw  json.RawMessage
+	InstallationID pgtype.UUID
+	Type           Type
+	Raw            json.RawMessage
 
 	// Handler is the shared inbound entry point the engine injects so the
 	// built Channel can deliver normalized InboundMessage values into the

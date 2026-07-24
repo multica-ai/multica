@@ -54,6 +54,21 @@ type InboundMessage struct {
 	// enricher prepends quoted/forwarded context). `/issue` is parsed from
 	// THIS, not the enriched Body.
 	CommandBody string
+
+	// Resources contains only message-bound Lark resource keys extracted from
+	// the receive event. The worker later exchanges these keys through Lark's
+	// message-resource API after installation, mention, identity, and workspace
+	// membership checks have passed. It never accepts a URL from the event.
+	Resources []MessageResourceRef
+}
+
+// MessageResourceRef is the minimal, serializable reference needed to fetch a
+// binary that belongs to one inbound message. Key values are secrets for
+// transport purposes: callers must not log them or expose them in errors.
+type MessageResourceRef struct {
+	Type     string `json:"type"`
+	Key      string `json:"key"`
+	Filename string `json:"filename,omitempty"`
 }
 
 // Outcome categorizes what the inbound pipeline decided. The OutcomeReplier

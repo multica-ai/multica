@@ -296,6 +296,22 @@ type ChannelInboundAudit struct {
 	ReceivedAt       pgtype.Timestamptz `json:"received_at"`
 }
 
+type ChannelInboundDelivery struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	MessageID      string             `json:"message_id"`
+	SequenceKey    string             `json:"sequence_key"`
+	Payload        []byte             `json:"payload"`
+	Status         string             `json:"status"`
+	Attempts       int32              `json:"attempts"`
+	AvailableAt    pgtype.Timestamptz `json:"available_at"`
+	LeaseToken     pgtype.UUID        `json:"lease_token"`
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	LastError      pgtype.Text        `json:"last_error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type ChannelInboundMessageDedup struct {
 	InstallationID pgtype.UUID        `json:"installation_id"`
 	MessageID      string             `json:"message_id"`

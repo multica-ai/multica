@@ -7,8 +7,51 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+type uploadFailReader struct {
+	done bool
+}
+
+func (r *uploadFailReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, io.ErrUnexpectedEOF
+	}
+	r.done = true
+	return copy(p, "partial"), nil
+}
+
+func TestLocalStorageUploadFromReaderIsStreamingAndAtomic(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+	store := &LocalStorage{uploadDir: tmpDir}
+	ctx := context.Background()
+
+	url, err := store.UploadFromReader(ctx, "nested/new.txt", strings.NewReader("streamed"), int64(len("streamed")), "text/plain", "new.txt")
+	if err != nil {
+		t.Fatalf("UploadFromReader: %v", err)
+	}
+	if url != "/uploads/nested/new.txt" {
+		t.Fatalf("url = %q", url)
+	}
+	got, err := os.ReadFile(filepath.Join(tmpDir, "nested/new.txt"))
+	if err != nil || string(got) != "streamed" {
+		t.Fatalf("stored bytes = %q err=%v", got, err)
+	}
+
+	if err := os.WriteFile(filepath.Join(tmpDir, "nested/new.txt"), []byte("previous"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UploadFromReader(ctx, "nested/new.txt", &uploadFailReader{}, -1, "text/plain", "new.txt"); err == nil {
+		t.Fatal("expected reader failure")
+	}
+	got, err = os.ReadFile(filepath.Join(tmpDir, "nested/new.txt"))
+	if err != nil || string(got) != "previous" {
+		t.Fatalf("failed upload replaced destination: bytes=%q err=%v", got, err)
+	}
+}
 
 func TestLocalStorage_Upload(t *testing.T) {
 	tmpDir := t.TempDir()

@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -126,13 +127,45 @@ func (s *LocalStorage) DeleteKeys(ctx context.Context, keys []string) {
 }
 
 func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
+	return s.UploadFromReader(ctx, key, bytes.NewReader(data), int64(len(data)), contentType, filename)
+}
+
+func (s *LocalStorage) UploadFromReader(ctx context.Context, key string, reader io.Reader, size int64, contentType string, filename string) (string, error) {
 	dest := filepath.Join(s.uploadDir, key)
+	if !isUnder(s.uploadDir, dest) {
+		return "", fmt.Errorf("local storage: key escapes upload dir")
+	}
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return "", fmt.Errorf("local storage MkdirAll: %w", err)
 	}
-	if err := os.WriteFile(dest, data, 0644); err != nil {
-		return "", fmt.Errorf("local storage WriteFile: %w", err)
+	tmp, err := os.CreateTemp(filepath.Dir(dest), ".multica-upload-*")
+	if err != nil {
+		return "", fmt.Errorf("local storage CreateTemp: %w", err)
 	}
+	tmpName := tmp.Name()
+	committed := false
+	defer func() {
+		_ = tmp.Close()
+		if !committed {
+			_ = os.Remove(tmpName)
+		}
+	}()
+	if _, err := io.Copy(tmp, &contextReader{ctx: ctx, reader: reader}); err != nil {
+		return "", fmt.Errorf("local storage stream copy: %w", err)
+	}
+	if err := tmp.Sync(); err != nil {
+		return "", fmt.Errorf("local storage sync: %w", err)
+	}
+	if err := tmp.Chmod(0644); err != nil {
+		return "", fmt.Errorf("local storage chmod: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		return "", fmt.Errorf("local storage close: %w", err)
+	}
+	if err := os.Rename(tmpName, dest); err != nil {
+		return "", fmt.Errorf("local storage atomic replace: %w", err)
+	}
+	committed = true
 	// Best-effort sidecar so ServeFile can restore the original filename in
 	// Content-Disposition. A failure here is logged but does not fail the
 	// upload — the file is still usable, just without the human-readable
@@ -216,11 +249,16 @@ func readLocalMeta(filePath string) (localMeta, bool) {
 	return meta, true
 }
 
-func (s *LocalStorage) UploadFromReader(ctx context.Context, key string, reader io.Reader, contentType string, filename string) (string, error) {
-	data, err := io.ReadAll(reader)
-	if err != nil {
-		return "", fmt.Errorf("local storage ReadAll: %w", err)
-	}
+type contextReader struct {
+	ctx    context.Context
+	reader io.Reader
+}
 
-	return s.Upload(ctx, key, data, contentType, filename)
+func (r *contextReader) Read(p []byte) (int, error) {
+	select {
+	case <-r.ctx.Done():
+		return 0, r.ctx.Err()
+	default:
+		return r.reader.Read(p)
+	}
 }

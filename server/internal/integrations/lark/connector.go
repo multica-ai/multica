@@ -15,10 +15,9 @@ import "context"
 // connector MUST NOT bypass emit by writing to the DB directly; emit is the
 // only ingress path.
 //
-// Historically the Feishu Hub passed this to the connector; with the
-// channel-agnostic engine the feishuChannel adapter wraps the connector and
-// supplies an emit that normalizes each event and hands it to the engine
-// Router (injected via channel.Config.Handler).
+// The Feishu channel supplies an emit that durably enqueues the decoded event.
+// A background worker later enriches and normalizes it before invoking the
+// engine Router, keeping Lark's acknowledgement path free of network calls.
 type EventEmitter func(ctx context.Context, msg InboundMessage) (DispatchResult, error)
 
 // EventConnector is the per-installation Feishu transport: it opens the

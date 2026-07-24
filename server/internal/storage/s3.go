@@ -259,15 +259,23 @@ func (s *S3Storage) DeleteKeys(ctx context.Context, keys []string) {
 }
 
 func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
-	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+	return s.UploadFromReader(ctx, key, bytes.NewReader(data), int64(len(data)), contentType, filename)
+}
+
+func (s *S3Storage) UploadFromReader(ctx context.Context, key string, reader io.Reader, size int64, contentType string, filename string) (string, error) {
+	input := &s3.PutObjectInput{
 		Bucket:             aws.String(s.bucket),
 		Key:                aws.String(key),
-		Body:               bytes.NewReader(data),
+		Body:               reader,
 		ContentType:        aws.String(contentType),
 		ContentDisposition: aws.String(ContentDisposition(contentType, filename)),
 		CacheControl:       aws.String("max-age=432000,public"),
 		StorageClass:       s.storageClass(),
-	})
+	}
+	if size >= 0 {
+		input.ContentLength = aws.Int64(size)
+	}
+	_, err := s.client.PutObject(ctx, input)
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)
 	}

@@ -8,6 +8,7 @@ import (
 
 type Storage interface {
 	Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error)
+	UploadFromReader(ctx context.Context, key string, reader io.Reader, size int64, contentType string, filename string) (string, error)
 	Delete(ctx context.Context, key string)
 	DeleteKeys(ctx context.Context, keys []string)
 	KeyFromURL(rawURL string) string

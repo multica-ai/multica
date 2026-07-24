@@ -69,6 +69,14 @@ func (m *mockStorage) Upload(_ context.Context, key string, data []byte, _ strin
 	return fmt.Sprintf("https://cdn.example.com/%s", key), nil
 }
 
+func (m *mockStorage) UploadFromReader(ctx context.Context, key string, reader io.Reader, _ int64, contentType string, filename string) (string, error) {
+	data, err := io.ReadAll(reader)
+	if err != nil {
+		return "", err
+	}
+	return m.Upload(ctx, key, data, contentType, filename)
+}
+
 func (m *mockStorage) Delete(_ context.Context, key string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

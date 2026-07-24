@@ -384,15 +384,26 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Registering the Factory (connect/send) + ResolverSet
 				// (inbound pipeline seams) is all it takes to add the platform
 				// to the engine — no engine edit.
-				connector, connectorLabel := buildLarkConnector(installSvc, larkClient)
+				enricher := lark.NewInboundEnricher(larkClient, lark.InboundEnricherConfig{
+					RecentContextSize: lark.DefaultRecentContextSize,
+					Logger:            slog.Default(),
+				})
+				inboundWorker := lark.NewInboundDeliveryWorker(queries, installSvc, enricher, channelRouter.Handle, slog.Default())
+				h.LarkInboundDeliveryWorker = inboundWorker
+				connector, connectorLabel := buildLarkConnector(installSvc)
 				lark.RegisterFeishu(channelRegistry, lark.FeishuChannelDeps{
 					Connector:   connector,
+					Inbound:     inboundWorker,
 					APIClient:   larkClient,
 					Credentials: installSvc,
 					Logger:      slog.Default(),
 				})
+				var mediaResolver *lark.FeishuMediaResolver
+				if downloader, ok := larkClient.(lark.MessageResourceDownloader); ok && store != nil {
+					mediaResolver = lark.NewFeishuMediaResolver(downloader, installSvc, store, slog.Default())
+				}
 				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
-					cs, feishuSession, auditLogger, resolverReplier, typingIndicator,
+					cs, feishuSession, auditLogger, mediaResolver, resolverReplier, typingIndicator,
 				))
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
 
@@ -1420,7 +1431,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 //
 // Returns the connector plus a short label for the boot log:
 // "ws-long-conn" in the healthy case, "noop" in the fallback case.
-func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.APIClient) (lark.EventConnector, string) {
+func buildLarkConnector(installSvc *lark.InstallationService) (lark.EventConnector, string) {
 	endpointFetcher, err := lark.NewHTTPConnectionTokenFetcher(lark.HTTPConnectionTokenConfig{
 		BaseURL: strings.TrimSpace(os.Getenv("MULTICA_LARK_CALLBACK_BASE_URL")),
 		Logger:  slog.Default(),
@@ -1449,20 +1460,10 @@ func buildLarkConnector(installSvc *lark.InstallationService, apiClient lark.API
 		}
 		return creds, nil
 	})
-	// Inbound enricher: expands quoted replies / forwarded bundles AND
-	// prefetches a window of surrounding group history (MUL-3084) into the
-	// agent's body via the IM API before dispatch. It shares the
-	// connector's resolved credentials and runs under the connector's
-	// EnrichTimeout so it cannot overrun the Lark long-conn ACK budget.
-	enricher := lark.NewInboundEnricher(apiClient, lark.InboundEnricherConfig{
-		RecentContextSize: lark.DefaultRecentContextSize,
-		Logger:            slog.Default(),
-	})
 	conn, err := lark.NewWSLongConnConnector(lark.WSConnectorConfig{
 		Dialer:              dialer,
 		EndpointFetcher:     endpointFetcher,
 		FrameDecoder:        decoder,
-		Enricher:            enricher,
 		CredentialsProvider: credsProvider,
 		Logger:              slog.Default(),
 	})

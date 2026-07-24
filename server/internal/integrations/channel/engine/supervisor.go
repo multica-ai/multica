@@ -480,9 +480,10 @@ func (s *Supervisor) supervise(ctx context.Context, inst Installation, id string
 		// Lease acquired. Build the platform channel via the registry,
 		// run it under a child context, and renew the lease in parallel.
 		ch, err := s.registry.Build(channel.Config{
-			Type:    inst.ChannelType,
-			Raw:     inst.Config,
-			Handler: s.handler,
+			InstallationID: inst.ID,
+			Type:           inst.ChannelType,
+			Raw:            inst.Config,
+			Handler:        s.handler,
 		})
 		if err != nil {
 			log.Error("channel engine: build channel failed", "error", err)

@@ -30,6 +30,21 @@ type fakeIdentity struct {
 	err error
 }
 
+type fakeMediaResolver struct {
+	calls        int
+	cleanupCalls int
+	result       channel.InboundMessage
+	err          error
+}
+
+func (f *fakeMediaResolver) Resolve(_ context.Context, _ ResolvedInstallation, _ ResolvedIdentity, msg channel.InboundMessage) (channel.InboundMessage, func(context.Context), error) {
+	f.calls++
+	if f.result.MessageID == "" {
+		f.result = msg
+	}
+	return f.result, func(context.Context) { f.cleanupCalls++ }, f.err
+}
+
 func (f *fakeIdentity) ResolveSender(_ context.Context, _ ResolvedInstallation, _ channel.InboundMessage) (ResolvedIdentity, error) {
 	return f.id, f.err
 }
@@ -216,6 +231,7 @@ type harness struct {
 	router  *Router
 	inst    *fakeInstaller
 	ident   *fakeIdentity
+	media   *fakeMediaResolver
 	dedup   *fakeDedup
 	binder  *fakeBinder
 	audit   *fakeAuditor
@@ -231,6 +247,7 @@ func newHarness(t *testing.T) *harness {
 	h := &harness{
 		inst:    &fakeInstaller{inst: activeResolved(t)},
 		ident:   &fakeIdentity{id: ResolvedIdentity{UserID: uuidFromString(t, "44444444-4444-4444-4444-444444444444")}},
+		media:   &fakeMediaResolver{},
 		dedup:   &fakeDedup{token: uuidFromString(t, "55555555-5555-5555-5555-555555555555")},
 		binder:  &fakeBinder{ensureID: uuidFromString(t, "66666666-6666-6666-6666-666666666666"), appendResult: AppendResult{DedupMarked: true}},
 		audit:   &fakeAuditor{},
@@ -244,6 +261,7 @@ func newHarness(t *testing.T) *harness {
 	h.router.Register(channel.TypeFeishu, ResolverSet{
 		Installation: h.inst,
 		Identity:     h.ident,
+		Media:        h.media,
 		Dedup:        h.dedup,
 		Session:      h.binder,
 		Audit:        h.audit,
@@ -252,6 +270,53 @@ func newHarness(t *testing.T) *harness {
 		OriginType:   "lark_chat",
 	})
 	return h
+}
+
+func TestRouterResolvesMediaOnlyAfterAccessChecks(t *testing.T) {
+	h := newHarness(t)
+	h.ident.err = ErrSenderNotMember
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatal(err)
+	}
+	if h.media.calls != 0 {
+		t.Fatalf("media resolver called %d times before membership passed", h.media.calls)
+	}
+
+	h = newHarness(t)
+	msg := p2pMessage(t)
+	msg.Source.ChatType = channel.ChatTypeGroup
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatal(err)
+	}
+	if h.media.calls != 0 {
+		t.Fatalf("media resolver called %d times for a group message not addressed to the bot", h.media.calls)
+	}
+}
+
+func TestRouterMediaCleanupTracksAtomicAppend(t *testing.T) {
+	h := newHarness(t)
+	resolved := p2pMessage(t)
+	resolved.MediaRefs = []channel.MediaRef{{Type: channel.MsgTypeFile, StorageKey: "workspaces/ws/channel-inbound/id.pdf"}}
+	h.media.result = resolved
+	h.binder.ensureErr = errors.New("database unavailable")
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err == nil {
+		t.Fatal("expected ensure failure")
+	}
+	if h.media.cleanupCalls != 1 {
+		t.Fatalf("cleanup calls after failed transaction = %d, want 1", h.media.cleanupCalls)
+	}
+
+	h = newHarness(t)
+	h.media.result = resolved
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatal(err)
+	}
+	if h.media.cleanupCalls != 0 {
+		t.Fatalf("cleanup calls after committed append = %d, want 0", h.media.cleanupCalls)
+	}
+	if got := h.binder.lastAppend.Message.MediaRefs; len(got) != 1 || got[0].StorageKey != resolved.MediaRefs[0].StorageKey {
+		t.Fatalf("append media refs = %#v", got)
+	}
 }
 
 func TestRouter_NoResolverSet_ReturnsError(t *testing.T) {
