@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
@@ -572,9 +573,15 @@ export function AgentTranscriptDialog({
               {hasRunDetails && (
                 <Popover>
                   <PopoverTrigger
-                    aria-label={t(($) => $.transcript.run_info)}
-                    title={t(($) => $.transcript.run_info)}
-                    className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={t(($) => $.transcript.run_info)}
+                        title={t(($) => $.transcript.run_info)}
+                        className="text-muted-foreground"
+                      />
+                    }
                   >
                     <Info className="h-3.5 w-3.5" />
                   </PopoverTrigger>
@@ -623,13 +630,15 @@ export function AgentTranscriptDialog({
                   </PopoverContent>
                 </Popover>
               )}
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => onOpenChange(false)}
-                className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                aria-label={t(($) => $.transcript.close)}
+                className="text-muted-foreground"
               >
                 <X className="h-4 w-4" />
-              </button>
+              </Button>
             </div>
           </div>
         </div>
@@ -656,8 +665,14 @@ export function AgentTranscriptDialog({
             {items.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger
-                  aria-label={t(($) => $.transcript.density_label)}
-                  className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={t(($) => $.transcript.density_label)}
+                      className="text-muted-foreground"
+                    />
+                  }
                 >
                   <ListCollapse className="h-3 w-3" />
                   <span className="hidden sm:inline">
@@ -707,18 +722,19 @@ export function AgentTranscriptDialog({
             {filterOptions.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger
-                  aria-label={t(($) => $.transcript.filter)}
-                  className={cn(
-                    "flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs transition-colors",
-                    activeFilterKeys.length > 0
-                      ? "text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/20"
-                      : "text-muted-foreground hover:text-foreground hover:bg-accent",
-                  )}
+                  render={
+                    <Button
+                      variant={activeFilterKeys.length > 0 ? "brand" : "ghost"}
+                      size="sm"
+                      aria-label={t(($) => $.transcript.filter)}
+                      className={activeFilterKeys.length > 0 ? undefined : "text-muted-foreground"}
+                    />
+                  }
                 >
                   <Filter className="h-3 w-3" />
                   <span className="hidden sm:inline">{t(($) => $.transcript.filter)}</span>
                   {activeFilterKeys.length > 0 && (
-                    <span className="ml-0.5 rounded-full bg-blue-500/20 px-1.5 py-0 text-[10px] font-medium">
+                    <span className="ml-0.5 rounded-full bg-brand-foreground/20 px-1.5 py-0 text-[10px] font-medium tabular-nums">
                       {activeFilterKeys.length}
                     </span>
                   )}
@@ -751,15 +767,16 @@ export function AgentTranscriptDialog({
                 </DropdownMenuContent>
               </DropdownMenu>
             )}
-            <button
-              type="button"
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={handleCopyAll}
               aria-label={copyTranscriptLabel}
-              className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              className="text-muted-foreground"
             >
               {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
               <span className="hidden sm:inline">{copyTranscriptLabel}</span>
-            </button>
+            </Button>
           </div>
         </div>
 
@@ -843,12 +860,13 @@ interface SortDirectionToggleProps {
 function SortDirectionToggle({ value, onChange, labels }: SortDirectionToggleProps) {
   const isChronological = value === "chronological";
   return (
-    <button
-      type="button"
+    <Button
+      variant="ghost"
+      size="sm"
       onClick={() => onChange(isChronological ? "newest_first" : "chronological")}
       aria-label={labels.ariaLabel}
-      title={isChronological ? labels.chronological : labels.newestFirst}
-      className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      title={labels.ariaLabel}
+      className="text-muted-foreground"
     >
       {isChronological ? (
         <ArrowDownNarrowWide className="h-3 w-3" />
@@ -858,7 +876,7 @@ function SortDirectionToggle({ value, onChange, labels }: SortDirectionTogglePro
       <span className="hidden sm:inline">
         {isChronological ? labels.chronological : labels.newestFirst}
       </span>
-    </button>
+    </Button>
   );
 }
 

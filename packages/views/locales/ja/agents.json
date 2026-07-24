@@ -661,8 +661,8 @@
     "sort_newest_first": "新しい順",
     "preserve_filters": "フィルターを保持",
     "density_label": "展開モード",
-    "density_smart": "スマート",
-    "density_smart_desc": "回答とエラーはそのまま読め、思考とツールの過程は折りたたまれます",
+    "density_smart": "重点展開",
+    "density_smart_desc": "回答とエラーは展開、思考とツールの過程は折りたたみ",
     "density_expanded": "すべて展開",
     "density_expanded_desc": "各行のパラメータと出力を完全に展開し、逐次レビューに",
     "density_collapsed": "すべて折りたたむ",
@@ -689,7 +689,8 @@
     "details_started": "開始",
     "details_completed": "完了",
     "copy_workdir": "作業ディレクトリをコピー",
-    "details_triggered_by": "トリガー"
+    "details_triggered_by": "トリガー",
+    "close": "閉じる"
   },
   "task_failure": {
     "agent_error": "エージェント実行エラー",

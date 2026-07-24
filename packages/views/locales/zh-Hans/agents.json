@@ -761,12 +761,12 @@
     "antigravity_live_unavailable": "Antigravity 暂不提供实时执行事件。task 完成后即可查看执行记录。",
     "no_data": "未记录执行数据。",
     "sort_label": "排序",
-    "sort_chronological": "时间顺序",
+    "sort_chronological": "最早在前",
     "sort_newest_first": "最新在前",
     "preserve_filters": "保留筛选",
     "density_label": "展开方式",
-    "density_smart": "智能",
-    "density_smart_desc": "汇报与错误直接可读，思考和工具过程保持折叠",
+    "density_smart": "重点展开",
+    "density_smart_desc": "汇报与错误展开，思考和工具过程保持折叠",
     "density_expanded": "全部展开",
     "density_expanded_desc": "展开每一行的完整参数与输出，逐条审阅用",
     "density_collapsed": "全部收起",
@@ -793,7 +793,8 @@
     "details_started": "开始",
     "details_completed": "完成",
     "copy_workdir": "复制工作目录",
-    "details_triggered_by": "触发人"
+    "details_triggered_by": "触发人",
+    "close": "关闭"
   },
   "task_failure": {
     "agent_error": "智能体执行出错",

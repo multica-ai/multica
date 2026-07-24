@@ -669,8 +669,8 @@
     "sort_newest_first": "최신 순",
     "preserve_filters": "필터 유지",
     "density_label": "펼치기 방식",
-    "density_smart": "스마트",
-    "density_smart_desc": "응답과 오류는 바로 읽을 수 있고, 사고와 도구 과정은 접힌 상태로 유지됩니다",
+    "density_smart": "핵심 펼치기",
+    "density_smart_desc": "응답과 오류는 펼치고, 사고와 도구 과정은 접힌 상태 유지",
     "density_expanded": "모두 펼치기",
     "density_expanded_desc": "각 행의 전체 매개변수와 출력을 펼쳐 단계별 검토에 사용",
     "density_collapsed": "모두 접기",
@@ -697,7 +697,8 @@
     "details_started": "시작",
     "details_completed": "완료",
     "copy_workdir": "작업 디렉터리 복사",
-    "details_triggered_by": "트리거한 사람"
+    "details_triggered_by": "트리거한 사람",
+    "close": "닫기"
   },
   "task_failure": {
     "agent_error": "에이전트 실행 오류",

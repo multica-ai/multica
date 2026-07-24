@@ -781,8 +781,8 @@
     "sort_newest_first": "Newest first",
     "preserve_filters": "Preserve filters",
     "density_label": "Expand mode",
-    "density_smart": "Smart",
-    "density_smart_desc": "Replies and errors read in place; thinking and tool steps stay folded",
+    "density_smart": "Focus",
+    "density_smart_desc": "Replies and errors open; thinking and tool steps stay folded",
     "density_expanded": "Expand all",
     "density_expanded_desc": "Every row's full params and output, for step-by-step review",
     "density_collapsed": "Collapse all",
@@ -809,7 +809,8 @@
     "details_started": "Started",
     "details_completed": "Completed",
     "copy_workdir": "Copy working directory",
-    "details_triggered_by": "Triggered by"
+    "details_triggered_by": "Triggered by",
+    "close": "Close"
   },
   "task_failure": {
     "agent_error": "Agent execution error",
