@@ -273,6 +273,16 @@ i18next 用 `_one` / `_other`；中文不区分语法单复数，只填 `_other`
 
 参考 `auth.json`（`web` 段含 `prefer_desktop` / `desktop_handoff.*`）。
 
+### 荷兰语（`nl`）术语表
+
+荷兰语属日耳曼语系，英文产品借词读起来很自然，所以实体 vs 概念的划分比中文简单：**核心产品实体保留英文**，其余 UI 翻译。
+
+- 保留英文（绝不翻译）：`issue`、`agent`、`skill`、`task`、`workspace`、`project`、`autopilot`、`squad`、`inbox`、`runtime`，以及上文表格里的品牌和缩写。
+- 完整翻译：通用 UI 词（按钮、状态、标签、提示、toast），如 `Save → Opslaan`、`Cancel → Annuleren`、`Delete → Verwijderen`、`Settings → Instellingen`、`Members → Leden`。
+- 复数：与 `zh-Hans` / `ko` / `ja` 不同，荷兰语有语法数，所以 `nl` bundle **同时保留** `_one` 和 `_other` 复数 key（与 EN 一致），不要合并成 `_other`。
+- 保留所有 `{{placeholder}}`、`$t()` 引用、标点和行内 code。
+- 语气对齐现有 `ko` / `ja` bundle：第二人称非正式（`je` / `jij`），简洁、直接。
+
 ---
 
 ## 3. 中文风格

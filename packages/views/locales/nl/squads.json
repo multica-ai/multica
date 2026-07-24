@@ -1,0 +1,103 @@
+{
+  "page": {
+    "title": "Squads",
+    "new_button": "Nieuwe squad",
+    "empty_no_squads": "Nog geen squads. Maak er een aan om te beginnen.",
+    "empty_no_match": "Geen squads komen overeen met je filters.",
+    "table": {
+      "name": "Squad",
+      "leader": "Leider",
+      "members": "Leden",
+      "creator": "Aangemaakt door",
+      "created": "Aangemaakt"
+    },
+    "no_matches": "Geen overeenkomende squads",
+    "row_menu": "Squad-acties",
+    "archive_action": "Archiveren"
+  },
+  "inspector": {
+    "details_section": "Details",
+    "archive_button": "Archiveren"
+  },
+  "archive_dialog": {
+    "title": "Deze squad archiveren?",
+    "description": "\"{{name}}\" wordt gearchiveerd. Issues die momenteel aan deze squad zijn toegewezen worden overgedragen aan de leider. Dit kan niet ongedaan worden gemaakt — maak een nieuwe squad aan als je de routing terug nodig hebt.",
+    "cancel": "Annuleren",
+    "confirm": "Archiveren",
+    "archiving": "Archiveren…",
+    "success": "Squad gearchiveerd"
+  },
+  "name_editor": {
+    "cancel": "Annuleren"
+  },
+  "add_member_dialog": {
+    "title": "Lid toevoegen",
+    "description": "Voeg een workspacelid of agent toe aan deze squad.",
+    "label_member": "Lid",
+    "label_role": "Rol",
+    "label_optional": "(optioneel)",
+    "placeholder_role_inline": "Rol toevoegen…",
+    "cancel": "Annuleren"
+  },
+  "description_dialog": {
+    "title": "Beschrijving bewerken",
+    "placeholder_empty": "Voeg een beschrijving toe",
+    "cancel": "Annuleren"
+  },
+  "discard_changes_dialog": {
+    "title": "Niet-opgeslagen wijzigingen verwerpen?",
+    "description": "Je hebt niet-opgeslagen wijzigingen op dit tabblad. Van tabblad wisselen verwerpt ze.",
+    "keep_editing": "Blijven bewerken",
+    "discard_button": "Verwerpen"
+  },
+  "members_tab": {
+    "section_title": "Leden",
+    "section_count_one": "{{count}} lid in deze squad",
+    "section_count_other": "{{count}} leden in deze squad",
+    "add_member_button": "Lid toevoegen",
+    "create_agent_button": "Agent aanmaken",
+    "leader_chip": "Leider",
+    "view_agent_tooltip": "Agentdetails openen",
+    "make_leader_tooltip": "Squadleider maken",
+    "remove_member_tooltip": "Uit squad verwijderen",
+    "status_working": "Bezig",
+    "status_idle": "Inactief",
+    "status_offline": "Offline",
+    "status_unstable": "Instabiel",
+    "status_archived": "Gearchiveerd",
+    "issue_status_blocked": "geblokkeerd",
+    "active_issue_more": "en {{count}} meer",
+    "last_active_label": "laatst actief {{time}}"
+  },
+  "profile_card": {
+    "unavailable": "Squad niet beschikbaar",
+    "detail_link": "Details →",
+    "archived": "Gearchiveerd",
+    "member_count_one": "{{count}} lid",
+    "member_count_other": "{{count}} leden",
+    "members_section": "Leden",
+    "more_members_one": "+{{count}} meer",
+    "more_members_other": "+{{count}} meer"
+  },
+  "instructions_tab": {
+    "description": "Squad-instructies worden in de prompt van de leidende agent geïnjecteerd wanneer die aan een issue werkt dat aan deze squad is toegewezen. Gebruik ze om de leider squadbrede sturing, werkafspraken of context te geven die de leider bij elke task moet volgen.",
+    "unsaved_changes": "Niet-opgeslagen wijzigingen",
+    "save_button": "Opslaan"
+  },
+  "scope": {
+    "mine": "Van mij",
+    "all": "Alle"
+  },
+  "toolbar": {
+    "display": "Weergave",
+    "sort_by": "Sorteren op",
+    "direction_asc": "Oplopend",
+    "direction_desc": "Aflopend",
+    "section_columns": "Kolommen",
+    "result_count_title": "Overeenkomende squads / alle squads",
+    "filter_label": "Filteren",
+    "filter_active_count_one": "{{count}} filter",
+    "filter_active_count_other": "{{count}} filters",
+    "clear_filters": "Filters wissen"
+  }
+}

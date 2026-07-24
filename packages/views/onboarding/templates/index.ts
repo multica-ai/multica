@@ -35,6 +35,9 @@ const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
   "zh-Hans": "zh",
   ko: "ko",
   ja: "ja",
+  // Dutch UI ships fully translated, but the seeded onboarding content
+  // (starter issues/agents prose) falls back to English for now.
+  nl: "en",
 };
 
 /**

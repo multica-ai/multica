@@ -273,6 +273,16 @@ Examples:
 
 See `auth.json` for the canonical example (the `web` section contains `prefer_desktop` / `desktop_handoff.*`).
 
+### Dutch (`nl`) glossary
+
+Dutch is Germanic and English product loanwords read naturally, so the entity-vs-concept split is simpler than for Chinese: **keep Multica's core product entities in English** and translate the surrounding UI.
+
+- Keep in English (never translate): `issue`, `agent`, `skill`, `task`, `workspace`, `project`, `autopilot`, `squad`, `inbox`, `runtime`, plus all brands and acronyms from the tables above.
+- Translate fully: generic UI words (buttons, statuses, labels, hints, toasts) — e.g. `Save → Opslaan`, `Cancel → Annuleren`, `Delete → Verwijderen`, `Settings → Instellingen`, `Members → Leden`.
+- Plurals: unlike `zh-Hans` / `ko` / `ja`, Dutch has grammatical number, so the `nl` bundle keeps **both** `_one` and `_other` plural keys (mirroring EN). Do not collapse to `_other`.
+- Preserve every `{{placeholder}}`, `$t()` reference, punctuation, and inline code span verbatim.
+- Match the register of the existing `ko` / `ja` bundles: second-person informal (`je` / `jij`), concise, direct.
+
 ---
 
 ## 3. Chinese voice and style

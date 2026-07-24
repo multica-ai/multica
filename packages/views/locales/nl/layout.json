@@ -1,0 +1,63 @@
+{
+  "nav": {
+    "inbox": "Inbox",
+    "chat": "Chat",
+    "my_issues": "Mijn issues",
+    "issues": "Issues",
+    "projects": "Projects",
+    "autopilots": "Autopilot",
+    "agents": "Agents",
+    "squads": "Squads",
+    "usage": "Gebruik",
+    "runtimes": "Runtimes",
+    "skills": "Skills",
+    "settings": "Instellingen"
+  },
+  "tab": {
+    "issue": "Issue",
+    "project": "Project",
+    "autopilot": "Autopilot",
+    "agent": "Agent",
+    "member": "Lid",
+    "squad": "Squad",
+    "skill": "Skill",
+    "machine": "Machine",
+    "runtime": "Runtime",
+    "attachment": "Bijlage",
+    "create_agent": "Agent aanmaken",
+    "unknown": "Onbekende pagina"
+  },
+  "help": {
+    "trigger": "Help",
+    "docs": "Documentatie",
+    "changelog": "Wijzigingslog",
+    "discord": "Discord",
+    "feedback": "Feedback",
+    "server_version": "Serverversie {{version}}"
+  },
+  "workspace_loader": {
+    "loading_workspace": "Workspace laden…",
+    "loading_named_prefix": "Laden"
+  },
+  "sidebar": {
+    "unpin_tooltip": "Losmaken",
+    "workspaces_label": "Workspaces",
+    "create_workspace": "Workspace aanmaken",
+    "pending_invitations_label": "Openstaande uitnodigingen",
+    "invitation_workspace_fallback": "Workspace",
+    "invitation_join": "Deelnemen",
+    "invitation_decline": "Weigeren",
+    "log_out": "Uitloggen",
+    "new_issue": "Nieuwe issue",
+    "new_issue_shortcut": "C",
+    "pinned_label": "Vastgezet",
+    "workspace_group": "Workspace",
+    "configure_group": "Configureren",
+    "unread_overflow": "99+",
+    "discord_card": {
+      "title": "Word lid van onze Discord",
+      "description": "Chat met het team en andere makers.",
+      "dismiss": "Sluiten"
+    }
+  }
+}
