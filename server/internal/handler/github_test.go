@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"reflect"
 	"strings"
 	"testing"
@@ -214,6 +215,100 @@ func TestStateRoundTrip(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", "different")
 	if _, ok := verifyState(tok); ok {
 		t.Error("token signed with old secret should fail under a new one")
+	}
+}
+
+func TestStateRoundTripWithRepositoryReturnTarget(t *testing.T) {
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")
+	wsID := "11111111-2222-3333-4444-555555555555"
+
+	tok, err := signStateForReturn(wsID, githubReturnToRepositories, false)
+	if err != nil {
+		t.Fatalf("signStateForReturn: %v", err)
+	}
+	gotWorkspaceID, gotReturnTo, ok := verifyStateWithReturn(tok)
+	if !ok {
+		t.Fatal("verifyStateWithReturn rejected a freshly-signed token")
+	}
+	if gotWorkspaceID != wsID || gotReturnTo != githubReturnToRepositories {
+		t.Errorf(
+			"verifyStateWithReturn() = (%q, %q), want (%q, %q)",
+			gotWorkspaceID,
+			gotReturnTo,
+			wsID,
+			githubReturnToRepositories,
+		)
+	}
+
+	tampered := strings.Replace(tok, ".repositories.", ".github.", 1)
+	if _, _, ok := verifyStateWithReturn(tampered); ok {
+		t.Error("tampered return target should fail verification")
+	}
+}
+
+func TestGitHubConnectRepositoryReturnTarget(t *testing.T) {
+	t.Setenv("GITHUB_APP_SLUG", "multica-test")
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")
+	wsID := "11111111-2222-3333-4444-555555555555"
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/workspaces/"+wsID+"/github/connect?return_to=repositories",
+		nil,
+	)
+	req = withURLParam(req, "id", wsID)
+	rec := httptest.NewRecorder()
+	(&Handler{}).GitHubConnect(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GitHubConnect: got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var body GitHubConnectResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode connect response: %v", err)
+	}
+	installURL, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatalf("parse install URL: %v", err)
+	}
+	_, returnTo, ok := verifyStateWithReturn(installURL.Query().Get("state"))
+	if !ok || returnTo != githubReturnToRepositories {
+		t.Fatalf("signed return target = %q, valid=%v, want repositories", returnTo, ok)
+	}
+
+	badReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/workspaces/"+wsID+"/github/connect?return_to=https://evil.example",
+		nil,
+	)
+	badReq = withURLParam(badReq, "id", wsID)
+	badRec := httptest.NewRecorder()
+	(&Handler{}).GitHubConnect(badRec, badReq)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid return target: got %d, want 400", badRec.Code)
+	}
+}
+
+func TestGitHubSetupCallbackRepositoryReturnTarget(t *testing.T) {
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")
+	t.Setenv("FRONTEND_ORIGIN", "https://app.multica.test/")
+	wsID := "11111111-2222-3333-4444-555555555555"
+	state, err := signStateForReturn(wsID, githubReturnToRepositories, false)
+	if err != nil {
+		t.Fatalf("signStateForReturn: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/github/setup?installation_id=not-a-number&state="+url.QueryEscape(state),
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	(&Handler{}).GitHubSetupCallback(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("GitHubSetupCallback: got %d, want 302", rec.Code)
+	}
+	if got := rec.Header().Get("Location"); got != "https://app.multica.test/settings?tab=repositories&github_error=bad_installation_id" {
+		t.Fatalf("redirect = %q, want repository settings error", got)
 	}
 }
 
@@ -2071,6 +2166,7 @@ func TestGitHubRoutes_RoleGating(t *testing.T) {
 
 	const slug = "github-routes-role-gating"
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
+	_, _ = testPool.Exec(ctx, `DELETE FROM "user" WHERE email LIKE $1`, "github-routes-"+slug+"-%")
 
 	var wsID string
 	if err := testPool.QueryRow(ctx, `
@@ -2143,6 +2239,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
 			r.Get("/github/connect", testHandler.GitHubConnect)
+			r.Get("/github/installations/{installationId}/repositories", testHandler.ListGitHubInstallationRepositories)
 			r.Delete("/github/installations/{installationId}", testHandler.DeleteGitHubInstallation)
 		})
 	})
@@ -2184,6 +2281,16 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 		}
 		if code := exercise(t, http.MethodGet, "/api/workspaces/"+wsID+"/github/connect", outsiderUserID); code != http.StatusNotFound {
 			t.Errorf("outsider GET connect: want 404, got %d", code)
+		}
+	})
+
+	t.Run("GET repositories remains owner/admin only", func(t *testing.T) {
+		path := "/api/workspaces/" + wsID + "/github/installations/" + uuidToString(createdInst.ID) + "/repositories"
+		if code := exercise(t, http.MethodGet, path, memberUserID); code != http.StatusForbidden {
+			t.Errorf("member GET repositories: want 403, got %d", code)
+		}
+		if code := exercise(t, http.MethodGet, path, outsiderUserID); code != http.StatusNotFound {
+			t.Errorf("outsider GET repositories: want 404, got %d", code)
 		}
 	})
 
@@ -2493,6 +2600,123 @@ func TestSignGitHubAppJWT_ClaimsAndSignature(t *testing.T) {
 	}
 	if exp-iat > int64(10*time.Minute/time.Second) {
 		t.Errorf("exp-iat = %d s, exceeds GitHub's 10m max", exp-iat)
+	}
+}
+
+func TestFetchGitHubInstallationRepositories(t *testing.T) {
+	pemBytes, key := generateTestRSAKeyPEM(t)
+	t.Setenv("GITHUB_APP_ID", "424242")
+	t.Setenv("GITHUB_APP_PRIVATE_KEY", string(pemBytes))
+
+	const installationID int64 = 314159
+	var tokenRevoked bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodPost && r.URL.Path == "/app/installations/314159/access_tokens":
+			bearer := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+			if bearer == "" {
+				http.Error(w, "missing app jwt", http.StatusUnauthorized)
+				return
+			}
+			if _, err := jwt.Parse(bearer, func(token *jwt.Token) (any, error) {
+				return &key.PublicKey, nil
+			}); err != nil {
+				http.Error(w, "bad app jwt", http.StatusUnauthorized)
+				return
+			}
+			writeJSON(w, http.StatusCreated, map[string]any{"token": "installation-secret"})
+		case r.Method == http.MethodGet && r.URL.Path == "/installation/repositories":
+			if got := r.Header.Get("Authorization"); got != "Bearer installation-secret" {
+				http.Error(w, "bad installation token", http.StatusUnauthorized)
+				return
+			}
+			if r.URL.Query().Get("page") != "2" || r.URL.Query().Get("per_page") != "1" {
+				http.Error(w, "bad pagination", http.StatusBadRequest)
+				return
+			}
+			writeJSON(w, http.StatusOK, map[string]any{
+				"total_count": 3,
+				"repositories": []map[string]any{{
+					"id":             9,
+					"full_name":      "acme/private-repo",
+					"html_url":       "https://github.com/acme/private-repo",
+					"clone_url":      "https://github.com/acme/private-repo.git",
+					"description":    "Private repository",
+					"private":        true,
+					"archived":       false,
+					"default_branch": "main",
+				}},
+			})
+		case r.Method == http.MethodDelete && r.URL.Path == "/installation/token":
+			tokenRevoked = r.Header.Get("Authorization") == "Bearer installation-secret"
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	oldBase := githubAPIBase
+	githubAPIBase = srv.URL
+	t.Cleanup(func() { githubAPIBase = oldBase })
+
+	got, err := fetchGitHubInstallationRepositories(
+		context.Background(),
+		installationID,
+		2,
+		1,
+	)
+	if err != nil {
+		t.Fatalf("fetchGitHubInstallationRepositories: %v", err)
+	}
+	if len(got.Repositories) != 1 {
+		t.Fatalf("repositories = %d, want 1", len(got.Repositories))
+	}
+	repository := got.Repositories[0]
+	if repository.FullName != "acme/private-repo" || !repository.Private {
+		t.Errorf("repository = %+v, want mapped private repository", repository)
+	}
+	if got.TotalCount != 3 || got.NextPage == nil || *got.NextPage != 3 {
+		t.Errorf("pagination = total %d, next %v; want total 3, next 3", got.TotalCount, got.NextPage)
+	}
+	if !tokenRevoked {
+		t.Error("installation token was not revoked after repository listing")
+	}
+}
+
+func TestListGitHubInstallationRepositoriesRejectsCrossWorkspaceRow(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	const installationID int64 = 818181
+	row, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "cross-workspace-acct",
+		AccountType:    "Organization",
+	})
+	if err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
+	})
+
+	otherWorkspaceID := "11111111-2222-3333-4444-555555555555"
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/workspaces/"+otherWorkspaceID+"/github/installations/"+uuidToString(row.ID)+"/repositories",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	router := chi.NewRouter()
+	router.Get(
+		"/api/workspaces/{id}/github/installations/{installationId}/repositories",
+		testHandler.ListGitHubInstallationRepositories,
+	)
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("cross-workspace row: got %d (%s), want 404", rec.Code, rec.Body.String())
 	}
 }
 

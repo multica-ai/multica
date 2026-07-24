@@ -24,6 +24,44 @@ afterEach(() => {
 // app in past incidents. The contract is: a malformed response degrades to
 // an empty/safe shape, never throws into React.
 describe("ApiClient schema fallback", () => {
+  describe("GitHub repository import", () => {
+    it("falls back safely when installation or repository responses are malformed", async () => {
+      stubFetchJson({ installations: "not-an-array", configured: true });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listGitHubInstallations("ws-1")).resolves.toEqual({
+        installations: [],
+        configured: false,
+        repository_browse_configured: false,
+        can_manage: false,
+      });
+
+      stubFetchJson({ repositories: [{ id: "wrong-type" }] });
+      await expect(
+        client.listGitHubInstallationRepositories("ws-1", "installation-1"),
+      ).resolves.toEqual({
+        repositories: [],
+        total_count: 0,
+        next_page: null,
+      });
+    });
+
+    it("adds the allowlisted repository return target to the connect request", async () => {
+      stubFetchJson({
+        configured: true,
+        url: "https://github.com/apps/multica/installations/new",
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await client.getGitHubConnectURL("ws-1", "repositories");
+
+      const fetchMock = vi.mocked(fetch);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/github/connect?return_to=repositories",
+        expect.any(Object),
+      );
+    });
+  });
+
   describe("listTimeline", () => {
     it("falls back to an empty array when the body is null", async () => {
       stubFetchJson(null);

@@ -132,6 +132,8 @@ export type {
   GitHubPullRequestChecksConclusion,
   GitHubPullRequestState,
   ListGitHubInstallationsResponse,
+  GitHubRepository,
+  ListGitHubRepositoriesResponse,
   GitHubConnectResponse,
 } from "./github";
 export type {

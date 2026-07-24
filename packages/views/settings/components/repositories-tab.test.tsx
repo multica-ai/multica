@@ -7,6 +7,9 @@ import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
+const mockGetGitHubConnectURL = vi.hoisted(() => vi.fn());
+const mockFetchNextPage = vi.hoisted(() => vi.fn());
+const mockNavReplace = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const workspaceRef = vi.hoisted(() => ({
   current: {
@@ -22,10 +25,56 @@ const workspaceRef = vi.hoisted(() => ({
 const membersRef = vi.hoisted(() => ({
   current: [{ user_id: "user-1", role: "owner" as "owner" | "admin" | "member" }],
 }));
+const githubRef = vi.hoisted(() => ({
+  current: {
+    installations: [] as { id: string; account_login: string }[],
+    configured: true,
+    repository_browse_configured: true,
+    can_manage: true,
+  },
+}));
+const githubRepositoriesRef = vi.hoisted(() => ({
+  current: [] as {
+    id: number;
+    full_name: string;
+    html_url: string;
+    clone_url: string;
+    description: string | null;
+    private: boolean;
+    archived: boolean;
+    default_branch: string;
+  }[],
+}));
+const searchParamsRef = vi.hoisted(() => ({
+  current: new URLSearchParams("tab=repositories"),
+}));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: () => ({ data: membersRef.current }),
+  useQuery: (options: { queryKey: readonly unknown[] }) => {
+    if (options.queryKey.includes("installations")) {
+      return { data: githubRef.current };
+    }
+    return { data: membersRef.current };
+  },
+  useInfiniteQuery: () => ({
+    data: {
+      pages: [
+        {
+          repositories: githubRepositoriesRef.current,
+          total_count: githubRepositoriesRef.current.length,
+          next_page: null,
+        },
+      ],
+    },
+    isPending: false,
+    isError: false,
+    hasNextPage: false,
+    isFetchingNextPage: false,
+    fetchNextPage: mockFetchNextPage,
+  }),
   useQueryClient: () => ({ setQueryData: vi.fn() }),
+  queryOptions: <T,>(options: T) => options,
+  infiniteQueryOptions: <T,>(options: T) => options,
 }));
 
 vi.mock("@multica/core/hooks", () => ({
@@ -42,7 +91,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
 }));
 
 vi.mock("@multica/core/api", () => ({
-  api: { updateWorkspace: mockUpdateWorkspace },
+  api: {
+    updateWorkspace: mockUpdateWorkspace,
+    getGitHubConnectURL: mockGetGitHubConnectURL,
+  },
 }));
 
 vi.mock("@multica/core/auth", () => {
@@ -56,6 +108,17 @@ vi.mock("@multica/core/auth", () => {
 
 vi.mock("sonner", () => ({
   toast: { success: mockToastSuccess, error: vi.fn() },
+}));
+
+vi.mock("../../navigation", () => ({
+  useNavigation: () => ({
+    push: vi.fn(),
+    replace: mockNavReplace,
+    back: vi.fn(),
+    pathname: "/acme/settings",
+    searchParams: searchParamsRef.current,
+    getShareableUrl: (path: string) => `https://app.example${path}`,
+  }),
 }));
 
 import { RepositoriesTab } from "./repositories-tab";
@@ -83,6 +146,17 @@ describe("RepositoriesTab — automatic updates", () => {
       repos: [{ url: "https://github.com/multica-ai/multica" }],
     };
     membersRef.current = [{ user_id: "user-1", role: "owner" }];
+    githubRef.current = {
+      installations: [],
+      configured: true,
+      repository_browse_configured: true,
+      can_manage: true,
+    };
+    githubRepositoriesRef.current = [];
+    searchParamsRef.current = new URLSearchParams("tab=repositories");
+    mockNavReplace.mockImplementation((path: string) => {
+      searchParamsRef.current = new URLSearchParams(path.split("?")[1] ?? "");
+    });
     mockUpdateWorkspace.mockImplementation(
       async (_id: string, payload: { repos: { url: string; description?: string }[] }) => ({
         ...workspaceRef.current,
@@ -228,5 +302,132 @@ describe("RepositoriesTab — automatic updates", () => {
 
     expect(screen.getAllByRole("textbox").every((input) => input.hasAttribute("disabled"))).toBe(true);
     expect(screen.queryByRole("button", { name: /Add repository/ })).toBeNull();
+  });
+
+  it("starts GitHub connection with the signed repository return target", async () => {
+    const user = setupUser();
+    mockGetGitHubConnectURL.mockResolvedValue({
+      configured: true,
+      url: "https://github.com/apps/multica/installations/new",
+    });
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    await user.click(screen.getByRole("button", { name: "Connect GitHub" }));
+
+    await waitFor(() => {
+      expect(mockGetGitHubConnectURL).toHaveBeenCalledWith(
+        "workspace-1",
+        "repositories",
+      );
+      expect(open).toHaveBeenCalledWith(
+        "https://github.com/apps/multica/installations/new",
+        "_blank",
+        "noopener",
+      );
+    });
+    open.mockRestore();
+  });
+
+  it("keeps GitHub import disabled when repository browsing is unavailable", () => {
+    githubRef.current = {
+      installations: [],
+      configured: true,
+      repository_browse_configured: false,
+      can_manage: true,
+    };
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    const button = screen.getByRole("button", { name: "Connect GitHub" });
+    expect(
+      button.hasAttribute("disabled") ||
+        button.getAttribute("aria-disabled") === "true",
+    ).toBe(true);
+    expect(button.getAttribute("title")).toContain("GITHUB_APP_ID");
+  });
+
+  it("imports selected GitHub repositories and deduplicates HTTPS against SSH", async () => {
+    workspaceRef.current = {
+      ...workspaceRef.current,
+      repos: [{ url: "git@github.com:multica-ai/multica.git" }],
+    };
+    githubRef.current = {
+      installations: [{ id: "installation-row-1", account_login: "multica-ai" }],
+      configured: true,
+      repository_browse_configured: true,
+      can_manage: true,
+    };
+    githubRepositoriesRef.current = [
+      {
+        id: 1,
+        full_name: "multica-ai/multica",
+        html_url: "https://github.com/multica-ai/multica",
+        clone_url: "https://github.com/multica-ai/multica.git",
+        description: "Existing repository",
+        private: false,
+        archived: false,
+        default_branch: "main",
+      },
+      {
+        id: 2,
+        full_name: "multica-ai/console",
+        html_url: "https://github.com/multica-ai/console",
+        clone_url: "https://github.com/multica-ai/console.git",
+        description: "Console app",
+        private: true,
+        archived: false,
+        default_branch: "main",
+      },
+    ];
+    const user = setupUser();
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    await user.click(
+      screen.getByRole("button", { name: "Choose from GitHub" }),
+    );
+    const checkboxes = screen.getAllByRole("checkbox");
+    expect(checkboxes).toHaveLength(2);
+    expect(
+      checkboxes[0]!.hasAttribute("disabled") ||
+        checkboxes[0]!.getAttribute("aria-disabled") === "true",
+    ).toBe(true);
+
+    await user.click(checkboxes[1]!);
+    await user.click(screen.getByRole("button", { name: "Add repositories" }));
+
+    await waitFor(() => {
+      expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
+        repos: [
+          { url: "git@github.com:multica-ai/multica.git" },
+          {
+            url: "https://github.com/multica-ai/console.git",
+            description: "Console app",
+          },
+        ],
+      });
+    });
+  });
+
+  it("opens the picker after returning from a GitHub connection", async () => {
+    githubRef.current = {
+      installations: [{ id: "installation-row-1", account_login: "multica-ai" }],
+      configured: true,
+      repository_browse_configured: true,
+      can_manage: true,
+    };
+    searchParamsRef.current = new URLSearchParams(
+      "tab=repositories&github_connected=1",
+    );
+
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      await screen.findByRole("heading", {
+        name: "Choose GitHub repositories",
+      }),
+    ).toBeTruthy();
+    expect(mockNavReplace).toHaveBeenCalledWith(
+      "/acme/settings?tab=repositories",
+    );
   });
 });
