@@ -808,7 +808,8 @@
     "details_created": "Created",
     "details_started": "Started",
     "details_completed": "Completed",
-    "copy_workdir": "Copy working directory"
+    "copy_workdir": "Copy working directory",
+    "details_triggered_by": "Triggered by"
   },
   "task_failure": {
     "agent_error": "Agent execution error",

@@ -688,7 +688,8 @@
     "details_created": "作成",
     "details_started": "開始",
     "details_completed": "完了",
-    "copy_workdir": "作業ディレクトリをコピー"
+    "copy_workdir": "作業ディレクトリをコピー",
+    "details_triggered_by": "トリガー"
   },
   "task_failure": {
     "agent_error": "エージェント実行エラー",

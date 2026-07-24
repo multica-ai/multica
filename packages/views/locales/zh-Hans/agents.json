@@ -792,7 +792,8 @@
     "details_created": "创建",
     "details_started": "开始",
     "details_completed": "完成",
-    "copy_workdir": "复制工作目录"
+    "copy_workdir": "复制工作目录",
+    "details_triggered_by": "触发人"
   },
   "task_failure": {
     "agent_error": "智能体执行出错",

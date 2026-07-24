@@ -436,7 +436,6 @@ export function AgentTranscriptDialog({
         ? elapsed
         : null;
 
-  const toolCount = items.filter((i) => i.type === "tool_use").length;
   const copyTranscriptLabel = copied
     ? t(($) => $.transcript.copied)
     : activeFilterKeys.length > 0
@@ -526,7 +525,9 @@ export function AgentTranscriptDialog({
   const createdLabel = task.created_at ? formatRunTime(task.created_at) : null;
   const startedLabel = task.started_at ? formatRunTime(task.started_at) : null;
   const completedLabel = task.completed_at ? formatRunTime(task.completed_at) : null;
+  const hasTriggeredBy = !!task.attribution?.initiator;
   const hasRunDetails =
+    hasTriggeredBy ||
     !!runtimeInfo ||
     !!task.relative_work_dir ||
     !!createdLabel ||
@@ -561,13 +562,10 @@ export function AgentTranscriptDialog({
                   {agentName || agentInfo?.name || ""}
                 </span>
               </div>
+              {/* Trigger mechanism (why this run exists). The accountable
+                  human is audit metadata, not read-time context — it lives in
+                  the ⓘ popover as "triggered by", not on this row. */}
               <span className="shrink-0 text-xs text-muted-foreground">{triggerLabel}</span>
-              {/* Accountable member (MUL-4302 §9): whose behalf this run is on. */}
-              <AttributionBadge
-                attribution={task.attribution}
-                variant="inline"
-                className="min-w-0"
-              />
             </div>
 
             <div className="flex shrink-0 items-center gap-0.5">
@@ -585,6 +583,14 @@ export function AgentTranscriptDialog({
                       {t(($) => $.transcript.run_info)}
                     </div>
                     <div className="space-y-1 text-xs">
+                      {hasTriggeredBy && (
+                        <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-center gap-3">
+                          <span className="text-muted-foreground">
+                            {t(($) => $.transcript.details_triggered_by)}
+                          </span>
+                          <AttributionBadge attribution={task.attribution} variant="inline" />
+                        </div>
+                      )}
                       {runtimeInfo && (
                         <RunDetailRow label={t(($) => $.transcript.details_runtime)} value={runtimeInfo.name} />
                       )}
@@ -645,12 +651,6 @@ export function AgentTranscriptDialog({
                 ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
                 : t(($) => $.transcript.events, { count: items.length })}
             </span>
-            {toolCount > 0 && (
-              <>
-                <FactDot />
-                <span>{t(($) => $.transcript.tool_calls, { count: toolCount })}</span>
-              </>
-            )}
           </div>
           <div className="flex shrink-0 items-center gap-1">
             {items.length > 0 && (
@@ -837,44 +837,28 @@ interface SortDirectionToggleProps {
   labels: { chronological: string; newestFirst: string; ariaLabel: string };
 }
 
+// Sort is a two-state toggle, not a mode picker: one button showing the
+// current direction that flips on click. Shares the toolbar button chassis so
+// it reads as the same control family as density/filter/copy — no tab strip.
 function SortDirectionToggle({ value, onChange, labels }: SortDirectionToggleProps) {
+  const isChronological = value === "chronological";
   return (
-    <div
-      role="group"
+    <button
+      type="button"
+      onClick={() => onChange(isChronological ? "newest_first" : "chronological")}
       aria-label={labels.ariaLabel}
-      className="inline-flex shrink-0 items-center rounded border bg-muted/40 p-0.5 text-xs"
+      title={isChronological ? labels.chronological : labels.newestFirst}
+      className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
     >
-      <button
-        type="button"
-        aria-pressed={value === "chronological"}
-        title={labels.chronological}
-        onClick={() => onChange("chronological")}
-        className={cn(
-          "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
-          value === "chronological"
-            ? "bg-background text-foreground shadow-sm"
-            : "text-muted-foreground hover:text-foreground",
-        )}
-      >
+      {isChronological ? (
         <ArrowDownNarrowWide className="h-3 w-3" />
-        <span className="hidden sm:inline">{labels.chronological}</span>
-      </button>
-      <button
-        type="button"
-        aria-pressed={value === "newest_first"}
-        title={labels.newestFirst}
-        onClick={() => onChange("newest_first")}
-        className={cn(
-          "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
-          value === "newest_first"
-            ? "bg-background text-foreground shadow-sm"
-            : "text-muted-foreground hover:text-foreground",
-        )}
-      >
+      ) : (
         <ArrowUpNarrowWide className="h-3 w-3" />
-        <span className="hidden sm:inline">{labels.newestFirst}</span>
-      </button>
-    </div>
+      )}
+      <span className="hidden sm:inline">
+        {isChronological ? labels.chronological : labels.newestFirst}
+      </span>
+    </button>
   );
 }
 

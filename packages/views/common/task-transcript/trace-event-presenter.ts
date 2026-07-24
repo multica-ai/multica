@@ -121,6 +121,15 @@ function firstLine(value: string | undefined): string {
   return value?.split("\n").find((l) => l.trim().length > 0) ?? "";
 }
 
+/**
+ * Collapse all whitespace runs to single spaces. Unlike firstLine this keeps
+ * content that spans lines, so a pretty-printed JSON result previews as
+ * `[ { "id": ... } ]` instead of a lone opening bracket.
+ */
+function collapseWhitespace(value: string | undefined): string {
+  return (value ?? "").replace(/\s+/g, " ").trim();
+}
+
 /** One-line summary for the collapsed row — never contains a newline. */
 export function traceEventSummary(event: TraceEvent): string {
   switch (traceEventKind(event)) {
@@ -129,7 +138,7 @@ export function traceEventSummary(event: TraceEvent): string {
     case "tool_use":
       return traceToolArgSummary(event.input);
     case "tool_result":
-      return clip(firstLine(event.output), 200);
+      return clip(collapseWhitespace(event.output), 200);
     default:
       return firstLine(event.content ?? event.output);
   }

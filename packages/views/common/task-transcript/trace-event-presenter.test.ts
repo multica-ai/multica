@@ -55,12 +55,16 @@ describe("traceToolArgSummary", () => {
 });
 
 describe("traceEventSummary", () => {
-  it("takes the first non-empty line for agent text and tool output", () => {
+  it("takes the first non-empty line for agent text", () => {
     expect(traceEventSummary({ type: "text", content: "\n\nFirst line\nrest" })).toBe(
       "First line",
     );
-    expect(traceEventSummary({ type: "tool_result", output: "line one\nline two" })).toBe(
-      "line one",
+  });
+
+  it("collapses pretty-printed JSON output to a content preview, not a lone bracket", () => {
+    const output = '[\n  {\n    "id": "694c",\n    "title": "x"\n  }\n]';
+    expect(traceEventSummary({ type: "tool_result", output })).toBe(
+      '[ { "id": "694c", "title": "x" } ]',
     );
   });
 

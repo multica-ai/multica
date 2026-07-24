@@ -696,7 +696,8 @@
     "details_created": "생성",
     "details_started": "시작",
     "details_completed": "완료",
-    "copy_workdir": "작업 디렉터리 복사"
+    "copy_workdir": "작업 디렉터리 복사",
+    "details_triggered_by": "트리거한 사람"
   },
   "task_failure": {
     "agent_error": "에이전트 실행 오류",
