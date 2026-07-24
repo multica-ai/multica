@@ -54,3 +54,52 @@ export interface WorkpadProgress {
 export function workpadProgress(items: WorkpadItem[]): WorkpadProgress {
   return { done: items.filter((i) => i.done).length, total: items.length };
 }
+
+// A phase groups consecutive checklist steps under a markdown heading, so a long
+// plan reads as a handful of phases instead of one flat 17-step wall. `title` is
+// null for steps that appear before the first heading (an ungrouped preamble).
+export interface WorkpadPhase {
+  title: string | null;
+  items: WorkpadItem[];
+}
+
+const HEADING_LINE = /^\s{0,3}(#{1,6})\s+(.*\S?)\s*$/;
+
+// parseWorkpadPhases groups the plan's steps by the markdown headings above
+// them (FIR-3765): each `#`…`######` heading opens a new phase, and every
+// checklist line below it joins that phase until the next heading. Steps before
+// the first heading form a leading phase with `title: null`. Phases that carry
+// no checklist steps (e.g. a bare `# Plan` title line, or two headings in a row)
+// are dropped, so the result contains only phases the panel can actually show.
+// The flat step order is preserved, so `phases.flatMap(p => p.items)` equals
+// `parseWorkpadChecklist(body)`.
+export function parseWorkpadPhases(body: string | undefined | null): WorkpadPhase[] {
+  if (!body) return [];
+  const phases: WorkpadPhase[] = [];
+  let current: WorkpadPhase = { title: null, items: [] };
+  const flush = () => {
+    if (current.items.length > 0) phases.push(current);
+  };
+  for (const line of body.replace(/\r\n/g, "\n").split("\n")) {
+    const heading = HEADING_LINE.exec(line);
+    if (heading) {
+      flush();
+      current = { title: (heading[2] ?? "").trim() || "Untitled", items: [] };
+      continue;
+    }
+    const m = CHECKLIST_LINE.exec(line);
+    if (!m) continue;
+    const [, mark, text] = m;
+    if (mark === undefined || text === undefined) continue;
+    current.items.push({ done: mark.toLowerCase() === "x", text: text.trim() });
+  }
+  flush();
+  return phases;
+}
+
+// namedPhases returns only the phases that are worth offering as a filter in the
+// Workpad: those with a heading title. When fewer than two named phases exist
+// the panel renders the plan flat (no selector), matching the pre-phase view.
+export function namedPhases(phases: WorkpadPhase[]): WorkpadPhase[] {
+  return phases.filter((p) => p.title !== null);
+}
