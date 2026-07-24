@@ -132,12 +132,13 @@ export function formatTokens(n: number): string {
 //   DeepSeek:  https://api-docs.deepseek.com/quick_start/pricing
 //   Moonshot:  https://www.kimi.com/resources/kimi-k2-6-pricing
 //   Zhipu:     https://docs.z.ai/guides/overview/pricing
+//   xAI:       https://docs.x.ai/developers/pricing
 //
 // Anthropic's cacheWrite reflects the 5-minute cache TTL (1.25× input); the
 // daemon reports cache_creation_input_tokens without TTL metadata, so 5m is
 // the safest / cheapest assumption (matches the API default). DeepSeek,
-// Moonshot and Zhipu do not bill cache writes separately (cached input is
-// just discounted on subsequent reads), so cacheWrite mirrors input there.
+// Moonshot, Zhipu and xAI do not bill cache writes separately (cached input
+// is just discounted on subsequent reads), so cacheWrite mirrors input there.
 // OpenAI historically did the same, but its GPT-5.6+ generation bills cache
 // writes at 1.25× input (cache reads still get the 90% cached-input
 // discount), so those rows carry a distinct cacheWrite. Codex usage doesn't
@@ -152,7 +153,8 @@ export function formatTokens(n: number): string {
 // `server/pkg/agent/models.go` so the catalog and pricing stay in sync.
 //
 // Provider-qualified keys: a model id that is NOT vendor-prefixed
-// (`claude-*`, `gpt-*`, `o3*`/`o4*`, `glm-*`, `deepseek-*`, `kimi-*`) and is
+// (`claude-*`, `gpt-*`, `o3*`/`o4*`, `glm-*`, `deepseek-*`, `kimi-*`,
+// `grok-*`) and is
 // not the provider name itself can collide across providers — more than one
 // provider may report the same generic id like `auto`. Such generic ids MUST be keyed as
 // `${provider}/${model}` (e.g. `cursor/auto`). `resolvePricing` tries the
@@ -252,6 +254,31 @@ const MODEL_PRICING: Record<
   "glm-4.5-air":        { input: 0.2,  output: 1.1,  cacheRead: 0.03,   cacheWrite: 0.2 },
   "glm-4.5-airx":       { input: 1.1,  output: 4.5,  cacheRead: 0.22,   cacheWrite: 1.1 },
   "glm-4.5-flash":      { input: 0,    output: 0,    cacheRead: 0,      cacheWrite: 0 },
+
+  // -- xAI Grok (docs.x.ai/developers/pricing). Rates below are the
+  //    short-context tier, and are now only a FALLBACK for Grok: xAI reports
+  //    its own price per turn and `estimateCost` prefers it. That matters
+  //    because xAI bills a request at 2x once its prompt reaches 200K tokens,
+  //    and a usage row aggregates every model call in a turn — so these rates
+  //    cannot tell which tier a request hit, while xAI's own figure already
+  //    has it priced in. These rows still apply to Grok usage recorded by a
+  //    daemon too old to report cost (the same trade-off the Anthropic `[1m]`
+  //    context tag takes, see `resolvePricing`).
+  //    `cacheRead` is xAI's published "Cached" input rate; there is no
+  //    separate cache-write rate on the page (writes bill as normal input),
+  //    so cacheWrite mirrors input per the header note. Grok ids are
+  //    vendor-prefixed, so these keys stay unqualified — which is what makes
+  //    them resolve at all, since the daemon tags the rows with the runtime
+  //    provider `grok`, not `xai`.
+  //    `grok-composer-*` ships in the Grok Build catalog
+  //    (server/pkg/agent/models.go) but is absent from the price sheet; it
+  //    deliberately stays unmapped rather than inheriting a guessed rate. --
+  "grok-4.5":                     { input: 2,    output: 6,    cacheRead: 0.30, cacheWrite: 2 },
+  "grok-4.3":                     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
+  "grok-build-0.1":               { input: 1,    output: 2,    cacheRead: 0.20, cacheWrite: 1 },
+  "grok-4.20-multi-agent-0309":   { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
+  "grok-4.20-0309-reasoning":     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
+  "grok-4.20-0309-non-reasoning": { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
 
   // -- Cursor Composer / Auto (cursor.com/docs/models-and-pricing,
   //    cursor.com/docs/models/cursor-composer-2,
@@ -446,12 +473,22 @@ export function isModelPriced(model: string, provider?: string): boolean {
 // the row carries a provider, so the same bare model id reported by two
 // providers surfaces as two distinct entries the user can price separately.
 // Empty when everything's priced or there are no rows.
+// A row the provider priced in full needs no rate-table entry, so it must not
+// raise the "we can't price this model" warning — its cost is already exact,
+// and asking the user to supply a rate for it would be asking them to override
+// a real bill with a guess.
 export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
   const set = new Set<string>();
   for (const r of rows) {
-    if (r.model && !isModelPriced(r.model, r.provider)) {
-      set.add(pricingKey(r.model, r.provider));
-    }
+    if (!r.model || isModelPriced(r.model, r.provider)) continue;
+    const uncosted = uncostedTokens(r);
+    const needsEstimate =
+      uncosted.input > 0 ||
+      uncosted.output > 0 ||
+      uncosted.cacheRead > 0 ||
+      uncosted.cacheWrite > 0;
+    if (!needsEstimate && (r.cost_usd_ticks ?? 0) > 0) continue;
+    set.add(pricingKey(r.model, r.provider));
   }
   return Array.from(set).toSorted();
 }
@@ -466,18 +503,85 @@ export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
 // DashboardUsageDaily / DashboardUsageByAgent all carry it on the wire.
 type Priceable = Pick<
   RuntimeUsage,
-  "model" | "input_tokens" | "output_tokens" | "cache_read_tokens" | "cache_write_tokens"
-> & { provider?: string };
+  | "model"
+  | "input_tokens"
+  | "output_tokens"
+  | "cache_read_tokens"
+  | "cache_write_tokens"
+> & {
+  provider?: string;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
+};
 
+// Providers report cost in ticks of 1e-10 USD (xAI's unit), which keeps
+// sub-cent turn costs exact as integers all the way from the agent to here.
+const COST_USD_TICKS_PER_USD = 10_000_000_000;
+
+// The tokens in a row that still need pricing from the table above, i.e. the
+// ones no provider priced for us.
+//
+// A backend older than the cost split sends no `uncosted_*` at all. Treating
+// that as "0 tokens left to estimate" would report $0 for every row, so
+// `undefined` falls back to the full token counts — exactly the pre-split
+// behaviour. The one exception is a row that DOES carry an authoritative cost
+// without the split: adding a full-token estimate on top would double-charge
+// it, so the authoritative figure stands alone. A current backend always sends
+// both, so this only guards against version drift.
+function uncostedTokens(usage: Priceable): {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+} {
+  if (usage.uncosted_input_tokens === undefined) {
+    if ((usage.cost_usd_ticks ?? 0) > 0) {
+      return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    }
+    return {
+      input: usage.input_tokens,
+      output: usage.output_tokens,
+      cacheRead: usage.cache_read_tokens,
+      cacheWrite: usage.cache_write_tokens,
+    };
+  }
+  return {
+    input: usage.uncosted_input_tokens,
+    output: usage.uncosted_output_tokens ?? 0,
+    cacheRead: usage.uncosted_cache_read_tokens ?? 0,
+    cacheWrite: usage.uncosted_cache_write_tokens ?? 0,
+  };
+}
+
+// Cost of a usage row: what the provider actually charged, plus a rate-table
+// estimate for whatever it didn't charge for.
+//
+// The rate table cannot express request-level pricing rules — xAI bills a Grok
+// request at 2x once its prompt reaches 200K tokens, and these rows aggregate
+// every model call in a turn, so the token counts genuinely cannot say which
+// tier a given request hit. Where the provider tells us its own price, that
+// number is the bill and no estimate can improve on it.
+//
+// Both halves are summed rather than one winning outright because a single row
+// can aggregate both kinds of source row (two providers in a bucket, or Grok
+// either side of a CLI upgrade). Custom pricing overrides still apply — but
+// only to the estimated half, since they are a user's guess at a rate and the
+// authoritative half is not a guess.
 export function estimateCost(usage: Priceable): number {
+  const authoritative = (usage.cost_usd_ticks ?? 0) / COST_USD_TICKS_PER_USD;
   const pricing = resolvePricing(usage.model, usage.provider);
-  if (!pricing) return 0;
+  if (!pricing) return authoritative;
+  const uncosted = uncostedTokens(usage);
   return (
-    (usage.input_tokens * pricing.input +
-      usage.output_tokens * pricing.output +
-      usage.cache_read_tokens * pricing.cacheRead +
-      usage.cache_write_tokens * pricing.cacheWrite) /
-    1_000_000
+    authoritative +
+    (uncosted.input * pricing.input +
+      uncosted.output * pricing.output +
+      uncosted.cacheRead * pricing.cacheRead +
+      uncosted.cacheWrite * pricing.cacheWrite) /
+      1_000_000
   );
 }
 
@@ -488,16 +592,59 @@ export interface CostBreakdown {
   cacheWrite: number;
 }
 
+// Per-token-type split of `estimateCost`. The estimated half splits naturally;
+// the authoritative half arrives as one number per row, so it is distributed
+// across the buckets in the same proportions the rate table would have charged.
+// Only the total is authoritative — the split is presentation, and doing it
+// this way keeps the stacked chart summing to the headline figure instead of
+// silently under-drawing every Grok row.
 export function estimateCostBreakdown(usage: Priceable): CostBreakdown {
   const pricing = resolvePricing(usage.model, usage.provider);
   if (!pricing) {
-    return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    // No rates to split by, but the provider may still have priced the turn
+    // itself. Returning zeros here would make the stacked chart disagree with
+    // the headline `estimateCost` on exactly the rows whose cost is EXACT, so
+    // the charge lands whole in one bucket instead.
+    return {
+      input: (usage.cost_usd_ticks ?? 0) / COST_USD_TICKS_PER_USD,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    };
   }
+  const uncosted = uncostedTokens(usage);
+  const breakdown: CostBreakdown = {
+    input: (uncosted.input * pricing.input) / 1_000_000,
+    output: (uncosted.output * pricing.output) / 1_000_000,
+    cacheRead: (uncosted.cacheRead * pricing.cacheRead) / 1_000_000,
+    cacheWrite: (uncosted.cacheWrite * pricing.cacheWrite) / 1_000_000,
+  };
+
+  const authoritative = (usage.cost_usd_ticks ?? 0) / COST_USD_TICKS_PER_USD;
+  if (authoritative <= 0) return breakdown;
+
+  // Shape the authoritative charge like the rate table would have priced the
+  // tokens it covers — the row's full tokens minus the estimated ones.
+  const shape = {
+    input: ((usage.input_tokens - uncosted.input) * pricing.input) / 1_000_000,
+    output: ((usage.output_tokens - uncosted.output) * pricing.output) / 1_000_000,
+    cacheRead:
+      ((usage.cache_read_tokens - uncosted.cacheRead) * pricing.cacheRead) / 1_000_000,
+    cacheWrite:
+      ((usage.cache_write_tokens - uncosted.cacheWrite) * pricing.cacheWrite) / 1_000_000,
+  };
+  const shapeTotal = shape.input + shape.output + shape.cacheRead + shape.cacheWrite;
+  if (shapeTotal <= 0) {
+    // Nothing to shape it with (unpriced tokens, or a row carrying cost but no
+    // tokens). Keep the money in the total rather than dropping it.
+    return { ...breakdown, input: breakdown.input + authoritative };
+  }
+  const scale = authoritative / shapeTotal;
   return {
-    input: (usage.input_tokens * pricing.input) / 1_000_000,
-    output: (usage.output_tokens * pricing.output) / 1_000_000,
-    cacheRead: (usage.cache_read_tokens * pricing.cacheRead) / 1_000_000,
-    cacheWrite: (usage.cache_write_tokens * pricing.cacheWrite) / 1_000_000,
+    input: breakdown.input + shape.input * scale,
+    output: breakdown.output + shape.output * scale,
+    cacheRead: breakdown.cacheRead + shape.cacheRead * scale,
+    cacheWrite: breakdown.cacheWrite + shape.cacheWrite * scale,
   };
 }
 

@@ -153,7 +153,7 @@
     "section_profile": "资料",
     "section_profile_hint": "管理该智能体在工作区内的展示方式。",
     "section_execution": "执行配置",
-    "section_execution_hint": "选择运行时、模型、思考强度和并行任务上限。",
+    "section_execution_hint": "选择运行时、模型、思考强度、速度和并行任务上限。",
     "section_access": "访问权限",
     "section_access_hint": "控制谁可以运行该智能体并使用它已连接的能力。",
     "section_properties": "属性",
@@ -164,6 +164,7 @@
     "prop_runtime": "运行时",
     "prop_model": "模型",
     "prop_thinking": "思考",
+    "prop_speed": "速度",
     "prop_visibility": "可见性",
     "prop_concurrency": "并发",
     "prop_owner": "所有者",
@@ -222,7 +223,11 @@
     "thinking_default": "跟随 CLI 配置",
     "thinking_tooltip": "思考 · {{value}}",
     "thinking_clear": "跟随 CLI 配置",
-    "thinking_clear_title": "清除覆盖，让本地 CLI（claude/codex）的配置决定推理级别"
+    "thinking_clear_title": "清除覆盖，让本地 CLI（claude/codex）的配置决定推理级别",
+    "service_tier_default": "运行时默认",
+    "service_tier_tooltip": "速度 · {{value}}",
+    "service_tier_clear": "运行时默认",
+    "service_tier_clear_title": "清除速度覆盖，交由本地 Codex 配置决定"
   },
   "model_dropdown": {
     "label": "模型",
@@ -328,6 +333,9 @@
       "start_failed": "无法启动 Agent Builder。",
       "send_failed": "无法发送消息。",
       "stop_failed": "无法停止当前生成任务。",
+      "switch_runtime_failed": "切换运行时失败，对话仍在原来的运行时上执行。",
+      "switch_runtime_pending": "停止当前回复后即可切换运行时。",
+      "switch_runtime_success": "已切换运行时。配置草稿保留，后续对话将在新运行时上重新开始一段模型会话。",
       "chat_title": "Agent Builder",
       "chat_hint": "通过对话梳理需求，并持续完善右侧配置。",
       "runtime_online": "运行时在线",
@@ -348,6 +356,7 @@
     "create_and_add": "创建并加入小队",
     "creating": "正在创建…",
     "create_failed": "无法创建智能体。",
+    "name_conflict": "工作区中已存在同名智能体。",
     "created": "已创建 {{name}}"
   },
   "create_dialog": {

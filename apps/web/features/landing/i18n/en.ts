@@ -294,6 +294,58 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.9",
+        date: "2026-07-23",
+        title: "Richer sub-issues, Codex Fast mode, and a smoother UI",
+        changes: [],
+        features: [
+          "Codex agents can now run in a faster mode.",
+          "Sub-issues now show priority, labels, progress, and due dates at a glance.",
+          "You can now choose which details show on each sub-issue.",
+          "Your Inbox now shows which agents are working, right in the list.",
+        ],
+        improvements: [
+          "Grouping and filters now behave the same across List, Board, and Swimlane views.",
+          "The chat box now grows with the window so you can see more of a long draft.",
+          "Getting started now takes fewer steps.",
+          "Grok cost now comes from what xAI actually charged for each turn, including long-context requests, and your saved custom prices stay editable.",
+          "Animations across the app are now smoother.",
+        ],
+        fixes: [
+          "In the desktop app, app links now open in a tab instead of a browser window.",
+          "Your options on a new-issue draft are no longer lost.",
+          "Switching runtime while building an agent now takes effect right away.",
+          "Setup no longer flashes 'no runtime found' while it is still checking.",
+          "Codex agents now recover cleanly when a session fails to start.",
+        ],
+      },
+      {
+        version: "0.4.8",
+        date: "2026-07-22",
+        title: "Per-agent skill controls, sharper desktop tabs, and steadier tasks",
+        changes: [],
+        features: [
+          "You can now turn individual skills on or off for each agent.",
+          "Desktop tabs now show the right icon and title for whatever you opened.",
+          "You can now add sub-issues right inside the table view.",
+        ],
+        improvements: [
+          "New agents now get a colorful emoji avatar automatically.",
+          "Grouped issue tables now load faster and stay consistent.",
+        ],
+        fixes: [
+          "Importing skills from large repositories no longer times out.",
+          "Codex tasks no longer stall on their first turn.",
+          "Tasks now resume where they left off after you switch accounts, instead of failing.",
+          "Editing a cell in the issue table no longer closes on its own, and clicking a title opens the issue.",
+          "Sub-issue lists now stay up to date when you open an issue.",
+          "Grok agents now report their token usage accurately.",
+          "Qwen agents can now run shell commands and edit files during tasks.",
+          "The chat editor's format menu is back, so you can clear formatting again.",
+          "On mobile, the My Issues list no longer gets stuck refreshing.",
+        ],
+      },
+      {
         version: "0.4.7",
         date: "2026-07-21",
         title: "Qwen Code runtime, live chat diagrams, and Windows agent fixes",

@@ -232,6 +232,46 @@ func (q *Queries) ListProjects(ctx context.Context, arg ListProjectsParams) ([]P
 	return items, nil
 }
 
+const lockProjectForChatSessionCreate = `-- name: LockProjectForChatSessionCreate :one
+SELECT id FROM project
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE
+`
+
+type LockProjectForChatSessionCreateParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Conflicts with project deletion so a chat session cannot commit a soft
+// project reference after the delete transaction has swept existing sessions.
+func (q *Queries) LockProjectForChatSessionCreate(ctx context.Context, arg LockProjectForChatSessionCreateParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockProjectForChatSessionCreate, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockProjectForDelete = `-- name: LockProjectForDelete :one
+SELECT id FROM project
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockProjectForDeleteParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Serializes project deletion with chat-session creation. The handler locks,
+// clears every soft chat reference, and deletes the project in one transaction.
+func (q *Queries) LockProjectForDelete(ctx context.Context, arg LockProjectForDeleteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockProjectForDelete, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const updateProject = `-- name: UpdateProject :one
 UPDATE project SET
     title = COALESCE($2, title),

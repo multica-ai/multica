@@ -63,7 +63,17 @@ type DashboardUsageDailyResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	// Cost split: `CostUSDTicks` is what the provider itself charged for the
+	// rows behind this aggregate (1e-10 USD), and the `Uncosted*` token
+	// counts are the tokens from rows the provider did NOT price. The client
+	// reports authoritative + estimate(uncosted), so a window mixing both
+	// kinds of row stays whole. See migration 213.
+	CostUSDTicks             int64 `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64 `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64 `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64 `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64 `json:"uncosted_cache_write_tokens"`
+	TaskCount                int32 `json:"task_count"`
 }
 
 // GetDashboardUsageDaily returns per-(date, model) token rows for the
@@ -108,14 +118,19 @@ func (h *Handler) listDashboardUsageDaily(
 	resp := make([]DashboardUsageDailyResponse, len(rows))
 	for i, row := range rows {
 		resp[i] = DashboardUsageDailyResponse{
-			Date:             row.Date.Time.Format("2006-01-02"),
-			Provider:         row.Provider,
-			Model:            row.Model,
-			InputTokens:      row.InputTokens,
-			OutputTokens:     row.OutputTokens,
-			CacheReadTokens:  row.CacheReadTokens,
-			CacheWriteTokens: row.CacheWriteTokens,
-			TaskCount:        row.TaskCount,
+			Date:                     row.Date.Time.Format("2006-01-02"),
+			Provider:                 row.Provider,
+			Model:                    row.Model,
+			InputTokens:              row.InputTokens,
+			OutputTokens:             row.OutputTokens,
+			CacheReadTokens:          row.CacheReadTokens,
+			CacheWriteTokens:         row.CacheWriteTokens,
+			CostUSDTicks:             row.CostUsdTicks,
+			UncostedInputTokens:      row.UncostedInputTokens,
+			UncostedOutputTokens:     row.UncostedOutputTokens,
+			UncostedCacheReadTokens:  row.UncostedCacheReadTokens,
+			UncostedCacheWriteTokens: row.UncostedCacheWriteTokens,
+			TaskCount:                row.TaskCount,
 		}
 	}
 	return resp, nil
@@ -132,7 +147,17 @@ type DashboardUsageByAgentResponse struct {
 	OutputTokens     int64  `json:"output_tokens"`
 	CacheReadTokens  int64  `json:"cache_read_tokens"`
 	CacheWriteTokens int64  `json:"cache_write_tokens"`
-	TaskCount        int32  `json:"task_count"`
+	// Cost split: `CostUSDTicks` is what the provider itself charged for the
+	// rows behind this aggregate (1e-10 USD), and the `Uncosted*` token
+	// counts are the tokens from rows the provider did NOT price. The client
+	// reports authoritative + estimate(uncosted), so a window mixing both
+	// kinds of row stays whole. See migration 213.
+	CostUSDTicks             int64 `json:"cost_usd_ticks"`
+	UncostedInputTokens      int64 `json:"uncosted_input_tokens"`
+	UncostedOutputTokens     int64 `json:"uncosted_output_tokens"`
+	UncostedCacheReadTokens  int64 `json:"uncosted_cache_read_tokens"`
+	UncostedCacheWriteTokens int64 `json:"uncosted_cache_write_tokens"`
+	TaskCount                int32 `json:"task_count"`
 }
 
 // GetDashboardUsageByAgent returns per-(agent, model) token aggregates
@@ -177,14 +202,19 @@ func (h *Handler) listDashboardUsageByAgent(
 	resp := make([]DashboardUsageByAgentResponse, len(rows))
 	for i, row := range rows {
 		resp[i] = DashboardUsageByAgentResponse{
-			AgentID:          uuidToString(row.AgentID),
-			Provider:         row.Provider,
-			Model:            row.Model,
-			InputTokens:      row.InputTokens,
-			OutputTokens:     row.OutputTokens,
-			CacheReadTokens:  row.CacheReadTokens,
-			CacheWriteTokens: row.CacheWriteTokens,
-			TaskCount:        row.TaskCount,
+			AgentID:                  uuidToString(row.AgentID),
+			Provider:                 row.Provider,
+			Model:                    row.Model,
+			InputTokens:              row.InputTokens,
+			OutputTokens:             row.OutputTokens,
+			CacheReadTokens:          row.CacheReadTokens,
+			CacheWriteTokens:         row.CacheWriteTokens,
+			CostUSDTicks:             row.CostUsdTicks,
+			UncostedInputTokens:      row.UncostedInputTokens,
+			UncostedOutputTokens:     row.UncostedOutputTokens,
+			UncostedCacheReadTokens:  row.UncostedCacheReadTokens,
+			UncostedCacheWriteTokens: row.UncostedCacheWriteTokens,
+			TaskCount:                row.TaskCount,
 		}
 	}
 	return resp, nil

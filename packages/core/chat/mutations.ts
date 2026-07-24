@@ -101,8 +101,12 @@ export function useCreateChatSession() {
   const wsId = useWorkspaceId();
 
   return useMutation({
-    mutationFn: (data: { agent_id: string; title?: string }) => {
-      logger.info("createChatSession.start", { agent_id: data.agent_id, titleLength: data.title?.length ?? 0 });
+    mutationFn: (data: { agent_id: string; title?: string; project_id?: string | null }) => {
+      logger.info("createChatSession.start", {
+        agent_id: data.agent_id,
+        project_id: data.project_id,
+        titleLength: data.title?.length ?? 0,
+      });
       return api.createChatSession(data);
     },
     onSuccess: (session) => {
@@ -184,6 +188,45 @@ export function useUpdateChatSession() {
     },
     onError: (err, vars, ctx) => {
       logger.error("updateChatSession.error.rollback", { sessionId: vars.sessionId, err });
+      if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: chatKeys.sessions(wsId) });
+    },
+  });
+}
+
+/**
+ * Changes the project context of an existing chat without replacing the
+ * session. The optimistic patch keeps the context chip in place while the
+ * server validates the soft project reference; failures restore the old row.
+ */
+export function useSetChatSessionProject() {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+
+  return useMutation({
+    mutationFn: (data: { sessionId: string; projectId: string | null }) => {
+      logger.info("setChatSessionProject.start", data);
+      return api.updateChatSession(data.sessionId, { project_id: data.projectId });
+    },
+    onMutate: async ({ sessionId, projectId }) => {
+      await qc.cancelQueries({ queryKey: chatKeys.sessions(wsId) });
+
+      const prevSessions = qc.getQueryData<ChatSession[]>(chatKeys.sessions(wsId));
+      const patch = (old?: ChatSession[]) =>
+        old?.map((session) =>
+          session.id === sessionId ? { ...session, project_id: projectId } : session,
+        );
+      qc.setQueryData<ChatSession[]>(chatKeys.sessions(wsId), patch);
+
+      return { prevSessions };
+    },
+    onError: (err, vars, ctx) => {
+      logger.error("setChatSessionProject.error.rollback", {
+        sessionId: vars.sessionId,
+        err,
+      });
       if (ctx?.prevSessions) qc.setQueryData(chatKeys.sessions(wsId), ctx.prevSessions);
     },
     onSettled: () => {

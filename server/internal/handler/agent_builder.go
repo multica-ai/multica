@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -73,28 +74,8 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
-	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	runtime, ok := h.resolveBuilderRuntime(w, r, workspaceID, workspaceUUID, runtimeID, "start")
 	if !ok {
-		return
-	}
-	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-		ID:          runtimeUUID,
-		WorkspaceID: workspaceUUID,
-	})
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid runtime_id")
-		return
-	}
-	member, ok := h.workspaceMember(w, r, workspaceID)
-	if !ok {
-		return
-	}
-	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can use it")
-		return
-	}
-	if runtime.Status != "online" {
-		writeError(w, http.StatusConflict, "runtime must be online to start an agent builder session")
 		return
 	}
 
@@ -159,4 +140,176 @@ func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Reque
 		BuilderAgentID: uuidToString(builder.ID),
 		RuntimeID:      runtimeID,
 	})
+}
+
+// resolveBuilderRuntime loads a runtime the caller is allowed to execute a
+// builder conversation on. Shared by session create and runtime switch so both
+// enforce the same three gates in the same order: it exists in this workspace,
+// this member may use it (private runtimes stay owner/admin-only), and it is
+// online. verb names the attempted action in the offline error so the two call
+// sites read naturally.
+func (h *Handler) resolveBuilderRuntime(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID pgtype.UUID, runtimeID, verb string) (db.AgentRuntime, bool) {
+	runtimeUUID, ok := parseUUIDOrBadRequest(w, runtimeID, "runtime_id")
+	if !ok {
+		return db.AgentRuntime{}, false
+	}
+	runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+		ID:          runtimeUUID,
+		WorkspaceID: workspaceUUID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return db.AgentRuntime{}, false
+	}
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return db.AgentRuntime{}, false
+	}
+	if !canUseRuntimeForAgent(member, runtime) {
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can use it")
+		return db.AgentRuntime{}, false
+	}
+	if runtime.Status != "online" {
+		writeError(w, http.StatusConflict, fmt.Sprintf("runtime must be online to %s an agent builder session", verb))
+		return db.AgentRuntime{}, false
+	}
+	return runtime, true
+}
+
+type SwitchAgentBuilderRuntimeRequest struct {
+	RuntimeID string `json:"runtime_id"`
+}
+
+type SwitchAgentBuilderRuntimeResponse struct {
+	RuntimeID string `json:"runtime_id"`
+}
+
+// SwitchAgentBuilderRuntime re-points a live builder conversation at another
+// runtime. The live-draft runtime picker used to mutate React state only, so the
+// UI could show runtime B while every subsequent message still enqueued against
+// the carrier agent frozen to runtime A at session create time (MUL-5163).
+//
+// The rebind runs under LockChatSessionForRuntimeBind, the same row lock
+// SendDirectChatMessage takes, so "no reply is in flight" and "the carrier now
+// points at B" are decided in one serialised step. Without that lock a send that
+// had already read runtime A could still land its task after this handler
+// returned success — reproducing the exact inconsistency this endpoint exists to
+// remove.
+//
+// chat_session.runtime_id is deliberately left pointing at the old runtime: the
+// daemon only resumes a stored provider session when that pointer matches the
+// claiming task's runtime, so leaving it stale is what makes B start a fresh
+// provider session instead of resuming A's. Multica-side chat history and the
+// draft are untouched.
+func (h *Handler) SwitchAgentBuilderRuntime(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+
+	var req SwitchAgentBuilderRuntimeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	runtimeID := strings.TrimSpace(req.RuntimeID)
+	if runtimeID == "" {
+		writeError(w, http.StatusBadRequest, "runtime_id is required")
+		return
+	}
+
+	// Creator-only, like every other write on a chat session.
+	session, ok := h.loadChatSessionForUser(w, r, userID, workspaceID, chi.URLParam(r, "sessionId"))
+	if !ok {
+		return
+	}
+	if session.Status != "active" {
+		writeError(w, http.StatusBadRequest, "chat session is archived")
+		return
+	}
+
+	// Only builder carriers may be rebound. A user-authored agent changes runtime
+	// through the agent update path, which has its own permission model — this
+	// endpoint must not become a second, weaker way in.
+	agent, err := h.Queries.GetAgent(r.Context(), session.AgentID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load chat agent")
+		return
+	}
+	if !isAgentBuilderCarrier(agent) {
+		writeError(w, http.StatusNotFound, "agent builder session not found")
+		return
+	}
+
+	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
+	if !ok {
+		return
+	}
+	runtime, ok := h.resolveBuilderRuntime(w, r, workspaceID, workspaceUUID, runtimeID, "switch")
+	if !ok {
+		return
+	}
+
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to switch agent builder runtime")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if _, err := qtx.LockChatSessionForRuntimeBind(r.Context(), session.ID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "chat session not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to lock chat session")
+		return
+	}
+
+	// Checked under the lock, so a send cannot slip in behind it. A task that is
+	// still queued on an offline runtime also counts as pending — the client is
+	// expected to stop it first, which restores the message to the composer.
+	if _, err := qtx.GetPendingChatTask(r.Context(), session.ID); err == nil {
+		writeError(w, http.StatusConflict, "stop the current reply before switching runtime")
+		return
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusInternalServerError, "failed to check pending builder task")
+		return
+	}
+
+	// Model ids are per-runtime, so the carrier's model is cleared rather than
+	// carried over; the new runtime resolves its own default.
+	updated, err := qtx.RebindAgentBuilderRuntime(r.Context(), db.RebindAgentBuilderRuntimeParams{
+		ID:          agent.ID,
+		RuntimeID:   runtime.ID,
+		RuntimeMode: runtime.RuntimeMode,
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "agent builder session not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "failed to switch agent builder runtime")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to commit agent builder runtime switch")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, SwitchAgentBuilderRuntimeResponse{
+		RuntimeID: uuidToString(updated.RuntimeID),
+	})
+}
+
+// isAgentBuilderCarrier reports whether an agent is a hidden builder execution
+// carrier. Mirrors the kind/system_key guard the builder SQL statements carry, so
+// the handler rejects a non-builder session before reaching the database rather
+// than relying on an UPDATE matching zero rows.
+func isAgentBuilderCarrier(agent db.Agent) bool {
+	return agent.Kind == "system" &&
+		agent.SystemKey.Valid &&
+		strings.HasPrefix(agent.SystemKey.String, "agent_builder:")
 }

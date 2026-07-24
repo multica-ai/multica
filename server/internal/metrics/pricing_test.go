@@ -94,3 +94,105 @@ func TestPriceForModelAliasCodexGPT56(t *testing.T) {
 		}
 	}
 }
+
+// TestPriceForModelAliasGrok pins the xAI catalog to the published rates
+// (docs.x.ai/developers/pricing). Before these rows existed every Grok token
+// took the unpriced branch in RecordLLMUsage, so llm_cost_usd reported zero
+// Grok spend while the tokens piled up in llm_unpriced_tokens.
+func TestPriceForModelAliasGrok(t *testing.T) {
+	cases := []struct {
+		model string
+		want  ModelPrice
+	}{
+		{
+			model: "grok-4.5",
+			want:  ModelPrice{Provider: "xai", Model: "grok-4.5", InputPerM: 2, CacheReadPerM: 0.3, CacheWritePerM: 2, OutputPerM: 6},
+		},
+		{
+			model: "xai:grok-4.5",
+			want:  ModelPrice{Provider: "xai", Model: "grok-4.5", InputPerM: 2, CacheReadPerM: 0.3, CacheWritePerM: 2, OutputPerM: 6},
+		},
+		{
+			model: "xai/grok-4.5",
+			want:  ModelPrice{Provider: "xai", Model: "grok-4.5", InputPerM: 2, CacheReadPerM: 0.3, CacheWritePerM: 2, OutputPerM: 6},
+		},
+		{
+			model: "grok-4.3",
+			want:  ModelPrice{Provider: "xai", Model: "grok-4.3", InputPerM: 1.25, CacheReadPerM: 0.2, CacheWritePerM: 1.25, OutputPerM: 2.5},
+		},
+		{
+			model: "grok-build-0.1",
+			want:  ModelPrice{Provider: "xai", Model: "grok-build-0.1", InputPerM: 1, CacheReadPerM: 0.2, CacheWritePerM: 1, OutputPerM: 2},
+		},
+		{
+			model: "grok-4.20-multi-agent-0309",
+			want:  ModelPrice{Provider: "xai", Model: "grok-4.20-multi-agent-0309", InputPerM: 1.25, CacheReadPerM: 0.2, CacheWritePerM: 1.25, OutputPerM: 2.5},
+		},
+		{
+			model: "grok-4.20-0309-reasoning",
+			want:  ModelPrice{Provider: "xai", Model: "grok-4.20-0309-reasoning", InputPerM: 1.25, CacheReadPerM: 0.2, CacheWritePerM: 1.25, OutputPerM: 2.5},
+		},
+		{
+			model: "grok-4.20-0309-non-reasoning",
+			want:  ModelPrice{Provider: "xai", Model: "grok-4.20-0309-non-reasoning", InputPerM: 1.25, CacheReadPerM: 0.2, CacheWritePerM: 1.25, OutputPerM: 2.5},
+		},
+	}
+
+	for _, tc := range cases {
+		got, ok := PriceForModelAlias(tc.model)
+		if !ok {
+			t.Fatalf("PriceForModelAlias(%q) did not resolve", tc.model)
+		}
+		if got != tc.want {
+			t.Fatalf("PriceForModelAlias(%q) = %+v, want %+v", tc.model, got, tc.want)
+		}
+	}
+
+	// `grok-composer-*` ships in the Grok Build catalog but xAI publishes no
+	// rate for it, so it must stay unmapped rather than inherit grok-4.5's.
+	// Suffixed and dash-spelled variants must miss for the same reason the
+	// gpt-5.6 rows do: the frontend resolver is an exact match that does not
+	// dash-normalize non-Anthropic ids, so both sides agree on "unmapped".
+	for _, model := range []string{
+		"grok-composer-2.5-fast",
+		"grok-composer-2.5",
+		"grok-4.5-fast",
+		"grok-4-5",
+		"grok-4.20-0309",
+		"grok",
+		"unknown",
+	} {
+		if got, ok := PriceForModelAlias(model); ok {
+			t.Fatalf("PriceForModelAlias(%q) unexpectedly resolved to %+v; want unmapped", model, got)
+		}
+	}
+}
+
+// TestGrokPricingMatchesRecordedTurn re-derives the cost of a real
+// grok 0.2.106 turn from the table and checks it against the costUsdTicks xAI
+// returned for that same turn (1 tick = 1e-10 USD). This is the end-to-end
+// proof that both the rates and the cached-input bucketing are right.
+func TestGrokPricingMatchesRecordedTurn(t *testing.T) {
+	// Captured payload: inputTokens 12929, cachedReadTokens 10880,
+	// outputTokens 29, totalTokens 12958, costUsdTicks 75360000. Grok counts
+	// the cached prefix inside inputTokens, so the uncached remainder is
+	// 12929 - 10880 = 2049 (see excludeACPCachedInput in pkg/agent/hermes.go).
+	const (
+		uncachedInput = int64(2049)
+		cacheRead     = int64(10880)
+		output        = int64(29)
+		wantUSD       = 75360000 / 1e10
+	)
+
+	price, ok := PriceForModelAlias("grok-4.5")
+	if !ok {
+		t.Fatal("grok-4.5 did not resolve")
+	}
+	got := tokenCostUSD(uncachedInput, price.InputPerM) +
+		tokenCostUSD(cacheRead, price.CacheReadPerM) +
+		tokenCostUSD(output, price.OutputPerM)
+
+	if diff := got - wantUSD; diff > 1e-12 || diff < -1e-12 {
+		t.Fatalf("recomputed cost = %.10f, want %.10f (xAI costUsdTicks)", got, wantUSD)
+	}
+}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowLeft,
@@ -13,7 +14,7 @@ import {
   Search,
 } from "lucide-react";
 import { toast } from "sonner";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import {
   agentTemplateDetailOptions,
@@ -50,6 +51,10 @@ import { Button } from "@multica/ui/components/ui/button";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
+import {
+  UI_EASE_OUT,
+  UI_MOTION_DURATION,
+} from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { useAppForeground } from "../../common/use-app-foreground";
@@ -71,7 +76,23 @@ import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { SkillMultiSelect } from "./skill-multi-select";
 
 type StudioMode = "choose" | "templates" | "blank" | "template" | "ai";
+type StudioScreenKey =
+  | "choose"
+  | "templates"
+  | "configure"
+  | "ai-setup"
+  | "ai-builder";
+type TransitionDirection = 1 | -1;
 type PermissionScope = "private" | "workspace" | "members";
+
+export function getAgentCreationScreenKey(
+  mode: StudioMode,
+  builderSessionId: string,
+): StudioScreenKey {
+  if (mode === "blank" || mode === "template") return "configure";
+  if (mode === "ai") return builderSessionId ? "ai-builder" : "ai-setup";
+  return mode;
+}
 
 export interface AgentDraft {
   name: string;
@@ -95,6 +116,23 @@ export interface BuilderDraftPayload {
   skill_ids?: unknown;
   permission_scope?: unknown;
   member_ids?: unknown;
+}
+
+export interface AgentCreateErrors {
+  nameError: string | null;
+  formError: string | null;
+}
+
+export function classifyAgentCreateError(
+  error: unknown,
+  fallbackMessage: string,
+  conflictMessage: string,
+): AgentCreateErrors {
+  const message =
+    error instanceof Error && error.message ? error.message : fallbackMessage;
+  return error instanceof ApiError && error.status === 409
+    ? { nameError: conflictMessage, formError: null }
+    : { nameError: null, formError: message };
 }
 
 const BUILDER_INPUT_PREFIX = "MULTICA_AGENT_BUILDER_INPUT\n";
@@ -121,6 +159,7 @@ export function AgentCreationStudio() {
   const currentUser = useAuthStore((state) => state.user);
   const duplicateId = navigation.searchParams.get("duplicate");
   const squadId = navigation.searchParams.get("squad");
+  const shouldReduceMotion = useReducedMotion() ?? false;
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
@@ -136,15 +175,19 @@ export function AgentCreationStudio() {
     ? agents.find((agent) => agent.id === duplicateId) ?? null
     : null;
   const [mode, setMode] = useState<StudioMode>(duplicateId ? "blank" : "choose");
+  const [transitionDirection, setTransitionDirection] =
+    useState<TransitionDirection>(1);
   const [draft, setDraft] = useState<AgentDraft>(EMPTY_DRAFT);
   const [sourceTemplate, setSourceTemplate] = useState<AgentTemplateSummary | null>(null);
   const [selectedTemplate, setSelectedTemplate] = useState<AgentTemplateSummary | null>(null);
   const [templateSearch, setTemplateSearch] = useState("");
   const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<string | null>(null);
+  const [formError, setFormError] = useState<string | null>(null);
   const [builderSessionId, setBuilderSessionId] = useState("");
   const [builderStarting, setBuilderStarting] = useState(false);
   const [builderClosing, setBuilderClosing] = useState(false);
+  const [builderSwitchingRuntime, setBuilderSwitchingRuntime] = useState(false);
   const [builderError, setBuilderError] = useState<string | null>(null);
   const [builderRestoreDraft, setBuilderRestoreDraft] = useState<{
     id: string;
@@ -388,10 +431,13 @@ export function AgentCreationStudio() {
           : t(($) => $.creation_studio.step_configure);
 
   const resetCreationMode = () => {
+    setTransitionDirection(-1);
     setMode("choose");
     setSelectedTemplate(null);
     setSourceTemplate(null);
     setBuilderSessionId("");
+    setNameError(null);
+    setFormError(null);
   };
 
   const deleteBuilderSession = async () => {
@@ -403,7 +449,6 @@ export function AgentCreationStudio() {
       qc.removeQueries({ queryKey: chatKeys.messages(builderSessionId) });
       qc.removeQueries({ queryKey: chatKeys.pendingTask(builderSessionId) });
       builderSessionIdRef.current = "";
-      setBuilderSessionId("");
       return true;
     } catch (error) {
       setBuilderError(
@@ -422,6 +467,7 @@ export function AgentCreationStudio() {
       navigation.push(paths.agents());
       return;
     }
+    setTransitionDirection(-1);
     if (mode === "templates" && selectedTemplate) {
       setSelectedTemplate(null);
       return;
@@ -441,7 +487,13 @@ export function AgentCreationStudio() {
       ...EMPTY_DRAFT,
       runtimeId: current.runtimeId || usableRuntimes[0]?.id || "",
     }));
+    setTransitionDirection(1);
     setMode("blank");
+  };
+
+  const chooseAI = () => {
+    setTransitionDirection(1);
+    setMode("ai");
   };
 
   const applyTemplate = () => {
@@ -455,6 +507,7 @@ export function AgentCreationStudio() {
       instructions: detail.instructions,
       runtimeId: current.runtimeId || usableRuntimes[0]?.id || "",
     }));
+    setTransitionDirection(1);
     setMode("template");
   };
 
@@ -468,6 +521,7 @@ export function AgentCreationStudio() {
         model: draft.model.trim() || undefined,
       });
       if (!session.session_id) throw new Error(t(($) => $.creation_studio.builder.start_failed));
+      setTransitionDirection(1);
       setBuilderSessionId(session.session_id);
     } catch (error) {
       setBuilderError(
@@ -478,9 +532,52 @@ export function AgentCreationStudio() {
     }
   };
 
+  // Rebinds the conversation's execution runtime on the server BEFORE the draft
+  // reflects the new selection. Updating the draft first is what produced
+  // MUL-5163: the picker showed runtime B while every subsequent message still
+  // ran on the runtime the session was created with.
+  const switchBuilderRuntime = async (runtimeId: string) => {
+    if (!runtimeId || runtimeId === draft.runtimeId) return;
+    // Before the conversation exists there is no carrier to rebind, so the
+    // picker is still plain draft state.
+    if (!builderSessionId) {
+      setDraft((current) => ({ ...current, runtimeId, model: "" }));
+      return;
+    }
+    if (builderSwitchingRuntime) return;
+    setBuilderSwitchingRuntime(true);
+    setBuilderError(null);
+    try {
+      const result = await api.switchAgentBuilderRuntime(builderSessionId, {
+        runtime_id: runtimeId,
+      });
+      // Follow the runtime the server says it bound. Resolving here at all means
+      // the rebind committed, so refusing to move the draft would leave the
+      // picker pointing at a runtime that no longer executes anything — the same
+      // split this whole change removes. The client fallback already resolves an
+      // unparseable success body to the requested id.
+      const boundRuntimeId = result.runtime_id || runtimeId;
+      // Model ids are per-runtime; clear it so the new runtime resolves its own
+      // default instead of keeping one it may not serve.
+      setDraft((current) => ({ ...current, runtimeId: boundRuntimeId, model: "" }));
+      toast.success(t(($) => $.creation_studio.builder.switch_runtime_success));
+    } catch (error) {
+      setBuilderError(
+        error instanceof Error
+          ? error.message
+          : t(($) => $.creation_studio.builder.switch_runtime_failed),
+      );
+    } finally {
+      setBuilderSwitchingRuntime(false);
+    }
+  };
+
   const sendBuilderMessage = async (content: string): Promise<boolean> => {
     const text = content.trim();
-    if (!text || !builderSessionId || builderPending) return false;
+    // builderSwitchingRuntime blocks the send while a rebind is in flight: the
+    // server serialises the two anyway, but letting the message through would
+    // mean the user cannot tell which runtime answered it.
+    if (!text || !builderSessionId || builderPending || builderSwitchingRuntime) return false;
     setBuilderError(null);
     try {
       const encodedContent = encodeBuilderInput(
@@ -561,7 +658,8 @@ export function AgentCreationStudio() {
   const createAgent = async () => {
     if (!canCreate || !selectedRuntime) return;
     setCreating(true);
-    setCreateError(null);
+    setNameError(null);
+    setFormError(null);
     try {
       const invocationTargets = buildInvocationTargets(draft);
       let agent: Agent;
@@ -641,11 +739,54 @@ export function AgentCreationStudio() {
       toast.success(t(($) => $.creation_studio.created, { name: agent.name || draft.name.trim() }));
       navigation.push(squadId ? paths.squadDetail(squadId) : paths.agentDetail(agent.id));
     } catch (error) {
-      setCreateError(
-        error instanceof Error ? error.message : t(($) => $.creation_studio.create_failed),
+      const nextErrors = classifyAgentCreateError(
+        error,
+        t(($) => $.creation_studio.create_failed),
+        t(($) => $.creation_studio.name_conflict),
       );
+      setNameError(nextErrors.nameError);
+      setFormError(nextErrors.formError);
       setCreating(false);
     }
+  };
+
+  const screenKey = getAgentCreationScreenKey(mode, builderSessionId);
+  const screenVariants = {
+    initial: (direction: TransitionDirection) => ({
+      opacity: 0,
+      transform: shouldReduceMotion
+        ? "translateX(0)"
+        : direction === 1
+          ? "translateX(8px)"
+          : "translateX(-8px)",
+    }),
+    animate: {
+      opacity: 1,
+      transform: "translateX(0)",
+      transition: {
+        duration: shouldReduceMotion
+          ? UI_MOTION_DURATION.fast
+          : UI_MOTION_DURATION.standard,
+        ease: UI_EASE_OUT,
+      },
+    },
+    exit: (direction: TransitionDirection) => ({
+      opacity: 0,
+      transform: shouldReduceMotion
+        ? "translateX(0)"
+        : direction === 1
+          ? "translateX(-8px)"
+          : "translateX(8px)",
+      transition: {
+        duration: UI_MOTION_DURATION.fast,
+        ease: UI_EASE_OUT,
+      },
+    }),
+  };
+
+  const updateAgentName = (name: string) => {
+    setNameError(null);
+    setDraft((current) => ({ ...current, name }));
   };
 
   return (
@@ -680,10 +821,24 @@ export function AgentCreationStudio() {
         )}
       </header>
 
+      <AnimatePresence
+        mode="wait"
+        initial={false}
+        custom={transitionDirection}
+      >
+        <motion.div
+          key={screenKey}
+          custom={transitionDirection}
+          variants={screenVariants}
+          initial="initial"
+          animate="animate"
+          exit="exit"
+          className="flex min-h-0 flex-1 flex-col"
+        >
       {mode === "choose" && (
         <ModeChooser
           onBlank={chooseBlank}
-          onAI={() => setMode("ai")}
+          onAI={chooseAI}
         />
       )}
 
@@ -716,13 +871,15 @@ export function AgentCreationStudio() {
               runtimesLoading={runtimesLoading}
               members={members}
               currentUserId={currentUser?.id ?? null}
-              createError={createError}
+              nameError={nameError}
+              onNameChange={updateAgentName}
             />
           </div>
           <StudioFooter
             canCreate={canCreate}
             creating={creating}
             squad={!!squadId}
+            error={formError}
             onCreate={createAgent}
           />
         </div>
@@ -782,18 +939,27 @@ export function AgentCreationStudio() {
                 runtimesLoading={runtimesLoading}
                 members={members}
                 currentUserId={currentUser?.id ?? null}
-                createError={createError}
+                nameError={nameError}
+                onNameChange={updateAgentName}
+                onRuntimeSelect={(runtimeId) => {
+                  void switchBuilderRuntime(runtimeId);
+                }}
+                runtimeSwitchPending={builderPending}
+                runtimeSwitchInFlight={builderSwitchingRuntime}
               />
             </div>
             <StudioFooter
               canCreate={canCreate && !builderPending}
               creating={creating}
               squad={!!squadId}
+              error={formError}
               onCreate={createAgent}
             />
           </div>
         </div>
       )}
+        </motion.div>
+      </AnimatePresence>
     </div>
   );
 }
@@ -972,8 +1138,12 @@ function ConfigurationPanel({
   runtimesLoading,
   members,
   currentUserId,
-  createError,
+  nameError,
+  onNameChange,
   compact = false,
+  onRuntimeSelect,
+  runtimeSwitchPending = false,
+  runtimeSwitchInFlight = false,
 }: {
   draft: AgentDraft;
   onChange: (draft: AgentDraft) => void;
@@ -981,13 +1151,33 @@ function ConfigurationPanel({
   runtimesLoading: boolean;
   members: MemberWithUser[];
   currentUserId: string | null;
-  createError: string | null;
+  nameError: string | null;
+  onNameChange: (name: string) => void;
   compact?: boolean;
+  /** Builder sessions rebind the server-side carrier instead of only editing
+   *  the draft. Absent for the plain create flows, where the draft is the only
+   *  state that exists. */
+  onRuntimeSelect?: (runtimeId: string) => void;
+  /** A builder reply is in flight, so the server would refuse the rebind. */
+  runtimeSwitchPending?: boolean;
+  /** A rebind request is in flight. */
+  runtimeSwitchInFlight?: boolean;
 }) {
   const { t } = useT("agents");
   const selectedRuntime = runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
   const set = <K extends keyof AgentDraft>(key: K, value: AgentDraft[K]) => onChange({ ...draft, [key]: value });
   const otherMembers = members.filter((member) => member.user_id !== currentUserId);
+  const runtimeLocked = runtimeSwitchPending || runtimeSwitchInFlight;
+  const handleRuntimeSelect = (id: string) => {
+    if (id === draft.runtimeId) return;
+    if (onRuntimeSelect) {
+      onRuntimeSelect(id);
+      return;
+    }
+    // Model is per-runtime; clear it on runtime change so the new
+    // runtime resolves its own default instead of a stale value.
+    onChange({ ...draft, runtimeId: id, model: "" });
+  };
 
   return (
     <div className={cn("space-y-8", compact && "space-y-6")}>
@@ -1011,21 +1201,12 @@ function ConfigurationPanel({
               />
             </div>
           </DraftFieldRow>
-          <DraftFieldRow
+          <AgentNameField
             compact={compact}
-            label={t(($) => $.create_dialog.name_label)}
-            htmlFor="agent-create-name"
-          >
-            <Input
-              id="agent-create-name"
-              name="agent-name"
-              autoComplete="off"
-              aria-label={t(($) => $.create_dialog.name_label)}
-              value={draft.name}
-              onChange={(event) => set("name", event.target.value)}
-              placeholder={t(($) => $.create_dialog.name_placeholder)}
-            />
-          </DraftFieldRow>
+            name={draft.name}
+            error={nameError}
+            onChange={onNameChange}
+          />
           <DraftFieldRow
             compact={compact}
             align="start"
@@ -1084,24 +1265,33 @@ function ConfigurationPanel({
       >
         <SettingsCard>
           <div className={cn("grid gap-4 px-4 py-4", !compact && "sm:grid-cols-2")}>
-            <RuntimePicker
-              runtimes={runtimes}
-              runtimesLoading={runtimesLoading}
-              members={members}
-              currentUserId={currentUserId}
-              selectedRuntimeId={draft.runtimeId}
-              onSelect={(id) => {
-                // Model is per-runtime; clear it on runtime change so the new
-                // runtime resolves its own default instead of a stale value.
-                if (id !== draft.runtimeId) onChange({ ...draft, runtimeId: id, model: "" });
-              }}
-            />
+            <div className="min-w-0">
+              <RuntimePicker
+                runtimes={runtimes}
+                runtimesLoading={runtimesLoading}
+                members={members}
+                currentUserId={currentUserId}
+                selectedRuntimeId={draft.runtimeId}
+                onSelect={handleRuntimeSelect}
+                disabled={runtimeLocked}
+              />
+              {/* A silently greyed-out picker is the worst version of this: the
+                  user reaches for it exactly when the current runtime has gone
+                  wrong, so say what unblocks it instead of just refusing. */}
+              {runtimeSwitchPending && (
+                <p className="mt-1.5 text-xs text-muted-foreground">
+                  {t(($) => $.creation_studio.builder.switch_runtime_pending)}
+                </p>
+              )}
+            </div>
             <ModelDropdown
               runtimeId={selectedRuntime?.id ?? null}
               runtimeOnline={selectedRuntime?.status === "online"}
               value={draft.model}
               onChange={(value) => set("model", value)}
-              disabled={!selectedRuntime}
+              // A successful switch clears the model, so an edit made while the
+              // rebind is in flight would be silently discarded.
+              disabled={!selectedRuntime || runtimeSwitchInFlight}
             />
           </div>
         </SettingsCard>
@@ -1192,17 +1382,57 @@ function ConfigurationPanel({
           ) : null}
         </SettingsCard>
       </SettingsSection>
-
-      {createError ? (
-        <div
-          role="alert"
-          aria-live="polite"
-          className="rounded-lg border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive"
-        >
-          {createError}
-        </div>
-      ) : null}
     </div>
+  );
+}
+
+export function AgentNameField({
+  name,
+  error,
+  onChange,
+  compact = false,
+}: {
+  name: string;
+  error: string | null;
+  onChange: (name: string) => void;
+  compact?: boolean;
+}) {
+  const { t } = useT("agents");
+  const errorId = "agent-create-name-error";
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!error) return;
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, [error]);
+
+  return (
+    <DraftFieldRow
+      compact={compact}
+      label={t(($) => $.create_dialog.name_label)}
+      htmlFor="agent-create-name"
+    >
+      <div className="space-y-1.5">
+        <Input
+          ref={inputRef}
+          id="agent-create-name"
+          name="agent-name"
+          autoComplete="off"
+          aria-label={t(($) => $.create_dialog.name_label)}
+          aria-invalid={!!error}
+          aria-describedby={error ? errorId : undefined}
+          value={name}
+          onChange={(event) => onChange(event.target.value)}
+          placeholder={t(($) => $.create_dialog.name_placeholder)}
+        />
+        {error ? (
+          <p id={errorId} className="text-xs text-destructive">
+            {error}
+          </p>
+        ) : null}
+      </div>
+    </DraftFieldRow>
   );
 }
 
@@ -1363,7 +1593,46 @@ function BuilderConversation({
   );
 }
 
-function StudioFooter({ canCreate, creating, squad, onCreate }: { canCreate: boolean; creating: boolean; squad: boolean; onCreate: () => void; }) { const { t } = useT("agents"); return <div className="sticky bottom-0 mt-8 flex items-center justify-end gap-3 border-t bg-background/95 px-5 py-3 backdrop-blur"><Button type="button" onClick={onCreate} disabled={!canCreate}>{creating && <Loader2 className="size-4 animate-spin" />}{creating ? t(($) => $.creation_studio.creating) : squad ? t(($) => $.creation_studio.create_and_add) : t(($) => $.creation_studio.create_and_open)}</Button></div>; }
+export function StudioFooter({
+  canCreate,
+  creating,
+  squad,
+  error,
+  onCreate,
+}: {
+  canCreate: boolean;
+  creating: boolean;
+  squad: boolean;
+  error: string | null;
+  onCreate: () => void;
+}) {
+  const { t } = useT("agents");
+  return (
+    <div className="sticky bottom-0 mt-8 flex items-center justify-between gap-3 border-t bg-background/95 px-5 py-3 backdrop-blur">
+      {error ? (
+        <p
+          role="alert"
+          className="min-w-0 flex-1 break-words text-sm text-destructive"
+        >
+          {error}
+        </p>
+      ) : null}
+      <Button
+        type="button"
+        className="ml-auto shrink-0"
+        onClick={onCreate}
+        disabled={!canCreate}
+      >
+        {creating && <Loader2 className="size-4 animate-spin" />}
+        {creating
+          ? t(($) => $.creation_studio.creating)
+          : squad
+            ? t(($) => $.creation_studio.create_and_add)
+            : t(($) => $.creation_studio.create_and_open)}
+      </Button>
+    </div>
+  );
+}
 export function buildInvocationTargets(
   draft: AgentDraft,
 ): AgentInvocationTargetInput[] {

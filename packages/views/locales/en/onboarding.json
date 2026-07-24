@@ -45,12 +45,15 @@
   },
   "source_backfill": {
     "eyebrow": "Quick question",
-    "lede": "We noticed you didn't pick this during signup — it helps us understand who finds Multica useful. One question, then you're back to your work.",
+    "lede": "One quick question — it helps us understand who finds Multica useful. Answer once and you're back to your work.",
     "submit": "Submit",
     "hint_ready": "Looks good. Hit Submit when you're ready."
   },
   "questions": {
     "eyebrow_about_you": "About you",
+    "about_you": {
+      "question": "Tell us a bit about you."
+    },
     "source": {
       "question": "How did you hear about Multica?",
       "friends_colleagues": "Friends or colleagues",
@@ -133,59 +136,6 @@
     "on_list": "You're on the list",
     "success_toast": "You're on the list. We'll email when cloud runtimes are live.",
     "failed_toast": "Failed to join waitlist"
-  },
-  "first_issue": {
-    "error_title": "Something went wrong",
-    "retry": "Retry",
-    "retry_failed": "Retry failed",
-    "finishing": "Finishing up",
-    "opening": "Almost there — opening your workspace."
-  },
-  "step_agent": {
-    "eyebrow": "Your first agent",
-    "headline": "Meet your first teammate.",
-    "lede_prefix": "Your answers point to a ",
-    "lede_suffix": ". Pick whichever of the four fits you — each template ships ready to take its first issue. You can retune its instructions from the agent settings page later.",
-    "footer_hint": "One agent is enough to start. Add more from the sidebar later.",
-    "create_action": "Create {{name}}",
-    "create_failed": "Failed to create agent",
-    "recommended_badge": "Recommended",
-    "templates": {
-      "coding": {
-        "label": "Coding Agent",
-        "blurb": "Writes, refactors, and ships code. Reads your repo.",
-        "instructions": "You are a Coding Agent on a product team. Pick up coding issues — implement features, fix bugs, write tests, and open pull requests. Read the repository before you start, follow existing code conventions, and keep diffs focused. Ask for clarification when the acceptance criteria are ambiguous."
-      },
-      "planning": {
-        "label": "Planning Agent",
-        "blurb": "Breaks down work, drafts specs, keeps the board tidy.",
-        "instructions": "You are a Planning Agent. Turn loose ideas and open issues into scoped, ready-to-execute work: break them down into subtasks, write acceptance criteria, and propose owners and sequencing. Prefer clarity over speed. When blocked by missing context, ask one specific question rather than guessing."
-      },
-      "writing": {
-        "label": "Writing Agent",
-        "blurb": "Drafts, summarizes, researches. Long-form friendly.",
-        "instructions": "You are a Writing Agent. Draft documents, summarize long content, and research topics on the web when needed. Structure your output as finished prose a reader can use directly — not an outline. Cite sources when you draw from them. Match the tone the user establishes in the issue."
-      },
-      "assistant": {
-        "label": "Assistant",
-        "blurb": "General-purpose. Good default when the task is unclear.",
-        "instructions": "You are a general-purpose teammate. Handle varied tasks — light coding, writing, research, planning — and stay pragmatic about scope. When the task is ambiguous, ask one clarifying question before diving in. Default to short, useful outputs over exhaustive ones."
-      }
-    },
-    "about_eyebrow": "What's an agent",
-    "about_headline": "An AI teammate that lives in your workspace.",
-    "about_body": "Agents show up in every assignee picker, just like any other colleague — except they can work 24/7 on whatever runtime you give them.",
-    "ways_eyebrow": "Ways to work with an agent",
-    "way_assign_title": "Assign it an issue",
-    "way_assign_body": "It picks up the task and reports back in the thread.",
-    "way_mention_title": "@mention in a comment",
-    "way_mention_body": "Pull it into a conversation for a quick take.",
-    "way_chat_title": "Chat one-on-one",
-    "way_chat_body": "Ask quick questions without creating an issue.",
-    "way_autopilot_title": "Put it on Autopilot",
-    "way_autopilot_body": "Daily triage, weekly digest, monthly audit — on a schedule.",
-    "add_more_hint": "Add more agents anytime. A small team of specialized agents beats one jack-of-all-trades.",
-    "docs_link": "Creating your first agent →"
   },
   "welcome_after_onboarding": {
     "loading_helper": "Preparing your Helper…",

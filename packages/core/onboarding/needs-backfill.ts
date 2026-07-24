@@ -14,14 +14,37 @@ import type { QuestionnaireAnswers } from "./types";
 export const SOURCE_BACKFILL_MAX_DISMISSALS = 3;
 
 /**
+ * Minimum number of issues completed by an AI assignee (agent or
+ * squad) in the current workspace before the source prompt may open.
+ *
+ * Source is not asked during onboarding at all — attribution is a
+ * zero-payoff question for the user, so we wait until Multica has
+ * demonstrably delivered value (agents finished real work) before
+ * spending goodwill on it. Answer rates for "how did you hear about
+ * us" prompts are also materially better after an activation moment
+ * than at signup. 3 ≈ one Helper starter-task batch, so an engaged
+ * new user typically crosses it within the first session.
+ *
+ * The count itself comes from `agentCompletedIssueCountOptions` in
+ * `./queries.ts`; the modal combines it with `needsSourceBackfill`.
+ */
+export const SOURCE_BACKFILL_MIN_AGENT_DONE_ISSUES = 3;
+
+/**
  * Should we ask this already-onboarded user where they heard about
  * Multica?
  *
  * Returns true for users who:
  *  - have completed onboarding (`onboarded_at` set), and
  *  - have not recorded any source (empty array or absent), and
- *  - did not previously click Skip on the onboarding `source` step, and
+ *  - did not previously decline the source question (skip marker), and
  *  - have not closed this backfill prompt enough times to dismiss it.
+ *
+ * This is the user-level half of the gate. The workspace-level half —
+ * "have agents completed at least SOURCE_BACKFILL_MIN_AGENT_DONE_ISSUES
+ * issues here?" — needs a server query, so it lives in the modal
+ * (`source-backfill-modal.tsx`), which also uses this predicate to
+ * decide whether that query is worth running at all.
  *
  * Pure function — `dismissCount` is passed in so this stays callable
  * from core (no localStorage / StorageAdapter dependency).

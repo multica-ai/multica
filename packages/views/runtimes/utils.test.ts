@@ -461,6 +461,274 @@ describe("estimateCost", () => {
     ).toBe(0);
   });
 
+  it("prices grok-4.5 at xAI's short-context $2.00 / $6.00 tier", () => {
+    // 1M input × $2.00 + 1M output × $6.00 + 1M cached-read × $0.30.
+    // Short context on purpose: the long-context (≥200K prompt) tier is 2x,
+    // but aggregated rows carry no per-request prompt sizes.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "xai",
+        model: "grok-4.5",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(8.3, 5);
+  });
+
+  it("prices the rest of the published Grok catalog", () => {
+    // grok-4.3 and the 4.20 snapshots share one $1.25 / $2.50 tier;
+    // grok-build-0.1 is its own $1.00 / $2.00 row.
+    for (const model of [
+      "grok-4.3",
+      "grok-4.20-multi-agent-0309",
+      "grok-4.20-0309-reasoning",
+      "grok-4.20-0309-non-reasoning",
+    ]) {
+      expect(
+        estimateCost({
+          ...zeroUsage,
+          provider: "xai",
+          model,
+          input_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+        }),
+      ).toBeCloseTo(3.75, 5);
+    }
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "xai",
+        model: "grok-build-0.1",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(3, 5);
+  });
+
+  // -------------------------------------------------------------------------
+  // Provider-reported cost. `cost_usd_ticks` is what the provider actually
+  // charged (1e-10 USD) for the rows behind an aggregate; `uncosted_*` are the
+  // tokens it did not price and which therefore still need the rate table.
+  // -------------------------------------------------------------------------
+
+  it("uses the provider's own cost instead of the rate table when it reports one", () => {
+    // Real grok 0.2.106 turn: 2049 uncached input + 10880 cache read + 29
+    // output, costUsdTicks 75360000 = $0.007536. Here the rate table would
+    // agree, which is what makes it a clean check that the authoritative
+    // number is the one being used rather than added to an estimate.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "grok",
+        model: "grok-4.5",
+        input_tokens: 2049,
+        cache_read_tokens: 10880,
+        output_tokens: 29,
+        cost_usd_ticks: 75_360_000,
+        uncosted_input_tokens: 0,
+        uncosted_output_tokens: 0,
+        uncosted_cache_read_tokens: 0,
+        uncosted_cache_write_tokens: 0,
+      }),
+    ).toBeCloseTo(0.007536, 10);
+  });
+
+  it("keeps the long-context surcharge the rate table cannot express", () => {
+    // xAI bills a request at 2x once its prompt reaches 200K tokens. The same
+    // tokens priced from the table give the short-context figure; the
+    // provider's own number carries the surcharge, and must not be quietly
+    // replaced by the cheaper local estimate.
+    const tokens = {
+      ...zeroUsage,
+      provider: "grok",
+      model: "grok-4.5",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    };
+    const shortContext = estimateCost(tokens);
+    expect(shortContext).toBeCloseTo(8, 5);
+
+    const longContext = estimateCost({
+      ...tokens,
+      cost_usd_ticks: 16 * 10_000_000_000, // $16 — the 2x tier
+      uncosted_input_tokens: 0,
+      uncosted_output_tokens: 0,
+      uncosted_cache_read_tokens: 0,
+      uncosted_cache_write_tokens: 0,
+    });
+    expect(longContext).toBeCloseTo(16, 5);
+  });
+
+  it("adds an estimate for the tokens the provider did not price", () => {
+    // A bucket can mix rows that carry a provider cost with rows that don't —
+    // two providers in one aggregate, or Grok either side of a CLI upgrade.
+    // Reporting only the authoritative half would under-report the bucket.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "grok",
+        model: "grok-4.5",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cost_usd_ticks: 4 * 10_000_000_000, // $4 for the priced half
+        uncosted_input_tokens: 1_000_000, // $2 at the table rate
+        uncosted_output_tokens: 1_000_000, // $6 at the table rate
+        uncosted_cache_read_tokens: 0,
+        uncosted_cache_write_tokens: 0,
+      }),
+    ).toBeCloseTo(12, 5);
+  });
+
+  it("falls back to estimating the full row when the backend omits the split", () => {
+    // A backend older than the cost split sends no `uncosted_*` fields.
+    // Treating that as "nothing left to estimate" would report $0 for every
+    // row, so an absent split must estimate the full token counts.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "grok",
+        model: "grok-4.5",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(8, 5);
+  });
+
+  it("does not double-charge a cost that arrives without its token split", () => {
+    // Defensive: an authoritative cost with no `uncosted_*` must not also get
+    // a full-row estimate stacked on top.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "grok",
+        model: "grok-4.5",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cost_usd_ticks: 16 * 10_000_000_000,
+      }),
+    ).toBeCloseTo(16, 5);
+  });
+
+  it("reports provider cost even for a model with no rate-table row", () => {
+    // `grok-composer-*` has no published rate, but a turn the provider priced
+    // itself needs no rate — the money is known exactly.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "grok",
+        model: "grok-composer-2.5-fast",
+        input_tokens: 500,
+        output_tokens: 100,
+        cost_usd_ticks: 12_345_678_900,
+        uncosted_input_tokens: 0,
+        uncosted_output_tokens: 0,
+        uncosted_cache_read_tokens: 0,
+        uncosted_cache_write_tokens: 0,
+      }),
+    ).toBeCloseTo(1.23456789, 8);
+  });
+
+  it("keeps the breakdown and the headline agreeing on an unpriced model", () => {
+    // `grok-composer-*` has no rate row, so there is nothing to split by — but
+    // the provider priced the turn. If the breakdown returned zeros here the
+    // stacked chart would read $0 while the headline read the real cost, and
+    // the unmapped banner (correctly) would not be shown to explain it.
+    const usage = {
+      ...zeroUsage,
+      provider: "grok",
+      model: "grok-composer-2.5-fast",
+      input_tokens: 500,
+      output_tokens: 100,
+      cost_usd_ticks: 12_345_678_900,
+      uncosted_input_tokens: 0,
+      uncosted_output_tokens: 0,
+      uncosted_cache_read_tokens: 0,
+      uncosted_cache_write_tokens: 0,
+    };
+    const b = estimateCostBreakdown(usage);
+    expect(b.input + b.output + b.cacheRead + b.cacheWrite).toBeCloseTo(
+      estimateCost(usage),
+      8,
+    );
+    expect(b.input).toBeCloseTo(1.23456789, 8);
+  });
+
+  it("reports no cost for an unpriced model the provider did not price either", () => {
+    // The control for the case above: no rates and no provider cost must stay
+    // at zero rather than inventing a figure.
+    const usage = {
+      ...zeroUsage,
+      provider: "grok",
+      model: "grok-composer-2.5-fast",
+      input_tokens: 500,
+      output_tokens: 100,
+    };
+    expect(estimateCost(usage)).toBe(0);
+    const b = estimateCostBreakdown(usage);
+    expect(b.input + b.output + b.cacheRead + b.cacheWrite).toBe(0);
+    // ...and it still asks the user for a rate, because one would help here.
+    expect(collectUnmappedModels([usage])).toEqual(["grok/grok-composer-2.5-fast"]);
+  });
+
+  it("keeps the cost breakdown summing to the total on provider-priced rows", () => {
+    // The stacked chart is drawn from the breakdown while the headline uses
+    // estimateCost; if the authoritative charge were dropped from the split
+    // the two would silently disagree on every Grok row.
+    const usage = {
+      ...zeroUsage,
+      provider: "grok",
+      model: "grok-4.5",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cost_usd_ticks: 16 * 10_000_000_000,
+      uncosted_input_tokens: 0,
+      uncosted_output_tokens: 0,
+      uncosted_cache_read_tokens: 0,
+      uncosted_cache_write_tokens: 0,
+    };
+    const b = estimateCostBreakdown(usage);
+    expect(b.input + b.output + b.cacheRead + b.cacheWrite).toBeCloseTo(
+      estimateCost(usage),
+      5,
+    );
+    // Split follows the rate table's own proportions ($2 input : $6 output).
+    expect(b.input).toBeCloseTo(4, 5);
+    expect(b.output).toBeCloseTo(12, 5);
+  });
+
+  it("drops a fully provider-priced model from the unmapped diagnostic", () => {
+    // The banner asks the user to supply a missing rate. A row the provider
+    // priced in full needs no rate, so prompting for one would invite
+    // overriding a real bill with a guess.
+    const row = {
+      ...zeroUsage,
+      provider: "grok",
+      model: "grok-composer-2.5-fast",
+      input_tokens: 500,
+      cost_usd_ticks: 12_345_678_900,
+      uncosted_input_tokens: 0,
+      uncosted_output_tokens: 0,
+      uncosted_cache_read_tokens: 0,
+      uncosted_cache_write_tokens: 0,
+    };
+    expect(collectUnmappedModels([row])).toEqual([]);
+    // ...but the same model still surfaces while any of its tokens are
+    // unpriced, because those genuinely need a rate.
+    expect(
+      collectUnmappedModels([{ ...row, uncosted_input_tokens: 500 }]),
+    ).toEqual(["grok/grok-composer-2.5-fast"]);
+  });
+
+  it("leaves Grok SKUs that xAI does not publish a price for unmapped", () => {
+    // No startsWith fallback: `grok-composer-2.5-fast` is in the Grok Build
+    // catalog but absent from docs.x.ai/developers/pricing, so it must NOT
+    // inherit grok-4.5's rate — it surfaces in the unmapped diagnostic
+    // instead, where the user can supply their own rate.
+    expect(isModelPriced("grok-composer-2.5-fast", "xai")).toBe(false);
+  });
+
   it("recognises the provider-prefixed forms emitted by OpenRouter-style runtimes", () => {
     // opencode + OpenRouter route IDs through as `<provider>/<model>`.
     // canonicalCandidates strips the prefix; without this the rows above

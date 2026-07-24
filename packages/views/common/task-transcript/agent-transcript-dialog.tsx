@@ -186,6 +186,14 @@ function formatElapsedMs(ms: number): string {
   return `${minutes}m ${secs}s`;
 }
 
+function formatEventForClipboard(item: TimelineItem): string {
+  const label = getEventLabel(item);
+  const summary = getEventSummary(item);
+  const date = item.created_at ? new Date(item.created_at) : null;
+  const timestamp = date && !Number.isNaN(date.getTime()) ? `[${date.toISOString()}] ` : "";
+  return `${timestamp}[${label}] ${summary}`;
+}
+
 // ─── Main dialog ────────────────────────────────────────────────────────────
 
 export function AgentTranscriptDialog({
@@ -362,11 +370,7 @@ export function AgentTranscriptDialog({
 
   const handleCopyAll = useCallback(() => {
     const text = displayItems
-      .map((item) => {
-        const label = getEventLabel(item);
-        const summary = getEventSummary(item);
-        return `[${label}] ${summary}`;
-      })
+      .map(formatEventForClipboard)
       .join("\n");
     void copyText(text).then((ok) => {
       if (!ok) return;

@@ -1,0 +1,17 @@
+agy
+claude
+codebuddy
+codex
+copilot
+cursor-agent
+deveco
+grok
+hermes
+kimi
+kiro-cli
+openclaw
+opencode
+pi
+qwen
+qodercli
+traecli

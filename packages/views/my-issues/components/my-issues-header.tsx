@@ -15,7 +15,10 @@ import type {
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
 } from "@multica/core/types";
-import type { MyIssuesScope } from "@multica/core/issues/stores/my-issues-view-store";
+import {
+  myIssuesRelationFromScope,
+  type MyIssuesScope,
+} from "@multica/core/issues/stores/my-issues-view-store";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { useT } from "../../i18n";
 import { WorkspaceAgentWorkingChip } from "../../issues/components/workspace-agent-working-chip";
@@ -26,7 +29,6 @@ import {
 
 export function MyIssuesHeader({
   allIssues,
-  workingIssues,
   scope,
   onScopeChange,
   isRefreshing = false,
@@ -35,10 +37,6 @@ export function MyIssuesHeader({
   onTableFacetChange,
 }: {
   allIssues: Issue[];
-  /** The rows the agents-working filter would leave on screen — undefined
-   *  when the set is unknown (chip renders indeterminate). Scopes the chip:
-   *  it counts the agents working on these rows. */
-  workingIssues: Issue[] | undefined;
   scope: MyIssuesScope;
   onScopeChange: (scope: MyIssuesScope) => void;
   isRefreshing?: boolean;
@@ -49,6 +47,7 @@ export function MyIssuesHeader({
 }) {
   const { t } = useT("my-issues");
   const { t: tIssues } = useT("issues");
+  const mineRelation = myIssuesRelationFromScope(scope);
   const SCOPES: { value: MyIssuesScope; label: string; description: string }[] = [
     { value: "all", label: t(($) => $.header.scope.all_label), description: t(($) => $.header.scope.all_description) },
     { value: "assigned", label: t(($) => $.header.scope.assigned_label), description: t(($) => $.header.scope.assigned_description) },
@@ -124,7 +123,7 @@ export function MyIssuesHeader({
           <WorkspaceAgentWorkingChip
             value={agentRunningFilter}
             onToggle={toggleAgentRunningFilter}
-            workingIssues={workingIssues}
+            mineRelation={mineRelation === "all" ? "any" : mineRelation}
           />
           <IssueDisplayControls
             scopedIssues={allIssues}

@@ -27,7 +27,7 @@ vi.mock("@multica/core/auth", () => ({
   }),
 }));
 
-import { DesktopNavigationProvider } from "./navigation";
+import { DesktopNavigationProvider, routeContentLinkPath } from "./navigation";
 import { useNavigation } from "@multica/views/navigation";
 import { useTabStore, getActiveTab } from "@/stores/tab-store";
 
@@ -216,5 +216,26 @@ describe("back", () => {
     const active = getActiveTab(useTabStore.getState())!;
     expect(active.url).toBe("/acme/issues");
     expect(active.history.index).toBe(0);
+  });
+});
+
+describe("routeContentLinkPath (links inside content — MUL-5208)", () => {
+  it("opens a same-workspace path in a foreground tab of its own", () => {
+    routeContentLinkPath("/acme/issues/MUL-1");
+
+    const group = useTabStore.getState().byWorkspace.acme;
+    const opened = group.tabs.find((t) => t.url === "/acme/issues/MUL-1")!;
+    expect(opened).toBeDefined();
+    expect(group.activeTabId).toBe(opened.id);
+  });
+
+  it("switches workspace instead of opening the path under the active group", () => {
+    routeContentLinkPath("/butter/issues/BUT-1");
+
+    const state = useTabStore.getState();
+    expect(state.activeWorkspaceSlug).toBe("butter");
+    expect(
+      state.byWorkspace.acme.tabs.some((t) => t.url === "/butter/issues/BUT-1"),
+    ).toBe(false);
   });
 });

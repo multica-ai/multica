@@ -10,11 +10,17 @@ import { renderWithI18n } from "../../test/i18n";
 import { AgentTranscriptDialog } from "./agent-transcript-dialog";
 import type { TimelineItem } from "./build-timeline";
 
+const copyTextMock = vi.hoisted(() => vi.fn().mockResolvedValue(true));
+
 vi.mock("@multica/core/api", () => ({
   api: {
     getAgent: vi.fn().mockResolvedValue(null),
     listRuntimes: vi.fn().mockResolvedValue([]),
   },
+}));
+
+vi.mock("@multica/ui/lib/clipboard", () => ({
+  copyText: copyTextMock,
 }));
 
 vi.mock("../actor-avatar", () => ({
@@ -196,6 +202,7 @@ function renderDialog(
 
 beforeEach(() => {
   cleanup();
+  copyTextMock.mockClear();
   vi.mocked(api.listRuntimes).mockResolvedValue([]);
   useTranscriptViewStore.setState({
     sortDirection: "chronological",
@@ -291,5 +298,53 @@ describe("AgentTranscriptDialog", () => {
 
     expect(screen.getByText(/Agent hidden detail/)).toBeInTheDocument();
     expect(screen.getByText(/"command": "pnpm test"/)).toBeInTheDocument();
+  });
+
+  it("copies RFC 3339 timestamps before event labels", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "text",
+        content: "Agent summary\nAgent hidden detail",
+        created_at: "2026-06-08T08:00:00+08:00",
+      },
+      {
+        seq: 2,
+        type: "thinking",
+        content: "Thinking summary",
+        created_at: "2026-06-08T08:00:05.123Z",
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+
+    expect(copyTextMock).toHaveBeenCalledWith(
+      [
+        "[2026-06-08T00:00:00.000Z] [Agent] Agent summary",
+        "[2026-06-08T08:00:05.123Z] [Thinking] Thinking summary",
+      ].join("\n"),
+    );
+  });
+
+  it("keeps older events without a valid timestamp copyable", () => {
+    renderDialog([
+      {
+        seq: 1,
+        type: "text",
+        content: "Missing timestamp",
+      },
+      {
+        seq: 2,
+        type: "error",
+        content: "Invalid timestamp",
+        created_at: "not-a-date",
+      },
+    ]);
+
+    fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+
+    expect(copyTextMock).toHaveBeenCalledWith(
+      ["[Agent] Missing timestamp", "[Error] Invalid timestamp"].join("\n"),
+    );
   });
 });

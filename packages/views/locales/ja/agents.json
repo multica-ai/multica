@@ -145,7 +145,7 @@
     "section_profile": "プロフィール",
     "section_profile_hint": "ワークスペース内でのエージェントの表示を管理します。",
     "section_execution": "実行設定",
-    "section_execution_hint": "ランタイム、モデル、思考レベル、同時タスク数を設定します。",
+    "section_execution_hint": "ランタイム、モデル、思考レベル、速度、同時タスク数を設定します。",
     "section_access": "アクセス",
     "section_access_hint": "このエージェントと接続済み機能を利用できる相手を管理します。",
     "section_properties": "プロパティ",
@@ -156,6 +156,7 @@
     "prop_runtime": "ランタイム",
     "prop_model": "モデル",
     "prop_thinking": "思考",
+    "prop_speed": "速度",
     "prop_visibility": "公開範囲",
     "prop_concurrency": "同時実行数",
     "prop_owner": "オーナー",
@@ -214,7 +215,11 @@
     "thinking_default": "CLI 設定に従う",
     "thinking_tooltip": "思考 · {{value}}",
     "thinking_clear": "CLI 設定に従う",
-    "thinking_clear_title": "上書きをクリアし、推論レベルをローカルの CLI 設定（claude/codex）に任せます"
+    "thinking_clear_title": "上書きをクリアし、推論レベルをローカルの CLI 設定（claude/codex）に任せます",
+    "service_tier_default": "ランタイムのデフォルト",
+    "service_tier_tooltip": "速度 · {{value}}",
+    "service_tier_clear": "ランタイムのデフォルト",
+    "service_tier_clear_title": "速度の上書きをクリアし、ローカルの Codex 設定に任せます"
   },
   "model_dropdown": {
     "label": "モデル",
@@ -765,6 +770,9 @@
       "start_failed": "Agent Builder を開始できませんでした。",
       "send_failed": "メッセージを送信できませんでした。",
       "stop_failed": "現在の生成を停止できませんでした。",
+      "switch_runtime_failed": "ランタイムを切り替えられませんでした。会話は引き続き元のランタイムで実行されています。",
+      "switch_runtime_pending": "現在の返信を停止するとランタイムを切り替えられます。",
+      "switch_runtime_success": "ランタイムを切り替えました。下書き設定はそのまま残り、以降の会話は新しいランタイムで新しいモデルセッションとして続きます。",
       "chat_title": "Agent Builder",
       "chat_hint": "会話で要件を整理し、隣の設定を調整します。",
       "runtime_online": "ランタイムはオンライン",
@@ -785,6 +793,7 @@
     "create_and_add": "作成してスクワッドに追加",
     "creating": "エージェントを作成中…",
     "create_failed": "エージェントを作成できませんでした。",
+    "name_conflict": "同じ名前のエージェントがすでに存在します。",
     "created": "{{name}} を作成しました"
   },
   "actions": {
