@@ -104,6 +104,7 @@ type Task struct {
 	QuickCreateDueDate       string                 `json:"quick_create_due_date,omitempty"`       // explicit calendar due date selected in quick-create
 	QuickCreateAttachmentIDs []string               `json:"quick_create_attachment_ids,omitempty"` // attachments uploaded in the quick-create prompt and bound by issue create
 	HandoffNote              string                 `json:"handoff_note,omitempty"`                // assignment handoff instruction; rendered into the opening prompt + issue_context.md
+	SelectedSkillInvocations []SkillInvocationData  `json:"selected_skill_invocations,omitempty"`  // validated user-selected skills to invoke natively at prompt start
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
@@ -225,6 +226,10 @@ type SkillRefData struct {
 	SizeBytes   int64              `json:"size_bytes"`
 	FileCount   int                `json:"file_count"`
 	Files       []SkillFileRefData `json:"files,omitempty"`
+}
+
+type SkillInvocationData struct {
+	Name string `json:"name"`
 }
 
 type SkillFileRefData struct {
