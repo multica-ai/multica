@@ -407,7 +407,7 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 		return d.orphanByMTime(taskDir, "issue not accessible")
 	}
 
-	if (result.Status == "done" || result.Status == "cancelled") &&
+	if (result.Status == "done" || result.Status == "cancelled" || result.Status == "archived") &&
 		time.Since(result.UpdatedAt) > d.cfg.GCTTL {
 		d.logger.Info("gc: eligible for cleanup",
 			"dir", filepath.Base(taskDir),

@@ -1516,7 +1516,7 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// intent was ever delivered, the user should decide manually.
 		if state == "merged" || state == "closed" {
 			for _, issue := range reevalIssues {
-				if issue.Status == "done" || issue.Status == "cancelled" {
+				if issue.Status == "done" || issue.Status == "cancelled" || issue.Status == "archived" {
 					continue
 				}
 				// Combined across providers: an issue may also carry a still-open
