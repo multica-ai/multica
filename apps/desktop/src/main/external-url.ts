@@ -24,12 +24,25 @@ export function openExternalSafely(url: string): Promise<void> | void {
 // to `webContents.downloadURL` elsewhere in the main process are banned by
 // the no-restricted-syntax rule in apps/desktop/eslint.config.mjs.
 // Reuses the same http/https allowlist as openExternalSafely.
-export function downloadURLSafely(win: BrowserWindow, url: string): void {
+export function downloadURLSafely(
+  win: BrowserWindow,
+  url: string,
+  authorization?: string,
+): void {
   if (getHttpProtocol(url) === null) {
     console.warn(`[security] blocked downloadURL: ${describeScheme(url)}`);
     return;
   }
-  win.webContents.downloadURL(url);
+  // Native downloads bypass the renderer's fetch client, so the Bearer token
+  // the API requires is never attached — the request 401s and the save dialog
+  // never appears (self-hosted PAT/JWT auth). Re-attach it here. The caller
+  // (use-download-attachment) only supplies `authorization` for a same-origin
+  // API URL, never for an off-origin CloudFront/S3 presigned download_url, so
+  // the token cannot leak to a foreign host.
+  win.webContents.downloadURL(
+    url,
+    authorization ? { headers: { Authorization: authorization } } : undefined,
+  );
 }
 
 function getHttpProtocol(url: string): "http:" | "https:" | null {
