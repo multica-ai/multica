@@ -556,19 +556,8 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 			_ = excludeFromGit(worktreePath, pattern)
 		}
 
-		// Install or remove the Co-authored-by hook based on the workspace
-		// setting. The hook lives in the bare repo's shared hooks dir, so we
-		// must actively remove it when disabled — otherwise a previously
-		// installed hook keeps appending the trailer to every commit even
-		// after the user toggles the setting off.
-		if params.CoAuthoredByEnabled {
-			if err := installCoAuthoredByHook(worktreePath); err != nil {
-				c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
-			}
-		} else {
-			if err := removeCoAuthoredByHook(worktreePath); err != nil {
-				c.logger.Warn("repo checkout: remove co-authored-by hook failed (non-fatal)", "error", err)
-			}
+		if action, err := reconcileCoAuthoredByHook(worktreePath, params.CoAuthoredByEnabled); err != nil {
+			c.logger.Warn("repo checkout: "+action+" co-authored-by hook failed (non-fatal)", "error", err)
 		}
 
 		c.logger.Info("repo checkout: existing worktree updated",
@@ -596,17 +585,8 @@ func (c *Cache) CreateWorktree(params WorktreeParams) (*WorktreeResult, error) {
 		_ = excludeFromGit(worktreePath, pattern)
 	}
 
-	// Install or remove the Co-authored-by hook based on the workspace
-	// setting. See the existing-worktree branch above for why removal is
-	// required when the setting is disabled.
-	if params.CoAuthoredByEnabled {
-		if err := installCoAuthoredByHook(worktreePath); err != nil {
-			c.logger.Warn("repo checkout: install co-authored-by hook failed (non-fatal)", "error", err)
-		}
-	} else {
-		if err := removeCoAuthoredByHook(worktreePath); err != nil {
-			c.logger.Warn("repo checkout: remove co-authored-by hook failed (non-fatal)", "error", err)
-		}
+	if action, err := reconcileCoAuthoredByHook(worktreePath, params.CoAuthoredByEnabled); err != nil {
+		c.logger.Warn("repo checkout: "+action+" co-authored-by hook failed (non-fatal)", "error", err)
 	}
 
 	c.logger.Info("repo checkout: worktree created",
@@ -1207,6 +1187,26 @@ func installCoAuthoredByHook(worktreePath string) error {
 		return fmt.Errorf("write prepare-commit-msg hook: %w", err)
 	}
 	return nil
+}
+
+func reconcileCoAuthoredByHook(worktreePath string, enabled bool) (string, error) {
+	if enabled && !gitIdentityConfigured(worktreePath) {
+		return "install", installCoAuthoredByHook(worktreePath)
+	}
+	return "remove", removeCoAuthoredByHook(worktreePath)
+}
+
+func gitIdentityConfigured(worktreePath string) bool {
+	return gitConfigValue(worktreePath, "user.name") != "" &&
+		gitConfigValue(worktreePath, "user.email") != ""
+}
+
+func gitConfigValue(worktreePath, key string) string {
+	out, err := runGitOutput("-C", worktreePath, "config", "--get", key)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // isDaemonInstalledHook reports whether a prepare-commit-msg hook on disk was
