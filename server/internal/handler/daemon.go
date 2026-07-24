@@ -1803,10 +1803,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 							ResourceRef:  ref,
 							Label:        label,
 						})
-						// Lift github_repo resources into the daemon's repo list
+						// Lift git repo resources into the daemon's repo list
 						// so `multica repo checkout` and the meta-skill render
 						// them as the issue's repos.
-						if row.ResourceType == "github_repo" {
+						if isGitRepoResourceType(row.ResourceType) {
 							var payload struct {
 								URL string `json:"url"`
 								Ref string `json:"ref,omitempty"`
@@ -2285,7 +2285,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 								ResourceRef:  ref,
 								Label:        label,
 							})
-							if row.ResourceType == "github_repo" {
+							if isGitRepoResourceType(row.ResourceType) {
 								var payload struct {
 									URL string `json:"url"`
 									Ref string `json:"ref,omitempty"`

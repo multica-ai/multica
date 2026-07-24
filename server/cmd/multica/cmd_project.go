@@ -585,17 +585,17 @@ func runProjectResourceAdd(cmd *cobra.Command, args []string) error {
 	} else if ok {
 		body["resource_ref"] = ref
 	} else {
-		switch resourceType {
-		case "github_repo":
+		switch {
+		case isGitRepoResourceType(resourceType):
 			ref, has, err := buildResourceRefFromFlags(cmd, resourceType, nil)
 			if err != nil {
 				return err
 			}
 			if !has {
-				return fmt.Errorf("github_repo requires --url (or pass a JSON payload via --ref)")
+				return fmt.Errorf("%s requires --url (or pass a JSON payload via --ref)", resourceType)
 			}
 			body["resource_ref"] = ref
-		case "local_directory":
+		case resourceType == "local_directory":
 			pathVal, _ := cmd.Flags().GetString("local-path")
 			pathVal = strings.TrimSpace(pathVal)
 			daemonVal, _ := cmd.Flags().GetString("daemon-id")
@@ -760,14 +760,14 @@ func buildResourceRefFromRefFlag(cmd *cobra.Command, resourceType string, existi
 	// shortcut that merges with --url. Only parse JSON when the value is
 	// actually meant as JSON; otherwise json.Unmarshal would accept "2024" as a
 	// number and silently swallow a legitimate checkout ref.
-	if rawRef != "" && (resourceType != "github_repo" || looksLikeJSONPayload(rawRef)) {
+	if rawRef != "" && (!isGitRepoResourceType(resourceType) || looksLikeJSONPayload(rawRef)) {
 		var ref any
 		if err := json.Unmarshal([]byte(rawRef), &ref); err != nil {
 			return nil, false, fmt.Errorf("--ref is not valid JSON: %w", err)
 		}
 		return ref, true, nil
 	}
-	if resourceType != "github_repo" {
+	if !isGitRepoResourceType(resourceType) {
 		return nil, false, fmt.Errorf("--ref must be a JSON resource_ref payload for resource type %q", resourceType)
 	}
 	ref, has, err := buildResourceRefFromFlags(cmd, resourceType, existingRef)
@@ -782,6 +782,12 @@ func looksLikeJSONPayload(raw string) bool {
 	return strings.HasPrefix(raw, "{") || strings.HasPrefix(raw, "[")
 }
 
+// isGitRepoResourceType reports whether a resource_type is a git repo resource,
+// under either the canonical git_repo name or the legacy github_repo alias.
+func isGitRepoResourceType(resourceType string) bool {
+	return resourceType == "git_repo" || resourceType == "github_repo"
+}
+
 // buildResourceRefFromFlags collects the per-type shortcut flags into a
 // resource_ref payload, seeding from existingRef so partial edits (only
 // --default-branch-hint, only --ref-label) preserve the unmentioned fields.
@@ -791,8 +797,8 @@ func looksLikeJSONPayload(raw string) bool {
 // where there is nothing to merge with; in that case partial inputs that miss
 // required fields are still rejected.
 func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existingRef map[string]any) (map[string]any, bool, error) {
-	switch resourceType {
-	case "github_repo":
+	switch {
+	case isGitRepoResourceType(resourceType):
 		urlSet := cmd.Flags().Changed("url")
 		hintSet := cmd.Flags().Changed("default-branch-hint")
 		refSet := cmd.Flags().Changed("ref")
@@ -838,10 +844,10 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 			}
 		}
 		if _, ok := ref["url"]; !ok {
-			return nil, false, fmt.Errorf("github_repo: --url is required (no existing url to merge with)")
+			return nil, false, fmt.Errorf("%s: --url is required (no existing url to merge with)", resourceType)
 		}
 		return ref, true, nil
-	case "local_directory":
+	case resourceType == "local_directory":
 		pathSet := cmd.Flags().Changed("local-path")
 		daemonSet := cmd.Flags().Changed("daemon-id")
 		labelSet := cmd.Flags().Changed("ref-label")

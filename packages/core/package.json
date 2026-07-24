@@ -89,6 +89,8 @@
     "./billing/mutations": "./billing/mutations.ts",
     "./github": "./github/index.ts",
     "./github/queries": "./github/queries.ts",
+    "./gitea": "./gitea/index.ts",
+    "./gitea/queries": "./gitea/queries.ts",
     "./lark": "./lark/index.ts",
     "./lark/queries": "./lark/queries.ts",
     "./composio": "./composio/index.ts",

@@ -1102,3 +1102,31 @@ func TestCreateProjectBundledLocalDirectoryDaemonConflict(t *testing.T) {
 		t.Errorf("per-daemon bundle: expected 2 resources, got %d", len(resp.Resources))
 	}
 }
+
+// TestGitRepoResourceTypeAlias verifies git_repo (canonical) and github_repo
+// (legacy alias) validate and normalize through the same path.
+func TestGitRepoResourceTypeAlias(t *testing.T) {
+	payload := json.RawMessage(`{"url":"https://gitea.example.com/org/repo.git","ref":"main"}`)
+	for _, typ := range []string{"git_repo", "github_repo"} {
+		norm, err := validateAndNormalizeResourceRef(typ, payload)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", typ, err)
+		}
+		var got struct {
+			URL string `json:"url"`
+			Ref string `json:"ref"`
+		}
+		if err := json.Unmarshal(norm, &got); err != nil {
+			t.Fatalf("%s: decode normalized ref: %v", typ, err)
+		}
+		if got.URL != "https://gitea.example.com/org/repo.git" || got.Ref != "main" {
+			t.Errorf("%s: normalized ref = %+v", typ, got)
+		}
+	}
+	if !isGitRepoResourceType("git_repo") || !isGitRepoResourceType("github_repo") {
+		t.Error("isGitRepoResourceType must accept both git_repo and github_repo")
+	}
+	if isGitRepoResourceType("local_directory") {
+		t.Error("isGitRepoResourceType must reject local_directory")
+	}
+}

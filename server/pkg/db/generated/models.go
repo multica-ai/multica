@@ -483,6 +483,18 @@ type Feedback struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type GiteaConnection struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	BaseUrl          string             `json:"base_url"`
+	TokenEncrypted   []byte             `json:"token_encrypted"`
+	AccountLogin     string             `json:"account_login"`
+	AccountAvatarUrl pgtype.Text        `json:"account_avatar_url"`
+	ConnectedByID    pgtype.UUID        `json:"connected_by_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type GithubInstallation struct {
 	ID               pgtype.UUID        `json:"id"`
 	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
@@ -508,6 +520,8 @@ type GithubPendingCheckSuite struct {
 	Status         string             `json:"status"`
 	SuiteUpdatedAt pgtype.Timestamptz `json:"suite_updated_at"`
 	ReceivedAt     pgtype.Timestamptz `json:"received_at"`
+	Provider       string             `json:"provider"`
+	BaseHost       string             `json:"base_host"`
 }
 
 type GithubPendingInstallation struct {
@@ -543,6 +557,8 @@ type GithubPullRequest struct {
 	Additions       int32              `json:"additions"`
 	Deletions       int32              `json:"deletions"`
 	ChangedFiles    int32              `json:"changed_files"`
+	Provider        string             `json:"provider"`
+	BaseHost        string             `json:"base_host"`
 }
 
 type GithubPullRequestCheckSuite struct {

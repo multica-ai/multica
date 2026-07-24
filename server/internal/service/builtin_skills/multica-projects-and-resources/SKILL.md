@@ -28,7 +28,7 @@ A project's `description` is also durable context: when an issue (or a quick-cre
 
 Common resource types:
 
-- `github_repo` — durable GitHub repo context, with `resource_ref.url`, optional checkout `ref`, and optional prompt-only `default_branch_hint`;
+- `git_repo` — durable git repo context (GitHub, Gitea, or any host), with `resource_ref.url`, optional checkout `ref`, and optional prompt-only `default_branch_hint`. `github_repo` is a backward-compatible alias for the same shape; both validate and behave identically;
 - `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, and optional label.
 
 ## CLI

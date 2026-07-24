@@ -32,6 +32,7 @@
     "---Integrations---",
     "channels",
     "github-integration",
+    "gitea-integration",
     "lark-bot-integration",
     "slack-bot-integration",
     "---Self-hosting & ops---",

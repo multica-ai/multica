@@ -238,7 +238,7 @@ func TestPrepareWithProjectResources(t *testing.T) {
 		"## Project Context",
 		"Agent UX 2026",
 		"Always write copy in British English. Ship behind a feature flag.",
-		"GitHub repo",
+		"Git repo",
 		"https://github.com/multica-ai/multica",
 		"checkout ref: `release/v2`",
 		"default branch hint: `main`",

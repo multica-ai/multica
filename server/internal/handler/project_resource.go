@@ -63,6 +63,22 @@ type UpdateProjectResourceRequest struct {
 	Position    *int32          `json:"position"`
 }
 
+// Resource type identifiers. resourceTypeGitRepo is the canonical, host-neutral
+// name (works for GitHub, Gitea, or any git host); resourceTypeGithubRepo is
+// kept as a backward-compatible alias so existing rows and older clients keep
+// working. Both validate and dispatch identically everywhere.
+const (
+	resourceTypeGitRepo        = "git_repo"
+	resourceTypeGithubRepo     = "github_repo"
+	resourceTypeLocalDirectory = "local_directory"
+)
+
+// isGitRepoResourceType reports whether a resource_type is a git repo resource,
+// under either the canonical name or the legacy github_repo alias.
+func isGitRepoResourceType(resourceType string) bool {
+	return resourceType == resourceTypeGitRepo || resourceType == resourceTypeGithubRepo
+}
+
 // validateAndNormalizeResourceRef checks the payload for a known resource_type.
 // New types are added here without schema migration; unknown types are rejected
 // at the API boundary so a typo can't slip through and produce a resource the
@@ -71,33 +87,33 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 	if len(ref) == 0 {
 		return nil, errors.New("resource_ref is required")
 	}
-	switch resourceType {
-	case "github_repo":
-		return validateGithubRepoRef(ref)
-	case "local_directory":
+	switch {
+	case isGitRepoResourceType(resourceType):
+		return validateGitRepoRef(ref)
+	case resourceType == resourceTypeLocalDirectory:
 		return validateLocalDirectoryRef(ref)
 	default:
 		return nil, fmt.Errorf("unknown resource_type %q", resourceType)
 	}
 }
 
-type githubRepoRef struct {
+type gitRepoRef struct {
 	URL               string `json:"url"`
 	DefaultBranchHint string `json:"default_branch_hint,omitempty"`
 	Ref               string `json:"ref,omitempty"`
 }
 
-func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
-	var payload githubRepoRef
+func validateGitRepoRef(ref json.RawMessage) (json.RawMessage, error) {
+	var payload gitRepoRef
 	if err := json.Unmarshal(ref, &payload); err != nil {
-		return nil, fmt.Errorf("invalid github_repo payload: %w", err)
+		return nil, fmt.Errorf("invalid git_repo payload: %w", err)
 	}
 	payload.URL = strings.TrimSpace(payload.URL)
 	if payload.URL == "" {
-		return nil, errors.New("github_repo: url is required")
+		return nil, errors.New("git_repo: url is required")
 	}
 	if !isValidGitRepoURL(payload.URL) {
-		return nil, errors.New("github_repo: url must be a valid http(s) or ssh git URL")
+		return nil, errors.New("git_repo: url must be a valid http(s) or ssh git URL")
 	}
 	payload.DefaultBranchHint = strings.TrimSpace(payload.DefaultBranchHint)
 	payload.Ref = strings.TrimSpace(payload.Ref)

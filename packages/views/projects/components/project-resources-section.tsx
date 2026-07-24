@@ -54,7 +54,7 @@ import { useT } from "../../i18n";
 function isGithubRef(r: ProjectResource): r is ProjectResource & {
   resource_ref: GithubRepoResourceRef;
 } {
-  return r.resource_type === "github_repo";
+  return r.resource_type === "git_repo" || r.resource_type === "github_repo";
 }
 
 function isLocalDirectoryRef(r: ProjectResource): r is ProjectResource & {
