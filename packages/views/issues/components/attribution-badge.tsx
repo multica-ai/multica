@@ -106,8 +106,9 @@ export function AttributionBadge({
     attribution.precise === false && attribution.source !== "backfill";
   const initiator = attribution.initiator;
 
-  // Inline shape: avatar + plain muted text, no border — static provenance
-  // reads as typography, not as an interactive chip.
+  // Inline shape: avatar + bare name, no border and no "on behalf of" wrapper —
+  // the caller supplies the label ("Triggered by") so the value is just the
+  // person. The resolution source stays in the tooltip.
   if (variant === "inline") {
     const initiatorInline = attribution.initiator;
     if (!initiatorInline) return null;
@@ -119,7 +120,7 @@ export function AttributionBadge({
             <span
               className={cn(
                 "inline-flex min-w-0 items-center gap-1.5 text-xs",
-                uncertain ? "text-warning" : "text-muted-foreground",
+                uncertain ? "text-warning" : "text-foreground/80",
                 className
               )}
             >
@@ -130,9 +131,7 @@ export function AttributionBadge({
                 size="xs"
                 className="shrink-0"
               />
-              <span className="min-w-0 truncate">
-                {t(($) => $.execution_log.attribution.on_behalf_of, { name })}
-              </span>
+              <span className="min-w-0 truncate">{name}</span>
             </span>
           }
         />

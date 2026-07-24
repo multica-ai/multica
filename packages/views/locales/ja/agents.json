@@ -659,7 +659,6 @@
     "sort_label": "並び替え",
     "sort_chronological": "古い順",
     "sort_newest_first": "新しい順",
-    "preserve_filters": "フィルターを保持",
     "density_label": "展開モード",
     "density_smart": "重点展開",
     "density_smart_desc": "回答とエラーは展開、思考とツールの過程は折りたたみ",

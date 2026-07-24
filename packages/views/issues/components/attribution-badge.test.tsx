@@ -96,7 +96,7 @@ describe("AttributionBadge", () => {
     expect(screen.getByText("On behalf of someone")).toBeInTheDocument();
   });
 
-  it("inline variant renders borderless on-behalf-of text with the source in a tooltip", () => {
+  it("inline variant renders the bare name (no on-behalf-of wrapper), source in tooltip", () => {
     const attribution: TaskAttribution = {
       source: "direct_human",
       precise: true,
@@ -106,7 +106,10 @@ describe("AttributionBadge", () => {
       <AttributionBadge attribution={attribution} variant="inline" />,
     );
 
-    expect(screen.getByText("On behalf of Ada Lovelace")).toBeInTheDocument();
+    // The caller supplies the label; the value is just the person (the mocked
+    // avatar also echoes the name, hence getAllByText).
+    expect(screen.getAllByText("Ada Lovelace").length).toBeGreaterThan(0);
+    expect(screen.queryByText("On behalf of Ada Lovelace")).toBeNull();
     // Typography, not a chip: the inline shape must not render a Badge border.
     expect(container.querySelector("[data-slot='badge']")).toBeNull();
   });

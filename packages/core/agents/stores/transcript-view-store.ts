@@ -19,11 +19,9 @@ const DENSITIES: readonly TranscriptDetailDensity[] = ["smart", "expanded", "col
 
 interface TranscriptViewState {
   sortDirection: TranscriptSortDirection;
-  preserveFilters: boolean;
   selectedFilterKeys: TranscriptFilterKey[];
   density: TranscriptDetailDensity;
   setSortDirection: (dir: TranscriptSortDirection) => void;
-  setPreserveFilters: (preserve: boolean) => void;
   setSelectedFilterKeys: (keys: TranscriptFilterKey[]) => void;
   toggleFilterKey: (key: TranscriptFilterKey) => void;
   clearFilterKeys: () => void;
@@ -32,7 +30,6 @@ interface TranscriptViewState {
 
 const DEFAULTS = {
   sortDirection: "chronological" as TranscriptSortDirection,
-  preserveFilters: false,
   selectedFilterKeys: [] as TranscriptFilterKey[],
   density: "smart" as TranscriptDetailDensity,
 };
@@ -46,7 +43,6 @@ export const useTranscriptViewStore = create<TranscriptViewState>()(
     (set) => ({
       ...DEFAULTS,
       setSortDirection: (sortDirection) => set({ sortDirection }),
-      setPreserveFilters: (preserveFilters) => set({ preserveFilters }),
       setSelectedFilterKeys: (selectedFilterKeys) =>
         set({ selectedFilterKeys: uniqueFilterKeys(selectedFilterKeys) }),
       toggleFilterKey: (key) =>
@@ -63,7 +59,6 @@ export const useTranscriptViewStore = create<TranscriptViewState>()(
       storage: createJSONStorage(() => defaultStorage),
       partialize: (state) => ({
         sortDirection: state.sortDirection,
-        preserveFilters: state.preserveFilters,
         selectedFilterKeys: state.selectedFilterKeys,
         density: state.density,
       }),
@@ -81,7 +76,6 @@ export const useTranscriptViewStore = create<TranscriptViewState>()(
         return {
           ...current,
           sortDirection: p.sortDirection ?? DEFAULTS.sortDirection,
-          preserveFilters: p.preserveFilters ?? DEFAULTS.preserveFilters,
           selectedFilterKeys: uniqueFilterKeys(p.selectedFilterKeys ?? []),
           density,
         };

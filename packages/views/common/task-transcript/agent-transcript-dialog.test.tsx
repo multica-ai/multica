@@ -275,7 +275,6 @@ beforeEach(() => {
   vi.mocked(api.listRuntimes).mockResolvedValue([]);
   useTranscriptViewStore.setState({
     sortDirection: "chronological",
-    preserveFilters: false,
     selectedFilterKeys: [],
     // Legacy row assertions below expect one-line summaries; smart density is
     // exercised by its own tests.
@@ -312,11 +311,10 @@ describe("AgentTranscriptDialog", () => {
     expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
   });
 
-  it("preserves selected filters across dialog remounts when enabled", () => {
+  it("preserves selected filters across dialog remounts unconditionally", () => {
     const first = renderDialog();
 
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Thinking" }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Preserve filters" }));
 
     expect(screen.queryByText("Agent summary")).not.toBeInTheDocument();
     expect(screen.getByText(/Thinking summary/)).toBeInTheDocument();
@@ -331,7 +329,6 @@ describe("AgentTranscriptDialog", () => {
 
   it("ignores stale persisted filter keys that are not available in the current transcript", () => {
     useTranscriptViewStore.setState({
-      preserveFilters: true,
       selectedFilterKeys: ["thinking"],
     });
 

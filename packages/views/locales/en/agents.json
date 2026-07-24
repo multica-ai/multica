@@ -779,7 +779,6 @@
     "sort_label": "Sort",
     "sort_chronological": "Oldest first",
     "sort_newest_first": "Newest first",
-    "preserve_filters": "Preserve filters",
     "density_label": "Expand mode",
     "density_smart": "Focus",
     "density_smart_desc": "Replies and errors open; thinking and tool steps stay folded",

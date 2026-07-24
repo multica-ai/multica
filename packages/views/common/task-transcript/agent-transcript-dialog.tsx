@@ -217,23 +217,21 @@ export function AgentTranscriptDialog({
   const [copiedWorkdir, setCopiedWorkdir] = useState(false);
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
-  const [sessionFilterKeys, setSessionFilterKeys] = useState<TranscriptFilterKey[]>([]);
   // Row-level expand overrides. A row the user toggled follows the toggle; any
   // other row follows the density preference (see traceEventDefaultExpanded).
   // Switching density or task resets the overrides wholesale.
   const [rowOverrides, setRowOverrides] = useState<Map<number, boolean>>(() => new Map());
   const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
   const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
-  const preserveFilters = useTranscriptViewStore((s) => s.preserveFilters);
-  const setPreserveFilters = useTranscriptViewStore((s) => s.setPreserveFilters);
-  const persistedFilterKeys = useTranscriptViewStore((s) => s.selectedFilterKeys);
-  const setPersistedFilterKeys = useTranscriptViewStore((s) => s.setSelectedFilterKeys);
-  const togglePersistedFilterKey = useTranscriptViewStore((s) => s.toggleFilterKey);
-  const clearPersistedFilterKeys = useTranscriptViewStore((s) => s.clearFilterKeys);
+  // Filters always persist across opens — a facet a run doesn't have simply
+  // no-ops (see activeFilterKeys), so there is no reason to make persistence a
+  // user-facing toggle.
+  const selectedFilterKeys = useTranscriptViewStore((s) => s.selectedFilterKeys);
+  const toggleFilterKey = useTranscriptViewStore((s) => s.toggleFilterKey);
+  const clearFilters = useTranscriptViewStore((s) => s.clearFilterKeys);
   const density = useTranscriptViewStore((s) => s.density);
   const setDensity = useTranscriptViewStore((s) => s.setDensity);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
-  const selectedFilterKeys = preserveFilters ? persistedFilterKeys : sessionFilterKeys;
 
   useEffect(() => {
     setRowOverrides(new Map());
@@ -381,45 +379,6 @@ export function AgentTranscriptDialog({
     });
   }, [displayItems]);
 
-  const toggleSessionFilterKey = useCallback((key: TranscriptFilterKey) => {
-    setSessionFilterKeys((prev) => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return Array.from(next);
-    });
-  }, []);
-
-  const clearFilters = useCallback(() => {
-    if (preserveFilters) {
-      clearPersistedFilterKeys();
-      return;
-    }
-    setSessionFilterKeys([]);
-  }, [clearPersistedFilterKeys, preserveFilters]);
-
-  const toggleFilterKey = useCallback(
-    (key: TranscriptFilterKey) => {
-      if (preserveFilters) {
-        togglePersistedFilterKey(key);
-        return;
-      }
-      toggleSessionFilterKey(key);
-    },
-    [preserveFilters, togglePersistedFilterKey, toggleSessionFilterKey],
-  );
-
-  const handlePreserveFiltersChange = useCallback(
-    (next: boolean) => {
-      if (next) {
-        setPersistedFilterKeys(sessionFilterKeys);
-      } else {
-        setSessionFilterKeys(persistedFilterKeys);
-      }
-      setPreserveFilters(next);
-    },
-    [persistedFilterKeys, sessionFilterKeys, setPersistedFilterKeys, setPreserveFilters],
-  );
 
   const handleRowExpandedChange = useCallback((seq: number, expanded: boolean) => {
     setRowOverrides((prev) => {
@@ -526,6 +485,17 @@ export function AgentTranscriptDialog({
   const createdLabel = task.created_at ? formatRunTime(task.created_at) : null;
   const startedLabel = task.started_at ? formatRunTime(task.started_at) : null;
   const completedLabel = task.completed_at ? formatRunTime(task.completed_at) : null;
+  // "When did this run happen" — a read-before-you-read fact worth the toolbar
+  // surface (the ⓘ popover keeps the full-precision created/started/completed).
+  const whenSource = task.started_at ?? task.created_at ?? null;
+  const whenLabel = whenSource
+    ? new Date(whenSource).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
   const hasTriggeredBy = !!task.attribution?.initiator;
   const hasRunDetails =
     hasTriggeredBy ||
@@ -648,6 +618,12 @@ export function AgentTranscriptDialog({
             instead of leaving dead space. ── */}
         <div className="flex items-center gap-3 border-b px-4 py-1.5 shrink-0">
           <div className="flex min-w-0 flex-1 items-center gap-x-1.5 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
+            {whenLabel && (
+              <>
+                <span>{whenLabel}</span>
+                <FactDot />
+              </>
+            )}
             {duration && (
               <span className="inline-flex items-center gap-1">
                 <Clock className="h-3 w-3" />
@@ -749,13 +725,6 @@ export function AgentTranscriptDialog({
                       {label}
                     </DropdownMenuCheckboxItem>
                   ))}
-                  <DropdownMenuSeparator />
-                  <DropdownMenuCheckboxItem
-                    checked={preserveFilters}
-                    onCheckedChange={(checked) => handlePreserveFiltersChange(checked === true)}
-                  >
-                    {t(($) => $.transcript.preserve_filters)}
-                  </DropdownMenuCheckboxItem>
                   {selectedFilterKeys.length > 0 && (
                     <>
                       <DropdownMenuSeparator />
