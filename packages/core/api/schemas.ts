@@ -184,6 +184,10 @@ export interface AppConfigResponse {
   daemon_server_url?: string;
   daemon_app_url?: string;
   workspace_creation_disabled?: boolean;
+  /** Whether this deployment offers the self-hosted Git provider integration
+   * (self-host only; off on the managed cloud). Absent/false hides the whole
+   * Settings → Integrations "Git providers" section. */
+  vcs_integration_available?: boolean;
   feature_flags?: Record<string, boolean>;
   server_version?: string;
 }
@@ -334,6 +338,7 @@ export const AppConfigSchema = z.object({
   daemon_server_url: OptionalStringSchema,
   daemon_app_url: OptionalStringSchema,
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
+  vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
   server_version: OptionalStringSchema,
 }).loose();
@@ -346,6 +351,7 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_server_url: "",
   daemon_app_url: "",
   workspace_creation_disabled: false,
+  vcs_integration_available: false,
   feature_flags: {},
 };
 

@@ -25,6 +25,12 @@ export interface VCSConnection {
 
 export interface ListVCSConnectionsResponse {
   connections: VCSConnection[];
+  /** Whether this deployment offers the integration at all (self-host only;
+   * off on the managed cloud). When false the section is hidden entirely.
+   * Older backends omit it; treat as true so the existing self-host UI still
+   * renders (visibility is also gated by vcs_integration_available on
+   * /api/config, which is the authoritative deployment signal). */
+  available?: boolean;
   /** Whether the deployment has MULTICA_VCS_SECRET_KEY configured. When false
    * the connect form is disabled. Older backends omit it; treat as false. */
   configured?: boolean;

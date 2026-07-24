@@ -5,6 +5,10 @@ description: 为每个工作区连接自托管的 Forgejo、Gitea 或 GitLab 实
 
 import { Callout } from "fumadocs-ui/components/callout";
 
+<Callout type="warn">
+**仅适用于自部署的 Multica。** 此集成只在你**自己部署 Multica** 时可用，Multica 云端不提供。这里的「自托管」指的是 **Multica 本身自部署**——通常是为了让它能访问你自己网络内的 Git 实例。需要服务端运维开启（`MULTICA_VCS_INTEGRATION_ENABLED=true`）并设置 `MULTICA_VCS_SECRET_KEY`；在此之前，设置 → 集成里不会出现该板块。
+</Callout>
+
 Multica 按工作区连接自托管的 Git 代码托管：**Forgejo**、**Gitea** 或 **GitLab**。连接后，任何在分支名、标题或正文中包含 issue 编号（例如 `MUL-123`）的 Pull Request（GitLab 为 Merge Request）都会**自动关联**到对应的 [issue](/issues)，出现在 issue 侧栏的 **Pull requests** 中；当带有关闭关键字的 PR 合并后，issue 会被移动到「完成」。head commit 的 CI 会以检查条的形式显示在卡片上。
 
 这些代码托管与 GitHub 并行工作：一个工作区可任意组合使用。
@@ -15,7 +19,15 @@ Multica 按工作区连接自托管的 Git 代码托管：**Forgejo**、**Gitea*
 
 ## 前置条件（服务端）
 
-设置一个 base64 编码的 32 字节密钥，供服务端加密存储的凭据。未设置时，连接表单将不可用。
+先为该部署开启此集成。它默认关闭，未开启时该板块不会出现：
+
+```sh
+MULTICA_VCS_INTEGRATION_ENABLED=true
+```
+
+官方自部署 `docker compose` 文件（`docker-compose.selfhost.yml`）已为你设置好。
+
+再设置一个 base64 编码的 32 字节密钥，供服务端加密存储的凭据。未设置时，连接表单将不可用。
 
 ```sh
 openssl rand -base64 32
@@ -24,6 +36,8 @@ openssl rand -base64 32
 ```sh
 MULTICA_VCS_SECRET_KEY=<base64 32 字节密钥>
 ```
+
+两者都必需：开关决定是否提供该功能，密钥用于加密存储的令牌与 Webhook 密钥。连接、Webhook、轮换都要求两者同时满足。
 
 设置 `MULTICA_PUBLIC_URL` 为服务端的公网基础地址，Multica 即可直接给出可粘贴的 Webhook 地址；否则界面只显示 Webhook 路径，需自行拼接来源地址。
 

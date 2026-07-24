@@ -37,6 +37,15 @@ type AppConfig struct {
 	DaemonServerURL string `json:"daemon_server_url,omitempty"`
 	DaemonAppURL    string `json:"daemon_app_url,omitempty"`
 
+	// VCSIntegrationAvailable mirrors the MULTICA_VCS_INTEGRATION_ENABLED
+	// deployment switch so the Settings UI can hide the whole self-hosted Git
+	// provider section on deployments where it is off (the managed cloud),
+	// instead of rendering it and surfacing an operator-only "missing
+	// MULTICA_VCS_SECRET_KEY" hint a cloud user cannot resolve. Omitted when
+	// false so the managed-cloud response keeps its previous shape; the UI
+	// defaults absent to false (hidden).
+	VCSIntegrationAvailable bool `json:"vcs_integration_available,omitempty"`
+
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
 	// into the frontend bundle via NEXT_PUBLIC_*) means self-hosted
@@ -73,6 +82,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
+	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
 	// Only surface the build version on self-hosted deployments. The managed
 	// cloud is continuously deployed and its users can't choose the build, so

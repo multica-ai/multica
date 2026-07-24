@@ -44,6 +44,13 @@ type VCSConnectResponse struct {
 
 const vcsWebhookPathPrefix = "/api/webhooks/vcs/"
 
+// isVCSAvailable reports whether this deployment offers the self-hosted Git
+// provider integration at all. It is the product boundary (self-host only) and
+// is independent of isVCSConfigured (whether the encryption key is set): the
+// managed cloud leaves it off, so connect/rotate/webhook reject and the UI
+// hides the section rather than surfacing an operator-only "missing key" hint.
+func (h *Handler) isVCSAvailable() bool { return h.cfg.VCSIntegrationEnabled }
+
 func (h *Handler) isVCSConfigured() bool { return h.VCSSecretBox != nil }
 
 func (h *Handler) vcsWebhookPath(connID string) string { return vcsWebhookPathPrefix + connID }
@@ -106,6 +113,20 @@ func (h *Handler) ListVCSConnections(w http.ResponseWriter, r *http.Request) {
 	member, _ := middleware.MemberFromContext(r.Context())
 	canManage := roleAllowed(member.Role, "owner", "admin")
 
+	// Deployments where the integration is off (the managed cloud) report
+	// available=false and nothing else, so the UI hides the whole section
+	// instead of showing an operator-only "missing key" hint. No connections
+	// can exist there anyway (connect is rejected), so skip the query.
+	if !h.isVCSAvailable() {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"connections": []VCSConnectionResponse{},
+			"available":   false,
+			"configured":  false,
+			"can_manage":  false,
+		})
+		return
+	}
+
 	rows, err := h.Queries.ListVCSConnectionsByWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list connections")
@@ -117,6 +138,7 @@ func (h *Handler) ListVCSConnections(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"connections": out,
+		"available":   true,
 		"configured":  h.isVCSConfigured(),
 		"can_manage":  canManage,
 	})
@@ -136,6 +158,10 @@ func (h *Handler) ConnectVCS(w http.ResponseWriter, r *http.Request) {
 	workspaceID := chi.URLParam(r, "id")
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id")
 	if !ok {
+		return
+	}
+	if !h.isVCSAvailable() {
+		writeError(w, http.StatusNotFound, "vcs integration is not available on this deployment")
 		return
 	}
 	if !h.isVCSConfigured() {
@@ -254,6 +280,10 @@ func (h *Handler) RotateVCSConnectionWebhook(w http.ResponseWriter, r *http.Requ
 	connID := chi.URLParam(r, "connectionId")
 	connUUID, ok := parseUUIDOrBadRequest(w, connID, "connection id")
 	if !ok {
+		return
+	}
+	if !h.isVCSAvailable() {
+		writeError(w, http.StatusNotFound, "vcs integration is not available on this deployment")
 		return
 	}
 	if !h.isVCSConfigured() {

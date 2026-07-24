@@ -85,6 +85,13 @@ func vcsPullRequestRowToResponse(p db.ListVCSPullRequestsByIssueRow) GitHubPullR
 // adapter handles the provider-specific signature scheme, event header, and
 // payload shape, returning normalized events to the shared mirror logic below.
 func (h *Handler) HandleVCSWebhook(w http.ResponseWriter, r *http.Request) {
+	// Where the integration is off (the managed cloud) the endpoint behaves as
+	// if it does not exist — a bare 404 that reveals nothing about config, the
+	// same response a genuinely unknown connection id gets below.
+	if !h.isVCSAvailable() {
+		writeError(w, http.StatusNotFound, "unknown connection")
+		return
+	}
 	if !h.isVCSConfigured() {
 		writeError(w, http.StatusServiceUnavailable, "vcs webhooks not configured")
 		return

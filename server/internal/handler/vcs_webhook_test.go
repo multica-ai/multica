@@ -27,7 +27,14 @@ func withVCSBox(t *testing.T) *secretbox.Box {
 	}
 	prev := testHandler.VCSSecretBox
 	testHandler.VCSSecretBox = box
-	t.Cleanup(func() { testHandler.VCSSecretBox = prev })
+	// The feature also requires the deployment-level switch; the box alone is
+	// no longer sufficient. Enable it for the "configured" path tests.
+	prevEnabled := testHandler.cfg.VCSIntegrationEnabled
+	testHandler.cfg.VCSIntegrationEnabled = true
+	t.Cleanup(func() {
+		testHandler.VCSSecretBox = prev
+		testHandler.cfg.VCSIntegrationEnabled = prevEnabled
+	})
 	return box
 }
 
@@ -501,6 +508,31 @@ func TestVCSWebhook_UnknownConnection(t *testing.T) {
 	testHandler.HandleVCSWebhook(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+// TestVCSWebhook_DisabledDeploymentReturns404 verifies the deployment-level
+// switch is enforced server-side: with the integration off (the managed-cloud
+// posture), even a valid, correctly-signed delivery to a real connection is
+// rejected with a bare 404, so the feature is never processed and reveals
+// nothing about config. The availability gate short-circuits before signature
+// verification.
+func TestVCSWebhook_DisabledDeploymentReturns404(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t) // sets the box AND enables the switch
+	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
+	t.Cleanup(func() { cleanupVCS(ctx, "") })
+
+	// Now flip the deployment switch off (withVCSBox's cleanup restores it).
+	testHandler.cfg.VCSIntegrationEnabled = false
+
+	raw := []byte(`{"action":"opened","pull_request":{"number":1}}`)
+	w := httptest.NewRecorder()
+	testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+		"X-Gitea-Event": "pull_request", "X-Gitea-Signature": giteaSig(raw),
+	}, raw))
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 when integration disabled, got %d (%s)", w.Code, w.Body.String())
 	}
 }
 
