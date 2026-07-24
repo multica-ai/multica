@@ -22,13 +22,16 @@ func newSelfHealTestDaemon() *Daemon {
 }
 
 // stubDetectVersionFromPath makes detectAgentVersion report the version encoded
-// in an installVersionedCodex path (…/codex/<ver>/bin/codex), so a heal to a
-// v2 directory "detects" v2. checkAgentMinVersion is intentionally left as the
-// real agent.CheckMinVersion so the min-version gate is exercised for real.
+// in a versioned test path, so a heal to a v2 executable "detects" v2.
+// checkAgentMinVersion is intentionally left as the real agent.CheckMinVersion
+// so the min-version gate is exercised for real.
 func stubDetectVersionFromPath(t *testing.T) {
 	t.Helper()
 	orig := detectAgentVersion
 	detectAgentVersion = func(_ context.Context, path string) (string, error) {
+		if base := filepath.Base(path); strings.Count(base, ".") >= 2 {
+			return base, nil
+		}
 		return filepath.Base(filepath.Dir(filepath.Dir(path))), nil
 	}
 	t.Cleanup(func() { detectAgentVersion = orig })
@@ -70,7 +73,7 @@ func installVersionedCodex(t *testing.T, root, version, stableBin string) string
 // ~/.local/share/claude/versions/<version>.
 func installVersionedClaude(t *testing.T, root, version, stableBin string) string {
 	t.Helper()
-	versioned := filepath.Join(root, ".local", "share", "claude", "versions", version, "bin", "claude")
+	versioned := filepath.Join(root, ".local", "share", "claude", "versions", version)
 	writeExecStub(t, versioned)
 	link := filepath.Join(stableBin, "claude")
 	_ = os.Remove(link) // repoint on upgrade
@@ -197,6 +200,9 @@ func TestResolveAgentEntry_SelfHealsClaudeAfterNativeInstallerUpgrade(t *testing
 	got, ver := d.resolveAgentEntry(ctx, "claude", entry)
 	if got.Path != v2 {
 		t.Fatalf("self-heal resolved %q, want re-resolved v2 %q", got.Path, v2)
+	}
+	if !agentExecutablePresent(got.Path) {
+		t.Fatalf("self-healed path is not runnable: %q", got.Path)
 	}
 	if ver != "2.1.215" {
 		t.Fatalf("returned version not paired with healed path: got %q, want %q", ver, "2.1.215")
