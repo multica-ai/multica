@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -164,6 +165,16 @@ type hermesBackend struct {
 var (
 	hermesReaderDrainGrace      = 2 * time.Second
 	hermesNotificationQuietTime = 250 * time.Millisecond
+	// hermesProcessWaitDelay bounds the deferred cmd.Wait() so a lingering
+	// grandchild that inherited an stdout/stderr pipe (e.g. a Git Bash / MSYS
+	// helper on Windows that never exits — see MUL-5241) can't hang reaping
+	// forever. Mirrors codexProcessWaitDelay's 10s default.
+	hermesProcessWaitDelay = 10 * time.Second
+	// hermesForcedShutdownGrace bounds the post-cancel drain wait so the task
+	// always reaches a terminal Result even when a descendant keeps an
+	// inherited pipe open on a platform without process-group signalling
+	// (Windows). The deferred cmd.Wait()+WaitDelay reaps the tree afterward.
+	hermesForcedShutdownGrace = 3 * time.Second
 )
 
 func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
@@ -190,6 +201,27 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, hermesArgs...)
 	hideAgentWindow(cmd)
+	// Run hermes in its own process group so a cancel-on-stuck cleanup reaches
+	// the whole tree — `hermes acp` plus any tool subprocess it spawns (bash on
+	// POSIX, Git Bash / MSYS helpers on Windows) — not just the direct child.
+	// Without this, killing the leader leaves grandchildren as orphans that keep
+	// inherited stdout/stderr pipes open and wedge the drain below. Mirrors the
+	// codex backend; configureProcessGroup is a no-op on Windows.
+	configureProcessGroup(cmd)
+	// Override exec.CommandContext's default cancel (SIGKILL to the leader only)
+	// so we signal the whole process group and descendants die too. Returning
+	// nil keeps exec from logging a spurious error; cmd.WaitDelay still backstops
+	// cmd.Wait() if the kill leaves a pipe held open by a grandchild.
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			signalProcessGroup(cmd.Process, syscall.SIGKILL)
+		}
+		return nil
+	}
+	// Bound the deferred cmd.Wait() so a stuck child — or a pipe held open by a
+	// lingering grandchild (e.g. a Git Bash / MSYS health-check helper that
+	// never exits; see MUL-5241) — can't hang reaping forever.
+	cmd.WaitDelay = hermesProcessWaitDelay
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", hermesArgs)
 	agentsMDPresent := false
 	if opts.Cwd != "" {
@@ -580,9 +612,22 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				"pid", cmd.Process.Pid,
 				"grace", hermesReaderDrainGrace.String(),
 			)
+			// cancel() runs cmd.Cancel, which SIGKILLs the whole process group so
+			// descendants release the inherited pipes and the readers hit EOF.
 			cancel()
-			<-readerDone
-			<-stderrDone
+			// On a platform without process-group signalling (Windows), Cancel
+			// terminates only the leader; a descendant can keep an inherited pipe
+			// open indefinitely. Bound this wait so the task still reaches a
+			// terminal Result — the deferred cmd.Wait() (backed by cmd.WaitDelay)
+			// reaps the tree and force-closes the pipes afterward. Without the
+			// bound this was an unconditional <-readerDone/<-stderrDone that could
+			// hang the task forever (MUL-5241).
+			if !waitForHermesPipeDrain(readerDone, stderrDone, hermesForcedShutdownGrace) {
+				b.cfg.Logger.Warn("hermes readers still blocked after forced shutdown; proceeding without full drain",
+					"pid", cmd.Process.Pid,
+					"grace", hermesForcedShutdownGrace.String(),
+				)
+			}
 		}
 		streamingCurrentTurn.Store(false)
 

@@ -989,6 +989,80 @@ done
 	}
 }
 
+// TestHermesBackendReapsLingeringPipeHoldingDescendant covers the case the
+// sibling test above cannot: after end_turn the agent leaves a *descendant*
+// that inherited stdout/stderr and lingers (e.g. a Git Bash / MSYS health-check
+// helper that never exits on Windows — MUL-5241). The daemon's stdout/stderr
+// readers never see EOF, so the old unconditional <-readerDone/<-stderrDone
+// after the drain grace would hang the task forever. With the process-group
+// cancel + bounded forced-shutdown drain, the task must still reach a terminal
+// Result well before the lingering descendant would exit on its own.
+func TestHermesBackendReapsLingeringPipeHoldingDescendant(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "hermes")
+	// After answering session/prompt the shell backgrounds a long sleep that
+	// INHERITS fd 1 and 2 (the daemon's read pipes) and then exits. The sleep
+	// keeps those pipes open, so EOF never arrives until it is killed. It shares
+	// the leader's process group, so only a group-directed SIGKILL reaps it —
+	// exactly what cmd.Cancel now does.
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_ling_desc"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      sleep 30 &
+      exit 0
+      ;;
+  esac
+done
+`
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("hermes", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new hermes backend: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{Timeout: 15 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	start := time.Now()
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+		}
+		// The lingering descendant sleeps 30s. Without the group-kill + bounded
+		// drain the Result would block until that sleep exits; the bounded path
+		// returns within grace + forced-shutdown grace (2s + 3s) plus slack.
+		if elapsed := time.Since(start); elapsed > 8*time.Second {
+			t.Fatalf("result took %s; bounded drain did not reap the lingering descendant", elapsed)
+		}
+	case <-time.After(8 * time.Second):
+		t.Fatal("timeout waiting for result; lingering pipe-holding descendant wedged the drain")
+	}
+}
+
 func TestHermesClientHandleAgentThought(t *testing.T) {
 	t.Parallel()
 
