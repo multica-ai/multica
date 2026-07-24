@@ -96,6 +96,21 @@ describe("AttributionBadge", () => {
     expect(screen.getByText("On behalf of someone")).toBeInTheDocument();
   });
 
+  it("inline variant renders borderless on-behalf-of text with the source in a tooltip", () => {
+    const attribution: TaskAttribution = {
+      source: "direct_human",
+      precise: true,
+      initiator: { id: "u1", name: "Ada Lovelace" },
+    };
+    const { container } = renderWithI18n(
+      <AttributionBadge attribution={attribution} variant="inline" />,
+    );
+
+    expect(screen.getByText("On behalf of Ada Lovelace")).toBeInTheDocument();
+    // Typography, not a chip: the inline shape must not render a Badge border.
+    expect(container.querySelector("[data-slot='badge']")).toBeNull();
+  });
+
   it("renders nothing when no responsible member resolved (MUL-4765)", () => {
     const attribution: TaskAttribution = {
       source: "unattributed",

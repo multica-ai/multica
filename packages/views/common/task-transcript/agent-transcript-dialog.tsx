@@ -419,223 +419,230 @@ export function AgentTranscriptDialog({
         <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>
 
         {/* ── Header ─────────────────────────────────────────────── */}
-        <div className="border-b px-4 py-3 shrink-0 space-y-2">
-          {/* Top row: agent name, status, actions */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        <div className="border-b px-4 py-3 shrink-0 space-y-1.5">
+          {/* Identity row: outcome first, then who ran and on whose behalf.
+              Status is the one fact every viewer opens this dialog for, so it
+              anchors the left edge. Entities render through their existing
+              identity components (avatar + hover card), never ad-hoc chips. */}
+          <div className="flex min-w-0 items-center gap-2.5">
+            {statusBadge}
             <div className="flex min-w-0 items-center gap-2">
               {task.agent_id ? (
-                <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" />
+                <ActorAvatar actorType="agent" actorId={task.agent_id} size="sm" enableHoverCard />
               ) : (
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
-                  <Bot className="h-3.5 w-3.5" />
+                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
+                  <Bot className="h-3 w-3" />
                 </div>
               )}
-              <span className="truncate font-medium text-sm">{agentName}</span>
+              <span className="truncate font-medium text-sm">
+                {agentName || agentInfo?.name || ""}
+              </span>
             </div>
-
-            {statusBadge}
-
             {/* Accountable member (MUL-4302 §9): whose behalf this run is on. */}
-            <AttributionBadge attribution={task.attribution} className="shrink-0" />
-
-            <div className="flex w-full max-w-full flex-wrap items-center justify-end gap-1 sm:ml-auto sm:w-auto">
-              {items.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    aria-label={t(($) => $.transcript.density_label)}
-                    className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                  >
-                    <ListCollapse className="h-3 w-3" />
-                    <span className="hidden sm:inline">
-                      {density === "smart"
-                        ? t(($) => $.transcript.density_smart)
-                        : density === "expanded"
-                          ? t(($) => $.transcript.density_expanded)
-                          : t(($) => $.transcript.density_collapsed)}
-                    </span>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-64">
-                    <DropdownMenuRadioGroup
-                      value={density}
-                      onValueChange={(value) => setDensity(value as TranscriptDetailDensity)}
-                    >
-                      {(
-                        [
-                          ["smart", t(($) => $.transcript.density_smart), t(($) => $.transcript.density_smart_desc)],
-                          ["expanded", t(($) => $.transcript.density_expanded), t(($) => $.transcript.density_expanded_desc)],
-                          ["collapsed", t(($) => $.transcript.density_collapsed), t(($) => $.transcript.density_collapsed_desc)],
-                        ] as const
-                      ).map(([value, name, description]) => (
-                        <DropdownMenuRadioItem key={value} value={value} className="items-start">
-                          <span className="flex min-w-0 flex-col gap-0.5">
-                            <span>{name}</span>
-                            <span className="text-[11px] leading-snug text-muted-foreground">
-                              {description}
-                            </span>
-                          </span>
-                        </DropdownMenuRadioItem>
-                      ))}
-                    </DropdownMenuRadioGroup>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-              {items.length > 1 && (
-                <SortDirectionToggle
-                  value={sortDirection}
-                  onChange={handleSortDirectionChange}
-                  labels={{
-                    chronological: t(($) => $.transcript.sort_chronological),
-                    newestFirst: t(($) => $.transcript.sort_newest_first),
-                    ariaLabel: t(($) => $.transcript.sort_label),
-                  }}
-                />
-              )}
-              {filterOptions.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    aria-label={t(($) => $.transcript.filter)}
-                    className={cn(
-                      "flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs transition-colors",
-                      activeFilterKeys.length > 0
-                        ? "text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/20"
-                        : "text-muted-foreground hover:text-foreground hover:bg-accent",
-                    )}
-                  >
-                    <Filter className="h-3 w-3" />
-                    <span className="hidden sm:inline">{t(($) => $.transcript.filter)}</span>
-                    {activeFilterKeys.length > 0 && (
-                      <span className="ml-0.5 rounded-full bg-blue-500/20 px-1.5 py-0 text-[10px] font-medium">
-                        {activeFilterKeys.length}
-                      </span>
-                    )}
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-auto">
-                    {filterOptions.map(([value, label]) => (
-                      <DropdownMenuCheckboxItem
-                        key={value}
-                        checked={selectedFilterKeys.includes(value)}
-                        onCheckedChange={() => toggleFilterKey(value)}
-                      >
-                        {label}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuCheckboxItem
-                      checked={preserveFilters}
-                      onCheckedChange={(checked) => handlePreserveFiltersChange(checked === true)}
-                    >
-                      {t(($) => $.transcript.preserve_filters)}
-                    </DropdownMenuCheckboxItem>
-                    {selectedFilterKeys.length > 0 && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
-                          {t(($) => $.transcript.clear_filters)}
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-              <button
-                type="button"
-                onClick={handleCopyAll}
-                aria-label={copyTranscriptLabel}
-                className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-              >
-                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                <span className="hidden sm:inline">{copyTranscriptLabel}</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => onOpenChange(false)}
-                className="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
+            <AttributionBadge
+              attribution={task.attribution}
+              variant="inline"
+              className="min-w-0"
+            />
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="ml-auto flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            >
+              <X className="h-4 w-4" />
+            </button>
           </div>
 
-          {/* Metadata chips row */}
-          <div className="flex items-center gap-2 flex-wrap text-xs">
-            {/* Runtime provider */}
+          {/* Facts line: quantitative run facts as plain dot-separated
+              typography — borders belong to controls, not to information.
+              Diagnostic details (hostname, workdir path) hide behind
+              hover/copy affordances instead of occupying the line. */}
+          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
             {runtimeInfo?.provider && (
-              <MetadataChip icon={<Cpu className="h-3 w-3" />}>
+              <span className="inline-flex items-center gap-1">
+                <Cpu className="h-3 w-3" />
                 {formatProvider(runtimeInfo.provider)}
-              </MetadataChip>
+              </span>
             )}
-
-            {/* Runtime environment */}
             {runtimeInfo && (
-              <MetadataChip
-                icon={runtimeInfo.runtime_mode === "cloud" ? <Cloud className="h-3 w-3" /> : <Monitor className="h-3 w-3" />}
-              >
-                {runtimeInfo.name}
-                <span className="text-muted-foreground/60 ml-0.5">({runtimeInfo.runtime_mode})</span>
-              </MetadataChip>
+              <>
+                <FactDot />
+                <span className="inline-flex items-center gap-1" title={runtimeInfo.name}>
+                  {runtimeInfo.runtime_mode === "cloud" ? (
+                    <Cloud className="h-3 w-3" />
+                  ) : (
+                    <Monitor className="h-3 w-3" />
+                  )}
+                  {runtimeInfo.runtime_mode}
+                </span>
+              </>
             )}
-
-            {/* Agent type / description */}
-            {agentInfo?.description && (
-              <MetadataChip icon={<Bot className="h-3 w-3" />}>
-                {agentInfo.description.length > 40 ? agentInfo.description.slice(0, 40) + "..." : agentInfo.description}
-              </MetadataChip>
-            )}
-
-            {/* Duration */}
             {duration && (
-              <MetadataChip icon={<Clock className="h-3 w-3" />}>
-                {duration}
-              </MetadataChip>
+              <>
+                <FactDot />
+                <span className="inline-flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  {duration}
+                </span>
+              </>
             )}
-
-            {/* Event counts */}
             {toolCount > 0 && (
-              <MetadataChip>{t(($) => $.transcript.tool_calls, { count: toolCount })}</MetadataChip>
+              <>
+                <FactDot />
+                <span>{t(($) => $.transcript.tool_calls, { count: toolCount })}</span>
+              </>
             )}
-            <MetadataChip>
+            <FactDot />
+            <span>
               {activeFilterKeys.length > 0
                 ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
                 : t(($) => $.transcript.events, { count: items.length })}
-            </MetadataChip>
-
-            {/* Working directory — server-derived display path. Falls back to
-                nothing when older backends omit the field rather than rendering
-                `work_dir` raw and leaking the user's home directory. The
-                absolute `task.work_dir` deliberately never reaches the DOM
-                anywhere — only `relative_work_dir` is safe to render / put in
-                title / copy to clipboard, because the server has already
-                stripped $HOME and the username out of it. The button
-                truncates because real workdir paths are routinely long
-                enough to push every other chip off the row. */}
+            </span>
+            {task.created_at && (
+              <>
+                <FactDot />
+                <span>
+                  {new Date(task.created_at).toLocaleString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </span>
+              </>
+            )}
+            {/* Working directory — server-derived display path. Only
+                `relative_work_dir` is safe to render / put in title / copy:
+                the server has already stripped $HOME and the username out of
+                it, while the absolute `task.work_dir` never reaches the DOM.
+                The path itself stays out of the line (routinely long); the
+                icon copies it and the tooltip shows it. */}
             {task.relative_work_dir && (
               <button
                 type="button"
                 onClick={handleCopyWorkdir}
                 title={task.relative_work_dir}
-                className="inline-flex max-w-[16rem] items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                className="inline-flex items-center gap-1 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
               >
                 {copiedWorkdir ? (
-                  <Check className="h-3 w-3 shrink-0 text-emerald-500" />
+                  <Check className="h-3 w-3 shrink-0 text-success" />
                 ) : (
                   <Folder className="h-3 w-3 shrink-0" />
                 )}
-                <span className="truncate font-mono">{task.relative_work_dir}</span>
               </button>
             )}
-
-            {/* Created time */}
-            {task.created_at && (
-              <MetadataChip>
-                {new Date(task.created_at).toLocaleString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </MetadataChip>
-            )}
           </div>
+        </div>
+
+        {/* ── List toolbar: every control operating the list below ── */}
+        <div className="flex flex-wrap items-center justify-end gap-1 border-b px-4 py-1.5 shrink-0">
+            {items.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  aria-label={t(($) => $.transcript.density_label)}
+                  className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                >
+                  <ListCollapse className="h-3 w-3" />
+                  <span className="hidden sm:inline">
+                    {density === "smart"
+                      ? t(($) => $.transcript.density_smart)
+                      : density === "expanded"
+                        ? t(($) => $.transcript.density_expanded)
+                        : t(($) => $.transcript.density_collapsed)}
+                  </span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuRadioGroup
+                    value={density}
+                    onValueChange={(value) => setDensity(value as TranscriptDetailDensity)}
+                  >
+                    {(
+                      [
+                        ["smart", t(($) => $.transcript.density_smart), t(($) => $.transcript.density_smart_desc)],
+                        ["expanded", t(($) => $.transcript.density_expanded), t(($) => $.transcript.density_expanded_desc)],
+                        ["collapsed", t(($) => $.transcript.density_collapsed), t(($) => $.transcript.density_collapsed_desc)],
+                      ] as const
+                    ).map(([value, name, description]) => (
+                      <DropdownMenuRadioItem key={value} value={value} className="items-start">
+                        <span className="flex min-w-0 flex-col gap-0.5">
+                          <span>{name}</span>
+                          <span className="text-[11px] leading-snug text-muted-foreground">
+                            {description}
+                          </span>
+                        </span>
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {items.length > 1 && (
+              <SortDirectionToggle
+                value={sortDirection}
+                onChange={handleSortDirectionChange}
+                labels={{
+                  chronological: t(($) => $.transcript.sort_chronological),
+                  newestFirst: t(($) => $.transcript.sort_newest_first),
+                  ariaLabel: t(($) => $.transcript.sort_label),
+                }}
+              />
+            )}
+            {filterOptions.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  aria-label={t(($) => $.transcript.filter)}
+                  className={cn(
+                    "flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs transition-colors",
+                    activeFilterKeys.length > 0
+                      ? "text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/20"
+                      : "text-muted-foreground hover:text-foreground hover:bg-accent",
+                  )}
+                >
+                  <Filter className="h-3 w-3" />
+                  <span className="hidden sm:inline">{t(($) => $.transcript.filter)}</span>
+                  {activeFilterKeys.length > 0 && (
+                    <span className="ml-0.5 rounded-full bg-blue-500/20 px-1.5 py-0 text-[10px] font-medium">
+                      {activeFilterKeys.length}
+                    </span>
+                  )}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-auto">
+                  {filterOptions.map(([value, label]) => (
+                    <DropdownMenuCheckboxItem
+                      key={value}
+                      checked={selectedFilterKeys.includes(value)}
+                      onCheckedChange={() => toggleFilterKey(value)}
+                    >
+                      {label}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuCheckboxItem
+                    checked={preserveFilters}
+                    onCheckedChange={(checked) => handlePreserveFiltersChange(checked === true)}
+                  >
+                    {t(($) => $.transcript.preserve_filters)}
+                  </DropdownMenuCheckboxItem>
+                  {selectedFilterKeys.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
+                        {t(($) => $.transcript.clear_filters)}
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <button
+              type="button"
+              onClick={handleCopyAll}
+              aria-label={copyTranscriptLabel}
+              className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            >
+              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+              <span className="hidden sm:inline">{copyTranscriptLabel}</span>
+            </button>
         </div>
 
         {/* ── Timeline progress bar ─────────────────────────────── */}
@@ -753,13 +760,12 @@ function SortDirectionToggle({ value, onChange, labels }: SortDirectionTogglePro
   );
 }
 
-// ─── Metadata chip ──────────────────────────────────────────────────────────
+// ─── Facts line separator ───────────────────────────────────────────────────
 
-function MetadataChip({ icon, children }: { icon?: React.ReactNode; children: React.ReactNode }) {
+function FactDot() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground">
-      {icon}
-      {children}
+    <span aria-hidden className="text-muted-foreground/40">
+      ·
     </span>
   );
 }
