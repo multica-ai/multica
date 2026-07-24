@@ -306,9 +306,9 @@ describe("AgentTranscriptDialog", () => {
 
     renderDialog([], { task: liveTask, isLive: true });
 
-    // The runtime's display name lives in the facts line's hover title; the
-    // visible text is the runtime mode.
-    await screen.findByTitle("hermes runtime");
+    // Runtime detail now lives in the ⓘ popover; its trigger appearing proves
+    // the runtime loaded. The non-antigravity live state still waits.
+    await screen.findByRole("button", { name: "Run details" });
     expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
   });
 

@@ -88,7 +88,7 @@ const SHELL_WRAPPER_PATTERN =
 
 export function stripShellWrapper(command: string): string {
   const match = SHELL_WRAPPER_PATTERN.exec(command.trim());
-  return match ? match[2] : command;
+  return match?.[2] ?? command;
 }
 
 function clip(value: string, max: number): string {

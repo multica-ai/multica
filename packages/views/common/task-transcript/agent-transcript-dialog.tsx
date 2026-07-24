@@ -14,18 +14,16 @@ import {
   Clock,
   Copy,
   Check,
-  Monitor,
-  Cloud,
-  Cpu,
   Filter,
-  Folder,
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
   ListCollapse,
+  Info,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import {
   DropdownMenu,
@@ -131,6 +129,63 @@ function formatElapsedMs(ms: number): string {
   const minutes = Math.floor(seconds / 60);
   const secs = seconds % 60;
   return `${minutes}m ${secs}s`;
+}
+
+function formatRunTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+// ─── Run detail row (ⓘ popover) ─────────────────────────────────────────────
+// One labeled fact in the diagnostic popover. When `onCopy` is given the whole
+// row is a copy button (used for the workdir path).
+function RunDetailRow({
+  label,
+  value,
+  mono,
+  onCopy,
+  copied,
+  copyTitle,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  onCopy?: () => void;
+  copied?: boolean;
+  copyTitle?: string;
+}) {
+  const valueClass = cn("min-w-0 select-text break-all text-foreground/80", mono && "font-mono");
+  if (onCopy) {
+    return (
+      <button
+        type="button"
+        onClick={onCopy}
+        title={copyTitle}
+        className="group -mx-1 grid w-[calc(100%+0.5rem)] grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 rounded px-1 py-0.5 text-left transition-colors hover:bg-accent/60"
+      >
+        <span className="text-muted-foreground">{label}</span>
+        <span className="flex min-w-0 items-start gap-1.5">
+          <span className={cn(valueClass, "flex-1")}>{value}</span>
+          {copied ? (
+            <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />
+          ) : (
+            <Copy className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+          )}
+        </span>
+      </button>
+    );
+  }
+  return (
+    <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={valueClass}>{value}</span>
+    </div>
+  );
 }
 
 // ─── Main dialog ────────────────────────────────────────────────────────────
@@ -388,27 +443,95 @@ export function AgentTranscriptDialog({
       ? t(($) => $.transcript.copy_filtered)
       : t(($) => $.transcript.copy_all);
 
-  // Status display
-  const statusBadge = isLive ? (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-info/15 px-2 py-0.5 text-xs font-medium text-info">
-      <Loader2 className="h-3 w-3 animate-spin" />
-      {t(($) => $.transcript.status_running)}
-    </span>
-  ) : task.status === "completed" ? (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
-      <CheckCircle2 className="h-3 w-3" />
-      {t(($) => $.transcript.status_completed)}
-    </span>
-  ) : task.status === "failed" ? (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive">
-      <XCircle className="h-3 w-3" />
-      {t(($) => $.transcript.status_failed)}
-    </span>
-  ) : (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground capitalize">
-      {task.status}
-    </span>
-  );
+  // Status badge — full state machine, so queued/dispatched/cancelled render as
+  // proper labels instead of raw enum text.
+  const effectiveStatus = isLive ? "running" : task.status;
+  const statusBadge = (() => {
+    const base = "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium";
+    switch (effectiveStatus) {
+      case "running":
+        return (
+          <span className={cn(base, "bg-info/15 text-info")}>
+            <Loader2 className="h-3 w-3 animate-spin" />
+            {t(($) => $.transcript.status_running)}
+          </span>
+        );
+      case "completed":
+        return (
+          <span className={cn(base, "bg-success/15 text-success")}>
+            <CheckCircle2 className="h-3 w-3" />
+            {t(($) => $.transcript.status_completed)}
+          </span>
+        );
+      case "failed":
+        return (
+          <span className={cn(base, "bg-destructive/15 text-destructive")}>
+            <XCircle className="h-3 w-3" />
+            {t(($) => $.transcript.status_failed)}
+          </span>
+        );
+      case "cancelled":
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground")}>
+            <XCircle className="h-3 w-3" />
+            {t(($) => $.transcript.status_cancelled)}
+          </span>
+        );
+      case "queued":
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground")}>
+            {t(($) => $.transcript.status_queued)}
+          </span>
+        );
+      case "dispatched":
+        return (
+          <span className={cn(base, "bg-info/15 text-info")}>
+            {t(($) => $.transcript.status_dispatched)}
+          </span>
+        );
+      case "waiting_local_directory":
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground")}>
+            {t(($) => $.transcript.status_waiting)}
+          </span>
+        );
+      default:
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground capitalize")}>
+            {task.status}
+          </span>
+        );
+    }
+  })();
+
+  // Trigger source: one word answering "why does this run exist" — more useful
+  // up front than the runtime/provider diagnostics, which move to the ⓘ popover.
+  const triggerLabel = task.parent_task_id
+    ? t(($) => $.transcript.trigger_retry)
+    : task.kind === "comment" || task.trigger_comment_id
+      ? t(($) => $.transcript.trigger_comment)
+      : task.kind === "autopilot" || task.autopilot_run_id
+        ? t(($) => $.transcript.trigger_autopilot)
+        : task.kind === "chat" || task.chat_session_id
+          ? t(($) => $.transcript.trigger_chat)
+          : task.kind === "quick_create"
+            ? t(($) => $.transcript.trigger_quick_create)
+            : task.kind === "direct" || task.handoff_note
+              ? t(($) => $.transcript.trigger_direct)
+              : t(($) => $.transcript.trigger_initial);
+
+  // Diagnostic detail for the ⓘ popover: everything a reader needs only when
+  // debugging this specific run, kept off the always-visible surface.
+  const providerLabel = runtimeInfo?.provider ? formatProvider(runtimeInfo.provider) : null;
+  const createdLabel = task.created_at ? formatRunTime(task.created_at) : null;
+  const startedLabel = task.started_at ? formatRunTime(task.started_at) : null;
+  const completedLabel = task.completed_at ? formatRunTime(task.completed_at) : null;
+  const hasRunDetails =
+    !!runtimeInfo ||
+    !!task.relative_work_dir ||
+    !!createdLabel ||
+    !!startedLabel ||
+    !!completedLabel;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -418,124 +541,118 @@ export function AgentTranscriptDialog({
       >
         <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>
 
-        {/* ── Header ─────────────────────────────────────────────── */}
-        <div className="border-b px-4 py-3 shrink-0 space-y-1.5">
-          {/* Identity row: outcome first, then who ran and on whose behalf.
-              Status is the one fact every viewer opens this dialog for, so it
-              anchors the left edge. Entities render through their existing
-              identity components (avatar + hover card), never ad-hoc chips. */}
+        {/* ── Header: identity only ──────────────────────────────────
+            Tier 1 — everything a viewer needs BEFORE reading: outcome
+            (status anchors the left), who ran it, why it exists (trigger),
+            and who's accountable. All diagnostics move to the ⓘ popover. */}
+        <div className="border-b px-4 py-3 shrink-0">
           <div className="flex min-w-0 items-center gap-2.5">
             {statusBadge}
-            <div className="flex min-w-0 items-center gap-2">
-              {task.agent_id ? (
-                <ActorAvatar actorType="agent" actorId={task.agent_id} size="sm" enableHoverCard />
-              ) : (
-                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
-                  <Bot className="h-3 w-3" />
-                </div>
-              )}
-              <span className="truncate font-medium text-sm">
-                {agentName || agentInfo?.name || ""}
-              </span>
+            <div className="flex min-w-0 flex-1 items-center gap-x-3 overflow-hidden">
+              <div className="flex min-w-0 items-center gap-2">
+                {task.agent_id ? (
+                  <ActorAvatar actorType="agent" actorId={task.agent_id} size="sm" enableHoverCard />
+                ) : (
+                  <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
+                    <Bot className="h-3 w-3" />
+                  </div>
+                )}
+                <span className="truncate font-medium text-sm">
+                  {agentName || agentInfo?.name || ""}
+                </span>
+              </div>
+              <span className="shrink-0 text-xs text-muted-foreground">{triggerLabel}</span>
+              {/* Accountable member (MUL-4302 §9): whose behalf this run is on. */}
+              <AttributionBadge
+                attribution={task.attribution}
+                variant="inline"
+                className="min-w-0"
+              />
             </div>
-            {/* Accountable member (MUL-4302 §9): whose behalf this run is on. */}
-            <AttributionBadge
-              attribution={task.attribution}
-              variant="inline"
-              className="min-w-0"
-            />
-            <button
-              type="button"
-              onClick={() => onOpenChange(false)}
-              className="ml-auto flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
 
-          {/* Facts line: quantitative run facts as plain dot-separated
-              typography — borders belong to controls, not to information.
-              Diagnostic details (hostname, workdir path) hide behind
-              hover/copy affordances instead of occupying the line. */}
-          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-xs text-muted-foreground">
-            {runtimeInfo?.provider && (
+            <div className="flex shrink-0 items-center gap-0.5">
+              {hasRunDetails && (
+                <Popover>
+                  <PopoverTrigger
+                    aria-label={t(($) => $.transcript.run_info)}
+                    title={t(($) => $.transcript.run_info)}
+                    className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] p-3">
+                    <div className="mb-2 text-xs font-medium text-foreground">
+                      {t(($) => $.transcript.run_info)}
+                    </div>
+                    <div className="space-y-1 text-xs">
+                      {runtimeInfo && (
+                        <RunDetailRow label={t(($) => $.transcript.details_runtime)} value={runtimeInfo.name} />
+                      )}
+                      {providerLabel && (
+                        <RunDetailRow label={t(($) => $.transcript.details_provider)} value={providerLabel} />
+                      )}
+                      {runtimeInfo && (
+                        <RunDetailRow label={t(($) => $.transcript.details_mode)} value={runtimeInfo.runtime_mode} />
+                      )}
+                      {task.relative_work_dir && (
+                        <RunDetailRow
+                          label={t(($) => $.transcript.details_workdir)}
+                          value={task.relative_work_dir}
+                          mono
+                          onCopy={handleCopyWorkdir}
+                          copied={copiedWorkdir}
+                          copyTitle={t(($) => $.transcript.copy_workdir)}
+                        />
+                      )}
+                      {createdLabel && (
+                        <RunDetailRow label={t(($) => $.transcript.details_created)} value={createdLabel} />
+                      )}
+                      {startedLabel && (
+                        <RunDetailRow label={t(($) => $.transcript.details_started)} value={startedLabel} />
+                      )}
+                      {completedLabel && (
+                        <RunDetailRow label={t(($) => $.transcript.details_completed)} value={completedLabel} />
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* ── List toolbar: read-before-you-read summary (left) + controls
+            (right). Duration + event count fill the left, so the row balances
+            instead of leaving dead space. ── */}
+        <div className="flex items-center gap-3 border-b px-4 py-1.5 shrink-0">
+          <div className="flex min-w-0 flex-1 items-center gap-x-1.5 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
+            {duration && (
               <span className="inline-flex items-center gap-1">
-                <Cpu className="h-3 w-3" />
-                {formatProvider(runtimeInfo.provider)}
+                <Clock className="h-3 w-3" />
+                {duration}
               </span>
             )}
-            {runtimeInfo && (
-              <>
-                <FactDot />
-                <span className="inline-flex items-center gap-1" title={runtimeInfo.name}>
-                  {runtimeInfo.runtime_mode === "cloud" ? (
-                    <Cloud className="h-3 w-3" />
-                  ) : (
-                    <Monitor className="h-3 w-3" />
-                  )}
-                  {runtimeInfo.runtime_mode}
-                </span>
-              </>
-            )}
-            {duration && (
-              <>
-                <FactDot />
-                <span className="inline-flex items-center gap-1">
-                  <Clock className="h-3 w-3" />
-                  {duration}
-                </span>
-              </>
-            )}
+            {duration && <FactDot />}
+            <span>
+              {activeFilterKeys.length > 0
+                ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
+                : t(($) => $.transcript.events, { count: items.length })}
+            </span>
             {toolCount > 0 && (
               <>
                 <FactDot />
                 <span>{t(($) => $.transcript.tool_calls, { count: toolCount })}</span>
               </>
             )}
-            <FactDot />
-            <span>
-              {activeFilterKeys.length > 0
-                ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
-                : t(($) => $.transcript.events, { count: items.length })}
-            </span>
-            {task.created_at && (
-              <>
-                <FactDot />
-                <span>
-                  {new Date(task.created_at).toLocaleString(undefined, {
-                    month: "short",
-                    day: "numeric",
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
-                </span>
-              </>
-            )}
-            {/* Working directory — server-derived display path. Only
-                `relative_work_dir` is safe to render / put in title / copy:
-                the server has already stripped $HOME and the username out of
-                it, while the absolute `task.work_dir` never reaches the DOM.
-                The path itself stays out of the line (routinely long); the
-                icon copies it and the tooltip shows it. */}
-            {task.relative_work_dir && (
-              <button
-                type="button"
-                onClick={handleCopyWorkdir}
-                title={task.relative_work_dir}
-                className="inline-flex items-center gap-1 rounded p-0.5 text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-              >
-                {copiedWorkdir ? (
-                  <Check className="h-3 w-3 shrink-0 text-success" />
-                ) : (
-                  <Folder className="h-3 w-3 shrink-0" />
-                )}
-              </button>
-            )}
           </div>
-        </div>
-
-        {/* ── List toolbar: every control operating the list below ── */}
-        <div className="flex flex-wrap items-center justify-end gap-1 border-b px-4 py-1.5 shrink-0">
+          <div className="flex shrink-0 items-center gap-1">
             {items.length > 0 && (
               <DropdownMenu>
                 <DropdownMenuTrigger
@@ -643,6 +760,7 @@ export function AgentTranscriptDialog({
               {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
               <span className="hidden sm:inline">{copyTranscriptLabel}</span>
             </button>
+          </div>
         </div>
 
         {/* ── Timeline progress bar ─────────────────────────────── */}
