@@ -45,6 +45,12 @@
     "preview_unsupported": "このファイル形式はプレビューできません。",
     "close": "閉じる",
     "open_in_new_tab": "新しいタブで開く",
+    "find_placeholder": "ページ内を検索",
+    "find_count": "{{current}}/{{total}}",
+    "find_no_results": "結果なし",
+    "find_prev": "前の一致",
+    "find_next": "次の一致",
+    "find_close": "検索を閉じる",
     "remove": "添付ファイルを削除"
   },
   "link_hover": {

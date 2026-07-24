@@ -45,6 +45,12 @@
     "preview_unsupported": "This file type can't be previewed.",
     "close": "Close",
     "open_in_new_tab": "Open in new tab",
+    "find_placeholder": "Find in page",
+    "find_count": "{{current}}/{{total}}",
+    "find_no_results": "No results",
+    "find_prev": "Previous match",
+    "find_next": "Next match",
+    "find_close": "Close find",
     "remove": "Remove attachment"
   },
   "link_hover": {
