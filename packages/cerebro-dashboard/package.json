@@ -21,7 +21,8 @@
     "@multica/cerebro-usage": "workspace:*",
     "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
-    "@multica/views": "workspace:*"
+    "@multica/views": "workspace:*",
+    "zod": "catalog:"
   },
   "peerDependencies": {
     "@tanstack/react-query": "catalog:",

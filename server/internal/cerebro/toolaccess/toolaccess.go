@@ -186,7 +186,7 @@ func (s *Service) resolvePolicy(ctx context.Context, query toolpolicy.Query, age
 func DescriptorForCapability(t capabilityregistry.View) Descriptor {
 	protocols := []string{"native_tool_loop", "mcp_stdio", "mcp_http_sse", "managed_http_tool_loop"}
 	source := "platform"
-	if t.Source == "scan" {
+	if t.Source == "scan" || strings.HasPrefix(t.Key, "mcp__") {
 		source = "mcp"
 		protocols = []string{"mcp_stdio", "mcp_http_sse"}
 	}

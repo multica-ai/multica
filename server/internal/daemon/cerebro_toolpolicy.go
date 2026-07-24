@@ -27,6 +27,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 )
 
 const (
@@ -160,15 +162,11 @@ type toolPolicySpawn struct {
 // or deploy — wherever the daemon runs, the hook runs. Workspace/agent identity
 // and the daemon port come from the MULTICA_* env already injected at spawn.
 func (d *Daemon) prepareToolPolicySpawn(provider, workdir, providerHome string, fastMode bool) (*toolPolicySpawn, error) {
-	switch provider {
-	case "copilot", "opencode", "openclaw", "hermes", "pi", "kimi", "kiro", "antigravity":
-		return nil, fmt.Errorf("local provider %q does not support mandatory tool-policy enforcement", provider)
-	case "claude", "codex", "cursor", "gemini":
-		// Enforced below through a provider-specific adapter.
-	case "firtal-gateway":
+	if provider == "firtal-gateway" {
 		// Managed HTTP providers do not dispatch local CLI tools.
 		return nil, nil
-	default:
+	}
+	if _, ok := localtoolpolicy.ProviderAdapterFor(provider); !ok {
 		return nil, fmt.Errorf("local provider %q does not support mandatory tool-policy enforcement", provider)
 	}
 
@@ -194,19 +192,23 @@ func writeToolPolicySettingsJSON(provider, workdir, providerHome, exe string, fa
 	var dir, filename string
 	var settings map[string]any
 	command := fmt.Sprintf("%q cerebro-tool-policy-hook", exe)
+	adapter, ok := localtoolpolicy.ProviderAdapterFor(provider)
+	if !ok {
+		return "", fmt.Errorf("local provider %q does not support mandatory tool-policy enforcement", provider)
+	}
 	switch provider {
 	case "claude":
 		dir, filename = filepath.Join(workdir, ".claude"), "cerebro-tool-policy-settings.json"
-		settings = claudeStyleToolPolicySettings("PreToolUse", command)
+		settings = claudeStyleToolPolicySettings(adapter.HookEvent, command)
 	case "gemini":
 		dir, filename = filepath.Join(workdir, ".gemini"), "settings.json"
-		settings = claudeStyleToolPolicySettings("BeforeTool", command)
+		settings = claudeStyleToolPolicySettings(adapter.HookEvent, command)
 	case "cursor":
 		dir, filename = filepath.Join(workdir, ".cursor"), "hooks.json"
 		settings = map[string]any{
 			"version": 1,
 			"hooks": map[string]any{
-				"preToolUse": []map[string]any{{
+				adapter.HookEvent: []map[string]any{{
 					"type": "command", "command": command, "failClosed": true, "timeout": 300,
 				}},
 			},
@@ -216,9 +218,7 @@ func writeToolPolicySettingsJSON(provider, workdir, providerHome, exe string, fa
 			return "", fmt.Errorf("codex home is required for tool-policy hooks")
 		}
 		dir, filename = providerHome, "hooks.json"
-		settings = claudeStyleToolPolicySettings("PreToolUse", command)
-	default:
-		return "", nil
+		settings = claudeStyleToolPolicySettings(adapter.HookEvent, command)
 	}
 	if provider == "claude" && fastMode {
 		settings["fastMode"] = true

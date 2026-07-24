@@ -88,6 +88,22 @@ func TestAnalyticsQueryRoutesAreMounted(t *testing.T) {
 	}
 }
 
+func TestAIImpactObservationRoutesAreMounted(t *testing.T) {
+	router := NewRouter(nil, realtime.NewHub(), events.New(), analytics.NoopClient{}, nil, nil)
+
+	const metricID = "22222222-2222-2222-2222-222222222222"
+	path := "/api/cerebro/ai-impact/metrics/" + metricID + "/observations"
+	for _, method := range []string{"GET", "POST"} {
+		rctx := chi.NewRouteContext()
+		if !router.Match(rctx, method, path) {
+			t.Fatalf("expected %s %s to match a mounted route", method, path)
+		}
+		if got := rctx.RoutePattern(); got != "/api/cerebro/ai-impact/metrics/{metricId}/observations" {
+			t.Fatalf("%s %s matched %q", method, path, got)
+		}
+	}
+}
+
 // CEREBRO-PATCH(cerebro-account-routes): FIR-3118 — the per-account routes
 // sit inside the workspace group whose RequireWorkspaceMemberFromURL reads
 // URLParam("id"). chi returns the innermost value for duplicate param names,

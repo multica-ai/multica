@@ -47,7 +47,8 @@ type stageFailingCommander struct {
 func stageVerb(args []string) string {
 	joined := strings.Join(args, " ")
 	switch {
-	case strings.Contains(joined, "find role link click"):
+	case strings.Contains(joined, "find role link click"),
+		strings.Contains(joined, "find text ") && strings.Contains(joined, " click --exact"):
 		return "navigation"
 	case strings.HasSuffix(joined, "batch"):
 		return "auth"
@@ -71,7 +72,7 @@ func (c *stageFailingCommander) Run(_ context.Context, _ string, args ...string)
 	}
 	switch {
 	case len(args) > 0 && args[len(args)-1] == "url":
-		return []byte("http://multica.internal:3000/\n"), nil
+		return []byte("http://multica.internal:3000/firtal/issues\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "snapshot":
 		return []byte("Dashboard\nData Sources\nYour roles:\nIssues\nAgents\nSettings\nDesk\nAnalytics\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "errors":
@@ -116,7 +117,7 @@ func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string
 	c.calls = append(c.calls, commandCall{args: append([]string(nil), args...), stdin: stdin})
 	switch {
 	case len(args) > 0 && args[len(args)-1] == "url":
-		return []byte("http://firtal-data-registry-private.internal:3000/\n"), nil
+		return []byte("http://multica.internal:3000/firtal/issues\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "snapshot":
 		return []byte("Dashboard\nData Sources\nAuthentication\nAPI Keys\nYour roles:\nIssues\nAgents\nSettings\nDesk\nAnalytics\nLogout\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "errors":
@@ -173,6 +174,9 @@ func (c *concurrentProbeCommander) CaptureScreenshot(_ context.Context, _ ...str
 func testRunner(commander Commander) *Runner {
 	runner := NewRunner(commander)
 	runner.resolveHost = func(context.Context, string) error { return nil }
+	runner.fetchVersion = func(context.Context, string) (string, error) {
+		return "0123456789abcdef0123456789abcdef01234567", nil
+	}
 	return runner
 }
 
@@ -269,8 +273,8 @@ func TestVerifyCapturesScreenshotOnRecoverableStageFailure(t *testing.T) {
 	if !bytes.HasPrefix(result.ScreenshotPNG, pngSignature) {
 		t.Fatalf("failure screenshot = %q, want PNG evidence", result.ScreenshotPNG)
 	}
-	if result.FailureDetail != "link: Issues" {
-		t.Fatalf("failure detail = %q, want the element that was looked for", result.FailureDetail)
+	if result.FailureDetail != "exact text: Issues" {
+		t.Fatalf("failure detail = %q, want the exact label that was looked for", result.FailureDetail)
 	}
 }
 
@@ -381,6 +385,109 @@ func TestMulticaTargetUsesFullProductionNavigationMarkers(t *testing.T) {
 	if strings.Join(target.ExpectedText, "|") != strings.Join(want, "|") {
 		t.Fatalf("multica markers = %v, want %v", target.ExpectedText, want)
 	}
+	if !target.NavigateExactText {
+		t.Fatal("multica navigation must not assume the current Issues row exposes role=link")
+	}
+	if target.VersionPath != "/version" {
+		t.Fatalf("multica version path = %q, want /version", target.VersionPath)
+	}
+	if target.ExpectedPathSuffix != "/issues" {
+		t.Fatalf("multica expected path suffix = %q, want /issues", target.ExpectedPathSuffix)
+	}
+}
+
+func TestRunnerReturnsSafeMulticaVersionCommit(t *testing.T) {
+	runner := testRunner(&recordingCommander{})
+	var requestedURL string
+	runner.fetchVersion = func(_ context.Context, versionURL string) (string, error) {
+		requestedURL = versionURL
+		return "abcdef0123456789abcdef0123456789abcdef01", nil
+	}
+	result, err := runner.Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if requestedURL != "http://multica.internal:3000/version" {
+		t.Fatalf("version URL = %q, want same-origin /version", requestedURL)
+	}
+	if result.VersionCommit != "abcdef0123456789abcdef0123456789abcdef01" {
+		t.Fatalf("version commit = %q", result.VersionCommit)
+	}
+}
+
+func TestRunnerFailsClosedWhenMulticaVersionIsUnavailable(t *testing.T) {
+	runner := testRunner(&stageFailingCommander{stage: "no-such-stage"})
+	runner.fetchVersion = func(context.Context, string) (string, error) {
+		return "", errors.New("must not escape")
+	}
+	result, err := runner.Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
+	if err == nil || err.Error() != "internal browser stage version failed" {
+		t.Fatalf("error = %v, want version stage failure", err)
+	}
+	if result.FailureDetail != "version endpoint: /version" {
+		t.Fatalf("failure detail = %q", result.FailureDetail)
+	}
+	if !bytes.HasPrefix(result.ScreenshotPNG, pngSignature) {
+		t.Fatalf("version failure screenshot = %q, want UI evidence", result.ScreenshotPNG)
+	}
+}
+
+func TestRunnerFailsClosedWhenMulticaVersionIsUnknown(t *testing.T) {
+	runner := testRunner(&recordingCommander{})
+	runner.fetchVersion = func(context.Context, string) (string, error) {
+		return "unknown", nil
+	}
+	result, err := runner.Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
+	if err == nil || err.Error() != "internal browser stage version failed" {
+		t.Fatalf("error = %v, want version stage failure", err)
+	}
+	if result.FailureDetail != "version endpoint: /version" {
+		t.Fatalf("failure detail = %q", result.FailureDetail)
+	}
+}
+
+func TestSafeVersionCommitRejectsUntrustedVersionText(t *testing.T) {
+	for _, test := range []struct {
+		commit string
+		want   bool
+	}{
+		{commit: "unknown", want: false},
+		{commit: "abcdef0", want: true},
+		{commit: "0123456789abcdef0123456789abcdef01234567", want: true},
+		{commit: "", want: false},
+		{commit: "release/latest", want: false},
+		{commit: "abcdef\\nsecret", want: false},
+	} {
+		if got := safeVersionCommit(test.commit); got != test.want {
+			t.Fatalf("safeVersionCommit(%q) = %v, want %v", test.commit, got, test.want)
+		}
+	}
+}
+
+type wrongPathCommander struct {
+	recordingCommander
+}
+
+func (c *wrongPathCommander) Run(ctx context.Context, stdin string, args ...string) ([]byte, error) {
+	if len(args) > 0 && args[len(args)-1] == "url" {
+		c.calls = append(c.calls, commandCall{args: append([]string(nil), args...), stdin: stdin})
+		return []byte("http://multica.internal:3000/firtal/settings\n"), nil
+	}
+	return c.recordingCommander.Run(ctx, stdin, args...)
+}
+
+func TestRunnerFailsClosedWhenMulticaNavigationMissesIssues(t *testing.T) {
+	commander := &wrongPathCommander{}
+	result, err := testRunner(commander).Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
+	if err == nil || err.Error() != "internal browser stage url not-found failed" {
+		t.Fatalf("error = %v, want url not-found stage failure", err)
+	}
+	if result.FailureDetail != "unexpected final path" {
+		t.Fatalf("failure detail = %q", result.FailureDetail)
+	}
+	if !bytes.HasPrefix(result.ScreenshotPNG, pngSignature) {
+		t.Fatalf("path failure screenshot = %q, want UI evidence", result.ScreenshotPNG)
+	}
 }
 
 func TestRunnerNavigatesMulticaToIssuesBeforeSnapshot(t *testing.T) {
@@ -392,7 +499,7 @@ func TestRunnerNavigatesMulticaToIssuesBeforeSnapshot(t *testing.T) {
 	var navigateIndex, snapshotIndex = -1, -1
 	for i, call := range commander.calls {
 		joined := strings.Join(call.args, " ")
-		if strings.Contains(joined, "find role link click --name Issues") {
+		if strings.Contains(joined, "find text Issues click --exact") {
 			navigateIndex = i
 		}
 		if len(call.args) > 0 && call.args[len(call.args)-1] == "snapshot" {

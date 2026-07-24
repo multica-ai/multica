@@ -153,6 +153,8 @@ func TestRuntimeClientFetchesImmutableFrontendAsset(t *testing.T) {
 		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
 		w.Header().Set("Content-Security-Policy", "default-src 'self'")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Access-Control-Allow-Origin", "null")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
 		_, _ = w.Write([]byte("<h1>Allergen Formatter</h1>"))
 	}))
 	defer server.Close()
@@ -169,7 +171,9 @@ func TestRuntimeClientFetchesImmutableFrontendAsset(t *testing.T) {
 		t.Fatalf("unexpected runtime asset: %+v", asset)
 	}
 	if asset.Headers.Get("Content-Type") != "text/html; charset=utf-8" ||
-		asset.Headers.Get("Content-Security-Policy") != "default-src 'self'" {
+		asset.Headers.Get("Content-Security-Policy") != "default-src 'self'" ||
+		asset.Headers.Get("Access-Control-Allow-Origin") != "null" ||
+		asset.Headers.Get("Access-Control-Allow-Credentials") != "true" {
 		t.Fatalf("runtime response headers were not preserved: %v", asset.Headers)
 	}
 }
@@ -177,9 +181,13 @@ func TestRuntimeClientFetchesImmutableFrontendAsset(t *testing.T) {
 func TestRuntimeAssetHandlerOnlyProxiesFrontendAndSDK(t *testing.T) {
 	runtime := &fakeRuntimeAssetFetcher{
 		asset: RuntimeAsset{
-			Status:  http.StatusOK,
-			Headers: http.Header{"Content-Type": []string{"text/html; charset=utf-8"}},
-			Body:    []byte("<h1>Allergen Formatter</h1>"),
+			Status: http.StatusOK,
+			Headers: http.Header{
+				"Content-Type":                     []string{"text/html; charset=utf-8"},
+				"Access-Control-Allow-Origin":      []string{"null"},
+				"Access-Control-Allow-Credentials": []string{"true"},
+			},
+			Body: []byte("<h1>Allergen Formatter</h1>"),
 		},
 	}
 	handler := &Handler{runtimeAssets: runtime}
@@ -194,6 +202,10 @@ func TestRuntimeAssetHandlerOnlyProxiesFrontendAndSDK(t *testing.T) {
 	))
 	if allowed.Code != http.StatusOK || !strings.Contains(allowed.Body.String(), "Allergen Formatter") {
 		t.Fatalf("frontend asset returned %d: %s", allowed.Code, allowed.Body.String())
+	}
+	if allowed.Header().Get("Access-Control-Allow-Origin") != "null" ||
+		allowed.Header().Get("Access-Control-Allow-Credentials") != "true" {
+		t.Fatalf("frontend asset CORS headers were dropped: %v", allowed.Header())
 	}
 	if runtime.path != "apps/f1540000-0000-4154-8154-000000000001/1.0.0/index.html" {
 		t.Fatalf("unexpected proxied path %q", runtime.path)

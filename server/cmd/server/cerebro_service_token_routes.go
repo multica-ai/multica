@@ -27,7 +27,7 @@ import (
 func wireCerebroServiceToken(cerebroQueries *cerebrodb.Queries, queries *db.Queries, issues *service.IssueService) *servicetokenapi.Handler {
 	svc := servicetoken.NewTokenService(servicetoken.NewStore(cerebroQueries))
 	servicetoken.SetAuthenticator(svc)
-	return servicetokenapi.NewHandler(svc, queries, issues)
+	return servicetokenapi.NewHandler(svc, queries)
 }
 
 // mountCerebroServiceTokenRoutes registers both the management and machine
@@ -49,6 +49,5 @@ func mountCerebroServiceTokenRoutes(r chi.Router, h *servicetokenapi.Handler, qu
 		r.With(servicetoken.RequireScope(servicetoken.ScopeSkillsRead)).Get("/skills", h.ListSkills)
 		r.With(servicetoken.RequireScope(servicetoken.ScopeAgentsRead)).Get("/agents", h.ListAgents)
 		r.With(servicetoken.RequireScope(servicetoken.ScopeIssuesRead)).Get("/issues", h.ListIssues)
-		r.With(servicetoken.RequireScope(servicetoken.ScopeIssuesWrite)).Post("/issues", h.CreateIssue)
 	})
 }

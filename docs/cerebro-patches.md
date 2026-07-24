@@ -1343,7 +1343,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `delegation-missing-human-sentinel` | server/internal/service/task.go<br>server/internal/cerebro/delegationorigin/resolve.go (cerebro zone, no marker) | 1 inline | TECH-3629 — `CommentDelegationContext` now returns the typed `delegationorigin.ErrMissingHuman` sentinel (message string unchanged) instead of an anonymous `fmt.Errorf`, so the comment handler can distinguish "no human principal in the chain" from genuine auth failures (missing/invalid/mismatched source task) and route only the former to agent-owner approval. |
 | `mention-missing-human-approval` | server/internal/handler/comment.go | ~4 inline | TECH-3629 — in `enqueueMentionedAgentTasks`, when the delegation error is `delegationorigin.ErrMissingHuman` (a truly human-less chain that already passed Port 1 permission + private-agent owner checks), route to a run-request to the **agent owner** (`PrivateAgentRunRequester.RequestPrivateAgentRun`, the FIR-2385/TECH-3252 flow) instead of silently dropping + posting the "delegation blocked" system comment. Jesper's explicit decision: it is the owner of the agent being woken who approves. The owner-approval step doubles as the loop-brake. The system-comment path remains only when no run-requester is wired. |
 | `daemon-connection-tool-ask` | server/internal/handler/daemon_tool_policy_cerebro.go | ~25 inline | TECH-3498 — route **Ask** on a workspace-connection MCP tool through the existing approval inbox on the Claude-daemon engine. The generic `tools:<name>` resolve in the daemon tool-policy endpoint never matches the connection chain (`PolicyToolKey` keeps the `mcp__` name as-is), so a connection-tool Ask/Deny was invisible to the local-runtime resolve. The patch folds `toolpolicy.Store.ConnectionToolEffective` (the new Ask-capable generalisation of `ConnectionToolDenied`, in the cerebro zone) into the resolve result by TIGHTENING, so a connection-tool Ask drives the same PreToolUse inbox + long-poll path as any other Ask, and a connection-tool Deny blocks at runtime too. Fail-closed under enforce / keep-base under observe on a connection-resolve error, matching the existing resource-pattern fold. Gateway half (`runtime/approval_gate.go`) is fully in the cerebro zone, so no marker there. |
-| `runtime-tool-parity` | server/internal/daemon/capabilities.go, cerebro_toolpolicy.go, daemon.go<br>server/internal/handler/daemon_effective_tools_cerebro.go | runtime probe + provider hooks + claim mapping | FIR-3723 — replace Claude's stale static tool inventory with its installed init report, normalize MCP discovery names into callable mandate names, install a wildcard Codex before-call hook, and keep Ask tools visible so inventory, Capabilities, task mandates, and call-time enforcement resolve the same verdict. |
+| `runtime-tool-parity` / `codex-mandatory-tool-policy-hooks` | server/internal/daemon/capabilities.go, cerebro_toolpolicy.go, daemon.go<br>server/internal/handler/capability_register_cerebro.go, daemon_effective_tools_cerebro.go<br>server/pkg/agent/codex.go | runtime probe + provider hooks + claim mapping | FIR-3723 / FIR-3753 — use Claude's installed init report without removing direct MCP tools; store direct MCP inventory under its exact callable `mcp__<server>__<tool>` key; classify it as MCP in Capabilities; derive the runnable local-provider set from the complete-before-call adapter registry; and start Codex with its daemon-vetted wildcard `PreToolUse` hook forcibly enabled and trusted. The mandatory enable is last-wins, so agent custom arguments cannot turn the gate off. Inventory, Capabilities, task mandates, and call-time enforcement therefore resolve the same Allow/Ask/Deny verdict. |
 | `cerebro-note-types-routes` | server/cmd/server/router.go | 8 inline | TECH-3511 — wire the note-types REST surface. One cerebro-package import (`internal/cerebro/note_types`), one handler construction, and the `/api/cerebro/note-types` routes (list/create + `{id}` get/update/delete + `{id}/run`). All logic lives in the cerebro zone (`server/internal/cerebro/note_types`); pure wiring. |
 | `main-note-types-sweeper` | server/cmd/server/main.go | 2 inline (import + goroutine) | TECH-3511 — start the daily note-types materialiser goroutine (`cerebronotetypes.NewSweeper(pool, cerebrodb.New(pool)).Run(sweepCtx, 24h)`). No-ops when no workspace has the `cerebro_note_types` flag on. Mirrors `main-sprints-sweeper`. |
 | `main-artifact-versions` | server/cmd/server/main.go | 2 inline (import + registration) | FIR-2697 — register the artifact version listener (`cerebronote.RegisterArtifactVersionListener(bus, cerebrodb.New(pool))`). It subscribes to the `artifact:created`/`artifact:updated` events the upstream artifact handler already publishes and snapshots a version into `cerebro_note_version` (FK widened to `artifact(id)` in migration 9120), so agent-created documents get version history reusing the note engine — no change to the artifact handler itself. All logic lives in the cerebro zone (`server/internal/cerebro/note/artifact_version_listener.go`). Mirrors `main-wakeup`. |
@@ -1696,13 +1696,21 @@ The runtime-image, entrypoint, fallback-provider helpers, canary, and cloud runb
 | Patch | Location | Reason |
 |---|---|---|
 | `main-access-decision-shadow` | `server/cmd/server/main.go` | Wire the Cerebro-owned canonical policy/evidence observer and append-only Decision Ledger into the existing Gateway executor. The shadow is observational only and cannot change a live access result. |
-| `opencode-auto-flag` | `server/pkg/agent/opencode.go` | Keep the full-server verification executable on the managed runtime after the installed OpenCode CLI replaced `--dangerously-skip-permissions` with `--auto`; existing explicit question/plan denies remain in force. |
+| `opencode-permission-flag` | `server/pkg/agent/opencode.go`<br>`server/pkg/agent/opencode_test.go` | Keep OpenCode daemon runs non-interactive with the installed CLI's real `--dangerously-skip-permissions` flag. The removed `--auto` assumption caused an immediate usage exit on OpenCode 1.14.31; existing explicit question/plan denies remain in force. The shared test verifies that the retired flag is removed from custom arguments, while the real-binary contract test pins every emitted flag to `opencode run --help`. |
 
 ## FIR-3386 — Subscribers and sidebar
 
 - `issue-sidebar-subscribers-component` in `packages/views/package.json` and `packages/views/issues/components/issue-detail.tsx` mounts the fork-owned Subscribers section from `packages/cerebro-issue-sidebar`.
 - `issue-sidebar-subscribers-single` in `packages/views/issues/components/issue-detail.tsx` removes the former Activity-header subscriber popover so regular issues have one subscriber surface.
 - Approved by Jesper Hvejsel on FIR-3386, 2026-07-16.
+
+## FIR-3411 — AI Impact Observation routes
+
+| Patch | Location | Reason |
+|---|---|---|
+| `ai-impact-routes` | `server/cmd/server/router.go` | Mount the fork-owned AI Impact Observation API inside the existing workspace-member router. The handler, service and store remain in `server/internal/cerebro/aiimpact`. |
+
+Approved through FIR-3411 Gate 0 and plan artifact `019f6fac-0134-7e34-b485-0cdfa59fbb27`.
 
 ## FIR-3212 — Agent configuration full scope: brief-layer modes
 
@@ -1757,6 +1765,12 @@ Approved by Jesper Hvejsel on FIR-3539 ("Fix det" + "find en måde hvor det ikke
 |---|---|---|
 | `handoff-brief-flags-verbatim` | `server/cmd/multica/cerebro_sessions.go`; skill docs in `server/internal/service/builtin_skills/multica-working-on-issues/` | `--done` / `--remaining` on `issue session handoff` were pflag `StringSlice`, which splits its value on every comma — so one prose sentence became several bullets cut mid-sentence. Switched to `StringArray` (value taken verbatim; repeat the flag for more bullets). Tests: `server/cmd/multica/cerebro_sessions_test.go`. |
 
+## FIR-3482 — Hermes task isolation
+
+| Patch | Location | Reason |
+|---|---|---|
+| `hermes-all-task-isolation` | `server/internal/daemon/execenv/execenv.go` | Build and refresh the per-task Hermes home for every Hermes task, including agents with no bound skills, so memory and SQLite state cannot fall back to the shared host home. Approved through FIR-3482 review on 2026-07-22. |
+
 ## FIR-2996 — Dashboard branch make-check hygiene
 
 | Patch | Location | Reason |
@@ -1793,13 +1807,21 @@ listening on `before.issue.status_change` exists.
 | `issue-workpad-panel` | `packages/views/issues/components/issue-detail.tsx` | Import + one-line `<WorkpadPanel issueId={issue.id} />` render directly above the bottom composer, showing the issue's plan (a `kind:"plan"` artifact) as a checklist. Logic lives in `packages/cerebro-artifacts`. |
 | `one-plan-per-issue` | `server/internal/handler/artifact.go` | One-line `h.rejectSecondIssuePlan(...)` call in CreateArtifact so an issue can hold at most one `plan` artifact (the Workpad's source). Logic lives in `artifact_one_plan_per_issue_cerebro.go`. |
 
+## FIR-3729 — Cursor tool-policy key normalization
+
+| Patch | Location | Reason |
+|---|---|---|
+| `cursor-tool-policy-key` | `server/internal/handler/daemon_tool_policy_cerebro.go` | Normalize Cursor `preToolUse` names to the canonical Cursor runtime inventory before task-mandate and permission checks, so allowed Cursor tools are not denied because the provider uses different names. |
+
+Approved by Jesper Hvejsel via FIR-3729 takeover request, 2026-07-23.
+
 ## FIR-3608 — Scoped service tokens (`msv_`)
 
 | Patch | Location | Reason |
 |---|---|---|
 | `service-token-auth` | server/internal/middleware/auth.go (2)<br>server/internal/handler/actor_guards.go (1)<br>server/cmd/server/router.go (2) | ~5 marked | FIR-3608 — non-personal, workspace-bound, scoped, revocable API credentials for external systems and provisioned agents. All logic lives in the cerebro zone (`server/internal/cerebro/servicetoken` + `/api`). The upstream files only gain: an `msv_` branch in `Auth` that delegates to `servicetoken.AuthBranch` (resolve + fail-closed `/api/service/` boundary + scope context); `service_token` added to the `RequireHumanActor` machine-actor denylist (the guard's own doc mandates this for any new machine credential); and the two one-line wire/mount calls in router.go. Read/write access is gated by `servicetoken.RequireScope` on the `/api/service/*` surface. Migration `9156_cerebro_service_token`. Tests: `server/internal/cerebro/servicetoken/middleware_test.go` (skills:read succeeds on read route, 403 on write route + fail-closed boundary + revoke). |
 | `cerebro-service-tokens-client` | server/core-mirror: `packages/core/api/client.ts` | FIR-3608 UI — three thin methods (`listServiceTokens`/`createServiceToken`/`revokeServiceToken`) over the `/api/service-tokens` management surface. Bodies are `unknown`; the `@multica/cerebro-service-tokens` package owns the zod schema via `parseWithFallback`. |
-| `tokens-tab-service-tokens` | `packages/views/settings/components/tokens-tab.tsx` | FIR-3608 UI — reuse the existing Settings → Tokens tab (no new admin tab): marked import + a flag-gated render of `ServiceTokensSection` from `@multica/cerebro-service-tokens/views`. All UI logic lives in the cerebro package; owner/admin gating is computed there and enforced server-side. Gated by the `cerebro_service_tokens` flag (default OFF until QA'd). Tests: `packages/cerebro-service-tokens/views/components/service-tokens-section.test.tsx` (create with scopes + one-time secret reveal, revoke-with-confirm, owner/admin-only gate, load-error toast). |
+| `tokens-tab-service-tokens` | `packages/views/settings/components/tokens-tab.tsx` | FIR-3608/FIR-3754 UI — reuse the existing Settings → Tokens tab (no new admin tab): marked import + a workspace-authoritative flag gate around `ServiceTokensSection` from `@multica/cerebro-service-tokens/views`. Personal overrides are ignored for this security boundary, so UI visibility matches the backend kill switch exactly: registry default ON, explicit workspace OFF disables, loading/error hides. Owner/admin gating is computed in the cerebro package and enforced server-side. Tests: `packages/cerebro-service-tokens/views/components/service-tokens-section.test.tsx` plus `packages/views/settings/components/tokens-tab.test.tsx` for workspace ON/OFF visibility. |
 
 ## FIR-3388 — Runtime capability discovery and Codex policy home
 
@@ -1807,3 +1829,23 @@ listening on `before.issue.status_change` exists.
 |---|---|---|
 | `daemon-capability-probe` | `server/internal/daemon/capabilities.go`, `server/internal/daemon/daemon.go` | Keep the upstream hook thin while the Cerebro-owned probe implementation lives in `server/internal/daemon/cerebro_capabilities.go`; include the configured provider binary when reporting effective runtime capabilities. |
 | `codex-tool-policy-home` | `server/internal/daemon/daemon.go` | Pass the task-scoped Codex home into the mandatory policy preparation seam so direct Codex calls use the generated policy configuration. |
+
+## MUL-5156 — Squad leaders own parent issue status (backport)
+
+Backport of upstream `fcb370edfd23624c83cc7db4ac111ca73e20fa30` (MUL-5156, #5758) — ported fork-native because the runtime-brief and child-done paths have diverged from upstream. **Delete on the next upstream sync** — this aligns the fork with upstream's own change, not fork-only behaviour. Squad leaders now open an assigned parent to `in_progress` on first dispatch, keep it there while members work, and move it to `in_review` only when a later re-trigger confirms the overall goal is met; `done` stays human/integration owned. Guest leaders (an `@squad` mention on an issue owned by someone else, or a quick-create turn) receive an explicit "do NOT change this issue's status" instead of the grant.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `squad-parent-status` | `server/internal/daemon/execenv/runtime_config.go` (2 marked call sites; helpers in the net-new cerebro sibling `runtime_config_squad_status_cerebro.go`) | The fork inlines the comment/assignment workflows into `buildMetaSkillContent` rather than upstream's `writeWorkflowComment`/`writeWorkflowAssignment` helpers, so the `IsSquadLeader` carve-outs (step 9 comment guardrail exception; step 8 assignment "leave parent in_progress after dispatch") live in the sibling and are called via one marked `WriteString` each. |
+| `squad-parent-status` | `server/internal/handler/squad_briefing.go` | Split `squadOperatingProtocol` into `squadOperatingProtocolHeader` + `squadOperatingProtocolHardRules`, add `squadParentStatusOwned`/`squadParentStatusNotOwned` (responsibility 6) and `squadOperatingProtocolFor(ownsIssueStatus)`, and thread `ownsIssueStatus` through `buildSquadLeaderBriefing`. |
+| `squad-parent-status` | `server/internal/handler/daemon.go` | Compute `ownsIssueStatus` (issue `assignee_type == "squad"` && `assignee_id == squad.id`) at the issue-bound leader-briefing call site; quick-create passes `false` (no issue exists yet). |
+
+**Deliberately NOT ported** (documented, not silent): upstream's `issue_child_done.go` nudge (all-sub-issues-complete / stage-advance system comment gains a `multica issue status <parent> in_review` instruction). The fork's `notifyParentOfChildDone` diverged — it posts a per-child backlog-promotion notice and has no all-complete or stage-advance branch (stage/verify orchestration lives in the fork-owned `orchestration_cerebro.go`), so there is no matching code path. The standing "Own the parent issue status" grant already authorizes the owning leader to wrap up without an explicit ask, so the contract holds without it.
+
+## FIR-3724 / MUL-4923 — Bounded daemon task preparation time (backport)
+
+Backport of upstream `ed57707bb` (MUL-4923, #5584) — ported as a targeted patch because the fork is 918 commits behind upstream and a full sync is out of scope (FIR-3724). **Delete on the next upstream sync** — this is a backport, not fork-only behaviour.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `mul-4923-prepare-timeout` | `server/internal/daemon/execenv/isolation.go`, `isolation_unix.go`, `isolation_windows.go` (net-new, verbatim upstream copies + 1 marker line each)<br>`server/internal/daemon/execenv/isolation_test.go`, `isolation_unix_test.go`, `isolation_windows_test.go` (net-new; `isolation_test.go` adapted: fork `ReuseParams` has no `WorkspacesRoot`)<br>`server/cmd/multica/main.go` (helper-mode dispatch)<br>`server/internal/daemon/daemon.go` (timeout const/var, struct fields, `New` wiring, `taskRunFailureReason`, `prepareExecutionEnvironment`/`reuseExecutionEnvironment`/`effectiveTaskPrepareTimeout`, `runTask` prepareCtx + killable Prepare/Reuse) | Bounds everything between claim and `StartTask` (runtime resolution, skill bundles, execenv setup, StartTask) with a hard 5-minute deadline, and runs execution-environment `Prepare`/`Reuse` in a killable helper subprocess (`multica __multica_execenv_prepare`) so a timed-out attempt cannot keep writing after the task is retried. On timeout, `runTask` collapses the failure into `errTaskPrepareTimeout`, which `handleTask` maps to the retryable `timeout` failure reason. **Fork adaptations:** (a) `defaultExecutionEnvironmentCommand` resolves the self binary via `os.Executable()` (fork idiom) instead of upstream's `selfexec.Resolve`; (b) the fork's diverged `Reuse`/`ReuseParams` (no error return, no `WorkspacesRoot`) are wrapped rather than replaced. **Deliberately NOT ported** (documented, not silent): the upstream Windows-runner CI job in `.github/workflows/ci.yml` (fork ships Linux/macOS only; `isolation_windows.go` still ships, build-tagged, so a future full sync converges), the modify/delete `workdir_race_test.go` (fork deleted it), and the `issue_child_done_test.go` additions (would collide with the fork's `child-done-notify-flag` patch). |

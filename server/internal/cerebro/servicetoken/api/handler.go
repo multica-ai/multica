@@ -6,7 +6,6 @@ package servicetokenapi
 
 import (
 	"encoding/json"
-	"errors"
 	"net/http"
 	"time"
 
@@ -15,7 +14,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebro/servicetoken"
 	"github.com/multica-ai/multica/server/internal/middleware"
-	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -28,18 +26,17 @@ const serviceReadLimit = 200
 //
 //   - Management (/api/service-tokens): owner/admin CRUD over the credentials,
 //     authenticated as a human member (gated by RequireWorkspaceRole).
-//   - Machine (/api/service/...): the scoped, read-first data surface a service
+//   - Machine (/api/service/...): the scoped, read-only data surface a service
 //     token itself calls, gated by servicetoken.RequireScope.
 type Handler struct {
 	tokens *servicetoken.TokenService
 	q      *db.Queries
-	issues *service.IssueService
 }
 
 // NewHandler builds the HTTP handler over the token service and the data
-// dependencies its machine surface reads/writes.
-func NewHandler(tokens *servicetoken.TokenService, q *db.Queries, issues *service.IssueService) *Handler {
-	return &Handler{tokens: tokens, q: q, issues: issues}
+// dependencies its read-only machine surface exposes.
+func NewHandler(tokens *servicetoken.TokenService, q *db.Queries) *Handler {
+	return &Handler{tokens: tokens, q: q}
 }
 
 // ---------------------------------------------------------------------------
@@ -92,6 +89,9 @@ func (h *Handler) CreateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := middleware.WorkspaceIDFromContext(r.Context())
+	if !h.requireEnabled(w, r, workspaceID) {
+		return
+	}
 
 	var req createTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -103,13 +103,13 @@ func (h *Handler) CreateToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var expiresAt *time.Time
-	if req.ExpiresInDays != nil && *req.ExpiresInDays > 0 {
-		t := time.Now().Add(time.Duration(*req.ExpiresInDays) * 24 * time.Hour)
-		expiresAt = &t
+	if req.ExpiresInDays == nil || *req.ExpiresInDays < 1 || *req.ExpiresInDays > servicetoken.MaxExpiryDays {
+		writeError(w, http.StatusBadRequest, "expires_in_days is required and must be between 1 and 365")
+		return
 	}
+	expiresAt := time.Now().Add(time.Duration(*req.ExpiresInDays) * 24 * time.Hour)
 
-	tok, raw, err := h.tokens.Mint(r.Context(), workspaceID, req.Name, req.Scopes, expiresAt, util.UUIDToString(member.UserID))
+	tok, raw, err := h.tokens.Mint(r.Context(), workspaceID, req.Name, req.Scopes, &expiresAt, util.UUIDToString(member.UserID))
 	if err != nil {
 		// NormalizeScopes rejects unknown/empty scope sets with a caller
 		// error; surface those as 400 rather than 500.
@@ -126,6 +126,9 @@ func (h *Handler) CreateToken(w http.ResponseWriter, r *http.Request) {
 // ListTokens returns the workspace's service tokens (never the secret/hash).
 func (h *Handler) ListTokens(w http.ResponseWriter, r *http.Request) {
 	workspaceID := middleware.WorkspaceIDFromContext(r.Context())
+	if !h.requireEnabled(w, r, workspaceID) {
+		return
+	}
 	tokens, err := h.tokens.List(r.Context(), workspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list service tokens")
@@ -147,6 +150,9 @@ func (h *Handler) RevokeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	workspaceID := middleware.WorkspaceIDFromContext(r.Context())
+	if !h.requireEnabled(w, r, workspaceID) {
+		return
+	}
 	id := chi.URLParam(r, "id")
 	if _, err := util.ParseUUID(id); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid token id")
@@ -157,6 +163,19 @@ func (h *Handler) RevokeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) requireEnabled(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
+	enabled, err := h.tokens.Enabled(r.Context(), workspaceID)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "service token feature is unavailable")
+		return false
+	}
+	if !enabled {
+		writeError(w, http.StatusNotFound, "service token feature is disabled")
+		return false
+	}
+	return true
 }
 
 // ---------------------------------------------------------------------------
@@ -279,70 +298,6 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)
-}
-
-type createIssueRequest struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Priority    string `json:"priority"`
-}
-
-// CreateIssue serves the issues:write scope. The created issue is attributed
-// to the human who minted the token (carried in X-Service-Token-Created-By) —
-// a service token has no identity of its own in the human-modeled issue
-// tables, so a write must name a real actor.
-func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
-	ws, ok := serviceWorkspace(r)
-	if !ok {
-		writeError(w, http.StatusBadRequest, "workspace not resolved")
-		return
-	}
-	creator := r.Header.Get("X-Service-Token-Created-By")
-	creatorUUID, err := util.ParseUUID(creator)
-	if err != nil {
-		writeError(w, http.StatusConflict, "this token has no attributable creator and cannot write")
-		return
-	}
-
-	var req createIssueRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
-		return
-	}
-	if req.Title == "" {
-		writeError(w, http.StatusBadRequest, "title is required")
-		return
-	}
-	priority := req.Priority
-	if priority == "" {
-		priority = "none"
-	}
-
-	res, err := h.issues.Create(r.Context(), service.IssueCreateParams{
-		WorkspaceID: ws,
-		Title:       req.Title,
-		Description: util.PtrToText(&req.Description),
-		Status:      "todo",
-		Priority:    priority,
-		CreatorType: "member",
-		CreatorID:   creatorUUID,
-	}, service.IssueCreateOpts{})
-	if err != nil {
-		switch {
-		case errors.Is(err, service.ErrActiveDuplicate):
-			writeError(w, http.StatusConflict, "an active issue with this title already exists")
-		default:
-			writeError(w, http.StatusInternalServerError, "failed to create issue")
-		}
-		return
-	}
-	writeJSON(w, http.StatusCreated, issueResponse{
-		ID:       util.UUIDToString(res.Issue.ID),
-		Number:   res.Issue.Number,
-		Title:    res.Issue.Title,
-		Status:   res.Issue.Status,
-		Priority: res.Issue.Priority,
-	})
 }
 
 func timePtrToString(t *time.Time) *string {

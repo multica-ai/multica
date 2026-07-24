@@ -5,7 +5,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { CEREBRO_FLAG_DEFAULTS, type CerebroFlagKey } from "./registry";
-import { useCerebroFeatureFlagsStore, useFlagValue } from "./store";
+import {
+  resolveWorkspaceFlag,
+  useCerebroFeatureFlagsStore,
+  useFlagValue,
+} from "./store";
 
 const featureFlagKeys = {
   all: (wsId: string) => ["cerebro-feature-flags", wsId] as const,
@@ -116,4 +120,16 @@ export function useSetWorkspaceFeatureFlagMutation() {
 export function useFeatureFlag(key: CerebroFlagKey): boolean {
   useFeatureFlagsQuery();
   return useFlagValue(key);
+}
+
+/**
+ * Workspace-authoritative feature value. Personal overrides are deliberately
+ * ignored. Until the server response is available (or if it fails), this
+ * fails closed so security-sensitive UI never flashes controls the backend
+ * may reject.
+ */
+export function useWorkspaceEffectiveFlag(key: CerebroFlagKey): boolean {
+  const query = useFeatureFlagsQuery();
+  if (!query.data) return false;
+  return resolveWorkspaceFlag(key, query.data.workspace_overrides ?? {});
 }

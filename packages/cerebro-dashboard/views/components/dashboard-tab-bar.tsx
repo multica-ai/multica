@@ -3,19 +3,32 @@
 import { cn } from "@multica/ui/lib/utils";
 import { useDashboardStore, type DashboardTab } from "../../core/store";
 
-const TABS: { id: DashboardTab; label: string }[] = [
+const CORE_TABS: { id: DashboardTab; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "runs", label: "Runs" },
   { id: "messages", label: "Messages" },
 ];
 
-export function DashboardTabBar() {
+const AI_IMPACT_TAB: { id: DashboardTab; label: string } = {
+  id: "ai-impact",
+  label: "AI Impact",
+};
+
+const PEOPLE_TAB: { id: DashboardTab; label: string } = {
+  id: "people",
+  label: "People",
+};
+
+export function DashboardTabBar({ showAIImpact = false }: { showAIImpact?: boolean }) {
   const tab = useDashboardStore((s) => s.tab);
   const setTab = useDashboardStore((s) => s.setTab);
+  const tabs = showAIImpact
+    ? [...CORE_TABS, AI_IMPACT_TAB, PEOPLE_TAB]
+    : CORE_TABS;
 
   return (
     <nav aria-label="Dashboard sections" className="inline-flex h-full items-stretch gap-6">
-      {TABS.map((t) => (
+      {tabs.map((t) => (
         <button
           key={t.id}
           type="button"

@@ -166,7 +166,7 @@ var providerRegistry = map[string]Set{
 		ToolProtocols:   []string{"mcp_stdio"},
 		SupportsAsk:     true,
 		Subagents:       []string{},
-		Hooks:           []string{"OnTaskStart", "OnTaskEnd"},
+		Hooks:           []string{"PreToolUse", "PostToolUse", "Stop"},
 		SecretBindings:  []string{"OPENAI_API_KEY"},
 		DiscoveryMethod: "static",
 	},

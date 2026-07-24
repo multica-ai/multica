@@ -5,12 +5,12 @@ import (
 	"encoding/hex"
 )
 
-const allergenFormatterVersion = "1.0.2"
+const allergenFormatterVersion = "1.0.3"
 
 func allergenFormatterBundleFiles() []BundleFile {
 	return []BundleFile{
 		builtinFile("app.json", "application/json", string(allergenFormatterSnapshot)),
-		builtinFile("frontend/index.html", "text/html; charset=utf-8", `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Allergen Formatter</title><style>body{font:15px system-ui;margin:0;padding:24px;color:#18181b}main{max-width:720px;margin:auto}textarea{box-sizing:border-box;width:100%;min-height:180px;padding:12px}button{margin-top:12px;padding:11px 16px}pre{white-space:pre-wrap}</style></head><body><main><h1>Allergen Formatter</h1><p>Paste ingredients to uppercase regulated allergens.</p><form><textarea id="ingredients" required></textarea><button>Format ingredients</button></form><pre id="result" hidden></pre></main><script type="module" src="./app.js"></script></body></html>`),
+		builtinFile("frontend/index.html", "text/html; charset=utf-8", `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Allergen Formatter</title><style>body{font:15px system-ui;margin:0;padding:24px;color:#18181b}main{max-width:720px;margin:auto}textarea{box-sizing:border-box;width:100%;min-height:180px;padding:12px}button{margin-top:12px;padding:11px 16px}pre{white-space:pre-wrap}</style></head><body><main><h1>Allergen Formatter</h1><p>Paste ingredients to uppercase regulated allergens.</p><form><textarea id="ingredients" required></textarea><button>Format ingredients</button></form><pre id="result" hidden></pre></main><script type="module" src="./app.js" crossorigin="use-credentials"></script></body></html>`),
 		builtinFile("frontend/app.js", "text/javascript; charset=utf-8", `import { createMulticaApp } from "/api/cerebro/apps-runtime/sdk/multica.js";
 const identity=window.location.pathname.match(/\/apps-runtime\/apps\/([^/]+)\/([^/]+)(?:\/|$)/);
 if(!identity)throw new Error("Invalid app runtime URL");

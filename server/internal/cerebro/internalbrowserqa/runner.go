@@ -8,8 +8,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -41,8 +43,20 @@ type Target struct {
 	PasswordSelector string
 	SubmitSelector   string
 	NavigateLinkName string
-	ExpectedText     []string
-	SessionCookie    bool
+	// ExpectedPathSuffix proves that navigation reached the intended in-app
+	// route instead of accepting global sidebar markers from another page.
+	ExpectedPathSuffix string
+	// VersionPath is a same-origin, public endpoint whose response contains the
+	// deployed commit. It is configured only for Multica so a successful UI
+	// verification also proves exactly which production build served it.
+	VersionPath string
+	// NavigateExactText clicks the exact visible label without assuming the
+	// control's ARIA role. Multica's current sidebar can render the active
+	// workspace row without exposing role=link, while the label remains the
+	// stable user-facing contract.
+	NavigateExactText bool
+	ExpectedText      []string
+	SessionCookie     bool
 	// SubmitButtonName clicks a button by its accessible name instead of a CSS
 	// selector, for a form whose submit control carries no stable selector.
 	SubmitButtonName string
@@ -66,7 +80,9 @@ func (t Target) Host() string {
 var targets = map[string]Target{
 	"multica": {
 		Name: "multica", URL: "http://multica.internal:3000/login",
-		NavigateLinkName: "Issues", ExpectedText: []string{"Issues", "Agents", "Settings"}, SessionCookie: true,
+		NavigateLinkName: "Issues", NavigateExactText: true,
+		ExpectedPathSuffix: "/issues", VersionPath: "/version",
+		ExpectedText: []string{"Issues", "Agents", "Settings"}, SessionCookie: true,
 	},
 	// Cerebro staging runs on its own Sliplane server, so the verifier cannot
 	// resolve its internal address. It is reached over the public edge with a
@@ -138,6 +154,12 @@ func TargetFor(name string) (Target, error) {
 	internal := parsed.Scheme == "http" && strings.Contains(parsed.Hostname(), ".internal")
 	publicEdge := target.AccessHeaders && parsed.Scheme == "https" && strings.HasSuffix(parsed.Hostname(), ".firtal.com")
 	if !internal && !publicEdge {
+		return Target{}, fmt.Errorf("internal browser target is misconfigured")
+	}
+	if target.VersionPath != "" && (!strings.HasPrefix(target.VersionPath, "/") || strings.Contains(target.VersionPath, "://")) {
+		return Target{}, fmt.Errorf("internal browser target is misconfigured")
+	}
+	if target.ExpectedPathSuffix != "" && (!strings.HasPrefix(target.ExpectedPathSuffix, "/") || strings.Contains(target.ExpectedPathSuffix, "://")) {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	return target, nil
@@ -311,6 +333,7 @@ type Result struct {
 	Markers       []string `json:"markers"`
 	Errors        []string `json:"errors"`
 	ScreenshotPNG []byte   `json:"screenshot_png"`
+	VersionCommit string   `json:"version_commit,omitempty"`
 
 	// Failure diagnostics. Empty on success. FailureDetail is sourced only from
 	// this package's static target allowlist — never from browser output — so it
@@ -353,6 +376,7 @@ type Runner struct {
 	cleanupTimeout time.Duration
 	dnsTimeout     time.Duration
 	resolveHost    func(context.Context, string) error
+	fetchVersion   func(context.Context, string) (string, error)
 	verificationMu sync.Mutex
 	observeStage   func(stageObservation)
 }
@@ -372,8 +396,8 @@ const (
 
 // countedStages is how many stageTimeout-bounded steps a full verification can
 // spend after the open stage: auth, reload, render, dialog, navigation, the
-// second render, snapshot, url, errors and screenshot.
-const countedStages = 10
+// second render, snapshot, url, version, errors and screenshot.
+const countedStages = 11
 
 // MaxVerificationDuration is the longest a single Verify can legitimately take:
 // the DNS preflight, every open attempt including the cold-start retry, and each
@@ -390,11 +414,93 @@ func NewRunner(commander Commander) *Runner {
 		commander: commander, openTimeout: defaultOpenTimeout,
 		stageTimeout: defaultStageTimeout, cleanupTimeout: defaultStageTimeout,
 		dnsTimeout: dnsPreflightTimeout, resolveHost: resolveInternalHost,
+		fetchVersion: fetchVersionCommit,
 		observeStage: func(observation stageObservation) {
 			log.Printf("internal browser diagnostic app=%s stage=%s duration_ms=%d exit_class=%s target_host=%s",
 				observation.App, observation.Stage, observation.Duration.Milliseconds(), observation.ExitClass, observation.TargetHost)
 		},
 	}
+}
+
+func fetchVersionCommit(ctx context.Context, versionURL string) (string, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, versionURL, nil)
+	if err != nil {
+		return "", err
+	}
+	client := &http.Client{
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return "", err
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("version endpoint returned %d", response.StatusCode)
+	}
+	var payload struct {
+		Commit string `json:"commit"`
+	}
+	decoder := json.NewDecoder(io.LimitReader(response.Body, 4096))
+	if err := decoder.Decode(&payload); err != nil {
+		return "", err
+	}
+	commit := strings.TrimSpace(payload.Commit)
+	if !safeVersionCommit(commit) {
+		return "", fmt.Errorf("version endpoint returned an invalid commit")
+	}
+	return commit, nil
+}
+
+func safeVersionCommit(commit string) bool {
+	if commit == "unknown" {
+		return false
+	}
+	if len(commit) < 7 || len(commit) > 64 {
+		return false
+	}
+	for _, char := range commit {
+		if (char < '0' || char > '9') && (char < 'a' || char > 'f') && (char < 'A' || char > 'F') {
+			return false
+		}
+	}
+	return true
+}
+
+func versionURL(target Target) string {
+	parsed, _ := url.Parse(target.URL)
+	return parsed.Scheme + "://" + parsed.Host + target.VersionPath
+}
+
+func (r *Runner) readVersion(ctx context.Context, target Target) (string, error) {
+	if target.VersionPath == "" {
+		return "", nil
+	}
+	stageCtx, cancel := context.WithTimeout(ctx, r.stageTimeout)
+	defer cancel()
+	started := time.Now()
+	commit, err := r.fetchVersion(stageCtx, versionURL(target))
+	if err == nil && !safeVersionCommit(commit) {
+		err = fmt.Errorf("version endpoint returned an invalid commit")
+	}
+	exitClass := commandFailureKind("success")
+	if err != nil {
+		exitClass = commandFailureUnknown
+		if stageCtx.Err() != nil {
+			exitClass = commandFailureTimeout
+		}
+	}
+	if r.observeStage != nil {
+		r.observeStage(stageObservation{
+			App: target.Name, Stage: "version", Duration: time.Since(started), ExitClass: exitClass, TargetHost: target.Host(),
+		})
+	}
+	if err != nil {
+		return "", stageError{stage: "version", kind: exitClass}
+	}
+	return commit, nil
 }
 
 // openStage is the first navigation of a run, so it absorbs the target's cold
@@ -548,7 +654,7 @@ func (r *Runner) failure(target Target, baseArgs []string, detail string, err er
 var safeStageErrors = buildSafeStageErrors()
 
 func buildSafeStageErrors() map[string]struct{} {
-	stages := []string{dnsStage, openStage, "auth", "reload", "render", "navigation", "snapshot", "markers", "url", "errors", "screenshot"}
+	stages := []string{dnsStage, openStage, "auth", "reload", "render", "navigation", "snapshot", "markers", "url", "version", "errors", "screenshot"}
 	kinds := []commandFailureKind{
 		"", commandFailureUnknown, commandFailureTimeout, commandFailureDNS, commandFailureDNSTimeout,
 		commandFailureConnection, commandFailureBrowserLaunch, commandFailureNotFound,
@@ -685,8 +791,14 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	}
 	if target.NavigateLinkName != "" {
 		r.dismissBlockingDialog(ctx, target, baseArgs)
-		if _, err := r.runStage(ctx, target, "navigation", "", append(baseArgs, "find", "role", "link", "click", "--name", target.NavigateLinkName)...); err != nil {
-			return r.failure(target, baseArgs, "link: "+target.NavigateLinkName, err)
+		navigationArgs := []string{"find", "role", "link", "click", "--name", target.NavigateLinkName}
+		navigationDetail := "link: " + target.NavigateLinkName
+		if target.NavigateExactText {
+			navigationArgs = []string{"find", "text", target.NavigateLinkName, "click", "--exact"}
+			navigationDetail = "exact text: " + target.NavigateLinkName
+		}
+		if _, err := r.runStage(ctx, target, "navigation", "", append(baseArgs, navigationArgs...)...); err != nil {
+			return r.failure(target, baseArgs, navigationDetail, err)
 		}
 		if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
 			return r.failure(target, baseArgs, target.URL, err)
@@ -706,6 +818,18 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	if err != nil {
 		return r.failure(target, baseArgs, target.URL, err)
 	}
+	finalURLText := strings.TrimSpace(string(finalURL))
+	if target.ExpectedPathSuffix != "" {
+		parsedFinalURL, parseErr := url.Parse(finalURLText)
+		if parseErr != nil || !strings.HasSuffix(strings.TrimSuffix(parsedFinalURL.Path, "/"), target.ExpectedPathSuffix) {
+			return r.failure(target, baseArgs, "unexpected final path",
+				stageError{stage: "url", kind: commandFailureNotFound})
+		}
+	}
+	versionCommit, err := r.readVersion(ctx, target)
+	if err != nil {
+		return r.failure(target, baseArgs, "version endpoint: "+target.VersionPath, err)
+	}
 	rawErrors, err := r.runStage(ctx, target, "errors", "", append(baseArgs, "errors")...)
 	if err != nil {
 		return r.failure(target, baseArgs, target.URL, err)
@@ -718,8 +842,9 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	}
 	errors := decodeErrors(rawErrors)
 	return Result{
-		App: target.Name, InternalHost: target.Host(), FinalURL: strings.TrimSpace(string(finalURL)),
+		App: target.Name, InternalHost: target.Host(), FinalURL: finalURLText,
 		Markers: append([]string(nil), target.ExpectedText...), Errors: errors, ScreenshotPNG: screenshot,
+		VersionCommit: versionCommit,
 	}, nil
 }
 

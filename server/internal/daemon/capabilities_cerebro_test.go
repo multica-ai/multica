@@ -22,7 +22,7 @@ func TestProbeClaudeToolsUsesInstalledInitInventory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []string{"Read", "Skill", "ToolSearch"}; !reflect.DeepEqual(got, want) {
+	if want := []string{"Read", "Skill", "ToolSearch", "mcp__x__y"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("probeClaudeTools() = %v, want %v", got, want)
 	}
 

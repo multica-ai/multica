@@ -45,9 +45,9 @@
     {
       "key": "cerebro_service_tokens",
       "label": "Service tokens",
-      "description": "Add a Service tokens section to Settings → Tokens: owners and admins mint workspace-bound, scoped, revocable API keys (msv_) for external systems and agents. Off hides the section; existing tokens keep working.",
+      "description": "Add a Service tokens section to Settings → Tokens: owners and admins mint workspace-bound, read-only, expiring and revocable API keys (msv_) for external systems and agents. Off disables management and every existing token immediately.",
       "group": "permissions",
-      "default": false
+      "default": true
     },
     {
       "key": "cerebro_embedded_chat",
@@ -209,6 +209,13 @@
       "description": "Enable the cerebro workspace operations dashboard at /:workspace/dashboard (agent strip, KPI cards, recent tasks).",
       "group": "workspace",
       "default": true
+    },
+    {
+      "key": "cerebro_ai_impact",
+      "label": "AI Impact",
+      "description": "Enable the evidence-backed AI Impact control room inside Dashboard.",
+      "group": "workspace",
+      "default": false
     },
     {
       "key": "cerebro_inbox_row_actions",
