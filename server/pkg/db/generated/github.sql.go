@@ -283,11 +283,18 @@ func (q *Queries) GetIssuePullRequestCloseAggregate(ctx context.Context, issueID
 }
 
 const getIssueReviewHeadSha = `-- name: GetIssueReviewHeadSha :one
-SELECT pr.head_sha
-FROM github_pull_request pr
-JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
-WHERE ipr.issue_id = $1 AND pr.head_sha <> ''
-ORDER BY (pr.state IN ('open', 'draft')) DESC, pr.pr_updated_at DESC
+SELECT head_sha FROM (
+    SELECT pr.head_sha AS head_sha, pr.state AS state, pr.pr_updated_at AS pr_updated_at
+    FROM github_pull_request pr
+    JOIN issue_pull_request ipr ON ipr.pull_request_id = pr.id
+    WHERE ipr.issue_id = $1 AND pr.head_sha <> '' AND NOT ipr.reference_only
+    UNION ALL
+    SELECT pr.head_sha AS head_sha, pr.state AS state, pr.pr_updated_at AS pr_updated_at
+    FROM vcs_pull_request pr
+    JOIN issue_vcs_pull_request ipr ON ipr.pull_request_id = pr.id
+    WHERE ipr.issue_id = $1 AND pr.head_sha <> '' AND NOT ipr.reference_only
+) combined
+ORDER BY (state IN ('open', 'draft')) DESC, pr_updated_at DESC
 LIMIT 1
 `
 
@@ -300,6 +307,14 @@ LIMIT 1
 // newest linked PR with a head_sha when none are open. Returns no rows (empty
 // string) when the issue has no linked PR — callers treat that as "no SHA key"
 // and dedup on (issue_id, agent_id) alone, preserving pre-TEN-356 behavior.
+//
+// Spans both GitHub and self-hosted VCS PRs: a self-hosted PR pushing a new
+// commit must move the dedup head SHA the same way a GitHub PR does, otherwise
+// a fresh review round could be merged away against a stale key.
+// reference_only links are excluded on both arms, matching the PR-list and
+// close-aggregate queries: a body-only mention is hidden from the list and the
+// close gate, so it must not win this ORDER BY and become the review dedup head
+// SHA either, masking the real working PR's SHA.
 func (q *Queries) GetIssueReviewHeadSha(ctx context.Context, issueID pgtype.UUID) (string, error) {
 	row := q.db.QueryRow(ctx, getIssueReviewHeadSha, issueID)
 	var head_sha string

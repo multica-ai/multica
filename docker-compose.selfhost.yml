@@ -119,6 +119,8 @@ services:
       # in the database, so this single deployment-wide key is all the operator
       # needs to set here.
       MULTICA_SLACK_SECRET_KEY: ${MULTICA_SLACK_SECRET_KEY:-}
+      # VCS integration at-rest encryption key for token-based providers
+      MULTICA_VCS_SECRET_KEY: ${MULTICA_VCS_SECRET_KEY:-}
     restart: unless-stopped
 
   frontend:

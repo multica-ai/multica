@@ -147,6 +147,10 @@ const (
 	EventPullRequestUpdated        = "pull_request:updated"
 	EventPullRequestUnlinked       = "pull_request:unlinked"
 
+	// VCS integration events (Forgejo / Gitea / GitLab)
+	EventVCSConnectionCreated = "vcs_connection:created"
+	EventVCSConnectionDeleted = "vcs_connection:deleted"
+
 	// Lark integration events. `created` covers both first-install
 	// (UNIQUE on (workspace_id, agent_id) means at most one row per
 	// agent) and re-install via UpsertLarkInstallation — front-ends

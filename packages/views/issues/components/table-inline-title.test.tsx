@@ -7,6 +7,19 @@ import { describe, expect, it, vi } from "vitest";
 import { useState } from "react";
 
 import type { Issue } from "@multica/core/types";
+
+// InlineTitle renders the self-contained agent-activity badge, which fetches
+// the workspace agent-task snapshot via React Query. Stub it (same pattern as
+// inbox-list-item.test.tsx) instead of standing up query/workspace providers,
+// but render a marker carrying the issue id so a test can assert the badge is
+// wired into the cell with the row's issue — otherwise the badge insertion in
+// table-view.tsx could be deleted and every test here would still pass.
+vi.mock("./issue-agent-activity-indicator", () => ({
+  IssueAgentActivityIndicator: ({ issueId }: { issueId: string }) => (
+    <span data-testid="issue-agent-activity" data-issue-id={issueId} />
+  ),
+}));
+
 import { InlineTitle } from "./table-view";
 import type { IssueTableDisplayRow } from "./table-view-model";
 
@@ -191,5 +204,28 @@ describe("InlineTitle", () => {
     expect(screen.getByRole("textbox")).toHaveValue("Local draft");
     fireEvent.keyDown(screen.getByRole("textbox"), { key: "Escape" });
     expect(screen.getByRole("button", { name: "Remote title" })).toBeTruthy();
+  });
+
+  it("renders the agent-activity badge for the row's issue, between the identifier and the title", () => {
+    render(<Harness title="Original" />);
+
+    const identifier = screen.getByText("MUL-1");
+    const badge = screen.getByTestId("issue-agent-activity");
+    const titleButton = screen.getByRole("button", { name: "Original" });
+
+    // Wired to THIS row's issue — deleting the badge insertion in
+    // table-view.tsx would drop the marker and fail this test, so the core
+    // product change is actually covered.
+    expect(badge.getAttribute("data-issue-id")).toBe("issue-1");
+
+    // Same reading order as List/Board: identifier → activity → title.
+    expect(
+      identifier.compareDocumentPosition(badge) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      badge.compareDocumentPosition(titleButton) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 });
