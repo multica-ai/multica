@@ -2375,6 +2375,7 @@ func (h *Handler) UpsertSkillFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.publishSkillFilesChanged(r, skill)
 	writeJSON(w, http.StatusOK, skillFileToResponse(sf))
 }
 
@@ -2404,7 +2405,33 @@ func (h *Handler) DeleteSkillFile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to delete skill file")
 		return
 	}
+	h.publishSkillFilesChanged(r, skill)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// publishSkillFilesChanged broadcasts skill:updated after an incremental
+// file mutation (UpsertSkillFile / DeleteSkillFile). UpdateSkill already
+// publishes the same event with the same payload shape when it replaces
+// files wholesale; without this, per-file edits are invisible to WS
+// consumers (stale skill lists, external mirrors). Best-effort: a failed
+// reload skips the broadcast rather than failing the completed mutation.
+func (h *Handler) publishSkillFilesChanged(r *http.Request, skill db.Skill) {
+	files, err := h.Queries.ListSkillFiles(r.Context(), skill.ID)
+	if err != nil {
+		slog.Warn("list skill files for skill:updated broadcast failed", "error", err, "skill_id", uuidToString(skill.ID))
+		return
+	}
+	fileResps := make([]SkillFileResponse, len(files))
+	for i, f := range files {
+		fileResps[i] = skillFileToResponse(f)
+	}
+	resp := SkillWithFilesResponse{
+		SkillResponse: skillToResponse(skill),
+		Files:         fileResps,
+	}
+	wsID := uuidToString(skill.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, requestUserID(r), wsID)
+	h.publish(protocol.EventSkillUpdated, wsID, actorType, actorID, map[string]any{"skill": resp})
 }
 
 // --- Agent-Skill junction ---

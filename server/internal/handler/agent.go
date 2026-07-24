@@ -1872,6 +1872,11 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	userID := requestUserID(r)
 	actorType, actorID := h.resolveActor(r, userID, uuidToString(updated.WorkspaceID))
 	h.publish(protocol.EventAgentStatus, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
+	// agent:status doubles as a presence signal (runtime sweeper, env-var
+	// changes), so external consumers can't tell "definition changed" from
+	// "status flipped". agent:updated fires only for definition updates —
+	// mirrors/webhook-style integrations subscribe to this one.
+	h.publish(protocol.EventAgentUpdated, uuidToString(updated.WorkspaceID), actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
 	// Workspace admins / non-owner members pass canManageAgent for legitimate
 	// admin actions (e.g. bulk reassigning agents off a leaving member's
