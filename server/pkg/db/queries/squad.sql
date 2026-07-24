@@ -9,6 +9,14 @@ SELECT * FROM squad WHERE id = $1;
 -- name: GetSquadInWorkspace :one
 SELECT * FROM squad WHERE id = $1 AND workspace_id = $2;
 
+-- name: LockActiveSquadForTaskCreate :one
+-- Serialize squad task creation with ArchiveSquad. FOR SHARE conflicts with
+-- the archive UPDATE while still allowing concurrent task creators. The
+-- archived_at predicate is rechecked after a competing archive commits.
+SELECT id FROM squad
+WHERE id = $1 AND archived_at IS NULL
+FOR SHARE;
+
 -- name: ListSquads :many
 SELECT * FROM squad WHERE workspace_id = $1 AND archived_at IS NULL ORDER BY created_at ASC;
 

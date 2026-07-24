@@ -224,16 +224,23 @@ Creating every serial step as `todo` enqueues the whole chain at once.
 ### Stages: order sub-issues into barrier groups
 
 `--stage <N>` (N ≥ 1) groups sub-issues under the same parent into ordered
-stages. The parent assignee is woken **once, when a whole stage finishes** —
+stages. The parent coordinator is woken **once, when a whole stage finishes** —
 i.e. every sub-issue in the lowest unfinished stage has reached a terminal
-status (`done`/`cancelled`). A completion that does not close a stage is silent
+status (`done`/`cancelled`). The coordinator is normally the parent assignee.
+For an unassigned parent reached through `@Squad`, an agent-created child's
+exact `origin_id` can instead resume the same squad leader task context without
+assigning the parent or changing the human authority behind the run. A handoff
+resumes only when every child in the closed stage (or every sibling in an
+unstaged barrier) shares that exact origin task, including siblings that
+finished earlier; ambiguous mixed-origin barriers post the completion comment
+but do not guess a coordinator. A completion that does not close a stage is silent
 (no comment, no wake). A sibling set with **no** stages is one implicit stage,
 so the parent is woken once when the *last* sub-issue finishes — not on every
 child.
 
 Advancement is agent-driven: the server only detects the closed barrier and
-wakes the parent assignee, who then decides whether to promote the next stage's
-`backlog` sub-issues to `todo`.
+wakes the resolved parent coordinator, who then decides whether to promote the
+next stage's `backlog` sub-issues to `todo`.
 
 ```bash
 # Stage 1 runs now; later stages parked until promoted

@@ -199,8 +199,22 @@ Contracts:
 - when a child issue closes a stage barrier and the parent is assigned to a
   squad, the parent squad leader is triggered (triggerChildDoneSquad in
   issue_child_done.go);
-- routing is leader-only — one `EnqueueTaskForSquadLeader` on the leader, no
-  member fan-out (triggerChildDoneSquad / dispatchParentAssigneeTrigger);
+- an unassigned parent can also resume a mention-started squad orchestration:
+  the completed child must have `origin_type=agent_create`, and its exact
+  `origin_id` task must be a squad leader task on that parent by the child's
+  creator. The task's `squad_id` is used only as the dispatch target; the parent
+  remains unassigned, while the continuation inherits the task's human
+  attribution. Missing or mismatched provenance fails closed instead of
+  guessing from timestamps or the latest task. Every child in the closed stage
+  (or every sibling in an unstaged barrier), including already-terminal
+  siblings, must share that exact origin task; mixed origins leave the comment
+  unmentioned and enqueue no leader (GH #5706);
+- routing is leader-only — one `EnqueueTaskForSquadLeader` for an assigned
+  parent, or `EnqueueTaskForSquadLeaderFromOriginTask` for the proven unassigned
+  continuation, with no member fan-out (triggerChildDoneSquad /
+  dispatchParentAssigneeTrigger);
+- archived squads fail closed in `triggerChildDoneSquad` and receive no new
+  continuation task;
 - no self-trigger guard: a same-squad or shared-leader child still wakes the
   parent squad leader — the wake is a serial handoff onto the PARENT and is the
   only carrier of the stage-barrier "advance / wrap up" instruction (MUL-3969,

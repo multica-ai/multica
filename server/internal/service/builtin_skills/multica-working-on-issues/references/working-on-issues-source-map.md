@@ -119,7 +119,7 @@ and is hidden from the PR list.
 | `shouldEnqueueAgentTask` returns false for `backlog` (parking lot) | `server/internal/handler/issue.go:2644-2648` | new citation |
 | Backlog → non-backlog (not done/cancelled) enqueues on update | `server/internal/handler/issue.go:2537-2540` | `:2523` |
 | Same contract in batch update | `server/internal/handler/issue.go:3021-3024` | new citation |
-| Child → `done` notifies + wakes the parent, gated by the stage barrier | `server/internal/handler/issue_child_done.go:66` (`notifyParentOfChildDone`; doc comment at `:15`; barrier gate at `:115`) | func def `:51` |
+| Child → terminal notifies + wakes the resolved parent coordinator, gated by the stage barrier; an unassigned mention-started squad flow can resume only through the child's exact `agent_create` origin task and inherits that task's human attribution | `server/internal/handler/issue_child_done.go` (`notifyParentOfChildDone`, `resolveChildDoneDispatchTarget`); `server/internal/service/task.go` (`EnqueueTaskForSquadLeaderFromOriginTask`) | parent-assignee-only wake |
 | Status change (incl. → `cancelled`) does NOT cancel in-flight tasks; only issue deletion does (MUL-4465) | no-cancel note in `server/internal/handler/issue.go:2652-2658` (`UpdateIssue`) and `:3170-3171` (`BatchUpdateIssues`); deletion still cancels at `:2863` (`DeleteIssue`) / `:3239` (`BatchDeleteIssues`) via `CancelTasksForIssue` (`server/internal/service/task.go:1229`) | new citation |
 | `StartTask` / `CompleteTask` do not write issue status (agent CLI owns progress) | `server/internal/service/task.go` (`StartTask` / `CompleteTask` comments) | new citation |
 | Assignment brief: ordinary agent `in_progress` then `in_review`; squad leader `in_progress` only on first dispatch | `server/internal/daemon/execenv/runtime_config_sections.go` (`writeWorkflowAssignment`) | new citation |
@@ -148,9 +148,15 @@ away, so no task is left orphaned.
 | `multica issue children <id>` (sub-issues grouped by stage) | `server/cmd/multica/cmd_issue.go:114,678`; route `GET /api/issues/{id}/children` → `ListChildIssues` |
 
 Advancement is agent-driven: the server only detects the closed barrier and
-wakes the parent assignee. Promoting the next stage's `backlog` sub-issues to
+wakes the resolved parent coordinator. This is normally the parent assignee;
+for an unassigned mention-started squad flow, the exact `agent_create`
+`origin_id` task can identify the originating squad leader without assigning
+the parent and supplies the continuation's human attribution. Every child in
+the closed stage (or every sibling in an unstaged barrier), including children
+that finished earlier, must share that exact origin task; mixed origins fail
+closed for dispatch. Promoting the next stage's `backlog` sub-issues to
 `todo` is the woken agent's decision, not a server side effect. When the woken
-assignee (often a squad leader) decides the parent is complete, the system
+coordinator (often a squad leader) decides the parent is complete, the system
 comment explicitly asks for `multica issue status <parent-id> in_review` —
 comment-triggered runs otherwise must not change status unless asked.
 

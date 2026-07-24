@@ -563,6 +563,22 @@ func (q *Queries) ListSquadsByMember(ctx context.Context, arg ListSquadsByMember
 	return items, nil
 }
 
+const lockActiveSquadForTaskCreate = `-- name: LockActiveSquadForTaskCreate :one
+SELECT id FROM squad
+WHERE id = $1 AND archived_at IS NULL
+FOR SHARE
+`
+
+// Serialize squad task creation with ArchiveSquad. FOR SHARE conflicts with
+// the archive UPDATE while still allowing concurrent task creators. The
+// archived_at predicate is rechecked after a competing archive commits.
+func (q *Queries) LockActiveSquadForTaskCreate(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockActiveSquadForTaskCreate, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
+}
+
 const removeSquadMember = `-- name: RemoveSquadMember :execrows
 DELETE FROM squad_member
 WHERE squad_id = $1 AND member_type = $2 AND member_id = $3
