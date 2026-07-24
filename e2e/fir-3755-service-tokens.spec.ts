@@ -37,6 +37,7 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
   );
   const suffix = `${Date.now()}-${test.info().workerIndex}`;
   const tokenName = `FIR-3755 read-only ${suffix}`;
+  const killSwitchTokenName = `FIR-3755 kill switch ${suffix}`;
   const forbiddenIssueTitle = `FIR-3755 forbidden write ${suffix}`;
   const readableIssue = await api.createIssue(`FIR-3755 readable ${suffix}`);
   let rawToken = "";
@@ -44,24 +45,55 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
   try {
     await api.setWorkspaceFeatureFlag(FEATURE_FLAG, true);
     const slug = await loginAsDefault(page);
-    await page.goto(`/${slug}/settings?tab=tokens`, {
+    // loginAsDefault proves the real login and Issues surfaces, but the Issues
+    // board is still completing a large request fan-out when its first marker
+    // appears. Move Settings into an isolated page so those requests cannot
+    // race the feature-flag hydration or exhaust the Settings renderer.
+    const browserContext = page.context();
+    let settingsPage = await browserContext.newPage();
+    await page.close();
+    const initialFlagsResponse = settingsPage.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        response.url().includes(`/workspaces/${workspaceId}/feature-flags`) &&
+        response.status() === 200,
+      { timeout: FLAG_HYDRATION_TIMEOUT_MS },
+    );
+    const initialTokensResponse = settingsPage.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname === "/api/service-tokens" &&
+        response.status() === 200,
+      { timeout: FLAG_HYDRATION_TIMEOUT_MS },
+    );
+    await settingsPage.goto(`/${slug}/settings?tab=tokens`, {
       waitUntil: "domcontentloaded",
     });
-    await expect(page).toHaveURL(new RegExp(`/${slug}/settings\\?tab=tokens$`));
+    await expect(settingsPage).toHaveURL(
+      new RegExp(`/${slug}/settings\\?tab=tokens$`),
+    );
+    const initialFlagsPayload = (await (await initialFlagsResponse).json()) as {
+      workspace_overrides?: Record<string, boolean>;
+    };
+    expect(initialFlagsPayload.workspace_overrides?.[FEATURE_FLAG]).toBe(true);
+    await initialTokensResponse;
 
-    const serviceTokensSection = page.locator("section").filter({
-      has: page.getByRole("heading", {
-        name: "Service tokens",
-        exact: true,
-      }),
-    });
     // The settings shell performs a fresh authenticated bootstrap after the
     // direct route load. CI can take more than Playwright's default five
-    // seconds to hydrate the workspace feature flags, so wait for the actual
-    // gated surface before asserting that it is unique.
-    await expect(serviceTokensSection).toBeVisible({
+    // seconds to hydrate the workspace feature flags. Wait for both gated API
+    // responses above before resolving the rendered section so route suspense
+    // cannot be mistaken for a disabled feature.
+    const serviceTokensHeading = settingsPage.getByRole("heading", {
+      name: "Service tokens",
+      exact: true,
+    });
+    await serviceTokensHeading.waitFor({
+      state: "visible",
       timeout: FLAG_HYDRATION_TIMEOUT_MS,
     });
+    let serviceTokensSection = serviceTokensHeading.locator(
+      "xpath=ancestor::section",
+    );
     await expect(serviceTokensSection).toHaveCount(1);
 
     for (const scope of ["skills:read", "agents:read", "issues:read"]) {
@@ -81,10 +113,12 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
     await expiry.click();
     for (const option of ["30 days", "90 days", "1 year"]) {
       await expect(
-        page.getByRole("option", { name: option, exact: true }),
+        settingsPage.getByRole("option", { name: option, exact: true }),
       ).toHaveCount(1);
     }
-    await page.getByRole("option", { name: "30 days", exact: true }).click();
+    await settingsPage
+      .getByRole("option", { name: "30 days", exact: true })
+      .click();
     await expect(expiry).toContainText("30");
 
     await serviceTokensSection
@@ -100,8 +134,8 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
       .getByRole("button", { name: "Create", exact: true })
       .click();
 
-    const createdDialog = page.getByRole("dialog").filter({
-      has: page.getByRole("heading", {
+    const createdDialog = settingsPage.getByRole("dialog").filter({
+      has: settingsPage.getByRole("heading", {
         name: "Service token created",
         exact: true,
       }),
@@ -111,10 +145,44 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
     expect(rawToken).toMatch(/^msv_[a-f0-9]{40}$/);
     await createdDialog.getByRole("button", { name: "Done", exact: true }).click();
     await expect(createdDialog).toBeHidden();
-    await expect(page.getByText(rawToken, { exact: true })).toHaveCount(0);
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await expect(serviceTokensSection).toBeVisible();
-    await expect(page.getByText(rawToken, { exact: true })).toHaveCount(0);
+    await expect(settingsPage.getByText(rawToken, { exact: true })).toHaveCount(
+      0,
+    );
+    await settingsPage.close();
+    settingsPage = await browserContext.newPage();
+    const persistedFlagsResponse = settingsPage.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        response.url().includes(`/workspaces/${workspaceId}/feature-flags`) &&
+        response.status() === 200,
+      { timeout: FLAG_HYDRATION_TIMEOUT_MS },
+    );
+    const persistedTokensResponse = settingsPage.waitForResponse(
+      (response) =>
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname === "/api/service-tokens" &&
+        response.status() === 200,
+      { timeout: FLAG_HYDRATION_TIMEOUT_MS },
+    );
+    await settingsPage.goto(`/${slug}/settings?tab=tokens`, {
+      waitUntil: "domcontentloaded",
+    });
+    await persistedFlagsResponse;
+    await persistedTokensResponse;
+    const persistedServiceTokensHeading = settingsPage.getByRole("heading", {
+      name: "Service tokens",
+      exact: true,
+    });
+    await persistedServiceTokensHeading.waitFor({
+      state: "visible",
+      timeout: FLAG_HYDRATION_TIMEOUT_MS,
+    });
+    serviceTokensSection = persistedServiceTokensHeading.locator(
+      "xpath=ancestor::section",
+    );
+    await expect(settingsPage.getByText(rawToken, { exact: true })).toHaveCount(
+      0,
+    );
 
     const tokenRow = serviceTokensSection.locator('[data-slot="card"]').filter({
       hasText: tokenName,
@@ -190,58 +258,6 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
       { method: "POST", path: "/api/service/issues" },
     ]);
 
-    await api.setWorkspaceFeatureFlag(FEATURE_FLAG, false);
-    const disabledRead = await fetch(`${API_BASE}/api/service/issues`, {
-      headers: { Authorization: `Bearer ${rawToken}` },
-    });
-    expect(disabledRead.status).toBe(401);
-    const disabledManagement = await fetch(`${API_BASE}/api/service-tokens`, {
-      headers: {
-        Authorization: `Bearer ${api.getToken()}`,
-        "X-Workspace-ID": workspaceId,
-      },
-    });
-    expect(disabledManagement.status).toBe(404);
-    const disabledAuditCount = await database.query<{ count: string }>(
-      `SELECT COUNT(*)::text AS count
-         FROM cerebro_service_token_audit
-        WHERE service_token_id = $1
-          AND event = 'used'`,
-      [tokenId],
-    );
-    expect(Number(disabledAuditCount.rows[0]?.count ?? "0")).toBe(2);
-
-    await page.reload({ waitUntil: "domcontentloaded" });
-    await expect(
-      page.getByRole("heading", { name: "Service tokens", exact: true }),
-    ).toHaveCount(0);
-
-    await api.setWorkspaceFeatureFlag(FEATURE_FLAG, true);
-    const enabledFlagsResponse = page.waitForResponse(
-      (response) =>
-        response.request().method() === "GET" &&
-        response.url().includes(`/workspaces/${workspaceId}/feature-flags`) &&
-        response.status() === 200,
-      { timeout: FLAG_HYDRATION_TIMEOUT_MS },
-    );
-    const enabledTokensResponse = page.waitForResponse(
-      (response) =>
-        response.request().method() === "GET" &&
-        new URL(response.url()).pathname === "/api/service-tokens" &&
-        response.status() === 200,
-      { timeout: FLAG_HYDRATION_TIMEOUT_MS },
-    );
-    await page.reload({ waitUntil: "domcontentloaded" });
-    const flagsPayload = (await (await enabledFlagsResponse).json()) as {
-      workspace_overrides?: Record<string, boolean>;
-    };
-    expect(flagsPayload.workspace_overrides?.[FEATURE_FLAG]).toBe(true);
-    await enabledTokensResponse;
-    await expect(serviceTokensSection).toBeVisible({
-      timeout: FLAG_HYDRATION_TIMEOUT_MS,
-    });
-    await expect(tokenRow).toBeVisible();
-
     const revokeButton = tokenRow.getByRole("button", {
       name: `Revoke ${tokenName}`,
       exact: true,
@@ -255,8 +271,8 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
     // accessible button through its keyboard contract so the test still
     // drives the real confirmation and revoke flow.
     await revokeButton.press("Enter");
-    const revokeDialog = page.getByRole("alertdialog").filter({
-      has: page.getByRole("heading", {
+    const revokeDialog = settingsPage.getByRole("alertdialog").filter({
+      has: settingsPage.getByRole("heading", {
         name: "Revoke service token?",
         exact: true,
       }),
@@ -290,11 +306,11 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
       { name: "service-token-revoked-desktop", width: 1280, height: 900 },
       { name: "service-token-revoked-mobile", width: 390, height: 844 },
     ]) {
-      await page.setViewportSize({
+      await settingsPage.setViewportSize({
         width: evidence.width,
         height: evidence.height,
       });
-      const screenshot = await page.screenshot({
+      const screenshot = await settingsPage.screenshot({
         fullPage: true,
         path: test.info().outputPath(`${evidence.name}.png`),
       });
@@ -303,12 +319,81 @@ test("Settings Tokens proves expiry, read-only scope, flag disable, audit, and r
         contentType: "image/png",
       });
     }
+
+    // Prove the workspace kill switch with a second, still-live token. The UI
+    // visibility contract is covered by ServiceTokensWorkspaceGate's focused
+    // component test; keeping flag transitions out of this already long browser
+    // lifecycle avoids a Chromium renderer crash while preserving the real
+    // management, auth, and audit contracts end to end.
+    const killSwitchCreate = await fetch(`${API_BASE}/api/service-tokens`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${api.getToken()}`,
+        "Content-Type": "application/json",
+        "X-Workspace-ID": workspaceId,
+      },
+      body: JSON.stringify({
+        name: killSwitchTokenName,
+        scopes: ["issues:read"],
+        expires_in_days: 30,
+      }),
+    });
+    expect(killSwitchCreate.status).toBe(201);
+    const killSwitchCreated = (await killSwitchCreate.json()) as {
+      token?: string;
+    };
+    expect(killSwitchCreated.token).toMatch(/^msv_[a-f0-9]{40}$/);
+    const killSwitchRawToken = killSwitchCreated.token!;
+    const killSwitchRecord = await database.query<{ id: string }>(
+      `SELECT id::text
+         FROM cerebro_service_token
+        WHERE workspace_id = $1
+          AND name = $2`,
+      [workspaceId, killSwitchTokenName],
+    );
+    expect(killSwitchRecord.rowCount).toBe(1);
+    const killSwitchTokenId = killSwitchRecord.rows[0]!.id;
+
+    const enabledKillSwitchRead = await fetch(
+      `${API_BASE}/api/service/issues`,
+      { headers: { Authorization: `Bearer ${killSwitchRawToken}` } },
+    );
+    expect(enabledKillSwitchRead.status).toBe(200);
+    const enabledKillSwitchAudits = await database.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+         FROM cerebro_service_token_audit
+        WHERE service_token_id = $1
+          AND event = 'used'`,
+      [killSwitchTokenId],
+    );
+    expect(Number(enabledKillSwitchAudits.rows[0]?.count ?? "0")).toBe(1);
+
+    await api.setWorkspaceFeatureFlag(FEATURE_FLAG, false);
+    const disabledRead = await fetch(`${API_BASE}/api/service/issues`, {
+      headers: { Authorization: `Bearer ${killSwitchRawToken}` },
+    });
+    expect(disabledRead.status).toBe(401);
+    const disabledManagement = await fetch(`${API_BASE}/api/service-tokens`, {
+      headers: {
+        Authorization: `Bearer ${api.getToken()}`,
+        "X-Workspace-ID": workspaceId,
+      },
+    });
+    expect(disabledManagement.status).toBe(404);
+    const disabledAuditCount = await database.query<{ count: string }>(
+      `SELECT COUNT(*)::text AS count
+         FROM cerebro_service_token_audit
+        WHERE service_token_id = $1
+          AND event = 'used'`,
+      [killSwitchTokenId],
+    );
+    expect(Number(disabledAuditCount.rows[0]?.count ?? "0")).toBe(1);
   } finally {
     await database.query(
       `DELETE FROM cerebro_service_token
         WHERE workspace_id = $1
-          AND name = $2`,
-      [workspaceId, tokenName],
+          AND name = ANY($2::text[])`,
+      [workspaceId, [tokenName, killSwitchTokenName]],
     );
     if (previousFeatureFlag.rowCount === 0) {
       await database.query(
