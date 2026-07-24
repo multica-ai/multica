@@ -62,7 +62,10 @@ var versionOneHookActionTypes = []string{
 	"workflow.activate", "workflow.pause", "workflow.resume", "workflow.stop",
 	"approval.require", "audit.record", "metric.increment",
 	"skill.run", "judge.gate", "eval.gate", "eval.run",
+	"issue.comment", "issue.status",
 }
+
+var issueStatusActionValues = []string{"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"}
 
 func validateTypedHookAction(action HookAction) error {
 	known := false
@@ -141,6 +144,19 @@ func validateTypedHookAction(action HookAction) error {
 			return fmt.Errorf("eval.run requires eval_id: %w", err)
 		}
 		return nil
+	case "issue.comment":
+		return requireString("body")
+	case "issue.status":
+		if err := requireString("status"); err != nil {
+			return err
+		}
+		status := hookConfigString(action.Config, "status", "")
+		for _, allowed := range issueStatusActionValues {
+			if status == allowed {
+				return nil
+			}
+		}
+		return fmt.Errorf("issue.status status %q is not a valid issue status", status)
 	case "agent.dispatch":
 		return requireString("agent_id")
 	case "squad.dispatch":
@@ -171,8 +187,10 @@ func validateTypedHookActions(policy HookPolicy) error {
 
 func hookActionCapability(actionType string) string {
 	switch actionType {
-	case "member.notify":
+	case "member.notify", "issue.comment":
 		return "add_comment"
+	case "issue.status":
+		return "update_issue"
 	case "agent.dispatch", "squad.dispatch", "skill.run", "judge.gate", "eval.gate", "eval.run":
 		return "trigger_other_agent"
 	case "wakeup.create", "wakeup.cancel":
