@@ -120,6 +120,12 @@ const (
 	EventAutopilotRunStart = "autopilot:run_start"
 	EventAutopilotRunDone  = "autopilot:run_done"
 
+	// Approval events (sensitive-operation approval flow, WS-721).
+	EventApprovalRequestCreated  = "approval_request:created"
+	EventApprovalRequestDecided  = "approval_request:decided"
+	EventApprovalRequestCancelled = "approval_request:cancelled"
+	EventApprovalRequestExecuted = "approval_request:executed"
+
 	// Squad events
 	EventSquadCreated = "squad:created"
 	EventSquadUpdated = "squad:updated"

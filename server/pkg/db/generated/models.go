@@ -158,6 +158,41 @@ type AgentToLabel struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
+type ApprovalEvent struct {
+	ID                pgtype.UUID        `json:"id"`
+	ApprovalRequestID pgtype.UUID        `json:"approval_request_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	EventType         string             `json:"event_type"`
+	ActorType         pgtype.Text        `json:"actor_type"`
+	ActorID           pgtype.UUID        `json:"actor_id"`
+	Comment           string             `json:"comment"`
+	Details           []byte             `json:"details"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+type ApprovalRequest struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	Operation       string             `json:"operation"`
+	TargetType      string             `json:"target_type"`
+	TargetID        pgtype.UUID        `json:"target_id"`
+	Reason          string             `json:"reason"`
+	Status          string             `json:"status"`
+	InitiatedByType string             `json:"initiated_by_type"`
+	InitiatedByID   pgtype.UUID        `json:"initiated_by_id"`
+	CurrentStep     int32              `json:"current_step"`
+	DecidedByType   pgtype.Text        `json:"decided_by_type"`
+	DecidedByID     pgtype.UUID        `json:"decided_by_id"`
+	DecidedAt       pgtype.Timestamptz `json:"decided_at"`
+	DecisionComment string             `json:"decision_comment"`
+	Payload         []byte             `json:"payload"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	ExecutedAt      pgtype.Timestamptz `json:"executed_at"`
+	ExecutionError  pgtype.Text        `json:"execution_error"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Attachment struct {
 	ID            pgtype.UUID        `json:"id"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`

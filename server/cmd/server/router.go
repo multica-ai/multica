@@ -1169,6 +1169,25 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Approval flow (sensitive-operation approvals, WS-721). Listing,
+			// creation, history, and execution are member-scoped; approve/reject
+			// and config writes enforce owner/admin inside the handlers.
+			r.Route("/api/approvals", func(r chi.Router) {
+				r.Get("/", h.ListApprovals)
+				r.Post("/", h.CreateApproval)
+				r.Get("/pending", h.ListPendingApprovals)
+				r.Get("/config", h.GetApprovalConfig)
+				r.Put("/config", h.UpdateApprovalConfig)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetApproval)
+					r.Post("/approve", h.ApproveApproval)
+					r.Post("/reject", h.RejectApproval)
+					r.Post("/cancel", h.CancelApproval)
+					r.Post("/execute", h.ExecuteApproval)
+					r.Get("/events", h.ListApprovalEvents)
+				})
+			})
+
 			// Pins
 			r.Route("/api/pins", func(r chi.Router) {
 				r.Get("/", h.ListPins)
