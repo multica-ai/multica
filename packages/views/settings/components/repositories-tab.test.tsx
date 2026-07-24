@@ -33,6 +33,12 @@ const githubRef = vi.hoisted(() => ({
     can_manage: true,
   },
 }));
+const githubQueryStateRef = vi.hoisted(() => ({
+  current: {
+    isPending: false,
+    isFetching: false,
+  },
+}));
 const githubRepositoriesRef = vi.hoisted(() => ({
   current: [] as {
     id: number;
@@ -52,7 +58,7 @@ const searchParamsRef = vi.hoisted(() => ({
 vi.mock("@tanstack/react-query", () => ({
   useQuery: (options: { queryKey: readonly unknown[] }) => {
     if (options.queryKey.includes("installations")) {
-      return { data: githubRef.current };
+      return { data: githubRef.current, ...githubQueryStateRef.current };
     }
     return { data: membersRef.current };
   },
@@ -121,7 +127,7 @@ vi.mock("../../navigation", () => ({
   }),
 }));
 
-import { RepositoriesTab } from "./repositories-tab";
+import { RepositoriesTab, repositoryIdentity } from "./repositories-tab";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, settings: enSettings },
@@ -151,6 +157,10 @@ describe("RepositoriesTab — automatic updates", () => {
       configured: true,
       repository_browse_configured: true,
       can_manage: true,
+    };
+    githubQueryStateRef.current = {
+      isPending: false,
+      isFetching: false,
     };
     githubRepositoriesRef.current = [];
     searchParamsRef.current = new URLSearchParams("tab=repositories");
@@ -408,6 +418,15 @@ describe("RepositoriesTab — automatic updates", () => {
     });
   });
 
+  it("preserves repository path casing when comparing clone URLs", () => {
+    expect(
+      repositoryIdentity("https://GitHub.com/Acme/Repo.git"),
+    ).toBe("github.com/Acme/Repo");
+    expect(
+      repositoryIdentity("git@github.com:acme/repo.git"),
+    ).toBe("github.com/acme/repo");
+  });
+
   it("opens the picker after returning from a GitHub connection", async () => {
     githubRef.current = {
       installations: [{ id: "installation-row-1", account_login: "multica-ai" }],
@@ -429,5 +448,24 @@ describe("RepositoriesTab — automatic updates", () => {
     expect(mockNavReplace).toHaveBeenCalledWith(
       "/acme/settings?tab=repositories",
     );
+  });
+
+  it("clears the GitHub callback query after an empty installation result", async () => {
+    searchParamsRef.current = new URLSearchParams(
+      "tab=repositories&github_connected=1",
+    );
+
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    await waitFor(() => {
+      expect(mockNavReplace).toHaveBeenCalledWith(
+        "/acme/settings?tab=repositories",
+      );
+    });
+    expect(
+      screen.queryByRole("heading", {
+        name: "Choose GitHub repositories",
+      }),
+    ).toBeNull();
   });
 });

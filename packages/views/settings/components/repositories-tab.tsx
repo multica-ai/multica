@@ -98,8 +98,7 @@ export function repositoryIdentity(rawURL: string): string | null {
 
   const normalizedPath = path
     .replace(/^\/+|\/+$/g, "")
-    .replace(/\.git$/i, "")
-    .toLowerCase();
+    .replace(/\.git$/i, "");
   if (!host || !normalizedPath) return null;
   return `${host.toLowerCase()}/${normalizedPath}`;
 }
@@ -127,7 +126,11 @@ export function RepositoriesTab() {
   const currentMember = members.find((member) => member.user_id === user?.id) ?? null;
   const canManageWorkspace =
     currentMember?.role === "owner" || currentMember?.role === "admin";
-  const { data: githubData } = useQuery({
+  const {
+    data: githubData,
+    isPending: githubInstallationsPending,
+    isFetching: githubInstallationsFetching,
+  } = useQuery({
     ...githubInstallationsOptions(wsId),
     enabled: !!wsId && canManageWorkspace,
   });
@@ -193,6 +196,12 @@ export function RepositoriesTab() {
     const connected = navigation.searchParams.get("github_connected") === "1";
     const githubError = navigation.searchParams.get("github_error");
     if ((!connected && !githubError) || !canManageWorkspace) return;
+    if (
+      !githubError &&
+      (githubInstallationsPending || githubInstallationsFetching)
+    ) {
+      return;
+    }
 
     if (githubError) {
       toast.error(t(($) => $.repositories.github_connect_failed));
@@ -201,8 +210,6 @@ export function RepositoriesTab() {
       setGitHubPickerOpen(true);
     } else if (githubInstallations.length > 0) {
       toast.error(t(($) => $.repositories.github_browse_not_configured));
-    } else {
-      return;
     }
 
     const next = new URLSearchParams(navigation.searchParams);
@@ -214,6 +221,8 @@ export function RepositoriesTab() {
     canManageWorkspace,
     githubBrowseConfigured,
     githubInstallations,
+    githubInstallationsFetching,
+    githubInstallationsPending,
     navigation,
     t,
   ]);

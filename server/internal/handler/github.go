@@ -262,10 +262,10 @@ func isGitHubRepositoryBrowseConfigured() bool {
 // install flow so the setup callback can recover the workspace without
 // trusting query params alone. Format: "<workspaceID>.<nonce>.<sigHex>".
 func signState(workspaceID string) (string, error) {
-	return signStateForReturn(workspaceID, githubReturnToGitHub, true)
+	return signStateForReturn(workspaceID, githubReturnToGitHub)
 }
 
-func signStateForReturn(workspaceID, returnTo string, legacy bool) (string, error) {
+func signStateForReturn(workspaceID, returnTo string) (string, error) {
 	secret := githubWebhookSecret()
 	if secret == "" {
 		return "", errors.New("github integration is not configured")
@@ -279,7 +279,7 @@ func signStateForReturn(workspaceID, returnTo string, legacy bool) (string, erro
 	}
 	nonce := hex.EncodeToString(nonceBytes)
 	payload := workspaceID + "." + nonce
-	if !legacy {
+	if returnTo != githubReturnToGitHub {
 		payload = workspaceID + "." + returnTo + "." + nonce
 	}
 	mac := hmac.New(sha256.New, []byte(secret))
@@ -355,7 +355,7 @@ func (h *Handler) GitHubConnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	slug := githubAppSlug()
-	state, err := signStateForReturn(workspaceID, returnTo, returnTo == githubReturnToGitHub)
+	state, err := signStateForReturn(workspaceID, returnTo)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to sign state")
 		return
@@ -709,7 +709,12 @@ func fetchGitHubInstallationRepositories(
 		strings.TrimRight(githubAPIBase, "/"),
 		installationID,
 	)
-	tokenReq, err := http.NewRequestWithContext(ctx, http.MethodPost, tokenEndpoint, strings.NewReader("{}"))
+	tokenReq, err := http.NewRequestWithContext(
+		ctx,
+		http.MethodPost,
+		tokenEndpoint,
+		strings.NewReader(`{"permissions":{"metadata":"read"}}`),
+	)
 	if err != nil {
 		return GitHubRepositoriesResponse{}, err
 	}
