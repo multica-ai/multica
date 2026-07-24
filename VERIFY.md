@@ -39,7 +39,7 @@ Run the two permission-surface browser contracts:
 ```sh
 pnpm generate:feature-catalog
 git diff --exit-code -- server/cmd/multica/cerebro_feature_catalog.json
-pnpm exec playwright test e2e/fir-3388-capabilities.spec.ts e2e/fir-3755-service-tokens.spec.ts --project=chromium
+pnpm exec playwright test e2e/fir-3388-permissions-authoring.spec.ts e2e/fir-3388-capabilities.spec.ts e2e/fir-3755-service-tokens.spec.ts --project=chromium
 ```
 
 Run the complete repository contract before delivery:

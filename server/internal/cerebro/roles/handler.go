@@ -5,6 +5,8 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -27,18 +29,21 @@ func New(cerebro *cerebrodb.Queries, upstream *db.Queries, bus *events.Bus) *Han
 }
 
 type createRoleRequest struct {
-	Name        string  `json:"name"`
-	Description *string `json:"description"`
+	Name        string          `json:"name"`
+	Description *string         `json:"description"`
+	Permissions RolePermissions `json:"permissions"`
 }
 
 type updateRoleRequest struct {
-	Name        *string `json:"name"`
-	Description *string `json:"description"`
+	Name        *string          `json:"name"`
+	Description *string          `json:"description"`
+	Permissions *RolePermissions `json:"permissions"`
 }
 
 type assignRoleRequest struct {
 	SubjectType string `json:"subject_type"`
 	SubjectID   string `json:"subject_id"`
+	ExpiresAt   string `json:"expires_at"`
 }
 
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
@@ -46,7 +51,8 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	roles, err := h.Service.List(r.Context(), workspaceID)
+	includeArchived, _ := strconv.ParseBool(r.URL.Query().Get("include_archived"))
+	roles, err := h.Service.List(r.Context(), workspaceID, includeArchived)
 	if err != nil {
 		slog.Error("list cerebro roles failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to list roles")
@@ -73,7 +79,7 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	role, err := h.Service.Create(r.Context(), workspaceID, actorID, req.Name, req.Description)
+	role, err := h.Service.Create(r.Context(), workspaceID, actorID, req.Name, req.Description, req.Permissions)
 	if err != nil {
 		h.writeServiceError(w, r, err)
 		return
@@ -108,7 +114,7 @@ func (h *Handler) Update(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	role, err := h.Service.Update(r.Context(), workspaceID, actorID, roleID, req.Name, req.Description)
+	role, err := h.Service.Update(r.Context(), workspaceID, actorID, roleID, req.Name, req.Description, req.Permissions)
 	if err != nil {
 		h.writeServiceError(w, r, err)
 		return
@@ -125,7 +131,7 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if _, err := h.Service.Delete(r.Context(), workspaceID, actorID, roleID); err != nil {
+	if _, err := h.Service.Archive(r.Context(), workspaceID, actorID, roleID); err != nil {
 		h.writeServiceError(w, r, err)
 		return
 	}
@@ -151,7 +157,16 @@ func (h *Handler) Assign(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid subject_id")
 		return
 	}
-	assignment, err := h.Service.Assign(r.Context(), workspaceID, actorID, roleID, subjectID, req.SubjectType)
+	var expiresAt *time.Time
+	if req.ExpiresAt != "" {
+		parsed, err := time.Parse(time.RFC3339, req.ExpiresAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "expires_at must be RFC3339")
+			return
+		}
+		expiresAt = &parsed
+	}
+	assignment, err := h.Service.Assign(r.Context(), workspaceID, actorID, roleID, subjectID, req.SubjectType, expiresAt)
 	if err != nil {
 		h.writeServiceError(w, r, err)
 		return
@@ -219,6 +234,10 @@ func (h *Handler) writeServiceError(w http.ResponseWriter, r *http.Request, err 
 		writeError(w, http.StatusNotFound, "role assignment not found")
 	case errors.Is(err, ErrInvalidRoleName):
 		writeError(w, http.StatusBadRequest, "name is required")
+	case errors.Is(err, ErrInvalidPermissions):
+		writeError(w, http.StatusBadRequest, err.Error())
+	case errors.Is(err, ErrRoleArchived):
+		writeError(w, http.StatusConflict, "role is archived")
 	case errors.Is(err, ErrInvalidSubjectType):
 		writeError(w, http.StatusBadRequest, "subject_type must be member or agent")
 	case errors.Is(err, ErrSubjectNotFound):

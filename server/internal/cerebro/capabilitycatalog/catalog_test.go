@@ -45,6 +45,7 @@ func TestCatalogResolvesEveryKnownKeyFormAndRoundTrips(t *testing.T) {
 		{"api policy tuple", PolicyKey("connection:agentvault", "GET /v1/status", "connection-endpoint"), "connection:agentvault:api:GET:/v1/status", RelationAlias},
 		{"codex runtime tool", RuntimeKey("codex", "apply_patch"), "runtime:codex:apply_patch", RelationCanonical},
 		{"codex policy key", RuntimePolicyKey("codex", "tools:apply_patch", "runtime_report"), "runtime:codex:apply_patch", RelationAlias},
+		{"codex observed patch alias", RuntimeKey("codex", "patch_apply"), "runtime:codex:apply_patch", RelationAlias},
 	}
 
 	for _, tt := range tests {
@@ -75,6 +76,25 @@ func TestCatalogResolvesEveryKnownKeyFormAndRoundTrips(t *testing.T) {
 				t.Errorf("Forms(%q) does not contain round-trip mapping for %+v", tt.wantID, tt.key)
 			}
 		})
+	}
+}
+
+func TestCanonicalRuntimeToolNameUsesCodexObservedAliases(t *testing.T) {
+	t.Parallel()
+
+	for _, tt := range []struct {
+		raw  string
+		want string
+	}{
+		{raw: "exec_command", want: "bash"},
+		{raw: "shell", want: "bash"},
+		{raw: "patch_apply", want: "apply_patch"},
+		{raw: "apply-patch", want: "apply_patch"},
+		{raw: "view", want: "view"},
+	} {
+		if got := CanonicalRuntimeToolName("codex", tt.raw); got != tt.want {
+			t.Errorf("CanonicalRuntimeToolName(codex, %q) = %q, want %q", tt.raw, got, tt.want)
+		}
 	}
 }
 

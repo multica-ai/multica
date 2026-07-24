@@ -209,6 +209,10 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Keep every appended/synthetic row on the same fully resolved actor
+	// context. In particular, resource-scoped Role permissions must be expanded
+	// against the same groups as capability-wide rows and call-time resolution.
+	in.GroupIDs = groupIDs
 
 	// When a runtime is in scope (a runtime page, or an agent page where the
 	// agent's runtime is known) the table must show what THAT runtime can do —
@@ -463,7 +467,7 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 
 func (s *Store) resolveTablePermission(ctx context.Context, in TableQuery, key string, layers map[Layer]Setting) (Effective, error) {
 	if _, special := platformaccess.ForKey(key); !special {
-		return ResolveWithMode(tableRowMode(in.mode, key), Input{Settings: layers, Base: in.Base}), nil
+		return s.resolveTableResourcePermission(ctx, in, key, "", layers, in.Base)
 	}
 	return s.ResolvePermission(ctx, Query{
 		WorkspaceID:  in.WorkspaceID,
@@ -476,6 +480,38 @@ func (s *Store) resolveTablePermission(ctx context.Context, in TableQuery, key s
 		SystemID:     in.SystemID,
 		Base:         in.Base,
 	}, tablePermissionActor(in))
+}
+
+// resolveTableResourcePermission is the single read-model seam for ordinary
+// capability rows and synthetic per-resource rows. It expands active Roles into
+// the same Agent layer used by Store.Resolve before applying the table's
+// hard-floor/openable mode, so Settings → Permissions cannot disagree with
+// call-time enforcement for repos, credentials or Connection tools.
+func (s *Store) resolveTableResourcePermission(
+	ctx context.Context,
+	in TableQuery,
+	key string,
+	resourcePattern string,
+	layers map[Layer]Setting,
+	base Setting,
+) (Effective, error) {
+	query := Query{
+		WorkspaceID:     in.WorkspaceID,
+		ToolKey:         key,
+		ResourcePattern: resourcePattern,
+		RuntimeID:       in.RuntimeID,
+		AgentID:         in.AgentID,
+		UserID:          in.UserID,
+		GroupIDs:        in.GroupIDs,
+		OnBehalfOfID:    in.OnBehalfOfID,
+		SystemID:        in.SystemID,
+		Base:            base,
+	}
+	input := Input{Settings: layers, Base: base}
+	if err := s.applyActiveRoles(ctx, query, requestContextWithRuntime(query), &input); err != nil {
+		return Effective{}, err
+	}
+	return ResolveWithMode(tableRowMode(in.mode, key), input), nil
 }
 
 func tablePermissionActor(in TableQuery) platformaccess.Actor {

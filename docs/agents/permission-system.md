@@ -1,9 +1,12 @@
 # Permission & access control — what an agent can and cannot do
 
-> **FIR-3402 role/mandate contract.** Durable agent access is authored only as
-> versioned `cerebro_role` permission packages and expiring or permanent
-> `cerebro_role_assignment` bindings. Policy resolution expands only unexpired
-> bindings on every decision. Every task receives an immutable
+> **FIR-3402 role/mandate contract.** Durable agent access can be authored as a
+> direct layered policy decision or packaged into a reusable, versioned
+> `cerebro_role` with an expiring or permanent `cerebro_role_assignment`.
+> Both authoring paths enter the same Policy Decision Service; a Role is not a
+> second resolver. Policy resolution expands only unexpired, non-archived
+> bindings on every decision and records the Role name and version in its
+> explanation. Every task receives an immutable
 > `cerebro_task_mandate` tool snapshot, and both managed and local runtimes
 > check that snapshot at each call. Migration 9147 removes the former direct
 > per-agent grant store and the former pre-run pass store after preserving their
@@ -34,13 +37,13 @@
 agent action.** Permission enforcement in this codebase is spread across many
 subsystems, and they are easy to confuse. This document is the map.
 
-> **The mistake this doc exists to prevent.** The *new* tool-policy chain
-> (Allow / Ask / Deny / Inherit) is **off by default** as a general gate on tool
-> calls. It is tempting to conclude from that "agents are ungated — nothing
-> blocks them." **That is false.** Many *other* mechanisms enforce real, live
-> access control today, independent of any flag. Do not conflate "the new
-> approval chain is off" with "there are no permissions." They are different
-> statements about different systems.
+> **The mistake this doc exists to prevent.** A visible control, a runtime
+> inventory entry, or an agent description is not evidence of access. Gateway
+> and supported local runtimes always resolve the canonical policy and the
+> immutable Task Mandate before a call. Independent credential, sandbox,
+> repository and approval ceilings then intersect that verdict and may only
+> tighten it. Never add a second authoring or resolution path for one of those
+> surfaces.
 
 > **The rule for anyone refactoring this area.** Several of the live gates below
 > look like ad-hoc legacy code worth folding into the tool-policy chain. They
@@ -71,6 +74,27 @@ as evidence of access.
 
 Keep these apart. This doc answers question 2 honestly.
 
+### One permission truth across every surface
+
+For a concrete agent, member, runtime, task and resource, all user and agent
+surfaces must project the same effective decision:
+
+- **Settings → Permissions** authors direct rules and reusable Roles, and its
+  **Why Access** detail names the deciding layer or Role version.
+- **Capabilities** and `get_agent_capabilities` tell the agent what is available,
+  allowed, approval-gated or denied using that same effective decision.
+- The task transcript and `multica permissions task <id>` show the immutable
+  Task Mandate captured for the run, including whether it is active or ended.
+- `multica permissions explain` provides the same current explanation for an
+  actor/resource outside the task snapshot.
+- Claim-time listing and call-time enforcement use the same capability identity.
+  A listed action that cannot be called, or a callable action missing from the
+  brief, is a contract failure.
+
+Service Tokens follow the same feature catalog and server switch, but represent
+a machine identity with a deliberately read-only scope and their own expiry,
+audit and revocation lifecycle. They do not widen an agent's tool permissions.
+
 ### Permission keys with a declared special contract
 
 Eight keys deliberately differ from the ordinary Allow-baseline chain. Their
@@ -95,8 +119,8 @@ a one-shot approval only when workspace, agent, capability, resource, and ID all
 match, so replay, rejection, mismatch, and expiry create nothing. Root issues
 and sub-issues use the same capability and contract. Member-created issues and
 internal system materialisation are not agent platform actions and remain
-unchanged. This floor does not depend on approval-inbox availability or the
-`cerebro_approvals` UI flag.
+unchanged. This floor does not depend on approval-inbox availability or either
+approval UI flag.
 
 Agents can also explicitly raise a pending human decision with the
 `request_approval` tool. Workspace MCP and the managed Firtal Gateway use the
@@ -107,9 +131,11 @@ requests or bypass the permission decision for the action being proposed.
 Approvals with that origin context are displayed inline below the matching Chat
 turn or Issue/Channel/DM comment. Requests without a triggering comment appear
 at the top of the matching issue timeline; the Approvals page remains the full
-workspace inbox and audit surface. The `cerebro_approvals` flag gates both the
-inline query and approval realtime subscriptions; it never disables the server
-permission floor.
+workspace inbox and audit surface. The approval experience is visible whenever
+either `cerebro_approvals` or `cerebro_approval_gate` is enabled: navigation,
+inline query and realtime subscriptions use that same combined condition. This
+prevents an active Ask gate from hiding the human decision path. Neither flag
+disables the server permission floor.
 
 > **FIR-2175 / FIR-3062 (flag `cerebro_member_override`, default ON):** when this general
 > gate IS deciding a call (question 1), a workspace uses the
@@ -359,6 +385,13 @@ Where it mentions `cerebro_runtime_tool`, runtime grant/override routes,
 `agent_tool_grant` as a broad exposure cascade, or a server rollout switch,
 that text is historical context rather than the current contract. The three
 points above are authoritative for runtime-tool inventory and access.
+
+> **FIR-3388 Connection resolver correction.** Historical text in row 2b
+> mentions `connectionWideBases` and `connectionWideAuthoredBases`. Those
+> parallel table folds are retired. Connection-wide policy now resolves through
+> `Store.ResolveGeneral`, and exact tool/endpoint rows use the same
+> Role-aware resource resolver as repository and credential rows. This applies
+> even when an API Connection has no capability-register row.
 
 | # | What is gated | Mechanism / where | Default behavior |
 |---|---|---|---|

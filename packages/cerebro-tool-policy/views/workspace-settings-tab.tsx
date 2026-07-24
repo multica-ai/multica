@@ -13,6 +13,7 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { WebFetchPolicySettingsTab } from "@multica/cerebro-web-fetch-policy/views";
 import { ToolPolicyTabs } from "./tool-policy-table";
 import { CapabilityIsolationSections } from "./capability-isolation-sections";
+import { PermissionRoles } from "./permission-roles";
 
 // Mirrors @multica/views ExtraSettingsTab structurally. Defined locally so this
 // entrypoint stays free of a views dependency (and the topo-sort coupling it
@@ -55,6 +56,7 @@ export function WorkspacePermissionsTab({
           and member below can only tighten what is set here — never loosen it.
         </p>
       </div>
+      <PermissionRoles workspaceId={wsId} />
       <ToolPolicyTabs
         wsId={wsId}
         view="workspace"

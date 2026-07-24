@@ -1,9 +1,11 @@
 # Permission architecture — the real structure & completeness register
 
-> **FIR-3402 canonical access source.** Versioned roles plus role bindings are
-> the only durable way to grant agent access. `toolpolicy.Store` expands active
-> bindings into the same Policy Decision Service input used by authored policy
-> rows; expired bindings are filtered with the database clock on every resolve.
+> **FIR-3402 canonical access source.** A direct layered policy decision and a
+> reusable versioned Role are two authoring forms for the same permission
+> contract. `toolpolicy.Store` expands active Role bindings into the same Policy
+> Decision Service input used by direct policy rows; expired or archived
+> bindings are filtered with the database clock on every resolve, and the
+> effective explanation records the deciding Role name and version.
 > A per-run Task Mandate then freezes the allowed-tool envelope and is checked
 > again on every managed or local-runtime call. Migration 9147 deletes the two
 > superseded direct stores; automated contract coverage prevents either route
@@ -24,7 +26,7 @@
 > audit read model exposes and sorts by the same explicit severity concept.
 
 **Read this together with [`permission-system.md`](./permission-system.md).** That doc is the
-*behavioral* map ("what is enforced live today vs. off by default", row by row). **This**
+*behavioral* map ("what is enforced live and which safety intersections apply", row by row). **This**
 doc is the *structural* map: what permission **models** actually exist, which gates are
 authored through the 5 permission interfaces vs. which live **only in code**, and the
 decision to remove Persona. If you change the permission model itself (add an interface,
@@ -46,13 +48,14 @@ Line numbers drift; this doc cites files + functions. Grep the function name if 
 
 ## 1. The mistake this doc exists to prevent
 
-It is tempting to believe Multica has **one** permission model — the unified tool-policy
-chain (Allow / Ask / Deny / Inherit across **Workspace › Runtime › Agent › Group › User**),
-which is what the settings UI shows. **That belief is false.** The tool-policy chain (the
-"5 interfaces") is a thin, deliberate slice. The **majority** of real access control lives
-in code, spread across **four parallel models** that the 5 interfaces neither show nor
-control. Section 4 is the complete register of those code-only gates. If you are building
-"one place to see and control all permissions", that register is your backlog.
+Multica has **one authored permission model**: the unified tool-policy chain
+(Allow / Ask / Deny / Inherit across **Workspace › Runtime › Agent › Group › User**),
+with Roles expanded into the Agent layer. It is intersected by code-owned safety
+ceilings for credentials, sandboxing, repository access, ownership and other
+non-delegable invariants. Those ceilings are not alternative places to author
+the same permission; they can only preserve or tighten the canonical verdict.
+Section 4 is the register of those deliberate intersections and of remaining
+legacy visibility/access models.
 
 ---
 
@@ -68,6 +71,15 @@ Workspace/runtime/agent/group/user choices are authored only in
   (`server/internal/cerebro/toolpolicy/chain.go:62-70`). These are the 5 settable surfaces
   the UI renders (`packages/cerebro-tool-policy` `ToolPolicyTable`, `view` prop →
   `VIEW_EDIT_LAYER`).
+- **Roles are reusable authoring packages, not a sixth layer.** Active Role
+  rules are expanded into the Agent layer for capability-wide and exact-resource
+  decisions alike (repositories, credentials and Connection tools/endpoints).
+  Direct Agent rules remain a tighten-only ceiling over a Role, and the
+  explanation carries Role name + version provenance.
+- **Task Mandate is a run snapshot, not a second policy store.** It freezes the
+  exact allowed-tool envelope when a task is claimed and is checked again before
+  every managed or local-runtime call. The task transcript and
+  `multica permissions task <id>` expose that historical snapshot.
 - **Resolver:** `toolpolicy.Resolve` (pure fold, `chain.go:153`) / `Store.Resolve`
   (DB, `store.go:95`). Folds base→ceiling, most-restrictive-wins; `Inherit`/absent =
   pass-through; **Base default = Allow** (`chain.go:155-157`).
@@ -148,11 +160,15 @@ Workspace/runtime/agent/group/user choices are authored only in
   into `RequestContext.ArgValues`, so an `arg_allowlist` WHEN condition on the capability row
   pins `Manage group permissions` to specific group(s). Workspace/Runtime/System-layer writes
   (on a non-credential key) stay admin-only.
-- **CLI surface (FIR-1609):** `multica permissions explain|set|clear`
+- **CLI surface (FIR-1609/FIR-3388):** `multica permissions explain|set|clear`,
+  `multica permissions roles list|show|create|update|archive|assign|unassign`,
+  and `multica permissions task <id>`
   (`server/cmd/multica/cerebro_permissions.go`) wraps the read model + write surface above —
   `explain` (GET) prints per-tool `Effective` + `DecidedBy`/`CappedBy`/reason + group blame to
   answer "why is this agent+member blocked"; `set`/`clear` (PUT/DELETE) author/remove one
-  Allow/Ask/Deny rule at one layer, optional WHEN/CEL condition. Same admin-only server gate.
+  Allow/Ask/Deny rule at one layer, optional WHEN/CEL condition; `roles` manages reusable
+  versioned packages and bindings; `task` prints the immutable run snapshot. The server
+  keeps the same ownership/admin gates as the matching UI operations.
 
 **What actually routes through these interfaces today (Class A — the whole list):**
 

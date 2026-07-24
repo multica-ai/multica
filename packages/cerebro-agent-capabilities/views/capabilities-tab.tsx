@@ -116,6 +116,8 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
       runtime_type: "",
       status: "unknown",
       verified: 0,
+      discovered: 0,
+      declared: 0,
       unproven: 0,
     },
     limits: { mcp_servers: [], has_mcp_config: false },
@@ -352,8 +354,11 @@ function ToolsAvailabilitySummary({
       {availability.status === "known" ? (
         <span className="text-xs text-muted-foreground">
           {availability.verified} of {total} proved on the{runtime} runtime
-          {availability.unproven > 0
-            ? ` · ${availability.unproven} only declared`
+          {availability.discovered > 0
+            ? ` · ${availability.discovered} discovered`
+            : ""}
+          {availability.declared > 0
+            ? ` · ${availability.declared} only declared`
             : ""}
         </span>
       ) : (
