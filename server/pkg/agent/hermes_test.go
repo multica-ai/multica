@@ -1659,6 +1659,96 @@ func TestHermesProviderErrorSnifferStillCapturesErrorRootRecords(t *testing.T) {
 	}
 }
 
+// TestHermesProviderErrorSnifferIgnoresMultiLineInfoRecords guards the
+// second pollution shape from GitHub multica#5862. Hermes echoes a
+// conversation/tool record whose JSON spans several physical lines: only
+// the first line carries the `[INFO] root:` prefix, the continuation lines
+// do not, yet they may embed both a capture token (`Error:`) and a terminal
+// token (`❌`) on the same physical line. The whole record must be skipped,
+// so a completed run with a successful final reply stays completed.
+func TestHermesProviderErrorSnifferIgnoresMultiLineInfoRecords(t *testing.T) {
+	t.Parallel()
+
+	record := "2026-07-24 10:09:00 [INFO] root: {\n" +
+		"  \"message\": {\"role\": \"tool\", \"content\": \"❌ Error: KeyError 'series' is quoted documentation, not a provider failure\"}\n" +
+		"}\n"
+
+	s := newACPProviderErrorSniffer("hermes")
+	if _, err := s.Write([]byte(record)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if msg := s.message(); msg != "" {
+		t.Errorf("multi-line INFO echo must not be captured, got %q", firstNRunes(msg, 120))
+	}
+	if msg := s.terminalMessage(); msg != "" {
+		t.Errorf("multi-line INFO echo must not be terminal, got %q", firstNRunes(msg, 120))
+	}
+	status, errStr := promoteACPResultOnProviderError("completed", "", "Done. The requested work completed successfully.", s)
+	if status != "completed" {
+		t.Errorf("multi-line INFO echo flipped a completed run to %q (error=%q)", status, firstNRunes(errStr, 120))
+	}
+}
+
+// TestHermesProviderErrorSnifferErrorRecordAfterInfoRecord is the control
+// for the multi-line skip: a genuine `[ERROR] root:` record that FOLLOWS a
+// multi-line INFO echo must still be terminal. The error record's own
+// prefix ends the skipped INFO record, so real failures are not swallowed.
+func TestHermesProviderErrorSnifferErrorRecordAfterInfoRecord(t *testing.T) {
+	t.Parallel()
+
+	stream := "2026-07-24 10:09:00 [INFO] root: {\n" +
+		"  \"content\": \"❌ Error: harmless echoed documentation\"\n" +
+		"}\n" +
+		"2026-07-24 10:09:05 [ERROR] root: ❌ API call failed after 3 retries: HTTP 429 rate limit exceeded\n"
+
+	s := newACPProviderErrorSniffer("hermes")
+	if _, err := s.Write([]byte(stream)); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	msg := s.terminalMessage()
+	if !strings.Contains(msg, "HTTP 429") {
+		t.Fatalf("real ERROR record after an INFO echo must stay terminal, got %q", msg)
+	}
+}
+
+// TestHermesProviderErrorSnifferLongRealErrorStillFails guards the #1952
+// regression: a genuine provider failure emitted as one long line (well
+// over acpMaxErrorLineLen) with no successful output must still fail the
+// run. Length must never decide whether a line is an error. The shared
+// sniffer backs hermes/kimi/kiro/qoder/grok/traecli, so verify the
+// non-Hermes callers too, and confirm the persisted message stays bounded.
+func TestHermesProviderErrorSnifferLongRealErrorStillFails(t *testing.T) {
+	t.Parallel()
+
+	longReal := "❌ API call failed after 3 retries: BadRequestError [HTTP 400] " +
+		"Error: HTTP 400: Error code: 400 - {'detail': \"" +
+		strings.Repeat("the requested model is not supported for this account; ", 200) +
+		"\"}"
+	if len(longReal) <= acpMaxErrorLineLen {
+		t.Fatalf("fixture is %d bytes, must exceed the cap %d to exercise the path", len(longReal), acpMaxErrorLineLen)
+	}
+
+	for _, provider := range []string{"hermes", "kimi", "kiro", "qoder", "grok", "traecli"} {
+		t.Run(provider, func(t *testing.T) {
+			s := newACPProviderErrorSniffer(provider)
+			if _, err := s.Write([]byte(longReal + "\n")); err != nil {
+				t.Fatalf("Write: %v", err)
+			}
+			// Empty output: no successful reply to fall back on (#1952).
+			status, errStr := promoteACPResultOnProviderError("completed", "", "", s)
+			if status != "failed" {
+				t.Fatalf("long real provider error was dropped; run stayed %q instead of failed", status)
+			}
+			if errStr == "" {
+				t.Fatal("failed run must carry a non-empty provider-error message")
+			}
+			if len(errStr) > acpMaxErrorLineLen+len("…(truncated)") {
+				t.Errorf("persisted error not bounded: %d bytes", len(errStr))
+			}
+		})
+	}
+}
+
 // firstNRunes returns at most n runes of s, for bounded error output.
 func firstNRunes(s string, n int) string {
 	r := []rune(s)

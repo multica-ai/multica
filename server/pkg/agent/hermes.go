@@ -2085,6 +2085,12 @@ type acpProviderErrorSniffer struct {
 	lines    []string // captured error lines, bounded
 	seen     map[string]bool
 	terminal bool // sticky: at least one line matched acpTerminalErrorRe
+	// skipEcho is true while the sniffer is inside a Python INFO/DEBUG
+	// root-logger record (see acpEchoLogLevels): its first physical line
+	// carried an echo-level prefix, so this line and its prefix-less
+	// continuation lines are conversation/tool data to skip, until the
+	// next record prefix arrives. Persisted across Write calls.
+	skipEcho bool
 }
 
 // acpErrorHeaderRe matches the first line of an API-error block.
@@ -2115,29 +2121,32 @@ var acpAgentOutputTerminalRe = regexp.MustCompile(`API call failed after \d+ ret
 
 const acpMaxErrorLines = 8
 
-// acpHermesInfoRootRe matches Python logging records where Hermes echoes
-// conversation and tool data to stderr. These are pollution sources, not
-// real provider errors: the agent may already have produced a successful
-// final reply while the payload still embeds documentation/code/tool text
-// that looks like an error. INFO data must never participate in
-// provider-error matching.
-var acpHermesInfoRootRe = regexp.MustCompile(
-	`^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:,[0-9]+)? \[INFO\] root:`,
+// acpLogRecordPrefixRe matches the start of a Python `logging` record that
+// Hermes writes to stderr: "YYYY-MM-DD HH:MM:SS[,mmm] [LEVEL] root: ...".
+// Capture group 1 is the level. A physical line WITHOUT this prefix is a
+// continuation line of the record above it: Hermes echoes multi-line
+// conversation / tool JSON whose embedded newlines split one logical record
+// across several physical lines (GitHub multica#5862).
+var acpLogRecordPrefixRe = regexp.MustCompile(
+	`^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}(?:,[0-9]+)? \[([A-Z]+)\] root:`,
 )
 
-// acpMaxErrorLineLen bounds how long a single stderr line may be to
-// still be considered for provider-error matching. Genuine ACP
-// provider-error lines are short (an error header plus a one-line
-// "Error: ..." detail — see TestHermesProviderErrorSniffer, ~150
-// bytes). Hermes, however, echoes whole conversation / tool-result
-// records to stderr at `[INFO] root:` level as a *single physical
-// line* tens of KB long; when that echoed content happens to embed
-// unrelated skill-doc substrings — a bare "❌" bullet plus an
-// "Error:" / "KeyError:" fragment far apart on the same line — it
-// satisfies both the capture filter and the terminal condition and
-// flips a completed run to failed (GitHub multica#5862). Skipping
-// known INFO records above is the primary guard; this length bound is
-// defense in depth for oversized echoes with an unknown log prefix.
+// acpEchoLogLevels are the Python root-logger levels Hermes uses purely to
+// echo conversation and tool data to stderr. Those records are arbitrary
+// payload, never a provider error, even when they embed strings such as
+// "❌", "Error:", "HTTP 429", or "API call failed". ERROR / WARNING /
+// CRITICAL records are real diagnostics and must still be matched.
+var acpEchoLogLevels = map[string]bool{"INFO": true, "DEBUG": true}
+
+// acpMaxErrorLineLen bounds the length of the persisted provider-error
+// summary. Genuine ACP provider-error lines are short (an error header plus
+// a one-line "Error: ..." detail — see TestHermesProviderErrorSniffer, ~150
+// bytes), but an oversized echo that slips past the log-record filter could
+// otherwise store tens of KB. This bound is applied only when BUILDING the
+// stored message, never as a precondition for *classifying* a line as an
+// error: a real provider failure whose single line happens to exceed this
+// length must still fail the run, not be silently dropped (GitHub
+// multica#5862 — do not gate matching on length).
 const acpMaxErrorLineLen = 4096
 
 // newACPProviderErrorSniffer returns a sniffer that tags its messages
@@ -2170,17 +2179,19 @@ func (s *acpProviderErrorSniffer) Write(p []byte) (int, error) {
 		if line == "" {
 			continue
 		}
-		// Hermes emits conversation and tool records to stderr through
-		// Python's root logger. Their payload is arbitrary data, not a
-		// provider error, even when it contains strings such as "❌",
-		// "Error:", "HTTP 429", or "API call failed".
-		if acpHermesInfoRootRe.MatchString(line) {
-			continue
+		// Track Python root-logger records so conversation/tool echoes
+		// never reach the error matchers. A line carrying a record prefix
+		// starts a new record: INFO/DEBUG records are data (skip them and
+		// their continuation lines); ERROR/WARNING/CRITICAL records are
+		// real diagnostics. A line WITHOUT a prefix is a continuation of
+		// the record above it and inherits that record's skip state —
+		// this is what stops a multi-line INFO echo whose inner JSON
+		// embeds "❌"/"Error:" from flipping a completed run to failed
+		// (GitHub multica#5862).
+		if m := acpLogRecordPrefixRe.FindStringSubmatch(line); m != nil {
+			s.skipEcho = acpEchoLogLevels[m[1]]
 		}
-		// Hermes echoes whole conversation / tool-result records to
-		// stderr as a single line. Keep a length guard as a fallback
-		// for an oversized echo whose logger prefix changes.
-		if len(line) > acpMaxErrorLineLen {
+		if s.skipEcho {
 			continue
 		}
 		if !(acpErrorHeaderRe.MatchString(line) || acpErrorDetailRe.MatchString(line)) {
@@ -2241,16 +2252,27 @@ func (s *acpProviderErrorSniffer) messageLocked() string {
 		if m := acpErrorDetailRe.FindStringSubmatch(line); m != nil {
 			detail := strings.TrimSpace(m[1])
 			if detail != "" {
-				return prefix + detail
+				return acpTruncateError(prefix + detail)
 			}
 		}
 	}
 	for _, line := range s.lines {
 		if acpErrorHeaderRe.MatchString(line) {
-			return prefix + line
+			return acpTruncateError(prefix + line)
 		}
 	}
 	return ""
+}
+
+// acpTruncateError bounds a persisted provider-error summary to
+// acpMaxErrorLineLen bytes on a valid UTF-8 boundary, marking any cut.
+// Classification already happened by the time this runs; it only limits
+// how much of an oversized message is stored, never whether a run fails.
+func acpTruncateError(msg string) string {
+	if len(msg) <= acpMaxErrorLineLen {
+		return msg
+	}
+	return strings.ToValidUTF8(msg[:acpMaxErrorLineLen], "") + "…(truncated)"
 }
 
 // promoteACPResultOnProviderError flips finalStatus to "failed" if
