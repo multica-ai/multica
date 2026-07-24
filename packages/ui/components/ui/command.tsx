@@ -68,6 +68,7 @@ function CommandDialog({
 
 function CommandInput({
   className,
+  onKeyDown,
   ...props
 }: React.ComponentProps<typeof CommandPrimitive.Input>) {
   return (
@@ -79,6 +80,14 @@ function CommandInput({
             "w-full text-sm outline-hidden disabled:cursor-not-allowed disabled:opacity-50",
             className
           )}
+          onKeyDown={(e) => {
+            // cmdk's root handler intercepts Home/End for list navigation;
+            // stop propagation so the browser moves the text caret instead.
+            if (e.key === "Home" || e.key === "End") {
+              e.stopPropagation();
+            }
+            onKeyDown?.(e);
+          }}
           {...props}
         />
         <InputGroupAddon>

@@ -96,6 +96,24 @@ describe("AttributionBadge", () => {
     expect(screen.getByText("On behalf of someone")).toBeInTheDocument();
   });
 
+  it("inline variant renders the bare name (no on-behalf-of wrapper), source in tooltip", () => {
+    const attribution: TaskAttribution = {
+      source: "direct_human",
+      precise: true,
+      initiator: { id: "u1", name: "Ada Lovelace" },
+    };
+    const { container } = renderWithI18n(
+      <AttributionBadge attribution={attribution} variant="inline" />,
+    );
+
+    // The caller supplies the label; the value is just the person (the mocked
+    // avatar also echoes the name, hence getAllByText).
+    expect(screen.getAllByText("Ada Lovelace").length).toBeGreaterThan(0);
+    expect(screen.queryByText("On behalf of Ada Lovelace")).toBeNull();
+    // Typography, not a chip: the inline shape must not render a Badge border.
+    expect(container.querySelector("[data-slot='badge']")).toBeNull();
+  });
+
   it("renders nothing when no responsible member resolved (MUL-4765)", () => {
     const attribution: TaskAttribution = {
       source: "unattributed",

@@ -23,6 +23,26 @@ vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: copyTextMock,
 }));
 
+// Real react-virtuoso renders no data rows under jsdom's zero-height viewport,
+// so stub it with a flat render to make rows visible to these tests.
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: ({
+    data,
+    itemContent,
+    computeItemKey,
+  }: {
+    data: TimelineItem[];
+    itemContent: (i: number, item: TimelineItem) => ReactNode;
+    computeItemKey: (i: number, item: TimelineItem) => number;
+  }) => (
+    <div>
+      {data.map((item, i) => (
+        <div key={computeItemKey(i, item)}>{itemContent(i, item)}</div>
+      ))}
+    </div>
+  ),
+}));
+
 vi.mock("../actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));
@@ -36,7 +56,14 @@ vi.mock("@multica/ui/components/ui/dialog", () => ({
   DialogTitle: ({ children }: { children: ReactNode }) => <h2>{children}</h2>,
 }));
 
-vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
+vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
+  const React = await import("react");
+  const RadioContext = React.createContext<{
+    value?: string;
+    onValueChange?: (value: string) => void;
+  }>({});
+
+  return {
   DropdownMenu: ({ children }: { children: ReactNode }) => <div>{children}</div>,
   DropdownMenuTrigger: ({
     children,
@@ -77,6 +104,45 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
       {children}
     </button>
   ),
+  DropdownMenuRadioGroup: ({
+    value,
+    onValueChange,
+    children,
+  }: {
+    value?: string;
+    onValueChange?: (value: string) => void;
+    children: ReactNode;
+  }) => (
+    <RadioContext.Provider value={{ value, onValueChange }}>{children}</RadioContext.Provider>
+  ),
+  DropdownMenuRadioItem: ({
+    value,
+    children,
+  }: {
+    value: string;
+    children: ReactNode;
+  }) => {
+    const ctx = React.useContext(RadioContext);
+    return (
+      <button
+        type="button"
+        role="menuitemradio"
+        aria-checked={ctx.value === value}
+        onClick={() => ctx.onValueChange?.(value)}
+      >
+        {children}
+      </button>
+    );
+  },
+  };
+});
+
+// The transcript body renders agent markdown through RichContent; stub it to
+// keep these tests independent of the markdown pipeline.
+vi.mock("../../rich-content", () => ({
+  RichContent: ({ content }: { content: string }) => (
+    <div data-testid="rich-content">{content}</div>
+  ),
 }));
 
 vi.mock("@multica/ui/components/ui/collapsible", async () => {
@@ -102,15 +168,18 @@ vi.mock("@multica/ui/components/ui/collapsible", async () => {
       disabled,
       children,
       className: _className,
+      ...props
     }: ButtonHTMLAttributes<HTMLButtonElement>) => {
       const ctx = React.useContext(Context);
       return (
         <button
           type="button"
           disabled={disabled}
+          aria-expanded={ctx.open}
           onClick={() => {
             if (!disabled) ctx.onOpenChange?.(!ctx.open);
           }}
+          {...props}
         >
           {children}
         </button>
@@ -206,9 +275,10 @@ beforeEach(() => {
   vi.mocked(api.listRuntimes).mockResolvedValue([]);
   useTranscriptViewStore.setState({
     sortDirection: "chronological",
-    preserveFilters: false,
     selectedFilterKeys: [],
-    defaultExpanded: false,
+    // Legacy row assertions below expect one-line summaries; smart density is
+    // exercised by its own tests.
+    density: "collapsed",
   });
 });
 
@@ -235,15 +305,16 @@ describe("AgentTranscriptDialog", () => {
 
     renderDialog([], { task: liveTask, isLive: true });
 
-    await screen.findByText("hermes runtime");
+    // Runtime detail now lives in the ⓘ popover; its trigger appearing proves
+    // the runtime loaded. The non-antigravity live state still waits.
+    await screen.findByRole("button", { name: "Run details" });
     expect(screen.getByText("Waiting for events...")).toBeInTheDocument();
   });
 
-  it("preserves selected filters across dialog remounts when enabled", () => {
+  it("preserves selected filters across dialog remounts unconditionally", () => {
     const first = renderDialog();
 
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Thinking" }));
-    fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Preserve filters" }));
 
     expect(screen.queryByText("Agent summary")).not.toBeInTheDocument();
     expect(screen.getByText(/Thinking summary/)).toBeInTheDocument();
@@ -258,7 +329,6 @@ describe("AgentTranscriptDialog", () => {
 
   it("ignores stale persisted filter keys that are not available in the current transcript", () => {
     useTranscriptViewStore.setState({
-      preserveFilters: true,
       selectedFilterKeys: ["thinking"],
     });
 
@@ -274,30 +344,50 @@ describe("AgentTranscriptDialog", () => {
     expect(screen.queryByText("No execution data recorded.")).not.toBeInTheDocument();
   });
 
-  it("expands and collapses every currently visible detailed row", () => {
+  it("switches wholesale between expand-all and collapse-all via the density menu", () => {
     renderDialog();
 
     expect(screen.queryByText(/Agent hidden detail/)).not.toBeInTheDocument();
     expect(screen.queryByText(/"command": "pnpm test"/)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Expand visible" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Expand all/ }));
 
     expect(screen.getByText(/Agent hidden detail/)).toBeInTheDocument();
+    expect(screen.getByText(/Thinking hidden detail/)).toBeInTheDocument();
     expect(screen.getByText(/"command": "pnpm test"/)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Collapse visible" }));
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Collapse all/ }));
 
     expect(screen.queryByText(/Agent hidden detail/)).not.toBeInTheDocument();
     expect(screen.queryByText(/"command": "pnpm test"/)).not.toBeInTheDocument();
   });
 
-  it("uses the default-expanded preference for newly opened transcripts", () => {
-    useTranscriptViewStore.setState({ defaultExpanded: true });
+  it("smart density opens agent text in place and keeps process noise folded", () => {
+    useTranscriptViewStore.setState({ density: "smart" });
 
     renderDialog();
 
-    expect(screen.getByText(/Agent hidden detail/)).toBeInTheDocument();
-    expect(screen.getByText(/"command": "pnpm test"/)).toBeInTheDocument();
+    // Agent body reads without a click (through RichContent), tools stay folded.
+    expect(screen.getByTestId("rich-content")).toHaveTextContent("Agent hidden detail");
+    expect(screen.queryByText(/Thinking hidden detail/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/"command": "pnpm test"/)).not.toBeInTheDocument();
+  });
+
+  it("row-level toggles override the density default until the mode changes", () => {
+    useTranscriptViewStore.setState({ density: "smart" });
+
+    renderDialog();
+
+    // Fold the default-open agent body back to one line. The `expanded`
+    // filter distinguishes the collapse trigger from the timeline segment,
+    // which also carries the "Agent" accessible name via its title.
+    fireEvent.click(screen.getByRole("button", { name: "Agent", expanded: true }));
+    expect(screen.queryByTestId("rich-content")).not.toBeInTheDocument();
+    expect(screen.getByText("Agent summary")).toBeInTheDocument();
+
+    // Open a default-folded thinking row.
+    fireEvent.click(screen.getByRole("button", { name: /Thinking summary/ }));
+    expect(screen.getByText(/Thinking hidden detail/)).toBeInTheDocument();
   });
 
   it("copies RFC 3339 timestamps before event labels", () => {
@@ -318,11 +408,13 @@ describe("AgentTranscriptDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
 
+    // Full body (not the truncated summary) with the RFC 3339 prefix, events
+    // separated by a blank line.
     expect(copyTextMock).toHaveBeenCalledWith(
       [
-        "[2026-06-08T00:00:00.000Z] [Agent] Agent summary",
+        "[2026-06-08T00:00:00.000Z] [Agent] Agent summary\nAgent hidden detail",
         "[2026-06-08T08:00:05.123Z] [Thinking] Thinking summary",
-      ].join("\n"),
+      ].join("\n\n"),
     );
   });
 
@@ -344,7 +436,7 @@ describe("AgentTranscriptDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
 
     expect(copyTextMock).toHaveBeenCalledWith(
-      ["[Agent] Missing timestamp", "[Error] Invalid timestamp"].join("\n"),
+      ["[Agent] Missing timestamp", "[Error] Invalid timestamp"].join("\n\n"),
     );
   });
 });

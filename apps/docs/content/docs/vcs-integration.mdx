@@ -5,6 +5,15 @@ description: Connect a self-hosted Forgejo, Gitea, or GitLab instance per worksp
 
 import { Callout } from "fumadocs-ui/components/callout";
 
+<Callout type="warn">
+**Self-hosted Multica only.** This integration is available only when you run
+Multica yourself; it is not offered on Multica Cloud. "Self-hosted" here means
+**Multica** is self-hosted — typically so it can reach a Git instance on your own
+network. A server operator must enable it (`MULTICA_VCS_INTEGRATION_ENABLED=true`)
+and set `MULTICA_VCS_SECRET_KEY`; until then the section does not appear in
+Settings → Integrations.
+</Callout>
+
 Multica connects to a self-hosted Git provider per workspace: **Forgejo**, **Gitea**, or **GitLab**. Once connected, any pull request (GitLab: merge request) whose branch name, title, or body contains an issue identifier (for example `MUL-123`) is **auto-linked** to that [issue](/issues), appears under **Pull requests** in the issue sidebar, and — when merged with a closing keyword — moves the issue to **Done**. CI for the head commit shows as a checks bar on the card.
 
 These providers run alongside GitHub: a workspace can use any combination.
@@ -15,7 +24,15 @@ Unlike GitHub, these providers have no "App" model. Each workspace stores its ow
 
 ## Prerequisites (server)
 
-Set a base64-encoded 32-byte key so the server can encrypt stored credentials. Without it, the connect form is disabled.
+Turn the integration on for this deployment. It is off by default, so the section stays hidden until you set:
+
+```sh
+MULTICA_VCS_INTEGRATION_ENABLED=true
+```
+
+The official self-hosted `docker compose` file (`docker-compose.selfhost.yml`) sets this for you.
+
+Then set a base64-encoded 32-byte key so the server can encrypt stored credentials. Without it, the connect form is disabled.
 
 ```sh
 openssl rand -base64 32
@@ -24,6 +41,8 @@ openssl rand -base64 32
 ```sh
 MULTICA_VCS_SECRET_KEY=<base64 32-byte key>
 ```
+
+Both are required: the switch decides whether the feature is offered, and the key encrypts the stored token and webhook secret. Connect, webhook, and rotate all require both.
 
 Set `MULTICA_PUBLIC_URL` to the server's public base URL so Multica can show a ready-to-paste webhook URL. Without it, the UI shows only the webhook path and you prepend your own origin.
 

@@ -510,6 +510,7 @@
         "allowedEmails",
         "allowedEmailDomains",
         "disableWorkspaceCreation",
+        "vcsIntegrationEnabled",
         "googleClientId",
         "googleRedirectUri",
         "smtp",
@@ -547,6 +548,7 @@
         "allowedEmails": { "type": "string" },
         "allowedEmailDomains": { "type": "string" },
         "disableWorkspaceCreation": { "type": "boolean" },
+        "vcsIntegrationEnabled": { "type": "boolean" },
         "googleClientId": { "type": "string" },
         "googleRedirectUri": { "type": "string" },
         "smtp": {

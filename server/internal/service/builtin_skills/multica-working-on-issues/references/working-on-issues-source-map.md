@@ -14,8 +14,8 @@ at the bottom before relying on an exact line.
 | `runIssuePullRequests` handler | `server/cmd/multica/cmd_issue.go:507` | new citation |
 | Calls `GET /api/issues/<id>/pull-requests` | `server/cmd/multica/cmd_issue.go:522` | `:522` (unchanged) |
 | API route registration | `server/cmd/server/router.go:480` | `:480` (unchanged) |
-| Handler `ListPullRequestsForIssue` → `Queries.ListPullRequestsByIssue` | `server/internal/handler/github.go:466,471` | `:466` (unchanged) |
-| Row → response mapper `issuePullRequestRowToResponse` | `server/internal/handler/github.go:149` | new citation |
+| Handler `ListPullRequestsForIssue` → `Queries.ListPullRequestsByIssue` | `server/internal/handler/github.go:687,692` | `:466` |
+| Row → response mapper `issuePullRequestRowToResponse` | `server/internal/handler/github.go:205` | `:149` |
 
 The CLI resolves the issue ref, GETs the endpoint, and (for `--output json`)
 prints the raw `{"pull_requests": [...]}` body. Only `--output` is accepted; the
@@ -23,25 +23,33 @@ default `table` shows `NUMBER STATE TITLE URL`.
 
 ## PR response shape
 
-`GitHubPullRequestResponse` struct: `server/internal/handler/github.go:51`. JSON
+`GitHubPullRequestResponse` struct: `server/internal/handler/github.go:58`. JSON
 fields the agent can read off each element of `pull_requests`:
 
-- `number` (`json:"number"`, line 56)
-- `html_url` (`json:"html_url"`, line 59)
-- `title` (`json:"title"`, line 57)
-- `state` (`json:"state"`, line 58) — the folded lifecycle enum (see below)
-- `merged_at` (`json:"merged_at"`, line 63), `closed_at` (line 64)
-- `mergeable_state` (`json:"mergeable_state"`, line 70) — mirrors GitHub; UI only
+- `provider` (`json:"provider"`, line 63)
+- `number` (`json:"number"`, line 67)
+- `html_url` (`json:"html_url"`, line 70)
+- `title` (`json:"title"`, line 68)
+- `state` (`json:"state"`, line 69) — the folded lifecycle enum (see below)
+- `merged_at` (`json:"merged_at"`, line 74), `closed_at` (line 75)
+- `mergeable_state` (`json:"mergeable_state"`, line 80) — mirrors GitHub; UI only
   surfaces `clean`/`dirty`, other values round-trip as unknown
-- `checks_conclusion` (`json:"checks_conclusion"`, line 74) — aggregated
-  `"passed"`/`"failed"`/`"pending"` or `null` (no observed suite)
-- `checks_passed` / `checks_failed` / `checks_pending` (lines 78-80) — per-suite
-  counts; `aggregateChecksConclusion` (line 183) folds them into
-  `checks_conclusion`
+- `snapshot_available` (`json:"snapshot_available"`, line 100) — for GitHub,
+  true only when the App snapshot feature is enabled and the snapshot head
+  matches the current PR head (`currentGitHubSnapshotAvailable`, lines 258-265)
+- `mergeable` / `merge_state_status` (lines 90, 94) — conflict-only verdict vs
+  the complete merge gate; "ready" requires `merge_state_status == "clean"`
+- `checks_rollup` (`json:"checks_rollup"`, line 105) and run-level
+  `checks_total` / `checks_passed` / `checks_failed` / `checks_running`
+  (lines 111-114), plus `failed_check_names` (line 118)
+- `checks_conclusion` (`json:"checks_conclusion"`, line 108) — coarse
+  `"passed"`/`"failed"`/`"pending"` or `null`; GitHub derives it only from an
+  available current-head snapshot (mapper lines 242-254), while self-hosted VCS
+  providers use `aggregateChecksConclusion` (line 275)
 
 There is **no** standalone `draft` or `merged` boolean in the response. The
 PR lifecycle is encoded in the single `state` string by `derivePRState`
-(`server/internal/handler/github.go:994`):
+(`server/internal/handler/github.go:1317`):
 
 ```
 merged   → if PullRequest.Merged
@@ -51,7 +59,7 @@ open     → otherwise
 ```
 
 `derivePRState` is called when the webhook upserts the row
-(`server/internal/handler/github.go:682`), so `state` is what the list endpoint
+(`server/internal/handler/github.go:1115`), so `state` is what the list endpoint
 returns. "Is it merged?" = `state == "merged"` (or `merged_at != null`); "is it a
 draft?" = `state == "draft"`. Combine with `checks_conclusion` for CI status.
 

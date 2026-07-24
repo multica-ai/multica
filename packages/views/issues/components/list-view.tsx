@@ -22,7 +22,7 @@ import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
 import { useDragSettle } from "./use-drag-settle";
-import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { useT } from "../../i18n";
 import {
   type DragMoveUpdates,
@@ -56,11 +56,6 @@ const LIST_ROW_ESTIMATED_HEIGHT = 36;
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
-// Passed to <Virtuoso components> when there is no Footer. Must be a STABLE
-// object, never `undefined`: react-virtuoso seeds `components` with an internal
-// `{}` default, and an explicit `undefined` prop overwrites that default, so
-// its startup destructure of `EmptyPlaceholder`/`Footer` throws (MUL-4474).
-const EMPTY_VIRTUOSO_COMPONENTS = {};
 
 function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
   return visibleStatuses.map((status) => ({
@@ -462,33 +457,22 @@ function StatusAccordionItem({
   // The infinite-scroll sentinel rides Virtuoso's Footer so it sits at the true
   // end of the virtualized rows and still fires loadMore when scrolled to it.
   const listComponents = useMemo(
-    () => {
-      if (page.isError) {
-        return {
-          Footer: () => (
-            <button
-              type="button"
-              className="w-full py-2 text-xs text-destructive hover:underline"
-              onClick={page.retry}
-            >
-              {t(($) => $.table.load_more_failed_retry)}
-            </button>
-          ),
-        };
-      }
-      if (page.hasMore) {
-        return {
-          Footer: () => (
-            <InfiniteScrollSentinel
-              onVisible={page.loadMore}
-              loading={page.isLoading || page.isFetching}
-            />
-          ),
-        };
-      }
-      return EMPTY_VIRTUOSO_COMPONENTS;
-    },
-    [page, t],
+    () => ({
+      // Always a non-undefined object: react-virtuoso throws if `components`
+      // is ever undefined (MUL-4474). The footer itself renders null for a
+      // short, non-paginated section.
+      Footer: () => (
+        <ListLoadMoreFooter
+          hasMore={page.hasMore}
+          isLoading={page.isLoading || page.isFetching}
+          total={page.total}
+          onLoadMore={page.loadMore}
+          isError={page.isError}
+          onRetry={page.retry}
+        />
+      ),
+    }),
+    [page],
   );
 
   const computeItemKey = (_index: number, issue: Issue) => issue.id;

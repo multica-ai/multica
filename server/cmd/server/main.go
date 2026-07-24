@@ -428,6 +428,9 @@ func main() {
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
 	}
+	// GitHub PR-card API snapshot pipeline (MUL-5265): worker pool + TTL sweeper.
+	// No-op when unconfigured (no App private key).
+	h.PRRefresh.Start(sweepCtx)
 
 	// Channel inbound supervisor (MUL-3620): holds the §4.4 WS lease per
 	// installation and drives each channel.Channel. It is built

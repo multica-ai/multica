@@ -41,6 +41,7 @@ CLOUDFRONT_PRIVATE_KEY
 GITHUB_WEBHOOK_SECRET
 GITHUB_APP_PRIVATE_KEY
 MULTICA_LLM_API_KEY
+MULTICA_VCS_SECRET_KEY
 ```
 
 Bundled PostgreSQL additionally needs `POSTGRES_PASSWORD`. A basic external
@@ -93,6 +94,7 @@ must react to out-of-band Secret changes.
 | `allowedEmails` | `ALLOWED_EMAILS` |
 | `allowedEmailDomains` | `ALLOWED_EMAIL_DOMAINS` |
 | `disableWorkspaceCreation` | `DISABLE_WORKSPACE_CREATION` |
+| `vcsIntegrationEnabled` | `MULTICA_VCS_INTEGRATION_ENABLED` |
 | `googleClientId` | `GOOGLE_CLIENT_ID` |
 | `googleRedirectUri` | `GOOGLE_REDIRECT_URI` |
 | `smtp.host` | `SMTP_HOST` |

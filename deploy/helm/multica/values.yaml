@@ -26,6 +26,7 @@ imagePullSecrets: []
 # SMTP_PASSWORD, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_SESSION_TOKEN,
 # RESEND_API_KEY, GOOGLE_CLIENT_SECRET, CLOUDFRONT_PRIVATE_KEY,
 # GITHUB_WEBHOOK_SECRET, GITHUB_APP_PRIVATE_KEY and MULTICA_LLM_API_KEY.
+# Self-hosted VCS integrations additionally need MULTICA_VCS_SECRET_KEY.
 # Built-in PostgreSQL additionally needs POSTGRES_PASSWORD. Only the relevant
 # keys are required.
 existingSecret: multica-secrets
@@ -102,6 +103,11 @@ backend:
     allowedEmails: ""
     allowedEmailDomains: ""
     disableWorkspaceCreation: false
+    # Self-host-only VCS integration (Forgejo / Gitea / GitLab). The official
+    # chart enables the product surface by default; operators must also provide
+    # MULTICA_VCS_SECRET_KEY through existingSecret before connections work.
+    # Set false to hide and reject the integration for this deployment.
+    vcsIntegrationEnabled: true
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
     smtp:

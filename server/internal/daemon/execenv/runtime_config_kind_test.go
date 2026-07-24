@@ -262,7 +262,17 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 		"run the work synchronously instead",
 		"Never background-and-yield",
 		"foreground tool call that blocks",
-		"only to work owned by the current run",
+		// MUL-5274: an explicitly requested persistent local service is a
+		// completed handoff, not unfinished run-owned work. Pin the narrow
+		// exception and its readiness / cleanup / honesty requirements.
+		"persistent service handoff",
+		"running service itself is the requested deliverable",
+		"stdio redirected to durable logs",
+		"PID/profile",
+		"verify readiness before replying",
+		"survival as best-effort, not guaranteed",
+		"does not cover tests, builds, CI polling",
+		"are not agent-owned background tasks",
 		"GitHub Actions after a successful push",
 		"Do not wait for them by default",
 		// MUL-5223 pins: named tool-shape bans, merge requirements
@@ -287,5 +297,11 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 	// section's example of how to wait properly.
 	if strings.Contains(out, "e.g. `gh run watch`") {
 		t.Errorf("slim Background Task Safety should not suggest waiting for external GitHub CI\n---\n%s", out)
+	}
+	// MUL-5274 review: with the persistent-service exception in the list, a
+	// "The rules above ..." scoping sentence would sweep in work that is
+	// precisely no longer run-owned after handoff.
+	if strings.Contains(out, "The rules above") {
+		t.Errorf("slim Background Task Safety must not reintroduce the ambiguous \"The rules above\" scoping sentence\n---\n%s", out)
 	}
 }
