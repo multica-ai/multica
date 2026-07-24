@@ -1222,10 +1222,14 @@ const runtimeVersionProbeConcurrency = 8
 // well inside the UI's scanning window.
 //
 // Each probe still self-heals a vanished pinned path (MUL-4486) and re-detects
-// the live version — no result is cached across registrations, so an in-place
-// CLI upgrade is still reported with its current version. A probe that fails to
+// the live version — nothing is cached on the Daemon, so an in-place CLI
+// upgrade is still reported with its current version. A probe that fails to
 // detect a version or is below the minimum supported version is logged and
 // skipped, exactly as the serial loop did.
+//
+// The result describes the machine, not a workspace, so a caller registering a
+// batch of workspaces at once calls this ONCE and passes the payload to
+// registerRuntimesForWorkspaceBatch for each workspace (MUL-5225).
 func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string {
 	type detected struct {
 		name    string
@@ -1289,9 +1293,54 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string 
 	return runtimes
 }
 
+// cloneRuntimeEntries deep-copies a registration runtime payload. Callers that
+// receive a shared built-in payload (see registerRuntimesForWorkspaceBatch) use
+// this before appending their own workspace's custom runtime profiles, so one
+// workspace's profiles can never leak into another's registration.
+func cloneRuntimeEntries(in []map[string]string) []map[string]string {
+	out := make([]map[string]string, 0, len(in))
+	for _, entry := range in {
+		cp := make(map[string]string, len(entry))
+		for k, v := range entry {
+			cp[k] = v
+		}
+		out = append(out, cp)
+	}
+	return out
+}
+
+// registerRuntimesForWorkspace registers this host's runtimes for one
+// workspace, probing the built-in agent CLIs itself. This is the entry point
+// for every standalone registration — a runtime_gone re-register, a profile
+// drift refresh, a recovery retry — so each of those still re-detects versions
+// and picks up an in-place CLI upgrade.
+//
+// Registering a batch of workspaces at once (daemon startup) goes through
+// registerRuntimesForWorkspaceBatch instead, which shares one probe round
+// across the batch.
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
+	return d.registerRuntimesForWorkspaceBatch(ctx, workspaceID, d.detectBuiltinRuntimes(ctx))
+}
+
+// registerRuntimesForWorkspaceBatch registers one workspace against an already
+// detected built-in runtime payload.
+//
+// Built-in CLIs are a machine-level fact, not a per-workspace one, but
+// registration is per-workspace — so probing inside every registration made a
+// daemon serving N workspaces spawn N×M `<cli> --version` processes at startup
+// (24 workspaces × 5 agents = 120 instead of 5, MUL-5225 / #5837). Beyond the
+// wasted startup time, some CLI wrappers have visible side effects when
+// executed, and a single slow probe gets multiplied by the workspace count.
+//
+// Taking the payload as a parameter lets one probe round serve a whole
+// registration batch while keeping the refresh semantics: nothing is cached on
+// the Daemon, so the next standalone registration re-probes.
+//
+// builtins is treated as read-only and is copied before this workspace's custom
+// runtime profiles are appended.
+func (d *Daemon) registerRuntimesForWorkspaceBatch(ctx context.Context, workspaceID string, builtins []map[string]string) (*RegisterResponse, string, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
-	runtimes := d.detectBuiltinRuntimes(ctx)
+	runtimes := cloneRuntimeEntries(builtins)
 	var failedProfiles []map[string]string
 
 	// Append any workspace custom runtime profiles whose command resolves on
@@ -2158,6 +2207,23 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	}
 	d.mu.Unlock()
 
+	// Built-in agent CLIs are installed per machine, so one probe round serves
+	// every workspace this sync has to register (MUL-5225). Probing is lazy —
+	// a sync that finds nothing new to register never shells out at all, which
+	// is the common case for the periodic sync — and scoped to this call, so
+	// the next sync re-detects and an in-place CLI upgrade is still reported.
+	var (
+		builtins       []map[string]string
+		builtinsProbed bool
+	)
+	probeBuiltins := func() []map[string]string {
+		if !builtinsProbed {
+			builtins = d.detectBuiltinRuntimes(ctx)
+			builtinsProbed = true
+		}
+		return builtins
+	}
+
 	var registered int
 	var removed int
 	for id, name := range apiIDs {
@@ -2183,7 +2249,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			registered++
 			continue
 		}
-		resp, profileSig, err := d.registerRuntimesForWorkspace(ctx, id)
+		resp, profileSig, err := d.registerRuntimesForWorkspaceBatch(ctx, id, probeBuiltins())
 		if err != nil {
 			d.logger.Error("failed to register runtimes", "workspace_id", id, "name", name, "error", err)
 			continue
