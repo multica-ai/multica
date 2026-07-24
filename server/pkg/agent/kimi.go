@@ -377,6 +377,9 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// per-attempt warnings followed by a successful retry stay
 		// "completed".
 		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
+		if finalStatus == "failed" && providerErr.isPoisonedHistory() {
+			resumeRejected = true
+		}
 
 		c.usageMu.Lock()
 		u := c.usage
