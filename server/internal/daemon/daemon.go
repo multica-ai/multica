@@ -426,6 +426,7 @@ type Daemon struct {
 	// the production default; zero-valued test daemons fall back to the same
 	// default in effectiveTaskPrepareTimeout.
 	taskPrepareTimeout time.Duration
+	diskPreflight      *diskPreflight
 	// runUpdateFn executes the brew-or-download upgrade. Set to d.runUpdate by
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
@@ -489,6 +490,10 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
+	if runtime.GOOS == "darwin" && cfg.WorkspacesRoot != "" &&
+		cfg.DiskWarningGiB > 0 && cfg.DiskCriticalGiB > 0 && cfg.DiskRecoveryGiB > 0 {
+		d.diskPreflight = newDiskPreflight(cfg, logger)
+	}
 	return d
 }
 
@@ -3528,6 +3533,12 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 
 		runtimeIDs := d.allRuntimeIDs()
 		if len(runtimeIDs) == 0 {
+			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
+				return
+			}
+			continue
+		}
+		if d.diskPreflight != nil && !d.diskPreflight.allowTaskClaim() {
 			if err := sleepWithContextOrWakeup(pollerCtx, d.cfg.PollInterval, wakeup); err != nil {
 				return
 			}

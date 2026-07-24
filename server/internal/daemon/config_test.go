@@ -35,6 +35,39 @@ func TestDefaultGCIntervalIsTwoHours(t *testing.T) {
 	}
 }
 
+func TestLoadConfigDiskPreflightThresholds(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_DISK_WARNING_GIB", "30")
+	t.Setenv("MULTICA_DISK_CRITICAL_GIB", "18")
+	t.Setenv("MULTICA_DISK_RECOVERY_GIB", "32")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.DiskWarningGiB != 30 || cfg.DiskCriticalGiB != 18 || cfg.DiskRecoveryGiB != 32 {
+		t.Fatalf("disk thresholds = warning:%d critical:%d recovery:%d", cfg.DiskWarningGiB, cfg.DiskCriticalGiB, cfg.DiskRecoveryGiB)
+	}
+}
+
+func TestLoadConfigRejectsUnsafeDiskPreflightThresholds(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_DISK_WARNING_GIB", "15")
+	t.Setenv("MULTICA_DISK_CRITICAL_GIB", "15")
+	t.Setenv("MULTICA_DISK_RECOVERY_GIB", "20")
+
+	_, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err == nil || !strings.Contains(err.Error(), "invalid disk thresholds") {
+		t.Fatalf("LoadConfig error = %v, want invalid disk thresholds", err)
+	}
+}
+
 func TestPatternsFromEnv_DropsSeparatorBearingEntries(t *testing.T) {
 	t.Setenv("MULTICA_GC_ARTIFACT_PATTERNS", "node_modules, .next ,foo/bar, ../etc, ,target")
 	got := patternsFromEnv("MULTICA_GC_ARTIFACT_PATTERNS", nil)
