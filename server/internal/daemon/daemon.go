@@ -4698,7 +4698,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// (the no_response contract owns those), and poisoned outputs (blocked
 	// path handles those).
 	suggestEligible := result.Status == "completed" && task.ChatSessionID != "" &&
-		task.ChatChannelType == "" && result.SessionID != "" && strings.TrimSpace(result.Output) != ""
+		task.ChatChannelType == "" && !task.QuickActionsDisabled &&
+		result.SessionID != "" && strings.TrimSpace(result.Output) != ""
 	if suggestEligible {
 		if _, poisoned := classifyPoisonedOutput(result.Output); poisoned {
 			suggestEligible = false

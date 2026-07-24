@@ -61,25 +61,79 @@
     "send_error": "보내기는 Enter 또는 Mod+Enter만 사용할 수 있습니다.",
     "unsafe_error": "이 키는 텍스트 입력이나 기본 키보드 탐색을 방해합니다.",
     "send_enter_hint": "Shift+Enter로 단락을 삽입하거나 목록을 이어가고 코드 블록에서 줄을 바꿀 수 있습니다.",
-    "categories": { "general": "일반", "navigation": "탐색" },
+    "categories": {
+      "general": "일반",
+      "navigation": "탐색"
+    },
     "actions": {
-      "openSearch": { "label": "검색 열기", "description": "어디서나 검색하고 명령을 실행합니다." },
-      "createIssue": { "label": "Issue 만들기", "description": "선호하는 issue 만들기 흐름을 엽니다." },
-      "toggleSidebar": { "label": "사이드바 전환", "description": "기본 사이드바를 표시하거나 숨깁니다." },
-      "findInIssue": { "label": "Issue에서 찾기", "description": "열린 issue 상세 내용에서 검색합니다." },
-      "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 이슈를 만듭니다." },
-      "goInbox": { "label": "받은 편지함으로 이동", "description": "워크스페이스 받은 편지함을 엽니다." },
-      "goChat": { "label": "채팅으로 이동", "description": "워크스페이스 채팅을 엽니다." },
-      "goMyIssues": { "label": "내 Issues로 이동", "description": "나에게 할당된 issue를 엽니다." },
-      "goIssues": { "label": "Issues로 이동", "description": "Issue 목록을 엽니다." },
-      "goProjects": { "label": "프로젝트로 이동", "description": "프로젝트 목록을 엽니다." },
-      "goAutopilots": { "label": "자동화로 이동", "description": "워크스페이스 자동화를 엽니다." },
-      "goAgents": { "label": "에이전트로 이동", "description": "에이전트 목록을 엽니다." },
-      "goSquads": { "label": "스쿼드로 이동", "description": "스쿼드 목록을 엽니다." },
-      "goUsage": { "label": "사용량으로 이동", "description": "사용량 분석을 엽니다." },
-      "goRuntimes": { "label": "런타임으로 이동", "description": "런타임 설정을 엽니다." },
-      "goSkills": { "label": "Skills로 이동", "description": "Skill 라이브러리를 엽니다." },
-      "goSettings": { "label": "설정으로 이동", "description": "워크스페이스 설정을 엽니다." }
+      "openSearch": {
+        "label": "검색 열기",
+        "description": "어디서나 검색하고 명령을 실행합니다."
+      },
+      "createIssue": {
+        "label": "Issue 만들기",
+        "description": "선호하는 issue 만들기 흐름을 엽니다."
+      },
+      "toggleSidebar": {
+        "label": "사이드바 전환",
+        "description": "기본 사이드바를 표시하거나 숨깁니다."
+      },
+      "findInIssue": {
+        "label": "Issue에서 찾기",
+        "description": "열린 issue 상세 내용에서 검색합니다."
+      },
+      "send": {
+        "label": "보내기",
+        "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 이슈를 만듭니다."
+      },
+      "goInbox": {
+        "label": "받은 편지함으로 이동",
+        "description": "워크스페이스 받은 편지함을 엽니다."
+      },
+      "goChat": {
+        "label": "채팅으로 이동",
+        "description": "워크스페이스 채팅을 엽니다."
+      },
+      "goMyIssues": {
+        "label": "내 Issues로 이동",
+        "description": "나에게 할당된 issue를 엽니다."
+      },
+      "goIssues": {
+        "label": "Issues로 이동",
+        "description": "Issue 목록을 엽니다."
+      },
+      "goProjects": {
+        "label": "프로젝트로 이동",
+        "description": "프로젝트 목록을 엽니다."
+      },
+      "goAutopilots": {
+        "label": "자동화로 이동",
+        "description": "워크스페이스 자동화를 엽니다."
+      },
+      "goAgents": {
+        "label": "에이전트로 이동",
+        "description": "에이전트 목록을 엽니다."
+      },
+      "goSquads": {
+        "label": "스쿼드로 이동",
+        "description": "스쿼드 목록을 엽니다."
+      },
+      "goUsage": {
+        "label": "사용량으로 이동",
+        "description": "사용량 분석을 엽니다."
+      },
+      "goRuntimes": {
+        "label": "런타임으로 이동",
+        "description": "런타임 설정을 엽니다."
+      },
+      "goSkills": {
+        "label": "Skills로 이동",
+        "description": "Skill 라이브러리를 엽니다."
+      },
+      "goSettings": {
+        "label": "설정으로 이동",
+        "description": "워크스페이스 설정을 엽니다."
+      }
     },
     "fixed": {
       "title": "고정 시스템 단축키",
@@ -96,8 +150,8 @@
     "floating_label": "플로팅 채팅 창",
     "floating_hint": "모든 페이지 모서리에 플로팅 채팅 버튼을 표시합니다. 기본값은 꺼짐 — 켜면 어디서나 채팅을 불러올 수 있고, 꺼면 채팅은 이 탭에서만 사용할 수 있습니다.",
     "quick_actions_title": "추천 작업",
-    "quick_actions_label": "추천 작업 표시",
-    "quick_actions_hint": "에이전트 답변 아래에 다음 작업 추천을 최대 3개 표시합니다. 끄면 표시되지 않습니다."
+    "quick_actions_label": "추천 작업 생성",
+    "quick_actions_hint": "에이전트가 답변할 때마다 후속 작업 추천을 최대 3개 생성합니다. 끄면 이 기기에서 보낸 메시지는 더 이상 생성을 트리거하지 않으며, 기존 추천은 계속 표시됩니다."
   },
   "issue": {
     "description": "각 생성 방식의 툴바에 항상 표시할 필드를 선택합니다. 숨긴 필드는 ⋯ 메뉴에서 계속 사용할 수 있으며, 값이 있는 동안에는 자동으로 표시됩니다.",
@@ -223,7 +277,11 @@
     "empty": "{{scope}} 레이블이 없습니다",
     "no_results": "일치하는 레이블이 없습니다",
     "save_failed": "레이블을 저장하지 못했습니다",
-    "actions": { "open": "{{name}} 작업", "edit": "편집", "delete": "삭제" },
+    "actions": {
+      "open": "{{name}} 작업",
+      "edit": "편집",
+      "delete": "삭제"
+    },
     "editor": {
       "create_title": "새 레이블",
       "edit_title": "레이블 편집",

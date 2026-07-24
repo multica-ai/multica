@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { StrictMode } from "react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import type { Agent } from "@multica/core/types";
@@ -202,13 +203,18 @@ function renderPage(search: string, { strict = false } = {}) {
   };
   // A fresh element per render — reusing one element object lets React bail
   // out of re-rendering, which would make the rerender-based tests vacuous.
+  // ChatPage reads the client-only quick-actions pending marker via useQuery,
+  // so the page needs a QueryClient like it has in the real app shell.
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const makeUi = () => {
     const page = (
-      <I18nProvider locale="en" resources={TEST_RESOURCES}>
-        <NavigationProvider value={navigation}>
-          <ChatPage />
-        </NavigationProvider>
-      </I18nProvider>
+      <QueryClientProvider client={qc}>
+        <I18nProvider locale="en" resources={TEST_RESOURCES}>
+          <NavigationProvider value={navigation}>
+            <ChatPage />
+          </NavigationProvider>
+        </I18nProvider>
+      </QueryClientProvider>
     );
     return strict ? <StrictMode>{page}</StrictMode> : page;
   };

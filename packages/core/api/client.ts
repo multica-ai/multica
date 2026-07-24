@@ -2130,10 +2130,20 @@ export class ApiClient {
     sessionId: string,
     content: string,
     attachmentIds?: string[],
+    options?: { quickActionsEnabled?: boolean },
   ): Promise<SendChatMessageResponse> {
-    const body: { content: string; attachment_ids?: string[] } = { content };
+    const body: {
+      content: string;
+      attachment_ids?: string[];
+      quick_actions_enabled?: boolean;
+    } = { content };
     if (attachmentIds && attachmentIds.length > 0) {
       body.attachment_ids = attachmentIds;
+    }
+    // Only an explicit false is sent: absent means enabled server-side, so
+    // older payload shapes keep generating suggestions unchanged.
+    if (options?.quickActionsEnabled === false) {
+      body.quick_actions_enabled = false;
     }
     return this.fetch(`/api/chat/sessions/${sessionId}/messages`, {
       method: "POST",

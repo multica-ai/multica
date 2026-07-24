@@ -39,7 +39,7 @@ func sendDirectChat(t *testing.T, ctx context.Context, agentID, sessionID, conte
 	if err != nil {
 		t.Fatalf("load agent: %v", err)
 	}
-	res, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), content, nil, "member", parseUUID(testUserID))
+	res, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), content, nil, "member", parseUUID(testUserID), false)
 	if err != nil {
 		t.Fatalf("SendDirectChatMessage: %v", err)
 	}
@@ -503,5 +503,41 @@ func TestCompleteTask_ChatQuickActionsSupplement(t *testing.T) {
 	}
 	if len(actions) != 1 || actions[0].Label != "From pass" {
 		t.Fatalf("empty supplement must keep existing actions, got %+v", actions)
+	}
+}
+
+// TestDirectChat_QuickActionsOptOutStampsTask: a send carrying the opt-out
+// stamps the task row, which the claim payload forwards so the daemon skips
+// the suggestion pass at the source.
+func TestDirectChat_QuickActionsOptOutStampsTask(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "opt-out chat")
+	sess, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	ag, err := testHandler.Queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+
+	optedOut, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), "no suggestions", nil, "member", parseUUID(testUserID), true)
+	if err != nil {
+		t.Fatalf("send opted-out message: %v", err)
+	}
+	if !optedOut.Task.QuickActionsDisabled {
+		t.Fatal("opt-out send must stamp quick_actions_disabled on the task")
+	}
+
+	// Default (older clients / toggle on) stays enabled.
+	normal, err := testHandler.TaskService.SendDirectChatMessage(ctx, sess, ag, parseUUID(testUserID), "with suggestions", nil, "member", parseUUID(testUserID), false)
+	if err != nil {
+		t.Fatalf("send normal message: %v", err)
+	}
+	if normal.Task.QuickActionsDisabled {
+		t.Fatal("default send must leave quick_actions_disabled false")
 	}
 }

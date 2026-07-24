@@ -56,7 +56,6 @@ export function ChatPage() {
   const isMobile = useIsMobile();
 
   const c = useChatController({ isActive: true });
-  const quickActionsEnabled = useChatStore((s) => s.quickActionsEnabled);
   const { data: quickActionsPending = null } = useQuery(
     chatQuickActionsPendingOptions(c.activeSessionId ?? ""),
   );
@@ -241,15 +240,11 @@ export function ChatPage() {
           hasOlderMessages={c.hasOlderMessages}
           isFetchingOlderMessages={c.isFetchingOlderMessages}
           onLoadOlderMessages={() => void c.fetchOlderMessages()}
-          onQuickAction={
-            quickActionsEnabled ? (action) => c.handleSend(action.prompt) : undefined
-          }
+          onQuickAction={(action) => c.handleSend(action.prompt)}
           quickActionsDisabled={
             !!c.pendingTaskId || c.isSessionArchived || c.isAgentArchived || c.noAgent
           }
-          quickActionsPendingMessageId={
-            quickActionsEnabled ? quickActionsPending?.message_id ?? null : null
-          }
+          quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
         />
       ) : (
         <EmptyState agent={c.activeAgent} />

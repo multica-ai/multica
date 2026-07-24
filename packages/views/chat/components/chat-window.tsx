@@ -136,7 +136,6 @@ export function ChatWindow() {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
   const isOpen = useChatStore((s) => s.isOpen);
-  const quickActionsEnabled = useChatStore((s) => s.quickActionsEnabled);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const { data: quickActionsPending = null } = useQuery(
     chatQuickActionsPendingOptions(activeSessionId ?? ""),
@@ -542,7 +541,9 @@ export function ChatWindow() {
 
       let result;
       try {
-        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds);
+        result = await api.sendChatMessage(sessionId, finalContent, attachmentIds, {
+          quickActionsEnabled: useChatStore.getState().quickActionsEnabled,
+        });
       } catch (err) {
         apiLogger.error("sendChatMessage.error.rollback", { sessionId, optimisticId: optimistic.id, err });
         stopRequestedBeforeTaskRef.current = false;
@@ -804,15 +805,11 @@ export function ChatWindow() {
           hasOlderMessages={!!hasOlderMessages}
           isFetchingOlderMessages={isFetchingOlderMessages}
           onLoadOlderMessages={() => void fetchOlderMessages()}
-          onQuickAction={
-            quickActionsEnabled ? (action) => handleSend(action.prompt) : undefined
-          }
+          onQuickAction={(action) => handleSend(action.prompt)}
           quickActionsDisabled={
             !!pendingTaskId || isSessionArchived || isAgentArchived || noAgent
           }
-          quickActionsPendingMessageId={
-            quickActionsEnabled ? quickActionsPending?.message_id ?? null : null
-          }
+          quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
         />
       ) : (
         <EmptyState
