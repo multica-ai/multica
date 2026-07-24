@@ -1,4 +1,0 @@
-interface:
-  display_name: "Focused Testing"
-  short_description: "Run one test target without triggering a full suite"
-  default_prompt: "Use $multica-focused-testing to select and run the narrowest valid test target for this repository."
