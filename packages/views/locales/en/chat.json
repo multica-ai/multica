@@ -26,7 +26,8 @@
     "project_context": "Project context",
     "change_project_context": "Change project context",
     "remove_project_context": "Remove project context",
-    "no_projects": "No projects yet"
+    "no_projects": "No projects yet",
+    "project_context_unsupported": "Project description won't apply — this agent's daemon needs an upgrade"
   },
   "message_list": {
     "show_details": "Show details",

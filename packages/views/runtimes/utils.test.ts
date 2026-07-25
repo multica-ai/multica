@@ -209,6 +209,28 @@ describe("estimateCost", () => {
     expect(isModelPriced("claude-opus-4-7[1m]")).toBe(true);
   });
 
+  it("prices Opus 5 on the standard Opus tier across its transport spellings", () => {
+    // Opus 5 is a 5/25 SKU like Opus 4.5-4.8. Claude Code reports the
+    // 1M-context window with a bracketed suffix and openclaw/opencode prefix
+    // the id with the provider, so all three spellings reach the cost
+    // estimator and must land on the same row.
+    for (const model of [
+      "claude-opus-5",
+      "claude-opus-5[1m]",
+      "anthropic/claude-opus-5",
+    ]) {
+      expect(
+        estimateCost({
+          ...zeroUsage,
+          model,
+          input_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+        }),
+      ).toBeCloseTo(5 + 25, 5);
+      expect(isModelPriced(model)).toBe(true);
+    }
+  });
+
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
     // Every dotted minor version is priced independently. The resolver does
     // exact-match-after-date-strip (no startsWith fallback), so each row

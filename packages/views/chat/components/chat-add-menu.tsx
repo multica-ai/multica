@@ -24,6 +24,10 @@ interface ChatAddMenuProps {
   projects?: Project[];
   projectId?: string | null;
   onSelectProject?: (projectId: string | null) => void;
+  /** Soft warning: the active agent's daemon is too old to receive the
+   *  project description. Selection stays enabled; the submenu only appends
+   *  an explanatory hint so the user knows before choosing. */
+  projectContextUnsupported?: boolean;
   disabled?: boolean;
 }
 
@@ -38,6 +42,7 @@ export function ChatAddMenu({
   projects = [],
   projectId,
   onSelectProject,
+  projectContextUnsupported,
   disabled,
 }: ChatAddMenuProps) {
   const { t } = useT("chat");
@@ -103,6 +108,14 @@ export function ChatAddMenu({
                     <X />
                     {t(($) => $.input.remove_project_context)}
                   </DropdownMenuItem>
+                )}
+                {projectContextUnsupported && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <div className="max-w-56 px-2 py-1.5 text-xs text-muted-foreground">
+                      {t(($) => $.input.project_context_unsupported)}
+                    </div>
+                  </>
                 )}
               </DropdownMenuSubContent>
             </DropdownMenuSub>

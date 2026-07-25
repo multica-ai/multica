@@ -113,6 +113,19 @@ func TestProjectClaudeLevels_PerModelSubset(t *testing.T) {
 	if !reflect.DeepEqual(values, superset) {
 		t.Fatalf("projectClaudeLevels for Opus: got %v, want %v", values, superset)
 	}
+	// Opus 5 declares `xhigh_effort` + `max_effort` upstream, so it keeps the
+	// full superset like the rest of the Opus family. Without an entry here it
+	// would fall through to "no allow-list" and coincidentally get the same
+	// levels — this pins the mapping so a later Sonnet-style restriction on the
+	// fallback path can't silently widen it.
+	got = projectClaudeLevels(superset, claudeModelEffortAllow["claude-opus-5"])
+	values = values[:0]
+	for _, lvl := range got {
+		values = append(values, lvl.Value)
+	}
+	if !reflect.DeepEqual(values, superset) {
+		t.Fatalf("projectClaudeLevels for Opus 5: got %v, want %v", values, superset)
+	}
 }
 
 // ── Codex discovery argv ────────────────────────────────────────────
@@ -571,6 +584,19 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	}
 	if !ok {
 		t.Errorf("xhigh should be valid on opus-4-7; got false")
+	}
+
+	// The whole Opus effort range round-trips on Opus 5, which is the point of
+	// adding it to the catalog: an agent pinned to it can still carry a
+	// persisted thinking_level without the daemon dropping the flag.
+	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
+		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-5", level)
+		if err != nil {
+			t.Fatalf("unexpected err for opus-5 %q: %v", level, err)
+		}
+		if !ok {
+			t.Errorf("%q should be valid on opus-5; got false", level)
+		}
 	}
 
 	// xhigh is NOT valid on Sonnet — should fail.

@@ -31,7 +31,7 @@ function initialsOf(name: string): string {
  * earns no warning tone; its historical origin still shows in the tooltip and
  * the raw `source` field (MUL-4768).
  *
- * Two shapes, both silent when no responsible member resolved (MUL-4765):
+ * Three shapes, all silent when no responsible member resolved (MUL-4765):
  *  - `variant="badge"` (default): the full "on behalf of <name>" chip. Renders
  *    nothing when there's no accountable member, so an unassigned run reads as
  *    plain rather than a warning.
@@ -39,6 +39,10 @@ function initialsOf(name: string): string {
  *    source in a hover tooltip. Compact enough for a dense task row. Renders
  *    nothing when there's no accountable member — an avatar-only surface has
  *    nothing meaningful to show for an unattributed run.
+ *  - `variant="inline"`: the bare member name (borderless, avatar optional via
+ *    `hideAvatar`) with the source in a tooltip — for a sentence-like identity
+ *    row (transcript header) where the caller supplies the label. Same silence
+ *    rule.
  *
  * Renders nothing when the task has no attribution at all (older backends) —
  * the caller should optional-chain `task.attribution`.
@@ -47,10 +51,14 @@ export function AttributionBadge({
   attribution,
   className,
   variant = "badge",
+  hideAvatar = false,
 }: {
   attribution?: TaskAttribution;
   className?: string;
-  variant?: "badge" | "avatar";
+  variant?: "badge" | "avatar" | "inline";
+  /** Inline variant only: render the name without the avatar, so it does not
+   *  compete with a nearby primary avatar (the transcript identity row). */
+  hideAvatar?: boolean;
 }) {
   const { t } = useT("issues");
   if (!attribution) return null;
@@ -103,6 +111,42 @@ export function AttributionBadge({
   const uncertain =
     attribution.precise === false && attribution.source !== "backfill";
   const initiator = attribution.initiator;
+
+  // Inline shape: avatar + bare name, no border and no "on behalf of" wrapper —
+  // the caller supplies the label ("Triggered by") so the value is just the
+  // person. The resolution source stays in the tooltip.
+  if (variant === "inline") {
+    const initiatorInline = attribution.initiator;
+    if (!initiatorInline) return null;
+    const name = initiatorInline.name || t(($) => $.execution_log.attribution.someone);
+    return (
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <span
+              className={cn(
+                "inline-flex min-w-0 items-center gap-1.5 text-xs",
+                uncertain ? "text-warning" : "text-foreground/80",
+                className
+              )}
+            >
+              {!hideAvatar && (
+                <ActorAvatar
+                  name={name}
+                  initials={initialsOf(name)}
+                  avatarUrl={initiatorInline.avatar_url}
+                  size="xs"
+                  className="shrink-0"
+                />
+              )}
+              <span className="min-w-0 truncate">{name}</span>
+            </span>
+          }
+        />
+        <TooltipContent>{sourceLabel}</TooltipContent>
+      </Tooltip>
+    );
+  }
 
   // Avatar-only shape: just the accountable member's face, with the name +
   // source in a hover tooltip. Nothing to show without an accountable member.

@@ -5,6 +5,70 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient pull-request response schema", () => {
+  const validPR = {
+    id: "pr-1",
+    provider: "github",
+    workspace_id: "ws-1",
+    repo_owner: "acme",
+    repo_name: "widget",
+    number: 7,
+    title: "MUL-1: fix",
+    state: "open",
+    html_url: "https://github.example/acme/widget/pull/7",
+    branch: "fix/mul-1",
+    author_login: "octocat",
+    author_avatar_url: null,
+    merged_at: null,
+    closed_at: null,
+    pr_created_at: "2026-01-01T00:00:00Z",
+    pr_updated_at: "2026-01-01T00:00:00Z",
+    snapshot_available: true,
+    checks_rollup: "failure",
+    failed_check_names: ["backend"],
+  };
+
+  it("parses and defaults a valid pull-request list", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ pull_requests: [validPR] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    const result = await new ApiClient("https://api.example.test").listIssuePullRequests("issue-1");
+    expect(result.pull_requests[0]).toMatchObject({
+      id: "pr-1",
+      failed_check_names: ["backend"],
+      checks_total: 0,
+    });
+  });
+
+  it("falls back safely when failed_check_names is malformed", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            pull_requests: [{ ...validPR, failed_check_names: "backend" }],
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient("https://api.example.test").listIssuePullRequests("issue-1"),
+    ).resolves.toEqual({ pull_requests: [] });
+  });
+});
+
 describe("ApiClient server Table query", () => {
   it("posts the canonical query to the group and branch endpoints", async () => {
     const fetchMock = vi

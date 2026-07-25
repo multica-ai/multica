@@ -68,6 +68,17 @@ monorepo 的包边界是硬约束：
 - 枚举：优先用 string literal union，需要 runtime 迭代时才用 `enum`
 - TanStack Query key：用 `<feature>/queries.ts` 里的工厂函数，例如 `issueKeys.detail(id)`
 
+### Runtime 显示名
+
+`AgentRuntime.name` 是 daemon 的原始技术名（例如 `Codex (host)`），用户别名在 `custom_name`。用户可见文案不得直接渲染 `runtime.name`，要用共享 helper，保证别名和 provider 一致（MUL-5248、#5260）：
+
+- 独立展示 runtime（列表、标签、确认弹窗、窗口标题）：`runtimeDisplayLabel(runtime)` → 别名 + provider，无别名时回退 daemon 名。
+- 旁边已经单独显示 provider 图标/文字时：`runtimeDisplayName(runtime)` → 只显示别名，避免重复 provider。
+- 在机器分组内：机器标题用 `machine.title`，子行用 `runtimeRowLabel(runtime, machine.title)`。
+- runtime 选择器用 `buildRuntimeMachines` 按机器分组，不要自己拼扁平的原始名列表。
+
+原始 `runtime.name` 只允许用于内部识别——hostname 解析、分组、搜索 haystack、协议 payload——绝不能进入 JSX 文本、i18n 参数、`<Select>` label 或窗口标题。
+
 ### Issue 编号
 
 每个 issue 有人类可读的编号，比如 `MUL-123`：工作区 `issue_prefix`（大写字母和数字，通常 3 个字符，最长 10 个）+ 流水号。工作区管理员可以在 Settings → General 中修改前缀；修改会让所有现有 issue 重新编号，外部引用——PR 标题、分支名、文档与聊天里的链接——里的旧前缀会失效。

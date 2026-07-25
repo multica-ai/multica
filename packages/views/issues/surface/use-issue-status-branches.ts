@@ -59,6 +59,10 @@ interface StatusBranchData {
   isError: boolean;
   headUpdatedAt: number;
   headFetching: boolean;
+  /** The head (cursor === null) page alone is still loading with nothing to
+   * show. Distinct from `isLoading`, which also accumulates tail pages so the
+   * per-branch load-more sentinel can spin. */
+  headPending: boolean;
 }
 
 function statusGroupKey(status: IssueStatus) {
@@ -228,6 +232,7 @@ export function useIssueStatusBranches({
         isError: false,
         headUpdatedAt: 0,
         headFetching: false,
+        headPending: false,
       });
     }
 
@@ -277,6 +282,7 @@ export function useIssueStatusBranches({
       if (target.cursor === null) {
         current.headUpdatedAt = queryResult.dataUpdatedAt;
         current.headFetching = queryResult.isFetching;
+        current.headPending = queryResult.isPending;
       }
     }
     return result;
@@ -395,11 +401,15 @@ export function useIssueStatusBranches({
   );
   const isTotalKnown = facets !== undefined;
   const total = facets?.total ?? issues.length;
-  const rowsPending = statuses.some(
-    (status) => branchData.get(status)?.isLoading,
+  // Surface-level loading reflects only each branch's HEAD page. A tail page
+  // (load-more) is pending/fetching while the already-rendered rows stay on
+  // screen, so it must never re-trigger the full-surface skeleton or the
+  // global refreshing indicator — the per-branch sentinel owns "loading more".
+  const headsPending = statuses.some(
+    (status) => branchData.get(status)?.headPending,
   );
-  const rowsFetching = statuses.some(
-    (status) => branchData.get(status)?.isFetching,
+  const headsFetching = statuses.some(
+    (status) => branchData.get(status)?.headFetching,
   );
 
   return {
@@ -408,11 +418,11 @@ export function useIssueStatusBranches({
     pagination,
     total,
     isTotalKnown,
-    isLoading: enabled && (facetsPending || rowsPending),
+    isLoading: enabled && (facetsPending || headsPending),
     isRefreshing:
       enabled &&
       !facetsPending &&
-      !rowsPending &&
-      (facetsFetching || rowsFetching),
+      !headsPending &&
+      (facetsFetching || headsFetching),
   };
 }

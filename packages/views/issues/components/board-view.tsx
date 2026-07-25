@@ -35,6 +35,7 @@ import { BoardColumn, BOARD_CARD_WIDTH, type BoardColumnGroup } from "./board-co
 import { BoardCardContent } from "./board-card";
 import { HiddenColumnsPanel, HiddenColumnRow } from "./hidden-columns-panel";
 import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { ListLoadMoreFooter } from "./list-load-more-footer";
 import type { ChildProgress } from "./list-row";
 import type { IssueCreateDefaults } from "../surface/types";
 import type {
@@ -793,9 +794,12 @@ const PaginatedAssigneeBoardColumn = memo(function PaginatedAssigneeBoardColumn(
       onCreateIssue={onCreateIssue}
       sortLabel={sortLabel}
       footer={
-        hasMore ? (
-          <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
-        ) : undefined
+        <ListLoadMoreFooter
+          hasMore={hasMore}
+          isLoading={isLoading}
+          total={total}
+          onLoadMore={loadMore}
+        />
       }
     />
   );
@@ -822,21 +826,16 @@ const ServerPaginatedBoardColumn = memo(function ServerPaginatedBoardColumn({
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   sortLabel?: string | null;
 }) {
-  const { t } = useT("issues");
-  const footer = page.isError ? (
-    <button
-      type="button"
-      className="w-full py-2 text-xs text-destructive hover:underline"
-      onClick={page.retry}
-    >
-      {t(($) => $.table.load_more_failed_retry)}
-    </button>
-  ) : page.hasMore ? (
-    <InfiniteScrollSentinel
-      onVisible={page.loadMore}
-      loading={page.isLoading || page.isFetching}
+  const footer = (
+    <ListLoadMoreFooter
+      hasMore={page.hasMore}
+      isLoading={page.isLoading || page.isFetching}
+      total={page.total}
+      onLoadMore={page.loadMore}
+      isError={page.isError}
+      onRetry={page.retry}
     />
-  ) : undefined;
+  );
   return (
     <BoardColumn
       group={group}
@@ -893,9 +892,12 @@ const PaginatedBoardColumn = memo(function PaginatedBoardColumn({
       onCreateIssue={onCreateIssue}
       sortLabel={sortLabel}
       footer={
-        hasMore ? (
-          <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} />
-        ) : undefined
+        <ListLoadMoreFooter
+          hasMore={hasMore}
+          isLoading={isLoading}
+          total={total}
+          onLoadMore={loadMore}
+        />
       }
     />
   );

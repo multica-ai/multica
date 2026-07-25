@@ -163,6 +163,12 @@ jobs:
           go-version: "1.26.1"
           cache-dependency-path: server/go.sum
 
+      - name: Setup Helm
+        uses: azure/setup-helm@v4
+
+      - name: Test Helm chart
+        run: bash scripts/helm-config.test.sh
+
       - name: Build
         run: cd server && go build ./...
 

@@ -7,6 +7,10 @@ import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { runtimeKeys } from "@multica/core/runtimes/queries";
+import {
+  runtimeDisplayLabel,
+  runtimeDisplayName,
+} from "@multica/core/runtimes";
 import type { AgentRuntime } from "@multica/core/types";
 import { DragStrip } from "@multica/views/platform";
 import { StepHeader } from "../components/step-header";
@@ -201,7 +205,9 @@ function FancyView({
 
   const footerHint =
     phase === "found" && selected
-      ? t(($) => $.step_runtime.hint_selected, { name: selected.name })
+      ? t(($) => $.step_runtime.hint_selected, {
+          name: runtimeDisplayLabel(selected),
+        })
       : phase === "found"
         ? t(($) => $.step_runtime.hint_pick)
         : phase === "scanning"
@@ -619,7 +625,7 @@ function RuntimeCard({
       </div>
       <div className="min-w-0 flex-1">
         <div className="truncate text-sm font-medium text-foreground">
-          {runtime.name}
+          {runtimeDisplayName(runtime)}
         </div>
         <div className="mt-0.5 flex items-center gap-1.5 font-mono text-[11px] text-muted-foreground">
           <span

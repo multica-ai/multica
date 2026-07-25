@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { TriangleAlert } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -101,6 +102,11 @@ interface ChatInputProps {
   projectId?: string | null;
   onProjectChange?: (projectId: string | null) => void;
   isProjectUpdating?: boolean;
+  /** True when the active agent's daemon is too old to inject the project
+   *  description into the run brief. Soft signal: selection stays enabled,
+   *  the composer only surfaces a warning next to the chip and in the
+   *  project submenu. */
+  projectContextUnsupported?: boolean;
   /** Monotonic nonce bumped by the owner whenever the compose box should grab
    *  keyboard focus — currently on "new chat" so the user can type right away.
    *  0 (the initial value) is inert, so a plain deep-link open never steals
@@ -132,6 +138,7 @@ export function ChatInput({
   projectId,
   onProjectChange,
   isProjectUpdating,
+  projectContextUnsupported,
   focusRequest,
   draftKeyOverride,
   editorKeyOverride,
@@ -548,7 +555,7 @@ export function ChatInput({
         aria-disabled={noAgent || undefined}
       >
         {selectedProject && (
-          <div className="px-3 pt-2">
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pt-2">
             <div
               className={cn(
                 "inline-flex max-w-full",
@@ -570,6 +577,12 @@ export function ChatInput({
                 }
               />
             </div>
+            {projectContextUnsupported && (
+              <span className="inline-flex min-w-0 items-center gap-1 text-xs text-warning">
+                <TriangleAlert className="size-3 shrink-0" />
+                {t(($) => $.input.project_context_unsupported)}
+              </span>
+            )}
           </div>
         )}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
@@ -614,6 +627,7 @@ export function ChatInput({
                 projects={projects}
                 projectId={projectId}
                 onSelectProject={projectSelectionEnabled ? onProjectChange : undefined}
+                projectContextUnsupported={projectContextUnsupported}
               />
             )}
             {leftAdornment}

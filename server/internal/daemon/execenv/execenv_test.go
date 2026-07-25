@@ -988,7 +988,16 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 				// no follow-up wakeup. These pins forbid that shape.
 				"Never background-and-yield",
 				"foreground tool call that blocks",
-				"only to work owned by the current run",
+				// MUL-5274: persistent local services are allowed only as
+				// an explicit, verified handoff with a cleanup handle.
+				"persistent service handoff",
+				"running service itself is the requested deliverable",
+				"stdio redirected to durable logs",
+				"PID/profile",
+				"verify readiness before replying",
+				"survival as best-effort, not guaranteed",
+				"does not cover tests, builds, CI polling",
+				"are not agent-owned background tasks",
 				"GitHub Actions after a successful push",
 				"Do not wait for them by default",
 				// MUL-5223: the conceptual boundary above was read as
@@ -1020,6 +1029,12 @@ func TestInjectRuntimeConfigBackgroundTaskSafetyProviderAgnostic(t *testing.T) {
 			// the section's example of how to wait properly.
 			if strings.Contains(s, "e.g. `gh run watch`") {
 				t.Errorf("%s should not suggest waiting for external GitHub CI\n---\n%s", tc.file, s)
+			}
+			// MUL-5274 review: with the persistent-service exception in the
+			// list, a "The rules above ..." scoping sentence would sweep in
+			// work that is precisely no longer run-owned after handoff.
+			if strings.Contains(s, "The rules above") {
+				t.Errorf("%s must not reintroduce the ambiguous \"The rules above\" scoping sentence\n---\n%s", tc.file, s)
 			}
 		})
 	}

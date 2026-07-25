@@ -104,6 +104,7 @@ var claudeEffortLabel = map[string]string{
 var claudeModelEffortAllow = map[string]map[string]bool{
 	// Opus is the only model that publicly supports xhigh; the help
 	// list still includes it for Sonnet / Haiku so we filter here.
+	"claude-opus-5":             {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
 	"claude-opus-4-8":           {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
 	"claude-opus-4-7":           {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},
 	"claude-opus-4-6":           {"low": true, "medium": true, "high": true, "xhigh": true, "max": true},

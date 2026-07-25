@@ -513,6 +513,13 @@ export function SearchCommand() {
               placeholder={t(($) => $.placeholder)}
               value={query}
               onValueChange={handleValueChange}
+              onKeyDown={(e) => {
+                // cmdk's root handler intercepts Home/End for list navigation;
+                // stop propagation so the browser moves the text caret instead.
+                if (e.key === "Home" || e.key === "End") {
+                  e.stopPropagation();
+                }
+              }}
               className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
             />
             <ShortcutKeycaps

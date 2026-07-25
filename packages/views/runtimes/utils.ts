@@ -168,9 +168,10 @@ const MODEL_PRICING: Record<
   //    intro launch rate ($2 / $10 through 2026-08-31). This static map has
   //    no future-dated pricing support yet, so update the row when the
   //    post-intro $3 / $15 rate takes effect. Fable 5 is a Mythos-class SKU
-  //    at 10/50; Opus 4.5+ stays on the lower 5/25 Opus tier. --
+  //    at 10/50; Opus 4.5 through Opus 5 stay on the lower 5/25 Opus tier. --
   "claude-sonnet-5":     { input: 2,    output: 10,   cacheRead: 0.20, cacheWrite: 2.50 },
   "claude-fable-5":     { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
+  "claude-opus-5":      { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
   "claude-haiku-4-5":   { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25 },
   "claude-sonnet-4-5":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
   "claude-sonnet-4-6":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },

@@ -28,6 +28,7 @@ import {
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
+  runtimeDisplayLabel,
   runtimeListOptions,
   runtimeModelsOptions,
 } from "@multica/core/runtimes";
@@ -814,7 +815,7 @@ export function AgentCreationStudio() {
             </span>
             {selectedRuntime && (
               <span className="rounded-full bg-muted px-2 py-1">
-                {selectedRuntime.name || selectedRuntime.provider}
+                {runtimeDisplayLabel(selectedRuntime)}
               </span>
             )}
           </div>

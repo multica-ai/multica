@@ -116,6 +116,45 @@ func TestClaudeStaticModelsExposesSonnet5(t *testing.T) {
 	}
 }
 
+func TestClaudeStaticModelsExposesOpus5(t *testing.T) {
+	models := claudeStaticModels()
+	ids := map[string]Model{}
+	defaults := 0
+	for _, m := range models {
+		ids[m.ID] = m
+		if m.Default {
+			defaults++
+		}
+	}
+
+	opus, ok := ids["claude-opus-5"]
+	if !ok {
+		t.Fatalf("missing Claude Opus 5 in: %+v", models)
+	}
+	if opus.Label != "Claude Opus 5" || opus.Provider != "anthropic" || opus.Default {
+		t.Errorf("unexpected Opus 5 entry: %+v", opus)
+	}
+	// Opus stays a deliberate opt-in: Sonnet remains the everyday workhorse
+	// the catalog badges as its default pick.
+	if defaults != 1 || !ids["claude-sonnet-4-6"].Default {
+		t.Errorf("expected Sonnet 4.6 to remain the sole default, got defaults=%d models=%+v", defaults, models)
+	}
+}
+
+// TestClaudeOpus5AcceptedByProviderCompatibilityGate pins the other half of
+// catalog membership: ModelKnownIncompatibleWithProvider erases a saved model
+// that a runtime's maintained catalog doesn't advertise, so an unlisted
+// `claude-opus-5` would be silently dropped from an agent on save.
+func TestClaudeOpus5AcceptedByProviderCompatibilityGate(t *testing.T) {
+	t.Parallel()
+	if ModelKnownIncompatibleWithProvider("claude", "claude-opus-5") {
+		t.Error("claude-opus-5 must be accepted by the claude provider gate")
+	}
+	if !ModelKnownIncompatibleWithProvider("codex", "claude-opus-5") {
+		t.Error("claude-opus-5 must still be rejected for the codex provider")
+	}
+}
+
 func TestCodexStaticModelsMatchVerifiedFallbackCatalog(t *testing.T) {
 	// This fallback is used for Codex <0.122.0 and whenever dynamic bundled
 	// discovery fails. Keep the latest verified visible models plus 5.3 Codex

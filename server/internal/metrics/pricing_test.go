@@ -2,7 +2,7 @@ package metrics
 
 import "testing"
 
-func TestPriceForModelAliasAnthropicFableAndOpus48(t *testing.T) {
+func TestPriceForModelAliasAnthropicCurrentGeneration(t *testing.T) {
 	cases := []struct {
 		model string
 		want  ModelPrice
@@ -30,6 +30,20 @@ func TestPriceForModelAliasAnthropicFableAndOpus48(t *testing.T) {
 		{
 			model: "claude-opus-4-8",
 			want:  ModelPrice{Provider: "anthropic", Model: "claude-opus-4.8", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 6.25, OutputPerM: 25},
+		},
+		// Opus 5 sits on the same 5/25 Opus tier as 4.5-4.8.
+		{
+			model: "claude-opus-5",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-opus-5", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 6.25, OutputPerM: 25},
+		},
+		{
+			model: "anthropic/claude-opus-5",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-opus-5", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 6.25, OutputPerM: 25},
+		},
+		// Claude Code reports the 1M-context beta with a bracketed suffix.
+		{
+			model: "claude-opus-5[1m]",
+			want:  ModelPrice{Provider: "anthropic", Model: "claude-opus-5", InputPerM: 5, CacheReadPerM: 0.5, CacheWritePerM: 6.25, OutputPerM: 25},
 		},
 	}
 
