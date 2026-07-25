@@ -7,6 +7,53 @@ import (
 	"time"
 )
 
+// TestDetectBuiltinRuntimes_NoDuplicateProbesAcrossWorkspaces verifies that
+// built-in agent version probes are not repeated across multiple workspace
+// registrations (MUL-5837). A daemon with N workspaces and M built-in agents
+// must run at most M probes total, not N×M.
+func TestDetectBuiltinRuntimes_NoDuplicateProbesAcrossWorkspaces(t *testing.T) {
+	origDetect := detectAgentVersion
+	origCheck := checkAgentMinVersion
+	t.Cleanup(func() {
+		detectAgentVersion = origDetect
+		checkAgentMinVersion = origCheck
+	})
+
+	var probeCount int32
+	detectAgentVersion = func(_ context.Context, _ string) (string, error) {
+		atomic.AddInt32(&probeCount, 1)
+		return "9.9.9", nil
+	}
+	checkAgentMinVersion = func(_, _ string) error { return nil }
+
+	d := freshDaemon("")
+	d.cfg.Agents = map[string]AgentEntry{
+		"claude": {Path: "/usr/bin/true"},
+		"codex":  {Path: "/usr/bin/true"},
+	}
+
+	// First workspace registration — each agent is probed once to populate the cache.
+	runtimes1 := d.detectBuiltinRuntimes(context.Background())
+	if len(runtimes1) != len(d.cfg.Agents) {
+		t.Fatalf("first registration: expected %d runtimes, got %d", len(d.cfg.Agents), len(runtimes1))
+	}
+	afterFirst := atomic.LoadInt32(&probeCount)
+	if int(afterFirst) != len(d.cfg.Agents) {
+		t.Fatalf("first registration: expected %d probes, got %d", len(d.cfg.Agents), afterFirst)
+	}
+
+	// Second workspace registration — cached versions must be reused; no new probes.
+	runtimes2 := d.detectBuiltinRuntimes(context.Background())
+	if len(runtimes2) != len(d.cfg.Agents) {
+		t.Fatalf("second registration: expected %d runtimes, got %d", len(d.cfg.Agents), len(runtimes2))
+	}
+	afterSecond := atomic.LoadInt32(&probeCount)
+	if afterSecond != afterFirst {
+		t.Fatalf("second workspace registration triggered %d extra probe(s); want 0 (versions should be cached)",
+			afterSecond-afterFirst)
+	}
+}
+
 // TestDetectBuiltinRuntimes_ProbesRunConcurrently proves the registration
 // version probes fan out instead of running serially (MUL-5119). Each stubbed
 // `--version` probe blocks briefly and records the peak number of in-flight

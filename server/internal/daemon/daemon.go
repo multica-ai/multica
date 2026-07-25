@@ -1221,11 +1221,12 @@ const runtimeVersionProbeConcurrency = 8
 // instead of their sum, so a freshly-created workspace lights up its runtimes
 // well inside the UI's scanning window.
 //
-// Each probe still self-heals a vanished pinned path (MUL-4486) and re-detects
-// the live version — no result is cached across registrations, so an in-place
-// CLI upgrade is still reported with its current version. A probe that fails to
-// detect a version or is below the minimum supported version is logged and
-// skipped, exactly as the serial loop did.
+// Each probe self-heals a vanished pinned path (MUL-4486). Built-in agent
+// executables are machine-scoped, so a version detected for one workspace is
+// reused for subsequent workspace registrations via resolveAgentEntry's cache
+// — avoiding N×M subprocess spawns when a daemon serves many workspaces
+// (MUL-5837). A probe that fails to detect a version or is below the minimum
+// supported version is logged and skipped, exactly as the serial loop did.
 func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string {
 	type detected struct {
 		name    string
@@ -1240,17 +1241,22 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string 
 	for name, entry := range d.cfg.Agents {
 		name, entry := name, entry
 		g.Go(func() error {
-			// Self-heal a pinned executable path an in-place upgrade deleted
-			// (MUL-4486) so version detection — and thus staying
-			// registered/online — recovers without a daemon restart.
-			// resolveAgentEntry already version-gates the healed binary; the
-			// detect + min-version check below still runs to produce the
-			// version string this registration reports.
-			entry, _ = d.resolveAgentEntry(ctx, name, entry)
-			version, err := detectAgentVersion(ctx, entry.Path)
-			if err != nil {
-				d.logger.Warn("skip registering runtime", "name", name, "error", err)
-				return nil
+			// Self-heal a vanished pinned path (MUL-4486) and reuse the
+			// already-cached version when available. Built-in agent executables
+			// are machine-scoped, not workspace-scoped: probing each binary
+			// once per workspace in a N-workspace daemon produces N×M
+			// subprocess spawns. resolveAgentEntry returns the version it
+			// cached for the provider on a prior probe; fall through to
+			// detectAgentVersion only when the cache is empty (first probe for
+			// this provider in this daemon run) (MUL-5837).
+			entry, version := d.resolveAgentEntry(ctx, name, entry)
+			if version == "" {
+				var probeErr error
+				version, probeErr = detectAgentVersion(ctx, entry.Path)
+				if probeErr != nil {
+					d.logger.Warn("skip registering runtime", "name", name, "error", probeErr)
+					return nil
+				}
 			}
 			if err := checkAgentMinVersion(name, version); err != nil {
 				d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
