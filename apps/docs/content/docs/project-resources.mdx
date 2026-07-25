@@ -54,8 +54,9 @@ multica project resource add <project-id> \
 The owning daemon canonicalizes the path, verifies that it is a readable Git
 repository, and clones its committed refs into the normal Multica cache. Every
 task still receives its own branch, worktree/index, and Git metadata; the
-canonical checkout and its uncommitted state are not touched. Local repository
-sources are fetch-only—agent pushes back into the source are disabled.
+canonical checkout and its uncommitted state are not touched. Agents may push
+their task branches back into the local repository normally; updating those
+refs does not switch or modify the canonical checkout.
 
 ## Resource type: `local_directory`
 

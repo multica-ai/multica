@@ -52,7 +52,7 @@ multica project resource update <project-id> <resource-id> --ref <branch-or-sha>
 multica project resource remove <project-id> <resource-id> --output json
 ```
 
-For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default checkout branch/tag/SHA for future tasks in that project. A `file://` URL requires `--daemon-id`; the daemon validates and canonicalizes the local Git repository, then uses the normal private-checkout pipeline. Local sources are fetch-only: agent pushes back into the canonical local repository are disabled. JSON `--ref '<json>'` remains the escape hatch for full payloads or resource types not covered by shortcuts.
+For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default checkout branch/tag/SHA for future tasks in that project. A `file://` URL requires `--daemon-id`; the daemon validates and canonicalizes the local Git repository, then uses the normal private-checkout pipeline. Agents may push their task branches back into the local repository normally without switching or modifying its canonical checkout. JSON `--ref '<json>'` remains the escape hatch for full payloads or resource types not covered by shortcuts.
 
 `--start-date` / `--due-date` are optional calendar days (`YYYY-MM-DD`, like issue dates). On `project update`, pass an empty string (`--start-date ""`) to clear a date; an unset flag leaves it untouched.
 

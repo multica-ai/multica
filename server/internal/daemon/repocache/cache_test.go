@@ -79,9 +79,8 @@ func TestLocalFileRepoConcurrentPrivateCheckoutsPreserveSource(t *testing.T) {
 		gitTestRun(t, checkout.Path, "config", "user.email", "agent@example.com")
 		gitTestRun(t, checkout.Path, "config", "user.name", "Agent")
 		gitTestRun(t, checkout.Path, "commit", "-m", "agent change")
-		if got := strings.TrimSpace(gitTestOutput(t, checkout.Path, "remote", "get-url", "--push", "origin")); got != "multica-read-only://local-repository" {
-			t.Fatalf("checkout %d push URL = %q", i, got)
-		}
+		gitTestRun(t, checkout.Path, "push", "-u", "origin", "HEAD")
+		gitTestRun(t, source, "show-ref", "--verify", "refs/heads/"+checkout.BranchName)
 	}
 
 	if got := strings.TrimSpace(gitTestOutput(t, source, "rev-parse", "HEAD")); got != baseSHA {
