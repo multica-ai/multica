@@ -7,26 +7,29 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
 type observerPolicy struct {
 	settings map[[16]byte]toolpolicy.Setting
+	declared *toolpolicy.Setting
 	err      error
 	calls    *int
 }
 
-func (p observerPolicy) ResolveGeneral(_ context.Context, q toolpolicy.Query, _ bool) (toolpolicy.Effective, error) {
+func (p observerPolicy) ResolvePermission(_ context.Context, q toolpolicy.Query, _ platformaccess.Actor) (toolpolicy.Effective, error) {
 	if p.calls != nil {
 		*p.calls++
 	}
 	if p.err != nil {
 		return toolpolicy.Effective{}, p.err
 	}
+	if p.declared != nil {
+		return toolpolicy.Effective{Setting: *p.declared}, nil
+	}
 	return toolpolicy.Effective{Setting: p.settings[q.AgentID.Bytes]}, nil
 }
-
-func (observerPolicy) MemberOverrideEnabled(context.Context, pgtype.UUID) bool { return false }
 
 type observerEvidence map[string]availabilityevidence.Evidence
 
@@ -60,11 +63,11 @@ func observerUUID(b byte) pgtype.UUID {
 	return id
 }
 
-func TestObserverRecordsZeroDiffForAgentsWithDifferentPolicies(t *testing.T) {
+func TestDecisionServiceRecordsCanonicalOutcomesForDifferentAgents(t *testing.T) {
 	allowAgent := observerUUID(1)
 	denyAgent := observerUUID(2)
 	writer := &observerWriter{}
-	observer := NewObserver(
+	service := NewService(
 		observerPolicy{settings: map[[16]byte]toolpolicy.Setting{
 			allowAgent.Bytes: toolpolicy.SettingAllow,
 			denyAgent.Bytes:  toolpolicy.SettingDeny,
@@ -84,8 +87,6 @@ func TestObserverRecordsZeroDiffForAgentsWithDifferentPolicies(t *testing.T) {
 			RuntimeID:             observerUUID(8),
 			CanonicalCapabilityID: "platform:create_issue",
 			ObservedToolName:      "create_issue",
-			LegacyDecision:        DecisionAllow,
-			LegacyPath:            "platform_action",
 		},
 		{
 			WorkspaceID:           observerUUID(9),
@@ -93,26 +94,24 @@ func TestObserverRecordsZeroDiffForAgentsWithDifferentPolicies(t *testing.T) {
 			RuntimeID:             observerUUID(8),
 			CanonicalCapabilityID: "platform:create_issue",
 			ObservedToolName:      "create_issue",
-			LegacyDecision:        DecisionDeny,
-			LegacyPath:            "platform_action",
 		},
 	} {
-		observer.Observe(context.Background(), call)
+		service.Decide(context.Background(), call)
 	}
 
 	if len(writer.entries) != 2 {
 		t.Fatalf("ledger entries = %d, want 2", len(writer.entries))
 	}
-	report := Summarize(writer.entries)
-	if report.Total != 2 || report.Diffs != 0 {
-		t.Fatalf("report = %+v, want two calls and zero diffs", report)
+	if writer.entries[0].Decision != DecisionAllow || writer.entries[1].Decision != DecisionDeny {
+		t.Fatalf("recorded decisions = (%q, %q), want allow and deny",
+			writer.entries[0].Decision, writer.entries[1].Decision)
 	}
 }
 
 func TestPolicyDecisionServiceAllowsOneAgentAndDeniesAnotherAcrossGatewayFamilies(t *testing.T) {
 	allowAgent := observerUUID(1)
 	denyAgent := observerUUID(2)
-	service := NewObserver(
+	service := NewService(
 		observerPolicy{settings: map[[16]byte]toolpolicy.Setting{
 			allowAgent.Bytes: toolpolicy.SettingAllow,
 			denyAgent.Bytes:  toolpolicy.SettingDeny,
@@ -148,8 +147,8 @@ func TestPolicyDecisionServiceAllowsOneAgentAndDeniesAnotherAcrossGatewayFamilie
 						ObservedToolName:      family,
 						EvidenceLevel:         availabilityevidence.LevelDiscovered,
 					})
-					if entry.ShadowDecision != tt.want {
-						t.Fatalf("decision = %q, want %q (%s)", entry.ShadowDecision, tt.want, entry.Reason)
+					if entry.Decision != tt.want {
+						t.Fatalf("decision = %q, want %q (%s)", entry.Decision, tt.want, entry.Reason)
 					}
 				})
 			}
@@ -157,34 +156,89 @@ func TestPolicyDecisionServiceAllowsOneAgentAndDeniesAnotherAcrossGatewayFamilie
 	}
 }
 
-func TestObserverFailsClosedOnUnknownCapabilityAndPolicyErrorWithoutAffectingCaller(t *testing.T) {
+func TestPolicyDecisionServiceUsesDeclaredPermissionContract(t *testing.T) {
+	allow := toolpolicy.SettingAllow
+	agent := observerUUID(1)
+	service := NewService(
+		observerPolicy{
+			settings: map[[16]byte]toolpolicy.Setting{agent.Bytes: toolpolicy.SettingDeny},
+			declared: &allow,
+		},
+		nil,
+		nil,
+	)
+
+	entry := service.Decide(context.Background(), Call{
+		WorkspaceID:           observerUUID(9),
+		AgentID:               agent,
+		RuntimeID:             observerUUID(8),
+		CanonicalCapabilityID: "platform:hooks:read",
+		ObservedToolName:      "hooks:read",
+		EvidenceLevel:         availabilityevidence.LevelVerified,
+	})
+	if entry.PolicyDecision != PolicyAllow || entry.Decision != DecisionAllow {
+		t.Fatalf("declared contract decision = %+v, want allow", entry)
+	}
+}
+
+func TestDecisionServiceFailsClosedOnUnknownCapabilityAndPolicyError(t *testing.T) {
 	writer := &observerWriter{err: errors.New("ledger unavailable")}
 	policyCalls := 0
-	observer := NewObserver(
+	service := NewService(
 		observerPolicy{err: errors.New("policy unavailable"), calls: &policyCalls},
 		observerEvidence{},
 		writer,
 	)
 
-	entry := observer.Observe(context.Background(), Call{
+	entry := service.Decide(context.Background(), Call{
 		WorkspaceID:      observerUUID(9),
 		AgentID:          observerUUID(1),
 		RuntimeID:        observerUUID(8),
 		ObservedToolName: "mystery_tool",
-		LegacyDecision:   DecisionAllow,
-		LegacyPath:       "allow_gate_off",
 	})
 
 	if entry.PolicyDecision != PolicyError {
 		t.Fatalf("policy decision = %q, want error", entry.PolicyDecision)
 	}
-	if entry.ShadowDecision != DecisionDeny || !entry.Differs {
-		t.Fatalf("shadow result = (%q, %t), want deny and diff", entry.ShadowDecision, entry.Differs)
+	if entry.Decision != DecisionDeny {
+		t.Fatalf("decision result = %q, want deny", entry.Decision)
 	}
 	if len(writer.entries) != 1 {
 		t.Fatalf("writer entries = %d, want 1 best-effort attempt", len(writer.entries))
 	}
 	if policyCalls != 0 {
 		t.Fatalf("policy calls = %d, want 0 for an uncanonicalized tool", policyCalls)
+	}
+}
+
+func TestDecisionServiceFailsClosedOnCanonicalPolicyLookupError(t *testing.T) {
+	policyCalls := 0
+	service := NewService(
+		observerPolicy{err: errors.New("policy unavailable"), calls: &policyCalls},
+		nil,
+		&observerWriter{},
+	)
+
+	entry := service.Decide(context.Background(), Call{
+		WorkspaceID:           observerUUID(9),
+		AgentID:               observerUUID(1),
+		RuntimeID:             observerUUID(8),
+		CanonicalCapabilityID: "platform:web_fetch",
+		ObservedToolName:      "web_fetch",
+		EvidenceLevel:         availabilityevidence.LevelDiscovered,
+	})
+
+	if policyCalls != 1 {
+		t.Fatalf("policy calls = %d, want one canonical lookup", policyCalls)
+	}
+	if entry.PolicyDecision != PolicyError || entry.Decision != DecisionDeny {
+		t.Fatalf("lookup error = policy %q decision %q, want error/deny",
+			entry.PolicyDecision, entry.Decision)
+	}
+}
+
+func TestDisabledPermissionIsAClosedDecision(t *testing.T) {
+	if got := policyDecisionFromSetting(toolpolicy.SettingDisable); got != PolicyDeny {
+		t.Fatalf("disabled permission = %q, want deny", got)
 	}
 }

@@ -39,6 +39,10 @@ import {
   type RoleDecision,
   type RolePermissions,
 } from "../core";
+import {
+  isFileWriteToolKey,
+  presentCapabilityRows,
+} from "./capability-presentation";
 
 export function PermissionRoles({ workspaceId }: { workspaceId: string }) {
   const roles = useQuery(permissionRolesOptions(workspaceId));
@@ -53,7 +57,7 @@ export function PermissionRoles({ workspaceId }: { workspaceId: string }) {
   }, [roles.data, selectedRoleId]);
 
   return (
-    <section className="rounded-lg border bg-card" aria-labelledby="permission-roles-heading">
+    <section className="overflow-hidden rounded-lg border bg-card" aria-labelledby="permission-roles-heading">
       <div className="flex flex-wrap items-start justify-between gap-3 border-b p-4">
         <div>
           <div className="flex items-center gap-2">
@@ -85,13 +89,13 @@ export function PermissionRoles({ workspaceId }: { workspaceId: string }) {
         </p>
       ) : (
         <div className="grid min-h-64 md:grid-cols-[16rem_minmax(0,1fr)]">
-          <div className="border-b p-2 md:border-b-0 md:border-r">
+          <div className="flex gap-2 overflow-x-auto border-b p-2 md:block md:border-b-0 md:border-r">
             {(roles.data ?? []).map((role) => (
               <button
                 key={role.id}
                 type="button"
                 onClick={() => setSelectedRoleId(role.id)}
-                className={`mb-1 w-full rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                className={`w-48 shrink-0 rounded-md px-3 py-2 text-left text-sm transition-colors md:mb-1 md:w-full ${
                   selectedRoleId === role.id ? "bg-accent" : "hover:bg-muted"
                 }`}
               >
@@ -232,11 +236,13 @@ function RoleDetails({
           <p className="text-sm text-muted-foreground">This Role currently inherits every permission.</p>
         ) : (
           <div className="flex flex-wrap gap-2">
-            {roleKeys.map((key) => {
-              const decisions = (role.permissions[key] ?? []).map((rule) => rule.setting);
+            {presentRolePermissionKeys(roleKeys).map(({ key, label, keys }) => {
+              const decisions = keys.flatMap((permissionKey) =>
+                (role.permissions[permissionKey] ?? []).map((rule) => rule.setting),
+              );
               return (
                 <span key={key} className="inline-flex items-center gap-1.5 rounded-md border px-2 py-1 text-xs">
-                  <span className="font-mono">{key}</span>
+                  <span className={keys.length > 1 ? "" : "font-mono"}>{label}</span>
                   <DecisionBadge decision={mostRestrictive(decisions)} />
                 </span>
               );
@@ -251,7 +257,7 @@ function RoleDetails({
         </h5>
         <div className="space-y-2">
           {(assignments.data ?? []).map((assignment) => (
-            <div key={`${assignment.subject_type}:${assignment.subject_id}`} className="flex items-center gap-2 rounded-md border px-3 py-2 text-sm">
+            <div key={`${assignment.subject_type}:${assignment.subject_id}`} className="flex flex-wrap items-center gap-2 rounded-md border px-3 py-2 text-sm">
               <Badge variant="outline">{assignment.subject_type}</Badge>
               <span className="min-w-0 flex-1 truncate">
                 {assignment.subject_display_name || assignment.subject_id}
@@ -367,10 +373,15 @@ function RoleEditor({
   const [permissions, setPermissions] = useState<RolePermissions>(role?.permissions ?? {});
   const saving = create.isPending || update.isPending;
 
-  const rows = useMemo(() => {
+  const presentedRows = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return (catalog.data ?? []).filter((row) =>
-      !needle || `${row.title} ${row.tool_key} ${row.category}`.toLowerCase().includes(needle),
+    return presentCapabilityRows(catalog.data ?? []).filter((presented) =>
+      !needle ||
+      `${presented.title} ${presented.rows
+        .map((row) => `${row.title} ${row.tool_key} ${row.category}`)
+        .join(" ")}`
+        .toLowerCase()
+        .includes(needle),
     );
   }, [catalog.data, search]);
 
@@ -384,7 +395,7 @@ function RoleEditor({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[85vh] max-w-3xl flex-col overflow-hidden">
+      <DialogContent className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-3xl flex-col overflow-hidden sm:max-h-[85vh]">
         <DialogHeader>
           <DialogTitle>{role ? `Edit ${role.name}` : "Create role"}</DialogTitle>
           <DialogDescription>
@@ -410,27 +421,52 @@ function RoleEditor({
             onChange={(event) => setSearch(event.target.value)}
           />
           <div className="max-h-[48vh] overflow-y-auto rounded-md border">
-            {rows.map((row) => {
-              const decision = capabilityWideDecision(permissions[row.tool_key]);
-              const hasScoped = (permissions[row.tool_key] ?? []).some((rule) => rule.resource_pattern);
+            {presentedRows.map((presented) => {
+              const decisions = presented.rows.map((row) =>
+                capabilityWideDecision(permissions[row.tool_key]),
+              );
+              const decision = decisions.every((value) => value === decisions[0])
+                ? decisions[0]!
+                : "mixed";
+              const hasScoped = presented.rows.some((row) =>
+                (permissions[row.tool_key] ?? []).some((rule) => rule.resource_pattern),
+              );
               return (
-                <div key={row.tool_key} className="grid items-center gap-2 border-b px-3 py-2 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_9rem]">
+                <div key={presented.key} className="grid items-center gap-2 border-b px-3 py-2 last:border-b-0 sm:grid-cols-[minmax(0,1fr)_9rem]">
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{row.title || row.tool_key}</p>
+                    <p className="truncate text-sm font-medium">{presented.title}</p>
                     <p className="truncate text-xs text-muted-foreground">
-                      {row.category} · {row.tool_key}{hasScoped ? " · scoped rules retained" : ""}
+                      {presented.rows.length > 1
+                        ? presented.rows
+                            .map((row) => row.tool_key.replace(/^tools:/i, ""))
+                            .join(" · ")
+                        : `${presented.rows[0]!.category} · ${presented.rows[0]!.tool_key}`}
+                      {hasScoped ? " · scoped rules retained" : ""}
                     </p>
                   </div>
                   <Select
                     value={decision}
-                    onValueChange={(value) => setPermissions((current) =>
-                      withRoleDecision(current, row.tool_key, (value ?? "inherit") as DraftRoleDecision),
-                    )}
+                    onValueChange={(value) =>
+                      setPermissions((current) =>
+                        presented.rows.reduce(
+                          (next, row) =>
+                            withRoleDecision(
+                              next,
+                              row.tool_key,
+                              (value ?? "inherit") as DraftRoleDecision,
+                            ),
+                          current,
+                        ),
+                      )
+                    }
                   >
-                    <SelectTrigger aria-label={`${row.title || row.tool_key} decision`}>
+                    <SelectTrigger aria-label={`${presented.title} decision`}>
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
+                      {decision === "mixed" ? (
+                        <SelectItem value="mixed" disabled>Mixed</SelectItem>
+                      ) : null}
                       <SelectItem value="inherit">Inherit</SelectItem>
                       <SelectItem value="allow">Allow</SelectItem>
                       <SelectItem value="ask">Ask</SelectItem>
@@ -456,6 +492,28 @@ function RoleEditor({
 
 function capabilityWideDecision(rules: RolePermissions[string] | undefined): DraftRoleDecision {
   return rules?.find((rule) => rule.resource_pattern === "")?.setting ?? "inherit";
+}
+
+function presentRolePermissionKeys(keys: string[]) {
+  const fileWriteKeys = keys.filter(isFileWriteToolKey);
+  const combineFileWrite = fileWriteKeys.length >= 2;
+  const presented: Array<{ key: string; label: string; keys: string[] }> = [];
+  let insertedFileWrite = false;
+  for (const key of keys) {
+    if (combineFileWrite && isFileWriteToolKey(key)) {
+      if (!insertedFileWrite) {
+        presented.push({
+          key: "file-write",
+          label: "Create and edit files",
+          keys: fileWriteKeys,
+        });
+        insertedFileWrite = true;
+      }
+      continue;
+    }
+    presented.push({ key, label: key, keys: [key] });
+  }
+  return presented;
 }
 
 function mostRestrictive(decisions: RoleDecision[]): RoleDecision {

@@ -142,8 +142,15 @@ describe("CerebroCapabilitiesTab", () => {
 
     renderTab();
 
+    expect(
+      await screen.findByRole("heading", { name: "What can this agent do?" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("General access")).toBeInTheDocument();
+    expect(screen.getByText("One task")).toBeInTheDocument();
+    expect(screen.getByText("Change access")).toBeInTheDocument();
+
     // Every section is present.
-    expect(await screen.findByText("Skills")).toBeInTheDocument();
+    expect(screen.getByText("Skills")).toBeInTheDocument();
     expect(screen.getByText("Tools")).toBeInTheDocument();
     expect(screen.getByText("Repos")).toBeInTheDocument();
     expect(screen.getByText("Connections")).toBeInTheDocument();

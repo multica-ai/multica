@@ -1,13 +1,11 @@
 // Package toolpolicy implements the unified per-tool permission chain for the
 // cerebro control plane (FIR-2230, phase 1 — "the engine").
 //
-// Before this package, three separate systems decided whether an agent could
-// use a tool: the workspace-grant resolver (capability patterns), the per-tool
-// runtime grant tables (boolean enabled + user/group access), and the group
-// permission service (capability whitelists). Each computed its own answer and
-// none expressed the product's actual model: every individual CLI tool and
-// every individual MCP action is governed on its own, at five stacked layers,
-// where each layer can only tighten the one below it.
+// Before this package, separate systems decided whether an agent could use a
+// tool: a workspace-grant resolver, per-tool runtime grants, and group
+// capability whitelists. The obsolete grant resolver is now retired; this chain
+// is the canonical decision path for individual CLI, MCP, and Registry actions
+// across five stacked layers.
 //
 // The layers, from base to ceiling, are:
 //

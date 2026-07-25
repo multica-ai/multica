@@ -38,8 +38,9 @@ const (
 	// LegacyPathConnectionPerTool is the per-tool connection access surface
 	// (a tool reachable because its connection is attached to the agent).
 	LegacyPathConnectionPerTool LegacyPath = "connection_per_tool"
-	// LegacyPathCredentialGrant is the credential grant floor (deny-by-default
-	// grants). The chain caps layer (adminCap/resolveCap) tightens on top of it.
+	// LegacyPathCredentialGrant names the historical credential grant surface
+	// for audit-report compatibility. Credential checks now use a direct
+	// deny-by-default floor plus the canonical tool-policy chain.
 	LegacyPathCredentialGrant LegacyPath = "credential_grant"
 )
 
