@@ -307,6 +307,10 @@ vi.mock("@multica/core/issues/config", () => ({
   ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled", "archived"],
   STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled", "archived"],
   BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+  CLOSED_STATUSES: ["done", "cancelled", "archived"],
+  COMPLETED_STATUSES: ["done", "cancelled"],
+  isClosedStatus: (s: string) => ["done", "cancelled", "archived"].includes(s),
+  isCompletedStatus: (s: string) => ["done", "cancelled"].includes(s),
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
     todo: { label: "Todo", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -1613,6 +1617,36 @@ describe("IssueDetail (shared)", () => {
       const due = screen.getByText("Jan 1");
       expect(due.closest("span")?.className).not.toContain("text-destructive");
       expect(due.closest("span")?.className).toContain("text-muted-foreground");
+    });
+
+    it("dims archived sub-issue titles like other closed statuses", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 11,
+            identifier: "TES-11",
+            title: "Retired spike",
+            status: "archived",
+          }),
+          subIssue({
+            id: "child-2",
+            number: 12,
+            identifier: "TES-12",
+            title: "Active work",
+            status: "in_progress",
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      const archivedTitle = await screen.findByText("Retired spike");
+      expect(archivedTitle.className).toContain("text-muted-foreground");
+      // Active sibling stays bright (dims only on row hover, not by default).
+      const activeTitle = screen.getByText("Active work");
+      expect(activeTitle.className).not.toContain("text-muted-foreground");
+      expect(activeTitle.className).toContain("group-hover/row:text-foreground");
     });
   });
 });

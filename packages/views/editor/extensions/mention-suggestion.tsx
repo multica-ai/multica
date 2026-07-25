@@ -33,6 +33,7 @@ import { useT } from "../../i18n";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { cn } from "@multica/ui/lib/utils";
 import type { IssueStatus, ProjectStatus } from "@multica/core/types";
+import { isClosedStatus } from "@multica/core/issues/config";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
@@ -394,9 +395,11 @@ function MentionRow({
 }) {
   const { t } = useT("editor");
   if (item.type === "issue") {
-    // Visually dim closed issues (done/cancelled) so they're distinguishable
-    // from active ones in the suggestion list — they're still selectable.
-    const isClosed = item.status === "done" || item.status === "cancelled";
+    // Visually dim closed issues (done/cancelled/archived) so they're
+    // distinguishable from active ones in the suggestion list — they're still
+    // selectable. Archived reads as closed but keeps its
+    // own icon, so it isn't mistaken for a completed issue.
+    const isClosed = isClosedStatus(item.status as IssueStatus);
     return (
       <button
         type="button"
