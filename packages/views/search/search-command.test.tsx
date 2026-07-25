@@ -783,4 +783,51 @@ describe("SearchCommand", () => {
       ),
     ).toBeInTheDocument();
   });
+
+  it("lets Home/End edit the query caret instead of hijacking result navigation", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+
+    const input = screen.getByPlaceholderText(
+      "Type a command or search...",
+    ) as HTMLInputElement;
+    await user.type(input, "new");
+
+    // "new" surfaces New Issue + New Project, so cmdk has a multi-item list.
+    await waitFor(() => {
+      expect(
+        screen.getByText((_, el) => el?.textContent === "New Issue" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+      expect(
+        screen.getByText((_, el) => el?.textContent === "New Project" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+    });
+
+    const selectedValue = () =>
+      document
+        .querySelector('[cmdk-item=""][aria-selected="true"]')
+        ?.getAttribute("data-value") ?? null;
+
+    // cmdk auto-selects the first item; Arrow keys must still move that selection.
+    const first = selectedValue();
+    expect(first).not.toBeNull();
+
+    await user.keyboard("{ArrowDown}");
+    expect(selectedValue()).not.toBe(first);
+
+    await user.keyboard("{ArrowUp}");
+    expect(selectedValue()).toBe(first);
+
+    // Home moves the text caret to the start — it must NOT jump the result list.
+    await user.keyboard("{Home}");
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(0);
+    expect(selectedValue()).toBe(first);
+
+    // End moves the caret to the end — again leaving the result selection alone.
+    await user.keyboard("{End}");
+    expect(input.selectionStart).toBe(input.value.length);
+    expect(input.selectionEnd).toBe(input.value.length);
+    expect(selectedValue()).toBe(first);
+  });
 });

@@ -50,6 +50,24 @@ export interface UpdateIssueRequest {
   handoff_note?: string;
 }
 
+/**
+ * Server-owned drag intent. The client may use a provisional position for its
+ * optimistic animation, but the canonical position is derived from these
+ * workspace-scoped neighbors by `POST /api/issues/:id/move`.
+ */
+export interface MoveIssueRequest
+  extends Pick<
+    UpdateIssueRequest,
+    | "status"
+    | "assignee_type"
+    | "assignee_id"
+    | "parent_issue_id"
+    | "project_id"
+  > {
+  before_id: string | null;
+  after_id: string | null;
+}
+
 /** Inputs to `POST /api/issues/preview-trigger`. A nil prospective field means
  *  "leave unchanged"; `isCreate` previews a not-yet-persisted issue. */
 export interface IssueTriggerPreviewParams {
@@ -217,6 +235,192 @@ export interface IssueAssigneeGroup {
 /** Raw backend response shape for `GET /api/issues/grouped?group_by=assignee`. */
 export interface GroupedIssuesResponse {
   groups: IssueAssigneeGroup[];
+}
+
+// Server-authoritative Table query contract. Membership, grouping and counts
+// are evaluated against the complete result set; the browser only owns view
+// state such as collapsed groups/parents.
+export type IssueTableScope =
+  | { kind: "workspace"; assignee_types?: IssueAssigneeType[] }
+  | { kind: "project"; project_id: string }
+  | { kind: "assignee"; actor: IssueActorRef }
+  | { kind: "creator"; actor: IssueActorRef }
+  | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
+
+export interface IssueTableFilters {
+  statuses?: IssueStatus[];
+  priorities?: IssuePriority[];
+  assignees?: IssueActorRef[];
+  include_no_assignee?: boolean;
+  creators?: IssueActorRef[];
+  project_ids?: string[];
+  include_no_project?: boolean;
+  label_ids?: string[];
+  properties?: Record<string, string[]>;
+  date?: {
+    field: "created_at" | "updated_at";
+    start: string;
+    end: string;
+  };
+  working_only?: boolean;
+  /** Match the running-task issue projection returned by
+   *  `/api/working-agents`. An explicit empty list matches nothing. */
+  working_issue_ids?: string[];
+  include_sub_issues?: boolean;
+}
+
+export type IssueTableSortField =
+  | "position"
+  | "status"
+  | "priority"
+  | "title"
+  | "created_at"
+  | "updated_at"
+  | "start_date"
+  | "due_date"
+  | `property:${string}`;
+
+export interface IssueTableQuerySpec {
+  scope: IssueTableScope;
+  filters: IssueTableFilters;
+  search?: string;
+  sort: {
+    field: IssueTableSortField;
+    direction: "asc" | "desc";
+  };
+}
+
+export type IssueTableGroupSpec =
+  | { kind: "none" }
+  | { kind: "status" }
+  | { kind: "assignee" }
+  | { kind: "project" }
+  | { kind: "parent" }
+  | {
+      kind: "compound";
+      primary: "assignee" | "project" | "parent";
+      secondary: "status";
+      /** Optional visible secondary buckets. When present, the server pages
+       * only primary groups that contain at least one matching card and
+       * returns `total` for that complete visible result set. */
+      secondary_values?: IssueStatus[];
+    }
+  | { kind: "property"; property_id: string; include_empty?: boolean };
+
+/** Response-side actor reference. Kept open for forward compatibility: an
+ * installed desktop client may receive a new actor kind from a newer server. */
+export interface IssueTableActorRef {
+  type: string;
+  id: string;
+}
+
+export interface IssueTableParentRef {
+  id: string;
+  number: number;
+  identifier: string;
+  title: string;
+  status: string;
+}
+
+export type IssueTableGroupValue =
+  | { kind: "status"; status: string }
+  | { kind: "assignee"; actor: IssueTableActorRef | null }
+  | { kind: "project"; project_id: string | null }
+  | {
+      kind: "parent";
+      parent_id: string | null;
+      parent: IssueTableParentRef | null;
+      value_state: "value" | "unavailable" | "unset";
+    }
+  | {
+      kind: "property";
+      property_id: string;
+      value?: string | boolean | null;
+      value_state: "value" | "unavailable" | "unset";
+    };
+
+export interface IssueTableGroupDescriptor {
+  key: string;
+  value: IssueTableGroupValue;
+  count: number;
+  /** Present for compound groups. These opaque keys can be passed straight
+   * back to `/table/rows`; clients must not reconstruct them. */
+  secondary_groups?: IssueTableGroupDescriptor[];
+}
+
+export interface IssueTablePageRequest {
+  limit?: number;
+  cursor?: string | null;
+}
+
+export interface IssueTableGroupsRequest {
+  query: IssueTableQuerySpec;
+  group: Exclude<IssueTableGroupSpec, { kind: "none" }>;
+  page?: IssueTablePageRequest;
+}
+
+export interface IssueTableGroupsResponse {
+  query_fingerprint: string;
+  total: number;
+  groups: IssueTableGroupDescriptor[];
+  next_cursor: string | null;
+}
+
+export interface IssueTableRowsRequest {
+  query: IssueTableQuerySpec;
+  group: IssueTableGroupSpec;
+  group_key: string | null;
+  hierarchy: { enabled: boolean };
+  parent_id: string | null;
+  page?: IssueTablePageRequest;
+}
+
+export interface IssueTableRow {
+  issue: Issue;
+  direct_child_count: number;
+}
+
+export interface IssueTableRowsResponse {
+  query_fingerprint: string;
+  group_key: string | null;
+  parent_id: string | null;
+  total: number;
+  rows: IssueTableRow[];
+  branch_total: number;
+  next_cursor: string | null;
+}
+
+export type IssueTableFacetSpec =
+  | { kind: "status" }
+  | { kind: "priority" }
+  | { kind: "assignee" }
+  | { kind: "creator" }
+  | { kind: "project" }
+  | { kind: "label" }
+  | { kind: "property"; property_id: string };
+
+export interface IssueTableFacetsRequest {
+  query: IssueTableQuerySpec;
+  facets: IssueTableFacetSpec[];
+  /** Existing callers default to true. Count-only UIs can skip the extra scan. */
+  include_total?: boolean;
+}
+
+export interface IssueTableFacetValue {
+  key: string;
+  count: number;
+}
+
+export interface IssueTableFacet {
+  kind: IssueTableFacetSpec["kind"];
+  property_id?: string;
+  values: IssueTableFacetValue[];
+}
+
+export interface IssueTableFacetsResponse {
+  query_fingerprint: string;
+  total: number;
+  facets: IssueTableFacet[];
 }
 
 /** Per-status bucket in the paginated issue cache. `total` is the server count (all pages), not the length of `issues`. */

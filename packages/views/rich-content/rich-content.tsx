@@ -48,7 +48,7 @@ import {
   markdownSanitizeSchema,
   markdownUrlTransform,
 } from "@multica/ui/markdown";
-import { AppLink } from "../navigation";
+import { AppLink, useAppOrigin } from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { useResolveIssueIdentifier } from "../issues/hooks";
 import { ProjectChip } from "../projects/components/project-chip";
@@ -163,6 +163,7 @@ function childrenToLabel(children: ReactNode): string | undefined {
 
 function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   const slug = useWorkspaceSlug();
+  const appOrigin = useAppOrigin();
 
   if (href?.startsWith("slash://skill/")) {
     return <span className="slash-command">{children}</span>;
@@ -185,13 +186,14 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
     return <span className="mention">{children}</span>;
   }
 
-  // Regular links — open directly on click
+  // Regular links — open directly on click. A URL pointing back at this
+  // deployment routes in-app rather than out to the browser.
   return (
     <a
       href={href}
       onClick={(e) => {
         e.preventDefault();
-        if (href) openLink(href, slug);
+        if (href) openLink(href, slug, appOrigin);
       }}
     >
       {children}

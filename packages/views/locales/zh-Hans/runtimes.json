@@ -400,6 +400,8 @@
     "unmapped_notice_other": "有 {{count}} 个模型没有维护价格，相关 token 未计入费用统计。",
     "custom_pricing": {
       "open_button": "设置自定义价格",
+      "edit_button": "编辑自定义价格",
+      "active_notice": "当前时间范围内有模型按你设置的自定义价格计费。",
       "title": "自定义模型价格",
       "description": "为我们未维护官方价格的模型填入每百万 token 的费率。仅保存在本机。",
       "empty": "目前没有需要设置价格的模型。",

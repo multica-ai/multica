@@ -198,6 +198,27 @@ export interface AgentRunCount {
   run_count: number;
 }
 
+// Privacy-safe display summary returned by GET /api/working-agents. The
+// endpoint is workspace-scoped and includes each user-authored agent with at
+// least one running task exactly once.
+export interface WorkspaceWorkingAgent {
+  id: string;
+  name: string;
+  avatar_url: string | null;
+  running_task_count: number;
+  /** Distinct issues referenced by this agent's currently running tasks after
+   *  applying the endpoint's type/scope/relation filters. */
+  issue_ids: string[];
+}
+
+export type WorkspaceWorkingAgentType = "issue" | "autopilot" | "chat";
+
+export type WorkspaceWorkingAgentMineRelation =
+  | "assigned"
+  | "created"
+  | "involved"
+  | "any";
+
 /**
  * A departed-member-safe user ref resolved from the global user table. `name` /
  * `email` / `avatar_url` are absent until the server hydrates them (present on
@@ -443,6 +464,12 @@ export interface Agent {
    * (MUL-2339).
    */
   thinking_level?: string;
+  /**
+   * Runtime-native Codex service tier (for example `priority`, displayed as
+   * Fast). Empty/undefined means no override: local Codex configuration and
+   * account defaults remain authoritative.
+   */
+  service_tier?: string;
   owner_id: string | null;
   skills: AgentSkillSummary[];
   /** Runtime-local skills this agent must not inherit. Older servers omit it. */
@@ -510,6 +537,8 @@ export interface CreateAgentRequest {
   model?: string;
   /** Optional runtime-native reasoning/effort token. See `Agent.thinking_level`. */
   thinking_level?: string;
+  /** Optional Codex service-tier catalog ID. See `Agent.service_tier`. */
+  service_tier?: string;
   /** Optional template slug used by the onboarding agent picker. Surfaced
    *  as the `template` property on the `agent_created` PostHog event. */
   template?: string;
@@ -520,6 +549,13 @@ export interface CreateAgentRequest {
 export interface AgentBuilderSession {
   session_id: string;
   builder_agent_id: string;
+  runtime_id: string;
+}
+
+/** Result of rebinding a live builder conversation to another runtime.
+ *  `runtime_id` is the runtime the server actually bound — the caller must
+ *  wait for it before showing the new runtime as selected. */
+export interface AgentBuilderRuntimeSwitch {
   runtime_id: string;
 }
 
@@ -664,6 +700,11 @@ export interface UpdateAgentRequest {
    *     runtime's provider enum, rejected with 400 if not recognised
    */
   thinking_level?: string;
+  /**
+   * Codex service-tier override. Omitted preserves the saved value, `""`
+   * clears it, and a non-empty value stores a runtime-catalog ID.
+   */
+  service_tier?: string;
 }
 
 /**
@@ -750,9 +791,27 @@ export interface IssueUsageSummary {
   total_output_tokens: number;
   total_cache_read_tokens: number;
   total_cache_write_tokens: number;
+  // Optional unlike the usage-row types: `getIssueUsage` returns this shape
+  // unvalidated (no zod schema), so nothing guarantees the field is present
+  // when the backend is older than the cost split.
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
   task_count: number;
 }
 
+// `cost_usd_ticks` + `uncosted_*`: the cost split every usage row carries.
+// All five are optional: a backend older than the split sends none of them,
+// and `undefined` has to stay distinguishable from a real 0 (see below).
+// The provider priced the rows behind `cost_usd_ticks` itself (1e-10 USD);
+// `uncosted_*` are the tokens it did not price, and are the only ones that
+// should go through the client's rate table. The `uncosted_*` fields are
+// optional because a backend older than the split omits them — `undefined`
+// there means "estimate from the full token counts", which is not the same as
+// a real 0 ("nothing left to estimate"). See estimateCost in
+// packages/views/runtimes/utils.ts.
 export interface RuntimeUsage {
   runtime_id: string;
   date: string;
@@ -762,6 +821,11 @@ export interface RuntimeUsage {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
 }
 
 export interface RuntimeHourlyActivity {
@@ -782,6 +846,11 @@ export interface RuntimeUsageByAgent {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
   task_count: number;
 }
 
@@ -795,6 +864,11 @@ export interface RuntimeUsageByHour {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
   task_count: number;
 }
 
@@ -812,6 +886,11 @@ export interface DashboardUsageDaily {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
   task_count: number;
 }
 
@@ -826,6 +905,11 @@ export interface DashboardUsageByAgent {
   output_tokens: number;
   cache_read_tokens: number;
   cache_write_tokens: number;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
   task_count: number;
 }
 
@@ -881,6 +965,17 @@ export interface RuntimeModel {
    * picker for this model". See MUL-2339.
    */
   thinking?: RuntimeModelThinking;
+  /** Runtime-native execution tiers advertised for this exact model. */
+  service_tiers?: RuntimeModelServiceTier[];
+}
+
+export interface RuntimeModelServiceTier {
+  /** Catalog ID sent to the provider protocol unchanged. */
+  id: string;
+  /** Provider-owned display name, for example `Fast`. */
+  name: string;
+  /** Optional provider-owned helper copy. */
+  description?: string;
 }
 
 export interface RuntimeModelThinking {

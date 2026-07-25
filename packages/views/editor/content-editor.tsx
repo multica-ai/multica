@@ -61,6 +61,7 @@ import { uploadAndInsertFile } from "./extensions/file-upload";
 import { configStore } from "@multica/core/config";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { repairEmptyListItems } from "./utils/repair-list-items";
+import { useAppOrigin } from "../navigation";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { posFromAnchor, type TextAnchor } from "./text-anchor";
@@ -397,6 +398,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const workspaceSlugRef = useRef(workspaceSlug);
     workspaceSlugRef.current = workspaceSlug;
 
+    // Same reasoning for this deployment's app origin: it tells openLink which
+    // absolute URLs address this app and must route in-app instead of opening
+    // the system browser.
+    const appOrigin = useAppOrigin();
+    const appOriginRef = useRef(appOrigin);
+    appOriginRef.current = appOrigin;
+
     // Keep refs in sync without recreating editor
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
@@ -538,7 +546,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             if (!href || isMentionHref(href)) return false;
 
             event.preventDefault();
-            openLink(href, workspaceSlugRef.current);
+            openLink(href, workspaceSlugRef.current, appOriginRef.current);
             return true;
           },
         },

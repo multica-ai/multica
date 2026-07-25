@@ -14,6 +14,7 @@ import {
   type AgentAvailability,
 } from "@multica/core/agents";
 import type { MemberWithUser } from "@multica/core/types";
+import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
   AGENT_SCOPES,
@@ -154,7 +155,7 @@ export function AgentListToolbar({
     if (rt) {
       const entry = runtimeOptions.get(rt.id);
       if (entry) entry.count += 1;
-      else runtimeOptions.set(rt.id, { name: rt.name, count: 1 });
+      else runtimeOptions.set(rt.id, { name: runtimeDisplayLabel(rt), count: 1 });
     }
     const a = effectiveAccessScope(row.agent.permission_mode, row.agent.invocation_targets);
     accessCounts.set(a, (accessCounts.get(a) ?? 0) + 1);

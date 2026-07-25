@@ -443,10 +443,23 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					finalStatus = "aborted"
 					finalError = "grok cancelled the prompt"
 				}
+				// `session/load` carries no model id (only `session/new`
+				// does), so a resumed session with no configured model would
+				// otherwise bucket its whole spend under "unknown" — which
+				// prices at $0 because no pricing row matches. The turn's
+				// own `_meta.modelId` is authoritative; use it.
+				if effectiveModel == "" {
+					effectiveModel = pr.modelID
+				}
 				c.usageMu.Lock()
 				c.usage.InputTokens += pr.usage.InputTokens
 				c.usage.OutputTokens += pr.usage.OutputTokens
 				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
+				// xAI prices the turn itself and reports the result here.
+				// Carrying it through is the only way the ≥200K long-context
+				// surcharge reaches the bill — token counts alone cannot
+				// reconstruct which tier a request hit.
+				c.usage.CostUSDTicks += pr.usage.CostUSDTicks
 				c.usageMu.Unlock()
 			default:
 			}

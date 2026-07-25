@@ -38,6 +38,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import {
   PreviewTooLargeError,
   PreviewUnsupportedError,
@@ -46,6 +47,10 @@ import { Download, ExternalLink, FileText, Loader2, X } from "lucide-react";
 import type { Attachment } from "@multica/core/types";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
+import {
+  UI_EASE_OUT,
+  UI_MOTION_DURATION,
+} from "@multica/ui/lib/motion";
 import { useT } from "../i18n";
 import { useNavigation } from "../navigation";
 import { openExternal } from "../platform";
@@ -162,8 +167,12 @@ export interface AttachmentPreviewHandle {
 
 export function useAttachmentPreview(): AttachmentPreviewHandle {
   const [current, setCurrent] = useState<PreviewSource | null>(null);
+  const [previewOpen, setPreviewOpen] = useState(false);
 
-  const open = useCallback((source: PreviewSource) => setCurrent(source), []);
+  const open = useCallback((source: PreviewSource) => {
+    setCurrent(source);
+    setPreviewOpen(true);
+  }, []);
   const tryOpen = useCallback((source: PreviewSource) => {
     const state = normalize(source);
     const kind = getPreviewKind(state.contentType, state.filename);
@@ -171,16 +180,22 @@ export function useAttachmentPreview(): AttachmentPreviewHandle {
     // URL-only sources cannot drive text kinds — the /content proxy is ID-keyed.
     if (source.kind === "url" && !URL_ONLY_KINDS.has(kind)) return false;
     setCurrent(source);
+    setPreviewOpen(true);
     return true;
   }, []);
 
-  const modal = current ? (
-    <AttachmentPreviewModal
-      source={current}
-      open
-      onClose={() => setCurrent(null)}
-    />
-  ) : null;
+  const modal = useMemo(
+    () =>
+      current ? (
+        <AttachmentPreviewModal
+          source={current}
+          open={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          onExitComplete={() => setCurrent(null)}
+        />
+      ) : null,
+    [current, previewOpen],
+  );
 
   return useMemo(() => ({ open, tryOpen, modal }), [open, tryOpen, modal]);
 }
@@ -193,9 +208,11 @@ export function AttachmentPreviewModal({
   source,
   open,
   onClose,
-}: AttachmentPreviewModalProps) {
+  onExitComplete,
+}: AttachmentPreviewModalProps & { onExitComplete?: () => void }) {
   const { t } = useT("editor");
   const download = useDownloadAttachment();
+  const shouldReduceMotion = useReducedMotion() ?? false;
   const state = normalize(source);
   // useWorkspaceSlug (not useWorkspacePaths) — returns null outside a
   // workspace route instead of throwing, so the new-tab button just hides.
@@ -244,24 +261,61 @@ export function AttachmentPreviewModal({
     onClose();
   };
 
-  if (!open || typeof document === "undefined") return null;
+  if (typeof document === "undefined") return null;
 
   return createPortal(
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
-      onClick={onClose}
-      role="dialog"
-      aria-modal="true"
-      aria-label={state.filename}
-    >
-      {/* Larger than the create-issue dialog (max-w-4xl, manualDialogContentClass)
-          because PDF / video previews want more room. Capped to viewport
-          minus the surrounding p-4 (1rem each side) so it never overflows
-          the screen on small displays / split panes. */}
-      <div
-        className="flex h-[min(90vh,calc(100vh-2rem))] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-background shadow-xl"
-        onClick={(e) => e.stopPropagation()}
-      >
+    <AnimatePresence onExitComplete={onExitComplete}>
+      {open && (
+        <motion.div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4"
+          onClick={onClose}
+          role="dialog"
+          aria-modal="true"
+          aria-label={state.filename}
+          initial={{ opacity: 0 }}
+          animate={{
+            opacity: 1,
+            transition: {
+              duration: UI_MOTION_DURATION.fast,
+              ease: UI_EASE_OUT,
+            },
+          }}
+          exit={{
+            opacity: 0,
+            transition: {
+              duration: UI_MOTION_DURATION.fast,
+              ease: UI_EASE_OUT,
+            },
+          }}
+        >
+          {/* Larger than the create-issue dialog (max-w-4xl, manualDialogContentClass)
+              because PDF / video previews want more room. Capped to viewport
+              minus the surrounding p-4 (1rem each side) so it never overflows
+              the screen on small displays / split panes. */}
+          <motion.div
+            className="flex h-[min(90vh,calc(100vh-2rem))] w-full max-w-6xl flex-col overflow-hidden rounded-lg bg-background shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+            initial={{
+              opacity: 0,
+              transform: shouldReduceMotion ? "scale(1)" : "scale(0.95)",
+            }}
+            animate={{
+              opacity: 1,
+              transform: "scale(1)",
+              transition: {
+                duration: UI_MOTION_DURATION.standard,
+                ease: UI_EASE_OUT,
+              },
+            }}
+            exit={{
+              opacity: 0,
+              transform: shouldReduceMotion ? "scale(1)" : "scale(0.95)",
+              transition: {
+                duration: UI_MOTION_DURATION.fast,
+                ease: UI_EASE_OUT,
+              },
+            }}
+          >
         <div className="flex items-center gap-2 border-b border-border bg-muted/30 px-4 py-2">
           <FileText className="size-4 shrink-0 text-muted-foreground" />
           <p className="truncate text-sm font-medium">{state.filename}</p>
@@ -300,16 +354,18 @@ export function AttachmentPreviewModal({
             </button>
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-auto bg-background">
-          <PreviewContent
-            kind={kind}
-            source={source}
-            state={state}
-            onDownload={handleDownload}
-          />
-        </div>
-      </div>
-    </div>,
+            <div className="min-h-0 flex-1 overflow-auto bg-background">
+              <PreviewContent
+                kind={kind}
+                source={source}
+                state={state}
+                onDownload={handleDownload}
+              />
+            </div>
+          </motion.div>
+        </motion.div>
+      )}
+    </AnimatePresence>,
     document.body,
   );
 }

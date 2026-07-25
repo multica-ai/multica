@@ -29,6 +29,7 @@ let mockPRs: GitHubPullRequest[] = [];
 function makePR(overrides: Partial<GitHubPullRequest> = {}): GitHubPullRequest {
   return {
     id: "pr-1",
+    provider: "github",
     workspace_id: "ws-1",
     repo_owner: "acme",
     repo_name: "widget",
@@ -43,11 +44,17 @@ function makePR(overrides: Partial<GitHubPullRequest> = {}): GitHubPullRequest {
     closed_at: null,
     pr_created_at: "2026-01-01T00:00:00Z",
     pr_updated_at: "2026-01-01T00:00:00Z",
-    mergeable_state: null,
-    checks_conclusion: null,
+    mergeable: null,
+    merge_state_status: null,
+    snapshot_available: true,
+    checks_rollup: null,
+    checks_total: 0,
     checks_passed: 0,
     checks_failed: 0,
-    checks_pending: 0,
+    checks_running: 0,
+    failed_check_names: [],
+    snapshot_stale: false,
+    snapshot_fetched_at: null,
     additions: 0,
     deletions: 0,
     changed_files: 0,
@@ -80,76 +87,220 @@ describe("PullRequestList sidebar rows", () => {
     expect(row).not.toHaveClass("rounded-lg", "border", "bg-card");
   });
 
-  it("renders All-checks-passed status when only passed counts are non-zero", async () => {
-    mockPRs = [makePR({ checks_passed: 3 })];
+  // --- CI status element ---------------------------------------------------
+
+  it("renders all-checks-passed only when the rollup is success", async () => {
+    mockPRs = [makePR({ checks_rollup: "success", checks_total: 7 })];
     renderList();
     await waitForRender();
-    expect(screen.getByText("All checks passed")).toBeInTheDocument();
+    expect(screen.getByText("All checks passed (7/7)")).toBeInTheDocument();
   });
 
-  it("renders Some-checks-failed when any failed count is non-zero", async () => {
-    mockPRs = [makePR({ checks_failed: 1, checks_passed: 5 })];
+  it("renders 'No checks yet' when the rollup is absent — never passed", async () => {
+    // Acceptance criterion 5: absent snapshot must not read as a green build.
+    mockPRs = [makePR({ checks_rollup: null, checks_passed: 5, checks_total: 5 })];
     renderList();
     await waitForRender();
-    expect(screen.getByText("Some checks failed")).toBeInTheDocument();
+    expect(screen.getByText("No checks yet")).toBeInTheDocument();
+    expect(screen.queryByText(/All checks passed/)).not.toBeInTheDocument();
   });
 
-  it("renders pending status when only pending suites remain", async () => {
-    mockPRs = [makePR({ checks_pending: 2, checks_passed: 1 })];
+  it("hides snapshot status when the GitHub App key is unavailable, even with old data", async () => {
+    mockPRs = [
+      makePR({
+        snapshot_available: false,
+        checks_rollup: "failure",
+        checks_conclusion: "failed",
+        checks_total: 2,
+        checks_failed: 2,
+        mergeable: "conflicting",
+        merge_state_status: "dirty",
+      }),
+    ];
     renderList();
     await waitForRender();
-    expect(screen.getByText("Some checks haven't completed yet")).toBeInTheDocument();
+    expect(screen.queryByText(/failed/)).not.toBeInTheDocument();
+    expect(screen.queryByText("No checks yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("Has merge conflicts")).not.toBeInTheDocument();
   });
 
-  it("renders conflicts status when mergeable_state=dirty", async () => {
-    mockPRs = [makePR({ mergeable_state: "dirty" })];
+  it("renders failed count with the first failing check names", async () => {
+    mockPRs = [
+      makePR({
+        checks_rollup: "failure",
+        checks_total: 7,
+        checks_failed: 2,
+        failed_check_names: ["backend", "e2e"],
+      }),
+    ];
     renderList();
     await waitForRender();
-    expect(screen.getByText("Has merge conflicts")).toBeInTheDocument();
+    const badge = screen.getByText(/2\/7 failed/);
+    expect(badge).toHaveTextContent("2/7 failed");
+    expect(badge).toHaveTextContent("backend, e2e");
   });
 
-  it("renders Ready-to-merge when mergeable=clean and no suites observed", async () => {
-    mockPRs = [makePR({ mergeable_state: "clean" })];
+  it("truncates the failing names to two and appends a +N more count", async () => {
+    mockPRs = [
+      makePR({
+        checks_rollup: "failure",
+        checks_total: 7,
+        checks_failed: 4,
+        failed_check_names: ["a", "b", "c", "d"],
+      }),
+    ];
+    renderList();
+    await waitForRender();
+    const badge = screen.getByText(/4\/7 failed/);
+    expect(badge).toHaveTextContent("4/7 failed");
+    expect(badge).toHaveTextContent("a, b, +2 more");
+  });
+
+  it("renders the running count when the rollup is pending", async () => {
+    mockPRs = [
+      makePR({ checks_rollup: "pending", checks_total: 7, checks_passed: 5, checks_running: 2 }),
+    ];
+    renderList();
+    await waitForRender();
+    const badge = screen.getByText(/2 running/);
+    expect(badge).toHaveTextContent("5/7");
+    expect(badge).toHaveTextContent("2 running");
+  });
+
+  it.each([
+    ["forgejo", "passed", "All checks passed (3/3)"],
+    ["gitea", "pending", "2/3 · 1 running"],
+    ["gitlab", "failed", "1/3 failed"],
+  ] as const)(
+    "preserves %s legacy %s check status",
+    async (provider, conclusion, expected) => {
+      mockPRs = [
+        makePR({
+          provider,
+          snapshot_available: undefined,
+          checks_rollup: undefined,
+          checks_conclusion: conclusion,
+          checks_total: 3,
+          checks_passed: conclusion === "passed" ? 3 : 2,
+          checks_failed: conclusion === "failed" ? 1 : 0,
+          checks_running: conclusion === "pending" ? 1 : 0,
+          checks_pending: conclusion === "pending" ? 1 : 0,
+        }),
+      ];
+      renderList();
+      await waitForRender();
+      expect(screen.getByText(expected, { exact: false })).toBeInTheDocument();
+    },
+  );
+
+  // --- Mergeability element ------------------------------------------------
+
+  it("renders 'Ready to merge' only when the merge state is clean", async () => {
+    mockPRs = [makePR({ merge_state_status: "clean" })];
     renderList();
     await waitForRender();
     expect(screen.getByText("Ready to merge")).toBeInTheDocument();
   });
 
-  it("renders Merged status for merged PRs, suppressing conflict/check text", async () => {
+  it("never infers 'Ready to merge' from mergeable alone", async () => {
+    // Acceptance criterion 8: mergeable without a clean state shows neither.
+    mockPRs = [makePR({ mergeable: "mergeable", merge_state_status: null })];
+    renderList();
+    await waitForRender();
+    expect(screen.queryByText("Ready to merge")).not.toBeInTheDocument();
+    expect(screen.queryByText("Has merge conflicts")).not.toBeInTheDocument();
+  });
+
+  it("renders 'Has merge conflicts' when mergeable is conflicting", async () => {
+    mockPRs = [makePR({ mergeable: "conflicting" })];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText("Has merge conflicts")).toBeInTheDocument();
+  });
+
+  it("shows neither conflict nor ready when the merge verdict is unknown", async () => {
+    // Acceptance criterion 5: unknown mergeability shows neither element.
+    mockPRs = [makePR({ mergeable: "unknown", merge_state_status: "unknown" })];
+    renderList();
+    await waitForRender();
+    expect(screen.queryByText("Has merge conflicts")).not.toBeInTheDocument();
+    expect(screen.queryByText("Ready to merge")).not.toBeInTheDocument();
+  });
+
+  // --- The two elements are independent ------------------------------------
+
+  it("shows a failed CI element and a conflict element together", async () => {
+    mockPRs = [
+      makePR({
+        checks_rollup: "failure",
+        checks_total: 7,
+        checks_failed: 2,
+        failed_check_names: ["backend"],
+        mergeable: "conflicting",
+      }),
+    ];
+    renderList();
+    await waitForRender();
+    expect(screen.getByText(/2\/7 failed/)).toHaveTextContent("2/7 failed");
+    expect(screen.getByText("Has merge conflicts")).toBeInTheDocument();
+  });
+
+  // --- Terminal PRs suppress both elements ---------------------------------
+
+  it("shows neither status element for merged PRs", async () => {
     mockPRs = [
       makePR({
         state: "merged",
-        mergeable_state: "dirty",
-        checks_conclusion: "failed",
+        checks_rollup: "failure",
         checks_failed: 5,
+        checks_total: 5,
+        mergeable: "conflicting",
       }),
     ];
     renderList();
     await waitForRender();
-    expect(screen.getByText("Merged")).toBeInTheDocument();
+    expect(screen.queryByText(/failed/)).not.toBeInTheDocument();
     expect(screen.queryByText("Has merge conflicts")).not.toBeInTheDocument();
-    expect(screen.queryByText("Some checks failed")).not.toBeInTheDocument();
-    expect(screen.queryByText("Conflicts")).not.toBeInTheDocument();
-    expect(screen.queryByText("Checks failed")).not.toBeInTheDocument();
+    expect(screen.queryByText("No checks yet")).not.toBeInTheDocument();
   });
 
-  it("renders Closed-without-merging status for closed PRs, suppressing conflict/check badges", async () => {
+  it("shows neither status element for closed PRs", async () => {
     mockPRs = [
       makePR({
         state: "closed",
-        mergeable_state: "clean",
-        checks_conclusion: "passed",
+        checks_rollup: "success",
         checks_passed: 3,
+        checks_total: 3,
+        merge_state_status: "clean",
       }),
     ];
     renderList();
     await waitForRender();
-    expect(screen.getByText("Closed without merging")).toBeInTheDocument();
+    expect(screen.queryByText(/All checks passed/)).not.toBeInTheDocument();
     expect(screen.queryByText("Ready to merge")).not.toBeInTheDocument();
-    expect(screen.queryByText("All checks passed")).not.toBeInTheDocument();
-    expect(screen.queryByText("No conflicts")).not.toBeInTheDocument();
-    expect(screen.queryByText("Checks passed")).not.toBeInTheDocument();
+    expect(screen.queryByText("No checks yet")).not.toBeInTheDocument();
   });
+
+  // --- Stale snapshot ------------------------------------------------------
+
+  it("greys out the status elements and annotates the age when the snapshot is stale", async () => {
+    mockPRs = [
+      makePR({
+        checks_rollup: "success",
+        checks_total: 3,
+        snapshot_stale: true,
+        snapshot_fetched_at: "2026-01-01T00:00:00Z",
+      }),
+    ];
+    renderList();
+    await waitForRender();
+    const badge = screen.getByText("All checks passed (3/3)");
+    expect(badge).toHaveClass("opacity-60");
+    expect(badge).toHaveAttribute("title");
+    expect(badge.getAttribute("title")).toBeTruthy();
+  });
+
+  // --- Diff stats ----------------------------------------------------------
 
   it("hides stats row when all stats are 0 (legacy backend)", async () => {
     mockPRs = [makePR()];
@@ -174,6 +325,8 @@ describe("PullRequestList sidebar rows", () => {
     await waitForRender();
     expect(screen.getByText("1 file")).toBeInTheDocument();
   });
+
+  // --- Collapse behaviour --------------------------------------------------
 
   it("collapses extra PR rows past the visible limit behind Show more toggle", async () => {
     mockPRs = [

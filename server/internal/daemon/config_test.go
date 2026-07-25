@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -635,7 +636,11 @@ func TestResolveAgentsViaLoginShell_StripsAliasShadowing(t *testing.T) {
 	// scenario the test couldn't actually set up.
 	t.Setenv("SHELL", sh)
 	t.Setenv("ENV", rc)
-	probe, err := exec.Command(sh, "-ilc", "alias fakeclaude 2>/dev/null").Output()
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer probeCancel()
+	probeCmd := exec.CommandContext(probeCtx, sh, "-ilc", "alias fakeclaude 2>/dev/null")
+	probeCmd.Stdin = strings.NewReader("")
+	probe, err := probeCmd.Output()
 	if err != nil || !strings.Contains(string(probe), "fakeclaude") {
 		t.Skipf("test host's /bin/sh did not load alias from $ENV; cannot simulate shadowing (probe=%q err=%v)", string(probe), err)
 	}

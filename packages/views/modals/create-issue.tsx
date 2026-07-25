@@ -265,9 +265,12 @@ export function ManualCreatePanel({
   const [labelIds, setLabelIds] = useState<string[]>(draft.labelIds);
   const [propertyValues, setPropertyValues] = useState(draft.propertyValues ?? {});
   const [customPropertyPickerId, setCustomPropertyPickerId] = useState<string | null>(null);
-  const [projectId, setProjectId] = useState<string | undefined>(
-    (data?.project_id as string) || undefined,
-  );
+  const [projectId, setProjectId] = useState<string | undefined>(() => {
+    if (data && "project_id" in data) {
+      return (data.project_id as string | null) ?? undefined;
+    }
+    return draft.projectId;
+  });
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
@@ -358,6 +361,7 @@ export function ManualCreatePanel({
     setAssigneeType(type); setAssigneeId(id);
     setDraft({ assigneeType: type, assigneeId: id });
   };
+  const updateProject = (id?: string) => { setProjectId(id); setDraft({ projectId: id }); };
   const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
   const updateLabelIds = (ids: string[]) => { setLabelIds(ids); setDraft({ labelIds: ids }); };
@@ -415,6 +419,7 @@ export function ManualCreatePanel({
       priority: "none",
       assigneeType,
       assigneeId,
+      projectId: undefined,
       startDate: null,
       dueDate: null,
       labelIds: [],
@@ -896,7 +901,7 @@ export function ManualCreatePanel({
               {showField.project && (
                 <ProjectPicker
                   projectId={projectId ?? null}
-                  onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
+                  onUpdate={(u) => updateProject(u.project_id ?? undefined)}
                   triggerRender={<PillButton />}
                   align="start"
                   open={fieldPickerOpen === "project" ? true : undefined}

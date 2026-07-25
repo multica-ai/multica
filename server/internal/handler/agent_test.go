@@ -144,6 +144,403 @@ func TestListWorkspaceAgentTaskSnapshot(t *testing.T) {
 	}
 }
 
+func TestListWorkspaceWorkingAgents(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	workingAgentID := createHandlerTestAgent(t, "working-agents-running", []byte(`{}`))
+	queuedAgentID := createHandlerTestAgent(t, "working-agents-queued", []byte(`{}`))
+
+	// An agent owned by someone else keeps the squad fixtures mutually
+	// exclusive: it can lead a squad without accidentally satisfying the
+	// "leader owned by me" branch.
+	var outsiderUserID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO "user" (name, email)
+		VALUES ('Working Agents Outsider', 'working-agents-outsider-' || gen_random_uuid()::text || '@multica.test')
+		RETURNING id
+	`).Scan(&outsiderUserID); err != nil {
+		t.Fatalf("insert outsider user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, outsiderUserID)
+	})
+
+	var outsiderAgentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (
+			workspace_id, name, description, runtime_mode, runtime_config,
+			runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id,
+			instructions, custom_env, custom_args, mcp_config
+		)
+		VALUES (
+			$1, 'working-agents-outsider', '', 'cloud', '{}'::jsonb,
+			$2, 'workspace', 'private', 1, $3,
+			'', '{}'::jsonb, '[]'::jsonb, '{}'::jsonb
+		)
+		RETURNING id
+	`, testWorkspaceID, testRuntimeID, outsiderUserID).Scan(&outsiderAgentID); err != nil {
+		t.Fatalf("insert outsider agent: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, outsiderAgentID)
+	})
+
+	insertedSquadIDs := make([]string, 0, 3)
+	insertSquad := func(name, leaderID string) string {
+		t.Helper()
+		var squadID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO squad (
+				workspace_id, name, description, leader_id, creator_id
+			)
+			VALUES ($1, $2, '', $3, $4)
+			RETURNING id
+		`,
+			testWorkspaceID,
+			name,
+			leaderID,
+			testUserID,
+		).Scan(&squadID); err != nil {
+			t.Fatalf("insert squad %q: %v", name, err)
+		}
+		insertedSquadIDs = append(insertedSquadIDs, squadID)
+		return squadID
+	}
+	directMemberSquadID := insertSquad(
+		"working-agents-direct-member-squad",
+		outsiderAgentID,
+	)
+	ownedLeaderSquadID := insertSquad(
+		"working-agents-owned-leader-squad",
+		workingAgentID,
+	)
+	ownedMemberSquadID := insertSquad(
+		"working-agents-owned-member-squad",
+		outsiderAgentID,
+	)
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO squad_member (squad_id, member_type, member_id)
+		VALUES
+			($1, 'member', $2),
+			($3, 'agent', $4)
+	`,
+		directMemberSquadID,
+		testUserID,
+		ownedMemberSquadID,
+		workingAgentID,
+	); err != nil {
+		t.Fatalf("insert squad involvement fixtures: %v", err)
+	}
+	t.Cleanup(func() {
+		for _, squadID := range insertedSquadIDs {
+			testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, squadID)
+		}
+	})
+
+	// Insert source issues directly: this test is about the working-agent
+	// projection, so it must not inherit unrelated CreateIssue validation or
+	// side effects. The fixtures cover every direct My Issues relation plus
+	// all three squad-involvement branches.
+	insertedIssueIDs := make([]string, 0, 6)
+	insertIssue := func(
+		title, creatorType, creatorID string,
+		assigneeType, assigneeID any,
+	) string {
+		t.Helper()
+		var issueID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO issue (
+				workspace_id, number, title, status, priority,
+				assignee_type, assignee_id, creator_type, creator_id
+			)
+			SELECT $1, COALESCE(MIN(number), 0) - 1, $2, 'todo', 'none',
+			       $3, $4, $5, $6
+			FROM issue
+			WHERE workspace_id = $1
+			RETURNING id
+		`,
+			testWorkspaceID,
+			title,
+			assigneeType,
+			assigneeID,
+			creatorType,
+			creatorID,
+		).Scan(&issueID); err != nil {
+			t.Fatalf("insert source issue %q: %v", title, err)
+		}
+		insertedIssueIDs = append(insertedIssueIDs, issueID)
+		return issueID
+	}
+	assignedIssueID := insertIssue(
+		"working-agent-assigned-to-me",
+		"member",
+		testUserID,
+		"member",
+		testUserID,
+	)
+	ownedAgentIssueID := insertIssue(
+		"working-agent-owned-agent",
+		"agent",
+		outsiderAgentID,
+		"agent",
+		workingAgentID,
+	)
+	outsideIssueID := insertIssue(
+		"working-agent-outside-mine",
+		"agent",
+		outsiderAgentID,
+		nil,
+		nil,
+	)
+	directMemberSquadIssueID := insertIssue(
+		"working-agent-direct-member-squad",
+		"agent",
+		outsiderAgentID,
+		"squad",
+		directMemberSquadID,
+	)
+	ownedLeaderSquadIssueID := insertIssue(
+		"working-agent-owned-leader-squad",
+		"agent",
+		outsiderAgentID,
+		"squad",
+		ownedLeaderSquadID,
+	)
+	ownedMemberSquadIssueID := insertIssue(
+		"working-agent-owned-member-squad",
+		"agent",
+		outsiderAgentID,
+		"squad",
+		ownedMemberSquadID,
+	)
+	t.Cleanup(func() {
+		for _, issueID := range insertedIssueIDs {
+			testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+		}
+	})
+	chatSessionID := createHandlerTestChatSession(t, workingAgentID)
+	autopilotID := insertListTestAutopilot(t, workingAgentID, "working-agent-source-filter")
+	var autopilotRunID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, source, status)
+		VALUES ($1, 'manual', 'running')
+		RETURNING id
+	`, autopilotID).Scan(&autopilotRunID); err != nil {
+		t.Fatalf("insert autopilot run: %v", err)
+	}
+
+	// Nine running tasks on one agent: six issue relations, chat, autopilot,
+	// and quick-create (no source FK). The autopilot task also carries issue_id
+	// to prove source precedence keeps it out of type=issue.
+	insertedTaskIDs := make([]string, 0, 10)
+	for _, fixture := range []struct {
+		agentID        string
+		status         string
+		issueID        any
+		chatSessionID  any
+		autopilotRunID any
+	}{
+		{workingAgentID, "running", assignedIssueID, nil, nil},
+		{workingAgentID, "running", ownedAgentIssueID, nil, nil},
+		{workingAgentID, "running", outsideIssueID, nil, nil},
+		{workingAgentID, "running", directMemberSquadIssueID, nil, nil},
+		{workingAgentID, "running", ownedLeaderSquadIssueID, nil, nil},
+		{workingAgentID, "running", ownedMemberSquadIssueID, nil, nil},
+		{workingAgentID, "running", nil, chatSessionID, nil},
+		{workingAgentID, "running", assignedIssueID, nil, autopilotRunID},
+		{workingAgentID, "running", nil, nil, nil},
+		{queuedAgentID, "queued", nil, nil, nil},
+	} {
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (
+				agent_id, runtime_id, status, priority, issue_id,
+				chat_session_id, autopilot_run_id, started_at
+			)
+			VALUES ($1, $2, $3, 0, $4, $5, $6, now())
+			RETURNING id
+		`,
+			fixture.agentID,
+			testRuntimeID,
+			fixture.status,
+			fixture.issueID,
+			fixture.chatSessionID,
+			fixture.autopilotRunID,
+		).Scan(&taskID); err != nil {
+			t.Fatalf("insert %s task: %v", fixture.status, err)
+		}
+		insertedTaskIDs = append(insertedTaskIDs, taskID)
+	}
+	t.Cleanup(func() {
+		for _, taskID := range insertedTaskIDs {
+			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		}
+	})
+
+	for _, tc := range []struct {
+		name         string
+		query        string
+		wantCount    int32
+		wantIssueIDs []string
+	}{
+		{
+			name:      "all sources",
+			wantCount: 9,
+			wantIssueIDs: []string{
+				assignedIssueID,
+				ownedAgentIssueID,
+				outsideIssueID,
+				directMemberSquadIssueID,
+				ownedLeaderSquadIssueID,
+				ownedMemberSquadIssueID,
+			},
+		},
+		{
+			name:      "issue",
+			query:     "?type=issue",
+			wantCount: 6,
+			wantIssueIDs: []string{
+				assignedIssueID,
+				ownedAgentIssueID,
+				outsideIssueID,
+				directMemberSquadIssueID,
+				ownedLeaderSquadIssueID,
+				ownedMemberSquadIssueID,
+			},
+		},
+		{
+			name:         "autopilot",
+			query:        "?type=autopilot",
+			wantCount:    1,
+			wantIssueIDs: []string{assignedIssueID},
+		},
+		{name: "chat", query: "?type=chat", wantCount: 1, wantIssueIDs: []string{}},
+		{
+			name:      "mine defaults to any",
+			query:     "?type=issue&scope=mine",
+			wantCount: 5,
+			wantIssueIDs: []string{
+				assignedIssueID,
+				ownedAgentIssueID,
+				directMemberSquadIssueID,
+				ownedLeaderSquadIssueID,
+				ownedMemberSquadIssueID,
+			},
+		},
+		{
+			name:      "mine any",
+			query:     "?type=issue&scope=mine&relation=any",
+			wantCount: 5,
+			wantIssueIDs: []string{
+				assignedIssueID,
+				ownedAgentIssueID,
+				directMemberSquadIssueID,
+				ownedLeaderSquadIssueID,
+				ownedMemberSquadIssueID,
+			},
+		},
+		{
+			name:         "mine assigned",
+			query:        "?type=issue&scope=mine&relation=assigned",
+			wantCount:    1,
+			wantIssueIDs: []string{assignedIssueID},
+		},
+		{
+			name:         "mine created",
+			query:        "?type=issue&scope=mine&relation=created",
+			wantCount:    1,
+			wantIssueIDs: []string{assignedIssueID},
+		},
+		{
+			name:      "mine involved",
+			query:     "?type=issue&scope=mine&relation=involved",
+			wantCount: 4,
+			wantIssueIDs: []string{
+				ownedAgentIssueID,
+				directMemberSquadIssueID,
+				ownedLeaderSquadIssueID,
+				ownedMemberSquadIssueID,
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			testHandler.ListWorkspaceWorkingAgents(
+				w,
+				newRequest(http.MethodGet, "/api/working-agents"+tc.query, nil),
+			)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+
+			var agents []WorkspaceWorkingAgent
+			if err := json.NewDecoder(w.Body).Decode(&agents); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+
+			var working *WorkspaceWorkingAgent
+			for i := range agents {
+				switch agents[i].ID {
+				case workingAgentID:
+					working = &agents[i]
+				case queuedAgentID:
+					t.Errorf("queued-only agent must not be returned")
+				}
+			}
+			if working == nil {
+				t.Fatalf("running agent %s was not returned", workingAgentID)
+			}
+			if working.Name != "working-agents-running" {
+				t.Errorf("name = %q, want %q", working.Name, "working-agents-running")
+			}
+			if working.RunningTaskCount != tc.wantCount {
+				t.Errorf("running_task_count = %d, want %d", working.RunningTaskCount, tc.wantCount)
+			}
+			if len(working.IssueIDs) != len(tc.wantIssueIDs) {
+				t.Fatalf("issue_ids = %v, want %v", working.IssueIDs, tc.wantIssueIDs)
+			}
+			wantIssueIDs := make(map[string]struct{}, len(tc.wantIssueIDs))
+			for _, issueID := range tc.wantIssueIDs {
+				wantIssueIDs[issueID] = struct{}{}
+			}
+			for _, issueID := range working.IssueIDs {
+				if _, ok := wantIssueIDs[issueID]; !ok {
+					t.Errorf("unexpected issue_id %s; want %v", issueID, tc.wantIssueIDs)
+				}
+			}
+		})
+	}
+}
+
+func TestListWorkspaceWorkingAgentsRejectsInvalidFilters(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	for _, path := range []string{
+		"/api/working-agents?type=quick_create",
+		"/api/working-agents?scope=mine",
+		"/api/working-agents?type=chat&scope=mine",
+		"/api/working-agents?type=issue&scope=workspace",
+		"/api/working-agents?type=issue&relation=assigned",
+		"/api/working-agents?type=issue&scope=mine&relation=watching",
+	} {
+		t.Run(path, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			testHandler.ListWorkspaceWorkingAgents(
+				w,
+				newRequest(http.MethodGet, path, nil),
+			)
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

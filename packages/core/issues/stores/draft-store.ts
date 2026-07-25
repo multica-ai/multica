@@ -17,6 +17,7 @@ interface IssueDraft {
   priority: IssuePriority;
   assigneeType?: IssueAssigneeType;
   assigneeId?: string;
+  projectId?: string;
   startDate: string | null;
   dueDate: string | null;
   /** Label IDs chosen in the create dialog. Attached to the issue right
@@ -34,6 +35,7 @@ const EMPTY_DRAFT: IssueDraft = {
   priority: "none",
   assigneeType: undefined,
   assigneeId: undefined,
+  projectId: undefined,
   startDate: null,
   dueDate: null,
   labelIds: [],

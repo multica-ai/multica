@@ -28,11 +28,13 @@ import {
 import type {
   InboxItem,
   Issue,
+  IssueTableRowsResponse,
   ListIssuesCache,
   ListIssuesResponse,
 } from "../types";
 
 export type IssueFlatCache = InfiniteData<ListIssuesResponse, number>;
+export type IssueTableRowCache = IssueTableRowsResponse;
 
 /**
  * IssueCacheCoordinator — the one rules table for how a single issue change
@@ -82,6 +84,7 @@ export interface IssueCacheChangeResult {
    *  {@link rollbackIssueChange} from onError. */
   prevLists: [QueryKey, ListIssuesCache][];
   prevFlatLists: [QueryKey, IssueFlatCache][];
+  prevTableRows: [QueryKey, IssueTableRowCache][];
   prevDetail: Issue | undefined;
   prevInboxList: InboxItem[] | undefined;
   /** Loaded list keys whose server result may have drifted (membership
@@ -138,6 +141,20 @@ function flatListEntries(
     .filter(
       (entry): entry is [QueryKey, IssueFlatCache] =>
         !!entry[1] && Array.isArray(entry[1].pages),
+    );
+}
+
+function tableRowEntries(
+  qc: QueryClient,
+  wsId: string,
+): [QueryKey, IssueTableRowCache][] {
+  return qc
+    .getQueriesData<unknown>({ queryKey: issueKeys.tableAll(wsId) })
+    .filter(
+      (entry): entry is [QueryKey, IssueTableRowCache] =>
+        !!entry[1] &&
+        typeof entry[1] === "object" &&
+        Array.isArray((entry[1] as IssueTableRowCache).rows),
     );
 }
 
@@ -260,6 +277,7 @@ export function applyIssueChange(
   const { changed, baseIssue } = opts;
   const prevLists: [QueryKey, ListIssuesCache][] = [];
   const prevFlatLists: [QueryKey, IssueFlatCache][] = [];
+  const prevTableRows: [QueryKey, IssueTableRowCache][] = [];
   const staleKeys: QueryKey[] = [];
   let prevIssue: Issue | undefined = baseIssue;
 
@@ -383,6 +401,24 @@ export function applyIssueChange(
     }
   }
 
+  // Table branch pages are partial server-owned projections, so membership,
+  // counts and ordering still reconcile through the existing tableAll
+  // invalidation on settle. The entity snapshot inside every loaded row is
+  // determinate, though: patch it immediately so inline edits never flash the
+  // old title/status/assignee while the authoritative branch refetch runs.
+  for (const [key, data] of tableRowEntries(qc, wsId)) {
+    let found: Issue | undefined;
+    const rows = data.rows.map((row) => {
+      if (row.issue.id !== id) return row;
+      found = row.issue;
+      return { ...row, issue: { ...row.issue, ...patch } };
+    });
+    if (!found) continue;
+    if (!prevIssue) prevIssue = found;
+    prevTableRows.push([key, data]);
+    qc.setQueryData<IssueTableRowCache>(key, { ...data, rows });
+  }
+
   const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
   if (prevDetail) {
     qc.setQueryData<Issue>(issueKeys.detail(wsId, id), {
@@ -403,6 +439,7 @@ export function applyIssueChange(
   return {
     prevLists,
     prevFlatLists,
+    prevTableRows,
     prevDetail,
     prevInboxList,
     staleKeys,
@@ -418,13 +455,20 @@ export function rollbackIssueChange(
   id: string,
   result: Pick<
     IssueCacheChangeResult,
-    "prevLists" | "prevFlatLists" | "prevDetail" | "prevInboxList"
+    | "prevLists"
+    | "prevFlatLists"
+    | "prevTableRows"
+    | "prevDetail"
+    | "prevInboxList"
   >,
 ) {
   for (const [key, snapshot] of result.prevLists) {
     qc.setQueryData(key, snapshot);
   }
   for (const [key, snapshot] of result.prevFlatLists) {
+    qc.setQueryData(key, snapshot);
+  }
+  for (const [key, snapshot] of result.prevTableRows) {
     qc.setQueryData(key, snapshot);
   }
   if (result.prevDetail !== undefined) {

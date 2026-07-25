@@ -98,6 +98,70 @@ func TestCreateAgent_ThinkingLevel_ValidationConsistency(t *testing.T) {
 	})
 }
 
+func TestAgentServiceTierValidationAndTriState(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	codexRuntimeID := createCodexProviderRuntime(t)
+	claudeRuntimeID := createClaudeProviderRuntime(t)
+
+	t.Run("create persists Codex catalog id", func(t *testing.T) {
+		body := map[string]any{
+			"name":                 "service-tier-create",
+			"runtime_id":           codexRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"model":                "gpt-5.6-sol",
+			"service_tier":         "priority",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusCreated {
+			t.Fatalf("create service_tier: expected 201, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp map[string]any
+		_ = json.NewDecoder(w.Body).Decode(&resp)
+		if resp["service_tier"] != "priority" {
+			t.Fatalf("service_tier response = %v, want priority", resp["service_tier"])
+		}
+		agentID, _ := resp["id"].(string)
+		t.Cleanup(func() {
+			testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
+		})
+
+		clear := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
+			"service_tier": "",
+		}), "id", agentID)
+		testHandler.UpdateAgent(clear, req)
+		if clear.Code != http.StatusOK {
+			t.Fatalf("clear service_tier: expected 200, got %d: %s", clear.Code, clear.Body.String())
+		}
+		var cleared map[string]any
+		_ = json.NewDecoder(clear.Body).Decode(&cleared)
+		if cleared["service_tier"] != "" {
+			t.Fatalf("cleared service_tier = %v, want empty", cleared["service_tier"])
+		}
+	})
+
+	t.Run("non-Codex runtime rejects tier", func(t *testing.T) {
+		body := map[string]any{
+			"name":                 "service-tier-rejected",
+			"runtime_id":           claudeRuntimeID,
+			"visibility":           "private",
+			"max_concurrent_tasks": 1,
+			"service_tier":         "priority",
+		}
+		w := httptest.NewRecorder()
+		testHandler.CreateAgent(w, newRequest(http.MethodPost, "/api/agents", body))
+		if w.Code != http.StatusBadRequest {
+			t.Fatalf("Claude service_tier: expected 400, got %d: %s", w.Code, w.Body.String())
+		}
+	})
+}
+
 // TestUpdateAgent_ThinkingLevel_TriState covers the three modes of
 // the field on PATCH:
 //   - field omitted → leave the existing value alone (the silent-clear

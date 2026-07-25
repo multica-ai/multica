@@ -73,6 +73,9 @@ type AgentResponse struct {
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
 	ThinkingLevel string `json:"thinking_level"`
+	// ServiceTier is the runtime-native Codex execution tier persisted for
+	// this agent (empty = inherit local Codex configuration).
+	ServiceTier string `json:"service_tier"`
 	// ComposioToolkitAllowlist is the subset of Composio toolkit slugs this
 	// agent is allowed to mount as MCP at task dispatch — for ANY run that
 	// passes the agent's invocation permission, using the agent OWNER's
@@ -173,6 +176,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		MaxConcurrentTasks:       a.MaxConcurrentTasks,
 		Model:                    a.Model.String,
 		ThinkingLevel:            a.ThinkingLevel.String,
+		ServiceTier:              a.ServiceTier.String,
 		ComposioToolkitAllowlist: composioAllowlist,
 		OwnerID:                  uuidToPtr(a.OwnerID),
 		Skills:                   []AgentSkillSummary{},
@@ -568,6 +572,7 @@ type TaskAgentData struct {
 	McpConfig             json.RawMessage             `json:"mcp_config,omitempty"`
 	Model                 string                      `json:"model,omitempty"`
 	ThinkingLevel         string                      `json:"thinking_level,omitempty"`
+	ServiceTier           string                      `json:"service_tier,omitempty"`
 	DisabledRuntimeSkills []DisabledRuntimeSkill      `json:"disabled_runtime_skills,omitempty"`
 	// RuntimeConfig is the agent's saved runtime_config JSON as-is. The
 	// daemon decodes it per-provider — e.g. the openclaw backend reads
@@ -940,6 +945,7 @@ type CreateAgentRequest struct {
 	MaxConcurrentTasks int32                      `json:"max_concurrent_tasks"`
 	Model              string                     `json:"model"`
 	ThinkingLevel      string                     `json:"thinking_level"`
+	ServiceTier        string                     `json:"service_tier"`
 	// ComposioToolkitAllowlist seeds the per-task overlay gate (MUL-3869). On
 	// create only the calling user can be the owner, so we accept the field
 	// unconditionally here; the cross-owner permission gate lives on PUT.
@@ -1059,6 +1065,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", req.ThinkingLevel, runtime.Provider))
 		return
 	}
+	if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtime.Provider))
+		return
+	}
 
 	// Probe workspace agent count BEFORE the insert so the funnel has a
 	// clean "first agent ever in this workspace" signal — Step 4 of
@@ -1145,6 +1155,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		McpConfig:                mc,
 		Model:                    pgtype.Text{String: req.Model, Valid: req.Model != ""},
 		ThinkingLevel:            pgtype.Text{String: req.ThinkingLevel, Valid: req.ThinkingLevel != ""},
+		ServiceTier:              pgtype.Text{String: req.ServiceTier, Valid: req.ServiceTier != ""},
 		ComposioToolkitAllowlist: allowlist,
 	})
 	if err != nil {
@@ -1300,6 +1311,9 @@ type UpdateAgentRequest struct {
 	// Distinguishing those modes is why this is a pointer; the raw-fields
 	// map captured at decode time tells us whether the key was sent.
 	ThinkingLevel *string `json:"thinking_level"`
+	// ServiceTier follows the same tri-state contract as ThinkingLevel:
+	// omitted preserves, empty clears, and non-empty sets a Codex catalog ID.
+	ServiceTier *string `json:"service_tier"`
 	// ComposioToolkitAllowlist is a tri-state, same pattern as
 	// thinking_level, mcp_config:
 	//   - field omitted → no change (column preserved as-is)
@@ -1707,6 +1721,46 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	shouldClearServiceTier := false
+	if req.ServiceTier != nil {
+		value := *req.ServiceTier
+		if value == "" {
+			shouldClearServiceTier = true
+		} else {
+			provider := targetProvider
+			if provider == "" {
+				var ok bool
+				provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+				if !ok {
+					writeError(w, http.StatusInternalServerError, "failed to resolve runtime for service_tier validation")
+					return
+				}
+			}
+			if !agent.IsKnownServiceTier(provider, value) {
+				writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", value, provider))
+				return
+			}
+			params.ServiceTier = pgtype.Text{String: value, Valid: true}
+		}
+	} else if req.RuntimeID != nil && existing.ServiceTier.Valid && existing.ServiceTier.String != "" {
+		provider := targetProvider
+		if provider == "" {
+			var ok bool
+			provider, ok = h.resolveAgentProvider(r, existing.WorkspaceID, targetRuntimeID)
+			if !ok {
+				writeError(w, http.StatusInternalServerError, "failed to resolve runtime for service_tier validation")
+				return
+			}
+		}
+		if !agent.IsKnownServiceTier(provider, existing.ServiceTier.String) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf(
+				"existing service_tier %q is not valid for runtime %q; pass service_tier=\"\" to clear or set a value valid for the new runtime",
+				existing.ServiceTier.String, provider,
+			))
+			return
+		}
+	}
+
 	// composio_toolkit_allowlist handling (MUL-3869). Tri-state semantics
 	// mirror thinking_level (see above): omitted → no change, null →
 	// ClearAgentComposioToolkitAllowlist, slice → wholesale replace.
@@ -1751,9 +1805,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// mcp_config / thinking_level: null/empty in the request means explicitly
-	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL,
-	// so we use dedicated clear queries.
+	// Nullable runtime overrides: null/empty in the request means explicitly
+	// clear the field. COALESCE in UpdateAgent cannot set a column to NULL, so
+	// mcp_config, thinking_level, and service_tier use dedicated clear queries.
 	if shouldClearMcpConfig {
 		updated, err = h.Queries.ClearAgentMcpConfig(r.Context(), updated.ID)
 		if err != nil {
@@ -1767,6 +1821,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			slog.Warn("clear agent thinking_level failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 			writeError(w, http.StatusInternalServerError, "failed to clear thinking_level: "+err.Error())
+			return
+		}
+	}
+	if shouldClearServiceTier {
+		updated, err = h.Queries.ClearAgentServiceTier(r.Context(), updated.ID)
+		if err != nil {
+			slog.Warn("clear agent service_tier failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
+			writeError(w, http.StatusInternalServerError, "failed to clear service_tier: "+err.Error())
 			return
 		}
 	}
@@ -2030,6 +2092,118 @@ type AgentActivityBucket struct {
 type AgentRunCount struct {
 	AgentID  string `json:"agent_id"`
 	RunCount int32  `json:"run_count"`
+}
+
+// WorkspaceWorkingAgent is the privacy-safe agent summary returned by the
+// workspace working-agents endpoint. It deliberately carries only display
+// information plus the current running-task count and referenced issue ids;
+// full AgentResponse fields include runtime and integration configuration that
+// this chip does not need.
+type WorkspaceWorkingAgent struct {
+	ID               string   `json:"id"`
+	Name             string   `json:"name"`
+	AvatarURL        *string  `json:"avatar_url"`
+	RunningTaskCount int32    `json:"running_task_count"`
+	IssueIDs         []string `json:"issue_ids"`
+}
+
+// ListWorkspaceWorkingAgents returns currently working user-authored agents in
+// the workspace, independent of issue filters or Table pagination. The
+// optional type query selects issue, autopilot, or chat work; omitting it keeps
+// the all-sources projection. scope=mine narrows issue work to the authenticated
+// member's selected My Issues relation. Access filtering mirrors the other
+// workspace-wide agent aggregations so a private/non-allow-listed agent is
+// never exposed by its name, avatar, count, or even presence.
+func (h *Handler) ListWorkspaceWorkingAgents(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+
+	workType := strings.TrimSpace(r.URL.Query().Get("type"))
+	switch workType {
+	case "", "issue", "autopilot", "chat":
+	default:
+		writeError(w, http.StatusBadRequest, "invalid type: must be issue, autopilot, or chat")
+		return
+	}
+
+	scope := strings.TrimSpace(r.URL.Query().Get("scope"))
+	mineRelation := strings.TrimSpace(r.URL.Query().Get("relation"))
+	var memberID pgtype.UUID
+	switch scope {
+	case "":
+		if mineRelation != "" {
+			writeError(w, http.StatusBadRequest, "relation requires scope=mine")
+			return
+		}
+	case "mine":
+		if workType != "issue" {
+			writeError(w, http.StatusBadRequest, "scope=mine requires type=issue")
+			return
+		}
+		if mineRelation == "" {
+			mineRelation = "any"
+		}
+		switch mineRelation {
+		case "assigned", "created", "involved", "any":
+		default:
+			writeError(w, http.StatusBadRequest, "invalid relation: must be assigned, created, involved, or any")
+			return
+		}
+		userID, ok := requireUserID(w, r)
+		if !ok {
+			return
+		}
+		var err error
+		memberID, err = util.ParseUUID(userID)
+		if err != nil {
+			writeError(w, http.StatusUnauthorized, "user not authenticated")
+			return
+		}
+	default:
+		writeError(w, http.StatusBadRequest, "invalid scope: must be mine")
+		return
+	}
+
+	rows, err := h.Queries.ListWorkspaceWorkingAgents(
+		r.Context(),
+		db.ListWorkspaceWorkingAgentsParams{
+			WorkspaceID:  parseUUID(workspaceID),
+			WorkType:     workType,
+			MineRelation: mineRelation,
+			MemberID:     memberID,
+		},
+	)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list workspace working agents")
+		return
+	}
+
+	actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+
+	resp := make([]WorkspaceWorkingAgent, 0, len(rows))
+	for _, row := range rows {
+		agentID := uuidToString(row.ID)
+		if _, ok := allowed[agentID]; !ok {
+			continue
+		}
+		resp = append(resp, WorkspaceWorkingAgent{
+			ID:               agentID,
+			Name:             row.Name,
+			AvatarURL:        textToPtr(row.AvatarUrl),
+			RunningTaskCount: row.RunningTaskCount,
+			IssueIDs:         uuidStringsOrEmpty(row.IssueIds),
+		})
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 // GetWorkspaceAgentRunCounts returns 30-day total run counts for every

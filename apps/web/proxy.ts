@@ -4,6 +4,7 @@ import {
   MULTICA_LOCALE_HEADER,
   resolveLocaleFromSignals,
 } from "./lib/locale-routing";
+import { runtimeRewriteDestination } from "./config/runtime-urls";
 import { isOfficialMarketingHost } from "./lib/public-host";
 
 // Old workspace-scoped route segments that existed before the URL refactor
@@ -47,6 +48,13 @@ function nextWithLocale(req: NextRequest): NextResponse {
 // edge.
 export function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl;
+  const runtimeDestination = runtimeRewriteDestination(pathname, process.env);
+  if (runtimeDestination) {
+    const url = new URL(runtimeDestination);
+    url.search = req.nextUrl.search;
+    return NextResponse.rewrite(url);
+  }
+
   const hasSession = req.cookies.has("multica_logged_in");
   const lastSlug = req.cookies.get("last_workspace_slug")?.value;
 
@@ -98,8 +106,15 @@ export function proxy(req: NextRequest) {
 
 export const config = {
   // i18n header must land on every page request, so we use the standard
-  // negative-lookahead pattern from Next's i18n guide: skip API routes
-  // (Go backend), Next internals, and any path with a file extension
-  // (favicons, sw.js, public/* assets).
-  matcher: ["/((?!api|_next/static|_next/image|favicon.ico|.*\\.).*)"],
+  // negative-lookahead pattern from Next's i18n guide, plus explicit runtime
+  // proxy routes whose upstream origins are resolved from process.env at
+  // request time instead of being baked into next.config.js at build time.
+  matcher: [
+    "/api/:path*",
+    "/auth/:path*",
+    "/uploads/:path*",
+    "/docs/:path*",
+    "/ws",
+    "/((?!api|_next/static|_next/image|favicon.ico|.*\\.).*)",
+  ],
 };

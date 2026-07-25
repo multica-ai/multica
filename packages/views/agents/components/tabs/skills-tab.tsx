@@ -19,7 +19,10 @@ import type {
 } from "@multica/core/types";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { runtimeCapabilitiesOptions } from "@multica/core/runtimes";
+import {
+  runtimeCapabilitiesOptions,
+  runtimeDisplayLabel,
+} from "@multica/core/runtimes";
 import {
   skillDetailOptions,
   skillListOptions,
@@ -229,7 +232,7 @@ export function SkillsTab({
       <CapabilitySection
         title={t(($) => $.tab_body.skills.runtime_title)}
         description={t(($) => $.tab_body.skills.runtime_hint, {
-          runtime: runtime?.custom_name || runtime?.name || "Runtime",
+          runtime: runtime ? runtimeDisplayLabel(runtime) : "Runtime",
         })}
         action={
           runtimeId ? (

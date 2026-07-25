@@ -1,7 +1,15 @@
 -- name: CreateChatSession :one
-INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id, is_agent_intro)
-VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2), $5)
+INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id, is_agent_intro, project_id)
+VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2), $5, sqlc.narg('project_id'))
 RETURNING *;
+
+-- name: ClearChatSessionProjectByProject :exec
+-- Project references are intentionally soft (no database FK). Keep chat
+-- history while removing the context selection when a project is deleted.
+-- Do not touch updated_at: context cleanup is not chat activity.
+UPDATE chat_session
+SET project_id = NULL
+WHERE project_id = $1 AND workspace_id = $2;
 
 -- name: GetChatSession :one
 SELECT * FROM chat_session
@@ -72,6 +80,14 @@ UPDATE chat_session SET title = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateChatSessionProject :one
+-- Project context is user-editable session metadata. Do not touch updated_at:
+-- changing context is not conversation activity and must not reorder history.
+UPDATE chat_session
+SET project_id = sqlc.narg('project_id')
+WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
+RETURNING *;
+
 -- name: UpdateChatSessionTitleIfCurrent :one
 -- Compare-and-swap the title: only overwrite it when it still equals the
 -- value the caller observed (@expected_title). This is the idempotency /
@@ -128,6 +144,27 @@ WHERE id = sqlc.arg('id');
 -- KEY SHARE lock on the parent row during INSERT validation, which
 -- conflicts with FOR UPDATE — concurrent inserts block here and then fail
 -- their FK check after we commit the delete.
+SELECT id FROM chat_session
+WHERE id = $1
+FOR UPDATE;
+
+-- name: LockChatSessionForRuntimeBind :one
+-- Acquires an exclusive (FOR UPDATE) row lock on chat_session(id), serialising
+-- "which runtime does this session execute on" against "enqueue the next task".
+--
+-- Both SendDirectChatMessage and the agent-builder runtime switch take this lock
+-- for their whole transaction. Without it the two are a read-then-write race: a
+-- send reads the carrier agent's runtime_id, the switch then passes its
+-- pending-task check and rebinds the carrier, and the send finally inserts a task
+-- still stamped with the pre-switch runtime — so the user is told the switch
+-- succeeded while their message runs on the old runtime (MUL-5163).
+--
+-- The lock alone is not sufficient: the send path must also re-read the agent
+-- INSIDE the locked transaction, because a send blocked at INSERT would otherwise
+-- resume and write the runtime_id it read before blocking.
+--
+-- Same row and same lock mode as LockChatSessionForDelete, and both take it as
+-- their first statement, so the delete path and this one cannot deadlock.
 SELECT id FROM chat_session
 WHERE id = $1
 FOR UPDATE;
