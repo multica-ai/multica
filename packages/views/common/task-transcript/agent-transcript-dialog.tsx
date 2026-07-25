@@ -48,7 +48,6 @@ import {
   type TranscriptSortDirection,
 } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
-import { runtimeDisplayName } from "@multica/core/runtimes";
 import { redactSecrets } from "./redact";
 import type { TimelineItem } from "./build-timeline";
 import {
@@ -523,7 +522,8 @@ export function AgentTranscriptDialog({
                 foreground entity — avatar + medium weight. */}
             <div className="flex min-w-0 items-center gap-2">
               {task.agent_id ? (
-                <ActorAvatar actorType="agent" actorId={task.agent_id} size="sm" enableHoverCard />
+                // CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — this fork's ActorAvatar still takes a pixel size, not upstream size tiers.
+                <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard />
               ) : (
                 <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
                   <Bot className="h-3 w-3" />
@@ -566,7 +566,8 @@ export function AgentTranscriptDialog({
                       {runtimeInfo && (
                         <RunDetailRow
                           label={t(($) => $.transcript.details_runtime)}
-                          value={runtimeDisplayName(runtimeInfo)}
+                          // CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — runtimeDisplayName ships in a later upstream commit; name is the same string until custom aliases land.
+                          value={runtimeInfo.name}
                         />
                       )}
                       {providerLabel && (
@@ -697,7 +698,8 @@ export function AgentTranscriptDialog({
                 <DropdownMenuTrigger
                   render={
                     <Button
-                      variant={activeFilterKeys.length > 0 ? "brand" : "ghost"}
+                      // CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — the upstream "brand" Button variant has not synced down.
+                      variant={activeFilterKeys.length > 0 ? "secondary" : "ghost"}
                       size="sm"
                       aria-label={t(($) => $.transcript.filter)}
                       className={activeFilterKeys.length > 0 ? undefined : "text-muted-foreground"}
