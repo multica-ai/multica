@@ -24,6 +24,22 @@ export const ALL_STATUSES: IssueStatus[] = [
 
 export const BOARD_STATUSES: IssueStatus[] = ALL_STATUSES.filter((s) => s !== "archived");
 
+// Single source of truth (frontend side) for classifying an issue status as
+// "closed" vs "completed".  Keep in lock-step with the Go helpers in
+// server/internal/issueguard/issue_status.go and the Postgres functions in
+// server/migrations/235_issue_status_classifier_functions.*.sql.
+//
+//   closed    = done | cancelled | archived
+//   completed = done | cancelled             (archived is closed, NOT completed)
+
+export const CLOSED_STATUSES: IssueStatus[] = ["done", "cancelled", "archived"];
+
+export const COMPLETED_STATUSES: IssueStatus[] = ["done", "cancelled"];
+
+export const isClosedStatus = (s: IssueStatus): boolean => CLOSED_STATUSES.includes(s);
+
+export const isCompletedStatus = (s: IssueStatus): boolean => COMPLETED_STATUSES.includes(s);
+
 export const STATUS_CONFIG: Record<
   IssueStatus,
   {

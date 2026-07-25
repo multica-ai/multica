@@ -473,7 +473,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	whereClause := "(" + strings.Join(whereParts, " OR ") + ")"
 
 	if !includeClosed {
-		whereClause += " AND i.status NOT IN ('done', 'cancelled', 'archived')"
+		whereClause += " AND NOT issue_status_is_closed(i.status)"
 	}
 
 	// --- ORDER BY clause ---
