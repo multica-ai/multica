@@ -137,7 +137,12 @@ function canEditArtifact(
   role: string | null,
 ): boolean {
   if (role === "owner" || role === "admin") return true;
-  return artifact.author_type === "member" && artifact.author_id === userId;
+  if (artifact.author_type === "member" && artifact.author_id === userId)
+    return true;
+  // FIR-3778 — an agent writing on a person's behalf stays the author, so the
+  // person it was written for is only reachable through requester_user_id. The
+  // null check matters: a signed-out reader must not match an unrequested doc.
+  return userId !== null && artifact.requester_user_id === userId;
 }
 
 type SaveStatus = "idle" | "saving" | "saved";
