@@ -42,7 +42,7 @@ func TestPrepareToolPolicySpawn_AllLocalProvidersEnforce(t *testing.T) {
 
 func TestPrepareToolPolicySpawn_RejectsLocalProvidersWithoutEnforcementAdapter(t *testing.T) {
 	d := &Daemon{}
-	for _, provider := range []string{"copilot", "opencode", "openclaw", "hermes", "pi", "kimi", "kiro", "antigravity"} {
+	for _, provider := range []string{"copilot", "opencode", "openclaw", "hermes", "kimi", "kiro", "antigravity"} {
 		t.Run(provider, func(t *testing.T) {
 			got, err := d.prepareToolPolicySpawn(provider, t.TempDir(), "", false)
 			if err == nil {
@@ -96,6 +96,27 @@ func TestWriteToolPolicySettingsJSON_ProviderContracts(t *testing.T) {
 				t.Fatalf("cursor hook is not fail-closed: %s", raw)
 			}
 		})
+	}
+}
+
+// Pi is enforced by the harness extension, not a settings file, so the spawn
+// preparer must accept it and write nothing. The refusal path when the harness
+// is disabled is covered by TestPreparePiHarnessKillSwitchRefusesPiSpawn.
+func TestPrepareToolPolicySpawn_HarnessProviderWritesNoSettingsFile(t *testing.T) {
+	workdir := t.TempDir()
+	got, err := (&Daemon{}).prepareToolPolicySpawn("pi", workdir, "", false)
+	if err != nil {
+		t.Fatalf("pi must be runnable through its harness adapter: %v", err)
+	}
+	if got != nil {
+		t.Fatalf("spawn = %+v, want no settings file for a harness provider", got)
+	}
+	entries, err := os.ReadDir(workdir)
+	if err != nil {
+		t.Fatalf("read workdir: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("harness provider wrote %d file(s) into the workdir", len(entries))
 	}
 }
 

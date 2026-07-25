@@ -343,9 +343,16 @@ Before every managed tool call the extension asks the existing daemon
 dispatches, `Ask` dispatches only after the resolver returns a final approved
 decision, and `Deny` does not dispatch. In `enforce` stage, a missing or invalid
 policy response fails closed. A failed call marked as a mutation is never
-automatically retried because the external outcome may be unknown. Turning the
-workspace flag off restores the prior Pi spawn path; other providers are
-unchanged.
+automatically retried because the external outcome may be unknown.
+
+The harness is also Pi's **mandatory tool-policy adapter**. Pi has no
+provider-native before-tool hook file and no built-in MCP, so the extension's
+`pi.on("tool_call")` gate is the only call-time enforcement point Pi has;
+`localtoolpolicy.ProviderAdapterFor("pi")` therefore reports it as a `Harness`
+adapter and `prepareToolPolicySpawn` writes no settings file for it. Because the
+gate lives in the extension, turning the workspace flag off no longer falls back
+to an unenforced Pi spawn — `preparePiHarness` refuses to start Pi at all and
+names `cerebro_pi_harness` in the error. Other providers are unchanged.
 
 ## What is enforced LIVE today (no flag required)
 

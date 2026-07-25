@@ -166,8 +166,16 @@ func (d *Daemon) prepareToolPolicySpawn(provider, workdir, providerHome string, 
 		// Managed HTTP providers do not dispatch local CLI tools.
 		return nil, nil
 	}
-	if _, ok := localtoolpolicy.ProviderAdapterFor(provider); !ok {
+	adapter, ok := localtoolpolicy.ProviderAdapterFor(provider)
+	if !ok {
 		return nil, fmt.Errorf("local provider %q does not support mandatory tool-policy enforcement", provider)
+	}
+	if adapter.Harness {
+		// The provider's before-call hook ships inside a Firtal harness
+		// extension, not a settings file this function could write. The
+		// harness preparer is the gate that refuses the spawn when the
+		// harness is not installed (see preparePiHarness).
+		return nil, nil
 	}
 
 	exe, err := os.Executable()
