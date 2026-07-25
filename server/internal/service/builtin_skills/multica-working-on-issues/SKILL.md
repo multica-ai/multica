@@ -226,7 +226,10 @@ Creating every serial step as `todo` enqueues the whole chain at once.
 `--stage <N>` (N ≥ 1) groups sub-issues under the same parent into ordered
 stages. The parent coordinator is woken **once, when a whole stage finishes** —
 i.e. every sub-issue in the lowest unfinished stage has reached a terminal
-status (`done`/`cancelled`). The coordinator is normally the parent assignee.
+status (`done`/`blocked`/`cancelled`). A `blocked` child wakes the coordinator
+so it can resolve the blocker; when that child later reaches `done`, the
+coordinator receives a separate completion wake. The coordinator is normally
+the parent assignee.
 For an unassigned parent reached through `@Squad`, an agent-created child's
 exact `origin_id` can instead resume the same squad leader task context without
 assigning the parent or changing the human authority behind the run. A handoff

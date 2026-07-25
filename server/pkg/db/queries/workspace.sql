@@ -156,6 +156,9 @@ cleared_installations AS (
 cleared_issue_properties AS (
     DELETE FROM issue_property WHERE workspace_id = $1
 ),
+cleared_child_done_transitions AS (
+    DELETE FROM child_done_transition WHERE workspace_id = $1
+),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 ),

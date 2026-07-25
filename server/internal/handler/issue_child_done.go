@@ -2,13 +2,17 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -22,10 +26,11 @@ import (
 //
 // Guards on whether the comment fires at all:
 //   - the child must transition from a non-terminal status INTO a terminal one
-//     (done or cancelled). Repeat saves of an already-terminal child do not
-//     re-fire; only the entering transition does. Cancelled counts because a
-//     cancelled sibling never finishes and so closes its stage (see the entry
-//     guard and isTerminalChildStatus).
+//     (done, blocked, or cancelled). Repeat saves of an already-terminal child
+//     do not re-fire, except blocked -> done/cancelled: resolving the blocker is
+//     a distinct completion handoff. Blocked wakes the coordinator to resolve
+//     the blocker, while cancelled closes work that will never finish (see the
+//     entry guard and isTerminalChildStatus).
 //   - issue.ParentIssueID must be set
 //   - parent must not be "done" or "cancelled" — the parent is already
 //     closed and a notification has no follow-up to drive
@@ -62,78 +67,33 @@ import (
 // own trigger is fired explicitly by dispatchParentAssigneeTrigger below,
 // with the idempotency guard documented there.
 //
-// Errors are logged at warn level and swallowed: this is a best-effort
-// notification on the side of a successful status update; failing it must
-// not roll back the user's status change.
+// Terminal status writers persist a child_done_transition in the same database
+// transaction. A leased worker turns that transition into the system-comment
+// outbox row, and a second lease phase dispatches the task. Both phases survive
+// process restarts; permanent routing loss is recorded as skipped rather than
+// retried in a hot loop.
 func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Issue) {
-	if !issue.ParentIssueID.Valid {
+	if !issue.ParentIssueID.Valid || !entersChildDoneBarrier(prev.Status, issue.Status) {
 		return
 	}
-	// Fire on a transition INTO a terminal status (done OR cancelled), not only
-	// `done`. A cancelled child can close a stage too: isTerminalChildStatus
-	// treats cancelled as terminal (a cancelled sibling never finishes, so it
-	// must not hold the stage open), so the barrier has to be evaluated when the
-	// last open child of a stage is cancelled. Keying on the transition also
-	// makes a later cancelled -> done edit a no-op (terminal -> terminal), which
-	// avoids a lagging duplicate wake.
-	if isTerminalChildStatus(prev.Status) || !isTerminalChildStatus(issue.Status) {
-		return
-	}
-	parent, err := h.Queries.GetIssue(ctx, issue.ParentIssueID)
-	if err != nil {
-		slog.Warn("child done: failed to load parent",
-			"error", err,
+	if err := h.notifyParentsOfBatchChildDone(ctx, []db.Issue{issue}); err != nil {
+		slog.Warn("child done: notification deferred", "error", err,
 			"child_id", uuidToString(issue.ID),
 			"parent_id", uuidToString(issue.ParentIssueID))
-		return
 	}
-	if parent.Status == "done" || parent.Status == "cancelled" {
-		return
-	}
-	// A parent parked in backlog is deliberately held for later. Posting the
-	// system comment would wake its assignee, and the woken agent can then
-	// promote sibling backlog sub-issues into todo — the surprise auto-
-	// activation reported in #4320 / MUL-3497. Skip the whole notification so
-	// a backlog parent stays inert until the user explicitly promotes it.
-	if parent.Status == "backlog" {
-		return
-	}
-	// Human-assigned parents read their own timeline; an automated system
-	// comment is just noise and there is no agent task to trigger. Skip the
-	// whole notification (comment + mention + inbox row) — MUL-2538.
-	if parent.AssigneeType.Valid && parent.AssigneeType.String == "member" {
-		return
-	}
+}
 
-	// Stage barrier (MUL-3508 / discussion #4320). The notification + assignee
-	// wake fire only when this completion *closes a stage* — i.e. every sibling
-	// in the lowest unfinished stage is now terminal. An unstaged sibling set is
-	// one implicit stage, so this collapses to "wake once when the last
-	// sub-issue finishes" instead of the old fire-on-every-child behavior that
-	// caused the surprise cascade. A completion that does not close a stage is
-	// silent: no comment, no wake. ListChildIssues already reflects this child's
-	// committed `done` status (the status update commits before this runs).
-	children, err := h.Queries.ListChildIssues(ctx, parent.ID)
-	if err != nil {
-		slog.Warn("child done: failed to list siblings for stage barrier",
-			"error", err,
-			"child_id", uuidToString(issue.ID),
-			"parent_id", uuidToString(parent.ID))
-		return
+// entersChildDoneBarrier allows the coordinator to be woken once when work is
+// blocked and again when that blocker is actually resolved. Other
+// terminal-to-terminal edits (for example cancelled -> done) remain silent.
+func entersChildDoneBarrier(previous, current string) bool {
+	if !isTerminalChildStatus(current) {
+		return false
 	}
-	if !stageBarrierClosed(children, issue) {
-		return
+	if !isTerminalChildStatus(previous) {
+		return true
 	}
-	staged := siblingsAreStaged(children)
-	// When the set is staged and the barrier closed, the completed child is
-	// guaranteed to carry a stage (stageBarrierClosed returns false for an
-	// unstaged completed child in a staged set), so issue.Stage.Int32 is safe.
-	var closedStage int32
-	if staged {
-		closedStage = issue.Stage.Int32
-	}
-	dispatchCandidates := childDoneDispatchCandidates(children, staged, closedStage)
-	h.postChildDoneComment(ctx, parent, issue, children, staged, closedStage, false, dispatchCandidates)
+	return previous == "blocked" && current != "blocked"
 }
 
 // notifyParentsOfBatchChildDone emits child-done parent notifications for a
@@ -149,11 +109,12 @@ func (h *Handler) notifyParentOfChildDone(ctx context.Context, prev, issue db.Is
 // here makes the result order-independent — each affected parent gets at most
 // one comment built from the final state, plus one wake pinned to that comment.
 //
-// Best-effort, mirroring notifyParentOfChildDone: a failure on one parent is
-// logged and skipped; it never rolls back the committed batch.
-func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed []db.Issue) {
+// Transient reads or outbox writes are returned to the transition worker so the
+// whole group is retried. Permanent guards (deleted/closed/backlog/human parent
+// or a barrier that is not closed) consume the event without a comment.
+func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed []db.Issue) error {
 	if len(completed) == 0 {
-		return
+		return nil
 	}
 
 	// Group the completed children by parent, preserving first-seen order so the
@@ -181,9 +142,12 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 	for _, g := range groups {
 		parent, err := h.Queries.GetIssue(ctx, g.parentID)
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				continue
+			}
 			slog.Warn("batch child done: failed to load parent",
 				"error", err, "parent_id", uuidToString(g.parentID))
-			continue
+			return fmt.Errorf("load child-done parent: %w", err)
 		}
 		// Same parent guards as the single path (see notifyParentOfChildDone).
 		if parent.Status == "done" || parent.Status == "cancelled" {
@@ -200,7 +164,7 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 		if err != nil {
 			slog.Warn("batch child done: failed to list siblings for stage barrier",
 				"error", err, "parent_id", uuidToString(parent.ID))
-			continue
+			return fmt.Errorf("list child-done siblings: %w", err)
 		}
 
 		batch := len(g.children) > 1
@@ -212,7 +176,9 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 				continue
 			}
 			dispatchCandidates := childDoneDispatchCandidates(children, false, 0)
-			h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch, dispatchCandidates)
+			if err := h.postChildDoneComment(ctx, parent, g.children[0], children, false, 0, batch, dispatchCandidates); err != nil {
+				return err
+			}
 			continue
 		}
 
@@ -244,8 +210,11 @@ func (h *Handler) notifyParentsOfBatchChildDone(ctx context.Context, completed [
 			continue
 		}
 		dispatchCandidates := childDoneDispatchCandidates(children, true, bestStage)
-		h.postChildDoneComment(ctx, parent, rep, children, true, bestStage, batch, dispatchCandidates)
+		if err := h.postChildDoneComment(ctx, parent, rep, children, true, bestStage, batch, dispatchCandidates); err != nil {
+			return err
+		}
 	}
+	return nil
 }
 
 // childDoneDispatchCandidates returns the complete sibling set that owns the
@@ -266,6 +235,18 @@ func childDoneDispatchCandidates(children []db.Issue, staged bool, closedStage i
 	return candidates
 }
 
+func barrierContainsStatus(children []db.Issue, staged bool, closedStage int32, status string) bool {
+	for _, child := range children {
+		if child.Status != status {
+			continue
+		}
+		if !staged || (child.Stage.Valid && child.Stage.Int32 == closedStage) {
+			return true
+		}
+	}
+	return false
+}
+
 // postChildDoneComment builds and posts the parent's child-done system comment
 // for a closed stage barrier, then dispatches the parent-assignee trigger. It
 // assumes every guard in notifyParentOfChildDone / notifyParentsOfBatchChildDone
@@ -277,7 +258,7 @@ func childDoneDispatchCandidates(children []db.Issue, staged bool, closedStage i
 // an unstaged set). `batch` selects batch-aware wording: a single update keeps
 // its historical byte-identical copy, while a batch that finished several
 // children at once must not claim "the last sub-issue just finished".
-func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db.Issue, children []db.Issue, staged bool, closedStage int32, batch bool, dispatchCandidates []db.Issue) {
+func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db.Issue, children []db.Issue, staged bool, closedStage int32, batch bool, dispatchCandidates []db.Issue) error {
 	prefix := h.getIssuePrefix(ctx, completed.WorkspaceID)
 	identifier := prefix + "-" + strconv.Itoa(int(completed.Number))
 	childID := uuidToString(completed.ID)
@@ -288,19 +269,33 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	// issue. If that task created this child, its task row is durable proof of
 	// the orchestration owner and can carry the stage-complete handoff back to
 	// the same squad (GH #5706). A real parent assignee always wins.
-	dispatchTarget := h.resolveChildDoneDispatchTarget(ctx, parent, dispatchCandidates)
+	dispatchTarget, err := h.resolveChildDoneDispatchTarget(ctx, parent, dispatchCandidates)
+	if err != nil {
+		return err
+	}
 
 	// Build the dispatch-target mention prefix. Empty when neither a parent
 	// assignee nor a proven originating squad context exists.
 	mentionPrefix := h.buildParentAssigneeMention(ctx, dispatchTarget.Issue)
+	barrierBlocked := barrierContainsStatus(children, staged, closedStage, "blocked")
 
 	var content string
 	if staged {
 		summary, nextStage := stageProgressSummary(children, closedStage)
 		advance := stageAdvanceInstruction(nextStage, parentID)
-		if batch {
+		if batch && barrierBlocked {
+			content = fmt.Sprintf(
+				"%sStage %d of this issue reached a barrier — its sub-issues reached terminal states together in a batch update, most recently [%s](mention://issue/%s) — \"%s\". Stage progress — %s. Resolve the blocked work before advancing.%s",
+				mentionPrefix, closedStage, identifier, childID, title, summary, advance,
+			)
+		} else if batch {
 			content = fmt.Sprintf(
 				"%sStage %d of this issue is complete — its sub-issues just finished together in a batch update, most recently [%s](mention://issue/%s) — \"%s\". Stage progress — %s.%s",
+				mentionPrefix, closedStage, identifier, childID, title, summary, advance,
+			)
+		} else if completed.Status == "blocked" {
+			content = fmt.Sprintf(
+				"%sStage %d of this issue reached a barrier — its last sub-issue [%s](mention://issue/%s) — \"%s\" — became blocked. Stage progress — %s. Resolve the blocker before advancing.%s",
 				mentionPrefix, closedStage, identifier, childID, title, summary, advance,
 			)
 		} else {
@@ -310,10 +305,20 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 			)
 		}
 	} else {
-		if batch {
+		if batch && barrierBlocked {
+			content = fmt.Sprintf(
+				"%sAll sub-issues reached terminal states together in a batch update, most recently [%s](mention://issue/%s) — \"%s\". Resolve the blocked work before advancing the parent.",
+				mentionPrefix, identifier, childID, title,
+			)
+		} else if batch {
 			content = fmt.Sprintf(
 				"%sAll sub-issues are complete — they just finished together in a batch update, most recently [%s](mention://issue/%s) — \"%s\". Continue the parent: synthesize the children's results and move it forward, or — if nothing remains — run `multica issue status %s in_review` to mark the parent ready for review.",
 				mentionPrefix, identifier, childID, title, parentID,
+			)
+		} else if completed.Status == "blocked" {
+			content = fmt.Sprintf(
+				"%sAll sub-issues reached terminal states — the last one, [%s](mention://issue/%s) — \"%s\", became blocked. Resolve the blocker before advancing the parent.",
+				mentionPrefix, identifier, childID, title,
 			)
 		} else {
 			content = fmt.Sprintf(
@@ -323,41 +328,73 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 		}
 	}
 
-	// author_type='system', author_id=zero UUID. The zero UUID is a valid 16
-	// byte value and the column is NOT NULL; frontend code should branch on
-	// author_type === 'system' rather than on the UUID value.
-	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
-		IssueID:     parent.ID,
-		WorkspaceID: parent.WorkspaceID,
-		AuthorType:  "system",
-		AuthorID:    pgtype.UUID{Valid: true},
-		Content:     content,
-		Type:        "system",
-		ParentID:    pgtype.UUID{Valid: false},
+	targetType := dispatchTarget.Issue.AssigneeType
+	targetID := dispatchTarget.Issue.AssigneeID
+	var originTaskID pgtype.UUID
+	if dispatchTarget.OriginTask != nil {
+		originTaskID = dispatchTarget.OriginTask.ID
+	}
+	outcome := "complete"
+	if barrierBlocked {
+		outcome = "blocked"
+	}
+	barrierName := "implicit"
+	if staged {
+		barrierName = "stage:" + strconv.Itoa(int(closedStage))
+	}
+	transitionAt := completed.UpdatedAt.Time.UTC().Format(time.RFC3339Nano)
+	barrierKey := fmt.Sprintf("%s:%s:%s:%s", barrierName, outcome, childID, transitionAt)
+
+	// The comment doubles as a durable outbox row. A zero-row return means the
+	// exact transition was already persisted by another request/replica.
+	comment, err := h.Queries.CreateChildDoneDispatchComment(ctx, db.CreateChildDoneDispatchCommentParams{
+		IssueID:               parent.ID,
+		WorkspaceID:           parent.WorkspaceID,
+		AuthorID:              pgtype.UUID{Valid: true},
+		Content:               content,
+		ChildDoneBarrierKey:   pgtype.Text{String: barrierKey, Valid: true},
+		ChildDoneTargetType:   targetType,
+		ChildDoneTargetID:     targetID,
+		ChildDoneOriginTaskID: originTaskID,
 	})
+	created := true
+	if errors.Is(err, pgx.ErrNoRows) {
+		created = false
+		comment, err = h.Queries.GetChildDoneDispatchByBarrier(ctx, db.GetChildDoneDispatchByBarrierParams{
+			IssueID:             parent.ID,
+			ChildDoneBarrierKey: pgtype.Text{String: barrierKey, Valid: true},
+		})
+	}
 	if err != nil {
-		slog.Warn("child done: create system comment failed",
+		slog.Warn("child done: persist dispatch comment failed",
 			"error", err,
 			"child_id", childID,
 			"parent_id", uuidToString(parent.ID))
-		return
+		return fmt.Errorf("persist child-done dispatch comment: %w", err)
 	}
 
-	h.publish(protocol.EventCommentCreated, uuidToString(parent.WorkspaceID), "system", "", map[string]any{
-		"comment":             commentToResponse(comment, nil, nil),
-		"issue_title":         parent.Title,
-		"issue_assignee_type": textToPtr(parent.AssigneeType),
-		"issue_assignee_id":   uuidToPtr(parent.AssigneeID),
-		"issue_status":        parent.Status,
-	})
-
-	// Dispatch the explicit trigger / inbox row for the parent assignee.
-	// Listener-level mention parsing is intentionally NOT involved (the
-	// notification + subscriber listeners both short-circuit on
-	// author_type='system'); this keeps smuggled mentions from the child
-	// title inert and gives the platform a single place to apply the loop
-	// and idempotency guards.
-	h.dispatchParentAssigneeTrigger(ctx, dispatchTarget, comment)
+	if created {
+		h.publish(protocol.EventCommentCreated, uuidToString(parent.WorkspaceID), "system", "", map[string]any{
+			"comment":             commentToResponse(comment, nil, nil),
+			"issue_title":         parent.Title,
+			"issue_assignee_type": textToPtr(parent.AssigneeType),
+			"issue_assignee_id":   uuidToPtr(parent.AssigneeID),
+			"issue_status":        parent.Status,
+		})
+	}
+	if h.ChildDoneDispatchWorker != nil {
+		worked, dispatchErr := h.ChildDoneDispatchWorker.ProcessID(ctx, comment.ID)
+		if dispatchErr != nil {
+			slog.Warn("child done: immediate dispatch deferred to durable worker",
+				"error", dispatchErr,
+				"comment_id", uuidToString(comment.ID),
+				"parent_id", uuidToString(parent.ID))
+		}
+		if !worked || dispatchErr != nil {
+			h.ChildDoneDispatchWorker.Notify()
+		}
+	}
+	return nil
 }
 
 type childDoneDispatchTarget struct {
@@ -374,20 +411,20 @@ type childDoneDispatchTarget struct {
 // request order would decide which squad and human authority receive the wake.
 // The task's squad_id is the fallback routing target only when it is a leader
 // task on this parent by every child creator.
-func (h *Handler) resolveChildDoneDispatchTarget(ctx context.Context, parent db.Issue, completed []db.Issue) childDoneDispatchTarget {
+func (h *Handler) resolveChildDoneDispatchTarget(ctx context.Context, parent db.Issue, completed []db.Issue) (childDoneDispatchTarget, error) {
 	target := childDoneDispatchTarget{Issue: parent}
 	if parent.AssigneeType.Valid || parent.AssigneeID.Valid {
-		return target
+		return target, nil
 	}
 	if len(completed) == 0 {
-		return target
+		return target, nil
 	}
 
 	originTaskID := completed[0].OriginID
 	for _, child := range completed {
 		if child.CreatorType != "agent" || !child.CreatorID.Valid ||
 			!child.OriginType.Valid || child.OriginType.String != "agent_create" || !child.OriginID.Valid {
-			return target
+			return target, nil
 		}
 		if uuidToString(child.OriginID) != uuidToString(originTaskID) {
 			slog.Warn("child done: batch has ambiguous squad orchestration provenance",
@@ -395,7 +432,7 @@ func (h *Handler) resolveChildDoneDispatchTarget(ctx context.Context, parent db.
 				"parent_id", uuidToString(parent.ID),
 				"first_origin_task_id", uuidToString(originTaskID),
 				"conflicting_origin_task_id", uuidToString(child.OriginID))
-			return target
+			return target, nil
 		}
 	}
 
@@ -406,14 +443,17 @@ func (h *Handler) resolveChildDoneDispatchTarget(ctx context.Context, parent db.
 			"child_id", uuidToString(completed[0].ID),
 			"parent_id", uuidToString(parent.ID),
 			"origin_task_id", uuidToString(originTaskID))
-		return target
+		if errors.Is(err, pgx.ErrNoRows) {
+			return target, nil
+		}
+		return target, fmt.Errorf("load child-done origin task: %w", err)
 	}
 	if uuidToString(originTask.IssueID) != uuidToString(parent.ID) || !originTask.IsLeaderTask || !originTask.SquadID.Valid {
 		slog.Warn("child done: exact origin task is not valid squad orchestration context",
 			"child_id", uuidToString(completed[0].ID),
 			"parent_id", uuidToString(parent.ID),
 			"origin_task_id", uuidToString(originTask.ID))
-		return target
+		return target, nil
 	}
 	for _, child := range completed {
 		if uuidToString(originTask.AgentID) != uuidToString(child.CreatorID) {
@@ -421,21 +461,22 @@ func (h *Handler) resolveChildDoneDispatchTarget(ctx context.Context, parent db.
 				"child_id", uuidToString(child.ID),
 				"parent_id", uuidToString(parent.ID),
 				"origin_task_id", uuidToString(originTask.ID))
-			return target
+			return target, nil
 		}
 	}
 
 	target.Issue.AssigneeType = pgtype.Text{String: "squad", Valid: true}
 	target.Issue.AssigneeID = originTask.SquadID
 	target.OriginTask = &originTask
-	return target
+	return target, nil
 }
 
 // isTerminalChildStatus reports whether a child issue status counts as
-// "finished" for stage-barrier purposes. Cancelled counts as terminal: a
-// cancelled sibling will never complete, so it must not hold a stage open.
+// "finished" for stage-barrier purposes. Blocked wakes the coordinator to
+// resolve the blocker; cancelled work will never complete and must not hold a
+// stage open.
 func isTerminalChildStatus(status string) bool {
-	return status == "done" || status == "cancelled"
+	return status == "done" || status == "blocked" || status == "cancelled"
 }
 
 // siblingsAreStaged reports whether any child in the set carries an explicit
@@ -497,7 +538,9 @@ func stageBarrierClosed(children []db.Issue, completed db.Issue) bool {
 // children are skipped (they are not part of any stage), so the breakdown
 // never renders a "Stage 0".
 func stageProgressSummary(children []db.Issue, closedStage int32) (summary string, nextStage int32) {
-	type agg struct{ total, done int }
+	type agg struct {
+		total, terminal, done, blocked, cancelled int
+	}
 	byStage := map[int32]*agg{}
 	order := []int32{}
 	for _, c := range children {
@@ -513,15 +556,34 @@ func stageProgressSummary(children []db.Issue, closedStage int32) (summary strin
 		}
 		a.total++
 		if isTerminalChildStatus(c.Status) {
+			a.terminal++
+		}
+		switch c.Status {
+		case "done":
 			a.done++
+		case "blocked":
+			a.blocked++
+		case "cancelled":
+			a.cancelled++
 		}
 	}
 	sort.Slice(order, func(i, j int) bool { return order[i] < order[j] })
 	parts := make([]string, 0, len(order))
 	for _, s := range order {
 		a := byStage[s]
-		label := fmt.Sprintf("Stage %d: %d/%d done", s, a.done, a.total)
-		if nextStage == 0 && s > closedStage && a.done < a.total {
+		label := ""
+		if a.blocked == 0 {
+			// Preserve the historical presentation for done/cancelled stages.
+			// Blocked is the only newly terminal status and needs an explicit
+			// breakdown so the coordinator cannot mistake it for completed work.
+			label = fmt.Sprintf("Stage %d: %d/%d done", s, a.terminal, a.total)
+		} else {
+			label = fmt.Sprintf(
+				"Stage %d: %d/%d terminal (%d done, %d blocked, %d cancelled)",
+				s, a.terminal, a.total, a.done, a.blocked, a.cancelled,
+			)
+		}
+		if nextStage == 0 && s > closedStage && a.terminal < a.total {
 			nextStage = s
 			label += " (next)"
 		}
@@ -680,19 +742,22 @@ func sanitizeMentionLabel(name string) string {
 //     itself push a child back into a terminal transition.
 //   - Readiness: archived agents / missing runtimes are silently skipped
 //     so a closed-out agent does not surface as a phantom assignee.
-func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, target childDoneDispatchTarget, systemComment db.Comment) {
+func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, target childDoneDispatchTarget, systemComment db.Comment) error {
 	parent := target.Issue
 	if !parent.AssigneeType.Valid || !parent.AssigneeID.Valid {
-		return
+		return nil
 	}
 
 	switch parent.AssigneeType.String {
 	case "agent":
-		h.triggerChildDoneAgent(ctx, parent, systemComment.ID)
+		return h.triggerChildDoneAgent(ctx, parent, systemComment.ID)
 	case "squad":
-		h.triggerChildDoneSquad(ctx, parent, systemComment.ID, target.OriginTask)
+		return h.triggerChildDoneSquad(ctx, parent, systemComment.ID, target.OriginTask)
 	}
+	return nil
 }
+
+var errChildDoneDispatchSkipped = errors.New("child-done dispatch target is permanently unavailable")
 
 // triggerChildDoneAgent enqueues a mention-style task for the parent's
 // agent assignee.
@@ -707,13 +772,19 @@ func (h *Handler) dispatchParentAssigneeTrigger(ctx context.Context, target chil
 // stranded those parents (MUL-2808). Runaway re-triggering is prevented by
 // the HasPendingTaskForIssueAndAgent dedup below, exactly as the @mention
 // self-trigger path relies on it (see computeMentionedAgentCommentTriggers).
-func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID) {
+func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID) error {
 	agent, err := h.Queries.GetAgentInWorkspace(ctx, db.GetAgentInWorkspaceParams{
 		ID:          parent.AssigneeID,
 		WorkspaceID: parent.WorkspaceID,
 	})
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-		return
+	if errors.Is(err, pgx.ErrNoRows) {
+		return errChildDoneDispatchSkipped
+	}
+	if err != nil {
+		return fmt.Errorf("load child-done agent target: %w", err)
+	}
+	if !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		return errChildDoneDispatchSkipped
 	}
 
 	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
@@ -723,15 +794,13 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 		HeadSha: h.TaskService.ResolveIssueReviewSHAParam(ctx, parent.ID),
 	})
 	if err != nil || hasPending {
-		return
+		return err
 	}
 
-	if _, err := h.TaskService.EnqueueTaskForMention(ctx, parent, parent.AssigneeID, triggerCommentID); err != nil {
-		slog.Warn("child done: enqueue parent agent task failed",
-			"error", err,
-			"parent_id", uuidToString(parent.ID),
-			"agent_id", uuidToString(parent.AssigneeID))
+	if _, err := h.TaskService.EnqueueTaskForChildDoneAgent(ctx, parent, parent.AssigneeID, triggerCommentID); err != nil {
+		return err
 	}
+	return nil
 }
 
 // triggerChildDoneSquad enqueues a leader-role task for the parent's squad
@@ -757,55 +826,84 @@ func (h *Handler) triggerChildDoneAgent(ctx context.Context, parent db.Issue, tr
 //
 // Re-triggering is bounded by the HasPendingTaskForIssueAndAgent idempotency
 // check below, exactly as the agent path relies on it.
-func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID, originTask *db.AgentTaskQueue) {
-	squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
-		ID:          parent.AssigneeID,
-		WorkspaceID: parent.WorkspaceID,
-	})
-	if err != nil || squad.ArchivedAt.Valid {
-		return
-	}
+func (h *Handler) triggerChildDoneSquad(ctx context.Context, parent db.Issue, triggerCommentID pgtype.UUID, originTask *db.AgentTaskQueue) error {
+	const maxAttempts = 3
 
-	agent, err := h.Queries.GetAgent(ctx, squad.LeaderID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-		return
-	}
-	if originTask != nil && !h.canInvokeAgent(
-		ctx,
-		agent,
-		"agent",
-		uuidToString(originTask.AgentID),
-		uuidToString(originTask.OriginatorUserID),
-		uuidToString(parent.WorkspaceID),
-	) {
-		slog.Debug("child done: originator cannot invoke current squad leader",
+	var lastErr error
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
+			ID:          parent.AssigneeID,
+			WorkspaceID: parent.WorkspaceID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errChildDoneDispatchSkipped
+		}
+		if err != nil {
+			lastErr = fmt.Errorf("load child-done squad target: %w", err)
+			continue
+		}
+		if squad.ArchivedAt.Valid {
+			return errChildDoneDispatchSkipped
+		}
+
+		agent, err := h.Queries.GetAgent(ctx, squad.LeaderID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return errChildDoneDispatchSkipped
+		}
+		if err != nil {
+			lastErr = fmt.Errorf("load child-done squad leader: %w", err)
+			continue
+		}
+		if !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+			return errChildDoneDispatchSkipped
+		}
+		if originTask != nil && !h.canInvokeAgent(
+			ctx,
+			agent,
+			"agent",
+			uuidToString(originTask.AgentID),
+			uuidToString(originTask.OriginatorUserID),
+			uuidToString(parent.WorkspaceID),
+		) {
+			slog.Debug("child done: originator cannot invoke current squad leader",
+				"parent_id", uuidToString(parent.ID),
+				"squad_id", uuidToString(squad.ID),
+				"leader_id", uuidToString(squad.LeaderID))
+			return errChildDoneDispatchSkipped
+		}
+
+		hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+			IssueID: parent.ID,
+			AgentID: squad.LeaderID,
+			// Key dedup on the reviewed head (TEN-356).
+			HeadSha: h.TaskService.ResolveIssueReviewSHAParam(ctx, parent.ID),
+		})
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if hasPending {
+			return nil
+		}
+
+		if originTask != nil {
+			_, err = h.TaskService.EnqueueTaskForSquadLeaderFromOriginTask(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID, *originTask)
+		} else {
+			_, err = h.TaskService.EnqueueTaskForChildDoneSquadLeader(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID)
+		}
+		if err == nil {
+			return nil
+		}
+		if errors.Is(err, service.ErrIssueAssignedForTask) {
+			return err
+		}
+		lastErr = err
+		slog.Warn("child done: retrying parent squad leader enqueue",
+			"error", err,
+			"attempt", attempt,
 			"parent_id", uuidToString(parent.ID),
 			"squad_id", uuidToString(squad.ID),
 			"leader_id", uuidToString(squad.LeaderID))
-		return
 	}
-
-	hasPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
-		IssueID: parent.ID,
-		AgentID: squad.LeaderID,
-		// Key dedup on the reviewed head (TEN-356).
-		HeadSha: h.TaskService.ResolveIssueReviewSHAParam(ctx, parent.ID),
-	})
-	if err != nil || hasPending {
-		return
-	}
-
-	var enqueueErr error
-	if originTask != nil {
-		_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeaderFromOriginTask(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID, *originTask)
-	} else {
-		_, enqueueErr = h.TaskService.EnqueueTaskForSquadLeader(ctx, parent, squad.LeaderID, squad.ID, triggerCommentID)
-	}
-	if enqueueErr != nil {
-		slog.Warn("child done: enqueue parent squad leader task failed",
-			"error", enqueueErr,
-			"parent_id", uuidToString(parent.ID),
-			"squad_id", uuidToString(squad.ID),
-			"leader_id", uuidToString(squad.LeaderID))
-	}
+	return lastErr
 }

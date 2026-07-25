@@ -569,14 +569,34 @@ WHERE id = $1 AND archived_at IS NULL
 FOR SHARE
 `
 
-// Serialize squad task creation with ArchiveSquad. FOR SHARE conflicts with
-// the archive UPDATE while still allowing concurrent task creators. The
-// archived_at predicate is rechecked after a competing archive commits.
+// Serialize squad task creation with archival. FOR SHARE conflicts with the
+// archive UPDATE while still allowing concurrent task creators. The active
+// predicate is rechecked after a competing update commits.
 func (q *Queries) LockActiveSquadForTaskCreate(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, lockActiveSquadForTaskCreate, id)
 	var id_2 pgtype.UUID
 	err := row.Scan(&id_2)
 	return id_2, err
+}
+
+const lockActiveSquadLeaderForTaskCreate = `-- name: LockActiveSquadLeaderForTaskCreate :one
+SELECT id FROM squad
+WHERE id = $1 AND leader_id = $2 AND archived_at IS NULL
+FOR SHARE
+`
+
+type LockActiveSquadLeaderForTaskCreateParams struct {
+	ID       pgtype.UUID `json:"id"`
+	LeaderID pgtype.UUID `json:"leader_id"`
+}
+
+// Leader-task creation additionally serializes with leader rotation and
+// rechecks that the target agent is still the current leader.
+func (q *Queries) LockActiveSquadLeaderForTaskCreate(ctx context.Context, arg LockActiveSquadLeaderForTaskCreateParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockActiveSquadLeaderForTaskCreate, arg.ID, arg.LeaderID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const removeSquadMember = `-- name: RemoveSquadMember :execrows

@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY child_done_transition_group_queue_idx;

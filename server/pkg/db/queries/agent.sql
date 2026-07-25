@@ -235,6 +235,20 @@ VALUES (
 )
 RETURNING *;
 
+-- name: LockChildDoneTaskCreate :exec
+-- Serialize task creation for one durable child-done comment across replicas.
+-- The matching task lookup and insert run in the same transaction.
+SELECT pg_advisory_xact_lock(hashtextextended(@dispatch_key, 0));
+
+-- name: GetAgentTaskByTriggerCommentAndTarget :one
+SELECT * FROM agent_task_queue
+WHERE trigger_comment_id = @trigger_comment_id
+  AND agent_id = @agent_id
+  AND squad_id IS NOT DISTINCT FROM sqlc.narg(squad_id)::uuid
+  AND is_leader_task = @is_leader_task
+ORDER BY created_at, id
+LIMIT 1;
+
 -- name: CreateQuickCreateTask :one
 -- Quick-create tasks have no issue / chat / autopilot link; the entire job
 -- description (prompt, requester, workspace) lives in context JSONB. The

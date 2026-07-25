@@ -1,0 +1,11 @@
+ALTER TABLE comment
+    DROP COLUMN child_done_dispatch_error,
+    DROP COLUMN child_done_dispatch_attempts,
+    DROP COLUMN child_done_lease_expires_at,
+    DROP COLUMN child_done_lease_token,
+    DROP COLUMN child_done_available_at,
+    DROP COLUMN child_done_dispatch_status,
+    DROP COLUMN child_done_origin_task_id,
+    DROP COLUMN child_done_target_id,
+    DROP COLUMN child_done_target_type,
+    DROP COLUMN child_done_barrier_key;

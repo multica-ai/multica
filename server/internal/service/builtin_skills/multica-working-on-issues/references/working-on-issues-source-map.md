@@ -119,7 +119,7 @@ and is hidden from the PR list.
 | `shouldEnqueueAgentTask` returns false for `backlog` (parking lot) | `server/internal/handler/issue.go:2644-2648` | new citation |
 | Backlog → non-backlog (not done/cancelled) enqueues on update | `server/internal/handler/issue.go:2537-2540` | `:2523` |
 | Same contract in batch update | `server/internal/handler/issue.go:3021-3024` | new citation |
-| Child → terminal notifies + wakes the resolved parent coordinator, gated by the stage barrier; an unassigned mention-started squad flow can resume only through the child's exact `agent_create` origin task and inherits that task's human attribution | `server/internal/handler/issue_child_done.go` (`notifyParentOfChildDone`, `resolveChildDoneDispatchTarget`); `server/internal/service/task.go` (`EnqueueTaskForSquadLeaderFromOriginTask`) | parent-assignee-only wake |
+| Child → terminal (`done`/`blocked`/`cancelled`) notifies + wakes the resolved parent coordinator, gated by the stage barrier; blocked → done is a distinct completion wake. The system comment is a durable leased outbox with persisted target/origin/retry state; task creation is idempotent by comment ID. Unassigned mention-started squad flows atomically recheck parent assignment + active/current leader, and assignment/leader races are re-resolved by the worker | `server/internal/handler/issue_child_done.go` (`notifyParentOfChildDone`, `resolveChildDoneDispatchTarget`, `triggerChildDoneSquad`); `server/internal/handler/child_done_dispatch_worker.go`; `server/internal/service/task.go` (`EnqueueTaskForChildDone*`, `createAgentTaskWithSquadGuard`); `server/pkg/db/queries/{comment,issue,squad,agent}.sql`; migrations `212`–`214` | parent-assignee-only wake |
 | Status change (incl. → `cancelled`) does NOT cancel in-flight tasks; only issue deletion does (MUL-4465) | no-cancel note in `server/internal/handler/issue.go:2652-2658` (`UpdateIssue`) and `:3170-3171` (`BatchUpdateIssues`); deletion still cancels at `:2863` (`DeleteIssue`) / `:3239` (`BatchDeleteIssues`) via `CancelTasksForIssue` (`server/internal/service/task.go:1229`) | new citation |
 | `StartTask` / `CompleteTask` do not write issue status (agent CLI owns progress) | `server/internal/service/task.go` (`StartTask` / `CompleteTask` comments) | new citation |
 | Assignment brief: ordinary agent `in_progress` then `in_review`; squad leader `in_progress` only on first dispatch | `server/internal/daemon/execenv/runtime_config_sections.go` (`writeWorkflowAssignment`) | new citation |
@@ -142,7 +142,7 @@ away, so no task is left orphaned.
 | Behavior | File:line |
 |---|---|
 | `issue.stage` column (nullable, `>= 1`) | `server/migrations/123_issue_stage.up.sql` |
-| Stage barrier: notify+wake fire only when the lowest unfinished stage is all-terminal; unstaged set = one implicit stage | `server/internal/handler/issue_child_done.go:231` (`stageBarrierClosed`) |
+| Stage barrier: notify+wake fire only when the lowest unfinished stage is all-terminal (`done`/`blocked`/`cancelled`); unstaged set = one implicit stage | `server/internal/handler/issue_child_done.go` (`isTerminalChildStatus`, `stageBarrierClosed`) |
 | Per-stage summary + next stage for the wake comment | `server/internal/handler/issue_child_done.go:254` (`stageProgressSummary`) |
 | `--stage` on `issue create` / `issue update` | `server/cmd/multica/cmd_issue.go:328,350` |
 | `multica issue children <id>` (sub-issues grouped by stage) | `server/cmd/multica/cmd_issue.go:114,678`; route `GET /api/issues/{id}/children` → `ListChildIssues` |

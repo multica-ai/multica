@@ -961,23 +961,107 @@ func headShaText(sha string) pgtype.Text {
 	return pgtype.Text{String: sha, Valid: sha != ""}
 }
 
-var errSquadUnavailableForTask = errors.New("squad is archived or unavailable")
+// ErrSquadUnavailableForTask means a guarded squad task lost admission because
+// the squad was archived/deleted or a fresh leader dispatch targeted a stale
+// leader snapshot.
+var ErrSquadUnavailableForTask = errors.New("squad is archived, unavailable, or leader changed")
+
+// ErrIssueAssignedForTask means an unassigned-parent continuation lost its row
+// lock race to an explicit assignee.
+var ErrIssueAssignedForTask = errors.New("issue received an explicit assignee")
+
+func lockActiveSquadTaskTarget(ctx context.Context, qtx *db.Queries, squadID, agentID pgtype.UUID, requireCurrentLeader bool) error {
+	var err error
+	if requireCurrentLeader {
+		_, err = qtx.LockActiveSquadLeaderForTaskCreate(ctx, db.LockActiveSquadLeaderForTaskCreateParams{
+			ID:       squadID,
+			LeaderID: agentID,
+		})
+	} else {
+		_, err = qtx.LockActiveSquadForTaskCreate(ctx, squadID)
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return ErrSquadUnavailableForTask
+	}
+	if err != nil {
+		return fmt.Errorf("lock active squad task target: %w", err)
+	}
+	return nil
+}
+
+type taskCreateGuards struct {
+	requireUnassignedIssueID pgtype.UUID
+	requireAssignedIssueID   pgtype.UUID
+	requireAssigneeType      pgtype.Text
+	requireAssigneeID        pgtype.UUID
+	requireCurrentLeader     bool
+	idempotencyCommentID     pgtype.UUID
+}
 
 // createAgentTaskWithSquadGuard serializes squad task creation with archival.
-// A shared row lock allows concurrent enqueues but conflicts with ArchiveSquad's
-// UPDATE lock, making the active check and task insert one atomic decision.
-func (s *TaskService) createAgentTaskWithSquadGuard(ctx context.Context, params db.CreateAgentTaskParams) (db.AgentTaskQueue, error) {
-	if !params.SquadID.Valid {
-		return s.Queries.CreateAgentTask(ctx, params)
+// Current-leader validation is intentionally opt-in: child-done dispatch owns
+// the retry/retarget loop needed after a rotation, while generic assignment,
+// @squad, and autopilot paths retain their historical active-squad admission
+// semantics. Child-done also supplies a durable comment ID so a crash after
+// INSERT but before outbox completion reuses the existing task.
+func (s *TaskService) createAgentTaskWithSquadGuard(ctx context.Context, params db.CreateAgentTaskParams, guards taskCreateGuards) (db.AgentTaskQueue, bool, error) {
+	needsTx := params.SquadID.Valid || guards.requireUnassignedIssueID.Valid ||
+		guards.requireAssignedIssueID.Valid || guards.idempotencyCommentID.Valid
+	if !needsTx {
+		task, err := s.Queries.CreateAgentTask(ctx, params)
+		return task, err == nil, err
+	}
+	if s.TxStarter == nil {
+		return db.AgentTaskQueue{}, false, fmt.Errorf("guarded task creation requires transactional task service")
 	}
 
 	var task db.AgentTaskQueue
+	created := false
 	err := s.runInTx(ctx, func(qtx *db.Queries) error {
-		if _, err := qtx.LockActiveSquadForTaskCreate(ctx, params.SquadID); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return errSquadUnavailableForTask
+		if params.SquadID.Valid {
+			if err := lockActiveSquadTaskTarget(ctx, qtx, params.SquadID, params.AgentID, guards.requireCurrentLeader); err != nil {
+				return err
 			}
-			return fmt.Errorf("lock active squad: %w", err)
+		}
+		if guards.requireUnassignedIssueID.Valid {
+			if _, err := qtx.LockUnassignedIssueForTaskCreate(ctx, guards.requireUnassignedIssueID); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrIssueAssignedForTask
+				}
+				return fmt.Errorf("lock unassigned issue: %w", err)
+			}
+		}
+		if guards.requireAssignedIssueID.Valid {
+			_, err := qtx.LockAssignedIssueForTaskCreate(ctx, db.LockAssignedIssueForTaskCreateParams{
+				ID:           guards.requireAssignedIssueID,
+				AssigneeType: guards.requireAssigneeType,
+				AssigneeID:   guards.requireAssigneeID,
+			})
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrIssueAssignedForTask
+			}
+			if err != nil {
+				return fmt.Errorf("lock assigned issue: %w", err)
+			}
+		}
+		if guards.idempotencyCommentID.Valid {
+			dispatchKey := "child-done:" + util.UUIDToString(guards.idempotencyCommentID)
+			if err := qtx.LockChildDoneTaskCreate(ctx, dispatchKey); err != nil {
+				return fmt.Errorf("lock child-done task create: %w", err)
+			}
+			existing, err := qtx.GetAgentTaskByTriggerCommentAndTarget(ctx, db.GetAgentTaskByTriggerCommentAndTargetParams{
+				TriggerCommentID: guards.idempotencyCommentID,
+				AgentID:          params.AgentID,
+				SquadID:          params.SquadID,
+				IsLeaderTask:     params.IsLeaderTask.Bool,
+			})
+			if err == nil {
+				task = existing
+				return nil
+			}
+			if !errors.Is(err, pgx.ErrNoRows) {
+				return fmt.Errorf("find child-done task: %w", err)
+			}
 		}
 
 		var err error
@@ -985,9 +1069,10 @@ func (s *TaskService) createAgentTaskWithSquadGuard(ctx context.Context, params 
 		if err != nil {
 			return fmt.Errorf("create task: %w", err)
 		}
+		created = true
 		return nil
 	})
-	return task, err
+	return task, created, err
 }
 
 // ResolveIssueReviewSHAParam is ResolveIssueReviewSHA wrapped as the pgtype.Text
@@ -1037,7 +1122,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	task, err := s.createAgentTaskWithSquadGuard(ctx, db.CreateAgentTaskParams{
+	task, _, err := s.createAgentTaskWithSquadGuard(ctx, db.CreateAgentTaskParams{
 		AgentID:              issue.AssigneeID,
 		RuntimeID:            agent.RuntimeID,
 		IssueID:              issue.ID,
@@ -1060,7 +1145,7 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
-	})
+	}, taskCreateGuards{})
 	if err != nil {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
@@ -1087,13 +1172,13 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 // Unlike EnqueueTaskForIssue, this takes an explicit agent ID rather than
 // deriving it from the issue assignee.
 func (s *TaskService) EnqueueTaskForMention(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, nil)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, nil, pgtype.UUID{})
 }
 
 // EnqueueTaskForThreadParent creates a queued task for the agent who authored
 // the direct parent comment a member replied to.
 func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, nil)
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, nil, pgtype.UUID{})
 }
 
 // EnqueueTaskForSquadLeader is the leader-role variant of EnqueueTaskForMention.
@@ -1108,7 +1193,31 @@ func (s *TaskService) EnqueueTaskForThreadParent(ctx context.Context, issue db.I
 // leader task was triggered (comment @squad, issue assign, autopilot,
 // sub-issue done callback). See migration 127.
 func (s *TaskService) EnqueueTaskForSquadLeader(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, nil)
+	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, nil, pgtype.UUID{})
+}
+
+// EnqueueTaskForChildDoneAgent is the durable child-done variant. The trigger
+// comment is its idempotency key, so worker retries never create a second task.
+func (s *TaskService) EnqueueTaskForChildDoneAgent(ctx context.Context, issue db.Issue, agentID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTaskWithGuards(ctx, issue, agentID, triggerCommentID, false, pgtype.UUID{}, nil, taskCreateGuards{
+		requireAssignedIssueID: issue.ID,
+		requireAssigneeType:    pgtype.Text{String: "agent", Valid: true},
+		requireAssigneeID:      agentID,
+		idempotencyCommentID:   triggerCommentID,
+	})
+}
+
+// EnqueueTaskForChildDoneSquadLeader validates that the resolved leader is
+// still current at INSERT time. The worker retries by reloading the squad when
+// a concurrent rotation wins.
+func (s *TaskService) EnqueueTaskForChildDoneSquadLeader(ctx context.Context, issue db.Issue, leaderID, squadID, triggerCommentID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTaskWithGuards(ctx, issue, leaderID, triggerCommentID, true, squadID, nil, taskCreateGuards{
+		requireAssignedIssueID: issue.ID,
+		requireAssigneeType:    pgtype.Text{String: "squad", Valid: true},
+		requireAssigneeID:      squadID,
+		requireCurrentLeader:   true,
+		idempotencyCommentID:   triggerCommentID,
+	})
 }
 
 // EnqueueTaskForSquadLeaderFromOriginTask continues a proven squad
@@ -1124,7 +1233,11 @@ func (s *TaskService) EnqueueTaskForSquadLeaderFromOriginTask(ctx context.Contex
 		OriginOriginator:  originTask.OriginatorUserID,
 		OriginAccountable: originTask.AccountableUserID,
 	})
-	return s.enqueueMentionTask(ctx, issue, leaderID, triggerCommentID, true, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, &attr)
+	return s.enqueueMentionTaskWithGuards(ctx, issue, leaderID, triggerCommentID, true, squadID, &attr, taskCreateGuards{
+		requireUnassignedIssueID: issue.ID,
+		requireCurrentLeader:     true,
+		idempotencyCommentID:     triggerCommentID,
+	})
 }
 
 // EnqueueTaskForSquadLeaderWithHandoff is the assign/promote variant carrying a
@@ -1133,26 +1246,41 @@ func (s *TaskService) EnqueueTaskForSquadLeaderFromOriginTask(ctx context.Contex
 // performed the assign/promote and becomes the accountable human (MUL-4302 §4);
 // invalid when the caller has no member actor.
 func (s *TaskService) EnqueueTaskForSquadLeaderWithHandoff(ctx context.Context, issue db.Issue, leaderID pgtype.UUID, squadID pgtype.UUID, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, handoffNote, actorUserID, pgtype.UUID{}, nil)
+	return s.enqueueMentionTask(ctx, issue, leaderID, pgtype.UUID{}, true, squadID, false, handoffNote, actorUserID, pgtype.UUID{}, nil, pgtype.UUID{})
 }
 
-func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, attributionOverride *attribution.Result) (db.AgentTaskQueue, error) {
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, attributionOverride)
+func (s *TaskService) enqueueMentionTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, attributionOverride *attribution.Result, requireUnassignedIssueID pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, attributionOverride, requireUnassignedIssueID)
 }
 
-func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, attributionOverride *attribution.Result) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueMentionTaskWithGuards(ctx context.Context, issue db.Issue, agentID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, attributionOverride *attribution.Result, guards taskCreateGuards) (db.AgentTaskQueue, error) {
+	params, err := s.prepareMentionTaskCreateParams(ctx, issue, agentID, triggerCommentID, nil, isLeader, squadID, false, "", pgtype.UUID{}, pgtype.UUID{}, attributionOverride)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	task, created, err := s.createAgentTaskWithSquadGuard(ctx, params, guards)
+	if err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
+	}
+	if created {
+		s.finishMentionTaskEnqueue(ctx, issue.ID, agentID, isLeader, task)
+	}
+	return task, nil
+}
+
+func (s *TaskService) prepareMentionTaskCreateParams(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, attributionOverride *attribution.Result) (db.CreateAgentTaskParams, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		slog.Error("mention task enqueue failed: agent not found", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
-		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
+		return db.CreateAgentTaskParams{}, fmt.Errorf("load agent: %w", err)
 	}
 	if agent.ArchivedAt.Valid {
 		slog.Debug("mention task enqueue skipped: agent is archived", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
-		return db.AgentTaskQueue{}, fmt.Errorf("agent is archived")
+		return db.CreateAgentTaskParams{}, fmt.Errorf("agent is archived")
 	}
 	if !agent.RuntimeID.Valid {
 		slog.Error("mention task enqueue failed: agent has no runtime", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
-		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
+		return db.CreateAgentTaskParams{}, fmt.Errorf("agent has no runtime")
 	}
 
 	// An explicit mention / thread-parent / squad-leader hop from an
@@ -1170,12 +1298,12 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 	attr, err = s.applyAttributionFallback(ctx, attr, agent)
 	if err != nil {
 		slog.Warn("mention task enqueue refused: attribution fail-closed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
-		return db.AgentTaskQueue{}, err
+		return db.CreateAgentTaskParams{}, err
 	}
 	originatorUserID := attr.UserID
 	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	task, err := s.createAgentTaskWithSquadGuard(ctx, db.CreateAgentTaskParams{
+	return db.CreateAgentTaskParams{
 		AgentID:              agentID,
 		RuntimeID:            agent.RuntimeID,
 		IssueID:              issue.ID,
@@ -1200,16 +1328,31 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		// Stamp the reviewed head so dedup can distinguish this run's target
 		// from a later request against a new HEAD (TEN-356).
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
+	}, nil
+}
+
+func (s *TaskService) finishMentionTaskEnqueue(ctx context.Context, issueID, agentID pgtype.UUID, isLeader bool, task db.AgentTaskQueue) {
+	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issueID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
+	// See EnqueueTaskForIssue for ordering rationale.
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.NotifyTaskEnqueued(ctx, task)
+}
+
+func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, attributionOverride *attribution.Result, requireUnassignedIssueID pgtype.UUID) (db.AgentTaskQueue, error) {
+	params, err := s.prepareMentionTaskCreateParams(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, attributionOverride)
+	if err != nil {
+		return db.AgentTaskQueue{}, err
+	}
+	task, created, err := s.createAgentTaskWithSquadGuard(ctx, params, taskCreateGuards{
+		requireUnassignedIssueID: requireUnassignedIssueID,
 	})
 	if err != nil {
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
-
-	slog.Info("mention task enqueued", "task_id", util.UUIDToString(task.ID), "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "is_leader_task", isLeader)
-	// See EnqueueTaskForIssue for ordering rationale.
-	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
-	s.NotifyTaskEnqueued(ctx, task)
+	if created {
+		s.finishMentionTaskEnqueue(ctx, issue.ID, agentID, isLeader, task)
+	}
 	return task, nil
 }
 
@@ -3496,6 +3639,38 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		}
 	}
 
+	// A squad rerun must validate the active squad, cancel prior work, and
+	// create its replacement under one squad row lock. Manual per-row rerun
+	// deliberately keeps targeting the historical source agent and role; the
+	// stricter current-leader check belongs to fresh leader dispatch.
+	if squadID.Valid {
+		task, cancelled, err := s.rerunSquadTaskAtomically(
+			ctx,
+			issue,
+			agentID,
+			triggerCommentID,
+			coalescedCommentIDs,
+			isLeader,
+			squadID,
+			actorUserID,
+			sourceTaskID,
+		)
+		if err != nil {
+			return nil, err
+		}
+		s.publishRerunCancellations(ctx, cancelled)
+		s.finishMentionTaskEnqueue(ctx, issue.ID, agentID, isLeader, task)
+		slog.Info("issue rerun enqueued",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(issueID),
+			"agent_id", util.UUIDToString(agentID),
+			"source_task_id", util.UUIDToString(sourceTaskID),
+			"is_leader", isLeader,
+			"cancelled_prior", len(cancelled),
+		)
+		return &task, nil
+	}
+
 	// Cancel only the target agent's active/queued tasks on this issue.
 	cancelled, err := s.Queries.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
 		IssueID: issueID,
@@ -3508,11 +3683,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 			"error", err,
 		)
 	}
-	for _, t := range cancelled {
-		s.captureTaskCancelled(ctx, t)
-		s.ReconcileAgentStatus(ctx, t.AgentID)
-		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
-	}
+	s.publishRerunCancellations(ctx, cancelled)
 
 	// A manual rerun is a NEW direct_human trigger attributed to the rerunning
 	// member, not the original run's human (MUL-4302 §5); actorUserID carries them.
@@ -3532,6 +3703,86 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		"cancelled_prior", len(cancelled),
 	)
 	return &task, nil
+}
+
+func rerunUsesIssueAssigneePath(issue db.Issue, agentID pgtype.UUID) bool {
+	return issue.AssigneeType.String == "agent" &&
+		issue.AssigneeID.Valid &&
+		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID)
+}
+
+func (s *TaskService) publishRerunCancellations(ctx context.Context, cancelled []db.AgentTaskQueue) {
+	for _, task := range cancelled {
+		s.captureTaskCancelled(ctx, task)
+		s.ReconcileAgentStatus(ctx, task.AgentID)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
+	}
+}
+
+func (s *TaskService) rerunSquadTaskAtomically(
+	ctx context.Context,
+	issue db.Issue,
+	agentID pgtype.UUID,
+	triggerCommentID pgtype.UUID,
+	coalescedCommentIDs []pgtype.UUID,
+	isLeader bool,
+	squadID pgtype.UUID,
+	actorUserID pgtype.UUID,
+	rerunOfTaskID pgtype.UUID,
+) (db.AgentTaskQueue, []db.AgentTaskQueue, error) {
+	if s.TxStarter == nil {
+		return db.AgentTaskQueue{}, nil, fmt.Errorf("squad rerun requires transactional task service")
+	}
+
+	params, err := s.prepareMentionTaskCreateParams(
+		ctx,
+		issue,
+		agentID,
+		triggerCommentID,
+		coalescedCommentIDs,
+		isLeader,
+		squadID,
+		true,
+		"",
+		actorUserID,
+		rerunOfTaskID,
+		nil,
+	)
+	if err != nil {
+		return db.AgentTaskQueue{}, nil, err
+	}
+
+	var (
+		task      db.AgentTaskQueue
+		cancelled []db.AgentTaskQueue
+	)
+	err = s.runInTx(ctx, func(qtx *db.Queries) error {
+		if _, err := qtx.LockActiveSquadForTaskCreate(ctx, squadID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return ErrSquadUnavailableForTask
+			}
+			return fmt.Errorf("lock active squad for rerun: %w", err)
+		}
+
+		var err error
+		cancelled, err = qtx.CancelAgentTasksByIssueAndAgent(ctx, db.CancelAgentTasksByIssueAndAgentParams{
+			IssueID: issue.ID,
+			AgentID: agentID,
+		})
+		if err != nil {
+			return fmt.Errorf("cancel prior tasks: %w", err)
+		}
+
+		task, err = qtx.CreateAgentTask(ctx, params)
+		if err != nil {
+			return fmt.Errorf("create rerun task: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return db.AgentTaskQueue{}, nil, err
+	}
+	return task, cancelled, nil
 }
 
 // promoteNewestSurvivingComment repairs a manual rerun whose original trigger
@@ -3599,11 +3850,10 @@ func (s *TaskService) promoteNewestSurvivingComment(ctx context.Context, ids []p
 // (rerun_of_task_id) to reuse its workdir and, when the failure did not poison
 // the conversation, resume its session (MUL-4869).
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
-	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
-		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
+	if rerunUsesIssueAssigneePath(issue, agentID) {
 		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID)
 	}
-	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, nil)
+	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID, nil, pgtype.UUID{})
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of

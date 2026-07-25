@@ -668,6 +668,46 @@ func (q *Queries) GetIssueByOrigin(ctx context.Context, arg GetIssueByOriginPara
 	return i, err
 }
 
+const getIssueForUpdate = `-- name: GetIssueForUpdate :one
+SELECT id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties FROM issue
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetIssueForUpdate(ctx context.Context, id pgtype.UUID) (Issue, error) {
+	row := q.db.QueryRow(ctx, getIssueForUpdate, id)
+	var i Issue
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Title,
+		&i.Description,
+		&i.Status,
+		&i.Priority,
+		&i.AssigneeType,
+		&i.AssigneeID,
+		&i.CreatorType,
+		&i.CreatorID,
+		&i.ParentIssueID,
+		&i.AcceptanceCriteria,
+		&i.ContextRefs,
+		&i.Position,
+		&i.DueDate,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Number,
+		&i.ProjectID,
+		&i.OriginType,
+		&i.OriginID,
+		&i.FirstExecutedAt,
+		&i.StartDate,
+		&i.Metadata,
+		&i.Stage,
+		&i.Properties,
+	)
+	return i, err
+}
+
 const getIssueGCStatus = `-- name: GetIssueGCStatus :one
 SELECT workspace_id, status, updated_at
 FROM issue
@@ -1207,6 +1247,30 @@ func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) 
 	return items, nil
 }
 
+const lockAssignedIssueForTaskCreate = `-- name: LockAssignedIssueForTaskCreate :one
+SELECT id FROM issue
+WHERE id = $1
+  AND assignee_type = $2
+  AND assignee_id = $3
+FOR SHARE
+`
+
+type LockAssignedIssueForTaskCreateParams struct {
+	ID           pgtype.UUID `json:"id"`
+	AssigneeType pgtype.Text `json:"assignee_type"`
+	AssigneeID   pgtype.UUID `json:"assignee_id"`
+}
+
+// Child-done resolves an explicit assignee before it prepares the task. Lock
+// and recheck that target at INSERT time so a concurrent reassignment is
+// handled by the durable worker instead of waking the stale assignee.
+func (q *Queries) LockAssignedIssueForTaskCreate(ctx context.Context, arg LockAssignedIssueForTaskCreateParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockAssignedIssueForTaskCreate, arg.ID, arg.AssigneeType, arg.AssigneeID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const lockIssueDuplicateKey = `-- name: LockIssueDuplicateKey :exec
 SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 `
@@ -1214,6 +1278,22 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))
 func (q *Queries) LockIssueDuplicateKey(ctx context.Context, dollar_1 string) error {
 	_, err := q.db.Exec(ctx, lockIssueDuplicateKey, dollar_1)
 	return err
+}
+
+const lockUnassignedIssueForTaskCreate = `-- name: LockUnassignedIssueForTaskCreate :one
+SELECT id FROM issue
+WHERE id = $1 AND assignee_type IS NULL AND assignee_id IS NULL
+FOR SHARE
+`
+
+// Serialize unassigned-parent continuation creation with explicit assignment.
+// If assignment wins the row lock, the NULL predicates are rechecked after its
+// commit and the continuation fails closed.
+func (q *Queries) LockUnassignedIssueForTaskCreate(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockUnassignedIssueForTaskCreate, id)
+	var id_2 pgtype.UUID
+	err := row.Scan(&id_2)
+	return id_2, err
 }
 
 const markIssueFirstExecuted = `-- name: MarkIssueFirstExecuted :one

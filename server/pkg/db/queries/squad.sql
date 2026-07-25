@@ -10,11 +10,18 @@ SELECT * FROM squad WHERE id = $1;
 SELECT * FROM squad WHERE id = $1 AND workspace_id = $2;
 
 -- name: LockActiveSquadForTaskCreate :one
--- Serialize squad task creation with ArchiveSquad. FOR SHARE conflicts with
--- the archive UPDATE while still allowing concurrent task creators. The
--- archived_at predicate is rechecked after a competing archive commits.
+-- Serialize squad task creation with archival. FOR SHARE conflicts with the
+-- archive UPDATE while still allowing concurrent task creators. The active
+-- predicate is rechecked after a competing update commits.
 SELECT id FROM squad
 WHERE id = $1 AND archived_at IS NULL
+FOR SHARE;
+
+-- name: LockActiveSquadLeaderForTaskCreate :one
+-- Leader-task creation additionally serializes with leader rotation and
+-- rechecks that the target agent is still the current leader.
+SELECT id FROM squad
+WHERE id = $1 AND leader_id = $2 AND archived_at IS NULL
 FOR SHARE;
 
 -- name: ListSquads :many

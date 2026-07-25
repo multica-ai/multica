@@ -203,7 +203,16 @@ provenance does not fall back to timestamp or latest-task inference. A handoff
 wakes the leader only when every child in the closed stage (or every sibling in
 an unstaged barrier) shares the same exact origin task, including children that
 finished earlier. Mixed origins still produce the stage-complete comment but do
-not dispatch a coordinator. An archived origin squad also receives no wake.
+not dispatch a coordinator. `done`, `blocked`, and `cancelled` all close a stage
+barrier; a blocked child wakes the coordinator to resolve the blocker. Task
+creation revalidates under database row locks that the parent is still
+unassigned, the squad is active, and the target agent is still its current
+leader. A concurrent leader rotation is re-resolved and retried. If an explicit
+assignment wins, the stage comment and wake are retargeted to that assignee;
+archived squads still fail closed. The system comment is also a durable outbox:
+leased workers retry after crashes or transient database failures, while the
+comment ID makes task creation idempotent. A later `blocked` → `done` transition
+is a distinct completion handoff and wakes the coordinator again.
 
 ## Autopilot behavior
 

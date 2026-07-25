@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY child_done_transition_event_uidx;
