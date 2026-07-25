@@ -192,6 +192,98 @@ func TestRegistryGate_RuntimeLayerDenyBlocks(t *testing.T) {
 	}
 }
 
+// TestRegistryGate_MatchesSettingsMemberOverride reproduces FIR-3388's
+// production mismatch at the enforcement seam. Registry data sources are a
+// declared safety floor, so a User Allow must not open a Workspace Deny. The
+// projected Settings row and the actual registry call must therefore both deny
+// the same actor and data source.
+func TestRegistryGate_MatchesSettingsMemberOverride(t *testing.T) {
+	if runtimeAccountTestPool == nil {
+		t.Skip("DATABASE_URL not configured; skipping registry gate integration test")
+	}
+	pool := runtimeAccountTestPool
+	ctx := context.Background()
+
+	const dataSourceID = "member-opened-registry-source"
+
+	var agentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_id, owner_id)
+		VALUES ($1, $2, 'local', $3, $4)
+		RETURNING id
+	`, runtimeAccountTestWSID, "registry-member-override-probe", runtimeAccountTestRuntimeID, runtimeAccountTestUserID).Scan(&agentID); err != nil {
+		t.Fatalf("create agent: %v", err)
+	}
+
+	cerebro := cerebrodb.New(pool)
+	if err := cerebro.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: runtimeAccountTestWSID,
+		FlagKey:     toolpolicy.FlagMemberOverride,
+		Enabled:     true,
+	}); err != nil {
+		t.Fatalf("enable member override: %v", err)
+	}
+	t.Cleanup(func() {
+		bg := context.Background()
+		_, _ = pool.Exec(bg, `DELETE FROM cerebro_feature_flags WHERE workspace_id = $1 AND flag_key = $2`,
+			runtimeAccountTestWSID, toolpolicy.FlagMemberOverride)
+		_, _ = pool.Exec(bg, `DELETE FROM cerebro_tool_policy WHERE workspace_id = $1 AND tool_key = 'firtal_registry'`,
+			runtimeAccountTestWSID)
+		_, _ = pool.Exec(bg, `DELETE FROM agent WHERE id = $1`, agentID)
+	})
+
+	store := toolpolicy.NewStore(pool)
+	for _, policy := range []toolpolicy.SetParams{
+		{
+			WorkspaceID:     runtimeAccountTestWSID,
+			ToolKey:         "firtal_registry",
+			Layer:           toolpolicy.LayerWorkspace,
+			SubjectID:       runtimeAccountTestWSID,
+			Setting:         toolpolicy.SettingDeny,
+			ResourcePattern: dataSourceID,
+		},
+		{
+			WorkspaceID:     runtimeAccountTestWSID,
+			ToolKey:         "firtal_registry",
+			Layer:           toolpolicy.LayerUser,
+			SubjectID:       runtimeAccountTestUserID,
+			Setting:         toolpolicy.SettingAllow,
+			ResourcePattern: dataSourceID,
+		},
+	} {
+		if _, err := store.Set(ctx, policy); err != nil {
+			t.Fatalf("author %s policy: %v", policy.Layer, err)
+		}
+	}
+
+	rows, err := store.AppendRegistryDataSourceRows(ctx, toolpolicy.TableQuery{
+		WorkspaceID: runtimeAccountTestWSID,
+		RuntimeID:   runtimeAccountTestRuntimeID,
+		AgentID:     agentID,
+		UserID:      runtimeAccountTestUserID,
+		Base:        toolpolicy.SettingAllow,
+	}, []toolpolicy.RegistryDataSource{{ID: dataSourceID, Name: "Member opened source"}}, nil)
+	if err != nil {
+		t.Fatalf("project Settings row: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Effective.Setting != toolpolicy.SettingDeny {
+		t.Fatalf("Settings effective = %+v, want Deny", rows)
+	}
+
+	tool := &FirtalRegistryTool{
+		queries: db.New(pool),
+		cerebro: cerebro,
+		tctx: ToolContext{
+			WorkspaceID: runtimeAccountTestWSID,
+			AgentID:     agentID,
+			UserID:      runtimeAccountTestUserID,
+		},
+	}
+	if err := tool.chainGateDataSource(ctx, "execute", dataSourceID, "", ""); err == nil {
+		t.Fatal("Registry gate allowed a source that Settings correctly reports as Deny")
+	}
+}
+
 // TestRegistryGate_NoScopingRuleAllowsAll proves the change is behavior-preserving:
 // with the flag ON but no scoping rule authored, every source passes (Base=Allow),
 // so enabling the gate without configuring scope does not brick the registry.

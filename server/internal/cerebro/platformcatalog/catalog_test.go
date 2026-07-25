@@ -55,6 +55,13 @@ func TestCatalogInvariants(t *testing.T) {
 		if len(c.Ops) == 0 && len(c.Evidence) == 0 {
 			t.Errorf("capability %q has neither Ops (route) nor Evidence (internal check)", c.Key)
 		}
+		hasExternalOwner := strings.TrimSpace(c.ExternalSecurityOwner) != ""
+		if c.ManagedExternally != hasExternalOwner {
+			t.Errorf(
+				"capability %q managed_externally=%v but external security owner=%q",
+				c.Key, c.ManagedExternally, c.ExternalSecurityOwner,
+			)
+		}
 		for _, e := range c.Evidence {
 			if !evidenceRe.MatchString(e) {
 				t.Errorf("capability %q evidence %q must point at a .go file (file.go:line)", c.Key, e)

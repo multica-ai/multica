@@ -7,7 +7,14 @@
 // cost-optimization and feature-flag tabs are injected, so it appears in both
 // web and desktop with no duplication.
 
-import { Wrench } from "lucide-react";
+import {
+  Eye,
+  Layers3,
+  ListChecks,
+  ShieldCheck,
+  UserRound,
+  Wrench,
+} from "lucide-react";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { WebFetchPolicySettingsTab } from "@multica/cerebro-web-fetch-policy/views";
@@ -26,6 +33,69 @@ export interface ExtraSettingsTab {
   // FIR-1404: wide data-table tabs (Permissions) opt out of the narrow
   // max-w-3xl settings column so the per-tool catalog can use the full pane.
   wide?: boolean;
+}
+
+function PermissionDecisionGuide() {
+  const steps = [
+    {
+      icon: ShieldCheck,
+      title: "Roles",
+      body: "Reusable permission profiles assigned to agents or members.",
+    },
+    {
+      icon: Layers3,
+      title: "Workspace default",
+      body: "The broad starting point. Disable remains a non-openable safety floor.",
+    },
+    {
+      icon: UserRound,
+      title: "Overrides",
+      body: "More specific rules can change general access; protected security floors only tighten.",
+    },
+    {
+      icon: ListChecks,
+      title: "Task access",
+      body: "A locked per-run list can narrow what the agent may use on one task.",
+    },
+    {
+      icon: Eye,
+      title: "Capabilities",
+      body: "The read-only live answer the agent receives and the platform enforces.",
+    },
+  ];
+  return (
+    <section
+      className="overflow-hidden rounded-lg border bg-card"
+      aria-labelledby="permission-decision-guide"
+    >
+      <div className="border-b p-4">
+        <h3 id="permission-decision-guide" className="text-sm font-semibold">
+          How access is decided
+        </h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          All permission screens feed one live decision. The declared contract
+          decides which specific overrides may open a default and which safety
+          floors can only tighten.
+        </p>
+      </div>
+      <ol className="grid gap-px bg-border sm:grid-cols-2 xl:grid-cols-5">
+        {steps.map(({ icon: Icon, title, body }, index) => (
+          <li key={title} className="min-w-0 bg-card p-4">
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-muted text-xs">
+                {index + 1}
+              </span>
+              <Icon className="size-4 text-muted-foreground" />
+              {title}
+            </div>
+            <p className="mt-2 text-xs leading-relaxed text-muted-foreground">
+              {body}
+            </p>
+          </li>
+        ))}
+      </ol>
+    </section>
+  );
 }
 
 // WorkspacePermissionsTab is the Settings-tab body: the per-tool catalog editing
@@ -52,10 +122,12 @@ export function WorkspacePermissionsTab({
       <div>
         <h2 className="text-base font-semibold">Permissions</h2>
         <p className="text-sm text-muted-foreground">
-          The workspace-wide default for every tool. Each runtime, group, agent,
-          and member below can only tighten what is set here — never loosen it.
+          The workspace-wide starting point for every tool. More specific rules
+          may change general access, while Disable and protected security floors
+          cannot be opened downstream.
         </p>
       </div>
+      <PermissionDecisionGuide />
       <PermissionRoles workspaceId={wsId} />
       <ToolPolicyTabs
         wsId={wsId}

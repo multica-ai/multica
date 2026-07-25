@@ -123,7 +123,10 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 		return out, nil
 	}
 
-	settings, err := s.loadConnectionPolicySettings(ctx, in, groupIDs)
+	settings, err := s.loadResourcePolicySettings(ctx, in, groupIDs, resourcePolicyFilter{
+		toolPrefix: connectionToolKeyPrefix + "%",
+		scope:      resourcePatternNonEmpty,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -160,7 +163,7 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 				Layers:          map[Layer]Setting{},
 				Conditions:      map[Layer]*Condition{},
 			}
-			if cell, ok := settings[repoPolicyKey{toolKey, t.Name}]; ok {
+			if cell, ok := settings[resourcePolicyKey{toolKey: toolKey, resourcePattern: t.Name}]; ok {
 				for l, set := range cell.layers {
 					row.Layers[l] = set
 				}
@@ -681,68 +684,6 @@ func (s *Store) ConnectionToolVerdicts(ctx context.Context, in TableQuery) ([]Co
 			Tool:       r.ResourcePattern,
 			Setting:    r.Effective.Setting,
 		})
-	}
-	return out, nil
-}
-
-// loadConnectionPolicySettings fetches every explicit per-layer setting authored
-// for a connection tool (tool_key 'connection:%', resource_pattern non-empty) in
-// the query's context, bucketed by (tool_key, tool). It mirrors the subject
-// predicates of table_repo.go's loader so an absent subject id never matches and
-// that layer stays Inherit.
-func (s *Store) loadConnectionPolicySettings(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID) (map[repoPolicyKey]*repoPolicyLayers, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT p.tool_key, p.resource_pattern, p.layer, p.setting, p.conditions
-		FROM cerebro_tool_policy p
-		WHERE p.workspace_id = $1
-		  AND p.resource_pattern <> ''
-		  AND p.tool_key LIKE 'connection:%'
-		  AND (
-		    (p.layer = 'workspace' AND p.subject_id = $1) OR
-		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
-		    (p.layer = 'agent'     AND p.subject_id = $3) OR
-		    (p.layer = 'user'      AND p.subject_id = $4) OR
-		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
-		    (p.layer = 'on_behalf_of' AND p.subject_id = $6)
-		  )
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.OnBehalfOfID)
-	if err != nil {
-		return nil, fmt.Errorf("toolpolicy: load connection policy settings: %w", err)
-	}
-	defer rows.Close()
-
-	out := map[repoPolicyKey]*repoPolicyLayers{}
-	for rows.Next() {
-		var toolKey, resourcePattern, layer, setting string
-		var conditions []byte
-		if err := rows.Scan(&toolKey, &resourcePattern, &layer, &setting, &conditions); err != nil {
-			return nil, fmt.Errorf("toolpolicy: scan connection policy setting: %w", err)
-		}
-		key := repoPolicyKey{toolKey, resourcePattern}
-		cell, ok := out[key]
-		if !ok {
-			cell = &repoPolicyLayers{layers: map[Layer]Setting{}, conditions: map[Layer]*Condition{}}
-			out[key] = cell
-		}
-		l := Layer(layer)
-		set := Setting(setting)
-		if l == LayerGroup {
-			cell.groups = append(cell.groups, set)
-		} else {
-			cell.layers[l] = set
-			// Surface the rule's WHEN layer for single-subject layers only,
-			// mirroring table_repo.go and the capability-wide decode (FIR-1708 D).
-			cond, err := decodeCondition(conditions)
-			if err != nil {
-				return nil, fmt.Errorf("toolpolicy: decode connection conditions for %q at %s: %w", toolKey, l, err)
-			}
-			if cond != nil {
-				cell.conditions[l] = cond
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("toolpolicy: iterate connection policy settings: %w", err)
 	}
 	return out, nil
 }

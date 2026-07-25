@@ -7,10 +7,6 @@ export {
   type ToolPolicyView,
 } from "./tool-policy-table";
 export {
-  SimpleToolPolicyTable,
-  type SimpleToolPolicyTableProps,
-} from "./simple-tool-policy-table";
-export {
   WorkspacePermissionsTab,
   useCerebroToolPolicySettingsTabs,
   type ExtraSettingsTab,

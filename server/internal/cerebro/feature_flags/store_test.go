@@ -173,7 +173,7 @@ func TestWorkspaceFlag_RelockUpdates(t *testing.T) {
 	}
 	ctx := context.Background()
 	q := cerebrodb.New(ffTestPool)
-	const flag = "cerebro_simple_tool_policy"
+	const flag = "cerebro_tool_policy"
 
 	// First a soft (unlocked) workspace default.
 	if err := q.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{

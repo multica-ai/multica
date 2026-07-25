@@ -309,10 +309,9 @@ func TestRoleMultipleRulesPerToolResolveIndependently(t *testing.T) {
 // row is irrelevant to the migrated data), seeds the escalation fixtures, and
 // executes the real migration file inside a transaction that is rolled back.
 //
-// The retired table names are assembled at runtime: the FIR-3403 regression
-// guard (TestLegacyRuntimeToolStoreHasNoReaders) scans source files for the
-// literal name so no reader can quietly return, and this replay fixture is a
-// test of the migration, not a reader.
+// The retired table names are assembled at runtime because this replay fixture
+// tests the historical migration, not the current read model. Live-schema
+// absence is covered by the database-backed migration guard.
 var (
 	legacyRuntimeToolTable = "cerebro_runtime" + "_tool"
 	legacyGroupGrantTable  = legacyRuntimeToolTable + "_group_grant"

@@ -372,13 +372,13 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Local-only master code: when MULTICA_DEV_MASTER_CODE is set (only in
-	// local .env, NEVER in production), accept it as a code for any email
-	// without consulting the verification_code table. The empty default
-	// makes this a no-op everywhere it isn't explicitly opted into.
+	// Static staging/local code: when MULTICA_DEV_MASTER_CODE is explicitly set
+	// and this deployment is allowlisted, accept it without consulting the
+	// verification_code table. The empty default keeps the path disabled.
 	devMaster := strings.TrimSpace(os.Getenv("MULTICA_DEV_MASTER_CODE"))
-	if devMaster != "" && subtle.ConstantTimeCompare([]byte(code), []byte(devMaster)) == 1 {
-		slog.Warn("login via dev master code (MULTICA_DEV_MASTER_CODE) — disable in production", "email", email)
+	// CEREBRO-PATCH(static-staging-login-guard): FIR-3774 keeps the static login on Cerebro staging/local only.
+	if devMaster != "" && cerebroStaticLoginAllowed() && subtle.ConstantTimeCompare([]byte(code), []byte(devMaster)) == 1 {
+		slog.Warn("login via static staging/local code (MULTICA_DEV_MASTER_CODE)", "email", email)
 	} else {
 		dbCode, err := h.Queries.GetLatestVerificationCode(r.Context(), email)
 		if err != nil {

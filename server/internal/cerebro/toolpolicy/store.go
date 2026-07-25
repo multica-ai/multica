@@ -4,8 +4,7 @@ package toolpolicy
 // phase 1, persistence). chain.go holds the pure resolution logic; Store loads
 // the per-layer settings one context needs and folds them through Resolve.
 //
-// The split mirrors permissions.Resolver (Can hits the DB, Decide stays pure):
-// the interesting decision logic lives in the pure Resolve and is exhaustively
+// The interesting decision logic lives in the pure Resolve and is exhaustively
 // unit-tested without a database, while Store is the thin seam that assembles a
 // chain Input from stored rows.
 
@@ -215,6 +214,22 @@ func (s *Store) ResolveGeneral(ctx context.Context, in Query, memberOverride boo
 	return ResolveWithMode(mode, input), nil
 }
 
+// ResolveDeclared resolves one ordinary permission with its declared
+// resolution contract. Callers no longer choose between Resolve and
+// ResolveGeneral themselves: hard-floor keys stay tighten-only, while ordinary
+// permissions follow the workspace member-override setting.
+func (s *Store) ResolveDeclared(ctx context.Context, in Query) (Effective, error) {
+	input, err := s.loadInput(ctx, in)
+	if err != nil {
+		return Effective{}, err
+	}
+	generalMode := ModeHardFloor
+	if s.MemberOverrideEnabled(ctx, in.WorkspaceID) {
+		generalMode = ModeOpenable
+	}
+	return ResolveWithMode(DeclaredResolutionMode(in.ToolKey, generalMode), input), nil
+}
+
 // MemberOverrideEnabled reports whether cerebro_member_override is on for the
 // workspace — read from the workspace-level row (the all-zero sentinel
 // user_id), exactly like the gateway (runtime.memberOverrideEnabled) and
@@ -248,7 +263,7 @@ func (s *Store) MemberOverrideEnabled(ctx context.Context, workspaceID pgtype.UU
 func (s *Store) ResolvePermission(ctx context.Context, in Query, actor platformaccess.Actor) (Effective, error) {
 	contract, special := platformaccess.ForKey(in.ToolKey)
 	if !special {
-		return s.Resolve(ctx, in)
+		return s.ResolveDeclared(ctx, in)
 	}
 	if contract.Enforcement == platformaccess.EnforcementAuthenticatedRead ||
 		contract.Enforcement == platformaccess.EnforcementOwnerOnly ||
