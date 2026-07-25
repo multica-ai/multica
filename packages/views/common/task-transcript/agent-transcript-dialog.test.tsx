@@ -16,7 +16,19 @@ vi.mock("@multica/core/api", () => ({
   api: {
     getAgent: vi.fn().mockResolvedValue(null),
     listRuntimes: vi.fn().mockResolvedValue([]),
+    // CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 the dialog also loads a task permission snapshot.
+    getTaskAccess: vi.fn().mockRejectedValue(new Error("unavailable")),
   },
+}));
+
+// CEREBRO-PATCH(transcript-dialog-runprompt-stub): the dialog hard-imports the
+// cerebro RunPromptDisclosure (@multica/cerebro-sessions), which pulls in the
+// feature-flag + workspace data layer (TanStack Query + workspace route). This
+// upstream test only exercises the dialog's own behaviour, so it stubs the
+// cerebro child the same way it stubs ActorAvatar.
+vi.mock("@multica/cerebro-sessions", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/cerebro-sessions")>()),
+  RunPromptDisclosure: () => null,
 }));
 
 vi.mock("@multica/ui/lib/clipboard", () => ({
@@ -136,14 +148,6 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
   },
   };
 });
-
-// The transcript body renders agent markdown through RichContent; stub it to
-// keep these tests independent of the markdown pipeline.
-vi.mock("../../rich-content", () => ({
-  RichContent: ({ content }: { content: string }) => (
-    <div data-testid="rich-content">{content}</div>
-  ),
-}));
 
 vi.mock("@multica/ui/components/ui/collapsible", async () => {
   const React = await import("react");
@@ -372,8 +376,10 @@ describe("AgentTranscriptDialog", () => {
 
     renderDialog();
 
-    // Agent body reads without a click (through RichContent), tools stay folded.
-    expect(screen.getByTestId("rich-content")).toHaveTextContent("Agent hidden detail");
+    // CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — this fork renders the agent
+    // body as plain text; upstream renders it through RichContent. Same assertion,
+    // one less indirection.
+    expect(screen.getByText(/Agent hidden detail/)).toBeInTheDocument();
     expect(screen.queryByText(/Thinking hidden detail/)).not.toBeInTheDocument();
     expect(screen.queryByText(/"command": "pnpm test"/)).not.toBeInTheDocument();
   });

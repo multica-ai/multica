@@ -20,6 +20,27 @@ vi.mock("../actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
 }));
 
+// CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — the ported dialog virtualizes
+// its event list, and real react-virtuoso renders no rows in jsdom's zero-height
+// viewport. Flat-render stub, same as the upstream dialog test uses.
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: ({
+    data,
+    itemContent,
+    computeItemKey,
+  }: {
+    data: unknown[];
+    itemContent: (i: number, item: never) => React.ReactNode;
+    computeItemKey: (i: number, item: never) => number;
+  }) => (
+    <div>
+      {data.map((item, i) => (
+        <div key={computeItemKey(i, item as never)}>{itemContent(i, item as never)}</div>
+      ))}
+    </div>
+  ),
+}));
+
 // CEREBRO-PATCH(transcript-dialog-runprompt-stub): the dialog hard-imports the
 // cerebro RunPromptDisclosure (@multica/cerebro-sessions), which pulls in the
 // feature-flag + workspace data layer (TanStack Query + workspace route). This
