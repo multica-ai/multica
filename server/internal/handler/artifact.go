@@ -234,7 +234,8 @@ func (h *Handler) CreateArtifact(w http.ResponseWriter, r *http.Request) {
 	if req.RequesterUserID != nil && *req.RequesterUserID != "" {
 		requesterUserID = parseUUID(*req.RequesterUserID)
 	} else if authorType == "agent" {
-		requesterUserID = parseUUID(userID)
+		// CEREBRO-PATCH(agent-document-requester-edit): FIR-3778 — stamp the human the agent acted for, not the runtime owner.
+		requesterUserID = h.resolveArtifactRequester(r, userID)
 	}
 
 	metadata := []byte("{}")
@@ -426,8 +427,10 @@ func (h *Handler) UpdateArtifact(w http.ResponseWriter, r *http.Request) {
 
 	authorType, authorID := h.resolveActor(r, userID, workspaceID)
 	isAuthor := existing.AuthorType == authorType && uuidToString(existing.AuthorID) == authorID
+	// CEREBRO-PATCH(agent-document-requester-edit): FIR-3778 — the human an agent wrote this for may edit it.
+	isRequester := authorType == "member" && existing.RequesterUserID.Valid && uuidToString(existing.RequesterUserID) == authorID
 	isAdmin := member.Role == "admin" || member.Role == "owner"
-	if !isAuthor && !isAdmin {
+	if !isAuthor && !isRequester && !isAdmin {
 		writeError(w, http.StatusForbidden, "not authorized to edit this artifact")
 		return
 	}

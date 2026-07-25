@@ -28,6 +28,9 @@ export class TestApiClient {
   private createdInboxItemIds: string[] = [];
   private createdProjectIds: string[] = [];
   private createdSprintIds: string[] = [];
+  private createdArtifactIds: string[] = [];
+  private createdAgentIds: string[] = [];
+  private createdRuntimeIds: string[] = [];
 
   async login(email: string, name: string) {
     const client = new pg.Client(DATABASE_URL);
@@ -371,8 +374,73 @@ export class TestApiClient {
     return res.json();
   }
 
+  /**
+   * FIR-3778 — seed the one artifact shape the public API cannot produce from a
+   * member session: a document authored by an AGENT for this logged-in user.
+   * Creating it over HTTP would need agent task credentials the E2E harness has
+   * no way to mint, so the row is inserted directly.
+   */
+  async createAgentDocument(title: string, body: string) {
+    if (!this.workspaceId) {
+      throw new Error("createAgentDocument: no workspace — call login() first");
+    }
+    const client = new pg.Client(DATABASE_URL);
+    await client.connect();
+    try {
+      const runtime = await client.query(
+        `INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at)
+         VALUES ($1, NULL, 'FIR-3778 E2E Runtime', 'cloud', 'e2e_runtime', 'online', 'E2E runtime', '{}'::jsonb, now())
+         RETURNING id`,
+        [this.workspaceId],
+      );
+      this.createdRuntimeIds.push(runtime.rows[0].id);
+      const agent = await client.query(
+        `INSERT INTO agent (workspace_id, name, description, runtime_mode, runtime_config,
+                            runtime_id, visibility, max_concurrent_tasks, owner_id)
+         VALUES ($1, 'FIR-3778 E2E Agent', '', 'cloud', '{}'::jsonb, $2, 'workspace', 1, $3)
+         RETURNING id`,
+        [this.workspaceId, runtime.rows[0].id, this.userId],
+      );
+      const artifact = await client.query(
+        `INSERT INTO artifact (workspace_id, kind, format, title, body, metadata,
+                               author_type, author_id, requester_user_id)
+         VALUES ($1, 'note', 'md', $2, $3, '{}'::jsonb, 'agent', $4, $5)
+         RETURNING id`,
+        [this.workspaceId, title, body, agent.rows[0].id, this.userId],
+      );
+      this.createdArtifactIds.push(artifact.rows[0].id);
+      this.createdAgentIds.push(agent.rows[0].id);
+      return { id: artifact.rows[0].id as string };
+    } finally {
+      await client.end();
+    }
+  }
+
   /** Clean up all issues + inbox items created during this test. */
   async cleanup() {
+    if (this.createdArtifactIds.length || this.createdAgentIds.length || this.createdRuntimeIds.length) {
+      const client = new pg.Client(DATABASE_URL);
+      await client.connect();
+      try {
+        for (const id of this.createdArtifactIds) {
+          await client.query("DELETE FROM artifact WHERE id = $1", [id]);
+        }
+        for (const id of this.createdAgentIds) {
+          await client.query("DELETE FROM agent WHERE id = $1", [id]);
+        }
+        for (const id of this.createdRuntimeIds) {
+          await client.query("DELETE FROM agent_runtime WHERE id = $1", [id]);
+        }
+      } catch {
+        /* ignore — best-effort cleanup */
+      } finally {
+        await client.end();
+      }
+      this.createdArtifactIds = [];
+      this.createdAgentIds = [];
+      this.createdRuntimeIds = [];
+    }
+
     for (const id of this.createdIssueIds) {
       try {
         await this.deleteIssue(id);
