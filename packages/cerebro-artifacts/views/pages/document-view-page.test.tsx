@@ -197,6 +197,57 @@ describe("DocumentViewPage markdown body", () => {
     expect(screen.getByLabelText("Markdown editor")).toBeInTheDocument();
   });
 
+  // FIR-3778 — an agent that writes a document for a person stays its author,
+  // so the person it was written for used to get a read-only view with no edit
+  // affordance at all. requester_user_id names that person.
+  it("lets the person an agent wrote the document for edit it", () => {
+    currentMember.userId = "user-1";
+    currentMember.role = "member";
+
+    renderPage(
+      artifact({
+        author_type: "agent",
+        author_id: "agent-1",
+        requester_user_id: "user-1",
+      }),
+    );
+
+    expect(screen.getByLabelText("Markdown editor")).toBeInTheDocument();
+    expect(screen.queryByTestId("readonly-artifact-content")).toBeNull();
+  });
+
+  it("keeps an unrelated member out of a document an agent wrote for someone else", () => {
+    currentMember.userId = "user-2";
+    currentMember.role = "member";
+
+    renderPage(
+      artifact({
+        author_type: "agent",
+        author_id: "agent-1",
+        requester_user_id: "user-1",
+      }),
+    );
+
+    expect(screen.queryByLabelText("Markdown editor")).toBeNull();
+  });
+
+  // Guard against the null trap: a signed-out reader (userId === null) must not
+  // match a document whose requester_user_id is also null.
+  it("does not treat a signed-out reader as the requester of an unrequested document", () => {
+    currentMember.userId = null;
+    currentMember.role = null;
+
+    renderPage(
+      artifact({
+        author_type: "agent",
+        author_id: "agent-1",
+        requester_user_id: null,
+      }),
+    );
+
+    expect(screen.queryByLabelText("Markdown editor")).toBeNull();
+  });
+
   // FIR-3190 — the readonly path was missing the same 70ch-cap override the
   // editable path applies, squeezing wide tables (e.g. AI CFO reports) into a
   // narrow column and shredding cell text mid-word.

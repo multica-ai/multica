@@ -82,6 +82,7 @@ SELECT EXISTS (
         OR (n.artifact_id IS NULL AND (
               cerebro_artifact_folder_grant_visible(a.folder_id, $2)
               OR (a.author_type = 'member' AND a.author_id = $2)
+              OR a.requester_user_id = $2
         ))
       )
 ) AS allowed
@@ -99,7 +100,9 @@ type CanUserEditArtifactParams struct {
 // A document is writable when the caller reaches its folder (or an ancestor) via
 // a Collections grant, OR authored the document themselves (covers a root
 // document with no folder — e.g. a member restoring a version of a doc they
-// created). Deny-by-default otherwise.
+// created), OR is the human an agent wrote it for (requester_user_id, FIR-3778 —
+// an agent stays the author, so without this the person it was made for could
+// never edit it). Deny-by-default otherwise.
 func (q *Queries) CanUserEditArtifact(ctx context.Context, arg CanUserEditArtifactParams) (bool, error) {
 	row := q.db.QueryRow(ctx, canUserEditArtifact, arg.ID, arg.PUser)
 	var allowed bool

@@ -1850,3 +1850,26 @@ Backport of upstream `ed57707bb` (MUL-4923, #5584) — ported as a targeted patc
 | Patch | Location | Reason |
 |---|---|---|
 | `mul-4923-prepare-timeout` | `server/internal/daemon/execenv/isolation.go`, `isolation_unix.go`, `isolation_windows.go` (net-new, verbatim upstream copies + 1 marker line each)<br>`server/internal/daemon/execenv/isolation_test.go`, `isolation_unix_test.go`, `isolation_windows_test.go` (net-new; `isolation_test.go` adapted: fork `ReuseParams` has no `WorkspacesRoot`)<br>`server/cmd/multica/main.go` (helper-mode dispatch)<br>`server/internal/daemon/daemon.go` (timeout const/var, struct fields, `New` wiring, `taskRunFailureReason`, `prepareExecutionEnvironment`/`reuseExecutionEnvironment`/`effectiveTaskPrepareTimeout`, `runTask` prepareCtx + killable Prepare/Reuse) | Bounds everything between claim and `StartTask` (runtime resolution, skill bundles, execenv setup, StartTask) with a hard 5-minute deadline, and runs execution-environment `Prepare`/`Reuse` in a killable helper subprocess (`multica __multica_execenv_prepare`) so a timed-out attempt cannot keep writing after the task is retried. On timeout, `runTask` collapses the failure into `errTaskPrepareTimeout`, which `handleTask` maps to the retryable `timeout` failure reason. **Fork adaptations:** (a) `defaultExecutionEnvironmentCommand` resolves the self binary via `os.Executable()` (fork idiom) instead of upstream's `selfexec.Resolve`; (b) the fork's diverged `Reuse`/`ReuseParams` (no error return, no `WorkspacesRoot`) are wrapped rather than replaced. **Deliberately NOT ported** (documented, not silent): the upstream Windows-runner CI job in `.github/workflows/ci.yml` (fork ships Linux/macOS only; `isolation_windows.go` still ships, build-tagged, so a future full sync converges), the modify/delete `workdir_race_test.go` (fork deleted it), and the `issue_child_done_test.go` additions (would collide with the fork's `child-done-notify-flag` patch). |
+
+## FIR-3778 — A person can edit a document an agent created for them
+
+An agent that writes a document on a person's behalf stays the artifact author, so the
+person it was written for could never edit it: every gate admitted only the *member*
+author or a workspace admin. `artifact.requester_user_id` (migration
+`9004_artifact_requester`) already records that person, but nothing consulted it — and on
+an agent run it was stamped with the authenticated caller (the runtime owner), not the
+human who actually asked. Both halves are fixed here. The agent remains `author_id`, so
+every existing agent write path (including the Workpad plan an agent rewrites each run)
+is unchanged.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `agent-document-requester-edit` | `server/internal/handler/artifact.go` (2 marked lines; helper in the net-new cerebro sibling `artifact_requester_cerebro.go`) | `CreateArtifact` stamps `requester_user_id` from the originating agent task's `original_user_id` — the same source an issue's `on_behalf_of` uses — falling back to the authenticated caller when a run has no delegating human. `UpdateArtifact` adds one `isRequester` term to its authorization gate, guarded by `authorType == "member"` so an agent can never be admitted through it. |
+
+**Deliberately NOT widened** (documented, not silent): `UpdateArtifactScope`,
+`MoveArtifactToFolder` and `DeleteArtifact` keep the author-or-admin rule. FIR-3778
+decided edit rights; re-scoping, re-filing and deleting are separate permissions and were
+not part of that decision.
+
+**Upstream:** this is a genuine multica bug, not cerebro-specific — a good candidate to
+land at `multica-ai/multica` and drop on the next sync.
