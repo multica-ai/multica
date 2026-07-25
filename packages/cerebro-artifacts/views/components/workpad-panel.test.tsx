@@ -47,9 +47,26 @@ vi.mock("@multica/views/issues/components", () => ({
     <span data-testid="status-icon" data-status={status} />
   ),
 }));
+// The step marker forwards the props that decide whether it is legible: it must
+// be `readOnly` and NOT `disabled`, because `disabled` is what pulls in the
+// shared Checkbox's `disabled:opacity-50` and made the empty boxes almost
+// invisible (FIR-3765 review).
 vi.mock("@multica/ui/components/ui/checkbox", () => ({
-  Checkbox: (props: { checked?: boolean }) => (
-    <input type="checkbox" readOnly checked={Boolean(props.checked)} />
+  Checkbox: (props: {
+    checked?: boolean;
+    readOnly?: boolean;
+    disabled?: boolean;
+    className?: string;
+  }) => (
+    <input
+      type="checkbox"
+      readOnly
+      checked={Boolean(props.checked)}
+      data-testid="step-box"
+      data-readonly={props.readOnly ? "true" : "false"}
+      data-disabled={props.disabled ? "true" : "false"}
+      data-class={props.className ?? ""}
+    />
   ),
 }));
 
@@ -176,6 +193,71 @@ describe("WorkpadPanel", () => {
     expect(screen.getByText("Byg A").className).toContain(
       "text-muted-foreground",
     );
+  });
+
+  // FIR-3765 (Jesper's review) — the header's icon is a status circle like the
+  // phase circles beneath it, filled proportionally so the collapsed panel alone
+  // shows how far the plan has come.
+  it("shows the plan's overall progress in the header circle", () => {
+    planRef.value = { id: "p1", title: "Plan", body: MULTI };
+    render(<WorkpadPanel issueId="issue-1" />);
+
+    // Collapsed: 1 of 3 steps done → the circle is a third full.
+    const circle = screen.getByTestId("workpad-progress-circle");
+    expect(Number(circle.getAttribute("data-fraction"))).toBeCloseTo(1 / 3, 5);
+
+    // The circle stays the panel toggle.
+    openPanel();
+    expect(screen.getByRole("button", { name: /Fase 1: Byg/ })).toBeTruthy();
+  });
+
+  it("fills the header circle completely when every step is done", () => {
+    planRef.value = {
+      id: "p1",
+      title: "Plan",
+      body: "## Fase 1\n- [x] A\n## Fase 2\n- [x] B",
+    };
+    render(<WorkpadPanel issueId="issue-1" />);
+
+    const circle = screen.getByTestId("workpad-progress-circle");
+    expect(Number(circle.getAttribute("data-fraction"))).toBe(1);
+  });
+
+  // FIR-3765 (Jesper's review) — the step boxes were almost invisible because
+  // `disabled` dimmed them to 50% on top of an already-faint border.
+  it("renders step boxes read-only rather than disabled, so they are not dimmed", () => {
+    planRef.value = { id: "p1", title: "Plan", body: MULTI };
+    render(<WorkpadPanel issueId="issue-1" />);
+    openPanel();
+    clickPhaseStatus(0);
+
+    const boxes = screen.getAllByTestId("step-box");
+    expect(boxes.length).toBeGreaterThan(0);
+    for (const box of boxes) {
+      expect(box.getAttribute("data-disabled")).toBe("false");
+      expect(box.getAttribute("data-readonly")).toBe("true");
+      // …and the unchecked box gets a visible edge instead of `border-input`.
+      expect(box.getAttribute("data-class")).toContain("border-muted-foreground");
+    }
+  });
+
+  // FIR-3765 (Jesper's review) — a rule between the heading and the plan title.
+  it("separates the heading from the plan title with a rule when expanded", () => {
+    planRef.value = { id: "p1", title: "Plan", body: MULTI };
+    const { container } = render(<WorkpadPanel issueId="issue-1" />);
+
+    // Collapsed: heading only, no rule.
+    expect(container.querySelector('[data-slot="separator"]')).toBeNull();
+
+    openPanel();
+    const rule = container.querySelector('[data-slot="separator"]');
+    expect(rule).toBeTruthy();
+
+    // The rule sits between the heading and the plan title line.
+    const title = screen.getByText("Plan");
+    expect(
+      rule!.compareDocumentPosition(title) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
   });
 
   it("renders a flat list with no phase headers for a plan without named phases", () => {
