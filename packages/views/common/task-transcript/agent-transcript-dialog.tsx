@@ -44,6 +44,9 @@ import type { TimelineItem } from "./build-timeline";
 import { useT } from "../../i18n";
 // CEREBRO-PATCH(run-prompt-disclosure): FIR-1839 point 5 — surface the run's full initial prompt in the transcript modal.
 import { RunPromptDisclosure } from "@multica/cerebro-sessions";
+// CEREBRO-PATCH(run-failure-card): FIR-3782 — direct entry, not the /views barrel: the barrel re-exports pages that import @multica/views, and the resulting cycle blanks this dialog.
+import { RunFailureCard } from "@multica/cerebro-runtime/views/components/run-failure-card";
+import { useFlagValue } from "@multica/cerebro-feature-flags";
 
 interface AgentTranscriptDialogProps {
   open: boolean;
@@ -184,6 +187,7 @@ export function AgentTranscriptDialog({
   const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
   const eventRefs = useRef<Map<number, HTMLDivElement>>(new Map());
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const failureCardEnabled = useFlagValue("cerebro_run_failure_card"); // CEREBRO-PATCH(run-failure-card): FIR-3782 — useFlagValue, not useFeatureFlag: a store read, so the dialog needs no QueryClient of its own.
 
   // Derive filter options from each item:
   //   tool_use / tool_result → filter value = tool, display = "tool:Bash"
@@ -554,6 +558,10 @@ export function AgentTranscriptDialog({
             </div>
           ) : (
             <div className="divide-y">
+              {/* CEREBRO-PATCH(run-failure-card): FIR-3782 — pass `items`, not `displayItems`: the card must read the true last step regardless of sort and filter. */}
+              {failureCardEnabled && task.status === "failed" && (
+                <RunFailureCard failureReason={task.failure_reason} items={items} />
+              )}
               {displayItems.map((item) => (
                 <TranscriptEventRow
                   key={item.seq}

@@ -16,14 +16,14 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { TranscriptButton } from "../../common/task-transcript";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
-import { failureReasonLabel } from "../../agents/components/tabs/task-failure";
 // CEREBRO-PATCH(runtime-pause-queued-ui): FIR-2717 — show runtime-pause detail on the queued execution-log status.
 import {
   parseRuntimePauseWaitReason,
   runtimePauseQueuedLabel,
 } from "@multica/cerebro-runtime/views";
 // CEREBRO-PATCH(interrupted-not-failed): a run stopped by a daemon restart / runtime pause / rate-limit is auto-retried, not broken — render it amber, not red "Failed".
-import { isInterruptionReason } from "@multica/cerebro-runtime/views";
+// CEREBRO-PATCH(failure-reason-copy): FIR-3782 — resolve all 21 backend reasons; the upstream map covers 6 and rendered the rest blank.
+import { isInterruptionReason, resolveFailureReasonLabel } from "@multica/cerebro-runtime/views";
 import { useT } from "../../i18n";
 import { stripMentionMarkdown } from "../utils/strip-mention-markdown";
 
@@ -363,8 +363,9 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const failureLabel =
     task.status === "failed" && task.failure_reason
       ? isInterruptionReason(task.failure_reason)
-        ? `Interrupted, retrying (${failureReasonLabel[task.failure_reason as TaskFailureReason]})`
-        : failureReasonLabel[task.failure_reason as TaskFailureReason]
+        // CEREBRO-PATCH(failure-reason-copy): FIR-3782 — resolver covers all 21 reasons; the upstream map returned undefined for 15.
+        ? `Interrupted, retrying (${resolveFailureReasonLabel(task.failure_reason)})`
+        : resolveFailureReasonLabel(task.failure_reason)
       : null;
 
   // Retry only makes sense for terminal-but-not-success rows. The rerun
@@ -393,7 +394,8 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
       <TriggerText text={trigger} />
       <RowStatus title={failureLabel ?? label}>
         <TaskStatusIcon status={task.status} failureReason={task.failure_reason} />
-        <span className="sr-only">{failureLabel ?? label}</span>
+        {/* CEREBRO-PATCH(failure-reason-visible): FIR-3782 — the reason was sr-only, so a failed run showed only a red icon. */}
+        <span className={failureLabel ? "truncate text-destructive" : "sr-only"}>{failureLabel ?? label}</span>
         <span className="text-muted-foreground">{time}</span>
       </RowStatus>
       <RowActions>
