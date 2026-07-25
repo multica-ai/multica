@@ -7,6 +7,11 @@ import (
 
 type diskPreflightState uint8
 
+// Every state except normal parks new claims. warning and critical differ only
+// in how loudly they are reported: warning means "below the admission floor",
+// critical means "far enough below it to deserve a louder line". Neither admits
+// work, so there is exactly one admission boundary (the warning/recovery
+// threshold), not two.
 const (
 	diskPreflightUnknown diskPreflightState = iota
 	diskPreflightNormal
@@ -48,16 +53,16 @@ func (p *diskPreflight) allowTaskClaim() bool {
 
 	next := diskPreflightNormal
 	allow := true
-	if p.state == diskPreflightCritical || p.state == diskPreflightError {
-		if free < p.recoveryGiB {
-			next = diskPreflightCritical
-			allow = false
-		}
-	} else if free < p.criticalGiB {
+	if free < p.criticalGiB {
 		next = diskPreflightCritical
 		allow = false
 	} else if free < p.warningGiB {
-		next = diskPreflightWarning
+		allow = false
+		if p.state == diskPreflightCritical || p.state == diskPreflightError {
+			next = diskPreflightCritical
+		} else {
+			next = diskPreflightWarning
+		}
 	}
 	p.transition(next, free, nil)
 	return allow
@@ -79,12 +84,12 @@ func (p *diskPreflight) transition(next diskPreflightState, free uint64, cause e
 	}
 	switch next {
 	case diskPreflightCritical:
-		p.logger.Warn("disk preflight parked new task claims", fields...)
+		p.logger.Warn("disk preflight: new task claims parked, free space critically below admission floor", fields...)
 	case diskPreflightError:
 		fields = append(fields, "error", cause)
-		p.logger.Error("disk preflight failed closed", fields...)
+		p.logger.Error("disk preflight failed closed: new task claims parked", fields...)
 	case diskPreflightWarning:
-		p.logger.Warn("disk preflight warning; task claims remain enabled", fields...)
+		p.logger.Warn("disk preflight: new task claims parked, free space below admission floor", fields...)
 	default:
 		p.logger.Info("disk preflight recovered; task claims enabled", fields...)
 	}

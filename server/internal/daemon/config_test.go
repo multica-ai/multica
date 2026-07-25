@@ -35,11 +35,24 @@ func TestDefaultGCIntervalIsTwoHours(t *testing.T) {
 	}
 }
 
-func TestLoadConfigDiskPreflightThresholds(t *testing.T) {
+// TestDefaultDiskThresholdsMatchLocalGuard pins the admission floor to the
+// number the local disk-headroom guard uses to block heavy task starts. If the
+// two drift apart, operators get a band where the guard reports OK while the
+// daemon quietly refuses to claim, which reads as "the agents died".
+func TestDefaultDiskThresholdsMatchLocalGuard(t *testing.T) {
+	if DefaultDiskWarningGiB != 15 || DefaultDiskRecoveryGiB != 15 {
+		t.Fatalf("admission floor = warning:%d recovery:%d, want 15/15", DefaultDiskWarningGiB, DefaultDiskRecoveryGiB)
+	}
+	if DefaultDiskCriticalGiB != 10 {
+		t.Fatalf("DefaultDiskCriticalGiB = %d, want 10", DefaultDiskCriticalGiB)
+	}
+	if !(0 < DefaultDiskCriticalGiB && DefaultDiskCriticalGiB < DefaultDiskWarningGiB && DefaultDiskWarningGiB == DefaultDiskRecoveryGiB) {
+		t.Fatal("defaults violate the 0 < critical < warning = recovery invariant")
+	}
+}
+
+func TestLoadConfigDefaultDiskPreflightThresholds(t *testing.T) {
 	stageFakeAgent(t)
-	t.Setenv("MULTICA_DISK_WARNING_GIB", "30")
-	t.Setenv("MULTICA_DISK_CRITICAL_GIB", "18")
-	t.Setenv("MULTICA_DISK_RECOVERY_GIB", "32")
 
 	cfg, err := LoadConfig(Overrides{
 		ServerURL:      "http://localhost:0",
@@ -48,23 +61,53 @@ func TestLoadConfigDiskPreflightThresholds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadConfig: %v", err)
 	}
-	if cfg.DiskWarningGiB != 30 || cfg.DiskCriticalGiB != 18 || cfg.DiskRecoveryGiB != 32 {
+	if cfg.DiskWarningGiB != 15 || cfg.DiskCriticalGiB != 10 || cfg.DiskRecoveryGiB != 15 {
+		t.Fatalf("disk thresholds = warning:%d critical:%d recovery:%d, want 15/10/15", cfg.DiskWarningGiB, cfg.DiskCriticalGiB, cfg.DiskRecoveryGiB)
+	}
+}
+
+func TestLoadConfigDiskPreflightThresholds(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_DISK_WARNING_GIB", "30")
+	t.Setenv("MULTICA_DISK_CRITICAL_GIB", "18")
+	t.Setenv("MULTICA_DISK_RECOVERY_GIB", "30")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.DiskWarningGiB != 30 || cfg.DiskCriticalGiB != 18 || cfg.DiskRecoveryGiB != 30 {
 		t.Fatalf("disk thresholds = warning:%d critical:%d recovery:%d", cfg.DiskWarningGiB, cfg.DiskCriticalGiB, cfg.DiskRecoveryGiB)
 	}
 }
 
 func TestLoadConfigRejectsUnsafeDiskPreflightThresholds(t *testing.T) {
-	stageFakeAgent(t)
-	t.Setenv("MULTICA_DISK_WARNING_GIB", "15")
-	t.Setenv("MULTICA_DISK_CRITICAL_GIB", "15")
-	t.Setenv("MULTICA_DISK_RECOVERY_GIB", "20")
+	for _, tc := range []struct {
+		name     string
+		warning  string
+		critical string
+		recovery string
+	}{
+		{name: "critical equals warning", warning: "15", critical: "15", recovery: "15"},
+		{name: "recovery differs from warning", warning: "20", critical: "15", recovery: "21"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			stageFakeAgent(t)
+			t.Setenv("MULTICA_DISK_WARNING_GIB", tc.warning)
+			t.Setenv("MULTICA_DISK_CRITICAL_GIB", tc.critical)
+			t.Setenv("MULTICA_DISK_RECOVERY_GIB", tc.recovery)
 
-	_, err := LoadConfig(Overrides{
-		ServerURL:      "http://localhost:0",
-		WorkspacesRoot: t.TempDir(),
-	})
-	if err == nil || !strings.Contains(err.Error(), "invalid disk thresholds") {
-		t.Fatalf("LoadConfig error = %v, want invalid disk thresholds", err)
+			_, err := LoadConfig(Overrides{
+				ServerURL:      "http://localhost:0",
+				WorkspacesRoot: t.TempDir(),
+			})
+			if err == nil || !strings.Contains(err.Error(), "invalid disk thresholds") {
+				t.Fatalf("LoadConfig error = %v, want invalid disk thresholds", err)
+			}
+		})
 	}
 }
 

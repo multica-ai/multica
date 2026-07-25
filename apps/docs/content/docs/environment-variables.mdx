@@ -197,6 +197,9 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_DAEMON_POLL_INTERVAL` | `30s` | Task polling interval when no wake event arrives |
 | `MULTICA_DAEMON_HEARTBEAT_INTERVAL` | `15s` | Heartbeat interval |
 | `MULTICA_DAEMON_MAX_CONCURRENT_TASKS` | `20` | Concurrent task ceiling per daemon |
+| `MULTICA_DISK_WARNING_GIB` | `15` | macOS admission floor; new claims are parked below it |
+| `MULTICA_DISK_CRITICAL_GIB` | `10` | macOS alert level below the floor; claims are already parked, only log severity changes |
+| `MULTICA_DISK_RECOVERY_GIB` | `15` | macOS claim recovery threshold; must equal `MULTICA_DISK_WARNING_GIB` |
 | `MULTICA_AGENT_TIMEOUT` | `0` | Absolute time limit per run; `0` means no limit |
 | `MULTICA_AGENT_IDLE_WATCHDOG` | `30m` | Silence ceiling with no output and no tool execution |
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | Silence ceiling for a single tool call |
@@ -207,6 +210,11 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for task working directories |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep task directories for debugging |
+
+On macOS, disk preflight runs before task claim. Warning, critical, and filesystem-stat
+errors fail closed for new claims; queued tasks stay retryable and active tasks continue.
+Claims resume at the shared warning/recovery boundary (`15` GiB by default). Other
+operating systems do not apply this gate.
 
 Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for four tools: Claude Code, Codex, CodeBuddy, and Qwen Code. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, and `MULTICA_QWEN_ARGS`. For example:
 

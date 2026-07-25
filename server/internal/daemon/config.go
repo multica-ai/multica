@@ -70,9 +70,14 @@ const (
 	DefaultGCArtifactTTL                  = 12 * time.Hour      // 12h — drop regenerable artifacts on completed but still-open issues
 	DefaultGCCodexSessionTTL              = 14 * 24 * time.Hour // 14 days — reclaim per-issue Codex session stores untouched this long
 	DefaultAutoUpdateCheckInterval        = 6 * time.Hour       // how often the daemon polls GitHub for a newer CLI release
-	DefaultDiskWarningGiB                 = 20
-	DefaultDiskCriticalGiB                = 15
-	DefaultDiskRecoveryGiB                = 20
+	// Admission floor for new task claims. 15 GiB matches the local
+	// disk-headroom guard that already blocks heavy task starts at the same
+	// number, so operators see one threshold in one place instead of a
+	// 15–20 GiB band where the guard reports OK while the daemon silently
+	// stops claiming.
+	DefaultDiskWarningGiB  = 15
+	DefaultDiskCriticalGiB = 10 // alert level below the floor; claims are already parked
+	DefaultDiskRecoveryGiB = 15
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -98,9 +103,9 @@ type Config struct {
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
 	MaxConcurrentTasks             int                   // max tasks running in parallel (default: 20)
-	DiskWarningGiB                 int                   // allow claims but warn below this free-space threshold on macOS (default: 20)
-	DiskCriticalGiB                int                   // park new claims below this free-space threshold on macOS (default: 15)
-	DiskRecoveryGiB                int                   // resume claims after a critical state at or above this threshold (default: 20)
+	DiskWarningGiB                 int                   // admission floor on macOS: new claims are parked below it (default: 15)
+	DiskCriticalGiB                int                   // louder alert level below the floor; claims stay parked (default: 10)
+	DiskRecoveryGiB                int                   // resume claims at or above this threshold; must equal warning threshold (default: 15)
 	GCEnabled                      bool                  // enable periodic workspace garbage collection (default: true)
 	GCInterval                     time.Duration         // how often the GC loop runs (default: 2h)
 	GCTTL                          time.Duration         // clean dirs whose issue is done/cancelled and updated_at < now()-TTL (default: 24h)
@@ -336,8 +341,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	if diskCriticalGiB <= 0 || diskWarningGiB <= diskCriticalGiB || diskRecoveryGiB < diskWarningGiB {
-		return Config{}, fmt.Errorf("invalid disk thresholds: require 0 < MULTICA_DISK_CRITICAL_GIB < MULTICA_DISK_WARNING_GIB <= MULTICA_DISK_RECOVERY_GIB")
+	if diskCriticalGiB <= 0 || diskWarningGiB <= diskCriticalGiB || diskRecoveryGiB != diskWarningGiB {
+		return Config{}, fmt.Errorf("invalid disk thresholds: require 0 < MULTICA_DISK_CRITICAL_GIB < MULTICA_DISK_WARNING_GIB = MULTICA_DISK_RECOVERY_GIB")
 	}
 
 	// Profile

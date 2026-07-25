@@ -181,12 +181,25 @@ Daemon behavior is configured via flags or environment variables:
 | Device name | `--device-name` | `MULTICA_DAEMON_DEVICE_NAME` | hostname |
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
 | Workspaces root | — | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` |
+| Disk admission floor (macOS) | — | `MULTICA_DISK_WARNING_GIB` | `15` GiB |
+| Disk critical alert level (macOS) | — | `MULTICA_DISK_CRITICAL_GIB` | `10` GiB |
+| Disk recovery threshold (macOS) | — | `MULTICA_DISK_RECOVERY_GIB` | `15` GiB |
 | GC enabled | — | `MULTICA_GC_ENABLED` | `true` (set `false`/`0` to disable) |
 | GC scan interval | — | `MULTICA_GC_INTERVAL` | `2h` |
 | GC TTL (done/cancelled issues) | — | `MULTICA_GC_TTL` | `24h` |
 | GC orphan TTL (no `.gc_meta.json`) | — | `MULTICA_GC_ORPHAN_TTL` | `72h` |
 | GC artifact TTL (open issues) | — | `MULTICA_GC_ARTIFACT_TTL` | `12h` (set `0` to disable) |
 | GC artifact patterns | — | `MULTICA_GC_ARTIFACT_PATTERNS` | `node_modules,.next,.turbo` |
+
+On macOS, disk preflight runs before the daemon claims server work. Free space below
+`MULTICA_DISK_WARNING_GIB` — the admission floor — parks new claims without creating
+a workdir, and so does a filesystem-stat error (fail-closed); active tasks continue
+and nothing is failed, the work stays queued server-side. `MULTICA_DISK_CRITICAL_GIB`
+does not admit anything either: below it the daemon is already parked and only the
+log severity changes, so it is an alert level, not a second gate. Claims resume at
+`MULTICA_DISK_RECOVERY_GIB`, which must equal the warning threshold, so admission has
+exactly one boundary (`15` GiB by default — the same number the local disk-headroom
+guard uses to block heavy task starts). Non-macOS daemons are unchanged.
 
 #### Workspace garbage collection
 
