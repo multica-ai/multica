@@ -11,7 +11,10 @@ import (
 	"sync"
 )
 
-const defaultJWTSecret = "multica-dev-secret-change-in-production"
+const (
+	defaultJWTSecret      = "multica-dev-secret-change-in-production"
+	LocalAgentActorSource = "local_agent_automation"
+)
 
 var (
 	jwtSecret     []byte

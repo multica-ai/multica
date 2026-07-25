@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -224,6 +225,13 @@ func (h *Handler) invokeOriginatorFromRequest(r *http.Request, actorType, actorI
 		return actorID
 	}
 	if actorType == "agent" {
+		if r.Header.Get("X-Actor-Source") == auth.LocalAgentActorSource {
+			// The loopback-only controller JWT is minted only after the
+			// automation credential selects an Agent owned by this local
+			// human. Auth middleware overwrites X-User-ID from the signed
+			// claim, so it is the trusted top-of-chain originator.
+			return requestUserID(r)
+		}
 		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
 			if taskUUID, err := util.ParseUUID(taskIDHeader); err == nil {
 				if task, err := h.Queries.GetAgentTask(r.Context(), taskUUID); err == nil {

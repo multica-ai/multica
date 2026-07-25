@@ -8,6 +8,8 @@ import (
 	"crypto/subtle"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
+	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -16,6 +18,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -36,14 +39,25 @@ const (
 var localUsernamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]{3,64}$`)
 
 type LocalLoginResponse struct {
-	Token     string            `json:"token"`
-	User      UserResponse      `json:"user"`
-	Workspace WorkspaceResponse `json:"workspace"`
+	Token     string              `json:"token"`
+	User      UserResponse        `json:"user"`
+	Workspace WorkspaceResponse   `json:"workspace"`
+	Actor     *LocalActorResponse `json:"actor,omitempty"`
 }
 
 type LocalCredentialRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+type LocalAutomationRequest struct {
+	AgentName string `json:"agent_name,omitempty"`
+}
+
+type LocalActorResponse struct {
+	Type string `json:"type"`
+	ID   string `json:"id"`
+	Name string `json:"name"`
 }
 
 type localCredential struct {
@@ -155,7 +169,81 @@ func (h *Handler) LocalAutomationLogin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid automation credential")
 		return
 	}
+	var req LocalAutomationRequest
+	r.Body = http.MaxBytesReader(w, r.Body, localAuthBodyLimit)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&req); err != nil && !errors.Is(err, io.EOF) {
+		writeError(w, http.StatusBadRequest, "invalid automation request")
+		return
+	}
+	if strings.TrimSpace(req.AgentName) != "" {
+		h.completeLocalAgentAutomationLogin(w, r, strings.TrimSpace(req.AgentName))
+		return
+	}
 	h.completeLocalLogin(w, r, false)
+}
+
+func (h *Handler) completeLocalAgentAutomationLogin(w http.ResponseWriter, r *http.Request, agentName string) {
+	user, workspace, changed, err := h.ensureLocalIdentity(r.Context())
+	if err != nil {
+		slog.Error("local mode bootstrap failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to initialize local workspace")
+		return
+	}
+	agents, err := h.Queries.ListAgents(r.Context(), workspace.ID)
+	if err != nil {
+		slog.Error("local automation agent lookup failed", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to resolve local automation actor")
+		return
+	}
+	var actor *db.Agent
+	for index := range agents {
+		candidate := &agents[index]
+		if candidate.Name == agentName &&
+			candidate.OwnerID.Valid &&
+			uuidToString(candidate.OwnerID) == uuidToString(user.ID) &&
+			!candidate.ArchivedAt.Valid {
+			actor = candidate
+			break
+		}
+	}
+	if actor == nil {
+		writeError(w, http.StatusBadRequest, "local automation agent not found")
+		return
+	}
+	tokenString, err := h.issueLocalAgentAutomationJWT(user, workspace, *actor)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create local automation session")
+		return
+	}
+	if changed {
+		h.notifyDaemonWorkspacesChanged(uuidToString(user.ID))
+	}
+	writeJSON(w, http.StatusOK, LocalLoginResponse{
+		Token:     tokenString,
+		User:      userToResponse(user),
+		Workspace: workspaceToResponse(workspace),
+		Actor: &LocalActorResponse{
+			Type: "agent",
+			ID:   uuidToString(actor.ID),
+			Name: actor.Name,
+		},
+	})
+}
+
+func (h *Handler) issueLocalAgentAutomationJWT(user db.User, workspace db.Workspace, agent db.Agent) (string, error) {
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub":             uuidToString(user.ID),
+		"email":           user.Email,
+		"name":            user.Name,
+		"exp":             time.Now().Add(auth.AuthTokenTTL()).Unix(),
+		"iat":             time.Now().Unix(),
+		"actor_source":    auth.LocalAgentActorSource,
+		"agent_id":        uuidToString(agent.ID),
+		"actor_workspace": uuidToString(workspace.ID),
+	})
+	return token.SignedString(auth.JWTSecret())
 }
 
 func (h *Handler) completeLocalLogin(w http.ResponseWriter, r *http.Request, setCookies bool) {

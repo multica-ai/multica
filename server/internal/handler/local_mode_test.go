@@ -9,7 +9,11 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -103,6 +107,91 @@ func TestLocalSetupAndLoginBootstrapOneIdentity(t *testing.T) {
 	}
 	if users != 1 || workspaces != 1 || memberships != 1 {
 		t.Fatalf("local bootstrap counts: users=%d workspaces=%d memberships=%d", users, workspaces, memberships)
+	}
+
+	var userID, workspaceID, runtimeID, agentID pgtype.UUID
+	if err := testPool.QueryRow(ctx, `SELECT id FROM "user" WHERE email = $1`, localUserEmail).Scan(&userID); err != nil {
+		t.Fatal(err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT id FROM workspace WHERE slug = $1`, localWorkspaceSlug).Scan(&workspaceID); err != nil {
+		t.Fatal(err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime(workspace_id, name, runtime_mode, provider, status, owner_id)
+		VALUES ($1, 'local automation test runtime', 'local', 'codex', 'online', $2)
+		RETURNING id
+	`, workspaceID, userID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent(workspace_id, name, runtime_mode, status, owner_id, runtime_id)
+		VALUES ($1, 'AI 星耀', 'local', 'idle', $2, $3)
+		RETURNING id
+	`, workspaceID, userID, runtimeID).Scan(&agentID); err != nil {
+		t.Fatal(err)
+	}
+
+	automationRecorder := httptest.NewRecorder()
+	automationRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/auth/local/automation",
+		strings.NewReader(`{"agent_name":"AI 星耀"}`),
+	)
+	automationRequest.Header.Set("X-LifeOS-Automation-Token", "test-automation-token-12345678901234567890")
+	h.LocalAutomationLogin(automationRecorder, automationRequest)
+	if automationRecorder.Code != http.StatusOK {
+		t.Fatalf("local agent automation status = %d, want 200: %s", automationRecorder.Code, automationRecorder.Body.String())
+	}
+	var automationResponse LocalLoginResponse
+	if err := json.Unmarshal(automationRecorder.Body.Bytes(), &automationResponse); err != nil {
+		t.Fatalf("decode local agent automation response: %v", err)
+	}
+	if automationResponse.Actor == nil ||
+		automationResponse.Actor.Type != "agent" ||
+		automationResponse.Actor.Name != "AI 星耀" ||
+		automationResponse.Actor.ID != util.UUIDToString(agentID) {
+		t.Fatalf("unexpected local automation actor: %+v", automationResponse.Actor)
+	}
+	if len(automationRecorder.Result().Cookies()) != 0 {
+		t.Fatal("machine automation login must not set browser cookies")
+	}
+
+	token, err := jwt.Parse(automationResponse.Token, func(token *jwt.Token) (any, error) {
+		return auth.JWTSecret(), nil
+	})
+	if err != nil || !token.Valid {
+		t.Fatalf("parse local automation token: %v", err)
+	}
+	claims, ok := token.Claims.(jwt.MapClaims)
+	if !ok ||
+		claims["actor_source"] != auth.LocalAgentActorSource ||
+		claims["agent_id"] != util.UUIDToString(agentID) ||
+		claims["actor_workspace"] != util.UUIDToString(workspaceID) {
+		t.Fatalf("unexpected local automation claims: %+v", claims)
+	}
+
+	var gotActorType, gotActorID, gotActorSource, gotWorkspaceID string
+	authenticated := middleware.Auth(db.New(testPool), nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotActorType, gotActorID = h.resolveActor(r, r.Header.Get("X-User-ID"), r.Header.Get("X-Workspace-ID"))
+		gotActorSource = r.Header.Get("X-Actor-Source")
+		gotWorkspaceID = r.Header.Get("X-Workspace-ID")
+		w.WriteHeader(http.StatusOK)
+	}))
+	authenticatedRequest := httptest.NewRequest(http.MethodGet, "/api/issues", nil)
+	authenticatedRequest.Header.Set("Authorization", "Bearer "+automationResponse.Token)
+	authenticatedRequest.Header.Set("X-Workspace-ID", "00000000-0000-0000-0000-000000000000")
+	authenticatedRecorder := httptest.NewRecorder()
+	authenticated.ServeHTTP(authenticatedRecorder, authenticatedRequest)
+	if authenticatedRecorder.Code != http.StatusOK {
+		t.Fatalf("local automation auth status = %d: %s", authenticatedRecorder.Code, authenticatedRecorder.Body.String())
+	}
+	if gotActorType != "agent" || gotActorID != util.UUIDToString(agentID) ||
+		gotActorSource != auth.LocalAgentActorSource ||
+		gotWorkspaceID != util.UUIDToString(workspaceID) {
+		t.Fatalf(
+			"local automation actor headers: type=%q id=%q source=%q workspace=%q",
+			gotActorType, gotActorID, gotActorSource, gotWorkspaceID,
+		)
 	}
 }
 

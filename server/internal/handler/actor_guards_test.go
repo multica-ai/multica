@@ -59,6 +59,9 @@ func TestRequireHumanActor_BlocksMachineCredentials(t *testing.T) {
 		// of machine credential as mat_ for billing-authorization
 		// purposes.
 		{name: "cloud_pat", actorSource: "cloud_pat"},
+		// Local LifeOS controller credential — a machine acting as an
+		// explicitly selected Agent, never as the chairman.
+		{name: "local_agent_automation", actorSource: "local_agent_automation"},
 	}
 
 	for _, tc := range cases {

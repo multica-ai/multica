@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -44,6 +45,15 @@ func SetMemberContext(ctx context.Context, workspaceID string, member db.Member)
 // (400) from "identifier provided but invalid" (404).
 var errWorkspaceNotFound = errors.New("workspace not found")
 
+func workspaceBoundMachineActor(r *http.Request) bool {
+	switch r.Header.Get("X-Actor-Source") {
+	case "task_token", auth.LocalAgentActorSource:
+		return true
+	default:
+		return false
+	}
+}
+
 // ResolveWorkspaceIDFromRequest returns the workspace UUID for an HTTP
 // request using the same priority order as the workspace middleware. This is
 // the single source of truth for "which workspace is this request targeting?",
@@ -52,7 +62,7 @@ var errWorkspaceNotFound = errors.New("workspace not found")
 // themselves.
 //
 // Priority:
-//  1. task-token binding (X-Actor-Source == "task_token") — authoritative,
+//  1. machine-actor binding (task token or local Agent automation) — authoritative,
 //     server-set, cannot be re-negotiated by the client (MUL-2600)
 //  2. middleware-injected context (fast path for middleware-protected routes)
 //  3. X-Workspace-Slug header → GetWorkspaceBySlug → UUID (post-refactor frontend)
@@ -66,13 +76,13 @@ var errWorkspaceNotFound = errors.New("workspace not found")
 // internal resolver instead — this helper collapses both cases to "" for
 // simpler handler-level checks.
 func ResolveWorkspaceIDFromRequest(r *http.Request, queries *db.Queries) string {
-	// A mat_ task token is bound to exactly one workspace by the token
-	// row. Auth middleware writes that workspace into X-Workspace-ID
+	// A machine Agent credential is bound to exactly one workspace by its
+	// token. Auth middleware writes that workspace into X-Workspace-ID
 	// after stripping any client-supplied X-Actor-Source. Any other
 	// workspace identifier on the request (slug header/query, ID
 	// query, URL param) is the agent trying to widen its blast
 	// radius — ignore it.
-	if r.Header.Get("X-Actor-Source") == "task_token" {
+	if workspaceBoundMachineActor(r) {
 		return r.Header.Get("X-Workspace-ID")
 	}
 	if id := WorkspaceIDFromContext(r.Context()); id != "" {
@@ -103,7 +113,7 @@ type workspaceResolver func(r *http.Request) (string, error)
 // resolveWorkspaceUUID builds a resolver that accepts slug-first identification.
 //
 // Priority:
-//  1. task-token binding (X-Actor-Source == "task_token") — authoritative,
+//  1. machine-actor binding (task token or local Agent automation) — authoritative,
 //     server-set; the agent cannot widen its workspace scope by passing a
 //     different slug/id (MUL-2600)
 //  2. X-Workspace-Slug header / ?workspace_slug query → GetWorkspaceBySlug → UUID
@@ -116,7 +126,7 @@ func resolveWorkspaceUUID(queries *db.Queries) workspaceResolver {
 		// token's bound workspace. The auth middleware wrote that ID
 		// into X-Workspace-ID; nothing the agent can put on the wire
 		// (slug header/query, id query, URL param) can override it.
-		if r.Header.Get("X-Actor-Source") == "task_token" {
+		if workspaceBoundMachineActor(r) {
 			id := r.Header.Get("X-Workspace-ID")
 			if id == "" {
 				return "", errWorkspaceNotFound
@@ -211,7 +221,7 @@ func buildMiddleware(queries *db.Queries, resolve workspaceResolver, roles []str
 			// allowed to operate on a workspace other than the one
 			// stamped into its task token. This is the catch-all
 			// behind resolveWorkspaceUUID's earlier check. MUL-2600.
-			if r.Header.Get("X-Actor-Source") == "task_token" {
+			if workspaceBoundMachineActor(r) {
 				bound := r.Header.Get("X-Workspace-ID")
 				if bound == "" || workspaceID != bound {
 					writeError(w, http.StatusForbidden, "task token is bound to a different workspace")

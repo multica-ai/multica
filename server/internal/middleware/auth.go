@@ -283,6 +283,36 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			if email != "" {
 				r.Header.Set("X-User-Email", email)
 			}
+			if actorSource, _ := claims["actor_source"].(string); actorSource == auth.LocalAgentActorSource {
+				agentID, agentOK := claims["agent_id"].(string)
+				workspaceID, workspaceOK := claims["actor_workspace"].(string)
+				if !agentOK || !workspaceOK || strings.TrimSpace(agentID) == "" ||
+					strings.TrimSpace(workspaceID) == "" || queries == nil {
+					slog.Warn("auth: invalid local automation actor claims", "path", r.URL.Path)
+					http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
+					return
+				}
+				agentUUID, agentErr := util.ParseUUID(agentID)
+				workspaceUUID, workspaceErr := util.ParseUUID(workspaceID)
+				if agentErr != nil || workspaceErr != nil {
+					slog.Warn("auth: invalid local automation actor ids", "path", r.URL.Path)
+					http.Error(w, `{"error":"invalid claims"}`, http.StatusUnauthorized)
+					return
+				}
+				agent, lookupErr := queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+					ID:          agentUUID,
+					WorkspaceID: workspaceUUID,
+				})
+				if lookupErr != nil || agent.ArchivedAt.Valid || !agent.OwnerID.Valid ||
+					uuidToString(agent.OwnerID) != sub {
+					slog.Warn("auth: rejected local automation actor", "path", r.URL.Path)
+					http.Error(w, `{"error":"invalid token"}`, http.StatusUnauthorized)
+					return
+				}
+				r.Header.Set("X-Agent-ID", agentID)
+				r.Header.Set("X-Workspace-ID", workspaceID)
+				r.Header.Set("X-Actor-Source", auth.LocalAgentActorSource)
+			}
 
 			// Sliding session: a browser that keeps using the app keeps its
 			// cookie, instead of being logged out on the anniversary of its
