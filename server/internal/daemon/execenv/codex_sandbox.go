@@ -69,11 +69,28 @@ func resolveGOOS(goos string) string {
 	return goos
 }
 
+// runningInDocker reports whether the daemon is running in a Docker
+// container. Docker creates /.dockerenv in its containers; the cgroup check
+// covers Docker configurations where that marker is unavailable.
+func runningInDocker() bool {
+	if _, err := os.Stat("/.dockerenv"); err == nil {
+		return true
+	}
+	data, err := os.ReadFile("/proc/1/cgroup")
+	if err != nil {
+		return false
+	}
+	return strings.Contains(string(data), "/docker/") || strings.Contains(string(data), "/docker-")
+}
+
 // codexSandboxPolicyFor picks the default policy for the given platform and
 // detected Codex CLI version. It is the platform baseline; per-task user config
 // can refine it (see codexSandboxPolicyForConfig).
 //
-//   - Linux: workspace-write with network access. Landlock enforces the
+//   - Linux in Docker: danger-full-access. The Docker container is already
+//     the daemon's isolation boundary, and Codex's Landlock workspace-write
+//     sandbox prevents daemon tasks from accessing required container paths.
+//   - Other Linux: workspace-write with network access. Landlock enforces the
 //     filesystem sandbox and is not affected by the macOS Seatbelt bug.
 //   - Windows: danger-full-access, as a deliberate compatibility choice.
 //     Codex ships a native Windows sandbox (windows.sandbox = "unelevated" via
@@ -94,6 +111,13 @@ func resolveGOOS(goos string) string {
 //   - darwin otherwise (including when the version is unknown): fall back to
 //     danger-full-access so the Multica CLI can reach the API.
 func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
+	return codexSandboxPolicyForEnvironment(goos, detectedVersion, runningInDocker())
+}
+
+// codexSandboxPolicyForEnvironment selects a policy for a platform and
+// container state. Keeping container detection as an argument makes the
+// Docker policy deterministic in tests.
+func codexSandboxPolicyForEnvironment(goos, detectedVersion string, inDocker bool) codexSandboxPolicy {
 	if goos == "" {
 		goos = runtime.GOOS
 	}
@@ -101,6 +125,12 @@ func codexSandboxPolicyFor(goos, detectedVersion string) codexSandboxPolicy {
 		return codexSandboxPolicy{
 			Mode:   "danger-full-access",
 			Reason: "codex on windows: compatibility fallback; no native windows.sandbox configured, so workspace-write cannot be enforced (MUL-4957)",
+		}
+	}
+	if goos == "linux" && inDocker {
+		return codexSandboxPolicy{
+			Mode:   "danger-full-access",
+			Reason: "codex in Docker: container isolation is the boundary; workspace-write blocks required daemon task access",
 		}
 	}
 	if goos != "darwin" {

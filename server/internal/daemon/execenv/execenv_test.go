@@ -2966,7 +2966,7 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			p := codexSandboxPolicyFor(tc.goos, tc.version)
+			p := codexSandboxPolicyForEnvironment(tc.goos, tc.version, false)
 			if p.Mode != tc.wantMode {
 				t.Errorf("mode = %q, want %q", p.Mode, tc.wantMode)
 			}
@@ -2980,6 +2980,26 @@ func TestCodexSandboxPolicyFor(t *testing.T) {
 				t.Errorf("hint present = %v, want %v (hint=%q)", p.Hint != "", tc.wantHint, p.Hint)
 			}
 		})
+	}
+}
+
+func TestCodexSandboxPolicyForEnvironmentDocker(t *testing.T) {
+	t.Parallel()
+
+	docker := codexSandboxPolicyForEnvironment("linux", "0.144.5", true)
+	if docker.Mode != "danger-full-access" {
+		t.Errorf("Docker Linux mode = %q, want danger-full-access", docker.Mode)
+	}
+	if docker.NetworkAccess {
+		t.Error("Docker Linux policy must not emit workspace-write network_access")
+	}
+	if docker.Reason == "" {
+		t.Error("expected Docker Linux policy to include a reason")
+	}
+
+	host := codexSandboxPolicyForEnvironment("linux", "0.144.5", false)
+	if host.Mode != "workspace-write" || !host.NetworkAccess {
+		t.Errorf("non-Docker Linux policy = %+v, want workspace-write with network access", host)
 	}
 }
 
