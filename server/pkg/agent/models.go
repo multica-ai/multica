@@ -846,9 +846,19 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 // levels to every discovered model so the UI thinking picker works
 // for kimi the same way it does for claude/codex. If the runtime only
 // advertises "on" (kimi 0.27.0's current behavior), the picker shows
-// that single option. Levels may vary by model/version in future
-// builds; the discovery path is generic and follows whatever the CLI
-// returns.
+// that single option.
+//
+// KNOWN LIMITATION (v1): the thought_level select is read from the
+// single discovery session/new — i.e. the default model — and the same
+// catalog is reused for every model, so this is not truly per-model.
+// It is harmless today because kimi 0.27.0 advertises only "on" and the
+// daemon's ValidateThinkingLevel guard drops any UI-over-advertised pick
+// before it reaches session/set_config_option. If a future kimi build
+// diverges thought_level per model, the picker would over-advertise
+// levels for non-default models; making it per-model then means probing
+// session/new once per model. Levels may otherwise vary by model/version
+// in future builds; the discovery path is generic and follows whatever
+// the CLI returns.
 //
 // There is deliberately NO static fallback: the picker must reflect
 // what the installed CLI actually offers so the list stays in sync
