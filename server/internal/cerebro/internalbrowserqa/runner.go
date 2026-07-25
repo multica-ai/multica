@@ -66,7 +66,9 @@ type Target struct {
 	// AccessHeaders sends the Cloudflare Access service-token headers with the
 	// first navigation. Only a target on the public edge needs this, and it is
 	// the one case where the URL is allowed to be public HTTPS.
-	AccessHeaders bool
+	AccessHeaders         bool
+	AccessClientIDKey     string
+	AccessClientSecretKey string
 }
 
 func (t Target) Host() string {
@@ -91,6 +93,7 @@ var targets = map[string]Target{
 	"cerebro": {
 		Name: "cerebro", URL: "https://cerebro.firtal.com/login",
 		Vault: "Shared/browser-login/cerebro", AccessHeaders: true,
+		AccessClientIDKey: "CF_ACCESS_CLIENT_ID", AccessClientSecretKey: "CF_ACCESS_CLIENT_SECRET",
 		UsernameSelector: "#login-email", SubmitButtonName: "Continue",
 		CodeSelector:     "input[data-input-otp]",
 		NavigateLinkName: "Issues", ExpectedText: []string{"Issues", "Agents", "Settings"},
@@ -131,11 +134,31 @@ var targets = map[string]Target{
 		SubmitSelector: "button[type=submit]", NavigateLinkName: "Production planning",
 		ExpectedText: []string{"Production planning", "Job assignment"},
 	},
-	// Atlas serves the catalog itself; the private host carries no app login, so
-	// the landing page's own heading is the proof that the app rendered.
+	// Atlas role checks use two dedicated Cloudflare Access service tokens on the
+	// public edge. The application validates the resulting Access assertion and
+	// maps each token to exactly one built-in role. The unknown check deliberately
+	// uses the private host without credentials to prove the default-deny path.
 	"data-catalog": {
-		Name: "data-catalog", URL: "http://data-catalog.internal:3000/",
+		Name: "data-catalog", URL: "https://atlas.firtal.com/",
+		Vault: "Shared/browser-login/data-catalog", AccessHeaders: true,
+		AccessClientIDKey: "ADMIN_CF_ACCESS_CLIENT_ID", AccessClientSecretKey: "ADMIN_CF_ACCESS_CLIENT_SECRET",
+		NavigateLinkName: "Permissions", ExpectedText: []string{"Permissions", "Roles", "Assignments"},
+	},
+	"data-catalog-reader": {
+		Name: "data-catalog-reader", URL: "https://atlas.firtal.com/",
+		Vault: "Shared/browser-login/data-catalog", AccessHeaders: true,
+		AccessClientIDKey: "READER_CF_ACCESS_CLIENT_ID", AccessClientSecretKey: "READER_CF_ACCESS_CLIENT_SECRET",
 		ExpectedText: []string{"Atlas Graph Health"},
+	},
+	"data-catalog-reader-permissions": {
+		Name: "data-catalog-reader-permissions", URL: "https://atlas.firtal.com/permissions",
+		Vault: "Shared/browser-login/data-catalog", AccessHeaders: true,
+		AccessClientIDKey: "READER_CF_ACCESS_CLIENT_ID", AccessClientSecretKey: "READER_CF_ACCESS_CLIENT_SECRET",
+		ExpectedText: []string{"No access"},
+	},
+	"data-catalog-unknown": {
+		Name: "data-catalog-unknown", URL: "http://data-catalog.internal:3000/",
+		ExpectedText: []string{"No access", "All services healthy"},
 	},
 }
 
@@ -154,6 +177,9 @@ func TargetFor(name string) (Target, error) {
 	internal := parsed.Scheme == "http" && strings.Contains(parsed.Hostname(), ".internal")
 	publicEdge := target.AccessHeaders && parsed.Scheme == "https" && strings.HasSuffix(parsed.Hostname(), ".firtal.com")
 	if !internal && !publicEdge {
+		return Target{}, fmt.Errorf("internal browser target is misconfigured")
+	}
+	if target.AccessHeaders && (target.Vault == "" || target.AccessClientIDKey == "" || target.AccessClientSecretKey == "") {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	if target.VersionPath != "" && (!strings.HasPrefix(target.VersionPath, "/") || strings.Contains(target.VersionPath, "://")) {
@@ -682,20 +708,22 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		return Result{}, err
 	}
 	// A code-login target signs in with the staging master code, so its second
-	// secret is the code rather than a password. Everything else is unchanged:
-	// a vault target must arrive complete, and a vault-less one must arrive bare.
+	// secret is the code rather than a password. Cloudflare-only targets also
+	// use a vault, but never receive form credentials.
 	secondSecret := credential.Password
 	if target.CodeSelector != "" {
 		secondSecret = credential.LoginCode
 	}
-	hasCredential := credential.Username != "" || secondSecret != ""
-	if target.Vault == "" && hasCredential {
+	formLogin := target.UsernameSelector != ""
+	hasLoginCredential := credential.Username != "" || secondSecret != ""
+	if !formLogin && hasLoginCredential {
 		return Result{}, fmt.Errorf("target does not accept a browser credential")
 	}
-	if target.Vault != "" && (credential.Username == "" || secondSecret == "") {
+	if formLogin && (credential.Username == "" || secondSecret == "") {
 		return Result{}, fmt.Errorf("target requires a complete browser credential")
 	}
-	if target.AccessHeaders && (credential.AccessClientID == "" || credential.AccessClientSecret == "") {
+	hasAccessCredential := credential.AccessClientID != "" || credential.AccessClientSecret != ""
+	if target.AccessHeaders != hasAccessCredential || (target.AccessHeaders && (credential.AccessClientID == "" || credential.AccessClientSecret == "")) {
 		return Result{}, fmt.Errorf("target requires a complete browser credential")
 	}
 	if target.SessionCookie != (credential.SessionToken != "") {
@@ -744,9 +772,9 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	} else if _, err := r.runStage(ctx, target, openStage, "", append(baseArgs, "open", target.URL)...); err != nil {
 		return r.failure(target, baseArgs, target.URL, err)
 	}
-	if target.Vault != "" || target.SessionCookie {
+	if formLogin || target.SessionCookie {
 		commands := make([][]string, 0, 6)
-		if target.Vault != "" {
+		if formLogin {
 			commands = append(commands, []string{"fill", target.UsernameSelector, credential.Username})
 			if target.CodeSelector != "" {
 				// Two-step code login: submit the email, wait for the code field,
