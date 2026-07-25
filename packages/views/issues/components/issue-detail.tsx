@@ -2900,15 +2900,6 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
             </>
             )}
 
-            {/* CEREBRO-PATCH(issue-workpad-panel): FIR-3659 — the Workpad renders
-                the issue's plan (a kind:"plan" artifact coupled to the issue) as a
-                checklist directly above the composer. It is driven purely by the
-                plan's existence: no plan → nothing renders; a plan exists → the
-                panel appears automatically. Gated inside WorkpadPanel by
-                cerebro_workpad. Uses issue.id (UUID) like ArtifactList, not the
-                route id. */}
-            {!isChat && <WorkpadPanel issueId={issue.id} className="mt-4" />}
-
             {/* Bottom comment input — no avatar, full width */}
             <div className="mt-4">
               {/* CEREBRO-PATCH(issue-detail-pin-comment-input): JEH-1065 — opt
@@ -2928,6 +2919,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 topBanner={sessionsEnabled && armedHandoff ? <HandoffArmedBanner name={armedHandoff.name} onCancel={() => setArmedHandoff(null)} /> : undefined}
               />
             </div>
+
+            {/* CEREBRO-PATCH(issue-workpad-panel): FIR-3659 — the Workpad renders the issue's plan (a kind:"plan" artifact) as a checklist BELOW the composer, at the very bottom of the issue (Jesper, FIR-3765 review: under the input, not above it). No plan → nothing renders. Gated inside WorkpadPanel by cerebro_workpad; uses issue.id (UUID) like ArtifactList, not the route id. */}
+            {!isChat && <WorkpadPanel issueId={issue.id} className="mt-4" />}
               </TabsContent>
             </Tabs>
           </div>
