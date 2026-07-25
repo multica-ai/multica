@@ -92,9 +92,8 @@ export function workpadProgress(items: WorkpadItem[]): WorkpadProgress {
   return { done: items.filter((i) => i.done).length, total: items.length };
 }
 
-// phaseStatus / phaseComplete mirror packages/cerebro-artifacts/core/workpad.ts
-// (FIR-3765) so a phase shows the same circular status icon and the same
-// collapse-when-complete default on both clients.
+// phaseStatus mirrors packages/cerebro-artifacts/core/workpad.ts (FIR-3765) so a
+// phase shows the same circular status icon on both clients.
 export function phaseStatus({
   done,
   total,
@@ -102,8 +101,4 @@ export function phaseStatus({
   if (total > 0 && done >= total) return "done";
   if (done > 0) return "in_progress";
   return "todo";
-}
-
-export function phaseComplete(progress: WorkpadProgress): boolean {
-  return progress.total > 0 && progress.done >= progress.total;
 }

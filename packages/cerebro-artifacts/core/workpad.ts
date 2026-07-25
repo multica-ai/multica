@@ -69,12 +69,6 @@ export function phaseStatus({
   return "todo";
 }
 
-// phaseComplete reports whether every step in a phase is done — used to collapse
-// finished phases by default so a long plan opens on the work that remains.
-export function phaseComplete(progress: WorkpadProgress): boolean {
-  return progress.total > 0 && progress.done >= progress.total;
-}
-
 // A phase groups consecutive checklist steps under a markdown heading, so a long
 // plan reads as a handful of phases instead of one flat 17-step wall. `title` is
 // null for steps that appear before the first heading (an ungrouped preamble).

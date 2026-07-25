@@ -11,15 +11,13 @@
  *   - the filter appears only with ≥2 named phases, exactly like web;
  *   - gated by the same `cerebro_workpad` flag (default-off).
  *
- * Mobile-only divergence: the whole panel is collapsible (a plan can be long
- * and the issue screen is short), controlled by local `open` state with a
- * Pressable header — the required extra state per the UI rules.
- *
  * FIR-3765 (variant A): a phase renders as a collapsible section headed by the
  * shared StatusIcon reflecting the phase's own progress (todo / in-progress /
- * done). Completed phases start collapsed; tapping a header folds it. No phase
- * filter — mirrors web's packages/cerebro-artifacts/views/components/
- * workpad-panel.tsx.
+ * done). The status row is the toggle — no disclosure arrow — and a phase's
+ * sub-steps render one shade lighter beneath it. No phase filter.
+ *
+ * Everything starts folded, mirroring web: the panel itself opens collapsed
+ * (tapping its header row, icon included, toggles it) and so does every phase.
  */
 import { useState } from "react";
 import { Pressable, View } from "react-native";
@@ -38,12 +36,12 @@ import {
   namedPhases,
   workpadProgress,
   phaseStatus,
-  phaseComplete,
   type WorkpadItem,
   type WorkpadPhase,
 } from "@/lib/workpad";
 
-function StepRow({ item }: { item: WorkpadItem }) {
+// `subdued` renders a step one shade lighter than the phase title it sits under.
+function StepRow({ item, subdued }: { item: WorkpadItem; subdued?: boolean }) {
   const { colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
   return (
@@ -57,6 +55,7 @@ function StepRow({ item }: { item: WorkpadItem }) {
       <Text
         className={cn(
           "flex-1 text-sm leading-snug",
+          subdued && "text-muted-foreground",
           item.done && "text-muted-foreground line-through",
         )}
       >
@@ -67,7 +66,8 @@ function StepRow({ item }: { item: WorkpadItem }) {
 }
 
 // PhaseSection — a named phase as a collapsible section: a status icon for the
-// phase's own progress, its title, count, and its steps when expanded.
+// phase's own progress, its title, count, and its steps when expanded. The
+// status row itself is the toggle; there is no disclosure arrow.
 function PhaseSection({
   phase,
   open,
@@ -77,8 +77,6 @@ function PhaseSection({
   open: boolean;
   onToggle: () => void;
 }) {
-  const { colorScheme } = useColorScheme();
-  const mutedFg = THEME[colorScheme].mutedForeground;
   const progress = workpadProgress(phase.items);
   return (
     <View className="gap-1.5">
@@ -89,11 +87,6 @@ function PhaseSection({
         accessibilityState={{ expanded: open }}
         className="flex-row items-center gap-2 active:opacity-70"
       >
-        <Ionicons
-          name={open ? "chevron-down" : "chevron-forward"}
-          size={14}
-          color={mutedFg}
-        />
         <StatusIcon status={phaseStatus(progress)} size={14} />
         <Text className="flex-1 text-sm font-medium" numberOfLines={1}>
           {phase.title}
@@ -103,9 +96,9 @@ function PhaseSection({
         </Text>
       </Pressable>
       {open && (
-        <View className="gap-1.5 pl-6">
+        <View className="gap-1.5 pl-5">
           {phase.items.map((item, i) => (
-            <StepRow key={i} item={item} />
+            <StepRow key={i} item={item} subdued />
           ))}
         </View>
       )}
@@ -127,8 +120,8 @@ function StepGroup({ items }: { items: WorkpadItem[] }) {
 export function WorkpadPanel({ issueId }: { issueId: string }) {
   const enabled = useWorkpadEnabled();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
-  const [open, setOpen] = useState(true);
-  // Per-phase open overrides (keyed by title); default is collapsed-when-complete.
+  const [open, setOpen] = useState(false);
+  // Per-phase open overrides (keyed by title); a phase not present is collapsed.
   const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
   const { colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
@@ -161,12 +154,6 @@ export function WorkpadPanel({ issueId }: { issueId: string }) {
             {done}/{total}
           </Text>
         )}
-        <Ionicons
-          name={open ? "chevron-down" : "chevron-forward"}
-          size={16}
-          color={mutedFg}
-          style={total > 0 ? undefined : { marginLeft: "auto" }}
-        />
       </Pressable>
 
       {open && (
@@ -187,10 +174,8 @@ export function WorkpadPanel({ issueId }: { issueId: string }) {
                 if (phase.title === null) {
                   return <StepGroup key={`__lead__${i}`} items={phase.items} />;
                 }
-                const complete = phaseComplete(workpadProgress(phase.items));
                 const title = phase.title;
-                const phaseOpen =
-                  title in openOverrides ? openOverrides[title] : !complete;
+                const phaseOpen = openOverrides[title] ?? false;
                 return (
                   <PhaseSection
                     key={title}

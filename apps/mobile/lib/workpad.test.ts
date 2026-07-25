@@ -5,7 +5,6 @@ import {
   namedPhases,
   workpadProgress,
   phaseStatus,
-  phaseComplete,
   type WorkpadArtifact,
 } from "./workpad";
 
@@ -88,13 +87,5 @@ describe("phaseStatus", () => {
     expect(phaseStatus({ done: 1, total: 3 })).toBe("in_progress");
     expect(phaseStatus({ done: 3, total: 3 })).toBe("done");
     expect(phaseStatus({ done: 0, total: 0 })).toBe("todo");
-  });
-});
-
-describe("phaseComplete", () => {
-  it("is true only when every step is done", () => {
-    expect(phaseComplete({ done: 2, total: 2 })).toBe(true);
-    expect(phaseComplete({ done: 1, total: 2 })).toBe(false);
-    expect(phaseComplete({ done: 0, total: 0 })).toBe(false);
   });
 });

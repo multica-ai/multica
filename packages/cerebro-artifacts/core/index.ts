@@ -75,7 +75,6 @@ export {
   parseWorkpadPhases,
   namedPhases,
   phaseStatus,
-  phaseComplete,
   type WorkpadItem,
   type WorkpadProgress,
   type WorkpadPhase,
