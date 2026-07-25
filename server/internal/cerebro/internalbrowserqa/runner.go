@@ -43,6 +43,9 @@ type Target struct {
 	PasswordSelector string
 	SubmitSelector   string
 	NavigateLinkName string
+	NavigateSelector string
+	NavigateTabName  string
+	ExpectedURLPart  string
 	// ExpectedPathSuffix proves that navigation reached the intended in-app
 	// route instead of accepting global sidebar markers from another page.
 	ExpectedPathSuffix string
@@ -99,10 +102,18 @@ var targets = map[string]Target{
 		NavigateLinkName: "Issues", ExpectedText: []string{"Issues", "Agents", "Settings"},
 	},
 	"registry": {
-		Name: "registry", URL: "http://firtal-data-registry-private.internal:3000/auth/login?manual=true",
-		Vault: "Shared/browser-login/registry", UsernameSelector: "#email", PasswordSelector: "#password",
+		// Registry and the verifier run on different Sliplane servers. Internal
+		// DNS is server-scoped, so use the Cloudflare Access-gated public edge
+		// with the app-specific service token instead of an unreachable
+		// .internal hostname.
+		Name: "registry", URL: "https://registry.firtal.com/auth/login?manual=true",
+		Vault: "Shared/browser-login/registry", AccessHeaders: true,
+		AccessClientIDKey: "CF_ACCESS_CLIENT_ID", AccessClientSecretKey: "CF_ACCESS_CLIENT_SECRET",
+		UsernameSelector: "#email", PasswordSelector: "#password",
 		SubmitSelector: "button[type=submit]", NavigateLinkName: "API Keys",
-		ExpectedText: []string{"Authentication", "API Keys"},
+		NavigateSelector: "tbody tr", NavigateTabName: "Permissions",
+		ExpectedURLPart: "/authentication/api-keys/",
+		ExpectedText:    []string{"Data Sources", "API Endpoints", "AI Models", "Apps", "API Access", "Save"},
 	},
 	// Finance is firtal-agents-private, not firtal-internal-private — those are
 	// two different apps that share a login, so pointing at the wrong one logged
@@ -186,6 +197,9 @@ func TargetFor(name string) (Target, error) {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	if target.ExpectedPathSuffix != "" && (!strings.HasPrefix(target.ExpectedPathSuffix, "/") || strings.Contains(target.ExpectedPathSuffix, "://")) {
+		return Target{}, fmt.Errorf("internal browser target is misconfigured")
+	}
+	if target.ExpectedURLPart != "" && (!strings.HasPrefix(target.ExpectedURLPart, "/") || strings.Contains(target.ExpectedURLPart, "://")) {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	return target, nil
@@ -420,10 +434,11 @@ const (
 	defaultStageTimeout = 30 * time.Second
 )
 
-// countedStages is how many stageTimeout-bounded steps a full verification can
-// spend after the open stage: auth, reload, render, dialog, navigation, the
-// second render, snapshot, url, version, errors and screenshot.
-const countedStages = 11
+// countedStages is how many stageTimeout-bounded steps the longest verification
+// can spend after the open stage. Registry adds a row click, a Permissions-tab
+// click, and their render waits after the shared login/navigation sequence;
+// Multica additionally verifies its deployed commit through /version.
+const countedStages = 14
 
 // MaxVerificationDuration is the longest a single Verify can legitimately take:
 // the DNS preflight, every open attempt including the cold-start retry, and each
@@ -832,6 +847,22 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 			return r.failure(target, baseArgs, target.URL, err)
 		}
 	}
+	if target.NavigateSelector != "" {
+		if _, err := r.runStage(ctx, target, "navigation", "", append(baseArgs, "click", target.NavigateSelector)...); err != nil {
+			return r.failure(target, baseArgs, "selector: "+target.NavigateSelector, err)
+		}
+		if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
+			return r.failure(target, baseArgs, target.URL, err)
+		}
+	}
+	if target.NavigateTabName != "" {
+		if _, err := r.runStage(ctx, target, "navigation", "", append(baseArgs, "find", "role", "tab", "click", "--name", target.NavigateTabName)...); err != nil {
+			return r.failure(target, baseArgs, "tab: "+target.NavigateTabName, err)
+		}
+		if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
+			return r.failure(target, baseArgs, target.URL, err)
+		}
+	}
 	snapshot, err := r.runStage(ctx, target, "snapshot", "", append(baseArgs, "snapshot")...)
 	if err != nil {
 		return r.failure(target, baseArgs, target.URL, err)
@@ -847,6 +878,10 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		return r.failure(target, baseArgs, target.URL, err)
 	}
 	finalURLText := strings.TrimSpace(string(finalURL))
+	if target.ExpectedURLPart != "" && !strings.Contains(finalURLText, target.ExpectedURLPart) {
+		return r.failure(target, baseArgs, "missing URL part: "+target.ExpectedURLPart,
+			stageError{stage: "url", kind: commandFailureNotFound})
+	}
 	if target.ExpectedPathSuffix != "" {
 		parsedFinalURL, parseErr := url.Parse(finalURLText)
 		if parseErr != nil || !strings.HasSuffix(strings.TrimSuffix(parsedFinalURL.Path, "/"), target.ExpectedPathSuffix) {
