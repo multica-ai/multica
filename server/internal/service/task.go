@@ -555,11 +555,19 @@ func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, work
 // run never starts.
 var ErrAttributionFailClosed = errors.New("attribution: no precise accountable human and enqueue refused (fail-closed policy, policy read failed, or no agent owner)")
 
-// ErrTaskAlreadyPending is returned by enqueueMentionTaskWithCommentPlan when
+// ErrTaskAlreadyPending is returned by the task enqueue paths when
 // CreateAgentTask hits idx_one_pending_task_per_issue_agent — i.e. a concurrent
 // request already enqueued a task for the same (issue, agent) pair. Callers
 // should treat this as a deferred/already-active outcome, not an error.
 var ErrTaskAlreadyPending = errors.New("task: pending task already exists for this (issue, agent) pair")
+
+// isPendingTaskDedupViolation reports whether err is the unique-constraint
+// violation raised by idx_one_pending_task_per_issue_agent, i.e. a concurrent
+// enqueue won the race for the same (issue, agent) pair.
+func isPendingTaskDedupViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_one_pending_task_per_issue_agent"
+}
 
 // applyAttributionFallback applies the workspace's degraded-attribution policy to a
 // resolved attribution whose source came back unattributed (no precise human). A
@@ -1042,6 +1050,12 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
 	})
 	if err != nil {
+		if isPendingTaskDedupViolation(err) {
+			// Same dedup race as the mention path: a concurrent request already
+			// enqueued a task for this (issue, agent) pair. Not a server fault.
+			slog.Info("assignee task already enqueued (concurrent dedup)", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(issue.AssigneeID))
+			return db.AgentTaskQueue{}, ErrTaskAlreadyPending
+		}
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
@@ -1161,8 +1175,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
 	})
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_one_pending_task_per_issue_agent" {
+		if isPendingTaskDedupViolation(err) {
 			// A concurrent request already enqueued a task for this (issue, agent)
 			// pair — the unique index raced us. This is a normal dedup outcome,
 			// not a server fault: log at Info and let callers handle it as
