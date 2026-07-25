@@ -1873,3 +1873,16 @@ not part of that decision.
 
 **Upstream:** this is a genuine multica bug, not cerebro-specific — a good candidate to
 land at `multica-ai/multica` and drop on the next sync.
+
+## FIR-3782 — A failed run explains itself
+
+A failed run showed a red icon and a timestamp and nothing else. Three defects compounded: the reason was rendered `sr-only`, the upstream label map covered only 6 of the backend's 21 canonical reasons (so every `agent_error.*` value resolved to `undefined`), and the daemon head-truncated tool output at 8192 bytes, discarding the tail where a failing command prints its error. All new logic lives in the cerebro zone; the upstream files carry one marked call site each.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `failure-reason-copy` | `packages/views/issues/components/execution-log-section.tsx` (2 marked lines; resolver in the cerebro-zone `packages/cerebro-runtime/views/failure-reason-label.ts`) | Replaces the `failureReasonLabel[...]` lookups with `resolveFailureReasonLabel()`, which covers all 21 reasons and degrades an unknown future reason to readable copy instead of `undefined`. The upstream import is dropped in the same hunk. |
+| `failure-reason-visible` | `packages/views/issues/components/execution-log-section.tsx` (1 marked line) | The reason span was `sr-only`, so the text existed only for screen readers and the `title` tooltip. It now renders as visible `text-destructive` copy when a reason is present, falling back to `sr-only` for the plain status label. |
+| `tool-output-keep-tail` | `server/internal/daemon/daemon.go` (1 marked line; helper in the net-new cerebro sibling `server/internal/daemon/cerebro_output_clip.go`) | `output[:8192]` kept the head. A command that prints a lot and then fails puts its error on the last lines, so head-only truncation preserved the part that succeeded and discarded the diagnosis. `clipToolOutput` keeps a weighted head and tail with an explicit elision marker. |
+| `run-failure-card` | `packages/views/common/task-transcript/agent-transcript-dialog.tsx` (3 marked lines; component in the cerebro-zone `packages/cerebro-runtime/views/components/run-failure-card.tsx`) | Renders the reason, the last step and the tail of its output above the event list on a failed run, behind `cerebro_run_failure_card` (ON). Two wiring constraints are marked in place: the component is imported by its **direct entry**, not the `/views` barrel (the barrel re-exports pages that import `@multica/views`, and the cycle blanks the dialog), and the flag is read with `useFlagValue` (a store read) rather than `useFeatureFlag` (which runs a query), so the dialog needs no `QueryClient` of its own. |
+
+**Also fixed, cerebro-zone only (no marker needed):** `packages/cerebro-runtime/views/task-failure-severity.ts` keyed `INTERRUPTION_REASONS` on `runtime_paused` and `rate_limit`. Neither string is emitted any more — `taskfailure.Classify` resolves a provider stall to an `agent_error.*` sub-reason and never returns a platform-side reason — so an auto-retried provider rate limit rendered as a hard red failure instead of the amber "Interrupted, retrying" state.

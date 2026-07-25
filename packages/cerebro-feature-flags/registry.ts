@@ -233,6 +233,8 @@ export type CerebroFlagKey =
   | "cerebro_session_context_hairline"
   // FIR-1839: the "CLI runs" tab (the local Claude Code / CLI work-sessions list, formerly the "Sessions" tab). OFF by default — hidden unless a workspace opts in.
   | "cerebro_cli_runs_tab"
+  // FIR-3782: failure summary card at the top of a failed run's transcript.
+  | "cerebro_run_failure_card"
   // FIR-2827: sidebar "Subscribers" section on regular issues — subscribers split by type (Members / Agents) with the add/remove popover, replacing the avatar stack next to the Activity header.
   | "cerebro_issue_sidebar_subscribers"
   // FIR-1597: optional time-of-day on an issue's start/due date; start time auto-starts an agent, due time times the reminder.
@@ -656,6 +658,9 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-1839: OFF by default — the "CLI runs" tab (local CLI work-sessions) is
   // hidden unless a workspace opts in.
   cerebro_cli_runs_tab: false,
+  // FIR-3782: ON. Shows the reason, the last step and the tail of its output
+  // at the top of a failed run, so "why did this fail" needs no scrolling.
+  cerebro_run_failure_card: true,
   // FIR-2827: ON by default — subscribers listed in the issue sidebar, split by
   // type. Off falls back to the avatar stack next to the Activity header.
   cerebro_issue_sidebar_subscribers: true,
@@ -1598,6 +1603,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Show the \"CLI runs\" tab on an issue — the list of local Claude Code / CLI work-sessions started from a terminal (start, stop, resume, fork, transcript). This was previously the \"Sessions\" tab; renamed to avoid colliding with comment sessions. OFF by default — hidden unless a workspace opts in. FIR-1839.",
+  },
+  {
+    key: "cerebro_run_failure_card",
+    label: "Run failure card",
+    group: "workspace",
+    description:
+      "Show a summary card at the top of a failed run's execution log: the failure reason in plain words, the last step the agent took, and the end of that step's output. Everything on the card already exists in the run timeline — the card just stops you scrolling to find it. ON by default. FIR-3782.",
   },
   {
     key: "cerebro_issue_sidebar_subscribers",
