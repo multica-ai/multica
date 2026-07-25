@@ -29,6 +29,11 @@ function applyAppBadge(count: number) {
 // the SW isn't ready or the API isn't supported.
 function postBadgeToSw(count: number) {
   if (typeof navigator === "undefined") return;
+  // CEREBRO-PATCH(installed-pwa-badge-bridge): avoid unsupported worker badge IPC in normal tabs.
+  const installedPwa =
+    window.matchMedia?.("(display-mode: standalone)").matches === true ||
+    (navigator as Navigator & { standalone?: boolean }).standalone === true;
+  if (!installedPwa) return;
   const sw = navigator.serviceWorker;
   if (!sw) return;
   sw.ready

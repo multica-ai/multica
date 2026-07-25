@@ -15,7 +15,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
-	cerebroaccessdecision "github.com/multica-ai/multica/server/internal/cerebro/accessdecision"     // CEREBRO-PATCH(main-access-decision-shadow): FIR-3399 observational Gateway Decision Ledger.
+	cerebroaccessdecision "github.com/multica-ai/multica/server/internal/cerebro/accessdecision"     // CEREBRO-PATCH(main-access-decision-service): FIR-3388 canonical Gateway Policy Decision Service.
 	cerebroaccessgovernance "github.com/multica-ai/multica/server/internal/cerebro/accessgovernance" // CEREBRO-PATCH(main-access-governance): FIR-3403 tighten-only access governance sweeper.
 	cerebroapprovals "github.com/multica-ai/multica/server/internal/cerebro/approvals"               // CEREBRO-PATCH(main-request-approval): FIR-3266 agent-callable approval intake.
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -470,7 +470,7 @@ func main() {
 		h.CapabilityEvidence = cerebroruntime.NewGatewayAvailabilityLedger(gatewayRuntimeCtx, h, queries)
 		mandates := cerebrotaskmandate.NewStore(pool)
 		gatewayExecutor.SetTaskMandates(mandates)
-		gatewayExecutor.SetAccessDecisionObserver(cerebroaccessdecision.NewObserver(cerebrotoolpolicy.NewStore(pool), h.CapabilityEvidence, cerebroaccessdecision.NewStore(pool)).WithMandates(mandates))
+		gatewayExecutor.SetAccessDecisionService(cerebroaccessdecision.NewService(cerebrotoolpolicy.NewStore(pool), h.CapabilityEvidence, cerebroaccessdecision.NewStore(pool)).WithMandates(mandates)) // CEREBRO-PATCH(main-access-decision-service): FIR-3388 canonical Gateway decision.
 		// CEREBRO-PATCH(main-firtal-gateway-inproc-bridge): FIR-1449 policy-controlled in-process bridge to the full CLI tool surface.
 		cerebroruntime.MaybeEnableInProcessBridge(gatewayExecutor, r)
 		go gatewayExecutor.Run(gatewayRuntimeCtx)

@@ -632,7 +632,7 @@ func (t *FirtalRegistryTool) chainGateDataSource(ctx context.Context, action, ds
 		ArgValues: argValues,
 	}
 	for _, resourcePattern := range []string{dsID, ""} {
-		eff, err := store.Resolve(ctx, toolpolicy.Query{
+		eff, err := store.ResolveDeclared(ctx, toolpolicy.Query{
 			WorkspaceID:     t.tctx.WorkspaceID,
 			ToolKey:         "firtal_registry",
 			ResourcePattern: resourcePattern,

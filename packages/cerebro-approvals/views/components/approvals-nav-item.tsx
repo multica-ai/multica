@@ -2,7 +2,6 @@
 
 import { Inbox } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useCurrentMember } from "@multica/core/permissions";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { cn } from "@multica/ui/lib/utils";
@@ -13,6 +12,7 @@ import {
   SidebarMenuItem,
 } from "@multica/ui/components/ui/sidebar";
 import { approvalsListOptions } from "../../core/queries";
+import { useApprovalExperienceEnabled } from "../../core/availability";
 
 interface ApprovalsNavItemProps {
   workspaceSlug: string;
@@ -20,13 +20,14 @@ interface ApprovalsNavItemProps {
 }
 
 // Sidebar entry for the cerebro approval inbox (FIR-2131). Hidden when the
-// `cerebro_approvals` flag is off and for non-admins (the page gates them too).
+// both the inbox and Ask enforcement are off, and for non-admins (the page
+// gates them too). Ask can never create requests without a visible inbox.
 // Shows a badge with the pending count so an approver notices waiting asks.
 export function ApprovalsNavItem({
   workspaceSlug,
   onClick,
 }: ApprovalsNavItemProps) {
-  const enabled = useFeatureFlag("cerebro_approvals");
+  const enabled = useApprovalExperienceEnabled();
   const workspace = useCurrentWorkspace();
   const { role } = useCurrentMember(workspace?.id ?? "");
   const { pathname } = useNavigation();

@@ -23,7 +23,7 @@ func TestAgentHasCallableTools_UsesPolicyDecisionServiceAllow(t *testing.T) {
 func TestAgentHasCallableTools_MissingPolicyDecisionServiceFailsClosed(t *testing.T) {
 	e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
 	e.registry = NewRegistry(runtimeAccountTestPool)
-	e.accessDecisionObserver = nil
+	e.accessDecisions = nil
 
 	if e.agentHasCallableTools(context.Background(), agentID, runtimeAccountTestWSID, runtimeAccountTestUserID, runtimeAccountTestUserID) {
 		t.Fatal("expected chat-only when the Policy Decision Service is unavailable")

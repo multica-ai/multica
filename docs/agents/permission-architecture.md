@@ -1,9 +1,11 @@
 # Permission architecture — the real structure & completeness register
 
-> **FIR-3402 canonical access source.** Versioned roles plus role bindings are
-> the only durable way to grant agent access. `toolpolicy.Store` expands active
-> bindings into the same Policy Decision Service input used by authored policy
-> rows; expired bindings are filtered with the database clock on every resolve.
+> **FIR-3402 canonical access source.** A direct layered policy decision and a
+> reusable versioned Role are two authoring forms for the same permission
+> contract. `toolpolicy.Store` expands active Role bindings into the same Policy
+> Decision Service input used by direct policy rows; expired or archived
+> bindings are filtered with the database clock on every resolve, and the
+> effective explanation records the deciding Role name and version.
 > A per-run Task Mandate then freezes the allowed-tool envelope and is checked
 > again on every managed or local-runtime call. Migration 9147 deletes the two
 > superseded direct stores; automated contract coverage prevents either route
@@ -24,7 +26,7 @@
 > audit read model exposes and sorts by the same explicit severity concept.
 
 **Read this together with [`permission-system.md`](./permission-system.md).** That doc is the
-*behavioral* map ("what is enforced live today vs. off by default", row by row). **This**
+*behavioral* map ("what is enforced live and which safety intersections apply", row by row). **This**
 doc is the *structural* map: what permission **models** actually exist, which gates are
 authored through the 5 permission interfaces vs. which live **only in code**, and the
 decision to remove Persona. If you change the permission model itself (add an interface,
@@ -46,13 +48,14 @@ Line numbers drift; this doc cites files + functions. Grep the function name if 
 
 ## 1. The mistake this doc exists to prevent
 
-It is tempting to believe Multica has **one** permission model — the unified tool-policy
-chain (Allow / Ask / Deny / Inherit across **Workspace › Runtime › Agent › Group › User**),
-which is what the settings UI shows. **That belief is false.** The tool-policy chain (the
-"5 interfaces") is a thin, deliberate slice. The **majority** of real access control lives
-in code, spread across **four parallel models** that the 5 interfaces neither show nor
-control. Section 4 is the complete register of those code-only gates. If you are building
-"one place to see and control all permissions", that register is your backlog.
+Multica has **one authored permission model**: the unified tool-policy chain
+(Allow / Ask / Deny / Inherit across **Workspace › Runtime › Agent › Group › User**),
+with Roles expanded into the Agent layer. It is intersected by code-owned safety
+ceilings for credentials, sandboxing, repository access, ownership and other
+non-delegable invariants. Those ceilings are not alternative places to author
+the same permission; they can only preserve or tighten the canonical verdict.
+Section 4 is the register of those deliberate intersections and of remaining
+legacy visibility/access models.
 
 ---
 
@@ -68,6 +71,15 @@ Workspace/runtime/agent/group/user choices are authored only in
   (`server/internal/cerebro/toolpolicy/chain.go:62-70`). These are the 5 settable surfaces
   the UI renders (`packages/cerebro-tool-policy` `ToolPolicyTable`, `view` prop →
   `VIEW_EDIT_LAYER`).
+- **Roles are reusable authoring packages, not a sixth layer.** Active Role
+  rules are expanded into the Agent layer for capability-wide and exact-resource
+  decisions alike (repositories, credentials and Connection tools/endpoints).
+  Direct Agent rules remain a tighten-only ceiling over a Role, and the
+  explanation carries Role name + version provenance.
+- **Task Mandate is a run snapshot, not a second policy store.** It freezes the
+  exact allowed-tool envelope when a task is claimed and is checked again before
+  every managed or local-runtime call. The task transcript and
+  `multica permissions task <id>` expose that historical snapshot.
 - **Resolver:** `toolpolicy.Resolve` (pure fold, `chain.go:153`) / `Store.Resolve`
   (DB, `store.go:95`). Folds base→ceiling, most-restrictive-wins; `Inherit`/absent =
   pass-through; **Base default = Allow** (`chain.go:155-157`).
@@ -148,11 +160,15 @@ Workspace/runtime/agent/group/user choices are authored only in
   into `RequestContext.ArgValues`, so an `arg_allowlist` WHEN condition on the capability row
   pins `Manage group permissions` to specific group(s). Workspace/Runtime/System-layer writes
   (on a non-credential key) stay admin-only.
-- **CLI surface (FIR-1609):** `multica permissions explain|set|clear`
+- **CLI surface (FIR-1609/FIR-3388):** `multica permissions explain|set|clear`,
+  `multica permissions roles list|show|create|update|archive|assign|unassign`,
+  and `multica permissions task <id>`
   (`server/cmd/multica/cerebro_permissions.go`) wraps the read model + write surface above —
   `explain` (GET) prints per-tool `Effective` + `DecidedBy`/`CappedBy`/reason + group blame to
   answer "why is this agent+member blocked"; `set`/`clear` (PUT/DELETE) author/remove one
-  Allow/Ask/Deny rule at one layer, optional WHEN/CEL condition. Same admin-only server gate.
+  Allow/Ask/Deny rule at one layer, optional WHEN/CEL condition; `roles` manages reusable
+  versioned packages and bindings; `task` prints the immutable run snapshot. The server
+  keeps the same ownership/admin gates as the matching UI operations.
 
 **What actually routes through these interfaces today (Class A — the whole list):**
 
@@ -167,7 +183,7 @@ Workspace/runtime/agent/group/user choices are authored only in
 | `create_issue` platform action | `platformaction/gate.go`; REST hook `handler/issue.go`; workspace MCP hook `handler/workspace_mcp_cerebro.go`; Gateway hook `runtime/approval_gate.go` | live, always-on for agents |
 | connection per-tool Deny/Ask | `table_connection.go:305` `ConnectionToolEffective` | live |
 | mention `trigger_other_agent` (layered over a code baseline) | `mentiongate/gate.go:92` | live |
-| general gateway tool calls (Policy Decision Service via `accessdecision.Observer`) | `runtime/access_decision_shadow.go` + `approval_gate.go` | **live and fail-closed**; no server rollout switch |
+| general gateway tool calls (Policy Decision Service via `accessdecision.Service`) | `runtime/access_decision.go` + `approval_gate.go` | **live and fail-closed**; no server rollout switch |
 | local-CLI tool calls (Claude/Codex/Cursor/Gemini, via `ResolveGeneral`) | `daemon_tool_policy_cerebro.go:68` | **always enforced**; provider adapters fail closed, and local CLI providers without an adapter are rejected before spawn |
 
 Both **general** gates resolve through `Store.ResolveGeneral`, so when `cerebro_member_override`
@@ -191,20 +207,18 @@ buried code gates become settable instead of invisible**. Each entry carries: `K
 it is not a single route). A capability MUST have at least one of `Ops` or `Evidence` — that
 is the traceability tripwire.
 
-**This catalog is the canonical scope of platform actions.** It is **62 capabilities** in 17
-categories (count `catalog` directly in `platformcatalog/catalog.go` — the table below lists a
-representative subset, not every key). It is surfaced in the tool-policy table **only when the `cerebro_platform_capabilities`
-feature flag is on (default OFF)** and the server gate `toolpolicy.PlatformCapabilitiesEnabled`
-passes — so today it is an **inventory, not an enforcement point**. Wiring it on is part of FIR-1496.
+**This catalog is the canonical scope of platform actions.** Count `catalog` directly in
+`platformcatalog/catalog.go`; the table below lists a representative subset, not every key.
+The Settings API always surfaces the complete catalog when Unified tool permissions is active.
+Engine-owned entries run through the canonical policy gate. Entries governed elsewhere are
+read-only and must name their concrete `ExternalSecurityOwner`.
 
-**Light agent-start surface (FIR-3091 slice 4).** The four "start someone else's agent"
+**Focused agent-start surface (FIR-3091 slice 4).** The four "start someone else's agent"
 capabilities — `trigger_other_agent`, `rerun_issue`, `schedule_agent_wakeup`, `trigger_autopilot`
-(marked `Surfaced` in the catalog, see `platformcatalog.SurfacedKeys`) — also surface on their own,
-behind the lighter `cerebro_agent_trigger_permissions` flag (gate `toolpolicy.AgentStartCapabilitiesEnabled`,
-`TableQuery.IncludeAgentStart`), **without** opening the rest of the catalog. This makes that family
-visible/settable in Permissions next to the friendly Agent-start tab. Enforcement is unchanged: only
-`trigger_other_agent` is enforced through the tool-policy chain (`mentiongate`, FIR-2409); the other
-three surface for visibility and are not yet an enforcement point.
+(marked `Surfaced` in the catalog, see `platformcatalog.SurfacedKeys`) can also appear in focused
+Agent-start guidance behind `cerebro_agent_trigger_permissions`. That flag controls presentation
+only; all four rows remain visible in the canonical Permissions table. `trigger_other_agent` is
+engine-owned; the other entries name the external access gate that owns their enforcement.
 
 | Category | Capabilities (`tool_key`) |
 |---|---|
@@ -257,7 +271,7 @@ Eval catalog mutations (`POST`/`PUT`/`DELETE /api/cerebro/evals*`) belong to `ma
 | **M1** | **HTTP role / membership / ownership middleware** | hardcoded Go string compares + membership rows | nowhere (code) | **No** |
 | **M2** | **Capability register + tool-policy chain** (section 2) | `cerebro_capability` inventory/evidence + `cerebro_tool_policy` decisions | Settings → Permissions | **Yes — canonical runtime-tool path** |
 | **M3** | **Group capabilities** | `cerebro_group_capability` / `_runtime_access` / `_agent_access` | Groups UI + `multica group capability` CLI | partly (group layer only) |
-| **M4** | **Per-feature stores + the grant resolver** | one bespoke table/config per feature (see 4.3) | a different screen/dialog per feature, or nothing | **No** |
+| **M4** | **Per-feature floors + stores** | one bespoke table/config per feature (see 4.3) | a different screen/dialog per feature, or nothing | **No** |
 
 M1 is by far the largest. M4 is the most scattered. M2 is authoritative for
 runtime-tool inventory and policy; M3/M4 remain separate only for the explicitly
@@ -303,11 +317,11 @@ Middleware defs in `server/internal/middleware/`; helpers `roleAllowed` (`handle
 **different store** from `cerebro_tool_policy` and only partly overlap the 5 interfaces —
 there is no workspace/runtime/agent/user authoring of these capabilities, only group.)*
 
-### 4.3 M4 — Per-feature stores + the grant resolver (code-only, scattered)
+### 4.3 M4 — Per-feature floors + stores (code-only, scattered)
 
 | Gate | Where | Protects | Default | Backed by |
 |---|---|---|---|---|
-| **Credentials** `enforce` | `credentials/service.go:95`; chain `cerebro_credentials_policy.go:248` | attach/read/reveal/rotate/revoke a secret | **deny-by-default for agents** | the **grant resolver** (`permissions/resolver.go`, now a deny-by-default floor — `cerebro_workspace_grant` dropped, FIR-1512) + owner check + tool-policy chain |
+| **Credentials** `enforce` | `credentials/service.go:95`; chain `cerebro_credentials_policy.go` | attach/read/reveal/rotate/revoke a secret | **deny-by-default for agents** | owner check + direct Deny floor + canonical tool-policy chain; explicit Allow grants remain flag-gated |
 | **web_fetch host policy** | `webfetchpolicy/policy.go:73,156`; gate `firtal_gateway_tools_extended.go:830` | which hosts `web_fetch` reaches | allow-list `{firtal.com, docs.anthropic.com}` | `cerebro_web_fetch_policy` table |
 | **firtal_registry scope** | `runtime/firtal_gateway_tools_extended.go` + `toolpolicy.chainGateDataSource` | data-source/app/write scope | **deny-by-default** for resource rows; write is never implied by read | canonical `cerebro_tool_policy` resource rows plus server-owned Registry connection configuration |
 | **agentvault** | `agentvault/store.go` `ListForAgent`/`SetAccess`, reconciled via `mirror.go` | which secret boxes the agent token is scoped to | empty → no brokering | per-agent `Access[]` list; flag `cerebro_agent_vault` (off) |
@@ -322,7 +336,7 @@ there is no workspace/runtime/agent/user authoring of these capabilities, only g
 | **daemon repo allowlist** | `daemon/daemon.go:885` `workspaceRepoAllowed` | repo URL in the daemon's in-memory allowlist | not present → false | in-memory list |
 | **autopilot webhook scope** | `handler/autopilot_webhook.go:663` | autopilot webhook event filter | missing → **fail closed** | trigger config |
 | **wakeup self-limits** | `wakeup/service.go:465` | max wakeups/issue + min interval | limit-based (anti-flood, not access) | workspace settings |
-| **the capability engine** (grant resolver + permgate, FIR-2193) — **documented in §5.2** | `permissions/resolver.go` `Can` + `permgate/permgate.go` | credentials + repo grants + the approval inbox | **deny-by-default** (resolves against an empty grant set → Deny) | no table — `cerebro_workspace_grant` dropped (FIR-1512 Step A, see §5.2) |
+| **approval seam** (`permgate`, FIR-2193) — **documented in §5.2** | `permissions/decision.go` + `permgate/permgate.go` | materialises canonical Ask decisions in the approval inbox | no independent access decision; callers supply the canonical verdict | approval rows + the caller's canonical policy store |
 
 ### 4.4 Not access control — do NOT fold these into the model
 
@@ -332,11 +346,11 @@ codexlimit, `permguard` (test-time inventory), Cloudflare Access (authentication
 
 ---
 
-## 5. The capability engine (grant resolver + permgate) — a usable function, and Persona's status
+## 5. The approval seam and retired grant resolver
 
-The word "grant" covers two different things here. Keep them separate: the **external Persona
-service** (gone) and the **capability engine** (a live, usable function — documented below, NOT
-cruft to delete ad-hoc).
+The word "grant" historically covered the external Persona service, an empty workspace-grant
+resolver, and approval-inbox decisions. Persona and the constant resolver are gone; `permgate`
+remains as the shared mechanism that materialises a canonical Ask verdict.
 
 ### 5.1 Persona — the external service + SDK — REMOVED ✅ (FIR-1497 / FIR-1609 Phase 8 / FIR-1777)
 Persona-the-service was gated entirely behind `MULTICA_PERSONA_URL`/`_TOKEN`, **unset in prod**
@@ -359,78 +373,28 @@ Still inert and tracked for a later sweep: the `agent.persona_sandbox` / `agent_
 DB columns + the frontend persona-sandbox tab. The old persona Go package was renamed to `spawn`,
 reduced to `server/internal/cerebro/spawn/spawn.go` (`ResolveSpawnSubject`, used by the daemon — keep).
 
-### 5.2 The capability engine — deny-by-default floor + approval seam (engine-flip Step A done)
-`permissions.Resolver` (`permissions/resolver.go`, FIR-2193) + `permgate`
-(`permgate/permgate.go`) are the **deny-by-default security floor + approval engine**. As of the
-FIR-1512 engine-flip Step A the resolver no longer reads any grant table: every grant-authoring
-surface was removed (Spor 1 #1688, #1768), the `cerebro_workspace_grant` table is dropped
-(migration `9102_cerebro_drop_workspace_grant`), and `Can` resolves against an **empty grant
-set**. Use it as follows:
+### 5.2 Canonical decisions + approval seam (FIR-3388)
 
-- **What it answers:** `Can(actor, capability, resource) → Deny`, always — **deny-by-default**
-  with no grant able to exist (`capability == ""` returns the capability-required deny). This is
-  byte-for-byte the verdict the prior algorithm produced against the already-empty table; only
-  the synchronous table read (and the table) are gone. The grant-evaluation machinery
-  (subject layering, `capabilityMatches`, `resourceMatches`, time-windows) was removed with it —
-  it only ever processed grant rows that can no longer exist.
-- **It is the FLOOR, not the allow source.** Each call site supplies its own allow authority on
-  top of this deny floor: credentials add an upstream **owner-allow** check (`ChainPolicyChecker(owner, multica)`)
-  and the tighten-only tool-policy chain; the approval gate uses the tool-policy chain via
-  `EvaluateDecision`. Removing the floor itself (engine-flip option B) is a separate, larger
-  decision and is intentionally NOT part of Step A.
-- **permgate** is the enforcement seam that turns a `NeedsApproval` verdict into a real entry in
-  the approval inbox and blocks the action until a human approves / rejects / it expires
-  (cross-process, by polling the approval row). Consulted by: the credentials policy, the daemon
-  tool-policy gate, repo-approval, the runtime approval gate, and the firtal-gateway executor.
-- **Where it is wired live today:**
-  - **Credentials** — the deny-by-default secret gate (`cerebro_credentials_policy.go`): owner
-    passes; an agent needs a grant. The unified tool-policy chain is layered on top as (a) a
-    tighten-only **cap** and (b) — flag-gated `cerebro_credential_chain_grant` (default OFF) —
-    an **explicit-Allow grant source** (FIR-1609 Phase 7 keystone, `chainCredentialSignal` →
-    `foldCredentialVerdict`). The keystone is the safe step that lets the chain eventually own
-    credential grants: it grants only from an authored Allow row (`Effective.DecidedBy != ""`),
-    never a no-row Base=Allow default, so it can never widen who reveals a secret by default.
-  - **Repo grants** — `repo.checkout/read/push`, but only when the `repo_grants_enabled`
-    workspace setting is ON. Default OFF ⇒ repo checkout is `Base=Allow` via the tool-policy
-    chain (`CheckDaemonRepoCapability`), **not** this engine.
-- **Current data state (Firtal):** the `cerebro_workspace_grant` table is **dropped** (FIR-1512
-  Step A). It previously held only inert `workspace_default` rows and **zero** credential/repo
-  grants. Secrets live in **Infisical + agent vault**, and credentials are **owner-only** in
-  practice. The engine grants nothing beyond owner access; the resolver remains as the
-  deny-by-default floor the call sites layer their allow authority on (see §5.3).
+- `permissions/decision.go` defines only the shared decision contract
+  (`Allow`, `Deny`, `NeedsApproval`). It does not query a second permission store.
+- `permgate` receives a decision already produced by the canonical tool-policy path. It turns
+  `NeedsApproval` into an inbox row and waits for approve, reject, or expiry. Allow and Deny pass
+  through without another access calculation.
+- Credentials preserve the former security posture with a direct Deny floor. Workspace
+  owner/admin access is checked first; an authored tool-policy Allow may grant access only when
+  `cerebro_credential_chain_grant` is enabled, while Ask/Deny always tighten.
+- The old resolver returned Deny for every request after `cerebro_workspace_grant` was dropped.
+  FIR-3388 removed it, its dead SQL query, and the duplicate
+  `permission_policy_evaluated` activity rows. This does not widen access.
+- Repo, Registry, connection, gateway, and daemon gates resolve through their canonical
+  tool-policy paths. None calls a fallback grant resolver.
 
-### 5.3 Consolidation path — via the engine-flip, never a blind drop
+### 5.3 Completed grant-store retirement
 
-**FIR-1512 ("Engine-flip — pensionér grants") is closed** (2026-07-13), **superseded by
-FIR-3176**, which now owns the remaining consolidation work below plus the broader "every
-gate on one engine" sweep. The steps below marked **done** were completed under FIR-1512
-before it closed and remain accurate; any step still open is now tracked under FIR-3176, not
-FIR-1512.
-
-The end state moves credential (and other) grant authority off `cerebro_workspace_grant` and
-onto the unified tool-policy chain, then retires the table (+ FIR-1739) — a deliberate change,
-**not** a one-shot delete. Because the resolver + permgate are wired into the live credential /
-approval / repo paths, an unsequenced `DROP` breaks those gates. Safe sequence:
-1. Credential keystone on the chain — **done** (flag-gated, §5.2).
-2. Migrate any real grants → tool-policy Allow rows (fail-closed if not 1:1), then flip the
-   credential flag on and retire the deny-by-default floor.
-3. Repoint repo + workspace-copy off the table; remove the operator grants surfaces.
-   - Repo capability — **done** (FIR-2505): `CheckDaemonRepoCapability` resolves through the
-     tool-policy chain, not the grant table.
-   - Operator grants UI (web/desktop) — **done** (FIR-2284): no remaining frontend caller.
-   - workspace-copy (`workspacecopy/copy_roles.go`) — **done** (FIR-1777): the foundation +
-     relink passes no longer copy `cerebro_workspace_grant`; roles/groups/capabilities still copy.
-   - `cerebro/grants` server handler + `router.go` `/grants` routes + the `cerebro_grants` /
-     `cerebro_persona_permissions` settings flags — **done** (FIR-1777): the operator grant
-     control plane is fully removed (handler package deleted, routes unmounted, `manage_grants`
-     dropped from the platform catalog + permguard inventory).
-   - Reader decoupling — **done** (FIR-1512 Step A): the credentials resolver and permgate no
-     longer read the table; `Can` resolves against an empty grant set (deny-by-default).
-4. Drop `cerebro_workspace_grant` (+ `_audit`) and reduce the resolver — **Step A built**
-   (migration `9102_cerebro_drop_workspace_grant`, grant-evaluation machinery removed,
-   `approval_required` / `time_window_*` / `classification_ceiling` gone with the table since
-   they carried no live enforcement). The migration applies to **staging** with `main`; the
-   **prod DROP is irreversible and gated on explicit approval** — it does not auto-promote.
+FIR-1512 removed the operator grant surfaces and dropped `cerebro_workspace_grant`; FIR-3388
+completed the code cleanup by removing the constant resolver and generated query. The remaining
+credential floor is deliberate, local to the credential check, and covered by behaviour tests.
+Do not recreate a general grant store or add a second decision path beside `cerebro_tool_policy`.
 
 ### 5.4 Credentials are ONE permission type — and the parallel store NOT to wire in
 
@@ -487,13 +451,12 @@ The end state we are building toward (FIR-1496):
    gets a row in one of the 5 interfaces. Gates that must stay code-owned (registry exclusion,
    last-owner guard, signup) are documented as such so "code-only" reads as a deliberate choice,
    not a missing feature.
-3. **Credentials onto the chain** (Base=Deny), retiring the grant resolver for credentials. The
+3. **Credentials onto the chain** (direct Deny floor), with the grant resolver retired. The
    separate `cerebro_credential_policy` authoring store (FIR-1479) has folded onto the chain
    credential rows and is now retired (§5.4) — it was never wired into `Check` as a parallel
    enforcement path.
-4. **Persona service removed** (§5.1, done); the **capability engine** (§5.2) is a documented,
-   usable function that consolidates onto the chain via the engine-flip (§5.3, tracked in
-   FIR-3176 — FIR-1512 closed 2026-07-13 as superseded) — never an ad-hoc drop.
+4. **Persona service and the constant grant resolver removed** (§5.1-5.3, done);
+   `permgate` remains the shared Ask materialisation seam, not a parallel permission engine.
 5. **Visible enforcement state.** The settings that affect policy execution (including
    `cerebro_approval_gate`) must be shown next
    to the policy tables — an admin setting Deny must see whether enforcement is on.

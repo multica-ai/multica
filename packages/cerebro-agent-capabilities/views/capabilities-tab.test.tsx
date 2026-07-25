@@ -142,8 +142,15 @@ describe("CerebroCapabilitiesTab", () => {
 
     renderTab();
 
+    expect(
+      await screen.findByRole("heading", { name: "What can this agent do?" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("General access")).toBeInTheDocument();
+    expect(screen.getByText("One task")).toBeInTheDocument();
+    expect(screen.getByText("Change access")).toBeInTheDocument();
+
     // Every section is present.
-    expect(await screen.findByText("Skills")).toBeInTheDocument();
+    expect(screen.getByText("Skills")).toBeInTheDocument();
     expect(screen.getByText("Tools")).toBeInTheDocument();
     expect(screen.getByText("Repos")).toBeInTheDocument();
     expect(screen.getByText("Connections")).toBeInTheDocument();
@@ -301,6 +308,8 @@ describe("CerebroCapabilitiesTab", () => {
         runtime_type: "firtal_gateway",
         status: "known",
         verified: 1,
+        discovered: 0,
+        declared: 1,
         unproven: 1,
       },
     });
@@ -315,6 +324,48 @@ describe("CerebroCapabilitiesTab", () => {
     // Both tools still render as pills regardless of proof.
     expect(screen.getByText("add_comment")).toBeInTheDocument();
     expect(screen.getByText("gogcli_sheets_write")).toBeInTheDocument();
+  });
+
+  it("distinguishes live discovery from configuration-only declarations", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      agent_id: "agent-1",
+      name: "Sofie",
+      model: "gpt-5",
+      tools: [
+        {
+          key: "tools:bash",
+          title: "bash",
+          permission: "allow",
+          allowed: true,
+          available: true,
+          enforced: true,
+          callable: true,
+          verified: false,
+          availability: {
+            level: "discovered",
+            proven: false,
+            reason: "found in the agent runtime's current tool inventory",
+          },
+        },
+      ],
+      availability: {
+        runtime_type: "local",
+        status: "known",
+        verified: 0,
+        discovered: 1,
+        declared: 0,
+        unproven: 1,
+      },
+    });
+
+    renderTab();
+
+    expect(await screen.findByText(/1 discovered/i)).toBeInTheDocument();
+    expect(screen.queryByText(/1 only declared/i)).not.toBeInTheDocument();
+    expect(screen.getByText("bash")).toBeInTheDocument();
+    expect(
+      screen.getByTitle(/available: yes.*callable: yes/i),
+    ).toBeInTheDocument();
   });
 
   it("shows availability as unknown rather than implying nothing works (FIR-3398)", async () => {

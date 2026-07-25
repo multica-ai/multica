@@ -1460,7 +1460,7 @@ describe("silent-failure feedback (FIR-2706 follow-up)", () => {
       expect(msg).toContain('"Allow" was saved on the Agent layer');
       expect(msg).toContain('the decision stays "Deny"');
       expect(msg).toContain("User blocks it");
-      expect(msg).toContain("ceiling");
+      expect(msg).toContain("member's own permissions");
     });
 
     it("names the blocking group and its owner", () => {

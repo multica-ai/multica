@@ -7,8 +7,11 @@ package roles
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -22,7 +25,7 @@ import (
 const (
 	EventRoleCreated    = "role:created"
 	EventRoleUpdated    = "role:updated"
-	EventRoleDeleted    = "role:deleted"
+	EventRoleArchived   = "role:archived"
 	EventRoleAssigned   = "role:assigned"
 	EventRoleUnassigned = "role:unassigned"
 )
@@ -36,6 +39,8 @@ const (
 var (
 	ErrRoleNotFound       = errors.New("role not found")
 	ErrInvalidRoleName    = errors.New("role name is required")
+	ErrInvalidPermissions = errors.New("role permissions are invalid")
+	ErrRoleArchived       = errors.New("role is archived")
 	ErrInvalidSubjectType = errors.New("subject_type must be member or agent")
 	ErrSubjectNotFound    = errors.New("subject not found in workspace")
 	ErrAssignmentNotFound = errors.New("role assignment not found")
@@ -51,14 +56,17 @@ func NewService(cerebro *cerebrodb.Queries, upstream *db.Queries, bus *events.Bu
 	return &Service{Cerebro: cerebro, Upstream: upstream, Bus: bus}
 }
 
-func (s *Service) List(ctx context.Context, workspaceID pgtype.UUID) ([]cerebrodb.CerebroRole, error) {
-	rows, err := s.Cerebro.ListCerebroRoles(ctx, workspaceID)
+func (s *Service) List(ctx context.Context, workspaceID pgtype.UUID, includeArchived bool) ([]cerebrodb.CerebroRole, error) {
+	rows, err := s.Cerebro.ListCerebroRoles(ctx, cerebrodb.ListCerebroRolesParams{
+		WorkspaceID:     workspaceID,
+		IncludeArchived: includeArchived,
+	})
 	if err != nil {
 		return nil, err
 	}
 	out := make([]cerebrodb.CerebroRole, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, roleFromListRow(row))
+		out = append(out, row)
 	}
 	return out, nil
 }
@@ -74,31 +82,39 @@ func (s *Service) Get(ctx context.Context, workspaceID, roleID pgtype.UUID) (cer
 	if role.WorkspaceID != workspaceID {
 		return cerebrodb.CerebroRole{}, ErrRoleNotFound
 	}
-	return roleFromGetRow(role), nil
+	return role, nil
 }
 
-func (s *Service) Create(ctx context.Context, workspaceID, actorID pgtype.UUID, name string, description *string) (cerebrodb.CerebroRole, error) {
+func (s *Service) Create(ctx context.Context, workspaceID, actorID pgtype.UUID, name string, description *string, permissions RolePermissions) (cerebrodb.CerebroRole, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
 		return cerebrodb.CerebroRole{}, ErrInvalidRoleName
+	}
+	raw, err := marshalRolePermissions(permissions)
+	if err != nil {
+		return cerebrodb.CerebroRole{}, err
 	}
 	role, err := s.Cerebro.CreateCerebroRole(ctx, cerebrodb.CreateCerebroRoleParams{
 		WorkspaceID: workspaceID,
 		Name:        name,
 		Description: strOrEmpty(description),
 		CreatedBy:   actorID,
+		Permissions: raw,
 	})
 	if err != nil {
 		return cerebrodb.CerebroRole{}, err
 	}
-	model := roleFromCreateRow(role)
-	s.publish(EventRoleCreated, workspaceID, actorID, map[string]any{"role": roleResponseFromModel(model)})
-	return model, nil
+	s.publish(EventRoleCreated, workspaceID, actorID, map[string]any{"role": roleResponseFromModel(role)})
+	return role, nil
 }
 
-func (s *Service) Update(ctx context.Context, workspaceID, actorID, roleID pgtype.UUID, name, description *string) (cerebrodb.CerebroRole, error) {
-	if _, err := s.Get(ctx, workspaceID, roleID); err != nil {
+func (s *Service) Update(ctx context.Context, workspaceID, actorID, roleID pgtype.UUID, name, description *string, permissions *RolePermissions) (cerebrodb.CerebroRole, error) {
+	current, err := s.Get(ctx, workspaceID, roleID)
+	if err != nil {
 		return cerebrodb.CerebroRole{}, err
+	}
+	if current.ArchivedAt.Valid {
+		return cerebrodb.CerebroRole{}, ErrRoleArchived
 	}
 
 	var nameArg pgtype.Text
@@ -110,34 +126,53 @@ func (s *Service) Update(ctx context.Context, workspaceID, actorID, roleID pgtyp
 		nameArg = pgtype.Text{String: trimmed, Valid: true}
 	}
 
+	raw := json.RawMessage(`{}`)
+	if permissions != nil {
+		raw, err = marshalRolePermissions(*permissions)
+		if err != nil {
+			return cerebrodb.CerebroRole{}, err
+		}
+	}
 	role, err := s.Cerebro.UpdateCerebroRole(ctx, cerebrodb.UpdateCerebroRoleParams{
-		ID:          roleID,
-		Name:        nameArg,
-		Description: textFromPtr(description),
+		ID:                 roleID,
+		Name:               nameArg,
+		Description:        textFromPtr(description),
+		ReplacePermissions: permissions != nil,
+		Permissions:        raw,
 	})
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return cerebrodb.CerebroRole{}, ErrRoleArchived
+		}
 		return cerebrodb.CerebroRole{}, err
 	}
-	model := roleFromUpdateRow(role)
-	s.publish(EventRoleUpdated, workspaceID, actorID, map[string]any{"role": roleResponseFromModel(model)})
-	return model, nil
+	s.publish(EventRoleUpdated, workspaceID, actorID, map[string]any{"role": roleResponseFromModel(role)})
+	return role, nil
 }
 
-func (s *Service) Delete(ctx context.Context, workspaceID, actorID, roleID pgtype.UUID) (cerebrodb.CerebroRole, error) {
+func (s *Service) Archive(ctx context.Context, workspaceID, actorID, roleID pgtype.UUID) (cerebrodb.CerebroRole, error) {
 	role, err := s.Get(ctx, workspaceID, roleID)
 	if err != nil {
 		return cerebrodb.CerebroRole{}, err
 	}
-	if err := s.Cerebro.DeleteCerebroRole(ctx, roleID); err != nil {
+	if role.ArchivedAt.Valid {
+		return role, nil
+	}
+	role, err = s.Cerebro.ArchiveCerebroRole(ctx, roleID)
+	if err != nil {
 		return cerebrodb.CerebroRole{}, err
 	}
-	s.publish(EventRoleDeleted, workspaceID, actorID, map[string]any{"role": roleResponseFromModel(role)})
+	s.publish(EventRoleArchived, workspaceID, actorID, map[string]any{"role": roleResponseFromModel(role)})
 	return role, nil
 }
 
-func (s *Service) Assign(ctx context.Context, workspaceID, actorID, roleID, subjectID pgtype.UUID, subjectType string) (cerebrodb.AssignCerebroRoleRow, error) {
-	if _, err := s.Get(ctx, workspaceID, roleID); err != nil {
+func (s *Service) Assign(ctx context.Context, workspaceID, actorID, roleID, subjectID pgtype.UUID, subjectType string, expiresAt *time.Time) (cerebrodb.AssignCerebroRoleRow, error) {
+	role, err := s.Get(ctx, workspaceID, roleID)
+	if err != nil {
 		return cerebrodb.AssignCerebroRoleRow{}, err
+	}
+	if role.ArchivedAt.Valid {
+		return cerebrodb.AssignCerebroRoleRow{}, ErrRoleArchived
 	}
 	subjectType = strings.ToLower(strings.TrimSpace(subjectType))
 	if subjectType != SubjectMember && subjectType != SubjectAgent {
@@ -146,12 +181,20 @@ func (s *Service) Assign(ctx context.Context, workspaceID, actorID, roleID, subj
 	if err := s.requireSubjectExists(ctx, workspaceID, subjectType, subjectID); err != nil {
 		return cerebrodb.AssignCerebroRoleRow{}, err
 	}
+	var expiry pgtype.Timestamptz
+	if expiresAt != nil {
+		if !expiresAt.After(time.Now()) {
+			return cerebrodb.AssignCerebroRoleRow{}, fmt.Errorf("%w: expires_at must be in the future", ErrInvalidPermissions)
+		}
+		expiry = pgtype.Timestamptz{Time: *expiresAt, Valid: true}
+	}
 
 	assignment, err := s.Cerebro.AssignCerebroRole(ctx, cerebrodb.AssignCerebroRoleParams{
 		RoleID:      roleID,
 		SubjectType: subjectType,
 		SubjectID:   subjectID,
 		AddedBy:     actorID,
+		ExpiresAt:   expiry,
 	})
 	if err != nil {
 		return cerebrodb.AssignCerebroRoleRow{}, err
@@ -185,25 +228,9 @@ func (s *Service) Unassign(ctx context.Context, workspaceID, actorID, roleID, su
 	}
 	s.publish(EventRoleUnassigned, workspaceID, actorID, map[string]any{
 		"role_id":    util.UUIDToString(roleID),
-		"assignment": roleAssignmentResponseFromModel(assignmentFromUnassignRow(assignment)),
+		"assignment": roleAssignmentResponseFromModel(assignment),
 	})
-	return assignmentFromUnassignRow(assignment), nil
-}
-
-func roleFromListRow(r cerebrodb.ListCerebroRolesRow) cerebrodb.CerebroRole {
-	return cerebrodb.CerebroRole{ID: r.ID, WorkspaceID: r.WorkspaceID, Name: r.Name, Description: r.Description, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
-}
-func roleFromGetRow(r cerebrodb.GetCerebroRoleRow) cerebrodb.CerebroRole {
-	return cerebrodb.CerebroRole{ID: r.ID, WorkspaceID: r.WorkspaceID, Name: r.Name, Description: r.Description, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
-}
-func roleFromCreateRow(r cerebrodb.CreateCerebroRoleRow) cerebrodb.CerebroRole {
-	return cerebrodb.CerebroRole{ID: r.ID, WorkspaceID: r.WorkspaceID, Name: r.Name, Description: r.Description, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
-}
-func roleFromUpdateRow(r cerebrodb.UpdateCerebroRoleRow) cerebrodb.CerebroRole {
-	return cerebrodb.CerebroRole{ID: r.ID, WorkspaceID: r.WorkspaceID, Name: r.Name, Description: r.Description, CreatedBy: r.CreatedBy, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt}
-}
-func assignmentFromUnassignRow(r cerebrodb.UnassignCerebroRoleRow) cerebrodb.CerebroRoleAssignment {
-	return cerebrodb.CerebroRoleAssignment{RoleID: r.RoleID, SubjectType: r.SubjectType, SubjectID: r.SubjectID, AddedBy: r.AddedBy, AddedAt: r.AddedAt}
+	return assignment, nil
 }
 
 func (s *Service) ListAssignments(ctx context.Context, workspaceID, roleID pgtype.UUID) ([]cerebrodb.ListCerebroRoleAssignmentsWithNamesRow, error) {
@@ -262,4 +289,32 @@ func strOrEmpty(s *string) string {
 		return ""
 	}
 	return *s
+}
+
+func marshalRolePermissions(permissions RolePermissions) ([]byte, error) {
+	if permissions == nil {
+		permissions = RolePermissions{}
+	}
+	for key, rules := range permissions {
+		if strings.TrimSpace(key) == "" || len(rules) == 0 {
+			return nil, fmt.Errorf("%w: every capability needs at least one rule", ErrInvalidPermissions)
+		}
+		seenPatterns := map[string]bool{}
+		for _, rule := range rules {
+			switch rule.Setting {
+			case "allow", "ask", "deny":
+			default:
+				return nil, fmt.Errorf("%w: %s has unknown setting %q", ErrInvalidPermissions, key, rule.Setting)
+			}
+			if seenPatterns[rule.ResourcePattern] {
+				return nil, fmt.Errorf("%w: %s repeats resource pattern %q", ErrInvalidPermissions, key, rule.ResourcePattern)
+			}
+			seenPatterns[rule.ResourcePattern] = true
+		}
+	}
+	raw, err := json.Marshal(permissions)
+	if err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidPermissions, err)
+	}
+	return raw, nil
 }

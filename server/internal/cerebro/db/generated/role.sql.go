@@ -11,27 +11,54 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const archiveCerebroRole = `-- name: ArchiveCerebroRole :one
+UPDATE cerebro_role
+SET archived_at = COALESCE(archived_at, now()),
+    version = CASE WHEN archived_at IS NULL THEN version + 1 ELSE version END,
+    updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, name, description, created_by, created_at, updated_at,
+          version, permissions, archived_at
+`
+
+func (q *Queries) ArchiveCerebroRole(ctx context.Context, id pgtype.UUID) (CerebroRole, error) {
+	row := q.db.QueryRow(ctx, archiveCerebroRole, id)
+	var i CerebroRole
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Version,
+		&i.Permissions,
+		&i.ArchivedAt,
+	)
+	return i, err
+}
+
 const assignCerebroRole = `-- name: AssignCerebroRole :one
 WITH inserted AS (
-    INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_by)
-    VALUES ($1, $2, $3, $4)
-    ON CONFLICT (role_id, subject_type, subject_id) DO NOTHING
-    RETURNING role_id, subject_type, subject_id, added_by, added_at
+    INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_by, expires_at)
+    VALUES ($1, $2, $3, $4, $5)
+    ON CONFLICT (role_id, subject_type, subject_id) DO UPDATE SET
+        added_by = EXCLUDED.added_by,
+        added_at = now(),
+        expires_at = EXCLUDED.expires_at
+    RETURNING role_id, subject_type, subject_id, added_by, added_at, expires_at
 )
-SELECT role_id, subject_type, subject_id, added_by, added_at FROM inserted
-UNION ALL
-SELECT role_id, subject_type, subject_id, added_by, added_at
-FROM cerebro_role_assignment
-WHERE role_id = $1 AND subject_type = $2 AND subject_id = $3
-  AND NOT EXISTS (SELECT 1 FROM inserted)
-LIMIT 1
+SELECT role_id, subject_type, subject_id, added_by, added_at, expires_at
+FROM inserted
 `
 
 type AssignCerebroRoleParams struct {
-	RoleID      pgtype.UUID `json:"role_id"`
-	SubjectType string      `json:"subject_type"`
-	SubjectID   pgtype.UUID `json:"subject_id"`
-	AddedBy     pgtype.UUID `json:"added_by"`
+	RoleID      pgtype.UUID        `json:"role_id"`
+	SubjectType string             `json:"subject_type"`
+	SubjectID   pgtype.UUID        `json:"subject_id"`
+	AddedBy     pgtype.UUID        `json:"added_by"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 }
 
 type AssignCerebroRoleRow struct {
@@ -40,6 +67,7 @@ type AssignCerebroRoleRow struct {
 	SubjectID   pgtype.UUID        `json:"subject_id"`
 	AddedBy     pgtype.UUID        `json:"added_by"`
 	AddedAt     pgtype.Timestamptz `json:"added_at"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
 }
 
 func (q *Queries) AssignCerebroRole(ctx context.Context, arg AssignCerebroRoleParams) (AssignCerebroRoleRow, error) {
@@ -48,6 +76,7 @@ func (q *Queries) AssignCerebroRole(ctx context.Context, arg AssignCerebroRolePa
 		arg.SubjectType,
 		arg.SubjectID,
 		arg.AddedBy,
+		arg.ExpiresAt,
 	)
 	var i AssignCerebroRoleRow
 	err := row.Scan(
@@ -56,14 +85,16 @@ func (q *Queries) AssignCerebroRole(ctx context.Context, arg AssignCerebroRolePa
 		&i.SubjectID,
 		&i.AddedBy,
 		&i.AddedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
 
 const createCerebroRole = `-- name: CreateCerebroRole :one
-INSERT INTO cerebro_role (workspace_id, name, description, created_by)
-VALUES ($1, $2, $3, $4)
-RETURNING id, workspace_id, name, description, created_by, created_at, updated_at
+INSERT INTO cerebro_role (workspace_id, name, description, created_by, permissions)
+VALUES ($1, $2, $3, $4, $5)
+RETURNING id, workspace_id, name, description, created_by, created_at, updated_at,
+          version, permissions, archived_at
 `
 
 type CreateCerebroRoleParams struct {
@@ -71,26 +102,18 @@ type CreateCerebroRoleParams struct {
 	Name        string      `json:"name"`
 	Description string      `json:"description"`
 	CreatedBy   pgtype.UUID `json:"created_by"`
+	Permissions []byte      `json:"permissions"`
 }
 
-type CreateCerebroRoleRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	CreatedBy   pgtype.UUID        `json:"created_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
-func (q *Queries) CreateCerebroRole(ctx context.Context, arg CreateCerebroRoleParams) (CreateCerebroRoleRow, error) {
+func (q *Queries) CreateCerebroRole(ctx context.Context, arg CreateCerebroRoleParams) (CerebroRole, error) {
 	row := q.db.QueryRow(ctx, createCerebroRole,
 		arg.WorkspaceID,
 		arg.Name,
 		arg.Description,
 		arg.CreatedBy,
+		arg.Permissions,
 	)
-	var i CreateCerebroRoleRow
+	var i CerebroRole
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -99,39 +122,23 @@ func (q *Queries) CreateCerebroRole(ctx context.Context, arg CreateCerebroRolePa
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Version,
+		&i.Permissions,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
 
-const deleteCerebroRole = `-- name: DeleteCerebroRole :exec
-DELETE FROM cerebro_role
-WHERE id = $1
-`
-
-func (q *Queries) DeleteCerebroRole(ctx context.Context, id pgtype.UUID) error {
-	_, err := q.db.Exec(ctx, deleteCerebroRole, id)
-	return err
-}
-
 const getCerebroRole = `-- name: GetCerebroRole :one
-SELECT id, workspace_id, name, description, created_by, created_at, updated_at
+SELECT id, workspace_id, name, description, created_by, created_at, updated_at,
+       version, permissions, archived_at
 FROM cerebro_role
 WHERE id = $1
 `
 
-type GetCerebroRoleRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	CreatedBy   pgtype.UUID        `json:"created_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
-func (q *Queries) GetCerebroRole(ctx context.Context, id pgtype.UUID) (GetCerebroRoleRow, error) {
+func (q *Queries) GetCerebroRole(ctx context.Context, id pgtype.UUID) (CerebroRole, error) {
 	row := q.db.QueryRow(ctx, getCerebroRole, id)
-	var i GetCerebroRoleRow
+	var i CerebroRole
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -140,40 +147,36 @@ func (q *Queries) GetCerebroRole(ctx context.Context, id pgtype.UUID) (GetCerebr
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Version,
+		&i.Permissions,
+		&i.ArchivedAt,
 	)
 	return i, err
 }
 
 const listCerebroRoleAssignments = `-- name: ListCerebroRoleAssignments :many
-SELECT role_id, subject_type, subject_id, added_by, added_at
+SELECT role_id, subject_type, subject_id, added_by, added_at, expires_at
 FROM cerebro_role_assignment
 WHERE role_id = $1
 ORDER BY subject_type, added_at ASC
 `
 
-type ListCerebroRoleAssignmentsRow struct {
-	RoleID      pgtype.UUID        `json:"role_id"`
-	SubjectType string             `json:"subject_type"`
-	SubjectID   pgtype.UUID        `json:"subject_id"`
-	AddedBy     pgtype.UUID        `json:"added_by"`
-	AddedAt     pgtype.Timestamptz `json:"added_at"`
-}
-
-func (q *Queries) ListCerebroRoleAssignments(ctx context.Context, roleID pgtype.UUID) ([]ListCerebroRoleAssignmentsRow, error) {
+func (q *Queries) ListCerebroRoleAssignments(ctx context.Context, roleID pgtype.UUID) ([]CerebroRoleAssignment, error) {
 	rows, err := q.db.Query(ctx, listCerebroRoleAssignments, roleID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListCerebroRoleAssignmentsRow{}
+	items := []CerebroRoleAssignment{}
 	for rows.Next() {
-		var i ListCerebroRoleAssignmentsRow
+		var i CerebroRoleAssignment
 		if err := rows.Scan(
 			&i.RoleID,
 			&i.SubjectType,
 			&i.SubjectID,
 			&i.AddedBy,
 			&i.AddedAt,
+			&i.ExpiresAt,
 		); err != nil {
 			return nil, err
 		}
@@ -188,6 +191,7 @@ func (q *Queries) ListCerebroRoleAssignments(ctx context.Context, roleID pgtype.
 const listCerebroRoleAssignmentsWithNames = `-- name: ListCerebroRoleAssignmentsWithNames :many
 SELECT
     ra.role_id, ra.subject_type, ra.subject_id, ra.added_by, ra.added_at,
+    ra.expires_at,
     COALESCE(
         NULLIF(u.name, ''),
         NULLIF(ag.name, ''),
@@ -208,6 +212,7 @@ type ListCerebroRoleAssignmentsWithNamesRow struct {
 	SubjectID          pgtype.UUID        `json:"subject_id"`
 	AddedBy            pgtype.UUID        `json:"added_by"`
 	AddedAt            pgtype.Timestamptz `json:"added_at"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
 	SubjectDisplayName string             `json:"subject_display_name"`
 }
 
@@ -229,6 +234,7 @@ func (q *Queries) ListCerebroRoleAssignmentsWithNames(ctx context.Context, roleI
 			&i.SubjectID,
 			&i.AddedBy,
 			&i.AddedAt,
+			&i.ExpiresAt,
 			&i.SubjectDisplayName,
 		); err != nil {
 			return nil, err
@@ -246,6 +252,8 @@ SELECT ra.role_id
 FROM cerebro_role_assignment ra
 JOIN cerebro_role r ON r.id = ra.role_id
 WHERE r.workspace_id = $1
+  AND r.archived_at IS NULL
+  AND (ra.expires_at IS NULL OR ra.expires_at > now())
   AND ra.subject_type = $2
   AND ra.subject_id = $3
 ORDER BY ra.role_id
@@ -278,31 +286,28 @@ func (q *Queries) ListCerebroRoleIDsForSubject(ctx context.Context, arg ListCere
 }
 
 const listCerebroRoles = `-- name: ListCerebroRoles :many
-SELECT id, workspace_id, name, description, created_by, created_at, updated_at
+SELECT id, workspace_id, name, description, created_by, created_at, updated_at,
+       version, permissions, archived_at
 FROM cerebro_role
 WHERE workspace_id = $1
+  AND ($2::boolean OR archived_at IS NULL)
 ORDER BY lower(name), created_at ASC
 `
 
-type ListCerebroRolesRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	CreatedBy   pgtype.UUID        `json:"created_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+type ListCerebroRolesParams struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	IncludeArchived bool        `json:"include_archived"`
 }
 
-func (q *Queries) ListCerebroRoles(ctx context.Context, workspaceID pgtype.UUID) ([]ListCerebroRolesRow, error) {
-	rows, err := q.db.Query(ctx, listCerebroRoles, workspaceID)
+func (q *Queries) ListCerebroRoles(ctx context.Context, arg ListCerebroRolesParams) ([]CerebroRole, error) {
+	rows, err := q.db.Query(ctx, listCerebroRoles, arg.WorkspaceID, arg.IncludeArchived)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListCerebroRolesRow{}
+	items := []CerebroRole{}
 	for rows.Next() {
-		var i ListCerebroRolesRow
+		var i CerebroRole
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -311,6 +316,9 @@ func (q *Queries) ListCerebroRoles(ctx context.Context, workspaceID pgtype.UUID)
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.Version,
+			&i.Permissions,
+			&i.ArchivedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -325,7 +333,7 @@ func (q *Queries) ListCerebroRoles(ctx context.Context, workspaceID pgtype.UUID)
 const unassignCerebroRole = `-- name: UnassignCerebroRole :one
 DELETE FROM cerebro_role_assignment
 WHERE role_id = $1 AND subject_type = $2 AND subject_id = $3
-RETURNING role_id, subject_type, subject_id, added_by, added_at
+RETURNING role_id, subject_type, subject_id, added_by, added_at, expires_at
 `
 
 type UnassignCerebroRoleParams struct {
@@ -334,23 +342,16 @@ type UnassignCerebroRoleParams struct {
 	SubjectID   pgtype.UUID `json:"subject_id"`
 }
 
-type UnassignCerebroRoleRow struct {
-	RoleID      pgtype.UUID        `json:"role_id"`
-	SubjectType string             `json:"subject_type"`
-	SubjectID   pgtype.UUID        `json:"subject_id"`
-	AddedBy     pgtype.UUID        `json:"added_by"`
-	AddedAt     pgtype.Timestamptz `json:"added_at"`
-}
-
-func (q *Queries) UnassignCerebroRole(ctx context.Context, arg UnassignCerebroRoleParams) (UnassignCerebroRoleRow, error) {
+func (q *Queries) UnassignCerebroRole(ctx context.Context, arg UnassignCerebroRoleParams) (CerebroRoleAssignment, error) {
 	row := q.db.QueryRow(ctx, unassignCerebroRole, arg.RoleID, arg.SubjectType, arg.SubjectID)
-	var i UnassignCerebroRoleRow
+	var i CerebroRoleAssignment
 	err := row.Scan(
 		&i.RoleID,
 		&i.SubjectType,
 		&i.SubjectID,
 		&i.AddedBy,
 		&i.AddedAt,
+		&i.ExpiresAt,
 	)
 	return i, err
 }
@@ -360,30 +361,36 @@ UPDATE cerebro_role
 SET
     name = COALESCE($1, name),
     description = COALESCE($2, description),
+    permissions = CASE
+        WHEN $3::boolean
+            THEN $4::jsonb
+        ELSE permissions
+    END,
+    version = version + 1,
     updated_at = now()
-WHERE id = $3
-RETURNING id, workspace_id, name, description, created_by, created_at, updated_at
+WHERE id = $5
+  AND archived_at IS NULL
+RETURNING id, workspace_id, name, description, created_by, created_at, updated_at,
+          version, permissions, archived_at
 `
 
 type UpdateCerebroRoleParams struct {
-	Name        pgtype.Text `json:"name"`
-	Description pgtype.Text `json:"description"`
-	ID          pgtype.UUID `json:"id"`
+	Name               pgtype.Text `json:"name"`
+	Description        pgtype.Text `json:"description"`
+	ReplacePermissions bool        `json:"replace_permissions"`
+	Permissions        []byte      `json:"permissions"`
+	ID                 pgtype.UUID `json:"id"`
 }
 
-type UpdateCerebroRoleRow struct {
-	ID          pgtype.UUID        `json:"id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	CreatedBy   pgtype.UUID        `json:"created_by"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
-func (q *Queries) UpdateCerebroRole(ctx context.Context, arg UpdateCerebroRoleParams) (UpdateCerebroRoleRow, error) {
-	row := q.db.QueryRow(ctx, updateCerebroRole, arg.Name, arg.Description, arg.ID)
-	var i UpdateCerebroRoleRow
+func (q *Queries) UpdateCerebroRole(ctx context.Context, arg UpdateCerebroRoleParams) (CerebroRole, error) {
+	row := q.db.QueryRow(ctx, updateCerebroRole,
+		arg.Name,
+		arg.Description,
+		arg.ReplacePermissions,
+		arg.Permissions,
+		arg.ID,
+	)
+	var i CerebroRole
 	err := row.Scan(
 		&i.ID,
 		&i.WorkspaceID,
@@ -392,6 +399,9 @@ func (q *Queries) UpdateCerebroRole(ctx context.Context, arg UpdateCerebroRolePa
 		&i.CreatedBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.Version,
+		&i.Permissions,
+		&i.ArchivedAt,
 	)
 	return i, err
 }

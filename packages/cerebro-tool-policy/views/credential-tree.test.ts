@@ -3,7 +3,7 @@ import {
   buildCredentialTree,
   subtreeGroups,
   type CredentialTreeNode,
-} from "./tool-policy-table";
+} from "./credential-presentation";
 
 // A CredentialGroupData is { resource, label, rows }; the tree only reads
 // resource + label, so rows can be an empty stand-in here.

@@ -9,10 +9,10 @@
 //
 //   1. OwnerPolicyChecker — workspace owners/admins always allow.
 //   2. multicaCredentialPolicy — the unified Multica permission engine:
-//      a deny-by-default grant floor (id scope first, type scope fallback)
-//      layered with the tighten-only tool-policy cap chain. This is the
-//      sole governance authority for credentials (FIR-1609); the legacy
-//      Persona cut-over was removed once the chain became authoritative.
+//      a direct deny-by-default floor layered with the canonical tool-policy
+//      chain (id scope first, type scope fallback). This is the sole governance
+//      authority for credentials (FIR-1609); the legacy Persona cut-over and
+//      constant grant resolver are retired.
 //
 // Layered: first ALLOW wins. If neither layer allows, the chain returns
 // the deny (or owner deny in dev when the engine is unconfigured), which
@@ -79,22 +79,9 @@ func (m *memberLookupFromQueries) GetMemberRole(ctx context.Context, workspaceID
 // credential PolicyChecker interface. It mirrors Persona's two resource scopes:
 // exact credential first, credential-type fallback second.
 type multicaCredentialPolicy struct {
-	// resolver is the credential GRANT FLOOR. Credentials are deny-by-default:
-	// a non-owner actor with no live grant gets nothing. The toolpolicy chain is
-	// the opposite (default-allow, tighten-only), so the chain CANNOT be the sole
-	// authority for a credential verdict without opening a default-allow hole on
-	// reveal. The resolver therefore stays as the deny-by-default floor, and the
-	// unified tool-policy chain (caps) is layered ON TOP as a tighten-only cap —
-	// see Check. This is FIR-1609 Phase 7: credentials join the unified chain for
-	// the System/runtime/user/group/condition CAP layers, while grant-state keeps
-	// supplying the floor. (Honest framing: the resolver is retained, not removed;
-	// the chain adds caps it cannot loosen.)
-	resolver *cerebropermissions.Resolver
-	// caps is the unified tool-policy chain, consulted with Base=Allow so it
-	// contributes ONLY admin/System/runtime/user/group Deny|Ask rows that tighten
-	// the grant floor. nil keeps pure grant-floor behaviour (no caps). It never
-	// grants: a chain Allow row on a credential is a no-op because the floor, not
-	// the chain, decides whether access exists at all.
+	// caps is the canonical tool-policy chain. Credentials stay deny-by-default:
+	// only an explicit Allow row can lift the floor, and Deny/Ask rows remain
+	// tighten-only caps. A no-row Base=Allow result is never treated as a grant.
 	caps *toolpolicy.Store
 	// agents maps an agent actor onto its runtime/owner so the chain can resolve
 	// the agent + runtime + owner-user ceilings. nil (or a lookup error) fails
@@ -143,15 +130,15 @@ type agentRuntimeLookup interface {
 }
 
 func (m *multicaCredentialPolicy) Check(ctx context.Context, req credentials.PolicyRequest) credentials.PolicyDecision {
-	if m == nil || m.resolver == nil {
+	if m == nil || m.caps == nil {
 		return credentials.Deny("multica permission engine not configured")
 	}
 	// CANONICAL CREDENTIAL TOOL-POLICY CONVENTION (FIR-1609 Phase 7). The cap layer
 	// only tightens rows authored with these EXACT strings (resource_pattern is
 	// matched by equality, not glob), so any admin-authoring surface that writes
 	// credential cap rows MUST mint ToolKey/ResourcePattern identically or the cap
-	// silently misses. Until such an authoring surface exists the caps are inert in
-	// the SAFE direction (no row ⇒ Allow ⇒ no-op ⇒ grant floor decides).
+	// silently misses. Without an authored row the no-row Allow result is never
+	// treated as a grant, so the direct deny-by-default floor remains effective.
 	//   ToolKey         = "credential.<attach|read_redacted|reveal|rotate|revoke>"
 	//   ResourcePattern = "cerebro-credential:<uuid>"   (id scope, most specific)
 	//                     "cerebro-credential-type:<type>" (type scope, fallback)
@@ -162,11 +149,11 @@ func (m *multicaCredentialPolicy) Check(ctx context.Context, req credentials.Pol
 		typeResource = "cerebro-credential-type:" + string(req.CredentialType)
 	}
 
-	// 1. GRANT FLOOR — deny-by-default, exact pre-existing id→type semantics.
-	floor, askResource, floorReason, err := m.grantFloor(ctx, req, action, idResource, typeResource)
-	if err != nil {
-		return credentials.Deny("multica permission engine failed: " + err.Error())
-	}
+	// 1. DENY-BY-DEFAULT FLOOR — the retired grant resolver could only return
+	// Deny after its grant store was removed. Keep that exact security floor
+	// directly, without two misleading resolver calls and activity-log writes.
+	floor := toolpolicy.SettingDeny
+	floorReason := "no explicit credential grant"
 
 	// 2. CHAIN SIGNAL — one resolution of the unified tool-policy chain per scope,
 	// reporting BOTH roles the chain plays for credentials:
@@ -183,7 +170,7 @@ func (m *multicaCredentialPolicy) Check(ctx context.Context, req credentials.Pol
 		return credentials.Deny("credential policy chain resolve failed: " + err.Error())
 	}
 
-	// 3. COMBINE — union the grant authorities (grant floor OR explicit chain Allow),
+	// 3. COMBINE — let an explicit chain Allow lift the direct Deny floor,
 	// then apply the tighten-only cap. The cap can only tighten, never loosen, so the
 	// result is never looser than both the floor and an explicit per-credential Deny.
 	final, reason := foldCredentialVerdict(floor, floorReason, granted, grantReason, cap, capReason)
@@ -197,11 +184,7 @@ func (m *multicaCredentialPolicy) Check(ctx context.Context, req credentials.Pol
 		// the shared inbox; with the gate off, fall through to deny exactly as the
 		// pre-FIR-2586 behaviour did.
 		if m.gate != nil {
-			r := askResource
-			if r == "" {
-				r = idResource
-			}
-			return m.awaitApproval(ctx, req, action, r, reason)
+			return m.awaitApproval(ctx, req, action, idResource, reason)
 		}
 		return credentials.Deny("approval required but approval gate disabled")
 	default:
@@ -209,9 +192,9 @@ func (m *multicaCredentialPolicy) Check(ctx context.Context, req credentials.Pol
 	}
 }
 
-// foldCredentialCap applies the tighten-only admin/System cap to the grant floor.
+// foldCredentialCap applies the tighten-only admin/System cap to the direct floor.
 // This is the security-critical core: MoreRestrictive guarantees the cap can only
-// raise restrictiveness, so the credential verdict is NEVER looser than the grant
+// raise restrictiveness, so the credential verdict is NEVER looser than the
 // floor alone. When the cap is the decider, attribution flows to the cap reason.
 func foldCredentialCap(floor, cap toolpolicy.Setting, floorReason, capReason string) (toolpolicy.Setting, string) {
 	final := toolpolicy.MoreRestrictive(floor, cap)
@@ -225,7 +208,7 @@ func foldCredentialCap(floor, cap toolpolicy.Setting, floorReason, capReason str
 // cap into the final credential verdict (FIR-1609 Phase 7 keystone).
 //
 // Step 1 — UNION the grant authorities: access is granted if the deny-by-default
-// grant floor allows OR an explicit tool-policy Allow row grants it. An explicit
+// direct floor allows OR an explicit tool-policy Allow row grants it. An explicit
 // chain Allow only ever RAISES the floor toward Allow; it can never tighten (that
 // is the cap's job) and never fabricates a grant from a no-row default (the caller
 // passes granted=false in that case), so deny-by-default is preserved.
@@ -242,47 +225,6 @@ func foldCredentialVerdict(floor toolpolicy.Setting, floorReason string, granted
 		base, baseReason = toolpolicy.SettingAllow, grantReason
 	}
 	return foldCredentialCap(base, cap, baseReason, capReason)
-}
-
-// grantFloor computes the deny-by-default credential verdict from grants alone,
-// reproducing the prior id→type precedence exactly: an Allow at EITHER scope
-// wins (id first), then an Ask at either scope (id first), else Deny. The
-// returned askResource names the scope that asked (for the inbox row).
-func (m *multicaCredentialPolicy) grantFloor(ctx context.Context, req credentials.PolicyRequest, action, idResource, typeResource string) (setting toolpolicy.Setting, askResource, reason string, err error) {
-	actor := cerebropermissions.Actor{Type: req.ActorType, ID: req.ActorID}
-
-	idDec, err := m.resolveScope(ctx, req, actor, action, idResource)
-	if err != nil {
-		return "", "", "", err
-	}
-	if idDec.Kind == cerebropermissions.DecisionAllow {
-		return toolpolicy.SettingAllow, "", "multica grant matched", nil
-	}
-
-	var typeDec cerebropermissions.Decision
-	if typeResource != "" {
-		typeDec, err = m.resolveScope(ctx, req, actor, action, typeResource)
-		if err != nil {
-			return "", "", "", err
-		}
-		if typeDec.Kind == cerebropermissions.DecisionAllow {
-			return toolpolicy.SettingAllow, "", "multica grant matched (type)", nil
-		}
-	}
-
-	// No allow at either scope. An approval_required grant surfaces as Ask, id
-	// first so the inbox row names the exact credential.
-	if idDec.Kind == cerebropermissions.DecisionNeedsApproval {
-		return toolpolicy.SettingAsk, idResource, idDec.Reason, nil
-	}
-	if typeResource != "" && typeDec.Kind == cerebropermissions.DecisionNeedsApproval {
-		return toolpolicy.SettingAsk, typeResource, typeDec.Reason, nil
-	}
-
-	if typeResource == "" {
-		return toolpolicy.SettingDeny, "", "no id-scoped grant; no type fallback", nil
-	}
-	return toolpolicy.SettingDeny, "", "no matching credential grant (id or type)", nil
 }
 
 // flagCredentialChainGrant is the workspace feature-flag key (default OFF) that
@@ -303,7 +245,7 @@ const flagCredentialChainGrant = "cerebro_credential_chain_grant"
 //     cerebro_credential_chain_grant flag is on for this workspace. A no-row Base=Allow
 //     result is NOT a grant, so this can never open a default-allow hole on reveal.
 //
-// nil store ⇒ Allow cap, no grant (pure grant-floor behaviour). Any lookup/resolve
+// nil store ⇒ Allow cap, no grant (the direct Deny floor remains). Any lookup/resolve
 // error fails CLOSED (cap=Deny, grant=false).
 func (m *multicaCredentialPolicy) chainCredentialSignal(ctx context.Context, req credentials.PolicyRequest, action, idResource, typeResource string) (cap toolpolicy.Setting, capReason string, grant bool, grantReason string, err error) {
 	if m.caps == nil {
@@ -422,16 +364,6 @@ func (m *multicaCredentialPolicy) actorQueryBase(ctx context.Context, req creden
 	}
 }
 
-// resolveScope returns the raw grant decision for one (action, resource) pair.
-func (m *multicaCredentialPolicy) resolveScope(ctx context.Context, req credentials.PolicyRequest, actor cerebropermissions.Actor, action, resource string) (cerebropermissions.Decision, error) {
-	return m.resolver.Can(ctx, cerebropermissions.Request{
-		WorkspaceID: req.WorkspaceID,
-		Actor:       actor,
-		Capability:  action,
-		Resource:    resource,
-	})
-}
-
 // awaitApproval raises a credential approval in the shared inbox and blocks until
 // a human decides. Approve → Allow; reject/expire/timeout → Deny. A gate error
 // fails closed (Deny), never a silent allow. (FIR-2586)
@@ -473,7 +405,7 @@ func (m *multicaCredentialPolicy) awaitApproval(ctx context.Context, req credent
 //
 // The chain is ChainPolicyChecker(owner, multica): workspace owners/admins
 // short-circuit to allow, everyone else goes through the Multica permission
-// engine (deny-by-default grant floor + tighten-only tool-policy caps). When
+// engine (direct deny-by-default floor + canonical tool-policy decisions). When
 // cerebroQueries is nil the multica layer is omitted and only the owner check
 // fires — the deny-by-default behaviour from JEH-1197.
 //
@@ -487,10 +419,9 @@ func newCredentialsPolicy(cerebroQueries *cerebrodb.Queries, queries *db.Queries
 	multica := credentials.PolicyChecker(nil)
 	if cerebroQueries != nil {
 		multica = &multicaCredentialPolicy{
-			resolver: cerebropermissions.New(cerebroQueries),
-			// Unified tool-policy chain as the tighten-only cap layer (FIR-1609
-			// Phase 7) — built from the same cerebro queries; agent→runtime/owner
-			// mapping comes from the upstream queries (GetAgent).
+			// Unified tool-policy chain (FIR-1609 Phase 7) — built from the same
+			// cerebro queries; agent→runtime/owner mapping comes from the upstream
+			// queries (GetAgent).
 			caps:           toolpolicy.NewStoreFromQueries(cerebroQueries),
 			agents:         queries,
 			gate:           gate,

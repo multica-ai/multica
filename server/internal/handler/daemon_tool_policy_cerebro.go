@@ -3,8 +3,8 @@ package handler
 // CEREBRO-PATCH(daemon-tool-policy-cerebro): TECH-3173 — per-tool enforcement for
 // LOCAL CLI runtimes (Claude, Codex, Cursor, Gemini) spawned by the daemon.
 //
-// The gateway executor already gates every tool call through the unified
-// tool-policy chain (guardToolCallViaPolicy). Local CLIs run on a Mac and never
+// The gateway executor already gates every tool call through the authoritative
+// Policy Decision Service. Local CLIs run on a Mac and never
 // pass through that executor, so an Ask/Deny row in the permission table never
 // reaches them. This file is the daemon-side seam that closes that gap: a local
 // runtime's provider-native before-call hook calls ResolveDaemonToolPolicy,
@@ -114,8 +114,8 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	}
 
 	// The chain's Runtime and User/Group layers key on the agent's runtime and
-	// owner. Resolve them server-side from the agent row (never trust the
-	// caller), exactly as guardToolCallViaPolicy does. Lookup failure fails closed.
+	// owner. Resolve them server-side from the agent row (never trust the caller),
+	// matching the canonical Gateway decision context. Lookup failure fails closed.
 	var runtimeID, ownerID pgtype.UUID
 	if agentID.Valid {
 		agent, err := h.Queries.GetAgent(r.Context(), agentID)

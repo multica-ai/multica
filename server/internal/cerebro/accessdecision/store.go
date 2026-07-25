@@ -10,8 +10,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
-// Store persists the append-only Decision Ledger and reads its grouped drift
-// report. It is never consulted by an enforcement path.
+// Store persists the append-only decision ledger. It is never consulted by an
+// enforcement path.
 type Store struct {
 	q *cerebrodb.Queries
 }
@@ -45,41 +45,17 @@ func (s *Store) Append(ctx context.Context, entry Entry) error {
 		IssueID:               optionalUUID(entry.IssueID),
 		ObservedToolName:      entry.ObservedToolName,
 		CanonicalCapabilityID: optionalText(entry.CanonicalCapabilityID),
-		LegacyDecision:        string(entry.LegacyDecision),
-		LegacyPath:            entry.LegacyPath,
-		ShadowDecision:        string(entry.ShadowDecision),
-		PolicyDecision:        string(entry.PolicyDecision),
-		EvidenceLevel:         string(entry.EvidenceLevel),
-		Differs:               entry.Differs,
-		Reason:                entry.Reason,
+		// The existing database shape predates the Gateway cutover and still has
+		// comparison columns. Persist the one canonical outcome into both sides
+		// so storage cannot revive a caller-controlled legacy access path.
+		LegacyDecision: string(entry.Decision),
+		LegacyPath:     "policy_decision_service",
+		ShadowDecision: string(entry.Decision),
+		PolicyDecision: string(entry.PolicyDecision),
+		EvidenceLevel:  string(entry.EvidenceLevel),
+		Differs:        false,
+		Reason:         entry.Reason,
 	})
-}
-
-// Report returns drift grouped by agent, runtime, and canonical tool. Unknown
-// tools fall back to the observed Gateway name in the SQL query.
-func (s *Store) Report(ctx context.Context, workspaceID pgtype.UUID) (Report, error) {
-	if s == nil || s.q == nil {
-		return Report{}, fmt.Errorf("accessdecision: store is not configured")
-	}
-	rows, err := s.q.ReportCerebroAccessDecisionLedger(ctx, workspaceID)
-	if err != nil {
-		return Report{}, fmt.Errorf("accessdecision: report: %w", err)
-	}
-	report := Report{Groups: make([]Group, 0, len(rows))}
-	for _, row := range rows {
-		group := Group{
-			AgentID:        util.UUIDToString(row.AgentID),
-			RuntimeID:      util.UUIDToString(row.RuntimeID),
-			Tool:           row.Tool,
-			PolicyDecision: PolicyDecision(row.PolicyDecision),
-			Total:          int(row.Total),
-			Diffs:          int(row.Diffs),
-		}
-		report.Total += group.Total
-		report.Diffs += group.Diffs
-		report.Groups = append(report.Groups, group)
-	}
-	return report, nil
 }
 
 func requiredUUID(field, value string) (pgtype.UUID, error) {
