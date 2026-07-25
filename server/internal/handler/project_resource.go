@@ -85,6 +85,7 @@ type githubRepoRef struct {
 	URL               string `json:"url"`
 	DefaultBranchHint string `json:"default_branch_hint,omitempty"`
 	Ref               string `json:"ref,omitempty"`
+	DaemonID          string `json:"daemon_id,omitempty"`
 }
 
 func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
@@ -96,8 +97,22 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 	if payload.URL == "" {
 		return nil, errors.New("github_repo: url is required")
 	}
-	if !isValidGitRepoURL(payload.URL) {
-		return nil, errors.New("github_repo: url must be a valid http(s) or ssh git URL")
+	local, err := isLocalGitRepoURL(payload.URL)
+	if err != nil {
+		return nil, fmt.Errorf("github_repo: %w", err)
+	}
+	payload.DaemonID = strings.TrimSpace(payload.DaemonID)
+	if local {
+		if payload.DaemonID == "" {
+			return nil, errors.New("github_repo: daemon_id is required for file URLs")
+		}
+	} else {
+		if !isValidGitRepoURL(payload.URL) {
+			return nil, errors.New("github_repo: url must be a valid http(s), ssh, or absolute file git URL")
+		}
+		if payload.DaemonID != "" {
+			return nil, errors.New("github_repo: daemon_id is only valid for file URLs")
+		}
 	}
 	payload.DefaultBranchHint = strings.TrimSpace(payload.DefaultBranchHint)
 	payload.Ref = strings.TrimSpace(payload.Ref)
@@ -106,6 +121,23 @@ func validateGithubRepoRef(ref json.RawMessage) (json.RawMessage, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+// isLocalGitRepoURL validates the server-visible portion of a file URL. The
+// server cannot inspect a daemon's filesystem, so existence, canonical path,
+// and Git repository checks happen on the owning daemon before checkout.
+func isLocalGitRepoURL(raw string) (bool, error) {
+	u, err := url.Parse(raw)
+	if err != nil || !strings.EqualFold(u.Scheme, "file") {
+		return false, nil
+	}
+	if u.Host != "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return true, errors.New("file URL must be local and must not contain a host, credentials, query, or fragment")
+	}
+	if u.Path == "" || !isAbsoluteLocalPath(u.Path) {
+		return true, errors.New("file URL must contain an absolute path")
+	}
+	return true, nil
 }
 
 // localDirectoryRef is the JSONB shape stored for resource_type=local_directory.

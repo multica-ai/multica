@@ -4080,6 +4080,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// in the per-workspace allowlist and the local cache, otherwise
 	// `multica repo checkout` would reject project-only URLs that aren't also
 	// bound at the workspace level.
+	normalizedRepos, err := normalizeTaskRepos(task.Repos)
+	if err != nil {
+		return TaskResult{}, fmt.Errorf("prepare task repositories: %w", err)
+	}
+	task.Repos = normalizedRepos
 	d.registerTaskRepos(task.WorkspaceID, task.ID, task.Repos)
 	defer d.clearTaskRepoRefs(task.WorkspaceID, task.ID)
 

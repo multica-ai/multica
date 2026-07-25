@@ -172,6 +172,12 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			http.Error(w, "url is required", http.StatusBadRequest)
 			return
 		}
+		normalizedURL, _, err := normalizeRepoURL(req.URL)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		req.URL = normalizedURL
 		if req.WorkspaceID == "" {
 			http.Error(w, "workspace_id is required", http.StatusBadRequest)
 			return

@@ -24,6 +24,26 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+func TestProjectGithubRepoForDaemonScopesFileResources(t *testing.T) {
+	network, ok, visible := projectGithubRepoForDaemon(
+		"github_repo",
+		json.RawMessage(`{"url":"https://github.com/acme/repo","ref":"main"}`),
+		"daemon-a",
+	)
+	if !ok || !visible || network.URL == "" {
+		t.Fatalf("network repo should be globally visible: %+v %v %v", network, ok, visible)
+	}
+
+	localRaw := json.RawMessage(`{"url":"file:///Users/ada/repo","daemon_id":"daemon-a"}`)
+	local, ok, visible := projectGithubRepoForDaemon("github_repo", localRaw, "daemon-a")
+	if !ok || !visible || local.URL != "file:///Users/ada/repo" {
+		t.Fatalf("owning daemon should receive local repo: %+v %v %v", local, ok, visible)
+	}
+	if _, ok, visible := projectGithubRepoForDaemon("github_repo", localRaw, "daemon-b"); ok || visible {
+		t.Fatalf("foreign daemon must not receive local repo")
+	}
+}
+
 func TestLogClaimEndpointSlowIncludesPayloadFields(t *testing.T) {
 	var logs bytes.Buffer
 	prev := slog.Default()

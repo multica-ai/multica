@@ -28,7 +28,7 @@ A project's `description` is also durable context: when an issue (or a quick-cre
 
 Common resource types:
 
-- `github_repo` — durable GitHub repo context, with `resource_ref.url`, optional checkout `ref`, and optional prompt-only `default_branch_hint`;
+- `github_repo` — durable Git repo context, with `resource_ref.url`, optional checkout `ref`, and optional prompt-only `default_branch_hint`. An absolute `file://` URL is supported when `daemon_id` pins it to the machine that owns the repository;
 - `local_directory` — daemon-local path context, with `resource_ref.local_path`, `daemon_id`, and optional label.
 
 ## CLI
@@ -45,13 +45,14 @@ multica project status <project-id> in_progress --output json
 multica project resource list <project-id> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --output json
 multica project resource add <project-id> --type github_repo --url <github-url> --ref <branch-or-sha> --output json
+multica project resource add <project-id> --type github_repo --url file:///absolute/repo --daemon-id <daemon-id> --output json
 multica project resource add <project-id> --type local_directory --local-path <abs-path> --daemon-id <daemon-id> --output json
 multica project resource update <project-id> <resource-id> --url <new-github-url> --output json
 multica project resource update <project-id> <resource-id> --ref <branch-or-sha> --output json
 multica project resource remove <project-id> <resource-id> --output json
 ```
 
-For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default checkout branch/tag/SHA for future tasks in that project. JSON `--ref '<json>'` remains the escape hatch for full payloads or resource types not covered by shortcuts.
+For `github_repo`, non-JSON `--ref` sets `resource_ref.ref`, the default checkout branch/tag/SHA for future tasks in that project. A `file://` URL requires `--daemon-id`; the daemon validates and canonicalizes the local Git repository, then uses the normal private-checkout pipeline. Local sources are fetch-only: agent pushes back into the canonical local repository are disabled. JSON `--ref '<json>'` remains the escape hatch for full payloads or resource types not covered by shortcuts.
 
 `--start-date` / `--due-date` are optional calendar days (`YYYY-MM-DD`, like issue dates). On `project update`, pass an empty string (`--start-date ""`) to clear a date; an unset flag leaves it untouched.
 

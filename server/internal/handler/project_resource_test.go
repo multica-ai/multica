@@ -242,6 +242,39 @@ func TestIsValidGitRepoURL(t *testing.T) {
 	}
 }
 
+func TestValidateGithubRepoRefFileURLRequiresDaemon(t *testing.T) {
+	t.Run("accepts daemon scoped absolute file URL", func(t *testing.T) {
+		got, err := validateGithubRepoRef(json.RawMessage(`{
+			"url": " file:///Users/ada/project ",
+			"daemon_id": " daemon-1 ",
+			"ref": " local-only "
+		}`))
+		if err != nil {
+			t.Fatalf("validateGithubRepoRef: %v", err)
+		}
+		var ref githubRepoRef
+		if err := json.Unmarshal(got, &ref); err != nil {
+			t.Fatalf("unmarshal: %v", err)
+		}
+		if ref.URL != "file:///Users/ada/project" || ref.DaemonID != "daemon-1" || ref.Ref != "local-only" {
+			t.Fatalf("unexpected normalized ref: %+v", ref)
+		}
+	})
+
+	for name, raw := range map[string]string{
+		"missing daemon": `{"url":"file:///Users/ada/project"}`,
+		"relative path":  `{"url":"file:project","daemon_id":"daemon-1"}`,
+		"remote host":    `{"url":"file://server/share/repo","daemon_id":"daemon-1"}`,
+		"remote daemon":  `{"url":"https://github.com/acme/repo","daemon_id":"daemon-1"}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := validateGithubRepoRef(json.RawMessage(raw)); err == nil {
+				t.Fatalf("expected validation error for %s", raw)
+			}
+		})
+	}
+}
+
 // TestProjectResourceLocalDirectoryLifecycle covers the full CRUD path for the
 // local_directory resource type added in MUL-2662. Unlike github_repo, the
 // ref schema requires local_path + daemon_id and forbids any path that isn't

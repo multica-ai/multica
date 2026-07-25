@@ -1780,6 +1780,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			}
 
 			var projectRepos []RepoData
+			hasProjectRepoResource := false
 			if issue.ProjectID.Valid {
 				resp.ProjectID = uuidToString(issue.ProjectID)
 				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
@@ -1789,6 +1790,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if rows := h.listProjectResourcesForProject(r.Context(), issue.ProjectID); len(rows) > 0 {
 					out := make([]ProjectResourceData, 0, len(rows))
 					for _, row := range rows {
+						if row.ResourceType == "github_repo" {
+							hasProjectRepoResource = true
+						}
 						label := ""
 						if row.Label.Valid {
 							label = row.Label.String
@@ -1796,6 +1800,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						ref := json.RawMessage(row.ResourceRef)
 						if len(ref) == 0 {
 							ref = json.RawMessage("{}")
+						}
+						repo, isRepo, visible := projectGithubRepoForDaemon(row.ResourceType, ref, runtime.DaemonID.String)
+						if !visible {
+							continue
 						}
 						out = append(out, ProjectResourceData{
 							ID:           uuidToString(row.ID),
@@ -1806,21 +1814,15 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 						// Lift github_repo resources into the daemon's repo list
 						// so `multica repo checkout` and the meta-skill render
 						// them as the issue's repos.
-						if row.ResourceType == "github_repo" {
-							var payload struct {
-								URL string `json:"url"`
-								Ref string `json:"ref,omitempty"`
-							}
-							if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-								projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
-							}
+						if isRepo {
+							projectRepos = append(projectRepos, repo)
 						}
 					}
 					resp.ProjectResources = out
 				}
 			}
 
-			if len(projectRepos) > 0 {
+			if hasProjectRepoResource {
 				resp.Repos = projectRepos
 			} else if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
@@ -2094,6 +2096,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// claim time: a deleted/stale project degrades to workspace context and
 			// can never leak a project from another tenant.
 			var projectRepos []RepoData
+			hasProjectRepoResource := false
 			if cs.ProjectID.Valid {
 				if project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
 					ID:          cs.ProjectID,
@@ -2105,6 +2108,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					if rows := h.listProjectResourcesForProject(r.Context(), project.ID); len(rows) > 0 {
 						resources := make([]ProjectResourceData, 0, len(rows))
 						for _, row := range rows {
+							if row.ResourceType == "github_repo" {
+								hasProjectRepoResource = true
+							}
 							label := ""
 							if row.Label.Valid {
 								label = row.Label.String
@@ -2113,27 +2119,25 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 							if len(ref) == 0 {
 								ref = json.RawMessage("{}")
 							}
+							repo, isRepo, visible := projectGithubRepoForDaemon(row.ResourceType, ref, runtime.DaemonID.String)
+							if !visible {
+								continue
+							}
 							resources = append(resources, ProjectResourceData{
 								ID:           uuidToString(row.ID),
 								ResourceType: row.ResourceType,
 								ResourceRef:  ref,
 								Label:        label,
 							})
-							if row.ResourceType == "github_repo" {
-								var payload struct {
-									URL string `json:"url"`
-									Ref string `json:"ref,omitempty"`
-								}
-								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
-								}
+							if isRepo {
+								projectRepos = append(projectRepos, repo)
 							}
 						}
 						resp.ProjectResources = resources
 					}
 				}
 			}
-			if len(projectRepos) > 0 {
+			if hasProjectRepoResource {
 				resp.Repos = projectRepos
 			} else if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
 				var repos []RepoData
@@ -2306,6 +2310,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// the project, and `multica repo checkout` sees the project's
 			// github_repo resources instead of the workspace fallback.
 			var projectRepos []RepoData
+			hasProjectRepoResource := false
 			if qc.ProjectID != "" {
 				projectUUID, err := util.ParseUUID(qc.ProjectID)
 				if err == nil {
@@ -2317,6 +2322,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					if rows := h.listProjectResourcesForProject(r.Context(), projectUUID); len(rows) > 0 {
 						out := make([]ProjectResourceData, 0, len(rows))
 						for _, row := range rows {
+							if row.ResourceType == "github_repo" {
+								hasProjectRepoResource = true
+							}
 							label := ""
 							if row.Label.Valid {
 								label = row.Label.String
@@ -2325,20 +2333,18 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 							if len(ref) == 0 {
 								ref = json.RawMessage("{}")
 							}
+							repo, isRepo, visible := projectGithubRepoForDaemon(row.ResourceType, ref, runtime.DaemonID.String)
+							if !visible {
+								continue
+							}
 							out = append(out, ProjectResourceData{
 								ID:           uuidToString(row.ID),
 								ResourceType: row.ResourceType,
 								ResourceRef:  ref,
 								Label:        label,
 							})
-							if row.ResourceType == "github_repo" {
-								var payload struct {
-									URL string `json:"url"`
-									Ref string `json:"ref,omitempty"`
-								}
-								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
-								}
+							if isRepo {
+								projectRepos = append(projectRepos, repo)
 							}
 						}
 						resp.ProjectResources = out
@@ -2346,7 +2352,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				}
 			}
 
-			if len(projectRepos) > 0 {
+			if hasProjectRepoResource {
 				resp.Repos = projectRepos
 			} else if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
 				var repos []RepoData

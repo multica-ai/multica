@@ -90,7 +90,7 @@
     "repos_search_empty": "No repositories match your search.",
     "attached_badge": "attached",
     "remove_tooltip": "Remove",
-    "url_placeholder": "https://github.com/owner/repo or git@github.com:owner/repo.git",
+    "url_placeholder": "Git URL or file:///absolute/path/to/repo",
     "url_submit": "Add",
     "toast_attached": "Repository attached",
     "toast_attach_failed": "Failed to attach",

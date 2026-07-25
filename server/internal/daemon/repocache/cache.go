@@ -190,6 +190,9 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 					firstErr = err
 				}
 			}
+			if isLocalFileRepoURL(repo.URL) {
+				_ = disableOriginPush(barePath)
+			}
 		} else {
 			// Not cached — bare clone.
 			c.logger.Info("repo cache: cloning", "url", repo.URL, "path", barePath)
@@ -198,6 +201,8 @@ func (c *Cache) Sync(workspaceID string, repos []RepoInfo) error {
 				if firstErr == nil {
 					firstErr = err
 				}
+			} else if isLocalFileRepoURL(repo.URL) {
+				_ = disableOriginPush(barePath)
 			}
 		}
 		repoLock.Unlock()
@@ -332,6 +337,24 @@ func gitCloneBare(url, dest string) error {
 	if err := ensureRemoteTrackingLayout(dest); err != nil {
 		os.RemoveAll(dest)
 		return fmt.Errorf("configure fetch refspec: %w", err)
+	}
+	return nil
+}
+
+func isLocalFileRepoURL(raw string) bool {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	return err == nil && strings.EqualFold(u.Scheme, "file") && u.Host == ""
+}
+
+// disableOriginPush keeps daemon-local repositories source-only. Fetching
+// committed refs is supported; promotion back into a user's canonical
+// repository must be an explicit future workflow.
+func disableOriginPush(repoPath string) error {
+	if out, err := runGitCombinedOutput(
+		"-C", repoPath,
+		"config", "remote.origin.pushurl", "multica-read-only://local-repository",
+	); err != nil {
+		return fmt.Errorf("disable local repository push: %s: %w", strings.TrimSpace(string(out)), err)
 	}
 	return nil
 }
@@ -752,6 +775,11 @@ func createIsolatedCheckout(barePath, repoURL, checkoutPath, branchName, baseRef
 	if out, err := runGitCombinedOutput("-C", checkoutPath, "remote", "add", "origin", repoURL); err != nil {
 		return "", fmt.Errorf("add origin remote: %s: %w", strings.TrimSpace(string(out)), err)
 	}
+	if isLocalFileRepoURL(repoURL) {
+		if err := disableOriginPush(checkoutPath); err != nil {
+			return "", err
+		}
+	}
 	if isPartialClone(barePath) {
 		if err := configurePromisorRemote(checkoutPath); err != nil {
 			return "", err
@@ -837,6 +865,11 @@ func setIsolatedCheckoutOrigin(path, repoURL string) error {
 	out, err := runGitCombinedOutput("-C", path, "remote", "set-url", "origin", repoURL)
 	if err != nil {
 		return fmt.Errorf("set origin remote: %s: %w", strings.TrimSpace(string(out)), err)
+	}
+	if isLocalFileRepoURL(repoURL) {
+		if err := disableOriginPush(path); err != nil {
+			return err
+		}
 	}
 	return nil
 }

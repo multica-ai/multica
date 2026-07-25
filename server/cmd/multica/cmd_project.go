@@ -152,7 +152,7 @@ func init() {
 	projectResourceAddCmd.Flags().String("url", "", "Shortcut: the repo URL (only used when --type github_repo)")
 	projectResourceAddCmd.Flags().String("default-branch-hint", "", "Shortcut: optional default branch hint (only used when --type github_repo)")
 	projectResourceAddCmd.Flags().String("local-path", "", "Shortcut: absolute path to the working directory (only used when --type local_directory)")
-	projectResourceAddCmd.Flags().String("daemon-id", "", "Shortcut: id of the daemon that owns the local path (only used when --type local_directory)")
+	projectResourceAddCmd.Flags().String("daemon-id", "", "Shortcut: daemon that owns a github_repo file URL or local_directory path")
 	projectResourceAddCmd.Flags().String("ref-label", "", "Shortcut: optional label embedded in resource_ref (only used when --type local_directory)")
 	projectResourceAddCmd.Flags().String("ref", "", "Generic JSON resource_ref payload, or a github_repo checkout ref when used with --url")
 	projectResourceAddCmd.Flags().String("label", "", "Optional human-readable label")
@@ -163,7 +163,7 @@ func init() {
 	projectResourceUpdateCmd.Flags().String("url", "", "Shortcut: new repo URL (github_repo)")
 	projectResourceUpdateCmd.Flags().String("default-branch-hint", "", "Shortcut: new default branch hint (github_repo)")
 	projectResourceUpdateCmd.Flags().String("local-path", "", "Shortcut: new absolute local path (local_directory)")
-	projectResourceUpdateCmd.Flags().String("daemon-id", "", "Shortcut: new daemon id (local_directory)")
+	projectResourceUpdateCmd.Flags().String("daemon-id", "", "Shortcut: new daemon id (github_repo file URL or local_directory)")
 	projectResourceUpdateCmd.Flags().String("ref-label", "", "Shortcut: new label embedded in resource_ref (local_directory)")
 	projectResourceUpdateCmd.Flags().String("ref", "", "Generic JSON resource_ref payload, or a github_repo checkout ref")
 	projectResourceUpdateCmd.Flags().String("label", "", "New human-readable label; pass an empty string to clear")
@@ -796,7 +796,8 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 		urlSet := cmd.Flags().Changed("url")
 		hintSet := cmd.Flags().Changed("default-branch-hint")
 		refSet := cmd.Flags().Changed("ref")
-		if !urlSet && !hintSet && !refSet {
+		daemonSet := cmd.Flags().Changed("daemon-id")
+		if !urlSet && !hintSet && !refSet && !daemonSet {
 			return nil, false, nil
 		}
 		ref := map[string]any{}
@@ -811,6 +812,9 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 			}
 			if checkoutRef, ok := existingRef["ref"].(string); ok && strings.TrimSpace(checkoutRef) != "" {
 				ref["ref"] = strings.TrimSpace(checkoutRef)
+			}
+			if daemonID, ok := existingRef["daemon_id"].(string); ok && strings.TrimSpace(daemonID) != "" {
+				ref["daemon_id"] = strings.TrimSpace(daemonID)
 			}
 		}
 		if urlSet {
@@ -835,6 +839,14 @@ func buildResourceRefFromFlags(cmd *cobra.Command, resourceType string, existing
 				delete(ref, "ref")
 			} else {
 				ref["ref"] = checkoutRef
+			}
+		}
+		if daemonSet {
+			daemonID := strings.TrimSpace(mustString(cmd, "daemon-id"))
+			if daemonID == "" {
+				delete(ref, "daemon_id")
+			} else {
+				ref["daemon_id"] = daemonID
 			}
 		}
 		if _, ok := ref["url"]; !ok {

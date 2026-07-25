@@ -113,9 +113,19 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
 
   const handleAttach = async (url: string) => {
     try {
+      const isLocalRepo = url.trim().toLowerCase().startsWith("file://");
+      if (isLocalRepo && (!localDaemonId || !daemonStatus.running)) {
+        toast.error(t(($) => $.resources.toast_local_daemon_not_running));
+        return;
+      }
       await createResource.mutateAsync({
         resource_type: "github_repo",
-        resource_ref: { url },
+        resource_ref: {
+          url,
+          ...(isLocalRepo && localDaemonId
+            ? { daemon_id: localDaemonId }
+            : {}),
+        },
       });
       toast.success(t(($) => $.resources.toast_attached));
     } catch (err) {
@@ -411,20 +421,32 @@ function ResourceRow({
     const ref = resource.resource_ref;
     const display = resource.label || (ref.ref ? `${githubShortLabel(ref.url)} @ ${ref.ref}` : githubShortLabel(ref.url));
     const tooltip = ref.ref ? `${ref.url}\nref: ${ref.ref}` : ref.url;
+    const isLocalRepo = Boolean(ref.daemon_id);
+    const localMismatch =
+      isLocalRepo &&
+      (localDaemonId === null || ref.daemon_id !== localDaemonId);
     return (
-      <div className="flex items-center gap-2 text-xs group">
+      <div
+        className={`flex items-center gap-2 text-xs group ${
+          localMismatch ? "opacity-60" : ""
+        }`}
+      >
         <FolderGit className="size-3.5 text-muted-foreground shrink-0" />
         <Tooltip>
           <TooltipTrigger
             render={
-              <a
-                href={ref.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="truncate flex-1 hover:underline"
-              >
-                {display}
-              </a>
+              isLocalRepo ? (
+                <span className="truncate flex-1">{display}</span>
+              ) : (
+                <a
+                  href={ref.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="truncate flex-1 hover:underline"
+                >
+                  {display}
+                </a>
+              )
             }
           />
           <TooltipContent side="top" className="whitespace-pre-line">{tooltip}</TooltipContent>

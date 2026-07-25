@@ -4,12 +4,108 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 )
+
+func TestLocalFileRepoConcurrentPrivateCheckoutsPreserveSource(t *testing.T) {
+	source := t.TempDir()
+	gitTestRun(t, source, "init", "-b", "main")
+	gitTestRun(t, source, "config", "user.email", "test@example.com")
+	gitTestRun(t, source, "config", "user.name", "Test")
+	if err := os.WriteFile(filepath.Join(source, "base.txt"), []byte("local-only commit\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitTestRun(t, source, "add", "base.txt")
+	gitTestRun(t, source, "commit", "-m", "local only base")
+	baseSHA := strings.TrimSpace(gitTestOutput(t, source, "rev-parse", "HEAD"))
+	if err := os.WriteFile(filepath.Join(source, "dirty.txt"), []byte("canonical dirty state\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	statusBefore := gitTestOutput(t, source, "status", "--porcelain=v1")
+
+	sourceURL := (&url.URL{Scheme: "file", Path: source}).String()
+	cache := New(filepath.Join(t.TempDir(), "cache"), testLogger())
+	if err := cache.Sync("ws-local", []RepoInfo{{URL: sourceURL}}); err != nil {
+		t.Fatalf("Sync: %v", err)
+	}
+
+	type result struct {
+		checkout *WorktreeResult
+		err      error
+	}
+	results := make(chan result, 2)
+	for i, taskID := range []string{"aaaaaaaa-task-local", "bbbbbbbb-task-local"} {
+		workDir := filepath.Join(t.TempDir(), "task")
+		go func(index int, id, dir string) {
+			checkout, err := cache.CreateWorktree(WorktreeParams{
+				WorkspaceID:         "ws-local",
+				RepoURL:             sourceURL,
+				WorkDir:             dir,
+				AgentName:           "test",
+				TaskID:              id,
+				IsolatedGitMetadata: true,
+			})
+			results <- result{checkout: checkout, err: err}
+		}(i, taskID, workDir)
+	}
+
+	checkouts := make([]*WorktreeResult, 0, 2)
+	for range 2 {
+		got := <-results
+		if got.err != nil {
+			t.Fatalf("CreateWorktree: %v", got.err)
+		}
+		checkouts = append(checkouts, got.checkout)
+	}
+	if checkouts[0].Path == checkouts[1].Path || checkouts[0].BranchName == checkouts[1].BranchName {
+		t.Fatalf("checkouts are not private: %+v", checkouts)
+	}
+	for i, checkout := range checkouts {
+		if got := strings.TrimSpace(gitTestOutput(t, checkout.Path, "rev-parse", "HEAD")); got != baseSHA {
+			t.Fatalf("checkout %d base SHA = %s, want %s", i, got, baseSHA)
+		}
+		if _, err := os.Stat(filepath.Join(checkout.Path, "dirty.txt")); !os.IsNotExist(err) {
+			t.Fatalf("checkout %d unexpectedly copied canonical dirty state", i)
+		}
+		if err := os.WriteFile(filepath.Join(checkout.Path, "agent.txt"), []byte(checkout.BranchName), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		gitTestRun(t, checkout.Path, "add", "agent.txt")
+		gitTestRun(t, checkout.Path, "config", "user.email", "agent@example.com")
+		gitTestRun(t, checkout.Path, "config", "user.name", "Agent")
+		gitTestRun(t, checkout.Path, "commit", "-m", "agent change")
+		if got := strings.TrimSpace(gitTestOutput(t, checkout.Path, "remote", "get-url", "--push", "origin")); got != "multica-read-only://local-repository" {
+			t.Fatalf("checkout %d push URL = %q", i, got)
+		}
+	}
+
+	if got := strings.TrimSpace(gitTestOutput(t, source, "rev-parse", "HEAD")); got != baseSHA {
+		t.Fatalf("source HEAD changed: got %s want %s", got, baseSHA)
+	}
+	if got := gitTestOutput(t, source, "status", "--porcelain=v1"); got != statusBefore {
+		t.Fatalf("source status changed:\nbefore: %q\nafter:  %q", statusBefore, got)
+	}
+}
+
+func gitTestRun(t *testing.T, dir string, args ...string) {
+	t.Helper()
+	_ = gitTestOutput(t, dir, args...)
+}
+
+func gitTestOutput(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmdArgs := append([]string{"-C", dir}, args...)
+	out, err := exec.Command("git", cmdArgs...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %v: %s: %v", args, out, err)
+	}
+	return string(out)
+}
 
 func testLogger() *slog.Logger {
 	return slog.Default()

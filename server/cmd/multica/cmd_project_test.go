@@ -138,6 +138,20 @@ func TestBuildResourceRefFromFlagsGithubMergesHint(t *testing.T) {
 		}
 	})
 
+	t.Run("file url carries daemon scope", func(t *testing.T) {
+		cmd := newProjectResourceUpdateTestCmd()
+		_ = cmd.Flags().Set("url", "file:///Users/ada/project")
+		_ = cmd.Flags().Set("daemon-id", "daemon-1")
+
+		ref, has, err := buildResourceRefFromFlags(cmd, "github_repo", nil)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if !has || ref["url"] != "file:///Users/ada/project" || ref["daemon_id"] != "daemon-1" {
+			t.Fatalf("unexpected local repo ref: %#v", ref)
+		}
+	})
+
 	t.Run("empty checkout ref clears existing ref", func(t *testing.T) {
 		cmd := newProjectResourceUpdateTestCmd()
 		_ = cmd.Flags().Set("ref", "")

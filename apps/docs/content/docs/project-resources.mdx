@@ -23,7 +23,8 @@ Today two resource types ship: [`github_repo`](#resource-type-github_repo) (clon
 
 ## Resource type: `github_repo`
 
-The default resource type — checked out per task into an isolated worktree:
+The default resource type — checked out per task into an isolated worktree.
+The URL may be a network Git URL or an absolute daemon-scoped `file://` URL:
 
 ```json
 {
@@ -39,6 +40,22 @@ The default resource type — checked out per task into an isolated worktree:
 `ref` is optional — if present, `multica repo checkout <url>` uses it as the default branch, tag, or commit for tasks in this project. An explicit `multica repo checkout <url> --ref <other-ref>` still wins for that one checkout.
 
 `default_branch_hint` is optional prompt context. It is not used for checkout; use `ref` when the project should pin a branch, tag, or SHA.
+
+To use an existing local Git repository without pushing its commits to a
+network remote first:
+
+```bash
+multica project resource add <project-id> \
+  --type github_repo \
+  --url file:///absolute/path/to/repo \
+  --daemon-id <daemon-id>
+```
+
+The owning daemon canonicalizes the path, verifies that it is a readable Git
+repository, and clones its committed refs into the normal Multica cache. Every
+task still receives its own branch, worktree/index, and Git metadata; the
+canonical checkout and its uncommitted state are not touched. Local repository
+sources are fetch-only—agent pushes back into the source are disabled.
 
 ## Resource type: `local_directory`
 

@@ -252,6 +252,33 @@ type RepoData struct {
 	Ref         string `json:"ref,omitempty"`
 }
 
+// projectGithubRepoForDaemon lifts a github_repo resource into task repo
+// context only when it is usable by the claiming daemon. Network repositories
+// are global; file repositories are deliberately pinned to one daemon because
+// their paths have no meaning (and may disclose host layout) elsewhere.
+func projectGithubRepoForDaemon(resourceType string, raw json.RawMessage, daemonID string) (RepoData, bool, bool) {
+	if resourceType != "github_repo" {
+		return RepoData{}, false, true
+	}
+	var payload struct {
+		URL      string `json:"url"`
+		Ref      string `json:"ref,omitempty"`
+		DaemonID string `json:"daemon_id,omitempty"`
+	}
+	if json.Unmarshal(raw, &payload) != nil {
+		return RepoData{}, false, false
+	}
+	payload.URL = strings.TrimSpace(payload.URL)
+	payload.DaemonID = strings.TrimSpace(payload.DaemonID)
+	if payload.URL == "" {
+		return RepoData{}, false, false
+	}
+	if payload.DaemonID != "" && payload.DaemonID != strings.TrimSpace(daemonID) {
+		return RepoData{}, false, false
+	}
+	return RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)}, true, true
+}
+
 // ProjectResourceData is the wire shape for a project resource included in a
 // claim response. The daemon reads this list and writes it into the agent's
 // working directory so skills/agents can discover project-scoped context.
