@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ListChecks, ExternalLink, ChevronRight } from "lucide-react";
+import { ListChecks, ExternalLink } from "lucide-react";
 import {
   artifactsByIssueOptions,
   planVersionsOptions,
@@ -11,7 +11,6 @@ import {
   namedPhases,
   workpadProgress,
   phaseStatus,
-  phaseComplete,
   type WorkpadItem,
   type WorkpadPhase,
 } from "@multica/cerebro-artifacts/core";
@@ -23,8 +22,16 @@ import { StatusIcon } from "@multica/views/issues/components";
 import { cn } from "@multica/ui/lib/utils";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
 
-// StepList renders one flat run of checklist steps.
-function StepList({ items }: { items: WorkpadItem[] }) {
+// StepList renders one flat run of checklist steps. `subdued` renders the steps
+// one step lighter than the phase titles they sit under, so a phase's sub-steps
+// read as detail below its status row.
+function StepList({
+  items,
+  subdued,
+}: {
+  items: WorkpadItem[];
+  subdued?: boolean;
+}) {
   return (
     <ul className="flex flex-col gap-1.5">
       {items.map((item, i) => (
@@ -38,6 +45,7 @@ function StepList({ items }: { items: WorkpadItem[] }) {
           <span
             className={cn(
               "min-w-0 leading-snug",
+              subdued && "text-muted-foreground",
               item.done && "text-muted-foreground line-through",
             )}
           >
@@ -51,8 +59,9 @@ function StepList({ items }: { items: WorkpadItem[] }) {
 
 // PhaseSection renders one named phase as a collapsible row: a status icon that
 // reflects the phase's own progress (todo / in-progress / done), the phase
-// title, and its step count, followed by its steps when expanded. Clicking the
-// header toggles the steps — a long plan folds down to a handful of phase rows.
+// title, and its step count, followed by its steps when expanded. The status row
+// itself is the toggle — there is no separate disclosure arrow — so a long plan
+// folds down to a handful of phase rows.
 function PhaseSection({
   phase,
   open,
@@ -71,13 +80,10 @@ function PhaseSection({
         aria-expanded={open}
         className="group -mx-1 flex items-center gap-2 rounded-sm px-1 py-0.5 text-left hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring"
       >
-        <ChevronRight
-          className={cn(
-            "size-3.5 shrink-0 text-muted-foreground transition-transform",
-            open && "rotate-90",
-          )}
+        <StatusIcon
+          status={phaseStatus(progress)}
+          className="size-3.5 shrink-0"
         />
-        <StatusIcon status={phaseStatus(progress)} className="size-3.5" />
         <span className="min-w-0 truncate text-sm font-medium">
           {phase.title}
         </span>
@@ -86,8 +92,8 @@ function PhaseSection({
         </span>
       </button>
       {open && (
-        <div className="pl-6">
-          <StepList items={phase.items} />
+        <div className="pl-5">
+          <StepList items={phase.items} subdued />
         </div>
       )}
     </div>
@@ -103,17 +109,22 @@ function PhaseSection({
 //
 // FIR-3765 — when the plan groups its steps under markdown headings (phases),
 // each phase renders as a collapsible section headed by a status icon that
-// reflects the phase's own progress (todo / in-progress / done). Completed
-// phases start collapsed so a long plan opens on the work that remains; the
-// user can fold any phase in or out. A plan with fewer than two named phases
-// renders as a single flat list, exactly as before.
+// reflects the phase's own progress (todo / in-progress / done). The status row
+// is the toggle; a phase's sub-steps render one shade lighter beneath it. A plan
+// with fewer than two named phases renders as a single flat list, exactly as
+// before.
+//
+// Everything starts folded: the panel itself opens collapsed (the Workpad icon
+// toggles it) and so does every phase, so the panel reads as a compact status
+// line until the reader asks for detail.
 export function WorkpadPanel({ issueId, className }: { issueId: string; className?: string }) {
   const enabled = useFeatureFlag("cerebro_workpad");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const router = useNavigation();
-  // Per-phase open overrides (keyed by title). A phase not present here uses its
-  // default: collapsed when complete, expanded otherwise.
+  const [open, setOpen] = useState(false);
+  // Per-phase open overrides (keyed by title). A phase not present here is
+  // collapsed.
   const [openOverrides, setOpenOverrides] = useState<Record<string, boolean>>({});
 
   const { data } = useQuery({
@@ -158,7 +169,16 @@ export function WorkpadPanel({ issueId, className }: { issueId: string; classNam
       )}
     >
       <div className="flex items-center gap-2">
-        <ListChecks className="size-4 shrink-0 text-muted-foreground" />
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          aria-label="Toggle Workpad"
+          title="Toggle Workpad"
+          className="-m-1 shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <ListChecks className="size-4" />
+        </button>
         <button
           type="button"
           onClick={openPlan}
@@ -175,53 +195,55 @@ export function WorkpadPanel({ issueId, className }: { issueId: string; classNam
         )}
       </div>
 
-      <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
-        {plan.title && <span className="truncate">{plan.title}</span>}
-        {versionCount > 0 && (
-          <>
-            {plan.title && <span aria-hidden="true">·</span>}
-            <button
-              type="button"
-              onClick={openPlan}
-              className="shrink-0 tabular-nums hover:underline focus:outline-none focus:ring-2 focus:ring-ring rounded-sm"
-              title="Open plan history"
-            >
-              {versionCount === 1 ? "1 version" : `${versionCount} versions`}
-            </button>
-          </>
-        )}
-      </p>
+      {open && (
+        <>
+          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+            {plan.title && <span className="truncate">{plan.title}</span>}
+            {versionCount > 0 && (
+              <>
+                {plan.title && <span aria-hidden="true">·</span>}
+                <button
+                  type="button"
+                  onClick={openPlan}
+                  className="shrink-0 tabular-nums hover:underline focus:outline-none focus:ring-2 focus:ring-ring rounded-sm"
+                  title="Open plan history"
+                >
+                  {versionCount === 1 ? "1 version" : `${versionCount} versions`}
+                </button>
+              </>
+            )}
+          </p>
 
-      {total === 0 ? (
-        <p className="mt-2 text-xs text-muted-foreground">
-          The plan has no steps yet.
-        </p>
-      ) : showPhases ? (
-        <div className="mt-2 flex flex-col gap-2">
-          {phases.map((phase, i) => {
-            if (phase.title === null) {
-              return <StepList key={`__lead__${i}`} items={phase.items} />;
-            }
-            const complete = phaseComplete(workpadProgress(phase.items));
-            const title = phase.title;
-            const override = openOverrides[title];
-            const open = override === undefined ? !complete : override;
-            return (
-              <PhaseSection
-                key={title}
-                phase={phase}
-                open={open}
-                onToggle={() =>
-                  setOpenOverrides((o) => ({ ...o, [title]: !open }))
+          {total === 0 ? (
+            <p className="mt-2 text-xs text-muted-foreground">
+              The plan has no steps yet.
+            </p>
+          ) : showPhases ? (
+            <div className="mt-2 flex flex-col gap-2">
+              {phases.map((phase, i) => {
+                if (phase.title === null) {
+                  return <StepList key={`__lead__${i}`} items={phase.items} />;
                 }
-              />
-            );
-          })}
-        </div>
-      ) : (
-        <div className="mt-2">
-          <StepList items={items} />
-        </div>
+                const title = phase.title;
+                const phaseOpen = openOverrides[title] ?? false;
+                return (
+                  <PhaseSection
+                    key={title}
+                    phase={phase}
+                    open={phaseOpen}
+                    onToggle={() =>
+                      setOpenOverrides((o) => ({ ...o, [title]: !phaseOpen }))
+                    }
+                  />
+                );
+              })}
+            </div>
+          ) : (
+            <div className="mt-2">
+              <StepList items={items} />
+            </div>
+          )}
+        </>
       )}
     </div>
   );
