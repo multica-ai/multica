@@ -23,6 +23,7 @@ export interface TimelineItem {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+  created_at?: string; // CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — carry the event timestamp the revamped dialog renders.
 }
 
 function canMergeStreamingText(prev: TimelineItem, next: TimelineItem): boolean {
@@ -40,6 +41,7 @@ export function coalesceTimelineItems(items: TimelineItem[]): TimelineItem[] {
       out[out.length - 1] = {
         ...prev,
         content: `${prev.content ?? ""}${item.content ?? ""}`,
+        created_at: item.created_at ?? prev.created_at, // CEREBRO-PATCH(transcript-revamp-port): FIR-3782
       };
       continue;
     }
@@ -72,6 +74,7 @@ export function buildTimeline(msgs: TaskMessagePayload[]): TimelineItem[] {
       content: msg.content,
       input: msg.input,
       output: msg.output,
+      created_at: msg.created_at, // CEREBRO-PATCH(transcript-revamp-port): FIR-3782
     });
   }
   return redactTimelineItems(coalesceTimelineItems(items));
