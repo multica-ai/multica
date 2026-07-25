@@ -6,6 +6,8 @@ import {
   workpadProgress,
   parseWorkpadPhases,
   namedPhases,
+  phaseStatus,
+  phaseComplete,
 } from "./workpad";
 
 function artifact(over: Partial<Artifact>): Artifact {
@@ -144,5 +146,28 @@ describe("namedPhases", () => {
   it("keeps only titled phases", () => {
     const phases = parseWorkpadPhases("- [ ] pre\n## A\n- [ ] a\n## B\n- [ ] b");
     expect(namedPhases(phases).map((p) => p.title)).toEqual(["A", "B"]);
+  });
+});
+
+describe("phaseStatus", () => {
+  it("is todo when nothing is done", () => {
+    expect(phaseStatus({ done: 0, total: 3 })).toBe("todo");
+  });
+  it("is in_progress when some but not all are done", () => {
+    expect(phaseStatus({ done: 1, total: 3 })).toBe("in_progress");
+  });
+  it("is done when every step is done", () => {
+    expect(phaseStatus({ done: 3, total: 3 })).toBe("done");
+  });
+  it("treats an empty phase as todo", () => {
+    expect(phaseStatus({ done: 0, total: 0 })).toBe("todo");
+  });
+});
+
+describe("phaseComplete", () => {
+  it("is true only when every step is done", () => {
+    expect(phaseComplete({ done: 2, total: 2 })).toBe(true);
+    expect(phaseComplete({ done: 1, total: 2 })).toBe(false);
+    expect(phaseComplete({ done: 0, total: 0 })).toBe(false);
   });
 });
