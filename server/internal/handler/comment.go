@@ -1572,7 +1572,14 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 			}
 		}
 		if err := h.enqueueSingleCommentTrigger(ctx, issue, triggerCommentID, trigger, getEscalationDelay); err != nil {
-			record(trigger, DispatchBlocked, commentEnqueueFailureReason(err))
+			if errors.Is(err, service.ErrTaskAlreadyPending) {
+				// A concurrent request raced the pre-check and already enqueued a
+				// task for this (issue, agent). Treat as deferred — the active task
+				// will process this trigger via completion reconciliation.
+				record(trigger, DispatchDeferred, ReasonAlreadyActive)
+			} else {
+				record(trigger, DispatchBlocked, commentEnqueueFailureReason(err))
+			}
 			continue
 		}
 		record(trigger, DispatchQueued, ReasonQueued)

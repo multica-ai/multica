@@ -1800,6 +1800,15 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := h.Queries.UpdateAgent(r.Context(), params)
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "agent_workspace_name_unique" {
+			name := ""
+			if req.Name != nil {
+				name = *req.Name
+			}
+			writeError(w, http.StatusConflict, fmt.Sprintf("an agent named %q already exists in this workspace", name))
+			return
+		}
 		slog.Warn("update agent failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
 		writeError(w, http.StatusInternalServerError, "failed to update agent: "+err.Error())
 		return

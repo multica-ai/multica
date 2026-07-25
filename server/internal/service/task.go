@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
@@ -553,6 +554,12 @@ func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, work
 // owner_fallback has no agent owner to fall back to. Enqueue paths surface it so the
 // run never starts.
 var ErrAttributionFailClosed = errors.New("attribution: no precise accountable human and enqueue refused (fail-closed policy, policy read failed, or no agent owner)")
+
+// ErrTaskAlreadyPending is returned by enqueueMentionTaskWithCommentPlan when
+// CreateAgentTask hits idx_one_pending_task_per_issue_agent — i.e. a concurrent
+// request already enqueued a task for the same (issue, agent) pair. Callers
+// should treat this as a deferred/already-active outcome, not an error.
+var ErrTaskAlreadyPending = errors.New("task: pending task already exists for this (issue, agent) pair")
 
 // applyAttributionFallback applies the workspace's degraded-attribution policy to a
 // resolved attribution whose source came back unattributed (no precise human). A
@@ -1154,6 +1161,15 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
 	})
 	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_one_pending_task_per_issue_agent" {
+			// A concurrent request already enqueued a task for this (issue, agent)
+			// pair — the unique index raced us. This is a normal dedup outcome,
+			// not a server fault: log at Info and let callers handle it as
+			// an already-active task.
+			slog.Info("mention task already enqueued (concurrent dedup)", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+			return db.AgentTaskQueue{}, ErrTaskAlreadyPending
+		}
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
