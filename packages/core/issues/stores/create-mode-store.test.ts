@@ -4,16 +4,19 @@ import {
   useCreateModeStore,
 } from "./create-mode-store";
 import { useModalStore } from "../../modals";
+import { configStore } from "../../config";
 
 describe("openCreateIssueWithPreference", () => {
   const initialMode = useCreateModeStore.getState().lastMode;
 
   beforeEach(() => {
+    configStore.setState({ localMode: false });
     useModalStore.getState().close();
   });
 
   afterEach(() => {
     useCreateModeStore.getState().setLastMode(initialMode);
+    configStore.setState({ localMode: false });
     useModalStore.getState().close();
   });
 
@@ -26,6 +29,13 @@ describe("openCreateIssueWithPreference", () => {
 
   it("opens create-issue when last mode is manual", () => {
     useCreateModeStore.getState().setLastMode("manual");
+    openCreateIssueWithPreference();
+    expect(useModalStore.getState().modal).toBe("create-issue");
+  });
+
+  it("always opens manual task entry in LifeOS local mode", () => {
+    configStore.setState({ localMode: true });
+    useCreateModeStore.getState().setLastMode("agent");
     openCreateIssueWithPreference();
     expect(useModalStore.getState().modal).toBe("create-issue");
   });

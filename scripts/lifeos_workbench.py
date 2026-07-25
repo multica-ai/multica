@@ -1,0 +1,763 @@
+#!/usr/bin/env python3
+"""LifeOS 工作台本机运行入口。"""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import hashlib
+import json
+import os
+import plistlib
+import secrets
+import shutil
+import sqlite3
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+import webbrowser
+from pathlib import Path
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence
+
+
+REPO = Path(__file__).resolve().parents[1]
+ENV_FILE = REPO / ".env.lifeos"
+COMPOSE_FILES = (
+    REPO / "docker-compose.selfhost.yml",
+    REPO / "docker-compose.selfhost.build.yml",
+    REPO / "docker-compose.lifeos.yml",
+)
+APP_URL = "http://127.0.0.1:3000/lifeos/issues"
+BACKEND_URL = "http://127.0.0.1:8080"
+PROFILE = "lifeos"
+LAUNCH_LABEL = "ai.lifeos.workbench"
+INDEX_LABEL = "ai.lifeos.workbench.index"
+BACKUP_LABEL = "ai.lifeos.workbench.backup"
+CHATGPT_WAKE_LABEL = "ai.lifeos.chatgpt-wake"
+INDEX_SYNC_INTERVAL_SECONDS = 2 * 60 * 60
+LOCAL_AUTH_VERSION = "2"
+CLI_ALIAS = REPO / "server" / "bin" / "multica"
+STATE_ROOT = Path.home() / "Library/Application Support/LifeOS"
+CONTEXT_DB = STATE_ROOT / "data/lifeos-workbench.sqlite3"
+AUTOMATION_TOKEN_FILE = STATE_ROOT / "secrets/automation-token"
+
+
+class WorkbenchError(RuntimeError):
+    pass
+
+
+def _candidate_codex_paths() -> List[Path]:
+    paths: List[Path] = []
+    found = shutil.which("codex")
+    if found:
+        paths.append(Path(found))
+    paths.extend(sorted((Path.home() / ".nvm/versions/node").glob("*/bin/codex"), reverse=True))
+    paths.extend(
+        [
+            Path.home() / ".local/bin/codex",
+            Path("/opt/homebrew/bin/codex"),
+            Path("/usr/local/bin/codex"),
+        ]
+    )
+    return [path for path in paths if path.is_file()]
+
+
+def runtime_environment(lifeos_root: Path, controller_root: Path) -> Dict[str, str]:
+    environment = os.environ.copy()
+    path_parts = [
+        str((REPO / "server" / "bin").resolve()),
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+        "/bin",
+    ]
+    candidates = _candidate_codex_paths()
+    if candidates:
+        path_parts.insert(0, str(candidates[0].parent))
+    current_path = environment.get("PATH", "")
+    if current_path:
+        path_parts.append(current_path)
+    environment.update(
+        {
+            "PATH": ":".join(dict.fromkeys(path_parts)),
+            "LIFEOS_ROOT": str(lifeos_root),
+            "LIFEOS_CONTROLLER_ROOT": str(controller_root),
+            "LIFEOS_CODEX_HOME": str(Path.home() / ".codex"),
+            "LIFEOS_SERVER_URL": BACKEND_URL,
+            "LIFEOS_WORKBENCH_DB": str(CONTEXT_DB),
+            "LIFEOS_AUTOMATION_TOKEN_FILE": str(AUTOMATION_TOKEN_FILE),
+        }
+    )
+    return environment
+
+
+def ensure_context_database(lifeos_root: Path) -> Path:
+    """Keep writable background state outside macOS-protected Documents."""
+    CONTEXT_DB.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    os.chmod(STATE_ROOT, 0o700)
+    os.chmod(CONTEXT_DB.parent, 0o700)
+    if CONTEXT_DB.is_file():
+        os.chmod(CONTEXT_DB, 0o600)
+        return CONTEXT_DB
+
+    legacy = lifeos_root / "inbox/lifeos-workbench.sqlite3"
+    if legacy.is_file():
+        source = sqlite3.connect("file:%s?mode=ro" % legacy, uri=True)
+        destination = sqlite3.connect(str(CONTEXT_DB))
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+            source.close()
+    if CONTEXT_DB.exists():
+        os.chmod(CONTEXT_DB, 0o600)
+    return CONTEXT_DB
+
+
+def _find_executable(name: str, environment: Optional[Mapping[str, str]] = None) -> str:
+    path = shutil.which(name, path=(environment or os.environ).get("PATH"))
+    if not path:
+        raise WorkbenchError("缺少本机依赖：%s" % name)
+    return path
+
+
+def _run(
+    command: Sequence[str],
+    *,
+    environment: Mapping[str, str],
+    cwd: Path = REPO,
+    check: bool = True,
+    capture: bool = False,
+) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        list(command),
+        cwd=str(cwd),
+        env=dict(environment),
+        text=True,
+        capture_output=capture,
+        check=check,
+    )
+
+
+def parse_env(path: Path = ENV_FILE) -> Dict[str, str]:
+    result: Dict[str, str] = {}
+    if not path.is_file():
+        return result
+    for line in path.read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or "=" not in stripped:
+            continue
+        key, value = stripped.split("=", 1)
+        result[key] = value
+    return result
+
+
+def ensure_env(path: Path = ENV_FILE) -> Dict[str, str]:
+    existing = parse_env(path)
+    jwt_secret = existing.get("JWT_SECRET")
+    if existing.get("LIFEOS_AUTH_VERSION") != LOCAL_AUTH_VERSION:
+        # The strong-login rollout must invalidate cookies issued by the old
+        # passwordless local session. Rotate once, then keep the secret stable.
+        jwt_secret = secrets.token_urlsafe(64)
+    required = {
+        "POSTGRES_DB": "lifeos",
+        "POSTGRES_USER": "lifeos",
+        "POSTGRES_PASSWORD": existing.get("POSTGRES_PASSWORD") or secrets.token_urlsafe(36),
+        "JWT_SECRET": jwt_secret or secrets.token_urlsafe(64),
+        "LIFEOS_AUTH_VERSION": LOCAL_AUTH_VERSION,
+        "LIFEOS_AUTOMATION_TOKEN": existing.get("LIFEOS_AUTOMATION_TOKEN")
+        or secrets.token_urlsafe(48),
+        "LIFEOS_LOCAL_MODE": "true",
+        "ALLOW_SIGNUP": "false",
+        "DISABLE_WORKSPACE_CREATION": "true",
+        "FRONTEND_ORIGIN": "http://127.0.0.1:3000",
+        "MULTICA_APP_URL": "http://127.0.0.1:3000",
+        "BACKEND_PORT": "8080",
+        "FRONTEND_PORT": "3000",
+        "APP_ENV": "production",
+    }
+    values = dict(existing)
+    values.update(required)
+    lines = [
+        "# LifeOS 工作台本机配置。包含凭据，禁止提交或分享。",
+        *["%s=%s" % (key, values[key]) for key in sorted(values)],
+        "",
+    ]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=str(path.parent), prefix=".env.lifeos.", delete=False
+    )
+    temp_path = Path(handle.name)
+    try:
+        os.chmod(temp_path, 0o600)
+        with handle:
+            handle.write("\n".join(lines))
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        os.chmod(path, 0o600)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+    AUTOMATION_TOKEN_FILE.parent.mkdir(parents=True, mode=0o700, exist_ok=True)
+    os.chmod(AUTOMATION_TOKEN_FILE.parent, 0o700)
+    token_handle = tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=str(AUTOMATION_TOKEN_FILE.parent),
+        prefix="automation-token.",
+        delete=False,
+    )
+    token_path = Path(token_handle.name)
+    try:
+        os.chmod(token_path, 0o600)
+        with token_handle:
+            token_handle.write(values["LIFEOS_AUTOMATION_TOKEN"] + "\n")
+            token_handle.flush()
+            os.fsync(token_handle.fileno())
+        os.replace(token_path, AUTOMATION_TOKEN_FILE)
+        os.chmod(AUTOMATION_TOKEN_FILE, 0o600)
+    finally:
+        if token_path.exists():
+            token_path.unlink()
+    return values
+
+
+def compose_command(environment: Mapping[str, str]) -> List[str]:
+    docker = _find_executable("docker", environment)
+    command = [docker, "compose", "--env-file", str(ENV_FILE)]
+    for compose_file in COMPOSE_FILES:
+        command.extend(["-f", str(compose_file)])
+    return command
+
+
+def docker_ready(environment: Mapping[str, str]) -> bool:
+    try:
+        completed = _run(
+            [_find_executable("docker", environment), "info"],
+            environment=environment,
+            check=False,
+            capture=True,
+        )
+    except WorkbenchError:
+        return False
+    return completed.returncode == 0
+
+
+def ensure_docker(environment: Mapping[str, str]) -> None:
+    if docker_ready(environment):
+        return
+    colima = _find_executable("colima", environment)
+    print("正在启动 LifeOS 本机运行底座…")
+    _run(
+        [
+            colima,
+            "start",
+            "--cpu",
+            "4",
+            "--memory",
+            "6",
+            "--disk",
+            "60",
+            "--dns",
+            "223.5.5.5",
+            "--dns",
+            "114.114.114.114",
+        ],
+        environment=environment,
+    )
+    if not docker_ready(environment):
+        raise WorkbenchError("本机容器运行底座启动失败")
+
+
+def wait_for_url(url: str, timeout: float = 180.0) -> None:
+    deadline = time.monotonic() + timeout
+    last_error = ""
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(url, timeout=5) as response:
+                if 200 <= response.status < 500:
+                    return
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            last_error = str(error)
+        time.sleep(2)
+    raise WorkbenchError("等待本地服务超时：%s（%s）" % (url, last_error))
+
+
+def cli_binary() -> Path:
+    return REPO / "server" / "bin" / "lifeos-multica"
+
+
+def build_cli(environment: Mapping[str, str]) -> Path:
+    go = _find_executable("go", environment)
+    target = cli_binary()
+    target.parent.mkdir(parents=True, exist_ok=True)
+    _run(
+        [go, "build", "-o", str(target), "./cmd/multica"],
+        environment=environment,
+        cwd=REPO / "server",
+    )
+    os.chmod(target, 0o755)
+    ensure_cli_alias(target)
+    return target
+
+
+def ensure_cli_alias(target: Optional[Path] = None) -> Path:
+    """Expose the task-scoped CLI name expected by Multica's Agent workflow."""
+    source = (target or cli_binary()).resolve()
+    if not source.is_file():
+        raise WorkbenchError("LifeOS Multica CLI 尚未构建")
+    temp_alias = CLI_ALIAS.with_name(".multica.lifeos-link")
+    try:
+        temp_alias.unlink(missing_ok=True)
+        os.symlink(source.name, temp_alias)
+        os.replace(temp_alias, CLI_ALIAS)
+    finally:
+        temp_alias.unlink(missing_ok=True)
+    return CLI_ALIAS
+
+
+def resolve_controller_root(value: Optional[Path]) -> Path:
+    if value:
+        root = value.expanduser().resolve()
+    elif os.environ.get("LIFEOS_CONTROLLER_ROOT"):
+        root = Path(os.environ["LIFEOS_CONTROLLER_ROOT"]).expanduser().resolve()
+    else:
+        sibling = REPO.parent / "lifeos-ai-workbench-control"
+        root = sibling if (sibling / "scripts/lifeos_mcp_server.py").is_file() else Path.home() / "Documents/Life OS AI"
+        root = root.resolve()
+    if not (root / "scripts/lifeos_mcp_server.py").is_file():
+        raise WorkbenchError("找不到 LifeOS 控制器：%s" % root)
+    return root
+
+
+def resolve_lifeos_root(value: Optional[Path]) -> Path:
+    root = (value or Path(os.environ.get("LIFEOS_ROOT", str(Path.home() / "Documents/Life OS AI")))).expanduser().resolve()
+    if not (root / "meta/00-charter.md").is_file():
+        raise WorkbenchError("找不到 LifeOS AI 正本：%s" % root)
+    return root
+
+
+def configure_agents(
+    environment: Mapping[str, str], lifeos_root: Path, controller_root: Path
+) -> None:
+    binary = cli_binary()
+    if not binary.is_file():
+        raise WorkbenchError("LifeOS Multica CLI 尚未构建")
+    _run(
+        [
+            str(binary),
+            "setup",
+            "lifeos",
+            "--profile",
+            PROFILE,
+            "--server-url",
+            BACKEND_URL,
+            "--app-url",
+            "http://127.0.0.1:3000",
+            "--lifeos-root",
+            str(lifeos_root),
+            "--controller-root",
+            str(controller_root),
+        ],
+        environment=environment,
+        cwd=REPO / "server",
+    )
+
+
+def sync_codex_index(
+    environment: Mapping[str, str], lifeos_root: Path, controller_root: Path
+) -> None:
+    database = ensure_context_database(lifeos_root)
+    _run(
+        [
+            sys.executable,
+            str(controller_root / "scripts/lifeos_controller.py"),
+            "--root",
+            str(lifeos_root),
+            "--database",
+            str(database),
+            "--server-url",
+            BACKEND_URL,
+            "--codex-home",
+            str(Path.home() / ".codex"),
+            "sync",
+        ],
+        environment=environment,
+        cwd=controller_root,
+    )
+
+
+def start(
+    lifeos_root: Path,
+    controller_root: Path,
+    *,
+    build: bool = True,
+    open_browser: bool = True,
+    start_executor: bool = True,
+) -> None:
+    environment = runtime_environment(lifeos_root, controller_root)
+    ensure_env()
+    ensure_docker(environment)
+    compose = compose_command(environment)
+    print("正在启动 LifeOS 工作台…")
+    command = compose + ["up", "-d"]
+    if build:
+        command.append("--build")
+    _run(command, environment=environment)
+    wait_for_url(BACKEND_URL + "/readyz", timeout=240)
+    wait_for_url("http://127.0.0.1:3000/api/config", timeout=240)
+    if build or not cli_binary().is_file():
+        build_cli(environment)
+    else:
+        ensure_cli_alias()
+    if start_executor:
+        configure_agents(environment, lifeos_root, controller_root)
+    sync_codex_index(environment, lifeos_root, controller_root)
+    if start_executor:
+        print("LifeOS 工作台已就绪：%s" % APP_URL)
+    else:
+        print("LifeOS 看板与索引已就绪；AI 执行器由置顶 Codex 任务按需启动。")
+    if open_browser:
+        webbrowser.open(APP_URL)
+
+
+def ensure_running(lifeos_root: Path, controller_root: Path) -> None:
+    """由置顶 Codex 心跳调用；幂等恢复看板、执行器和全局索引。"""
+    start(
+        lifeos_root,
+        controller_root,
+        build=False,
+        open_browser=False,
+        start_executor=True,
+    )
+
+
+def stop(lifeos_root: Path, controller_root: Path) -> None:
+    environment = runtime_environment(lifeos_root, controller_root)
+    binary = cli_binary()
+    if binary.is_file():
+        _run(
+            [str(binary), "daemon", "stop", "--profile", PROFILE],
+            environment=environment,
+            cwd=REPO / "server",
+            check=False,
+        )
+    if ENV_FILE.is_file() and docker_ready(environment):
+        _run(compose_command(environment) + ["stop"], environment=environment, check=False)
+    print("LifeOS 工作台已停止；数据卷和任务记录已保留。")
+
+
+def status(lifeos_root: Path, controller_root: Path) -> int:
+    environment = runtime_environment(lifeos_root, controller_root)
+    if not ENV_FILE.is_file() or not docker_ready(environment):
+        print("LifeOS 工作台未运行。")
+        return 1
+    compose_status = _run(
+        compose_command(environment) + ["ps", "--format", "json"],
+        environment=environment,
+        check=False,
+        capture=True,
+    )
+    services = []
+    for line in compose_status.stdout.splitlines():
+        try:
+            item = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        services.append(
+            {
+                "service": item.get("Service"),
+                "state": item.get("State"),
+                "health": item.get("Health"),
+            }
+        )
+    daemon = None
+    if cli_binary().is_file():
+        daemon_result = _run(
+            [str(cli_binary()), "daemon", "status", "--profile", PROFILE, "--output", "json"],
+            environment=environment,
+            cwd=REPO / "server",
+            check=False,
+            capture=True,
+        )
+        try:
+            daemon = json.loads(daemon_result.stdout) if daemon_result.stdout.strip() else None
+        except json.JSONDecodeError:
+            daemon = {"status": "unknown", "detail": daemon_result.stdout.strip()[:500]}
+    payload = {"app_url": APP_URL, "services": services, "daemon": daemon}
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    healthy = bool(services) and all(item.get("state") == "running" for item in services)
+    return 0 if healthy else 1
+
+
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def backup(lifeos_root: Path, controller_root: Path) -> Path:
+    environment = runtime_environment(lifeos_root, controller_root)
+    ensure_env()
+    if not docker_ready(environment):
+        raise WorkbenchError("备份前需要启动本机容器运行底座")
+    timestamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S")
+    root = Path.home() / "Library/Application Support/LifeOS/backups" / timestamp
+    root.mkdir(parents=True, mode=0o700)
+    os.chmod(root, 0o700)
+    postgres_dump = root / "workbench-postgres.dump"
+    with postgres_dump.open("wb") as output:
+        completed = subprocess.run(
+            compose_command(environment)
+            + ["exec", "-T", "postgres", "pg_dump", "-U", "lifeos", "-d", "lifeos", "--format=custom"],
+            cwd=str(REPO),
+            env=dict(environment),
+            stdout=output,
+            stderr=subprocess.PIPE,
+            check=False,
+        )
+    if completed.returncode != 0:
+        raise WorkbenchError("PostgreSQL 备份失败")
+    os.chmod(postgres_dump, 0o600)
+
+    files = [postgres_dump]
+    source_db = ensure_context_database(lifeos_root)
+    if source_db.is_file():
+        sqlite_dump = root / "lifeos-context.sqlite3"
+        source = sqlite3.connect("file:%s?mode=ro" % source_db, uri=True)
+        destination = sqlite3.connect(str(sqlite_dump))
+        try:
+            source.backup(destination)
+        finally:
+            destination.close()
+            source.close()
+        os.chmod(sqlite_dump, 0o600)
+        files.append(sqlite_dump)
+    manifest = {
+        "created_at": dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat(),
+        "lifeos_root": str(lifeos_root),
+        "contains_codex_chat_raw": False,
+        "files": [
+            {"name": path.name, "bytes": path.stat().st_size, "sha256": _sha256_file(path)}
+            for path in files
+        ],
+    }
+    manifest_path = root / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.chmod(manifest_path, 0o600)
+    print("LifeOS 工作台备份已完成：%s" % root)
+    return root
+
+
+def doctor(lifeos_root: Path, controller_root: Path) -> int:
+    environment = runtime_environment(lifeos_root, controller_root)
+    database = ensure_context_database(lifeos_root)
+    completed = _run(
+        [
+            sys.executable,
+            str(controller_root / "scripts/lifeos_controller.py"),
+            "--root",
+            str(lifeos_root),
+            "--database",
+            str(database),
+            "--server-url",
+            BACKEND_URL,
+            "--codex-home",
+            str(Path.home() / ".codex"),
+            "doctor",
+        ],
+        environment=environment,
+        cwd=controller_root,
+        check=False,
+    )
+    return completed.returncode
+
+
+def _write_plist(path: Path, payload: Mapping[str, object]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle = tempfile.NamedTemporaryFile(mode="wb", dir=str(path.parent), prefix=path.name + ".", delete=False)
+    temp_path = Path(handle.name)
+    try:
+        os.chmod(temp_path, 0o600)
+        with handle:
+            plistlib.dump(dict(payload), handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_path, path)
+        os.chmod(path, 0o600)
+    finally:
+        if temp_path.exists():
+            temp_path.unlink()
+
+
+def install_autostart(lifeos_root: Path, controller_root: Path) -> None:
+    environment = runtime_environment(lifeos_root, controller_root)
+    database = ensure_context_database(lifeos_root)
+    launch_dir = Path.home() / "Library/LaunchAgents"
+    log_dir = Path.home() / "Library/Logs/LifeOS"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    python = sys.executable
+    common_env = {
+        "PATH": environment["PATH"],
+        "LIFEOS_ROOT": str(lifeos_root),
+        "LIFEOS_CONTROLLER_ROOT": str(controller_root),
+        "LIFEOS_CODEX_HOME": str(Path.home() / ".codex"),
+        "LIFEOS_SERVER_URL": BACKEND_URL,
+        "LIFEOS_WORKBENCH_DB": str(database),
+        "LIFEOS_AUTOMATION_TOKEN_FILE": str(AUTOMATION_TOKEN_FILE),
+    }
+    plists = {
+        LAUNCH_LABEL: {
+            "Label": LAUNCH_LABEL,
+            "ProgramArguments": [
+                python,
+                str(Path(__file__).resolve()),
+                "start",
+                "--no-open",
+                "--no-build",
+                "--board-only",
+            ],
+            "RunAtLoad": True,
+            "ThrottleInterval": 60,
+            "EnvironmentVariables": common_env,
+            "StandardOutPath": str(log_dir / "workbench.log"),
+            "StandardErrorPath": str(log_dir / "workbench-error.log"),
+        },
+        INDEX_LABEL: {
+            "Label": INDEX_LABEL,
+            "ProgramArguments": [
+                python,
+                str(controller_root / "scripts/lifeos_controller.py"),
+                "--root",
+                str(lifeos_root),
+                "--database",
+                str(database),
+                "--codex-home",
+                str(Path.home() / ".codex"),
+                "sync",
+            ],
+            "RunAtLoad": True,
+            "StartInterval": INDEX_SYNC_INTERVAL_SECONDS,
+            "ThrottleInterval": 60,
+            "EnvironmentVariables": common_env,
+            "StandardOutPath": str(log_dir / "index.log"),
+            "StandardErrorPath": str(log_dir / "index-error.log"),
+        },
+        BACKUP_LABEL: {
+            "Label": BACKUP_LABEL,
+            "ProgramArguments": [python, str(Path(__file__).resolve()), "backup"],
+            "StartCalendarInterval": {"Hour": 3, "Minute": 15},
+            "ThrottleInterval": 300,
+            "EnvironmentVariables": common_env,
+            "StandardOutPath": str(log_dir / "backup.log"),
+            "StandardErrorPath": str(log_dir / "backup-error.log"),
+        },
+        CHATGPT_WAKE_LABEL: {
+            "Label": CHATGPT_WAKE_LABEL,
+            "ProgramArguments": ["/usr/bin/open", "-gj", "-a", "ChatGPT"],
+            "RunAtLoad": True,
+            "ThrottleInterval": 300,
+            "EnvironmentVariables": {"PATH": environment["PATH"]},
+            "StandardOutPath": str(log_dir / "chatgpt-wake.log"),
+            "StandardErrorPath": str(log_dir / "chatgpt-wake-error.log"),
+        },
+    }
+    launchctl = _find_executable("launchctl", environment)
+    domain = "gui/%s" % os.getuid()
+    for label, payload in plists.items():
+        path = launch_dir / (label + ".plist")
+        _run([launchctl, "bootout", domain + "/" + label], environment=environment, check=False, capture=True)
+        _write_plist(path, payload)
+        _run([launchctl, "bootstrap", domain, str(path)], environment=environment)
+    print(
+        "已启用：登录后自动启动看板并唤醒 Codex，置顶会话经营心跳恢复 AI 执行器，"
+        "每 2 小时静默刷新索引、每日本地备份。"
+    )
+
+
+def uninstall_autostart(lifeos_root: Path, controller_root: Path) -> None:
+    environment = runtime_environment(lifeos_root, controller_root)
+    launchctl = _find_executable("launchctl", environment)
+    domain = "gui/%s" % os.getuid()
+    launch_dir = Path.home() / "Library/LaunchAgents"
+    for label in (LAUNCH_LABEL, INDEX_LABEL, BACKUP_LABEL, CHATGPT_WAKE_LABEL):
+        _run([launchctl, "bootout", domain + "/" + label], environment=environment, check=False, capture=True)
+        path = launch_dir / (label + ".plist")
+        if path.exists():
+            path.unlink()
+    print("LifeOS 工作台自动启动与定时任务已移除；工作台数据未删除。")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="LifeOS 工作台本机运行入口")
+    parser.add_argument("--lifeos-root", type=Path)
+    parser.add_argument("--controller-root", type=Path)
+    commands = parser.add_subparsers(dest="command", required=True)
+    start_parser = commands.add_parser("start", help="启动并打开工作台")
+    start_parser.add_argument("--no-build", action="store_true")
+    start_parser.add_argument("--no-open", action="store_true")
+    start_parser.add_argument(
+        "--board-only",
+        action="store_true",
+        help="只启动看板与索引；AI 执行器由置顶 Codex 任务按需启动",
+    )
+    commands.add_parser("stop", help="停止工作台但保留数据")
+    commands.add_parser("status", help="查看本地服务状态")
+    commands.add_parser("backup", help="创建受限本地备份")
+    commands.add_parser("doctor", help="检查完整执行闭环")
+    commands.add_parser("ensure", help="幂等恢复看板、AI 执行器和索引")
+    commands.add_parser("install-autostart", help="启用自动启动、索引和备份")
+    commands.add_parser("uninstall-autostart", help="移除自动任务但保留数据")
+    return parser
+
+
+def main(argv: Optional[Sequence[str]] = None) -> int:
+    args = build_parser().parse_args(argv)
+    try:
+        lifeos_root = resolve_lifeos_root(args.lifeos_root)
+        controller_root = resolve_controller_root(args.controller_root)
+        if args.command == "start":
+            start(
+                lifeos_root,
+                controller_root,
+                build=not args.no_build,
+                open_browser=not args.no_open,
+                start_executor=not args.board_only,
+            )
+            return 0
+        if args.command == "stop":
+            stop(lifeos_root, controller_root)
+            return 0
+        if args.command == "status":
+            return status(lifeos_root, controller_root)
+        if args.command == "backup":
+            backup(lifeos_root, controller_root)
+            return 0
+        if args.command == "doctor":
+            return doctor(lifeos_root, controller_root)
+        if args.command == "ensure":
+            ensure_running(lifeos_root, controller_root)
+            return 0
+        if args.command == "install-autostart":
+            install_autostart(lifeos_root, controller_root)
+            return 0
+        if args.command == "uninstall-autostart":
+            uninstall_autostart(lifeos_root, controller_root)
+            return 0
+        raise WorkbenchError("未知命令")
+    except (WorkbenchError, OSError, subprocess.SubprocessError, sqlite3.Error) as error:
+        print("LifeOS 工作台操作失败：%s" % error, file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

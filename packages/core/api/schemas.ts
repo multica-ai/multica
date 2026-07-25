@@ -86,6 +86,7 @@ import type {
   Squad,
   TimelineEntry,
   User,
+  Workspace,
   WebhookDelivery,
   WorkspaceMcpServer,
 } from "../types";
@@ -761,6 +762,9 @@ export interface AppConfigResponse {
    * too, so absent must be treated as false (#8296). */
   comment_delete_keep_replies_supported?: boolean;
   server_version?: string;
+  local_mode?: boolean;
+  local_workspace_slug?: string;
+  local_auth_configured?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -1000,6 +1004,9 @@ export const AppConfigSchema = z.object({
   agent_conversation_starters_supported: BooleanWithDefaultSchema(false),
   comment_delete_keep_replies_supported: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
+  local_mode: BooleanWithDefaultSchema(false).optional(),
+  local_workspace_slug: OptionalStringSchema,
+  local_auth_configured: BooleanWithDefaultSchema(false).optional(),
 }).loose();
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
@@ -1019,6 +1026,46 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   // Fail closed: old servers delete a comment's replies with it.
   comment_delete_keep_replies_supported: false,
   feature_flags: {},
+  local_mode: false,
+  local_workspace_slug: "",
+  local_auth_configured: false,
+};
+
+export const WorkspaceSchema = z.object({
+  id: z.string(),
+  name: z.string().default(""),
+  slug: z.string(),
+  description: z.string().nullable().default(null),
+  context: z.string().nullable().default(null),
+  settings: z.record(z.string(), z.unknown()).default({}),
+  repos: z
+    .array(
+      z
+        .object({
+          url: z.string(),
+          description: z.string().optional(),
+        })
+        .loose(),
+    )
+    .default([]),
+  issue_prefix: z.string().default("LIFE"),
+  avatar_url: z.string().nullable().default(null),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_WORKSPACE: Workspace = {
+  id: "",
+  name: "",
+  slug: "",
+  description: null,
+  context: null,
+  settings: {},
+  repos: [],
+  issue_prefix: "LIFE",
+  avatar_url: null,
+  created_at: "",
+  updated_at: "",
 };
 
 // Preference keys may grow over time, so keep both the key and value spaces
@@ -2472,6 +2519,12 @@ export const EMPTY_USER: User = {
   created_at: "",
   updated_at: "",
 };
+
+export const LocalLoginResponseSchema = z.object({
+  token: z.string().min(1),
+  user: UserSchema,
+  workspace: WorkspaceSchema,
+}).loose();
 
 // ---------------------------------------------------------------------------
 // Cross-workspace unread inbox summary (`/api/inbox/unread-summary` GET).

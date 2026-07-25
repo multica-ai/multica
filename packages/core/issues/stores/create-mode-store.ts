@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { defaultStorage } from "../../platform/storage";
 import { useModalStore } from "../../modals";
+import { configStore } from "../../config";
 
 /**
  * Last create-issue mode the user landed on. Drives the global `c` shortcut
@@ -46,6 +47,10 @@ export const useCreateModeStore = create<CreateModeState>()(
 export function openCreateIssueWithPreference(
   data?: Record<string, unknown> | null,
 ) {
+  if (configStore.getState().localMode) {
+    useModalStore.getState().open("create-issue", data ?? null);
+    return;
+  }
   const lastMode = useCreateModeStore.getState().lastMode;
   const modal = lastMode === "manual" ? "create-issue" : "quick-create-issue";
   useModalStore.getState().open(modal, data ?? null);

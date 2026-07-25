@@ -1,0 +1,37 @@
+# LifeOS 工作台本机覆盖层。与 selfhost + selfhost.build 一起使用。
+name: lifeos-workbench
+
+services:
+  backend:
+    image: lifeos-workbench-backend:local
+    environment:
+      APP_ENV: production
+      LIFEOS_LOCAL_MODE: "true"
+      LIFEOS_BIND_HOST: "0.0.0.0"
+      LIFEOS_CONTAINER_LOOPBACK_PUBLISH: "true"
+      LIFEOS_AUTOMATION_TOKEN: ${LIFEOS_AUTOMATION_TOKEN:?required}
+      ALLOW_SIGNUP: "false"
+      DISABLE_WORKSPACE_CREATION: "true"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/readyz"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  frontend:
+    image: lifeos-workbench-web:local
+    environment:
+      LIFEOS_LOCAL_MODE: "true"
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:3000/lifeos/issues').then(r=>{if(!r.ok)process.exit(1)})",
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s

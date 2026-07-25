@@ -66,9 +66,17 @@ type dbExecutor interface {
 }
 
 type Config struct {
-	AllowSignup         bool
-	AllowedEmails       []string
-	AllowedEmailDomains []string
+	// LocalMode enables the deterministic, single-user LifeOS bootstrap.
+	// It removes the human login flow but keeps normal JWT, CSRF, daemon, and
+	// task-token boundaries for internal service isolation.
+	LocalMode bool
+	// LocalAutomationToken is a high-entropy machine credential used only by
+	// the loopback LifeOS controller. It is never returned by /api/config and
+	// is separate from the chairman's username and password.
+	LocalAutomationToken string
+	AllowSignup          bool
+	AllowedEmails        []string
+	AllowedEmailDomains  []string
 	// DisableWorkspaceCreation, when true, makes POST /api/workspaces return
 	// 403 for every caller. There is no role/owner exception because the repo
 	// has no platform-admin concept; operators bootstrap the workspace with

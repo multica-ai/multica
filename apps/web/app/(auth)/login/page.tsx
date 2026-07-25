@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, useEffect, useRef, useState, type FormEvent } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
@@ -14,7 +14,7 @@ import {
   resolvePostAuthDestination,
   useHasOnboarded,
 } from "@multica/core/paths";
-import { api } from "@multica/core/api";
+import { api, ApiError } from "@multica/core/api";
 import type { Workspace } from "@multica/core/types";
 import {
   Card,
@@ -24,6 +24,8 @@ import {
   CardContent,
 } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
+import { Label } from "@multica/ui/components/ui/label";
 import { Loader2 } from "lucide-react";
 import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
@@ -61,6 +63,10 @@ function LoginPageContent() {
   const qc = useQueryClient();
   const { t } = useT("auth");
   const googleClientId = useConfigStore((state) => state.googleClientId);
+  const localMode = useConfigStore((state) => state.localMode);
+  const localAuthConfigured = useConfigStore(
+    (state) => state.localAuthConfigured,
+  );
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -78,6 +84,11 @@ function LoginPageContent() {
 
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
   const [desktopError, setDesktopError] = useState("");
+  const [localUsername, setLocalUsername] = useState("");
+  const [localPassword, setLocalPassword] = useState("");
+  const [localPasswordConfirm, setLocalPasswordConfirm] = useState("");
+  const [localError, setLocalError] = useState("");
+  const [localSubmitting, setLocalSubmitting] = useState(false);
   const hasOnboarded = useHasOnboarded();
 
   // Latched once auth has been observed settled as logged-out on this page.
@@ -149,6 +160,39 @@ function LoginPageContent() {
     router.push(await resolveLoggedInDestination(qc, onboarded, list));
   };
 
+  const handleLocalSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!localAuthConfigured && localPassword !== localPasswordConfirm) {
+      setLocalError(t(($) => $.lifeos.password_mismatch));
+      return;
+    }
+    setLocalSubmitting(true);
+    setLocalError("");
+    try {
+      const session = localAuthConfigured
+        ? await api.localLogin(localUsername, localPassword)
+        : await api.localSetup(localUsername, localPassword);
+      qc.setQueryData(workspaceKeys.list(), [session.workspace]);
+      useAuthStore.setState({ user: session.user, isLoading: false });
+      setLoggedInCookie();
+      router.push("/lifeos/issues");
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 429) {
+        setLocalError(t(($) => $.lifeos.too_many_attempts));
+      } else {
+        setLocalError(
+          t(($) =>
+            localAuthConfigured
+              ? $.lifeos.invalid_credentials
+              : $.lifeos.setup_failed,
+          ),
+        );
+      }
+    } finally {
+      setLocalSubmitting(false);
+    }
+  };
+
   // Build Google OAuth state: encode platform, next URL, and CLI callback
   // params so the callback can redirect to the right place after login.
   // CLI callback/state must survive the Google OAuth round-trip so the
@@ -209,6 +253,104 @@ function LoginPageContent() {
             ) : (
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
             )}
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  if (localMode) {
+    return (
+      <div className="flex min-h-screen items-center justify-center px-4">
+        <Card className="w-full max-w-sm">
+          <CardHeader className="text-center">
+            <CardTitle className="text-2xl">
+              {t(($) => $.lifeos.title)}
+            </CardTitle>
+            <CardDescription>
+              {t(($) =>
+                localAuthConfigured
+                  ? $.lifeos.login_description
+                  : $.lifeos.setup_description,
+              )}
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <form onSubmit={handleLocalSubmit} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="lifeos-username">
+                  {t(($) => $.lifeos.username)}
+                </Label>
+                <Input
+                  id="lifeos-username"
+                  value={localUsername}
+                  onChange={(event) => setLocalUsername(event.target.value)}
+                  autoComplete="username"
+                  autoCapitalize="none"
+                  autoFocus
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="lifeos-password">
+                  {t(($) => $.lifeos.password)}
+                </Label>
+                <Input
+                  id="lifeos-password"
+                  type="password"
+                  value={localPassword}
+                  onChange={(event) => setLocalPassword(event.target.value)}
+                  autoComplete={
+                    localAuthConfigured ? "current-password" : "new-password"
+                  }
+                  required
+                />
+              </div>
+              {!localAuthConfigured && (
+                <>
+                  <p className="text-xs text-muted-foreground">
+                    {t(($) => $.lifeos.password_requirements)}
+                  </p>
+                  <div className="space-y-2">
+                    <Label htmlFor="lifeos-password-confirm">
+                      {t(($) => $.lifeos.password_confirm)}
+                    </Label>
+                    <Input
+                      id="lifeos-password-confirm"
+                      type="password"
+                      value={localPasswordConfirm}
+                      onChange={(event) =>
+                        setLocalPasswordConfirm(event.target.value)
+                      }
+                      autoComplete="new-password"
+                      required
+                    />
+                  </div>
+                </>
+              )}
+              {localError && (
+                <p className="text-sm text-destructive">{localError}</p>
+              )}
+              <Button
+                type="submit"
+                className="w-full"
+                size="lg"
+                disabled={
+                  localSubmitting ||
+                  !localUsername ||
+                  !localPassword ||
+                  (!localAuthConfigured && !localPasswordConfirm)
+                }
+              >
+                {localSubmitting
+                  ? t(($) => $.lifeos.submitting)
+                  : t(($) =>
+                      localAuthConfigured
+                        ? $.lifeos.login
+                        : $.lifeos.create_login,
+                    )}
+              </Button>
+            </form>
           </CardContent>
         </Card>
       </div>

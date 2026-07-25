@@ -1,6 +1,7 @@
 "use client";
 
 import { useChatStore } from "@multica/core/chat";
+import { useConfigStore } from "@multica/core/config";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useNavigation } from "../navigation";
 import { ChatFab } from "./components/chat-fab";
@@ -19,11 +20,15 @@ import { isFloatingChatRouteSuppressed } from "./floating-chat-visibility";
  *     would be pure duplication — hide it there.
  */
 export function FloatingChat() {
+  const localMode = useConfigStore((s) => s.localMode);
   const enabled = useChatStore((s) => s.floatingChatEnabled);
   const { pathname } = useNavigation();
   const wsPaths = useWorkspacePaths();
 
-  if (!enabled) return null;
+  // The pinned Codex task is LifeOS's single conversation surface. The
+  // workbench stays focused on task dispatch, progress, exceptions, and
+  // acceptance instead of creating a second AI inbox with split context.
+  if (localMode || !enabled) return null;
   // Suppress on the Chat tab — it renders the same conversation full-page.
   if (isFloatingChatRouteSuppressed(pathname, wsPaths.chat())) return null;
 

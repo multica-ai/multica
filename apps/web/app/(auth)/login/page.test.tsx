@@ -24,6 +24,8 @@ const {
   mockIssueCliToken,
   mockListWorkspaces,
   mockListMyInvitations,
+  mockLocalLogin,
+  mockLocalSetup,
   mockPush,
   mockReplace,
   searchParamsState,
@@ -32,6 +34,8 @@ const {
   mockIssueCliToken: vi.fn(),
   mockListWorkspaces: vi.fn(),
   mockListMyInvitations: vi.fn(),
+  mockLocalLogin: vi.fn(),
+  mockLocalSetup: vi.fn(),
   mockPush: vi.fn(),
   mockReplace: vi.fn(),
   searchParamsState: { params: new URLSearchParams() },
@@ -65,7 +69,11 @@ vi.mock("@multica/core/auth", async () => {
   const useAuthStore = Object.assign(
     (selector: (s: typeof authStateRef.state) => unknown) =>
       selector(authStateRef.state),
-    { getState: () => authStateRef.state },
+    {
+      getState: () => authStateRef.state,
+      setState: (next: Partial<typeof authStateRef.state>) =>
+        Object.assign(authStateRef.state, next),
+    },
   );
   return { ...actual, useAuthStore };
 });
@@ -84,10 +92,13 @@ vi.mock("@multica/core/api", () => ({
     setToken: vi.fn(),
     getMe: vi.fn(),
     issueCliToken: mockIssueCliToken,
+    localLogin: mockLocalLogin,
+    localSetup: mockLocalSetup,
   },
 }));
 
 import LoginPage from "./page";
+import { configStore } from "@multica/core/config";
 
 describe("LoginPage", () => {
   beforeEach(() => {
@@ -97,11 +108,60 @@ describe("LoginPage", () => {
     authStateRef.state.isLoading = false;
     mockListWorkspaces.mockResolvedValue([]);
     mockListMyInvitations.mockResolvedValue([]);
+    configStore.getState().setAuthConfig({
+      allowSignup: true,
+      localMode: false,
+      localAuthConfigured: false,
+    });
   });
 
   // Shared LoginPage behavior is canonical in
   // packages/views/auth/login-page.test.tsx. This wrapper suite only owns web
   // platform handoff and redirect behavior.
+
+  it("shows first-run local credential setup in LifeOS mode", () => {
+    configStore.getState().setAuthConfig({
+      allowSignup: false,
+      localMode: true,
+      localAuthConfigured: false,
+    });
+
+    render(<LoginPage />, { wrapper: createWrapper() });
+
+    expect(screen.getByText("AI Xingyao Workbench")).toBeInTheDocument();
+    expect(screen.getByLabelText("Username")).toBeInTheDocument();
+    expect(screen.getByLabelText("Confirm password")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Create account and continue" }),
+    ).toBeInTheDocument();
+  });
+
+  it("uses the strong local login endpoint after setup", async () => {
+    configStore.getState().setAuthConfig({
+      allowSignup: false,
+      localMode: true,
+      localAuthConfigured: true,
+    });
+    mockLocalLogin.mockResolvedValue({
+      token: "browser-session",
+      user: { id: "u1", email: "chairman@lifeos.invalid" },
+      workspace: { id: "ws1", slug: "lifeos" },
+    });
+    const user = userEvent.setup();
+    render(<LoginPage />, { wrapper: createWrapper() });
+
+    await user.type(screen.getByLabelText("Username"), "xingyao");
+    await user.type(screen.getByLabelText("Password"), "Strong!LifeOS2026");
+    await user.click(screen.getByRole("button", { name: "Open workbench" }));
+
+    await waitFor(() => {
+      expect(mockLocalLogin).toHaveBeenCalledWith(
+        "xingyao",
+        "Strong!LifeOS2026",
+      );
+      expect(mockPush).toHaveBeenCalledWith("/lifeos/issues");
+    });
+  });
 
   // Regression: MUL-1080 — if the user is already authenticated on the web
   // and the Desktop app redirects them to /login?platform=desktop, the web

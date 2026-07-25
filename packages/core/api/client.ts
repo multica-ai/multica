@@ -293,6 +293,7 @@ import {
   EMPTY_SQUAD_MEMBER_STATUS_LIST,
   EMPTY_TIMELINE_ENTRIES,
   EMPTY_USER,
+  LocalLoginResponseSchema,
   EMPTY_LIST_WEBHOOK_DELIVERIES_RESPONSE,
   EMPTY_WEBHOOK_DELIVERY,
   AppConfigSchema,
@@ -510,6 +511,10 @@ export interface ClientUsageRequest {
 export interface LoginResponse {
   token: string;
   user: User;
+}
+
+export interface LocalLoginResponse extends LoginResponse {
+  workspace: Workspace;
 }
 
 export class ApiError extends Error {
@@ -937,6 +942,40 @@ export class ApiClient {
       method: "POST",
       body: JSON.stringify({ email, code }),
     });
+  }
+
+  async localLogin(username: string, password: string): Promise<LocalLoginResponse> {
+    const raw = await this.fetch<unknown>("/auth/local", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    const session = parseWithFallback<LocalLoginResponse | null>(
+      raw,
+      LocalLoginResponseSchema,
+      null,
+      { endpoint: "POST /auth/local" },
+    );
+    if (!session) {
+      throw new Error("invalid local session response");
+    }
+    return session;
+  }
+
+  async localSetup(username: string, password: string): Promise<LocalLoginResponse> {
+    const raw = await this.fetch<unknown>("/auth/local/setup", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    const session = parseWithFallback<LocalLoginResponse | null>(
+      raw,
+      LocalLoginResponseSchema,
+      null,
+      { endpoint: "POST /auth/local/setup" },
+    );
+    if (!session) {
+      throw new Error("invalid local session response");
+    }
+    return session;
   }
 
   async googleLogin(code: string, redirectUri: string): Promise<LoginResponse> {

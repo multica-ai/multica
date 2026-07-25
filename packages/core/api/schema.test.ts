@@ -737,6 +737,22 @@ describe("ApiClient schema fallback", () => {
       expect(config.daemon_app_url).toBeUndefined();
       expect(config.feature_flags?.composio_mcp_apps).toBe(true);
     });
+
+    it("parses the local single-user mode contract", async () => {
+      stubFetchJson({
+        cdn_domain: "",
+        allow_signup: false,
+        workspace_creation_disabled: true,
+        local_mode: true,
+        local_workspace_slug: "lifeos",
+        local_auth_configured: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const config = await client.getConfig();
+      expect(config.local_mode).toBe(true);
+      expect(config.local_workspace_slug).toBe("lifeos");
+      expect(config.local_auth_configured).toBe(true);
+    });
   });
 
   describe("listGroupedIssues", () => {
