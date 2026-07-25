@@ -16,12 +16,19 @@ import (
 )
 
 type fakeObjectDeleter struct {
-	mu      sync.Mutex
-	deleted []string
-	err     error
+	mu       sync.Mutex
+	deleted  []string
+	err      error
+	onDelete func(key string)
 }
 
 func (f *fakeObjectDeleter) DeleteObject(_ context.Context, key string) error {
+	f.mu.Lock()
+	hook := f.onDelete
+	f.mu.Unlock()
+	if hook != nil {
+		hook(key)
+	}
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.err != nil {
@@ -267,6 +274,13 @@ func TestChannelMediaReconciler_SettleInvariantDwarfsPipelineBudgets(t *testing.
 	if channelMediaReconcileLease <= 0 || channelMediaReconcileLease >= ChannelMediaReconcileSettleDelay {
 		t.Fatalf("lease %v must be positive and well under settle %v", channelMediaReconcileLease, ChannelMediaReconcileSettleDelay)
 	}
+	// The lease is heartbeated per row, so it only ever needs to cover ONE
+	// row's worst case (a delete at its full timeout plus DB round-trips) —
+	// never the whole sequential batch. 2x margin keeps renewal comfortably
+	// ahead of expiry.
+	if channelMediaReconcileLease < 2*channelMediaReconcileDeleteTimeout {
+		t.Fatalf("lease %v must be >= 2x the per-delete timeout %v", channelMediaReconcileLease, channelMediaReconcileDeleteTimeout)
+	}
 }
 
 // Storage initialization can fail at boot (no S3, unwritable local dir) while
@@ -363,5 +377,54 @@ func TestChannelMediaReconciler_StalledDeleteIsBoundedAndBacksOff(t *testing.T) 
 	state, attempt, exists := f.rowState(t, "ws/lark/stalled")
 	if !exists || state != "deleting" || attempt != 1 {
 		t.Fatalf("row = (%q, attempt=%d, %v), want released 'deleting' with backoff", state, attempt, exists)
+	}
+}
+
+// The batch shares one claim but the lease is heartbeated per row: a row
+// reclaimed by another replica mid-batch (its lease expired while earlier
+// deletes ran long) must be skipped — no duplicate delete, no clobbered
+// attempt/backoff on the new owner's row.
+func TestChannelMediaReconciler_SkipsRowReclaimedMidBatch(t *testing.T) {
+	pool := newCancelFinalizePool(t)
+	f := seedReconcilerFixture(t, pool)
+	foreign := util.MustParseUUID("66666666-6666-4666-8666-666666666666")
+	deleter := &fakeObjectDeleter{}
+	// While row 1's delete runs, another replica reclaims row 2 (its shared
+	// lease "expired"): simulated by swapping in a foreign lease token.
+	deleter.onDelete = func(key string) {
+		if key != "ws/lark/first" {
+			return
+		}
+		if _, err := pool.Exec(context.Background(), `
+			UPDATE channel_media_pending_object
+			SET lease_token = $2, attempt = attempt + 1
+			WHERE storage_key = $1
+		`, "ws/lark/second", foreign); err != nil {
+			t.Errorf("simulate reclaim: %v", err)
+		}
+	}
+	rec := &ChannelMediaReconciler{Queries: db.New(pool), Storage: deleter}
+
+	// Ordered by next_attempt_at: "first" is older, processed first.
+	f.seedLedgerRow(t, "ws/lark/first", "https://cdn.test/first", "pending", ChannelMediaReconcileSettleDelay+2*time.Minute)
+	f.seedLedgerRow(t, "ws/lark/second", "https://cdn.test/second", "pending", ChannelMediaReconcileSettleDelay+time.Minute)
+
+	rec.RunOnce(context.Background())
+
+	if deleted := deleter.deletedKeys(); len(deleted) != 1 || deleted[0] != "ws/lark/first" {
+		t.Fatalf("deleted keys = %v, want only the first row (second was reclaimed)", deleted)
+	}
+	state, attempt, exists := f.rowState(t, "ws/lark/second")
+	if !exists || state != "deleting" || attempt != 2 {
+		t.Fatalf("reclaimed row = (%q, attempt=%d, %v), want untouched under the new owner ('deleting', 2, true)", state, attempt, exists)
+	}
+	var token pgtype.UUID
+	if err := pool.QueryRow(context.Background(), `
+		SELECT lease_token FROM channel_media_pending_object WHERE storage_key = $1
+	`, "ws/lark/second").Scan(&token); err != nil {
+		t.Fatalf("load lease: %v", err)
+	}
+	if token != foreign {
+		t.Fatalf("lease token = %v, want the new owner's %v", token, foreign)
 	}
 }

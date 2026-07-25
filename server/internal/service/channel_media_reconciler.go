@@ -139,6 +139,28 @@ func (r *ChannelMediaReconciler) RunOnce(ctx context.Context) {
 }
 
 func (r *ChannelMediaReconciler) settle(ctx context.Context, row db.ChannelMediaPendingObject, leaseToken pgtype.UUID) {
+	// Heartbeat the shared batch lease before this row's work: the lease only
+	// ever needs to cover ONE row's worst case (delete timeout << lease, see
+	// the invariant test), not the whole sequential batch. Losing the renewal
+	// means another replica already reclaimed the row after an expiry — skip
+	// it; touching it now would duplicate its delete and fight the new
+	// owner's attempt/backoff accounting.
+	renewed, err := r.Queries.RenewChannelMediaPendingObjectLease(ctx, db.RenewChannelMediaPendingObjectLeaseParams{
+		StorageKey:     row.StorageKey,
+		WorkspaceID:    row.WorkspaceID,
+		LeaseToken:     leaseToken,
+		LeaseExpiresAt: pgtype.Timestamptz{Time: r.clock().Add(channelMediaReconcileLease), Valid: true},
+	})
+	if err != nil {
+		r.logger().Warn("channel media reconciler: lease renew failed; skipping row",
+			"storage_key", row.StorageKey, "error", err)
+		return
+	}
+	if renewed == 0 {
+		r.logger().Info("channel media reconciler: row reclaimed by another worker; skipping",
+			"storage_key", row.StorageKey, "workspace_id", row.WorkspaceID)
+		return
+	}
 	// The reference check runs AFTER the claim flipped the row to 'deleting':
 	// from that point BindMediaRefs cannot attach this key, so a negative
 	// answer is terminal, not a snapshot race.

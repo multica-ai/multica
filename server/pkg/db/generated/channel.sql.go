@@ -1523,6 +1523,41 @@ func (q *Queries) ReleaseChannelWSLease(ctx context.Context, arg ReleaseChannelW
 	return err
 }
 
+const renewChannelMediaPendingObjectLease = `-- name: RenewChannelMediaPendingObjectLease :execrows
+UPDATE channel_media_pending_object
+SET lease_expires_at = $1
+WHERE storage_key = $2
+  AND workspace_id = $3
+  AND lease_token = $4
+`
+
+type RenewChannelMediaPendingObjectLeaseParams struct {
+	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
+	StorageKey     string             `json:"storage_key"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	LeaseToken     pgtype.UUID        `json:"lease_token"`
+}
+
+// Per-row heartbeat: the batch shares one claim, so the lease must be
+// extended before EACH row's settle work — otherwise a few storage deletes
+// running at their full timeout could outlive the lease mid-batch and a
+// second replica would reclaim the tail, duplicating deletes and inflating
+// attempt/backoff. Zero rows affected means another worker already reclaimed
+// this row: the caller must skip it. workspace_id explicit per the tenancy
+// rule.
+func (q *Queries) RenewChannelMediaPendingObjectLease(ctx context.Context, arg RenewChannelMediaPendingObjectLeaseParams) (int64, error) {
+	result, err := q.db.Exec(ctx, renewChannelMediaPendingObjectLease,
+		arg.LeaseExpiresAt,
+		arg.StorageKey,
+		arg.WorkspaceID,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const setChannelInstallationConfig = `-- name: SetChannelInstallationConfig :exec
 UPDATE channel_installation
 SET config = $2, updated_at = now()

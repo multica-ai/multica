@@ -695,6 +695,20 @@ FROM (
 WHERE obj.storage_key = due.storage_key
 RETURNING obj.*;
 
+-- name: RenewChannelMediaPendingObjectLease :execrows
+-- Per-row heartbeat: the batch shares one claim, so the lease must be
+-- extended before EACH row's settle work — otherwise a few storage deletes
+-- running at their full timeout could outlive the lease mid-batch and a
+-- second replica would reclaim the tail, duplicating deletes and inflating
+-- attempt/backoff. Zero rows affected means another worker already reclaimed
+-- this row: the caller must skip it. workspace_id explicit per the tenancy
+-- rule.
+UPDATE channel_media_pending_object
+SET lease_expires_at = @lease_expires_at
+WHERE storage_key = @storage_key
+  AND workspace_id = @workspace_id
+  AND lease_token = @lease_token;
+
 -- name: ReleaseChannelMediaPendingObject :exec
 -- Object-storage DELETE failed: keep the row in 'deleting' (bind must still
 -- never attach it), release the lease, and back off the next attempt.
