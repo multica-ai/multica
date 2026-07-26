@@ -107,6 +107,10 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"ToolCallUpdate","toolCallId":"tc-current","status":"completed","name":"Shell","parameters":{"command":"echo current"},"output":"current tool output\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"loaded"}}}}\n'
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1,"cacheReadTokens":7,"cacheWriteTokens":3}}}\n' "$id"
+      if [ -n "$KIRO_LATE_CHUNK" ]; then
+        sleep 0.05
+        printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":" tail"}}}}\n'
+      fi
       exit 0
       ;;
   esac
@@ -1104,7 +1108,6 @@ func TestKiroLoadIncludesMcpServersFromConfig(t *testing.T) {
 	}
 }
 
-
 // TestIsKiroOversizedHistoryImage pins the detector for the GH #5975 shape: a
 // resumed conversation whose history replays an image exceeding the provider's
 // max pixel dimensions, rejected at session/prompt as a -32603 that names the
@@ -1276,5 +1279,45 @@ func TestKiroFreshOversizedHistoryImageDoesNotSignalResumeRejected(t *testing.T)
 	}
 	if result.SessionID != "ses_fresh" {
 		t.Fatalf("expected the fresh session id, got %q", result.SessionID)
+	}
+}
+
+// TestKiroDrainsNotificationsAfterPromptResponse pins the trailing-notification
+// drain. kiro ACP can emit a final session update just after the
+// session/prompt response returns; closing stdin and cancelling the context at
+// that boundary raced the stdout reader and silently truncated the last chunk.
+// The same defect was fixed for the sibling ACP backends in #5440 (grok) and
+// #5675 (hermes).
+func TestKiroDrainsNotificationsAfterPromptResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPScript()))
+
+	backend, err := New("kiro", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"KIRO_LATE_CHUNK": "1"},
+	})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Output, "loaded tail") {
+		t.Fatalf("late output was truncated: %q", result.Output)
 	}
 }
