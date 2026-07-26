@@ -4,7 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -118,10 +120,13 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 		return nil, fmt.Errorf("toolaccess: service not configured")
 	}
 	subject := capabilityregistry.Subject{Type: "runtime", ID: uuidString(q.RuntimeID)}
+	listStart := time.Now()
 	tools, err := s.capabilities.List(ctx, q.WorkspaceID, &subject, nil)
 	if err != nil {
 		return nil, err
 	}
+	listElapsed := time.Since(listStart)
+	resolveStart := time.Now()
 
 	runtimeProtocols := RuntimeProtocols(q.RuntimeMode, q.RuntimeProvider, q.RuntimeCapabilities)
 	out := make([]EffectiveTool, 0, len(tools))
@@ -155,6 +160,18 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 			ExposureEffective: exposure,
 			Layers:            layerMap(policy),
 		})
+	}
+	// FIR-3781 instrumentation: separate the one catalog read from the
+	// per-capability policy resolution, so a regression can be attributed to a
+	// bigger N or a costlier resolve rather than inferred from the total.
+	if resolveElapsed := time.Since(resolveStart); listElapsed+resolveElapsed > 250*time.Millisecond {
+		slog.Info("effective tools resolve slow",
+			"workspace_id", uuidString(q.WorkspaceID),
+			"runtime_id", uuidString(q.RuntimeID),
+			"capabilities", len(tools),
+			"catalog_list_ms", listElapsed.Milliseconds(),
+			"policy_resolve_ms", resolveElapsed.Milliseconds(),
+		)
 	}
 	return out, nil
 }
