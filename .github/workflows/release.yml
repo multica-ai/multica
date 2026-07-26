@@ -113,7 +113,11 @@ jobs:
           args: ${{ steps.gr.outputs.args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+
+  # The public-tap mirror intentionally lives in firtal-group/homebrew-tap.
+  # It pulls every asset from this release, including Desktop installers that
+  # can arrive after the CLI archives, and writes with that repository's native
+  # GITHUB_TOKEN. This source workflow needs no cross-repo write credential.
 
   # Multi-arch images are built natively per platform on dedicated runners
   # (amd64 on ubuntu-latest, arm64 on ubuntu-24.04-arm) and merged into a
@@ -402,7 +406,7 @@ jobs:
   # notarized only when its Apple credentials are configured. Linux packages
   # do not require platform signing.
   desktop:
-    needs: [release]
+    needs: release
     strategy:
       fail-fast: false
       matrix:
@@ -445,12 +449,14 @@ jobs:
       - name: Package Desktop installers (${{ matrix.target }})
         working-directory: apps/desktop
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # electron-builder's GitHub publisher reads this:
-          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CSC_LINK || matrix.target == 'win' && secrets.WINDOWS_CSC_LINK || '' }}
           CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CSC_KEY_PASSWORD || matrix.target == 'win' && secrets.WINDOWS_CSC_KEY_PASSWORD || '' }}
           APPLE_ID: ${{ matrix.target == 'mac' && secrets.APPLE_ID || '' }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.target == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.target == 'mac' && secrets.APPLE_TEAM_ID || '' }}
-        run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always
+        # Publish to this private source release. The public tap mirror copies
+        # the installers and update metadata after each platform job uploads.
+        run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always -c.publish.repo=firtal-cerebro

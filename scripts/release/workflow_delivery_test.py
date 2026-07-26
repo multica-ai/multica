@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import json
 import unittest
 from pathlib import Path
 
@@ -18,6 +19,26 @@ class WorkflowDeliveryTest(unittest.TestCase):
         create = friday.index('gh release create "$TAG"')
         dispatch = friday.index('gh workflow run release.yml --ref "$TAG"')
         self.assertLess(create, dispatch)
+
+    def test_firtal_release_has_no_cross_repo_write_token(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+
+        self.assertIn('echo "args=release --clean --skip=homebrew"', release)
+        self.assertNotIn("${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}", release)
+        self.assertNotIn("\n  tap-mirror:\n", release)
+
+    def test_desktop_publishes_to_the_private_source_release(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+
+        desktop = release[release.index("\n  desktop:\n") :]
+        self.assertIn("    needs: release\n", desktop)
+        self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", desktop)
+        self.assertIn("-c.publish.repo=firtal-cerebro", desktop)
+
+    def test_desktop_declares_the_workspace_package_manager(self) -> None:
+        package = json.loads((ROOT / "apps/desktop/package.json").read_text())
+
+        self.assertEqual(package["packageManager"], "pnpm@10.28.2")
 
 
 if __name__ == "__main__":
