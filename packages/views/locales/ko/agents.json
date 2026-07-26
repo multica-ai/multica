@@ -513,6 +513,8 @@
     }
   },
   "profile_card": {
+    "_comment_model_label": "CEREBRO-PATCH(profile-card-model-row): FIR-3406 model row in agent hover card",
+    "model_label": "모델",
     "unavailable": "에이전트를 사용할 수 없습니다",
     "detail_link": "자세히 →",
     "runtime_label": "런타임",

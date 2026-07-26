@@ -114,10 +114,11 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
       )}
 
       {/* Meta rows — minimal set: runtime (where it lives), skills (what
-          it knows), owner (who manages it). Model is intentionally
-          omitted — power-user detail lives on the detail page. */}
+          it knows), owner (who manages it). */}
       <div className="flex flex-col gap-1.5 text-xs">
         <RuntimeRow agent={agent} runtime={runtime} />
+        {/* CEREBRO-PATCH(profile-card-model-row): FIR-3406 show the agent's model in the hover card. */}
+        <MetaRow label={t(($) => $.profile_card.model_label)} value={agent.model || t(($) => $.pickers.model_default)} mono />
         {agent.skills.length > 0 && (
           <SkillsRow skills={agent.skills.map((s) => s.name)} />
         )}

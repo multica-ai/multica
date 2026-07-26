@@ -513,6 +513,8 @@
     }
   },
   "profile_card": {
+    "_comment_model_label": "CEREBRO-PATCH(profile-card-model-row): FIR-3406 model row in agent hover card",
+    "model_label": "Model",
     "unavailable": "Agent unavailable",
     "detail_link": "Detail →",
     "runtime_label": "Runtime",
