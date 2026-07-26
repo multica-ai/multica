@@ -30,6 +30,14 @@ const (
 	censusInterval = 15 * time.Second
 	censusTopN     = 12
 	censusSQLChars = 110
+
+	// censusReportThreshold is the queries-per-window above which the census
+	// speaks. Normal production sits at ~2,000 acquires per 15s window; the
+	// 25 July incident ran 122,000-870,000. 20,000 is an order of magnitude
+	// above healthy and an order of magnitude below the incident, so the census
+	// stays silent in normal operation and names the offender during a flood
+	// without anyone having to turn it on first.
+	censusReportThreshold = 20_000
 )
 
 type queryCensus struct {
@@ -70,7 +78,10 @@ func (c *queryCensus) report() {
 	c.total = 0
 	c.mu.Unlock()
 
-	if total == 0 {
+	// Silent below the threshold: a healthy window is noise, and the census
+	// exists to catch the abnormal. CEREBRO_QUERY_CENSUS=1 forces every window
+	// to be reported, for deliberate measurement runs.
+	if total < censusReportThreshold && !censusVerbose() {
 		return
 	}
 	type row struct {
@@ -109,12 +120,14 @@ func (c *queryCensus) run(ctx context.Context) {
 	}
 }
 
-// queryCensusEnabled reports whether the census should be attached.
-func queryCensusEnabled() bool {
+// censusVerbose forces reporting of every window regardless of volume. Used for
+// deliberate measurement runs; unnecessary for catching a flood.
+func censusVerbose() bool {
 	return os.Getenv("CEREBRO_QUERY_CENSUS") == "1"
 }
 
-// activeQueryCensus is the process-wide census the pool tracer points at. It is
-// allocated unconditionally (a few hundred bytes) so the wiring in newDBPool
-// stays a single branch; nothing writes to it unless the tracer is attached.
+// activeQueryCensus is the process-wide census the pool tracer points at. The
+// tracer is always attached: one map lookup under a mutex per query is nothing
+// against a ~150 q/s baseline, and a census you have to switch on first is
+// useless for the incident you did not predict.
 var activeQueryCensus = newQueryCensus()
