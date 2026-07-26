@@ -70,6 +70,14 @@ type lifeOSAgent struct {
 	ArchivedAt *string `json:"archived_at"`
 }
 
+type lifeOSCommentReconcileResponse struct {
+	Scanned   int `json:"scanned"`
+	Queued    int `json:"queued"`
+	Coalesced int `json:"coalesced"`
+	Deferred  int `json:"deferred"`
+	Blocked   int `json:"blocked"`
+}
+
 func runSetupLifeOS(cmd *cobra.Command, _ []string) error {
 	if resolveProfile(cmd) == "" {
 		if err := cmd.Flags().Set("profile", defaultLifeOSProfile); err != nil {
@@ -128,8 +136,31 @@ func runSetupLifeOS(cmd *cobra.Command, _ []string) error {
 	if err := ensureLifeOSAgents(agentCtx, cfg, lifeOSRoot, controllerRoot); err != nil {
 		return err
 	}
+	reconciled, err := reconcileLifeOSComments(agentCtx, cfg)
+	if err != nil {
+		return err
+	}
+	if reconciled.Blocked > 0 {
+		return fmt.Errorf("AI 星耀 could not accept %d recovered comments", reconciled.Blocked)
+	}
+	accepted := reconciled.Queued + reconciled.Coalesced + reconciled.Deferred
+	if accepted > 0 {
+		fmt.Fprintf(os.Stderr, "AI 星耀 recovered %d recent comments.\n", accepted)
+	}
 	fmt.Fprintf(os.Stderr, "LifeOS workbench is ready: %s/lifeos/issues\n", appURL)
 	return nil
+}
+
+func reconcileLifeOSComments(ctx context.Context, cfg cli.CLIConfig) (lifeOSCommentReconcileResponse, error) {
+	client := cli.NewAPIClient(cfg.ServerURL, cfg.WorkspaceID, cfg.Token)
+	var response lifeOSCommentReconcileResponse
+	if err := client.PostJSON(ctx, "/api/lifeos/comments/reconcile", map[string]any{
+		"lookback_hours": 72,
+		"limit":          100,
+	}, &response); err != nil {
+		return lifeOSCommentReconcileResponse{}, fmt.Errorf("reconcile recent LifeOS comments: %w", err)
+	}
+	return response, nil
 }
 
 func resolveLifeOSControllerRoot(cmd *cobra.Command, lifeOSRoot string) (string, error) {

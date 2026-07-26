@@ -378,5 +378,9 @@ describe("isNoteCommentDraft", () => {
     expect(isNoteCommentDraft("/notes keep this routable")).toBe(false);
     expect(isNoteCommentDraft("/ note keep this routable")).toBe(false);
     expect(isNoteCommentDraft("please /note later")).toBe(false);
+    expect(isNoteCommentDraft("仅记录，无需回复")).toBe(true);
+    expect(isNoteCommentDraft("  仅记录，无需回复\n背景")).toBe(true);
+    expect(isNoteCommentDraft("仅记录，无需回复：背景")).toBe(true);
+    expect(isNoteCommentDraft("这句话仅记录，无需回复")).toBe(false);
   });
 });

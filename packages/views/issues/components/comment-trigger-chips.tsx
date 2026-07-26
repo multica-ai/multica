@@ -58,6 +58,8 @@ function sourceLabel(source: string, t: IssuesT): string {
       return t(($) => $.comment.trigger_source_mention_agent);
     case "mention_squad_leader":
       return t(($) => $.comment.trigger_source_mention_squad_leader);
+    case "lifeos_chairman":
+      return t(($) => $.comment.trigger_source_lifeos_chairman);
     default:
       return t(($) => $.comment.trigger_source_unknown);
   }
@@ -74,6 +76,8 @@ function sourceReason(agent: CommentTriggerPreviewAgent, t: IssuesT): string | n
       return null;
     case "mention_squad_leader":
       return t(($) => $.comment.trigger_reason_mention_squad_leader);
+    case "lifeos_chairman":
+      return t(($) => $.comment.trigger_reason_lifeos_chairman);
     default:
       return agent.reason || t(($) => $.comment.trigger_reason_unknown);
   }
@@ -102,13 +106,14 @@ function TriggerAgentTooltipBody({
   t: IssuesT;
 }) {
   const presenceLine = useTriggerPresenceLine(agent.id, t);
+  const locked = agent.source === "lifeos_chairman";
   return (
     <div className="space-y-0.5">
       <div className="flex items-baseline gap-1.5">
         <span className="font-medium">{agent.name}</span>
         <span className="text-micro text-muted-foreground">{sourceLabel(agent.source, t)}</span>
       </div>
-      {suppressed ? (
+      {suppressed && !locked ? (
         <div>{t(($) => $.comment.trigger_click_to_restore)}</div>
       ) : (
         <>
@@ -118,7 +123,9 @@ function TriggerAgentTooltipBody({
             const line = [sourceReason(agent, t), presenceLine].filter(Boolean).join(" ");
             return line ? <div>{line}</div> : null;
           })()}
-          <div className="text-muted-foreground">{t(($) => $.comment.trigger_click_to_skip)}</div>
+          {!locked && (
+            <div className="text-muted-foreground">{t(($) => $.comment.trigger_click_to_skip)}</div>
+          )}
         </>
       )}
     </div>
@@ -239,6 +246,10 @@ function SingleTriggerChip({
   onToggle: (agentId: string) => void;
   t: IssuesT;
 }) {
+  if (agent.source === "lifeos_chairman") {
+    return <LockedLifeOSTriggerChip agent={agent} t={t} />;
+  }
+
   const state = suppressed
     ? t(($) => $.comment.trigger_skipped_label)
     : sourceLabel(agent.source, t);
@@ -270,6 +281,35 @@ function SingleTriggerChip({
       />
       <TooltipContent side="top" className="max-w-72 text-caption">
         <TriggerAgentTooltipBody agent={agent} suppressed={suppressed} t={t} />
+      </TooltipContent>
+    </Tooltip>
+  );
+}
+
+function LockedLifeOSTriggerChip({
+  agent,
+  t,
+}: {
+  agent: CommentTriggerPreviewAgent;
+  t: IssuesT;
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <span
+            className="inline-flex h-6 min-w-0 max-w-full animate-in fade-in items-center gap-1.5 rounded-md px-1.5 text-[11px] font-medium text-muted-foreground"
+            aria-label={t(($) => $.comment.trigger_lifeos_locked_aria, { name: agent.name })}
+          >
+            <TriggerAgentAvatar agent={agent} suppressed={false} />
+            <span className="truncate">
+              {t(($) => $.comment.trigger_lifeos_will_handle, { name: agent.name })}
+            </span>
+          </span>
+        }
+      />
+      <TooltipContent side="top" className="max-w-72 text-xs">
+        <TriggerAgentTooltipBody agent={agent} suppressed={false} t={t} />
       </TooltipContent>
     </Tooltip>
   );

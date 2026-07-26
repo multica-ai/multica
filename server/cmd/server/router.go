@@ -1882,6 +1882,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
 
+			// Local LifeOS repair loop. The handler remains unavailable when
+			// local mode is disabled even though the route is registered here.
+			r.Post("/api/lifeos/comments/reconcile", h.ReconcileLifeOSComments)
+
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
 				r.Get("/limit-usage", h.GetIssueLimitUsage)

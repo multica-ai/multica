@@ -30,6 +30,13 @@ const bob: CommentTriggerPreviewAgent = {
   reason: "",
 };
 
+const xingyao: CommentTriggerPreviewAgent = {
+  id: "agent-lifeos-ceo",
+  name: "AI 星耀",
+  source: "lifeos_chairman",
+  reason: "",
+};
+
 describe("CommentTriggerChips", () => {
   it("renders nothing without agents", () => {
     const { container } = renderWithI18n(
@@ -96,6 +103,22 @@ describe("CommentTriggerChips", () => {
     const chip = screen.getByRole("button");
     expect(chip).toHaveTextContent("Won't start this time");
     expect(chip).toHaveAttribute("aria-pressed", "true");
+  });
+
+  it("renders the LifeOS default route as a locked receipt instead of an opt-out", () => {
+    const onToggle = vi.fn();
+    renderWithI18n(
+      <CommentTriggerChips
+        agents={[xingyao]}
+        suppressedAgentIds={new Set(["agent-lifeos-ceo"])}
+        onToggle={onToggle}
+      />,
+    );
+
+    expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    expect(screen.getByText("AI 星耀 will handle this")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("AI 星耀 will handle this"));
+    expect(onToggle).not.toHaveBeenCalled();
   });
 
   it("collapses several agents into a stack with an active count", () => {

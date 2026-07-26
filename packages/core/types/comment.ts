@@ -68,7 +68,8 @@ export interface CommentTriggerOutcome {
 export type CommentTriggerSource =
   | "issue_assignee"
   | "mention_agent"
-  | "mention_squad_leader";
+  | "mention_squad_leader"
+  | "lifeos_chairman";
 
 export interface CommentTriggerPreviewAgent {
   id: string;

@@ -30,6 +30,7 @@ const (
 	localWorkspaceName      = "LifeOS"
 	localWorkspaceSlug      = "lifeos"
 	localWorkspaceBrief     = "AI 星耀的本地日常工作执行看板。"
+	localLifeOSCEOAgentName = "AI 星耀"
 	localPasswordIterations = 600_000
 	localMaxFailedAttempts  = 5
 	localLockDuration       = 15 * time.Minute

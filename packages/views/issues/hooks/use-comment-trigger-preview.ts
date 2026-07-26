@@ -9,6 +9,7 @@ import type { CommentTriggerPreviewAgent, CommentTriggerOutcome } from "@multica
 
 const COMMENT_TRIGGER_PREVIEW_DEBOUNCE_MS = 300;
 const NOTE_COMMAND_RE = /^\/note(?:$|\s)/i;
+const LIFEOS_NOTE_RE = /^仅记录，无需回复(?:$|[\s:：,，。;；!！])/;
 
 export interface UseCommentTriggerPreviewResult {
   agents: CommentTriggerPreviewAgent[];
@@ -22,7 +23,8 @@ export interface UseCommentTriggerPreviewResult {
 }
 
 export function isNoteCommentDraft(content: string): boolean {
-  return NOTE_COMMAND_RE.test(content.replace(/^[ \t\r\n]+/, ""));
+  const trimmed = content.replace(/^[ \t\r\n]+/, "");
+  return NOTE_COMMAND_RE.test(trimmed) || LIFEOS_NOTE_RE.test(trimmed);
 }
 
 export function commentTriggerPreviewSignature(content: string): string {

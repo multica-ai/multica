@@ -1512,6 +1512,7 @@ const (
 	commentTriggerSourceMentionSquadLeader commentAgentTriggerSource = "mention_squad_leader"
 	commentTriggerSourceThreadParent       commentAgentTriggerSource = "thread_parent"
 	commentTriggerSourceConversation       commentAgentTriggerSource = "conversation_continuation"
+	commentTriggerSourceLifeOSChairman     commentAgentTriggerSource = "lifeos_chairman"
 )
 
 type commentAgentTrigger struct {
@@ -1548,6 +1549,8 @@ func commentAgentTriggerReason(trigger commentAgentTrigger) string {
 		return "This reply will trigger the parent comment's author."
 	case commentTriggerSourceConversation:
 		return "This follow-up will continue the recent agent conversation."
+	case commentTriggerSourceLifeOSChairman:
+		return "LifeOS routes every chairman comment to AI 星耀."
 	default:
 		return "This comment will trigger this agent."
 	}
@@ -1971,19 +1974,31 @@ func isClientAuthorableCommentType(t string) bool {
 // noteCommentPrefix marks a comment as a human-only note. A comment whose first
 // whitespace-delimited token is this prefix (case-insensitive) is stored like
 // any other comment but never triggers an agent.
-const noteCommentPrefix = "/note"
+const (
+	noteCommentPrefix       = "/note"
+	lifeOSChineseNotePrefix = "仅记录，无需回复"
+)
 
 // isNoteComment reports whether content opts out of agent triggering via the
-// reserved /note prefix. The prefix must be the comment's first token, so
-// "/note check expiry", "  /NOTE", and "/note" all match, while "/notes",
-// "/ note", and "see foo/note" do not.
+// reserved /note prefix or the explicit LifeOS Chinese note phrase. The marker
+// must begin the comment, so incidental use later in a sentence stays routable.
 func isNoteComment(content string) bool {
 	trimmed := strings.TrimLeft(content, " \t\r\n")
+	if strings.HasPrefix(trimmed, lifeOSChineseNotePrefix) {
+		remainder := strings.TrimPrefix(trimmed, lifeOSChineseNotePrefix)
+		if remainder == "" || isLifeOSChineseNoteBoundary([]rune(remainder)[0]) {
+			return true
+		}
+	}
 	firstToken := trimmed
 	if i := strings.IndexFunc(trimmed, unicode.IsSpace); i >= 0 {
 		firstToken = trimmed[:i]
 	}
 	return strings.EqualFold(firstToken, noteCommentPrefix)
+}
+
+func isLifeOSChineseNoteBoundary(char rune) bool {
+	return unicode.IsSpace(char) || strings.ContainsRune(":：,，。;；!！", char)
 }
 
 // triggerTasksForComment resolves and enqueues the comment's agent triggers and
@@ -2046,6 +2061,10 @@ func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppre
 	}
 	filtered := make([]commentAgentTrigger, 0, len(triggers))
 	for _, trigger := range triggers {
+		if trigger.Source == commentTriggerSourceLifeOSChairman {
+			filtered = append(filtered, trigger)
+			continue
+		}
 		if _, ok := suppressed[uuidToString(trigger.Agent.ID)]; ok {
 			continue
 		}
@@ -2614,7 +2633,7 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 				"agent_id", uuidToString(trigger.Agent.ID))
 			return err
 		}
-	case commentTriggerSourceMentionAgent:
+	case commentTriggerSourceMentionAgent, commentTriggerSourceLifeOSChairman:
 		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID, service.OriginNamed); err != nil {
 			logCommentEnqueueFailure("enqueue mention agent task failed", err,
 				"issue_id", uuidToString(issue.ID),
@@ -2659,6 +2678,14 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 
 	if isNoteComment(content) {
 		return nil, nil
+	}
+
+	// LifeOS local mode is deliberately a two-person interaction contract:
+	// every chairman comment goes through AI 星耀, independent of assignment,
+	// status, reply ancestry, or mention markup. Judge and other agents remain
+	// workflow implementation details rather than competing inboxes.
+	if trigger, ok := h.routeLifeOSChairmanToCEO(ctx, issue, actorType, actorID, opts); ok {
+		return []commentAgentTrigger{trigger}, nil
 	}
 
 	// Autopilot delegation authority (MUL-4857) is applied by the gate via
@@ -2738,6 +2765,41 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 		return []commentAgentTrigger{trigger}, nil
 	}
 	return nil, nil
+}
+
+func (h *Handler) routeLifeOSChairmanToCEO(
+	ctx context.Context,
+	issue db.Issue,
+	actorType string,
+	actorID string,
+	opts commentTriggerComputeOptions,
+) (commentAgentTrigger, bool) {
+	if !h.cfg.LocalMode || actorType != "member" || actorID == "" {
+		return commentAgentTrigger{}, false
+	}
+	agent, ok := h.localLifeOSCEOForChairman(ctx, issue.WorkspaceID, actorID)
+	if !ok {
+		return commentAgentTrigger{}, false
+	}
+	if !h.canInvokeAgent(
+		ctx,
+		agent,
+		actorType,
+		actorID,
+		opts.effectiveInvoker(),
+		uuidToString(issue.WorkspaceID),
+	) {
+		return commentAgentTrigger{}, false
+	}
+	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agent.ID, opts)
+	if err != nil {
+		return commentAgentTrigger{}, false
+	}
+	return commentAgentTrigger{
+		Agent:          agent,
+		Source:         commentTriggerSourceLifeOSChairman,
+		AlreadyPending: hasPending,
+	}, true
 }
 
 func hasAgentOrSquadMention(mentions []util.Mention) bool {
