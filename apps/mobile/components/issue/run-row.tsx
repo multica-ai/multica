@@ -67,7 +67,7 @@ function StatusBadge({ task }: { task: AgentTask }) {
   // For failed tasks, surface the failure_reason inline so users don't have
   // to drill in. Reasons are coarse enums; missing/empty stays as just "Failed".
   if (task.status === "failed" && task.failure_reason) {
-    const reasonLabel = FAILURE_REASON_LABEL[task.failure_reason];
+    const reasonLabel = FAILURE_REASON_LABEL[task.failure_reason as TaskFailureReason];
     if (reasonLabel) {
       return (
         <Text className={`text-xs ${cls}`}>

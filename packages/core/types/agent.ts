@@ -290,9 +290,9 @@ export interface AgentTask {
   completed_at: string | null;
   result: unknown;
   error: string | null;
-  // Empty string when the task is not in a failed state (the backend uses
-  // `omitempty`, so the field may also be missing on non-failed tasks).
-  failure_reason?: TaskFailureReason | "";
+  // The backend may add refined reason values over time. Keep the wire field
+  // open and let presentation code fall back safely for unknown values.
+  failure_reason?: string;
   created_at: string;
   /** Non-empty when the task was spawned from a chat session. */
   chat_session_id?: string;

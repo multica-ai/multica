@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { redactSecrets } from "./redact";
+import { formatTaskError, redactSecrets } from "./redact";
 
 describe("redactSecrets", () => {
   it("redacts AWS access key", () => {
@@ -105,5 +105,35 @@ describe("redactSecrets", () => {
     for (const input of inputs) {
       expect(redactSecrets(input)).toBe(input);
     }
+  });
+
+  it("formats a structured provider error and redacts its detail", () => {
+    const secret = ["sk-proj-", "abc123def456ghi789jkl012mno345"].join("");
+    const result = formatTaskError(
+      `OpenAI API error (400): ${JSON.stringify({
+        error: {
+          message: "Invalid value: 'max'. Supported values are none, low, medium, high, and xhigh.",
+          type: "invalid_request_error",
+          param: "reasoning.effort",
+          code: "invalid_value",
+        },
+        authorization: `Bearer ${secret}`,
+      })}`,
+    );
+
+    expect(result?.summary).toBe(
+      "Invalid value: 'max'. Supported values are none, low, medium, high, and xhigh. · reasoning.effort",
+    );
+    expect(result?.detail).toContain('"type": "invalid_request_error"');
+    expect(result?.detail).toContain("OpenAI API error (400):");
+    expect(result?.detail).toContain("[REDACTED API KEY]");
+    expect(result?.detail).not.toContain(secret);
+  });
+
+  it("keeps plain-text provider errors readable", () => {
+    expect(formatTaskError("codex exited with status 1")).toEqual({
+      summary: "codex exited with status 1",
+      detail: "codex exited with status 1",
+    });
   });
 });
