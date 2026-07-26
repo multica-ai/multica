@@ -217,6 +217,11 @@ type Client struct {
 	userID      string
 	workspaceID string
 
+	// sendMu guards sendClosed so inbound frame responses cannot race with
+	// hub teardown closing the send channel.
+	sendMu     sync.Mutex
+	sendClosed bool
+
 	// subscriptions is guarded by hub.mu. Tracks the scopes this client is
 	// currently in. Used to clean up rooms on disconnect.
 	subscriptions map[scopeKey]bool
@@ -255,6 +260,36 @@ func (c *Client) markSeen(eventID string) bool {
 		c.seenList = c.seenList[1:]
 		delete(c.seenIDs, drop)
 	}
+	return true
+}
+
+// trySend delivers frame to the write pump without blocking and without ever
+// writing to a closed channel. It returns false when the buffer is full or the
+// connection is closing.
+func (c *Client) trySend(frame []byte) bool {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.sendClosed {
+		return false
+	}
+	select {
+	case c.send <- frame:
+		return true
+	default:
+		return false
+	}
+}
+
+// closeSend marks the client as closed before closing the channel, making late
+// trySend calls no-ops and duplicate teardown calls harmless.
+func (c *Client) closeSend() bool {
+	c.sendMu.Lock()
+	defer c.sendMu.Unlock()
+	if c.sendClosed {
+		return false
+	}
+	c.sendClosed = true
+	close(c.send)
 	return true
 }
 
@@ -354,7 +389,7 @@ func (h *Hub) removeClient(client *Client) {
 			}
 		}
 	}
-	close(client.send)
+	client.closeSend()
 	cb := h.onLastSubscriber
 	total := len(h.clients)
 	h.mu.Unlock()
@@ -499,10 +534,9 @@ func (h *Hub) BroadcastToScopeDedup(scopeType, scopeID string, message []byte, e
 		if !client.markSeen(eventID) {
 			continue
 		}
-		select {
-		case client.send <- message:
+		if client.trySend(message) {
 			sent++
-		default:
+		} else {
 			slow = append(slow, client)
 		}
 	}
@@ -535,10 +569,9 @@ func (h *Hub) fanoutAllDedup(message []byte, excludeWorkspace, eventID string) {
 		if !client.markSeen(eventID) {
 			continue
 		}
-		select {
-		case client.send <- message:
+		if client.trySend(message) {
 			sent++
-		default:
+		} else {
 			slow = append(slow, client)
 		}
 	}
@@ -587,10 +620,9 @@ func (h *Hub) fanoutUser(userID string, message []byte, excludeWorkspace, eventI
 		if !client.markSeen(eventID) {
 			continue
 		}
-		select {
-		case client.send <- message:
+		if client.trySend(message) {
 			sent++
-		default:
+		} else {
 			slow = append(slow, client)
 		}
 	}
@@ -631,7 +663,7 @@ func (h *Hub) evictSlow(slow []*Client) {
 			}
 		}
 		c.subscriptions = nil
-		close(c.send)
+		c.closeSend()
 		evicted++
 	}
 	cb := h.onLastSubscriber
@@ -985,10 +1017,7 @@ func (c *Client) sendJSON(v any) {
 	if err != nil {
 		return
 	}
-	select {
-	case c.send <- data:
-	default:
-	}
+	c.trySend(data)
 }
 
 func (c *Client) writePump() {

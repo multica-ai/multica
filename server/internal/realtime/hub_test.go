@@ -90,6 +90,29 @@ func totalClients(hub *Hub) int {
 	return len(hub.clients)
 }
 
+func newRegisteredTestClient(hub *Hub) *Client {
+	client := &Client{
+		hub:           hub,
+		send:          make(chan []byte, 1),
+		userID:        testUserID,
+		workspaceID:   testWorkspaceID,
+		subscriptions: map[scopeKey]bool{sk(ScopeWorkspace, testWorkspaceID): true},
+	}
+	hub.clients[client] = true
+	hub.rooms[sk(ScopeWorkspace, testWorkspaceID)] = map[*Client]bool{client: true}
+	return client
+}
+
+func assertNoPanic(t *testing.T, fn func()) {
+	t.Helper()
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("unexpected panic: %v", r)
+		}
+	}()
+	fn()
+}
+
 func TestHub_ClientRegistration(t *testing.T) {
 	hub, server := newTestHub(t)
 	defer server.Close()
@@ -103,6 +126,61 @@ func TestHub_ClientRegistration(t *testing.T) {
 	if count != 1 {
 		t.Fatalf("expected 1 client, got %d", count)
 	}
+}
+
+func TestClientSendJSONAfterRemoveClientDoesNotPanic(t *testing.T) {
+	hub := NewHub()
+	client := newRegisteredTestClient(hub)
+
+	hub.removeClient(client)
+
+	assertNoPanic(t, func() {
+		client.sendJSON(map[string]string{"type": "pong"})
+	})
+}
+
+func TestClientSendJSONAfterEvictSlowDoesNotPanic(t *testing.T) {
+	hub := NewHub()
+	client := newRegisteredTestClient(hub)
+
+	hub.evictSlow([]*Client{client})
+
+	assertNoPanic(t, func() {
+		client.sendJSON(map[string]string{"type": "pong"})
+	})
+}
+
+func TestClientSendJSONConcurrentWithCloseSendDoesNotPanic(t *testing.T) {
+	client := &Client{
+		send: make(chan []byte, 1024),
+	}
+
+	var wg sync.WaitGroup
+	start := make(chan struct{})
+	done := make(chan struct{})
+	for i := 0; i < 8; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			for {
+				select {
+				case <-done:
+					return
+				default:
+					client.sendJSON(map[string]string{"type": "pong"})
+				}
+			}
+		}()
+	}
+
+	assertNoPanic(t, func() {
+		close(start)
+		time.Sleep(10 * time.Millisecond)
+		client.closeSend()
+		close(done)
+		wg.Wait()
+	})
 }
 
 func TestHub_Broadcast(t *testing.T) {
