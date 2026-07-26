@@ -106,6 +106,66 @@ const FAILED_MESSAGES: typeof COMPLETED_MESSAGES = [
   },
 ];
 
+/**
+ * What the daemon records as actually delivered to the model: the runtime
+ * brief written into the workdir, then the task prompt sent as the user turn.
+ * The triggering comment is a fraction of the last layer — which is the whole
+ * point of showing this instead of `trigger_summary`.
+ */
+const PROMPT_LAYERS = [
+  {
+    name: "runtime_brief",
+    delivery: "workdir_file",
+    byte_size: 2140,
+    sha256_original: "a1",
+    sha256_redacted: "a1",
+    content_redacted: [
+      "# Multica Agent Runtime",
+      "",
+      "You are a coding agent in the Multica platform. Use the `multica` CLI to",
+      "interact with the platform.",
+      "",
+      "## Agent Identity",
+      "",
+      "You are: Mia (ID: 4d8b4a77-e0df-4d5d-b279-a13587e8ff74)",
+      "",
+      "## Requesting User",
+      "",
+      "You are working on behalf of Jesper Hvejsel.",
+      "",
+      "## Credentials",
+      "",
+      "GITHUB_TOKEN=[REDACTED]",
+      "",
+      "## Available Commands",
+      "",
+      "- multica issue get <id> --output json — Get full issue details.",
+      "- multica issue comment add <issue-id> --content-stdin — Post a comment.",
+      "- multica artifact create --kind plan --title ... — Create a document.",
+    ].join("\n"),
+  },
+  {
+    name: "task_prompt",
+    delivery: "user_prompt",
+    byte_size: 612,
+    sha256_original: "b2",
+    sha256_redacted: "b2",
+    content_redacted: [
+      "Your assigned issue ID is: 73f3f200-0ccb-418a-85b3-22e7c6f2ed27",
+      "",
+      "[NEW COMMENT] A user just left a new comment:",
+      "",
+      "> Fix the login redirect so it keeps the workspace slug. Reproduce first,",
+      "> then fix, then run the auth tests.",
+      "",
+      "Start by running `multica issue get ... --output json` to understand the",
+      "issue context, then decide how to proceed.",
+    ].join("\n"),
+  },
+];
+
+type PromptLayer = (typeof PROMPT_LAYERS)[number];
+
 async function seedRun(
   database: pg.Client,
   args: {
@@ -117,6 +177,7 @@ async function seedRun(
     failureReason: string | null;
     triggerSummary: string;
     messages: typeof COMPLETED_MESSAGES;
+    promptLayers?: PromptLayer[];
   },
 ): Promise<string> {
   const taskId = (
@@ -152,6 +213,35 @@ async function seedRun(
         message.content ?? null,
         message.input ? JSON.stringify(message.input) : null,
         message.output ?? null,
+      ],
+    );
+  }
+
+  // The byte-exact prompt the run actually read, behind the Initial prompt
+  // disclosure. This lives in its own table, written by the daemon after it
+  // hands the prompt to the runtime — seeding the task alone would silently
+  // exercise the no-snapshot fallback instead of the real path.
+  if (args.promptLayers) {
+    const layers = args.promptLayers;
+    const totalBytes = layers.reduce((sum, l) => sum + l.byte_size, 0);
+    await database.query(
+      `INSERT INTO cerebro_run_prompt_snapshot (
+         workspace_id, task_id, agent_id, issue_id, provider, model,
+         system_prompt_mode, layers, sha256_original, sha256_redacted,
+         total_bytes, redacted
+       )
+       SELECT workspace_id, $1, $2, $3, 'claude-code', 'claude-opus-5',
+              'workdir_file', $4::jsonb, $5, $5, $6, true
+         FROM agent WHERE id = $2`,
+      [
+        taskId,
+        args.agentId,
+        args.issueId,
+        JSON.stringify(layers),
+        // Any stable hex stands in for the daemon's real digest; the dialog
+        // renders the layers, never recomputes the hash.
+        "3f2b91c4e7a05d68b1f4c2093a7de5108c6b4f2719ad30e5b8c71f6a24d09e3b",
+        totalBytes,
       ],
     );
   }
@@ -261,6 +351,7 @@ test("FIR-3782 — Logs dialog: Focus, Expand all, Collapse all, failure card, d
       triggerSummary:
         "Fix the login redirect so it keeps the workspace slug. Reproduce first, then fix, then run the auth tests.",
       messages: COMPLETED_MESSAGES,
+      promptLayers: PROMPT_LAYERS,
     });
     await seedRun(database, {
       agentId,
@@ -304,9 +395,25 @@ test("FIR-3782 — Logs dialog: Focus, Expand all, Collapse all, failure card, d
     // ── 4. The two fork-only disclosures still open ───────────────────────
     await setExpandMode(page, "Focus");
     await dialog.getByText("Initial prompt", { exact: true }).click();
+
+    // The disclosure must show what the MODEL read, not the comment: the
+    // runtime brief is the first layer and opens by default.
+    await expect(
+      dialog.getByText(/You are a coding agent in the Multica platform/),
+    ).toBeVisible();
+    await expect(dialog.getByText(/GITHUB_TOKEN=\[REDACTED\]/)).toBeVisible();
+    await expect(
+      dialog.getByRole("button", { name: /runtime_brief/ }),
+    ).toHaveAttribute("aria-pressed", "true");
+
+    // The triggering comment is one part of one later layer — reachable, but
+    // no longer the whole story.
+    await dialog.getByRole("button", { name: /task_prompt/ }).click();
     await expect(
       dialog.getByText(/keeps the workspace slug/).first(),
     ).toBeVisible();
+    await dialog.getByRole("button", { name: /runtime_brief/ }).click();
+
     await dialog.getByText(/^Task access · \d+ allowed$/).click();
     await expect(dialog.getByText("tools:bash", { exact: true })).toBeVisible();
     await dialog.screenshot({ path: `${SHOT_DIR}/4-run-prompt-and-task-access.png` });
@@ -319,6 +426,19 @@ test("FIR-3782 — Logs dialog: Focus, Expand all, Collapse all, failure card, d
     ).toBeVisible();
     await expect(failDialog.getByText(/SQLSTATE 23502/).first()).toBeVisible();
     await failDialog.screenshot({ path: `${SHOT_DIR}/5-failed-run-failure-card.png` });
+
+    // ── 6. A run with no recorded prompt still reads cleanly ──────────────
+    // This run was seeded WITHOUT a prompt snapshot, which is the ordinary
+    // case for older runs and runtimes that never report one. The panel must
+    // say so and fall back to the triggering comment, never blank out.
+    await failDialog.getByText("Initial prompt", { exact: true }).click();
+    await expect(
+      failDialog.getByText(/No full prompt was recorded for this run/),
+    ).toBeVisible();
+    await expect(
+      failDialog.getByText(/Run the pending migrations against staging/).first(),
+    ).toBeVisible();
+    await failDialog.screenshot({ path: `${SHOT_DIR}/6-run-prompt-fallback.png` });
   } finally {
     await api.setWorkspaceFeatureFlag("cerebro_comment_chapters", false);
     await database.query(
