@@ -1613,7 +1613,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Full run prompt",
     group: "workspace",
     description:
-      "Make a run's \"Initial prompt\" show the byte-exact prompt the model actually read — every layer in the order it was delivered, with secrets redacted — instead of only the comment that triggered the run. The prompt is already recorded per run; this only decides where you can read it. Runs with no recorded prompt, and runs from a runtime that does not report one, still show the triggering comment. ON by default. FIR-3782.",
+      "Show the \"Initial prompt\" panel on a run, carrying the byte-exact prompt the model actually read — every layer in the order it was delivered, with secrets redacted — instead of only the comment that triggered the run. The prompt is already recorded per run; this only decides where you can read it. Runs with no recorded prompt, and runs from a runtime that does not report one, still show the triggering comment and say so. Off hides the panel. ON by default. FIR-3782.",
   },
   {
     key: "cerebro_issue_sidebar_subscribers",

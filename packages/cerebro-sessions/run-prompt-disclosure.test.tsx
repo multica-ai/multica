@@ -154,21 +154,23 @@ describe("RunPromptDisclosure", () => {
     await waitFor(() => expect(mockGetSnapshot).toHaveBeenCalledTimes(1));
   });
 
-  it("shows only the triggering comment, with no explanation, when the full-prompt flag is off", async () => {
+  it("renders nothing at all when its own flag is off", () => {
     mockFlags.cerebro_run_full_prompt = false;
+
+    const { container } = renderDisclosure();
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it("does not depend on the comment-sessions flag", async () => {
+    // The panel used to hang off cerebro_comment_chapters, so showing a run's
+    // prompt to a workspace meant also switching on the comment-sessions UI
+    // that is off by default and pending a rebuild. The two are now unrelated.
+    mockFlags.cerebro_comment_chapters = false;
+    mockGetSnapshot.mockResolvedValue(null);
 
     renderDisclosure();
     await open();
 
-    expect(screen.getByText(TRIGGER)).toBeInTheDocument();
-    expect(screen.queryByText(/No full prompt was recorded/)).not.toBeInTheDocument();
-    expect(mockGetSnapshot).not.toHaveBeenCalled();
-  });
-
-  it("renders nothing at all when the sessions flag is off", () => {
-    mockFlags.cerebro_comment_chapters = false;
-
-    const { container } = renderDisclosure();
-    expect(container).toBeEmptyDOMElement();
+    await waitFor(() => expect(screen.getByText(TRIGGER)).toBeInTheDocument());
   });
 });

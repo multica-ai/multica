@@ -303,9 +303,9 @@ test("FIR-3782 — Logs dialog: Focus, Expand all, Collapse all, failure card, d
   api.setWorkspaceId(workspace.id);
   api.setWorkspaceSlug(workspace.slug);
 
-  // The run-prompt disclosure ships behind the sessions flag; turn it on so
-  // this run proves it survived the port.
-  await api.setWorkspaceFeatureFlag("cerebro_comment_chapters", true);
+  // No flag setup: the Initial prompt panel is on by default and no longer
+  // depends on the comment-sessions flag, which stays off here. If that
+  // coupling ever comes back, this spec fails on the panel not being there.
 
   const database = new pg.Client(DATABASE_URL);
   await database.connect();
@@ -440,7 +440,6 @@ test("FIR-3782 — Logs dialog: Focus, Expand all, Collapse all, failure card, d
     ).toBeVisible();
     await failDialog.screenshot({ path: `${SHOT_DIR}/6-run-prompt-fallback.png` });
   } finally {
-    await api.setWorkspaceFeatureFlag("cerebro_comment_chapters", false);
     await database.query(
       `DELETE FROM agent_task_queue WHERE agent_id = $1`,
       [agentId],

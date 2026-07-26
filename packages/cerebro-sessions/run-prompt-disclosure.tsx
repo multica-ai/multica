@@ -25,14 +25,14 @@ import { safeTaskText } from "./task-transcript-safety";
 // snapshot directly, layer by layer, and falls back to the triggering comment
 // for runs that have none.
 //
-// Two independent gates, deliberately:
-//   cerebro_comment_chapters — whether this panel exists at all. UNCHANGED: it
-//                              ships and hides with the rest of the sessions UI.
-//   cerebro_run_full_prompt  — whether the panel shows the recorded prompt or
-//                              only the triggering comment.
+// Gating: this panel used to hang off `cerebro_comment_chapters`, the flag for
+// the comment-sessions UI — which is OFF by default and documented as unsound
+// pending a rebuild (FIR-1741). That coupling meant the only way to show the
+// run's prompt to a workspace was to also switch on a known-broken sessions UI.
+// The two have nothing to do with each other, so the panel now owns its own
+// flag and can be turned on, or off, without touching comment sessions.
 export function RunPromptDisclosure({ task }: { task: AgentTask }) {
-  const enabled = useFeatureFlag("cerebro_comment_chapters");
-  const fullPromptEnabled = useFeatureFlag("cerebro_run_full_prompt");
+  const enabled = useFeatureFlag("cerebro_run_full_prompt");
   const [open, setOpen] = useState(false);
   const [activeLayer, setActiveLayer] = useState<string | null>(null);
 
@@ -60,7 +60,7 @@ export function RunPromptDisclosure({ task }: { task: AgentTask }) {
         throw err;
       }
     },
-    enabled: enabled && fullPromptEnabled && open && Boolean(task.agent_id),
+    enabled: enabled && open && Boolean(task.agent_id),
     staleTime: Infinity,
     retry: false,
   });
@@ -72,9 +72,7 @@ export function RunPromptDisclosure({ task }: { task: AgentTask }) {
   const selected = hasLayers
     ? (layers.find((l) => l.name === activeLayer) ?? layers[0]!)
     : null;
-  // A disabled query reports `isPending` forever, so only treat it as loading
-  // while a request can actually be in flight.
-  const loading = fullPromptEnabled && isPending && !isError;
+  const loading = isPending && !isError;
 
   return (
     <div className="rounded-md border bg-muted/30">
@@ -117,11 +115,9 @@ export function RunPromptDisclosure({ task }: { task: AgentTask }) {
               // Only explain the absence when the reader had reason to expect
               // more. With the flag off, the comment IS the intended content.
               note={
-                !fullPromptEnabled
-                  ? null
-                  : isError
-                    ? "The full prompt for this run could not be loaded. Showing the comment that triggered it."
-                    : "No full prompt was recorded for this run. Showing the comment that triggered it."
+                isError
+                  ? "The full prompt for this run could not be loaded. Showing the comment that triggered it."
+                  : "No full prompt was recorded for this run. Showing the comment that triggered it."
               }
             />
           )}
@@ -131,14 +127,12 @@ export function RunPromptDisclosure({ task }: { task: AgentTask }) {
   );
 }
 
-function TriggerOnly({ text, note }: { text: string; note: string | null }) {
+function TriggerOnly({ text, note }: { text: string; note: string }) {
   return (
     <div>
-      {note && (
-        <p className="border-b px-3 py-1.5 text-[11px] text-muted-foreground">
-          {note}
-        </p>
-      )}
+      <p className="border-b px-3 py-1.5 text-[11px] text-muted-foreground">
+        {note}
+      </p>
       <div className="max-h-64 overflow-y-auto px-3 py-2 text-xs leading-relaxed whitespace-pre-wrap break-words text-foreground/90">
         {text}
       </div>
