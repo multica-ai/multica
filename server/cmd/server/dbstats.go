@@ -58,6 +58,10 @@ func newDBPool(ctx context.Context, dbURL string) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
 
+	if queryCensusEnabled() { // CEREBRO-PATCH(query-census): FIR-3781 name the flooding statement.
+		cfg.ConnConfig.Tracer = activeQueryCensus
+	}
+
 	urlParams := poolParamsFromURL(dbURL)
 
 	// Compute the non-env fallback first: honor URL pool_* params if the

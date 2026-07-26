@@ -420,6 +420,9 @@ func main() {
 	go runIssueDateReminderSweeper(sweepCtx, queries, bus, taskSvc)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
+	if queryCensusEnabled() { // CEREBRO-PATCH(query-census): FIR-3781 report the busiest statements.
+		go activeQueryCensus.run(sweepCtx)
+	}
 	// CEREBRO-PATCH(cerebro-account-token-retention): bound token telemetry storage to the rolling windows.
 	go runCerebroAccountTokenUsageCleanup(sweepCtx, cerebrodb.New(pool))
 	// CEREBRO-PATCH(main-runtime-pause-sweeper): cerebro auto-unpause sweeper.
