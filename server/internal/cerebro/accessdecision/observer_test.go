@@ -31,6 +31,14 @@ func (p observerPolicy) ResolvePermission(_ context.Context, q toolpolicy.Query,
 	return toolpolicy.Effective{Setting: p.settings[q.AgentID.Bytes]}, nil
 }
 
+// Resolve is the actor-less half of toolaccess.PolicyResolver, which
+// live_permission_contract_test.go exercises through toolaccess.New. It shares
+// ResolvePermission's behaviour so a fixture set up for one path answers the
+// other identically.
+func (p observerPolicy) Resolve(ctx context.Context, q toolpolicy.Query) (toolpolicy.Effective, error) {
+	return p.ResolvePermission(ctx, q, platformaccess.Actor{})
+}
+
 type observerEvidence map[string]availabilityevidence.Evidence
 
 func (e observerEvidence) Lookup(capabilityID string, rt availabilityevidence.RuntimeType) availabilityevidence.Evidence {
