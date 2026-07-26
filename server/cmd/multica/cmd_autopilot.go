@@ -8,6 +8,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -95,6 +96,27 @@ var autopilotTriggerRotateURLCmd = &cobra.Command{
 	RunE:  runAutopilotTriggerRotateURL,
 }
 
+var autopilotSuccessorAddCmd = &cobra.Command{
+	Use:   "successor-add <autopilot-id> <successor-id>",
+	Short: "Add a chain edge so the successor autopilot fires when this one terminates",
+	Args:  exactArgs(2),
+	RunE:  runAutopilotSuccessorAdd,
+}
+
+var autopilotSuccessorDeleteCmd = &cobra.Command{
+	Use:   "successor-delete <autopilot-id> <successor-id>",
+	Short: "Remove a successor chain edge",
+	Args:  exactArgs(2),
+	RunE:  runAutopilotSuccessorDelete,
+}
+
+var autopilotSuccessorsCmd = &cobra.Command{
+	Use:   "successors <autopilot-id>",
+	Short: "List the successor chain edges for an autopilot",
+	Args:  exactArgs(1),
+	RunE:  runAutopilotSuccessors,
+}
+
 func init() {
 	autopilotCmd.AddCommand(autopilotListCmd)
 	autopilotCmd.AddCommand(autopilotGetCmd)
@@ -107,6 +129,9 @@ func init() {
 	autopilotCmd.AddCommand(autopilotTriggerUpdateCmd)
 	autopilotCmd.AddCommand(autopilotTriggerDeleteCmd)
 	autopilotCmd.AddCommand(autopilotTriggerRotateURLCmd)
+	autopilotCmd.AddCommand(autopilotSuccessorAddCmd)
+	autopilotCmd.AddCommand(autopilotSuccessorDeleteCmd)
+	autopilotCmd.AddCommand(autopilotSuccessorsCmd)
 
 	// list
 	autopilotListCmd.Flags().String("status", "", "Filter by status (active, paused)")
@@ -168,6 +193,13 @@ func init() {
 	autopilotTriggerUpdateCmd.Flags().String("timezone", "", "New IANA timezone")
 	autopilotTriggerUpdateCmd.Flags().String("label", "", "New label")
 	autopilotTriggerUpdateCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// successor-add
+	autopilotSuccessorAddCmd.Flags().String("on-status", "completed", "When to fire the successor: completed, failed, or both")
+	autopilotSuccessorAddCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// successors (list)
+	autopilotSuccessorsCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
 // ---------------------------------------------------------------------------
@@ -810,4 +842,137 @@ func resolveAgent(ctx context.Context, client *cli.APIClient, nameOrID string) (
 		}
 		return "", fmt.Errorf("ambiguous agent %q; matches:\n%s", nameOrID, strings.Join(parts, "\n"))
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Successor (chain) commands - WS-768 / Stage 4
+// ---------------------------------------------------------------------------
+
+func runAutopilotSuccessorAdd(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	onStatus, _ := cmd.Flags().GetString("on-status")
+	switch onStatus {
+	case "completed", "failed", "both":
+		// valid
+	default:
+		return fmt.Errorf("--on-status must be one of: completed, failed, both")
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	predecessorRef, err := resolveAutopilotID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve autopilot: %w", err)
+	}
+	successorRef, err := resolveAutopilotID(ctx, client, args[1])
+	if err != nil {
+		return fmt.Errorf("resolve successor autopilot: %w", err)
+	}
+
+	body := map[string]any{
+		"successor_autopilot_id": successorRef.ID,
+		"on_status":              onStatus,
+	}
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/autopilots/"+predecessorRef.ID+"/successors", body, &result); err != nil {
+		return fmt.Errorf("add successor: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	succ := mapFromList(result, "successors")
+	fmt.Printf("Successor added: %s -> %s (on=%s)\n", predecessorRef.ID, successorRef.ID, onStatus)
+	if len(succ) > 0 {
+		fmt.Printf("Total successors: %d\n", len(succ))
+	}
+	return nil
+}
+
+func runAutopilotSuccessorDelete(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	predecessorRef, err := resolveAutopilotID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve autopilot: %w", err)
+	}
+	successorRef, err := resolveAutopilotID(ctx, client, args[1])
+	if err != nil {
+		return fmt.Errorf("resolve successor autopilot: %w", err)
+	}
+
+	path := "/api/autopilots/" + predecessorRef.ID + "/successors/" + successorRef.ID
+	if err := client.DeleteJSON(ctx, path); err != nil {
+		return fmt.Errorf("delete successor: %w", err)
+	}
+	fmt.Printf("Successor removed: %s -> %s\n", predecessorRef.ID, successorRef.ID)
+	return nil
+}
+
+func runAutopilotSuccessors(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	autopilotRef, err := resolveAutopilotID(ctx, client, args[0])
+	if err != nil {
+		return fmt.Errorf("resolve autopilot: %w", err)
+	}
+
+	var result map[string]any
+	if err := client.GetJSON(ctx, "/api/autopilots/"+autopilotRef.ID+"/successors", &result); err != nil {
+		return fmt.Errorf("list successors: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+	successors := mapFromList(result, "successors")
+	if len(successors) == 0 {
+		fmt.Println("No successors configured.")
+		return nil
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "SUCCESSOR_ID\tON_STATUS\tCREATED_AT")
+	for _, s := range successors {
+		fmt.Fprintf(w, "%s\t%s\t%s\n", strVal(s, "successor_autopilot_id"), strVal(s, "on_status"), strVal(s, "created_at"))
+	}
+	return w.Flush()
+}
+
+// mapFromList extracts the named slice field from an API response object as a
+// []map[string]any so callers can iterate without type assertions.
+func mapFromList(result map[string]any, key string) []map[string]any {
+	raw, ok := result[key]
+	if !ok {
+		return nil
+	}
+	arr, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	out := make([]map[string]any, 0, len(arr))
+	for _, e := range arr {
+		if m, ok := e.(map[string]any); ok {
+			out = append(out, m)
+		}
+	}
+	return out
 }

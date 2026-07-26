@@ -63,6 +63,41 @@ func (q *Queries) AddAutopilotSubscriber(ctx context.Context, arg AddAutopilotSu
 	return err
 }
 
+const addAutopilotSuccessor = `-- name: AddAutopilotSuccessor :one
+INSERT INTO autopilot_successor (autopilot_id, successor_autopilot_id, workspace_id, on_status)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (autopilot_id, successor_autopilot_id)
+    DO UPDATE SET on_status = EXCLUDED.on_status
+RETURNING autopilot_id, successor_autopilot_id, workspace_id, on_status, created_at
+`
+
+type AddAutopilotSuccessorParams struct {
+	AutopilotID          pgtype.UUID `json:"autopilot_id"`
+	SuccessorAutopilotID pgtype.UUID `json:"successor_autopilot_id"`
+	WorkspaceID          pgtype.UUID `json:"workspace_id"`
+	OnStatus             string      `json:"on_status"`
+}
+
+// Add a chain edge from autopilot_id → successor_autopilot_id. The workspace
+// existence / same-workspace checks happen at the API layer.
+func (q *Queries) AddAutopilotSuccessor(ctx context.Context, arg AddAutopilotSuccessorParams) (AutopilotSuccessor, error) {
+	row := q.db.QueryRow(ctx, addAutopilotSuccessor,
+		arg.AutopilotID,
+		arg.SuccessorAutopilotID,
+		arg.WorkspaceID,
+		arg.OnStatus,
+	)
+	var i AutopilotSuccessor
+	err := row.Scan(
+		&i.AutopilotID,
+		&i.SuccessorAutopilotID,
+		&i.WorkspaceID,
+		&i.OnStatus,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const advanceTriggerNextRun = `-- name: AdvanceTriggerNextRun :exec
 UPDATE autopilot_trigger
 SET next_run_at = $2,
@@ -90,6 +125,17 @@ WHERE id = $1
 func (q *Queries) ArchiveAutopilot(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, archiveAutopilot, id)
 	return err
+}
+
+const countAutopilotSuccessors = `-- name: CountAutopilotSuccessors :one
+SELECT COUNT(*) FROM autopilot_successor WHERE autopilot_id = $1
+`
+
+func (q *Queries) CountAutopilotSuccessors(ctx context.Context, autopilotID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countAutopilotSuccessors, autopilotID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createAutopilot = `-- name: CreateAutopilot :one
@@ -489,6 +535,34 @@ WHERE autopilot_id = $1
 // Paired with a re-insert loop to implement full-replace PATCH semantics.
 func (q *Queries) DeleteAutopilotSubscribersForAutopilot(ctx context.Context, autopilotID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteAutopilotSubscribersForAutopilot, autopilotID)
+	return err
+}
+
+const deleteAutopilotSuccessor = `-- name: DeleteAutopilotSuccessor :exec
+DELETE FROM autopilot_successor
+WHERE autopilot_id = $1 AND successor_autopilot_id = $2
+`
+
+type DeleteAutopilotSuccessorParams struct {
+	AutopilotID          pgtype.UUID `json:"autopilot_id"`
+	SuccessorAutopilotID pgtype.UUID `json:"successor_autopilot_id"`
+}
+
+func (q *Queries) DeleteAutopilotSuccessor(ctx context.Context, arg DeleteAutopilotSuccessorParams) error {
+	_, err := q.db.Exec(ctx, deleteAutopilotSuccessor, arg.AutopilotID, arg.SuccessorAutopilotID)
+	return err
+}
+
+const deleteAutopilotSuccessorsForAutopilot = `-- name: DeleteAutopilotSuccessorsForAutopilot :exec
+DELETE FROM autopilot_successor
+WHERE autopilot_id = $1
+`
+
+// Cleanup when the predecessor autopilot is deleted (the ON DELETE CASCADE on
+// autopilot_id already handles this, but the delete handler also runs an
+// explicit sweep for symmetry with collaborators/subscribers).
+func (q *Queries) DeleteAutopilotSuccessorsForAutopilot(ctx context.Context, autopilotID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteAutopilotSuccessorsForAutopilot, autopilotID)
 	return err
 }
 
@@ -979,6 +1053,40 @@ func (q *Queries) ListAutopilotIDsForCollaborator(ctx context.Context, userID pg
 	return items, nil
 }
 
+const listAutopilotPredecessors = `-- name: ListAutopilotPredecessors :many
+SELECT autopilot_id, successor_autopilot_id, workspace_id, on_status, created_at FROM autopilot_successor
+WHERE successor_autopilot_id = $1
+ORDER BY created_at ASC
+`
+
+// Reverse lookup: returns all successor edges where the given autopilot is the
+// successor (i.e. which autopilots chain INTO this one).
+func (q *Queries) ListAutopilotPredecessors(ctx context.Context, successorAutopilotID pgtype.UUID) ([]AutopilotSuccessor, error) {
+	rows, err := q.db.Query(ctx, listAutopilotPredecessors, successorAutopilotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AutopilotSuccessor{}
+	for rows.Next() {
+		var i AutopilotSuccessor
+		if err := rows.Scan(
+			&i.AutopilotID,
+			&i.SuccessorAutopilotID,
+			&i.WorkspaceID,
+			&i.OnStatus,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAutopilotRuns = `-- name: ListAutopilotRuns :many
 SELECT id, autopilot_id, trigger_id, source, status, issue_id, task_id, triggered_at, completed_at, failure_reason, trigger_payload, result, created_at, squad_id, planned_at, webhook_delivery_id FROM autopilot_run
 WHERE autopilot_id = $1
@@ -1053,6 +1161,43 @@ func (q *Queries) ListAutopilotSubscribers(ctx context.Context, autopilotID pgty
 			&i.AutopilotID,
 			&i.UserType,
 			&i.UserID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAutopilotSuccessors = `-- name: ListAutopilotSuccessors :many
+
+SELECT autopilot_id, successor_autopilot_id, workspace_id, on_status, created_at FROM autopilot_successor
+WHERE autopilot_id = $1
+ORDER BY created_at ASC
+`
+
+// =====================
+// Autopilot Successors (chain triggering, WS-768 / Stage 4)
+// =====================
+// Returns all successor edges where the given autopilot is the predecessor.
+func (q *Queries) ListAutopilotSuccessors(ctx context.Context, autopilotID pgtype.UUID) ([]AutopilotSuccessor, error) {
+	rows, err := q.db.Query(ctx, listAutopilotSuccessors, autopilotID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AutopilotSuccessor{}
+	for rows.Next() {
+		var i AutopilotSuccessor
+		if err := rows.Scan(
+			&i.AutopilotID,
+			&i.SuccessorAutopilotID,
+			&i.WorkspaceID,
+			&i.OnStatus,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -1265,6 +1410,38 @@ func (q *Queries) ListSchedulableAutopilotTriggers(ctx context.Context) ([]ListS
 			&i.CreatedAt,
 			&i.LastFiredAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listSuccessorEdgesInWorkspace = `-- name: ListSuccessorEdgesInWorkspace :many
+SELECT autopilot_id, successor_autopilot_id FROM autopilot_successor
+WHERE workspace_id = $1
+`
+
+type ListSuccessorEdgesInWorkspaceRow struct {
+	AutopilotID          pgtype.UUID `json:"autopilot_id"`
+	SuccessorAutopilotID pgtype.UUID `json:"successor_autopilot_id"`
+}
+
+// Returns every successor edge in the workspace — used by the cycle detector
+// to build the DAG before checking reachability.
+func (q *Queries) ListSuccessorEdgesInWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListSuccessorEdgesInWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listSuccessorEdgesInWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListSuccessorEdgesInWorkspaceRow{}
+	for rows.Next() {
+		var i ListSuccessorEdgesInWorkspaceRow
+		if err := rows.Scan(&i.AutopilotID, &i.SuccessorAutopilotID); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

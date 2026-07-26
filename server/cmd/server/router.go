@@ -1166,6 +1166,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					})
 					r.Post("/collaborators", h.AddAutopilotCollaborator)
 					r.Delete("/collaborators/{userId}", h.RemoveAutopilotCollaborator)
+					r.Get("/successors", h.ListAutopilotSuccessors)
+					r.Post("/successors", h.AddAutopilotSuccessor)
+					r.Delete("/successors/{successorId}", h.DeleteAutopilotSuccessor)
+					r.Get("/predecessors", h.ListAutopilotPredecessors)
 				})
 			})
 

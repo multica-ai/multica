@@ -503,10 +503,21 @@ func (h *Handler) GetAutopilot(w http.ResponseWriter, r *http.Request) {
 		collabResp[i] = collaboratorToEntry(c)
 	}
 
+	// Include successor chain edges so the UI can display outgoing chains.
+	successors, err := h.Queries.ListAutopilotSuccessors(r.Context(), autopilot.ID)
+	if err != nil {
+		successors = nil
+	}
+	succResp := make([]AutopilotSuccessorEntry, len(successors))
+	for i, s := range successors {
+		succResp[i] = successorToEntry(s)
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"autopilot":     resp,
 		"triggers":      triggerResp,
 		"collaborators": collabResp,
+		"successors":    succResp,
 	})
 }
 
@@ -1198,6 +1209,202 @@ func (h *Handler) RemoveAutopilotCollaborator(w http.ResponseWriter, r *http.Req
 		"autopilot_id": uuidToString(ap.ID),
 	})
 	h.writeAutopilotCollaborators(w, r, ap.ID, http.StatusOK)
+}
+
+// ── Successor management (chain triggering, WS-768 / Stage 4) ──────────────
+
+// AutopilotSuccessorRequest is the body for POST /api/autopilots/{id}/successors.
+type AutopilotSuccessorRequest struct {
+	SuccessorAutopilotID string `json:"successor_autopilot_id"`
+	OnStatus             string `json:"on_status"` // "completed" | "failed" | "both"; defaults to "completed"
+}
+
+// AutopilotSuccessorEntry is one row in a successors / predecessors list.
+type AutopilotSuccessorEntry struct {
+	AutopilotID          string `json:"autopilot_id"`
+	SuccessorAutopilotID string `json:"successor_autopilot_id"`
+	OnStatus             string `json:"on_status"`
+	CreatedAt            string `json:"created_at"`
+}
+
+func successorToEntry(s db.AutopilotSuccessor) AutopilotSuccessorEntry {
+	return AutopilotSuccessorEntry{
+		AutopilotID:          uuidToString(s.AutopilotID),
+		SuccessorAutopilotID: uuidToString(s.SuccessorAutopilotID),
+		OnStatus:             s.OnStatus,
+		CreatedAt:            timestampToString(s.CreatedAt),
+	}
+}
+
+func (h *Handler) writeAutopilotSuccessors(w http.ResponseWriter, r *http.Request, autopilotID pgtype.UUID, status int) {
+	successors, err := h.Queries.ListAutopilotSuccessors(r.Context(), autopilotID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load successors")
+		return
+	}
+	resp := make([]AutopilotSuccessorEntry, len(successors))
+	for i, s := range successors {
+		resp[i] = successorToEntry(s)
+	}
+	writeJSON(w, status, map[string]any{"successors": resp})
+}
+
+// AddAutopilotSuccessor creates a chain edge from the request autopilot to the
+// named successor. Same-workspace is enforced here (not via FK); cycle
+// detection runs before the insert.
+func (h *Handler) AddAutopilotSuccessor(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+
+	ap, ok := h.loadAutopilotInWorkspace(w, r, id, workspaceID)
+	if !ok {
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
+		return
+	}
+
+	var req AutopilotSuccessorRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.SuccessorAutopilotID == "" {
+		writeError(w, http.StatusBadRequest, "successor_autopilot_id is required")
+		return
+	}
+	successorUUID, ok := parseUUIDOrBadRequest(w, req.SuccessorAutopilotID, "successor_autopilot_id")
+	if !ok {
+		return
+	}
+
+	// on_status defaults to "completed" when unset.
+	onStatus := strings.TrimSpace(req.OnStatus)
+	if onStatus == "" {
+		onStatus = "completed"
+	}
+	switch onStatus {
+	case "completed", "failed", "both":
+		// valid
+	default:
+		writeError(w, http.StatusBadRequest, "on_status must be one of: completed, failed, both")
+		return
+	}
+
+	// Self-loop.
+	if util.UUIDToString(successorUUID) == util.UUIDToString(ap.ID) {
+		writeError(w, http.StatusBadRequest, "an autopilot cannot chain to itself")
+		return
+	}
+
+	// Same workspace.
+	successorAP, err := h.Queries.GetAutopilot(r.Context(), successorUUID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "successor autopilot not found")
+		return
+	}
+	if util.UUIDToString(successorAP.WorkspaceID) != workspaceID {
+		writeError(w, http.StatusBadRequest, "successor must be in the same workspace")
+		return
+	}
+
+	// Cycle detection.
+	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
+	if !ok {
+		return
+	}
+	wouldCycle, _, err := h.AutopilotService.DetectCycle(r.Context(), wsUUID, ap.ID, successorUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cycle detection failed")
+		return
+	}
+	if wouldCycle {
+		writeError(w, http.StatusConflict, "adding this successor would create a cycle")
+		return
+	}
+
+	if _, err := h.Queries.AddAutopilotSuccessor(r.Context(), db.AddAutopilotSuccessorParams{
+		AutopilotID:          ap.ID,
+		SuccessorAutopilotID: successorUUID,
+		WorkspaceID:          wsUUID,
+		OnStatus:             onStatus,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to add successor")
+		return
+	}
+
+	actor := requestUserID(r)
+	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", actor, map[string]any{
+		"autopilot_id": uuidToString(ap.ID),
+	})
+	h.writeAutopilotSuccessors(w, r, ap.ID, http.StatusCreated)
+}
+
+// DeleteAutopilotSuccessor removes a chain edge.
+func (h *Handler) DeleteAutopilotSuccessor(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	successorID := chi.URLParam(r, "successorId")
+	workspaceID := h.resolveWorkspaceID(r)
+
+	ap, ok := h.loadAutopilotInWorkspace(w, r, id, workspaceID)
+	if !ok {
+		return
+	}
+	if !h.requireAutopilotWrite(w, r, ap, workspaceID) {
+		return
+	}
+	successorUUID, ok := parseUUIDOrBadRequest(w, successorID, "successor_id")
+	if !ok {
+		return
+	}
+
+	if err := h.Queries.DeleteAutopilotSuccessor(r.Context(), db.DeleteAutopilotSuccessorParams{
+		AutopilotID:          ap.ID,
+		SuccessorAutopilotID: successorUUID,
+	}); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to remove successor")
+		return
+	}
+
+	actor := requestUserID(r)
+	h.publish(protocol.EventAutopilotUpdated, workspaceID, "member", actor, map[string]any{
+		"autopilot_id": uuidToString(ap.ID),
+	})
+	writeJSON(w, http.StatusNoContent, nil)
+}
+
+// ListAutopilotSuccessors returns the chain edges for the given autopilot.
+func (h *Handler) ListAutopilotSuccessors(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+
+	ap, ok := h.loadAutopilotInWorkspace(w, r, id, workspaceID)
+	if !ok {
+		return
+	}
+	h.writeAutopilotSuccessors(w, r, ap.ID, http.StatusOK)
+}
+
+// ListAutopilotPredecessors returns chain edges where the given autopilot is
+// the successor (reverse lookup).
+func (h *Handler) ListAutopilotPredecessors(w http.ResponseWriter, r *http.Request) {
+	id := chi.URLParam(r, "id")
+	workspaceID := h.resolveWorkspaceID(r)
+
+	ap, ok := h.loadAutopilotInWorkspace(w, r, id, workspaceID)
+	if !ok {
+		return
+	}
+	predecessors, err := h.Queries.ListAutopilotPredecessors(r.Context(), ap.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load predecessors")
+		return
+	}
+	resp := make([]AutopilotSuccessorEntry, len(predecessors))
+	for i, s := range predecessors {
+		resp[i] = successorToEntry(s)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"predecessors": resp})
 }
 
 // ── Trigger management ──────────────────────────────────────────────────────
