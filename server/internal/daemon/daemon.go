@@ -4624,9 +4624,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	case result := <-session.Result:
 		if toolCallWatchdogFired.Load() {
 			result.Status = "tool_timeout"
-			if result.Error == "" {
-				result.Error = toolCallWatchdogReason(d.cfg.MaxToolCallDuration)
-			}
+			result.Error = toolCallWatchdogReason(d.cfg.MaxToolCallDuration) // CEREBRO-PATCH(daemon-per-tool-call-timeout): watchdog ownership overrides a backend cancellation race.
 		} else if idleWatchdogFired.Load() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
