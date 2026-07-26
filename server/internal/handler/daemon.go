@@ -1345,6 +1345,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 
 	outcome = "claimed"
 	buildStart = time.Now()
+	phases := newClaimPhases() // CEREBRO-PATCH(claim-build-phases): FIR-3781 which phase owns build_ms.
 
 	// Build response with fresh agent data (name + skills + custom_env + custom_args).
 	resp := taskToResponse(*task, runtimeWorkspaceID)
@@ -1366,6 +1367,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
 		agentSkillCount = len(skills)
 		builtinSkills := h.TaskService.BuiltinSkills()
+		phases.mark("agent_and_skills") // CEREBRO-PATCH(claim-build-phases): FIR-3781
 		builtinSkillCount = len(builtinSkills)
 		skills = append(skills, builtinSkills...)
 		var customEnv map[string]string
@@ -2161,6 +2163,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.AuthToken = tokenStr
 
+	phases.mark("history_and_session") // CEREBRO-PATCH(claim-build-phases): FIR-3781
 	slog.Info("task claimed by runtime", "task_id", uuidToString(task.ID), "runtime_id", runtimeID, "agent_id", uuidToString(task.AgentID), "prior_session", resp.PriorSessionID)
 	if resp.Agent != nil && len(resp.Agent.Skills) > 0 {
 		if skillPayload, err := json.Marshal(resp.Agent.Skills); err == nil {
@@ -2177,6 +2180,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to resolve agent tool mandate")
 		return
 	}
+	phases.mark("effective_tools") // CEREBRO-PATCH(claim-build-phases): FIR-3781
 	if resp.SessionModeConfig != nil && len(resp.SessionModeConfig.AllowedTools) > 0 {
 		resp.EffectiveTools, mandateTools = filterClaimToolsForSessionMode(resp.EffectiveTools, mandateTools, resp.SessionModeConfig.AllowedTools)
 	}
@@ -2186,9 +2190,13 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to issue task mandate")
 		return
 	}
+	phases.mark("task_mandate")                        // CEREBRO-PATCH(claim-build-phases): FIR-3781
 	h.applyMemoryAutoRecall(r.Context(), &resp, *task) // CEREBRO-PATCH(daemon-memory-autorecall-callsite): FIR-1794 layer 3 — auto-recall memories into the claim when cerebro_memory is on
 
+	phases.mark("memory_recall") // CEREBRO-PATCH(claim-build-phases): FIR-3781
 	payloadBytes, _ = writeMeasuredJSON(w, http.StatusOK, map[string]any{"task": resp})
+	phases.mark("json_write")                   // CEREBRO-PATCH(claim-build-phases): FIR-3781
+	phases.log(runtimeID, 500*time.Millisecond) // CEREBRO-PATCH(claim-build-phases): FIR-3781
 }
 
 // trailingUserMessages returns the run of user messages after the last
