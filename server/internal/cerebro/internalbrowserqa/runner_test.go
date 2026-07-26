@@ -43,6 +43,7 @@ type concurrentProbeCommander struct {
 type stageFailingCommander struct {
 	stage       string
 	kind        commandFailureKind
+	finalURL    string
 	screenshots atomic.Int32
 }
 
@@ -74,6 +75,9 @@ func (c *stageFailingCommander) Run(_ context.Context, _ string, args ...string)
 	}
 	switch {
 	case len(args) > 0 && args[len(args)-1] == "url":
+		if c.finalURL != "" {
+			return []byte(c.finalURL + "\n"), nil
+		}
 		return []byte("http://multica.internal:3000/firtal/issues\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "snapshot":
 		return []byte("Dashboard\nData Sources\nYour roles:\nIssues\nAgents\nSettings\nDesk\nAnalytics\n"), nil
@@ -254,7 +258,11 @@ func TestVerifyClassifiesFailureCauseOnEveryStage(t *testing.T) {
 		{stage: "navigation", kind: commandFailureNotFound, want: "internal browser stage navigation not-found failed"},
 	} {
 		t.Run(test.stage, func(t *testing.T) {
-			runner := testRunner(&stageFailingCommander{stage: test.stage, kind: test.kind})
+			commander := &stageFailingCommander{stage: test.stage, kind: test.kind}
+			if test.stage == "reload" {
+				commander.finalURL = "about:blank"
+			}
+			runner := testRunner(commander)
 			_, err := runner.Verify(context.Background(), "multica", Credential{SessionToken: "signed-session"})
 			if err == nil || err.Error() != test.want {
 				t.Fatalf("error = %v, want %q", err, test.want)
@@ -637,6 +645,18 @@ func TestRunnerSendsSessionCookieOnlyThroughBatchStdin(t *testing.T) {
 	if !strings.Contains(sessionBatch, `"multica_auth"`) || !strings.Contains(sessionBatch, `"multica_logged_in"`) {
 		t.Fatalf("session batch does not set both required cookies: %s", sessionBatch)
 	}
+	if strings.Contains(sessionBatch, `"open"`) {
+		t.Fatalf("session batch drives navigation, want a separately recoverable open stage: %s", sessionBatch)
+	}
+	var openedRoot bool
+	for _, call := range commander.calls {
+		if strings.HasSuffix(strings.Join(call.args, " "), "open http://multica.internal:3000/") {
+			openedRoot = true
+		}
+	}
+	if !openedRoot {
+		t.Fatal("Multica root was not opened after the session cookies were set")
+	}
 }
 
 func TestRunnerWaitsForClientRenderAfterReload(t *testing.T) {
@@ -844,6 +864,85 @@ func TestVerifyRetriesOpenOnceWhenTheAppIsSlowToWake(t *testing.T) {
 	}
 	if len(result.Markers) == 0 {
 		t.Fatal("markers empty, want the verified page markers")
+	}
+}
+
+// A navigation can time out after the browser has already reached the app when
+// the page keeps a request open. The expected host plus the later marker checks
+// are enough to continue without spending a second 30-second open attempt.
+type reachedTargetTimeoutCommander struct {
+	stageFailingCommander
+	stage     string
+	targetURL string
+	attempts  atomic.Int32
+}
+
+func (c *reachedTargetTimeoutCommander) Run(ctx context.Context, stdin string, args ...string) ([]byte, error) {
+	if stageVerb(args) == c.stage {
+		c.attempts.Add(1)
+		return nil, commandFailure{kind: commandFailureTimeout}
+	}
+	if len(args) > 0 && args[len(args)-1] == "url" {
+		return []byte(c.targetURL + "\n"), nil
+	}
+	return c.stageFailingCommander.Run(ctx, stdin, args...)
+}
+
+func TestVerifyContinuesWhenOpenTimesOutAfterReachingExpectedHost(t *testing.T) {
+	commander := &reachedTargetTimeoutCommander{
+		stageFailingCommander: stageFailingCommander{stage: "no-such-stage"},
+		stage:                 openStage, targetURL: "http://customer-service.internal:3456/desk",
+	}
+	result, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{})
+	if err != nil {
+		t.Fatalf("Verify failed after reaching the expected host: %v", err)
+	}
+	if commander.attempts.Load() != 1 {
+		t.Fatalf("open attempts = %d, want 1 after the URL probe proved the page arrived", commander.attempts.Load())
+	}
+	if len(result.Markers) == 0 {
+		t.Fatal("markers empty, want the verified page markers")
+	}
+}
+
+func TestVerifyContinuesWhenReloadTimesOutAfterReachingExpectedHost(t *testing.T) {
+	commander := &reachedTargetTimeoutCommander{
+		stageFailingCommander: stageFailingCommander{stage: "no-such-stage"},
+		stage:                 "reload", targetURL: "http://customer-service.internal:3456/desk",
+	}
+	if _, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{}); err != nil {
+		t.Fatalf("Verify failed after reload reached the expected host: %v", err)
+	}
+	if commander.attempts.Load() != 1 {
+		t.Fatalf("reload attempts = %d, want 1", commander.attempts.Load())
+	}
+}
+
+type redirectedTimeoutCommander struct {
+	stageFailingCommander
+	opens atomic.Int32
+}
+
+func (c *redirectedTimeoutCommander) Run(ctx context.Context, stdin string, args ...string) ([]byte, error) {
+	if stageVerb(args) == openStage {
+		c.opens.Add(1)
+		return nil, commandFailure{kind: commandFailureTimeout}
+	}
+	if len(args) > 0 && args[len(args)-1] == "url" {
+		return []byte("https://firtal.cloudflareaccess.com/cdn-cgi/access/login\n"), nil
+	}
+	return c.stageFailingCommander.Run(ctx, stdin, args...)
+}
+
+func TestVerifyDoesNotRecoverNavigationTimeoutOnAnUnexpectedHost(t *testing.T) {
+	commander := &redirectedTimeoutCommander{
+		stageFailingCommander: stageFailingCommander{stage: "no-such-stage"},
+	}
+	if _, err := testRunner(commander).Verify(context.Background(), "customer-service", Credential{}); err == nil {
+		t.Fatal("Verify succeeded after a redirect to an unexpected host")
+	}
+	if commander.opens.Load() != 2 {
+		t.Fatalf("open attempts = %d, want the bounded cold-start retry", commander.opens.Load())
 	}
 }
 
