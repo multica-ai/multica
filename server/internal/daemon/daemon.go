@@ -4570,10 +4570,8 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						}
 					}
 					s := seq.Add(1)
-					output := msg.Output
-					if len(output) > 8192 {
-						output = output[:8192]
-					}
+					// CEREBRO-PATCH(tool-output-keep-tail): FIR-3782 — head-only truncation discarded the error at the end of a failing command's output.
+					output := clipToolOutput(msg.Output, 8192)
 					toolName := msg.Tool
 					if toolName == "" && msg.CallID != "" {
 						mu.Lock()

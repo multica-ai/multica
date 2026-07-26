@@ -9,6 +9,7 @@
   },
   "exports": {
     ".": "./index.ts",
+    "./api": "./api.ts",
     "./views": "./views/index.ts"
   },
   "dependencies": {

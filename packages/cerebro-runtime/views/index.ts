@@ -41,6 +41,10 @@ export {
 } from "./runtime-pause-wait-reason";
 export { usePauseRuntime, useUnpauseRuntime } from "./use-pause-mutations";
 export { isInterruptionReason } from "./task-failure-severity";
+// FIR-3782: human copy for all 21 canonical task failure reasons.
+export { resolveFailureReasonLabel } from "./failure-reason-label";
+// FIR-3782: failure summary card for a failed run's transcript.
+export { RunFailureCard } from "./components/run-failure-card";
 export { RuntimeToolsCard, SandboxCard } from "@multica/cerebro-runtime-tools/views";
 export { AgentToolsCard } from "@multica/cerebro-agent-tools/views";
 export * from "./docs";

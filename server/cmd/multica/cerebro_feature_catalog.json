@@ -701,6 +701,20 @@
       "default": false
     },
     {
+      "key": "cerebro_run_failure_card",
+      "label": "Run failure card",
+      "description": "Show a summary card at the top of a failed run's execution log: the failure reason in plain words, the last step the agent took, and the end of that step's output. Everything on the card already exists in the run timeline — the card just stops you scrolling to find it. ON by default. FIR-3782.",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_run_full_prompt",
+      "label": "Full run prompt",
+      "description": "Show the \"Initial prompt\" panel on a run, carrying the byte-exact prompt the model actually read — every layer in the order it was delivered, with secrets redacted — instead of only the comment that triggered the run. The prompt is already recorded per run; this only decides where you can read it. Runs with no recorded prompt, and runs from a runtime that does not report one, still show the triggering comment and say so. Off hides the panel. ON by default. FIR-3782.",
+      "group": "workspace",
+      "default": true
+    },
+    {
       "key": "cerebro_issue_sidebar_subscribers",
       "label": "Sidebar subscribers",
       "description": "List an issue's subscribers in the sidebar, split by type (Members / Agents), with the same add/remove popover the chat Participants section uses. Every subscriber is a potential wake target, so the per-type split answers \"who can this issue dispatch to?\" at a glance. Off falls back to the avatar stack next to the Activity header. ON by default. FIR-2827.",
