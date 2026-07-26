@@ -246,6 +246,117 @@ var providerRegistry = map[string]Set{
 		DiscoveryMethod: "static",
 	},
 
+	// FIR-3762 follow-up: the eight providers below were supported by agent.New
+	// but had NO row here, so For() fell through to staticFallback and its empty
+	// ToolProtocols failed the protocol check in toolaccess.exposureEffective for
+	// every capability — a silent total lockout, the same failure mode the Pi
+	// outage above was. Live evidence when this landed: 14 of 39 runtimes in the
+	// Firtal workspace reported discovery_method="unmapped" with zero tools
+	// (4 pi, 4 hermes, 4 opencode, 2 antigravity).
+	//
+	// Each row declares only what is traceable to the backend implementation:
+	//   - ToolProtocols follows execOptionsSupport in
+	//     server/pkg/agent/cerebro_exec_options_matrix.go. A backend that honours
+	//     FieldMCPConfig speaks mcp_stdio (opencode, hermes, kimi, kiro); one that
+	//     drops it has no MCP surface and carries native_tool_loop only
+	//     (copilot, openclaw, antigravity, openai-eu).
+	//   - Tools stays empty on purpose. A hand-typed tool list drifts from the
+	//     runtime the day the CLI adds a tool, and fabricating entries here would
+	//     surface bogus rows in the permission UI. The inventory belongs to the
+	//     measured path (daemon probe / MCP tools-list scan), which writes the
+	//     capability register; this row only unblocks the protocol gate.
+	//   - SupportsAsk stays false unless the backend can actually park a call
+	//     pending a human decision. None of these can.
+	// TestEveryAgentProviderIsMapped guards the invariant so a new provider can
+	// never ship without a row again.
+	"copilot": {
+		Providers:       []string{"copilot"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"native_tool_loop"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"opencode": {
+		Providers:       []string{"opencode"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"openclaw": {
+		Providers:       []string{"openclaw"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"native_tool_loop"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"hermes": {
+		Providers:       []string{"hermes"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"kimi": {
+		Providers:       []string{"kimi"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"kiro": {
+		Providers:       []string{"kiro"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"antigravity": {
+		Providers:       []string{"antigravity"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"native_tool_loop"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"openai-eu": {
+		Providers:       []string{"openai-eu"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"native_tool_loop"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
 	// CEREBRO-PATCH(capabilities-firtal-local): TECH-3226 local Ollama tool-loop runtime.
 	"firtal-local": {
 		Providers:       []string{"firtal-local"},
