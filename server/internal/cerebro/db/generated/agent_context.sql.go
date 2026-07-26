@@ -511,18 +511,19 @@ func (q *Queries) GetWorkspaceReposForContextLint(ctx context.Context, id pgtype
 }
 
 const insertAgentSkillForContext = `-- name: InsertAgentSkillForContext :exec
-INSERT INTO agent_skill (agent_id, skill_id)
-VALUES ($1, $2)
-ON CONFLICT (agent_id, skill_id) DO NOTHING
+INSERT INTO agent_skill (agent_id, skill_id, always_on)
+VALUES ($1, $2, $3)
+ON CONFLICT (agent_id, skill_id) DO UPDATE SET always_on = EXCLUDED.always_on
 `
 
 type InsertAgentSkillForContextParams struct {
-	AgentID pgtype.UUID `json:"agent_id"`
-	SkillID pgtype.UUID `json:"skill_id"`
+	AgentID  pgtype.UUID `json:"agent_id"`
+	SkillID  pgtype.UUID `json:"skill_id"`
+	AlwaysOn bool        `json:"always_on"`
 }
 
 func (q *Queries) InsertAgentSkillForContext(ctx context.Context, arg InsertAgentSkillForContextParams) error {
-	_, err := q.db.Exec(ctx, insertAgentSkillForContext, arg.AgentID, arg.SkillID)
+	_, err := q.db.Exec(ctx, insertAgentSkillForContext, arg.AgentID, arg.SkillID, arg.AlwaysOn)
 	return err
 }
 
@@ -829,27 +830,35 @@ func (q *Queries) ListAgentContextVersions(ctx context.Context, agentID pgtype.U
 }
 
 const listAgentSkillIDsForContext = `-- name: ListAgentSkillIDsForContext :many
-SELECT skill_id FROM agent_skill
+SELECT skill_id, always_on FROM agent_skill
 WHERE agent_id = $1
 ORDER BY skill_id
 `
 
+type ListAgentSkillIDsForContextRow struct {
+	SkillID  pgtype.UUID `json:"skill_id"`
+	AlwaysOn bool        `json:"always_on"`
+}
+
 // ListAgentSkillIDsForContext returns the skill ids currently bound to the
 // agent, in a stable order so two snapshots of the same binding set compare
 // equal byte-for-byte.
-func (q *Queries) ListAgentSkillIDsForContext(ctx context.Context, agentID pgtype.UUID) ([]pgtype.UUID, error) {
+//
+// FIR-3805: always_on rides along because it is a property of the BINDING, not
+// of the skill, and it is versioned exactly like the binding set itself.
+func (q *Queries) ListAgentSkillIDsForContext(ctx context.Context, agentID pgtype.UUID) ([]ListAgentSkillIDsForContextRow, error) {
 	rows, err := q.db.Query(ctx, listAgentSkillIDsForContext, agentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.UUID{}
+	items := []ListAgentSkillIDsForContextRow{}
 	for rows.Next() {
-		var skill_id pgtype.UUID
-		if err := rows.Scan(&skill_id); err != nil {
+		var i ListAgentSkillIDsForContextRow
+		if err := rows.Scan(&i.SkillID, &i.AlwaysOn); err != nil {
 			return nil, err
 		}
-		items = append(items, skill_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -1102,6 +1111,26 @@ func (q *Queries) ReviewAgentChangeRequest(ctx context.Context, arg ReviewAgentC
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const setAgentSkillAlwaysOn = `-- name: SetAgentSkillAlwaysOn :exec
+UPDATE agent_skill
+SET always_on = (skill_id = ANY($2::uuid[]))
+WHERE agent_id = $1
+`
+
+type SetAgentSkillAlwaysOnParams struct {
+	AgentID          pgtype.UUID   `json:"agent_id"`
+	AlwaysOnSkillIds []pgtype.UUID `json:"always_on_skill_ids"`
+}
+
+// SetAgentSkillAlwaysOn (FIR-3805) replaces the agent's whole always-on set in
+// one statement: every binding named in the list is flagged, every other
+// binding is cleared. Ids that are not bound to this agent simply match no row,
+// so the always-on set can never drift out of the bound set.
+func (q *Queries) SetAgentSkillAlwaysOn(ctx context.Context, arg SetAgentSkillAlwaysOnParams) error {
+	_, err := q.db.Exec(ctx, setAgentSkillAlwaysOn, arg.AgentID, arg.AlwaysOnSkillIds)
+	return err
 }
 
 const updateAgentContextOwnership = `-- name: UpdateAgentContextOwnership :one

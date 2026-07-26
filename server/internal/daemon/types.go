@@ -229,6 +229,7 @@ type SkillData struct {
 	SizeBytes   int64           `json:"size_bytes,omitempty"`
 	Content     string          `json:"content"`
 	Files       []SkillFileData `json:"files,omitempty"`
+	AlwaysOn    bool            `json:"always_on,omitempty"` // CEREBRO-PATCH(skill-always-on): FIR-3805 inline this skill's full text in the brief
 }
 
 // SkillFileData represents a supporting file within a skill.

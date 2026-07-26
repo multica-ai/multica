@@ -1838,6 +1838,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/context/change-requests", cerebroAgentOfficeHandler.CreateChangeRequest)
 					r.Get("/context/diff", cerebroAgentOfficeHandler.Diff)
 					r.Post("/context/rollback", cerebroAgentOfficeHandler.Rollback)
+					r.Put("/skills/always-on", cerebroAgentOfficeHandler.SetAlwaysOnSkills)       // CEREBRO-PATCH(skill-always-on): FIR-3805 — direct (CLI) write path for the per-binding always-on flag.
 					r.Get("/context/lint", cerebroAgentOfficeHandler.LintAgent)                   // CEREBRO-PATCH(cerebro-agent-office-lint-routes): FIR-1775 Phase 3 — per-agent context lint.
 					r.Get("/context/observability", cerebroAgentOfficeHandler.ObservabilityAgent) // CEREBRO-PATCH(cerebro-agent-office-observability-routes): FIR-1775 Phase 4 — per-agent context observability.
 					// CEREBRO-PATCH(agent-capabilities-card-task-route): FIR-2243 — GET /capabilities is registered in the task-allowlist group above (AllowTaskScopeForAgent) so an agent's own task token can also reach it; chi forbids a duplicate flat+nested registration of the same path.

@@ -52,7 +52,7 @@ type IssueActions interface {
 	CreateComment(ctx context.Context, arg db.CreateCommentParams) (db.Comment, error)
 	AttachLabelToIssue(ctx context.Context, arg db.AttachLabelToIssueParams) error
 	ListSkillSummariesByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListSkillSummariesByWorkspaceRow, error)
-	ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]db.Skill, error)
+	ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]db.ListAgentSkillsRow, error)
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error)
 	SetAgentTaskModelOverride(ctx context.Context, arg db.SetAgentTaskModelOverrideParams) error
@@ -678,7 +678,7 @@ func skillNameExists(skills []db.ListSkillSummariesByWorkspaceRow, name string) 
 	return false
 }
 
-func agentSkillAttached(skills []db.Skill, name string) bool {
+func agentSkillAttached(skills []db.ListAgentSkillsRow, name string) bool {
 	for _, sk := range skills {
 		if sk.Name == name {
 			return true

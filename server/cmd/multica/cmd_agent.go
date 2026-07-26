@@ -794,12 +794,13 @@ func runAgentSkillsList(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, skills)
 	}
 
-	headers := []string{"ID", "NAME", "DESCRIPTION"}
+	headers := []string{"ID", "NAME", "ALWAYS_ON", "DESCRIPTION"} // CEREBRO-PATCH(skill-always-on): FIR-3805 show the always-on flag in the list
 	rows := make([][]string, 0, len(skills))
 	for _, s := range skills {
 		rows = append(rows, []string{
 			strVal(s, "id"),
 			strVal(s, "name"),
+			cerebroAlwaysOnCell(s), // CEREBRO-PATCH(skill-always-on): FIR-3805 render the per-binding flag
 			strVal(s, "description"),
 		})
 	}

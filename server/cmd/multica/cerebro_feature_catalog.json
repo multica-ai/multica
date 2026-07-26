@@ -85,6 +85,13 @@
       "default": false
     },
     {
+      "key": "cerebro_agent_skill_always_on",
+      "label": "Always-on skills",
+      "description": "Add an 'Always on' checkbox to each skill on the agent Skills tab. A skill marked always on has its full text pasted into the agent's instructions on every run, so rules that must hold for every response apply without the agent choosing to open the skill first. Off hides the checkbox; skills already marked stay marked and keep working.",
+      "group": "agents",
+      "default": true
+    },
+    {
       "key": "cerebro_agent_setup_capabilities",
       "label": "Agent engine support panel",
       "description": "Add an Engine support panel on the agent Instructions tab showing, for the engine the agent actually runs on: which run settings are honoured, which are dropped silently, and how the engine accepts a system prompt. Unknown support is shown as unknown, never as unsupported. Off hides the panel.",

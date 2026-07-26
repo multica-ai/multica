@@ -772,13 +772,15 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 			// providers get this natively from frontmatter discovery; providers
 			// without native discovery (hermes/default) only ever see this
 			// list, so a bare name gives them no signal for on-demand loading.
+			suffix := cerebroAlwaysOnSkillSuffix(skill) // CEREBRO-PATCH(skill-always-on): FIR-3805 flag always-on entries in the list
 			if desc := strings.TrimSpace(skill.Description); desc != "" {
-				fmt.Fprintf(&b, "- **%s** — %s\n", skill.Name, desc)
+				fmt.Fprintf(&b, "- **%s** — %s%s\n", skill.Name, desc, suffix)
 			} else {
-				fmt.Fprintf(&b, "- **%s**\n", skill.Name)
+				fmt.Fprintf(&b, "- **%s**%s\n", skill.Name, suffix)
 			}
 		}
 		b.WriteString("\n")
+		b.WriteString(cerebroAlwaysOnSkillsBrief(ctx.AgentSkills)) // CEREBRO-PATCH(skill-always-on): FIR-3805 inline the full text of always-on skills
 	}
 
 	// CEREBRO-PATCH(skill-governance-norm): FIR-2655 — make "propose, don't

@@ -21,7 +21,7 @@ type fakeIssueActions struct {
 	AttachedLabels     []db.AttachLabelToIssueParams
 
 	Skills      []db.ListSkillSummariesByWorkspaceRow
-	AgentSkills []db.Skill
+	AgentSkills []db.ListAgentSkillsRow
 	Agent       db.Agent
 	GetAgentErr error
 
@@ -100,7 +100,7 @@ func (f *fakeIssueActions) AttachLabelToIssue(_ context.Context, p db.AttachLabe
 func (f *fakeIssueActions) ListSkillSummariesByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.ListSkillSummariesByWorkspaceRow, error) {
 	return f.Skills, nil
 }
-func (f *fakeIssueActions) ListAgentSkills(_ context.Context, _ pgtype.UUID) ([]db.Skill, error) {
+func (f *fakeIssueActions) ListAgentSkills(_ context.Context, _ pgtype.UUID) ([]db.ListAgentSkillsRow, error) {
 	return f.AgentSkills, nil
 }
 func (f *fakeIssueActions) GetAgent(_ context.Context, _ pgtype.UUID) (db.Agent, error) {
@@ -255,7 +255,7 @@ func TestActionRunSkill_HappyPath(t *testing.T) {
 	skillName := "firtal-data-evaluate"
 	fake := &fakeIssueActions{
 		Skills:      []db.ListSkillSummariesByWorkspaceRow{{Name: skillName}},
-		AgentSkills: []db.Skill{{Name: skillName}},
+		AgentSkills: []db.ListAgentSkillsRow{{Name: skillName}},
 		Agent: db.Agent{
 			RuntimeID: mustUUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
 		},
@@ -327,7 +327,7 @@ func TestActionRunSkill_FallsBackToIssueAssignee(t *testing.T) {
 	assigneeID := mustUUID("ffffffff-ffff-ffff-ffff-ffffffffffff")
 	fake := &fakeIssueActions{
 		Skills:      []db.ListSkillSummariesByWorkspaceRow{{Name: skillName}},
-		AgentSkills: []db.Skill{{Name: skillName}},
+		AgentSkills: []db.ListAgentSkillsRow{{Name: skillName}},
 		Agent: db.Agent{
 			RuntimeID: mustUUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
 		},
@@ -368,7 +368,7 @@ func TestActionRunSkill_RejectsAgentMissingSkill(t *testing.T) {
 	skillName := "firtal-data-evaluate"
 	fake := &fakeIssueActions{
 		Skills:      []db.ListSkillSummariesByWorkspaceRow{{Name: skillName}},
-		AgentSkills: []db.Skill{}, // agent has no skills attached
+		AgentSkills: []db.ListAgentSkillsRow{}, // agent has no skills attached
 		Agent: db.Agent{
 			RuntimeID: mustUUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
 		},
@@ -392,7 +392,7 @@ func TestActionRunSkill_RejectsArchivedAgent(t *testing.T) {
 	skillName := "firtal-data-evaluate"
 	fake := &fakeIssueActions{
 		Skills:      []db.ListSkillSummariesByWorkspaceRow{{Name: skillName}},
-		AgentSkills: []db.Skill{{Name: skillName}},
+		AgentSkills: []db.ListAgentSkillsRow{{Name: skillName}},
 		Agent: db.Agent{
 			ArchivedAt: pgtype.Timestamptz{Valid: true},
 			RuntimeID:  mustUUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
@@ -768,7 +768,7 @@ func TestActionRunSkill_PropagatesTaskQueueError(t *testing.T) {
 	skillName := "x"
 	fake := &fakeIssueActions{
 		Skills:      []db.ListSkillSummariesByWorkspaceRow{{Name: skillName}},
-		AgentSkills: []db.Skill{{Name: skillName}},
+		AgentSkills: []db.ListAgentSkillsRow{{Name: skillName}},
 		Agent: db.Agent{
 			RuntimeID: mustUUID("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"),
 		},

@@ -501,6 +501,9 @@ var catalog = []Capability{
 			"POST /api/agents/{id}/cancel-tasks",
 			"PUT /api/agents/{id}/skills",
 			"POST /api/agents/{id}/skills/add",
+			// FIR-3805: flagging a binding always-on edits which text the agent
+			// reads on every run — an edit-agent action, same as binding it.
+			"PUT /api/agents/{id}/skills/always-on",
 			"PUT /api/agents/{id}/env",
 			"PUT /api/agents/{id}/infisical-folders",
 			// Agent Office — versioning + governance for agent context (FIR-1775),

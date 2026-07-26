@@ -418,6 +418,9 @@ export type CerebroFlagKey =
   // aggregated per config version over the runs that actually used it.
   // Default OFF until QA'd on staging.
   | "cerebro_agent_quality"
+  // FIR-3805: per-binding "always on" checkbox on the agent Skills tab — pastes
+  // the skill's full text into the agent's instructions on every run.
+  | "cerebro_agent_skill_always_on"
   // FIR-3212: Engine support panel on the agent Instructions tab — which run
   // settings the agent's runtime actually honours, which it drops silently,
   // and how it accepts a system prompt. Default OFF until QA'd on staging.
@@ -859,6 +862,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-3212: default OFF until QA'd on staging.
   cerebro_agent_production_prompt: false,
   cerebro_agent_quality: false,
+  // FIR-3805: default ON — an agent with no skill flagged always-on behaves
+  // exactly as before, so the only thing the flag gates is whether the
+  // checkbox is reachable at all.
+  cerebro_agent_skill_always_on: true,
   cerebro_agent_setup_capabilities: false,
   // FIR-2698: default OFF until QA'd on staging.
   cerebro_model_registry: false,
@@ -993,6 +1000,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Add a Quality tab on the agent page measuring each configuration version on the runs that actually used it: judge verdicts (solution) and human signals like reactions and approvals (satisfaction), always with sample sizes and honest missing states. Off hides the tab; measurements are kept.",
+  },
+  {
+    key: "cerebro_agent_skill_always_on",
+    label: "Always-on skills",
+    group: "agents",
+    description:
+      "Add an 'Always on' checkbox to each skill on the agent Skills tab. A skill marked always on has its full text pasted into the agent's instructions on every run, so rules that must hold for every response apply without the agent choosing to open the skill first. Off hides the checkbox; skills already marked stay marked and keep working.",
   },
   {
     key: "cerebro_agent_setup_capabilities",

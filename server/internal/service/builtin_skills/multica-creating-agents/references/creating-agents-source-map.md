@@ -30,7 +30,9 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | `parseMcpConfig` / `resolveMcpConfig` helpers | 1086, 1114 | Validator (object-or-`null`, content-free errors) + three-channel resolver, mirroring `parseCustomEnv`/`resolveCustomEnv` | read 1086–1170 |
 | `agent skills set` = replace-all | 792 | `PUT /api/agents/{id}/skills` (810); `--skill-ids ''` clears all (798–799) | `multica agent skills set --help` |
 | `agent skills add` = additive | 817 | `POST /api/agents/{id}/skills/add` (838); requires ≥1 id (823–828) | `multica agent skills add --help` |
-| `agent skills list` | 760 | reads bindings, no side effect | `multica agent skills list --help` |
+| `agent skills list` | 760 | <!-- CEREBRO-PATCH(skill-always-on): FIR-3805 — the list command now also reports the binding's always_on flag. --> reads bindings, no side effect; `ALWAYS_ON` column | `multica agent skills list --help` |
+| `agent skills always-on` = replace-all | `server/cmd/multica/cerebro_agent_skill_always_on.go` | `PUT /api/agents/{id}/skills/always-on`; handler `server/internal/cerebro/agentoffice/always_on.go`; column added in `9159_cerebro_agent_skill_always_on` | `multica agent skills always-on --help` |
+| always-on text reaches the brief | `server/internal/daemon/execenv/cerebro_always_on_skills_brief.go` | full skill content inlined below the skills list in `runtime_config.go` | — |
 | `agent env get` | 894 | `GET /api/agents/{id}/env` | `multica agent env get --help` |
 | `agent env set` | 929 | `PUT /api/agents/{id}/env` with full `custom_env` map (935, 949) | `multica agent env set --help` |
 

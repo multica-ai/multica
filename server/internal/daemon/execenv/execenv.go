@@ -165,6 +165,7 @@ type SkillContextForEnv struct {
 	Description string
 	Content     string
 	Files       []SkillFileContextForEnv
+	AlwaysOn    bool // CEREBRO-PATCH(skill-always-on): FIR-3805 paste this skill's full text into the brief on every run
 }
 
 // SkillFileContextForEnv represents a supporting file within a skill.

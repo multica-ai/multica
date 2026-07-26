@@ -1907,3 +1907,44 @@ A failed run showed a red icon and a timestamp and nothing else. Three defects c
 | `transcript-revamp-port` | `packages/views/common/task-transcript/agent-transcript-dialog.tsx`<br>`packages/views/common/task-transcript/agent-transcript-dialog.test.tsx`<br>`packages/views/common/task-transcript/build-timeline.ts`<br>`packages/views/common/task-transcript/transcript-button.test.tsx`<br>`packages/core/types/events.ts` | FIR-3782 — ports upstream `00e658401` (#5890, virtualized execution log with the `smart` / `expanded` / `collapsed` density modes). The transcript files, `trace-event-presenter.ts`, `task-transcript.css` and `transcript-view-store.ts` are taken from upstream verbatim; the locale files merge upstream's new `transcript.*` keys while keeping fork-only ones. Six marked adaptations bridge upstream APIs this fork does not carry yet: `AttributionBadge` and `RichContent` call sites degrade (the badge is dropped, agent replies render as plain text), `runtimeDisplayName` falls back to `runtime.name`, `ActorAvatar` takes this fork's pixel size instead of upstream size tiers, the `brand` Button variant becomes `secondary`, and `created_at` is added to `TaskMessagePayload` / `TimelineItem` (the server already sends it — `protocol.TaskMessagePayload` — only the TS type had not synced down). The wholesale file replacement is covered by a `CEREBRO-ALLOW-NO-PATCH:` commit; every fork-side adaptation on top of it carries a marker. |
 
 **Also fixed, cerebro-zone only (no marker needed):** `packages/cerebro-runtime/views/task-failure-severity.ts` keyed `INTERRUPTION_REASONS` on `runtime_paused` and `rate_limit`. Neither string is emitted any more — `taskfailure.Classify` resolves a provider stall to an `agent_error.*` sub-reason and never returns a platform-side reason — so an auto-retried provider rate limit rendered as a hard red failure instead of the amber "Interrupted, retrying" state.
+
+## FIR-3805 — Flueben "Altid med": a bound skill's full text in the agent's instructions
+
+A bound skill reached the agent as one line in its brief (name + description) and was
+opened on demand. That is right for a task recipe ("how to deploy") and wrong for a rule
+that must hold on every single response — writing style, check-before-you-send gates. The
+agent never opened those skills, because it had no reason to before it started writing, so
+the rules never applied. The only workaround was copying the rule into the agent's
+instructions by hand, which left the same rule in two places to drift apart.
+
+`always_on` is a column on `agent_skill`, so it is a property of the BINDING: the same
+skill can be always-on for one agent and load-on-demand for another. It flows DB → task →
+daemon → brief; the flag is set through the same versioned propose→approve flow as the
+binding set itself (turning a skill always-on is the stronger of the two actions), with a
+direct CLI path that records into the version history afterwards, exactly as
+`agent skills set` already does.
+
+All new logic lives in the cerebro zone (`server/internal/cerebro/agentoffice/always_on.go`,
+`server/internal/daemon/execenv/cerebro_always_on_skills_brief.go`,
+`server/cmd/multica/cerebro_agent_skill_always_on.go`,
+`packages/cerebro-agent-context/views/`, migration `9159_cerebro_agent_skill_always_on`).
+The upstream files carry one-line field/call-site additions each. Behind
+`cerebro_agent_skill_always_on` (ON) — an agent with nothing flagged behaves exactly as before.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `skill-always-on` | `server/pkg/db/queries/skill.sql` (2 marked lines) | `ListAgentSkills` and `ListAgentSkillSummaries` select `ask.always_on` so the runtime and the agent page read the flag alongside the skill. |
+| `skill-always-on` | `server/internal/handler/skill.go` + `agent.go` (2 marked lines) | `AgentSkillSummary` carries `always_on`; the agent page renders its checkbox from it. |
+| `skill-always-on` | `server/internal/service/task.go` (2 marked lines) | `AgentSkillData` carries the flag from the DB into the task payload. |
+| `skill-always-on` | `server/internal/daemon/types.go` + `daemon.go` (2 marked lines) | `SkillData` → `SkillContextForEnv` keeps the flag across the wire into the brief builder. |
+| `skill-always-on` | `server/internal/daemon/execenv/execenv.go` (1 marked line) | `SkillContextForEnv.AlwaysOn`. |
+| `skill-always-on` | `server/internal/daemon/execenv/runtime_config.go` (2 marked lines; section in the net-new cerebro sibling `cerebro_always_on_skills_brief.go`) | Marks always-on entries in the skills list and appends the full text of every always-on skill below it. Rejected alternative: instructing the agent to open the skill first — the text lands in the context either way, so it buys only a round-trip, and the agent can drop the skill again mid-run. |
+| `skill-always-on` | `server/cmd/server/router.go` (1 marked line) | `PUT /api/agents/{id}/skills/always-on` — the direct (CLI) write path. |
+| `skill-always-on` | `server/cmd/multica/cmd_agent.go` (2 marked lines; helper in the net-new cerebro sibling `cerebro_agent_skill_always_on.go`) | `agent skills list` gains an `ALWAYS_ON` column. |
+| `skill-always-on` | `packages/views/agents/components/tabs/skills-tab.tsx` (5 marked lines; checkbox + draft hook in the cerebro-zone `packages/cerebro-agent-context/views/`) | The checkbox sits on the skill's own row, so the row is both the control and the answer to "which skills are always on". Ticking it makes the tab dirty and is proposed together with the binding set. |
+| `skill-always-on` | `server/internal/service/builtin_skills/multica-creating-agents/SKILL.md` + `references/creating-agents-source-map.md` (marked sections, not ≤5-line inline patches) | `multica-creating-agents` is an UPSTREAM built-in skill, so documenting the new binding flag there is an upstream-zone edit and carries HTML-comment markers — same pattern as the marked sections in `multica-working-on-issues/SKILL.md`. Deliberately NOT carved out in `scripts/cerebro-zones.txt`: that carve-out family is scoped to net-new cerebro-only skills, and excluding an upstream skill directory would stop the guard catching real upstream-skill edits from then on. |
+
+**Known limitation, deliberately not solved here:** "always in the instructions" does not
+hold all the way through a very long run — the context is compacted and the earliest
+instructions dilute first. Enough for style and form rules. A watertight
+check-before-you-send gate has to run as a check at send time; that is a separate build.

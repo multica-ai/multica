@@ -22,13 +22,15 @@ import {
   AgentContextChangeRequestQueue,
   AgentContextFieldProposeDialog,
   AgentContextVersionsPanel,
+  AgentSkillAlwaysOnToggle, // CEREBRO-PATCH(skill-always-on): FIR-3805 per-binding "always on" checkbox
+  useAlwaysOnSkillDraft, // CEREBRO-PATCH(skill-always-on): FIR-3805 draft state for the checkbox
 } from "@multica/cerebro-agent-context/views";
 import { Button } from "@multica/ui/components/ui/button";
 import { SkillAddDialog } from "../skill-add-dialog";
 import { useT } from "../../../i18n";
 
 // Only the skills field is in scope for this tab's diffs and proposal queue.
-const SKILLS_KEYS = ["skill_ids"];
+const SKILLS_KEYS = ["skill_ids", "always_on_skill_ids"]; // CEREBRO-PATCH(skill-always-on): FIR-3805 scope always-on changes to this tab's queue + history
 
 export function SkillsTab({
   agent,
@@ -74,13 +76,20 @@ export function SkillsTab({
     return { name: ws?.name ?? id, description: ws?.description ?? "" };
   };
 
-  const dirty = !sameSet(draftIds, currentIds);
+  const alwaysOn = useAlwaysOnSkillDraft(agent); // CEREBRO-PATCH(skill-always-on): FIR-3805 second dimension of this tab's draft
 
-  const handleRemove = (id: string) =>
+  const dirty = !sameSet(draftIds, currentIds) || alwaysOn.dirty; // CEREBRO-PATCH(skill-always-on): FIR-3805 flipping the checkbox is a proposable change
+
+  const handleRemove = (id: string) => {
+    alwaysOn.forget(id); // CEREBRO-PATCH(skill-always-on): FIR-3805 an unbound skill cannot stay always-on
     setDraftIds((cur) => cur.filter((x) => x !== id));
+  };
   const handleAdd = (ids: string[]) =>
     setDraftIds((cur) => Array.from(new Set([...cur, ...ids])));
-  const handleDiscard = () => setDraftIds(currentIds);
+  const handleDiscard = () => {
+    alwaysOn.discard(); // CEREBRO-PATCH(skill-always-on): FIR-3805 discard resets both dimensions
+    setDraftIds(currentIds);
+  };
 
   return (
     <div className="space-y-5">
@@ -144,6 +153,13 @@ export function SkillsTab({
                     </div>
                   )}
                 </div>
+                {/* CEREBRO-PATCH(skill-always-on): FIR-3805 the row is both the control and the answer to "which skills are always on" */}
+                <AgentSkillAlwaysOnToggle
+                  skillId={id}
+                  checked={alwaysOn.isAlwaysOn(id)}
+                  onCheckedChange={(v) => alwaysOn.setAlwaysOn(id, v)}
+                  disabled={!canManage}
+                />
                 {canManage && (
                   <Button
                     variant="ghost"
@@ -217,7 +233,11 @@ export function SkillsTab({
         agent={agent}
         open={showPropose}
         onOpenChange={setShowPropose}
-        override={{ skill_ids: draftIds }}
+        // CEREBRO-PATCH(skill-always-on): FIR-3805 propose both dimensions together
+        override={{
+          skill_ids: draftIds,
+          always_on_skill_ids: alwaysOn.proposalValue(draftIds),
+        }}
         fieldLabel="skills"
         defaultTitle="Update bound skills"
       />

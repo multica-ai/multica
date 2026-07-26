@@ -9,6 +9,11 @@ export { AgentContextChangeRequestQueue } from "./components/agent-context-chang
 export { AgentContextProposeDialog } from "./components/agent-context-propose-dialog";
 export { AgentContextFieldProposeDialog } from "./components/agent-context-propose-field-dialog";
 export { AgentContextFieldDiff } from "./components/agent-context-field-diff";
+export { AgentSkillAlwaysOnToggle } from "./components/agent-skill-always-on-toggle";
+export {
+  useAlwaysOnSkillDraft,
+  type AlwaysOnSkillDraft,
+} from "./use-always-on-skill-draft";
 export { AgentContextDiffView } from "./components/agent-context-diff-view";
 export {
   AgentTabSections,

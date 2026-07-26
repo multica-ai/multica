@@ -229,7 +229,8 @@ func (q *Queries) GetSkillInWorkspace(ctx context.Context, arg GetSkillInWorkspa
 }
 
 const listAgentSkillSummaries = `-- name: ListAgentSkillSummaries :many
-SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at
+SELECT s.id, s.workspace_id, s.name, s.description, s.config, s.created_by, s.created_at, s.updated_at,
+       ask.always_on -- CEREBRO-PATCH(skill-always-on): FIR-3805 surface the per-binding always-on flag to the agent page
 FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
@@ -245,6 +246,7 @@ type ListAgentSkillSummariesRow struct {
 	CreatedBy   pgtype.UUID        `json:"created_by"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	AlwaysOn    bool               `json:"always_on"`
 }
 
 // Summary variant for the agent skills list endpoint — omits `content` for
@@ -267,6 +269,7 @@ func (q *Queries) ListAgentSkillSummaries(ctx context.Context, agentID pgtype.UU
 			&i.CreatedBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.AlwaysOn,
 		); err != nil {
 			return nil, err
 		}
@@ -280,22 +283,43 @@ func (q *Queries) ListAgentSkillSummaries(ctx context.Context, agentID pgtype.UU
 
 const listAgentSkills = `-- name: ListAgentSkills :many
 
-SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at, s.owner_id, s.approver_ids, s.current_version, s.metadata, s.notify_change_requests, s.notify_forks, s.notify_agent_assigned FROM skill s
+SELECT s.id, s.workspace_id, s.name, s.description, s.content, s.config, s.created_by, s.created_at, s.updated_at, s.owner_id, s.approver_ids, s.current_version, s.metadata, s.notify_change_requests, s.notify_forks, s.notify_agent_assigned, ask.always_on -- CEREBRO-PATCH(skill-always-on): FIR-3805 the brief builder needs the flag alongside the skill text
+FROM skill s
 JOIN agent_skill ask ON ask.skill_id = s.id
 WHERE ask.agent_id = $1
 ORDER BY s.name ASC
 `
 
+type ListAgentSkillsRow struct {
+	ID                   pgtype.UUID        `json:"id"`
+	WorkspaceID          pgtype.UUID        `json:"workspace_id"`
+	Name                 string             `json:"name"`
+	Description          string             `json:"description"`
+	Content              string             `json:"content"`
+	Config               []byte             `json:"config"`
+	CreatedBy            pgtype.UUID        `json:"created_by"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	OwnerID              pgtype.UUID        `json:"owner_id"`
+	ApproverIds          []pgtype.UUID      `json:"approver_ids"`
+	CurrentVersion       string             `json:"current_version"`
+	Metadata             []byte             `json:"metadata"`
+	NotifyChangeRequests bool               `json:"notify_change_requests"`
+	NotifyForks          bool               `json:"notify_forks"`
+	NotifyAgentAssigned  bool               `json:"notify_agent_assigned"`
+	AlwaysOn             bool               `json:"always_on"`
+}
+
 // Agent-Skill junction
-func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]Skill, error) {
+func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]ListAgentSkillsRow, error) {
 	rows, err := q.db.Query(ctx, listAgentSkills, agentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []Skill{}
+	items := []ListAgentSkillsRow{}
 	for rows.Next() {
-		var i Skill
+		var i ListAgentSkillsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.WorkspaceID,
@@ -313,6 +337,7 @@ func (q *Queries) ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]S
 			&i.NotifyChangeRequests,
 			&i.NotifyForks,
 			&i.NotifyAgentAssigned,
+			&i.AlwaysOn,
 		); err != nil {
 			return nil, err
 		}
