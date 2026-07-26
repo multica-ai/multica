@@ -1036,6 +1036,63 @@ func (q *Queries) ClaimChatFinalizeDeferred(ctx context.Context, id pgtype.UUID)
 	return i, err
 }
 
+const classifyActiveTasksForIssueAndAgent = `-- name: ClassifyActiveTasksForIssueAndAgent :one
+SELECT
+    COALESCE(bool_or(
+        COALESCE($1::text, '') = ''
+        OR COALESCE(context->>'head_sha', '') = COALESCE($1::text, '')
+    ), false)::boolean AS has_same_head_active,
+    COALESCE(bool_or(
+        NOT (
+            COALESCE($1::text, '') = ''
+            OR COALESCE(context->>'head_sha', '') = COALESCE($1::text, '')
+        )
+    ), false)::boolean AS has_different_head_active
+FROM agent_task_queue
+WHERE issue_id = $2
+  AND agent_id = $3
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+`
+
+type ClassifyActiveTasksForIssueAndAgentParams struct {
+	HeadSha pgtype.Text `json:"head_sha"`
+	IssueID pgtype.UUID `json:"issue_id"`
+	AgentID pgtype.UUID `json:"agent_id"`
+}
+
+type ClassifyActiveTasksForIssueAndAgentRow struct {
+	HasSameHeadActive      bool `json:"has_same_head_active"`
+	HasDifferentHeadActive bool `json:"has_different_head_active"`
+}
+
+// #5914 (Elon round 4): classify the active tasks for (issue, agent) in ONE
+// consistent snapshot, so the lost-race resolver never derives "different-head"
+// from two separate reads (a TOCTOU where a same-head sibling slips in between
+// "no same-head pending" and "any active task exists"). From a single read of
+// the queued/dispatched/running/waiting rows it returns:
+//
+//	has_same_head_active      — a same-head active task exists (or, for a
+//	                            PR-less issue with empty head, any active task).
+//	                            The comment must fold into it via the atomic
+//	                            merge (queued) or planned registration (claimed),
+//	                            so the caller RE-LOOPS rather than defers on top
+//	                            of a task that does not yet cover it.
+//	has_different_head_active  — an active task exists whose head differs. The
+//	                            comment is newer than it (HEAD advanced after it
+//	                            enqueued), so its completion reconcile covers the
+//	                            comment by timestamp — a DURABLE deferral,
+//	                            independent of anything that appears afterward.
+//
+// With neither flag set there is no active task and a fresh enqueue is safe. The
+// head match is NULL-safe (a task with no stamped head_sha counts as a different
+// head for a non-empty request head, matching HasPendingTaskForIssueAndAgent).
+func (q *Queries) ClassifyActiveTasksForIssueAndAgent(ctx context.Context, arg ClassifyActiveTasksForIssueAndAgentParams) (ClassifyActiveTasksForIssueAndAgentRow, error) {
+	row := q.db.QueryRow(ctx, classifyActiveTasksForIssueAndAgent, arg.HeadSha, arg.IssueID, arg.AgentID)
+	var i ClassifyActiveTasksForIssueAndAgentRow
+	err := row.Scan(&i.HasSameHeadActive, &i.HasDifferentHeadActive)
+	return i, err
+}
+
 const clearAgentComposioToolkitAllowlist = `-- name: ClearAgentComposioToolkitAllowlist :one
 UPDATE agent SET composio_toolkit_allowlist = NULL, updated_at = now()
 WHERE id = $1

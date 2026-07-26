@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -414,5 +415,95 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 	}
 	if orig != m2 {
 		t.Fatalf("originator_user_id = %s, want re-attributed to M2 %s (bare append would leave M1)", orig, m2)
+	}
+}
+
+// TestClassifyActiveTasksForIssueAndAgent is the regression for Elon round-4
+// must-fix: the lost-race resolver must decide "same-head vs different-head" from
+// ONE consistent snapshot, not two separate reads (a TOCTOU where a same-head
+// sibling slips in between "no same-head pending" and "any active"). This locks
+// the single-query classification directly — in particular that a same-head task
+// coexisting with a different-head task always reports has_same_head_active, so
+// the resolver re-loops to fold it rather than fabricating a deferred.
+func TestClassifyActiveTasksForIssueAndAgent(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, issueID, runtimeID := dupRaceFixture(t, "dup-race-classify", 999316)
+	issueUUID := util.MustParseUUID(issueID)
+	agentUUID := util.MustParseUUID(agentID)
+
+	insertTask := func(status, head string) {
+		t.Helper()
+		if head == "" {
+			if _, err := testPool.Exec(ctx, `
+				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
+				VALUES ($1, $2, $3, $4, 0, now())
+			`, agentID, runtimeID, issueID, status); err != nil {
+				t.Fatalf("insert %s task (no head): %v", status, err)
+			}
+			return
+		}
+		if _, err := testPool.Exec(ctx, `
+			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at, context)
+			VALUES ($1, $2, $3, $4, 0, now(), jsonb_build_object('head_sha', $5::text))
+		`, agentID, runtimeID, issueID, status, head); err != nil {
+			t.Fatalf("insert %s task (head %s): %v", status, head, err)
+		}
+	}
+	classify := func(head string) db.ClassifyActiveTasksForIssueAndAgentRow {
+		t.Helper()
+		row, err := testHandler.Queries.ClassifyActiveTasksForIssueAndAgent(ctx, db.ClassifyActiveTasksForIssueAndAgentParams{
+			IssueID: issueUUID,
+			AgentID: agentUUID,
+			HeadSha: pgtype.Text{String: head, Valid: head != ""},
+		})
+		if err != nil {
+			t.Fatalf("classify(head=%q): %v", head, err)
+		}
+		return row
+	}
+	clear := func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) }
+
+	// No active task → neither flag.
+	if c := classify(dupRaceHeadB); c.HasSameHeadActive || c.HasDifferentHeadActive {
+		t.Fatalf("no active: same=%v diff=%v, want false/false", c.HasSameHeadActive, c.HasDifferentHeadActive)
+	}
+
+	// Same-head queued only.
+	insertTask("queued", dupRaceHeadB)
+	if c := classify(dupRaceHeadB); !c.HasSameHeadActive || c.HasDifferentHeadActive {
+		t.Fatalf("same-head queued: same=%v diff=%v, want true/false", c.HasSameHeadActive, c.HasDifferentHeadActive)
+	}
+	clear()
+
+	// Different-head dispatched only.
+	insertTask("dispatched", dupRaceHeadA)
+	if c := classify(dupRaceHeadB); c.HasSameHeadActive || !c.HasDifferentHeadActive {
+		t.Fatalf("different-head: same=%v diff=%v, want false/true", c.HasSameHeadActive, c.HasDifferentHeadActive)
+	}
+	clear()
+
+	// A head-less (no-PR) task is a DIFFERENT head for a non-empty request head,
+	// but the SAME head for an empty request head (legacy coalescing) — matching
+	// HasPendingTaskForIssueAndAgent's key.
+	insertTask("queued", "")
+	if c := classify(dupRaceHeadB); c.HasSameHeadActive || !c.HasDifferentHeadActive {
+		t.Fatalf("head-less vs head B: same=%v diff=%v, want false/true", c.HasSameHeadActive, c.HasDifferentHeadActive)
+	}
+	if c := classify(""); !c.HasSameHeadActive || c.HasDifferentHeadActive {
+		t.Fatalf("head-less vs empty head: same=%v diff=%v, want true/false", c.HasSameHeadActive, c.HasDifferentHeadActive)
+	}
+	clear()
+
+	// THE TOCTOU CASE: a same-head sibling coexisting with a different-head task
+	// (running is outside the unique index, so it can sit alongside a queued row).
+	// The snapshot MUST report has_same_head_active so the resolver re-loops and
+	// folds it, never derives "different-head only" and fabricates a deferred.
+	insertTask("queued", dupRaceHeadB)
+	insertTask("running", dupRaceHeadA)
+	if c := classify(dupRaceHeadB); !c.HasSameHeadActive || !c.HasDifferentHeadActive {
+		t.Fatalf("same+different coexisting: same=%v diff=%v, want true/true", c.HasSameHeadActive, c.HasDifferentHeadActive)
 	}
 }
