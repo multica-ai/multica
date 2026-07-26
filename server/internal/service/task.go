@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/attribution"
@@ -553,6 +554,22 @@ func triggerOwnerAttribution(ctx context.Context, q *db.Queries, triggerID, work
 // owner_fallback has no agent owner to fall back to. Enqueue paths surface it so the
 // run never starts.
 var ErrAttributionFailClosed = errors.New("attribution: no precise accountable human and enqueue refused (fail-closed policy, policy read failed, or no agent owner)")
+
+// ErrDuplicatePendingTask means a fresh enqueue lost the race to a concurrent
+// one: a queued/dispatched task for the same (issue, agent) already exists, so
+// the idx_one_pending_task_per_issue_agent unique index rejected the insert
+// (#5914). This is a benign outcome — a sibling run already covers this target
+// — not a server fault. Enqueue paths return it so callers can report a
+// success-shaped coalesced outcome / structured 409 instead of surfacing the
+// raw Postgres constraint as a 500. It wraps the driver error for logging.
+var ErrDuplicatePendingTask = errors.New("a pending task for this issue and agent already exists")
+
+// isDuplicatePendingTaskErr reports whether err is the unique-index violation on
+// idx_one_pending_task_per_issue_agent (a concurrent enqueue won the race).
+func isDuplicatePendingTaskErr(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == "idx_one_pending_task_per_issue_agent"
+}
 
 // applyAttributionFallback applies the workspace's degraded-attribution policy to a
 // resolved attribution whose source came back unattributed (no precise human). A
@@ -1154,6 +1171,15 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		HeadSha: headShaText(s.ResolveIssueReviewSHA(ctx, issue.ID)),
 	})
 	if err != nil {
+		// A concurrent enqueue for the same (issue, agent) won the race and the
+		// unique index rejected this insert. That is benign — a sibling run
+		// already covers this target — so log it at debug and return a typed
+		// sentinel the caller maps to a coalesced outcome / 409 rather than a
+		// 500 that leaks the raw constraint name (#5914).
+		if isDuplicatePendingTaskErr(err) {
+			slog.Debug("mention task enqueue coalesced: pending task already exists", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
+			return db.AgentTaskQueue{}, fmt.Errorf("%w: %v", ErrDuplicatePendingTask, err)
+		}
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}

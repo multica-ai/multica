@@ -1572,6 +1572,16 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 			}
 		}
 		if err := h.enqueueSingleCommentTrigger(ctx, issue, triggerCommentID, trigger, getEscalationDelay); err != nil {
+			// A concurrent enqueue for the same (issue, agent) won the race and
+			// the unique index rejected this insert (#5914). The run is already
+			// handled by that sibling task, so this is a benign coalesced
+			// outcome — success-shaped, not a blocked internal_error. The
+			// sibling's completion reconcile (reconcileCommentsOnCompletion)
+			// still guarantees this comment earns a bounded follow-up.
+			if errors.Is(err, service.ErrDuplicatePendingTask) {
+				record(trigger, DispatchCoalesced, ReasonCoalesced)
+				continue
+			}
 			record(trigger, DispatchBlocked, commentEnqueueFailureReason(err))
 			continue
 		}
