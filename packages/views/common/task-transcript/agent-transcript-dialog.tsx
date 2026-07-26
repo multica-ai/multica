@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useMemo, forwardRef } from "react";
+import { Virtuoso, type VirtuosoHandle, type Components } from "react-virtuoso";
 import {
   Bot,
   ChevronRight,
@@ -13,18 +14,18 @@ import {
   Clock,
   Copy,
   Check,
-  Monitor,
-  Cloud,
-  Cpu,
   Filter,
-  Folder,
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
-  LockKeyhole,
+  ListCollapse,
+  Info,
+  LockKeyhole, // CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 icon for the task permission snapshot.
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
+import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
 import {
   DropdownMenu,
@@ -33,20 +34,37 @@ import {
   DropdownMenuSeparator,
   DropdownMenuCheckboxItem,
   DropdownMenuItem,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
+// CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — AttributionBadge and RichContent land in later upstream commits this fork does not carry yet; their two call sites below degrade instead of importing.
+import { RunFailureCard } from "@multica/cerebro-runtime/views/components/run-failure-card"; // CEREBRO-PATCH(run-failure-card): FIR-3782 — direct entry, not the views barrel: the barrel re-exports pages that import @multica/views and the cycle blanks this dialog.
+import { useFlagValue } from "@multica/cerebro-feature-flags"; // CEREBRO-PATCH(run-failure-card): FIR-3782 — a store read, so the dialog needs no QueryClient of its own.
 import { api } from "@multica/core/api";
-import { useTranscriptViewStore, type TranscriptSortDirection } from "@multica/core/agents/stores";
+import {
+  useTranscriptViewStore,
+  type TranscriptDetailDensity,
+  type TranscriptFilterKey,
+  type TranscriptSortDirection,
+} from "@multica/core/agents/stores";
 // CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 add the task permission snapshot contract.
 import type { AgentTask, Agent, AgentRuntime, TaskAccessSnapshot } from "@multica/core/types/agent";
-import { redactSecrets } from "./redact";
-import type { TimelineItem } from "./build-timeline";
-import { useT } from "../../i18n";
 // CEREBRO-PATCH(run-prompt-disclosure): FIR-1839 point 5 — surface the run's full initial prompt in the transcript modal.
 import { RunPromptDisclosure } from "@multica/cerebro-sessions";
-// CEREBRO-PATCH(run-failure-card): FIR-3782 — direct entry, not the /views barrel: the barrel re-exports pages that import @multica/views, and the resulting cycle blanks this dialog.
-import { RunFailureCard } from "@multica/cerebro-runtime/views/components/run-failure-card";
-import { useFlagValue } from "@multica/cerebro-feature-flags";
+import { redactSecrets } from "./redact";
+import type { TimelineItem } from "./build-timeline";
+import {
+  traceEventCopyText,
+  traceEventDefaultExpanded,
+  traceEventHasDetail,
+  traceEventKind,
+  traceEventLabel,
+  traceEventSummary,
+  traceEventSummaryIsMono,
+} from "./trace-event-presenter";
+import { useT } from "../../i18n";
+import "./task-transcript.css";
 
 interface AgentTranscriptDialogProps {
   open: boolean;
@@ -55,6 +73,13 @@ interface AgentTranscriptDialogProps {
   items: TimelineItem[];
   agentName: string;
   isLive?: boolean;
+  /**
+   * Optional content rendered between the header chips and the event list.
+   * Used by autopilot run rows to surface the inbound webhook trigger
+   * payload so it's visible regardless of whether the agent echoes it.
+   * The dialog stays generic — slot content is the caller's concern.
+   */
+  headerSlot?: React.ReactNode;
 }
 
 // ─── Color mapping for timeline segments ────────────────────────────────────
@@ -87,65 +112,13 @@ const colorClasses: Record<EventColor, { bg: string; bgActive: string; label: st
 };
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+// Presentation rules (kind/label/summary/default expansion) live in the pure
+// trace-event-presenter module; only view-plumbing helpers remain here.
 
-function getEventLabel(item: TimelineItem): string {
-  switch (item.type) {
-    case "text":
-      return "Agent";
-    case "thinking":
-      return "Thinking";
-    case "tool_use":
-      return item.tool ?? "Tool";
-    case "tool_result":
-      return item.tool ? `${item.tool}` : "Result";
-    case "error":
-      return "Error";
-    default:
-      return "Event";
-  }
-}
-
-function getEventSummary(item: TimelineItem): string {
-  switch (item.type) {
-    case "text":
-      return item.content?.split("\n").find((l) => l.trim().length > 0) ?? "";
-    case "thinking":
-      return item.content?.slice(0, 200) ?? "";
-    case "tool_use": {
-      if (!item.input) return "";
-      const inp = item.input as Record<string, string>;
-      if (inp.query) return inp.query;
-      if (inp.file_path) return shortenPath(inp.file_path);
-      if (inp.path) return shortenPath(inp.path);
-      if (inp.pattern) return inp.pattern;
-      if (inp.description) return String(inp.description);
-      if (inp.command) {
-        const cmd = String(inp.command);
-        return cmd.length > 120 ? cmd.slice(0, 120) + "..." : cmd;
-      }
-      if (inp.prompt) {
-        const p = String(inp.prompt);
-        return p.length > 120 ? p.slice(0, 120) + "..." : p;
-      }
-      if (inp.skill) return String(inp.skill);
-      for (const v of Object.values(inp)) {
-        if (typeof v === "string" && v.length > 0 && v.length < 120) return v;
-      }
-      return "";
-    }
-    case "tool_result":
-      return item.output?.slice(0, 200) ?? "";
-    case "error":
-      return item.content ?? "";
-    default:
-      return "";
-  }
-}
-
-function shortenPath(p: string): string {
-  const parts = p.split("/");
-  if (parts.length <= 3) return p;
-  return ".../" + parts.slice(-2).join("/");
+function getItemFilterKey(item: TimelineItem): TranscriptFilterKey {
+  return item.tool && (item.type === "tool_use" || item.type === "tool_result")
+    ? `tool:${item.tool}`
+    : item.type;
 }
 
 function formatDuration(start: string, end: string): string {
@@ -165,7 +138,74 @@ function formatElapsedMs(ms: number): string {
   return `${minutes}m ${secs}s`;
 }
 
+function formatRunTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+// ─── Run detail row (ⓘ popover) ─────────────────────────────────────────────
+// One labeled fact in the diagnostic popover. When `onCopy` is given the whole
+// row is a copy button (used for the workdir path).
+function RunDetailRow({
+  label,
+  value,
+  mono,
+  onCopy,
+  copied,
+  copyTitle,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  onCopy?: () => void;
+  copied?: boolean;
+  copyTitle?: string;
+}) {
+  const valueClass = cn("min-w-0 select-text break-all text-foreground/80", mono && "font-mono");
+  if (onCopy) {
+    return (
+      <button
+        type="button"
+        onClick={onCopy}
+        title={copyTitle}
+        className="group -mx-1 grid w-[calc(100%+0.5rem)] grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 rounded px-1 py-0.5 text-left transition-colors hover:bg-accent/60"
+      >
+        <span className="text-muted-foreground">{label}</span>
+        <span className="flex min-w-0 items-start gap-1.5">
+          <span className={cn(valueClass, "flex-1")}>{value}</span>
+          {copied ? (
+            <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />
+          ) : (
+            <Copy className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+          )}
+        </span>
+      </button>
+    );
+  }
+  return (
+    <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={valueClass}>{value}</span>
+    </div>
+  );
+}
+
 // ─── Main dialog ────────────────────────────────────────────────────────────
+
+// Virtuoso mounts rows as direct children of its List element; carry the
+// divider styling the plain list container used to provide. Defined at module
+// scope — an inline `components` object would remount the list every render.
+const VirtuosoList = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  function VirtuosoList(props, ref) {
+    return <div ref={ref} {...props} className="divide-y" />;
+  },
+);
+const LIST_COMPONENTS: Components<TimelineItem> = { List: VirtuosoList };
 
 export function AgentTranscriptDialog({
   open,
@@ -174,6 +214,7 @@ export function AgentTranscriptDialog({
   items,
   agentName,
   isLive = false,
+  headerSlot,
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
@@ -182,43 +223,61 @@ export function AgentTranscriptDialog({
   const [copiedWorkdir, setCopiedWorkdir] = useState(false);
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
-  const [selectedTools, setSelectedTools] = useState<Set<string>>(new Set());
+  // Row-level expand overrides. A row the user toggled follows the toggle; any
+  // other row follows the density preference (see traceEventDefaultExpanded).
+  // Switching density or task resets the overrides wholesale.
+  const [rowOverrides, setRowOverrides] = useState<Map<number, boolean>>(() => new Map());
   const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
   const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
-  const eventRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const failureCardEnabled = useFlagValue("cerebro_run_failure_card"); // CEREBRO-PATCH(run-failure-card): FIR-3782 — useFlagValue, not useFeatureFlag: a store read, so the dialog needs no QueryClient of its own.
+  // Filters always persist across opens — a facet a run doesn't have simply
+  // no-ops (see activeFilterKeys), so there is no reason to make persistence a
+  // user-facing toggle.
+  const selectedFilterKeys = useTranscriptViewStore((s) => s.selectedFilterKeys);
+  const toggleFilterKey = useTranscriptViewStore((s) => s.toggleFilterKey);
+  const clearFilters = useTranscriptViewStore((s) => s.clearFilterKeys);
+  const density = useTranscriptViewStore((s) => s.density);
+  const setDensity = useTranscriptViewStore((s) => s.setDensity);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+
+  useEffect(() => {
+    setRowOverrides(new Map());
+  }, [task.id, density]);
 
   // Derive filter options from each item:
   //   tool_use / tool_result → filter value = tool, display = "tool:Bash"
-  //   other types → display from getEventLabel
+  //   other types → display from traceEventLabel
   const filterOptions = useMemo(() => {
     const options = new Map<string, string>();
     for (const item of items) {
+      const key = getItemFilterKey(item);
       if (item.tool && (item.type === "tool_use" || item.type === "tool_result")) {
-        const key = `tool:${item.tool}`;
         if (!options.has(key)) options.set(key, key);
       } else {
-        const value = item.type;
-        if (!options.has(value)) {
-          options.set(value, getEventLabel(item));
+        if (!options.has(key)) {
+          options.set(key, traceEventLabel(item));
         }
       }
     }
     return Array.from(options.entries()).sort((a, b) => a[1].localeCompare(b[1]));
   }, [items]);
 
-  // Resolve filter key for each item — mirrors filterOptions derivation exactly
-  const itemFilterKey = (item: TimelineItem) =>
-    item.tool && (item.type === "tool_use" || item.type === "tool_result")
-      ? `tool:${item.tool}`
-      : item.type;
+  const filterOptionKeys = useMemo(
+    () => new Set(filterOptions.map(([value]) => value)),
+    [filterOptions],
+  );
+
+  const activeFilterKeys = useMemo(
+    () => selectedFilterKeys.filter((key) => filterOptionKeys.has(key)),
+    [selectedFilterKeys, filterOptionKeys],
+  );
+
+  const activeFilterSet = useMemo(() => new Set(activeFilterKeys), [activeFilterKeys]);
 
   // Strict filter
   const filteredItems = useMemo(() => {
-    if (selectedTools.size === 0) return items;
-    return items.filter((item) => selectedTools.has(itemFilterKey(item)));
-  }, [items, selectedTools]);
+    if (activeFilterSet.size === 0) return items;
+    return items.filter((item) => activeFilterSet.has(getItemFilterKey(item)));
+  }, [items, activeFilterSet]);
 
   // Apply user-chosen sort direction. Reverse is a pure presentation concern —
   // the underlying timeline (and its seq numbers) is untouched, so copy/filter
@@ -227,6 +286,22 @@ export function AgentTranscriptDialog({
     () => (sortDirection === "newest_first" ? [...filteredItems].reverse() : filteredItems),
     [filteredItems, sortDirection],
   );
+  const isAntigravityLiveEmpty =
+    isLive && displayItems.length === 0 && runtimeInfo?.provider === "antigravity";
+
+  // Newest-first shows live events as PREPENDS, and Virtuoso items opt out of
+  // native scroll anchoring (`overflow-anchor: none`), so without compensation
+  // every 500ms flush shifts the reading position. Virtuoso's contract: a
+  // decrease of firstItemIndex by N anchors the viewport across an N-item
+  // prepend, and the value must never increase within an instance — counting
+  // down from a large base satisfies that while the list only grows. Sort,
+  // filter, or task changes can shrink the list, so `listEpoch` remounts the
+  // instance (fresh at top) instead of letting firstItemIndex climb.
+  // `scrollToIndex`/`computeItemKey` are unaffected: indices stay data-relative
+  // (verified against scrollToIndexSystem — it never reads firstItemIndex).
+  const firstItemIndex =
+    sortDirection === "newest_first" ? 1_000_000 - displayItems.length : 0;
+  const listEpoch = `${task.id}:${sortDirection}:${activeFilterKeys.join(",")}`;
 
   // Toggling direction is a manual user action; jump the scroll container back
   // to the top so the newest end of the timeline (per the chosen direction) is
@@ -235,7 +310,7 @@ export function AgentTranscriptDialog({
     (dir: typeof sortDirection) => {
       if (dir === sortDirection) return;
       setSortDirection(dir);
-      scrollContainerRef.current?.scrollTo({ top: 0 });
+      virtuosoRef.current?.scrollTo({ top: 0 });
     },
     [sortDirection, setSortDirection],
   );
@@ -272,10 +347,17 @@ export function AgentTranscriptDialog({
     return () => clearInterval(interval);
   }, [isLive, task.started_at, task.dispatched_at]);
 
-  const handleSegmentClick = useCallback((seq: number) => {
-    setSelectedSeq(seq);
-    eventRefs.current.get(seq)?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, []);
+  // Rows are virtualized, so an off-screen target is not in the DOM;
+  // navigate by index instead of a node ref.
+  const handleSegmentClick = useCallback(
+    (seq: number) => {
+      setSelectedSeq(seq);
+      const index = displayItems.findIndex((item) => item.seq === seq);
+      if (index < 0) return;
+      virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "smooth" });
+    },
+    [displayItems],
+  );
 
   // Copy all events as text. Use the displayed order so users get the same
   // sequence they see on screen — matters when sort is set to newest-first.
@@ -289,13 +371,11 @@ export function AgentTranscriptDialog({
   }, [task.relative_work_dir]);
 
   const handleCopyAll = useCallback(() => {
+    // Copy the full body of each event (not the truncated row summary), with
+    // the same secret redaction the detail view applies.
     const text = displayItems
-      .map((item) => {
-        const label = getEventLabel(item);
-        const summary = getEventSummary(item);
-        return `[${label}] ${summary}`;
-      })
-      .join("\n");
+      .map((item) => redactSecrets(traceEventCopyText(item)))
+      .join("\n\n");
     void copyText(text).then((ok) => {
       if (!ok) return;
       setCopied(true);
@@ -303,18 +383,13 @@ export function AgentTranscriptDialog({
     });
   }, [displayItems]);
 
-  // Toggle tool filter
-  const toggleTool = useCallback((tool: string) => {
-    setSelectedTools((prev) => {
-      const next = new Set(prev);
-      if (next.has(tool)) next.delete(tool);
-      else next.add(tool);
+
+  const handleRowExpandedChange = useCallback((seq: number, expanded: boolean) => {
+    setRowOverrides((prev) => {
+      const next = new Map(prev);
+      next.set(seq, expanded);
       return next;
     });
-  }, []);
-
-  const clearFilters = useCallback(() => {
-    setSelectedTools(new Set());
   }, []);
 
   // Duration
@@ -325,29 +400,112 @@ export function AgentTranscriptDialog({
         ? elapsed
         : null;
 
-  const toolCount = items.filter((i) => i.type === "tool_use").length;
+  const copyTranscriptLabel = copied
+    ? t(($) => $.transcript.copied)
+    : activeFilterKeys.length > 0
+      ? t(($) => $.transcript.copy_filtered)
+      : t(($) => $.transcript.copy_all);
 
-  // Status display
-  const statusBadge = isLive ? (
-    <span className="inline-flex items-center gap-1 rounded-full bg-info/15 px-2 py-0.5 text-xs font-medium text-info">
-      <Loader2 className="h-3 w-3 animate-spin" />
-      {t(($) => $.transcript.status_running)}
-    </span>
-  ) : task.status === "completed" ? (
-    <span className="inline-flex items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
-      <CheckCircle2 className="h-3 w-3" />
-      {t(($) => $.transcript.status_completed)}
-    </span>
-  ) : task.status === "failed" ? (
-    <span className="inline-flex items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive">
-      <XCircle className="h-3 w-3" />
-      {t(($) => $.transcript.status_failed)}
-    </span>
-  ) : (
-    <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground capitalize">
-      {task.status}
-    </span>
-  );
+  // Status badge — full state machine, so queued/dispatched/cancelled render as
+  // proper labels instead of raw enum text.
+  const effectiveStatus = isLive ? "running" : task.status;
+  const statusBadge = (() => {
+    const base = "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium";
+    switch (effectiveStatus) {
+      case "running":
+        return (
+          <span className={cn(base, "bg-info/15 text-info")}>
+            <Loader2 className="h-3 w-3 animate-spin" />
+            {t(($) => $.transcript.status_running)}
+          </span>
+        );
+      case "completed":
+        return (
+          <span className={cn(base, "bg-success/15 text-success")}>
+            <CheckCircle2 className="h-3 w-3" />
+            {t(($) => $.transcript.status_completed)}
+          </span>
+        );
+      case "failed":
+        return (
+          <span className={cn(base, "bg-destructive/15 text-destructive")}>
+            <XCircle className="h-3 w-3" />
+            {t(($) => $.transcript.status_failed)}
+          </span>
+        );
+      case "cancelled":
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground")}>
+            <XCircle className="h-3 w-3" />
+            {t(($) => $.transcript.status_cancelled)}
+          </span>
+        );
+      case "queued":
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground")}>
+            {t(($) => $.transcript.status_queued)}
+          </span>
+        );
+      case "dispatched":
+        return (
+          <span className={cn(base, "bg-info/15 text-info")}>
+            {t(($) => $.transcript.status_dispatched)}
+          </span>
+        );
+      case "waiting_local_directory":
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground")}>
+            {t(($) => $.transcript.status_waiting)}
+          </span>
+        );
+      default:
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground capitalize")}>
+            {task.status}
+          </span>
+        );
+    }
+  })();
+
+  // Trigger source: one word answering "why does this run exist" — more useful
+  // up front than the runtime/provider diagnostics, which move to the ⓘ popover.
+  const triggerLabel = task.parent_task_id
+    ? t(($) => $.transcript.trigger_retry)
+    : task.kind === "comment" || task.trigger_comment_id
+      ? t(($) => $.transcript.trigger_comment)
+      : task.kind === "autopilot" || task.autopilot_run_id
+        ? t(($) => $.transcript.trigger_autopilot)
+        : task.kind === "chat" || task.chat_session_id
+          ? t(($) => $.transcript.trigger_chat)
+          : task.kind === "quick_create"
+            ? t(($) => $.transcript.trigger_quick_create)
+            : task.kind === "direct" || task.handoff_note
+              ? t(($) => $.transcript.trigger_direct)
+              : t(($) => $.transcript.trigger_initial);
+
+  // Diagnostic detail for the ⓘ popover: everything a reader needs only when
+  // debugging this specific run, kept off the always-visible surface.
+  const providerLabel = runtimeInfo?.provider ? formatProvider(runtimeInfo.provider) : null;
+  const createdLabel = task.created_at ? formatRunTime(task.created_at) : null;
+  const startedLabel = task.started_at ? formatRunTime(task.started_at) : null;
+  const completedLabel = task.completed_at ? formatRunTime(task.completed_at) : null;
+  // "When was this run created" — a read-before-you-read fact worth the toolbar
+  // surface (the ⓘ popover keeps the full-precision created/started/completed).
+  const createdShort = task.created_at
+    ? new Date(task.created_at).toLocaleString(undefined, {
+        month: "short",
+        day: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+      })
+    : null;
+  const failureCardEnabled = useFlagValue("cerebro_run_failure_card"); // CEREBRO-PATCH(run-failure-card): FIR-3782 — gate the failure summary card.
+  const hasRunDetails =
+    !!runtimeInfo ||
+    !!task.relative_work_dir ||
+    !!createdLabel ||
+    !!startedLabel ||
+    !!completedLabel;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -357,176 +515,241 @@ export function AgentTranscriptDialog({
       >
         <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>
 
-        {/* ── Header ─────────────────────────────────────────────── */}
-        <div className="border-b px-4 py-3 shrink-0 space-y-2">
-          {/* Top row: agent name, status, actions */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2">
+        {/* ── Header: identity only ──────────────────────────────────
+            Tier 1 — everything a viewer needs BEFORE reading: outcome
+            (status anchors the left), who ran it, why it exists (trigger),
+            and who's accountable. All diagnostics move to the ⓘ popover. */}
+        <div className="border-b px-4 py-3 shrink-0">
+          <div className="flex min-w-0 items-center gap-3">
+            {statusBadge}
+            {/* Primary identity: the agent that ran this. It is the one
+                foreground entity — avatar + medium weight. */}
+            <div className="flex min-w-0 items-center gap-2">
               {task.agent_id ? (
-                <ActorAvatar actorType="agent" actorId={task.agent_id} size={24} />
+                // CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — this fork's ActorAvatar still takes a pixel size, not upstream size tiers.
+                <ActorAvatar actorType="agent" actorId={task.agent_id} size={20} enableHoverCard />
               ) : (
-                <div className="flex items-center justify-center h-6 w-6 rounded-full bg-info/10 text-info">
-                  <Bot className="h-3.5 w-3.5" />
+                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
+                  <Bot className="h-3 w-3" />
                 </div>
               )}
-              <span className="font-medium text-sm">{agentName}</span>
+              <span className="truncate font-medium text-sm">
+                {agentName || agentInfo?.name || ""}
+              </span>
+            </div>
+            {/* Provenance, one muted secondary unit set apart from the agent:
+                who triggered the run and how — reads as "<person> · <how>",
+                not three peer entities. The person's avatar is dropped here so
+                two same-size faces don't read as two agents. */}
+            <div className="flex min-w-0 flex-1 items-center gap-x-1.5 overflow-hidden text-xs text-muted-foreground">
+              {/* CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — the initiator badge needs AttributionBadge; until that upstream commit lands the trigger label stands alone. */}
+              <span className="shrink-0">{triggerLabel}</span>
             </div>
 
-            {statusBadge}
-
-            <div className="ml-auto flex items-center gap-1">
-              {items.length > 1 && (
-                <SortDirectionToggle
-                  value={sortDirection}
-                  onChange={handleSortDirectionChange}
-                  labels={{
-                    chronological: t(($) => $.transcript.sort_chronological),
-                    newestFirst: t(($) => $.transcript.sort_newest_first),
-                    ariaLabel: t(($) => $.transcript.sort_label),
-                  }}
-                />
-              )}
-              {filterOptions.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    className={cn(
-                      "flex items-center gap-1 rounded px-2 py-1 text-xs transition-colors",
-                      selectedTools.size > 0
-                        ? "text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/20"
-                        : "text-muted-foreground hover:text-foreground hover:bg-accent",
-                    )}
+            <div className="flex shrink-0 items-center gap-0.5">
+              {hasRunDetails && (
+                <Popover>
+                  <PopoverTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={t(($) => $.transcript.run_info)}
+                        title={t(($) => $.transcript.run_info)}
+                        className="text-muted-foreground"
+                      />
+                    }
                   >
-                    <Filter className="h-3 w-3" />
-                    {t(($) => $.transcript.filter)}
-                    {selectedTools.size > 0 && (
-                      <span className="ml-0.5 rounded-full bg-blue-500/20 px-1.5 py-0 text-[10px] font-medium">
-                        {selectedTools.size}
-                      </span>
-                    )}
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-auto">
-                    {filterOptions.map(([value, label]) => (
-                      <DropdownMenuCheckboxItem
-                        key={value}
-                        checked={selectedTools.has(value)}
-                        onCheckedChange={() => toggleTool(value)}
-                      >
-                        {label}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                    {selectedTools.size > 0 && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
-                          {t(($) => $.transcript.clear_filters)}
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                    <Info className="h-3.5 w-3.5" />
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] p-3">
+                    <div className="mb-2 text-xs font-medium text-foreground">
+                      {t(($) => $.transcript.run_info)}
+                    </div>
+                    <div className="space-y-1 text-xs">
+                      {runtimeInfo && (
+                        <RunDetailRow
+                          label={t(($) => $.transcript.details_runtime)}
+                          // CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — runtimeDisplayName ships in a later upstream commit; name is the same string until custom aliases land.
+                          value={runtimeInfo.name}
+                        />
+                      )}
+                      {providerLabel && (
+                        <RunDetailRow label={t(($) => $.transcript.details_provider)} value={providerLabel} />
+                      )}
+                      {runtimeInfo && (
+                        <RunDetailRow label={t(($) => $.transcript.details_mode)} value={runtimeInfo.runtime_mode} />
+                      )}
+                      {task.relative_work_dir && (
+                        <RunDetailRow
+                          label={t(($) => $.transcript.details_workdir)}
+                          value={task.relative_work_dir}
+                          mono
+                          onCopy={handleCopyWorkdir}
+                          copied={copiedWorkdir}
+                          copyTitle={t(($) => $.transcript.copy_workdir)}
+                        />
+                      )}
+                      {createdLabel && (
+                        <RunDetailRow label={t(($) => $.transcript.details_created)} value={createdLabel} />
+                      )}
+                      {startedLabel && (
+                        <RunDetailRow label={t(($) => $.transcript.details_started)} value={startedLabel} />
+                      )}
+                      {completedLabel && (
+                        <RunDetailRow label={t(($) => $.transcript.details_completed)} value={completedLabel} />
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
               )}
-              <button
-                type="button"
-                onClick={handleCopyAll}
-                className="flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-              >
-                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                {copied ? t(($) => $.transcript.copied) : selectedTools.size > 0 ? t(($) => $.transcript.copy_filtered) : t(($) => $.transcript.copy_all)}
-              </button>
-              <button
-                type="button"
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => onOpenChange(false)}
-                className="flex items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                aria-label={t(($) => $.transcript.close)}
+                className="text-muted-foreground"
               >
                 <X className="h-4 w-4" />
-              </button>
+              </Button>
             </div>
           </div>
+        </div>
 
-          {/* Metadata chips row */}
-          <div className="flex items-center gap-2 flex-wrap text-xs">
-            {/* Runtime provider */}
-            {runtimeInfo?.provider && (
-              <MetadataChip icon={<Cpu className="h-3 w-3" />}>
-                {formatProvider(runtimeInfo.provider)}
-              </MetadataChip>
+        {/* ── List toolbar: read-before-you-read summary (left) + controls
+            (right). Duration + event count fill the left, so the row balances
+            instead of leaving dead space. ── */}
+        <div className="flex items-center gap-3 border-b px-4 py-1.5 shrink-0">
+          <div className="flex min-w-0 flex-1 items-center gap-x-1.5 overflow-hidden whitespace-nowrap text-xs text-muted-foreground">
+            {createdShort && (
+              <>
+                <span>{t(($) => $.transcript.fact_created, { time: createdShort })}</span>
+                <FactDot />
+              </>
             )}
-
-            {/* Runtime environment */}
-            {runtimeInfo && (
-              <MetadataChip
-                icon={runtimeInfo.runtime_mode === "cloud" ? <Cloud className="h-3 w-3" /> : <Monitor className="h-3 w-3" />}
-              >
-                {runtimeInfo.name}
-                <span className="text-muted-foreground/60 ml-0.5">({runtimeInfo.runtime_mode})</span>
-              </MetadataChip>
-            )}
-
-            {/* Agent type / description */}
-            {agentInfo?.description && (
-              <MetadataChip icon={<Bot className="h-3 w-3" />}>
-                {agentInfo.description.length > 40 ? agentInfo.description.slice(0, 40) + "..." : agentInfo.description}
-              </MetadataChip>
-            )}
-
-            {/* Duration */}
             {duration && (
-              <MetadataChip icon={<Clock className="h-3 w-3" />}>
-                {duration}
-              </MetadataChip>
+              <>
+                <span>{t(($) => $.transcript.fact_took, { duration })}</span>
+                <FactDot />
+              </>
             )}
-
-            {/* Event counts */}
-            {toolCount > 0 && (
-              <MetadataChip>{t(($) => $.transcript.tool_calls, { count: toolCount })}</MetadataChip>
-            )}
-            <MetadataChip>
-              {selectedTools.size > 0
+            <span>
+              {activeFilterKeys.length > 0
                 ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
                 : t(($) => $.transcript.events, { count: items.length })}
-            </MetadataChip>
-
-            {/* Working directory — server-derived display path. Falls back to
-                nothing when older backends omit the field rather than rendering
-                `work_dir` raw and leaking the user's home directory. The
-                absolute `task.work_dir` deliberately never reaches the DOM
-                anywhere — only `relative_work_dir` is safe to render / put in
-                title / copy to clipboard, because the server has already
-                stripped $HOME and the username out of it. The button
-                truncates because real workdir paths are routinely long
-                enough to push every other chip off the row. */}
-            {task.relative_work_dir && (
-              <button
-                type="button"
-                onClick={handleCopyWorkdir}
-                title={task.relative_work_dir}
-                className="inline-flex max-w-[16rem] items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                {copiedWorkdir ? (
-                  <Check className="h-3 w-3 shrink-0 text-emerald-500" />
-                ) : (
-                  <Folder className="h-3 w-3 shrink-0" />
-                )}
-                <span className="truncate font-mono">{task.relative_work_dir}</span>
-              </button>
-            )}
-
-            {/* Created time */}
-            {task.created_at && (
-              <MetadataChip>
-                {new Date(task.created_at).toLocaleString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </MetadataChip>
-            )}
+            </span>
           </div>
-
-          {/* CEREBRO-PATCH(run-prompt-disclosure): FIR-1839 point 5 — full initial prompt, openable. */}
-          <RunPromptDisclosure task={task} />
-          <TaskAccessDisclosure taskId={task.id} enabled={open} />
+          <div className="flex shrink-0 items-center gap-1">
+            {items.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      aria-label={t(($) => $.transcript.density_label)}
+                      className="text-muted-foreground"
+                    />
+                  }
+                >
+                  <ListCollapse className="h-3 w-3" />
+                  <span className="hidden sm:inline">
+                    {density === "smart"
+                      ? t(($) => $.transcript.density_smart)
+                      : density === "expanded"
+                        ? t(($) => $.transcript.density_expanded)
+                        : t(($) => $.transcript.density_collapsed)}
+                  </span>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-64">
+                  <DropdownMenuRadioGroup
+                    value={density}
+                    onValueChange={(value) => setDensity(value as TranscriptDetailDensity)}
+                  >
+                    {(
+                      [
+                        ["smart", t(($) => $.transcript.density_smart), t(($) => $.transcript.density_smart_desc)],
+                        ["expanded", t(($) => $.transcript.density_expanded), t(($) => $.transcript.density_expanded_desc)],
+                        ["collapsed", t(($) => $.transcript.density_collapsed), t(($) => $.transcript.density_collapsed_desc)],
+                      ] as const
+                    ).map(([value, name, description]) => (
+                      <DropdownMenuRadioItem key={value} value={value} className="items-start">
+                        <span className="flex min-w-0 flex-col gap-0.5">
+                          <span>{name}</span>
+                          <span className="text-[11px] leading-snug text-muted-foreground">
+                            {description}
+                          </span>
+                        </span>
+                      </DropdownMenuRadioItem>
+                    ))}
+                  </DropdownMenuRadioGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            {items.length > 1 && (
+              <SortDirectionToggle
+                value={sortDirection}
+                onChange={handleSortDirectionChange}
+                labels={{
+                  chronological: t(($) => $.transcript.sort_chronological),
+                  newestFirst: t(($) => $.transcript.sort_newest_first),
+                  ariaLabel: t(($) => $.transcript.sort_label),
+                }}
+              />
+            )}
+            {filterOptions.length > 0 && (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={
+                    <Button
+                      // CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — the upstream "brand" Button variant has not synced down.
+                      variant={activeFilterKeys.length > 0 ? "secondary" : "ghost"}
+                      size="sm"
+                      aria-label={t(($) => $.transcript.filter)}
+                      className={activeFilterKeys.length > 0 ? undefined : "text-muted-foreground"}
+                    />
+                  }
+                >
+                  <Filter className="h-3 w-3" />
+                  <span className="hidden sm:inline">{t(($) => $.transcript.filter)}</span>
+                  {activeFilterKeys.length > 0 && (
+                    <span className="ml-0.5 rounded-full bg-brand-foreground/20 px-1.5 py-0 text-[10px] font-medium tabular-nums">
+                      {activeFilterKeys.length}
+                    </span>
+                  )}
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-auto">
+                  {filterOptions.map(([value, label]) => (
+                    <DropdownMenuCheckboxItem
+                      key={value}
+                      checked={selectedFilterKeys.includes(value)}
+                      onCheckedChange={() => toggleFilterKey(value)}
+                    >
+                      {label}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                  {selectedFilterKeys.length > 0 && (
+                    <>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
+                        {t(($) => $.transcript.clear_filters)}
+                      </DropdownMenuItem>
+                    </>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleCopyAll}
+              aria-label={copyTranscriptLabel}
+              className="text-muted-foreground"
+            >
+              {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+              <span className="hidden sm:inline">{copyTranscriptLabel}</span>
+            </Button>
+          </div>
         </div>
 
         {/* ── Timeline progress bar ─────────────────────────────── */}
@@ -540,14 +763,33 @@ export function AgentTranscriptDialog({
           </div>
         )}
 
+        {/* ── Optional header slot (e.g. webhook payload preview) ── */}
+        {headerSlot && (
+          <div className="border-b px-4 py-3 shrink-0 bg-muted/20">
+            {headerSlot}
+          </div>
+        )}
+
+        {/* CEREBRO-PATCH(run-prompt-disclosure): FIR-1839 point 5 — full initial prompt, openable. */}
+        <RunPromptDisclosure task={task} />
+        {/* CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 immutable task permission snapshot. */}
+        <TaskAccessDisclosure taskId={task.id} enabled={open} />
+
+        {/* CEREBRO-PATCH(run-failure-card): FIR-3782 — pass `items`, not `displayItems`: the card must read the true last step regardless of sort and density. */}
+        {failureCardEnabled && task.status === "failed" && (
+          <RunFailureCard failureReason={task.failure_reason} items={items} />
+        )}
+
         {/* ── Event list ─────────────────────────────────────────── */}
-        <div
-          ref={scrollContainerRef}
-          className="flex-1 overflow-y-auto min-h-0"
-        >
+        <div className="flex-1 min-h-0">
           {displayItems.length === 0 ? (
             <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-              {isLive ? (
+              {isAntigravityLiveEmpty ? (
+                <div className="flex max-w-md items-center gap-2 px-4 text-center">
+                  <Clock className="h-4 w-4 shrink-0" />
+                  {t(($) => $.transcript.antigravity_live_unavailable)}
+                </div>
+              ) : isLive ? (
                 <div className="flex items-center gap-2">
                   <Loader2 className="h-4 w-4 animate-spin" />
                   {t(($) => $.transcript.waiting_events)}
@@ -557,27 +799,333 @@ export function AgentTranscriptDialog({
               )}
             </div>
           ) : (
-            <div className="divide-y">
-              {/* CEREBRO-PATCH(run-failure-card): FIR-3782 — pass `items`, not `displayItems`: the card must read the true last step regardless of sort and filter. */}
-              {failureCardEnabled && task.status === "failed" && (
-                <RunFailureCard failureReason={task.failure_reason} items={items} />
-              )}
-              {displayItems.map((item) => (
+            // Virtualized so a multi-thousand-event run mounts a bounded number
+            // of DOM rows (#5733). Rows expand/collapse to variable heights;
+            // Virtuoso re-measures them via ResizeObserver.
+            <Virtuoso
+              key={listEpoch}
+              ref={virtuosoRef}
+              style={{ height: "100%" }}
+              data={displayItems}
+              firstItemIndex={firstItemIndex}
+              computeItemKey={(_, item) => item.seq}
+              components={LIST_COMPONENTS}
+              itemContent={(_, item) => (
                 <TranscriptEventRow
-                  key={item.seq}
-                  ref={(el) => {
-                    if (el) eventRefs.current.set(item.seq, el);
-                    else eventRefs.current.delete(item.seq);
-                  }}
                   item={item}
                   isSelected={selectedSeq === item.seq}
+                  expanded={
+                    rowOverrides.get(item.seq) ?? traceEventDefaultExpanded(item, density)
+                  }
+                  onExpandedChange={(expanded) => handleRowExpandedChange(item.seq, expanded)}
                 />
-              ))}
-            </div>
+              )}
+            />
           )}
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+// ─── Sort direction toggle ──────────────────────────────────────────────────
+
+interface SortDirectionToggleProps {
+  value: TranscriptSortDirection;
+  onChange: (dir: TranscriptSortDirection) => void;
+  labels: { chronological: string; newestFirst: string; ariaLabel: string };
+}
+
+// Sort is a two-state toggle, not a mode picker: one button showing the
+// current direction that flips on click. Shares the toolbar button chassis so
+// it reads as the same control family as density/filter/copy — no tab strip.
+function SortDirectionToggle({ value, onChange, labels }: SortDirectionToggleProps) {
+  const isChronological = value === "chronological";
+  return (
+    <Button
+      variant="ghost"
+      size="sm"
+      onClick={() => onChange(isChronological ? "newest_first" : "chronological")}
+      aria-label={labels.ariaLabel}
+      title={labels.ariaLabel}
+      className="text-muted-foreground"
+    >
+      {isChronological ? (
+        <ArrowDownNarrowWide className="h-3 w-3" />
+      ) : (
+        <ArrowUpNarrowWide className="h-3 w-3" />
+      )}
+      <span className="hidden sm:inline">
+        {isChronological ? labels.chronological : labels.newestFirst}
+      </span>
+    </Button>
+  );
+}
+
+// ─── Facts line separator ───────────────────────────────────────────────────
+
+function FactDot() {
+  return (
+    <span aria-hidden className="text-muted-foreground/40">
+      ·
+    </span>
+  );
+}
+
+function formatProvider(provider: string): string {
+  const map: Record<string, string> = {
+    claude: "Claude Code",
+    "claude-code": "Claude Code",
+    codex: "Codex",
+    pi: "Pi",
+  };
+  return map[provider.toLowerCase()] ?? provider;
+}
+
+// ─── Timeline bar (colored segments) ────────────────────────────────────────
+
+function TimelineBar({
+  items,
+  selectedSeq,
+  onSegmentClick,
+}: {
+  items: TimelineItem[];
+  selectedSeq: number | null;
+  onSegmentClick: (seq: number) => void;
+}) {
+  const segments: { startIdx: number; endIdx: number; color: EventColor; count: number }[] = [];
+  let currentColor: EventColor | null = null;
+  let currentStart = 0;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    const color = getEventColor(item);
+    if (color !== currentColor) {
+      if (currentColor !== null) {
+        segments.push({ startIdx: currentStart, endIdx: i - 1, color: currentColor, count: i - currentStart });
+      }
+      currentColor = color;
+      currentStart = i;
+    }
+  }
+  if (currentColor !== null) {
+    segments.push({ startIdx: currentStart, endIdx: items.length - 1, color: currentColor, count: items.length - currentStart });
+  }
+
+  return (
+    <div className="flex gap-0.5 h-5 rounded overflow-hidden" role="navigation" aria-label="Timeline">
+      {segments.map((seg) => {
+        const isSelected = selectedSeq !== null && items.slice(seg.startIdx, seg.endIdx + 1).some((i) => i.seq === selectedSeq);
+        const color = colorClasses[seg.color];
+        const widthPercent = (seg.count / items.length) * 100;
+
+        return (
+          <button
+            type="button"
+            key={seg.startIdx}
+            className={cn(
+              "h-full transition-all duration-150 hover:opacity-80 relative group",
+              isSelected ? color.bgActive : color.bg,
+              "min-w-[4px]",
+            )}
+            style={{ width: `${Math.max(widthPercent, 0.5)}%` }}
+            onClick={() => onSegmentClick(items[seg.startIdx]!.seq)}
+            title={`${traceEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
+          >
+            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 pointer-events-none">
+              <div className="rounded bg-popover border px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-nowrap">
+                {traceEventLabel(items[seg.startIdx]!)}
+                {seg.count > 1 && <span className="text-muted-foreground ml-1">+{seg.count - 1}</span>}
+              </div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Transcript event row ───────────────────────────────────────────────────
+
+interface TranscriptEventRowProps {
+  item: TimelineItem;
+  isSelected: boolean;
+  expanded: boolean;
+  onExpandedChange: (expanded: boolean) => void;
+}
+
+const TranscriptEventRow = ({
+  item,
+  isSelected,
+  expanded,
+  onExpandedChange,
+}: TranscriptEventRowProps) => {
+  const { t } = useT("agents");
+  const kind = traceEventKind(item);
+  const color = getEventColor(item);
+  const label = traceEventLabel(item);
+  const summary = traceEventSummary(item);
+  const date = useMemo(
+    () => (item.created_at ? new Date(item.created_at) : null),
+    [item.created_at],
+  );
+
+  const hasDetail = traceEventHasDetail(item);
+  // Prose kinds swap the one-line summary for the full body in place when
+  // expanded (no box). Tool kinds keep the summary line and reveal the
+  // params/output surface below it.
+  const isProse = kind !== "tool_use" && kind !== "tool_result";
+  const showInlineBody = isProse && hasDetail && expanded;
+
+  return (
+    <div
+      className={cn(
+        "group transition-colors",
+        isSelected && "bg-accent/50",
+        kind === "error" && "bg-destructive/5",
+      )}
+    >
+      <Collapsible open={expanded} onOpenChange={onExpandedChange}>
+        <div className="flex items-start gap-2 px-4 py-2">
+          {/* Type label badge */}
+          <span
+            className={cn(
+              "inline-flex items-center shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium mt-0.5 min-w-[60px] justify-center",
+              colorClasses[color].label,
+            )}
+          >
+            {item.type === "thinking" && <Brain className="h-3 w-3 mr-1 shrink-0" />}
+            {item.type === "error" && <AlertCircle className="h-3 w-3 mr-1 shrink-0" />}
+            {label}
+          </span>
+
+          {showInlineBody ? (
+            <div className="flex flex-1 items-start gap-1.5 min-w-0">
+              <CollapsibleTrigger
+                aria-label={label}
+                className="shrink-0 mt-0.5 cursor-pointer rounded p-0.5 text-muted-foreground/50 transition-colors hover:text-foreground"
+              >
+                <ChevronRight className="h-3 w-3 rotate-90 transition-transform" />
+              </CollapsibleTrigger>
+              <div className="flex-1 min-w-0">
+                {/* CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — agent replies render as plain text until the upstream RichContent commit lands. */}
+                <div
+                  className={cn(
+                    "whitespace-pre-wrap break-words text-xs leading-relaxed",
+                    kind === "error" ? "text-destructive" : "text-muted-foreground",
+                  )}
+                >
+                  {item.content ?? ""}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <CollapsibleTrigger
+              className={cn(
+                "flex-1 text-left text-xs min-w-0 py-0.5 transition-colors",
+                hasDetail ? "cursor-pointer hover:text-foreground" : "cursor-default",
+                kind === "error" ? "text-destructive" : "text-muted-foreground",
+              )}
+              disabled={!hasDetail}
+            >
+              <div className="flex items-start gap-1.5">
+                {hasDetail && (
+                  <ChevronRight
+                    className={cn(
+                      "h-3 w-3 shrink-0 mt-0.5 text-muted-foreground/50 transition-transform",
+                      expanded && "rotate-90",
+                    )}
+                  />
+                )}
+                <span
+                  className={cn(
+                    "truncate",
+                    traceEventSummaryIsMono(kind) && summary && "font-mono text-[11px]",
+                    !summary && "text-muted-foreground/60",
+                  )}
+                >
+                  {summary || t(($) => $.transcript.no_output)}
+                </span>
+              </div>
+            </CollapsibleTrigger>
+          )}
+
+          {/* Seq number / index */}
+          <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1">
+            #{item.seq}
+          </span>
+
+          {/* Timestamp */}
+          {date && (
+            <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1" title={date.toLocaleString()}>
+              {date.toLocaleTimeString(undefined, {
+                hour: "2-digit",
+                minute: "2-digit",
+                second: "2-digit",
+              })}
+            </span>
+          )}
+        </div>
+
+        {/* Expanded params/output for tool kinds — a quiet, borderless surface
+            aligned to the content column. */}
+        {!isProse && hasDetail && (
+          <CollapsibleContent>
+            <div className="px-4 pb-3">
+              <div className="ml-[72px] rounded-md bg-muted/40">
+                <ToolDetailSurface
+                  text={
+                    kind === "tool_use"
+                      ? redactSecrets(JSON.stringify(item.input ?? {}, null, 2))
+                      : item.output
+                        ? item.output.length > 4000
+                          ? redactSecrets(item.output.slice(0, 4000)) + "\n... (truncated)"
+                          : redactSecrets(item.output)
+                        : ""
+                  }
+                />
+              </div>
+            </div>
+          </CollapsibleContent>
+        )}
+      </Collapsible>
+    </div>
+  );
+};
+
+// ─── Tool detail surface ────────────────────────────────────────────────────
+
+/**
+ * Long content fades out behind a "show all" affordance instead of trapping a
+ * nested scrollbar inside the virtualized list.
+ */
+function ToolDetailSurface({ text }: { text: string }) {
+  const { t } = useT("agents");
+  const [showAll, setShowAll] = useState(false);
+  const isLong = text.length > 1600 || text.split("\n").length > 14;
+
+  return (
+    <div className="relative">
+      <pre
+        className={cn(
+          "p-3 font-mono text-[11px] text-muted-foreground whitespace-pre-wrap break-all",
+          isLong && !showAll && "max-h-52 overflow-hidden",
+        )}
+      >
+        {text}
+      </pre>
+      {isLong && !showAll && (
+        <div className="absolute inset-x-0 bottom-0 flex h-12 items-end justify-center rounded-b-md bg-gradient-to-b from-transparent to-background">
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            className="mb-1.5 rounded px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            {t(($) => $.transcript.show_all)}
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -656,269 +1204,4 @@ function TaskAccessDisclosure({ taskId, enabled }: { taskId: string; enabled: bo
       </CollapsibleContent>
     </Collapsible>
   );
-}
-
-// ─── Sort direction toggle ──────────────────────────────────────────────────
-
-interface SortDirectionToggleProps {
-  value: TranscriptSortDirection;
-  onChange: (dir: TranscriptSortDirection) => void;
-  labels: { chronological: string; newestFirst: string; ariaLabel: string };
-}
-
-function SortDirectionToggle({ value, onChange, labels }: SortDirectionToggleProps) {
-  return (
-    <div
-      role="group"
-      aria-label={labels.ariaLabel}
-      className="inline-flex items-center rounded border bg-muted/40 p-0.5 text-xs"
-    >
-      <button
-        type="button"
-        aria-pressed={value === "chronological"}
-        title={labels.chronological}
-        onClick={() => onChange("chronological")}
-        className={cn(
-          "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
-          value === "chronological"
-            ? "bg-background text-foreground shadow-sm"
-            : "text-muted-foreground hover:text-foreground",
-        )}
-      >
-        <ArrowDownNarrowWide className="h-3 w-3" />
-        <span className="hidden sm:inline">{labels.chronological}</span>
-      </button>
-      <button
-        type="button"
-        aria-pressed={value === "newest_first"}
-        title={labels.newestFirst}
-        onClick={() => onChange("newest_first")}
-        className={cn(
-          "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
-          value === "newest_first"
-            ? "bg-background text-foreground shadow-sm"
-            : "text-muted-foreground hover:text-foreground",
-        )}
-      >
-        <ArrowUpNarrowWide className="h-3 w-3" />
-        <span className="hidden sm:inline">{labels.newestFirst}</span>
-      </button>
-    </div>
-  );
-}
-
-// ─── Metadata chip ──────────────────────────────────────────────────────────
-
-function MetadataChip({ icon, children }: { icon?: React.ReactNode; children: React.ReactNode }) {
-  return (
-    <span className="inline-flex items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground">
-      {icon}
-      {children}
-    </span>
-  );
-}
-
-function formatProvider(provider: string): string {
-  const map: Record<string, string> = {
-    claude: "Claude Code",
-    "claude-code": "Claude Code",
-    codex: "Codex",
-    pi: "Pi",
-  };
-  return map[provider.toLowerCase()] ?? provider;
-}
-
-// ─── Timeline bar (colored segments) ────────────────────────────────────────
-
-function TimelineBar({
-  items,
-  selectedSeq,
-  onSegmentClick,
-}: {
-  items: TimelineItem[];
-  selectedSeq: number | null;
-  onSegmentClick: (seq: number) => void;
-}) {
-  const segments: { startIdx: number; endIdx: number; color: EventColor; count: number }[] = [];
-  let currentColor: EventColor | null = null;
-  let currentStart = 0;
-
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i]!;
-    const color = getEventColor(item);
-    if (color !== currentColor) {
-      if (currentColor !== null) {
-        segments.push({ startIdx: currentStart, endIdx: i - 1, color: currentColor, count: i - currentStart });
-      }
-      currentColor = color;
-      currentStart = i;
-    }
-  }
-  if (currentColor !== null) {
-    segments.push({ startIdx: currentStart, endIdx: items.length - 1, color: currentColor, count: items.length - currentStart });
-  }
-
-  return (
-    <div className="flex gap-0.5 h-5 rounded overflow-hidden" role="navigation" aria-label="Timeline">
-      {segments.map((seg) => {
-        const isSelected = selectedSeq !== null && items.slice(seg.startIdx, seg.endIdx + 1).some((i) => i.seq === selectedSeq);
-        const color = colorClasses[seg.color];
-        const widthPercent = (seg.count / items.length) * 100;
-
-        return (
-          <button
-            type="button"
-            key={seg.startIdx}
-            className={cn(
-              "h-full transition-all duration-150 hover:opacity-80 relative group",
-              isSelected ? color.bgActive : color.bg,
-              "min-w-[4px]",
-            )}
-            style={{ width: `${Math.max(widthPercent, 0.5)}%` }}
-            onClick={() => onSegmentClick(items[seg.startIdx]!.seq)}
-            title={`${getEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
-          >
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 pointer-events-none">
-              <div className="rounded bg-popover border px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-nowrap">
-                {getEventLabel(items[seg.startIdx]!)}
-                {seg.count > 1 && <span className="text-muted-foreground ml-1">+{seg.count - 1}</span>}
-              </div>
-            </div>
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-// ─── Transcript event row ───────────────────────────────────────────────────
-
-interface TranscriptEventRowProps {
-  item: TimelineItem;
-  isSelected: boolean;
-}
-
-const TranscriptEventRow = ({
-  ref,
-  item,
-  isSelected,
-}: TranscriptEventRowProps & { ref?: React.Ref<HTMLDivElement> }) => {
-  const [expanded, setExpanded] = useState(false);
-  const color = getEventColor(item);
-  const label = getEventLabel(item);
-  const summary = getEventSummary(item);
-
-  const hasDetail =
-    (item.type === "tool_use" && item.input && Object.keys(item.input).length > 0) ||
-    (item.type === "tool_result" && item.output && item.output.length > 0) ||
-    (item.type === "thinking" && item.content && item.content.length > 0) ||
-    (item.type === "text" && item.content && item.content.length > 0) ||
-    (item.type === "error" && item.content && item.content.length > 0);
-
-  return (
-    <div
-      ref={ref}
-      className={cn(
-        "group transition-colors",
-        isSelected && "bg-accent/50",
-      )}
-    >
-      <Collapsible open={expanded} onOpenChange={setExpanded}>
-        <div className="flex items-start gap-2 px-4 py-2">
-          {/* Type label badge */}
-          <span
-            className={cn(
-              "inline-flex items-center shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium mt-0.5 min-w-[60px] justify-center",
-              colorClasses[color].label,
-            )}
-          >
-            {item.type === "thinking" && <Brain className="h-3 w-3 mr-1 shrink-0" />}
-            {item.type === "error" && <AlertCircle className="h-3 w-3 mr-1 shrink-0" />}
-            {label}
-          </span>
-
-          {/* Summary */}
-          <CollapsibleTrigger
-            className={cn(
-              "flex-1 text-left text-xs min-w-0 py-0.5 transition-colors",
-              hasDetail ? "cursor-pointer hover:text-foreground" : "cursor-default",
-              item.type === "error" ? "text-destructive" : "text-muted-foreground",
-            )}
-            disabled={!hasDetail}
-          >
-            <div className="flex items-start gap-1.5">
-              {hasDetail && (
-                <ChevronRight
-                  className={cn(
-                    "h-3 w-3 shrink-0 mt-0.5 text-muted-foreground/50 transition-transform",
-                    expanded && "rotate-90",
-                  )}
-                />
-              )}
-              <span className="truncate">{summary || "(empty)"}</span>
-            </div>
-          </CollapsibleTrigger>
-
-          {/* Seq number / index */}
-          <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1">
-            #{item.seq}
-          </span>
-        </div>
-
-        {/* Expanded detail */}
-        {hasDetail && (
-          <CollapsibleContent>
-            <div className="px-4 pb-3">
-              <div className="ml-[72px] rounded bg-muted/40 border">
-                <EventDetailContent item={item} />
-              </div>
-            </div>
-          </CollapsibleContent>
-        )}
-      </Collapsible>
-    </div>
-  );
-};
-
-// ─── Event detail content ───────────────────────────────────────────────────
-
-function EventDetailContent({ item }: { item: TimelineItem }) {
-  switch (item.type) {
-    case "tool_use":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
-          {item.input ? redactSecrets(JSON.stringify(item.input, null, 2)) : ""}
-        </pre>
-      );
-    case "tool_result":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
-          {item.output
-            ? item.output.length > 4000
-              ? redactSecrets(item.output.slice(0, 4000)) + "\n... (truncated)"
-              : redactSecrets(item.output)
-            : ""}
-        </pre>
-      );
-    case "thinking":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
-          {item.content ?? ""}
-        </pre>
-      );
-    case "text":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
-          {item.content ?? ""}
-        </pre>
-      );
-    case "error":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-destructive whitespace-pre-wrap break-words">
-          {item.content ?? ""}
-        </pre>
-      );
-    default:
-      return null;
-  }
 }
