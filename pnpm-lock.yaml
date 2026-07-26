@@ -4348,6 +4348,9 @@ importers:
 
   packages/cerebro-sessions:
     dependencies:
+      '@multica/cerebro-agent-prompt':
+        specifier: workspace:*
+        version: link:../cerebro-agent-prompt
       '@multica/cerebro-feature-flags':
         specifier: workspace:*
         version: link:../cerebro-feature-flags
