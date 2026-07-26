@@ -234,6 +234,11 @@ export function AgentTranscriptDialog({
   const density = useTranscriptViewStore((s) => s.density);
   const setDensity = useTranscriptViewStore((s) => s.setDensity);
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // Newest-first live follow: prepends are viewport-anchored (see
+  // firstItemIndex below), so a reader parked at the top would silently stop
+  // seeing new events. Track whether the user is at the top edge; a ref
+  // because scroll-position flips must not re-render the dialog.
+  const atTopRef = useRef(true);
 
   useEffect(() => {
     setRowOverrides(new Map());
@@ -310,6 +315,18 @@ export function AgentTranscriptDialog({
     },
     [sortDirection, setSortDirection],
   );
+
+  // Live follow for newest-first (#5921): when new events prepend while the
+  // reader is at the top, snap back to the newest row — prepend anchoring
+  // would otherwise hold the viewport on the previous first row. Chronological
+  // live follow is handled natively by Virtuoso's followOutput below; this
+  // effect is its prepend-side counterpart. Readers who scrolled away are
+  // left where they are.
+  const displayCount = displayItems.length;
+  useEffect(() => {
+    if (!isLive || sortDirection !== "newest_first" || !atTopRef.current) return;
+    virtuosoRef.current?.scrollToIndex({ index: 0, align: "start", behavior: "smooth" });
+  }, [isLive, sortDirection, displayCount]);
 
   // Fetch agent and runtime metadata when dialog opens
   useEffect(() => {
@@ -801,6 +818,26 @@ export function AgentTranscriptDialog({
               style={{ height: "100%" }}
               data={displayItems}
               firstItemIndex={firstItemIndex}
+              // Open a live chronological transcript pinned to the newest
+              // event (#5921); the per-listEpoch remount re-applies this after
+              // task / sort / filter changes. Completed tasks keep reading
+              // from the top, and newest-first has its live end there already.
+              initialTopMostItemIndex={
+                isLive && sortDirection !== "newest_first"
+                  ? { index: "LAST", align: "end" }
+                  : 0
+              }
+              // Follow appended events while the reader is at the bottom;
+              // scrolling up suspends the follow until they return (#5921).
+              // Newest-first opts out — its growth is prepends, handled by the
+              // scrollToIndex effect above.
+              followOutput={(atBottom) =>
+                isLive && sortDirection !== "newest_first" && atBottom ? "smooth" : false
+              }
+              atBottomThreshold={120}
+              atTopStateChange={(atTop) => {
+                atTopRef.current = atTop;
+              }}
               computeItemKey={(_, item) => item.seq}
               components={LIST_COMPONENTS}
               itemContent={(_, item) => (
