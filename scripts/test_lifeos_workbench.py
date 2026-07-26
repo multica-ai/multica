@@ -37,6 +37,37 @@ class ContextDatabaseTests(unittest.TestCase):
             )
             self.assertEqual(token_file.stat().st_mode & 0o777, 0o600)
 
+    def test_public_origin_is_persisted_and_used_for_the_board_url(self) -> None:
+        with tempfile.TemporaryDirectory() as tempdir:
+            root = Path(tempdir)
+            env_file = root / ".env.lifeos"
+            token_file = root / "secrets/automation-token"
+            with mock.patch.object(
+                lifeos_workbench, "AUTOMATION_TOKEN_FILE", token_file
+            ):
+                values = lifeos_workbench.ensure_env(
+                    env_file, public_origin="https://lifeos.example.com/"
+                )
+                repeated = lifeos_workbench.ensure_env(env_file)
+
+            for key in (
+                "FRONTEND_ORIGIN",
+                "MULTICA_APP_URL",
+                "CORS_ALLOWED_ORIGINS",
+                "ALLOWED_ORIGINS",
+            ):
+                self.assertEqual(values[key], "https://lifeos.example.com")
+                self.assertEqual(repeated[key], "https://lifeos.example.com")
+            self.assertEqual(
+                lifeos_workbench.configured_app_url(env_file),
+                "https://lifeos.example.com/lifeos/issues",
+            )
+
+    def test_public_origin_rejects_paths_and_non_https_urls(self) -> None:
+        for origin in ("http://lifeos.example.com", "https://lifeos.example.com/path"):
+            with self.assertRaises(lifeos_workbench.WorkbenchError):
+                lifeos_workbench._normalize_public_origin(origin)
+
     def test_strong_login_rollout_rotates_old_cookie_secret_once(self) -> None:
         with tempfile.TemporaryDirectory() as tempdir:
             root = Path(tempdir)
@@ -93,6 +124,31 @@ class ContextDatabaseTests(unittest.TestCase):
     def test_ensure_is_a_first_class_recovery_command(self) -> None:
         args = lifeos_workbench.build_parser().parse_args(["ensure"])
         self.assertEqual(args.command, "ensure")
+
+    def test_admin_commands_require_explicit_private_inputs(self) -> None:
+        reset_args = lifeos_workbench.build_parser().parse_args(
+            [
+                "reset-login",
+                "--username",
+                "chairman",
+                "--password-file",
+                "/tmp/password",
+            ]
+        )
+        self.assertEqual(reset_args.username, "chairman")
+        self.assertEqual(reset_args.password_file, Path("/tmp/password"))
+
+        tunnel_args = lifeos_workbench.build_parser().parse_args(
+            [
+                "install-tunnel",
+                "--token-file",
+                "/tmp/tunnel-token",
+                "--public-origin",
+                "https://lifeos.example.com",
+            ]
+        )
+        self.assertEqual(tunnel_args.command, "install-tunnel")
+        self.assertEqual(tunnel_args.public_origin, "https://lifeos.example.com")
 
     def test_ensure_restores_executor_without_rebuild_or_browser(self) -> None:
         lifeos_root = Path("/tmp/lifeos-root")

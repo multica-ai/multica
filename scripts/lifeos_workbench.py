@@ -9,6 +9,7 @@ import hashlib
 import json
 import os
 import plistlib
+import re
 import secrets
 import shutil
 import sqlite3
@@ -16,6 +17,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 import webbrowser
@@ -30,15 +32,19 @@ COMPOSE_FILES = (
     REPO / "docker-compose.selfhost.build.yml",
     REPO / "docker-compose.lifeos.yml",
 )
-APP_URL = "http://127.0.0.1:3000/lifeos/issues"
+LOCAL_APP_ORIGIN = "http://127.0.0.1:3000"
+APP_URL = LOCAL_APP_ORIGIN + "/lifeos/issues"
 BACKEND_URL = "http://127.0.0.1:8080"
 PROFILE = "lifeos"
 LAUNCH_LABEL = "ai.lifeos.workbench"
 INDEX_LABEL = "ai.lifeos.workbench.index"
 BACKUP_LABEL = "ai.lifeos.workbench.backup"
 CHATGPT_WAKE_LABEL = "ai.lifeos.chatgpt-wake"
+CLOUDFLARE_TUNNEL_LABEL = "ai.lifeos.cloudflare-tunnel"
 INDEX_SYNC_INTERVAL_SECONDS = 2 * 60 * 60
 LOCAL_AUTH_VERSION = "2"
+LOCAL_PASSWORD_ITERATIONS = 600_000
+LOCAL_USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9._-]{3,64}$")
 CLI_ALIAS = REPO / "server" / "bin" / "multica"
 STATE_ROOT = Path.home() / "Library/Application Support/LifeOS"
 CONTEXT_DB = STATE_ROOT / "data/lifeos-workbench.sqlite3"
@@ -155,13 +161,42 @@ def parse_env(path: Path = ENV_FILE) -> Dict[str, str]:
     return result
 
 
-def ensure_env(path: Path = ENV_FILE) -> Dict[str, str]:
+def _normalize_public_origin(value: str) -> str:
+    origin = value.strip().rstrip("/")
+    if not origin.startswith("https://"):
+        raise WorkbenchError("公网入口必须使用 https://")
+    remainder = origin[len("https://") :]
+    if not remainder or "/" in remainder or "@" in remainder:
+        raise WorkbenchError("公网入口必须是只包含域名的 HTTPS origin")
+    return origin
+
+
+def configured_app_url(path: Path = ENV_FILE) -> str:
+    values = parse_env(path)
+    origin = (
+        values.get("MULTICA_APP_URL")
+        or values.get("FRONTEND_ORIGIN")
+        or LOCAL_APP_ORIGIN
+    )
+    return origin.rstrip("/") + "/lifeos/issues"
+
+
+def ensure_env(
+    path: Path = ENV_FILE, public_origin: Optional[str] = None
+) -> Dict[str, str]:
     existing = parse_env(path)
     jwt_secret = existing.get("JWT_SECRET")
     if existing.get("LIFEOS_AUTH_VERSION") != LOCAL_AUTH_VERSION:
         # The strong-login rollout must invalidate cookies issued by the old
         # passwordless local session. Rotate once, then keep the secret stable.
         jwt_secret = secrets.token_urlsafe(64)
+    requested_origin = public_origin or os.environ.get("LIFEOS_PUBLIC_ORIGIN", "")
+    requested_origin = (
+        _normalize_public_origin(requested_origin) if requested_origin.strip() else ""
+    )
+    frontend_origin = (
+        requested_origin or existing.get("FRONTEND_ORIGIN") or LOCAL_APP_ORIGIN
+    )
     required = {
         "POSTGRES_DB": "lifeos",
         "POSTGRES_USER": "lifeos",
@@ -173,8 +208,16 @@ def ensure_env(path: Path = ENV_FILE) -> Dict[str, str]:
         "LIFEOS_LOCAL_MODE": "true",
         "ALLOW_SIGNUP": "false",
         "DISABLE_WORKSPACE_CREATION": "true",
-        "FRONTEND_ORIGIN": "http://127.0.0.1:3000",
-        "MULTICA_APP_URL": "http://127.0.0.1:3000",
+        "FRONTEND_ORIGIN": frontend_origin,
+        "MULTICA_APP_URL": requested_origin
+        or existing.get("MULTICA_APP_URL")
+        or frontend_origin,
+        "CORS_ALLOWED_ORIGINS": requested_origin
+        or existing.get("CORS_ALLOWED_ORIGINS")
+        or frontend_origin,
+        "ALLOWED_ORIGINS": requested_origin
+        or existing.get("ALLOWED_ORIGINS")
+        or frontend_origin,
         "BACKEND_PORT": "8080",
         "FRONTEND_PORT": "3000",
         "APP_ENV": "production",
@@ -417,12 +460,13 @@ def start(
     if start_executor:
         configure_agents(environment, lifeos_root, controller_root)
     sync_codex_index(environment, lifeos_root, controller_root)
+    app_url = configured_app_url()
     if start_executor:
-        print("LifeOS 工作台已就绪：%s" % APP_URL)
+        print("LifeOS 工作台已就绪：%s" % app_url)
     else:
         print("LifeOS 看板与索引已就绪；AI 执行器由置顶 Codex 任务按需启动。")
     if open_browser:
-        webbrowser.open(APP_URL)
+        webbrowser.open(app_url)
 
 
 def ensure_running(lifeos_root: Path, controller_root: Path) -> None:
@@ -488,7 +532,7 @@ def status(lifeos_root: Path, controller_root: Path) -> int:
             daemon = json.loads(daemon_result.stdout) if daemon_result.stdout.strip() else None
         except json.JSONDecodeError:
             daemon = {"status": "unknown", "detail": daemon_result.stdout.strip()[:500]}
-    payload = {"app_url": APP_URL, "services": services, "daemon": daemon}
+    payload = {"app_url": configured_app_url(), "services": services, "daemon": daemon}
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     healthy = bool(services) and all(item.get("state") == "running" for item in services)
     return 0 if healthy else 1
@@ -580,6 +624,146 @@ def doctor(lifeos_root: Path, controller_root: Path) -> int:
         check=False,
     )
     return completed.returncode
+
+
+def _validate_local_password(username: str, password: str) -> str:
+    normalized_username = username.strip().lower()
+    if not LOCAL_USERNAME_PATTERN.fullmatch(normalized_username):
+        raise WorkbenchError("用户名需为 3–64 位字母、数字、点、下划线或连字符")
+    if not 12 <= len(password) <= 128:
+        raise WorkbenchError("密码需为 12–128 个字符")
+    categories = (
+        any(value.islower() for value in password),
+        any(value.isupper() for value in password),
+        any(value.isdigit() for value in password),
+        any(unicodedata.category(value)[0] in {"P", "S"} for value in password),
+    )
+    if sum(categories) < 3:
+        raise WorkbenchError("密码至少包含小写、大写、数字、符号中的三类")
+    if normalized_username in password.lower():
+        raise WorkbenchError("密码不能包含用户名")
+    return normalized_username
+
+
+def reset_login(
+    lifeos_root: Path,
+    controller_root: Path,
+    *,
+    username: str,
+    password_file: Path,
+) -> None:
+    environment = runtime_environment(lifeos_root, controller_root)
+    values = ensure_env()
+    if not docker_ready(environment):
+        raise WorkbenchError("重置登录前需要启动本机容器运行底座")
+    password_file = password_file.expanduser().resolve()
+    if not password_file.is_file() or password_file.stat().st_mode & 0o077:
+        raise WorkbenchError("密码文件必须存在且权限为 0600")
+    raw_password = password_file.read_text(encoding="utf-8")
+    password = raw_password[:-1] if raw_password.endswith("\n") else raw_password
+    if "\n" in password or "\r" in password:
+        raise WorkbenchError("密码文件只能包含一行密码")
+    normalized_username = _validate_local_password(username, password)
+    salt = secrets.token_bytes(32)
+    digest = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        salt,
+        LOCAL_PASSWORD_ITERATIONS,
+        dklen=32,
+    )
+    statement = (
+        "INSERT INTO lifeos_local_credential("
+        "singleton, username, password_salt, password_hash, password_iterations, "
+        "failed_attempts, locked_until) VALUES ("
+        "1, '%s', decode('%s', 'hex'), decode('%s', 'hex'), %d, 0, NULL) "
+        "ON CONFLICT (singleton) DO UPDATE SET "
+        "username = EXCLUDED.username, password_salt = EXCLUDED.password_salt, "
+        "password_hash = EXCLUDED.password_hash, "
+        "password_iterations = EXCLUDED.password_iterations, failed_attempts = 0, "
+        "locked_until = NULL, updated_at = now();\n"
+        % (
+            normalized_username,
+            salt.hex(),
+            digest.hex(),
+            LOCAL_PASSWORD_ITERATIONS,
+        )
+    )
+    completed = subprocess.run(
+        compose_command(environment)
+        + [
+            "exec",
+            "-T",
+            "postgres",
+            "psql",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-U",
+            values["POSTGRES_USER"],
+            "-d",
+            values["POSTGRES_DB"],
+        ],
+        cwd=str(REPO),
+        env=dict(environment),
+        input=statement,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        raise WorkbenchError("本机登录凭据更新失败")
+    print("LifeOS 本机登录凭据已安全重置。")
+
+
+def install_cloudflare_tunnel(
+    lifeos_root: Path,
+    controller_root: Path,
+    *,
+    token_file: Path,
+    public_origin: str,
+) -> None:
+    environment = runtime_environment(lifeos_root, controller_root)
+    origin = _normalize_public_origin(public_origin)
+    token_file = token_file.expanduser().resolve()
+    if not token_file.is_file() or token_file.stat().st_mode & 0o077:
+        raise WorkbenchError("Cloudflare Tunnel token 文件必须存在且权限为 0600")
+    cloudflared = _find_executable("cloudflared", environment)
+    ensure_env(public_origin=origin)
+    launch_dir = Path.home() / "Library/LaunchAgents"
+    log_dir = Path.home() / "Library/Logs/LifeOS"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    path = launch_dir / (CLOUDFLARE_TUNNEL_LABEL + ".plist")
+    payload = {
+        "Label": CLOUDFLARE_TUNNEL_LABEL,
+        "ProgramArguments": [
+            cloudflared,
+            "tunnel",
+            "--no-autoupdate",
+            "--metrics",
+            "127.0.0.1:20249",
+            "run",
+            "--token-file",
+            str(token_file),
+            "--url",
+            LOCAL_APP_ORIGIN,
+        ],
+        "RunAtLoad": True,
+        "KeepAlive": True,
+        "ThrottleInterval": 15,
+        "StandardOutPath": str(log_dir / "cloudflare-tunnel.log"),
+        "StandardErrorPath": str(log_dir / "cloudflare-tunnel-error.log"),
+    }
+    launchctl = _find_executable("launchctl", environment)
+    domain = "gui/%s" % os.getuid()
+    _run(
+        [launchctl, "bootout", domain + "/" + CLOUDFLARE_TUNNEL_LABEL],
+        environment=environment,
+        check=False,
+        capture=True,
+    )
+    _write_plist(path, payload)
+    _run([launchctl, "bootstrap", domain, str(path)], environment=environment)
+    print("LifeOS 公网隧道已启用，并将在登录本机后自动恢复。")
 
 
 def _write_plist(path: Path, payload: Mapping[str, object]) -> None:
@@ -717,6 +901,18 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("ensure", help="幂等恢复看板、AI 执行器和索引")
     commands.add_parser("install-autostart", help="启用自动启动、索引和备份")
     commands.add_parser("uninstall-autostart", help="移除自动任务但保留数据")
+    reset_parser = commands.add_parser("reset-login", help="通过本机受限文件重置唯一登录凭据")
+    reset_parser.add_argument("--username", required=True)
+    reset_parser.add_argument("--password-file", type=Path, required=True)
+    tunnel_parser = commands.add_parser(
+        "install-tunnel", help="启用 Cloudflare Tunnel 公网入口"
+    )
+    tunnel_parser.add_argument("--token-file", type=Path, required=True)
+    tunnel_parser.add_argument(
+        "--public-origin",
+        required=True,
+        help="HTTPS 公网 origin，例如 https://lifeos.example.com",
+    )
     return parser
 
 
@@ -752,6 +948,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return 0
         if args.command == "uninstall-autostart":
             uninstall_autostart(lifeos_root, controller_root)
+            return 0
+        if args.command == "reset-login":
+            reset_login(
+                lifeos_root,
+                controller_root,
+                username=args.username,
+                password_file=args.password_file,
+            )
+            return 0
+        if args.command == "install-tunnel":
+            install_cloudflare_tunnel(
+                lifeos_root,
+                controller_root,
+                token_file=args.token_file,
+                public_origin=args.public_origin,
+            )
             return 0
         raise WorkbenchError("未知命令")
     except (WorkbenchError, OSError, subprocess.SubprocessError, sqlite3.Error) as error:
