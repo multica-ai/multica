@@ -2,8 +2,24 @@ package main
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 )
+
+func TestLifeOSJudgeInstructionsUsePlainChairmanFacingChinese(t *testing.T) {
+	for _, requirement := range []string{
+		"用户可见评论必须讲人话并且只发一条",
+		"我检查完了：可以验收",
+		"你现在需要做什么",
+		"你现在不用处理",
+		"不得在用户可见评论中出现 UUID",
+		"review_submit 不代写第二条用户评论",
+	} {
+		if !strings.Contains(lifeOSJudgeInstructions, requirement) {
+			t.Fatalf("LifeOS Judge instructions are missing %q", requirement)
+		}
+	}
+}
 
 func TestLifeOSMCPConfigIsRoleScopedAndUsesOriginalCodexHome(t *testing.T) {
 	root := filepath.Join("tmp", "Life OS AI")
