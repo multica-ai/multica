@@ -3,11 +3,14 @@ package handler
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 const (
@@ -284,5 +287,132 @@ func TestCommentEnqueueRaceDifferentHeadNotCoalesced(t *testing.T) {
 	}
 	if followupHead != dupRaceHeadB {
 		t.Fatalf("follow-up head_sha = %q, want head B %q (head B must earn its own coverage)", followupHead, dupRaceHeadB)
+	}
+}
+
+// TestRegisterPlannedCommentForActiveTaskExcludesQueued is the regression for
+// Elon round-3 must-fix 2: a planned-only append must never target a QUEUED task
+// (it has no claim receipt, so the append would be delivered at claim time and
+// bypass the atomic re-attribution a queued fold requires — MUL-4302). Only
+// claim-receipt statuses (dispatched/running/waiting_local_directory) are valid
+// planned-id targets; a queued task must miss so the caller routes it to the
+// atomic merge instead.
+func TestRegisterPlannedCommentForActiveTaskExcludesQueued(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, issueID, runtimeID := dupRaceFixture(t, "dup-race-register-scope", 999314)
+	commentID := insertDupRaceComment(t, issueID, "planned candidate", "1 minute")
+	triggerID := insertDupRaceComment(t, issueID, "winner trigger", "6 minutes")
+
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at)
+		VALUES ($1, $2, $3, $4, 'queued', 0, now() - interval '5 minutes')
+		RETURNING id
+	`, agentID, runtimeID, issueID, triggerID).Scan(&taskID); err != nil {
+		t.Fatalf("insert queued task: %v", err)
+	}
+
+	params := db.RegisterPlannedCommentForActiveTaskParams{
+		CommentID: util.MustParseUUID(commentID),
+		IssueID:   util.MustParseUUID(issueID),
+		AgentID:   util.MustParseUUID(agentID),
+	}
+
+	// QUEUED target must MISS.
+	if _, err := testHandler.Queries.RegisterPlannedCommentForActiveTask(ctx, params); !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("register against a QUEUED task: err = %v, want pgx.ErrNoRows (queued excluded)", err)
+	}
+
+	// Flip to dispatched: now the claim receipt exists and the append is valid.
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now() WHERE id = $1`, taskID); err != nil {
+		t.Fatalf("flip to dispatched: %v", err)
+	}
+	row, err := testHandler.Queries.RegisterPlannedCommentForActiveTask(ctx, params)
+	if err != nil {
+		t.Fatalf("register against a DISPATCHED task: %v", err)
+	}
+	var found bool
+	for _, id := range row.CoalescedCommentIds {
+		if uuidToString(id) == commentID {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("dispatched register did not add the planned comment: %v", row.CoalescedCommentIds)
+	}
+}
+
+// TestCommentEnqueueRaceQueuedWinnerReattributesOriginator is the regression for
+// Elon round-3 must-fix 2: when the lost-race winner is a same-head QUEUED task,
+// the losing comment must fold through the ATOMIC merge, which re-stamps the run
+// to the NEW comment's originator — never a bare planned append that would leave
+// a second member's comment executing under the first member's identity. Two
+// different members: the winner is attributed to M1, the losing comment is M2's,
+// and after the race the run must be re-attributed to M2.
+func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, issueID, _ := dupRaceFixture(t, "dup-race-reattr", 999315)
+	agentUUID := util.MustParseUUID(agentID)
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	agent, err := testHandler.Queries.GetAgent(ctx, agentUUID)
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+
+	// A second member M2 authors the losing comment.
+	var m2 string
+	if err := testPool.QueryRow(ctx, `INSERT INTO "user" (name, email) VALUES ('Race M2', 'race-m2-999315@multica.test') RETURNING id`).Scan(&m2); err != nil {
+		t.Fatalf("create M2 user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, m2) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`, testWorkspaceID, m2); err != nil {
+		t.Fatalf("create M2 member: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM member WHERE user_id = $1`, m2) })
+
+	// Winner: a queued task attributed to M1 (testUserID) via its own comment.
+	winnerCommentID := insertDupRaceComment(t, issueID, "M1 instruction", "6 minutes")
+	if _, err := testHandler.TaskService.EnqueueTaskForMention(ctx, issue, agentUUID, util.MustParseUUID(winnerCommentID)); err != nil {
+		t.Fatalf("enqueue winning task: %v", err)
+	}
+	// Losing comment authored by M2.
+	var loserCommentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, created_at)
+		VALUES ($1, $2, 'member', $3, 'M2 instruction', 'comment', now() - interval '1 minute')
+		RETURNING id
+	`, issueID, testWorkspaceID, m2).Scan(&loserCommentID); err != nil {
+		t.Fatalf("insert M2 loser comment: %v", err)
+	}
+
+	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
+	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(loserCommentID), []commentAgentTrigger{trigger})
+	if res := results[agentID]; res.status != DispatchCoalesced {
+		t.Fatalf("queued-winner reattribution race: got status %q reason %q, want coalesced", res.status, res.reason)
+	}
+
+	// The run is now attributed to M2 (the folded comment's author) and triggered
+	// by M2's comment — proving the atomic merge ran, not a bare planned append.
+	var trig, orig string
+	if err := testPool.QueryRow(ctx, `
+		SELECT COALESCE(trigger_comment_id::text,''), COALESCE(originator_user_id::text,'')
+		FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+	`, issueID, agentID).Scan(&trig, &orig); err != nil {
+		t.Fatalf("read winner attribution: %v", err)
+	}
+	if trig != loserCommentID {
+		t.Fatalf("trigger_comment_id = %s, want repointed to M2's comment %s", trig, loserCommentID)
+	}
+	if orig != m2 {
+		t.Fatalf("originator_user_id = %s, want re-attributed to M2 %s (bare append would leave M1)", orig, m2)
 	}
 }

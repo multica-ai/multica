@@ -1576,15 +1576,25 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 		}
 		return headSha
 	}
-	for attempt := 0; attempt < 2; attempt++ {
+	// Bounded retry (#5914, Elon round 3). INVARIANT: never return a
+	// success-shaped outcome (coalesced / deferred / queued) without a COMPLETED
+	// merge, planned-id registration, fresh enqueue, or a confirmed different-head
+	// deferral. A duplicate that cannot be durably resolved re-loops; on genuine
+	// non-convergence we return a truthful internal_error below, never a
+	// fabricated deferred that would silently drop the comment. maxAttempts is a
+	// concurrent-churn backstop — each duplicate is followed by a merge/register
+	// attempt, so the loop only spins while a sibling keeps flipping state.
+	const maxAttempts = 4
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		if pending {
-			// Fold into the not-yet-claimed queued task. HEAD-scoped so a lost
-			// race against a DIFFERENT-head task is never merged as same-request
-			// coalescing (TEN-356) — the merge misses and this falls through. The
-			// merge reports HOW it resolved: a real merge is coalesced; a
-			// fail-closed / failed merge is blocked (attribution_blocked /
-			// internal_error) — never mislabeled as success (MUL-4525 §2, Elon
-			// round 5). Only "no queued task to fold into" continues below.
+			// (a) Fold into a same-head QUEUED task. This is the ONLY path that
+			// ATOMICALLY re-attributes the run (trigger / originator / accountable
+			// / overlay / connected apps) to the folded comment, so a queued
+			// winner must always come through here, never a bare planned append
+			// (MUL-4302). HEAD-scoped so a DIFFERENT-head task is never folded
+			// (TEN-356) — the merge misses and this falls through. The merge
+			// reports HOW it resolved: coalesced on success; blocked on a
+			// fail-closed / failed merge — never mislabeled as success (MUL-4525 §2).
 			if status, reason, terminal := commentMergeTerminalOutcome(
 				h.mergeCommentIntoPendingTask(ctx, issue, trigger, triggerCommentID, getHeadSha()),
 			); terminal {
@@ -1611,12 +1621,30 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 				if registered {
 					return DispatchDeferred, ReasonDeferred
 				}
-				// registered==false → no SAME-head active task; a different-head
-				// task holds the slot. Its completion reconcile picks up this
-				// newer comment by timestamp and enqueues fresh-HEAD coverage.
+				// (c) Neither folded nor registered. A same-head QUEUED sibling may
+				// have appeared AFTER the merge miss (Elon round 3): only the
+				// atomic merge in (a) may fold it (re-attribution), so re-loop
+				// rather than defer on top of a task that does not yet cover this
+				// comment. Only reachable under concurrent churn.
+				sameHeadPending, err := h.Queries.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+					IssueID: issue.ID,
+					AgentID: trigger.Agent.ID,
+					HeadSha: getHeadSha(),
+				})
+				if err != nil {
+					slog.Warn("recheck same-head pending task failed",
+						"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
+					return DispatchBlocked, ReasonInternalError
+				}
+				if sameHeadPending {
+					continue
+				}
+				// registered==false and no same-head pending: a DIFFERENT-head
+				// task holds the slot. Its completion reconcile picks up this newer
+				// comment by timestamp and enqueues fresh-HEAD coverage (below).
 			}
-			// We must NOT enqueue a fresh queued task against an active sibling —
-			// it would trip the unique index again and risk a duplicate run; its
+			// (d) We must NOT enqueue a fresh queued task against an active sibling
+			// — it would trip the unique index again and risk a duplicate run; its
 			// completion reconcile covers the comment. Only a confirmed-none
 			// enqueues fresh; a query failure fails closed.
 			active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, trigger.Agent.ID)
@@ -1638,10 +1666,14 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 		}
 		return DispatchQueued, ReasonQueued
 	}
-	// Two enqueue races with no foldable/registrable target in between —
-	// extremely rare. A sibling occupies the slot, so its completion reconcile
-	// is the backstop; report deferred rather than a fabricated coalesced.
-	return DispatchDeferred, ReasonDeferred
+	// Non-convergence after the bounded retries (only reachable under sustained
+	// concurrent churn where a sibling keeps flipping state under us): surface a
+	// truthful non-success — NEVER a fabricated deferred/coalesced that would
+	// report the comment covered when no task provably covers it (#5914, Elon
+	// round 3). The comment row persists; a later trigger/edit can still cover it.
+	slog.Warn("comment trigger enqueue did not converge; reporting non-success",
+		"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID))
+	return DispatchBlocked, ReasonInternalError
 }
 
 // commentTriggerOutcomes maps each explicit mention target to its final outcome

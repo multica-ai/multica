@@ -4996,7 +4996,7 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.issue_id = $2
       AND t.agent_id = $3
-      AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+      AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
       AND (
           COALESCE($4::text, '') = ''
           OR t.context->>'head_sha' = $4::text
@@ -5032,6 +5032,16 @@ type RegisterPlannedCommentForActiveTaskRow struct {
 // so a new-HEAD comment is never attached to an old-HEAD run. Returns
 // pgx.ErrNoRows when no same-head active task exists (different HEAD, or the task
 // just terminated) so the caller falls back to the active-task decision.
+//
+// 'queued' is DELIBERATELY EXCLUDED (#5914, Elon round 3): a not-yet-claimed
+// task has no claim receipt, so a comment merged into it WILL be recorded as
+// delivered at claim time and never earns a completion follow-up under its own
+// attribution. A queued target must therefore go through the ATOMIC
+// MergeCommentIntoPendingTask (which re-stamps trigger/originator/accountable/
+// overlay), never a bare planned append — otherwise a second member's comment
+// could execute under the first member's identity/connected-apps (MUL-4302).
+// Only claim-receipt statuses (already-built delivered set) are safe planned-id
+// targets.
 func (q *Queries) RegisterPlannedCommentForActiveTask(ctx context.Context, arg RegisterPlannedCommentForActiveTaskParams) (RegisterPlannedCommentForActiveTaskRow, error) {
 	row := q.db.QueryRow(ctx, registerPlannedCommentForActiveTask,
 		arg.CommentID,
