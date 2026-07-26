@@ -1294,12 +1294,6 @@ var excluded = map[string]string{
 	"PATCH /api/cerebro/saved-filters/{id}":  "self_only — caller's own saved filters (FIR-1659)",
 	"DELETE /api/cerebro/saved-filters/{id}": "self_only — caller's own saved filters (FIR-1659)",
 
-	// cerebro iOS share inboxes — personal token-bound intake endpoints;
-	// owner_user_id enforces caller identity so a member can never touch
-	// another member's inbox (FIR-3545).
-	"POST /api/cerebro/share-inboxes/":       "self_only — caller's own iOS share inboxes (FIR-3545)",
-	"DELETE /api/cerebro/share-inboxes/{id}": "self_only — caller's own iOS share inboxes (FIR-3545)",
-
 	// AI Impact configuration is owner/admin-only in aiimpact.CanConfigure.
 	// These human-admin routes are not wired to the tool-policy engine.
 	"POST /api/cerebro/ai-impact/functions":                       "admin_only — workspace owner/admin configures AI Impact functions",
@@ -1413,7 +1407,6 @@ var excluded = map[string]string{
 	"POST /auth/logout":                                       "pre-auth — clears identity",
 	"POST /api/webhooks/github":                               "pre-auth signed webhook — GitHub HMAC authorises delivery",
 	"POST /api/webhooks/stripe":                               "pre-auth signed webhook — Stripe HMAC authorises delivery",
-	"POST /api/webhooks/ios-share/{token}":                    "pre-auth signed webhook — sit_ bearer token in path authorises iOS share intake (FIR-3545)",
 	"POST /api/cerebro/github/pull-requests":                  "pre-auth service-to-service — CEREBRO_GITHUB_LINK_KEY bearer token authorises the firtal-data-registry poll-based PR-link push (FIR-2568)",
 	"POST /api/cerebro/exchange-rates":                        "pre-auth service-to-service — CEREBRO_EXCHANGE_INGEST_KEY bearer token authorises the multica-hatchet-worker's daily FX snapshot push (FIR-43)",
 	"POST /api/cerebro/apps-internal/{id}/{version}/callback": "pre-auth service-to-service — signed Mini Apps runtime callback advances one deployment state (FIR-3172)",

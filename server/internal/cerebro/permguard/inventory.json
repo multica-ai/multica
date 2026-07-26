@@ -2029,14 +2029,6 @@
       "gate": "workspace_member"
     },
     {
-      "id": "POST /api/cerebro/share-inboxes/",
-      "gate": "workspace_member + human_only"
-    },
-    {
-      "id": "DELETE /api/cerebro/share-inboxes/{id}",
-      "gate": "workspace_member + human_only"
-    },
-    {
       "id": "POST /api/cerebro/ai-impact/functions",
       "gate": "workspace_admin"
     },
@@ -2055,10 +2047,6 @@
     {
       "id": "POST /api/cerebro/ai-impact/project-bindings",
       "gate": "workspace_admin"
-    },
-    {
-      "id": "POST /api/webhooks/ios-share/{token}",
-      "gate": "pre_auth_token"
     }
   ],
   "mcp": [

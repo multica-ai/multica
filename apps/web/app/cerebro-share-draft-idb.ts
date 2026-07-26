@@ -36,6 +36,12 @@ export interface ShareDraft {
   url: string;
   files: ShareDraftFile[];
   createdAt: number;
+  // CEREBRO-PATCH(ios-shortcut-authenticated-share): FIR-3545 — optional
+  // destination carried only by the URL-fragment Shortcut flow.
+  workspaceId?: string;
+  projectId?: string;
+  autoSubmit?: boolean;
+  source?: "share-target" | "ios-shortcut";
 }
 
 function openDB(): Promise<IDBDatabase> {
