@@ -46,6 +46,7 @@
     "@multica/cerebro-notifications": "workspace:*",
     "@multica/cerebro-preferences": "workspace:*",
     "@multica/cerebro-profile": "workspace:*",
+    "@multica/cerebro-quick-create": "workspace:*",
     "@multica/cerebro-realtime": "workspace:*",
     "@multica/cerebro-references": "workspace:*",
     "@multica/cerebro-reminders": "workspace:*",

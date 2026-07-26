@@ -205,6 +205,45 @@ func TestCerebroEffectiveToolsForClaimUsesConnectionDispatchMandateIdentity(t *t
 	}
 }
 
+func TestCerebroEffectiveToolsForClaimIncludesDirectMCPAndCapabilityDiagnosis(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	brief := &fakeAPIConnBrief{tools: []CerebroAPIConnectionBriefTool{
+		{
+			Connection:    "atlas-mcp",
+			Name:          "mcp__atlas-mcp__search_registry",
+			Description:   "Search Atlas",
+			Verdict:       "allow",
+			MandatePrefix: "mcp__atlas-mcp__*",
+		},
+	}}
+	h := &Handler{
+		runtimeToolAccess: fakeRuntimeToolAccess{rows: []RuntimeToolEffectiveAccessView{
+			exposedToolView("mcp__multica__get_agent_capabilities", "mcp", "", "Inspect effective access", "allow", true),
+		}},
+		APIConnectionBrief: brief,
+	}
+
+	_, mandate, err := h.cerebroEffectiveToolsForClaim(
+		context.Background(),
+		db.AgentRuntime{},
+		&TaskAgentData{ID: agentID},
+		"agent",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim: %v", err)
+	}
+	for _, want := range []string{
+		"mcp__atlas-mcp__search_registry",
+		"mcp__atlas-mcp__*",
+		"mcp__multica__get_agent_capabilities",
+	} {
+		if !containsString(mandate, want) {
+			t.Errorf("claim mandate = %v, want exact callable identity %q", mandate, want)
+		}
+	}
+}
+
 // When the tool-policy chain exposes nothing but the agent HAS api-connection
 // tools, the brief still lists them (not nil) — the whole point of FIR-2388.
 func TestCerebroEffectiveToolsForBriefAPIConnectionOnly(t *testing.T) {

@@ -20,7 +20,7 @@ func (p capabilitiesCardProvider) BuildAgentCapabilitiesCard(context.Context, pg
 }
 
 type rejectingTaskMandates struct {
-	rejected string
+	rejected map[string]bool
 }
 
 func (rejectingTaskMandates) Issue(context.Context, pgtype.UUID, pgtype.UUID, pgtype.UUID, []string, time.Time) error {
@@ -28,7 +28,7 @@ func (rejectingTaskMandates) Issue(context.Context, pgtype.UUID, pgtype.UUID, pg
 }
 
 func (m rejectingTaskMandates) Authorize(_ context.Context, _, _, _ pgtype.UUID, tool string) error {
-	if tool == m.rejected {
+	if m.rejected[tool] {
 		return errors.New("tool is outside the issued task mandate")
 	}
 	return nil
@@ -40,12 +40,28 @@ func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
 		provider: capabilitiesCardProvider{card: handler.AgentCapabilities{Tools: []handler.AgentCapabilityTool{
 			{Key: "allowed_tool", Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true},
 			{Key: "rejected_tool", Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true},
+		}, Connections: []handler.AgentCapabilityConnection{
+			{
+				Name: "atlas-mcp",
+				Tools: []handler.AgentCapabilityConnTool{
+					{Name: "getViewerStatus", Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true},
+				},
+			},
+			{
+				Name: "company-brain",
+				Tools: []handler.AgentCapabilityConnTool{
+					{Name: "whoami", Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true},
+				},
+			},
 		}}},
 		tctx: ToolContext{
-			AgentID:      id,
-			WorkspaceID:  id,
-			TaskID:       id,
-			TaskMandates: rejectingTaskMandates{rejected: "rejected_tool"},
+			AgentID:     id,
+			WorkspaceID: id,
+			TaskID:      id,
+			TaskMandates: rejectingTaskMandates{rejected: map[string]bool{
+				"rejected_tool":              true,
+				"mcp__company-brain__whoami": true,
+			}},
 		},
 	}
 
@@ -68,5 +84,12 @@ func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
 	}
 	if card.Tools[1].Allowed || card.Tools[1].Callable || card.Tools[1].BlockedReason == "" || card.Tools[1].HowToFix == "" {
 		t.Fatalf("rejected task mandate left a positive or unexplained truth verdict: %+v", card.Tools[1])
+	}
+	if got := card.Connections[0].Tools[0].Permission; got != "allow" {
+		t.Errorf("mandate-allowed connection tool permission = %q, want allow", got)
+	}
+	rejectedConnectionTool := card.Connections[1].Tools[0]
+	if rejectedConnectionTool.Permission != "deny" || rejectedConnectionTool.Allowed || rejectedConnectionTool.Callable || rejectedConnectionTool.BlockedReason == "" {
+		t.Fatalf("rejected connection tool left a positive or unexplained verdict: %+v", rejectedConnectionTool)
 	}
 }

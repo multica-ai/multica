@@ -202,9 +202,10 @@ func TestConnectionToolResolverAPIToolsCarryCallableHandle(t *testing.T) {
 	}
 }
 
-// The brief adapter is the first consumer moved onto Resolve. It must map the
-// carried api handles to the handler brief shape, and — like the old direct
-// path — return nil when the flag is off, so the router wiring swap is reversible.
+// The claim adapter must map both API endpoints and direct MCP tools to their
+// exact callable identities. The task mandate consumes this same result, so an
+// allowed connection cannot be injected into the runtime while missing from the
+// immutable call-time allowlist.
 func TestConnectionToolResolverBriefAdapter(t *testing.T) {
 	ident := handler.CerebroAPIConnectionBriefIdentity{
 		WorkspaceID: gateTestUUID(1),
@@ -215,8 +216,9 @@ func TestConnectionToolResolverBriefAdapter(t *testing.T) {
 
 	briefs := newMixedResolver().APIConnectionToolsForBrief(context.Background(), ident)
 	if len(briefs) == 0 {
-		t.Fatal("brief adapter returned no api tools with the flag on")
+		t.Fatal("brief adapter returned no connection tools with the flag on")
 	}
+	byName := make(map[string]handler.CerebroAPIConnectionBriefTool, len(briefs))
 	for _, b := range briefs {
 		if b.Name == "" {
 			t.Error("brief tool has an empty Name")
@@ -224,6 +226,19 @@ func TestConnectionToolResolverBriefAdapter(t *testing.T) {
 		if b.Verdict != string(toolpolicy.SettingAllow) {
 			t.Errorf("brief tool verdict = %q, want allow", b.Verdict)
 		}
+		byName[b.Name] = b
+	}
+	if _, ok := byName["apiconn__get_allow"]; !ok {
+		t.Errorf("brief tools = %v, want admitted API endpoint", byName)
+	}
+	if got, ok := byName["mcp__alpha__a1"]; !ok || got.Connection != "alpha" {
+		t.Errorf("brief tools = %v, want exact admitted MCP identity mcp__alpha__a1", byName)
+	}
+	if _, ok := byName["mcp__gamma__g2"]; ok {
+		t.Errorf("brief tools = %v, denied MCP tool must stay outside the mandate", byName)
+	}
+	if _, ok := byName["mcp__beta__b1"]; ok {
+		t.Errorf("brief tools = %v, tool from a withheld mixed-verdict server is not callable", byName)
 	}
 
 	// Flag off ⇒ nil, identical to the api-only resolver it replaces.

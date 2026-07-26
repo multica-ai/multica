@@ -79,10 +79,11 @@ type CerebroAPIConnectionBriefIdentity struct {
 // Name is the exact tool name the agent calls verbatim; Verdict is "allow" or
 // "ask".
 type CerebroAPIConnectionBriefTool struct {
-	Connection  string
-	Name        string
-	Description string
-	Verdict     string
+	Connection    string
+	Name          string
+	Description   string
+	Verdict       string
+	MandatePrefix string
 }
 
 // cerebroEffectiveToolsForBrief resolves the agent's exposed non-CLI tools for
@@ -235,9 +236,9 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 	// only on_behalf_of layer (FIR-2441), so the brief cannot show a tool the call
 	// path would then refuse — including a member-level Deny on the initiator.
 	if h.APIConnectionBrief != nil {
-		seen := make(map[string]struct{}, len(out))
-		for _, e := range out {
-			seen[e.Name] = struct{}{}
+		seen := make(map[string]struct{}, len(mandateTools))
+		for _, callableName := range mandateTools {
+			seen[callableName] = struct{}{}
 		}
 		apiTools := h.APIConnectionBrief.APIConnectionToolsForBrief(ctx, CerebroAPIConnectionBriefIdentity{
 			WorkspaceID: runtime.WorkspaceID,
@@ -250,6 +251,12 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 			name := strings.TrimSpace(t.Name)
 			if name == "" {
 				continue
+			}
+			if prefix := strings.TrimSpace(t.MandatePrefix); prefix != "" {
+				if _, dup := seen[prefix]; !dup {
+					seen[prefix] = struct{}{}
+					mandateTools = append(mandateTools, prefix)
+				}
 			}
 			if _, dup := seen[name]; dup {
 				continue

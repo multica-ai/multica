@@ -30,6 +30,7 @@ import (
 	cerebrocapabilities "github.com/multica-ai/multica/server/internal/cerebro/capabilities"
 	"github.com/multica-ai/multica/server/internal/cerebro/capabilitycatalog"
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
+	"github.com/multica-ai/multica/server/internal/cerebro/connmeta"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
@@ -398,6 +399,30 @@ func ApplyTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, 
 			card.Tools[i].Callable = false
 			card.Tools[i].BlockedReason = card.Tools[i].Reason
 			card.Tools[i].HowToFix = "Start a new task whose issued mandate includes this capability."
+		}
+	}
+	for i := range card.Connections {
+		for j := range card.Connections[i].Tools {
+			tool := &card.Connections[i].Tools[j]
+			callableName := cerebrotoolpolicy.MCPToolToken(card.Connections[i].Name, tool.Name)
+			if err := mandates.Authorize(ctx, taskID, workspaceID, agentID, callableName); err != nil {
+				tool.Permission = "deny"
+				tool.Allowed = false
+				tool.Callable = false
+				tool.BlockedReason = fmt.Sprintf("task mandate denied the capability: %v", err)
+				tool.HowToFix = "Start a new task whose issued mandate includes this capability."
+			}
+		}
+		for j := range card.Connections[i].Endpoints {
+			endpoint := &card.Connections[i].Endpoints[j]
+			for _, method := range endpoint.Methods {
+				if err := mandates.Authorize(ctx, taskID, workspaceID, agentID, connmeta.APIEndpointToolName(card.Connections[i].Name, method, endpoint.Path)); err != nil {
+					endpoint.Permission, endpoint.Allowed, endpoint.Callable = "deny", false, false
+					endpoint.BlockedReason = fmt.Sprintf("task mandate denied the capability: %v", err)
+					endpoint.HowToFix = "Start a new task whose issued mandate includes this capability."
+					break
+				}
+			}
 		}
 	}
 }
