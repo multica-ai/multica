@@ -31,9 +31,9 @@ export async function loginAsDefault(page: Page): Promise<string> {
   // so navigate onward only after the page itself has rendered successfully.
   const destination = `/${workspace.slug}/issues`;
   await page.goto("/login", { waitUntil: "domcontentloaded" });
-  await expect(page.getByText("Sign in to Multica", { exact: true })).toBeVisible({
-    timeout: 15000,
-  });
+  await expect(
+    page.getByRole("heading", { name: /(?:Sign|Log) in to Multica/ }),
+  ).toBeVisible({ timeout: 15000 });
   await page.goto(destination, { waitUntil: "domcontentloaded" });
   await expect(page.getByText("Agents", { exact: true }).first()).toBeVisible({
     timeout: 15000,
