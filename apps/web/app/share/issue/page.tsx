@@ -17,7 +17,7 @@
 // the OS dispatches the share intent without any workspace context — workspace
 // gets resolved here, after auth.
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react"; // CEREBRO-PATCH(ios-shortcut-authenticated-share): FIR-3545
 import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Paperclip, AlertTriangle } from "lucide-react";
@@ -28,6 +28,7 @@ import { setCurrentWorkspace } from "@multica/core/platform";
 import { paths } from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import type { Workspace, Project } from "@multica/core/types";
+import { parseShortcutShareHash } from "@multica/cerebro-quick-create"; // CEREBRO-PATCH(ios-shortcut-authenticated-share): FIR-3545
 
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
@@ -97,9 +98,12 @@ function SharePageContent() {
   useEffect(() => {
     if (isAuthLoading) return;
     if (!user) {
+      // CEREBRO-PATCH(ios-shortcut-authenticated-share): FIR-3545 — preserve
+      // the client-only Shortcut payload through the normal login redirect.
+      const hash = typeof window === "undefined" ? "" : window.location.hash;
       const next = draftToken
-        ? `/share/issue?draft=${encodeURIComponent(draftToken)}`
-        : "/share/issue";
+        ? `/share/issue?draft=${encodeURIComponent(draftToken)}${hash}`
+        : `/share/issue${hash}`;
       router.replace(`${paths.login()}?next=${encodeURIComponent(next)}`);
     }
   }, [user, isAuthLoading, draftToken, router]);
@@ -110,6 +114,31 @@ function SharePageContent() {
 
   useEffect(() => {
     if (!draftToken) {
+      // CEREBRO-PATCH(ios-shortcut-authenticated-share): FIR-3545 — consume
+      // the bounded client-side Shortcut payload, then remove it from history.
+      const shortcut =
+        typeof window === "undefined"
+          ? null
+          : parseShortcutShareHash(window.location.hash);
+      if (shortcut) {
+        setDraft({
+          token: "ios-shortcut",
+          title: shortcut.title,
+          text: shortcut.text,
+          url: shortcut.url,
+          files: [],
+          createdAt: Date.now(),
+          workspaceId: shortcut.workspaceId,
+          projectId: shortcut.projectId,
+          autoSubmit: shortcut.autoSubmit,
+          source: "ios-shortcut",
+        });
+        window.history.replaceState(
+          null,
+          "",
+          `${window.location.pathname}${window.location.search}`,
+        );
+      }
       setDraftLoaded(true);
       return;
     }
@@ -145,7 +174,7 @@ function SharePageContent() {
     );
   }
 
-  if (!draftToken) {
+  if (!draftToken && !draft) {
     return (
       <ErrorScreen
         title="No shared content"
@@ -190,13 +219,21 @@ function ShareForm({
   const qc = useQueryClient();
   const { data: workspaces = [], isLoading: wsLoading } = useQuery(workspaceListOptions());
 
+  // CEREBRO-PATCH(ios-shortcut-authenticated-share): FIR-3545 — seed the
+  // fixed destination while still validating it against the signed-in user.
   const [workspaceId, setWorkspaceId] = useState<string | undefined>(undefined);
   // Auto-select the first workspace once the list loads; the user can swap
   // via the dropdown if they have more than one.
   useEffect(() => {
-    if (workspaceId || workspaces.length === 0) return;
-    setWorkspaceId(workspaces[0]!.id);
-  }, [workspaceId, workspaces]);
+    if (workspaces.length === 0) return;
+    if (workspaceId && workspaces.some((workspace) => workspace.id === workspaceId)) {
+      return;
+    }
+    const fixedWorkspace = workspaces.find(
+      (workspace) => workspace.id === draft.workspaceId,
+    );
+    setWorkspaceId(fixedWorkspace?.id ?? workspaces[0]!.id);
+  }, [draft.workspaceId, workspaceId, workspaces]);
 
   const selectedWorkspace = useMemo<Workspace | undefined>(
     () => workspaces.find((w) => w.id === workspaceId),
@@ -218,21 +255,33 @@ function ShareForm({
 
   const [title, setTitle] = useState(() => deriveTitle(draft));
   const [description, setDescription] = useState(() => deriveDescription(draft));
-  const [projectId, setProjectId] = useState<string | undefined>(undefined);
+  const [projectId, setProjectId] = useState<string | undefined>(draft.projectId);
   const [submitting, setSubmitting] = useState(false);
+  const autoSubmitStarted = useRef(false);
 
   const projectsQuery = useQuery({
     queryKey: ["share", "projects", workspaceId ?? ""],
     queryFn: () => api.listProjects(),
-    enabled: !!workspaceId,
+    enabled: !!selectedWorkspace,
   });
-  const projects: Project[] = projectsQuery.data?.projects ?? [];
+  const projects = useMemo<Project[]>(
+    () => projectsQuery.data?.projects ?? [],
+    [projectsQuery.data?.projects],
+  );
+
+  useEffect(() => {
+    if (projectsQuery.isLoading || !projectId) return;
+    if (!projects.some((project) => project.id === projectId)) {
+      setProjectId(undefined);
+    }
+  }, [projectId, projects, projectsQuery.isLoading]);
 
   // Drop the IDB row + reset the slug singleton. Called both on a successful
   // submit and on cancel — once the user has interacted, the draft is no
   // longer useful and shouldn't survive into a subsequent share.
   const cleanup = async () => {
     setCurrentWorkspace(null, null);
+    if (draft.source === "ios-shortcut") return;
     try {
       await deleteShareDraft(draft.token);
     } catch {
@@ -296,6 +345,34 @@ function ShareForm({
       setSubmitting(false);
     }
   };
+
+  useEffect(() => {
+    // CEREBRO-PATCH(ios-shortcut-authenticated-share): FIR-3545
+    if (
+      draft.autoSubmit !== true ||
+      autoSubmitStarted.current ||
+      submitting ||
+      projectsQuery.isLoading ||
+      !selectedWorkspace ||
+      !projectId ||
+      !projects.some((project) => project.id === projectId) ||
+      !title.trim()
+    ) {
+      return;
+    }
+    autoSubmitStarted.current = true;
+    void onSubmit();
+    // The guarded one-shot intentionally calls the current submit closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    draft.autoSubmit,
+    projectId,
+    projects,
+    projectsQuery.isLoading,
+    selectedWorkspace,
+    submitting,
+    title,
+  ]);
 
   if (wsLoading) {
     return <CenteredSpinner />;
