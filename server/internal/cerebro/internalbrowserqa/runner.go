@@ -538,11 +538,16 @@ func (r *Runner) readVersion(ctx context.Context, target Target) (string, error)
 const openStageRetries = 1
 
 func (r *Runner) runStage(ctx context.Context, target Target, stage, stdin string, args ...string) ([]byte, error) {
-	if stage != openStage {
+	navigationStage := stage == openStage || stage == "reload"
+	if !navigationStage {
 		return r.runStageOnce(ctx, target, stage, stdin, args...)
 	}
+	retries := 0
+	if stage == openStage {
+		retries = openStageRetries
+	}
 	var lastErr error
-	for attempt := 0; attempt <= openStageRetries; attempt++ {
+	for attempt := 0; attempt <= retries; attempt++ {
 		output, err := r.runStageOnce(ctx, target, stage, stdin, args...)
 		if err == nil {
 			return output, nil
@@ -555,8 +560,41 @@ func (r *Runner) runStage(ctx context.Context, target Target, stage, stdin strin
 		if ctx.Err() != nil {
 			return nil, err
 		}
+		// Browser navigation waits for the page load event, but modern apps can
+		// keep network work alive after the document is already usable. Recover
+		// only when a separate URL read proves the browser reached the exact
+		// allowlisted origin. The snapshot, markers, final route, and version
+		// checks below still fail closed if the app itself is not ready.
+		if r.navigationReachedTarget(ctx, target, args) {
+			return nil, nil
+		}
 	}
 	return nil, lastErr
+}
+
+func (r *Runner) navigationReachedTarget(ctx context.Context, target Target, args []string) bool {
+	if len(args) < 2 || args[0] != "--session" || args[1] == "" {
+		return false
+	}
+	timeout := r.stageTimeout
+	if timeout <= 0 {
+		timeout = defaultStageTimeout
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	output, err := r.commander.Run(probeCtx, "", args[0], args[1], "get", "url")
+	if err != nil {
+		return false
+	}
+	reached, err := url.Parse(strings.TrimSpace(string(output)))
+	if err != nil || reached.Scheme == "" || reached.Host == "" {
+		return false
+	}
+	expected, err := url.Parse(target.URL)
+	if err != nil {
+		return false
+	}
+	return reached.Scheme == expected.Scheme && reached.Host == expected.Host
 }
 
 func (r *Runner) runStageOnce(ctx context.Context, target Target, stage, stdin string, args ...string) ([]byte, error) {
@@ -779,6 +817,7 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	}
 	if formLogin || target.SessionCookie {
 		commands := make([][]string, 0, 6)
+		var sessionRootURL string
 		if formLogin {
 			commands = append(commands, []string{"fill", target.UsernameSelector, credential.Username})
 			if target.CodeSelector != "" {
@@ -798,22 +837,28 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		}
 		if target.SessionCookie {
 			parsed, _ := url.Parse(target.URL)
-			rootURL := parsed.Scheme + "://" + parsed.Host + "/"
+			sessionRootURL = parsed.Scheme + "://" + parsed.Host + "/"
 			commands = append(commands,
-				[]string{"cookies", "set", "multica_auth", credential.SessionToken, "--url", rootURL, "--httpOnly", "--sameSite", "Strict"},
-				[]string{"cookies", "set", "multica_logged_in", "1", "--url", rootURL, "--sameSite", "Lax"},
-				[]string{"open", rootURL},
+				[]string{"cookies", "set", "multica_auth", credential.SessionToken, "--url", sessionRootURL, "--httpOnly", "--sameSite", "Strict"},
+				[]string{"cookies", "set", "multica_logged_in", "1", "--url", sessionRootURL, "--sameSite", "Lax"},
 			)
 		}
-		settle := "1500"
-		if target.CodeSelector != "" {
-			settle = "4000"
+		if formLogin {
+			settle := "1500"
+			if target.CodeSelector != "" {
+				settle = "4000"
+			}
+			commands = append(commands, []string{"wait", settle})
 		}
-		commands = append(commands, []string{"wait", settle})
 		payload, _ := json.Marshal(commands)
 		// This output is deliberately discarded: the stdin payload contains secrets.
 		if _, err := r.runStage(ctx, target, "auth", string(payload), append(baseArgs, "batch")...); err != nil {
 			return r.failure(target, baseArgs, target.URL, err)
+		}
+		if sessionRootURL != "" {
+			if _, err := r.runStage(ctx, target, openStage, "", append(baseArgs, "open", sessionRootURL)...); err != nil {
+				return r.failure(target, baseArgs, sessionRootURL, err)
+			}
 		}
 	}
 	if _, err := r.runStage(ctx, target, "reload", "", append(baseArgs, "reload")...); err != nil {
