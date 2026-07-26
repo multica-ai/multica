@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
+	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -171,6 +172,36 @@ func TestCerebroEffectiveToolsForBriefIncludesAPIConnectionTools(t *testing.T) {
 	}
 	if _, ok := byName["schedule_wakeup"]; !ok {
 		t.Errorf("tool-policy chain tools must remain alongside api-connection tools")
+	}
+}
+
+func TestCerebroEffectiveToolsForClaimUsesConnectionDispatchMandateIdentity(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	brief := &fakeAPIConnBrief{tools: []CerebroAPIConnectionBriefTool{
+		{Name: "infisical_admin__get_api_v3_secrets_raw", Description: "Read a secret", Verdict: "allow"},
+	}}
+	h := &Handler{
+		runtimeToolAccess:  fakeRuntimeToolAccess{},
+		APIConnectionBrief: brief,
+	}
+
+	_, mandate, err := h.cerebroEffectiveToolsForClaim(
+		context.Background(),
+		db.AgentRuntime{},
+		&TaskAgentData{ID: agentID},
+		"agent",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim: %v", err)
+	}
+	if !containsString(mandate, "infisical_admin__get_api_v3_secrets_raw") {
+		t.Fatalf("claim mandate = %v, want connection dispatch identity", mandate)
+	}
+
+	hookTool := "mcp__multica__infisical_admin__get_api_v3_secrets_raw"
+	if got := localtoolpolicy.ProviderMandateToolKey(hookTool); got != mandate[0] {
+		t.Fatalf("local hook mandate identity = %q, want claimed identity %q", got, mandate[0])
 	}
 }
 

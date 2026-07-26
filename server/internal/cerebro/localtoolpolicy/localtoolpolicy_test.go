@@ -66,6 +66,46 @@ func TestProviderPolicyToolKeyPreservesOtherProviders(t *testing.T) {
 	}
 }
 
+func TestProviderMandateToolKeyNormalizesWorkspaceConnectionDispatch(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		tool string
+		want string
+	}{
+		{
+			name: "api connection endpoint",
+			tool: "mcp__multica__infisical_admin__get_api_v3_secrets_raw",
+			want: "infisical_admin__get_api_v3_secrets_raw",
+		},
+		{
+			name: "workspace mcp management tool",
+			tool: "mcp__multica__create_connection",
+			want: "mcp__multica__create_connection",
+		},
+		{
+			name: "ordinary mcp tool",
+			tool: "mcp__company_brain__search",
+			want: "mcp__company_brain__search",
+		},
+		{
+			name: "built in tool",
+			tool: "tools:Bash",
+			want: "tools:Bash",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ProviderMandateToolKey(tc.tool); got != tc.want {
+				t.Fatalf("ProviderMandateToolKey(%q) = %q, want %q", tc.tool, got, tc.want)
+			}
+		})
+	}
+}
+
 func TestProviderPolicyToolKeyNormalizesCodexObservedNames(t *testing.T) {
 	t.Parallel()
 

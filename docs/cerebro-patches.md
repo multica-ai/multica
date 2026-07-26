@@ -1827,6 +1827,7 @@ listening on `before.issue.status_change` exists.
 | Patch | Location | Reason |
 |---|---|---|
 | `cursor-tool-policy-key` | `server/internal/handler/daemon_tool_policy_cerebro.go` | Normalize Cursor `preToolUse` names to the canonical Cursor runtime inventory before task-mandate and permission checks, so allowed Cursor tools are not denied because the provider uses different names. |
+| `connection-task-mandate-key` | `server/internal/handler/daemon_tool_policy_cerebro.go` | FIR-3828 — normalize the local `mcp__multica__<connection>__<operation>` wrapper to the shared `<connection>__<operation>` dispatch identity only for the immutable task-mandate check. The policy chain keeps its provider-native key, and ordinary workspace MCP management tools remain unchanged. |
 
 Approved by Jesper Hvejsel via FIR-3729 takeover request, 2026-07-23.
 
