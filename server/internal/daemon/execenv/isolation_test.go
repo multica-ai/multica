@@ -4,9 +4,11 @@ package execenv
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -45,7 +47,12 @@ func TestPreparationHelperRoundTripsReuse(t *testing.T) {
 		WorkspaceID:    "ws-helper-reuse",
 		TaskID:         "99999999-8888-7777-6666-555555555555",
 		Provider:       "claude",
-		Task:           TaskContextForEnv{IssueID: "issue-helper-reuse"},
+		// CEREBRO-PATCH(mul-5038-project-resource-decode): resources on both paths.
+		Task: TaskContextForEnv{
+			IssueID:          "issue-helper-reuse",
+			ProjectID:        "project-helper-reuse",
+			ProjectResources: []ProjectResourceForEnv{testProjectResource()},
+		},
 	}
 	env, err := PrepareIsolated(ctx, preparationHelperTestCommand(), params, logger)
 	if err != nil {
@@ -55,12 +62,81 @@ func TestPreparationHelperRoundTripsReuse(t *testing.T) {
 		// Fork ReuseParams keys off WorkDir only (no WorkspacesRoot field).
 		WorkDir:  env.WorkDir,
 		Provider: params.Provider,
-		Task:     TaskContextForEnv{IssueID: "issue-helper-reuse", NewCommentCount: 1},
+		// CEREBRO-PATCH(mul-5038-project-resource-decode): resources on the reuse path too.
+		Task: TaskContextForEnv{
+			IssueID:          "issue-helper-reuse",
+			NewCommentCount:  1,
+			ProjectID:        "project-helper-reuse",
+			ProjectResources: []ProjectResourceForEnv{testProjectResource()},
+		},
 	}, logger)
 	if err != nil {
 		t.Fatalf("ReuseIsolated: %v", err)
 	}
 	if reused == nil || reused.RootDir != env.RootDir || reused.WorkDir != env.WorkDir {
 		t.Fatalf("reused environment = %#v, want root %q workdir %q", reused, env.RootDir, env.WorkDir)
+	}
+}
+
+// CEREBRO-PATCH(mul-5038-project-resource-decode): backport of upstream MUL-5038 (#5688); drop on next upstream sync.
+// testProjectResource is the fixture that reproduces FIR-3801: the helper
+// decodes the preparation request with DisallowUnknownFields, so a project
+// resource in the payload used to abort every task before the agent started.
+func testProjectResource() ProjectResourceForEnv {
+	return ProjectResourceForEnv{
+		ID:           "resource-helper-project",
+		ResourceType: "github_repo",
+		ResourceRef:  json.RawMessage(`{"url":"https://github.com/firtal-group/firtal-cerebro"}`),
+		Label:        "firtal-cerebro",
+	}
+}
+
+// TestPreparationHelperRoundTripsProjectResources locks the encode/decode names
+// of ProjectResourceForEnv together across the helper process boundary. Drop a
+// json tag and this test fails instead of production.
+func TestPreparationHelperRoundTripsProjectResources(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	params := PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-helper-project-resource",
+		TaskID:         "88888888-7777-6666-5555-444444444444",
+		Provider:       "claude",
+		Task: TaskContextForEnv{
+			IssueID:          "issue-helper-project-resource",
+			ProjectID:        "project-helper-project-resource",
+			ProjectResources: []ProjectResourceForEnv{testProjectResource()},
+		},
+	}
+
+	env, err := PrepareIsolated(ctx, preparationHelperTestCommand(), params, logger)
+	if err != nil {
+		t.Fatalf("PrepareIsolated: %v", err)
+	}
+	defer env.Cleanup(true)
+
+	data, err := os.ReadFile(filepath.Join(env.WorkDir, ".multica", "project", "resources.json"))
+	if err != nil {
+		t.Fatalf("read project resources: %v", err)
+	}
+	var got projectResourceFile
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("decode project resources: %v", err)
+	}
+	if len(got.Resources) != 1 {
+		t.Fatalf("project resources = %#v, want one resource", got.Resources)
+	}
+	want := testProjectResource()
+	resource := got.Resources[0]
+	var ref struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(resource.ResourceRef, &ref); err != nil {
+		t.Fatalf("decode resource ref: %v", err)
+	}
+	if resource.ID != want.ID || resource.ResourceType != want.ResourceType ||
+		resource.Label != want.Label || ref.URL != "https://github.com/firtal-group/firtal-cerebro" {
+		t.Fatalf("project resource = %#v, want all fields preserved", resource)
 	}
 }
