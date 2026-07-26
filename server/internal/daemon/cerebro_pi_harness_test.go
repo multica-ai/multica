@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -46,14 +47,20 @@ func TestPreparePiHarnessLeavesOtherProvidersUntouched(t *testing.T) {
 	}
 }
 
-func TestPreparePiHarnessKillSwitchLeavesPiUntouched(t *testing.T) {
-	want := []string{"-e", "/user/extension.ts"}
+// The harness carries Pi's only before-call gate, so the kill switch must stop
+// the spawn. Letting a disabled harness fall through would start Pi with no
+// call-time tool-policy enforcement at all — the one outcome the mandatory
+// adapter contract exists to prevent.
+func TestPreparePiHarnessKillSwitchRefusesPiSpawn(t *testing.T) {
 	env := map[string]string{}
-	args, err := preparePiHarness(false, "pi", t.TempDir(), "enforce", want, nil, env)
-	if err != nil {
-		t.Fatalf("preparePiHarness: %v", err)
+	args, err := preparePiHarness(false, "pi", t.TempDir(), "enforce", []string{"-e", "/user/extension.ts"}, nil, env)
+	if err == nil {
+		t.Fatalf("disabled Pi harness must refuse the spawn, got args=%#v", args)
 	}
-	if !slices.Equal(args, want) || len(env) != 0 {
-		t.Fatalf("disabled Pi harness changed spawn: args=%#v env=%#v", args, env)
+	if !strings.Contains(err.Error(), "cerebro_pi_harness") {
+		t.Fatalf("error = %q, want the disabled feature flag named", err)
+	}
+	if len(env) != 0 {
+		t.Fatalf("refused spawn still mutated env: %#v", env)
 	}
 }

@@ -160,6 +160,11 @@ export async function resolvePolicy(toolName, input, override = {}) {
 			body: JSON.stringify({
 				workspace_id: process.env.MULTICA_WORKSPACE_ID || "",
 				agent_id: process.env.MULTICA_AGENT_ID || "",
+				// The server rejects a resolve without a task id (400) and the
+				// daemon turns that into a fail-closed deny, so omitting it
+				// would block every Pi tool call rather than gate it. The
+				// daemon injects MULTICA_TASK_ID into every agent spawn.
+				task_id: process.env.MULTICA_TASK_ID || "",
 				tool_name: toolName,
 				resource_pattern: "",
 				args: input || {},
