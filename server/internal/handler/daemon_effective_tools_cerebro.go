@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -237,6 +238,7 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 	// path would then refuse — including a member-level Deny on the initiator.
 	if h.APIConnectionBrief != nil {
 		seen := make(map[string]struct{}, len(mandateTools))
+		mandatePrefixes := make([]string, 0)
 		for _, callableName := range mandateTools {
 			seen[callableName] = struct{}{}
 		}
@@ -255,7 +257,7 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 			if prefix := strings.TrimSpace(t.MandatePrefix); prefix != "" {
 				if _, dup := seen[prefix]; !dup {
 					seen[prefix] = struct{}{}
-					mandateTools = append(mandateTools, prefix)
+					mandatePrefixes = append(mandatePrefixes, prefix)
 				}
 			}
 			if _, dup := seen[name]; dup {
@@ -275,6 +277,11 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 				Connection:  strings.TrimSpace(t.Connection),
 			})
 		}
+		// Keep the exact callable names positionally aligned with out. Session
+		// filtering pairs those two slices by index; server wildcards are
+		// supplemental mandate entries and therefore belong after that aligned
+		// prefix.
+		mandateTools = append(mandateTools, mandatePrefixes...)
 	}
 	if h.ConnectionInstructionsBrief != nil {
 		// CEREBRO-PATCH(connection-instructions-claim): Never load guidance for a denied/hidden connection.
@@ -324,6 +331,30 @@ func filterClaimToolsForSessionMode(tools []AgentTaskToolEntry, mandateTools, al
 				filteredMandate = append(filteredMandate, callableName)
 			}
 		}
+	}
+	supplemental := make(map[string]struct{})
+	if len(mandateTools) > len(tools) {
+		for _, name := range mandateTools[len(tools):] {
+			supplemental[strings.TrimSpace(name)] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{}, len(filteredMandate))
+	for _, name := range filteredMandate {
+		seen[name] = struct{}{}
+	}
+	for _, callableName := range filteredMandate {
+		prefix := taskmandate.MCPServerWildcard(callableName)
+		if prefix == "" {
+			continue
+		}
+		if _, issued := supplemental[prefix]; !issued {
+			continue
+		}
+		if _, dup := seen[prefix]; dup {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		filteredMandate = append(filteredMandate, prefix)
 	}
 	return filteredTools, filteredMandate
 }
