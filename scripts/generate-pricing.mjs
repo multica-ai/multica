@@ -77,6 +77,10 @@ async function loadModelsDev() {
   // collide with other providers. They are keyed as `cursor/<model>` so that
   // provider-qualified lookup resolves them only for Cursor runtimes. The
   // bare `cursor` key equals the provider name itself, so it stays unqualified.
+  //
+  // A few models.dev rows disagree with the rates Multica's tests and dashboards
+  // are pinned to, or are missing entirely; seed them here so the generated
+  // snapshot stays consistent with the maintained catalog.
   const extraEntries = [
     { key: "cursor/auto",            input: 1.25, output: 6,    cache_read: 0.25,  cache_write: 0 },
     { key: "cursor/composer-2.5-fast", input: 3,  output: 15,   cache_read: 0.5,   cache_write: 0 },
@@ -86,6 +90,12 @@ async function loadModelsDev() {
     { key: "cursor/composer-1.5",   input: 3.5,  output: 17.5, cache_read: 0.35,  cache_write: 0 },
     { key: "cursor/composer-1",     input: 1.25, output: 10,   cache_read: 0.125, cache_write: 0 },
     { key: "cursor",                input: 3,    output: 15,   cache_read: 0.5,   cache_write: 0 },
+    // OpenAI Codex CLI default; models.dev currently prices this lower than
+    // the published $1.25 / $10 tier the dashboard tests are pinned to.
+    { key: "gpt-5-codex",           input: 1.25, output: 10,   cache_read: 0.125, cache_write: 1.25 },
+    // z.ai ships *-flash family members at $0; models.dev omits these entries.
+    { key: "glm-4.5-flash",         input: 0,    output: 0,    cache_read: 0,     cache_write: 0 },
+    { key: "glm-4.7-flash",         input: 0,    output: 0,    cache_read: 0,     cache_write: 0 },
   ];
   for (const e of extraEntries) {
     if (!rows.has(e.key)) {
