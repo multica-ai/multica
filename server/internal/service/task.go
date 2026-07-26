@@ -561,7 +561,9 @@ var ErrAttributionFailClosed = errors.New("attribution: no precise accountable h
 // (#5914). This is a benign outcome — a sibling run already covers this target
 // — not a server fault. Enqueue paths return it so callers can report a
 // success-shaped coalesced outcome / structured 409 instead of surfacing the
-// raw Postgres constraint as a 500. It wraps the driver error for logging.
+// raw Postgres constraint as a 500. It is returned BARE (the raw driver text,
+// including the index name, is logged once at debug and never wrapped in) so no
+// upper-layer log or response can leak the constraint name (#5914, Elon review).
 var ErrDuplicatePendingTask = errors.New("a pending task for this issue and agent already exists")
 
 // isDuplicatePendingTaskErr reports whether err is the unique-index violation on
@@ -1178,7 +1180,7 @@ func (s *TaskService) enqueueMentionTaskWithCommentPlan(ctx context.Context, iss
 		// 500 that leaks the raw constraint name (#5914).
 		if isDuplicatePendingTaskErr(err) {
 			slog.Debug("mention task enqueue coalesced: pending task already exists", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID))
-			return db.AgentTaskQueue{}, fmt.Errorf("%w: %v", ErrDuplicatePendingTask, err)
+			return db.AgentTaskQueue{}, ErrDuplicatePendingTask
 		}
 		slog.Error("mention task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(agentID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)

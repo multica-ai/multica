@@ -1534,60 +1534,73 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 		results[uuidToString(trigger.Agent.ID)] = commentEnqueueResult{status: status, reason: reason, execSquadID: execSquadID}
 	}
 	for _, trigger := range triggers {
-		if trigger.AlreadyPending {
-			// MUL-4195: a queued/dispatched task for this (issue, agent)
-			// already exists. Historically we DROPPED the comment here, losing
-			// the user's follow-up instruction. Instead try to fold it into the
-			// queued (not-yet-claimed) task so a single run still covers every
-			// comment, re-stamping the run's originator/overlay to the new
-			// comment (mergeCommentIntoPendingTask).
-			//
-			// The merge reports HOW it resolved: a real merge is coalesced, a
-			// fail-closed / failed merge is blocked (attribution_blocked /
-			// internal_error) — never mislabeled as success (MUL-4525 §2, Elon
-			// round 5). Only "no queued task to fold into" falls through to the
-			// active-task decision below.
+		status, reason := h.resolveCommentTriggerEnqueue(ctx, issue, trigger, triggerCommentID, getEscalationDelay)
+		record(trigger, status, reason)
+	}
+	return results
+}
+
+// resolveCommentTriggerEnqueue resolves ONE trigger into its final dispatch
+// outcome, folding the comment into an existing pending task rather than
+// dropping it (MUL-4195). It handles the two ways the (issue, agent) pair can
+// already hold a pending task:
+//
+//   - resolution pre-flagged AlreadyPending, or
+//   - a fresh enqueue LOST the race to a concurrent sibling and the
+//     idx_one_pending_task_per_issue_agent unique index rejected the insert
+//     (service.ErrDuplicatePendingTask, #5914).
+//
+// Both mean "a task now exists", so both fold the comment in via
+// mergeCommentIntoPendingTask — which durably appends it to the winner's
+// coalesced_comment_ids, so completion reconcile delivers it via
+// planned_comment_ids even when the comment was persisted BEFORE the winning
+// task (the race window a bare coalesced record would drop — Elon review).
+//
+// Bounded to two attempts: the only way past the first is a merge-miss with NO
+// active task (the sibling already vanished), where one fresh enqueue is safe; a
+// second duplicate then means yet another sibling is durably present — a benign
+// coalesced outcome, never a 500 or a dropped instruction.
+func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, triggerCommentID pgtype.UUID, getEscalationDelay func() time.Duration) (DispatchStatus, DispatchReasonCode) {
+	pending := trigger.AlreadyPending
+	for attempt := 0; attempt < 2; attempt++ {
+		if pending {
+			// Fold into the not-yet-claimed queued task. The merge reports HOW
+			// it resolved: a real merge is coalesced; a fail-closed / failed
+			// merge is blocked (attribution_blocked / internal_error) — never
+			// mislabeled as success (MUL-4525 §2, Elon round 5). Only "no queued
+			// task to fold into" falls through to the active-task decision.
 			if status, reason, terminal := commentMergeTerminalOutcome(
 				h.mergeCommentIntoPendingTask(ctx, issue, trigger, triggerCommentID),
 			); terminal {
-				record(trigger, status, reason)
-				continue
+				return status, reason
 			}
-			// The merge found no queued task to fold into: the existing task
-			// is already dispatched/running (its claim response is built), or
-			// the queued row was just claimed. We must NOT enqueue a
-			// fresh queued task in that case — a dispatched sibling would trip
-			// the idx_one_pending_task_per_issue_agent unique index (dropping
-			// the comment again) and even where the index allows it we'd risk a
-			// duplicate concurrent run. When an active task exists, its
-			// completion reconcile (reconcileCommentsOnCompletion) is what
-			// guarantees this comment earns a bounded follow-up. Only when NO
-			// active task exists is a fresh enqueue both safe and necessary. On a
-			// query failure we fail closed (no fresh enqueue) and report a
-			// non-success internal_error rather than a fabricated deferred.
+			// The merge found no queued task to fold into: the sibling is
+			// dispatched/running (its claim response is built) or was just
+			// claimed. We must NOT enqueue a fresh queued task against an active
+			// sibling — it would trip the unique index again and risk a
+			// duplicate run; its completion reconcile covers the comment. Only a
+			// confirmed-none enqueues fresh; a query failure fails closed.
 			active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, trigger.Agent.ID)
 			if status, reason, enqueueFresh := decidePostMergeMiss(active, activeErr); !enqueueFresh {
-				record(trigger, status, reason)
-				continue
+				return status, reason
 			}
 		}
 		if err := h.enqueueSingleCommentTrigger(ctx, issue, triggerCommentID, trigger, getEscalationDelay); err != nil {
-			// A concurrent enqueue for the same (issue, agent) won the race and
-			// the unique index rejected this insert (#5914). The run is already
-			// handled by that sibling task, so this is a benign coalesced
-			// outcome — success-shaped, not a blocked internal_error. The
-			// sibling's completion reconcile (reconcileCommentsOnCompletion)
-			// still guarantees this comment earns a bounded follow-up.
+			// Lost the enqueue race: a sibling task for this (issue, agent) now
+			// exists. Re-resolve as pending so the next attempt folds this
+			// comment into that sibling instead of dropping it (#5914).
 			if errors.Is(err, service.ErrDuplicatePendingTask) {
-				record(trigger, DispatchCoalesced, ReasonCoalesced)
+				pending = true
 				continue
 			}
-			record(trigger, DispatchBlocked, commentEnqueueFailureReason(err))
-			continue
+			return DispatchBlocked, commentEnqueueFailureReason(err)
 		}
-		record(trigger, DispatchQueued, ReasonQueued)
+		return DispatchQueued, ReasonQueued
 	}
-	return results
+	// Two consecutive enqueue races with no foldable queued row in between: a
+	// sibling is durably present, so the run is covered — report the benign
+	// coalesced outcome rather than a blocked failure.
+	return DispatchCoalesced, ReasonCoalesced
 }
 
 // commentTriggerOutcomes maps each explicit mention target to its final outcome
@@ -1824,6 +1837,20 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 	return commentMergeSucceeded
 }
 
+// logCommentEnqueueFailure logs a failed comment-trigger enqueue. A benign
+// duplicate-pending-task race (service.ErrDuplicatePendingTask) is not a fault —
+// resolveCommentTriggerEnqueue folds the comment into the winning task — so it
+// is logged at debug and never surfaces as a warning, keeping the raw Postgres
+// constraint name out of warn/error logs (#5914, Elon review). Any other error
+// stays a warning with the error attached.
+func logCommentEnqueueFailure(msg string, err error, attrs ...any) {
+	if errors.Is(err, service.ErrDuplicatePendingTask) {
+		slog.Debug(msg+": duplicate pending task, coalescing into the sibling run", attrs...)
+		return
+	}
+	slog.Warn(msg, append(attrs, "error", err)...)
+}
+
 // enqueueSingleCommentTrigger creates a fresh task for one computed trigger.
 // Split out of enqueueCommentAgentTriggers so the merge-not-drop path
 // (MUL-4195) can fall back to it when a pending task vanished mid-flight.
@@ -1836,11 +1863,10 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 	case commentTriggerSourceIssueAssignee:
 		if trigger.Squad != nil {
 			if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
-				slog.Warn("enqueue squad leader task failed",
+				logCommentEnqueueFailure("enqueue squad leader task failed", err,
 					"issue_id", uuidToString(issue.ID),
 					"squad_id", uuidToString(trigger.Squad.ID),
-					"leader_id", uuidToString(trigger.Agent.ID),
-					"error", err)
+					"leader_id", uuidToString(trigger.Agent.ID))
 				return err
 			}
 			return nil
@@ -1851,18 +1877,16 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 		}
 	case commentTriggerSourceMentionSquadLeader:
 		if _, err := h.TaskService.EnqueueTaskForSquadLeader(ctx, issue, trigger.Agent.ID, trigger.Squad.ID, triggerCommentID); err != nil {
-			slog.Warn("enqueue squad leader mention task failed",
+			logCommentEnqueueFailure("enqueue squad leader mention task failed", err,
 				"issue_id", uuidToString(issue.ID),
-				"agent_id", uuidToString(trigger.Agent.ID),
-				"error", err)
+				"agent_id", uuidToString(trigger.Agent.ID))
 			return err
 		}
 	case commentTriggerSourceMentionAgent:
 		if _, err := h.TaskService.EnqueueTaskForMention(ctx, issue, trigger.Agent.ID, triggerCommentID); err != nil {
-			slog.Warn("enqueue mention agent task failed",
+			logCommentEnqueueFailure("enqueue mention agent task failed", err,
 				"issue_id", uuidToString(issue.ID),
-				"agent_id", uuidToString(trigger.Agent.ID),
-				"error", err)
+				"agent_id", uuidToString(trigger.Agent.ID))
 			return err
 		}
 	case commentTriggerSourceThreadParent, commentTriggerSourceConversation:
@@ -1874,11 +1898,10 @@ func (h *Handler) enqueueSingleCommentTrigger(ctx context.Context, issue db.Issu
 			task, err = h.TaskService.EnqueueTaskForThreadParent(ctx, issue, trigger.Agent.ID, triggerCommentID)
 		}
 		if err != nil {
-			slog.Warn("enqueue routed comment agent task failed",
+			logCommentEnqueueFailure("enqueue routed comment agent task failed", err,
 				"issue_id", uuidToString(issue.ID),
 				"agent_id", uuidToString(trigger.Agent.ID),
-				"source", trigger.Source,
-				"error", err)
+				"source", trigger.Source)
 			return err
 		}
 		if trigger.EscalationFallback == nil || getEscalationDelay() <= 0 {

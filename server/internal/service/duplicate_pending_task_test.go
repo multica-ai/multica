@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgconn"
@@ -70,6 +71,13 @@ func TestEnqueueTaskForMentionCoalescesDuplicatePendingTask(t *testing.T) {
 	_, err := svc.EnqueueTaskForMention(ctx, issueStruct, util.MustParseUUID(agentID), pgtype.UUID{})
 	if !errors.Is(err, ErrDuplicatePendingTask) {
 		t.Fatalf("second EnqueueTaskForMention: err = %v, want ErrDuplicatePendingTask", err)
+	}
+	// The returned error must NOT carry the raw Postgres constraint name or
+	// SQLSTATE — those used to leak into upper-layer warning logs (#5914).
+	for _, leak := range []string{"idx_one_pending_task_per_issue_agent", "23505", "SQLSTATE", "duplicate key"} {
+		if strings.Contains(err.Error(), leak) {
+			t.Fatalf("duplicate error leaked %q: %v", leak, err)
+		}
 	}
 
 	var n int
