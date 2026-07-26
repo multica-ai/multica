@@ -31,11 +31,61 @@ type DB interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
+// Snapshot is the immutable access contract issued when a task is claimed.
+// It is also the read model shown to operators, so the human and the running
+// agent can inspect the same exact allowlist that call-time enforcement uses.
+type Snapshot struct {
+	TaskID       pgtype.UUID
+	WorkspaceID  pgtype.UUID
+	AgentID      pgtype.UUID
+	AllowedTools []string
+	IssuedAt     time.Time
+	ExpiresAt    time.Time
+}
+
 func NewStore(pool *pgxpool.Pool) *Store {
 	return &Store{db: pool, now: time.Now}
 }
 
 func NewStoreDB(db DB) *Store { return &Store{db: db, now: time.Now} }
+
+// Get returns the exact stored task contract without applying expiry. Historical
+// task transcripts need to show what was issued even after the run has ended.
+func (s *Store) Get(ctx context.Context, taskID, workspaceID, agentID pgtype.UUID) (Snapshot, error) {
+	if s == nil || s.db == nil || !taskID.Valid || !workspaceID.Valid || !agentID.Valid {
+		return Snapshot{}, ErrMissing
+	}
+	var (
+		snapshot Snapshot
+		raw      []byte
+	)
+	err := s.db.QueryRow(ctx, `
+		SELECT task_id, workspace_id, agent_id, allowed_tools, issued_at, expires_at
+		FROM cerebro_task_mandate
+		WHERE task_id=$1 AND workspace_id=$2 AND agent_id=$3`,
+		taskID, workspaceID, agentID,
+	).Scan(
+		&snapshot.TaskID,
+		&snapshot.WorkspaceID,
+		&snapshot.AgentID,
+		&raw,
+		&snapshot.IssuedAt,
+		&snapshot.ExpiresAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return Snapshot{}, ErrMissing
+	}
+	if err != nil {
+		return Snapshot{}, err
+	}
+	if err := json.Unmarshal(raw, &snapshot.AllowedTools); err != nil {
+		return Snapshot{}, fmt.Errorf("task mandate: decode allowed tools: %w", err)
+	}
+	if snapshot.AllowedTools == nil {
+		snapshot.AllowedTools = []string{}
+	}
+	return snapshot, nil
+}
 
 // Issue snapshots the exact tools a task may call. Re-issuing for the same task
 // replaces the snapshot atomically, which supports a task being reclaimed.

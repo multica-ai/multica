@@ -9,72 +9,7 @@ package toolpolicy
 // Settings: a catalog (injected, because the FDR proxy lives in package handler)
 // crossed with the authored per-layer settings, resolved against Base.
 
-import (
-	"context"
-	"fmt"
-
-	"github.com/jackc/pgx/v5/pgtype"
-)
-
-// loadRegistryResourceSettings reads the authored per-data-source firtal_registry
-// chain rows for the query's in-scope subjects, keyed by data source id
-// (resource_pattern). It mirrors loadRepoPolicySettings but for the single
-// firtal_registry tool key, so each layer (workspace → runtime → group → user)
-// surfaces the same Allow/Ask/Deny the gate reads. A user in scope expands to
-// the group layer via groupIDs, supplied already-resolved by the caller.
-func (s *Store) loadRegistryResourceSettings(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID) (map[string]*repoPolicyLayers, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT p.resource_pattern, p.layer, p.setting, p.conditions
-		FROM cerebro_tool_policy p
-		WHERE p.workspace_id = $1
-		  AND p.resource_pattern <> ''
-		  AND p.tool_key = $7
-		  AND (
-		    (p.layer = 'workspace' AND p.subject_id = $1) OR
-		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
-		    (p.layer = 'agent'     AND p.subject_id = $3) OR
-		    (p.layer = 'user'      AND p.subject_id = $4) OR
-		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
-		    (p.layer = 'system'    AND p.subject_id = $6)
-		  )
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.SystemID, RegistryToolKey)
-	if err != nil {
-		return nil, fmt.Errorf("toolpolicy: load registry resource settings: %w", err)
-	}
-	defer rows.Close()
-
-	out := map[string]*repoPolicyLayers{}
-	for rows.Next() {
-		var resourcePattern, layer, setting string
-		var conditions []byte
-		if err := rows.Scan(&resourcePattern, &layer, &setting, &conditions); err != nil {
-			return nil, fmt.Errorf("toolpolicy: scan registry resource setting: %w", err)
-		}
-		cell, ok := out[resourcePattern]
-		if !ok {
-			cell = &repoPolicyLayers{layers: map[Layer]Setting{}, conditions: map[Layer]*Condition{}}
-			out[resourcePattern] = cell
-		}
-		l := Layer(layer)
-		set := Setting(setting)
-		if l == LayerGroup {
-			cell.groups = append(cell.groups, set)
-			continue
-		}
-		cell.layers[l] = set
-		cond, err := decodeCondition(conditions)
-		if err != nil {
-			return nil, fmt.Errorf("toolpolicy: decode registry conditions for %q at %s: %w", resourcePattern, l, err)
-		}
-		if cond != nil {
-			cell.conditions[l] = cond
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("toolpolicy: iterate registry resource settings: %w", err)
-	}
-	return out, nil
-}
+import "context"
 
 // AppendRegistryDataSourceRows folds the workspace's data-source catalog into the
 // table as one authorable firtal_registry per-source row each, populated with the
@@ -91,7 +26,10 @@ func (s *Store) AppendRegistryDataSourceRows(ctx context.Context, in TableQuery,
 	if err != nil {
 		return nil, err
 	}
-	settings, err := s.loadRegistryResourceSettings(ctx, in, groupIDs)
+	settings, err := s.loadResourcePolicySettings(ctx, in, groupIDs, resourcePolicyFilter{
+		toolKeys: []string{RegistryToolKey},
+		scope:    resourcePatternNonEmpty,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -128,7 +66,7 @@ func (s *Store) AppendRegistryDataSourceRows(ctx context.Context, in TableQuery,
 			Layers:          map[Layer]Setting{},
 			Conditions:      map[Layer]*Condition{},
 		}
-		if cell, ok := settings[id]; ok {
+		if cell, ok := settings[resourcePolicyKey{toolKey: RegistryToolKey, resourcePattern: id}]; ok {
 			for l, set := range cell.layers {
 				row.Layers[l] = set
 			}
@@ -139,7 +77,10 @@ func (s *Store) AppendRegistryDataSourceRows(ctx context.Context, in TableQuery,
 				row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 			}
 		}
-		row.Effective = ResolveWithMode(tableRowMode(in.mode, row.ToolKey), Input{Settings: row.Layers, Base: in.Base})
+		row.Effective, err = s.resolveRegistryDataSourceEffective(ctx, in, row.ResourcePattern)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, row)
 	}
 	return out, nil
@@ -156,7 +97,10 @@ func (s *Store) AppendAuthoredRegistryDataSourceRows(ctx context.Context, in Tab
 	if err != nil {
 		return nil, err
 	}
-	settings, err := s.loadRegistryResourceSettings(ctx, in, groupIDs)
+	settings, err := s.loadResourcePolicySettings(ctx, in, groupIDs, resourcePolicyFilter{
+		toolKeys: []string{RegistryToolKey},
+		scope:    resourcePatternNonEmpty,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -181,7 +125,7 @@ func (s *Store) AppendAuthoredRegistryDataSourceRows(ctx context.Context, in Tab
 
 	for _, ds := range dataSources {
 		id := ds.ID
-		cell, ok := settings[id]
+		cell, ok := settings[resourcePolicyKey{toolKey: RegistryToolKey, resourcePattern: id}]
 		if id == "" || !ok || authored[id] {
 			continue
 		}
@@ -203,8 +147,55 @@ func (s *Store) AppendAuthoredRegistryDataSourceRows(ctx context.Context, in Tab
 		if len(cell.groups) > 0 {
 			row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 		}
-		row.Effective = ResolveWithMode(tableRowMode(in.mode, row.ToolKey), Input{Settings: row.Layers, Base: in.Base})
+		row.Effective, err = s.resolveRegistryDataSourceEffective(ctx, in, row.ResourcePattern)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, row)
 	}
 	return out, nil
+}
+
+// resolveRegistryDataSourceEffective mirrors the live registry gate: one
+// concrete call must pass both its exact data-source row and the
+// capability-wide scoping row. The same RequestContext (including the concrete
+// data_source_id) is used for both decisions.
+func (s *Store) resolveRegistryDataSourceEffective(ctx context.Context, in TableQuery, dataSourceID string) (Effective, error) {
+	reqCtx := in.RequestContext
+	argValues := make(map[string]string, len(reqCtx.ArgValues)+1)
+	for key, value := range reqCtx.ArgValues {
+		argValues[key] = value
+	}
+	reqCtx.ArgValues = argValues
+	if reqCtx.ArgValues["data_source_id"] == "" {
+		reqCtx.ArgValues["data_source_id"] = dataSourceID
+	}
+	query := Query{
+		WorkspaceID:    in.WorkspaceID,
+		ToolKey:        RegistryToolKey,
+		RuntimeID:      in.RuntimeID,
+		AgentID:        in.AgentID,
+		UserID:         in.UserID,
+		GroupIDs:       in.GroupIDs,
+		OnBehalfOfID:   in.OnBehalfOfID,
+		SystemID:       in.SystemID,
+		Base:           in.Base,
+		IsSystem:       in.IsSystem,
+		RequestContext: reqCtx,
+		Eval:           in.Eval,
+	}
+	query.ResourcePattern = dataSourceID
+	exact, err := s.ResolveDeclared(ctx, query)
+	if err != nil {
+		return Effective{}, err
+	}
+	query.ResourcePattern = ""
+	wide, err := s.ResolveDeclared(ctx, query)
+	if err != nil {
+		return Effective{}, err
+	}
+	if rank(wide.Setting) > rank(exact.Setting) {
+		return wide, nil
+	}
+	return exact, nil
 }

@@ -2,6 +2,8 @@ package runtime
 
 import (
 	"context"
+	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -124,7 +126,7 @@ func TestCanonicalGatewayCapabilityIDUsesConcreteCallableIdentity(t *testing.T) 
 	}
 }
 
-func TestGuardToolCallObservesShadowWithoutChangingLegacyDecision(t *testing.T) {
+func TestGuardToolCallUsesCanonicalDecisionForEveryPlatformAction(t *testing.T) {
 	executor, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
 	const toolName = "get_issue"
 	setAgentToolPolicy(t, agentID, toolName, toolpolicy.SettingAllow)
@@ -133,7 +135,7 @@ func TestGuardToolCallObservesShadowWithoutChangingLegacyDecision(t *testing.T) 
 	writer := &shadowLedgerWriter{}
 	capabilityID := capabilitycatalog.PlatformTool(toolName).ID
 	createIssueCapabilityID := capabilitycatalog.PlatformTool("create_issue").ID
-	executor.SetAccessDecisionObserver(accessdecision.NewObserver(
+	executor.SetAccessDecisionService(accessdecision.NewService(
 		executor.toolPolicy,
 		shadowEvidence{
 			capabilityID:            {Level: availabilityevidence.LevelVerified},
@@ -156,7 +158,7 @@ func TestGuardToolCallObservesShadowWithoutChangingLegacyDecision(t *testing.T) 
 		},
 	)
 	if !allowed || reason != "" {
-		t.Fatalf("legacy decision = (%t, %q), want allow", allowed, reason)
+		t.Fatalf("canonical decision = (%t, %q), want allow", allowed, reason)
 	}
 	if len(writer.entries) != 1 {
 		t.Fatalf("ledger entries = %d, want 1", len(writer.entries))
@@ -165,8 +167,8 @@ func TestGuardToolCallObservesShadowWithoutChangingLegacyDecision(t *testing.T) 
 	if entry.CanonicalCapabilityID != capabilityID || entry.AgentID != util.UUIDToString(agentID) {
 		t.Fatalf("ledger identity = %+v, want agent and canonical capability", entry)
 	}
-	if entry.LegacyDecision != accessdecision.DecisionAllow || entry.ShadowDecision != accessdecision.DecisionAllow || entry.Differs {
-		t.Fatalf("ledger decisions = %+v, want matching allows", entry)
+	if entry.Decision != accessdecision.DecisionAllow {
+		t.Fatalf("ledger decision = %+v, want canonical allow", entry)
 	}
 
 	allowed, reason = executor.guardToolCall(
@@ -183,55 +185,82 @@ func TestGuardToolCallObservesShadowWithoutChangingLegacyDecision(t *testing.T) 
 		},
 	)
 	if !allowed || reason != "" {
-		t.Fatalf("platform-action legacy decision = (%t, %q), want allow", allowed, reason)
+		t.Fatalf("platform-action canonical decision = (%t, %q), want allow", allowed, reason)
 	}
-	if len(writer.entries) != 2 || writer.entries[1].LegacyPath != "policy_decision_service" {
-		t.Fatalf("platform-action ledger entries = %+v, want one additional policy decision observation", writer.entries)
+	if len(writer.entries) != 2 || writer.entries[1].Decision != accessdecision.DecisionAllow {
+		t.Fatalf("platform-action ledger entries = %+v, want one additional canonical allow", writer.entries)
 	}
 }
 
-func TestPolicyDecisionToolListAllowsOneAgentAndDeniesAnotherAcrossFamilies(t *testing.T) {
+// TestEveryRegisteredGatewayPermissionUsesThePolicyDecisionService exercises
+// the actual registered Gateway universe. New built-in tools enter this test
+// automatically, while the synthetic MCP and API tools cover dynamic
+// connection families.
+//
+// For every registered permission it proves the complete agent contract:
+// Allow and Ask are listed, Deny is hidden, Allow calls run, Deny and
+// human-less Ask calls stop, and the model receives a valid tool definition.
+func TestEveryRegisteredGatewayPermissionUsesThePolicyDecisionService(t *testing.T) {
 	executor, allowAgent := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
 	_, denyAgent := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
-	executor.SetAccessDecisionObserver(accessdecision.NewObserver(executor.toolPolicy, nil, &shadowLedgerWriter{}))
+	askExecutor, askAgent := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
+	executor.SetAccessDecisionService(accessdecision.NewService(executor.toolPolicy, nil, &shadowLedgerWriter{}))
 
-	registry := NewRegistry(nil)
-	registry.Register(stubTool{name: "web_fetch"})
-	registry.Register(stubTool{name: "create_issue"})
-	registry.Register(stubTool{name: "memory_recall"})
+	registry := NewDefaultRegistry(nil, nil, ToolContext{CapabilitiesProvider: stubCapabilitiesProvider{}})
 	registry.Register(&gatewayMCPTool{
 		exposedName:    "mcp__customer_service__draft_reply",
 		connectionName: "customer_service",
 		toolName:       "draft_reply",
+		description:    "Draft a customer reply.",
+		inputSchema:    map[string]any{"type": "object", "properties": map[string]any{}},
 	})
 	registry.Register(&APIConnectionTool{
-		toolName: "infisical_admin__get_secrets",
-		connName: "infisical-admin",
-		method:   "GET",
-		path:     "/secrets",
+		toolName:    "infisical_admin__get_secrets",
+		description: "Get secrets from Infisical.",
+		schema:      map[string]any{"type": "object", "properties": map[string]any{}},
+		connName:    "infisical-admin",
+		method:      "GET",
+		path:        "/secrets",
 	})
 
 	for _, name := range registry.Names() {
+		tool, ok := registry.Get(name)
+		if !ok {
+			t.Fatalf("registered tool %q disappeared during contract check", name)
+		}
+		if strings.TrimSpace(tool.Description()) == "" {
+			t.Errorf("registered tool %q has no agent-facing description", name)
+		}
+		schema := tool.InputSchema()
+		if schema == nil || schema["type"] != "object" {
+			t.Errorf("registered tool %q has invalid agent-facing input schema: %#v", name, schema)
+		}
 		setAgentToolPolicy(t, allowAgent, name, toolpolicy.SettingAllow)
+		setAgentToolPolicy(t, askAgent, name, toolpolicy.SettingAsk)
 		setAgentToolPolicy(t, denyAgent, name, toolpolicy.SettingDeny)
 	}
 
+	want := registry.Names()
+	sort.Strings(want)
+	if len(want) == 0 {
+		t.Fatal("dynamic Gateway permission contract found no registered tools")
+	}
 	allowNames := sortedToolNames(executor.policyDecisionTools(
 		context.Background(), registry, allowAgent, runtimeAccountTestWSID, GatewayRequestMeta{},
 	))
-	want := []string{
-		"create_issue",
-		"infisical_admin__get_secrets",
-		"mcp__customer_service__draft_reply",
-		"memory_recall",
-		"web_fetch",
-	}
 	if !equalStrings(allowNames, want) {
 		t.Fatalf("allow agent tools = %v, want %v", allowNames, want)
 	}
+	askNames := sortedToolNames(askExecutor.policyDecisionTools(
+		context.Background(), registry, askAgent, runtimeAccountTestWSID,
+		GatewayRequestMeta{TriggerUserID: util.UUIDToString(runtimeAccountTestUserID)},
+	))
+	if !equalStrings(askNames, want) {
+		t.Fatalf("ask agent tools = %v, want %v", askNames, want)
+	}
 	mandates := &captureTaskMandates{}
 	executor.SetTaskMandates(mandates)
-	executor.SetAccessDecisionObserver(accessdecision.NewObserver(executor.toolPolicy, nil, &shadowLedgerWriter{}).WithMandates(mandates))
+	executor.SetAccessDecisionService(accessdecision.NewService(executor.toolPolicy, nil, &shadowLedgerWriter{}).WithMandates(mandates))
 	issuedTools := executor.policyDecisionTools(
 		context.Background(), registry, allowAgent, runtimeAccountTestWSID,
 		GatewayRequestMeta{TaskID: util.UUIDToString(gateTestUUID(7))},
@@ -255,6 +284,11 @@ func TestPolicyDecisionToolListAllowsOneAgentAndDeniesAnotherAcrossFamilies(t *t
 			context.Background(), denyAgent, runtimeAccountTestWSID, name, nil, registry, GatewayRequestMeta{TaskID: util.UUIDToString(gateTestUUID(7))},
 		); allowed {
 			t.Errorf("deny agent call %q was allowed", name)
+		}
+		if allowed, _ := askExecutor.guardToolCall(
+			context.Background(), askAgent, runtimeAccountTestWSID, name, nil, registry, GatewayRequestMeta{},
+		); allowed {
+			t.Errorf("human-less Ask agent call %q was allowed", name)
 		}
 	}
 }

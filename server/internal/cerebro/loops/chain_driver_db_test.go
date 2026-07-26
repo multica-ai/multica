@@ -100,7 +100,7 @@ func TestChainDriver_RunsEveryBlockThroughOneIssueBoundPath(t *testing.T) {
 		runtimes: map[[16]byte]db.AgentRuntime{
 			runtimeID.Bytes: {ID: runtimeID, Status: "online"},
 		},
-		agentSkills: map[[16]byte][]db.Skill{
+		agentSkills: map[[16]byte][]db.ListAgentSkillsRow{
 			agentID.Bytes: {{Name: "build-skill"}, {Name: "review-skill"}},
 		},
 		issue: db.Issue{

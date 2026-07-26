@@ -124,7 +124,7 @@ type DispatchQueries interface {
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	GetAgentRuntime(ctx context.Context, id pgtype.UUID) (db.AgentRuntime, error)
 	CountRunningTasks(ctx context.Context, agentID pgtype.UUID) (int64, error)
-	ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]db.Skill, error)
+	ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]db.ListAgentSkillsRow, error)
 	CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error)
 	SetAgentTaskModelOverride(ctx context.Context, arg db.SetAgentTaskModelOverrideParams) error
 	SetAgentTaskThinkingOverride(ctx context.Context, arg db.SetAgentTaskThinkingOverrideParams) error
@@ -291,7 +291,7 @@ func (t *TaskDispatcher) firstAvailableRunner(ctx context.Context, block Block, 
 	return AgentRef{}, db.Agent{}, false, nil
 }
 
-func hasAttachedSkill(skills []db.Skill, name string) bool {
+func hasAttachedSkill(skills []db.ListAgentSkillsRow, name string) bool {
 	for _, skill := range skills {
 		if skill.Name == name {
 			return true

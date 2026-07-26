@@ -225,6 +225,27 @@ var providerRegistry = map[string]Set{
 		DiscoveryMethod: "static",
 	},
 
+	// FIR-3762: Pi's surface is entirely MCP pass-through — the Firtal Pi harness
+	// (packages/cerebro-pi-harness/multica-harness.ts) starts an `multica mcp serve`
+	// stdio client on session_start and registers every listed tool into Pi's own
+	// registry, then gates each call through /tool-policy/resolve. Without a row
+	// here Pi resolves to staticFallback, whose empty ToolProtocols fails the
+	// protocol check in toolaccess.exposureEffective for EVERY tool. Nothing is
+	// then exposed at claim time, the task mandate is issued empty, and
+	// taskmandate.Authorize denies every call — Pi starts but cannot act.
+	// SupportsAsk stays false: the harness can only allow or block a call, it has
+	// no way to park one pending a human approval.
+	"pi": {
+		Providers:       []string{"pi"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
 	// CEREBRO-PATCH(capabilities-firtal-local): TECH-3226 local Ollama tool-loop runtime.
 	"firtal-local": {
 		Providers:       []string{"firtal-local"},

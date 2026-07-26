@@ -98,6 +98,12 @@ type CreateChangeRequestRequest struct {
 	WorkspaceBriefMode *string          `json:"workspace_brief_mode"`
 	ToolsBriefMode     *string          `json:"tools_brief_mode"`
 	SkillIDs           *[]string        `json:"skill_ids"`
+	// AlwaysOnSkillIDs (FIR-3805) is the subset of SkillIDs whose full text is
+	// pasted into the agent's instructions on every run. Proposed through the
+	// same versioned flow as the binding set itself: turning a skill "always on"
+	// is the stronger of the two actions, so it cannot bypass the review that
+	// merely binding the skill already requires.
+	AlwaysOnSkillIDs *[]string `json:"always_on_skill_ids"`
 	McpConfig          *json.RawMessage `json:"mcp_config"`
 	CustomArgs         *json.RawMessage `json:"custom_args"`
 	RuntimeConfig      *json.RawMessage `json:"runtime_config"`
@@ -476,6 +482,9 @@ func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 		if req.SkillIDs != nil {
 			snap.SkillIDs = *req.SkillIDs
 		}
+		if req.AlwaysOnSkillIDs != nil {
+			snap.AlwaysOnSkillIDs = *req.AlwaysOnSkillIDs
+		}
 		// For the free-form JSON fields, presence of the key (even as null) means
 		// "set this field"; a null value clears it. Absence leaves it unchanged.
 		if keyPresent("mcp_config") {
@@ -517,6 +526,13 @@ func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 			snap = updated
 		}
 	}
+
+	// FIR-3805: an "always on" id only means something for a skill that is still
+	// bound. Dropping a skill and leaving it flagged would otherwise leave a
+	// ghost id in the snapshot that the apply path silently ignores while the
+	// review diff still shows it. Normalise here so proposed_snapshot and
+	// override paths both store the same, self-consistent document.
+	snap = NormalizeAlwaysOnSkills(snap)
 
 	// Validate the mode carried by the snapshot itself. The proposed_snapshot
 	// path and a raw runtime_config override both reach here without passing

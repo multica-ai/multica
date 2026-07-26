@@ -7,10 +7,6 @@ export {
   type ToolPolicyView,
 } from "./tool-policy-table";
 export {
-  SimpleToolPolicyTable,
-  type SimpleToolPolicyTableProps,
-} from "./simple-tool-policy-table";
-export {
   WorkspacePermissionsTab,
   useCerebroToolPolicySettingsTabs,
   type ExtraSettingsTab,
@@ -55,6 +51,7 @@ export {
   type ScopeConfig,
 } from "./data-source-scope";
 export { PermissionDetailPage } from "./permission-detail-page";
+export { PermissionRoles } from "./permission-roles";
 export { permissionDetailPath } from "./permission-detail-path";
 export {
   getPermissionHolders,

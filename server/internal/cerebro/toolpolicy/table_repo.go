@@ -55,27 +55,6 @@ var repoCapabilities = []repoCapability{
 	{capRepoPush, "Push changes"},
 }
 
-// repoPolicyKey identifies one (tool, repo) cell so stored settings can be bucketed
-// back onto the synthetic rows.
-type repoPolicyKey struct {
-	toolKey         string
-	resourcePattern string
-}
-
-// repoPolicyLayers holds the explicit per-layer settings authored for one (tool,
-// repo) cell. group settings are accumulated separately and combined with
-// CombineGroups, mirroring how table.go folds the capability-wide rows.
-// conditions carries the optional WHEN layer (FIR-1609) authored on each
-// single-subject layer's rule, so a repo's action condition (repo.checkout /
-// repo.push) surfaces on its row exactly like the capability-wide path does
-// (FIR-1708 D). The group layer is deliberately excluded — see
-// TableRow.Conditions.
-type repoPolicyLayers struct {
-	layers     map[Layer]Setting
-	groups     []Setting
-	conditions map[Layer]*Condition
-}
-
 // appendRepoRows discovers the workspace's repos and appends, for each repo, one
 // row per repo capability carrying that (tool, repo) cell's explicit per-layer
 // settings and resolved Effective verdict. groupIDs is the already-resolved group
@@ -95,7 +74,14 @@ func (s *Store) appendRepoRows(ctx context.Context, in TableQuery, groupIDs []pg
 		return out, nil
 	}
 
-	settings, err := s.loadRepoPolicySettings(ctx, in, groupIDs)
+	keys := make([]string, len(repoCapabilities))
+	for i, c := range repoCapabilities {
+		keys[i] = c.key
+	}
+	settings, err := s.loadResourcePolicySettings(ctx, in, groupIDs, resourcePolicyFilter{
+		toolKeys: keys,
+		scope:    resourcePatternNonEmpty,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -111,7 +97,7 @@ func (s *Store) appendRepoRows(ctx context.Context, in TableQuery, groupIDs []pg
 				Layers:          map[Layer]Setting{},
 				Conditions:      map[Layer]*Condition{},
 			}
-			if cell, ok := settings[repoPolicyKey{c.key, repoURL}]; ok {
+			if cell, ok := settings[resourcePolicyKey{toolKey: c.key, resourcePattern: repoURL}]; ok {
 				for l, set := range cell.layers {
 					row.Layers[l] = set
 				}
@@ -122,7 +108,15 @@ func (s *Store) appendRepoRows(ctx context.Context, in TableQuery, groupIDs []pg
 					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 				}
 			}
-			row.Effective = Resolve(Input{Settings: row.Layers, Base: in.Base})
+			row.Effective, err = s.resolveTableResourcePermission(
+				ctx, in, row.ToolKey, row.ResourcePattern, row.Layers, in.Base,
+			)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"toolpolicy: resolve repo permission %q on %q: %w",
+					row.ToolKey, row.ResourcePattern, err,
+				)
+			}
 			out = append(out, row)
 		}
 	}
@@ -187,71 +181,5 @@ func (s *Store) discoverRepoURLs(ctx context.Context, workspaceID pgtype.UUID) (
 		out = append(out, u)
 	}
 	sort.Strings(out)
-	return out, nil
-}
-
-// loadRepoPolicySettings fetches every explicit per-layer setting authored for a
-// repo capability (resource_pattern non-empty) in the query's context, bucketed
-// by (tool, repo). It mirrors the subject predicates of the capability-wide query
-// in table.go so an absent (Valid=false) subject id never matches and that layer
-// stays Inherit.
-func (s *Store) loadRepoPolicySettings(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID) (map[repoPolicyKey]*repoPolicyLayers, error) {
-	keys := make([]string, len(repoCapabilities))
-	for i, c := range repoCapabilities {
-		keys[i] = c.key
-	}
-
-	rows, err := s.pool.Query(ctx, `
-		SELECT p.tool_key, p.resource_pattern, p.layer, p.setting, p.conditions
-		FROM cerebro_tool_policy p
-		WHERE p.workspace_id = $1
-		  AND p.resource_pattern <> ''
-		  AND p.tool_key = ANY($6::text[])
-		  AND (
-		    (p.layer = 'workspace' AND p.subject_id = $1) OR
-		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
-		    (p.layer = 'agent'     AND p.subject_id = $3) OR
-		    (p.layer = 'user'      AND p.subject_id = $4) OR
-		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[]))
-		  )
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, keys)
-	if err != nil {
-		return nil, fmt.Errorf("toolpolicy: load repo policy settings: %w", err)
-	}
-	defer rows.Close()
-
-	out := map[repoPolicyKey]*repoPolicyLayers{}
-	for rows.Next() {
-		var toolKey, resourcePattern, layer, setting string
-		var conditions []byte
-		if err := rows.Scan(&toolKey, &resourcePattern, &layer, &setting, &conditions); err != nil {
-			return nil, fmt.Errorf("toolpolicy: scan repo policy setting: %w", err)
-		}
-		key := repoPolicyKey{toolKey, resourcePattern}
-		cell, ok := out[key]
-		if !ok {
-			cell = &repoPolicyLayers{layers: map[Layer]Setting{}, conditions: map[Layer]*Condition{}}
-			out[key] = cell
-		}
-		l := Layer(layer)
-		set := Setting(setting)
-		if l == LayerGroup {
-			cell.groups = append(cell.groups, set)
-		} else {
-			cell.layers[l] = set
-			// Surface the rule's WHEN layer for single-subject layers only,
-			// mirroring the capability-wide decode in table.go (FIR-1708 D).
-			cond, err := decodeCondition(conditions)
-			if err != nil {
-				return nil, fmt.Errorf("toolpolicy: decode repo conditions for %q at %s: %w", toolKey, l, err)
-			}
-			if cond != nil {
-				cell.conditions[l] = cond
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("toolpolicy: iterate repo policy settings: %w", err)
-	}
 	return out, nil
 }

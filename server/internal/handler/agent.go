@@ -1407,6 +1407,7 @@ func (h *Handler) attachAgentSkills(ctx context.Context, resp *AgentResponse, ag
 			ID:          uuidToString(s.ID),
 			Name:        s.Name,
 			Description: s.Description,
+			AlwaysOn:    s.AlwaysOn, // CEREBRO-PATCH(skill-always-on): FIR-3805 the agent page renders the checkbox from this
 		}
 	}
 	resp.Skills = out

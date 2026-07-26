@@ -23,7 +23,11 @@ import {
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import type { ToolEffectiveSetting, ToolPolicyRow } from "../core";
-import { permissionType, type PermissionType } from "./tool-policy-table";
+import {
+  permissionType,
+  presentCapabilityRows,
+  type PermissionType,
+} from "./capability-presentation";
 
 // One capability card: a titled group of tool rows with a verdict-dot summary.
 export interface CapabilityGroup {
@@ -128,7 +132,7 @@ export interface CapabilityCatalogProps {
   /** The already-filtered flat capability rows (no repo/credential sub-rows). */
   rows: ToolPolicyRow[];
   /** The caller's per-row decision cell — unchanged DecisionControl et al. */
-  renderDecision: (row: ToolPolicyRow) => ReactNode;
+  renderDecision: (row: ToolPolicyRow, linkedRows?: ToolPolicyRow[]) => ReactNode;
   /** Optional per-card bulk action rendered on the right of the header. */
   renderGroupAction?: (group: CapabilityGroup) => ReactNode;
   /**
@@ -192,19 +196,19 @@ export function CapabilityCatalog({
                 {renderGroupAction?.(group)}
               </div>
             </div>
-            {group.rows.map((row) => {
-              const rowKey = `${row.tool_key}:${row.resource_pattern ?? ""}`;
-              const detail = renderDetail?.(row) ?? null;
+            {presentCapabilityRows(group.rows).map((presented) => {
+              const row = presented.rows[0]!;
+              const rowKey = presented.key;
+              const composite = presented.rows.length > 1;
+              const detail = composite ? null : (renderDetail?.(row) ?? null);
               const isOpen = detail != null && expanded.has(rowKey);
               return (
                 <div
                   key={rowKey}
-                  data-testid={`tool-card-${row.tool_key}${
-                    row.resource_pattern ? `:${row.resource_pattern}` : ""
-                  }`}
+                  data-testid={`tool-card-${rowKey}`}
                   className="border-t first:border-t-0"
                 >
-                  <div className="flex items-center justify-between gap-4 px-4 py-3">
+                  <div className="flex min-w-0 flex-col items-stretch gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4">
                     {/* The name area doubles as the expand target when the row is
                         itself a group, so a big touch target opens it on mobile
                         without stealing the row from the Decision toggle. */}
@@ -224,14 +228,14 @@ export function CapabilityCatalog({
                         />
                         <span className="min-w-0">
                           <span className="block truncate text-sm font-medium">
-                            {row.title || row.tool_key}
+                            {presented.title}
                           </span>
                           <span className="block truncate font-mono text-xs text-muted-foreground">
                             {row.tool_key}
                           </span>
                         </span>
                       </button>
-                    ) : onOpenPermission ? (
+                    ) : onOpenPermission && !composite ? (
                       <button
                         type="button"
                         onClick={() => onOpenPermission(row.tool_key)}
@@ -240,7 +244,7 @@ export function CapabilityCatalog({
                       >
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-sm font-medium group-hover:underline">
-                            {row.title || row.tool_key}
+                            {presented.title}
                           </span>
                           <span className="block truncate font-mono text-xs text-muted-foreground">
                             {row.tool_key}
@@ -251,14 +255,18 @@ export function CapabilityCatalog({
                     ) : (
                       <div className="min-w-0 flex-1">
                         <div className="truncate text-sm font-medium">
-                          {row.title || row.tool_key}
+                          {presented.title}
                         </div>
-                        <div className="truncate font-mono text-xs text-muted-foreground">
-                          {row.tool_key}
+                        <div className="truncate text-xs text-muted-foreground">
+                          {composite
+                            ? presented.rows
+                                .map((item) => item.tool_key.replace(/^tools:/i, ""))
+                                .join(" · ")
+                            : row.tool_key}
                         </div>
                       </div>
                     )}
-                    <div className="flex shrink-0 items-center gap-2">
+                    <div className="flex shrink-0 items-center justify-end gap-2">
                       {detail != null && onOpenPermission ? (
                         <button
                           type="button"
@@ -269,7 +277,7 @@ export function CapabilityCatalog({
                           <ArrowUpRight className="size-3.5" />
                         </button>
                       ) : null}
-                      {renderDecision(row)}
+                      {renderDecision(row, presented.rows)}
                     </div>
                   </div>
                   {isOpen ? (

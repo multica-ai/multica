@@ -133,6 +133,7 @@ type AgentSkill struct {
 	AgentID   pgtype.UUID        `json:"agent_id"`
 	SkillID   pgtype.UUID        `json:"skill_id"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	AlwaysOn  bool               `json:"always_on"`
 }
 
 type AgentTaskQueue struct {
@@ -1661,6 +1662,7 @@ type CerebroRole struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Version     int32              `json:"version"`
 	Permissions []byte             `json:"permissions"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
 }
 
 type CerebroRoleAssignment struct {

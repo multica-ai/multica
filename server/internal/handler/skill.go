@@ -84,6 +84,7 @@ type AgentSkillSummary struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	AlwaysOn    bool   `json:"always_on"` // CEREBRO-PATCH(skill-always-on): FIR-3805 per-binding "paste full text into instructions every run"
 }
 
 type SkillFileResponse struct {

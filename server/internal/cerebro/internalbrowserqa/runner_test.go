@@ -123,9 +123,11 @@ func (c *recordingCommander) Run(_ context.Context, stdin string, args ...string
 	c.calls = append(c.calls, commandCall{args: append([]string(nil), args...), stdin: stdin})
 	switch {
 	case len(args) > 0 && args[len(args)-1] == "url":
-		return []byte("http://multica.internal:3000/firtal/issues\n"), nil
+		// The shared fake supports both the Registry detail-route assertion and
+		// Multica's final-path assertion. App-specific failure tests override it.
+		return []byte("https://registry.firtal.com/authentication/api-keys/key-1/issues\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "snapshot":
-		return []byte("Dashboard\nData Sources\nAuthentication\nAPI Keys\nYour roles:\nIssues\nAgents\nSettings\nDesk\nAnalytics\nLogout\n"), nil
+		return []byte("Dashboard\nAuthentication\nAPI Keys\nData Sources\nAPI Endpoints\nAI Models\nApps\nAPI Access\nSave\nYour roles:\nIssues\nAgents\nSettings\nDesk\nAnalytics\nLogout\n"), nil
 	case len(args) > 0 && args[len(args)-1] == "errors":
 		return []byte("[]\n"), nil
 	default:
@@ -340,16 +342,22 @@ func TestTargetForUsesOnlyInternalAllowlist(t *testing.T) {
 	if err != nil {
 		t.Fatalf("TargetFor(registry): %v", err)
 	}
-	if target.URL != "http://firtal-data-registry-private.internal:3000/auth/login?manual=true" {
+	if target.URL != "https://registry.firtal.com/auth/login?manual=true" {
 		t.Fatalf("registry URL = %q", target.URL)
 	}
-	if !strings.HasSuffix(target.Host(), ".internal:3000") {
-		t.Fatalf("registry host = %q, want internal host", target.Host())
+	if target.Host() != "registry.firtal.com" || !target.AccessHeaders {
+		t.Fatalf("registry target = %q access=%v, want Access-gated public edge", target.Host(), target.AccessHeaders)
 	}
 	if target.NavigateLinkName != "API Keys" {
 		t.Fatalf("registry navigation = %q, want API Keys", target.NavigateLinkName)
 	}
-	wantMarkers := []string{"Authentication", "API Keys"}
+	if target.NavigateSelector != "tbody tr" || target.NavigateTabName != "Permissions" {
+		t.Fatalf("registry detail navigation = %q/%q", target.NavigateSelector, target.NavigateTabName)
+	}
+	if target.ExpectedURLPart != "/authentication/api-keys/" {
+		t.Fatalf("registry expected URL = %q", target.ExpectedURLPart)
+	}
+	wantMarkers := []string{"Data Sources", "API Endpoints", "AI Models", "Apps", "API Access", "Save"}
 	if strings.Join(target.ExpectedText, "|") != strings.Join(wantMarkers, "|") {
 		t.Fatalf("registry markers = %v, want %v", target.ExpectedText, wantMarkers)
 	}
@@ -524,10 +532,15 @@ func TestRunnerNavigatesMulticaToIssuesBeforeSnapshot(t *testing.T) {
 func TestRunnerSendsCredentialsOnlyThroughBatchStdin(t *testing.T) {
 	const username = "registry-test@example.com"
 	const password = "password-must-never-leak"
+	const accessID = "access-id-must-never-leak"
+	const accessSecret = "access-secret-must-never-leak"
 	commander := &recordingCommander{}
 	runner := testRunner(commander)
 
-	result, err := runner.Verify(context.Background(), "registry", Credential{Username: username, Password: password})
+	result, err := runner.Verify(context.Background(), "registry", Credential{
+		Username: username, Password: password,
+		AccessClientID: accessID, AccessClientSecret: accessSecret,
+	})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)
 	}
@@ -542,26 +555,30 @@ func TestRunnerSendsCredentialsOnlyThroughBatchStdin(t *testing.T) {
 	var secretCallCount int
 	for _, call := range commander.calls {
 		argv := strings.Join(call.args, " ")
-		if strings.Contains(argv, username) || strings.Contains(argv, password) {
+		if strings.Contains(argv, username) || strings.Contains(argv, password) ||
+			strings.Contains(argv, accessID) || strings.Contains(argv, accessSecret) {
 			t.Fatalf("credential leaked into argv: %q", argv)
 		}
-		if strings.Contains(call.stdin, username) || strings.Contains(call.stdin, password) {
+		if strings.Contains(call.stdin, username) || strings.Contains(call.stdin, password) ||
+			strings.Contains(call.stdin, accessID) || strings.Contains(call.stdin, accessSecret) {
 			secretCallCount++
 			if len(call.args) == 0 || call.args[len(call.args)-1] != "batch" {
 				t.Fatalf("credential was sent outside batch stdin: args=%v", call.args)
 			}
 		}
 	}
-	if secretCallCount != 1 {
-		t.Fatalf("secret-bearing stdin calls = %d, want 1", secretCallCount)
+	if secretCallCount != 2 {
+		t.Fatalf("secret-bearing stdin calls = %d, want 2", secretCallCount)
 	}
 }
 
 func TestRunnerCapturesScreenshotAfterAuthenticatedMarkers(t *testing.T) {
 	commander := &recordingCommander{}
 	result, err := testRunner(commander).Verify(context.Background(), "registry", Credential{
-		Username: "registry-test@example.com",
-		Password: "password-must-never-leak",
+		Username:           "registry-test@example.com",
+		Password:           "password-must-never-leak",
+		AccessClientID:     "access-id-must-never-leak",
+		AccessClientSecret: "access-secret-must-never-leak",
 	})
 	if err != nil {
 		t.Fatalf("Verify: %v", err)

@@ -111,6 +111,38 @@ import {
   DataSourceList,
 } from "./firtal-registry-data-source-sheet";
 import { CapabilityCatalog } from "./capability-catalog";
+import {
+  permissionType,
+  type PermissionType,
+} from "./capability-presentation";
+import {
+  buildCredentialTree,
+  groupCredentialRows,
+  subtreeGroups,
+  type CredentialGroupData,
+  type CredentialTreeNode,
+} from "./credential-presentation";
+import {
+  LAYER_LABEL,
+  SETTING_LABEL,
+  SETTING_RANK,
+  futileWriteWarning,
+  rowAttribution,
+} from "./permission-attribution";
+import {
+  CatalogHeader,
+  FilterBar,
+  filterRows,
+} from "./permission-table-filters";
+
+export { permissionType } from "./capability-presentation";
+export type { PermissionType } from "./capability-presentation";
+export {
+  futileWriteWarning,
+  originOf,
+  rowAttribution,
+} from "./permission-attribution";
+export { filterRows } from "./permission-table-filters";
 
 /**
  * The actor surfaces. Each page renders the same catalog but authors a different
@@ -187,24 +219,19 @@ const VIEW_EDIT_LAYER: Record<ToolPolicyView, ToolLayer> = {
   system: "system",
 };
 
+const VIEW_SCOPE_LABEL: Record<Exclude<ToolPolicyView, "workspace">, string> = {
+  runtime: "Runtime",
+  agent: "Agent",
+  group: "Group",
+  member: "Member",
+  system: "Autopilot",
+};
+
 // Repo rows carry a non-empty resource_pattern (the repo URL) and render as
 // collapsible groups, not as flat rows in the tool catalog (FIR-2505 slice 3).
 // The order the three repo capabilities render inside a group, regardless of the
 // order the server emitted them.
 const REPO_CAP_ORDER = ["repo.read", "repo.checkout", "repo.push"];
-
-// Credential rows (FIR-1739) also carry a non-empty resource_pattern (the Agent
-// Vault box, `agentvault-vault:<name>`, or `cerebro-credential:<uuid>`) and render
-// as collapsible groups — one group per credential box — exactly like repos, so a
-// box is ONE permission row you fold open to set each action. The order the box's
-// capability rows render inside a group, regardless of server emission order.
-const CREDENTIAL_CAP_ORDER = [
-  "credential.reveal",
-  "credential.read_redacted",
-  "credential.rotate",
-  "credential.revoke",
-  "credential.attach",
-];
 
 const SETTING_CHOICES: ToolSetting[] = ["allow", "ask", "deny", "inherit"];
 // "disable" (FIR-2351 follow-up, product decision 2026-07-06) only ever makes
@@ -216,20 +243,6 @@ const WORKSPACE_SETTING_CHOICES: ToolSetting[] = ["allow", "ask", "deny", "disab
 function settingChoicesFor(editLayer: ToolLayer): ToolSetting[] {
   return editLayer === "workspace" ? WORKSPACE_SETTING_CHOICES : SETTING_CHOICES;
 }
-const SETTING_LABEL: Record<ToolSetting, string> = {
-  allow: "Allow",
-  ask: "Ask",
-  deny: "Deny",
-  inherit: "Inherit",
-  disable: "Disable",
-};
-const DECISION_FILTERS: ToolEffectiveSetting[] = ["allow", "ask", "deny"];
-
-// Restrictiveness rank — a sub-row choice can only TIGHTEN a group-wide floor,
-// never loosen it (TECH-3287 hul 7). Mirrors the connection sheet's rank so the
-// inline catalog lists and the sheet gate futile choices identically.
-const SETTING_RANK: Record<ToolEffectiveSetting, number> = { allow: 0, ask: 1, deny: 2 };
-
 // Decision palette — emerald / amber / destructive, matching the cerebro fork's
 // other permission surfaces (simple table, cerebro-access).
 const VERDICT_PILL: Record<ToolEffectiveSetting, string> = {
@@ -243,55 +256,17 @@ const VERDICT_ICON: Record<ToolEffectiveSetting, typeof ShieldCheck> = {
   ask: ShieldQuestion,
   deny: ShieldAlert,
 };
-// "Resolved by" layer → human label. "" means the system base default decided.
-const LAYER_LABEL: Record<string, string> = {
-  workspace: "Workspace",
-  runtime: "Runtime",
-  agent: "Agent",
-  group: "Group",
-  user: "User",
-  system: "System",
-  "": "Default",
-};
-
 // FIR-2281: the permission "Type" — the single dimension that used to be the
 // five top-level tabs, now a column + filter. FIR-2706 maps it onto three
 // tabs instead of two: "permissions" covers Multica + Runtime, "repos" covers
 // Repos, and "connections" covers Connections + Credentials. ONE classifier
 // drives the Type column AND the tab/filter partition, so a row can never
 // land under the wrong type.
-export type PermissionType =
-  | "Multica"
-  | "Runtime"
-  | "Connections"
-  | "Repos"
-  | "Credentials";
-
 const PERMISSION_TYPES_BY_TAB: Record<ToolPolicyTabFilter, PermissionType[]> = {
   permissions: ["Multica", "Runtime"],
   repos: ["Repos"],
   connections: ["Connections", "Credentials"],
 };
-
-// A runtime-reported tool is one a runtime actually advertised — built-ins and
-// MCP actions land with source "runtime_report" (the snapshot) or "scan" (the
-// daemon tools/list probe). The platform "Runtimes" category is the runtime
-// admin actions (manage_runtime, create_runtime) from platformcatalog; both
-// belong to the Runtime type.
-function isRuntimeReportedSource(r: ToolPolicyRow): boolean {
-  return r.source === "runtime_report" || r.source === "scan";
-}
-
-export function permissionType(r: ToolPolicyRow): PermissionType {
-  if (r.source === "connection") return "Connections";
-  if (r.source === "credential") return "Credentials";
-  // Any other per-resource row (a non-empty pattern that is not a connection
-  // sub-row or registry data source — those never reach the rendered sets) is a
-  // repository group.
-  if (r.resource_pattern) return "Repos";
-  if (isRuntimeReportedSource(r) || r.category === "Runtimes") return "Runtime";
-  return "Multica";
-}
 
 function TypeTag({ row }: { row: ToolPolicyRow }) {
   return (
@@ -598,17 +573,38 @@ export function ToolPolicyTable({
   // group rows, so the row bar is always one control wide and the tool name never
   // gets crowded off on mobile. Group rows additionally expand (chevron) to reveal
   // their sub-tool list; that lives in renderCatalogDetail below.
-  const renderDecision = (row: ToolPolicyRow) => (
-    <CatalogDecisionControl
-      row={row}
-      editLayer={editLayer}
-      disabled={busy}
-      onDecision={(s) => applySetting(row.tool_key, s, row.resource_pattern || undefined)}
-      onCondition={(c) => applyCondition(row, c)}
-      wsId={wsId}
-      argScopeConfig={argScopeConfig}
-    />
-  );
+  const renderDecision = (
+    row: ToolPolicyRow,
+    linkedRows: ToolPolicyRow[] = [row],
+  ) =>
+    linkedRows.length > 1 ? (
+      <LinkedDecisionControl
+        rows={linkedRows}
+        editLayer={editLayer}
+        disabled={busy}
+        onDecision={(setting) => {
+          for (const linkedRow of linkedRows) {
+            applySetting(
+              linkedRow.tool_key,
+              setting,
+              linkedRow.resource_pattern || undefined,
+            );
+          }
+        }}
+      />
+    ) : (
+      <CatalogDecisionControl
+        row={row}
+        editLayer={editLayer}
+        disabled={busy}
+        onDecision={(s) =>
+          applySetting(row.tool_key, s, row.resource_pattern || undefined)
+        }
+        onCondition={(c) => applyCondition(row, c)}
+        wsId={wsId}
+        argScopeConfig={argScopeConfig}
+      />
+    );
 
   // The inline detail for a group row: the per-tool list (connections) and data
   // sources as their own labelled sub-group — "expand and show the group"
@@ -649,6 +645,20 @@ export function ToolPolicyTable({
 
   return (
     <div className="flex flex-col gap-4" data-testid="tool-policy-table">
+      {view !== "workspace" ? (
+        <div className="flex items-start gap-2 rounded-lg border bg-muted/30 px-3 py-2.5 text-sm">
+          <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+          <p>
+            <span className="font-medium">
+              {VIEW_SCOPE_LABEL[view]} override.
+            </span>{" "}
+            This is the same permission engine as Settings → Permissions and
+            assigned Roles. The Effective result shows whether this choice wins,
+            is superseded by a more specific rule, or is capped by a protected
+            safety floor.
+          </p>
+        </div>
+      ) : null}
       <CatalogHeader
         shown={filtered.length}
         total={
@@ -933,189 +943,11 @@ export function ToolPolicyTabs(props: ToolPolicyTabsProps) {
   );
 }
 
-// --- filtering --------------------------------------------------------------
-
-interface FilterState {
-  search: string;
-  types: Set<PermissionType>;
-  decisions: Set<ToolEffectiveSetting>;
-  showInherited: boolean;
-  editLayer: ToolLayer;
-}
-
-// filterRows applies the combinable filters. Each facet (type / decision) is OR
-// within itself and AND across facets; an empty set means "all". "Show inherited"
-// off keeps only rows this page has explicitly authored at its own layer, so a
-// reviewer can see just the overrides they own.
-export function filterRows(rows: ToolPolicyRow[], f: FilterState): ToolPolicyRow[] {
-  const q = f.search.trim().toLowerCase();
-  return rows.filter((r) => {
-    if (q && !`${r.title} ${r.tool_key} ${r.category}`.toLowerCase().includes(q)) {
-      return false;
-    }
-    if (f.types.size && !f.types.has(permissionType(r))) return false;
-    if (f.decisions.size && !f.decisions.has(r.effective.setting)) return false;
-    if (!f.showInherited && !r.layers[f.editLayer]) return false;
-    return true;
-  });
-}
-
 function toggle<T>(set: Set<T>, value: T): Set<T> {
   const next = new Set(set);
   if (next.has(value)) next.delete(value);
   else next.add(value);
   return next;
-}
-
-// --- header -----------------------------------------------------------------
-
-function CatalogHeader({
-  shown,
-  total,
-  busy,
-  onBulk,
-}: {
-  shown: number;
-  total: number;
-  busy: boolean;
-  onBulk: (setting: "allow" | "deny") => void;
-}) {
-  return (
-    <div className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div>
-          <h3 className="text-base font-semibold">All tools</h3>
-          <p className="max-w-xl text-sm text-muted-foreground">
-            Permissions attach at the tool level; filter by type or decision.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="font-mono text-xs text-muted-foreground">
-            {shown === total ? `${total} tools` : `${shown} of ${total} tools`}
-          </span>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => onBulk("allow")}>
-            Allow all
-          </Button>
-          <Button size="sm" variant="outline" disabled={busy} onClick={() => onBulk("deny")}>
-            Deny all
-          </Button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// --- filter bar -------------------------------------------------------------
-
-function FilterBar({
-  search,
-  onSearch,
-  typeFacets,
-  types,
-  onToggleType,
-  decisions,
-  onToggleDecision,
-  showInherited,
-  onShowInherited,
-  editLayerLabel,
-}: {
-  search: string;
-  onSearch: (v: string) => void;
-  typeFacets: PermissionType[];
-  types: Set<PermissionType>;
-  onToggleType: (t: PermissionType) => void;
-  decisions: Set<ToolEffectiveSetting>;
-  onToggleDecision: (d: ToolEffectiveSetting) => void;
-  showInherited: boolean;
-  onShowInherited: (v: boolean) => void;
-  editLayerLabel: string;
-}) {
-  return (
-    <div className="flex flex-col gap-3 rounded-lg border bg-muted/30 p-3">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-        <div className="relative w-full sm:max-w-xs">
-          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-          <Input
-            value={search}
-            onChange={(e) => onSearch(e.target.value)}
-            placeholder="Filter tools by name…"
-            className="h-9 pl-9"
-            aria-label="Filter tools"
-          />
-        </div>
-      </div>
-
-      {typeFacets.length > 1 && (
-        <FilterGroup label="Type">
-          {typeFacets.map((t) => (
-            <FilterChip key={t} active={types.has(t)} onClick={() => onToggleType(t)}>
-              {t}
-            </FilterChip>
-          ))}
-        </FilterGroup>
-      )}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <FilterGroup label="Decision">
-          {DECISION_FILTERS.map((d) => (
-            <FilterChip
-              key={d}
-              active={decisions.has(d)}
-              onClick={() => onToggleDecision(d)}
-            >
-              {SETTING_LABEL[d]}
-            </FilterChip>
-          ))}
-        </FilterGroup>
-        <label className="ml-auto flex items-center gap-2 text-sm text-muted-foreground">
-          <Checkbox
-            checked={showInherited}
-            onCheckedChange={(v) => onShowInherited(v === true)}
-            aria-label="Show inherited"
-          />
-          Show inherited
-          <span className="text-xs">(off = only {editLayerLabel} overrides)</span>
-        </label>
-      </div>
-    </div>
-  );
-}
-
-function FilterGroup({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {label}
-      </span>
-      {children}
-    </div>
-  );
-}
-
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
-        active
-          ? "border-primary bg-primary/10 text-foreground"
-          : "border-border bg-background text-muted-foreground hover:bg-muted",
-      )}
-    >
-      {children}
-    </button>
-  );
 }
 
 // --- row cells --------------------------------------------------------------
@@ -1155,130 +987,6 @@ function PermissionHelp({ row }: { row: ToolPolicyRow }) {
       <Info className="size-3.5" aria-hidden />
     </span>
   );
-}
-
-// originOf frames one row relative to the level THIS page authors (editLayer):
-// either the rule is an override set right here, or it is inherited and we name
-// the level it actually comes from. This is the FIR-2284 "override vs. arv per
-// row" requirement — every row must say whether it is an override on the current
-// level or inherited from another, and which level set it.
-export function originOf(
-  row: ToolPolicyRow,
-  editLayer: ToolLayer,
-): { kind: "override" | "inherited"; level: string; label: string } {
-  // An explicit setting at this page's own layer (incl. a deliberate "inherit"
-  // pass-through) is an override authored here.
-  if (row.layers[editLayer]) {
-    const level = LAYER_LABEL[editLayer] ?? editLayer;
-    return { kind: "override", level, label: `Override on ${level}` };
-  }
-  // Otherwise the verdict was decided elsewhere in the chain. "" = no layer had
-  // an opinion, so the workspace default at the root decided.
-  const decided = row.effective.decided_by;
-  const level = decided ? (LAYER_LABEL[decided] ?? decided) : "Workspace default";
-  return { kind: "inherited", level, label: `Inherited from ${level}` };
-}
-
-// changeHint is the navigation breadcrumb shown in the tooltip so an admin knows
-// WHERE to change a blocking layer, not just that it is blocked (TECH-3287 hul 4).
-function changeHint(layer: string): string {
-  switch (layer) {
-    case "workspace":
-      return "Change it under Settings → Tools (workspace).";
-    case "runtime":
-      return "Change it under Runtime settings → Tools.";
-    case "agent":
-      return "Change it on this agent's Tools tab.";
-    case "group":
-      return "Change it under Settings → Groups.";
-    case "user":
-      return "It is set on the user's own permissions (the ceiling).";
-    case "system":
-      return "It is set on the autopilot's System ceiling (select the autopilot above).";
-    default:
-      return "";
-  }
-}
-
-// formatGroupAttribution renders the blocking group(s) as "Navn (ejer: Person)",
-// the TECH-3287 hul 5 copy. Owner is omitted when the backend has no creator.
-function formatGroupAttribution(row: ToolPolicyRow): string {
-  return row.capped_by_groups
-    .map((g) => (g.owner ? `${g.name} (owner: ${g.owner})` : g.name))
-    .join(", ");
-}
-
-interface RowAttribution {
-  kind: "override" | "inherited" | "capped";
-  label: string;
-  tooltip: string;
-}
-
-// blockerText names the layer (or group, by name + owner) that forces the
-// verdict, for the "where to change it" copy (TECH-3287 hul 4/5).
-function blockerText(row: ToolPolicyRow): { phrase: string; hint: string } {
-  const blocker = row.effective.capped_by || row.effective.decided_by;
-  if (blocker === "group" && row.capped_by_groups.length > 0) {
-    return { phrase: `group ${formatGroupAttribution(row)}`, hint: changeHint("group") };
-  }
-  return { phrase: LAYER_LABEL[blocker] ?? blocker, hint: changeHint(blocker) };
-}
-
-// futileWriteWarning — the message to toast when a write the server ACCEPTED
-// is nonetheless overridden by a layer this page cannot loosen (FIR-2706
-// follow-up: an accepted-but-capped write used to revert with no explanation
-// beyond a hover tooltip). Returns null when the write actually takes effect:
-// tightening (deny/disable) always bites, and so does any choice at or above
-// the effective verdict's restrictiveness. Exported for unit tests.
-export function futileWriteWarning(
-  row: ToolPolicyRow,
-  editLayer: ToolLayer,
-  setting: ToolSetting,
-): string | null {
-  if (setting !== "allow" && setting !== "ask") return null;
-  if (!isLockedFromElsewhere(row, editLayer)) return null;
-  const effective = row.effective.setting;
-  if (SETTING_RANK[setting] >= SETTING_RANK[effective]) return null;
-  const { phrase, hint } = blockerText(row);
-  return `"${SETTING_LABEL[setting]}" was saved on the ${LAYER_LABEL[editLayer]} layer, but it has no effect: the decision stays "${SETTING_LABEL[effective]}" because ${phrase} blocks it. ${hint}`.trim();
-}
-
-// rowAttribution is the single source of truth for what the Origin badge says.
-//
-// TECH-3287 hul 2/4/5 reframes two things WITHOUT touching the established
-// override/inherited language for the normal case:
-//   1. The lie: when this page holds an explicit override that a HIGHER layer
-//      overrides (a futile override beneath a cap), the old code still printed
-//      "Override on Agent". We now name the real blocker instead.
-//   2. The silent inherit: when a row is locked from a layer this page can't
-//      loosen, we keep the "Inherited from X" label but enrich the tooltip with
-//      where to change the blocking layer (and the DecisionControl shows a lock).
-export function rowAttribution(row: ToolPolicyRow, editLayer: ToolLayer): RowAttribution {
-  const locked = isLockedFromElsewhere(row, editLayer);
-  const hasLocalOverride = !!row.layers[editLayer];
-  const blocker = row.effective.capped_by || row.effective.decided_by;
-
-  // Case 1 — a futile local override beneath a higher decision: tell the truth.
-  if (locked && hasLocalOverride && blocker !== editLayer) {
-    const { phrase, hint } = blockerText(row);
-    return {
-      kind: "capped",
-      label: blocker === "group" ? `Capped by group ${formatGroupAttribution(row)}` : `Capped by ${phrase}`,
-      tooltip: `Your ${LAYER_LABEL[editLayer]} setting has no effect — blocked by ${phrase}. ${hint}`,
-    };
-  }
-
-  // Case 2 — the normal override/inherited language, enriched when locked.
-  const origin = originOf(row, editLayer);
-  let tooltip =
-    origin.kind === "override"
-      ? `This rule is an override set on ${origin.level}.`
-      : `No override on this level — the rule is inherited from ${origin.level}.`;
-  if (locked) {
-    const { phrase, hint } = blockerText(row);
-    tooltip = `Blocked by ${phrase} — cannot be made more open here. ${hint}`;
-  }
-  return { kind: origin.kind, label: origin.label, tooltip };
 }
 
 function OriginTag({
@@ -1369,6 +1077,73 @@ export function DecisionControl({
             {choice === "inherit" && (
               <span className="ml-auto text-xs text-muted-foreground">clears {LAYER_LABEL[editLayer]}</span>
             )}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+function LinkedDecisionControl({
+  rows,
+  editLayer,
+  disabled,
+  onDecision,
+}: {
+  rows: ToolPolicyRow[];
+  editLayer: ToolLayer;
+  disabled?: boolean;
+  onDecision: (setting: ToolSetting) => void;
+}) {
+  const settings = new Set(rows.map((row) => row.effective.setting));
+  const mixed = settings.size > 1;
+  const verdict = rows.some((row) => row.effective.setting === "deny")
+    ? "deny"
+    : rows.some((row) => row.effective.setting === "ask")
+      ? "ask"
+      : "allow";
+  const locked = rows.some((row) => isLockedFromElsewhere(row, editLayer));
+  const overridden = rows.some((row) => !!row.layers[editLayer]);
+  const Icon = locked ? Lock : VERDICT_ICON[verdict];
+  const label = mixed ? "Mixed" : SETTING_LABEL[verdict];
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        disabled={disabled}
+        aria-label={`Decision: ${label}`}
+        className={cn(
+          "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-xs font-semibold transition-colors disabled:opacity-50",
+          mixed
+            ? "border-border bg-muted text-foreground"
+            : VERDICT_PILL[verdict],
+          overridden && "ring-1 ring-primary/40",
+        )}
+      >
+        <Icon className="size-3.5" />
+        {label}
+        <ChevronDown className="size-3 opacity-60" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-52">
+        <div className="border-b px-2 py-1.5 text-xs text-muted-foreground">
+          Applies to create and edit actions.
+        </div>
+        {settingChoicesFor(editLayer).map((choice) => (
+          <DropdownMenuItem
+            key={choice}
+            data-testid={`catalog-decision-file-write-${choice}`}
+            onClick={() => onDecision(choice)}
+            className={cn(
+              "text-sm",
+              choice === "inherit" && "text-muted-foreground",
+            )}
+          >
+            {SETTING_LABEL[choice]}
+            {choice === "inherit" ? (
+              <span className="ml-auto text-xs text-muted-foreground">
+                clears {LAYER_LABEL[editLayer]}
+              </span>
+            ) : null}
           </DropdownMenuItem>
         ))}
       </DropdownMenuContent>
@@ -2580,124 +2355,6 @@ function RepoGroupControl({
       </DropdownMenuContent>
     </DropdownMenu>
   );
-}
-
-// CredentialGroupData is one Agent Vault box's collapsible group: its resource
-// pattern (`agentvault-vault:<name>` or `cerebro-credential:<uuid>`), the display
-// label (the box name), and its capability rows in CREDENTIAL_CAP_ORDER.
-interface CredentialGroupData {
-  resource: string;
-  label: string;
-  rows: ToolPolicyRow[];
-}
-
-// groupCredentialRows buckets the per-credential rows by resource pattern, labels
-// each group with the box name (the rows' Category), orders each group's rows by
-// CREDENTIAL_CAP_ORDER, and narrows by the free-text search on the box name.
-// Groups are sorted by label so the list is stable.
-export function groupCredentialRows(
-  rows: ToolPolicyRow[],
-  search: string,
-): CredentialGroupData[] {
-  const q = search.trim().toLowerCase();
-  const byResource = new Map<string, ToolPolicyRow[]>();
-  for (const r of rows) {
-    const list = byResource.get(r.resource_pattern);
-    if (list) list.push(r);
-    else byResource.set(r.resource_pattern, [r]);
-  }
-  const rank = (key: string) => {
-    const i = CREDENTIAL_CAP_ORDER.indexOf(key);
-    return i === -1 ? CREDENTIAL_CAP_ORDER.length : i;
-  };
-  const labelFor = (resource: string, rs: ToolPolicyRow[]) =>
-    rs[0]?.category?.trim() || resource.replace(/^[^:]*:/, "") || resource;
-  return [...byResource.entries()]
-    .map(([resource, rs]) => ({
-      resource,
-      label: labelFor(resource, rs),
-      rows: [...rs].sort((a, b) => rank(a.tool_key) - rank(b.tool_key)),
-    }))
-    .filter((g) => !q || g.label.toLowerCase().includes(q))
-    .sort((a, b) => a.label.localeCompare(b.label));
-}
-
-// FIR-2441: credential boxes follow the vault-naming convention
-// "<track>-<owner>-<credential>" (e.g. agents-mia-agent-vault,
-// members-jesper-bigquery), so the flat box list nests into a tree
-// track › owner › credential. Setting a decision on a track or owner node
-// cascades to every credential box beneath it — the naming IS the permission
-// structure. Boxes whose name does not fit the convention (e.g. "default", or a
-// registry credential UUID) stay at the top level as ungrouped leaves.
-const CREDENTIAL_TRACKS = ["agents", "members", "shared"];
-
-// A node in the credential permission tree. A branch (track/owner) carries
-// `children` and no `group`; a leaf carries `group` (one Agent Vault box) and no
-// children. `key` is stable across renders; `label` is the segment shown.
-export interface CredentialTreeNode {
-  key: string;
-  label: string;
-  children: CredentialTreeNode[];
-  group?: CredentialGroupData;
-}
-
-// buildCredentialTree nests the flat credential groups by parsing each box name
-// on "-": first segment = track (agents/members/shared), second = owner, the
-// rest = the credential label. Every level is sorted alphabetically so the tree
-// is stable. Names without a known track prefix are top-level leaves.
-export function buildCredentialTree(
-  groups: CredentialGroupData[],
-): CredentialTreeNode[] {
-  const roots: CredentialTreeNode[] = [];
-  const findOrAdd = (
-    siblings: CredentialTreeNode[],
-    key: string,
-    label: string,
-  ): CredentialTreeNode => {
-    let node = siblings.find((s) => s.key === key);
-    if (!node) {
-      node = { key, label, children: [] };
-      siblings.push(node);
-    }
-    return node;
-  };
-  for (const group of groups) {
-    const name = group.label;
-    const firstDash = name.indexOf("-");
-    const track = firstDash === -1 ? "" : name.slice(0, firstDash);
-    if (firstDash === -1 || !CREDENTIAL_TRACKS.includes(track)) {
-      roots.push({ key: group.resource, label: name, children: [], group });
-      continue;
-    }
-    const rest = name.slice(firstDash + 1); // e.g. "mia-agent-vault"
-    const secondDash = rest.indexOf("-");
-    const owner = secondDash === -1 ? rest : rest.slice(0, secondDash);
-    const leafLabel = secondDash === -1 ? rest : rest.slice(secondDash + 1);
-    const trackNode = findOrAdd(roots, `track:${track}`, track);
-    const ownerNode = findOrAdd(
-      trackNode.children,
-      `track:${track}/owner:${owner}`,
-      owner,
-    );
-    ownerNode.children.push({
-      key: group.resource,
-      label: leafLabel || name,
-      children: [],
-      group,
-    });
-  }
-  const sortRec = (nodes: CredentialTreeNode[]) => {
-    nodes.sort((a, b) => a.label.localeCompare(b.label));
-    for (const n of nodes) sortRec(n.children);
-  };
-  sortRec(roots);
-  return roots;
-}
-
-// subtreeGroups collects every leaf credential box under a node (the node itself
-// when it is a leaf) — the exact set a branch-level cascade writes to.
-export function subtreeGroups(node: CredentialTreeNode): CredentialGroupData[] {
-  return node.group ? [node.group] : node.children.flatMap(subtreeGroups);
 }
 
 // credentialNodeVerdict folds every capability row beneath a branch into one

@@ -80,7 +80,7 @@ func TestEvaluateFailsClosedUntilCanonicalPolicyAndEvidenceAgree(t *testing.T) {
 	}
 }
 
-func TestNewEntryRecordsIdentityOnBehalfOfAndDiff(t *testing.T) {
+func TestNewEntryRecordsIdentityAndOneCanonicalDecision(t *testing.T) {
 	entry := NewEntry(Observation{
 		WorkspaceID:           "workspace-1",
 		AgentID:               "agent-1",
@@ -90,8 +90,6 @@ func TestNewEntryRecordsIdentityOnBehalfOfAndDiff(t *testing.T) {
 		IssueID:               "issue-1",
 		ObservedToolName:      "create_issue",
 		CanonicalCapabilityID: "platform:create_issue",
-		LegacyDecision:        DecisionAllow,
-		LegacyPath:            "legacy_capability",
 		PolicyDecision:        PolicyDeny,
 		EvidenceLevel:         availabilityevidence.LevelVerified,
 	})
@@ -102,7 +100,7 @@ func TestNewEntryRecordsIdentityOnBehalfOfAndDiff(t *testing.T) {
 	if entry.OnBehalfOfUserID != "member-1" {
 		t.Fatalf("on-behalf-of identity = %q, want member-1", entry.OnBehalfOfUserID)
 	}
-	if entry.ShadowDecision != DecisionDeny || !entry.Differs {
-		t.Fatalf("shadow comparison = (%q, %t), want (deny, true)", entry.ShadowDecision, entry.Differs)
+	if entry.Decision != DecisionDeny {
+		t.Fatalf("canonical decision = %q, want deny", entry.Decision)
 	}
 }

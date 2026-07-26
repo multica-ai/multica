@@ -68,6 +68,15 @@ declare module "@multica/core/types/agent" {
   }
   interface CreateAgentContextChangeRequestRequest {
     /**
+     * FIR-3805: the subset of `skill_ids` whose full text is pasted into the
+     * agent's instructions on every run. Proposed through the same versioned
+     * flow as the binding set itself — turning a skill always-on is the
+     * stronger of the two actions, so it does not bypass the review that
+     * merely binding the skill already requires. Ids not in `skill_ids` are
+     * dropped server-side.
+     */
+    always_on_skill_ids?: string[];
+    /**
      * FIR-3212: typed shortcut for the mode stored in `runtime_config`. `""`
      * restores the runtime's own default. Applied after a `runtime_config`
      * override in the same request, so an explicit mode wins. The server
@@ -109,6 +118,17 @@ declare module "@multica/core/types/agent" {
     // TECH-3670: per-surface discovery visibility. Send {} to make the agent
     // visible everywhere again; omit to leave unchanged.
     surface_visibility?: Record<string, boolean> | null;
+  }
+  interface AgentSkillSummary {
+    /**
+     * FIR-3805: this BINDING is always on — the skill's full text is pasted
+     * into the agent's instructions on every run instead of being listed as a
+     * one-line, load-on-demand entry. A property of the agent-skill binding,
+     * not of the skill: the same skill can be always on for one agent and
+     * optional for another. Older servers omit the field, so always compare
+     * with `=== true`.
+     */
+    always_on?: boolean;
   }
 }
 

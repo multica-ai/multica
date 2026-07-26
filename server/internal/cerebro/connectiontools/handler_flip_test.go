@@ -61,6 +61,23 @@ func (f flipEndpointPolicy) ConnectionEndpointEffective(ctx context.Context, wor
 	return toolpolicy.SettingDeny, connName, nil
 }
 
+func (f flipEndpointPolicy) ConnectionEndpointVerdicts(_ context.Context, _ toolpolicy.TableQuery, targets []toolpolicy.ConnectionEndpointTarget) ([]toolpolicy.ConnectionEndpointVerdict, error) {
+	out := make([]toolpolicy.ConnectionEndpointVerdict, 0, len(targets))
+	for _, target := range targets {
+		setting := toolpolicy.SettingDeny
+		if resolved, ok := f.verdicts[target.Connection+" "+target.Method+" "+target.Path]; ok {
+			setting = resolved
+		}
+		out = append(out, toolpolicy.ConnectionEndpointVerdict{
+			Connection: target.Connection,
+			Method:     target.Method,
+			Path:       target.Path,
+			Setting:    setting,
+		})
+	}
+	return out, nil
+}
+
 type flipFlag struct{ on bool }
 
 func (f flipFlag) GetCerebroFeatureFlag(ctx context.Context, params cerebrodb.GetCerebroFeatureFlagParams) (bool, error) {

@@ -1,0 +1,120 @@
+---
+title: "Multica v1.19.0"
+description: "99 release bullets: 57 new, 22 fixed, 2 improved, plus 18 more."
+date: 2026-07-24
+---
+
+**Release summary:** 99 release bullets: 57 new, 22 fixed, 2 improved, plus 18 more.
+
+Changes since [v1.18.1](https://github.com/firtal-group/firtal-cerebro/compare/v1.18.1...v1.19.0) — bump: **minor**
+
+## New
+
+- Phase status sections, drop the phase filter (FIR-3765) [#2679](https://github.com/firtal-group/firtal-cerebro/pull/2679)
+- Verify Atlas roles [#2678](https://github.com/firtal-group/firtal-cerebro/pull/2678)
+- Workpad plan panel on the issue screen (FIR-3765) [#2676](https://github.com/firtal-group/firtal-cerebro/pull/2676)
+- Group Workpad plan into phases with an Alle/phase filter [#2673](https://github.com/firtal-group/firtal-cerebro/pull/2673)
+- Secure read-only service tokens
+- Squad leaders own parent issue status (MUL-5156 backport) [#2661](https://github.com/firtal-group/firtal-cerebro/pull/2661)
+- Isolate concurrent tasks (FIR-3482)
+- FIR-3659 Workpad as a cerebro_workpad feature flag [#2644](https://github.com/firtal-group/firtal-cerebro/pull/2644)
+- FIR-3659 workpad convention — issue-target eval, status-change gate, eval_failed hook condition, brief section [#2636](https://github.com/firtal-group/firtal-cerebro/pull/2636)
+- Add real people impact data
+- Settings → Tokens UI for scoped service tokens (FIR-3608)
+- Dispatch a turn's tool calls in parallel (FIR-3675) [#2633](https://github.com/firtal-group/firtal-cerebro/pull/2633)
+- Scoped non-personal service tokens (FIR-3608)
+- Secure iOS share inbox (FIR-3545) [#2626](https://github.com/firtal-group/firtal-cerebro/pull/2626)
+- Wire people impact dashboard
+- Connect dashboard read models
+- Add dashboard query options
+- Add dashboard read model client
+- Install Cursor Agent in cloud image
+- Expose overview summary
+- Expose function summaries
+- Expose quality risk decisions
+- Filter evidence by guardrail
+- Filter evidence by metric
+- Filter evidence by operating loop
+- Filter evidence by function
+- Filter evidence by confidence
+- Filter evidence by source
+- Filter evidence by period
+- Validate evidence filters
+- Combine evidence filters
+- Filter evidence by status
+- Filter evidence by metric family
+- Expose metric evidence read model
+- Expose operating loop evidence read model
+- Expose function evidence read model
+- Expose workspace evidence read model
+- Expose workspace observation read model
+- Expose latest observation read model
+- List workspace metrics
+- List operating loops
+- Expose function read seam
+- Add function analytics dimensions
+- Add project binding configuration seam
+- Add metric configuration seam
+- Add operating loop configuration seam
+- Add function configuration seam
+- Mount observation routes
+- Expose observation HTTP seam
+- Expose observation reads
+- Enforce observation write roles
+- Add workspace-scoped observation store
+- Add workspace-scoped evidence migration
+- Add evidence decision model
+- Add AI impact and people tabs
+- Add AI impact control room
+- Add People impact split view
+
+## Fixed
+
+- Workpad phase filter label English ("All" not "Alle") [#2675](https://github.com/firtal-group/firtal-cerebro/pull/2675)
+- Make live connection verification reliable
+- Register OpenCode permission contract patch
+- Fail closed on production evidence
+- Bound task preparation time (MUL-4923 backport, FIR-3724) [#2643](https://github.com/firtal-group/firtal-cerebro/pull/2643)
+- Align daemon flags with installed CLI
+- Align service token kill switch
+- Enforce Codex and direct MCP parity FIR-3753
+- Clear production release gates
+- Normalize Cursor tool-policy keys (#2651)
+- Normalize Cursor tool-policy keys [#2651](https://github.com/firtal-group/firtal-cerebro/pull/2651)
+- Load sandboxed app modules with credentials [#2650](https://github.com/firtal-group/firtal-cerebro/pull/2650)
+- Complete generated and safety checks
+- Preserve agent-filtered messages (FIR-2996)
+- Preserve agent-filtered messages (FIR-2996)
+- Align runtime tool enforcement
+- Populate IssueTitle/ParentIssueTitle in the claim response (FIR-3708) [#2638](https://github.com/firtal-group/firtal-cerebro/pull/2638)
+- Harden permission recovery validation
+- Keep permission release diff clean
+- Secure recovery approval gate
+- Unify effective capability truth
+- Close provider and legacy grant gaps
+
+## Improved
+
+- Document saved connection probes
+- Explain capabilities and service tokens
+
+## Other changes
+
+- FIR-3388: unify Codex permission identity [#2677](https://github.com/firtal-group/firtal-cerebro/pull/2677)
+- Workflow hooks: fire on.task.failure from task:failed + issue.comment/issue.status actions [#2663](https://github.com/firtal-group/firtal-cerebro/pull/2663)
+- FIR-3659 Workpad panel — auto-render the issue plan above the composer [#2655](https://github.com/firtal-group/firtal-cerebro/pull/2655)
+- Revert "fix(permissions): normalize Cursor tool-policy keys (#2651)" [#2660](https://github.com/firtal-group/firtal-cerebro/pull/2660)
+- Revert "fix(permissions): normalize Cursor tool-policy keys (#2651) (#2657)"
+- FIR-3659 Workpad panel — auto-render the issue plan above the composer [#2655](https://github.com/firtal-group/firtal-cerebro/pull/2655)
+- FIR-3388: release current access improvements to production
+- FIR-3725 Remove Mode configuration ceilings (#2640)
+- FIR-3725 Remove Mode configuration ceilings [#2640](https://github.com/firtal-group/firtal-cerebro/pull/2640)
+- FIR-3663: make Tasks status filters work [#2610](https://github.com/firtal-group/firtal-cerebro/pull/2610)
+- FIR-3721: verify capability decisions across UI and API
+- FIR-3663: make Tasks status filters work [#2610](https://github.com/firtal-group/firtal-cerebro/pull/2610)
+- FIR-3722: prove permission recovery lifecycle
+- FIR-3315: normalize Allergen Formatter AI output [#2630](https://github.com/firtal-group/firtal-cerebro/pull/2630)
+- FIR-3388 preserve Registry source scopes during migration
+- FIR-3388: unify special permission contracts
+- Reject agent comments that promise a continuation with no wakeup
+- FIR-3411: list AI impact project bindings

@@ -1,11 +1,16 @@
 package main
 
 import (
+	"context"
 	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
+	"github.com/multica-ai/multica/server/internal/cerebro/credentials"
+	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // TestVaultResourceDisjointFromCredentialScopes is the FIR-1739 v1 safety guard.
@@ -19,6 +24,7 @@ import (
 //     (Check never queries an agentvault-vault: resource), and
 //   - a credential id/type resource is never mistaken for a vault by the
 //     connector's VaultFromResourcePattern.
+//
 // If anyone renames a prefix and the two namespaces start overlapping, this
 // fails — exactly the cross-contamination the equality match exists to prevent.
 func TestVaultResourceDisjointFromCredentialScopes(t *testing.T) {
@@ -41,6 +47,83 @@ func TestVaultResourceDisjointFromCredentialScopes(t *testing.T) {
 	}
 	if v, ok := agentvault.VaultFromResourcePattern(vaultResource); !ok || v != "bigquery" {
 		t.Errorf("VaultFromResourcePattern(%q) = (%q, %v); want (bigquery, true)", vaultResource, v, ok)
+	}
+}
+
+// TestCredentialPolicyDoesNotWriteRetiredResolverAudits protects the credential
+// boundary from reintroducing the retired constant-Deny permission resolver.
+// Credential decisions are authored in the tool-policy store and audited by the
+// credential service; evaluating the obsolete id/type floor must not append two
+// misleading permission_policy_evaluated activity rows.
+func TestCredentialPolicyDoesNotWriteRetiredResolverAudits(t *testing.T) {
+	if testPool == nil {
+		t.Skip("DATABASE_URL not configured; skipping credential policy integration test")
+	}
+	ctx := context.Background()
+	workspaceID, err := util.ParseUUID(testWorkspaceID)
+	if err != nil {
+		t.Fatalf("parse workspace id: %v", err)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id
+		FROM agent
+		WHERE workspace_id = $1
+		ORDER BY created_at
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load integration agent: %v", err)
+	}
+	actorID, err := util.ParseUUID(agentID)
+	if err != nil {
+		t.Fatalf("parse agent id: %v", err)
+	}
+	credentialID, err := util.ParseUUID("11111111-1111-4111-8111-111111111111")
+	if err != nil {
+		t.Fatalf("parse credential id: %v", err)
+	}
+
+	_, _ = testPool.Exec(ctx, `
+		DELETE FROM activity_log
+		WHERE workspace_id = $1
+		  AND actor_id = $2
+		  AND action = 'permission_policy_evaluated'
+	`, workspaceID, actorID)
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+			DELETE FROM activity_log
+			WHERE workspace_id = $1
+			  AND actor_id = $2
+			  AND action = 'permission_policy_evaluated'
+		`, workspaceID, actorID)
+	})
+
+	policy := newCredentialsPolicy(cerebrodb.New(testPool), db.New(testPool), nil)
+	decision := policy.Check(ctx, credentials.PolicyRequest{
+		WorkspaceID:    workspaceID,
+		CredentialID:   credentialID,
+		CredentialType: credentials.TypeAPIKey,
+		Permission:     credentials.PermReveal,
+		ActorType:      "agent",
+		ActorID:        actorID,
+	})
+	if decision.Allowed {
+		t.Fatal("an agent without an explicit credential Allow must remain denied")
+	}
+
+	var count int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*)
+		FROM activity_log
+		WHERE workspace_id = $1
+		  AND actor_id = $2
+		  AND action = 'permission_policy_evaluated'
+	`, workspaceID, actorID).Scan(&count); err != nil {
+		t.Fatalf("count retired resolver audits: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("credential check wrote %d retired permission resolver audit rows, want 0", count)
 	}
 }
 

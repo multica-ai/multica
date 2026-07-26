@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/servicetoken"
 )
 
 func testFeatureDef(key string, def bool) cerebroFeatureDef {
@@ -44,6 +46,31 @@ func TestCerebroFeatureCatalogEmbedded(t *testing.T) {
 		seen[f.Key] = true
 		if !groups[f.Group] {
 			t.Errorf("flag %q references unknown group %q", f.Key, f.Group)
+		}
+	}
+}
+
+func TestPermissionCatalogMatchesRuntimeSafetyDefaults(t *testing.T) {
+	catalog, err := loadCerebroFeatureCatalog()
+	if err != nil {
+		t.Fatalf("loadCerebroFeatureCatalog: %v", err)
+	}
+	flags := make(map[string]cerebroFeatureDef, len(catalog.Flags))
+	for _, flag := range catalog.Flags {
+		flags[flag.Key] = flag
+	}
+	serviceTokens, ok := flags[servicetoken.FlagKey]
+	if !ok {
+		t.Fatalf("embedded CLI catalog is missing %q", servicetoken.FlagKey)
+	}
+	if serviceTokens.Default != servicetoken.DefaultEnabled || serviceTokens.Group != "permissions" {
+		t.Fatalf("service token catalog = default %t group %q, runtime = default %t permissions",
+			serviceTokens.Default, serviceTokens.Group, servicetoken.DefaultEnabled)
+	}
+	for _, key := range []string{"cerebro_approvals", "cerebro_approval_gate"} {
+		flag, exists := flags[key]
+		if !exists || !flag.Default || flag.Group != "permissions" {
+			t.Fatalf("permission decision path flag %q = %+v, want present, default on, permissions group", key, flag)
 		}
 	}
 }

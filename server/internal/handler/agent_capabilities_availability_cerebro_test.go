@@ -185,22 +185,25 @@ func TestAvailabilityReportsUnknownWithoutEvidenceSource(t *testing.T) {
 	}
 }
 
-// A row with no canonical name cannot be keyed to a probe. Say so plainly
-// instead of implying the probe ran and found nothing.
-func TestAvailabilityExplainsToolWithNoCanonicalName(t *testing.T) {
+// A live scan is discovery evidence even before an identity alias is known. It
+// must be available/callable when policy allows, but never presented as verified.
+func TestAvailabilityUsesLiveScanAsDiscoveredEvidenceWithoutCanonicalName(t *testing.T) {
 	tools, _ := applyAgentCapabilityAvailability(
-		[]AgentCapabilityTool{{Key: "some_scanned_tool", Source: capSourceScan, Permission: "allow"}},
+		[]AgentCapabilityTool{{Key: "some_scanned_tool", Source: capSourceScan, Permission: "allow", Enforced: true}},
 		availabilityevidence.RuntimeFirtalGateway, fakeEvidence{})
 
 	got := tools[0].Availability
 	if got.Proven {
 		t.Error("an unmappable tool must not be proven")
 	}
-	if got.Reason != capAvailabilityNoCanonicalName {
-		t.Errorf("reason = %q, want %q", got.Reason, capAvailabilityNoCanonicalName)
+	if got.Level != string(availabilityevidence.LevelDiscovered) {
+		t.Errorf("level = %q, want discovered", got.Level)
 	}
 	if tools[0].Permission != "allow" {
 		t.Errorf("permission = %q, want policy answer preserved outside the canonical engine", tools[0].Permission)
+	}
+	if !tools[0].Available || !tools[0].Callable {
+		t.Errorf("live scanned tool = %+v, want available and callable", tools[0])
 	}
 }
 
@@ -208,5 +211,32 @@ func TestAvailabilitySummaryNamesTheRuntimeItJudged(t *testing.T) {
 	_, summary := applyAgentCapabilityAvailability(nil, availabilityevidence.RuntimeClaudeCode, fakeEvidence{})
 	if summary.RuntimeType != string(availabilityevidence.RuntimeClaudeCode) {
 		t.Errorf("runtime_type = %q, want %q", summary.RuntimeType, availabilityevidence.RuntimeClaudeCode)
+	}
+}
+
+func TestAvailabilityTreatsRuntimeInventoryAsDiscoveredAndCallable(t *testing.T) {
+	tools, summary := applyAgentCapabilityAvailabilityForProvider(
+		[]AgentCapabilityTool{{
+			Key:        "tools:bash",
+			Title:      "bash",
+			Source:     capSourceRuntimeReport,
+			Permission: "allow",
+			Allowed:    true,
+			Enforced:   true,
+		}},
+		availabilityevidence.RuntimeLocal,
+		"codex",
+		fakeEvidence{},
+	)
+
+	got := tools[0]
+	if got.Availability.Level != string(availabilityevidence.LevelDiscovered) {
+		t.Fatalf("runtime inventory availability = %+v, want discovered", got.Availability)
+	}
+	if !got.Available || !got.Callable {
+		t.Fatalf("runtime-reported allowed tool = %+v, want available and callable", got)
+	}
+	if summary.Discovered != 1 || summary.Declared != 0 || summary.Unproven != 1 {
+		t.Fatalf("availability summary = %+v, want one discovered unproven tool", summary)
 	}
 }

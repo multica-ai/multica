@@ -1,12 +1,10 @@
-// Package accessdecision compares the live Gateway access decision with the
-// future canonical access model. It is deliberately observational: callers
-// persist and report the comparison, but never use the shadow result to allow
-// or deny the current tool call.
+// Package accessdecision is the Gateway's canonical permission and
+// availability decision contract.
 package accessdecision
 
 import "github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
 
-// Decision is the binary outcome compared by the ledger.
+// Decision is the binary outcome enforced by the Gateway.
 type Decision string
 
 const (
@@ -15,7 +13,8 @@ const (
 )
 
 // PolicyDecision is the result returned by the canonical policy lookup. Ask
-// and Error are recorded distinctly, but both fail closed inside the shadow.
+// and Error remain distinct so callers can route Ask through approvals while
+// both fail closed when no approval flow is available.
 type PolicyDecision string
 
 const (
@@ -25,22 +24,20 @@ const (
 	PolicyError PolicyDecision = "error"
 )
 
-// EvaluationInput is everything the pure shadow needs to reach a decision.
+// EvaluationInput is everything the pure decision needs.
 type EvaluationInput struct {
 	CanonicalCapabilityID string
 	PolicyDecision        PolicyDecision
 	EvidenceLevel         availabilityevidence.Level
 }
 
-// EvaluationResult is the shadow outcome and its audit-safe explanation.
+// EvaluationResult is the enforced outcome and its audit-safe explanation.
 type EvaluationResult struct {
 	Decision Decision
 	Reason   string
 }
 
-// Evaluate applies the canonical shadow rules. Every incomplete or uncertain
-// state denies inside the shadow. This result must never be used to enforce a
-// live Gateway call during the measurement phase.
+// Evaluate applies the canonical fail-closed rules.
 func Evaluate(in EvaluationInput) EvaluationResult {
 	if in.CanonicalCapabilityID == "" {
 		return EvaluationResult{Decision: DecisionDeny, Reason: "tool did not resolve to a canonical capability"}
@@ -54,7 +51,7 @@ func Evaluate(in EvaluationInput) EvaluationResult {
 	return EvaluationResult{Decision: DecisionAllow, Reason: "canonical policy allowed a capability present on the live runtime surface"}
 }
 
-// Observation is one live Gateway call plus the inputs used by the shadow.
+// Observation is one live Gateway call plus the canonical inputs.
 type Observation struct {
 	WorkspaceID           string
 	AgentID               string
@@ -64,13 +61,11 @@ type Observation struct {
 	IssueID               string
 	ObservedToolName      string
 	CanonicalCapabilityID string
-	LegacyDecision        Decision
-	LegacyPath            string
 	PolicyDecision        PolicyDecision
 	EvidenceLevel         availabilityevidence.Level
 }
 
-// Entry is the append-only Decision Ledger record for one Gateway tool call.
+// Entry is the append-only canonical decision record for one Gateway tool call.
 type Entry struct {
 	WorkspaceID           string
 	AgentID               string
@@ -80,18 +75,15 @@ type Entry struct {
 	IssueID               string
 	ObservedToolName      string
 	CanonicalCapabilityID string
-	LegacyDecision        Decision
-	LegacyPath            string
-	ShadowDecision        Decision
+	Decision              Decision
 	PolicyDecision        PolicyDecision
 	EvidenceLevel         availabilityevidence.Level
-	Differs               bool
 	Reason                string
 }
 
-// NewEntry evaluates the shadow and freezes the comparison for persistence.
+// NewEntry evaluates the canonical decision and freezes it for persistence.
 func NewEntry(o Observation) Entry {
-	shadow := Evaluate(EvaluationInput{
+	result := Evaluate(EvaluationInput{
 		CanonicalCapabilityID: o.CanonicalCapabilityID,
 		PolicyDecision:        o.PolicyDecision,
 		EvidenceLevel:         o.EvidenceLevel,
@@ -105,12 +97,9 @@ func NewEntry(o Observation) Entry {
 		IssueID:               o.IssueID,
 		ObservedToolName:      o.ObservedToolName,
 		CanonicalCapabilityID: o.CanonicalCapabilityID,
-		LegacyDecision:        o.LegacyDecision,
-		LegacyPath:            o.LegacyPath,
-		ShadowDecision:        shadow.Decision,
+		Decision:              result.Decision,
 		PolicyDecision:        o.PolicyDecision,
 		EvidenceLevel:         o.EvidenceLevel,
-		Differs:               o.LegacyDecision != shadow.Decision,
-		Reason:                shadow.Reason,
+		Reason:                result.Reason,
 	}
 }

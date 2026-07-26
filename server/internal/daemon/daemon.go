@@ -4916,6 +4916,7 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 			Name:        s.Name,
 			Description: s.Description,
 			Content:     s.Content,
+			AlwaysOn:    s.AlwaysOn, // CEREBRO-PATCH(skill-always-on): FIR-3805 carry the binding flag into the brief builder
 		}
 		for _, f := range s.Files {
 			result[i].Files = append(result[i].Files, execenv.SkillFileContextForEnv{

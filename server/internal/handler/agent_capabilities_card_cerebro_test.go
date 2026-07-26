@@ -4,18 +4,131 @@ package handler
 // capabilities-card limits parser.
 
 import (
+	"context"
 	"encoding/json"
+	"net/http/httptest"
 	"sort"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/capabilitycatalog"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	cerebrotoolpolicy "github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type capabilityTableCapture struct {
+	query cerebrotoolpolicy.TableQuery
+}
+
+func (c *capabilityTableCapture) Table(_ context.Context, in cerebrotoolpolicy.TableQuery) ([]cerebrotoolpolicy.TableRow, error) {
+	c.query = in
+	return nil, nil
+}
+
+func TestAgentCapabilityRowsScopesInventoryToAgentsRuntime(t *testing.T) {
+	t.Parallel()
+
+	runtimeID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	agentID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	workspaceID := pgtype.UUID{Bytes: [16]byte{3}, Valid: true}
+	capture := &capabilityTableCapture{}
+	h := &Handler{CapabilityToolPolicy: capture}
+
+	h.agentCapabilityRows(httptest.NewRequest("GET", "/", nil), workspaceID, runtimeID, agentID)
+
+	if capture.query.RuntimeID != runtimeID {
+		t.Fatalf("capabilities runtime scope = %+v, want %+v", capture.query.RuntimeID, runtimeID)
+	}
+}
+
+func TestPermissionLookupUsesCanonicalRuntimeAndMCPAliases(t *testing.T) {
+	t.Parallel()
+
+	rows := []cerebrotoolpolicy.TableRow{
+		{
+			ToolKey: "tools:bash", Title: "bash", Source: capSourceRuntimeReport,
+			Effective: cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingAllow},
+		},
+		{
+			ToolKey: "tools:apply_patch", Title: "apply_patch", Source: capSourceRuntimeReport,
+			Effective: cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingDeny},
+		},
+		{
+			ToolKey: "connection:company-brain", ResourcePattern: "search", Source: capSourceConnectionTool,
+			Effective: cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingAsk},
+		},
+	}
+
+	got := permissionLookupFromRows(rows)
+	if got["exec_command"] != "allow" {
+		t.Fatalf("exec_command permission = %q, want allow", got["exec_command"])
+	}
+	if got["patch_apply"] != "deny" {
+		t.Fatalf("patch_apply permission = %q, want deny", got["patch_apply"])
+	}
+	if got["mcp__company-brain__search"] != "ask" {
+		t.Fatalf("company-brain search permission = %q, want ask", got["mcp__company-brain__search"])
+	}
+}
+
+func TestCodexPermissionIdentityMatchesCatalogCapabilitiesAndCallTime(t *testing.T) {
+	t.Parallel()
+
+	catalog, err := capabilitycatalog.Build(capabilitycatalog.Inventory{
+		Runtimes: []capabilitycatalog.RuntimeInventory{{
+			Provider: "codex",
+			Tools:    []string{"bash"},
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	observed, ok := catalog.Resolve(capabilitycatalog.RuntimeKey("codex", "exec_command"))
+	if !ok {
+		t.Fatal("Codex exec_command is absent from the canonical catalog")
+	}
+	policy, ok := catalog.Resolve(capabilitycatalog.RuntimePolicyKey("codex", "tools:bash", capSourceRuntimeReport))
+	if !ok || policy.Capability.ID != observed.Capability.ID {
+		t.Fatalf("catalog identities differ: observed=%+v policy=%+v", observed, policy)
+	}
+
+	callKey := localtoolpolicy.ProviderPolicyToolKey("codex", "exec_command")
+	if callKey != "tools:bash" {
+		t.Fatalf("call-time key = %q, want tools:bash", callKey)
+	}
+	lookup := permissionLookupFromRows([]cerebrotoolpolicy.TableRow{{
+		ToolKey: callKey,
+		Title:   "bash",
+		Source:  capSourceRuntimeReport,
+		Effective: cerebrotoolpolicy.Effective{
+			Setting: cerebrotoolpolicy.SettingAllow,
+		},
+	}}, "codex")
+	if lookup["exec_command"] != "allow" {
+		t.Fatalf("Capabilities observed verdict = %q, want allow", lookup["exec_command"])
+	}
+}
+
+func TestMergeCanonicalCapabilityToolsCollapsesLiveBridgeAndPlatformRow(t *testing.T) {
+	t.Parallel()
+
+	tools := []AgentCapabilityTool{
+		{Key: "add_comment", Title: "add_comment", Source: capSourceScan, Permission: "allow", Allowed: true, Enforced: true},
+		{Key: "add_comment", Title: "Add comment", Source: platformcatalog.Source, Permission: "allow", Allowed: true, Available: true, Enforced: true},
+	}
+	got := mergeCanonicalCapabilityTools(tools, "codex")
+	if len(got) != 1 {
+		t.Fatalf("merged tools = %+v, want one canonical add_comment row", got)
+	}
+	if got[0].Source != capSourceScan {
+		t.Fatalf("merged source = %q, want live scan source", got[0].Source)
+	}
+}
 
 func TestCapabilityToolFromPlatformRowReportsCallability(t *testing.T) {
 	denied := capabilityToolFromRow(cerebrotoolpolicy.TableRow{

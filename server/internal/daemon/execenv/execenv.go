@@ -26,11 +26,15 @@ type RepoContextForEnv struct {
 // resources.json on disk for the full structure. This struct only carries
 // fields the meta-skill template needs to render a human-readable summary
 // (URL for github_repo, generic label otherwise).
+// CEREBRO-PATCH(mul-5038-project-resource-decode): backport of upstream MUL-5038 (#5688); drop on next upstream sync.
+// The tags mirror what MarshalJSON emits (context.go). The preparation helper
+// decodes with DisallowUnknownFields, so a name mismatch kills every task whose
+// project has a resource attached.
 type ProjectResourceForEnv struct {
-	ID           string          // server-assigned UUID
-	ResourceType string          // e.g. "github_repo"
-	ResourceRef  json.RawMessage // raw JSONB payload from the API
-	Label        string          // optional user-supplied label
+	ID           string          `json:"id"`              // server-assigned UUID
+	ResourceType string          `json:"resource_type"`   // e.g. "github_repo"
+	ResourceRef  json.RawMessage `json:"resource_ref"`    // raw JSONB payload from the API
+	Label        string          `json:"label,omitempty"` // optional user-supplied label
 }
 
 // PrepareParams holds all inputs needed to set up an execution environment.
@@ -165,6 +169,7 @@ type SkillContextForEnv struct {
 	Description string
 	Content     string
 	Files       []SkillFileContextForEnv
+	AlwaysOn    bool // CEREBRO-PATCH(skill-always-on): FIR-3805 paste this skill's full text into the brief on every run
 }
 
 // SkillFileContextForEnv represents a supporting file within a skill.

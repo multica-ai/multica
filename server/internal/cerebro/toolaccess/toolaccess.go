@@ -34,10 +34,10 @@ type CapabilityLister interface {
 }
 
 type PolicyResolver interface {
+	// Resolve is the tighten-only chain: a lower layer may restrict an
+	// inherited setting, never loosen it. Ordinary tools resolve through this
+	// and must keep doing so — see resolvePolicy.
 	Resolve(ctx context.Context, in toolpolicy.Query) (toolpolicy.Effective, error)
-}
-
-type permissionPolicyResolver interface {
 	ResolvePermission(ctx context.Context, in toolpolicy.Query, actor platformaccess.Actor) (toolpolicy.Effective, error)
 }
 
@@ -186,15 +186,30 @@ func (s *Service) resolvePolicy(ctx context.Context, query toolpolicy.Query, age
 	if bound {
 		permissionKey = capability.Key
 	}
+	query.ToolKey = permissionKey
+
+	// FIR-3781: ordinary tools resolve tighten-only, and that is a security
+	// floor, not an implementation detail.
+	//
+	// Routing every key through ResolvePermission looks like a simplification —
+	// one entry point instead of two — but ResolvePermission sends a non-special
+	// key to ResolveDeclared, which switches the chain to ModeOpenable whenever
+	// cerebro_member_override is on for the workspace (it is on by default).
+	// Openable lets a member-level row LOOSEN a restriction inherited from the
+	// workspace or group; hard floor only ever tightens.
+	//
+	// Measured on production, same runtime and same agent: the effective tool
+	// list shipped in a claim went from ~34KB to ~68KB the moment that routing
+	// changed. Agents were handed roughly twice the tools their administrators
+	// had granted, silently, by a change whose stated purpose was to make
+	// permissions stricter.
+	//
+	// Special keys (platform actions) genuinely need the declared contract —
+	// that is what ResolvePermission is for — so they keep it.
 	if _, special := platformaccess.ForKey(permissionKey); !special {
 		return s.policy.Resolve(ctx, query)
 	}
-	resolver, ok := s.policy.(permissionPolicyResolver)
-	if !ok {
-		return toolpolicy.Effective{}, fmt.Errorf("permission resolver not configured for %s", permissionKey)
-	}
-	query.ToolKey = permissionKey
-	return resolver.ResolvePermission(ctx, query, platformaccess.Actor{
+	return s.policy.ResolvePermission(ctx, query, platformaccess.Actor{
 		Authenticated: true,
 		Agent:         agentActor,
 	})

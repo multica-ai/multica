@@ -23,7 +23,7 @@ type fakeDispatchQueries struct {
 	agents            map[[16]byte]db.Agent
 	runtimes          map[[16]byte]db.AgentRuntime
 	runningTasks      map[[16]byte]int64
-	agentSkills       map[[16]byte][]db.Skill
+	agentSkills       map[[16]byte][]db.ListAgentSkillsRow
 	getErr            error
 	issue             db.Issue
 	getIssueErr       error
@@ -80,7 +80,7 @@ func (f *fakeDispatchQueries) CountRunningTasks(_ context.Context, id pgtype.UUI
 	return f.runningTasks[id.Bytes], nil
 }
 
-func (f *fakeDispatchQueries) ListAgentSkills(_ context.Context, id pgtype.UUID) ([]db.Skill, error) {
+func (f *fakeDispatchQueries) ListAgentSkills(_ context.Context, id pgtype.UUID) ([]db.ListAgentSkillsRow, error) {
 	return f.agentSkills[id.Bytes], nil
 }
 
@@ -242,7 +242,7 @@ func TestTaskDispatcher_DispatchBlockUsesFirstAvailableAgent(t *testing.T) {
 			secondRuntime.Bytes: {ID: secondRuntime, Status: "online"},
 		},
 		runningTasks: map[[16]byte]int64{firstID.Bytes: 1},
-		agentSkills: map[[16]byte][]db.Skill{
+		agentSkills: map[[16]byte][]db.ListAgentSkillsRow{
 			secondID.Bytes: {{Name: "build-skill"}},
 		},
 		issue: db.Issue{ID: issueID, WorkspaceID: workspaceID, Title: "Build"},
@@ -288,7 +288,7 @@ func TestTaskDispatcher_DispatchBlockRejectsRunnerMissingSkill(t *testing.T) {
 	q := &fakeDispatchQueries{
 		agents:      map[[16]byte]db.Agent{agentID.Bytes: {ID: agentID, WorkspaceID: workspaceID, RuntimeID: runtimeID, MaxConcurrentTasks: 1}},
 		runtimes:    map[[16]byte]db.AgentRuntime{runtimeID.Bytes: {ID: runtimeID, Status: "online"}},
-		agentSkills: map[[16]byte][]db.Skill{agentID.Bytes: {}},
+		agentSkills: map[[16]byte][]db.ListAgentSkillsRow{agentID.Bytes: {}},
 		issue:       db.Issue{ID: issueID, WorkspaceID: workspaceID, Title: "Build"},
 	}
 
@@ -314,7 +314,7 @@ func TestTaskDispatcher_DispatchBlockRequiresEveryConfiguredSkill(t *testing.T) 
 	q := &fakeDispatchQueries{
 		agents:      map[[16]byte]db.Agent{agentID.Bytes: {ID: agentID, WorkspaceID: workspaceID, RuntimeID: runtimeID, MaxConcurrentTasks: 1}},
 		runtimes:    map[[16]byte]db.AgentRuntime{runtimeID.Bytes: {ID: runtimeID, Status: "online"}},
-		agentSkills: map[[16]byte][]db.Skill{agentID.Bytes: {{Name: "plan"}}},
+		agentSkills: map[[16]byte][]db.ListAgentSkillsRow{agentID.Bytes: {{Name: "plan"}}},
 		issue:       db.Issue{ID: issueID, WorkspaceID: workspaceID, Title: "Build"},
 	}
 

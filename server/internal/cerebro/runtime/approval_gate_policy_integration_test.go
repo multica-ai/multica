@@ -2,10 +2,9 @@ package runtime
 
 // End-to-end proof for the FIR-2230 reviewer finding: the per-tool policy chain
 // must actually gate real tool calls, not just render in the admin table. These
-// tests drive the real executor path — guardToolCall → guardToolCallViaPolicy →
-// GetAgent (real DB) → toolpolicy.Store.Resolve (real DB chain) → permgate
-// GuardDecision — and assert that an Allow/Ask/Deny row authored on the agent
-// layer changes whether the tool runs.
+// tests drive the real executor path — guardToolCall → Policy Decision Service
+// → real DB chain → permgate GuardDecision — and assert that an
+// Allow/Ask/Deny row authored on the agent layer changes whether the tool runs.
 //
 // They reuse the shared pool + workspace/runtime/user fixture from
 // account_test.go's TestMain, and skip cleanly when no DB is reachable. The
@@ -164,8 +163,8 @@ func TestGateConnectionTool_DenyBlocksAlwaysOn(t *testing.T) {
 // newToolPolicyGatedExecutor builds an executor wired exactly like the
 // toolpolicy gate mode: real queries + real tool-policy store + a gate whose
 // inbox is faked. It also creates a real agent (owner = test user, runtime =
-// test runtime) and returns its id, so guardToolCallViaPolicy's GetAgent lookup
-// resolves the owner + runtime that anchor the chain.
+// test runtime) and returns its id, so the canonical decision service resolves
+// the owner + runtime that anchor the chain.
 func newToolPolicyGatedExecutor(t *testing.T, ap *gateFakeApprovals) (*FirtalGatewayExecutor, pgtype.UUID) {
 	t.Helper()
 	if runtimeAccountTestPool == nil {
@@ -193,7 +192,7 @@ func newToolPolicyGatedExecutor(t *testing.T, ap *gateFakeApprovals) (*FirtalGat
 		logger:     slog.Default(),
 		toolPolicy: toolpolicy.NewStore(pool),
 	}
-	e.SetAccessDecisionObserver(accessdecision.NewObserver(e.toolPolicy, nil, &shadowLedgerWriter{}))
+	e.SetAccessDecisionService(accessdecision.NewService(e.toolPolicy, nil, &shadowLedgerWriter{}))
 	gate := &permgate.Gate{Approvals: ap, PollInterval: time.Millisecond, WaitTimeout: time.Second}
 	e.EnableApprovalGate(gate)
 	return e, agentID

@@ -51,6 +51,16 @@ func (s countingPolicyStub) ResolvePermission(_ context.Context, _ toolpolicy.Qu
 	return toolpolicy.Effective{Setting: toolpolicy.SettingAllow}, nil
 }
 
+type declaredContractPolicyStub struct{}
+
+func (declaredContractPolicyStub) Resolve(_ context.Context, _ toolpolicy.Query) (toolpolicy.Effective, error) {
+	return toolpolicy.Effective{Setting: toolpolicy.SettingAllow}, nil
+}
+
+func (declaredContractPolicyStub) ResolvePermission(_ context.Context, _ toolpolicy.Query, _ platformaccess.Actor) (toolpolicy.Effective, error) {
+	return toolpolicy.Effective{Setting: toolpolicy.SettingDeny}, nil
+}
+
 func TestEffectiveToolWireShapeHasNoLegacyRuntimeGrant(t *testing.T) {
 	body, err := json.Marshal(EffectiveTool{})
 	if err != nil {
@@ -137,6 +147,47 @@ func TestListEffectiveToolsUsesPlatformActionContractForWorkflowHooks(t *testing
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing workflow hook rows: %v", want)
+	}
+}
+
+// TestListEffectiveToolsUsesDeclaredPermissionContractForPlatformKeys keeps the
+// declared-contract routing for the keys it was built for.
+//
+// This test previously asserted the same for ORDINARY tools, which is what made
+// the FIR-3781 regression invisible: routing an ordinary key through
+// ResolvePermission sends it to ResolveDeclared, which resolves ModeOpenable
+// whenever cerebro_member_override is on (default on) — so a member row could
+// loosen an inherited workspace deny, and the effective tool list an agent
+// received in a claim doubled in production. The declared contract is right for
+// platform actions and wrong as a security floor for ordinary tools; see
+// TestOrdinaryToolsResolveThroughTheTightenOnlyChain for the other half.
+func TestListEffectiveToolsUsesDeclaredPermissionContractForPlatformKeys(t *testing.T) {
+	const platformKey = "tools:test-as-user"
+	if _, special := platformaccess.ForKey(platformKey); !special {
+		t.Fatalf("%q is no longer a platform key — pick another one, this test needs a "+
+			"key that genuinely routes through the declared contract", platformKey)
+	}
+
+	service := New(capabilityListStub{views: []capabilityregistry.View{{
+		Key: platformKey, Title: "Test as user", Source: "builtin",
+	}}}, declaredContractPolicyStub{})
+
+	rows, err := service.ListEffectiveTools(context.Background(), Query{
+		RuntimeMode:     "cloud",
+		RuntimeProvider: "firtal-gateway",
+		AgentID:         pgtype.UUID{Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("got %d rows, want 1", len(rows))
+	}
+	if got := rows[0].Policy.Effective; got != AccessDeny {
+		t.Fatalf("platform key policy = %q, want %q from declared permission contract", got, AccessDeny)
+	}
+	if rows[0].ExposureEffective.Effective {
+		t.Fatal("platform key must not be exposed when the declared permission contract denies it")
 	}
 }
 
