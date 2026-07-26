@@ -2080,6 +2080,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					continue
 				}
 				resp.ChatChannelType = string(channelType)
+				resp.ChannelIdentity = h.resolveClaimChannelIdentity(r.Context(), *task, cs.WorkspaceID, binding)
 				if channelType == slack.TypeSlack {
 					// The latest trigger was a thread reply iff its reply-target
 					// thread (last_thread_id) differs from its own message id (a
@@ -2470,6 +2471,99 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	}
 
 	return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil
+}
+
+// resolveClaimChannelIdentity reverses the installation-scoped inbound binding
+// for the direct human attributed to a channel chat task. The result is safe to
+// pass to the daemon as identity metadata, but it is never an authorization
+// input: authenticated channel operations continue to use the task-scoped
+// credential broker. Every relationship is revalidated at claim time because
+// the generalized channel tables deliberately carry no foreign keys.
+func (h *Handler) resolveClaimChannelIdentity(ctx context.Context, task db.AgentTaskQueue, workspaceID pgtype.UUID, chatBinding db.ChannelChatSessionBinding) *ChannelIdentityData {
+	taskID := uuidToString(task.ID)
+	channelType := strings.TrimSpace(chatBinding.ChannelType)
+
+	if !task.InitiatorUserID.Valid ||
+		!task.OriginatorUserID.Valid ||
+		!task.OriginatorSource.Valid ||
+		task.OriginatorSource.String != "direct_human" ||
+		task.InitiatorUserID.Bytes != task.OriginatorUserID.Bytes {
+		slog.Debug("daemon claim: channel identity omitted for non-direct initiator",
+			"task_id", taskID,
+			"channel_type", channelType,
+		)
+		return nil
+	}
+
+	installation, err := h.Queries.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
+		ID:          chatBinding.InstallationID,
+		ChannelType: channelType,
+	})
+	if err != nil {
+		slog.Warn("daemon claim: channel identity omitted",
+			"task_id", taskID,
+			"channel_type", channelType,
+			"reason", "installation_unavailable",
+		)
+		return nil
+	}
+	if installation.Status != "active" ||
+		!workspaceID.Valid ||
+		installation.WorkspaceID.Bytes != workspaceID.Bytes ||
+		installation.AgentID.Bytes != task.AgentID.Bytes {
+		slog.Warn("daemon claim: channel identity omitted",
+			"task_id", taskID,
+			"channel_type", channelType,
+			"reason", "installation_mismatch",
+		)
+		return nil
+	}
+
+	if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+		UserID:      task.InitiatorUserID,
+		WorkspaceID: workspaceID,
+	}); err != nil {
+		slog.Warn("daemon claim: channel identity omitted",
+			"task_id", taskID,
+			"channel_type", channelType,
+			"reason", "initiator_not_member",
+		)
+		return nil
+	}
+
+	bindings, err := h.Queries.ListChannelUserBindingsForClaim(ctx, db.ListChannelUserBindingsForClaimParams{
+		WorkspaceID:    workspaceID,
+		InstallationID: chatBinding.InstallationID,
+		ChannelType:    channelType,
+		MulticaUserID:  task.InitiatorUserID,
+	})
+	if err != nil {
+		slog.Warn("daemon claim: channel identity omitted",
+			"task_id", taskID,
+			"channel_type", channelType,
+			"reason", "binding_lookup_failed",
+		)
+		return nil
+	}
+	if len(bindings) != 1 || strings.TrimSpace(bindings[0].ChannelUserID) == "" {
+		reason := "identity_unbound"
+		if len(bindings) > 1 {
+			reason = "identity_ambiguous"
+		}
+		slog.Warn("daemon claim: channel identity omitted",
+			"task_id", taskID,
+			"channel_type", channelType,
+			"reason", reason,
+			"binding_count", len(bindings),
+		)
+		return nil
+	}
+
+	return &ChannelIdentityData{
+		ChannelType:    channelType,
+		InstallationID: uuidToString(chatBinding.InstallationID),
+		ChannelUserID:  bindings[0].ChannelUserID,
+	}
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.

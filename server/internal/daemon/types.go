@@ -54,6 +54,15 @@ type ProjectResourceData struct {
 // sharing the canonical JSON shape with the runtime app metadata package.
 type ConnectedAppData = runtimeapps.ConnectedApp
 
+// ChannelIdentityData mirrors the optional server-attested channel identity in
+// a daemon claim. ChannelUserID is installation-scoped provider metadata (for
+// Feishu, open_id), not a credential or authorization input.
+type ChannelIdentityData struct {
+	ChannelType    string `json:"channel_type"`
+	InstallationID string `json:"installation_id"`
+	ChannelUserID  string `json:"channel_user_id"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
@@ -89,6 +98,7 @@ type Task struct {
 	NewCommentsSince         string                 `json:"new_comments_since,omitempty"`          // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
 	ChatSessionID            string                 `json:"chat_session_id,omitempty"`             // non-empty for chat tasks
 	ChatChannelType          string                 `json:"chat_channel_type,omitempty"`           // "slack" when the chat session is backed by an IM channel; empty for a web-only chat. Drives the channel-awareness block in the prompt
+	ChannelIdentity          *ChannelIdentityData   `json:"channel_identity,omitempty"`            // server-attested direct-human identity for this channel installation
 	ChatInThread             bool                   `json:"chat_in_thread,omitempty"`              // true when the latest @mention was a thread reply; selects which read command the prompt tells the agent to start with
 	ChatMessage              string                 `json:"chat_message,omitempty"`                // user message content for chat tasks
 	ChatMessageAttachments   []ChatAttachmentMeta   `json:"chat_message_attachments,omitempty"`    // attachments linked to the chat message; agent uses these to `multica attachment download <id>`
