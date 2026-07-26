@@ -19,7 +19,6 @@ import {
   ArrowUpNarrowWide,
   ListCollapse,
   Info,
-  LockKeyhole, // CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 icon for the task permission snapshot.
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
@@ -48,8 +47,8 @@ import {
   type TranscriptFilterKey,
   type TranscriptSortDirection,
 } from "@multica/core/agents/stores";
-// CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 add the task permission snapshot contract.
-import type { AgentTask, Agent, AgentRuntime, TaskAccessSnapshot } from "@multica/core/types/agent";
+// CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 task permission snapshot — re-add TaskAccessSnapshot here when FIR-3388 reaches production.
+import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
 // CEREBRO-PATCH(run-prompt-disclosure): FIR-1839 point 5 — surface the run's full initial prompt in the transcript modal.
 import { RunPromptDisclosure } from "@multica/cerebro-sessions";
 import { redactSecrets } from "./redact";
@@ -772,8 +771,7 @@ export function AgentTranscriptDialog({
 
         {/* CEREBRO-PATCH(run-prompt-disclosure): FIR-1839 point 5 — full initial prompt, openable. */}
         <RunPromptDisclosure task={task} />
-        {/* CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 immutable task permission snapshot. */}
-        <TaskAccessDisclosure taskId={task.id} enabled={open} />
+        {/* CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 task permission snapshot — restore this panel when FIR-3388 reaches production. */}
 
         {/* CEREBRO-PATCH(run-failure-card): FIR-3782 — pass `items`, not `displayItems`: the card must read the true last step regardless of sort and density. */}
         {failureCardEnabled && task.status === "failed" && (
@@ -1126,82 +1124,5 @@ function ToolDetailSurface({ text }: { text: string }) {
         </div>
       )}
     </div>
-  );
-}
-
-// CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 show the immutable task permission snapshot.
-function TaskAccessDisclosure({ taskId, enabled }: { taskId: string; enabled: boolean }) {
-  const [snapshot, setSnapshot] = useState<TaskAccessSnapshot | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [unavailable, setUnavailable] = useState(false);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let cancelled = false;
-    setLoading(true);
-    setUnavailable(false);
-    api.getTaskAccess(taskId)
-      .then((access) => {
-        if (!cancelled) setSnapshot(access);
-      })
-      .catch(() => {
-        if (!cancelled) setUnavailable(true);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [enabled, taskId]);
-
-  if (loading) {
-    return (
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <Loader2 className="h-3 w-3 animate-spin" />
-        Loading task access…
-      </div>
-    );
-  }
-  if (unavailable || !snapshot) {
-    return (
-      <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-        <LockKeyhole className="h-3 w-3" />
-        Task access snapshot unavailable
-      </div>
-    );
-  }
-
-  return (
-    <Collapsible>
-      <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-md border bg-muted/30 px-3 py-2 text-left text-xs hover:bg-muted/50">
-        <LockKeyhole className="h-3.5 w-3.5 text-muted-foreground" />
-        <span className="font-medium">Task access · {snapshot.allowed_tools.length} allowed</span>
-        <span className="ml-auto text-muted-foreground">
-          {snapshot.status === "active" ? "Active run window" : "Run window ended"}
-        </span>
-        <ChevronRight className="h-3.5 w-3.5 text-muted-foreground transition-transform group-data-[state=open]:rotate-90" />
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <div className="rounded-b-md border border-t-0 px-3 py-3 text-xs">
-          <p className="text-muted-foreground">
-            Locked when this run started. Every tool call is checked against this exact list.
-          </p>
-          <div className="mt-2 flex max-h-28 flex-wrap gap-1.5 overflow-y-auto">
-            {snapshot.allowed_tools.length === 0 ? (
-              <span className="text-muted-foreground">No tools were allowed.</span>
-            ) : snapshot.allowed_tools.map((tool) => (
-              <span key={tool} className="rounded border bg-background px-1.5 py-0.5 font-mono text-[10px]">
-                {tool}
-              </span>
-            ))}
-          </div>
-          <p className="mt-2 text-[10px] text-muted-foreground">
-            Issued {new Date(snapshot.issued_at).toLocaleString()} ·
-            expires {new Date(snapshot.expires_at).toLocaleString()}
-          </p>
-        </div>
-      </CollapsibleContent>
-    </Collapsible>
   );
 }
