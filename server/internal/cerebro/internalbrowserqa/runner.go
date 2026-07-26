@@ -771,8 +771,13 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	}()
 
 	if target.AccessHeaders {
-		// The service-token headers are secrets, so the navigation that carries
-		// them goes through batch stdin instead of the argument vector.
+		// The service-token headers are secrets, so they go through batch stdin
+		// instead of the argument vector. agent-browser honors a `--headers`
+		// flag on `open` only when it is a global CLI flag (argv, which would
+		// leak the secrets); inside a batch payload the flag is silently
+		// dropped and the navigation reaches Cloudflare Access without the
+		// token (FIR-3796). The session-level `set headers` command is the one
+		// form that both travels over stdin and applies to the navigation.
 		headers, headerErr := json.Marshal(map[string]string{
 			"CF-Access-Client-Id":     credential.AccessClientID,
 			"CF-Access-Client-Secret": credential.AccessClientSecret,
@@ -780,7 +785,7 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 		if headerErr != nil {
 			return r.failure(target, baseArgs, target.URL, stageError{stage: openStage, kind: commandFailureUnknown})
 		}
-		payload, _ := json.Marshal([][]string{{"open", target.URL, "--headers", string(headers)}})
+		payload, _ := json.Marshal([][]string{{"set", "headers", string(headers)}, {"open", target.URL}})
 		if _, err := r.runStage(ctx, target, openStage, string(payload), append(baseArgs, "batch")...); err != nil {
 			return r.failure(target, baseArgs, target.URL, err)
 		}
