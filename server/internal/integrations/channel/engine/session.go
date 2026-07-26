@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -42,6 +43,8 @@ type SessionQueries interface {
 	CreateChatSession(ctx context.Context, arg db.CreateChatSessionParams) (db.ChatSession, error)
 	CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error)
 	CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error)
+	CreateAttachment(ctx context.Context, arg db.CreateAttachmentParams) (db.Attachment, error)
+	LinkAttachmentsToChatMessage(ctx context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error)
 	TouchChatSession(ctx context.Context, id pgtype.UUID) error
 	GetMostRecentUserChatMessage(ctx context.Context, chatSessionID pgtype.UUID) (db.ChatMessage, error)
 	UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error
@@ -70,6 +73,12 @@ func (a dbSessionQueries) CreateChannelChatSessionBinding(ctx context.Context, a
 }
 func (a dbSessionQueries) CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	return a.q.CreateChatMessage(ctx, arg)
+}
+func (a dbSessionQueries) CreateAttachment(ctx context.Context, arg db.CreateAttachmentParams) (db.Attachment, error) {
+	return a.q.CreateAttachment(ctx, arg)
+}
+func (a dbSessionQueries) LinkAttachmentsToChatMessage(ctx context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error) {
+	return a.q.LinkAttachmentsToChatMessage(ctx, arg)
 }
 func (a dbSessionQueries) TouchChatSession(ctx context.Context, id pgtype.UUID) error {
 	return a.q.TouchChatSession(ctx, id)
@@ -243,12 +252,14 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 type AppendInput struct {
 	SessionID      pgtype.UUID
 	Sender         pgtype.UUID
+	WorkspaceID    pgtype.UUID
 	InstallationID pgtype.UUID
 	Body           string
 	CommandText    string
 	MessageID      string
 	ThreadID       string
 	ClaimToken     pgtype.UUID
+	MediaRefs      []channel.MediaRef
 }
 
 // AppendUserMessage writes the user message into the chat_session (touching it
@@ -257,6 +268,9 @@ type AppendInput struct {
 // ErrClaimLost when a concurrent reclaim rotated the dedup token mid-flight, in
 // which case the whole transaction rolls back (no chat_message lands).
 func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (AppendResult, error) {
+	if len(in.MediaRefs) > 0 && !in.WorkspaceID.Valid {
+		return AppendResult{}, errors.New("append user message: workspace_id is required for media")
+	}
 	tx, err := s.tx.Begin(ctx)
 	if err != nil {
 		return AppendResult{}, fmt.Errorf("begin tx: %w", err)
@@ -280,12 +294,52 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 		}
 	}
 
-	if _, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+	message, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
 		ChatSessionID: in.SessionID,
 		Role:          "user",
 		Content:       in.Body,
-	}); err != nil {
+	})
+	if err != nil {
 		return AppendResult{}, fmt.Errorf("create chat message: %w", err)
+	}
+
+	if len(in.MediaRefs) > 0 {
+		attachmentIDs := make([]pgtype.UUID, 0, len(in.MediaRefs))
+		for _, media := range in.MediaRefs {
+			id, err := uuid.NewV7()
+			if err != nil {
+				return AppendResult{}, fmt.Errorf("create attachment id: %w", err)
+			}
+			attachmentID := pgtype.UUID{Bytes: id, Valid: true}
+			if _, err := qtx.CreateAttachment(ctx, db.CreateAttachmentParams{
+				ID:            attachmentID,
+				WorkspaceID:   in.WorkspaceID,
+				ChatSessionID: in.SessionID,
+				UploaderType:  "member",
+				UploaderID:    in.Sender,
+				Filename:      media.Filename,
+				Url:           media.URL,
+				ContentType:   media.MimeType,
+				SizeBytes:     media.SizeBytes,
+			}); err != nil {
+				return AppendResult{}, fmt.Errorf("create chat attachment: %w", err)
+			}
+			attachmentIDs = append(attachmentIDs, attachmentID)
+		}
+		bound, err := qtx.LinkAttachmentsToChatMessage(ctx, db.LinkAttachmentsToChatMessageParams{
+			ChatMessageID: message.ID,
+			ChatSessionID: in.SessionID,
+			WorkspaceID:   in.WorkspaceID,
+			UploaderType:  "member",
+			UploaderID:    in.Sender,
+			AttachmentIds: attachmentIDs,
+		})
+		if err != nil {
+			return AppendResult{}, fmt.Errorf("link chat attachments: %w", err)
+		}
+		if len(bound) != len(attachmentIDs) {
+			return AppendResult{}, fmt.Errorf("link chat attachments: linked %d of %d", len(bound), len(attachmentIDs))
+		}
 	}
 	if err := qtx.TouchChatSession(ctx, in.SessionID); err != nil {
 		return AppendResult{}, fmt.Errorf("touch chat session: %w", err)

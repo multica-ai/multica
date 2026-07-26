@@ -386,6 +386,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// (inbound pipeline seams) is all it takes to add the platform
 				// to the engine — no engine edit.
 				connector, connectorLabel := buildLarkConnector(installSvc, larkClient)
+				var inboundMedia *lark.InboundMediaService
+				if downloader, ok := larkClient.(lark.MessageResourceDownloader); ok {
+					mediaSvc, mediaErr := lark.NewInboundMediaService(
+						downloader,
+						installSvc,
+						h.Storage,
+						lark.InboundMediaServiceConfig{Logger: slog.Default()},
+					)
+					if mediaErr != nil {
+						slog.Error("lark inbound media init failed", "error", mediaErr)
+					} else {
+						inboundMedia = mediaSvc
+					}
+				} else {
+					slog.Error("lark inbound media disabled: API client cannot download message resources")
+				}
 				lark.RegisterFeishu(channelRegistry, lark.FeishuChannelDeps{
 					Connector:   connector,
 					APIClient:   larkClient,
@@ -393,7 +409,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					Logger:      slog.Default(),
 				})
 				channelRouter.Register(channel.TypeFeishu, lark.NewFeishuResolverSet(
-					cs, feishuSession, auditLogger, resolverReplier, typingIndicator,
+					cs, feishuSession, auditLogger, resolverReplier, typingIndicator, inboundMedia,
 				))
 				slog.Info("lark inbound pipeline wired", "connector", connectorLabel)
 

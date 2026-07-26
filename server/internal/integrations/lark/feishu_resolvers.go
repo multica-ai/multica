@@ -44,12 +44,12 @@ func larkMsgFromRaw(msg channel.InboundMessage) (InboundMessage, error) {
 // shared session service, audit logger, and (optional) outbound replier +
 // typing indicator. Feishu is just another consumer of the channel-agnostic
 // engine.ChatSession — there is no Feishu-specific session implementation.
-func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager) engine.ResolverSet {
+func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager, media *InboundMediaService) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &feishuInstallationResolver{store: store},
 		Identity:     &feishuIdentityResolver{store: store},
 		Dedup:        &feishuDeduper{store: store},
-		Session:      &feishuSessionBinder{session: session},
+		Session:      &feishuSessionBinder{session: session, media: media},
 		Audit:        &feishuAuditor{audit: audit},
 		OriginType:   originFeishuChat,
 	}
@@ -159,7 +159,10 @@ type chatSession interface {
 	AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error)
 }
 
-type feishuSessionBinder struct{ session chatSession }
+type feishuSessionBinder struct {
+	session chatSession
+	media   *InboundMediaService
+}
 
 // larkBindingConfig is the opaque outbound routing persisted on the chat
 // binding's config when the binding key is a composite (Lark topic): the real
@@ -206,15 +209,36 @@ func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.Append
 	if err != nil {
 		return engine.AppendResult{}, err
 	}
+	mediaRefs := p.Message.MediaRefs
+	if r.media != nil && (lm.MessageType == "image" || lm.MessageType == "post") {
+		inst, ok := p.Installation.Platform.(Installation)
+		if !ok {
+			return engine.AppendResult{}, errors.New("lark: resolved installation platform has unexpected type")
+		}
+		refs, err := r.media.IngestMessageImages(
+			ctx,
+			inst,
+			p.Installation.WorkspaceID,
+			p.Message.MessageID,
+			lm.MessageType,
+			lm.RawContent,
+		)
+		if err != nil {
+			return engine.AppendResult{}, err
+		}
+		mediaRefs = append(mediaRefs, refs...)
+	}
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
 		SessionID:      p.SessionID,
 		Sender:         p.Sender,
+		WorkspaceID:    p.Installation.WorkspaceID,
 		InstallationID: p.InstallationID,
 		Body:           p.Message.Text,
 		CommandText:    lm.CommandBody,
 		MessageID:      p.Message.MessageID,
 		ThreadID:       p.Message.Source.ThreadID,
 		ClaimToken:     p.ClaimToken,
+		MediaRefs:      mediaRefs,
 	})
 }
 

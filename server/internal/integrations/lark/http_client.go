@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -595,6 +596,98 @@ func (c *httpAPIClient) GetMessage(ctx context.Context, creds InstallationCreden
 // im/v1/messages page. We clamp to it so a caller asking for more
 // silently gets the max rather than a 400 from Lark.
 const larkListMessagesMaxPageSize = 50
+
+// larkMessageResourceMaxBytes matches Lark's documented maximum for
+// GET /im/v1/messages/{message_id}/resources/{file_key} and Multica's own
+// attachment upload limit. The extra byte read in DownloadMessageResource
+// detects an oversized or misbehaving upstream response without buffering it
+// unboundedly.
+const larkMessageResourceMaxBytes = 100 << 20
+
+// DownloadMessageResource fetches a binary image/file attached to a message.
+// Lark requires the message_id and resource key to match and the `type` query
+// parameter to be either image or file.
+func (c *httpAPIClient) DownloadMessageResource(ctx context.Context, creds InstallationCredentials, messageID, fileKey, resourceType string) (MessageResource, error) {
+	if messageID == "" {
+		return MessageResource{}, errors.New("lark http client: missing message_id")
+	}
+	if fileKey == "" {
+		return MessageResource{}, errors.New("lark http client: missing file_key")
+	}
+	if resourceType != "image" && resourceType != "file" {
+		return MessageResource{}, fmt.Errorf("lark http client: unsupported message resource type %q", resourceType)
+	}
+	token, err := c.tenantAccessToken(ctx, creds)
+	if err != nil {
+		return MessageResource{}, err
+	}
+	q := url.Values{}
+	q.Set("type", resourceType)
+	resourcePath := "/open-apis/im/v1/messages/" + url.PathEscape(messageID) +
+		"/resources/" + url.PathEscape(fileKey) + "?" + q.Encode()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.resolveBaseURL(creds)+resourcePath, nil)
+	if err != nil {
+		return MessageResource{}, fmt.Errorf("lark http client: download message resource: new request: %w", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+token)
+	resp, err := c.cfg.HTTPClient.Do(req)
+	if err != nil {
+		return MessageResource{}, fmt.Errorf("lark http client: download message resource: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		raw, readErr := io.ReadAll(io.LimitReader(resp.Body, 513))
+		if readErr != nil {
+			return MessageResource{}, fmt.Errorf("lark http client: download message resource: http %d", resp.StatusCode)
+		}
+		var apiErr struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+		}
+		if json.Unmarshal(raw, &apiErr) == nil && apiErr.Code != 0 {
+			if isTokenError(apiErr.Code) {
+				c.invalidateToken(creds.AppID)
+			}
+			return MessageResource{}, &APIError{Op: "download message resource", Code: apiErr.Code, Msg: apiErr.Msg}
+		}
+		return MessageResource{}, fmt.Errorf("lark http client: download message resource: http %d: %s",
+			resp.StatusCode, truncate(string(raw), 512))
+	}
+
+	data, err := io.ReadAll(io.LimitReader(resp.Body, larkMessageResourceMaxBytes+1))
+	if err != nil {
+		return MessageResource{}, fmt.Errorf("lark http client: download message resource: read body: %w", err)
+	}
+	if len(data) > larkMessageResourceMaxBytes {
+		return MessageResource{}, fmt.Errorf("lark http client: download message resource exceeds %d bytes", larkMessageResourceMaxBytes)
+	}
+
+	contentType := strings.TrimSpace(resp.Header.Get("Content-Type"))
+	if mediaType, _, parseErr := mime.ParseMediaType(contentType); parseErr == nil {
+		contentType = mediaType
+	}
+	if contentType == "application/json" {
+		var apiErr struct {
+			Code int    `json:"code"`
+			Msg  string `json:"msg"`
+		}
+		if json.Unmarshal(data, &apiErr) == nil && apiErr.Code != 0 {
+			if isTokenError(apiErr.Code) {
+				c.invalidateToken(creds.AppID)
+			}
+			return MessageResource{}, &APIError{Op: "download message resource", Code: apiErr.Code, Msg: apiErr.Msg}
+		}
+	}
+
+	filename := ""
+	if disposition := resp.Header.Get("Content-Disposition"); disposition != "" {
+		if _, params, parseErr := mime.ParseMediaType(disposition); parseErr == nil {
+			filename = params["filename"]
+		}
+	}
+	return MessageResource{Data: data, Filename: filename, ContentType: contentType}, nil
+}
 
 // ListChatMessages retrieves a bounded, recent window of messages via
 // GET /open-apis/im/v1/messages. Where GetMessage fetches a single message

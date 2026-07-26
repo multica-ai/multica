@@ -34,6 +34,12 @@ type InboundMessage struct {
 	// expand while the core stays msg_type-agnostic and only reads Body.
 	MessageType string
 
+	// RawContent is Lark's JSON-encoded message.content string. Text is
+	// flattened into Body, while media consumers parse this field to obtain
+	// resource keys such as image_key without leaking platform-specific
+	// fields into channel.InboundMessage.
+	RawContent string
+
 	// CreateTime is the trigger message's creation time (epoch milliseconds).
 	// The enricher anchors the group recent-context window to it; the typing
 	// indicator uses it to skip stale reactions.

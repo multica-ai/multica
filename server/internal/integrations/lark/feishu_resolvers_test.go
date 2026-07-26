@@ -150,3 +150,100 @@ func TestFeishuSessionBinder_AppendUsesUnenrichedCommandBody(t *testing.T) {
 		t.Errorf("append mapping wrong: %+v", got)
 	}
 }
+
+func TestFeishuSessionBinder_IngestsImageBeforeAppend(t *testing.T) {
+	f := &fakeChatSession{}
+	downloader := &fakeMessageResourceDownloader{resource: MessageResource{
+		Data:        []byte("\x89PNG\r\n\x1a\nimage-body"),
+		ContentType: "image/png",
+	}}
+	media, err := NewInboundMediaService(
+		downloader,
+		fakeInboundMediaCredentials{},
+		&fakeInboundMediaStorage{},
+		InboundMediaServiceConfig{},
+	)
+	if err != nil {
+		t.Fatalf("NewInboundMediaService: %v", err)
+	}
+	b := &feishuSessionBinder{session: f, media: media}
+	inst := Installation{ID: binderUUID(2), WorkspaceID: binderUUID(3), AppID: "cli_1", Region: "feishu"}
+	raw, _ := json.Marshal(InboundMessage{
+		MessageType: "image",
+		RawContent:  `{"image_key":"img_1"}`,
+	})
+	if _, err := b.AppendMessage(context.Background(), engine.AppendParams{
+		SessionID:      binderUUID(1),
+		Sender:         binderUUID(7),
+		InstallationID: inst.ID,
+		Installation: engine.ResolvedInstallation{
+			ID:          inst.ID,
+			WorkspaceID: inst.WorkspaceID,
+			Platform:    inst,
+		},
+		Message: channel.InboundMessage{
+			MessageID: "om_1",
+			Type:      channel.MsgTypeImage,
+			Text:      "[Image]",
+			Raw:       raw,
+		},
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if len(f.appendIn.MediaRefs) != 1 {
+		t.Fatalf("MediaRefs = %v, want one image", f.appendIn.MediaRefs)
+	}
+	if f.appendIn.WorkspaceID != binderUUID(3) || f.appendIn.MediaRefs[0].MimeType != "image/png" {
+		t.Errorf("append media mapping wrong: %+v", f.appendIn)
+	}
+}
+
+func TestFeishuSessionBinder_IngestsPostImageBeforeAppend(t *testing.T) {
+	f := &fakeChatSession{}
+	downloader := &fakeMessageResourceDownloader{resource: MessageResource{
+		Data:        []byte("\x89PNG\r\n\x1a\nimage-body"),
+		ContentType: "image/png",
+	}}
+	media, err := NewInboundMediaService(
+		downloader,
+		fakeInboundMediaCredentials{},
+		&fakeInboundMediaStorage{},
+		InboundMediaServiceConfig{},
+	)
+	if err != nil {
+		t.Fatalf("NewInboundMediaService: %v", err)
+	}
+	b := &feishuSessionBinder{session: f, media: media}
+	inst := Installation{ID: binderUUID(2), WorkspaceID: binderUUID(3), AppID: "cli_1", Region: "feishu"}
+	raw, _ := json.Marshal(InboundMessage{
+		MessageType: "post",
+		RawContent:  `{"title":"","content":[[{"tag":"img","image_key":"img_post_1"},{"tag":"text","text":"图里有什么内容"}]]}`,
+	})
+	if _, err := b.AppendMessage(context.Background(), engine.AppendParams{
+		SessionID:      binderUUID(1),
+		Sender:         binderUUID(7),
+		InstallationID: inst.ID,
+		Installation: engine.ResolvedInstallation{
+			ID:          inst.ID,
+			WorkspaceID: inst.WorkspaceID,
+			Platform:    inst,
+		},
+		Message: channel.InboundMessage{
+			MessageID: "om_post_1",
+			Type:      channel.MsgTypeText,
+			Text:      "[Image] 图里有什么内容",
+			Raw:       raw,
+		},
+	}); err != nil {
+		t.Fatalf("AppendMessage: %v", err)
+	}
+	if !downloader.called || downloader.msgID != "om_post_1" || downloader.key != "img_post_1" {
+		t.Errorf("download call = %+v", downloader)
+	}
+	if len(f.appendIn.MediaRefs) != 1 {
+		t.Fatalf("MediaRefs = %v, want one image", f.appendIn.MediaRefs)
+	}
+	if f.appendIn.MediaRefs[0].MimeType != "image/png" {
+		t.Errorf("append media mapping wrong: %+v", f.appendIn)
+	}
+}

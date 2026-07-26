@@ -20,13 +20,12 @@ import (
 // REST item) carry the mentions array differently — only the caller
 // knows which one applies — so flattening stays mention-agnostic.
 //
-// Non-text media types render as a stable bracketed placeholder so the
-// agent sees that *something* was attached without us downloading the
-// binary. Attachment ingestion is explicitly out of scope (tracked as a
-// separate attachment-pipeline issue), and merge_forward is intercepted
-// by the enricher before it reaches here (expanding it needs an HTTP
-// round-trip); the inline placeholder is only a fallback for a forward
-// nested inside another forward.
+// Non-text media types render as a stable bracketed placeholder. Top-level
+// inbound images and image spans in inbound posts are downloaded later by
+// InboundMediaService; quoted/forwarded media and the other media kinds remain
+// placeholders. merge_forward is intercepted by the enricher before it reaches
+// here because expansion needs an HTTP round-trip; the inline placeholder is
+// only a fallback for a forward nested inside another forward.
 func flattenContent(msgType, rawContent string) string {
 	switch msgType {
 	case "text":
@@ -80,6 +79,7 @@ type larkPostSpan struct {
 	Href     string `json:"href"`
 	UserID   string `json:"user_id"`
 	UserName string `json:"user_name"`
+	ImageKey string `json:"image_key"`
 }
 
 // flattenPostContent flattens a received `post` body.content into plain

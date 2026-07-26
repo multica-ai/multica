@@ -73,6 +73,7 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 		MessageID:    evt.Message.MessageID,
 		SenderOpenID: OpenID(evt.Sender.SenderID.OpenID),
 		MessageType:  evt.Message.MessageType,
+		RawContent:   evt.Message.Content,
 		CreateTime:   evt.Message.CreateTime,
 		// parent_id / root_id are populated by Lark only in reply
 		// scenarios. The enricher keys quoted-reply expansion off
@@ -91,14 +92,13 @@ func (d *LarkJSONFrameDecoder) Decode(payload []byte, inst Installation) (Inboun
 		botUnionID = inst.BotUnionID.String
 	}
 
-	// text + post are flattened synchronously here (no external calls —
-	// the decoder must stay fast and dependency-free). merge_forward
-	// leaves Body empty: it needs an HTTP round-trip to expand and is
-	// handled downstream by the enricher, which keys off MessageType.
-	// Other types (image, file, …) also leave Body empty in this MVP;
-	// attachment ingestion is a separate issue.
+	// Text, post, and image are flattened synchronously here (no external
+	// calls — the decoder must stay fast and dependency-free). Image keeps a
+	// visible placeholder while its binary resource is downloaded later by
+	// the Feishu session binder. merge_forward leaves Body empty because it
+	// needs an HTTP round-trip to expand and is handled by the enricher.
 	switch evt.Message.MessageType {
-	case "text", "post":
+	case "text", "post", "image":
 		msg.Body = resolveMentions(flattenContent(evt.Message.MessageType, evt.Message.Content),
 			evt.Message.Mentions, inst.BotOpenID, botUnionID)
 	}

@@ -124,6 +124,22 @@ type APIClient interface {
 	DeleteMessageReaction(ctx context.Context, p DeleteReactionParams) error
 }
 
+// MessageResourceDownloader is the binary-resource slice of the Lark API.
+// Kept separate from APIClient so outbound-only fakes do not need to implement
+// an inbound attachment method they never exercise.
+type MessageResourceDownloader interface {
+	DownloadMessageResource(ctx context.Context, creds InstallationCredentials, messageID, fileKey, resourceType string) (MessageResource, error)
+}
+
+// MessageResource is one binary object downloaded from a Lark message.
+// ResourceType is supplied by the caller ("image" or "file"); the response
+// headers provide the remaining metadata.
+type MessageResource struct {
+	Data        []byte
+	Filename    string
+	ContentType string
+}
+
 // ListMessagesParams selects a bounded, recent window of messages in a
 // single Lark chat for the group-context prefetch. Only the fields the
 // enricher needs today are exposed (ChatID, ThreadID, PageSize, EndTime);

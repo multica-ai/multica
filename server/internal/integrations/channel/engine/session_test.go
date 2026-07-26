@@ -37,8 +37,11 @@ func (fakeTxStarter) Begin(context.Context) (pgx.Tx, error) { return fakeTx{}, n
 type fakeSessionQueries struct {
 	bindings        map[string]pgtype.UUID
 	nextSession     byte
+	nextMessage     byte
 	createdSessions int
 	messages        []string
+	attachments     []db.CreateAttachmentParams
+	linked          []pgtype.UUID
 	touched         int
 	replyTargets    int
 	lockedWorkspace int    // count of LockWorkspaceForChatSessionCreate calls
@@ -89,7 +92,18 @@ func (f *fakeSessionQueries) CreateChannelChatSessionBinding(_ context.Context, 
 
 func (f *fakeSessionQueries) CreateChatMessage(_ context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	f.messages = append(f.messages, arg.Content)
-	return db.ChatMessage{}, nil
+	f.nextMessage++
+	return db.ChatMessage{ID: uid(f.nextMessage + 100)}, nil
+}
+
+func (f *fakeSessionQueries) CreateAttachment(_ context.Context, arg db.CreateAttachmentParams) (db.Attachment, error) {
+	f.attachments = append(f.attachments, arg)
+	return db.Attachment{ID: arg.ID}, nil
+}
+
+func (f *fakeSessionQueries) LinkAttachmentsToChatMessage(_ context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error) {
+	f.linked = append(f.linked, arg.AttachmentIds...)
+	return arg.AttachmentIds, nil
 }
 
 func (f *fakeSessionQueries) TouchChatSession(context.Context, pgtype.UUID) error {
@@ -235,6 +249,43 @@ func TestAppendUserMessage_PlainText(t *testing.T) {
 	}
 	if f.touched != 1 || f.replyTargets != 1 {
 		t.Errorf("touched=%d replyTargets=%d, want 1/1", f.touched, f.replyTargets)
+	}
+}
+
+func TestAppendUserMessage_CreatesAndLinksInboundMedia(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	_, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID:   uid(1),
+		Sender:      uid(7),
+		WorkspaceID: uid(8),
+		Body:        "[Image]",
+		MediaRefs: []channel.MediaRef{{
+			Type:       channel.MsgTypeImage,
+			StorageKey: "workspaces/ws/channels/feishu/image.png",
+			URL:        "https://storage.example/image.png",
+			Filename:   "feishu-image.png",
+			MimeType:   "image/png",
+			SizeBytes:  4,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if len(f.attachments) != 1 {
+		t.Fatalf("created attachments = %d, want 1", len(f.attachments))
+	}
+	got := f.attachments[0]
+	if got.WorkspaceID != uid(8) || got.ChatSessionID != uid(1) ||
+		got.UploaderType != "member" || got.UploaderID != uid(7) {
+		t.Errorf("attachment ownership mapping wrong: %+v", got)
+	}
+	if got.Filename != "feishu-image.png" || got.ContentType != "image/png" ||
+		got.SizeBytes != 4 || got.Url != "https://storage.example/image.png" {
+		t.Errorf("attachment metadata mapping wrong: %+v", got)
+	}
+	if len(f.linked) != 1 || f.linked[0] != got.ID {
+		t.Errorf("linked attachment ids = %v, want [%v]", f.linked, got.ID)
 	}
 }
 

@@ -337,6 +337,7 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
 		SessionID:      p.SessionID,
 		Sender:         p.Sender,
+		WorkspaceID:    p.Installation.WorkspaceID,
 		InstallationID: p.InstallationID,
 		Body:           p.Message.Text,
 		// Slack text is not enriched, so the command source is the body itself.

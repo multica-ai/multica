@@ -92,6 +92,7 @@ type EnsureSessionParams struct {
 type AppendParams struct {
 	SessionID      pgtype.UUID
 	Sender         pgtype.UUID
+	Installation   ResolvedInstallation
 	InstallationID pgtype.UUID
 	Message        channel.InboundMessage
 	ClaimToken     pgtype.UUID

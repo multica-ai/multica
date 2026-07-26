@@ -263,6 +263,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	appendRes, err := set.Session.AppendMessage(ctx, AppendParams{
 		SessionID:      sessionID,
 		Sender:         identity.UserID,
+		Installation:   inst,
 		InstallationID: inst.ID,
 		Message:        msg,
 		ClaimToken:     claimToken,
