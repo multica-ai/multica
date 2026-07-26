@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ListChecks, ExternalLink } from "lucide-react";
+import { ExternalLink } from "lucide-react";
 import {
   artifactsByIssueOptions,
   planVersionsOptions,
@@ -21,6 +21,8 @@ import { useNavigation } from "@multica/views/navigation";
 import { StatusIcon } from "@multica/views/issues/components";
 import { cn } from "@multica/ui/lib/utils";
 import { Checkbox } from "@multica/ui/components/ui/checkbox";
+import { Separator } from "@multica/ui/components/ui/separator";
+import { WorkpadProgressCircle } from "./workpad-progress-circle";
 
 // StepList renders one flat run of checklist steps. `subdued` renders the steps
 // one step lighter than the phase titles they sit under, so a phase's sub-steps
@@ -36,11 +38,21 @@ function StepList({
     <ul className="flex flex-col gap-1.5">
       {items.map((item, i) => (
         <li key={i} className="flex items-start gap-2 text-sm">
+          {/* A step's box is a read-only MARKER, not an input. It uses
+              `readOnly` rather than `disabled` on purpose: `disabled` pulls in
+              the shared Checkbox's `disabled:opacity-50`, which on top of the
+              already-faint `border-input` left the empty boxes almost invisible
+              against the panel's muted background. `readOnly` keeps full
+              opacity, and the stronger border below gives the unchecked box a
+              visible edge. `tabIndex={-1}` keeps this aria-hidden marker out of
+              the tab order (a readOnly checkbox, unlike a disabled one, is
+              still focusable). */}
           <Checkbox
             checked={item.done}
-            disabled
+            readOnly
+            tabIndex={-1}
             aria-hidden="true"
-            className="mt-0.5 shrink-0"
+            className="mt-0.5 shrink-0 border-muted-foreground/60"
           />
           <span
             className={cn(
@@ -100,12 +112,12 @@ function PhaseSection({
   );
 }
 
-// FIR-3659 — WorkpadPanel renders the issue's PLAN as a checklist directly
-// above the composer. It is driven entirely by the presence of a `kind: "plan"`
-// artifact coupled to the issue: no plan → renders nothing; a plan exists → the
-// panel appears automatically, with no agent action required. Clicking the
-// title opens the plan note (where its version history lives). Gated by the
-// cerebro_workpad feature flag.
+// FIR-3659 — WorkpadPanel renders the issue's PLAN as a checklist at the very
+// bottom of the issue, below the composer. It is driven entirely by the presence
+// of a `kind: "plan"` artifact coupled to the issue: no plan → renders nothing;
+// a plan exists → the panel appears automatically, with no agent action
+// required. Clicking the title opens the plan note (where its version history
+// lives). Gated by the cerebro_workpad feature flag.
 //
 // FIR-3765 — when the plan groups its steps under markdown headings (phases),
 // each phase renders as a collapsible section headed by a status icon that
@@ -117,6 +129,11 @@ function PhaseSection({
 // Everything starts folded: the panel itself opens collapsed (the Workpad icon
 // toggles it) and so does every phase, so the panel reads as a compact status
 // line until the reader asks for detail.
+//
+// The header's own icon is a WorkpadProgressCircle — the same circle the phases
+// use, but filled proportionally to the whole plan's progress, so the collapsed
+// panel shows at a glance how far the plan has come. When expanded, a rule
+// separates the heading from the plan title beneath it.
 export function WorkpadPanel({ issueId, className }: { issueId: string; className?: string }) {
   const enabled = useFeatureFlag("cerebro_workpad");
   const wsId = useWorkspaceId();
@@ -175,9 +192,9 @@ export function WorkpadPanel({ issueId, className }: { issueId: string; classNam
           aria-expanded={open}
           aria-label="Toggle Workpad"
           title="Toggle Workpad"
-          className="-m-1 shrink-0 rounded-sm p-1 text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          className="-m-1 shrink-0 rounded-sm p-1 hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-ring"
         >
-          <ListChecks className="size-4" />
+          <WorkpadProgressCircle progress={{ done, total }} className="size-4" />
         </button>
         <button
           type="button"
@@ -197,7 +214,11 @@ export function WorkpadPanel({ issueId, className }: { issueId: string; classNam
 
       {open && (
         <>
-          <p className="mt-0.5 flex items-center gap-1.5 text-xs text-muted-foreground">
+          {/* A rule separates the Workpad heading from the plan it is showing,
+              so the expanded panel reads as a titled section instead of two
+              stacked lines. */}
+          <Separator className="mt-2" />
+          <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
             {plan.title && <span className="truncate">{plan.title}</span>}
             {versionCount > 0 && (
               <>

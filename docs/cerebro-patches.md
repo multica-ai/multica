@@ -1805,7 +1805,7 @@ listening on `before.issue.status_change` exists.
 | `daemon-task-workpad-brief` | `server/internal/daemon/types.go`, `server/internal/daemon/daemon.go` | `WorkpadBriefEnabled` on the daemon `Task` (JSON from the claim response) and its copy into `TaskContextForEnv`. |
 | `agent-task-workpad-brief` | `server/internal/handler/agent.go` | `WorkpadBriefEnabled` field on `AgentTaskResponse` so the claim response ships the workspace verdict to the daemon. |
 | `daemon-workpad-brief` | `server/internal/handler/daemon.go` | One-line `h.applyWorkpadBrief(...)` call at claim (resolver lives in the cerebro-prefixed `daemon_workpad_brief_cerebro.go`). |
-| `issue-workpad-panel` | `packages/views/issues/components/issue-detail.tsx` | Import + one-line `<WorkpadPanel issueId={issue.id} />` render directly above the bottom composer, showing the issue's plan (a `kind:"plan"` artifact) as a checklist. Logic lives in `packages/cerebro-artifacts`. |
+| `issue-workpad-panel` | `packages/views/issues/components/issue-detail.tsx` | Import + one-line `<WorkpadPanel issueId={issue.id} />` render at the very bottom of the issue, BELOW the bottom composer (moved from above it in the FIR-3765 review), showing the issue's plan (a `kind:"plan"` artifact) as a checklist. Logic lives in `packages/cerebro-artifacts`. |
 | `one-plan-per-issue` | `server/internal/handler/artifact.go` | One-line `h.rejectSecondIssuePlan(...)` call in CreateArtifact so an issue can hold at most one `plan` artifact (the Workpad's source). Logic lives in `artifact_one_plan_per_issue_cerebro.go`. |
 
 ## FIR-3729 — Cursor tool-policy key normalization
