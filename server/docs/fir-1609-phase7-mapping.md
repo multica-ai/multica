@@ -39,21 +39,21 @@
   (credential calls are actor-driven, not human-less autopilot runs); `SystemID` absent.
 - Owners never reach this checker — `OwnerPolicyChecker` short-circuits Allow first in the chain.
 
-## FIR-3388 follow-up: the constant resolver is retired
-<!-- CEREBRO-PATCH(credential-floor-doc): FIR-3388 records the retired duplicate resolver. -->
-
-After `cerebro_workspace_grant` was dropped, the remaining resolver returned Deny for every
-request and wrote duplicate activity rows without contributing a decision. FIR-3388 replaces
-that call with the same direct Deny floor inside the credential policy. The canonical
-tool-policy chain still evaluates System/runtime/agent/group/user/condition rows, so access does
-not widen.
+## Why keep the grant lookup (not a literal "rip out the resolver")
+Deny-by-default in a tighten-only chain is *only* achievable by projecting grant-state into the
+chain at resolve time (the Phase 5 pattern). The grant lookup is the source of that projection;
+it cannot be dropped without losing deny-by-default. The chain becomes the **decision engine on
+top of the projected floor** — that is the "swap": the verdict now flows through `toolpolicy`
+(so System/runtime/user/group/condition caps apply to credentials too), while grant-state feeds
+the floor. The full `cerebropermissions.Resolver` decision logic is replaced by the chain; only a
+thin grant-state lookup remains to compute granted/approval/not-granted.
 
 ## Outcome (post adversarial review)
 Two adversarial passes were run (Codex CLI not present in this runtime → adversarial
 reviewer subagent on the memo, then on the concrete diff). The memo's first design
 (external `max()` fold marketed as "mirror Phase 5") was rejected as unsafe. The
-**implemented** design keeps a deny-by-default floor and layers the toolpolicy chain as a
-tighten-only cap: `final =
+**implemented** design instead keeps the resolver as the deny-by-default grant floor
+and layers the toolpolicy chain as a tighten-only cap: `final =
 MoreRestrictive(grantFloor, adminCap)`, so the verdict is provably never looser than
 today. Second review verdict: **SAFE TO COMMIT** — no default-allow hole, every error
 path fails closed, cap proven tighten-only (tested 3×3). Tracked follow-ups: the caps

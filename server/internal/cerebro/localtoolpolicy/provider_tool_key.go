@@ -6,7 +6,6 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"github.com/multica-ai/multica/server/internal/cerebro/capabilitycatalog"
 	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
 )
 
@@ -19,8 +18,28 @@ const unavailableProviderToolKey = "tools:__provider_lookup_failed__"
 // ProviderPolicyToolKey maps a provider-native hook name to the capability key
 // stored in the runtime inventory and immutable task mandate.
 func ProviderPolicyToolKey(provider, toolName string) string {
-	canonicalName := capabilitycatalog.CanonicalRuntimeToolName(provider, toolName)
+	canonicalName := providerCanonicalToolName(provider, toolName)
 	return claudehook.PolicyToolKey(canonicalName)
+}
+
+func providerCanonicalToolName(provider, toolName string) string {
+	if provider == "cursor" {
+		switch toolName {
+		case "Shell":
+			return "run_terminal_cmd"
+		case "Read":
+			return "read_file"
+		case "Write", "StrReplace", "Delete":
+			return "edit_file"
+		case "Grep":
+			return "grep_search"
+		case "Glob":
+			return "file_search"
+		case "WebSearch":
+			return "web_search"
+		}
+	}
+	return toolName
 }
 
 // ProviderResourcePattern extracts the concrete resource from provider-native

@@ -15,7 +15,7 @@ import (
 // to the stable identity established by the capability catalog. Dynamic
 // connection tools use their endpoint/tool identity; ordinary Gateway tools
 // must also be present in the declared callable inventory. Anything else stays
-// unknown so the service fails closed instead of minting an identity from input.
+// unknown so the shadow fails closed instead of minting an identity from input.
 func canonicalGatewayCapabilityID(toolName string, registry *Registry) string {
 	if registry != nil {
 		tool, ok := registry.Get(toolName)
@@ -38,12 +38,13 @@ func canonicalGatewayCapabilityID(toolName string, registry *Registry) string {
 		}
 	}
 
-	// Use the same combined inventory that feeds registration. It contains
-	// bridge tools, Gateway-native tools, and built-in connection-family tools,
-	// so a registered implementation cannot lose its canonical identity through
-	// a second, narrower list.
-	for _, callable := range callableBuiltinToolNames() {
-		if callable == toolName {
+	for _, declared := range declaredCallableToolNames() {
+		if declared == toolName {
+			return capabilitycatalog.PlatformTool(toolName).ID
+		}
+	}
+	for _, native := range GatewayNativeToolNames() {
+		if native == toolName {
 			return capabilitycatalog.PlatformTool(toolName).ID
 		}
 	}
@@ -66,15 +67,15 @@ func (e *FirtalGatewayExecutor) decideAccess(
 	meta GatewayRequestMeta,
 	requestContext toolpolicy.RequestContext,
 ) accessdecision.Entry {
-	if e == nil || e.accessDecisions == nil || e.queries == nil {
-		return accessdecision.Entry{Decision: accessdecision.DecisionDeny, Reason: "policy decision service unavailable"}
+	if e == nil || e.accessDecisionObserver == nil || e.queries == nil {
+		return accessdecision.Entry{ShadowDecision: accessdecision.DecisionDeny, Reason: "policy decision service unavailable"}
 	}
 	agent, err := e.queries.GetAgent(ctx, agentID)
 	if err != nil {
 		if e.logger != nil {
-			e.logger.Warn("policy decision service: agent identity lookup failed", "agent_id", meta.AgentID, "tool_name", toolName, "error", err)
+			e.logger.Warn("access decision shadow: agent identity lookup failed", "agent_id", meta.AgentID, "tool_name", toolName, "error", err)
 		}
-		return accessdecision.Entry{Decision: accessdecision.DecisionDeny, Reason: "agent identity lookup failed"}
+		return accessdecision.Entry{ShadowDecision: accessdecision.DecisionDeny, Reason: "agent identity lookup failed"}
 	}
 
 	onBehalfOfID := optionalGatewayUUID(meta.TriggerUserID)
@@ -90,7 +91,7 @@ func (e *FirtalGatewayExecutor) decideAccess(
 			evidenceLevel = availabilityevidence.LevelDiscovered
 		}
 	}
-	return e.accessDecisions.Decide(ctx, accessdecision.Call{
+	return e.accessDecisionObserver.Decide(ctx, accessdecision.Call{
 		WorkspaceID:           workspaceID,
 		AgentID:               agentID,
 		RuntimeID:             agent.RuntimeID,
@@ -101,6 +102,8 @@ func (e *FirtalGatewayExecutor) decideAccess(
 		IssueID:               optionalGatewayUUID(meta.IssueID),
 		CanonicalCapabilityID: capabilityID,
 		ObservedToolName:      toolName,
+		LegacyDecision:        accessdecision.DecisionDeny,
+		LegacyPath:            "policy_decision_service",
 		IsSystem:              isSystem,
 		RequestContext:        requestContext,
 		EvidenceLevel:         evidenceLevel,

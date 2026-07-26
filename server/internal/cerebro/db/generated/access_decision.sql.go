@@ -61,3 +61,56 @@ func (q *Queries) AppendCerebroAccessDecisionLedger(ctx context.Context, arg App
 	)
 	return err
 }
+
+const reportCerebroAccessDecisionLedger = `-- name: ReportCerebroAccessDecisionLedger :many
+SELECT
+    agent_id,
+    runtime_id,
+    COALESCE(canonical_capability_id, observed_tool_name) AS tool,
+    CASE
+        WHEN COUNT(DISTINCT policy_decision) = 1 THEN MIN(policy_decision)
+        ELSE ''::text
+    END AS policy_decision,
+    COUNT(*)::bigint AS total,
+    COUNT(*) FILTER (WHERE differs)::bigint AS diffs
+FROM cerebro_access_decision_ledger
+WHERE workspace_id = $1
+GROUP BY agent_id, runtime_id, COALESCE(canonical_capability_id, observed_tool_name)
+ORDER BY agent_id, runtime_id, tool
+`
+
+type ReportCerebroAccessDecisionLedgerRow struct {
+	AgentID        pgtype.UUID `json:"agent_id"`
+	RuntimeID      pgtype.UUID `json:"runtime_id"`
+	Tool           string      `json:"tool"`
+	PolicyDecision string      `json:"policy_decision"`
+	Total          int64       `json:"total"`
+	Diffs          int64       `json:"diffs"`
+}
+
+func (q *Queries) ReportCerebroAccessDecisionLedger(ctx context.Context, workspaceID pgtype.UUID) ([]ReportCerebroAccessDecisionLedgerRow, error) {
+	rows, err := q.db.Query(ctx, reportCerebroAccessDecisionLedger, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ReportCerebroAccessDecisionLedgerRow{}
+	for rows.Next() {
+		var i ReportCerebroAccessDecisionLedgerRow
+		if err := rows.Scan(
+			&i.AgentID,
+			&i.RuntimeID,
+			&i.Tool,
+			&i.PolicyDecision,
+			&i.Total,
+			&i.Diffs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}

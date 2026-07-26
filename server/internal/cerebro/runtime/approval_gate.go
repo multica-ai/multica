@@ -139,8 +139,8 @@ func (e *FirtalGatewayExecutor) connectionToolSetting(
 
 // guardConnectionAsk routes an Ask verdict on a workspace-connection tool through
 // the shared approval gate: it creates an inbox request and BLOCKS until a human
-// approves (continue) or rejects/expires (stop), reusing the canonical
-// GuardDecision machinery. A gate error fails closed —
+// approves (continue) or rejects/expires (stop), reusing exactly the same
+// GuardDecision machinery as guardToolCallViaPolicy. A gate error fails closed —
 // an Ask is never silently downgraded to allow (TECH-3498).
 func (e *FirtalGatewayExecutor) guardConnectionAsk(
 	ctx context.Context,
@@ -217,7 +217,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	var decision, connNameLog string
 	if toolName == "create_issue" {
 		entry := e.decideAccess(ctx, agentID, workspaceID, toolName, reg, meta, gatewayPolicyRequestContext(toolName, args))
-		if entry.Decision != accessdecision.DecisionAllow {
+		if entry.ShadowDecision != accessdecision.DecisionAllow {
 			return false, entry.Reason
 		}
 		decision = "policy_decision_service+platform_action"
@@ -282,7 +282,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 		decision = "policy_decision_service+ask"
 		return e.guardCanonicalAsk(ctx, agentID, workspaceID, toolName, args, meta, entry.Reason)
 	}
-	if entry.Decision != accessdecision.DecisionAllow {
+	if entry.ShadowDecision != accessdecision.DecisionAllow {
 		return false, entry.Reason
 	}
 	// Connection Ask remains a safety floor on top of the authoritative Policy
@@ -430,6 +430,176 @@ func (e *FirtalGatewayExecutor) logToolDecision(meta GatewayRequestMeta, toolNam
 	e.logger.Warn("runtime tool decision (FIR-2243 B1)", append(attrs, "reason", reason)...)
 }
 
+// guardToolCallViaPolicy enforces the FIR-2230 per-tool permission chain for one
+// tool call. It resolves the tool through Runtime › Agent › Group › User for the
+// agent's owner — the principal whose ceiling the agent runs under — and maps
+// the Effective verdict: Allow proceeds immediately, Deny stops, Ask creates an
+// inbox request and BLOCKS until a human approves (continue) or rejects/expires
+// (stop), reusing the same gate machinery as the capability path. Any lookup or
+// gate error fails closed.
+func (e *FirtalGatewayExecutor) guardToolCallViaPolicy(
+	ctx context.Context,
+	agentID, workspaceID pgtype.UUID,
+	toolName string,
+	args map[string]any,
+	meta GatewayRequestMeta,
+) (bool, string) {
+	// The chain's user ceiling is the agent's owner; the runtime layer is the
+	// agent's runtime. Both come from the agent row. resolveGroupIDs (in the
+	// store) expands the owner's real groups for the Group layer.
+	var runtimeID, ownerID pgtype.UUID
+	if agentID.Valid {
+		agent, err := e.queries.GetAgent(ctx, agentID)
+		if err != nil {
+			e.logger.Warn("tool-policy gate: agent lookup failed — failing closed",
+				"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName, "error", err)
+			return false, fmt.Sprintf("tool-policy gate error: %v", err)
+		}
+		runtimeID = agent.RuntimeID
+		ownerID = agent.OwnerID
+	}
+
+	// A run with no triggering human is a System run (autopilot / system-triggered):
+	// there is no one to answer an approval prompt, so the chain treats any Ask it
+	// would resolve to as Deny — fail-safe (FIR-1609). The owner's User ceiling is
+	// still loaded below, so a System run is never looser than the same agent driven
+	// by its owner; IsSystem only adds the Ask→Deny safety on top.
+	isSystemRun := meta.TriggerUserID == ""
+
+	// The System layer's subject is the autopilot that drives the human-less run —
+	// the autopilot is the System actor, born from its owner (FIR-1609). It only
+	// enters resolution for a system run that carries one; a malformed id is left
+	// absent (the layer inherits) rather than failing the gate, since the owner's
+	// User ceiling plus the Ask→Deny fail-safe already bound the run.
+	var systemID pgtype.UUID
+	if isSystemRun && meta.AutopilotID != "" {
+		if id, perr := util.ParseUUID(meta.AutopilotID); perr == nil {
+			systemID = id
+		}
+	}
+
+	// The request attributes a Condition (the WHEN layer) is matched against: the
+	// host the call targets (parsed from a url arg when the tool carries one,
+	// web_fetch and the like) and the action verb derived from the tool key. The
+	// tool names this gate sees are the runtime's own snake_case names (web_fetch,
+	// credential_list …), not verbed dotted capability keys, so ActionOf yields ""
+	// here today — the derivation is wired for when repo/credential capabilities
+	// resolve through this chain. A rule with a host- or action-scoped Condition
+	// only bites when those match; rows without a Condition (every row today)
+	// ignore this entirely, so it is behaviour-preserving until conditions exist.
+	reqCtx := toolpolicy.RequestContext{Action: toolpolicy.ActionOf(toolName)}
+	if u, ok := args["url"].(string); ok {
+		reqCtx.Host = toolpolicy.HostOf(u)
+	}
+
+	// This is the GENERAL tool-policy gate, so it resolves through ResolveGeneral:
+	// when cerebro_member_override is on for the workspace it
+	// uses the member-override model (a member may loosen an inherited group/
+	// workspace default), otherwise it is identical to the tighten-only Resolve.
+	// The deny-by-default floors (credentials, sandbox, repo checkout, repo-
+	// approval cap) resolve through Resolve elsewhere and never reach this path.
+	eff, err := e.toolPolicy.ResolveGeneral(ctx, toolpolicy.Query{
+		WorkspaceID:    workspaceID,
+		ToolKey:        toolName,
+		RuntimeID:      runtimeID,
+		AgentID:        agentID,
+		UserID:         ownerID,
+		SystemID:       systemID,
+		IsSystem:       isSystemRun,
+		RequestContext: reqCtx,
+		// The CEL evaluator for the Expr escape hatch is injected only when the
+		// default-OFF cerebro_policy_cel flag is on for the workspace. While off,
+		// Eval stays nil — a row with a non-empty Expr is undecidable and fails
+		// closed by effect (ConditionedSetting). No row carries an Expr today, so
+		// the flag's default keeps behaviour identical until it is turned on.
+		Eval: e.policyCELEvaluator(ctx, workspaceID),
+	}, e.memberOverrideEnabled(ctx, workspaceID))
+	if err != nil {
+		e.logger.Warn("tool-policy gate: resolve failed — failing closed",
+			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName, "error", err)
+		return false, fmt.Sprintf("tool-policy gate error: %v", err)
+	}
+
+	// FIR-3091 punkt 8 fase 3: usage log — one row per applied gateway verdict,
+	// so the permission detail page can show every time this tool's policy was
+	// enforced on the gateway. Best-effort after the decision resolved.
+	e.toolPolicy.RecordUsage(ctx, toolpolicy.UsageParams{
+		WorkspaceID:      workspaceID,
+		ToolKey:          toolName,
+		EnforcementPoint: "gateway_tool",
+		SubjectType:      "agent",
+		SubjectID:        agentID,
+		Resource:         reqCtx.Host,
+		Decision:         eff.Setting,
+		DecidedBy:        string(eff.DecidedBy),
+	})
+
+	decision := toolPolicyDecision(eff)
+	if decision.Kind == permissions.DecisionAllow {
+		// Fast path: no ask, no await, no inbox row for an allowed tool.
+		return true, ""
+	}
+
+	req := permgate.Request{
+		Permission: permissions.Request{
+			WorkspaceID: workspaceID,
+			Actor:       permissions.Actor{Type: "agent", ID: agentID},
+			Agent:       agentID,
+			Capability:  toolName,
+		},
+		RequesterType: approvals.RequesterAgent,
+		RequesterID:   agentID,
+		Surface:       approvals.SurfaceSystem,
+		Context: map[string]any{
+			"tool_name": toolName,
+			"task_id":   meta.TaskID,
+			"issue_id":  meta.IssueID,
+			"args":      args,
+			"effective": string(eff.Setting),
+			"reason":    eff.Reason,
+		},
+	}
+
+	res, err := e.gate.GuardDecision(ctx, req, decision)
+	if err != nil {
+		e.logger.Warn("tool-policy gate error — failing closed",
+			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName,
+			"effective", string(eff.Setting), "error", err)
+		return false, fmt.Sprintf("permission gate error: %v", err)
+	}
+	e.logger.Info("tool-policy gate decision",
+		"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName,
+		"effective", string(eff.Setting), "system_run", isSystemRun,
+		"outcome", string(res.Outcome), "reason", eff.Reason)
+	if res.Outcome.Stops() {
+		reason := res.Reason
+		if reason == "" {
+			reason = eff.Reason
+		}
+		if reason == "" {
+			reason = string(res.Outcome)
+		}
+		return false, reason
+	}
+	return true, ""
+}
+
+// toolPolicyDecision maps a resolved tool-policy verdict to the permission
+// decision the gate acts on: Allow → allow, Ask → needs_approval (inbox + wait),
+// Deny → deny. Resolve never returns Inherit; any unexpected value fails closed.
+func toolPolicyDecision(eff toolpolicy.Effective) permissions.Decision {
+	switch eff.Setting {
+	case toolpolicy.SettingAllow:
+		return permissions.Decision{Kind: permissions.DecisionAllow, Reason: eff.Reason}
+	case toolpolicy.SettingAsk:
+		return permissions.Decision{Kind: permissions.DecisionNeedsApproval, Reason: eff.Reason}
+	case toolpolicy.SettingDeny:
+		return permissions.Decision{Kind: permissions.DecisionDeny, Reason: eff.Reason}
+	default:
+		return permissions.Decision{Kind: permissions.DecisionDeny, Reason: "unresolved tool policy"}
+	}
+}
+
 // workspaceApprovalGateEnabled checks the cerebro_approval_gate workspace
 // feature flag. The workspace-level row uses the all-zero sentinel user_id (see
 // feature_flags.sql.go). When no override row exists → use the default (true).
@@ -538,8 +708,9 @@ const (
 // credential governance, so a needs-approval verdict
 // from any of them lands in the one /approvals inbox instead of a silent block.
 func BuildApprovalGate(cerebroQueries *cerebrodb.Queries, tx approvals.TxStarter, bus *events.Bus) *permgate.Gate {
+	resolver := permissions.New(cerebroQueries)
 	approvalsSvc := approvals.New(cerebroQueries, tx, bus)
-	gate := permgate.New(approvalsSvc)
+	gate := permgate.New(resolver, approvalsSvc)
 	gate.WaitTimeout = durationFromEnv(defaultApprovalGateWait, envApprovalGateWait)
 	gate.ApprovalTTL = durationFromEnv(defaultApprovalGateTTL, envApprovalGateTTL)
 	return gate

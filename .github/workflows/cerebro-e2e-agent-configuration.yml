@@ -131,23 +131,7 @@ jobs:
           exit 1
 
       - name: Run Playwright specs
-        # Keep one browser process from accumulating every permissions flow.
-        # The authoring spec contains three data-heavy journeys, so each one
-        # gets its own process as well. This preserves every assertion and fails
-        # on the first real error without retries masking it as infrastructure.
-        run: |
-          for spec in ${SPECS}; do
-            pnpm exec playwright test "${spec}" --project=chromium
-          done
-          pnpm exec playwright test e2e/fir-3388-permissions-authoring.spec.ts \
-            --project=chromium \
-            --grep 'Settings Permissions writes the canonical policy and persists after reload'
-          pnpm exec playwright test e2e/fir-3388-permissions-authoring.spec.ts \
-            --project=chromium \
-            --grep 'Roles are created, assigned, explained, and enforced through the same permission decision'
-          pnpm exec playwright test e2e/fir-3388-permissions-authoring.spec.ts \
-            --project=chromium \
-            --grep 'Ask enforcement keeps the Approvals path visible'
+        run: pnpm exec playwright test ${SPECS} --project=chromium
 
       - name: Upload Playwright evidence
         if: always()

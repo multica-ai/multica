@@ -173,48 +173,6 @@ func TestTable_CredentialRowsFromAgentVault(t *testing.T) {
 	}
 }
 
-// TestTable_CredentialRowsExpandResourceScopedRoles keeps the credential view
-// aligned with the call-time resolver: a role on one exact vault box must be
-// visible there and must not change a sibling box.
-func TestTable_CredentialRowsExpandResourceScopedRoles(t *testing.T) {
-	s := newTPStore(t)
-	clearAll(t, s)
-	clearCaps(t, s)
-	clearCredentials(t, s)
-	defer clearCredentials(t, s)
-	s.WithVaultLister(fakeVaultLister{names: []string{"role-protected", "role-open"}})
-
-	const (
-		protectedResource = agentvault.VaultResourcePrefix + "role-protected"
-		openResource      = agentvault.VaultResourcePrefix + "role-open"
-	)
-	agent := uuidByte(73)
-	assignResourceRole(t, s, "Credential user", agent, capCredentialReveal, protectedResource, SettingDeny)
-
-	rows, err := s.Table(context.Background(), TableQuery{
-		WorkspaceID:        tpTestWorkspaceID,
-		AgentID:            agent,
-		IncludeCredentials: true,
-	})
-	if err != nil {
-		t.Fatalf("table: %v", err)
-	}
-	protected, ok := findCredentialRow(rows, capCredentialReveal, protectedResource)
-	if !ok {
-		t.Fatal("role-protected credential row missing")
-	}
-	if protected.Effective.Setting != SettingDeny {
-		t.Fatalf("role-protected credential effective = %q, want deny", protected.Effective.Setting)
-	}
-	open, ok := findCredentialRow(rows, capCredentialReveal, openResource)
-	if !ok {
-		t.Fatal("open credential row missing")
-	}
-	if open.Effective.Setting != SettingAllow {
-		t.Fatalf("resource-scoped role leaked to sibling credential: effective = %q, want allow", open.Effective.Setting)
-	}
-}
-
 // TestTable_CredentialRowsDedupedAgainstRegistered proves a box that is BOTH
 // registered in cerebro_credential AND present in Agent Vault is listed once,
 // under its id-scoped cerebro-credential:<uuid> resource (the registered row

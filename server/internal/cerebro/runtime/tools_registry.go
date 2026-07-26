@@ -9,7 +9,6 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
-	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -19,7 +18,7 @@ import (
 // FIR-1512). Kept as an interface so the resolution loop is unit-testable with
 // a fake and without a database. Satisfied by *toolpolicy.Store.
 type toolPolicyResolver interface {
-	ResolvePermission(ctx context.Context, q toolpolicy.Query, actor platformaccess.Actor) (toolpolicy.Effective, error)
+	Resolve(ctx context.Context, q toolpolicy.Query) (toolpolicy.Effective, error)
 }
 
 // Tool is the interface every in-process tool must implement.
@@ -70,36 +69,36 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return t, ok
 }
 
-// GetToolPolicyExecutableToolsForAgent builds the tools a direct executor may
-// call from the unified per-tool permission chain (FIR-2230). Only Allow is
-// executable here. Ask requires an approval-aware path and must never degrade
-// into Allow merely because this invocation endpoint cannot carry approval
-// state.
+// GetToolPolicyEnabledToolsForAgent builds an agent's tool list from the
+// unified per-tool permission chain (FIR-2230) instead of the legacy grant
+// cascade — this is the engine-flip (FIR-1512 Step 1). Every registered tool
+// whose Effective verdict is not Deny is offered; Allow and Ask both surface
+// the tool, because Ask only pauses at call time (the approval gate), it does
+// not hide the tool from the model.
 //
-// It resolves the identical chain query as the Policy Decision Service — same
-// tool key, same (workspace, runtime, agent, owner) context, same default-Allow
-// base — so for UNCONDITIONED rows the direct executor and the per-call gate
-// cannot disagree.
+// It resolves the identical chain query as guardToolCallViaPolicy — same tool
+// key, same (workspace, runtime, agent, owner) context, same default-Allow base
+// — so for UNCONDITIONED rows the tool LIST an agent is given and the per-call
+// GATE that guards each invocation are decided by one engine and cannot disagree.
 // The default-deny posture (an agent only gets explicitly-allowed tools) is
 // authored as policy rows (a workspace/runtime Deny base + per-tool Allow),
 // exactly as the gate expects; the engine itself stays faithful to the stored
 // chain.
 //
 // Conditioned rows (the FIR-1609 WHEN layer — host/action/Expr) are the one place
-// resolution can legitimately differ: this path has no live request, so it
+// the list and the gate legitimately differ: list-time has no live request, so it
 // passes an empty RequestContext and no CEL evaluator. A conditioned row therefore
-// resolves here as not-applicable (it drops, fail-closed); the approval-aware gate
-// makes the real decision against the live host/action.
+// resolves here as not-applicable (it drops, fail-closed), so a tool gated only by
+// a conditioned Allow is conservatively HIDDEN from the model rather than offered;
+// the gate then makes the real per-call decision against the live host/action. The
+// divergence is one-directional (the list never offers more than the gate allows),
+// so it can only hide a usable tool, never leak a forbidden one.
 //
 // runtimeID is the agent's runtime; ownerID is the agent's owner — the chain's
 // user ceiling. The caller resolves both from the agent row. Resolution is
 // fail-closed per tool: a resolve error excludes that one tool rather than
 // leaking it into the toolset.
-func (r *Registry) GetToolPolicyExecutableToolsForAgent(
-	ctx context.Context,
-	resolver toolPolicyResolver,
-	workspaceID, agentID, runtimeID, ownerID, onBehalfOfID pgtype.UUID,
-) []Tool {
+func (r *Registry) GetToolPolicyEnabledToolsForAgent(ctx context.Context, resolver toolPolicyResolver, workspaceID, agentID, runtimeID, ownerID pgtype.UUID) []Tool {
 	if resolver == nil {
 		return nil
 	}
@@ -117,14 +116,13 @@ func (r *Registry) GetToolPolicyExecutableToolsForAgent(
 
 	out := make([]Tool, 0, len(names))
 	for _, name := range names {
-		eff, err := resolver.ResolvePermission(ctx, toolpolicy.Query{
-			WorkspaceID:  workspaceID,
-			ToolKey:      name,
-			RuntimeID:    runtimeID,
-			AgentID:      agentID,
-			UserID:       ownerID,
-			OnBehalfOfID: onBehalfOfID,
-		}, platformaccess.Actor{Authenticated: true, Agent: agentID.Valid})
+		eff, err := resolver.Resolve(ctx, toolpolicy.Query{
+			WorkspaceID: workspaceID,
+			ToolKey:     name,
+			RuntimeID:   runtimeID,
+			AgentID:     agentID,
+			UserID:      ownerID,
+		})
 		if err != nil {
 			slog.Warn("tool registry: tool-policy resolve failed — excluding tool",
 				"agent_id", util.UUIDToString(agentID),
@@ -133,7 +131,7 @@ func (r *Registry) GetToolPolicyExecutableToolsForAgent(
 			)
 			continue
 		}
-		if eff.Setting != toolpolicy.SettingAllow {
+		if eff.Setting == toolpolicy.SettingDeny {
 			continue
 		}
 		r.mu.RLock()
@@ -249,7 +247,6 @@ var legacyGatewayToolMeta = []ToolMeta{
 	{Name: "firtal_registry", Description: "Query the Firtal Data Registry: discover data sources, fetch schema, and execute structured queries.", Status: ToolStatusImplemented},
 	{Name: "gogcli_sheets_write", Description: "Write data to a Google Sheets spreadsheet range.", Status: ToolStatusImplemented},
 	{Name: "create_file", Description: "Create a file from inline content (md, txt, csv, json, html, svg, xml) and attach it to the current chat or issue.", Status: ToolStatusNewlyImplemented},
-	{Name: "assign_issue", Description: "Assign an issue to a workspace member or agent.", Status: ToolStatusImplemented},
 }
 
 var multicaMCPToolMatrix = []ToolMeta{

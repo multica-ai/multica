@@ -1661,7 +1661,6 @@ type CerebroRole struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 	Version     int32              `json:"version"`
 	Permissions []byte             `json:"permissions"`
-	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
 }
 
 type CerebroRoleAssignment struct {

@@ -3,19 +3,6 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
-## FIR-3774 — Static login limited to Cerebro staging
-
-- `server/internal/handler/auth.go` delegates the explicitly configured static
-  login decision to the Cerebro-owned deployment guard in
-  `server/internal/handler/cerebro_auth_static_login.go`.
-- **Why:** Cerebro staging uses a fixed login code for automated and manual QA,
-  while the production Multica host must reject the same code even if the secret
-  is accidentally present. `APP_ENV` cannot distinguish the deployments because
-  staging runs with production-like settings, so the guard uses the exact public
-  application host and HTTPS instead.
-- **Local development:** loopback URLs remain eligible outside production when
-  `MULTICA_DEV_MASTER_CODE` is explicitly configured.
-
 ## macos26-seatbelt-port-glob — sandbox network policy on macOS 26
 
 - `server/pkg/agent/sandbox/macos.go` — `translateAllowlistToTCPRules` now emits a
@@ -234,7 +221,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `cerebro-artifact-brief-white-card` | server/internal/daemon/execenv/cerebro_artifact_brief.go | content-only (cerebro sibling file) | FIR-1905 — extends the `### Documents & Artifacts` subsection so agents stop posting their own `.md` output as grey `--attachment` raw-file rows. Adds the rule: for titled output meant for a comment / chat / DM / channel, create an artifact and put its `mention://artifact/<id>` link in the message body → renders as a compact white card. Covers all four message surfaces explicitly, clarifies `--attachment` is for raw binary only (screenshots/PDFs), and forward-references the first-class `--artifact` flag landing under FIR-1904. |
 | `cerebro-workflows-cron-sweeper` | server/cmd/server/main.go | 2 | JEH-1108 PR 2 — goroutine for the cron sweeper (1-minute tick); runs alongside retry sweeper. Gated per-tick on `CEREBRO_WORKFLOWS_ENABLED`. |
 | `cerebro-credentials-routes` | server/cmd/server/router.go | 4 | JEH-1196/1197 — import + handler instance + a single `cerebroCredentialsHandler.Mount(r)` call under the workspace-scoped group. JEH-1197 extends the handler line with `.WithPolicy(newCredentialsPolicy(cerebroQueries, queries, sharedApprovalGate))`; the new factory lives in the cerebro zone (`server/cmd/server/cerebro_credentials_policy.go`). New routes are added inside the cerebro `credentials` package's `Mount` method, not on router.go. |
-| `cerebro-credentials-policy` | server/cmd/server/cerebro_credentials_policy.go | ~90 | JEH-1197 / FIR-1609 / FIR-3388 — net-new cerebro-only file: builds the production `PolicyChecker` for the credential registry as `ChainPolicyChecker(owner, multica)`. The `multica` layer uses a direct deny-by-default floor plus the canonical tool-policy chain (id scope first, type scope fallback), with the shared approval gate for Ask verdicts (FIR-2586). FIR-1609 Phase 8 removed the Persona cut-over, and FIR-3388 retired the constant legacy grant resolver plus its duplicate audit writes. |
+| `cerebro-credentials-policy` | server/cmd/server/cerebro_credentials_policy.go | ~90 | JEH-1197 / FIR-1609 — net-new cerebro-only file: builds the production `PolicyChecker` for the credential registry as `ChainPolicyChecker(owner, multica)`. The `multica` layer is the unified Multica permission engine: a deny-by-default grant floor (id scope first, type scope fallback) layered with the tighten-only tool-policy cap chain (FIR-1609 Phase 7), with the shared approval gate for needs-approval verdicts (FIR-2586). FIR-1609 Phase 8 removed the legacy Persona cut-over (`CutoverPolicyChecker` / `personaBackend` / `MULTICA_PERMISSION_ENGINE`) — the chain is now the sole authority. Lives under `server/cmd/server/` alongside `cerebro_persona_mask.go` so the router's `cerebro-credentials-routes` patch stays a single line. |
 | `cerebro-workflows-routes` | server/cmd/server/router.go | 14 | JEH-1047 — import + handler instance + 7 REST endpoints under `/api/cerebro/workflows` (list / get / create / update / delete / toggle / runs). JEH-1108 PR 3 also injects the engine Service into the handler so the test-only cron-sweep endpoint can fire the sweeper synchronously. Same pattern as `cerebro-tasks-route`. |
 | `cerebro-status-models-routes` | server/cmd/server/router.go | 4 | FIR-1550 — import + handler instance + REST endpoints under `/api/cerebro/status-models` (list / create / assignments / get / update / delete) and `/api/cerebro/projects/{projectId}/status-model` (get / set / clear). Workflow v2a reusable status models; all net-new logic lives in the cerebro zone (`server/internal/cerebro/statusmodels`, migration 9046). Same wiring pattern as `cerebro-workflows-routes`. |
 | `cerebro-sprints-routes` | server/cmd/server/router.go | 5 | FIR-2666 — import + handler instance + REST routes under `/api/cerebro/projects/{projectID}/sprint-settings`, `/api/cerebro/projects/{projectID}/sprints`, `/api/cerebro/projects/{projectID}/sprint-recurring-tasks`, `/api/cerebro/sprint-recurring-tasks/{id}`, `/api/cerebro/sprints/{sprintID}`, and `/api/cerebro/issues/{issueID}/sprint`. FIR-2828 added `POST /api/cerebro/sprints/{sprintID}/complete` (end a sprint + choose what happens to its remaining issues). All net-new logic lives in `server/internal/cerebro/sprints/` (migration 9058). Same wiring pattern as `cerebro-workflows-routes`. |
@@ -1704,12 +1691,11 @@ Approved by Jesper Hvejsel through FIR-3406, 2026-07-16.
 
 The runtime-image, entrypoint, fallback-provider helpers, canary, and cloud runbook are deployment-owned surfaces outside the upstream server zone. ChatGPT Pro is the primary provider for both Pi and Hermes; the Infisical-backed Firtal AI Gateway is the managed backup.
 
-## FIR-3399 / FIR-3388 — Gateway Policy Decision Service
+## FIR-3399 — Gateway Decision Ledger shadow
 
 | Patch | Location | Reason |
 |---|---|---|
-| `main-access-decision-service` | `server/cmd/server/main.go` | Wire the canonical policy/evidence service and append-only decision ledger into the Gateway. FIR-3388 removed the unused observational/legacy comparison path: this service now supplies the single fail-closed decision used for tool listing and tool calls. |
-| `credential-floor-doc` | `server/docs/fir-1609-phase7-mapping.md` | Keep the historical FIR-1609 credential mapping accurate after FIR-3388 retired its duplicate constant resolver; the deny-by-default credential floor remains in the canonical policy. |
+| `main-access-decision-shadow` | `server/cmd/server/main.go` | Wire the Cerebro-owned canonical policy/evidence observer and append-only Decision Ledger into the existing Gateway executor. The shadow is observational only and cannot change a live access result. |
 | `opencode-permission-flag` | `server/pkg/agent/opencode.go`<br>`server/pkg/agent/opencode_test.go` | Keep OpenCode daemon runs non-interactive with the installed CLI's real `--dangerously-skip-permissions` flag. The removed `--auto` assumption caused an immediate usage exit on OpenCode 1.14.31; existing explicit question/plan denies remain in force. The shared test verifies that the retired flag is removed from custom arguments, while the real-binary contract test pins every emitted flag to `opencode run --help`. |
 
 ## FIR-3386 — Subscribers and sidebar
@@ -1844,12 +1830,6 @@ Approved by Jesper Hvejsel via FIR-3729 takeover request, 2026-07-23.
 |---|---|---|
 | `daemon-capability-probe` | `server/internal/daemon/capabilities.go`, `server/internal/daemon/daemon.go` | Keep the upstream hook thin while the Cerebro-owned probe implementation lives in `server/internal/daemon/cerebro_capabilities.go`; include the configured provider binary when reporting effective runtime capabilities. |
 | `codex-tool-policy-home` | `server/internal/daemon/daemon.go` | Pass the task-scoped Codex home into the mandatory policy preparation seam so direct Codex calls use the generated policy configuration. |
-
-## FIR-3774 — Installed-PWA badge bridge
-
-| Patch | Location | Reason |
-|---|---|---|
-| `installed-pwa-badge-bridge` | `packages/views/inbox/use-app-badge.ts` | Keep the service-worker badge bridge limited to installed standalone apps. Chromium's headless browser exposes the worker Badging API without a usable `BadgeService` binder, so messaging it from a normal tab terminates the renderer. Direct page badging and installed PWA badging remain unchanged. Covered by the existing FIR-3388 role-authoring browser journey that previously crashed and now completes. |
 
 ## MUL-5156 — Squad leaders own parent issue status (backport)
 

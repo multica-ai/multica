@@ -32,6 +32,10 @@ type CapabilityLister interface {
 }
 
 type PolicyResolver interface {
+	Resolve(ctx context.Context, in toolpolicy.Query) (toolpolicy.Effective, error)
+}
+
+type permissionPolicyResolver interface {
 	ResolvePermission(ctx context.Context, in toolpolicy.Query, actor platformaccess.Actor) (toolpolicy.Effective, error)
 }
 
@@ -165,8 +169,15 @@ func (s *Service) resolvePolicy(ctx context.Context, query toolpolicy.Query, age
 	if bound {
 		permissionKey = capability.Key
 	}
+	if _, special := platformaccess.ForKey(permissionKey); !special {
+		return s.policy.Resolve(ctx, query)
+	}
+	resolver, ok := s.policy.(permissionPolicyResolver)
+	if !ok {
+		return toolpolicy.Effective{}, fmt.Errorf("permission resolver not configured for %s", permissionKey)
+	}
 	query.ToolKey = permissionKey
-	return s.policy.ResolvePermission(ctx, query, platformaccess.Actor{
+	return resolver.ResolvePermission(ctx, query, platformaccess.Actor{
 		Authenticated: true,
 		Agent:         agentActor,
 	})

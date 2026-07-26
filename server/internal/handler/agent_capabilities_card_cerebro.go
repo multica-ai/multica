@@ -28,7 +28,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
 	cerebrocapabilities "github.com/multica-ai/multica/server/internal/cerebro/capabilities"
-	"github.com/multica-ai/multica/server/internal/cerebro/capabilitycatalog"
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
@@ -474,11 +473,10 @@ func (h *Handler) buildAgentCapabilitiesCard(r *http.Request, agent db.Agent) Ag
 	// MAY — every permission row resolved for this agent, split into tools,
 	// repos, per-connection-tool verdicts, and the scanned MCP tools grouped
 	// under the connection that exposes them (one tool-policy table read).
-	runtimeType, runtimeProvider := h.agentRuntimeEvidenceContext(r, agent)
-	rows := h.agentCapabilityRows(r, agent.WorkspaceID, agent.RuntimeID, agent.ID)
+	rows := h.agentCapabilityRows(r, agent.WorkspaceID, agent.ID)
 	conns := h.listCapabilityConnections(r, agent.WorkspaceID)
 	tools, repos, connPerms, connTools := classifyCapabilityRows(rows, connectionNameSet(conns))
-	out.Tools = mergeCanonicalCapabilityTools(tools, runtimeProvider)
+	out.Tools = tools
 	out.Repos = repos
 
 	// CONNECTIONS — all workspace connections + endpoints/tools, each tool
@@ -521,13 +519,13 @@ func (h *Handler) buildAgentCapabilitiesCard(r *http.Request, agent db.Agent) Ag
 	// recent runs, each compared against the declared policy rows above so
 	// blocked/unmapped use surfaces as drift. Tools only: it is the one
 	// runtime-usage signal recorded; observed secret use is not tracked anywhere.
-	out.ObservedAccess = h.buildObservedAccess(r, agent.ID, rows, runtimeProvider)
+	out.ObservedAccess = h.buildObservedAccess(r, agent.ID, rows)
 
 	// AVAILABILITY (FIR-3398) — what is PROVED on the runtime this agent really
 	// runs on, as opposed to what the rows above are granted. Stamped last so it
 	// judges the same tools the card presents; only verified is shown as reality.
-	out.Tools, out.Availability = applyAgentCapabilityAvailabilityForProvider(
-		out.Tools, runtimeType, runtimeProvider, h.CapabilityEvidence)
+	out.Tools, out.Availability = applyAgentCapabilityAvailability(
+		out.Tools, h.agentRuntimeType(r, agent), h.CapabilityEvidence)
 
 	// LIMITS — sandbox policy + MCP server surface.
 	out.Limits = buildAgentCapabilityLimits(agent.RuntimeConfig, agent.McpConfig)
@@ -544,15 +542,15 @@ func (h *Handler) buildAgentCapabilitiesCard(r *http.Request, agent db.Agent) Ag
 // read falls back to the local family, never to the Gateway: the Gateway is the
 // only runtime this server probes in-process, so guessing it would hand an
 // unknown runtime another runtime's proofs.
-func (h *Handler) agentRuntimeEvidenceContext(r *http.Request, agent db.Agent) (availabilityevidence.RuntimeType, string) {
+func (h *Handler) agentRuntimeType(r *http.Request, agent db.Agent) availabilityevidence.RuntimeType {
 	rt, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
 		ID:          agent.RuntimeID,
 		WorkspaceID: agent.WorkspaceID,
 	})
 	if err != nil {
-		return availabilityevidence.RuntimeLocal, ""
+		return availabilityevidence.RuntimeLocal
 	}
-	return availabilityevidence.RuntimeTypeForProvider(rt.Provider), rt.Provider
+	return availabilityevidence.RuntimeTypeForProvider(rt.Provider)
 }
 
 // builtinSkillCardDescription resolves a one-line description for a built-in
@@ -588,14 +586,13 @@ func builtinSkillCardDescription(desc, content string) string {
 // never diverge. A missing user (agent calling via CLI/MCP) is fine: the table
 // omits the user-ceiling layer (Valid=false) and resolves the rest. Returns nil
 // on any error so the card still renders.
-func (h *Handler) agentCapabilityRows(r *http.Request, workspaceID, runtimeID, agentID pgtype.UUID) []cerebrotoolpolicy.TableRow {
+func (h *Handler) agentCapabilityRows(r *http.Request, workspaceID, agentID pgtype.UUID) []cerebrotoolpolicy.TableRow {
 	if h.CapabilityToolPolicy == nil {
 		return nil
 	}
 	userID, _ := util.ParseUUID(requestUserID(r))
 	rows, err := h.CapabilityToolPolicy.Table(r.Context(), cerebrotoolpolicy.TableQuery{
 		WorkspaceID:     workspaceID,
-		RuntimeID:       runtimeID,
 		AgentID:         agentID,
 		UserID:          userID,
 		Base:            cerebrotoolpolicy.SettingAllow,
@@ -605,55 +602,6 @@ func (h *Handler) agentCapabilityRows(r *http.Request, workspaceID, runtimeID, a
 		return nil
 	}
 	return rows
-}
-
-// mergeCanonicalCapabilityTools collapses transport aliases that represent the
-// same capability before availability is applied. A live scan/runtime row wins
-// over a code-owned catalog row because it carries the agent runtime's actual
-// surface; the catalog row may still contribute its operator-friendly title.
-func mergeCanonicalCapabilityTools(tools []AgentCapabilityTool, provider string) []AgentCapabilityTool {
-	out := make([]AgentCapabilityTool, 0, len(tools))
-	index := make(map[string]int, len(tools))
-	for _, tool := range tools {
-		id, ok := canonicalCapabilityID(tool, provider)
-		if !ok {
-			id = tool.Source + "\x00" + tool.Key
-		}
-		at, exists := index[id]
-		if !exists {
-			index[id] = len(out)
-			out = append(out, tool)
-			continue
-		}
-		current := out[at]
-		if capabilitySourceRank(tool.Source) > capabilitySourceRank(current.Source) {
-			if (tool.Title == "" || tool.Title == tool.Key) && current.Title != "" {
-				tool.Title = current.Title
-			}
-			tool.ManagedExternally = tool.ManagedExternally || current.ManagedExternally
-			out[at] = tool
-			continue
-		}
-		if (current.Title == "" || current.Title == current.Key) && tool.Title != "" {
-			current.Title = tool.Title
-		}
-		current.ManagedExternally = current.ManagedExternally || tool.ManagedExternally
-		out[at] = current
-	}
-	return out
-}
-
-func capabilitySourceRank(source string) int {
-	switch source {
-	case capSourceScan:
-		return 3
-	case capSourceRuntimeReport:
-		return 2
-	case platformcatalog.Source, capSourceBuiltin:
-		return 1
-	default:
-		return 0
-	}
 }
 
 // classifyCapabilityRows splits the flat tool-policy table into the card's
@@ -1040,7 +988,7 @@ const (
 // declared policy rows to flag drift. A missing CerebroQueries handle or a failed
 // lookup yields status=unknown — the card never claims "nothing observed" when it
 // simply could not look it up.
-func (h *Handler) buildObservedAccess(r *http.Request, agentID pgtype.UUID, rows []cerebrotoolpolicy.TableRow, provider ...string) AgentCapabilityObservedAccess {
+func (h *Handler) buildObservedAccess(r *http.Request, agentID pgtype.UUID, rows []cerebrotoolpolicy.TableRow) AgentCapabilityObservedAccess {
 	out := AgentCapabilityObservedAccess{
 		Status:     capStatusUnknown,
 		WindowDays: observedAccessWindowDays,
@@ -1063,57 +1011,25 @@ func (h *Handler) buildObservedAccess(r *http.Request, agentID pgtype.UUID, rows
 	if err != nil {
 		return out
 	}
-	return observedAccessFromUsage(usage, taskCount, permissionLookupFromRows(rows, provider...), observedAccessWindowDays)
+	return observedAccessFromUsage(usage, taskCount, permissionLookupFromRows(rows), observedAccessWindowDays)
 }
 
 // permissionLookupFromRows indexes the declared policy rows by tool name so an
 // observed tool ("Bash") can be matched to its effective permission regardless of
 // whether the row carries the display title ("Bash") or the key ("bash"). Keys
 // are lower-cased on both sides so the runtime's tool name matches the catalog.
-func permissionLookupFromRows(rows []cerebrotoolpolicy.TableRow, provider ...string) map[string]string {
+func permissionLookupFromRows(rows []cerebrotoolpolicy.TableRow) map[string]string {
 	perm := make(map[string]string, len(rows)*2)
-	add := func(name, setting string) {
-		name = strings.ToLower(strings.TrimSpace(name))
-		if name != "" {
-			perm[name] = setting
-		}
-	}
-	providers := provider
-	if len(providers) == 0 || providers[0] == "" {
-		providers = cerebrocapabilities.KnownProviders()
-	}
 	for _, row := range rows {
 		setting := string(row.Effective.Setting)
 		if setting == "" {
 			continue
 		}
-		add(row.Title, setting)
-		add(row.ToolKey, setting)
-
-		raw := strings.TrimPrefix(row.ToolKey, "tools:")
-		if raw == row.ToolKey && row.Title != "" {
-			raw = row.Title
+		if row.Title != "" {
+			perm[strings.ToLower(row.Title)] = setting
 		}
-		add(raw, setting)
-		for _, runtimeProvider := range providers {
-			canonical := capabilitycatalog.CanonicalRuntimeToolName(runtimeProvider, raw)
-			add(canonical, setting)
-			add("tools:"+canonical, setting)
-			for _, alias := range capabilitycatalog.RuntimeToolAliases(runtimeProvider, canonical) {
-				add(alias, setting)
-			}
-		}
-
-		switch row.Source {
-		case capSourceConnectionTool:
-			connection := strings.TrimPrefix(row.ToolKey, capConnectionToolKeyPrefix)
-			if connection != "" && row.ResourcePattern != "" {
-				add(cerebrotoolpolicy.MCPToolToken(connection, row.ResourcePattern), setting)
-			}
-		case capSourceScan:
-			if row.Category != "" && row.Title != "" {
-				add(cerebrotoolpolicy.MCPToolToken(row.Category, row.Title), setting)
-			}
+		if row.ToolKey != "" {
+			perm[strings.ToLower(row.ToolKey)] = setting
 		}
 	}
 	return perm

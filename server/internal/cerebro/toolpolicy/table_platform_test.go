@@ -9,59 +9,13 @@ package toolpolicy
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
 	"testing"
+
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 )
-
-func TestSettingsTableAlwaysIncludesPlatformPermissions(t *testing.T) {
-	s := newTPStore(t)
-	clearAll(t, s)
-	clearCaps(t, s)
-	ctx := context.Background()
-
-	// A stale row for the retired rollout flag must not be able to hide a live
-	// permission from Settings.
-	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled, locked)
-		VALUES ($1, '00000000-0000-0000-0000-000000000000',
-			'cerebro_platform_capabilities', false, true)
-		ON CONFLICT (workspace_id, user_id, flag_key)
-		DO UPDATE SET enabled = false, locked = true`,
-		tpTestWorkspaceID,
-	); err != nil {
-		t.Fatalf("seed retired flag row: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = s.pool.Exec(context.Background(), `
-			DELETE FROM cerebro_feature_flags
-			WHERE workspace_id = $1 AND flag_key = 'cerebro_platform_capabilities'`,
-			tpTestWorkspaceID,
-		)
-	})
-
-	rec := httptest.NewRecorder()
-	NewHandler(s).Table(rec, usageRequest("admin", ""))
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body.String())
-	}
-	var response struct {
-		Tools []toolPolicyRow `json:"tools"`
-	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
-		t.Fatalf("decode Settings response: %v", err)
-	}
-	for _, row := range response.Tools {
-		if row.ToolKey == "create_issue" {
-			return
-		}
-	}
-	t.Fatal("Settings response hid create_issue behind the retired rollout flag")
-}
 
 // TestTable_PlatformRowsGatedByIncludeFlag proves the catalog is appended only
 // when IncludePlatform is true, so an unflagged workspace lists exactly what it
@@ -223,67 +177,6 @@ func TestTable_PlatformRowSettable(t *testing.T) {
 	}
 }
 
-// TestTable_PlatformRowsUseTheCompleteActorContext prevents the platform
-// authoring surface from maintaining a narrower copy of the permission query
-// than the live resolver. Every synthetic resource family must surface the same
-// conditions and mandate layers (system / on_behalf_of) that call time reads.
-func TestTable_PlatformRowsUseTheCompleteActorContext(t *testing.T) {
-	s := newTPStore(t)
-	clearAll(t, s)
-	clearCaps(t, s)
-	ctx := context.Background()
-
-	agent, system, member := uuidByte(31), uuidByte(32), uuidByte(33)
-	condition := &Condition{Actions: []string{"run"}}
-	for _, p := range []SetParams{
-		{
-			WorkspaceID: tpTestWorkspaceID, ToolKey: "trigger_autopilot",
-			Layer: LayerAgent, SubjectID: agent, Setting: SettingAllow,
-			Conditions: condition, UpdatedBy: tpTestUserID,
-		},
-		{
-			WorkspaceID: tpTestWorkspaceID, ToolKey: "trigger_autopilot",
-			Layer: LayerSystem, SubjectID: system, Setting: SettingAsk,
-			UpdatedBy: tpTestUserID,
-		},
-		{
-			WorkspaceID: tpTestWorkspaceID, ToolKey: "trigger_autopilot",
-			Layer: LayerOnBehalfOf, SubjectID: member, Setting: SettingDeny,
-			UpdatedBy: tpTestUserID,
-		},
-	} {
-		if _, err := s.Set(ctx, p); err != nil {
-			t.Fatalf("set %s row: %v", p.Layer, err)
-		}
-	}
-
-	rows, err := s.Table(ctx, TableQuery{
-		WorkspaceID:     tpTestWorkspaceID,
-		AgentID:         agent,
-		SystemID:        system,
-		OnBehalfOfID:    member,
-		IsSystem:        true,
-		RequestContext:  RequestContext{Action: "run"},
-		IncludePlatform: true,
-	})
-	if err != nil {
-		t.Fatalf("Table: %v", err)
-	}
-	row, ok := findRow(rows, "trigger_autopilot")
-	if !ok {
-		t.Fatal("trigger_autopilot row missing")
-	}
-	if got := row.Layers[LayerSystem]; got != SettingAsk {
-		t.Errorf("system layer = %q, want ask", got)
-	}
-	if got := row.Layers[LayerOnBehalfOf]; got != SettingDeny {
-		t.Errorf("on_behalf_of layer = %q, want deny", got)
-	}
-	if got := row.Conditions[LayerAgent]; got == nil || len(got.Actions) != 1 || got.Actions[0] != "run" {
-		t.Errorf("agent condition = %+v, want action [run]", got)
-	}
-}
-
 // TestTable_PlatformRowsSurviveRuntimeFilter proves platform rows appear even on
 // a runtime-scoped view (where the register query keeps only that runtime's
 // reported tools): a platform action is workspace-global, not bound to a machine.
@@ -304,6 +197,77 @@ func TestTable_PlatformRowsSurviveRuntimeFilter(t *testing.T) {
 	}
 	if _, ok := findRow(rows, "add_comment"); !ok {
 		t.Error("platform row add_comment hidden by runtime filter")
+	}
+}
+
+// TestPlatformCapabilitiesEnabled_HonorsWorkspaceOverride pins the FIR-2672 fix:
+// the gate must honor the workspace-level "Force on for the whole workspace"
+// override (stored under the all-zero sentinel user_id), not just a per-user
+// row. Before the fix the gate read only the requester's own row, so the admin
+// screen's workspace toggle had no effect and platform actions never surfaced.
+func TestPlatformCapabilitiesEnabled_HonorsWorkspaceOverride(t *testing.T) {
+	s := newTPStore(t)
+	clearFlags(t, s)
+	ctx := context.Background()
+	// A requester with no personal override row of their own.
+	requester := uuidByte(0x9)
+
+	// Default (no override anywhere) → off.
+	if s.PlatformCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("no override: want disabled (registry default OFF)")
+	}
+
+	// Locked workspace override ON → enabled for everyone, incl. a user with no
+	// personal row. This is the exact scenario Jesper configured.
+	setWorkspaceFlag(t, s, FlagPlatformCapabilities, true, true)
+	if !s.PlatformCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("locked workspace ON: want enabled for a user with no personal row")
+	}
+
+	// Locked workspace OFF wins outright over a personal ON.
+	setWorkspaceFlag(t, s, FlagPlatformCapabilities, false, true)
+	setPersonalFlag(t, s, requester, FlagPlatformCapabilities, true)
+	if s.PlatformCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("locked workspace OFF: must win over personal ON")
+	}
+
+	// Unlocked workspace OFF + personal ON → personal wins.
+	setWorkspaceFlag(t, s, FlagPlatformCapabilities, false, false)
+	if !s.PlatformCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("unlocked workspace OFF + personal ON: personal must win")
+	}
+	clearFlags(t, s)
+}
+
+func clearFlags(t *testing.T, s *Store) {
+	t.Helper()
+	if _, err := s.pool.Exec(context.Background(),
+		`DELETE FROM cerebro_feature_flags WHERE workspace_id = $1`, tpTestWorkspaceID); err != nil {
+		t.Fatalf("clear feature flags: %v", err)
+	}
+}
+
+func setWorkspaceFlag(t *testing.T, s *Store, key string, enabled, locked bool) {
+	t.Helper()
+	if _, err := s.pool.Exec(context.Background(), `
+		INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled, locked)
+		VALUES ($1, '00000000-0000-0000-0000-000000000000', $2, $3, $4)
+		ON CONFLICT (workspace_id, user_id, flag_key)
+		DO UPDATE SET enabled = EXCLUDED.enabled, locked = EXCLUDED.locked`,
+		tpTestWorkspaceID, key, enabled, locked); err != nil {
+		t.Fatalf("set workspace flag: %v", err)
+	}
+}
+
+func setPersonalFlag(t *testing.T, s *Store, userID pgtype.UUID, key string, enabled bool) {
+	t.Helper()
+	if _, err := s.pool.Exec(context.Background(), `
+		INSERT INTO cerebro_feature_flags (workspace_id, user_id, flag_key, enabled)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (workspace_id, user_id, flag_key)
+		DO UPDATE SET enabled = EXCLUDED.enabled`,
+		tpTestWorkspaceID, userID, key, enabled); err != nil {
+		t.Fatalf("set personal flag: %v", err)
 	}
 }
 
@@ -387,4 +351,32 @@ func TestTable_AgentStartRowSettable(t *testing.T) {
 	if row.Effective.Setting != SettingDeny {
 		t.Errorf("effective = %q, want deny", row.Effective.Setting)
 	}
+}
+
+// TestAgentStartCapabilitiesEnabled_HonorsWorkspaceOverride mirrors the
+// platform-flag precedence test for the agent-start gate: locked workspace wins,
+// else personal, else unlocked workspace, else registry default OFF.
+func TestAgentStartCapabilitiesEnabled_HonorsWorkspaceOverride(t *testing.T) {
+	s := newTPStore(t)
+	clearFlags(t, s)
+	ctx := context.Background()
+	requester := uuidByte(0x9)
+
+	if s.AgentStartCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("no override: want disabled (registry default OFF)")
+	}
+	setWorkspaceFlag(t, s, FlagAgentStartCapabilities, true, true)
+	if !s.AgentStartCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("locked workspace ON: want enabled for a user with no personal row")
+	}
+	setWorkspaceFlag(t, s, FlagAgentStartCapabilities, false, true)
+	setPersonalFlag(t, s, requester, FlagAgentStartCapabilities, true)
+	if s.AgentStartCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("locked workspace OFF: must win over personal ON")
+	}
+	setWorkspaceFlag(t, s, FlagAgentStartCapabilities, false, false)
+	if !s.AgentStartCapabilitiesEnabled(ctx, tpTestWorkspaceID, requester) {
+		t.Fatal("unlocked workspace OFF + personal ON: personal must win")
+	}
+	clearFlags(t, s)
 }

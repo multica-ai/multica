@@ -1,11 +1,13 @@
 // Package toolpolicy implements the unified per-tool permission chain for the
 // cerebro control plane (FIR-2230, phase 1 — "the engine").
 //
-// Before this package, separate systems decided whether an agent could use a
-// tool: a workspace-grant resolver, per-tool runtime grants, and group
-// capability whitelists. The obsolete grant resolver is now retired; this chain
-// is the canonical decision path for individual CLI, MCP, and Registry actions
-// across five stacked layers.
+// Before this package, three separate systems decided whether an agent could
+// use a tool: the workspace-grant resolver (capability patterns), the per-tool
+// runtime grant tables (boolean enabled + user/group access), and the group
+// permission service (capability whitelists). Each computed its own answer and
+// none expressed the product's actual model: every individual CLI tool and
+// every individual MCP action is governed on its own, at five stacked layers,
+// where each layer can only tighten the one below it.
 //
 // The layers, from base to ceiling, are:
 //
@@ -190,22 +192,6 @@ type Input struct {
 	// would resolve to is treated as Deny — fail-safe (FIR-1609). Default false
 	// preserves existing human-run behavior for every current caller.
 	IsSystem bool
-	// RoleSources records the active, versioned permission profiles that
-	// contributed an Agent-layer opinion. The resolver still folds one Agent
-	// setting; this metadata only makes the resulting Why Access answer name the
-	// profile that produced it.
-	RoleSources []RoleSource
-	// RoleDecidesAgent is true when the Agent-layer setting came from Roles
-	// rather than an explicit per-agent row.
-	RoleDecidesAgent bool
-}
-
-// RoleSource identifies one durable permission profile behind a verdict.
-type RoleSource struct {
-	ID      string
-	Name    string
-	Version int32
-	Setting Setting
 }
 
 // Effective is the resolved verdict for one tool.
@@ -270,13 +256,10 @@ const (
 // existing call sites and are equivalent to ResolveWithMode(ModeHardFloor, in)
 // and ResolveWithMode(ModeOpenable, in) respectively.
 func ResolveWithMode(mode Mode, in Input) Effective {
-	var out Effective
 	if mode == ModeOpenable {
-		out = resolveOpenable(in)
-	} else {
-		out = resolveHardFloor(in)
+		return resolveOpenable(in)
 	}
-	return decorateRoleSources(out, in)
+	return resolveHardFloor(in)
 }
 
 // Resolve folds the chain into a single Effective verdict using the
@@ -299,7 +282,7 @@ func ResolveWithMode(mode Mode, in Input) Effective {
 // loosen a Base=Deny floor from below. See ResolveMemberOverride for the
 // openable, member-layer counterpart used by the general tool-policy gate.
 func Resolve(in Input) Effective {
-	return ResolveWithMode(ModeHardFloor, in)
+	return resolveHardFloor(in)
 }
 
 func resolveHardFloor(in Input) Effective {
@@ -397,24 +380,7 @@ func resolveHardFloor(in Input) Effective {
 // deny-by-default floor. It is for the general tool-policy chain only, behind the
 // member-override feature flag. Keep credentials/sandbox/etc. on Resolve.
 func ResolveMemberOverride(in Input) Effective {
-	return ResolveWithMode(ModeOpenable, in)
-}
-
-func decorateRoleSources(out Effective, in Input) Effective {
-	if len(in.RoleSources) == 0 {
-		return out
-	}
-	if !in.RoleDecidesAgent || out.DecidedBy != LayerAgent {
-		return out
-	}
-	for _, source := range in.RoleSources {
-		if source.Setting != out.Setting {
-			continue
-		}
-		out.Reason = fmt.Sprintf("%s via role %s v%d", out.Reason, source.Name, source.Version)
-		break
-	}
-	return out
+	return resolveOpenable(in)
 }
 
 func resolveOpenable(in Input) Effective {

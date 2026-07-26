@@ -2,9 +2,9 @@
 
 import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useFlagValue } from "@multica/cerebro-feature-flags";
 import { useWSEvent } from "@multica/core/realtime";
 import { approvalKeys } from "../core/queries";
-import { useApprovalExperienceEnabled } from "../core/availability";
 
 export interface ApprovalRealtimeProps {
   wsId: string;
@@ -34,7 +34,7 @@ function EnabledApprovalRealtime({ wsId, onCreated }: ApprovalRealtimeProps) {
 }
 
 export function ApprovalRealtime(props: ApprovalRealtimeProps) {
-  const enabled = useApprovalExperienceEnabled();
+  const enabled = useFlagValue("cerebro_approvals");
   if (!enabled) return null;
   return <EnabledApprovalRealtime {...props} />;
 }

@@ -6,8 +6,8 @@ package toolpolicy
 //
 //   - card  → Store.Table  (handler.agentCapabilityRows → CapabilityToolPolicy.Table,
 //             read per TableRow.Effective.Setting)
-//   - brief → Store.ResolvePermission (toolaccess.Service.ListEffectiveTools →
-//             policy.ResolvePermission, read per Effective.Setting)
+//   - brief → Store.Resolve (toolaccess.Service.ListEffectiveTools → policy.Resolve,
+//             read per Effective.Setting)
 //
 // Both are authored with Base = Allow and, in the enforced default configuration
 // (member-override off — MemberOverrideEnabled resolves a missing workspace flag
@@ -79,8 +79,8 @@ func TestEightSpecialPermissionsMatchTableExplainAndCallResolver(t *testing.T) {
 }
 
 // TestCardBriefSurfaceParity seeds one agent with an Allow/Ask/Deny/base spread
-// and asserts Store.Table (card) and Store.ResolvePermission (brief) return the
-// same verdict for every tool.
+// and asserts Store.Table (card) and Store.Resolve (brief) return the same
+// verdict for every tool.
 func TestCardBriefSurfaceParity(t *testing.T) {
 	s := newTPStore(t)
 	clearAll(t, s)
@@ -151,15 +151,15 @@ func TestCardBriefSurfaceParity(t *testing.T) {
 		}
 
 		// Brief surface: the per-tool resolver the claim brief calls, same context.
-		briefEff, err := s.ResolvePermission(ctx, Query{
+		briefEff, err := s.Resolve(ctx, Query{
 			WorkspaceID: tpTestWorkspaceID,
 			ToolKey:     tool,
 			AgentID:     agent,
 			UserID:      user,
 			Base:        SettingAllow,
-		}, platformaccess.Actor{Authenticated: true, Agent: true})
+		})
 		if err != nil {
-			t.Fatalf("brief ResolvePermission %q: %v", tool, err)
+			t.Fatalf("brief Resolve %q: %v", tool, err)
 		}
 
 		if cardRow.Effective.Setting != expected {
@@ -229,13 +229,13 @@ func TestTableGeneralGateSurfaceParityWithMemberOverride(t *testing.T) {
 		if !ok {
 			t.Fatalf("table is missing %q", tool)
 		}
-		gate, err := s.ResolvePermission(ctx, Query{
+		gate, err := s.ResolveGeneral(ctx, Query{
 			WorkspaceID: tpTestWorkspaceID,
 			ToolKey:     tool,
 			AgentID:     agent,
 			UserID:      user,
 			Base:        SettingAllow,
-		}, platformaccess.Actor{Authenticated: true, Agent: true})
+		}, s.MemberOverrideEnabled(ctx, tpTestWorkspaceID))
 		if err != nil {
 			t.Fatalf("general gate: %v", err)
 		}

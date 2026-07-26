@@ -1657,7 +1657,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Task messages (user-facing, not daemon auth)
 			r.Get("/api/tasks/{taskId}/messages", h.ListTaskMessagesByUser)
-			r.Get("/api/tasks/{taskId}/access", h.GetTaskMandateByUser) // CEREBRO-PATCH(unified-permissions-task-access): FIR-3388
 
 			// CEREBRO-PATCH(work-sessions-routes): Work sessions (Claude Code MCP integration)
 			r.Route("/api/work-sessions", func(r chi.Router) {

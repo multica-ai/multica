@@ -36,7 +36,7 @@ func TestMain(m *testing.M) {
 	os.Exit(code)
 }
 
-func TestStoreAppendsCanonicalDecisionPerAgentRuntimeAndTool(t *testing.T) {
+func TestStoreAppendsAndReportsPerAgentRuntimeAndTool(t *testing.T) {
 	if accessDecisionTestPool == nil {
 		t.Skip("database unavailable")
 	}
@@ -65,7 +65,9 @@ func TestStoreAppendsCanonicalDecisionPerAgentRuntimeAndTool(t *testing.T) {
 			RuntimeID:             util.UUIDToString(runtimeID),
 			ObservedToolName:      "create_issue",
 			CanonicalCapabilityID: "platform:create_issue",
-			Decision:              DecisionAllow,
+			LegacyDecision:        DecisionAllow,
+			LegacyPath:            "platform_action",
+			ShadowDecision:        DecisionAllow,
 			PolicyDecision:        PolicyAllow,
 			EvidenceLevel:         availabilityevidence.LevelVerified,
 			Reason:                "verified allow",
@@ -76,7 +78,9 @@ func TestStoreAppendsCanonicalDecisionPerAgentRuntimeAndTool(t *testing.T) {
 			RuntimeID:             util.UUIDToString(runtimeID),
 			ObservedToolName:      "create_issue",
 			CanonicalCapabilityID: "platform:create_issue",
-			Decision:              DecisionDeny,
+			LegacyDecision:        DecisionDeny,
+			LegacyPath:            "platform_action",
+			ShadowDecision:        DecisionDeny,
 			PolicyDecision:        PolicyDeny,
 			EvidenceLevel:         availabilityevidence.LevelVerified,
 			Reason:                "verified deny",
@@ -88,18 +92,11 @@ func TestStoreAppendsCanonicalDecisionPerAgentRuntimeAndTool(t *testing.T) {
 		}
 	}
 
-	var count int
-	if err := accessDecisionTestPool.QueryRow(ctx, `
-		SELECT count(*)
-		FROM cerebro_access_decision_ledger
-		WHERE workspace_id = $1
-		  AND legacy_path = 'policy_decision_service'
-		  AND legacy_decision = shadow_decision
-		  AND differs = false
-	`, workspaceID).Scan(&count); err != nil {
-		t.Fatalf("read canonical ledger rows: %v", err)
+	report, err := store.Report(ctx, workspaceID)
+	if err != nil {
+		t.Fatalf("Report(): %v", err)
 	}
-	if count != 2 {
-		t.Fatalf("canonical ledger rows = %d, want 2", count)
+	if report.Total != 2 || report.Diffs != 0 || len(report.Groups) != 2 {
+		t.Fatalf("report = %+v, want two zero-diff groups", report)
 	}
 }

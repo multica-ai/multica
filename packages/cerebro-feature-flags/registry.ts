@@ -175,6 +175,7 @@ export type CerebroFlagKey =
   | "cerebro_workflow_step_model_override"
   | "cerebro_skill_mention"
   | "cerebro_tool_policy"
+  | "cerebro_simple_tool_policy"
   // FIR-1771: the "Test as user" profile-menu entry that resolves another
   // user+agent's effective tool verdict. The real gate is the
   // tools:test-as-user permission (default Allow for the owner only); this flag
@@ -188,6 +189,7 @@ export type CerebroFlagKey =
   // turns it on, and access is deny-by-default until a box is granted.
   | "cerebro_credentials_per_actor"
   | "cerebro_web_fetch_policy"
+  | "cerebro_platform_capabilities"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
   | "cerebro_move_comment_to_thread"
@@ -563,6 +565,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_workflow_step_model_override: true,
   cerebro_skill_mention: true,
   cerebro_tool_policy: true,
+  cerebro_simple_tool_policy: true,
   // FIR-1771: Test as user. Default ON — the feature is still locked down by the
   // tools:test-as-user permission (default Allow for the workspace owner only),
   // so turning the flag on exposes nothing to members who lack the permission.
@@ -575,6 +578,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // trigger autopilot, manage agents/runtimes/grants) in the tool-policy table
   // so they are settable Allow/Ask/Deny on every layer. Default OFF — nothing
   // new appears until an admin turns it on.
+  cerebro_platform_capabilities: false,
   // Deliberately ON (FIR-2230 phase 5): the legacy duplicate "Pending" tab on
   // the Access page was removed, so the approvals inbox is now the ONLY surface
   // for needs_approval asks. Leaving this off would leave prod with no approvals
@@ -1357,6 +1361,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Enable the capability catalog on agent and runtime pages: one flat, filterable list of every tool (Tool · Class · Side effect · Decision · Resolved by), narrowed by combinable class / side-effect / decision filters + search, with one editable decision pill per row and a mobile card layout. Backed by the four-layer Runtime › Agent › Group › User chain. GET /api/workspaces/{id}/tool-policy (member) + PUT/DELETE (admin/owner). FIR-2284 (redesign of FIR-2230).",
   },
   {
+    key: "cerebro_simple_tool_policy",
+    label: "Simple tool permissions",
+    group: "permissions",
+    description:
+      "Show the simplified, user-facing tool permission table on the agent Tools tab: one Allow/Ask/Block toggle per tool, grouped into Read · Execute · Fetch · Destructive. Reuses the cerebro_tool_policy data layer — writes the agent layer only. The rich Effective-chain table stays behind cerebro_tool_policy as a power-view. FIR-2358.",
+  },
+  {
     key: "cerebro_test_as_user",
     label: "Test as user",
     group: "permissions",
@@ -1371,11 +1382,18 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Let workspace admins control which URLs agents may fetch with the web_fetch tool. Choose a mode — allow-list (only listed hosts) or disallow-list (everything except listed hosts) — and manage the host rules (github.com, *.github.com). The active list is shown to agents so they can explain to the user when a host is blocked. When off, the legacy hardcoded allow-list applies. Default ON. TECH-3522.",
   },
   {
+    key: "cerebro_platform_capabilities",
+    label: "Platform actions in permissions",
+    group: "permissions",
+    description:
+      "Add the Multica platform actions to the tool-policy table alongside reported runtime tools: create/edit/delete issues, comments, sub-issues, autopilots, artifacts, and the management of agents, runtimes, groups, grants, and projects. Each becomes a settable Allow/Ask/Deny row on every layer (workspace › runtime › agent › group › user). Actions governed elsewhere (membership ACL, daemon token, webhook secret) are listed but marked as managed externally. Catalog is code-owned (server platformcatalog package, traceable to permguard/inventory.json). FIR-2594 phase 1.",
+  },
+  {
     key: "cerebro_approvals",
     label: "Approval inbox",
     group: "permissions",
     description:
-      "Enable the approval inbox at /:workspace/approvals — when the permission engine returns needs_approval, the ask lands here for a human to approve, reject, or delegate, with an audit trail per decision. Owner/admin only. The inbox remains visible whenever Tool approval enforcement is on, so an Ask can never wait without a human decision path. FIR-2131, FIR-3388.",
+      "Enable the approval inbox at /:workspace/approvals — when the permission engine returns needs_approval, the ask lands here for a human to approve, reject, or delegate, with an audit trail per decision. Owner/admin only. FIR-2131.",
   },
   {
     key: "cerebro_move_comment_to_subissue",
@@ -1853,7 +1871,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Tool approval enforcement",
     group: "permissions",
     description:
-      "When on, tools marked Ask route to the approval inbox and block until a human approves or rejects. The inbox navigation, inline cards and live updates stay visible while this gate is on, even if the separate inbox presentation flag is off. Turning this off keeps Ask blocked without opening an inbox request. Allow / Ask / Block access is always enforced from Settings → Permissions. FIR-3403, FIR-3388.",
+      "When on, tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off keeps Ask blocked without opening an inbox request. Allow / Ask / Block access is always enforced from Settings → Permissions. FIR-3403.",
   },
   // FIR-1914: firtal_registry per-agent access summary in the system prompt.
   {
@@ -2019,9 +2037,11 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   cerebro_scheduled_messages: "channels",
   // Tool permissions — the tool-policy chain and everything that feeds it.
   cerebro_tool_policy: "tool_permissions",
+  cerebro_simple_tool_policy: "tool_permissions",
   cerebro_web_fetch_policy: "tool_permissions",
   cerebro_web_fetch_permissions: "tool_permissions",
   cerebro_permission_detail: "tool_permissions",
+  cerebro_platform_capabilities: "tool_permissions",
   cerebro_approval_gate: "tool_permissions",
   cerebro_policy_cel: "tool_permissions",
   cerebro_credential_chain_grant: "tool_permissions",

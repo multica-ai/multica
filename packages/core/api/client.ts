@@ -27,7 +27,6 @@ import type {
   AgentEnvResponse,
   UpdateAgentEnvRequest,
   AgentTask,
-  TaskAccessSnapshot,
   AgentActivityBucket,
   AgentRunCount,
   AgentRuntime,
@@ -1067,16 +1066,12 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(cerebro-roles-client): FIR-2130/FIR-3388 role CRUD, versioning, and assignment.
+  // CEREBRO-PATCH(cerebro-roles-client): FIR-2130 role subject CRUD + assignment.
   // Server routes are mounted by `cerebro-roles-routes` in router.go on the
   // generic /api/workspaces/{id}/roles (workspace-scoped) and /api/roles/{id}
   // (workspace-membership-gated) paths.
-  async listCerebroRoles<T = unknown>(
-    wsId: string,
-    includeArchived = false,
-  ): Promise<T> {
-    const suffix = includeArchived ? "?include_archived=true" : "";
-    return this.fetch<T>(`/api/workspaces/${wsId}/roles${suffix}`);
+  async listCerebroRoles<T = unknown>(wsId: string): Promise<T> {
+    return this.fetch<T>(`/api/workspaces/${wsId}/roles`);
   }
 
   async getCerebroRole<T = unknown>(roleId: string): Promise<T> {
@@ -1085,12 +1080,7 @@ export class ApiClient {
 
   async createCerebroRole<T = unknown>(
     wsId: string,
-    // CEREBRO-PATCH(cerebro-role-permissions): FIR-3388 create versioned role permissions.
-    body: {
-      name: string;
-      description?: string | null;
-      permissions?: Record<string, unknown>;
-    },
+    body: { name: string; description?: string | null },
   ): Promise<T> {
     return this.fetch<T>(`/api/workspaces/${wsId}/roles`, {
       method: "POST",
@@ -1100,12 +1090,7 @@ export class ApiClient {
 
   async updateCerebroRole<T = unknown>(
     roleId: string,
-    // CEREBRO-PATCH(cerebro-role-permissions): FIR-3388 update versioned role permissions.
-    body: {
-      name?: string;
-      description?: string | null;
-      permissions?: Record<string, unknown>;
-    },
+    body: { name?: string; description?: string | null },
   ): Promise<T> {
     return this.fetch<T>(`/api/roles/${roleId}`, {
       method: "PATCH",
@@ -1123,8 +1108,7 @@ export class ApiClient {
 
   async assignCerebroRole<T = unknown>(
     roleId: string,
-    // CEREBRO-PATCH(cerebro-role-assignment-expiry): FIR-3388 preserve bounded role grants.
-    body: { subject_type: string; subject_id: string; expires_at?: string | null },
+    body: { subject_type: string; subject_id: string },
   ): Promise<T> {
     return this.fetch<T>(`/api/roles/${roleId}/assignments`, {
       method: "POST",
@@ -2571,11 +2555,6 @@ export class ApiClient {
 
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
     return this.fetch(`/api/tasks/${taskId}/messages`);
-  }
-
-  // CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 expose the task-scoped permission snapshot.
-  async getTaskAccess(taskId: string): Promise<TaskAccessSnapshot> {
-    return this.fetch(`/api/tasks/${taskId}/access`);
   }
 
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {

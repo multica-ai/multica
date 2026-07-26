@@ -60,8 +60,8 @@ func (e *ToolExecutorInvoker) Invoke(ctx context.Context, agentID, workspaceID, 
 		}
 		// The live registry is availability evidence; the unified policy resolver is
 		// the access decision. A tool must exist in both surfaces to be callable.
-		enabledTools = reg.GetToolPolicyExecutableToolsForAgent(
-			ctx, e.Policy, workspaceID, agentID, agent.RuntimeID, agent.OwnerID, cascadeUserID,
+		enabledTools = reg.GetToolPolicyEnabledToolsForAgent(
+			ctx, e.Policy, workspaceID, agentID, agent.RuntimeID, agent.OwnerID,
 		)
 	}
 	// CEREBRO-PATCH(memory-tools-offer): FIR-1794 — memory tools are additive,

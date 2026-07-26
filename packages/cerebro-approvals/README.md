@@ -49,8 +49,5 @@ one-shot approvals remain non-mutating. A time-boxed period grant is explicitly
 marked reusable and remains valid only until its expiry.
 
 Inline cards and approval realtime subscriptions are inert when
-both `cerebro_approvals` and `cerebro_approval_gate` are off. The presentation
-flag can hide the inbox only when Ask enforcement is also off; while the gate is
-active, navigation, inline cards and realtime updates remain visible so every
-Ask has a human decision path. The server floor remains
+`cerebro_approvals` is off. This is presentation-only; the server floor remains
 active regardless of the flag.

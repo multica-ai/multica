@@ -91,7 +91,7 @@ type PolicyRequest struct {
 //
 // The Service is wired with a ChainPolicyChecker(owner, multica) in
 // production, where the multica layer is the unified permission engine
-// (direct deny-by-default floor + canonical tool-policy decisions). When the
+// (deny-by-default grant floor + tighten-only tool-policy caps). When the
 // multica layer is unconfigured the chain still works — only the owner
 // check fires, giving the deny-by-default behaviour described in JEH-1197.
 type PolicyChecker interface {

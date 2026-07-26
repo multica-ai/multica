@@ -57,7 +57,7 @@ func TestCopyFoundation_LabelsSkillsRolesGroupsSettings(t *testing.T) {
 	s := New(testPool)
 
 	// members in both workspaces so member-scoped grants remap by user_id.
-	seedMember(ctx, t, srcWS)
+	srcMember := seedMember(ctx, t, srcWS)
 	seedMember(ctx, t, tgtWS)
 
 	// label
@@ -90,7 +90,7 @@ func TestCopyFoundation_LabelsSkillsRolesGroupsSettings(t *testing.T) {
 		srcRole, srcWS); err != nil {
 		t.Fatalf("seed role: %v", err)
 	}
-	if _, err := testPool.Exec(ctx, `INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_at) VALUES ($1,'member',$2,now())`, srcRole, testUser); err != nil {
+	if _, err := testPool.Exec(ctx, `INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_at) VALUES ($1,'member',$2,now())`, srcRole, srcMember); err != nil {
 		t.Fatalf("seed role assignment: %v", err)
 	}
 	// group + capability + member (cerebro_group_member is by user_id)
@@ -131,8 +131,7 @@ func TestCopyFoundation_LabelsSkillsRolesGroupsSettings(t *testing.T) {
 		t.Fatalf("target skill children: versions=%d files=%d, want 1/1", vCount, fCount)
 	}
 
-	// The member assignment preserves the canonical shared user id after
-	// proving that person belongs to the target workspace.
+	// target role's member assignment is remapped to the target member
 	var tgtRole pgtype.UUID
 	if err := testPool.QueryRow(ctx, `SELECT id FROM cerebro_role WHERE workspace_id = $1 AND name = 'reviewer'`, tgtWS).Scan(&tgtRole); err != nil {
 		t.Fatalf("load target role: %v", err)
@@ -140,7 +139,7 @@ func TestCopyFoundation_LabelsSkillsRolesGroupsSettings(t *testing.T) {
 	var raCount int
 	testPool.QueryRow(ctx, `
 		SELECT count(*) FROM cerebro_role_assignment ra
-		JOIN member m ON m.user_id = ra.subject_id AND m.workspace_id = $1
+		JOIN member m ON m.id = ra.subject_id AND m.workspace_id = $1
 		WHERE ra.role_id = $2 AND ra.subject_type = 'member'`, tgtWS, tgtRole).Scan(&raCount)
 	if raCount != 1 {
 		t.Fatalf("target role assignment = %d, want 1 (remapped by user)", raCount)

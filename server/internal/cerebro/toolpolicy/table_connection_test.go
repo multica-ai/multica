@@ -88,48 +88,6 @@ func TestDeniedConnectionTools_AgentDenyProducesToken(t *testing.T) {
 	}
 }
 
-// TestDeniedConnectionTools_ResourceScopedRoleProducesToken proves Roles and
-// direct per-tool policy share the exact same MCP enforcement path. A role may
-// deny one discovered tool without hiding or denying its sibling.
-func TestDeniedConnectionTools_ResourceScopedRoleProducesToken(t *testing.T) {
-	s := newTPStore(t)
-	clearAll(t, s)
-	ctx := context.Background()
-
-	agent := uuidByte(72)
-	const (
-		conn    = "role-connection"
-		toolKey = "connection:" + conn
-	)
-	if _, err := s.pool.Exec(ctx, `
-		INSERT INTO workspace_connection
-		  (workspace_id, name, display_name, type, url, tools, enabled)
-		VALUES ($1, $2, $3, 'mcp_http', 'http://internal:3000',
-		        '[{"name":"restricted_action"},{"name":"open_action"}]'::jsonb, true)
-	`, tpTestWorkspaceID, conn, "Role Connection"); err != nil {
-		if isUndefinedTable(err) {
-			t.Skip("workspace_connection table not present; skipping role connection test")
-		}
-		t.Fatalf("seed connection: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = s.pool.Exec(context.Background(),
-			`DELETE FROM workspace_connection WHERE workspace_id = $1 AND name = $2`, tpTestWorkspaceID, conn)
-	})
-	assignResourceRole(t, s, "Connection operator", agent, toolKey, "restricted_action", SettingDeny)
-
-	tokens, err := s.DeniedConnectionTools(ctx, TableQuery{
-		WorkspaceID: tpTestWorkspaceID,
-		AgentID:     agent,
-	})
-	if err != nil {
-		t.Fatalf("denied connection tools: %v", err)
-	}
-	assertSameTokens(t, "role-scoped connection tool", tokens, []string{
-		"mcp__role-connection__restricted_action",
-	})
-}
-
 // TestDeniedConnectionTools_ConnectionWideDenyScopedPerRuntimeAndAgent is the
 // TECH-3180 regression. Before the fix, denying the WHOLE connection (the
 // connection-wide row, resource_pattern ”) at the runtime or agent layer was

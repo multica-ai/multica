@@ -207,18 +207,6 @@ export interface AgentTask {
   relative_work_dir?: string;
 }
 
-// CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 immutable task permission snapshot.
-// Immutable tool allowlist issued when a task starts. This is the same
-// snapshot enforced at every tool call, exposed for the transcript and CLI.
-export interface TaskAccessSnapshot {
-  task_id: string;
-  agent_id: string;
-  allowed_tools: string[];
-  issued_at: string;
-  expires_at: string;
-  status: "active" | "expired";
-}
-
 export interface WorkSession {
   id: string;
   issue_id: string;

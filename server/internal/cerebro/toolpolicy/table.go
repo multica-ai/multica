@@ -20,6 +20,7 @@ package toolpolicy
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -119,22 +120,14 @@ type TableQuery struct {
 	// Zero (Valid=false) leaves the System column empty — the existing agent /
 	// runtime / user views pass no autopilot and so never surface a System row.
 	SystemID pgtype.UUID
-	// IsSystem applies the no-human Ask→Deny rule used by call-time resolution.
-	// It is false for ordinary member/agent catalog views.
-	IsSystem bool
 	// Base is the workspace/system default applied when every layer inherits.
 	// Empty defaults to Allow (see Resolve).
 	Base Setting
-	// RequestContext and Eval let Explain/parity callers project the same
-	// conditioned verdict as a concrete call. Ordinary catalog views leave both
-	// empty and still render the authored WHEN condition beside the row.
-	RequestContext RequestContext
-	Eval           ExprEvaluator
 	// IncludePlatform appends the code-owned platform-capability catalog
 	// (platformcatalog) to the listing — the Multica platform actions an agent or
-	// user can take, which no runtime reports. The public Settings handler always
-	// sets this; internal callers may omit it when they intentionally need only
-	// runtime-reported rows.
+	// user can take, which no runtime reports. Gated by the caller (the handler
+	// checks the cerebro_platform_capabilities flag) so prod sees nothing new
+	// until an admin turns the flag on (FIR-2594).
 	IncludePlatform bool
 	// PlatformActorOwner is trusted caller context for owner-only platform
 	// capabilities. Agent cards leave it false; member-facing callers set it
@@ -145,9 +138,10 @@ type TableQuery struct {
 	PlatformActorAdmin bool
 	// IncludeAgentStart appends ONLY the surfaced platform capabilities
 	// (platformcatalog.SurfacedKeys — the "start someone else's agent" family) to
-	// the listing, without the rest of the catalog. Retained for focused internal
-	// projections; the public Settings response uses IncludePlatform and therefore
-	// already contains this family. Ignored when IncludePlatform emits everything.
+	// the listing, without the rest of the catalog. Gated by the caller (the
+	// handler checks cerebro_agent_trigger_permissions) so the family becomes
+	// visible/settable in Permissions without opening the whole platform catalog
+	// (FIR-3091 slice 4). Ignored when IncludePlatform already emits everything.
 	IncludeAgentStart bool
 	// IncludeCredentials appends the per-credential authoring rows (one row per
 	// credential capability per Agent Vault box) to the listing, so an admin can
@@ -165,12 +159,27 @@ type TableQuery struct {
 	mode Mode
 }
 
+// agentBrowserCapabilityKey is the tool_key of the agent-browser unix-socket
+// gate — a deny-by-default floor whose daemon gate resolves through the
+// tighten-only Resolve regardless of the member-override flag, so its table
+// row must too (mirrors handler.agentBrowserToolKey).
+const agentBrowserCapabilityKey = "tools:agent-browser"
+
 // tableRowMode picks the resolution mode one table row's Effective is computed
-// with. It delegates to the same declared contract registry enforcement uses,
-// so a new permission family cannot silently pick different semantics in the
-// Settings table and at call time.
+// with. The openable mode reaches exactly the rows whose ENFORCEMENT honours
+// the member-override flag (the general gate and the connection paths); the
+// deny-by-default floors — credential.* keys, the verbed repo./credential.
+// capability keys (ActionOf), and the agent-browser socket — always display the
+// tighten-only fold their gates enforce, so the table can never show an
+// opening a floor would refuse.
 func tableRowMode(mode Mode, toolKey string) Mode {
-	return DeclaredResolutionMode(toolKey, mode)
+	if mode != ModeOpenable {
+		return ModeHardFloor
+	}
+	if strings.HasPrefix(toolKey, "credential.") || toolKey == agentBrowserCapabilityKey || ActionOf(toolKey) != "" {
+		return ModeHardFloor
+	}
+	return ModeOpenable
 }
 
 // Table returns one row per capability (tool) in the workspace, each with the
@@ -200,10 +209,6 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Keep every appended/synthetic row on the same fully resolved actor
-	// context. In particular, resource-scoped Role permissions must be expanded
-	// against the same groups as capability-wide rows and call-time resolution.
-	in.GroupIDs = groupIDs
 
 	// When a runtime is in scope (a runtime page, or an agent page where the
 	// agent's runtime is known) the table must show what THAT runtime can do —
@@ -458,7 +463,7 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 
 func (s *Store) resolveTablePermission(ctx context.Context, in TableQuery, key string, layers map[Layer]Setting) (Effective, error) {
 	if _, special := platformaccess.ForKey(key); !special {
-		return s.resolveTableResourcePermission(ctx, in, key, "", layers, in.Base)
+		return ResolveWithMode(tableRowMode(in.mode, key), Input{Settings: layers, Base: in.Base}), nil
 	}
 	return s.ResolvePermission(ctx, Query{
 		WorkspaceID:  in.WorkspaceID,
@@ -471,44 +476,6 @@ func (s *Store) resolveTablePermission(ctx context.Context, in TableQuery, key s
 		SystemID:     in.SystemID,
 		Base:         in.Base,
 	}, tablePermissionActor(in))
-}
-
-// resolveTableResourcePermission is the single read-model seam for ordinary
-// capability rows and synthetic per-resource rows. It deliberately calls the
-// canonical Store resolver instead of re-folding the table's display cells:
-// loadInput is where direct rules, groups, on-behalf-of, Systems, active Roles,
-// conditions and CEL are all evaluated. Keeping that work in one place prevents
-// Settings → Permissions from disagreeing with call-time enforcement.
-func (s *Store) resolveTableResourcePermission(
-	ctx context.Context,
-	in TableQuery,
-	key string,
-	resourcePattern string,
-	_ map[Layer]Setting,
-	base Setting,
-) (Effective, error) {
-	query := Query{
-		WorkspaceID:     in.WorkspaceID,
-		ToolKey:         key,
-		ResourcePattern: resourcePattern,
-		RuntimeID:       in.RuntimeID,
-		AgentID:         in.AgentID,
-		UserID:          in.UserID,
-		GroupIDs:        in.GroupIDs,
-		OnBehalfOfID:    in.OnBehalfOfID,
-		SystemID:        in.SystemID,
-		Base:            base,
-		IsSystem:        in.IsSystem,
-		RequestContext:  in.RequestContext,
-		Eval:            in.Eval,
-	}
-	query.RequestContext.Action = ActionOf(key)
-	if key == RegistryToolKey && resourcePattern != "" {
-		query.RequestContext.ArgValues = map[string]string{
-			"data_source_id": resourcePattern,
-		}
-	}
-	return s.ResolveGeneral(ctx, query, tableRowMode(in.mode, key) == ModeOpenable)
 }
 
 func tablePermissionActor(in TableQuery) platformaccess.Actor {

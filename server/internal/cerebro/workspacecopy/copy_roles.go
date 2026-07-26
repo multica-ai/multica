@@ -69,12 +69,8 @@ func copyRolesGroupsPermissionsTx(ctx context.Context, tx pgx.Tx, runID, sourceW
 		err := tx.QueryRow(ctx, `SELECT id FROM cerebro_role WHERE workspace_id = $1 AND name = $2`, targetWorkspace, rl.name).Scan(&targetID)
 		if err == pgx.ErrNoRows {
 			if err := tx.QueryRow(ctx, `
-				INSERT INTO cerebro_role (
-					id, workspace_id, name, description, created_by, created_at, updated_at,
-					version, permissions, archived_at
-				)
-				SELECT gen_random_uuid(), $1, r.name, r.description, r.created_by, r.created_at, now(),
-				       r.version, r.permissions, r.archived_at
+				INSERT INTO cerebro_role (id, workspace_id, name, description, created_by, created_at, updated_at)
+				SELECT gen_random_uuid(), $1, r.name, r.description, r.created_by, r.created_at, now()
 				FROM cerebro_role r WHERE r.id = $2
 				RETURNING id`,
 				targetWorkspace, rl.id).Scan(&targetID); err != nil {
@@ -89,23 +85,19 @@ func copyRolesGroupsPermissionsTx(ctx context.Context, tx pgx.Tx, runID, sourceW
 		}
 	}
 
-	// --- role assignments, member subjects. A member role assignment stores the
-	// shared user id (not a workspace-local member id), so preserve that identity
-	// after proving the same user belongs to the target workspace. Agent subjects
-	// are healed by RelinkGroupAccess once the agents have been copied. ---
+	// --- role assignments, member subjects (resolve source member → target
+	// member by user_id). Agent subjects are healed by RelinkGroupAccess once
+	// the agents have been copied. ---
 	raTag, err := tx.Exec(ctx, `
-		INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_by, added_at, expires_at)
-		SELECT rm.target_id, 'member', ra.subject_id, ra.added_by, ra.added_at, ra.expires_at
+		INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_by, added_at)
+		SELECT rm.target_id, 'member', tm.id, ra.added_by, ra.added_at
 		FROM cerebro_role_assignment ra
 		JOIN cerebro_workspace_copy_map rm
 		  ON rm.target_workspace_id = $2 AND rm.entity_type = 'role' AND rm.source_id = ra.role_id
-		JOIN member sm ON sm.user_id = ra.subject_id AND sm.workspace_id = $1
-		JOIN member tm ON tm.user_id = ra.subject_id AND tm.workspace_id = $2
+		JOIN member sm ON sm.id = ra.subject_id AND sm.workspace_id = $1
+		JOIN member tm ON tm.user_id = sm.user_id AND tm.workspace_id = $2
 		WHERE ra.subject_type = 'member'
-		ON CONFLICT (role_id, subject_type, subject_id) DO UPDATE SET
-			added_by = EXCLUDED.added_by,
-			added_at = EXCLUDED.added_at,
-			expires_at = EXCLUDED.expires_at`,
+		ON CONFLICT (role_id, subject_type, subject_id) DO NOTHING`,
 		sourceWorkspace, targetWorkspace)
 	if err != nil {
 		return rolesCopied, 0, 0, fmt.Errorf("copy role assignments: %w", err)
@@ -229,18 +221,15 @@ func (s *Store) RelinkGroupAccess(ctx context.Context, targetWorkspace pgtype.UU
 	total += gaTag.RowsAffected()
 
 	raTag, err := tx.Exec(ctx, `
-		INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_by, added_at, expires_at)
-		SELECT rmap.target_id, 'agent', amap.target_id, ra.added_by, ra.added_at, ra.expires_at
+		INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_by, added_at)
+		SELECT rmap.target_id, 'agent', amap.target_id, ra.added_by, ra.added_at
 		FROM cerebro_role_assignment ra
 		JOIN cerebro_workspace_copy_map rmap
 		  ON rmap.target_workspace_id = $1 AND rmap.entity_type = 'role' AND rmap.source_id = ra.role_id
 		JOIN cerebro_workspace_copy_map amap
 		  ON amap.target_workspace_id = $1 AND amap.entity_type = 'agent' AND amap.source_id = ra.subject_id
 		WHERE ra.subject_type = 'agent'
-		ON CONFLICT (role_id, subject_type, subject_id) DO UPDATE SET
-			added_by = EXCLUDED.added_by,
-			added_at = EXCLUDED.added_at,
-			expires_at = EXCLUDED.expires_at`,
+		ON CONFLICT (role_id, subject_type, subject_id) DO NOTHING`,
 		targetWorkspace)
 	if err != nil {
 		return 0, fmt.Errorf("relink agent role assignments: %w", err)

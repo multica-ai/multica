@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import type { ToolPolicyRow } from "../core";
-import {
-  CapabilityCatalog,
-  groupByCapability,
-} from "./capability-catalog";
-import { presentCapabilityRows } from "./capability-presentation";
+import { CapabilityCatalog, groupByCapability } from "./capability-catalog";
 
 const row = (over: Partial<ToolPolicyRow> = {}): ToolPolicyRow => ({
   tool_key: "read_files",
@@ -65,62 +61,7 @@ describe("groupByCapability", () => {
   });
 });
 
-describe("presentCapabilityRows", () => {
-  it("presents create and edit file access as one permission", () => {
-    const presented = presentCapabilityRows([
-      row({
-        tool_key: "tools:create_file",
-        title: "Create file",
-        category: "Built-in tools",
-        source: "runtime_report",
-      }),
-      row({
-        tool_key: "tools:edit_file",
-        title: "Edit file",
-        category: "Built-in tools",
-        source: "runtime_report",
-      }),
-    ]);
-
-    expect(presented).toHaveLength(1);
-    expect(presented[0]).toMatchObject({
-      key: "file-write",
-      title: "Create and edit files",
-    });
-    expect(presented[0]!.rows.map((item) => item.tool_key)).toEqual([
-      "tools:create_file",
-      "tools:edit_file",
-    ]);
-  });
-});
-
 describe("CapabilityCatalog", () => {
-  it("renders create and edit as one authoring row with one linked decision", () => {
-    render(
-      <CapabilityCatalog
-        rows={[
-          row({
-            tool_key: "tools:create_file",
-            title: "Create file",
-            category: "Built-in tools",
-          }),
-          row({
-            tool_key: "tools:edit_file",
-            title: "Edit file",
-            category: "Built-in tools",
-          }),
-        ]}
-        renderDecision={(_row, linkedRows) => (
-          <button type="button">controls:{linkedRows?.length}</button>
-        )}
-      />,
-    );
-
-    expect(screen.getByText("Create and edit files")).toBeInTheDocument();
-    expect(screen.getByText("controls:2")).toBeInTheDocument();
-    expect(screen.getAllByTestId("tool-card-file-write")).toHaveLength(1);
-  });
-
   it("opens a leaf permission detail without triggering its decision control", () => {
     const onOpenPermission = vi.fn();
     const onDecision = vi.fn();

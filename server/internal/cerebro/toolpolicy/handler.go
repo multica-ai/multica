@@ -319,17 +319,15 @@ func (h *Handler) Table(w http.ResponseWriter, r *http.Request) {
 	}
 
 	rows, err := h.Store.Table(r.Context(), TableQuery{
-		WorkspaceID: workspaceID,
-		RuntimeID:   runtimeID,
-		AgentID:     agentID,
-		UserID:      userID,
-		GroupIDs:    groupIDs,
-		SystemID:    systemID,
-		Base:        base,
-		// Platform permissions are part of the canonical catalog, not a rollout
-		// variant. Every Settings response includes them so the UI cannot hide a
-		// live gate behind a second feature flag.
-		IncludePlatform:    true,
+		WorkspaceID:        workspaceID,
+		RuntimeID:          runtimeID,
+		AgentID:            agentID,
+		UserID:             userID,
+		GroupIDs:           groupIDs,
+		SystemID:           systemID,
+		Base:               base,
+		IncludePlatform:    h.Store.PlatformCapabilitiesEnabled(r.Context(), workspaceID, member.UserID),
+		IncludeAgentStart:  h.Store.AgentStartCapabilitiesEnabled(r.Context(), workspaceID, member.UserID),
 		IncludeCredentials: h.Store.CredentialAuthoringEnabled(r.Context(), workspaceID, member.UserID),
 		PlatformActorOwner: platformActorOwner,
 	})

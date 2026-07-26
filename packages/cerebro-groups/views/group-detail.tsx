@@ -1165,7 +1165,7 @@ function CapabilitiesSection({
       className="overflow-hidden rounded-xl border bg-background shadow-sm"
       data-testid="capabilities-section"
     >
-      <header className="border-b bg-muted/40 px-4 py-3">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/40 px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <KeyRound className="size-[15px] text-muted-foreground" />
           Capabilities
@@ -1174,10 +1174,6 @@ function CapabilitiesSection({
             {GROUP_CAPABILITIES.length === 1 ? "capability" : "capabilities"}
           </span>
         </div>
-        <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
-          These switches decide what group members may create or manage in
-          Multica. Tool access is governed by Permissions below.
-        </p>
       </header>
       <div>
         {GROUP_CAPABILITIES.map((cap) => (

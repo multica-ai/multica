@@ -11,7 +11,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -132,40 +131,6 @@ func clearAll(t *testing.T, s *Store) {
 	}
 }
 
-// assignResourceRole creates one active agent role whose permission is scoped
-// to an exact resource. Synthetic table rows (repos, credentials and connection
-// tools) must expand this package through the same resolver as ordinary rows.
-func assignResourceRole(t *testing.T, s *Store, name string, agent pgtype.UUID, toolKey, resource string, setting Setting) {
-	t.Helper()
-	var roleID pgtype.UUID
-	if err := s.pool.QueryRow(context.Background(), `
-		INSERT INTO cerebro_role (workspace_id, name, description, created_by, permissions)
-		VALUES (
-		  $1, $2, 'resource-role parity fixture', $3,
-		  jsonb_build_object(
-		    $4::text,
-		    jsonb_build_array(jsonb_build_object(
-		      'setting', $5::text,
-		      'resource_pattern', $6::text,
-		      'conditions', NULL
-		    ))
-		  )
-		)
-		RETURNING id
-	`, tpTestWorkspaceID, name, tpTestUserID, toolKey, string(setting), resource).Scan(&roleID); err != nil {
-		t.Fatalf("create resource role: %v", err)
-	}
-	if _, err := s.pool.Exec(context.Background(), `
-		INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_by)
-		VALUES ($1, 'agent', $2, $3)
-	`, roleID, agent, tpTestUserID); err != nil {
-		t.Fatalf("assign resource role: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = s.pool.Exec(context.Background(), `DELETE FROM cerebro_role WHERE id=$1`, roleID)
-	})
-}
-
 // TestStoreFromQueries_ResolvesActiveRoleAssignments pins the public Resolve
 // seam used by handlers and runtimes that already own generated queries. Role
 // bindings must not disappear merely because the caller chose this constructor.
@@ -208,30 +173,6 @@ func TestStoreFromQueries_ResolvesActiveRoleAssignments(t *testing.T) {
 	}
 	if effective.Setting != SettingDeny {
 		t.Fatalf("setting = %q, want %q from active role binding", effective.Setting, SettingDeny)
-	}
-	if !strings.Contains(effective.Reason, "via role StoreFromQueries role v1") {
-		t.Fatalf("reason = %q, want role name and version provenance", effective.Reason)
-	}
-
-	if _, err := tpTestPool.Exec(ctx, `
-		UPDATE cerebro_role SET archived_at=now(), version=version+1 WHERE id=$1
-	`, roleID); err != nil {
-		t.Fatalf("archive role: %v", err)
-	}
-	effective, err = store.Resolve(ctx, Query{
-		WorkspaceID: tpTestWorkspaceID,
-		ToolKey:     tool,
-		AgentID:     agent,
-		UserID:      tpTestUserID,
-	})
-	if err != nil {
-		t.Fatalf("resolve after archive: %v", err)
-	}
-	if effective.Setting != SettingAllow {
-		t.Fatalf("setting after archive = %q, want base %q", effective.Setting, SettingAllow)
-	}
-	if strings.Contains(effective.Reason, "via role") {
-		t.Fatalf("reason after archive = %q, archived role must not participate", effective.Reason)
 	}
 }
 

@@ -65,7 +65,7 @@ type FirtalGatewayExecutor struct {
 	gate *permgate.Gate
 
 	// toolPolicy is retained as a narrow test seam for the legacy approval helper;
-	// live Gateway decisions use accessDecisions exclusively.
+	// live Gateway decisions use accessDecisionObserver exclusively.
 	toolPolicy         *toolpolicy.Store
 	platformActionGate *platformaction.Gate
 	approvalRequester  approvals.IntakeRequester
@@ -96,10 +96,11 @@ type FirtalGatewayExecutor struct {
 	// get_agent_capabilities absent rather than answering with a partial card.
 	capabilitiesProvider AgentCapabilitiesProvider
 
-	// accessDecisions is the authoritative permission and availability service
-	// for every Gateway list and call decision. nil fails closed.
-	accessDecisions *accessdecision.Service
-	taskMandates    taskMandateStore
+	// accessDecisionObserver records the future canonical access decision next
+	// to the live Gateway verdict. Its result is deliberately never returned to
+	// an enforcement path; nil leaves execution unchanged.
+	accessDecisionObserver *accessdecision.Observer
+	taskMandates           taskMandateStore
 
 	// routerHandler is the server's own HTTP router, used by the FIR-1449
 	// in-process bridge to reach the full CLI/MCP tool surface via a loopback
@@ -172,10 +173,11 @@ func (e *FirtalGatewayExecutor) SetAgentCapabilitiesProvider(p AgentCapabilities
 	return e
 }
 
-// SetAccessDecisionService wires the authoritative Gateway Policy Decision Service.
-func (e *FirtalGatewayExecutor) SetAccessDecisionService(service *accessdecision.Service) *FirtalGatewayExecutor {
+// SetAccessDecisionObserver wires the observational Decision Ledger shadow.
+// The observer cannot alter the live allow/deny result.
+func (e *FirtalGatewayExecutor) SetAccessDecisionObserver(observer *accessdecision.Observer) *FirtalGatewayExecutor {
 	if e != nil {
-		e.accessDecisions = service
+		e.accessDecisionObserver = observer
 	}
 	return e
 }
@@ -906,11 +908,10 @@ func (e *FirtalGatewayExecutor) completeGatewayForcingText(ctx context.Context, 
 }
 
 // policyDecisionTools builds the authoritative Gateway tool list through the
-// Policy Decision Service. Allow and Ask are visible so an Ask can reach the
-// approval flow at call time. Missing state, unknown identities, Deny, lookup
+// Policy Decision Service. Missing service state, unknown identities, policy
 // errors, and absence from the live runtime registry all exclude the tool.
 func (e *FirtalGatewayExecutor) policyDecisionTools(ctx context.Context, reg *Registry, agentID, workspaceID pgtype.UUID, meta GatewayRequestMeta) []Tool {
-	if e == nil || e.accessDecisions == nil || reg == nil {
+	if e == nil || e.accessDecisionObserver == nil || reg == nil {
 		return nil
 	}
 	reg.mu.RLock()
@@ -926,8 +927,7 @@ func (e *FirtalGatewayExecutor) policyDecisionTools(ctx context.Context, reg *Re
 	issuanceMeta.TaskID = ""
 	for _, name := range names {
 		entry := e.decideAccess(ctx, agentID, workspaceID, name, reg, issuanceMeta, gatewayPolicyRequestContext(name, nil))
-		if entry.PolicyDecision != accessdecision.PolicyAllow &&
-			entry.PolicyDecision != accessdecision.PolicyAsk {
+		if entry.ShadowDecision != accessdecision.DecisionAllow {
 			continue
 		}
 		reg.mu.RLock()

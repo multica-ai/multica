@@ -34,16 +34,6 @@ func (s platformPolicyStub) ResolvePermission(_ context.Context, in toolpolicy.Q
 	}}, in.ToolKey, actor), nil
 }
 
-type declaredContractPolicyStub struct{}
-
-func (declaredContractPolicyStub) Resolve(_ context.Context, _ toolpolicy.Query) (toolpolicy.Effective, error) {
-	return toolpolicy.Effective{Setting: toolpolicy.SettingAllow}, nil
-}
-
-func (declaredContractPolicyStub) ResolvePermission(_ context.Context, _ toolpolicy.Query, _ platformaccess.Actor) (toolpolicy.Effective, error) {
-	return toolpolicy.Effective{Setting: toolpolicy.SettingDeny}, nil
-}
-
 func TestEffectiveToolWireShapeHasNoLegacyRuntimeGrant(t *testing.T) {
 	body, err := json.Marshal(EffectiveTool{})
 	if err != nil {
@@ -130,29 +120,5 @@ func TestListEffectiveToolsUsesPlatformActionContractForWorkflowHooks(t *testing
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing workflow hook rows: %v", want)
-	}
-}
-
-func TestListEffectiveToolsUsesDeclaredPermissionContractForOrdinaryTools(t *testing.T) {
-	service := New(capabilityListStub{views: []capabilityregistry.View{{
-		Key: "mcp__github__create_issue", Title: "Create issue", Source: "scan",
-	}}}, declaredContractPolicyStub{})
-
-	rows, err := service.ListEffectiveTools(context.Background(), Query{
-		RuntimeMode:     "cloud",
-		RuntimeProvider: "firtal-gateway",
-		AgentID:         pgtype.UUID{Valid: true},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("got %d rows, want 1", len(rows))
-	}
-	if got := rows[0].Policy.Effective; got != AccessDeny {
-		t.Fatalf("ordinary tool policy = %q, want %q from declared permission contract", got, AccessDeny)
-	}
-	if rows[0].ExposureEffective.Effective {
-		t.Fatal("ordinary tool must not be exposed when declared permission contract denies it")
 	}
 }

@@ -66,24 +66,6 @@ func TestProviderPolicyToolKeyPreservesOtherProviders(t *testing.T) {
 	}
 }
 
-func TestProviderPolicyToolKeyNormalizesCodexObservedNames(t *testing.T) {
-	t.Parallel()
-
-	for _, tc := range []struct {
-		tool string
-		want string
-	}{
-		{tool: "exec_command", want: "tools:bash"},
-		{tool: "shell", want: "tools:bash"},
-		{tool: "patch_apply", want: "tools:apply_patch"},
-		{tool: "apply-patch", want: "tools:apply_patch"},
-	} {
-		if got := ProviderPolicyToolKey("codex", tc.tool); got != tc.want {
-			t.Errorf("ProviderPolicyToolKey(codex, %q) = %q, want %q", tc.tool, got, tc.want)
-		}
-	}
-}
-
 func TestProviderResourcePatternNormalizesCursorHookNames(t *testing.T) {
 	t.Parallel()
 

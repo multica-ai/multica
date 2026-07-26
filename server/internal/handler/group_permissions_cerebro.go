@@ -211,12 +211,12 @@ func (h *Handler) cerebroRequireLocalRuntimePolicy(w http.ResponseWriter, r *htt
 		return false
 	}
 	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
-	eff, err := store.ResolvePermission(r.Context(), toolpolicy.Query{
+	eff, err := store.Resolve(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     "create_local_runtime",
 		UserID:      viewer.UserID,
 		Base:        toolpolicy.SettingAllow,
-	}, platformaccess.Actor{Authenticated: true})
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
@@ -274,12 +274,12 @@ func (h *Handler) cerebroRequireConnectionsPolicy(w http.ResponseWriter, r *http
 		return false
 	}
 	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
-	eff, err := store.ResolvePermission(r.Context(), toolpolicy.Query{
+	eff, err := store.Resolve(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     "manage_connections",
 		UserID:      viewer.UserID,
 		Base:        toolpolicy.SettingAllow,
-	}, platformaccess.Actor{Authenticated: true})
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
@@ -353,12 +353,12 @@ func (h *Handler) cerebroRequireCredentialGrantPolicy(w http.ResponseWriter, r *
 		return false
 	}
 	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
-	eff, err := store.ResolvePermission(r.Context(), toolpolicy.Query{
+	eff, err := store.Resolve(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     "manage_credential_access",
 		UserID:      viewer.UserID,
 		Base:        toolpolicy.SettingAllow,
-	}, platformaccess.Actor{Authenticated: true})
+	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false

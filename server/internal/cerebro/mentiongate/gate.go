@@ -10,7 +10,6 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/cerebro/channels"
 	"github.com/multica-ai/multica/server/internal/cerebro/grouppermissions"
-	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -91,13 +90,13 @@ func (s *Service) canTriggerAgent(ctx context.Context, workspaceID, userID, agen
 	// otherwise be blocked. Base = Allow so an unconfigured workspace is fully
 	// governed by the baseline above.
 	store := toolpolicy.NewStoreFromQueries(s.Permissions.Cerebro)
-	eff, err := store.ResolvePermission(ctx, toolpolicy.Query{
+	eff, err := store.Resolve(ctx, toolpolicy.Query{
 		WorkspaceID: workspaceID,
 		ToolKey:     triggerOtherAgentKey,
 		UserID:      userID,
 		AgentID:     agentID,
 		Base:        toolpolicy.SettingAllow,
-	}, platformaccess.Actor{Authenticated: true})
+	})
 	if err != nil {
 		return false, err
 	}

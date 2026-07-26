@@ -136,36 +136,6 @@ func TestToolExecutorInvoker_ToolNotGranted_ReturnsErrToolNotPermitted(t *testin
 	}
 }
 
-func TestToolExecutorInvoker_AskRequiresApprovalAwarePath(t *testing.T) {
-	if runtimeAccountTestPool == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	agentID := createInvokerTestAgent(t, "larry-invoke-ask")
-	setInvokerToolPolicy(t, agentID, "list_issues", toolpolicy.SettingAsk)
-
-	invoker := &ToolExecutorInvoker{
-		Queries:        db.New(runtimeAccountTestPool),
-		CerebroQueries: cerebrodb.New(runtimeAccountTestPool),
-		Pool:           runtimeAccountTestPool,
-		Policy:         toolpolicy.NewStore(runtimeAccountTestPool),
-	}
-
-	_, err := invoker.Invoke(
-		ctx,
-		agentID, runtimeAccountTestWSID,
-		pgtype.UUID{},
-		runtimeAccountTestUserID,
-		pgtype.UUID{},
-		"list_issues",
-		map[string]any{},
-	)
-	if !errors.Is(err, handler.ErrToolNotPermitted) {
-		t.Fatalf("Ask executed through a path without approval context: %v", err)
-	}
-}
-
 func TestToolExecutorInvoker_OpenLoopStepUsesTaskScopedCapabilityWithoutGrant(t *testing.T) {
 	if runtimeAccountTestPool == nil {
 		t.Skip("database not available")

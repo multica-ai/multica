@@ -75,26 +75,15 @@ const AgentCapabilityAvailabilitySummarySchema = z
     runtime_type: z.string().catch(""),
     status: z.enum(["known", "unknown"]).catch("unknown"),
     verified: z.number().int().nonnegative().catch(0),
-    discovered: z.number().int().nonnegative().catch(0),
-    declared: z.number().int().nonnegative().catch(0),
     unproven: z.number().int().nonnegative().catch(0),
   })
   .loose()
-  .catch({
-    runtime_type: "",
-    status: "unknown",
-    verified: 0,
-    discovered: 0,
-    declared: 0,
-    unproven: 0,
-  });
+  .catch({ runtime_type: "", status: "unknown", verified: 0, unproven: 0 });
 
 const EMPTY_AVAILABILITY = {
   runtime_type: "",
   status: "unknown" as const,
   verified: 0,
-  discovered: 0,
-  declared: 0,
   unproven: 0,
 };
 

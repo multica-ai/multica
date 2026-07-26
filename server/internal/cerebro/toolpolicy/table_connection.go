@@ -123,10 +123,30 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 		return out, nil
 	}
 
-	settings, err := s.loadResourcePolicySettings(ctx, in, groupIDs, resourcePolicyFilter{
-		toolPrefix: connectionToolKeyPrefix + "%",
-		scope:      resourcePatternNonEmpty,
-	})
+	settings, err := s.loadConnectionPolicySettings(ctx, in, groupIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	// The connection-wide row (source 'connection', resource_pattern '') is the
+	// control for the WHOLE connection — its Deny/Ask must cascade to every tool
+	// on that connection so "deny the connection for this runtime/agent" actually
+	// blocks the tools, not just the (display-only) wide row (TECH-3180). The
+	// connection-wide rows were already resolved into `out` by Table(); reuse each
+	// one's Effective setting as the BASE for its per-tool resolution so a per-tool
+	// choice can only tighten the connection-wide one, never loosen it.
+	connWideBase := connectionWideBases(out)
+
+	// Fallback when no capability-wide row is in `out`. Table() only emits a
+	// source='connection' wide row when a cerebro_capability row exists for the
+	// connection (MCP connections register one; an API connection authored only in
+	// workspace_connection has none). Without that row the connection-wide
+	// Deny/Ask authored on `connection:<name>` (resource_pattern '') would never
+	// reach the per-endpoint rows, so a workspace/agent-level "deny this whole
+	// connection" would silently fail to cap its endpoints (FIR-2166). Resolve the
+	// authored wide settings straight from cerebro_tool_policy and use them as the
+	// base wherever the capability-derived base is absent.
+	authoredWideBase, err := s.connectionWideAuthoredBases(ctx, in, groupIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -134,25 +154,13 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 	for _, conn := range conns {
 		toolKey := connectionToolKeyPrefix + conn.name
 		source := sourceForKind(conn.kind)
-		// The whole-Connection control is resolved through the canonical store,
-		// not a table-only fold. This includes direct policy, active Roles, WHEN
-		// rules and the same member-override mode as call time even when an API
-		// Connection has no capability-register row.
-		wide, err := s.ResolveGeneral(ctx, Query{
-			WorkspaceID:  in.WorkspaceID,
-			ToolKey:      toolKey,
-			RuntimeID:    in.RuntimeID,
-			AgentID:      in.AgentID,
-			UserID:       in.UserID,
-			GroupIDs:     groupIDs,
-			OnBehalfOfID: in.OnBehalfOfID,
-			SystemID:     in.SystemID,
-			Base:         connectionDefaultBase(conn, in.Base),
-		}, in.mode == ModeOpenable)
-		if err != nil {
-			return nil, fmt.Errorf("toolpolicy: resolve connection-wide permission %q: %w", toolKey, err)
+		base := connectionDefaultBase(conn, in.Base)
+		if w, ok := authoredWideBase[toolKey]; ok && rank(w) >= 0 {
+			base = w
 		}
-		base := wide.Setting
+		if w, ok := connWideBase[toolKey]; ok && rank(w) >= 0 {
+			base = w
+		}
 		for _, t := range conn.tools {
 			row := TableRow{
 				ToolKey:         toolKey,
@@ -163,7 +171,7 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 				Layers:          map[Layer]Setting{},
 				Conditions:      map[Layer]*Condition{},
 			}
-			if cell, ok := settings[resourcePolicyKey{toolKey: toolKey, resourcePattern: t.Name}]; ok {
+			if cell, ok := settings[repoPolicyKey{toolKey, t.Name}]; ok {
 				for l, set := range cell.layers {
 					row.Layers[l] = set
 				}
@@ -174,17 +182,98 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 				}
 			}
-			row.Effective, err = s.resolveTableResourcePermission(
-				ctx, in, row.ToolKey, row.ResourcePattern, row.Layers, base,
-			)
-			if err != nil {
-				return nil, fmt.Errorf(
-					"toolpolicy: resolve connection permission %q on %q: %w",
-					row.ToolKey, row.ResourcePattern, err,
-				)
-			}
+			row.Effective = ResolveWithMode(tableRowMode(in.mode, row.ToolKey), Input{Settings: row.Layers, Base: base})
 			out = append(out, row)
 		}
+	}
+	return out, nil
+}
+
+// connectionWideBases maps each connection's policy key to the resolved Effective
+// setting of its connection-wide row (source 'connection', empty resource
+// pattern) already present in out. It is the per-connection floor every per-tool
+// row inherits from: the connection-wide chain (Workspace › Runtime › Agent ›
+// Group › User) decides the connection default, and per-tool rows tighten under
+// it. A connection with no capability-wide row contributes nothing (callers fall
+// back to the workspace Base).
+func connectionWideBases(out []TableRow) map[string]Setting {
+	bases := map[string]Setting{}
+	for _, r := range out {
+		if r.Source == "connection" && r.ResourcePattern == "" {
+			bases[r.ToolKey] = r.Effective.Setting
+		}
+	}
+	return bases
+}
+
+// connectionWideAuthoredBases resolves, per connection policy key, the effective
+// connection-wide setting from the authored rows in cerebro_tool_policy
+// (tool_key 'connection:%', resource_pattern ”) folded through the same
+// Workspace › Runtime › Agent › Group › User chain as every other layer. It is
+// the fallback for connectionWideBases: it does NOT depend on a cerebro_capability
+// row existing, so a connection authored only in workspace_connection (no
+// capability row — the common case for API connections) still propagates its
+// connection-wide cap to its per-endpoint rows. The subject predicates mirror
+// loadConnectionPolicySettings so an absent subject never matches and that layer
+// stays Inherit. Keys with no authored wide row are simply absent (callers keep
+// the query Base).
+func (s *Store) connectionWideAuthoredBases(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID) (map[string]Setting, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT p.tool_key, p.layer, p.setting
+		FROM cerebro_tool_policy p
+		WHERE p.workspace_id = $1
+		  AND p.resource_pattern = ''
+		  AND p.tool_key LIKE 'connection:%'
+		  AND (
+		    (p.layer = 'workspace' AND p.subject_id = $1) OR
+		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
+		    (p.layer = 'agent'     AND p.subject_id = $3) OR
+		    (p.layer = 'user'      AND p.subject_id = $4) OR
+		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
+		    (p.layer = 'on_behalf_of' AND p.subject_id = $6)
+		  )
+	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.OnBehalfOfID)
+	if err != nil {
+		if isUndefinedTable(err) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("toolpolicy: load connection-wide settings: %w", err)
+	}
+	defer rows.Close()
+
+	type wideAcc struct {
+		layers map[Layer]Setting
+		groups []Setting
+	}
+	byKey := map[string]*wideAcc{}
+	for rows.Next() {
+		var toolKey, layer, setting string
+		if err := rows.Scan(&toolKey, &layer, &setting); err != nil {
+			return nil, fmt.Errorf("toolpolicy: scan connection-wide setting: %w", err)
+		}
+		a, ok := byKey[toolKey]
+		if !ok {
+			a = &wideAcc{layers: map[Layer]Setting{}}
+			byKey[toolKey] = a
+		}
+		l := Layer(layer)
+		set := Setting(setting)
+		if l == LayerGroup {
+			a.groups = append(a.groups, set)
+		} else {
+			a.layers[l] = set
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("toolpolicy: iterate connection-wide settings: %w", err)
+	}
+
+	out := map[string]Setting{}
+	for key, a := range byKey {
+		if len(a.groups) > 0 {
+			a.layers[LayerGroup] = CombineGroups(a.groups...)
+		}
+		out[key] = ResolveWithMode(tableRowMode(in.mode, key), Input{Settings: a.layers, Base: in.Base}).Setting
 	}
 	return out, nil
 }
@@ -684,6 +773,68 @@ func (s *Store) ConnectionToolVerdicts(ctx context.Context, in TableQuery) ([]Co
 			Tool:       r.ResourcePattern,
 			Setting:    r.Effective.Setting,
 		})
+	}
+	return out, nil
+}
+
+// loadConnectionPolicySettings fetches every explicit per-layer setting authored
+// for a connection tool (tool_key 'connection:%', resource_pattern non-empty) in
+// the query's context, bucketed by (tool_key, tool). It mirrors the subject
+// predicates of table_repo.go's loader so an absent subject id never matches and
+// that layer stays Inherit.
+func (s *Store) loadConnectionPolicySettings(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID) (map[repoPolicyKey]*repoPolicyLayers, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT p.tool_key, p.resource_pattern, p.layer, p.setting, p.conditions
+		FROM cerebro_tool_policy p
+		WHERE p.workspace_id = $1
+		  AND p.resource_pattern <> ''
+		  AND p.tool_key LIKE 'connection:%'
+		  AND (
+		    (p.layer = 'workspace' AND p.subject_id = $1) OR
+		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
+		    (p.layer = 'agent'     AND p.subject_id = $3) OR
+		    (p.layer = 'user'      AND p.subject_id = $4) OR
+		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
+		    (p.layer = 'on_behalf_of' AND p.subject_id = $6)
+		  )
+	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.OnBehalfOfID)
+	if err != nil {
+		return nil, fmt.Errorf("toolpolicy: load connection policy settings: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[repoPolicyKey]*repoPolicyLayers{}
+	for rows.Next() {
+		var toolKey, resourcePattern, layer, setting string
+		var conditions []byte
+		if err := rows.Scan(&toolKey, &resourcePattern, &layer, &setting, &conditions); err != nil {
+			return nil, fmt.Errorf("toolpolicy: scan connection policy setting: %w", err)
+		}
+		key := repoPolicyKey{toolKey, resourcePattern}
+		cell, ok := out[key]
+		if !ok {
+			cell = &repoPolicyLayers{layers: map[Layer]Setting{}, conditions: map[Layer]*Condition{}}
+			out[key] = cell
+		}
+		l := Layer(layer)
+		set := Setting(setting)
+		if l == LayerGroup {
+			cell.groups = append(cell.groups, set)
+		} else {
+			cell.layers[l] = set
+			// Surface the rule's WHEN layer for single-subject layers only,
+			// mirroring table_repo.go and the capability-wide decode (FIR-1708 D).
+			cond, err := decodeCondition(conditions)
+			if err != nil {
+				return nil, fmt.Errorf("toolpolicy: decode connection conditions for %q at %s: %w", toolKey, l, err)
+			}
+			if cond != nil {
+				cell.conditions[l] = cond
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("toolpolicy: iterate connection policy settings: %w", err)
 	}
 	return out, nil
 }

@@ -23,7 +23,6 @@ import {
   Lock,
   Activity,
   AlertTriangle,
-  Settings2,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -117,8 +116,6 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
       runtime_type: "",
       status: "unknown",
       verified: 0,
-      discovered: 0,
-      declared: 0,
       unproven: 0,
     },
     limits: { mcp_servers: [], has_mcp_config: false },
@@ -136,41 +133,10 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
 
   return (
     <div className="flex flex-col gap-5">
-      <section
-        className="overflow-hidden rounded-lg border bg-card"
-        aria-labelledby="agent-access-guide"
-      >
-        <div className="border-b px-4 py-3">
-          <h2 id="agent-access-guide" className="text-sm font-semibold">
-            What can this agent do?
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            This page is the agent&apos;s current general access. Use Task access
-            on a run for the narrower answer on one task.
-          </p>
-        </div>
-        <div className="grid gap-px bg-border md:grid-cols-3">
-          <AccessGuideItem
-            icon={Activity}
-            title="General access"
-            body="Read the lists below. Green is callable, amber needs Approval, and red is blocked."
-          />
-          <AccessGuideItem
-            icon={Lock}
-            title="One task"
-            body="Open the task run and expand Task access. Its locked list is checked on every tool call."
-          />
-          <AccessGuideItem
-            icon={Settings2}
-            title="Change access"
-            body="Use Settings → Permissions for defaults and Roles, or the agent's Tools page for its specific rule."
-          />
-        </div>
-      </section>
-
       <p className="text-sm text-muted-foreground">
         Registered and observed access for this agent — the same fields agents
-        read via the CLI and MCP. Unknown sources are marked explicitly.
+        read via the CLI and MCP. Unknown sources are marked explicitly. Green =
+        allowed, amber = needs approval, red = blocked.
       </p>
 
       {/* Skills — two layers the runtime loads: workspace-bound + built-in */}
@@ -302,30 +268,8 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
   );
 }
 
-function AccessGuideItem({
-  icon: Icon,
-  title,
-  body,
-}: {
-  icon: ComponentType<{ className?: string }>;
-  title: string;
-  body: string;
-}) {
-  return (
-    <div className="min-w-0 bg-card p-4">
-      <div className="flex items-center gap-2 text-sm font-medium">
-        <Icon className="size-4 text-muted-foreground" />
-        {title}
-      </div>
-      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
-        {body}
-      </p>
-    </div>
-  );
-}
-
 // permissionPill maps the effective verdict to pill colours, reusing the cerebro
-// fork's emerald/amber/destructive permission palette. Enum
+// fork's emerald/amber/destructive palette (see simple-tool-policy-table). Enum
 // drift downgrades to a neutral pill (API Response Compatibility rule).
 function permissionPill(permission: string): string {
   switch (permission) {
@@ -408,11 +352,8 @@ function ToolsAvailabilitySummary({
       {availability.status === "known" ? (
         <span className="text-xs text-muted-foreground">
           {availability.verified} of {total} proved on the{runtime} runtime
-          {availability.discovered > 0
-            ? ` · ${availability.discovered} discovered`
-            : ""}
-          {availability.declared > 0
-            ? ` · ${availability.declared} only declared`
+          {availability.unproven > 0
+            ? ` · ${availability.unproven} only declared`
             : ""}
         </span>
       ) : (

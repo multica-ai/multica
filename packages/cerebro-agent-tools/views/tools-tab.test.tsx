@@ -5,10 +5,17 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent } from "@multica/core/types";
 
+const mockListRuntimes = vi.hoisted(() => vi.fn());
+const mockListRuntimeTools = vi.hoisted(() => vi.fn());
 const mockCerebroRequest = vi.hoisted(() => vi.fn());
+const mockUseFeatureFlag = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
+}));
+
+vi.mock("@multica/cerebro-feature-flags", () => ({
+  useFeatureFlag: (key: string) => mockUseFeatureFlag(key),
 }));
 
 vi.mock("@multica/core/api", async () => {
@@ -19,6 +26,8 @@ vi.mock("@multica/core/api", async () => {
     ...actual,
     api: {
       ...actual.api,
+      listRuntimes: mockListRuntimes,
+      listRuntimeTools: mockListRuntimeTools,
       cerebroRequest: mockCerebroRequest,
     },
   };
@@ -64,11 +73,78 @@ function renderToolsTab(agent: Agent = baseAgent, canEdit = true) {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockListRuntimes.mockResolvedValue([
+    { id: "runtime-1", name: "sara-mac-mini", workspace_id: "ws-1" },
+  ]);
+  mockListRuntimeTools.mockResolvedValue([]);
   mockCerebroRequest.mockResolvedValue([]);
+  // Default: unified tool-policy flag off → keep the legacy override card.
+  mockUseFeatureFlag.mockReturnValue(false);
 });
 
 describe("CerebroToolsTab", () => {
-  it("uses the unified permission surface without a legacy feature switch", async () => {
+  it("renders the AgentToolsCard for local agents", async () => {
+    renderToolsTab({ ...baseAgent, runtime_mode: "local" });
+
+    expect(await screen.findByText(/Agent tools/i)).toBeInTheDocument();
+  });
+
+  it("renders the AgentToolsCard for cloud agents", async () => {
+    renderToolsTab();
+
+    expect(await screen.findByText(/Agent tools/i)).toBeInTheDocument();
+    expect(
+      await screen.findByText(/daemon will scan on next heartbeat/i),
+    ).toBeInTheDocument();
+  });
+
+  it("hides override controls when canEdit is false", async () => {
+    mockListRuntimeTools.mockResolvedValue([
+      {
+        name: "read_issue",
+        description: "Read an issue",
+        source: "cloud",
+        mcp_server_name: "",
+        enabled: true,
+      },
+    ]);
+    renderToolsTab(baseAgent, false);
+
+    expect(await screen.findByText("read_issue")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("combobox", { name: /Skift override/i }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("renders the unified ToolPolicyTable when the flag is on", async () => {
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_tool_policy",
+    );
+    renderToolsTab();
+
+    // The FIR-2230 table replaces the legacy override card on the agent page.
+    expect(await screen.findByTestId("tool-policy-table")).toBeInTheDocument();
+    expect(screen.queryByText(/Agent tools/i)).not.toBeInTheDocument();
+  });
+
+  it("renders the simple table when only the simple flag is on", async () => {
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_simple_tool_policy",
+    );
+    renderToolsTab();
+
+    expect(
+      await screen.findByTestId("simple-tool-policy-table"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText(/Agent tools/i)).not.toBeInTheDocument();
+    expect(screen.queryByTestId("tool-policy-table")).not.toBeInTheDocument();
+  });
+
+  it("the rich power-view wins when both tool-policy flags are on", async () => {
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) =>
+        key === "cerebro_tool_policy" || key === "cerebro_simple_tool_policy",
+    );
     renderToolsTab();
 
     expect(await screen.findByTestId("tool-policy-table")).toBeInTheDocument();
@@ -78,6 +154,9 @@ describe("CerebroToolsTab", () => {
   });
 
   it("binds the agent's owner as the user ceiling on the agent page", async () => {
+    mockUseFeatureFlag.mockImplementation(
+      (key: string) => key === "cerebro_tool_policy",
+    );
     renderToolsTab();
 
     // The Effective column must reflect the full Runtime › Agent › Group › User

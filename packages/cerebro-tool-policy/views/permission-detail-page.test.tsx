@@ -131,14 +131,6 @@ describe("PermissionDetailPage permission audit", () => {
         name: "Why Access and Permission audit",
       }),
     ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", {
-        name: "Choose the question you want to answer",
-      }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /What can each person do\?/ }),
-    ).toHaveAttribute("aria-pressed", "true");
     const table = await screen.findByRole("table", { name: "Permission audit" });
     for (const heading of [
       "User",
@@ -207,15 +199,7 @@ describe("PermissionDetailPage permission audit", () => {
     const user = userEvent.setup();
     renderPage();
 
-    await user.click(
-      await screen.findByRole("button", {
-        name: /What can people do through one agent\?/,
-      }),
-    );
-    expect(screen.getByRole("tab", { name: /^Agents\b/ })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
+    await user.click(await screen.findByRole("tab", { name: /^Agents\b/ }));
     await user.click(screen.getByRole("button", { name: "View users for Lone" }));
 
     expect(screen.getByText("Shared agent")).toBeInTheDocument();

@@ -102,19 +102,16 @@ type Capability struct {
 	// ManagedExternally is true when the tool-policy gate is NOT this action's
 	// enforcement point (see package doc). Shown for visibility; phase 2 skips it.
 	ManagedExternally bool
-	// ExternalSecurityOwner names the concrete security boundary responsible for
-	// a ManagedExternally capability. It must be non-empty whenever
-	// ManagedExternally is true, so a registered permission can never degrade to
-	// an unowned "not wired" status.
-	ExternalSecurityOwner string
 	// ToolBindings names runtime tools that invoke this platform capability.
 	// Registration remains separate from permission, but the binding makes the
 	// relationship complete and mechanically testable.
 	ToolBindings []string
-	// Surfaced marks the "start someone else's agent" family used by the focused
-	// Agent-start projection. The main Permissions response always includes the
-	// complete platform catalog; SurfacedKeys remains the canonical subset for
-	// callers that intentionally request only this family.
+	// Surfaced marks a capability that appears in the Permissions table behind the
+	// light agent-start gate (cerebro_agent_trigger_permissions), NOT only behind
+	// the full-catalog flag (cerebro_platform_capabilities). It is set on the
+	// "start someone else's agent" family (FIR-3091 slice 4) so an admin can see
+	// and set those rules in the same screen as reported tools without opening the
+	// whole platform catalog. SurfacedKeys() is the canonical list.
 	Surfaced bool
 	// Ops are the permguard inventory ids (http surface) this capability covers.
 	// Traceability + coverage tripwire: every id must be a real, current route.
@@ -220,14 +217,12 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:                   "rerun_issue",
-		Title:                 "Re-run / cancel issue agent",
-		Category:              CategoryIssues,
-		Surfaced:              true,
-		Description:           "Re-trigger the assigned agent on an issue, or cancel a running task.",
-		DescriptionZh:         "重新触发工单上分配的 agent，或取消正在运行的任务。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Issue access and task ownership gates",
+		Key:           "rerun_issue",
+		Title:         "Re-run / cancel issue agent",
+		Category:      CategoryIssues,
+		Surfaced:      true,
+		Description:   "Re-trigger the assigned agent on an issue, or cancel a running task.",
+		DescriptionZh: "重新触发工单上分配的 agent，或取消正在运行的任务。",
 		Ops: []string{
 			"POST /api/issues/{id}/rerun",
 			"POST /api/issues/{id}/tasks/{taskId}/cancel",
@@ -344,27 +339,23 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:                   "trigger_autopilot",
-		Title:                 "Trigger autopilot",
-		Category:              CategoryAutopilots,
-		Surfaced:              true,
-		Description:           "Fire an autopilot manually, or replay a past delivery.",
-		DescriptionZh:         "手动触发 autopilot，或重放一次过往投递。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Autopilot scope gate",
+		Key:           "trigger_autopilot",
+		Title:         "Trigger autopilot",
+		Category:      CategoryAutopilots,
+		Surfaced:      true,
+		Description:   "Fire an autopilot manually, or replay a past delivery.",
+		DescriptionZh: "手动触发 autopilot，或重放一次过往投递。",
 		Ops: []string{
 			"POST /api/autopilots/{id}/trigger",
 			"POST /api/autopilots/{id}/deliveries/{deliveryId}/replay",
 		},
 	},
 	{
-		Key:                   "autopilot_scope",
-		Title:                 "Autopilot scope (who may see/edit/trigger)",
-		Category:              CategoryAutopilots,
-		Description:           "The hardcoded owner/group scope rule deciding who may see, edit, or trigger an autopilot. Today a code check, not on the controllable engine.",
-		DescriptionZh:         "决定谁可查看、编辑或触发 autopilot 的硬编码所有者/群组范围规则。目前为代码检查，尚未纳入可控引擎。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Autopilot scope gate",
+		Key:           "autopilot_scope",
+		Title:         "Autopilot scope (who may see/edit/trigger)",
+		Category:      CategoryAutopilots,
+		Description:   "The hardcoded owner/group scope rule deciding who may see, edit, or trigger an autopilot. Today a code check, not on the controllable engine.",
+		DescriptionZh: "决定谁可查看、编辑或触发 autopilot 的硬编码所有者/群组范围规则。目前为代码检查，尚未纳入可控引擎。",
 		Evidence: []string{
 			"server/internal/cerebro/access/autopilot_scope.go:48",  // ValidateScope
 			"server/internal/cerebro/access/autopilot_scope.go:150", // CanEdit
@@ -372,13 +363,12 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:                   "autopilot_webhook",
-		Title:                 "Autopilot inbound webhook",
-		Category:              CategoryAutopilots,
-		Description:           "An external caller firing an autopilot via its webhook URL. Governed by the per-trigger webhook secret, not the tool-policy gate.",
-		DescriptionZh:         "外部调用方通过 webhook URL 触发 autopilot。由每个触发器的 webhook 密钥管控，而非工具策略门。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Autopilot webhook secret",
+		Key:               "autopilot_webhook",
+		Title:             "Autopilot inbound webhook",
+		Category:          CategoryAutopilots,
+		Description:       "An external caller firing an autopilot via its webhook URL. Governed by the per-trigger webhook secret, not the tool-policy gate.",
+		DescriptionZh:     "外部调用方通过 webhook URL 触发 autopilot。由每个触发器的 webhook 密钥管控，而非工具策略门。",
+		ManagedExternally: true,
 		Ops: []string{
 			"POST /api/webhooks/autopilots/{token}",
 		},
@@ -540,14 +530,12 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:                   "schedule_agent_wakeup",
-		Title:                 "Schedule agent wakeup",
-		Category:              CategoryAgents,
-		Surfaced:              true,
-		Description:           "Create or cancel a scheduled wakeup that starts an agent on an issue later or when a watched event happens.",
-		DescriptionZh:         "创建或取消计划唤醒，在稍后或监视事件发生时于工单上启动 agent。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Issue membership and agent ownership gates",
+		Key:           "schedule_agent_wakeup",
+		Title:         "Schedule agent wakeup",
+		Category:      CategoryAgents,
+		Surfaced:      true,
+		Description:   "Create or cancel a scheduled wakeup that starts an agent on an issue later or when a watched event happens.",
+		DescriptionZh: "创建或取消计划唤醒，在稍后或监视事件发生时于工单上启动 agent。",
 		Ops: []string{
 			"POST /api/cerebro/wakeups/",
 			"POST /api/cerebro/wakeups/{id}/cancel",
@@ -648,26 +636,23 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:                   "use_other_runtime",
-		Title:                 "Use someone else's runtime",
-		Category:              CategoryRuntimes,
-		Description:           "Whether you may point an agent at a runtime you do not own. Today a hardcoded group allowlist, NOT on the controllable engine — the runtime twin of trigger_other_agent.",
-		DescriptionZh:         "是否可将 agent 指向不属于你的 runtime。目前为硬编码群组白名单，尚未纳入可控引擎——trigger_other_agent 的 runtime 对应物。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Group permission runtime access gate",
+		Key:           "use_other_runtime",
+		Title:         "Use someone else's runtime",
+		Category:      CategoryRuntimes,
+		Description:   "Whether you may point an agent at a runtime you do not own. Today a hardcoded group allowlist, NOT on the controllable engine — the runtime twin of trigger_other_agent.",
+		DescriptionZh: "是否可将 agent 指向不属于你的 runtime。目前为硬编码群组白名单，尚未纳入可控引擎——trigger_other_agent 的 runtime 对应物。",
 		Evidence: []string{
 			"server/internal/cerebro/grouppermissions/permissions.go:322", // CanUseRuntime
 			"server/internal/handler/group_permissions_cerebro.go:187",    // cerebroRequireRuntimeAccess call site
 		},
 	},
 	{
-		Key:                   "daemon_runtime_callback",
-		Title:                 "Daemon runtime callbacks",
-		Category:              CategoryRuntimes,
-		Description:           "The local daemon reporting heartbeats, claiming tasks, and posting results. Governed by the daemon token, not the tool-policy gate.",
-		DescriptionZh:         "本地守护进程上报心跳、领取任务并提交结果。由守护进程令牌管控，而非工具策略门。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Daemon token middleware",
+		Key:               "daemon_runtime_callback",
+		Title:             "Daemon runtime callbacks",
+		Category:          CategoryRuntimes,
+		Description:       "The local daemon reporting heartbeats, claiming tasks, and posting results. Governed by the daemon token, not the tool-policy gate.",
+		DescriptionZh:     "本地守护进程上报心跳、领取任务并提交结果。由守护进程令牌管控，而非工具策略门。",
+		ManagedExternally: true,
 		Ops: []string{
 			"POST /api/daemon/register",
 			"POST /api/daemon/heartbeat",
@@ -812,13 +797,12 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:                   "manage_project_access",
-		Title:                 "Manage project access",
-		Category:              CategoryProjects,
-		Description:           "Add/remove project members and group access. Governed by the project's own access list, not the tool-policy gate.",
-		DescriptionZh:         "添加/移除项目成员和群组访问。由项目自身的访问列表管控，而非工具策略门。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Project access control list",
+		Key:               "manage_project_access",
+		Title:             "Manage project access",
+		Category:          CategoryProjects,
+		Description:       "Add/remove project members and group access. Governed by the project's own access list, not the tool-policy gate.",
+		DescriptionZh:     "添加/移除项目成员和群组访问。由项目自身的访问列表管控，而非工具策略门。",
+		ManagedExternally: true,
 		Ops: []string{
 			"PATCH /api/projects/{id}/access",
 			"POST /api/projects/{id}/members",
@@ -1170,13 +1154,12 @@ var catalog = []Capability{
 		},
 	},
 	{
-		Key:                   "gateway_channel_delivery",
-		Title:                 "Gateway inbound channel message",
-		Category:              CategoryChannels,
-		Description:           "The Firtal Gateway delivering a webhook into a channel on behalf of a chosen principal (FIR-1766). Governed by the gateway service token plus the acting principal's channel membership, not the tool-policy gate.",
-		DescriptionZh:         "Firtal Gateway 代表选定主体将 webhook 投递到频道（FIR-1766）。由网关服务令牌加上执行主体的频道成员资格管控，而非工具策略门。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Gateway service token and channel membership",
+		Key:               "gateway_channel_delivery",
+		Title:             "Gateway inbound channel message",
+		Category:          CategoryChannels,
+		Description:       "The Firtal Gateway delivering a webhook into a channel on behalf of a chosen principal (FIR-1766). Governed by the gateway service token plus the acting principal's channel membership, not the tool-policy gate.",
+		DescriptionZh:     "Firtal Gateway 代表选定主体将 webhook 投递到频道（FIR-1766）。由网关服务令牌加上执行主体的频道成员资格管控，而非工具策略门。",
+		ManagedExternally: true,
 		Ops: []string{
 			"POST /api/webhooks/gateway/channel-message",
 		},
@@ -1187,23 +1170,21 @@ var catalog = []Capability{
 	// the tool-policy gate; listed (marked) so an admin can see the platform
 	// exposes them and a future phase can choose to gate them.
 	{
-		Key:                   "read_issues",
-		Title:                 "Read issues",
-		Category:              CategoryReadAccess,
-		Description:           "View issues, comments, and their history. Governed by workspace membership, not the tool-policy gate.",
-		DescriptionZh:         "查看工单、评论及其历史。由工作区成员资格管控，而非工具策略门。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Workspace membership middleware",
-		Evidence:              []string{"server/internal/middleware/workspace.go (RequireWorkspaceMember)"},
+		Key:               "read_issues",
+		Title:             "Read issues",
+		Category:          CategoryReadAccess,
+		Description:       "View issues, comments, and their history. Governed by workspace membership, not the tool-policy gate.",
+		DescriptionZh:     "查看工单、评论及其历史。由工作区成员资格管控，而非工具策略门。",
+		ManagedExternally: true,
+		Evidence:          []string{"server/internal/middleware/workspace.go (RequireWorkspaceMember)"},
 	},
 	{
-		Key:                   "read_projects",
-		Title:                 "Read projects",
-		Category:              CategoryReadAccess,
-		Description:           "View projects and their contents. Governed by the project access list (and a group-membership path), not the tool-policy gate.",
-		DescriptionZh:         "查看项目及其内容。由项目访问列表（及群组成员路径）管控，而非工具策略门。",
-		ManagedExternally:     true,
-		ExternalSecurityOwner: "Project access control list",
+		Key:               "read_projects",
+		Title:             "Read projects",
+		Category:          CategoryReadAccess,
+		Description:       "View projects and their contents. Governed by the project access list (and a group-membership path), not the tool-policy gate.",
+		DescriptionZh:     "查看项目及其内容。由项目访问列表（及群组成员路径）管控，而非工具策略门。",
+		ManagedExternally: true,
 		Evidence: []string{
 			"server/internal/handler/project_access.go (canAccessProject)",
 			"server/internal/cerebro/grouppermissions/permissions.go:352", // CanSeeProjectViaGroup
@@ -1299,11 +1280,11 @@ var excluded = map[string]string{
 
 	// AI Impact configuration is owner/admin-only in aiimpact.CanConfigure.
 	// These human-admin routes are not wired to the tool-policy engine.
-	"POST /api/cerebro/ai-impact/functions":                       "admin_only — workspace owner/admin configures AI Impact functions",
-	"POST /api/cerebro/ai-impact/metrics":                         "admin_only — workspace owner/admin configures AI Impact metrics",
-	"POST /api/cerebro/ai-impact/metrics/{metricId}/observations": "admin_only — workspace owner/admin appends AI Impact evidence",
-	"POST /api/cerebro/ai-impact/operating-loops":                 "admin_only — workspace owner/admin configures AI Impact operating loops",
-	"POST /api/cerebro/ai-impact/project-bindings":                "admin_only — workspace owner/admin configures AI Impact project bindings",
+	"POST /api/cerebro/ai-impact/functions":                             "admin_only — workspace owner/admin configures AI Impact functions",
+	"POST /api/cerebro/ai-impact/metrics":                               "admin_only — workspace owner/admin configures AI Impact metrics",
+	"POST /api/cerebro/ai-impact/metrics/{metricId}/observations":       "admin_only — workspace owner/admin appends AI Impact evidence",
+	"POST /api/cerebro/ai-impact/operating-loops":                       "admin_only — workspace owner/admin configures AI Impact operating loops",
+	"POST /api/cerebro/ai-impact/project-bindings":                      "admin_only — workspace owner/admin configures AI Impact project bindings",
 
 	// cerebro dictation — one-shot audio→text proxy; self-authenticates via the
 	// workspace token, persists no governable state, no agent tool equivalent.
@@ -1450,7 +1431,9 @@ func Keys() []string {
 }
 
 // SurfacedKeys returns the keys marked Surfaced (the agent-start family), in
-// catalog order, for focused internal projections.
+// catalog order. These are the capabilities the Permissions table shows behind
+// the light agent-start gate, without opening the whole platform catalog
+// (FIR-3091 slice 4).
 func SurfacedKeys() []string {
 	var out []string
 	for _, c := range catalog {
@@ -1461,13 +1444,32 @@ func SurfacedKeys() []string {
 	return out
 }
 
+// notEnforcedKeys is the closed set of capability keys that are Surfaced in the
+// Permissions table but whose stored setting does NOT yet gate anything at
+// runtime — "surfaced but not yet wired". Today these are the three agent-start
+// family keys added as Surfaced=true (FIR-3091 slice 4 / FIR-2409): the table
+// shows and lets an admin author them, but only trigger_other_agent is actually
+// read by the gate, so the other three are cosmetic until their gate lands. See
+// the Surfaced doc + SurfacedKeys() above for the surfacing side.
+//
+// Kept as an explicit exception list, not a per-entry flag, so the DEFAULT is
+// "enforced" (Jesper's rule, FIR-3091 punkt 8): every permission is enforced
+// unless it is one of these known-unwired keys, and a new capability is enforced
+// the moment it is added without touching every catalog entry.
+var notEnforcedKeys = map[string]bool{
+	"rerun_issue":           true,
+	"schedule_agent_wakeup": true,
+	"trigger_autopilot":     true,
+}
+
 // Enforced reports whether a policy setting authored on this tool_key is actually
-// read by the canonical policy gate. Unknown and externally-owned capabilities
-// are never reported as engine-enforced: a future permission must enter this
-// catalog and either pass the live gate contract or name its external owner.
+// read by the runtime gate today (FIR-3091 punkt 8). It backs the per-permission
+// detail page's "is this live or cosmetic" signal: true for every key except the
+// known "surfaced but not yet wired" exceptions in notEnforcedKeys. An unknown
+// key returns true (enforced by default), matching Jesper's rule that a
+// capability is enforced unless explicitly listed otherwise.
 func Enforced(key string) bool {
-	capability, ok := ByKey(key)
-	return ok && !capability.ManagedExternally
+	return !notEnforcedKeys[key]
 }
 
 // ByKey looks a capability up by its stable key.

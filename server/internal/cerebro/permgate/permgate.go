@@ -1,5 +1,5 @@
-// Package permgate connects a caller-resolved permission decision to the
-// approval inbox (FIR-2193).
+// Package permgate is the enforcement gate that finally connects the
+// permission resolver to the approval inbox (FIR-2193).
 //
 // Before this package existed the resolver could return
 // permissions.DecisionNeedsApproval, but nothing acted on it: in practice the
@@ -9,8 +9,8 @@
 // The gate does three things in one place so every call site behaves
 // identically:
 //
-//   - EvaluateDecision — accept the canonical resolver's allow/deny/ask verdict.
-//   - On Ask, materialise a pending ask in the approval inbox
+//   - Evaluate — ask the resolver allow/deny/needs_approval.
+//   - On needs_approval, materialise a pending ask in the approval inbox
 //     (approvals.Service.Intake) so a human sees it under /approvals.
 //   - Await — block the agent's action until the human approves, rejects, or
 //     the ask expires. Approve continues the action; reject/expiry stops it.
@@ -107,6 +107,12 @@ const (
 	DefaultApprovalTTL  = 15 * time.Minute
 )
 
+// resolverIface is the slice of permissions.Resolver the gate needs. Narrowed
+// to an interface so tests inject a fake without a database.
+type resolverIface interface {
+	Can(ctx context.Context, req permissions.Request) (permissions.Decision, error)
+}
+
 // approvalsIface is the slice of approvals.Service the gate needs.
 type approvalsIface interface {
 	Intake(ctx context.Context, p approvals.IntakeParams) (cerebrodb.CerebroApprovalRequest, error)
@@ -114,8 +120,9 @@ type approvalsIface interface {
 	FindReusable(ctx context.Context, q approvals.ReusableQuery) (cerebrodb.CerebroApprovalRequest, bool, error)
 }
 
-// Gate wires caller-resolved permission decisions to the approval inbox.
+// Gate wires the resolver and the approval inbox together.
 type Gate struct {
+	Resolver  resolverIface
 	Approvals approvalsIface
 
 	// PollInterval / WaitTimeout configure Await. Zero falls back to the
@@ -129,10 +136,9 @@ type Gate struct {
 	now func() time.Time
 }
 
-// New constructs a Gate from the approval service. Permission resolution stays
-// at the feature's canonical call-time gate; this type only owns ask lifecycle.
-func New(a *approvals.Service) *Gate {
-	return &Gate{Approvals: a}
+// New constructs a Gate from a resolver and approvals service.
+func New(r *permissions.Resolver, a *approvals.Service) *Gate {
+	return &Gate{Resolver: r, Approvals: a}
 }
 
 func (g *Gate) clock() time.Time {
@@ -156,9 +162,34 @@ func (g *Gate) waitTimeout() time.Duration {
 	return DefaultWaitTimeout
 }
 
-// EvaluateDecision maps a decision the caller already resolved through the
-// canonical permission engine to the shared inbox lifecycle. It does not block:
-// on needs_approval it returns OutcomePending with a valid ApprovalID.
+// Evaluate resolves the request and, when approval is required, creates the
+// inbox ask. It returns immediately — it does NOT block. Use it from the HTTP
+// gate endpoint that the runtime hook calls (the hook then long-polls the
+// approval status itself).
+//
+// Returned outcomes: OutcomeAllowed, OutcomeDenied, or OutcomePending (with a
+// valid ApprovalID). An error means the gate could not make a decision; the
+// caller MUST fail-closed (deny) on error.
+func (g *Gate) Evaluate(ctx context.Context, req Request) (Result, error) {
+	if g == nil || g.Resolver == nil || g.Approvals == nil {
+		return Result{Outcome: OutcomeDenied, Reason: "gate not configured"},
+			errors.New("permgate: gate not configured")
+	}
+
+	decision, err := g.Resolver.Can(ctx, req.Permission)
+	if err != nil {
+		return Result{Outcome: OutcomeDenied, Decision: decision, Reason: "permission lookup failed"}, err
+	}
+	return g.resultForDecision(ctx, req, decision)
+}
+
+// EvaluateDecision is Evaluate for a decision the caller already resolved
+// through its own engine (e.g. the FIR-2230 per-tool policy chain). It skips the
+// gate's own Resolver and goes straight to ask creation, so the inbox + await
+// machinery is shared by both the capability resolver and the tool-policy chain.
+// Like Evaluate it does NOT block — on needs_approval it returns OutcomePending
+// with a valid ApprovalID. An error means no decision could be recorded; the
+// caller MUST fail closed.
 func (g *Gate) EvaluateDecision(ctx context.Context, req Request, decision permissions.Decision) (Result, error) {
 	if g == nil || g.Approvals == nil {
 		return Result{Outcome: OutcomeDenied, Reason: "gate not configured"},
@@ -168,7 +199,8 @@ func (g *Gate) EvaluateDecision(ctx context.Context, req Request, decision permi
 }
 
 // resultForDecision maps a resolved Decision to a gate Result, materialising an
-// inbox ask on needs_approval.
+// inbox ask on needs_approval. Shared by Evaluate (Resolver-driven) and
+// EvaluateDecision (caller-driven).
 func (g *Gate) resultForDecision(ctx context.Context, req Request, decision permissions.Decision) (Result, error) {
 	switch decision.Kind {
 	case permissions.DecisionAllow:
@@ -229,7 +261,24 @@ func (g *Gate) EvaluateDecisionReusing(ctx context.Context, req Request, decisio
 	return g.resultForDecision(ctx, req, decision)
 }
 
-// GuardDecision is the synchronous caller-resolved path: EvaluateDecision, then
+// Guard is the synchronous convenience: Evaluate, and if the result is pending,
+// Await the human decision. Used by in-process call sites that can block the
+// caller until the human acts (the runtime hook uses Evaluate + its own poll
+// loop instead, to stay resilient across processes).
+//
+// Guard never returns OutcomePending — it always resolves to a terminal
+// outcome (allowed/approved/denied/rejected/expired/timed_out).
+func (g *Gate) Guard(ctx context.Context, req Request) (Result, error) {
+	res, err := g.Evaluate(ctx, req)
+	if err != nil || res.Outcome != OutcomePending {
+		return res, err
+	}
+	outcome, werr := g.Await(ctx, req.Permission.WorkspaceID, res.ApprovalID)
+	res.Outcome = outcome
+	return res, werr
+}
+
+// GuardDecision is Guard for a caller-resolved decision: EvaluateDecision, then
 // Await the human if the result is pending. The runtime tool gate uses it when
 // the per-tool policy chain (not the capability resolver) produced the verdict,
 // so a tool-policy "Ask" pauses the agent and lands in the same inbox as a

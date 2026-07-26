@@ -88,9 +88,8 @@ var credentialCapabilities = []credentialCapability{
 // vaultCredentialCapabilities is the capability set shown for an Agent Vault box
 // (resource agentvault-vault:<name>). Only "Use secret" (credential.reveal)
 // applies: the broker injects the box's secret read-only, and reveal is the ONLY
-// verb the Agent Vault mirror projects to broker access
-// (cerebro_agentvault_mirror.go, credentialBrokerAction).
-// Rotate/revoke/attach/read-redacted belong to cerebro's
+// verb the grant resolver projects to vault access (cerebro_agentvault_mirror.go,
+// credentialBrokerAction). Rotate/revoke/attach/read-redacted belong to cerebro's
 // own stored-secret model (cerebro-credential:<uuid>) and cannot act on a secret
 // that lives in Agent Vault — showing them only confuses the admin.
 var vaultCredentialCapabilities = []credentialCapability{
@@ -123,6 +122,23 @@ type credentialResourceGroup struct {
 	category string
 }
 
+// credentialPolicyKey identifies one (tool, credential) cell so stored settings can
+// be bucketed back onto the synthetic rows. Mirrors repoPolicyKey.
+type credentialPolicyKey struct {
+	toolKey         string
+	resourcePattern string
+}
+
+// credentialPolicyLayers holds the explicit per-layer settings authored for one
+// (tool, credential) cell. Mirrors repoPolicyLayers exactly: group settings are
+// accumulated separately and combined with CombineGroups; conditions carries the
+// optional WHEN layer for single-subject layers (the group layer is excluded).
+type credentialPolicyLayers struct {
+	layers     map[Layer]Setting
+	groups     []Setting
+	conditions map[Layer]*Condition
+}
+
 // appendCredentialRows discovers the workspace's grantable credential boxes and
 // appends, for each box, one row per credential capability carrying that
 // (tool, credential) cell's explicit per-layer settings and resolved Effective
@@ -150,14 +166,7 @@ func (s *Store) appendCredentialRows(ctx context.Context, in TableQuery, groupID
 		return out, nil
 	}
 
-	keys := make([]string, len(credentialCapabilities))
-	for i, c := range credentialCapabilities {
-		keys[i] = c.key
-	}
-	settings, err := s.loadResourcePolicySettings(ctx, in, groupIDs, resourcePolicyFilter{
-		toolKeys: keys,
-		scope:    resourcePatternNonEmpty,
-	})
+	settings, err := s.loadCredentialPolicySettings(ctx, in, groupIDs)
 	if err != nil {
 		return nil, err
 	}
@@ -173,7 +182,7 @@ func (s *Store) appendCredentialRows(ctx context.Context, in TableQuery, groupID
 				Layers:          map[Layer]Setting{},
 				Conditions:      map[Layer]*Condition{},
 			}
-			if cell, ok := settings[resourcePolicyKey{toolKey: c.key, resourcePattern: g.resource}]; ok {
+			if cell, ok := settings[credentialPolicyKey{c.key, g.resource}]; ok {
 				for l, set := range cell.layers {
 					row.Layers[l] = set
 				}
@@ -184,15 +193,7 @@ func (s *Store) appendCredentialRows(ctx context.Context, in TableQuery, groupID
 					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 				}
 			}
-			row.Effective, err = s.resolveTableResourcePermission(
-				ctx, in, row.ToolKey, row.ResourcePattern, row.Layers, in.Base,
-			)
-			if err != nil {
-				return nil, fmt.Errorf(
-					"toolpolicy: resolve credential permission %q on %q: %w",
-					row.ToolKey, row.ResourcePattern, err,
-				)
-			}
+			row.Effective = Resolve(Input{Settings: row.Layers, Base: in.Base})
 			out = append(out, row)
 		}
 	}
@@ -207,7 +208,7 @@ func (s *Store) appendCredentialRows(ctx context.Context, in TableQuery, groupID
 //     pins. These carry a MULTICA_CREDENTIALS_KEY-encrypted secret.
 //  2. Agent Vault boxes, when a vault lister is wired — resource
 //     agentvault-vault:<name>, the vault-level pattern (FIR-1739 v1) the mirror
-//     (agentvault/mirror.go) and canonical credential policy honor. Needs no
+//     (agentvault/mirror.go) and grant resolver already honor. Needs no
 //     cerebro_credential row because the secret already lives in Agent Vault.
 //
 // A box registered in cerebro_credential AND present in Agent Vault is the SAME
@@ -295,11 +296,76 @@ func (s *Store) discoverCredentials(ctx context.Context, workspaceID pgtype.UUID
 	return out, nil
 }
 
+// loadCredentialPolicySettings fetches every explicit per-layer setting authored
+// for a credential capability (resource_pattern non-empty) in the query's context,
+// bucketed by (tool, credential). Mirrors loadRepoPolicySettings — the subject
+// predicates match table.go so an absent (Valid=false) subject id never matches
+// and that layer stays Inherit.
+func (s *Store) loadCredentialPolicySettings(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID) (map[credentialPolicyKey]*credentialPolicyLayers, error) {
+	keys := make([]string, len(credentialCapabilities))
+	for i, c := range credentialCapabilities {
+		keys[i] = c.key
+	}
+
+	rows, err := s.pool.Query(ctx, `
+		SELECT p.tool_key, p.resource_pattern, p.layer, p.setting, p.conditions
+		FROM cerebro_tool_policy p
+		WHERE p.workspace_id = $1
+		  AND p.resource_pattern <> ''
+		  AND p.tool_key = ANY($6::text[])
+		  AND (
+		    (p.layer = 'workspace' AND p.subject_id = $1) OR
+		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
+		    (p.layer = 'agent'     AND p.subject_id = $3) OR
+		    (p.layer = 'user'      AND p.subject_id = $4) OR
+		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[]))
+		  )
+	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, keys)
+	if err != nil {
+		return nil, fmt.Errorf("toolpolicy: load credential policy settings: %w", err)
+	}
+	defer rows.Close()
+
+	out := map[credentialPolicyKey]*credentialPolicyLayers{}
+	for rows.Next() {
+		var toolKey, resourcePattern, layer, setting string
+		var conditions []byte
+		if err := rows.Scan(&toolKey, &resourcePattern, &layer, &setting, &conditions); err != nil {
+			return nil, fmt.Errorf("toolpolicy: scan credential policy setting: %w", err)
+		}
+		key := credentialPolicyKey{toolKey, resourcePattern}
+		cell, ok := out[key]
+		if !ok {
+			cell = &credentialPolicyLayers{layers: map[Layer]Setting{}, conditions: map[Layer]*Condition{}}
+			out[key] = cell
+		}
+		l := Layer(layer)
+		set := Setting(setting)
+		if l == LayerGroup {
+			cell.groups = append(cell.groups, set)
+		} else {
+			cell.layers[l] = set
+			cond, err := decodeCondition(conditions)
+			if err != nil {
+				return nil, fmt.Errorf("toolpolicy: decode credential conditions for %q at %s: %w", toolKey, l, err)
+			}
+			if cond != nil {
+				cell.conditions[l] = cond
+			}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("toolpolicy: iterate credential policy settings: %w", err)
+	}
+	return out, nil
+}
+
 // CredentialAuthoringEnabled reports whether the per-credential authoring rows
 // should be appended to the table for this (workspace, user). The flag defaults
 // OFF, so with no override anywhere it stays hidden; a DB error fails closed
 // (show nothing new) and is logged. Resolution mirrors the canonical client
-// precedence in packages/cerebro-feature-flags/store.ts (resolveFlag):
+// precedence in packages/cerebro-feature-flags/store.ts (resolveFlag), the same
+// way PlatformCapabilitiesEnabled does for its flag:
 //
 //  1. a LOCKED workspace override wins outright;
 //  2. otherwise a personal override wins;
