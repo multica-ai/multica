@@ -7,6 +7,7 @@ import (
 	"errors"
 	"net/url"
 	"os/exec"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -976,6 +977,22 @@ func TestVerifyUsesAccessOnlyDataCatalogCredentialWithoutFormLogin(t *testing.T)
 			batchCalls++
 			if !strings.Contains(call.stdin, "reader.access") || !strings.Contains(call.stdin, "reader-secret") {
 				t.Fatalf("access batch did not carry both service-token headers: %s", call.stdin)
+			}
+			// agent-browser only applies headers to the navigation via the
+			// session-level `set headers` command; an `open ... --headers`
+			// batch entry is silently ignored and the edge rejects the run
+			// (FIR-3796). Pin the working shape.
+			var commands [][]string
+			if err := json.Unmarshal([]byte(call.stdin), &commands); err != nil {
+				t.Fatalf("access batch stdin is not a command array: %v", err)
+			}
+			if len(commands) < 2 || commands[0][0] != "set" || commands[0][1] != "headers" {
+				t.Fatalf("access batch must set session headers before navigating: %s", call.stdin)
+			}
+			for _, command := range commands {
+				if command[0] == "open" && slices.Contains(command, "--headers") {
+					t.Fatalf("open must not carry --headers inside batch (silently ignored): %s", call.stdin)
+				}
 			}
 		}
 		if strings.Contains(joined, "reader.access") || strings.Contains(joined, "reader-secret") {
