@@ -18,7 +18,9 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -146,6 +148,12 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 		}
 	}
 
+	// FIR-3781 instrumentation: ListEffectiveTools resolves the tool-policy chain
+	// once per capability, so its cost is N x (per-capability DB work). build_ms on
+	// the claim endpoint brackets the whole response build; this line isolates the
+	// resolver's share and reports N, which is what tells N-grew apart from
+	// per-item-got-slower. Logged above 250ms so a healthy claim stays quiet.
+	resolveStart := time.Now()
 	rows, err := h.runtimeToolAccess.ListEffectiveTools(ctx, RuntimeToolAccessQuery{
 		WorkspaceID:         runtime.WorkspaceID,
 		RuntimeID:           runtime.ID,
@@ -162,6 +170,19 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 		// whole run. Surface the error so the claim path fails the claim and the
 		// task retries, rather than issuing a silent total-lockout mandate.
 		return nil, nil, fmt.Errorf("cerebro effective tools: list effective tools: %w", err)
+	}
+	if elapsed := time.Since(resolveStart); elapsed > 250*time.Millisecond {
+		perTool := int64(0)
+		if len(rows) > 0 {
+			perTool = elapsed.Milliseconds() / int64(len(rows))
+		}
+		slog.Info("claim tool resolve slow",
+			"runtime_id", uuidToString(runtime.ID),
+			"agent_id", agent.ID,
+			"total_ms", elapsed.Milliseconds(),
+			"capabilities", len(rows),
+			"per_capability_ms", perTool,
+		)
 	}
 
 	out := make([]AgentTaskToolEntry, 0, len(rows))

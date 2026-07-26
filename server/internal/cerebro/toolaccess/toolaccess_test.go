@@ -34,6 +34,23 @@ func (s platformPolicyStub) ResolvePermission(_ context.Context, in toolpolicy.Q
 	}}, in.ToolKey, actor), nil
 }
 
+// countingPolicyStub records how many times the policy chain is consulted, so a
+// test can pin the resolver's COST MODEL and not just its verdicts.
+type countingPolicyStub struct {
+	resolveCalls           *int
+	resolvePermissionCalls *int
+}
+
+func (s countingPolicyStub) Resolve(_ context.Context, _ toolpolicy.Query) (toolpolicy.Effective, error) {
+	*s.resolveCalls++
+	return toolpolicy.Effective{Setting: toolpolicy.SettingAllow}, nil
+}
+
+func (s countingPolicyStub) ResolvePermission(_ context.Context, _ toolpolicy.Query, _ platformaccess.Actor) (toolpolicy.Effective, error) {
+	*s.resolvePermissionCalls++
+	return toolpolicy.Effective{Setting: toolpolicy.SettingAllow}, nil
+}
+
 func TestEffectiveToolWireShapeHasNoLegacyRuntimeGrant(t *testing.T) {
 	body, err := json.Marshal(EffectiveTool{})
 	if err != nil {
@@ -120,5 +137,51 @@ func TestListEffectiveToolsUsesPlatformActionContractForWorkflowHooks(t *testing
 	}
 	if len(want) != 0 {
 		t.Fatalf("missing workflow hook rows: %v", want)
+	}
+}
+
+// TestListEffectiveToolsResolvesPolicyOncePerCapability pins the resolver's cost
+// model, which the claim path pays on every task handover: the capability
+// catalog is read once, and the tool-policy chain is consulted exactly once per
+// capability. Cost here is N x (per-capability DB work), so a change that
+// resolves more than once per capability — or that adds an uncached per-tool
+// lookup inside ResolvePermission — multiplies the claim's response-build time
+// by N without touching a single verdict. That is precisely how the 25 July
+// outage happened: build_ms went from ~3s to 50-65s with no behavioural change
+// visible in any assertion, because every existing test checked verdicts only.
+//
+// If a future change batches resolution, this test SHOULD fail — update it to
+// state the new cost model deliberately rather than letting it drift silently.
+func TestListEffectiveToolsResolvesPolicyOncePerCapability(t *testing.T) {
+	capabilities := []capabilityregistry.View{
+		{Key: "mcp__github__create_issue", Title: "Create issue", Source: "scan"},
+		{Key: "mcp__github__list_issues", Title: "List issues", Source: "scan"},
+		{Key: "mcp__slack__post", Title: "Post message", Source: "scan"},
+		{Key: "tools:personal-browser", Title: "Personal browser", Source: "builtin"},
+	}
+
+	var resolveCalls, resolvePermissionCalls int
+	service := New(capabilityListStub{views: capabilities}, countingPolicyStub{
+		resolveCalls:           &resolveCalls,
+		resolvePermissionCalls: &resolvePermissionCalls,
+	})
+
+	rows, err := service.ListEffectiveTools(context.Background(), Query{
+		RuntimeMode:     "cloud",
+		RuntimeProvider: "firtal-gateway",
+		AgentID:         pgtype.UUID{Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != len(capabilities) {
+		t.Fatalf("got %d rows, want %d", len(rows), len(capabilities))
+	}
+
+	totalResolves := resolveCalls + resolvePermissionCalls
+	if totalResolves != len(capabilities) {
+		t.Fatalf("policy chain consulted %d times for %d capabilities (Resolve=%d, ResolvePermission=%d); "+
+			"cost must stay 1 resolve per capability",
+			totalResolves, len(capabilities), resolveCalls, resolvePermissionCalls)
 	}
 }
