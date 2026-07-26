@@ -132,3 +132,22 @@ func TestGetFailsClosedForMissingOrMalformedSnapshot(t *testing.T) {
 		})
 	}
 }
+
+func TestMCPServerWildcardScopesOneDirectServer(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		tool string
+		want string
+	}{
+		{"mcp__atlas-mcp__getViewerStatus", "mcp__atlas-mcp__*"},
+		{"mcp__company-brain__whoami", "mcp__company-brain__*"},
+		{"mcp__multica__infisical_admin__get_api_v1_projects", "mcp__multica__*"},
+		{"tools:bash", ""},
+		{"mcp__atlas-mcp", ""},
+	}
+	for _, tc := range tests {
+		if got := MCPServerWildcard(tc.tool); got != tc.want {
+			t.Errorf("MCPServerWildcard(%q) = %q, want %q", tc.tool, got, tc.want)
+		}
+	}
+}
