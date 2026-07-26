@@ -1562,24 +1562,63 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 // coalesced outcome, never a 500 or a dropped instruction.
 func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, triggerCommentID pgtype.UUID, getEscalationDelay func() time.Duration) (DispatchStatus, DispatchReasonCode) {
 	pending := trigger.AlreadyPending
+	lostRace := false
+	// Resolve the reviewed HEAD lazily and at most once — the common
+	// non-pending path enqueues without ever needing it, so it stays off the
+	// hot path. It keys both the head-scoped merge and the planned-comment
+	// registration, matching the AlreadyPending pre-check's head (TEN-356).
+	var headSha pgtype.Text
+	headShaLoaded := false
+	getHeadSha := func() pgtype.Text {
+		if !headShaLoaded {
+			headSha = h.TaskService.ResolveIssueReviewSHAParam(ctx, issue.ID)
+			headShaLoaded = true
+		}
+		return headSha
+	}
 	for attempt := 0; attempt < 2; attempt++ {
 		if pending {
-			// Fold into the not-yet-claimed queued task. The merge reports HOW
-			// it resolved: a real merge is coalesced; a fail-closed / failed
-			// merge is blocked (attribution_blocked / internal_error) — never
-			// mislabeled as success (MUL-4525 §2, Elon round 5). Only "no queued
-			// task to fold into" falls through to the active-task decision.
+			// Fold into the not-yet-claimed queued task. HEAD-scoped so a lost
+			// race against a DIFFERENT-head task is never merged as same-request
+			// coalescing (TEN-356) — the merge misses and this falls through. The
+			// merge reports HOW it resolved: a real merge is coalesced; a
+			// fail-closed / failed merge is blocked (attribution_blocked /
+			// internal_error) — never mislabeled as success (MUL-4525 §2, Elon
+			// round 5). Only "no queued task to fold into" continues below.
 			if status, reason, terminal := commentMergeTerminalOutcome(
-				h.mergeCommentIntoPendingTask(ctx, issue, trigger, triggerCommentID),
+				h.mergeCommentIntoPendingTask(ctx, issue, trigger, triggerCommentID, getHeadSha()),
 			); terminal {
 				return status, reason
 			}
-			// The merge found no queued task to fold into: the sibling is
-			// dispatched/running (its claim response is built) or was just
-			// claimed. We must NOT enqueue a fresh queued task against an active
-			// sibling — it would trip the unique index again and risk a
-			// duplicate run; its completion reconcile covers the comment. Only a
-			// confirmed-none enqueues fresh; a query failure fails closed.
+			// No queued row to fold into: the same-head sibling was claimed
+			// (dispatched/running), or the pending task is a DIFFERENT head. On a
+			// lost INSERT race the losing comment can PREDATE the winning task,
+			// which completion reconcile's `created_at > since` window cannot see
+			// — so durably register it as a planned (undelivered) input on the
+			// SAME-head active task, turning the drop into a bounded follow-up
+			// (#5914, Elon round 2). Only for the race path: the AlreadyPending
+			// path's comment is always newer than its task, so reconcile already
+			// covers it and MUL-4195 keeps dispatched tasks untouched there.
+			if lostRace {
+				registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, triggerCommentID, getHeadSha())
+				if err != nil {
+					// Cannot confirm durable coverage — fail closed with a
+					// non-success outcome rather than a fabricated coalesced.
+					slog.Warn("register planned lost-race comment failed",
+						"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
+					return DispatchBlocked, ReasonInternalError
+				}
+				if registered {
+					return DispatchDeferred, ReasonDeferred
+				}
+				// registered==false → no SAME-head active task; a different-head
+				// task holds the slot. Its completion reconcile picks up this
+				// newer comment by timestamp and enqueues fresh-HEAD coverage.
+			}
+			// We must NOT enqueue a fresh queued task against an active sibling —
+			// it would trip the unique index again and risk a duplicate run; its
+			// completion reconcile covers the comment. Only a confirmed-none
+			// enqueues fresh; a query failure fails closed.
 			active, activeErr := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, trigger.Agent.ID)
 			if status, reason, enqueueFresh := decidePostMergeMiss(active, activeErr); !enqueueFresh {
 				return status, reason
@@ -1588,19 +1627,21 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 		if err := h.enqueueSingleCommentTrigger(ctx, issue, triggerCommentID, trigger, getEscalationDelay); err != nil {
 			// Lost the enqueue race: a sibling task for this (issue, agent) now
 			// exists. Re-resolve as pending so the next attempt folds this
-			// comment into that sibling instead of dropping it (#5914).
+			// comment into that sibling (queued) or durably registers it
+			// (dispatched) instead of dropping it (#5914).
 			if errors.Is(err, service.ErrDuplicatePendingTask) {
 				pending = true
+				lostRace = true
 				continue
 			}
 			return DispatchBlocked, commentEnqueueFailureReason(err)
 		}
 		return DispatchQueued, ReasonQueued
 	}
-	// Two consecutive enqueue races with no foldable queued row in between: a
-	// sibling is durably present, so the run is covered — report the benign
-	// coalesced outcome rather than a blocked failure.
-	return DispatchCoalesced, ReasonCoalesced
+	// Two enqueue races with no foldable/registrable target in between —
+	// extremely rare. A sibling occupies the slot, so its completion reconcile
+	// is the backstop; report deferred rather than a fabricated coalesced.
+	return DispatchDeferred, ReasonDeferred
 }
 
 // commentTriggerOutcomes maps each explicit mention target to its final outcome
@@ -1773,7 +1814,7 @@ func commentMergeTerminalOutcome(result commentMergeResult) (status DispatchStat
 // refreshed — so a different member's comment safely folds into a task another
 // member created, the coalescing run carrying the latest instruction's
 // originator and matching connected-app overlay.
-func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, newTriggerCommentID pgtype.UUID) commentMergeResult {
+func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, newTriggerCommentID pgtype.UUID, headSha pgtype.Text) commentMergeResult {
 	// Re-attribute the coalescing run to the new comment's human atomically: the
 	// whole attribution snapshot moves, not just the person columns (MUL-4302). An
 	// issue-assignee reaction is comment_source; a mention / thread-parent /
@@ -1811,6 +1852,7 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		NewTriggerSummary:       h.TaskService.BuildCommentTriggerSummary(ctx, issue.WorkspaceID, newTriggerCommentID),
 		NewRuntimeMcpOverlay:    overlay,
 		NewRuntimeConnectedApps: connectedApps,
+		HeadSha:                 headSha,
 	})
 	if err != nil {
 		if isNotFound(err) {
@@ -1835,6 +1877,36 @@ func (h *Handler) mergeCommentIntoPendingTask(ctx context.Context, issue db.Issu
 		"new_trigger_comment_id", uuidToString(newTriggerCommentID),
 		"coalesced_count", len(row.CoalescedCommentIds))
 	return commentMergeSucceeded
+}
+
+// registerPlannedCommentForActiveTask durably folds a lost-race comment into the
+// same-head active task's planned (coalesced) set when the queued merge could no
+// longer target it (the winner was already claimed → dispatched/running). It
+// returns true when a same-head active task absorbed the comment; (false, nil)
+// means no same-head active task exists (a DIFFERENT-head task holds the slot, or
+// the task just terminated), so the caller falls back to the active-task
+// decision. Delivered ids are untouched, so completion reconcile replays the
+// comment as a single bounded follow-up (#5914). See the query doc.
+func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue db.Issue, agentID, commentID pgtype.UUID, headSha pgtype.Text) (bool, error) {
+	row, err := h.Queries.RegisterPlannedCommentForActiveTask(ctx, db.RegisterPlannedCommentForActiveTaskParams{
+		CommentID: commentID,
+		IssueID:   issue.ID,
+		AgentID:   agentID,
+		HeadSha:   headSha,
+	})
+	if err != nil {
+		if isNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	slog.Info("registered lost-race comment as planned follow-up input",
+		"task_id", uuidToString(row.ID),
+		"issue_id", uuidToString(issue.ID),
+		"agent_id", uuidToString(agentID),
+		"comment_id", uuidToString(commentID),
+		"coalesced_count", len(row.CoalescedCommentIds))
+	return true, nil
 }
 
 // logCommentEnqueueFailure logs a failed comment-trigger enqueue. A benign

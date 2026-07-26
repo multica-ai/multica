@@ -4331,6 +4331,15 @@ WHERE id = (
     WHERE t.issue_id = $12
       AND t.agent_id = $13
       AND t.status = 'queued'
+      -- Head-scoped (TEN-356, #5914): never fold across HEADs. The physical
+      -- unique index is only (issue_id, agent_id), so an insert-race loser can
+      -- collide with a pending task stamped for a DIFFERENT head_sha; merging
+      -- into it would give a new-HEAD comment old-HEAD review coverage. Empty/
+      -- absent head_sha (no linked PR) matches any task, preserving coalescing.
+      AND (
+          COALESCE($14::text, '') = ''
+          OR t.context->>'head_sha' = $14::text
+      )
     ORDER BY t.created_at DESC
     LIMIT 1
 )
@@ -4351,6 +4360,7 @@ type MergeCommentIntoPendingTaskParams struct {
 	NewRuntimeConnectedApps []byte      `json:"new_runtime_connected_apps"`
 	IssueID                 pgtype.UUID `json:"issue_id"`
 	AgentID                 pgtype.UUID `json:"agent_id"`
+	HeadSha                 pgtype.Text `json:"head_sha"`
 }
 
 type MergeCommentIntoPendingTaskRow struct {
@@ -4416,6 +4426,7 @@ func (q *Queries) MergeCommentIntoPendingTask(ctx context.Context, arg MergeComm
 		arg.NewRuntimeConnectedApps,
 		arg.IssueID,
 		arg.AgentID,
+		arg.HeadSha,
 	)
 	var i MergeCommentIntoPendingTaskRow
 	err := row.Scan(&i.ID, &i.CoalescedCommentIds)
@@ -4971,6 +4982,65 @@ func (q *Queries) RefreshAgentStatusFromTasks(ctx context.Context, id pgtype.UUI
 		&i.DisabledRuntimeSkills,
 		&i.ServiceTier,
 	)
+	return i, err
+}
+
+const registerPlannedCommentForActiveTask = `-- name: RegisterPlannedCommentForActiveTask :one
+UPDATE agent_task_queue
+SET coalesced_comment_ids = (
+        SELECT COALESCE(array_agg(DISTINCT e), '{}')
+        FROM unnest(array_append(coalesced_comment_ids, $1::uuid)) AS e
+        WHERE e IS NOT NULL
+    )
+WHERE id = (
+    SELECT t.id FROM agent_task_queue t
+    WHERE t.issue_id = $2
+      AND t.agent_id = $3
+      AND t.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+      AND (
+          COALESCE($4::text, '') = ''
+          OR t.context->>'head_sha' = $4::text
+      )
+    ORDER BY t.created_at DESC
+    LIMIT 1
+)
+RETURNING id, coalesced_comment_ids
+`
+
+type RegisterPlannedCommentForActiveTaskParams struct {
+	CommentID pgtype.UUID `json:"comment_id"`
+	IssueID   pgtype.UUID `json:"issue_id"`
+	AgentID   pgtype.UUID `json:"agent_id"`
+	HeadSha   pgtype.Text `json:"head_sha"`
+}
+
+type RegisterPlannedCommentForActiveTaskRow struct {
+	ID                  pgtype.UUID   `json:"id"`
+	CoalescedCommentIds []pgtype.UUID `json:"coalesced_comment_ids"`
+}
+
+// #5914: durably register a comment that lost an enqueue race as a PLANNED
+// (undelivered) input on the same-(issue, agent) ACTIVE task whose queued row
+// MergeCommentIntoPendingTask could no longer target (it was claimed →
+// dispatched/running). The losing comment can predate that task's created_at,
+// so completion reconciliation's `created_at > since` window cannot see it;
+// appending it to coalesced_comment_ids (the planned set) WITHOUT touching
+// delivered_comment_ids makes reconcileCommentsOnCompletion replay it as a
+// single bounded follow-up (planned-but-not-delivered ⇒ follow-up).
+//
+// Head-scoped (TEN-356): only a task stamped with the SAME head_sha is a target,
+// so a new-HEAD comment is never attached to an old-HEAD run. Returns
+// pgx.ErrNoRows when no same-head active task exists (different HEAD, or the task
+// just terminated) so the caller falls back to the active-task decision.
+func (q *Queries) RegisterPlannedCommentForActiveTask(ctx context.Context, arg RegisterPlannedCommentForActiveTaskParams) (RegisterPlannedCommentForActiveTaskRow, error) {
+	row := q.db.QueryRow(ctx, registerPlannedCommentForActiveTask,
+		arg.CommentID,
+		arg.IssueID,
+		arg.AgentID,
+		arg.HeadSha,
+	)
+	var i RegisterPlannedCommentForActiveTaskRow
+	err := row.Scan(&i.ID, &i.CoalescedCommentIds)
 	return i, err
 }
 
