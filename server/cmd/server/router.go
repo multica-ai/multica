@@ -1016,6 +1016,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Post("/", h.CreatePersonalAccessToken)
 			r.Post("/current/renew", h.RenewCurrentPersonalAccessToken)
 			r.Delete("/{id}", h.RevokePersonalAccessToken)
+			// BUS-171: lets a running agent task mint a second, scoped mat_
+			// token for an owner/admin-granted cross-workspace_id. Self-
+			// referential (the caller's own agent/task come from its
+			// X-Actor-Source: task_token headers, not a URL param), so it
+			// lives alongside /current/renew rather than under /api/agents.
+			r.Post("/cross-workspace", h.MintCrossWorkspaceToken)
 		})
 
 		// Cloud Billing proxy. Same upstream service / port as
@@ -1258,6 +1264,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// internal/handler/agent_env.go.
 					r.Get("/env", h.GetAgentEnv)
 					r.Put("/env", h.UpdateAgentEnv)
+					// Dedicated cross-workspace grant-management endpoint
+					// (BUS-171). Owner/admin only; RequireHumanActor denies
+					// mat_/mcn_ callers before the handler even runs. Every
+					// grant change is audited. Pairs with the self-referential
+					// POST /api/tokens/cross-workspace mint endpoint, which a
+					// running agent task calls once its workspace is granted
+					// here.
+					r.With(handler.RequireHumanActor).Get("/cross-workspace-grants", h.GetAgentCrossWorkspaceGrants)
+					r.With(handler.RequireHumanActor).Put("/cross-workspace-grants", h.UpdateAgentCrossWorkspaceGrants)
 				})
 			})
 

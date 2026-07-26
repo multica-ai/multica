@@ -166,6 +166,16 @@ SET disabled_runtime_skills = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateAgentCrossWorkspaceIDs :one
+-- Replaces an agent's cross_workspace_ids allow-list wholesale. Owner/admin
+-- only, via the dedicated grant-management endpoint (PUT
+-- /api/agents/{id}/cross-workspace-grants) so every change is audit-logged;
+-- agent actors never reach this query.
+UPDATE agent
+SET cross_workspace_ids = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;
+
 -- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
