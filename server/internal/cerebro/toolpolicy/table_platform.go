@@ -61,15 +61,19 @@ func (s *Store) appendPlatformRows(ctx context.Context, in TableQuery, groupIDs 
 
 	for _, c := range caps {
 		row := TableRow{
-			ToolKey:           c.Key,
-			Title:             c.Title,
-			Category:          c.Category,
-			Source:            platformcatalog.Source,
-			ManagedExternally: c.ManagedExternally,
-			Layers:            map[Layer]Setting{},
-			Conditions:        map[Layer]*Condition{},
+			ToolKey:               c.Key,
+			Title:                 c.Title,
+			Category:              c.Category,
+			Source:                platformcatalog.Source,
+			ManagedExternally:     c.ManagedExternally,
+			ExternalSecurityOwner: c.ExternalSecurityOwner,
+			Layers:                map[Layer]Setting{},
+			Conditions:            map[Layer]*Condition{},
 		}
-		if cell, ok := settings[resourcePolicyKey{toolKey: c.Key}]; ok {
+		// Externally enforced capabilities are visible for auditability but never
+		// read a stored policy row. Legacy advisory rows must not make Settings
+		// imply that an Allow/Ask/Deny choice changes the live security boundary.
+		if cell, ok := settings[resourcePolicyKey{toolKey: c.Key}]; ok && !c.ManagedExternally {
 			for l, set := range cell.layers {
 				row.Layers[l] = set
 			}
