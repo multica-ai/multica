@@ -693,6 +693,9 @@ importers:
       '@multica/cerebro-profile':
         specifier: workspace:*
         version: link:../../packages/cerebro-profile
+      '@multica/cerebro-quick-create':
+        specifier: workspace:*
+        version: link:../../packages/cerebro-quick-create
       '@multica/cerebro-realtime':
         specifier: workspace:*
         version: link:../../packages/cerebro-realtime
