@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
+	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
 
@@ -73,6 +74,31 @@ func gateTestUUID(seed byte) pgtype.UUID {
 	return u
 }
 
+func TestConnectionToolSettingBlocksWhenResolverIsUnavailable(t *testing.T) {
+	e := &FirtalGatewayExecutor{logger: slog.Default()}
+	reg := NewRegistry(nil)
+	reg.Register(&gatewayMCPTool{
+		exposedName:    "mcp__customer_service__draft_reply",
+		connectionName: "customer_service",
+		toolName:       "draft_reply",
+	})
+	got, conn := e.connectionToolSetting(
+		context.Background(),
+		gateTestUUID(1),
+		gateTestUUID(2),
+		reg,
+		"mcp__customer_service__draft_reply",
+		GatewayRequestMeta{AgentID: "agent-1"},
+	)
+	if got != toolpolicy.SettingDeny || conn != "customer_service" {
+		t.Fatalf("missing connection resolver = %s/%q, want Deny/customer_service", got, conn)
+	}
+	resource, connection, ok := connectionPolicyTarget(reg, "mcp__customer_service__draft_reply")
+	if !ok || resource != "draft_reply" || connection != "customer_service" {
+		t.Fatalf("connection policy target = %q/%q/%v, want draft_reply/customer_service/true", resource, connection, ok)
+	}
+}
+
 func newGatedExecutor(ap *gateFakeApprovals) *FirtalGatewayExecutor {
 	e := &FirtalGatewayExecutor{logger: slog.Default()}
 	gate := &permgate.Gate{Approvals: ap, PollInterval: time.Millisecond, WaitTimeout: time.Second}
@@ -121,16 +147,46 @@ func TestGuardToolCallTaskMandateDeniesEveryCallPathBeforePolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		tool string
+		reg  *Registry
 		err  error
 	}{
 		{name: "expired ordinary tool", tool: "web_fetch", err: errors.New("task mandate expired")},
 		{name: "tool outside mandate", tool: "web_fetch", err: errors.New("tool is outside task mandate")},
 		{name: "expired create_issue early path", tool: "create_issue", err: errors.New("task mandate expired")},
+		{
+			name: "MCP connection tool outside mandate",
+			tool: "mcp__customer_service__draft_reply",
+			reg: func() *Registry {
+				reg := NewRegistry(nil)
+				reg.Register(&gatewayMCPTool{
+					exposedName:    "mcp__customer_service__draft_reply",
+					connectionName: "customer_service",
+					toolName:       "draft_reply",
+				})
+				return reg
+			}(),
+			err: errors.New("tool is outside task mandate"),
+		},
+		{
+			name: "API connection tool outside mandate",
+			tool: "infisical_admin__get_secrets",
+			reg: func() *Registry {
+				reg := NewRegistry(nil)
+				reg.Register(&APIConnectionTool{
+					toolName: "infisical_admin__get_secrets",
+					connName: "infisical-admin",
+					method:   "GET",
+					path:     "/secrets",
+				})
+				return reg
+			}(),
+			err: errors.New("tool is outside task mandate"),
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mandates := &gateFakeTaskMandates{authorizeErr: tc.err}
 			e := (&FirtalGatewayExecutor{logger: slog.Default()}).SetTaskMandates(mandates)
-			allowed, reason := e.guardToolCall(context.Background(), gateTestUUID(1), gateTestUUID(9), tc.tool, nil, nil, meta)
+			allowed, reason := e.guardToolCall(context.Background(), gateTestUUID(1), gateTestUUID(9), tc.tool, nil, tc.reg, meta)
 			if allowed || !strings.Contains(reason, tc.err.Error()) {
 				t.Fatalf("guardToolCall() = (%v, %q), want denial containing %q", allowed, reason, tc.err)
 			}

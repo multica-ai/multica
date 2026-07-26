@@ -72,6 +72,13 @@ describe("CerebroCapabilitiesTab", () => {
       tools: [
         { key: "add_comment", permission: "allow", decided_by: "runtime" },
         { key: "create_local_runtime", permission: "deny", decided_by: "agent" },
+        {
+          key: "autopilot_webhook",
+          title: "Autopilot inbound webhook",
+          permission: "allow",
+          managed_externally: true,
+          external_security_owner: "Autopilot webhook secret",
+        },
       ],
       repos: [
         {
@@ -162,6 +169,7 @@ describe("CerebroCapabilitiesTab", () => {
     expect(screen.getByText("deploy")).toBeInTheDocument();
     expect(screen.getByText("add_comment")).toBeInTheDocument();
     expect(screen.getByText("create_local_runtime")).toBeInTheDocument();
+    expect(screen.getByText(/managed by Autopilot webhook secret/)).toBeInTheDocument();
 
     // Repo permissions as pills.
     expect(screen.getByText("Read code")).toBeInTheDocument();

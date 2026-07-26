@@ -154,6 +154,17 @@ func TestCapabilityToolFromPlatformRowReportsCallability(t *testing.T) {
 	if !allowed.Allowed || !allowed.Available || !allowed.Enforced || !allowed.Callable {
 		t.Fatalf("allowed hooks:write = %+v, want callable effective action", allowed)
 	}
+
+	external := capabilityToolFromRow(cerebrotoolpolicy.TableRow{
+		ToolKey:               "autopilot_webhook",
+		Source:                platformcatalog.Source,
+		ManagedExternally:     true,
+		ExternalSecurityOwner: "Autopilot webhook secret",
+		Effective:             cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingAllow},
+	})
+	if external.ExternalSecurityOwner != "Autopilot webhook secret" || external.Enforced {
+		t.Fatalf("external permission projection = %+v, want named owner and policy-engine enforced=false", external)
+	}
 }
 
 func TestBuildAgentCapabilityLimits_Empty(t *testing.T) {

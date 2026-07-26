@@ -57,6 +57,23 @@ describe("AgentCapabilitiesSchema runtime_options", () => {
 });
 
 describe("AgentCapabilitiesSchema availability", () => {
+  it("preserves the security owner for externally managed permissions", () => {
+    const parsed = AgentCapabilitiesSchema.parse({
+      tools: [
+        {
+          key: "autopilot_webhook",
+          managed_externally: true,
+          external_security_owner: "Autopilot webhook secret",
+        },
+      ],
+    });
+
+    expect(parsed.tools[0]?.managed_externally).toBe(true);
+    expect(parsed.tools[0]?.external_security_owner).toBe(
+      "Autopilot webhook secret",
+    );
+  });
+
   it("parses verified tool evidence and the card summary", () => {
     const parsed = AgentCapabilitiesSchema.parse({
       tools: [

@@ -192,6 +192,7 @@ func newToolPolicyGatedExecutor(t *testing.T, ap *gateFakeApprovals) (*FirtalGat
 		logger:     slog.Default(),
 		toolPolicy: toolpolicy.NewStore(pool),
 	}
+	e.connDeny = e.toolPolicy
 	e.SetAccessDecisionService(accessdecision.NewService(e.toolPolicy, nil, &shadowLedgerWriter{}))
 	gate := &permgate.Gate{Approvals: ap, PollInterval: time.Millisecond, WaitTimeout: time.Second}
 	e.EnableApprovalGate(gate)
