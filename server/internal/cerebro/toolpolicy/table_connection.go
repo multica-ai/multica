@@ -138,17 +138,9 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 		// not a table-only fold. This includes direct policy, active Roles, WHEN
 		// rules and the same member-override mode as call time even when an API
 		// Connection has no capability-register row.
-		wide, err := s.ResolveGeneral(ctx, Query{
-			WorkspaceID:  in.WorkspaceID,
-			ToolKey:      toolKey,
-			RuntimeID:    in.RuntimeID,
-			AgentID:      in.AgentID,
-			UserID:       in.UserID,
-			GroupIDs:     groupIDs,
-			OnBehalfOfID: in.OnBehalfOfID,
-			SystemID:     in.SystemID,
-			Base:         connectionDefaultBase(conn, in.Base),
-		}, in.mode == ModeOpenable)
+		wide, err := s.resolveTableResourcePermission(
+			ctx, in, toolKey, "", nil, connectionDefaultBase(conn, in.Base),
+		)
 		if err != nil {
 			return nil, fmt.Errorf("toolpolicy: resolve connection-wide permission %q: %w", toolKey, err)
 		}
@@ -434,8 +426,23 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 		// that ignores the error.
 		return SettingDeny, connName, err
 	}
+	return connectionEndpointEffectiveFromRows(
+		rows,
+		connName,
+		method+" "+path,
+		s.MemberOverrideEnabled(ctx, workspaceID),
+		s.connectionDefaultAccess(ctx, workspaceID, connName),
+	)
+}
+
+func connectionEndpointEffectiveFromRows(
+	rows []TableRow,
+	connName string,
+	wantPattern string,
+	openableWS bool,
+	defaultSetting Setting,
+) (Setting, string, error) {
 	wantKey := connectionToolKeyPrefix + connName
-	wantPattern := method + " " + path
 	// Workspace-Deny-as-default (FIR-2351, product decision 2026-07-06): with the
 	// workspace member-override flag on, an explicit WORKSPACE-layer setting on a
 	// connection is a workspace-authored DEFAULT, not an instant global verdict —
@@ -444,7 +451,6 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 	// like the connection's own default_access=deny. Who may author those rows is
 	// the write path's job. With the flag off, behavior is unchanged: an explicit
 	// Deny at ANY layer (workspace included) wins immediately.
-	openableWS := s.MemberOverrideEnabled(ctx, workspaceID)
 	var hasAllow, hasAsk bool
 	var wsWide, wsEndpoint Setting
 	for _, r := range rows {
@@ -538,7 +544,7 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 	// No explicit per-actor row — fall back to the connection's configured default
 	// access (allow/ask/deny), chosen when the connection was created/edited. A
 	// missing row or column (mid-migration) resolves to Deny (fail closed).
-	switch s.connectionDefaultAccess(ctx, workspaceID, connName) {
+	switch defaultSetting {
 	case SettingAllow:
 		return SettingAllow, "", nil
 	case SettingAsk:
@@ -546,6 +552,65 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 	default:
 		return SettingDeny, connName, nil
 	}
+}
+
+// ConnectionEndpointVerdict is one discovered API endpoint paired with the
+// same effective setting ConnectionEndpointEffective would return for it.
+type ConnectionEndpointVerdict struct {
+	Connection string
+	Method     string
+	Path       string
+	Setting    Setting
+}
+
+type ConnectionEndpointTarget struct {
+	Connection string
+	Method     string
+	Path       string
+}
+
+// ConnectionEndpointVerdicts resolves every discovered API endpoint for one
+// actor in a single permission-table snapshot. Claim-time tool discovery must
+// use this bulk path: calling ConnectionEndpointEffective once per endpoint
+// repeats the complete table read and scales database work with endpoint count.
+// Call-time enforcement intentionally keeps the single-endpoint method above.
+func (s *Store) ConnectionEndpointVerdicts(ctx context.Context, in TableQuery, targets []ConnectionEndpointTarget) ([]ConnectionEndpointVerdict, error) {
+	rows, err := s.Table(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	conns, err := s.discoverConnectionTools(ctx, in.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defaults := make(map[string]Setting, len(conns))
+	for _, conn := range conns {
+		if conn.kind != "api" {
+			continue
+		}
+		defaults[conn.name] = connectionDefaultBase(conn, SettingDeny)
+	}
+	openableWS := s.MemberOverrideEnabled(ctx, in.WorkspaceID)
+	out := make([]ConnectionEndpointVerdict, 0, len(targets))
+	for _, target := range targets {
+		if target.Connection == "" || target.Method == "" || target.Path == "" {
+			continue
+		}
+		pattern := target.Method + " " + target.Path
+		setting, _, err := connectionEndpointEffectiveFromRows(
+			rows, target.Connection, pattern, openableWS, defaults[target.Connection],
+		)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ConnectionEndpointVerdict{
+			Connection: target.Connection,
+			Method:     target.Method,
+			Path:       target.Path,
+			Setting:    setting,
+		})
+	}
+	return out, nil
 }
 
 // connectionDefaultAccess reads a connection's configured default access mode

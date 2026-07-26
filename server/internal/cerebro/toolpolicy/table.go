@@ -163,6 +163,10 @@ type TableQuery struct {
 	// a workspace default at the gate still rendered as Deny). Unexported:
 	// callers never set it; hard-floor rows ignore it via tableRowMode.
 	mode Mode
+	// snapshot is loaded once by Table and reuses the same actor-scoped direct
+	// policies and active Roles for every row. It prevents connection-heavy
+	// claim responses from issuing database queries per discovered tool.
+	snapshot *tableResolutionSnapshot
 }
 
 // tableRowMode picks the resolution mode one table row's Effective is computed
@@ -204,6 +208,10 @@ func (s *Store) Table(ctx context.Context, in TableQuery) ([]TableRow, error) {
 	// context. In particular, resource-scoped Role permissions must be expanded
 	// against the same groups as capability-wide rows and call-time resolution.
 	in.GroupIDs = groupIDs
+	in.snapshot, err = s.loadTableResolutionSnapshot(ctx, in)
+	if err != nil {
+		return nil, err
+	}
 
 	// When a runtime is in scope (a runtime page, or an agent page where the
 	// agent's runtime is known) the table must show what THAT runtime can do —
@@ -507,6 +515,9 @@ func (s *Store) resolveTableResourcePermission(
 		query.RequestContext.ArgValues = map[string]string{
 			"data_source_id": resourcePattern,
 		}
+	}
+	if in.snapshot != nil {
+		return in.snapshot.resolve(query, tableRowMode(in.mode, key)), nil
 	}
 	return s.ResolveGeneral(ctx, query, tableRowMode(in.mode, key) == ModeOpenable)
 }

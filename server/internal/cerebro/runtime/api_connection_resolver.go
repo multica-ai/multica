@@ -57,9 +57,11 @@ type apiConnectionLister interface {
 	ListEnabled(ctx context.Context, workspaceID pgtype.UUID) ([]connections.Connection, error)
 }
 
-// endpointPolicyResolver resolves the per-actor verdict for one endpoint.
+// endpointPolicyResolver resolves per-actor endpoint verdicts in bulk for list
+// surfaces and individually for call-time enforcement.
 type endpointPolicyResolver interface {
 	ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID, onBehalfOfID pgtype.UUID, connName, method, path string) (toolpolicy.Setting, string, error)
+	ConnectionEndpointVerdicts(ctx context.Context, in toolpolicy.TableQuery, targets []toolpolicy.ConnectionEndpointTarget) ([]toolpolicy.ConnectionEndpointVerdict, error)
 	ConnectionToolEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID pgtype.UUID, toolName string) (toolpolicy.Setting, string, error)
 }
 
@@ -157,7 +159,7 @@ func NewAPIConnectionResolver(conns apiConnectionLister, policy endpointPolicyRe
 //   - flag off / store not wired / incomplete identity → nil (feature is additive
 //     and flag-gated; it must never break the caller's tool loop);
 //   - connection discovery error → nil (a transient blip must not break the loop);
-//   - per-endpoint policy error → DROP that endpoint (fail CLOSED — this fronts the
+//   - policy snapshot error → DROP every endpoint (fail CLOSED — this fronts the
 //     secrets box, so never list a tool whose verdict could not be verified);
 //   - verdict Deny → DROP;
 //   - verdict Allow or Ask → INCLUDE (Ask is surfaced as "requires approval", not
@@ -184,23 +186,44 @@ func (r *APIConnectionResolver) ListForAgent(ctx context.Context, ident APIConne
 	if len(built) == 0 {
 		return nil
 	}
+	targets := make([]toolpolicy.ConnectionEndpointTarget, 0, len(built))
+	for _, t := range built {
+		api, ok := t.(*APIConnectionTool)
+		if !ok {
+			continue
+		}
+		targets = append(targets, toolpolicy.ConnectionEndpointTarget{
+			Connection: api.ConnectionName(),
+			Method:     api.Method(),
+			Path:       api.Path(),
+		})
+	}
+	resolved, err := r.policy.ConnectionEndpointVerdicts(ctx, toolpolicy.TableQuery{
+		WorkspaceID:  ident.WorkspaceID,
+		RuntimeID:    ident.RuntimeID,
+		AgentID:      ident.AgentID,
+		UserID:       ident.OwnerID,
+		OnBehalfOfID: ident.OnBehalfOfID,
+	}, targets)
+	if err != nil {
+		r.logger.Warn("api connection resolver: endpoint policy bulk resolve failed — dropping all (fail closed)",
+			"workspace_id", util.UUIDToString(ident.WorkspaceID),
+			"agent_id", util.UUIDToString(ident.AgentID),
+			"error", err)
+		return nil
+	}
+	verdictByEndpoint := make(map[string]toolpolicy.Setting, len(resolved))
+	for _, verdict := range resolved {
+		verdictByEndpoint[verdict.Connection+" "+verdict.Method+" "+verdict.Path] = verdict.Setting
+	}
 	out := make([]APIConnectionToolVerdict, 0, len(built))
 	for _, t := range built {
 		api, ok := t.(*APIConnectionTool)
 		if !ok {
 			continue
 		}
-		setting, _, err := r.policy.ConnectionEndpointEffective(
-			ctx, ident.WorkspaceID, ident.RuntimeID, ident.AgentID, ident.OwnerID, ident.OnBehalfOfID,
-			api.ConnectionName(), api.Method(), api.Path())
-		if err != nil {
-			// Fail closed: a resolve error must not expose a gate that fronts the
-			// secrets box. The endpoint is dropped from the list.
-			r.logger.Warn("api connection resolver: endpoint policy resolve failed — dropping (fail closed)",
-				"workspace_id", util.UUIDToString(ident.WorkspaceID),
-				"agent_id", util.UUIDToString(ident.AgentID),
-				"connection", api.ConnectionName(), "method", api.Method(), "path", api.Path(),
-				"error", err)
+		setting, found := verdictByEndpoint[api.ConnectionName()+" "+api.Method()+" "+api.Path()]
+		if !found {
 			continue
 		}
 		if setting == toolpolicy.SettingDeny {

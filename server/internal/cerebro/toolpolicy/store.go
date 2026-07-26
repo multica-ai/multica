@@ -358,8 +358,13 @@ func (s *Store) applyActiveRoles(ctx context.Context, in Query, reqCtx RequestCo
 	if err != nil {
 		return err
 	}
+	applyResolvedRoles(input, roleSettings, roleSources)
+	return nil
+}
+
+func applyResolvedRoles(input *Input, roleSettings []Setting, roleSources []RoleSource) {
 	if len(roleSettings) == 0 {
-		return nil
+		return
 	}
 	roleSetting := CombineGroups(roleSettings...)
 	roleDecides := true
@@ -375,7 +380,6 @@ func (s *Store) applyActiveRoles(ctx context.Context, in Query, reqCtx RequestCo
 	input.Settings[LayerAgent] = roleSetting
 	input.RoleSources = roleSources
 	input.RoleDecidesAgent = roleDecides
-	return nil
 }
 
 // activeRoleSettings expands unexpired member/agent bindings into the policy
