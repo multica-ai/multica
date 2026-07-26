@@ -150,9 +150,26 @@ func TestListEffectiveToolsUsesPlatformActionContractForWorkflowHooks(t *testing
 	}
 }
 
-func TestListEffectiveToolsUsesDeclaredPermissionContractForOrdinaryTools(t *testing.T) {
+// TestListEffectiveToolsUsesDeclaredPermissionContractForPlatformKeys keeps the
+// declared-contract routing for the keys it was built for.
+//
+// This test previously asserted the same for ORDINARY tools, which is what made
+// the FIR-3781 regression invisible: routing an ordinary key through
+// ResolvePermission sends it to ResolveDeclared, which resolves ModeOpenable
+// whenever cerebro_member_override is on (default on) — so a member row could
+// loosen an inherited workspace deny, and the effective tool list an agent
+// received in a claim doubled in production. The declared contract is right for
+// platform actions and wrong as a security floor for ordinary tools; see
+// TestOrdinaryToolsResolveThroughTheTightenOnlyChain for the other half.
+func TestListEffectiveToolsUsesDeclaredPermissionContractForPlatformKeys(t *testing.T) {
+	const platformKey = "tools:test-as-user"
+	if _, special := platformaccess.ForKey(platformKey); !special {
+		t.Fatalf("%q is no longer a platform key — pick another one, this test needs a "+
+			"key that genuinely routes through the declared contract", platformKey)
+	}
+
 	service := New(capabilityListStub{views: []capabilityregistry.View{{
-		Key: "mcp__github__create_issue", Title: "Create issue", Source: "scan",
+		Key: platformKey, Title: "Test as user", Source: "builtin",
 	}}}, declaredContractPolicyStub{})
 
 	rows, err := service.ListEffectiveTools(context.Background(), Query{
@@ -167,10 +184,10 @@ func TestListEffectiveToolsUsesDeclaredPermissionContractForOrdinaryTools(t *tes
 		t.Fatalf("got %d rows, want 1", len(rows))
 	}
 	if got := rows[0].Policy.Effective; got != AccessDeny {
-		t.Fatalf("ordinary tool policy = %q, want %q from declared permission contract", got, AccessDeny)
+		t.Fatalf("platform key policy = %q, want %q from declared permission contract", got, AccessDeny)
 	}
 	if rows[0].ExposureEffective.Effective {
-		t.Fatal("ordinary tool must not be exposed when declared permission contract denies it")
+		t.Fatal("platform key must not be exposed when the declared permission contract denies it")
 	}
 }
 
