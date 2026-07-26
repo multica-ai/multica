@@ -983,6 +983,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 		}
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
+		s.dispatchChainSuccessors(ctx, updatedRun, "completed")
 	case "cancelled", "blocked":
 		reason := "issue " + issue.Status
 		updatedRun, err := s.Queries.UpdateAutopilotRunFailed(ctx, db.UpdateAutopilotRunFailedParams{
@@ -995,6 +996,7 @@ func (s *AutopilotService) SyncRunFromIssue(ctx context.Context, issue db.Issue)
 		}
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 		s.publishRunDone(wsID, updatedRun, "failed")
+		s.dispatchChainSuccessors(ctx, updatedRun, "failed")
 	}
 }
 
@@ -1027,6 +1029,7 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		}
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
+		s.dispatchChainSuccessors(ctx, updatedRun, "completed")
 	case "failed", "cancelled":
 		reason := "task " + task.Status
 		if task.Error.Valid {
@@ -1042,6 +1045,7 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		}
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 		s.publishRunDone(wsID, updatedRun, "failed")
+		s.dispatchChainSuccessors(ctx, updatedRun, "failed")
 	}
 }
 
@@ -1106,6 +1110,7 @@ func (s *AutopilotService) SyncRunFromLinkedIssueTask(ctx context.Context, task 
 	}
 	s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 	s.publishRunDone(util.UUIDToString(autopilot.WorkspaceID), updatedRun, "failed")
+	s.dispatchChainSuccessors(ctx, updatedRun, "failed")
 }
 
 func taskFailureReasonForAutopilotRun(task db.AgentTaskQueue) string {
