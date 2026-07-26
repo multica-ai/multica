@@ -2,6 +2,7 @@ package localtoolpolicy
 
 import (
 	"context"
+	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
@@ -21,6 +22,19 @@ const unavailableProviderToolKey = "tools:__provider_lookup_failed__"
 func ProviderPolicyToolKey(provider, toolName string) string {
 	canonicalName := capabilitycatalog.CanonicalRuntimeToolName(provider, toolName)
 	return claudehook.PolicyToolKey(canonicalName)
+}
+
+// ProviderMandateToolKey maps the provider-native policy identity to the exact
+// callable identity stored for server-dispatched workspace Connection endpoints.
+// Local MCP hooks wrap those endpoint names as mcp__multica__<connection>__<op>,
+// while the shared Gateway registry and task mandate use <connection>__<op>.
+func ProviderMandateToolKey(policyToolKey string) string {
+	const workspaceMCPPrefix = "mcp__multica__"
+	name, ok := strings.CutPrefix(strings.TrimSpace(policyToolKey), workspaceMCPPrefix)
+	if !ok || !strings.Contains(name, "__") {
+		return policyToolKey
+	}
+	return name
 }
 
 // ProviderResourcePattern extracts the concrete resource from provider-native

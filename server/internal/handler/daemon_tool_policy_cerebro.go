@@ -104,7 +104,7 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// PolicyToolKey the policy-chain resolve below uses, not the bare hook tool name.
 	toolKey, resourcePattern := localtoolpolicy.ProviderToolCallForAgent(r.Context(), h.DB, wsUUID, agentID, req.ToolName, req.ResourcePattern, req.Args) // CEREBRO-PATCH(cursor-tool-policy-key): FIR-3729 normalize Cursor hook names/resources to its runtime inventory.
 	req.ResourcePattern = resourcePattern
-	if err := taskmandate.NewStoreDB(h.DB).Authorize(r.Context(), taskID, wsUUID, agentID, toolKey); err != nil {
+	if err := taskmandate.NewStoreDB(h.DB).Authorize(r.Context(), taskID, wsUUID, agentID, localtoolpolicy.ProviderMandateToolKey(toolKey)); err != nil { // CEREBRO-PATCH(connection-task-mandate-key): FIR-3828 match local workspace Connection hooks to the shared dispatch identity.
 		writeJSON(w, http.StatusOK, map[string]any{
 			"allowed": false, "decision": string(localtoolpolicy.KindDeny),
 			"mode": mode, "enforced": true, "would_block": true,
