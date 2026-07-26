@@ -1017,7 +1017,7 @@ func TestOpencodeBackendInjectsThinkingVariant(t *testing.T) {
 	if argIndexOf(args, "low") >= 0 {
 		t.Errorf("filtered user --variant value still appears: %v", args)
 	}
-	autoCount := 0
+	autoCount := 0 // CEREBRO-PATCH(opencode-permission-flag): the daemon injects the supported non-interactive flag exactly once.
 	for _, arg := range args {
 		if arg == "--auto" {
 			autoCount++
