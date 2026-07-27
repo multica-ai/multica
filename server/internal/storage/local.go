@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -145,11 +146,8 @@ func (s *LocalStorage) DeleteKeys(ctx context.Context, keys []string) {
 
 func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error) {
 	dest := filepath.Join(s.uploadDir, key)
-	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
-		return "", fmt.Errorf("local storage MkdirAll: %w", err)
-	}
-	if err := os.WriteFile(dest, data, 0644); err != nil {
-		return "", fmt.Errorf("local storage WriteFile: %w", err)
+	if err := writeAtomic(dest, bytes.NewReader(data)); err != nil {
+		return "", err
 	}
 	// Best-effort sidecar so ServeFile can restore the original filename in
 	// Content-Disposition. A failure here is logged but does not fail the
@@ -170,35 +168,10 @@ func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, cont
 	return fmt.Sprintf("/uploads/%s", key), nil
 }
 
-// UploadStream writes through a temp file in the destination directory and
-// atomically renames it into place. Writing straight to dest would truncate an
-// existing object up front, so a stream that fails mid-copy would destroy a
-// previously-successful upload of the same key (and the old cleanup even
-// removed it outright) — an attachment row could then point at a file that no
-// longer exists. With rename-into-place a failed write only discards its own
-// temp file and the existing object survives untouched.
 func (s *LocalStorage) UploadStream(ctx context.Context, key string, data io.Reader, _ int64, contentType string, filename string) (string, error) {
 	dest := filepath.Join(s.uploadDir, key)
-	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
-		return "", fmt.Errorf("local storage MkdirAll: %w", err)
-	}
-	f, err := os.CreateTemp(filepath.Dir(dest), "."+filepath.Base(dest)+".tmp-*")
-	if err != nil {
-		return "", fmt.Errorf("local storage CreateTemp: %w", err)
-	}
-	tmp := f.Name()
-	if _, err := io.Copy(f, data); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("local storage stream copy: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("local storage Close: %w", err)
-	}
-	if err := os.Rename(tmp, dest); err != nil {
-		_ = os.Remove(tmp)
-		return "", fmt.Errorf("local storage Rename: %w", err)
+	if err := writeAtomic(dest, data); err != nil {
+		return "", err
 	}
 	if filename != "" {
 		body, _ := json.Marshal(localMeta{Filename: filename, ContentType: contentType})
@@ -212,6 +185,48 @@ func (s *LocalStorage) UploadStream(ctx context.Context, key string, data io.Rea
 	}
 	return fmt.Sprintf("/uploads/%s", key), nil
 }
+
+// writeAtomic writes src through a temp file in the destination directory and
+// renames it into place. Writing straight to dest would truncate an existing
+// object up front, so a write that fails mid-copy would destroy a
+// previously-successful upload of the same key (and the old cleanup even
+// removed it outright) — an attachment row could then point at a file that no
+// longer exists. With rename-into-place a failed write only discards its own
+// temp file and the existing object survives untouched. Both upload paths go
+// through here so neither can reintroduce the destructive shape.
+func writeAtomic(dest string, src io.Reader) error {
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return fmt.Errorf("local storage MkdirAll: %w", err)
+	}
+	f, err := os.CreateTemp(filepath.Dir(dest), "."+filepath.Base(dest)+".tmp-*")
+	if err != nil {
+		return fmt.Errorf("local storage CreateTemp: %w", err)
+	}
+	tmp := f.Name()
+	if _, err := io.Copy(f, src); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("local storage stream copy: %w", err)
+	}
+	// CreateTemp makes the file 0600; objects are served by this process (and,
+	// in some deployments, a front-end web server) under the 0644 the direct
+	// write used before this path existed.
+	if err := f.Chmod(0644); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return fmt.Errorf("local storage Chmod: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("local storage Close: %w", err)
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("local storage Rename: %w", err)
+	}
+	return nil
+}
+
 func (s *LocalStorage) GetFilePath(key string) string {
 	return filepath.Join(s.uploadDir, key)
 }
