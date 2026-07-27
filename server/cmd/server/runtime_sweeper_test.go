@@ -8,7 +8,11 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
+	"github.com/multica-ai/multica/server/pkg/providerfailover"
 )
 
 // setupSweeperTestFixture creates an issue and a task in the given status with
@@ -231,6 +235,84 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 	}
 	if status != "failed" {
 		t.Fatalf("expected task status 'failed', got '%s'", status)
+	}
+}
+
+// TestSweepSilentHangRecordsShadowBeforeRuntimeCleanup exercises the actual
+// sweeper boundary that used to be unreachable: runRuntimeSweeper marked the
+// runtime offline and failed all of its tasks before FailSilentHangTasks could
+// classify any row. The silent-hang sweep must now claim the row first and,
+// even with ordinary failover configured active, persist a shadow-only liveness
+// decision because a dead runtime cannot provide complete side-effect evidence.
+func TestSweepSilentHangRecordsShadowBeforeRuntimeCleanup(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+	var failoverTable *string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT to_regclass('provider_failover_handoff')::text`).Scan(&failoverTable); err != nil ||
+		failoverTable == nil {
+		t.Skip("provider failover migrations are not installed in the test database")
+	}
+
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`DELETE FROM provider_failover_handoff WHERE original_task_id = $1`, taskID)
+	})
+	ageOutAgentRuntime(t, agentID, 10*time.Minute)
+
+	var runtimeID, originalProvider string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT r.id, r.provider
+		FROM agent_runtime r
+		JOIN agent a ON a.runtime_id = r.id
+		WHERE a.id = $1
+	`, agentID).Scan(&runtimeID, &originalProvider); err != nil {
+		t.Fatalf("load test runtime: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE agent_runtime SET provider = 'claude', status = 'online' WHERE id = $1`, runtimeID); err != nil {
+		t.Fatalf("set test runtime provider: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`UPDATE agent_runtime SET provider = $2, status = 'online' WHERE id = $1`,
+			runtimeID, originalProvider)
+	})
+
+	static := featureflag.NewStaticProvider()
+	static.Set(featureflags.ProviderFailover, featureflag.Rule{Default: true})
+	static.Set(featureflags.ProviderFailoverActive, featureflag.Rule{Default: true})
+	queries := db.New(testPool)
+	taskSvc := service.NewTaskService(queries, testPool, nil, events.New())
+	taskSvc.FeatureFlags = featureflag.NewService(static)
+
+	sweepSilentHangTasks(context.Background(), queries, taskSvc)
+
+	var taskStatus, failureReason, handoffState, handoffMode string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT status, failure_reason
+		FROM agent_task_queue
+		WHERE id = $1
+	`, taskID).Scan(&taskStatus, &failureReason); err != nil {
+		t.Fatalf("read swept task: %v", err)
+	}
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT state, mode
+		FROM provider_failover_handoff
+		WHERE original_task_id = $1
+	`, taskID).Scan(&handoffState, &handoffMode); err != nil {
+		t.Fatalf("read liveness handoff: %v", err)
+	}
+	if taskStatus != "failed" || failureReason != "provider_liveness_timeout" {
+		t.Fatalf("task status/reason = %q/%q, want failed/provider_liveness_timeout",
+			taskStatus, failureReason)
+	}
+	if handoffState != string(providerfailover.StateShadow) ||
+		handoffMode != string(providerfailover.ModeShadow) {
+		t.Fatalf("liveness handoff = %q/%q, want shadow/shadow", handoffState, handoffMode)
 	}
 }
 

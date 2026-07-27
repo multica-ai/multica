@@ -28,7 +28,7 @@ type ChainHasOwningHandoffParams struct {
 // Reports whether another handoff already OWNS the given chain, excluding the
 // row for the task being evaluated (so re-evaluating the same failed task never
 // counts itself). Owning = PENDING/DISPATCHED/COMPLETED, mirroring the partial
-// unique index (migration 227). Pre-check for the policy; the unique index is
+// unique index (migration 234). Pre-check for the policy; the unique index is
 // the atomic backstop under concurrency.
 func (q *Queries) ChainHasOwningHandoff(ctx context.Context, arg ChainHasOwningHandoffParams) (bool, error) {
 	row := q.db.QueryRow(ctx, chainHasOwningHandoff, arg.ChainRootTaskID, arg.ExcludeOriginalTaskID)
@@ -485,7 +485,7 @@ type RecordFailoverHandoffParams struct {
 // (pgx.ErrNoRows), which callers treat as "already recorded".
 //
 // For active-mode owning rows (state HANDOFF_PENDING) the chain-owner partial
-// unique index (migration 227) additionally enforces at-most-one owner per
+// unique index (migration 234) additionally enforces at-most-one owner per
 // chain: a concurrent claim raises a unique_violation the caller maps to the
 // max-one-per-chain decline.
 func (q *Queries) RecordFailoverHandoff(ctx context.Context, arg RecordFailoverHandoffParams) (ProviderFailoverHandoff, error) {

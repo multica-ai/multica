@@ -34,8 +34,3 @@ CREATE TABLE IF NOT EXISTS control_plane_effect_ledger (
     target_ref TEXT NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
--- Reverse lookup: every control-plane effect recorded for a chain, for the
--- observability API and for reconciling what an interrupted orchestrator did.
-CREATE INDEX IF NOT EXISTS control_plane_effect_ledger_chain_idx
-    ON control_plane_effect_ledger (chain_root_task_id);

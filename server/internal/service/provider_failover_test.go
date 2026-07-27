@@ -66,6 +66,94 @@ func TestAgentAuthoritySensitive(t *testing.T) {
 	}
 }
 
+func TestFailoverTargetRequiresSameOwnerAndExplicitOptIn(t *testing.T) {
+	t.Parallel()
+	owner := uuid(1)
+	otherOwner := uuid(2)
+	source := db.Agent{OwnerID: owner}
+
+	cases := []struct {
+		name   string
+		target db.Agent
+		want   bool
+	}{
+		{
+			name: "same owner and opted in",
+			target: db.Agent{
+				OwnerID:       owner,
+				Kind:          "user",
+				RuntimeConfig: []byte(`{"provider_failover_target":true}`),
+			},
+			want: true,
+		},
+		{
+			name: "cross owner rejected",
+			target: db.Agent{
+				OwnerID:       otherOwner,
+				Kind:          "user",
+				RuntimeConfig: []byte(`{"provider_failover_target":true}`),
+			},
+		},
+		{
+			name: "missing opt in rejected",
+			target: db.Agent{
+				OwnerID:       owner,
+				Kind:          "user",
+				RuntimeConfig: []byte(`{}`),
+			},
+		},
+		{
+			name: "missing owner rejected",
+			target: db.Agent{
+				Kind:          "user",
+				RuntimeConfig: []byte(`{"provider_failover_target":true}`),
+			},
+		},
+		{
+			name: "malformed config rejected",
+			target: db.Agent{
+				OwnerID:       owner,
+				Kind:          "user",
+				RuntimeConfig: []byte(`{`),
+			},
+		},
+		{
+			name: "authority-sensitive target rejected",
+			target: db.Agent{
+				OwnerID:       owner,
+				Kind:          "system",
+				RuntimeConfig: []byte(`{"provider_failover_target":true}`),
+			},
+		},
+	}
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := failoverTargetStructurallyEligible(source, tc.target); got != tc.want {
+				t.Fatalf("failoverTargetStructurallyEligible() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestLivenessFailoverModeIsAlwaysShadowWhenEnabled(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		configured providerfailover.Mode
+		want       providerfailover.Mode
+	}{
+		{configured: providerfailover.ModeOff, want: providerfailover.ModeOff},
+		{configured: providerfailover.ModeShadow, want: providerfailover.ModeShadow},
+		{configured: providerfailover.ModeActive, want: providerfailover.ModeShadow},
+	}
+	for _, tc := range cases {
+		if got := livenessFailoverMode(tc.configured); got != tc.want {
+			t.Errorf("livenessFailoverMode(%s) = %s, want %s", tc.configured, got, tc.want)
+		}
+	}
+}
+
 // td-836aa9 #2/#8: completeness is proven only when the daemon sent a
 // completeness-marked evidence object. Nil evidence (old daemon / pre-execution
 // fail path) and Complete=false both keep the surface unproven, and the active

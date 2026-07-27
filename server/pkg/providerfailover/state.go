@@ -33,7 +33,7 @@ const (
 // owningStates are the states in which a handoff row owns its task chain — no
 // other handoff may be created for the same chain while one of these is live.
 // Kept in lockstep with the partial predicate of the chain-owner unique index
-// (migration 227).
+// (migration 234).
 var owningStates = map[HandoffState]bool{
 	StatePending:    true,
 	StateDispatched: true,

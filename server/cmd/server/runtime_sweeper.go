@@ -111,8 +111,12 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
+			// Silent-hang selection must precede runtime cleanup. The stale
+			// runtime sweep fails every task on that runtime; running it first
+			// would leave FailSilentHangTasks no rows to classify and make the
+			// provider-liveness shadow path unreachable.
 			sweepSilentHangTasks(ctx, queries, taskSvc)
+			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			sweepDeferredChatFinalizations(ctx, queries, taskSvc)

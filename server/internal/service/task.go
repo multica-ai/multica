@@ -3119,6 +3119,17 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		}
 	}
 
+	// Provider failover (td-836aa9): evaluate before creating any failure
+	// comment/chat/notification. Those are platform-authored consequences of
+	// this failure, not effects produced by the failed run; recording them first
+	// would make gatherFailoverSideEffects observe its own notification and
+	// incorrectly reject every otherwise-clean handoff as side_effects_present.
+	//
+	// This remains best-effort and post-commit — it never affects the fail
+	// outcome. The fast path returns immediately unless the failure is a
+	// provider usage/rate-limit trigger and the feature is enabled.
+	s.EvaluateFailover(ctx, task, failureReason, failoverEvidence)
+
 	// Skip the per-failure system comment when we'll immediately retry —
 	// the new task will surface its own status to the user, and we don't
 	// want to spam the issue with "task timed out" messages on every
@@ -3162,14 +3173,6 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	// Broadcast
 	s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
-
-	// Provider failover (td-836aa9): evaluate a GPT->Claude usage/rate-limit
-	// handoff. Best-effort and post-commit — it never affects the fail outcome,
-	// and the fast path returns immediately unless the failure is a provider
-	// usage/rate-limit trigger and the feature is enabled. failoverEvidence is
-	// the daemon's observed side-effect surface (nil for older daemons / paths
-	// that never observed the run, which holds active handoffs fail-closed).
-	s.EvaluateFailover(ctx, task, failureReason, failoverEvidence)
 
 	// If this failed task IS a dispatched Claude fallback, advance its handoff
 	// ledger row DISPATCHED -> FAILED (independent of the reason — any terminal

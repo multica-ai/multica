@@ -26,9 +26,13 @@ A SILENT HANG — where the provider process wedges without returning any error
   running tasks whose runtime is stale AND which have exceeded the
   provider-specific deadline, sets `failure_reason = 'provider_liveness_timeout'`.
 - `cmd/server/runtime_sweeper.go`: `sweepSilentHangTasks` (constants
-  `codexLivenessSecs = 3600`, `claudeLivenessSecs = 180`) fires before
-  `sweepStaleTasks` in each 30s tick; calls `EvaluateLivenessFailover` on
-  reaped tasks.
+  `codexLivenessSecs = 3600`, `claudeLivenessSecs = 180`) fires before both
+  `sweepStaleRuntimes` and `sweepStaleTasks` in each 30s tick; calls
+  `EvaluateLivenessFailover` on reaped tasks.
+- Liveness evaluations are deliberately **shadow-only**, even when ordinary
+  evidence-bearing callbacks are active. A dead runtime cannot produce a
+  complete terminal side-effect observation, so an automatic continuation
+  would risk duplicating unobserved effects.
 
 ### 2. Orchestrator-tier coverage
 
@@ -41,17 +45,20 @@ extended to them, gated by an active-mode safety hold:
 - `policy.go`: `Input.OrchestratorTier` and `Input.ControlPlaneIdempotent`
   fields. Active mode declines with `orchestrator_idempotency_unproven` unless
   `ControlPlaneIdempotent` is true. Shadow still records coverage.
-- `controlPlaneIdempotentForChain` returns `false` unconditionally (documented
-  fail-closed placeholder) until task-spawn/stage-promotion call sites adopt
-  `ClaimControlPlaneEffectOnce`.
+- `controlPlaneIdempotentForChain` accepts only a valid stable chain root. The
+  task-spawn and stage-promotion write boundaries claim the same effect ledger
+  inside their write transactions, so original and fallback replays contend on
+  one deterministic key.
 
 ### 3. Control-plane idempotency ledger
 
 Prevents a handed-off fallback from double-spawning children or
 double-promoting stages that the failed orchestrator already dispatched:
 
-- `migrations/230_control_plane_effect_ledger.up.sql`: table
+- `migrations/237_control_plane_effect_ledger.up.sql`: table
   `control_plane_effect_ledger` with `UNIQUE effect_key`.
+- `migrations/239_control_plane_effect_chain_index.up.sql`: isolated
+  `CREATE INDEX CONCURRENTLY` for chain reconciliation.
 - `pkg/providerfailover/controlplane.go`: `EffectKey(chainRoot, effect, target)`
   (SHA256 of NUL-separated components), `ControlPlaneEffect` enum
   (`task_spawn`, `stage_promotion`).
@@ -83,18 +90,20 @@ invent parallel machinery:
 - **Failure classification** is centralized in `server/pkg/taskfailure`
   (`Classify(error) Reason`). The two provider-limit reasons —
   `agent_error.provider_capacity_or_rate_limit` (429/529/overloaded) and
-  `agent_error.provider_quota_limit` (402/usage-limit/quota/credits) — are the
-  *only* failover triggers. Auth (`provider_auth_or_access`), timeouts,
-  networking, server 5xx, context overflow, etc. are structurally excluded.
+  `agent_error.provider_quota_limit` (402/usage-limit/quota/credits) — plus the
+  server-owned `provider_liveness_timeout` shadow signal are the only failover
+  triggers. Auth (`provider_auth_or_access`), ordinary timeouts, networking,
+  server 5xx, context overflow, etc. are structurally excluded.
 - **Provider is a property of the runtime** (`agent_runtime.provider`, the
   protocol/CLI family), not the task; a task binds a `runtime_id`. The
   OpenAI/GPT runtime provider is exactly **`codex`** (the Codex CLI) — there is
   no `openai`/`gpt` runtime provider in this repo (those are LLM *billing*
-  strings). The failover source is a **closed whitelist `{codex}`**
+  strings). The failover source is a **closed whitelist `{codex, claude}`**
   (`providerfailover.IsFailoverSource`), not "anything that isn't Claude": the
   repo has ~17 runtime providers (grok, kimi, cursor, gemini, …) and only the
-  GPT one is in scope. Failover re-targets a *different* agent whose runtime
-  provider is `claude`; it never mutates the original agent's binding.
+  two coding-plan runtimes are in scope. Failover re-targets a different,
+  explicitly opted-in agent on the paired provider; it never mutates the
+  original agent's binding.
 - **The failure path** (`TaskService.FailTask`, `server/internal/service/task.go`)
   already computes a refined `failure_reason` and, for a small allow-list of
   reasons, atomically creates a retry child inside the fail transaction. Failover
@@ -104,8 +113,8 @@ invent parallel machinery:
   explicit, chain-level supersede guard on top of that CAS so a late primary
   completion is discarded deliberately, not incidentally.
 
-There is **no** existing side-effect ledger or provider-failover concept in the
-repo; both are introduced here.
+The handoff and control-plane ledgers introduced here supply the durable
+ownership/idempotency layer.
 
 ## Components / files
 
@@ -133,9 +142,8 @@ The auditable core. Deterministic, table-tested, no I/O.
   ownership, so no ledger transition is warranted.)
 - `policy.go` — `Decide(Input) Decision`. Pure decision, in fail-closed order:
   1. not a failover trigger → decline (`not_a_failover_trigger`)
-  2. source provider not in the `{codex}` whitelist → decline
-     (`source_provider_not_failover_eligible`) — covers Claude itself and every
-     non-GPT CLI
+  2. source provider not in the `{codex, claude}` whitelist → decline
+     (`source_provider_not_failover_eligible`)
   3. task is itself a prior fallback → decline (loop prevention)
   4. chain already has an owning handoff → decline (at-most-one per chain)
   5. agent is authority-sensitive (`agent.kind = 'system'`,
@@ -145,10 +153,10 @@ The auditable core. Deterministic, table-tested, no I/O.
   6. run was cancelled → decline
   7. observable side effects present → decline
   8. **(active only)** side-effect completeness not proven → decline
-     (`side_effect_completeness_unproven`) — the current fail-closed posture,
-     since the server cannot prove absence of tool calls / head movement /
-     partial output
-  9. **(active only)** Claude unavailable → `HANDOFF_FAILED` (explicit)
+     (`side_effect_completeness_unproven`) — current daemons can prove it only
+     by sending a completeness-marked terminal observation
+  9. **(active only)** paired provider target unavailable →
+     `HANDOFF_FAILED` (explicit)
   10. otherwise → `HANDOFF_PENDING` (active). In **shadow** mode every path is
      recorded as `HANDOFF_SHADOW` with the full "would/would-not, and why"
      verdict (steps 1–7 only; the active-only safety/availability gates do not
@@ -156,10 +164,10 @@ The auditable core. Deterministic, table-tested, no I/O.
 
 ### New: persistence — migrations + sqlc
 
-- `server/migrations/225_provider_failover_handoff.{up,down}.sql` — the ledger &
+- `server/migrations/232_provider_failover_handoff.{up,down}.sql` — the ledger &
   ownership record `provider_failover_handoff`. No FKs (application-resolved),
   CHECK-constrained `state` and `mode`.
-- `226…229_provider_failover_*_index.{up,down}.sql` — one `CREATE INDEX
+- `233…236_provider_failover_*_index.{up,down}.sql` — one `CREATE INDEX
   CONCURRENTLY` per file:
   - `…_original_task_uidx` — unique on `original_task_id`: one ledger row per
     failed task (idempotent record).
@@ -172,21 +180,25 @@ The auditable core. Deterministic, table-tested, no I/O.
 - `server/pkg/db/queries/provider_failover.sql` — sqlc queries: record (ON
   CONFLICT DO NOTHING), chain-has-owning-handoff, get-by-original,
   get-by-fallback, list-for-issue, CAS state transition, finalize-by-fallback
-  (DISPATCHED → COMPLETED/FAILED), list-Claude-targets, create-fallback-task.
+  (DISPATCHED → COMPLETED/FAILED), list-paired-provider targets,
+  create-fallback-task.
 - Regenerated `server/pkg/db/generated/provider_failover.sql.go` + `models.go`.
 
 ### New: service wiring — `server/internal/service/provider_failover.go`
 
-- `EvaluateFailover(ctx, task, failureReason)` — invoked best-effort *after*
-  `FailTask` commits, only when `IsFailoverTrigger`. Gathers `Input`
+- `EvaluateFailover(ctx, task, failureReason)` — invoked best-effort after
+  `FailTask` commits but **before** platform-authored failure comments/chat
+  messages/notifications, only when `IsFailoverTrigger`. This prevents the
+  side-effect scan from mistaking its own failure notification for an effect of
+  the failed run. It gathers `Input`
   (side-effect snapshot, side-effect completeness, authority flags, chain state,
-  Claude availability), calls `providerfailover.Decide`, and persists the ledger
+  paired-provider availability), calls `providerfailover.Decide`, and persists the ledger
   row. The active proceed path is **atomic**: a single `runInTx` records the
   owning row (ON CONFLICT / chain-owner unique index), creates the Claude
   fallback task, and advances `PENDING → DISPATCHED` with the `fallback_task_id`
   linkage — all commit together or none do, so a crash can never leave a queued
   child without persisted linkage, nor an owning row without a child. When
-  Claude is unavailable it records `HANDOFF_FAILED` + posts a user-visible ledger
+  the paired provider is unavailable it records `HANDOFF_FAILED` + posts a user-visible ledger
   reference.
 - `FinalizeFailoverForFallbackOutcome(ctx, taskID, terminal)` — called
   post-commit from `CompleteTask`/`FailTask` for the **fallback** task (keyed by
@@ -203,9 +215,12 @@ The auditable core. Deterministic, table-tested, no I/O.
   daemon observation. Tool-call counts and partial streamed output are carried
   to the server fail path; any observed tool call or partial user output blocks
   an active handoff.
-- Target resolution: an eligible Claude agent is a non-archived, `kind='user'`
-  agent in the same workspace whose runtime is `online` with provider `claude`;
-  the service additionally drops any `agent.kind='system'` candidate.
+- Target resolution: an eligible paired-provider target is a non-archived,
+  `kind='user'` agent in the same workspace on an online runtime. The target
+  must have the **same owner** as the source agent, explicitly opt in with
+  `runtime_config.provider_failover_target=true`, be non-authority-sensitive,
+  and pass the exact same `CanInvokeAgent` permission predicate as an ordinary
+  agent-to-agent dispatch. Database/permission uncertainty fails closed.
 
 ### Wiring edits (minimal, gated)
 
@@ -230,9 +245,10 @@ The auditable core. Deterministic, table-tested, no I/O.
 2. **Usage/quota limit** (`provider_quota_limit`) → same as (1).
 3. **Silent hang / liveness timeout** (`provider_liveness_timeout`) — a running
    task whose runtime is stale AND which has exceeded the provider-specific
-   wall-clock deadline (codex: 60min, claude: 180s) → policy elects failover.
-   `sweepSilentHangTasks` fails the task first; `EvaluateLivenessFailover` then
-   evaluates it as a handoff candidate.
+   wall-clock deadline (codex: 60min, claude: 180s) → the earlier silent-hang
+   sweep records a **shadow-only** decision before stale-runtime cleanup. It
+   never creates an active continuation because terminal side-effect evidence
+   is unavailable.
 4. **Timeout** (`agent_error.agent_timeout` / platform `timeout`) → **no**
    failover (`HANDOFF_DECLINED`, reason `not_a_failover_trigger`). Plain timeout
    means the process was actively working; silent hang means it was wedged.
@@ -243,14 +259,15 @@ The auditable core. Deterministic, table-tested, no I/O.
 7. **Non-participant source** — a source runtime provider outside `{codex, claude}`
    (grok, gemini, kimi, …) → **no** failover (declined,
    `source_provider_not_failover_eligible`).
-8. **Side-effect completeness (active safety hold)** — even an otherwise-eligible
-   run declines in **active** mode (`side_effect_completeness_unproven`) because
-   the server cannot prove absence of in-run tool calls / head movement / partial
-   output. Shadow still records the observable would-fail-over verdict.
+8. **Side-effect completeness (active safety hold)** — active mode proceeds only
+   when a current daemon supplies a completeness-marked terminal observation
+   with zero tool calls and no partial output. Older daemons and paths without
+   that proof decline with `side_effect_completeness_unproven`; shadow still
+   records the observable verdict.
 9. **Orchestrator-tier (active safety hold)** — an orchestrator run (autopilot or
    leader task) declines in **active** mode with `orchestrator_idempotency_unproven`
-   unless `ControlPlaneIdempotent` is proven (currently always false). Shadow
-   still records orchestrator coverage so it is observable before enablement.
+   unless a stable chain root makes `ControlPlaneIdempotent` provable. Shadow
+   still records orchestrator coverage before enablement.
 10. **Control-plane idempotency** — `ClaimControlPlaneEffectOnce` (INSERT ON
     CONFLICT DO NOTHING by `effect_key`) ensures a handed-off fallback that
     re-plans cannot double-spawn children or double-promote stages the failed
@@ -277,30 +294,48 @@ The auditable core. Deterministic, table-tested, no I/O.
     workspaces are marked; other reviewer-like names and `system_key` substrings
     are not authority markers. Reviewer runs that produced an authoritative
     verdict are also excluded by the side-effect gate.
+18. **Authorization boundary** — a target must share the source owner, carry
+    `provider_failover_target=true`, and pass ordinary invocation permissions.
+    A foreign/private agent, member-only target for a different originator, or
+    failed membership lookup cannot receive a continuation.
+19. **Exactly once from the real failure path** — a clean quota failure creates
+    one owning ledger row and one continuation. Repeating the terminal callback
+    creates neither a second row nor a second task.
 
-## Legacy self-host migration collision
+## Migration numbering
 
-The first private self-host rollout shipped the failover schema under migration
-stems `212_provider_failover_handoff` through
-`217_control_plane_effect_ledger`. Upstream later assigned numeric prefixes
-212–217 to unrelated agent usage, chat-project, and VCS migrations. Migration
-identity is the full filename stem, so both sets can coexist in
-`schema_migrations`, but the duplicate-prefix source tree violates migration
-lint and can leave an affected self-host database missing the upstream schema.
+Current upstream owns migrations through 231. This change therefore uses one
+unambiguous sequence:
 
-The durable numbering is now:
+- 232: handoff table;
+- 233–236: isolated concurrent handoff indexes;
+- 237: control-plane effect table;
+- 238: HCX rollout compatibility;
+- 239: isolated concurrent control-plane chain index.
 
-- upstream migrations retain 212–223;
-- provider failover uses 224–229;
-- failover migrations 224–229 are idempotent so an affected database can record
-  the corrected stems without recreating already-present failover tables and
-  indexes.
+Every production index is created concurrently in its own migration. Do not
+reuse or collapse this sequence when merging a newer upstream; renumber it
+above the then-current upstream maximum if that maximum has advanced.
 
-Before upgrading an affected database, apply upstream migrations 212–217 and
-record their full stems, then run the normal migrator. The normal run applies
-upstream 218–223 followed by failover 224–229. Validate this sequence on a
-database clone first; do not infer correctness from the highest numeric prefix,
-because readiness checks full stems and out-of-order migrations are valid.
+## Shadow-first rollout and rollback
+
+1. Deploy the migrations and server with `FF_PROVIDER_FAILOVER=true` and
+   `FF_PROVIDER_FAILOVER_ACTIVE=false`. This is also the self-host compose
+   default.
+2. Opt in only paired-provider targets whose owner/credentials/tools are
+   intended for automatic continuation by setting
+   `runtime_config.provider_failover_target=true`. Keep protected reviewers and
+   authority-bearing agents opted out/protected.
+3. Observe `GET /api/issues/{id}/failover-handoffs` and aggregate ledger
+   `reason`, source/target provider, and `would_fail_over`. Confirm there are no
+   cross-owner candidates and no unexpected side-effect declines.
+4. Enable `FF_PROVIDER_FAILOVER_ACTIVE=true` only after the shadow sample is
+   reviewed and current daemons are confirmed to send complete side-effect
+   evidence. Liveness watchdog decisions remain shadow-only.
+5. Roll back real handoffs immediately with
+   `FF_PROVIDER_FAILOVER_ACTIVE=false`; the audit ledger continues in shadow.
+   Set `FF_PROVIDER_FAILOVER=false` to disable evaluation entirely. Existing
+   dispatched tasks and ledger rows are not rewritten by either switch.
 
 ## Fail-closed notes / documented safety decisions
 

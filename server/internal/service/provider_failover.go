@@ -40,11 +40,24 @@ func (s *TaskService) failoverMode(ctx context.Context) providerfailover.Mode {
 // The fast path — the overwhelmingly common case — returns before any DB work:
 // the failure is not a usage/rate-limit trigger, or the feature is off.
 func (s *TaskService) EvaluateFailover(ctx context.Context, task db.AgentTaskQueue, failureReason string, evidence *providerfailover.SideEffectEvidence) {
+	s.evaluateFailoverInMode(ctx, task, failureReason, evidence, s.failoverMode(ctx))
+}
+
+// evaluateFailoverInMode is the shared evaluator behind ordinary terminal
+// callbacks and the server-owned liveness watchdog. Ordinary callbacks use the
+// configured posture; liveness uses an explicitly forced shadow posture because
+// a dead runtime cannot provide complete terminal side-effect evidence.
+func (s *TaskService) evaluateFailoverInMode(
+	ctx context.Context,
+	task db.AgentTaskQueue,
+	failureReason string,
+	evidence *providerfailover.SideEffectEvidence,
+	mode providerfailover.Mode,
+) {
 	reason := taskfailure.Reason(failureReason)
 	if !providerfailover.IsFailoverTrigger(reason) {
 		return
 	}
-	mode := s.failoverMode(ctx)
 	if mode == providerfailover.ModeOff {
 		return
 	}
@@ -91,7 +104,7 @@ func (s *TaskService) EvaluateFailover(ctx context.Context, task db.AgentTaskQue
 		probe := in
 		probe.ClaudeAvailable = true // isolate the availability factor
 		if providerfailover.Decide(probe).Outcome == providerfailover.OutcomeProceed {
-			target, in.ClaudeAvailable = s.resolveFailoverTarget(ctx, agent.WorkspaceID, task.AgentID, targetProvider)
+			target, in.ClaudeAvailable = s.resolveFailoverTarget(ctx, agent, task, targetProvider)
 		}
 	}
 
@@ -428,35 +441,54 @@ func (s *TaskService) gatherFailoverSideEffects(ctx context.Context, task db.Age
 	return se
 }
 
-// resolveFailoverTarget finds an eligible target agent of the given provider in
-// the workspace and reports whether one is available. Availability == at least
-// one structurally-eligible, non-authority-sensitive agent of targetProvider on
-// an online runtime. Bidirectional (td-836aa9): targetProvider is 'claude' for a
-// GPT->Claude handoff and 'codex' for a Claude->GPT handoff. Returns the chosen
-// target (oldest first, deterministic) or nil.
-func (s *TaskService) resolveFailoverTarget(ctx context.Context, workspaceID, sourceAgentID pgtype.UUID, targetProvider string) (*db.Agent, bool) {
+// resolveFailoverTarget finds an explicitly opted-in, authorized target of the
+// requested provider. Failover is allowed to use another agent because that is
+// the product's selected cross-provider continuation model, but it may never
+// cross the source owner's paid-plan/credential boundary and it must pass the
+// same invocation-permission contract as an ordinary agent-to-agent dispatch.
+// Returns the oldest eligible target for deterministic selection.
+func (s *TaskService) resolveFailoverTarget(ctx context.Context, source db.Agent, task db.AgentTaskQueue, targetProvider string) (*db.Agent, bool) {
 	if targetProvider == "" {
 		return nil, false
 	}
 	candidates, err := s.Queries.ListFailoverTargets(ctx, db.ListFailoverTargetsParams{
-		WorkspaceID:    workspaceID,
-		ExcludeAgentID: sourceAgentID,
+		WorkspaceID:    source.WorkspaceID,
+		ExcludeAgentID: source.ID,
 		TargetProvider: targetProvider,
 	})
 	if err != nil {
 		slog.Warn("failover: list targets failed",
-			"workspace_id", util.UUIDToString(workspaceID),
+			"workspace_id", util.UUIDToString(source.WorkspaceID),
 			"target_provider", targetProvider, "error", err)
 		return nil, false
 	}
 	for i := range candidates {
 		c := candidates[i]
-		if agentAuthoritySensitive(c, db.AgentTaskQueue{}) {
+		if !failoverTargetStructurallyEligible(source, c) {
+			continue
+		}
+		if !CanInvokeAgent(
+			ctx,
+			s.Queries,
+			c,
+			"agent",
+			util.UUIDToString(source.ID),
+			util.UUIDToString(task.OriginatorUserID),
+			util.UUIDToString(source.WorkspaceID),
+		) {
 			continue
 		}
 		return &c, true
 	}
 	return nil, false
+}
+
+func failoverTargetStructurallyEligible(source, target db.Agent) bool {
+	return source.OwnerID.Valid &&
+		target.OwnerID.Valid &&
+		target.OwnerID == source.OwnerID &&
+		!agentAuthoritySensitive(target, db.AgentTaskQueue{}) &&
+		agentFailoverTargetEnabled(target)
 }
 
 // isOrchestratorTier reports whether a failed run is orchestrator-tier — it
@@ -552,18 +584,29 @@ func (s *TaskService) ClaimControlPlaneEffectOnce(ctx context.Context, workspace
 // path returns immediately when the feature is off. Only RUNNING-branch reaped
 // rows (StartedAt set) are silent hangs; a dispatched-but-never-started timeout
 // (StartedAt null) never ran, so it is skipped. Evidence is nil — the daemon is
-// gone, so nothing was observed — which keeps active handoffs fail-closed on
-// completeness while shadow records the would-fail-over verdict.
+// gone, so nothing was observed. That makes a real handoff unsafe: absence of
+// evidence is not evidence of absence. Liveness evaluations are therefore
+// ALWAYS shadow-only even when ordinary, evidence-bearing callbacks are active.
+// This keeps the watchdog reachable and observable without ever duplicating an
+// unobserved side effect.
 func (s *TaskService) EvaluateLivenessFailover(ctx context.Context, reaped []db.AgentTaskQueue) {
-	if s.failoverMode(ctx) == providerfailover.ModeOff {
+	mode := livenessFailoverMode(s.failoverMode(ctx))
+	if mode == providerfailover.ModeOff {
 		return
 	}
 	for _, t := range reaped {
 		if !t.StartedAt.Valid {
 			continue // dispatched-timeout branch: never actually started running
 		}
-		s.EvaluateFailover(ctx, t, string(taskfailure.ReasonProviderLivenessTimeout), nil)
+		s.evaluateFailoverInMode(ctx, t, string(taskfailure.ReasonProviderLivenessTimeout), nil, mode)
 	}
+}
+
+func livenessFailoverMode(configured providerfailover.Mode) providerfailover.Mode {
+	if configured == providerfailover.ModeOff {
+		return providerfailover.ModeOff
+	}
+	return providerfailover.ModeShadow
 }
 
 // agentAuthoritySensitive reports whether an agent is authority-sensitive and
@@ -596,6 +639,21 @@ func agentAuthoritySensitive(agent db.Agent, _ db.AgentTaskQueue) bool {
 	}
 	return json.Unmarshal(agent.RuntimeConfig, &config) == nil &&
 		config.ProviderFailoverProtected
+}
+
+// agentFailoverTargetEnabled is the explicit consent bit for receiving
+// cross-provider continuation work. Invocation permission answers who may run
+// the agent; this marker answers whether the owner opted that agent into the
+// automatic failover pool at all. Malformed or missing config fails closed.
+func agentFailoverTargetEnabled(agent db.Agent) bool {
+	if len(agent.RuntimeConfig) == 0 {
+		return false
+	}
+	var config struct {
+		ProviderFailoverTarget bool `json:"provider_failover_target"`
+	}
+	return json.Unmarshal(agent.RuntimeConfig, &config) == nil &&
+		config.ProviderFailoverTarget
 }
 
 // failoverSideEffectsComplete reports whether the server can PROVE the failed
