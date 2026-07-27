@@ -244,6 +244,39 @@ func TestCerebroEffectiveToolsForClaimIncludesDirectMCPAndCapabilityDiagnosis(t 
 	}
 }
 
+func TestCerebroEffectiveToolsForClaimIncludesAllowedPlatformTools(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	wants := []string{
+		"mcp__multica__list_evals",
+		"mcp__multica__list_eval_bindings",
+		"mcp__multica__list_commands",
+		"mcp__multica__get_agent_capabilities",
+		"mcp__multica__get_me",
+		"mcp__multica__list_issues",
+	}
+	rows := make([]RuntimeToolEffectiveAccessView, 0, len(wants))
+	for _, name := range wants {
+		rows = append(rows, exposedToolView(name, "mcp", "", "Allowed platform tool", "allow", true))
+	}
+	h := &Handler{runtimeToolAccess: fakeRuntimeToolAccess{rows: rows}}
+
+	_, mandate, err := h.cerebroEffectiveToolsForClaim(
+		context.Background(),
+		db.AgentRuntime{},
+		&TaskAgentData{ID: agentID},
+		"agent",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim: %v", err)
+	}
+	for _, want := range wants {
+		if !containsString(mandate, want) {
+			t.Errorf("claim mandate = %v, want allowed platform tool %q", mandate, want)
+		}
+	}
+}
+
 // When the tool-policy chain exposes nothing but the agent HAS api-connection
 // tools, the brief still lists them (not nil) — the whole point of FIR-2388.
 func TestCerebroEffectiveToolsForBriefAPIConnectionOnly(t *testing.T) {
