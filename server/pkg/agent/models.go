@@ -1131,9 +1131,8 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 }
 
 // parseACPSessionNewModels extracts the model catalog from an ACP
-// `session/new` response. Two shapes exist in the wild.
-//
-// The original SessionModelState block (Hermes and older runtimes):
+// `session/new` response. Hermes and older Kimi (and any other ACP
+// agent that follows that schema) emit:
 //
 //	{
 //	  "sessionId": "...",
@@ -1145,20 +1144,13 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 //	  }
 //	}
 //
-// The newer ACP session config-options schema (current Kimi builds),
-// where the catalog is one select entry among several:
+// Newer agents advertise the same catalog through the ACP
+// `configOptions` list instead — see parseACPConfigOptionModels. Both
+// shapes are accepted: the `models` block wins when present, and
+// `configOptions` is consulted only when it yields nothing, so no
+// existing provider changes behaviour.
 //
-//	{
-//	  "sessionId": "...",
-//	  "configOptions": [
-//	    {"type": "select", "id": "model", "category": "model",
-//	     "currentValue": "kimi-code/k3",
-//	     "options": [{"value": "kimi-code/k3", "name": "K3"}, ...]},
-//	    ...
-//	  ]
-//	}
-//
-// Returns nil (not an empty slice) when neither payload is present so
+// Returns nil (not an empty slice) when the payload is missing so
 // the caller can distinguish "parsed with no models" (valid but
 // empty catalog) from "couldn't find the structure at all".
 func parseACPSessionNewModels(raw json.RawMessage) []Model {
@@ -1175,16 +1167,6 @@ func parseACPSessionNewModels(raw json.RawMessage) []Model {
 			CurrentModelID       string         `json:"currentModelId"`
 			CurrentModelIDSnake  string         `json:"current_model_id"`
 		} `json:"models"`
-		ConfigOptions []struct {
-			Type         string `json:"type"`
-			ID           string `json:"id"`
-			Category     string `json:"category"`
-			CurrentValue string `json:"currentValue"`
-			Options      []struct {
-				Value string `json:"value"`
-				Name  string `json:"name"`
-			} `json:"options"`
-		} `json:"configOptions"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil
@@ -1192,33 +1174,6 @@ func parseACPSessionNewModels(raw json.RawMessage) []Model {
 	availableModels := resp.Models.AvailableModels
 	if len(availableModels) == 0 && resp.Models.AvailableModelsSnake != nil {
 		availableModels = resp.Models.AvailableModelsSnake
-	}
-	if len(availableModels) == 0 {
-		// No legacy models block — try the config-options schema. The
-		// catalog is the select entry whose category is "model"; the
-		// plain id match is a weaker fallback for runtimes that omit
-		// the category field.
-		for _, opt := range resp.ConfigOptions {
-			if opt.Category == "model" || (opt.Category == "" && opt.ID == "model") {
-				currentModelID := strings.TrimSpace(opt.CurrentValue)
-				models := make([]Model, 0, len(opt.Options))
-				seen := map[string]bool{}
-				for _, o := range opt.Options {
-					modelID := strings.TrimSpace(o.Value)
-					if modelID == "" || seen[modelID] {
-						continue
-					}
-					seen[modelID] = true
-					models = append(models, Model{
-						ID:      modelID,
-						Label:   acpModelLabel(o.Name, modelID),
-						Default: modelID == currentModelID,
-					})
-				}
-				return models
-			}
-		}
-		return nil
 	}
 	currentModelID := strings.TrimSpace(resp.Models.CurrentModelID)
 	if currentModelID == "" {
