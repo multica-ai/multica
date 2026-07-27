@@ -3,6 +3,7 @@ package providerfailover
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 )
 
@@ -63,4 +64,38 @@ func EffectKey(chainRoot string, effect ControlPlaneEffect, target string) strin
 		_, _ = h.Write([]byte{0}) // NUL separator, impossible in the UUID/text inputs
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// TaskSpawnTarget derives the stable target identity for an agent-created child
+// issue before that child has a database UUID. Description text is deliberately
+// excluded: a fallback may rephrase details while still attempting the same
+// logical child.
+func TaskSpawnTarget(parentID, title, assigneeType, assigneeID, projectID string, stage int32) string {
+	parentID = strings.TrimSpace(parentID)
+	title = strings.Join(strings.Fields(title), " ")
+	if parentID == "" || title == "" {
+		return ""
+	}
+	spec := strings.Join([]string{
+		parentID,
+		title,
+		strings.TrimSpace(assigneeType),
+		strings.TrimSpace(assigneeID),
+		strings.TrimSpace(projectID),
+		fmt.Sprintf("%d", stage),
+	}, "\x00")
+	sum := sha256.Sum256([]byte(spec))
+	return fmt.Sprintf("%s:child-spec=%s", parentID, hex.EncodeToString(sum[:]))
+}
+
+// StagePromotionTarget identifies one child activation inside a staged (or
+// unstaged serial) plan. Including childID allows every member of the same stage
+// to be promoted once while original/fallback replays of that child collapse.
+func StagePromotionTarget(parentID, childID string, stage int32) string {
+	parentID = strings.TrimSpace(parentID)
+	childID = strings.TrimSpace(childID)
+	if parentID == "" || childID == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:stage=%d:child=%s", parentID, stage, childID)
 }

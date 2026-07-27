@@ -476,15 +476,37 @@ func isOrchestratorTier(task db.AgentTaskQueue) bool {
 // ledger, so a handed-off fallback cannot double-dispatch them. It gates active
 // orchestrator handoffs (providerfailover.Input.ControlPlaneIdempotent).
 //
-// Returns false today (unconditionally): the orchestration effect sites — the
-// agent-driven `multica issue create --parent` (task-spawn) and stage-promotion
-// paths — do not yet wrap their effects in ClaimControlPlaneEffectOnce, so the
-// server cannot prove idempotency for an arbitrary chain. Active orchestrator
-// handoffs are therefore held closed, exactly mirroring failoverSideEffectsComplete's
-// fail-closed posture, while shadow still records orchestrator coverage. Flip
-// this to a real per-chain ledger check once those call sites adopt the claim.
-func (s *TaskService) controlPlaneIdempotentForChain(_ context.Context, _ pgtype.UUID) bool {
-	return false
+// The HTTP issue-create and backlog-child promotion boundaries now claim the
+// control-plane effect ledger atomically with their writes. Those are the two
+// agent-driven orchestration effects exposed to a task-token process, so a
+// valid chain root is sufficient proof that an original/fallback replay will
+// contend for the same claims. A missing root remains fail-closed.
+func (s *TaskService) controlPlaneIdempotentForChain(_ context.Context, chainRoot pgtype.UUID) bool {
+	return chainRoot.Valid
+}
+
+// ControlPlaneChainRootForTask resolves the stable root used by effect claims.
+// A fallback task has its own queue id, but the handoff row points back to the
+// original chain root; ordinary/chat tasks use the same root derivation as the
+// failover policy itself.
+func (s *TaskService) ControlPlaneChainRootForTask(ctx context.Context, taskID pgtype.UUID) (db.AgentTaskQueue, pgtype.UUID, error) {
+	task, err := s.Queries.GetAgentTask(ctx, taskID)
+	if err != nil {
+		return db.AgentTaskQueue{}, pgtype.UUID{}, fmt.Errorf("load control-plane task: %w", err)
+	}
+	if handoff, err := s.Queries.GetFailoverHandoffByFallbackTask(ctx, taskID); err == nil {
+		if !handoff.ChainRootTaskID.Valid {
+			return db.AgentTaskQueue{}, pgtype.UUID{}, errors.New("fallback handoff has no chain root")
+		}
+		return task, handoff.ChainRootTaskID, nil
+	} else if !errors.Is(err, pgx.ErrNoRows) {
+		return db.AgentTaskQueue{}, pgtype.UUID{}, fmt.Errorf("resolve fallback handoff: %w", err)
+	}
+	root := chainRootForTask(task)
+	if !root.Valid {
+		return db.AgentTaskQueue{}, pgtype.UUID{}, errors.New("task has no control-plane chain root")
+	}
+	return task, root, nil
 }
 
 // ClaimControlPlaneEffectOnce durably claims an orchestrator control-plane effect
