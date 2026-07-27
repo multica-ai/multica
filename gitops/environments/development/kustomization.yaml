@@ -40,4 +40,4 @@ images:
     newTag: "ceacfbd0"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "76b46e82"
+    newTag: "ceacfbd0"
