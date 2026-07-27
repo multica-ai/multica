@@ -432,7 +432,9 @@ func TestWaitKimiWireUsageSettlesAcrossAgentWires(t *testing.T) {
 		t.Fatal(err)
 	}
 	// The wire exists from session start but holds no usage record yet —
-	// kimi flushes it only after answering session/prompt.
+	// kimi flushes it only after answering session/prompt. The snapshot
+	// taken right after session/new therefore has no usage.record, and
+	// every flushed record lands strictly after it.
 	mainWire := filepath.Join(mainDir, "wire.jsonl")
 	if err := os.WriteFile(mainWire, []byte(`{"type":"llm.request","kind":"loop","model":"k3"}`+"\n"), 0o644); err != nil {
 		t.Fatal(err)
@@ -449,7 +451,7 @@ func TestWaitKimiWireUsageSettlesAcrossAgentWires(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.WriteString(kimiWireRec("kimi-code/k3", 100, 10, 0, 0, now) + "\n"); err != nil {
+	if _, err := f.WriteString(kimiWireRec("kimi-code/k3", 100, 10, 0, 0, now.Add(kimiWireUsagePollInterval)) + "\n"); err != nil {
 		f.Close()
 		t.Fatal(err)
 	}
@@ -462,7 +464,7 @@ func TestWaitKimiWireUsageSettlesAcrossAgentWires(t *testing.T) {
 	if err := os.MkdirAll(criticDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(criticDir, "wire.jsonl"), []byte(kimiWireRec("kimi-code/k3", 7, 3, 0, 0, now)+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(criticDir, "wire.jsonl"), []byte(kimiWireRec("kimi-code/k3", 7, 3, 0, 0, now.Add(2*kimiWireUsagePollInterval))+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -491,6 +493,37 @@ func TestWaitKimiWireUsageNoWireReturnsImmediately(t *testing.T) {
 	}
 	if elapsed := time.Since(start); elapsed > kimiWireUsagePollTimeout/2 {
 		t.Fatalf("expected immediate return on missing wire, took %s", elapsed)
+	}
+}
+
+// TestReadKimiWireUsageIgnoresRecordsBeforeSnapshot is the regression
+// guard for the grace-window double-billing bug: a previous task's
+// usage.record that landed shortly before the current task started must
+// NOT be summed into the current task's usage.
+func TestReadKimiWireUsageIgnoresRecordsBeforeSnapshot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", home)
+
+	now := time.Now()
+	dir := filepath.Join(home, "sessions", "wd_x_deadbeef", "session-abc", "agents", "main")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	wire := strings.Join([]string{
+		kimiWireRec("kimi-code/k3", 9999, 9999, 0, 0, now.Add(-2*time.Second)), // previous task
+		kimiWireRec("kimi-code/k3", 50, 5, 0, 0, now.Add(time.Second)),         // current task
+	}, "\n") + "\n"
+	if err := os.WriteFile(filepath.Join(dir, "wire.jsonl"), []byte(wire), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	got, foundWire := readKimiWireUsage("session-abc", now, slog.Default())
+	if !foundWire {
+		t.Fatal("expected foundWire=true with a wire file present")
+	}
+	u := got["kimi-code/k3"]
+	if u.InputTokens != 50 || u.OutputTokens != 5 {
+		t.Fatalf("expected only the current task's usage (50 in / 5 out), got %+v", got)
 	}
 }
 
@@ -528,6 +561,8 @@ func TestAccumulateKimiWireFileReadsPastOversizedLines(t *testing.T) {
 // whose prompt ends with the given canned JSON-RPC fragment — e.g.
 // `"error":{"code":-32603,...}` for a failed turn or
 // `"result":{"stopReason":"cancelled"}` for a cancelled one.
+// It writes a usage.record to the session wire during session/prompt so
+// the record lands strictly after the snapshot taken at session start.
 func fakeKimiACPPromptOutcomeScript(outcome string) string {
 	return `#!/bin/sh
 while IFS= read -r line; do
@@ -540,6 +575,11 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_wire"}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
+      if [ -n "$KIMI_CODE_HOME" ]; then
+        wire_dir="$KIMI_CODE_HOME/sessions/wd_x_deadbeef/ses_wire/agents/main"
+        mkdir -p "$wire_dir"
+        printf '{"type":"usage.record","model":"kimi-code/k3","usage":{"inputOther":120,"output":30,"inputCacheRead":8,"inputCacheCreation":2},"usageScope":"turn","time":%s}\n' "$(date +%s%3N)" >> "$wire_dir/wire.jsonl"
+      fi
       printf '{"jsonrpc":"2.0","id":%s,` + outcome + `}\n' "$id"
       exit 0
       ;;
@@ -568,17 +608,6 @@ func TestKimiBackendRecoversWireUsageOnNonCompletedRun(t *testing.T) {
 
 			home := t.TempDir()
 			t.Setenv("KIMI_CODE_HOME", home)
-
-			// Pre-seed the session wire the way kimi leaves it after a
-			// turn that consumed tokens but did not complete.
-			wireDir := filepath.Join(home, "sessions", "wd_x_deadbeef", "ses_wire", "agents", "main")
-			if err := os.MkdirAll(wireDir, 0o755); err != nil {
-				t.Fatal(err)
-			}
-			wire := kimiWireRec("kimi-code/k3", 120, 30, 8, 2, time.Now()) + "\n"
-			if err := os.WriteFile(filepath.Join(wireDir, "wire.jsonl"), []byte(wire), 0o644); err != nil {
-				t.Fatal(err)
-			}
 
 			fakePath := filepath.Join(t.TempDir(), "kimi")
 			writeTestExecutable(t, fakePath, []byte(fakeKimiACPPromptOutcomeScript(tt.outcome)))
@@ -735,10 +764,12 @@ func TestKimiBackendSwallowedTurnFailureFailsRun(t *testing.T) {
 
 	providerMsg := "400 the message at position 168 with role 'assistant' must not be empty"
 	// The wire exists (kimi creates it at session start) but the failed
-	// turn flushed no usage.record; the log holds the in-window failure.
+	// turn flushed no usage.record. The failure log is seeded with a
+	// future timestamp so it is strictly after the wire snapshot taken at
+	// session start, simulating an in-window turn failure.
 	seedKimiSessionFiles(t, home, "ses_swallowed",
 		`{"type":"llm.request","kind":"loop","model":"k3"}`+"\n",
-		kimiTurnFailedLogLines(time.Now(), 1, providerMsg))
+		kimiTurnFailedLogLines(time.Now().Add(time.Hour), 1, providerMsg))
 
 	fakePath := filepath.Join(t.TempDir(), "kimi")
 	writeTestExecutable(t, fakePath, []byte(fakeKimiACPSwallowedFailureScript()))
@@ -770,9 +801,13 @@ func TestKimiBackendSwallowedTurnFailureDropsPoisonedSession(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", home)
 
 	providerMsg := "400 the message at position 168 with role 'assistant' must not be empty"
+	// The poisoned session carries a stale failure from a previous turn
+	// plus a fresh failure seeded with a future timestamp so it is after
+	// the snapshot taken at session/resume.
 	seedKimiSessionFiles(t, home, "ses_poisoned",
 		`{"type":"llm.request","kind":"loop","model":"k3"}`+"\n",
-		kimiTurnFailedLogLines(time.Now(), 7, providerMsg))
+		kimiTurnFailedLogLines(time.Now().Add(-time.Hour), 7, "previous poisoned turn")+
+			kimiTurnFailedLogLines(time.Now().Add(time.Hour), 8, providerMsg))
 
 	fakePath := filepath.Join(t.TempDir(), "kimi")
 	writeTestExecutable(t, fakePath, []byte(fakeKimiACPSwallowedFailureScript()))
@@ -787,6 +822,34 @@ func TestKimiBackendSwallowedTurnFailureDropsPoisonedSession(t *testing.T) {
 	}
 }
 
+// fakeKimiACPHealthyEmptyCompletionScript impersonates `kimi acp` for a
+// turn that returns stopReason=end_turn with no text but still flushes a
+// usage.record to the session wire.
+func fakeKimiACPHealthyEmptyCompletionScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_swallowed"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      if [ -n "$KIMI_CODE_HOME" ]; then
+        wire_dir="$KIMI_CODE_HOME/sessions/wd_x_deadbeef/ses_swallowed/agents/main"
+        mkdir -p "$wire_dir"
+        printf '{"type":"usage.record","model":"kimi-code/k3","usage":{"inputOther":100,"output":10,"inputCacheRead":0,"inputCacheCreation":0},"usageScope":"turn","time":%s}\n' "$(date +%s%3N)" >> "$wire_dir/wire.jsonl"
+      fi
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
 // TestKimiBackendHealthyEmptyCompletionNotFlagged guards the false-positive
 // side: a legit answer with no text (the turn really ran and flushed its
 // usage.record) is a valid empty completion and must NOT be failed by the
@@ -797,14 +860,15 @@ func TestKimiBackendHealthyEmptyCompletionNotFlagged(t *testing.T) {
 	t.Setenv("KIMI_CODE_HOME", home)
 
 	now := time.Now()
-	// In-window usage.record for the turn; only stale (previous run)
-	// failure entries in the log.
+	// Only stale (previous run) failure entries in the log; the current
+	// turn's usage.record is written by the fake script during
+	// session/prompt, strictly after the wire snapshot.
 	seedKimiSessionFiles(t, home, "ses_swallowed",
-		kimiWireRec("kimi-code/k3", 100, 10, 0, 0, now)+"\n",
+		"",
 		kimiTurnFailedLogLines(now.Add(-time.Hour), 1, "400 the message at position 168 with role 'assistant' must not be empty"))
 
 	fakePath := filepath.Join(t.TempDir(), "kimi")
-	writeTestExecutable(t, fakePath, []byte(fakeKimiACPSwallowedFailureScript()))
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPHealthyEmptyCompletionScript()))
 
 	result := runFakeKimi(t, fakePath, ExecOptions{})
 

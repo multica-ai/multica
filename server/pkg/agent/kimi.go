@@ -194,6 +194,11 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// Per-model usage recovered from kimi's on-disk session wire
 		// when the ACP stream carries none (always, on kimi ≤ 0.27).
 		var wireUsage map[string]TokenUsage
+		// Largest usage.record timestamp already present in the session
+		// wire right after session/new or session/resume. Only records
+		// strictly after this snapshot are counted, preventing double-
+		// billing on resumed sessions.
+		var wireSnapshotMs int64 = -1
 
 		// 1. Initialize handshake.
 		initResult, err := c.request(runCtx, "initialize", map[string]any{
@@ -271,16 +276,22 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		c.sessionID = sessionID
 		b.cfg.Logger.Info("kimi session created", "session_id", sessionID)
 
+		// Snapshot the session wire before the prompt so usage and failure
+		// recovery only counts records appended by this turn. On a resumed
+		// session the wire holds every past turn; without the snapshot we
+		// would double-bill tokens already billed to earlier tasks.
+		wireSnapshotMs = snapshotKimiWire(sessionID, b.cfg.Logger)
+
 		// 3. If the caller picked a model (via agent.model from the
 		// UI dropdown), ask kimi to switch the session to it before
 		// we send any prompt. Kimi's ACP server exposes
 		// `session/set_model` and advertises available models via
-		// the `models.availableModels` block returned by
-		// `session/new` — we pass the chosen modelId through
-		// verbatim. This MUST fail the task on error: silently
-		// falling back to kimi's default model would let the user
-		// believe their pick was honoured while the task actually
-		// ran on something else.
+		// `configOptions` (kimi-code ≥ 0.29) or the legacy
+		// `models.availableModels` block returned by `session/new` —
+		// we pass the chosen modelId through verbatim. This MUST fail
+		// the task on error: silently falling back to kimi's default
+		// model would let the user believe their pick was honoured
+		// while the task actually ran on something else.
 		if opts.Model != "" {
 			if _, err := c.request(runCtx, "session/set_model", map[string]any{
 				"sessionId": sessionID,
@@ -409,7 +420,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				c.usage.CacheReadTokens == 0 && c.usage.CacheWriteTokens == 0
 			c.usageMu.Unlock()
 			if acpUsageEmpty && sessionID != "" && finalStatus == "completed" {
-				wireUsage = waitKimiWireUsage(sessionID, startTime, b.cfg.Logger)
+				wireUsage = waitKimiWireUsage(sessionID, time.UnixMilli(wireSnapshotMs), b.cfg.Logger)
 			}
 		}
 
@@ -467,26 +478,26 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				// should carry what the run consumed. Still nil when
 				// nothing usable was found — the run then reports no
 				// usage, matching prior behavior.
-				usageMap, _ = readKimiWireUsage(sessionID, startTime, b.cfg.Logger)
+				usageMap, _ = readKimiWireUsage(sessionID, time.UnixMilli(wireSnapshotMs), b.cfg.Logger)
 			}
 		}
 
 		// Kimi answers session/prompt with stopReason=end_turn even when
 		// the turn died provider-side (upstream kimi bug; the failure is
 		// only recorded in the session's logs/kimi-code.log). A
-		// "completed" run with no output AND no usage.record for the turn
-		// is therefore not a valid empty completion: cross-check the
-		// session log for an in-window turn failure and fail loudly with
-		// the real provider error instead of reporting a silent success.
-		// The session id is dropped as well — a failed turn can leave the
+		// "completed" run with no output and no ACP-stream usage is
+		// therefore not a valid empty completion: cross-check the session
+		// log for an in-window turn failure and fail loudly with the real
+		// provider error instead of reporting a silent success. The
+		// session id is dropped as well — a failed turn can leave the
 		// context corrupt (empty assistant message) and brick every
 		// follow-up resume, so the empty SessionID routes the daemon's
 		// resume-failure fallback to a fresh session. Healthy empty
-		// completions flushed a usage.record and never reach this check.
+		// completions flushed a usage.record; the snapshot keeps stale
+		// failure entries from previous runs out of the check.
 		if finalStatus == "completed" && finalOutput == "" && sessionID != "" &&
-			u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 &&
-			wireUsage == nil {
-			if failMsg, failed := readKimiTurnFailure(sessionID, startTime, b.cfg.Logger); failed {
+			u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
+			if failMsg, failed := readKimiTurnFailure(sessionID, time.UnixMilli(wireSnapshotMs), b.cfg.Logger); failed {
 				b.cfg.Logger.Warn("kimi turn failed provider-side behind end_turn; failing the run and dropping the poisoned session",
 					"session_id", sessionID,
 					"error", failMsg,
@@ -558,11 +569,6 @@ func kimiToolNameFromTitle(title string) string {
 	return strings.ReplaceAll(lower, " ", "_")
 }
 
-// kimiWireUsageGrace absorbs clock granularity between the daemon's run
-// start and kimi's record timestamps (same host, same clock). It stays
-// far below the age of any previous task's records on a resumed session.
-const kimiWireUsageGrace = 5 * time.Second
-
 // kimiWireUsagePoll bounds the post-prompt wait for kimi to flush the
 // turn's usage.record to the session wire. Kimi answers session/prompt
 // before the record hits disk; without a brief poll the teardown SIGKILL
@@ -611,16 +617,18 @@ func waitKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) m
 //	 "usage":{"inputOther":1884,"output":35,"inputCacheRead":19200,"inputCacheCreation":0},
 //	 "time":1784398522242}
 //
-// Only records at or after `since` count: a resumed session's wire
+// Only records strictly after `since` count: a resumed session's wire
 // accumulates every past turn, and re-summing history would double-report
-// tokens already billed to earlier tasks. Records are summed per model so
-// multi-model runs attribute correctly. The KIMI_CODE_HOME lookup uses the
-// daemon process env, which is what the child inherits in the common case.
-// The second return value reports whether any wire file matched at all —
-// callers use it to tell "this kimi build writes no wire" from "wire
-// exists but the turn's record isn't flushed yet". Totals are nil when
-// nothing usable is found — the caller then reports no usage, matching
-// the pre-recovery behavior.
+// tokens already billed to earlier tasks. The caller snapshots the wire
+// right after session/new or session/resume and passes that snapshot as
+// `since`, so previous task records are ignored regardless of clock skew.
+// Records are summed per model so multi-model runs attribute correctly.
+// The KIMI_CODE_HOME lookup uses the daemon process env, which is what the
+// child inherits in the common case. The second return value reports whether
+// any wire file matched at all — callers use it to tell "this kimi build
+// writes no wire" from "wire exists but the turn's record isn't flushed
+// yet". Totals are nil when nothing usable is found — the caller then
+// reports no usage, matching the pre-recovery behavior.
 func readKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) (map[string]TokenUsage, bool) {
 	home := kimiCodeHome()
 	if home == "" {
@@ -630,7 +638,7 @@ func readKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) (
 	if err != nil || len(files) == 0 {
 		return nil, false
 	}
-	cutoff := since.Add(-kimiWireUsageGrace).UnixMilli()
+	cutoff := since.UnixMilli()
 	totals := map[string]TokenUsage{}
 	for _, f := range files {
 		if err := accumulateKimiWireFile(f, cutoff, totals); err != nil {
@@ -643,7 +651,7 @@ func readKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) (
 	return totals, true
 }
 
-// accumulateKimiWireFile sums usage.record entries newer than cutoffMs
+// accumulateKimiWireFile sums usage.record entries strictly after cutoffMs
 // into totals, keyed by the record's model id. Malformed lines are
 // skipped — the wire is an append-only log best read leniently.
 //
@@ -672,8 +680,8 @@ func accumulateKimiWireFile(path string, cutoffMs int64, totals map[string]Token
 	}
 }
 
-// accumulateKimiWireLine folds one wire line into totals when it is an
-// in-window usage.record; anything else is ignored.
+// accumulateKimiWireLine folds one wire line into totals when it is a
+// usage.record strictly after cutoffMs; anything else is ignored.
 func accumulateKimiWireLine(line []byte, cutoffMs int64, totals map[string]TokenUsage) {
 	// Cheap pre-filter: almost no wire line is a usage record, and
 	// lines carrying tool output can be large.
@@ -695,7 +703,7 @@ func accumulateKimiWireLine(line []byte, cutoffMs int64, totals map[string]Token
 		return
 	}
 	model := strings.TrimSpace(rec.Model)
-	if model == "" || rec.Time < cutoffMs {
+	if model == "" || rec.Time <= cutoffMs {
 		return
 	}
 	u := totals[model]
@@ -717,6 +725,84 @@ func kimiCodeHome() string {
 		return filepath.Join(h, ".kimi-code")
 	}
 	return ""
+}
+
+// snapshotKimiWire returns the largest usage.record timestamp (epoch ms)
+// already present in the session's wire files right after session/new or
+// session/resume. The caller passes this value back as the `since` cutoff
+// for readKimiWireUsage and readKimiTurnFailure, so only records appended
+// after the snapshot are counted.
+//
+// When the session has no wire file yet (fresh session, older build) or
+// the wire holds no usage.record, the snapshot falls back to the current
+// time. That keeps stale failure log entries from previous runs from
+// looking in-window when there is no usage record to anchor the cutoff.
+func snapshotKimiWire(sessionID string, logger *slog.Logger) int64 {
+	home := kimiCodeHome()
+	if home == "" {
+		return time.Now().UnixMilli()
+	}
+	files, err := filepath.Glob(filepath.Join(home, "sessions", "*", sessionID, "agents", "*", "wire.jsonl"))
+	if err != nil || len(files) == 0 {
+		return time.Now().UnixMilli()
+	}
+	var maxTime int64 = -1
+	for _, f := range files {
+		t, err := maxKimiWireRecordTime(f)
+		if err != nil {
+			logger.Debug("kimi wire snapshot read failed", "file", f, "error", err)
+			continue
+		}
+		if t > maxTime {
+			maxTime = t
+		}
+	}
+	if maxTime < 0 {
+		return time.Now().UnixMilli()
+	}
+	return maxTime
+}
+
+// maxKimiWireRecordTime returns the largest usage.record timestamp in a
+// single wire file, or -1 when the file contains no usage.record lines.
+func maxKimiWireRecordTime(path string) (int64, error) {
+	fh, err := os.Open(path)
+	if err != nil {
+		return -1, err
+	}
+	defer fh.Close()
+	var maxTime int64 = -1
+	r := bufio.NewReader(fh)
+	for {
+		line, err := r.ReadBytes('\n')
+		if len(line) > 0 {
+			if t := kimiWireRecordTime(line); t > maxTime {
+				maxTime = t
+			}
+		}
+		if err != nil {
+			if err == io.EOF {
+				return maxTime, nil
+			}
+			return maxTime, err
+		}
+	}
+}
+
+// kimiWireRecordTime extracts the timestamp from a usage.record line, or
+// -1 if the line is not a usage.record or is malformed.
+func kimiWireRecordTime(line []byte) int64 {
+	if !bytes.Contains(line, []byte(`"usage.record"`)) {
+		return -1
+	}
+	var rec struct {
+		Type string `json:"type"`
+		Time int64  `json:"time"`
+	}
+	if err := json.Unmarshal(line, &rec); err != nil || rec.Type != "usage.record" {
+		return -1
+	}
+	return rec.Time
 }
 
 // Markers recorded in the session's logs/kimi-code.log when a turn dies
@@ -742,11 +828,10 @@ var kimiTurnFailedErrorRe = regexp.MustCompile(`\berror="((?:[^"\\]|\\.)*)"`)
 // turns over ACP as stopReason=end_turn with no output, so the session
 // log is the only place the failure — and its cause — is visible.
 //
-// Only entries newer than `since` (minus kimiWireUsageGrace, same host
-// clock) count: the log accumulates every past turn on a resumed session,
-// and a failure from a previous run must not flag the current one. Lines
-// whose timestamp can't be parsed are skipped for the same reason.
-// Returns ("", false) when no log exists at all (older kimi builds,
+// The caller snapshots the wire right after session/new or session/resume
+// and passes that snapshot as `since`, so failures from previous runs are
+// ignored. Lines whose timestamp can't be parsed are skipped for the same
+// reason. Returns ("", false) when no log exists at all (older kimi builds,
 // custom data dir) — no signal, never a false positive.
 func readKimiTurnFailure(sessionID string, since time.Time, logger *slog.Logger) (string, bool) {
 	home := kimiCodeHome()
@@ -757,11 +842,10 @@ func readKimiTurnFailure(sessionID string, since time.Time, logger *slog.Logger)
 	if err != nil || len(files) == 0 {
 		return "", false
 	}
-	cutoff := since.Add(-kimiWireUsageGrace)
 	failed := false
 	detail := ""
 	for _, f := range files {
-		fileDetail, fileFailed, err := scanKimiTurnFailureLog(f, cutoff)
+		fileDetail, fileFailed, err := scanKimiTurnFailureLog(f, since)
 		if err != nil {
 			logger.Debug("kimi turn-failure log read failed", "file", f, "error", err)
 			continue

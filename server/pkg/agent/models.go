@@ -834,11 +834,10 @@ func discoverHermesModels(ctx context.Context, executablePath string) ([]Model, 
 
 // discoverKimiModels spins up a throwaway `kimi acp` process and
 // drives the same minimal ACP handshake as Hermes to surface the
-// model catalog the installed CLI advertises from `session/new`.
-// Current kimi builds (≥ 0.2x) return it via the ACP configOptions
-// schema (the select entry with category "model"); older builds used
-// the `models.availableModels` block — parseACPSessionNewModels
-// handles both shapes.
+// model catalog advertised by Kimi's `session/new` response. Kimi
+// ≤0.28 returns a `models` block (`availableModels`/`currentModelId`);
+// 0.29 moved the same catalog into `configOptions` (MUL-5239). The
+// shared parser accepts both, so the discovery path stays identical.
 //
 // Kimi also advertises a per-session thinking-effort select under
 // `configOptions` with `category: "thought_level"` and `id: "thinking"`.
