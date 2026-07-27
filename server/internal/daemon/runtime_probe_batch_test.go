@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 // batchFixture wires a Daemon against a fake server that serves a configurable
@@ -34,6 +36,10 @@ type batchFixture struct {
 	registered []registeredCall
 	// probes counts detectAgentVersion calls per executable path.
 	probes map[string]int
+	// probeErr, when set, is consulted by the version probe stub before it
+	// succeeds. It receives the executable path and the 1-based attempt count
+	// for that path, and returns a non-nil error to fail that attempt.
+	probeErr func(path string, attempt int) error
 }
 
 type registeredCall struct {
@@ -51,6 +57,12 @@ func (fx *batchFixture) probeCount(path string) int {
 	fx.mu.Lock()
 	defer fx.mu.Unlock()
 	return fx.probes[path]
+}
+
+func (fx *batchFixture) setProbeErr(fn func(path string, attempt int) error) {
+	fx.mu.Lock()
+	defer fx.mu.Unlock()
+	fx.probeErr = fn
 }
 
 // registrationFor returns the runtime types registered for a workspace, and
@@ -91,7 +103,14 @@ func newBatchFixture(t *testing.T) *batchFixture {
 	detectAgentVersion = func(_ context.Context, path string) (string, error) {
 		fx.mu.Lock()
 		fx.probes[path]++
+		attempt := fx.probes[path]
+		probeErr := fx.probeErr
 		fx.mu.Unlock()
+		if probeErr != nil {
+			if err := probeErr(path, attempt); err != nil {
+				return "", err
+			}
+		}
 		return "9.9.9", nil
 	}
 	checkAgentMinVersion = func(_, _ string) error { return nil }
@@ -294,6 +313,143 @@ func TestRegisterRuntimesForWorkspace_ProbesOnStandaloneCall(t *testing.T) {
 		if got := fx.probeCount("/fake/claude"); got != i {
 			t.Fatalf("after %d standalone registrations, probed %d times; want %d", i, got, i)
 		}
+	}
+}
+
+// stubProbeRetry shrinks the version-probe retry knobs so a test can exercise
+// the retry path without paying the production delay, and can classify a probe
+// as "slow" (not worth retrying) without sleeping for a real second.
+func stubProbeRetry(t *testing.T, delay, window time.Duration) {
+	t.Helper()
+	origDelay, origWindow := runtimeVersionProbeRetryDelay, runtimeVersionProbeRetryWindow
+	t.Cleanup(func() {
+		runtimeVersionProbeRetryDelay = origDelay
+		runtimeVersionProbeRetryWindow = origWindow
+	})
+	runtimeVersionProbeRetryDelay = delay
+	runtimeVersionProbeRetryWindow = window
+}
+
+// TestSyncWorkspaces_RetriesFailedProbeForWholeBatch is the fail-once
+// regression for the batch reuse. One probe round now serves every workspace
+// the sync registers, so a single transient `--version` failure would otherwise
+// drop that provider from ALL of them at once — and nothing would restore it,
+// because workspaceNeedsRuntimeRecovery only retries a workspace that lost
+// every runtime. A fast failure gets one more attempt before the provider is
+// dropped.
+func TestSyncWorkspaces_RetriesFailedProbeForWholeBatch(t *testing.T) {
+	fx := newBatchFixture(t)
+	stubProbeRetry(t, time.Millisecond, time.Second)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	}
+	// codex fails its first attempt only — the transient shape of an in-place
+	// CLI upgrade briefly removing the binary.
+	fx.setProbeErr(func(path string, attempt int) error {
+		if path == "/fake/codex" && attempt == 1 {
+			return errors.New("fork/exec: resource temporarily unavailable")
+		}
+		return nil
+	})
+	fx.setWorkspaces(
+		WorkspaceInfo{ID: "ws-1", Name: "one"},
+		WorkspaceInfo{ID: "ws-2", Name: "two"},
+	)
+
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	if got := fx.probeCount("/fake/codex"); got != 2 {
+		t.Errorf("probed /fake/codex %d times, want 2 (one failure + one retry)", got)
+	}
+	// The retry is scoped to the provider that failed: a healthy CLI is not
+	// re-probed just because a sibling stumbled.
+	if got := fx.probeCount("/fake/claude"); got != 1 {
+		t.Errorf("probed /fake/claude %d times, want 1 (only the failed provider retries)", got)
+	}
+	for _, workspaceID := range []string{"ws-1", "ws-2"} {
+		types, _ := fx.registrationFor(workspaceID)
+		sort.Strings(types)
+		if len(types) != 2 || types[0] != "claude" || types[1] != "codex" {
+			t.Errorf("%s registered %v, want [claude codex]; one transient probe failure cost the whole batch a runtime", workspaceID, types)
+		}
+	}
+}
+
+// TestDetectBuiltinRuntimes_DropsProviderAfterRetriesExhausted keeps the retry
+// bounded: a provider that keeps failing is still dropped from the payload
+// after runtimeVersionProbeAttempts, and the healthy providers still register.
+func TestDetectBuiltinRuntimes_DropsProviderAfterRetriesExhausted(t *testing.T) {
+	fx := newBatchFixture(t)
+	stubProbeRetry(t, time.Millisecond, time.Second)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"claude": {Path: "/fake/claude"},
+		"codex":  {Path: "/fake/codex"},
+	}
+	fx.setProbeErr(func(path string, _ int) error {
+		if path == "/fake/codex" {
+			return errors.New("no such file or directory")
+		}
+		return nil
+	})
+
+	runtimes := d.detectBuiltinRuntimes(context.Background())
+
+	if got := fx.probeCount("/fake/codex"); got != runtimeVersionProbeAttempts {
+		t.Errorf("probed /fake/codex %d times, want %d (retry must stay bounded)", got, runtimeVersionProbeAttempts)
+	}
+	if len(runtimes) != 1 || runtimes[0]["type"] != "claude" {
+		t.Errorf("detected %v, want only claude", runtimes)
+	}
+}
+
+// TestDetectBuiltinRuntimes_DoesNotRetrySlowProbe protects registration
+// latency. A probe that burned its whole timeout is a hung CLI, not a hiccup;
+// retrying it would double the round's worst case, which is the latency that
+// used to strand the desktop runtime step in its empty state (MUL-5119).
+func TestDetectBuiltinRuntimes_DoesNotRetrySlowProbe(t *testing.T) {
+	fx := newBatchFixture(t)
+	const probeWindow = 20 * time.Millisecond
+	stubProbeRetry(t, time.Millisecond, probeWindow)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: "/fake/codex"}}
+	fx.setProbeErr(func(path string, _ int) error {
+		time.Sleep(2 * probeWindow)
+		return errors.New("signal: killed")
+	})
+
+	if runtimes := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+		t.Fatalf("detected %v, want none", runtimes)
+	}
+	if got := fx.probeCount("/fake/codex"); got != 1 {
+		t.Errorf("probed /fake/codex %d times, want 1 (a probe that ran to its timeout is not retried)", got)
+	}
+}
+
+// TestDetectBuiltinRuntimes_DoesNotRetryMinVersionRejection pins the other
+// no-retry case: the minimum-version verdict is a pure function of the detected
+// version, so a second probe would reach the same conclusion.
+func TestDetectBuiltinRuntimes_DoesNotRetryMinVersionRejection(t *testing.T) {
+	fx := newBatchFixture(t)
+	stubProbeRetry(t, time.Millisecond, time.Second)
+	checkAgentMinVersion = func(provider, _ string) error {
+		if provider == "codex" {
+			return errors.New("version too old")
+		}
+		return nil
+	}
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: "/fake/codex"}}
+
+	if runtimes := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+		t.Fatalf("detected %v, want none", runtimes)
+	}
+	if got := fx.probeCount("/fake/codex"); got != 1 {
+		t.Errorf("probed /fake/codex %d times, want 1 (a below-minimum version is not retried)", got)
 	}
 }
 
