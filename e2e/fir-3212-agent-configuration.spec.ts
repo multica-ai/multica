@@ -107,7 +107,6 @@ async function seed(page: Page, flags: string[]): Promise<Seed> {
               'mcp_config',      a.mcp_config,
               'custom_args',     a.custom_args,
               'runtime_config',  a.runtime_config,
-              'persona_sandbox', a.persona_sandbox,
               'skill_ids',       '[]'::jsonb,
               'custom_env_keys', '[]'::jsonb
             ),

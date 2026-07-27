@@ -100,7 +100,7 @@ export function changedSnapshotKeys(
 }
 
 // Field order is deliberate: what a person reads first (instructions, model,
-// thinking, sandbox) before the structured config (skills, secrets, configs).
+// thinking) before the structured config (skills, secrets, configs).
 export function snapshotToFields(
   s: AgentContextSnapshot,
   opts: SnapshotToFieldsOptions = {},
@@ -113,7 +113,6 @@ export function snapshotToFields(
     { key: "description", label: "Short description", value: (s.description ?? "").trim(), mono: false },
     { key: "model", label: "Model", value: (s.model ?? "").trim(), mono: true },
     { key: "thinking_level", label: "Thinking level", value: (s.thinking_level ?? "").trim(), mono: true },
-    { key: "persona_sandbox", label: "Sandbox", value: (s.persona_sandbox ?? "").trim(), mono: true },
     { key: "skill_ids", label: "Skills", value: skillsToText(s.skill_ids, opts.resolveSkill), mono: !skillsResolved },
     { key: "custom_env_keys", label: "Secret names", value: listToText(s.custom_env_keys), mono: true },
     { key: "mcp_config", label: "MCP config", value: jsonToText(s.mcp_config), mono: true },

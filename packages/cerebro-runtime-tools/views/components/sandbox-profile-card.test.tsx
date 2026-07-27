@@ -62,7 +62,6 @@ function makeRuntime(profile?: string): AgentRuntime {
     owner_id: null,
     sandbox_enabled: null,
     sandbox_profile: profile,
-    persona_sandbox: "",
     visibility: "private",
     timezone: "UTC",
     capabilities: {},

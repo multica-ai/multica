@@ -446,14 +446,7 @@ func TestStore_GroupsCombineThenUserCaps(t *testing.T) {
 	}
 }
 
-// TestStore_ResolveGeneralDispatchesByFlag proves the FIR-2175 phase-2 wiring at
-// the store seam: ResolveGeneral routes to the tighten-only Resolve when
-// memberOverride is false and to ResolveMemberOverride when it is true, against
-// the SAME stored rows. The fixture is the canonical case — a group Deny with a
-// member Allow — where the two models diverge: tighten-only caps to Deny by
-// group; member-override lets the member open it to Allow. Same inputs, two
-// verdicts, selected purely by the flag the handler passes in.
-func TestStore_ResolveGeneralDispatchesByFlag(t *testing.T) {
+func TestStoreResolveDeclaredDispatchesByWorkspaceFlag(t *testing.T) {
 	s := newTPStore(t)
 	clearAll(t, s)
 	ctx := context.Background()
@@ -471,8 +464,12 @@ func TestStore_ResolveGeneralDispatchesByFlag(t *testing.T) {
 
 	q := Query{WorkspaceID: tpTestWorkspaceID, ToolKey: tool, UserID: user, GroupIDs: []pgtype.UUID{group}}
 
-	// Flag OFF → tighten-only: the group Deny caps the member Allow.
-	off, err := s.ResolveGeneral(ctx, q, false)
+	if err := s.q.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: tpTestWorkspaceID, FlagKey: FlagMemberOverride, Enabled: false,
+	}); err != nil {
+		t.Fatalf("disable member override: %v", err)
+	}
+	off, err := s.ResolveDeclared(ctx, q)
 	if err != nil {
 		t.Fatalf("resolve general (off): %v", err)
 	}
@@ -480,8 +477,12 @@ func TestStore_ResolveGeneralDispatchesByFlag(t *testing.T) {
 		t.Fatalf("flag OFF: setting=%q cappedBy=%q, want deny/group (tighten-only)", off.Setting, off.CappedBy)
 	}
 
-	// Flag ON → member-override: the member's Allow wins over the group Deny.
-	on, err := s.ResolveGeneral(ctx, q, true)
+	if err := s.q.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: tpTestWorkspaceID, FlagKey: FlagMemberOverride, Enabled: true,
+	}); err != nil {
+		t.Fatalf("enable member override: %v", err)
+	}
+	on, err := s.ResolveDeclared(ctx, q)
 	if err != nil {
 		t.Fatalf("resolve general (on): %v", err)
 	}
@@ -489,14 +490,52 @@ func TestStore_ResolveGeneralDispatchesByFlag(t *testing.T) {
 		t.Fatalf("flag ON: setting=%q decidedBy=%q cappedBy=%q, want allow/user/none (member override)", on.Setting, on.DecidedBy, on.CappedBy)
 	}
 
-	// And the flag-OFF path must stay byte-for-byte identical to a plain Resolve —
-	// ResolveGeneral(false) is not allowed to drift from the floor resolver.
 	plain, err := s.Resolve(ctx, q)
 	if err != nil {
 		t.Fatalf("resolve baseline: %v", err)
 	}
 	if plain.Setting != off.Setting || plain.CappedBy != off.CappedBy {
-		t.Fatalf("ResolveGeneral(false) drifted from Resolve: %+v vs %+v", off, plain)
+		t.Fatalf("ResolveDeclared with flag off drifted from hard-floor Resolve: %+v vs %+v", off, plain)
+	}
+}
+
+func TestStoreResolveDeclaredNeverOpensHardFloorKeyClasses(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	ctx := context.Background()
+	agent := uuidByte(41)
+	if err := s.q.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: tpTestWorkspaceID, FlagKey: FlagMemberOverride, Enabled: true,
+	}); err != nil {
+		t.Fatalf("enable member override: %v", err)
+	}
+	for _, key := range []string{
+		"credential.reveal",
+		"tools:agent-browser",
+		RegistryToolKey,
+		"repo.checkout",
+		"repo.push",
+	} {
+		t.Run(key, func(t *testing.T) {
+			clearAll(t, s)
+			if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: key, Layer: LayerWorkspace, SubjectID: tpTestWorkspaceID, Setting: SettingDeny}); err != nil {
+				t.Fatalf("set workspace deny: %v", err)
+			}
+			if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: key, Layer: LayerAgent, SubjectID: agent, Setting: SettingAllow}); err != nil {
+				t.Fatalf("set agent allow: %v", err)
+			}
+			effective, err := s.ResolveDeclared(ctx, Query{
+				WorkspaceID: tpTestWorkspaceID,
+				ToolKey:     key,
+				AgentID:     agent,
+			})
+			if err != nil {
+				t.Fatalf("resolve declared: %v", err)
+			}
+			if effective.Openable || effective.Setting != SettingDeny {
+				t.Fatalf("hard-floor key resolved openable: %+v", effective)
+			}
+		})
 	}
 }
 

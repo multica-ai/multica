@@ -149,7 +149,6 @@ func init() {
 	agentContextProposeCmd.Flags().String("instructions-file", "", "Read replacement instructions from a local file")
 	agentContextProposeCmd.Flags().String("model", "", "Model override")
 	agentContextProposeCmd.Flags().String("thinking-level", "", "Thinking level override")
-	agentContextProposeCmd.Flags().String("persona-sandbox", "", "Persona sandbox override")
 	agentContextProposeCmd.Flags().String("workspace-brief-mode", "", "FIR-3212 shared-workspace-brief mode: off (strip the shared brief) or empty/full for the default")
 	agentContextProposeCmd.Flags().String("tools-brief-mode", "", "FIR-3212 tools-brief mode: summary (fold each connection to one line) or empty/full for the default")
 	agentContextProposeCmd.Flags().String("system-prompt-mode", "", "FIR-3212 system-prompt delivery: append, replace (drop the engine's own system prompt), prepend, or empty for the engine default")
@@ -240,9 +239,6 @@ func runAgentContextPropose(cmd *cobra.Command, args []string) error {
 	}
 	if v, _ := cmd.Flags().GetString("thinking-level"); v != "" {
 		body["thinking_level"] = v
-	}
-	if v, _ := cmd.Flags().GetString("persona-sandbox"); v != "" {
-		body["persona_sandbox"] = v
 	}
 	// FIR-3212 brief-layer modes. Forward on Changed() rather than non-empty so
 	// an explicit --workspace-brief-mode "" resets the agent back to the full

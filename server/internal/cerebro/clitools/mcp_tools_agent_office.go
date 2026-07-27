@@ -94,7 +94,7 @@ by the context owner/approvers; on approval it is applied atomically and
 snapshotted as a new version. Nothing changes until approved.
 
 You may either edit individual fields (instructions, model, thinking_level,
-persona_sandbox, workspace_brief_mode, tools_brief_mode, skill_ids, mcp_config)
+workspace_brief_mode, tools_brief_mode, skill_ids, mcp_config)
 which are merged onto the agent's current context, OR pass a full
 proposed_snapshot object. proposed_version must be a semver X.Y.Z strictly
 greater than the agent's current context_version.`,
@@ -109,7 +109,6 @@ greater than the agent's current context_version.`,
 				"instructions":     map[string]any{"type": "string", "description": "Full replacement instructions (persona/rules text)"},
 				"model":            map[string]any{"type": "string", "description": "Model override"},
 				"thinking_level":   map[string]any{"type": "string", "description": "Thinking level override"},
-				"persona_sandbox":  map[string]any{"type": "string", "description": "Persona sandbox override"},
 				"workspace_brief_mode": map[string]any{
 					"type":        "string",
 					"enum":        []string{"", "full", "off"},
@@ -162,9 +161,6 @@ greater than the agent's current context_version.`,
 		}
 		if v, ok := args["thinking_level"].(string); ok {
 			body["thinking_level"] = v
-		}
-		if v, ok := args["persona_sandbox"].(string); ok {
-			body["persona_sandbox"] = v
 		}
 		// FIR-3212 brief-layer modes. Forwarded verbatim when present (including
 		// the empty string, which resets to the full default) so the MCP, CLI

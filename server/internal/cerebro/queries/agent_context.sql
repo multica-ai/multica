@@ -1,8 +1,8 @@
 -- Agent Office (FIR-1775): versioning + governance for an agent's full runtime
 -- context, mirroring the skill-governance model (skill_version /
 -- skill_change_request) but for the agent COMPOSITE: instructions, bound skills,
--- model, thinking_level, mcp_config, custom_args, runtime_config,
--- persona_sandbox, and the NAMES (never values) of custom_env keys.
+-- model, thinking_level, mcp_config, custom_args, runtime_config, and the
+-- NAMES (never values) of custom_env keys.
 --
 -- Schema lives in 9100_cerebro_agent_context_versioning.{up,down}.sql.
 
@@ -61,11 +61,10 @@ UPDATE agent SET
     description     = $3,
     model           = $4,
     thinking_level  = $5,
-    persona_sandbox = $6,
-    mcp_config      = $7,
-    custom_args     = $8,
-    runtime_config  = $9,
-    context_version = $10,
+    mcp_config      = $6,
+    custom_args     = $7,
+    runtime_config  = $8,
+    context_version = $9,
     updated_at      = now()
 WHERE id = $1
 RETURNING *;

@@ -105,25 +105,25 @@ type Task struct {
 	// no owner (cloud / system runtimes) or the user hasn't set a description.
 	// Injected into the brief under `## Requesting User`; omitted entirely
 	// when description is empty so the agent doesn't see a useless heading.
-	RequestingUserName               string               `json:"requesting_user_name,omitempty"`
-	RequestingUserProfileDescription string               `json:"requesting_user_profile_description,omitempty"`
-	UserProfilePrompt                string               `json:"user_profile_prompt,omitempty"`
-	Kind                             string               `json:"kind,omitempty"`
-	Title                            string               `json:"title,omitempty"`
-	ModelOverride                    string               `json:"model_override,omitempty"`    // CEREBRO-PATCH(daemon-task-model-override): per-task model override (JEH-1310).
-	ThinkingOverride                 string               `json:"thinking_override,omitempty"` // CEREBRO-PATCH(daemon-task-thinking-override): per-task thinking override for issue workflow steps.
-	SandboxEnabled                   *bool                `json:"sandbox_enabled,omitempty"`
-	RuntimeSandboxPolicy             json.RawMessage      `json:"runtime_sandbox_policy,omitempty"`
-	RuntimePersonaSandbox            string               `json:"runtime_persona_sandbox,omitempty"`
-	RuntimeToolsConfig               json.RawMessage      `json:"runtime_tools_config,omitempty"`
-	PiHarnessEnabled                 bool                 `json:"pi_harness_enabled,omitempty"`   // CEREBRO-PATCH(daemon-task-pi-harness-flag): FIR-3272 workspace kill switch.
-	DisallowedMCPTools               []string             `json:"disallowed_mcp_tools,omitempty"` // CEREBRO-PATCH(daemon-task-disallowed-mcp-tools): TECH-3156 per-tool connection denies.
-	EffectiveTools                   []TaskToolBriefEntry `json:"effective_tools,omitempty"`      // CEREBRO-PATCH(daemon-task-effective-tools): FIR-2312 non-CLI tools (MCP + connections) the agent may use, rendered into the brief.
-	PersonaSpawnUserID               string               `json:"persona_spawn_user_id,omitempty"`
-	PersonaSpawnGroupIDs             []string             `json:"persona_spawn_group_ids,omitempty"`
-	ChatHistory                      []ChatHistoryMessage `json:"chat_history,omitempty"`
-	ChatMessages                     []string             `json:"chat_messages,omitempty"`
-	ChatMessageID                    string               `json:"chat_message_id,omitempty"`
+	RequestingUserName               string          `json:"requesting_user_name,omitempty"`
+	RequestingUserProfileDescription string          `json:"requesting_user_profile_description,omitempty"`
+	UserProfilePrompt                string          `json:"user_profile_prompt,omitempty"`
+	Kind                             string          `json:"kind,omitempty"`
+	Title                            string          `json:"title,omitempty"`
+	ModelOverride                    string          `json:"model_override,omitempty"`    // CEREBRO-PATCH(daemon-task-model-override): per-task model override (JEH-1310).
+	ThinkingOverride                 string          `json:"thinking_override,omitempty"` // CEREBRO-PATCH(daemon-task-thinking-override): per-task thinking override for issue workflow steps.
+	SandboxEnabled                   *bool           `json:"sandbox_enabled,omitempty"`
+	RuntimeSandboxPolicy             json.RawMessage `json:"runtime_sandbox_policy,omitempty"`
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed runtime persona data from task claims.
+	RuntimeToolsConfig   json.RawMessage      `json:"runtime_tools_config,omitempty"`
+	PiHarnessEnabled     bool                 `json:"pi_harness_enabled,omitempty"`   // CEREBRO-PATCH(daemon-task-pi-harness-flag): FIR-3272 workspace kill switch.
+	DisallowedMCPTools   []string             `json:"disallowed_mcp_tools,omitempty"` // CEREBRO-PATCH(daemon-task-disallowed-mcp-tools): TECH-3156 per-tool connection denies.
+	EffectiveTools       []TaskToolBriefEntry `json:"effective_tools,omitempty"`      // CEREBRO-PATCH(daemon-task-effective-tools): FIR-2312 non-CLI tools (MCP + connections) the agent may use, rendered into the brief.
+	PersonaSpawnUserID   string               `json:"persona_spawn_user_id,omitempty"`
+	PersonaSpawnGroupIDs []string             `json:"persona_spawn_group_ids,omitempty"`
+	ChatHistory          []ChatHistoryMessage `json:"chat_history,omitempty"`
+	ChatMessages         []string             `json:"chat_messages,omitempty"`
+	ChatMessageID        string               `json:"chat_message_id,omitempty"`
 	// Initiator* identify the actor who triggered THIS task (the real
 	// requester behind the current comment/mention or chat message) as
 	// distinct from the runtime owner whose credentials the agent runs with.
@@ -211,10 +211,9 @@ type AgentData struct {
 	Model            string            `json:"model,omitempty"`
 	ThinkingLevel    string            `json:"thinking_level,omitempty"`
 	// CEREBRO-PATCH(daemon-agent-sandbox-allowlist): admin-set list of
-	SandboxAllowlist      []string        `json:"sandbox_allowlist,omitempty"`
-	PersonaSandbox        string          `json:"persona_sandbox,omitempty"`
-	RuntimePersonaSandbox string          `json:"runtime_persona_sandbox,omitempty"`
-	RuntimeConfig         json.RawMessage `json:"runtime_config,omitempty"`
+	SandboxAllowlist []string        `json:"sandbox_allowlist,omitempty"`
+	RuntimeConfig    json.RawMessage `json:"runtime_config,omitempty"`
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed agent persona data from daemon payloads.
 	// CEREBRO-PATCH(run-prompt-snapshot): FIR-3212 — agent.context_version at claim time; empty on old servers.
 	ContextVersion string `json:"context_version,omitempty"`
 }

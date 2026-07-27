@@ -19,7 +19,7 @@ injects these fields at claim time (`server/internal/handler/daemon.go`
 - `instructions` (persona) — the big behavior contract
 - bound skills (`agent_skill` join) — the composition layer
 - `model`, `thinking_level`
-- `mcp_config`, `custom_args`, `runtime_config`, `persona_sandbox`
+- `mcp_config`, `custom_args`, `runtime_config`
 - `custom_env` — **secret values are NOT versioned**; we snapshot key *names*
   only (metadata), values stay in the env endpoint / Infisical / agentvault.
 

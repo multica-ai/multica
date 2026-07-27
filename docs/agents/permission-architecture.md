@@ -80,19 +80,10 @@ Workspace/runtime/agent/group/user choices are authored only in
   exact allowed-tool envelope when a task is claimed and is checked again before
   every managed or local-runtime call. The task transcript and
   `multica permissions task <id>` expose that historical snapshot.
-- **Resolver:** `toolpolicy.Resolve` (pure fold, `chain.go:153`) / `Store.Resolve`
-  (DB, `store.go:95`). Folds base→ceiling, most-restrictive-wins; `Inherit`/absent =
-  pass-through; **Base default = Allow** (`chain.go:155-157`).
-- **FIR-2351 unification:** `Resolve` and `ResolveMemberOverride` are now thin wrappers
-  over one function, `toolpolicy.ResolveWithMode(mode Mode, in Input)` — `ModeHardFloor`
-  runs `Resolve`'s body, `ModeOpenable` runs `ResolveMemberOverride`'s body. This closes
-  the class of bug that caused the on_behalf_of parity gap above (two hand-synced
-  algorithms drifting apart): there is now one function body per mode, checked
-  byte-for-byte equal to the pre-unification functions by
-  `TestResolveWithMode_HardFloorMatchesResolve` / `_OpenableMatchesResolveMemberOverride`.
-  `Store.ResolveGeneral` calls `ResolveWithMode` internally; no other call site changed.
-  The "contract" step (deleting the two wrapper names and moving every `Resolve(...)` call
-  site onto `ResolveWithMode` directly) is deferred to a follow-up PR.
+- **Resolver:** `toolpolicy.ResolveWithMode` contains the two pure folds. Public
+  DB callers use `Store.ResolveDeclared` or `Store.ResolvePermission`, so the
+  key registry — not the caller — selects hard-floor versus openable semantics.
+  `Inherit`/absent is pass-through and the base default is Allow.
 - **Workspace Deny = openable default (FIR-2351, product decision 2026-07-06):** REVERSES
   the earlier "authored vs default deny" plan item — a workspace-level setting, authored or
   not, is a DEFAULT under `ModeOpenable`, and an explicit Allow authored at the Agent, Group,
@@ -119,19 +110,15 @@ Workspace/runtime/agent/group/user choices are authored only in
   (`validSetting` + DB CHECK `cerebro_tool_policy_disable_workspace_only`, migration
   `9122`); workspace-layer writes already require owner/admin, so Disable needs no new
   write gate. UI: only the workspace-layer decision control offers it.
-- **Member-override resolver (FIR-2175/FIR-3062, flag `cerebro_member_override`, default ON):**
-  `toolpolicy.ResolveMemberOverride` (pure, `chain.go:245`) is a two-stage variant — Stage A
+- **Member-override mode (FIR-2175/FIR-3062, flag `cerebro_member_override`, default ON):**
+  `ModeOpenable` is a two-stage variant — Stage A
   resolves the human layers `Workspace › Group › User` by **specificity** (most specific wins,
   so a member's own Allow can OPEN what their group denied — it can LOOSEN, not only tighten),
   Stage B lets `Runtime`/`Agent`/`on_behalf_of`/`System` only tighten that member ceiling
-  (`on_behalf_of` — the delegated task initiator, FIR-2441 — closed a parity gap with `Resolve`:
-  it now tightens under both resolvers identically, never loosens either). The **general gate
-  only** dispatches to it through `Store.ResolveGeneral(ctx, q, memberOverride)` (`store.go`),
-  where `memberOverride` is the workspace flag read by the gate handler
-  (`runtime.memberOverrideEnabled` / `handler.daemonMemberOverrideEnabled`, both fail-to-OFF).
-  Flag OFF ⇒ `ResolveGeneral` is byte-for-byte `Resolve`. **SECURITY:** because it can loosen,
-  it MUST NOT govern any deny-by-default floor — credentials, the OS sandbox, repo checkout,
-  the repo-approval cap all keep calling `Resolve` directly and never reach `ResolveGeneral`.
+  (`on_behalf_of` — the delegated task initiator, FIR-2441 — tightens identically
+  under both modes). `Store.ResolveDeclared` reads the workspace flag and applies
+  `DeclaredResolutionMode`; hard-floor key classes always select `ModeHardFloor`
+  even when the flag is on.
 - **Backing table:** `cerebro_tool_policy` — `(workspace_id, tool_key, layer, subject_id,
   resource_pattern, setting)` (migrations `9042` + `9052` workspace layer + `9054`
   resource_pattern + `9122` `disable` setting). `setting ∈ inherit|allow|ask|deny|disable`,
@@ -184,13 +171,11 @@ Workspace/runtime/agent/group/user choices are authored only in
 | connection per-tool Deny/Ask | `table_connection.go:305` `ConnectionToolEffective` | live |
 | mention `trigger_other_agent` (layered over a code baseline) | `mentiongate/gate.go:92` | live |
 | general gateway tool calls (Policy Decision Service via `accessdecision.Service`) | `runtime/access_decision.go` + `approval_gate.go` | **live and fail-closed**; no server rollout switch |
-| local-CLI tool calls (Claude/Codex/Cursor/Gemini, via `ResolveGeneral`) | `daemon_tool_policy_cerebro.go:68` | **always enforced**; provider adapters fail closed, and local CLI providers without an adapter are rejected before spawn |
+| local-CLI tool calls (Claude/Codex/Cursor/Gemini, via `ResolveDeclared`) | `daemon_tool_policy_cerebro.go:68` | **always enforced**; provider adapters fail closed, and local CLI providers without an adapter are rejected before spawn |
 
-Both **general** gates resolve through `Store.ResolveGeneral`, so when `cerebro_member_override`
-(FIR-2175, default ON) is on for the workspace they apply the member-override model; OFF keeps
-them identical to `Resolve`. The **floor** gates in this table — agent-browser unix-socket
-(Base=Deny), repo checkout, connection per-tool — keep calling `Resolve` directly and are NOT
-affected by that flag.
+Both **general** gates resolve through `Store.ResolveDeclared`. When
+`cerebro_member_override` is on, ordinary keys use the openable mode; declared
+floor keys remain hard-floor and are not affected by that flag.
 
 Everything below in section 4 is **not** on this list — it is a separate model.
 
@@ -369,9 +354,9 @@ Persona-the-service was gated entirely behind `MULTICA_PERSONA_URL`/`_TOKEN`, **
   see or call grants, and nothing advertises "Persona" to a runtime. The prior "keep Persona as a
   separate service" plans are archived under [`docs/archive/persona/`](../archive/persona/) — do not act on them.
 
-Still inert and tracked for a later sweep: the `agent.persona_sandbox` / `agent_runtime.persona_sandbox`
-DB columns + the frontend persona-sandbox tab. The old persona Go package was renamed to `spawn`,
-reduced to `server/internal/cerebro/spawn/spawn.go` (`ResolveSpawnSubject`, used by the daemon — keep).
+The inert persona-sandbox columns, API fields, Agent Office fields, and frontend tab were removed in
+FIR-3820. The old persona Go package was renamed to `spawn`, reduced to
+`server/internal/cerebro/spawn/spawn.go` (`ResolveSpawnSubject`, used by the daemon — keep).
 
 ### 5.2 Canonical decisions + approval seam (FIR-3388)
 
@@ -432,7 +417,8 @@ the specific second model you will find in the code and must NOT cement.
   removed: the per-actor credentials authoring surface lives on the tool-policy chain credential rows
   above (`toolpolicy/table_credential.go`, flag `cerebro_credentials_per_actor` for visibility,
   writes gated by `manage_credential_access`), so authoring and enforcement read the SAME store. The
-  migration-9096 table is left orphaned (non-destructive), not dropped. If you are tempted to add a
+  migration-9096 table is left orphaned (non-destructive), not dropped. Its SQL source and generated
+  query methods are deleted, and a source guard prevents any Go or SQL reader from returning. If you are tempted to add a
   new credentials-specific authoring store or to read a display-only column as an "enforcement gap to
   be wired in," don't — that was the mistake this section was written for (it cost a review cycle on
   FIR-1739). Author credential access as `credential.*` rows on the chain, nowhere else.

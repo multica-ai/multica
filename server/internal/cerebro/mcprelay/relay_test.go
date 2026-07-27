@@ -2,6 +2,7 @@ package mcprelay
 
 import (
 	"context"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -264,6 +265,20 @@ func TestRelayDeniesToolByPolicy(t *testing.T) {
 	}
 }
 
+func TestRelayRejectsToolWhenPolicyResolutionFails(t *testing.T) {
+	pol := &fakePolicy{deny: map[string]bool{}, err: errors.New("resolver unavailable")}
+	srv, hit, tok := relayWithPolicy(t, pol)
+
+	resp := postToolCall(t, srv, tok, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"dangerous","arguments":{}}}`)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("resolver error: status = %d, want 503", resp.StatusCode)
+	}
+	if *hit {
+		t.Fatal("a tool call with an unresolved policy must NOT reach upstream")
+	}
+}
+
 // An Allow (not-denied) tool proxies through with its body intact.
 func TestRelayAllowsToolAndPreservesBody(t *testing.T) {
 	pol := &fakePolicy{deny: map[string]bool{"cs/dangerous": true}}
@@ -300,16 +315,15 @@ func TestRelayDoesNotGateNonToolCall(t *testing.T) {
 	}
 }
 
-// A resolver error fails OPEN — the call proxies through rather than breaking a
-// tool that works today (the error is logged, not surfaced as a block).
-func TestRelayFailsOpenOnPolicyError(t *testing.T) {
+// A resolver error fails closed so a policy outage cannot bypass a Deny.
+func TestRelayFailsClosedOnPolicyError(t *testing.T) {
 	pol := &fakePolicy{err: errFakePolicy}
 	srv, hit, tok := relayWithPolicy(t, pol)
 
 	resp := postToolCall(t, srv, tok, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"safe"}}`)
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK || !*hit {
-		t.Fatalf("policy error must fail open: status=%d hit=%v", resp.StatusCode, *hit)
+	if resp.StatusCode != http.StatusServiceUnavailable || *hit {
+		t.Fatalf("policy error must fail closed: status=%d hit=%v", resp.StatusCode, *hit)
 	}
 }
 
