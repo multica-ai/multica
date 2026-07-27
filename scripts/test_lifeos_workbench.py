@@ -125,6 +125,101 @@ class ContextDatabaseTests(unittest.TestCase):
         args = lifeos_workbench.build_parser().parse_args(["ensure"])
         self.assertEqual(args.command, "ensure")
 
+    def test_background_sync_is_a_first_class_silent_command(self) -> None:
+        args = lifeos_workbench.build_parser().parse_args(
+            [
+                "background-sync",
+                "--summary-limit",
+                "5",
+                "--triage-limit",
+                "20",
+                "--max-summaries",
+                "25",
+            ]
+        )
+        self.assertEqual(args.command, "background-sync")
+        self.assertEqual(args.summary_limit, 5)
+        self.assertEqual(args.triage_limit, 20)
+        self.assertEqual(args.max_summaries, 25)
+
+    def test_background_sync_drains_sanitized_queues_without_codex_task(self) -> None:
+        lifeos_root = Path("/tmp/lifeos-root")
+        controller_root = Path("/tmp/lifeos-controller")
+        calls = []
+
+        def controller_result(_lifeos_root, _controller_root, *arguments):
+            calls.append(arguments)
+            if arguments[0] == "process-summaries":
+                return {
+                    "processed": ["thread-1"],
+                    "coverage": {
+                        "summaries_pending": 0,
+                        "ceo_reviews_pending": 1,
+                    },
+                }
+            if arguments[0] == "triage-ceo":
+                return {
+                    "processed": [{"thread_id": "thread-1"}],
+                    "coverage": {
+                        "summaries_pending": 0,
+                        "ceo_reviews_pending": 0,
+                    },
+                }
+            raise AssertionError(arguments)
+
+        provenance = {
+            "status": "committed",
+            "workbench_git_head": "a" * 40,
+            "controller_git_head": "b" * 40,
+        }
+        with mock.patch.object(
+            lifeos_workbench,
+            "implementation_provenance",
+            return_value=provenance,
+        ) as provenance_check, mock.patch.object(
+            lifeos_workbench, "ensure_running"
+        ) as ensure, mock.patch.object(
+            lifeos_workbench,
+            "_controller_json",
+            side_effect=controller_result,
+        ), mock.patch("builtins.print"):
+            result = lifeos_workbench.background_sync(
+                lifeos_root,
+                controller_root,
+            )
+
+        ensure.assert_called_once_with(lifeos_root, controller_root)
+        self.assertEqual(provenance_check.call_count, 2)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["summaries_processed"], 1)
+        self.assertEqual(result["ceo_reviews_processed"], 1)
+        self.assertFalse(result["raw_content_stored"])
+        self.assertFalse(result["codex_task_created"])
+        self.assertEqual(
+            [call[0] for call in calls],
+            ["process-summaries", "triage-ceo"],
+        )
+        self.assertEqual(result["action_projection"], "deferred_to_visible_sync")
+        self.assertEqual(result["implementation_provenance"], provenance)
+
+    def test_background_sync_rejects_uncommitted_runtime_implementation(self) -> None:
+        with mock.patch.object(
+            lifeos_workbench,
+            "_run",
+            side_effect=[
+                mock.Mock(stdout="a" * 40 + "\n"),
+                mock.Mock(stdout=" M scripts/lifeos_workbench.py\n"),
+            ],
+        ):
+            with self.assertRaisesRegex(
+                lifeos_workbench.WorkbenchError,
+                "未提交改动",
+            ):
+                lifeos_workbench._committed_implementation_revision(
+                    Path("/tmp/repository"),
+                    "scripts/lifeos_workbench.py",
+                )
+
     def test_admin_commands_require_explicit_private_inputs(self) -> None:
         reset_args = lifeos_workbench.build_parser().parse_args(
             [

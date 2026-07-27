@@ -464,13 +464,13 @@ def start(
     if start_executor:
         print("LifeOS 工作台已就绪：%s" % app_url)
     else:
-        print("LifeOS 看板与索引已就绪；AI 执行器由置顶 Codex 任务按需启动。")
+        print("LifeOS 看板与索引已就绪；AI 执行器由本机后台管家按需恢复。")
     if open_browser:
         webbrowser.open(app_url)
 
 
 def ensure_running(lifeos_root: Path, controller_root: Path) -> None:
-    """由置顶 Codex 心跳调用；幂等恢复看板、执行器和全局索引。"""
+    """由本机后台管家调用；幂等恢复看板、执行器和全局索引。"""
     start(
         lifeos_root,
         controller_root,
@@ -478,6 +478,169 @@ def ensure_running(lifeos_root: Path, controller_root: Path) -> None:
         open_browser=False,
         start_executor=True,
     )
+
+
+def _controller_json(
+    lifeos_root: Path,
+    controller_root: Path,
+    *arguments: str,
+) -> Dict[str, object]:
+    environment = runtime_environment(lifeos_root, controller_root)
+    database = ensure_context_database(lifeos_root)
+    completed = _run(
+        [
+            sys.executable,
+            str(controller_root / "scripts/lifeos_controller.py"),
+            "--root",
+            str(lifeos_root),
+            "--database",
+            str(database),
+            "--server-url",
+            BACKEND_URL,
+            "--codex-home",
+            str(Path.home() / ".codex"),
+            "--role",
+            "ceo",
+            *arguments,
+        ],
+        environment=environment,
+        capture=True,
+    )
+    try:
+        payload = json.loads(completed.stdout)
+    except json.JSONDecodeError as error:
+        raise WorkbenchError("LifeOS 后台控制器没有返回有效收据") from error
+    if not isinstance(payload, dict):
+        raise WorkbenchError("LifeOS 后台控制器收据格式不正确")
+    return payload
+
+
+def _committed_implementation_revision(
+    repository: Path,
+    protected_path: str,
+) -> str:
+    """Bind a runtime implementation file to a durable Git commit."""
+    environment = os.environ.copy()
+    try:
+        head = _run(
+            ["git", "rev-parse", "HEAD"],
+            environment=environment,
+            cwd=repository,
+            capture=True,
+        ).stdout.strip()
+        dirty = _run(
+            ["git", "status", "--porcelain", "--", protected_path],
+            environment=environment,
+            cwd=repository,
+            capture=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise WorkbenchError("LifeOS 后台实现无法绑定 Git 提交") from error
+    if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
+        raise WorkbenchError("LifeOS 后台实现 Git 提交格式无效")
+    if dirty:
+        raise WorkbenchError("LifeOS 后台实现存在未提交改动，已停止同步")
+    return head
+
+
+def implementation_provenance(controller_root: Path) -> Dict[str, object]:
+    return {
+        "status": "committed",
+        "workbench_git_head": _committed_implementation_revision(
+            REPO,
+            "scripts/lifeos_workbench.py",
+        ),
+        "controller_git_head": _committed_implementation_revision(
+            controller_root,
+            "scripts/lifeos_controller.py",
+        ),
+    }
+
+
+def background_sync(
+    lifeos_root: Path,
+    controller_root: Path,
+    *,
+    summary_limit: int = 5,
+    triage_limit: int = 20,
+    max_summaries: int = 25,
+) -> Dict[str, object]:
+    """Run the bounded steward loop without creating a Codex task or thread."""
+    if summary_limit < 1 or triage_limit < 1 or max_summaries < 1:
+        raise WorkbenchError("LifeOS 后台同步批次参数必须大于零")
+
+    start_provenance = implementation_provenance(controller_root)
+    ensure_running(lifeos_root, controller_root)
+    summaries_processed = 0
+    reviews_processed = 0
+    iterations = 0
+    coverage: Dict[str, object] = {}
+
+    while iterations < 20:
+        iterations += 1
+        remaining = max_summaries - summaries_processed
+        processed: object = []
+        if remaining > 0:
+            summaries = _controller_json(
+                lifeos_root,
+                controller_root,
+                "process-summaries",
+                "--limit",
+                str(min(summary_limit, remaining)),
+            )
+            processed = summaries.get("processed")
+            summaries_processed += len(processed) if isinstance(processed, list) else 0
+            coverage_value = summaries.get("coverage")
+            coverage = coverage_value if isinstance(coverage_value, dict) else {}
+        else:
+            coverage = _controller_json(
+                lifeos_root,
+                controller_root,
+                "coverage",
+            )
+
+        triage = _controller_json(
+            lifeos_root,
+            controller_root,
+            "triage-ceo",
+            "--limit",
+            str(triage_limit),
+            "--allow-board-fallback",
+        )
+        triaged = triage.get("processed")
+        reviews_processed += len(triaged) if isinstance(triaged, list) else 0
+        coverage_value = triage.get("coverage")
+        coverage = coverage_value if isinstance(coverage_value, dict) else coverage
+
+        summaries_pending = int(coverage.get("summaries_pending") or 0)
+        reviews_pending = int(coverage.get("ceo_reviews_pending") or 0)
+        if summaries_pending == 0 and reviews_pending == 0:
+            break
+        if summaries_pending > 0 and summaries_processed >= max_summaries:
+            break
+        if not processed and not triaged:
+            raise WorkbenchError("LifeOS 后台同步队列未取得进展，请检查本机日志")
+
+    end_provenance = implementation_provenance(controller_root)
+    if end_provenance != start_provenance:
+        raise WorkbenchError("LifeOS 后台实现提交在同步期间发生变化")
+    result: Dict[str, object] = {
+        "status": (
+            "completed"
+            if int(coverage.get("summaries_pending") or 0) == 0
+            and int(coverage.get("ceo_reviews_pending") or 0) == 0
+            else "deferred"
+        ),
+        "summaries_processed": summaries_processed,
+        "ceo_reviews_processed": reviews_processed,
+        "coverage": coverage,
+        "raw_content_stored": False,
+        "codex_task_created": False,
+        "action_projection": "deferred_to_visible_sync",
+        "implementation_provenance": end_provenance,
+    }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return result
 
 
 def stop(lifeos_root: Path, controller_root: Path) -> None:
@@ -820,14 +983,18 @@ def install_autostart(lifeos_root: Path, controller_root: Path) -> None:
             "Label": INDEX_LABEL,
             "ProgramArguments": [
                 python,
-                str(controller_root / "scripts/lifeos_controller.py"),
-                "--root",
+                str(Path(__file__).resolve()),
+                "--lifeos-root",
                 str(lifeos_root),
-                "--database",
-                str(database),
-                "--codex-home",
-                str(Path.home() / ".codex"),
-                "sync",
+                "--controller-root",
+                str(controller_root),
+                "background-sync",
+                "--summary-limit",
+                "5",
+                "--triage-limit",
+                "20",
+                "--max-summaries",
+                "25",
             ],
             "RunAtLoad": True,
             "StartInterval": INDEX_SYNC_INTERVAL_SECONDS,
@@ -863,8 +1030,8 @@ def install_autostart(lifeos_root: Path, controller_root: Path) -> None:
         _write_plist(path, payload)
         _run([launchctl, "bootstrap", domain, str(path)], environment=environment)
     print(
-        "已启用：登录后自动启动看板并唤醒 Codex，置顶会话经营心跳恢复 AI 执行器，"
-        "每 2 小时静默刷新索引、每日本地备份。"
+        "已启用：登录后自动启动看板并唤醒 Codex，本机后台管家恢复 AI 执行器，"
+        "每 2 小时静默同步 LifeOS、每日本地备份。"
     )
 
 
@@ -892,13 +1059,20 @@ def build_parser() -> argparse.ArgumentParser:
     start_parser.add_argument(
         "--board-only",
         action="store_true",
-        help="只启动看板与索引；AI 执行器由置顶 Codex 任务按需启动",
+        help="只启动看板与索引；AI 执行器由本机后台管家按需恢复",
     )
     commands.add_parser("stop", help="停止工作台但保留数据")
     commands.add_parser("status", help="查看本地服务状态")
     commands.add_parser("backup", help="创建受限本地备份")
     commands.add_parser("doctor", help="检查完整执行闭环")
     commands.add_parser("ensure", help="幂等恢复看板、AI 执行器和索引")
+    background = commands.add_parser(
+        "background-sync",
+        help="不创建 Codex 任务的两小时静默管家同步",
+    )
+    background.add_argument("--summary-limit", type=int, default=5)
+    background.add_argument("--triage-limit", type=int, default=20)
+    background.add_argument("--max-summaries", type=int, default=25)
     commands.add_parser("install-autostart", help="启用自动启动、索引和备份")
     commands.add_parser("uninstall-autostart", help="移除自动任务但保留数据")
     reset_parser = commands.add_parser("reset-login", help="通过本机受限文件重置唯一登录凭据")
@@ -942,6 +1116,15 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             return doctor(lifeos_root, controller_root)
         if args.command == "ensure":
             ensure_running(lifeos_root, controller_root)
+            return 0
+        if args.command == "background-sync":
+            background_sync(
+                lifeos_root,
+                controller_root,
+                summary_limit=args.summary_limit,
+                triage_limit=args.triage_limit,
+                max_summaries=args.max_summaries,
+            )
             return 0
         if args.command == "install-autostart":
             install_autostart(lifeos_root, controller_root)
