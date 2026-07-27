@@ -4298,6 +4298,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"grok":       "Grok",
 	"qoderclicn": "Qoder CN",
 	"qwen":       "Qwen Code",
+	"qwenpaw":    "QwenPaw",
 }
 
 // providerDisplayName returns the human-facing runtime name for a provider key.

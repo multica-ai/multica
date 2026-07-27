@@ -178,31 +178,29 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		}
 
 		if opts.ResumeSessionID != "" {
-			result, err := c.request(runCtx, "session/resume", map[string]any{
+			result, err := c.request(runCtx, "session/load", map[string]any{
 				"cwd":        cwd,
 				"sessionId":  opts.ResumeSessionID,
 				"mcpServers": mcpServers,
 			})
 			if err != nil {
 				finalStatus = "failed"
-				// Check if this is a "session not found" error from QwenPaw's ACP server
-				// QwenPaw returns a specific error format; we treat any session-related error
-				// as a potential resume failure so the daemon can retry fresh.
-				finalError = fmt.Sprintf("qwenpaw session/resume failed: %v", err)
-				sessionID = ""
-				resumeRejected = true
-			} else {
-				sessionID = extractACPSessionID(result)
-			}
-			if sessionID == "" {
-				if finalStatus == "failed" {
-					// Already handled above.
+				finalError = fmt.Sprintf("qwenpaw session/load failed: %v", err)
+				if isACPSessionNotFound(err) {
+					sessionID = ""
+					resumeRejected = true
 				}
-				b.cfg.Logger.Info("qwenpaw session resumed",
-					"sessionID", sessionID, "requested", opts.ResumeSessionID)
-			} else {
-				b.cfg.Logger.Info("qwenpaw session resumed",
-					"sessionID", sessionID, "requested", opts.ResumeSessionID)
+				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected}
+				return
+			}
+			var changed bool
+			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
+			if changed {
+				b.cfg.Logger.Warn("agent returned a different session id on resume — original was likely lost; continuing with the new id",
+					"backend", "qwenpaw",
+					"requested", opts.ResumeSessionID,
+					"actual", sessionID,
+				)
 			}
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
@@ -237,7 +235,7 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			// Can't continue without a session.
 			finalStatus = "failed"
 			finalError = "qwenpaw session ID is empty"
-			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
+			resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds(), ResumeRejected: resumeRejected}
 			return
 		}
 
@@ -251,10 +249,18 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				"modelId":   opts.Model,
 			}); err != nil {
 				b.cfg.Logger.Warn("qwenpaw set_session_model failed", "error", err, "requested_model", opts.Model)
-				// Continue without model override — the ACP session already exists.
-			} else {
-				b.cfg.Logger.Info("qwenpaw session model set", "model", opts.Model)
+				finalStatus = "failed"
+				finalError = fmt.Sprintf("qwenpaw could not switch to model %q: %v", opts.Model, err)
+				resCh <- Result{
+					Status:         finalStatus,
+					Error:          finalError,
+					DurationMs:     time.Since(startTime).Milliseconds(),
+					SessionID:      sessionID,
+					ResumeRejected: resumeRejected,
+				}
+				return
 			}
+			b.cfg.Logger.Info("qwenpaw session model set", "model", opts.Model)
 		}
 
 		// 4. Build the prompt content. If we have a system prompt, prepend it.

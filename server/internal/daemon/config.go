@@ -216,9 +216,6 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		}
 	}
 
-	// Discover installed agent CLIs. Extracted so the periodic workspace sync
-	// can re-run the same discovery on a live daemon (MUL-5439).
-	agents := probeAgentCLIs()
 	if len(agents) == 0 && !overrides.AllowNoAgents {
 		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor-agent, kimi, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, or qwenpaw and ensure it is on PATH")
 	}

@@ -205,6 +205,11 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		// empty list keeps the runtime default and manual model entry available
 		// without advertising a Token-Plan-specific model to other accounts.
 		return Catalog{Models: []Model{}}, nil
+	case "qwenpaw":
+		// QwenPaw has no account-independent headless model catalog. An
+		// empty list keeps the runtime default and manual model entry
+		// available in the UI picker, matching the qwen pattern.
+		return Catalog{Models: []Model{}}, nil
 	case "grok":
 		// xAI Grok Build is ACP-native (`grok agent stdio`); model catalog
 		// comes from session/new. Falls back to a small static list so the
