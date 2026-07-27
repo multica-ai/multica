@@ -1624,29 +1624,30 @@ func TestDashboardFailuresByAgentUsesExactWindow(t *testing.T) {
 // exactly the success rows and silently turn every window into a 100% error
 // rate, so that regression is caught here rather than in a dashboard.
 func TestDashboardFailureWireContractKeepsEmptyReason(t *testing.T) {
-	body, err := json.Marshal(DashboardFailureDailyResponse{
-		Date:      "2026-05-19",
-		TaskCount: 3,
-	})
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	var decoded map[string]any
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if _, present := decoded["failure_reason"]; !present {
-		t.Errorf("succeeded rows must serialize an explicit empty failure_reason, got %s", body)
-	}
-
-	body, err = json.Marshal(DashboardFailureByAgentResponse{AgentID: "a", TaskCount: 3})
-	if err != nil {
-		t.Fatalf("marshal by-agent: %v", err)
-	}
-	if err := json.Unmarshal(body, &decoded); err != nil {
-		t.Fatalf("unmarshal by-agent: %v", err)
-	}
-	if _, present := decoded["failure_reason"]; !present {
-		t.Errorf("succeeded rows must serialize an explicit empty failure_reason, got %s", body)
+	// Each case decodes into its OWN map. json.Unmarshal merges into a
+	// non-nil map rather than resetting it, so sharing one across cases would
+	// leave the first payload's failure_reason in place and let a later
+	// omitempty regression pass unnoticed — the exact failure this test
+	// exists to catch.
+	for _, tc := range []struct {
+		name string
+		row  any
+	}{
+		{"daily", DashboardFailureDailyResponse{Date: "2026-05-19", TaskCount: 3}},
+		{"by-agent", DashboardFailureByAgentResponse{AgentID: "a", TaskCount: 3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(tc.row)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			decoded := map[string]any{}
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if _, present := decoded["failure_reason"]; !present {
+				t.Errorf("succeeded rows must serialize an explicit empty failure_reason, got %s", body)
+			}
+		})
 	}
 }

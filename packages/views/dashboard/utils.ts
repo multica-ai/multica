@@ -670,47 +670,26 @@ export function aggregateAgentFailures(
 //
 // `knownAgentIds` is null while the agent list is still loading. Unlike
 // `bucketUnknownAgentRows`, which passes rows through in that window, this
-// one buckets them: a transient flash of UUIDs is exactly the leak the
+// one anonymizes them: a transient flash of UUIDs is exactly the leak the
 // function exists to prevent, and one merged row for a few hundred
 // milliseconds is the cheaper failure.
-export function bucketUnresolvedAgentFailures(
-  rows: AgentFailureRow[],
+//
+// This rewrites the RAW per-(agent, reason) rows rather than merging the
+// aggregated ones, so the bucket is just another agent_id by the time
+// `aggregateAgentFailures` runs and its per-class counts stay exact. Merging
+// after aggregation loses the class breakdown: each row carries only its own
+// dominant class, so folding two agents would attribute each one's ENTIRE
+// failure count to that single class. An agent failing auth 6 / timeout 5
+// would contribute 11 to auth and nothing to timeout, and a bucket whose real
+// composition was timeout 15 / auth 6 would announce itself as Auth.
+export function anonymizeUnresolvedAgentRows(
+  rows: DashboardFailureByAgent[],
   knownAgentIds: ReadonlySet<string> | null,
-): AgentFailureRow[] {
-  const known: AgentFailureRow[] = [];
-  const bucket: AgentFailureRow = {
-    agentId: UNRESOLVED_AGENTS_ROW_ID,
-    failed: 0,
-    total: 0,
-    rate: 0,
-    topClass: null,
-  };
-  const bucketClasses = emptyClassCounts();
-  let hasUnresolved = false;
-
-  for (const r of rows) {
-    if (knownAgentIds?.has(r.agentId)) {
-      known.push(r);
-      continue;
-    }
-    hasUnresolved = true;
-    bucket.failed += r.failed;
-    bucket.total += r.total;
-    // The bucket's own dominant class is recomputed from its members' —
-    // weighted by each member's failure count, since that is all the row
-    // carries once aggregated.
-    if (r.topClass) bucketClasses[r.topClass] += r.failed;
-  }
-  if (!hasUnresolved) return known;
-
-  bucket.rate = bucket.total > 0 ? bucket.failed / bucket.total : 0;
-  for (const c of FAILURE_CLASSES) {
-    if (
-      bucketClasses[c] > 0 &&
-      (bucket.topClass === null || bucketClasses[c] > bucketClasses[bucket.topClass])
-    ) {
-      bucket.topClass = c;
-    }
-  }
-  return [...known, bucket].toSorted((a, b) => b.failed - a.failed || b.rate - a.rate);
+): DashboardFailureByAgent[] {
+  if (!rows.some((r) => !knownAgentIds?.has(r.agent_id))) return rows;
+  return rows.map((r) =>
+    knownAgentIds?.has(r.agent_id)
+      ? r
+      : { ...r, agent_id: UNRESOLVED_AGENTS_ROW_ID },
+  );
 }

@@ -73,7 +73,7 @@ import {
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
   bucketUnknownAgentRows,
-  bucketUnresolvedAgentFailures,
+  anonymizeUnresolvedAgentRows,
   computeDailyTotals,
   computeFailureTotals,
   DELETED_AGENTS_ROW_ID,
@@ -376,12 +376,28 @@ export function DashboardPage() {
     () => aggregateFailureReasons(failureDailyInWindow),
     [failureDailyInWindow],
   );
+  // Which agent ids this viewer can actually resolve to a name. Declared here
+  // rather than next to the leaderboard because the Errors aggregation below
+  // needs it too — see anonymizeUnresolvedAgentRows.
+  const knownAgentIds = useMemo(
+    () => (agentsQuery.isSuccess ? new Set(agents.map((a) => a.id)) : null),
+    [agentsQuery.isSuccess, agents],
+  );
+
   // The per-agent split has no date to trim on, so its window is closed
   // server-side instead — GetDashboardFailuresByAgent uses the exact N-day
   // cutoff rather than the N+1 one.
+  //
+  // Anonymize BEFORE aggregating: the sentinel then behaves like any other
+  // agent id, so the bucket's failure classes are summed from real
+  // per-(agent, reason) rows instead of being reconstructed from rows that
+  // have already collapsed to a single dominant class.
   const agentFailureRows = useMemo(
-    () => aggregateAgentFailures(failureByAgentRows),
-    [failureByAgentRows],
+    () =>
+      aggregateAgentFailures(
+        anonymizeUnresolvedAgentRows(failureByAgentRows, knownAgentIds),
+      ),
+    [failureByAgentRows, knownAgentIds],
   );
 
   // Weekly aggregates — built from the over-fetched per-date queries so the
@@ -439,19 +455,9 @@ export function DashboardPage() {
   // archived included); only truly-removed agents collapse into the bucket.
   // Skip bucketing until the agent list has loaded so a slow agents fetch
   // doesn't transiently merge every row.
-  const knownAgentIds = useMemo(
-    () => (agentsQuery.isSuccess ? new Set(agents.map((a) => a.id)) : null),
-    [agentsQuery.isSuccess, agents],
-  );
   const visibleAgentRows = useMemo(
     () => bucketUnknownAgentRows(agentRows, knownAgentIds),
     [agentRows, knownAgentIds],
-  );
-  // Same treatment for the Errors top-offenders list, but stricter while the
-  // agent list loads — see bucketUnresolvedAgentFailures.
-  const visibleAgentFailureRows = useMemo(
-    () => bucketUnresolvedAgentFailures(agentFailureRows, knownAgentIds),
-    [agentFailureRows, knownAgentIds],
   );
   // Distinct hard-deleted agents folded into the bucket — drives the caption's
   // "· N deleted" suffix (the bucket itself is a single row).
@@ -597,7 +603,7 @@ export function DashboardPage() {
                 totals={failureTotals}
                 classRows={failureClassRows}
                 reasonRows={failureReasonRows}
-                agentRows={visibleAgentFailureRows}
+                agentRows={agentFailureRows}
                 agents={agents}
               />
 

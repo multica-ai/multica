@@ -156,7 +156,8 @@ import { DashboardPage } from "./dashboard-page";
 // A minimal adapter — the Errors breakdown's drill-down renders an <AppLink>,
 // which reads the navigation context. Asserting on the rendered href (rather
 // than a push spy) keeps the test on the contract that matters: the row points
-// at the agent's Work tab, where its failed runs are listed.
+// at the agent's Overview, whose ActivityTab lists its runs and each failure's
+// reason.
 const navAdapter: NavigationAdapter = {
   push: vi.fn(),
   replace: vi.fn(),

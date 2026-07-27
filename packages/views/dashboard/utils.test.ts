@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   aggregateAgentFailures,
-  bucketUnresolvedAgentFailures,
+  anonymizeUnresolvedAgentRows,
   UNRESOLVED_AGENTS_ROW_ID,
   aggregateAgentTokens,
   aggregateDailyCost,
@@ -550,47 +550,63 @@ describe("aggregateAgentFailures", () => {
   });
 });
 
-describe("bucketUnresolvedAgentFailures", () => {
+describe("anonymizeUnresolvedAgentRows", () => {
+  // Raw per-(agent, reason) rows, which is the shape this operates on. Two
+  // agents the viewer cannot resolve, with deliberately conflicting dominant
+  // classes — see the counterexample test below.
   const rows = [
-    { agentId: "visible", failed: 5, total: 10, rate: 0.5, topClass: "timeout" as const },
-    { agentId: "private-1", failed: 3, total: 4, rate: 0.75, topClass: "auth" as const },
-    { agentId: "private-2", failed: 2, total: 6, rate: 1 / 3, topClass: "auth" as const },
+    { agent_id: "visible", failure_reason: "", task_count: 5 },
+    { agent_id: "visible", failure_reason: "timeout", task_count: 5 },
+    {
+      agent_id: "private-a",
+      failure_reason: "agent_error.provider_auth_or_access",
+      task_count: 6,
+    },
+    { agent_id: "private-a", failure_reason: "timeout", task_count: 5 },
+    { agent_id: "private-b", failure_reason: "timeout", task_count: 10 },
   ];
 
-  it("folds agents the viewer cannot resolve into one anonymous row", () => {
-    // The failure rollup is workspace-scoped and does NOT apply per-agent
-    // visibility, but the agent list does. Anything in the difference is
-    // either deleted or private to someone else — rendering its id would
-    // leak a private agent's existence and failure profile.
-    const result = bucketUnresolvedAgentFailures(rows, new Set(["visible"]));
+  it("rewrites unresolvable ids to the sentinel and leaves resolvable ones alone", () => {
+    const result = anonymizeUnresolvedAgentRows(rows, new Set(["visible"]));
 
-    expect(result).toEqual([
-      { agentId: "visible", failed: 5, total: 10, rate: 0.5, topClass: "timeout" },
-      {
-        agentId: UNRESOLVED_AGENTS_ROW_ID,
-        failed: 5,
-        total: 10,
-        rate: 0.5,
-        topClass: "auth",
-      },
+    expect(result.map((r) => r.agent_id)).toEqual([
+      "visible",
+      "visible",
+      UNRESOLVED_AGENTS_ROW_ID,
+      UNRESOLVED_AGENTS_ROW_ID,
+      UNRESOLVED_AGENTS_ROW_ID,
     ]);
-    expect(result.map((r) => r.agentId)).not.toContain("private-1");
-    expect(result.map((r) => r.agentId)).not.toContain("private-2");
+    // Counts are untouched — only identity is erased.
+    expect(result.map((r) => r.task_count)).toEqual([5, 5, 6, 5, 10]);
   });
 
-  it("buckets everything while the agent list is still loading", () => {
+  it("keeps the bucket's dominant class honest across merged agents", () => {
+    // This is why the rewrite happens on RAW rows. private-a is auth-dominant
+    // (6 vs 5) and private-b is timeout-only (10). Merging AFTER aggregation
+    // would see only each agent's top class and its total failure count —
+    // auth 11, timeout 10 — and label the bucket Auth. The true composition
+    // is timeout 15 / auth 6, so it must read Timeout.
+    const bucket = aggregateAgentFailures(
+      anonymizeUnresolvedAgentRows(rows, new Set(["visible"])),
+    ).find((r) => r.agentId === UNRESOLVED_AGENTS_ROW_ID);
+
+    expect(bucket).toMatchObject({ failed: 21, total: 21, topClass: "timeout" });
+  });
+
+  it("anonymizes everything while the agent list is still loading", () => {
     // Deliberately stricter than bucketUnknownAgentRows, which passes rows
     // through on null: a transient flash of raw UUIDs is precisely the leak
     // this function exists to prevent.
-    const result = bucketUnresolvedAgentFailures(rows, null);
+    const result = anonymizeUnresolvedAgentRows(rows, null);
 
-    expect(result).toHaveLength(1);
-    expect(result[0]?.agentId).toBe(UNRESOLVED_AGENTS_ROW_ID);
-    expect(result[0]?.failed).toBe(10);
+    expect(new Set(result.map((r) => r.agent_id))).toEqual(
+      new Set([UNRESOLVED_AGENTS_ROW_ID]),
+    );
   });
 
-  it("leaves the list alone when every agent resolves", () => {
-    const known = new Set(["visible", "private-1", "private-2"]);
-    expect(bucketUnresolvedAgentFailures(rows, known)).toEqual(rows);
+  it("returns the input untouched when every agent resolves", () => {
+    const known = new Set(["visible", "private-a", "private-b"]);
+    // Same reference, not just equal — nothing needed rewriting.
+    expect(anonymizeUnresolvedAgentRows(rows, known)).toBe(rows);
   });
 });
