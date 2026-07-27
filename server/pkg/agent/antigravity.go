@@ -42,6 +42,9 @@ type antigravityBackend struct {
 }
 
 func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
+	if mutationPolicyDenies(b.cfg.Env) {
+		return nil, fmt.Errorf("mutation policy denies antigravity execution because daemon mode requires --dangerously-skip-permissions")
+	}
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
 		execPath = "agy"

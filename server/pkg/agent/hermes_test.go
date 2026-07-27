@@ -738,6 +738,102 @@ func TestHermesClientAutoApprovesPermissionRequest(t *testing.T) {
 	}
 }
 
+func TestHermesClientMutationPolicyAllowsReadOnlyPermissionRequest(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	c := &hermesClient{
+		cfg: Config{
+			Logger: slog.Default(),
+			Env:    map[string]string{"MULTICA_AGENT_MUTATION_POLICY": "deny"},
+		},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":43,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"allow_once","kind":"allow_once"},{"optionId":"deny","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_read","title":"read: README.md","content":[]}}}`)
+
+	got := w.String()
+	var resp struct {
+		Result struct {
+			Outcome struct {
+				OptionID string `json:"optionId"`
+			} `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &resp); err != nil {
+		t.Fatalf("reply is not valid JSON: %q err=%v", got, err)
+	}
+	if resp.Result.Outcome.OptionID != "allow_once" {
+		t.Fatalf("read-only permission should remain allowed, got optionId=%q response=%s", resp.Result.Outcome.OptionID, got)
+	}
+}
+
+func TestHermesClientMutationPolicyDeniesWritePermissionRequest(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	c := &hermesClient{
+		cfg: Config{
+			Logger: slog.Default(),
+			Env:    map[string]string{"MULTICA_AGENT_MUTATION_POLICY": "deny"},
+		},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":44,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"allow_once","kind":"allow_once"},{"optionId":"deny","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_write","title":"write: reply.md","content":[]}}}`)
+
+	got := w.String()
+	var resp struct {
+		Result struct {
+			Outcome struct {
+				OptionID string `json:"optionId"`
+			} `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &resp); err != nil {
+		t.Fatalf("reply is not valid JSON: %q err=%v", got, err)
+	}
+	if resp.Result.Outcome.OptionID != "deny" {
+		t.Fatalf("mutating permission should select offered reject_once, got optionId=%q response=%s", resp.Result.Outcome.OptionID, got)
+	}
+}
+
+func TestHermesClientMutationPolicyFailsClosedWithoutRejectOnce(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	c := &hermesClient{
+		cfg: Config{
+			Logger: slog.Default(),
+			Env:    map[string]string{"MULTICA_AGENT_MUTATION_POLICY": "deny"},
+		},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":45,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"allow_once","kind":"allow_once"}],"toolCall":{"toolCallId":"tc_write","title":"write: reply.md","content":[]}}}`)
+
+	got := w.String()
+	var resp struct {
+		Error *struct {
+			Code    int    `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+		Result any `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(got)), &resp); err != nil {
+		t.Fatalf("reply is not valid JSON: %q err=%v", got, err)
+	}
+	if resp.Error == nil || resp.Error.Code != -32603 {
+		t.Fatalf("mutating permission without reject_once must fail closed with error, got response=%s", got)
+	}
+	if resp.Result != nil {
+		t.Fatalf("error response must not include result, got response=%s", got)
+	}
+}
+
 // TestHermesClientReplesMethodNotFoundForUnknownAgentRequest ensures
 // that any agent → client request we don't explicitly handle gets a
 // proper JSON-RPC error back, not silence. Silence would block the

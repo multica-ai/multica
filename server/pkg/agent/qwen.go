@@ -75,6 +75,9 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 	args := buildQwenArgs(prompt, opts, b.cfg.Logger)
+	if mutationPolicyDenies(b.cfg.Env) {
+		args = filterCustomArgs(args, map[string]blockedArgMode{"--yolo": blockedStandalone}, b.cfg.Logger)
+	}
 
 	// Qwen Code 0.20.0 accepts a JSON string or a file path through
 	// --mcp-config. Materialise a managed config into a 0600 temp file so it

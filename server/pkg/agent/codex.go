@@ -2239,11 +2239,19 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 	// Auto-approve all exec/patch requests in daemon mode
 	switch method {
 	case "item/commandExecution/requestApproval", "execCommandApproval":
+		if mutationPolicyDenies(c.cfg.Env) {
+			c.respond(id, map[string]any{"decision": "reject"})
+			return
+		}
 		c.respond(id, map[string]any{"decision": "accept"})
 	case "item/fileChange/requestApproval", "applyPatchApproval":
+		if mutationPolicyDenies(c.cfg.Env) {
+			c.respond(id, map[string]any{"decision": "reject"})
+			return
+		}
 		c.respond(id, map[string]any{"decision": "accept"})
 	case "item/permissions/requestApproval":
-		c.respond(id, codexPermissionsApprovalResponse(raw["params"], c.cfg.Logger))
+		c.respond(id, codexPermissionsApprovalResponseWithPolicy(raw["params"], c.cfg.Logger, mutationPolicyDenies(c.cfg.Env)))
 	case "mcpServer/elicitation/request":
 		c.respond(id, map[string]any{"action": "accept", "content": nil, "_meta": nil})
 	default:
@@ -2265,6 +2273,10 @@ func (c *codexClient) handleServerRequest(raw map[string]json.RawMessage) {
 // app-server protocol that adds a new permission shape is visible in daemon
 // logs instead of being silently narrowed away.
 func codexPermissionsApprovalResponse(params json.RawMessage, logger *slog.Logger) map[string]any {
+	return codexPermissionsApprovalResponseWithPolicy(params, logger, false)
+}
+
+func codexPermissionsApprovalResponseWithPolicy(params json.RawMessage, logger *slog.Logger, denyMutations bool) map[string]any {
 	var payload struct {
 		Permissions map[string]any `json:"permissions"`
 	}
@@ -2278,6 +2290,9 @@ func codexPermissionsApprovalResponse(params json.RawMessage, logger *slog.Logge
 		switch key {
 		case "network", "fileSystem":
 			if value != nil {
+				if denyMutations && key == "fileSystem" {
+					value = stripMutatingFileSystemPermissions(value)
+				}
 				granted[key] = value
 			}
 		default:
