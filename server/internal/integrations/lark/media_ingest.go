@@ -289,13 +289,21 @@ func mediaResourcesFromPost(lm InboundMessage) []larkMediaResource {
 		return nil
 	}
 	var out []larkMediaResource
+	// A post may reference the same image_key/file_key in more than one span.
+	// The object key is derived from (message, type, key), so duplicates would
+	// upload to the SAME key twice: a later failed attempt could destroy the
+	// object an earlier success already produced (dangling attachment), and a
+	// later success would yield two attachment rows for one object. Collapse
+	// them here, before any upload.
+	seen := make(map[string]bool)
 	for _, para := range doc.Content {
 		for _, span := range para {
 			switch span.Tag {
 			case "img":
-				if span.ImageKey == "" {
+				if span.ImageKey == "" || seen["image\x00"+span.ImageKey] {
 					continue
 				}
+				seen["image\x00"+span.ImageKey] = true
 				out = append(out, larkMediaResource{
 					key:       span.ImageKey,
 					kind:      channel.MsgTypeImage,
@@ -305,9 +313,10 @@ func mediaResourcesFromPost(lm InboundMessage) []larkMediaResource {
 					messageID: lm.MessageID,
 				})
 			case "media":
-				if span.FileKey == "" {
+				if span.FileKey == "" || seen["file\x00"+span.FileKey] {
 					continue
 				}
+				seen["file\x00"+span.FileKey] = true
 				out = append(out, larkMediaResource{
 					key:       span.FileKey,
 					kind:      channel.MsgTypeVideo,

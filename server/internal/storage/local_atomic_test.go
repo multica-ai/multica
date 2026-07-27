@@ -1,0 +1,79 @@
+package storage
+
+import (
+	"context"
+	"errors"
+	"io"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+type failingReader struct {
+	head     string
+	consumed bool
+}
+
+func (r *failingReader) Read(p []byte) (int, error) {
+	if !r.consumed {
+		r.consumed = true
+		n := copy(p, r.head)
+		return n, nil
+	}
+	return 0, errors.New("injected stream failure")
+}
+
+// A failed UploadStream must never destroy an object a previous successful
+// upload of the same key produced: writing straight to the destination would
+// truncate it up front (and the old cleanup removed it outright), leaving any
+// attachment row that already points at it dangling.
+func TestLocalStorageUploadStreamFailureKeepsPreviousObject(t *testing.T) {
+	dir := t.TempDir()
+	s := &LocalStorage{uploadDir: dir}
+	key := "workspaces/ws/lark/dup"
+
+	if _, err := s.UploadStream(context.Background(), key, strings.NewReader("first-upload"), 12, "image/png", "a.png"); err != nil {
+		t.Fatalf("first UploadStream: %v", err)
+	}
+	if _, err := s.UploadStream(context.Background(), key, &failingReader{head: "partial"}, 7, "image/png", "a.png"); err == nil {
+		t.Fatal("second UploadStream must fail")
+	}
+
+	got, err := os.ReadFile(filepath.Join(dir, key))
+	if err != nil {
+		t.Fatalf("previous object must survive a failed re-upload: %v", err)
+	}
+	if string(got) != "first-upload" {
+		t.Fatalf("object content = %q, want the first upload intact", got)
+	}
+	// No temp files left behind.
+	entries, err := os.ReadDir(filepath.Dir(filepath.Join(dir, key)))
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Fatalf("leftover temp file %q", e.Name())
+		}
+	}
+}
+
+// Sanity: a successful stream still lands the full body and stays readable.
+func TestLocalStorageUploadStreamAtomicSuccess(t *testing.T) {
+	dir := t.TempDir()
+	s := &LocalStorage{uploadDir: dir}
+	key := "workspaces/ws/lark/ok"
+	if _, err := s.UploadStream(context.Background(), key, strings.NewReader("payload"), 7, "text/plain", "p.txt"); err != nil {
+		t.Fatalf("UploadStream: %v", err)
+	}
+	rc, err := s.GetReader(context.Background(), key)
+	if err != nil {
+		t.Fatalf("GetReader: %v", err)
+	}
+	defer rc.Close()
+	body, _ := io.ReadAll(rc)
+	if string(body) != "payload" {
+		t.Fatalf("body = %q", body)
+	}
+}

@@ -170,23 +170,35 @@ func (s *LocalStorage) Upload(ctx context.Context, key string, data []byte, cont
 	return fmt.Sprintf("/uploads/%s", key), nil
 }
 
+// UploadStream writes through a temp file in the destination directory and
+// atomically renames it into place. Writing straight to dest would truncate an
+// existing object up front, so a stream that fails mid-copy would destroy a
+// previously-successful upload of the same key (and the old cleanup even
+// removed it outright) — an attachment row could then point at a file that no
+// longer exists. With rename-into-place a failed write only discards its own
+// temp file and the existing object survives untouched.
 func (s *LocalStorage) UploadStream(ctx context.Context, key string, data io.Reader, _ int64, contentType string, filename string) (string, error) {
 	dest := filepath.Join(s.uploadDir, key)
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return "", fmt.Errorf("local storage MkdirAll: %w", err)
 	}
-	f, err := os.Create(dest)
+	f, err := os.CreateTemp(filepath.Dir(dest), "."+filepath.Base(dest)+".tmp-*")
 	if err != nil {
-		return "", fmt.Errorf("local storage Create: %w", err)
+		return "", fmt.Errorf("local storage CreateTemp: %w", err)
 	}
+	tmp := f.Name()
 	if _, err := io.Copy(f, data); err != nil {
 		_ = f.Close()
-		_ = os.Remove(dest)
+		_ = os.Remove(tmp)
 		return "", fmt.Errorf("local storage stream copy: %w", err)
 	}
 	if err := f.Close(); err != nil {
-		_ = os.Remove(dest)
+		_ = os.Remove(tmp)
 		return "", fmt.Errorf("local storage Close: %w", err)
+	}
+	if err := os.Rename(tmp, dest); err != nil {
+		_ = os.Remove(tmp)
+		return "", fmt.Errorf("local storage Rename: %w", err)
 	}
 	if filename != "" {
 		body, _ := json.Marshal(localMeta{Filename: filename, ContentType: contentType})
