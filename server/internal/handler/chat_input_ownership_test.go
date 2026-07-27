@@ -427,7 +427,7 @@ func TestCompleteTask_SealedChannelEmptyOutputWritesNoRow(t *testing.T) {
 	agentID, sessionID, runtimeID, _ := setupDirectChatSession(t, ctx, "sealed channel chat")
 
 	emptyTask := insertSealedChannelChatTask(t, ctx, agentID, runtimeID, sessionID, "[Image]")
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(emptyTask), completeResult(t, "   "), "", ""); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(emptyTask), completeResult(t, "   "), "", "", false); err != nil {
 		t.Fatalf("complete sealed channel task (empty): %v", err)
 	}
 	if rows := assistantRows(t, ctx, sessionID); len(rows) != 0 {
@@ -436,7 +436,7 @@ func TestCompleteTask_SealedChannelEmptyOutputWritesNoRow(t *testing.T) {
 
 	// Non-empty output still writes one ordinary message.
 	textTask := insertSealedChannelChatTask(t, ctx, agentID, runtimeID, sessionID, "hello")
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(textTask), completeResult(t, "sealed channel reply"), "", ""); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(textTask), completeResult(t, "sealed channel reply"), "", "", false); err != nil {
 		t.Fatalf("complete sealed channel task (text): %v", err)
 	}
 	rows := assistantRows(t, ctx, sessionID)
@@ -467,7 +467,7 @@ func TestCompleteTask_SealedChannelRetryEmptyOutputWritesNoRow(t *testing.T) {
 		t.Fatalf("setup: create retry clone: %v", err)
 	}
 
-	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(retryTask), completeResult(t, ""), "", ""); err != nil {
+	if _, err := testHandler.TaskService.CompleteTask(ctx, parseUUID(retryTask), completeResult(t, ""), "", "", false); err != nil {
 		t.Fatalf("complete sealed channel retry (empty): %v", err)
 	}
 	if rows := assistantRows(t, ctx, sessionID); len(rows) != 0 {

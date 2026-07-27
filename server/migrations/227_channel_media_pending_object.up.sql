@@ -24,8 +24,8 @@
 -- as a tombstone and the object is re-deleted on a widening schedule
 -- (tombstone_pass-indexed), so a late materialization is caught by a later
 -- pass.
--- storage_key is the logical primary key, attached in migration 228 via a
--- CONCURRENTLY-built unique index (227) per the repo convention that every
+-- storage_key is the logical primary key, attached in migration 229 via a
+-- CONCURRENTLY-built unique index (228) per the repo convention that every
 -- migration index — including a new table's unique index — is created
 -- concurrently in its own single-statement migration (see 207-209 for the
 -- same three-step pattern on client_usage_daily).
