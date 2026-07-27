@@ -56,6 +56,9 @@ func (f *fakeTypingAPIClient) GetMessage(context.Context, InstallationCredential
 func (f *fakeTypingAPIClient) ListChatMessages(context.Context, InstallationCredentials, ListMessagesParams) ([]LarkMessage, error) {
 	return nil, nil
 }
+func (f *fakeTypingAPIClient) DownloadMessageResource(context.Context, InstallationCredentials, DownloadResourceParams) (DownloadedResource, error) {
+	return DownloadedResource{}, nil
+}
 func (f *fakeTypingAPIClient) BatchGetUsers(context.Context, InstallationCredentials, []string) (map[string]string, error) {
 	return nil, nil
 }
