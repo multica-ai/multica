@@ -314,6 +314,10 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "resources[].resource_type is required")
 			return
 		}
+		if res.ResourceType == "project_space" {
+			writeError(w, http.StatusForbidden, "resources["+strconv.Itoa(i)+"]: project_space is managed by Multica")
+			return
+		}
 		ref, err := validateAndNormalizeResourceRef(res.ResourceType, res.ResourceRef)
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "resources["+strconv.Itoa(i)+"]: "+err.Error())
@@ -347,20 +351,9 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 		DueDate:     dueDate,
 	}
 
-	// Without resources, keep the simple non-tx path.
-	if len(req.Resources) == 0 {
-		project, err := h.Queries.CreateProject(r.Context(), createParams)
-		if err != nil {
-			h.writeProjectWriteError(w, r, err, "create")
-			return
-		}
-		resp := projectToResponse(project)
-		h.publish(protocol.EventProjectCreated, workspaceID, "member", userID, map[string]any{"project": resp})
-		writeJSON(w, http.StatusCreated, resp)
-		return
-	}
-
-	// Transactional path: project + all resources are atomic.
+	// Every project owns one system-managed project_space resource, so project
+	// creation always uses a transaction even when the caller attaches no
+	// external resources.
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
@@ -376,7 +369,21 @@ func (h *Handler) CreateProject(w http.ResponseWriter, r *http.Request) {
 	}
 
 	creator, _ := h.parseUserUUIDOrZero(userID)
-	resourceRows := make([]db.ProjectResource, 0, len(req.Resources))
+	resourceRows := make([]db.ProjectResource, 0, len(req.Resources)+1)
+	projectSpaceRow, err := qtx.CreateProjectResource(r.Context(), db.CreateProjectResourceParams{
+		ProjectID:    project.ID,
+		WorkspaceID:  project.WorkspaceID,
+		ResourceType: "project_space",
+		ResourceRef:  []byte(`{"version":1}`),
+		Label:        pgtype.Text{String: "Project space", Valid: true},
+		Position:     -100,
+		CreatedBy:    creator,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to create project space")
+		return
+	}
+	resourceRows = append(resourceRows, projectSpaceRow)
 	for i, res := range req.Resources {
 		var label pgtype.Text
 		if res.Label != nil && strings.TrimSpace(*res.Label) != "" {

@@ -47,6 +47,8 @@ services:
       - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
+      - project_spaces:/app/data/project-spaces
+      - project_imports:/app/data/project-imports
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       PORT: "8080"
@@ -126,6 +128,8 @@ services:
       MULTICA_VCS_INTEGRATION_ENABLED: ${MULTICA_VCS_INTEGRATION_ENABLED:-true}
       # VCS integration at-rest encryption key for token-based providers
       MULTICA_VCS_SECRET_KEY: ${MULTICA_VCS_SECRET_KEY:-}
+      MULTICA_PROJECT_SPACE_ROOT: ${MULTICA_PROJECT_SPACE_ROOT:-/app/data/project-spaces}
+      MULTICA_PROJECT_IMPORT_STAGING_ROOT: ${MULTICA_PROJECT_IMPORT_STAGING_ROOT:-/app/data/project-imports}
     restart: unless-stopped
 
   frontend:
@@ -145,3 +149,5 @@ services:
 volumes:
   pgdata:
   backend_uploads:
+  project_spaces:
+  project_imports:

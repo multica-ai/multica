@@ -840,6 +840,38 @@ type ProjectResource struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 }
 
+type ProjectSpaceImport struct {
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ProjectID      pgtype.UUID        `json:"project_id"`
+	BatchName      string             `json:"batch_name"`
+	Status         string             `json:"status"`
+	TotalFiles     int32              `json:"total_files"`
+	TotalBytes     int64              `json:"total_bytes"`
+	CompletedFiles int32              `json:"completed_files"`
+	FailedFiles    int32              `json:"failed_files"`
+	CreatedBy      pgtype.UUID        `json:"created_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	CompletedAt    pgtype.Timestamptz `json:"completed_at"`
+}
+
+type ProjectSpaceImportFile struct {
+	ID                 pgtype.UUID        `json:"id"`
+	ImportID           pgtype.UUID        `json:"import_id"`
+	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
+	ProjectID          pgtype.UUID        `json:"project_id"`
+	RelativePath       string             `json:"relative_path"`
+	StoredRelativePath pgtype.Text        `json:"stored_relative_path"`
+	ContentType        string             `json:"content_type"`
+	SizeBytes          int64              `json:"size_bytes"`
+	Sha256             pgtype.Text        `json:"sha256"`
+	Status             string             `json:"status"`
+	ErrorCode          pgtype.Text        `json:"error_code"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type RuntimeProfile struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

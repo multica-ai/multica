@@ -140,6 +140,12 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 			out += " — " + label
 		}
 		return out
+	case "project_space":
+		out := "**Project space**: server-managed project files"
+		if label != "" {
+			out += " — " + label
+		}
+		return out
 	default:
 		ref := string(r.ResourceRef)
 		if ref == "" {

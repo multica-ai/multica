@@ -53,7 +53,10 @@
     "copy_action": "Copy",
     "copied_toast": "Copied",
     "copy_failed_toast": "Copy failed",
-    "loading_older": "Loading older messages…"
+    "loading_older": "Loading older messages…",
+    "save_to_project": "Save to project space",
+    "saved_to_project": "Attachments saved to project space",
+    "save_to_project_failed": "Failed to save attachments"
   },
   "session_history": {
     "untitled": "Untitled",

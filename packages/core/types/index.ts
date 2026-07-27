@@ -120,9 +120,17 @@ export type {
   ProjectResourceRef,
   GithubRepoResourceRef,
   LocalDirectoryResourceRef,
+  ProjectSpaceResourceRef,
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
+  ProjectSpaceEntry,
+  ListProjectSpaceFilesResponse,
+  ProjectSpaceImportStatus,
+  ProjectSpaceImportFile,
+  ProjectSpaceImport,
+  CreateProjectSpaceImportRequest,
+  ListProjectSpaceImportsResponse,
 } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {

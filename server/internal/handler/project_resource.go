@@ -76,9 +76,26 @@ func validateAndNormalizeResourceRef(resourceType string, ref json.RawMessage) (
 		return validateGithubRepoRef(ref)
 	case "local_directory":
 		return validateLocalDirectoryRef(ref)
+	case "project_space":
+		return validateProjectSpaceRef(ref)
 	default:
 		return nil, fmt.Errorf("unknown resource_type %q", resourceType)
 	}
+}
+
+type projectSpaceRef struct {
+	Version int `json:"version"`
+}
+
+func validateProjectSpaceRef(ref json.RawMessage) (json.RawMessage, error) {
+	var payload projectSpaceRef
+	if err := json.Unmarshal(ref, &payload); err != nil {
+		return nil, fmt.Errorf("invalid project_space payload: %w", err)
+	}
+	if payload.Version != 1 {
+		return nil, errors.New("project_space: version must be 1")
+	}
+	return json.Marshal(payload)
 }
 
 type githubRepoRef struct {
@@ -272,6 +289,10 @@ func (h *Handler) CreateProjectResource(w http.ResponseWriter, r *http.Request) 
 		writeError(w, http.StatusBadRequest, "resource_type is required")
 		return
 	}
+	if req.ResourceType == "project_space" {
+		writeError(w, http.StatusForbidden, "project_space is managed by Multica")
+		return
+	}
 	normalizedRef, err := validateAndNormalizeResourceRef(req.ResourceType, req.ResourceRef)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -358,6 +379,10 @@ func (h *Handler) UpdateProjectResource(w http.ResponseWriter, r *http.Request) 
 	}
 	if uuidToString(existing.ProjectID) != uuidToString(project.ID) {
 		writeError(w, http.StatusNotFound, "project resource not found")
+		return
+	}
+	if existing.ResourceType == "project_space" {
+		writeError(w, http.StatusForbidden, "project_space is managed by Multica")
 		return
 	}
 
@@ -510,6 +535,10 @@ func (h *Handler) DeleteProjectResource(w http.ResponseWriter, r *http.Request) 
 	}
 	if uuidToString(resource.ProjectID) != uuidToString(project.ID) {
 		writeError(w, http.StatusNotFound, "project resource not found")
+		return
+	}
+	if resource.ResourceType == "project_space" {
+		writeError(w, http.StatusForbidden, "project_space is managed by Multica")
 		return
 	}
 	if err := h.Queries.DeleteProjectResource(r.Context(), resource.ID); err != nil {

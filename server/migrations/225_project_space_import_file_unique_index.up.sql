@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY idx_project_space_import_file_path ON project_space_import_file(import_id, relative_path);

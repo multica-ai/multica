@@ -4464,6 +4464,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"TMP":                  taskTempDir,
 		"TEMP":                 taskTempDir,
 	}
+	if projectSpace, err := d.taskProjectSpace(task); err == nil && projectSpace != "" {
+		agentEnv["MULTICA_PROJECT_SPACE"] = projectSpace
+	} else if err != nil {
+		taskLog.Warn("project space unavailable for task", "error", err)
+	}
 	if checkoutMode := repoCheckoutModeFor(provider, runtime.GOOS); checkoutMode != "" {
 		agentEnv[repoCheckoutModeEnv] = checkoutMode
 	}

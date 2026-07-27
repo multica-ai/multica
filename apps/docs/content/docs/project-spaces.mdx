@@ -1,0 +1,72 @@
+---
+title: Project spaces and folder uploads
+description: Configure persistent per-project files for self-hosted Multica.
+---
+
+Every project has a system-managed **Project space** resource. It is separate
+from Git repositories and local-directory resources: it stores reference
+material, uploads, generated knowledge, and artifacts under a stable project
+ID.
+
+## Storage layout
+
+The backend resolves `MULTICA_PROJECT_SPACE_ROOT`. If it is unset, the default
+is `./data/project-spaces`; if it is set, that value is used and normalized to
+an absolute path.
+
+```text
+<root>/workspaces/<workspace-id>/projects/<project-id>/
+├── index.md
+├── inbox/uploads/YYYY-MM-DD/<batch-name>/
+├── knowledge/
+├── artifacts/
+└── .ai/
+```
+
+Folder imports preserve the browser-provided relative paths. One batch accepts
+up to 5,000 files and 5 GB total, with a 100 MB limit per file. Existing bytes
+are never overwritten: an identical file is skipped and different content at
+the same path receives a numbered suffix.
+
+## Self-host configuration
+
+```dotenv
+MULTICA_PROJECT_SPACE_ROOT=/srv/multica/project-spaces
+MULTICA_PROJECT_IMPORT_STAGING_ROOT=/var/lib/multica/project-imports
+```
+
+The backend and each daemon that runs project agents must see the same project
+space at the same path. Container deployments must mount the same shared
+volume into both processes. Staging is backend-only and can use local disk.
+
+At startup the backend verifies create, write, read, and same-directory atomic
+rename operations. A failed check disables project-space uploads and returns a
+clear unavailable state; it never silently falls back to the default path.
+
+For a TOS or other network mount, configure the mounted path explicitly. Do
+not put object-store credentials, mount credentials, or private endpoints in
+the repository.
+
+## Uploading
+
+Open a project, expand **Resources**, and open **Project space**. You can:
+
+- upload individual files;
+- select a folder and retain its nested structure;
+- browse imported files;
+- reselect a failed batch to retry missing files.
+
+Imports are persisted in PostgreSQL, so status survives a page refresh.
+Empty directories are intentionally not preserved.
+
+## Agent access
+
+The daemon only advertises `MULTICA_PROJECT_SPACE` when the claimed task has
+the immutable `project_space` resource and the exact project directory exists
+and is writable. The path is derived from trusted workspace and project IDs;
+clients cannot submit an absolute server path. Operators should run agents in
+their normal OS or container sandbox and must not mount the project-space root
+wholesale when only one project is required.
+
+Deleting a Multica project does not physically delete this directory. This
+no-delete behavior allows an administrator to recover or archive files later.
