@@ -249,6 +249,20 @@ func (h *Handler) SetWebhookChannelHandler(handler channelHandler) {
 // (non-message updates, the bot's own messages, channel posts, etc).
 func (h *Handler) TelegramWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
+
+	// Per-IP rate limit BEFORE the installation lookup. Mirrors
+	// HandleCloudBillingStripeWebhook: this is public unauthenticated ingress
+	// keyed on a raw, unauthenticated path param, so a spray of requests must
+	// not be allowed to force a DB query per request.
+	if h.WebhookIPRateLimiter != nil {
+		if ip := h.clientIPForRateLimit(r); ip != "" {
+			if !h.WebhookIPRateLimiter.Allow(ctx, ip) {
+				writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+				return
+			}
+		}
+	}
+
 	botID := chi.URLParam(r, "botId")
 
 	inst, err := h.Queries.GetChannelInstallationByAppID(ctx, db.GetChannelInstallationByAppIDParams{
