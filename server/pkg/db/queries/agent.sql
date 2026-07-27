@@ -319,18 +319,30 @@ RETURNING *;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, context, originator_user_id,
     accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
-    originator_source, trigger_evidence_kind, trigger_evidence_ref_id
+    originator_source, trigger_evidence_kind, trigger_evidence_ref_id, fire_at
 )
 VALUES (
-    $1, $2, NULL, 'queued', $3, $4,
+    $1, $2, NULL,
+    CASE WHEN sqlc.narg(fire_at)::timestamptz IS NULL THEN 'queued' ELSE 'deferred' END,
+    $3, $4,
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     sqlc.narg(runtime_mcp_overlay),
     sqlc.narg(runtime_connected_apps),
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
-    sqlc.narg(trigger_evidence_ref_id)
+    sqlc.narg(trigger_evidence_ref_id),
+    sqlc.narg(fire_at)
 )
+RETURNING *;
+
+-- name: PromoteQuickCreateTaskAfterMedia :one
+-- A channel quick-create with inbound media starts deferred so the daemon
+-- cannot claim it before the durable media pipeline has bound task-owned
+-- attachments. No row means the fire_at fallback already promoted/claimed it.
+UPDATE agent_task_queue
+SET status = 'queued', fire_at = NULL
+WHERE id = $1 AND status = 'deferred'
 RETURNING *;
 
 -- name: CreateDeferredAgentTask :one

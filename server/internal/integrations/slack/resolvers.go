@@ -353,11 +353,12 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 
 func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) error {
 	return r.session.BindMediaRefs(ctx, engine.BindMediaInput{
-		MessageID:   p.MessageID,
-		SessionID:   p.SessionID,
-		WorkspaceID: p.WorkspaceID,
-		Sender:      p.Sender,
-		MediaRefs:   p.MediaRefs,
+		MessageID:         p.MessageID,
+		SessionID:         p.SessionID,
+		WorkspaceID:       p.WorkspaceID,
+		Sender:            p.Sender,
+		MediaRefs:         p.MediaRefs,
+		QuickCreateTaskID: p.QuickCreateTaskID,
 	})
 }
 

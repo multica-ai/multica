@@ -3910,6 +3910,7 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 
 	quickPrompt := "create a follow-up issue for Codex session titles"
 	attachmentID := "019ec09d-6222-722b-bdfa-427b105d80be"
+	taskAttachmentID := "019ec09d-6222-722b-bdfa-427b105d80bf"
 	quickContext, _ := json.Marshal(map[string]any{
 		"type":           "quick_create",
 		"prompt":         quickPrompt,
@@ -3920,19 +3921,41 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 		"attachment_ids": []string{attachmentID},
 	})
 
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
-		VALUES ($1, $2, 'queued', 2, $3)
-	`, agentID, runtimeID, quickContext); err != nil {
-		t.Fatalf("setup: create quick-create task: %v", err)
+	var ancestorTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context, completed_at)
+		VALUES ($1, $2, 'failed', 2, $3, now())
+		RETURNING id
+	`, agentID, runtimeID, quickContext).Scan(&ancestorTaskID); err != nil {
+		t.Fatalf("setup: create failed quick-create ancestor: %v", err)
 	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context, parent_task_id)
+		VALUES ($1, $2, 'queued', 2, $3, $4)
+	`, agentID, runtimeID, quickContext, ancestorTaskID); err != nil {
+		t.Fatalf("setup: create quick-create retry: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO attachment (
+			id, workspace_id, task_id, uploader_type, uploader_id,
+			filename, url, content_type, size_bytes
+		)
+		VALUES ($1, $2, $3, 'member', $4, 'channel.png', 'https://example.test/channel.png', 'image/png', 3)
+	`, taskAttachmentID, testWorkspaceID, ancestorTaskID, testUserID); err != nil {
+		t.Fatalf("setup: create task-owned attachment: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, taskAttachmentID)
+	})
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.ThreadName != quickPrompt {
 		t.Fatalf("quick-create task thread_name = %q, want prompt", task.ThreadName)
 	}
-	if len(task.QuickCreateAttachmentIDs) != 1 || task.QuickCreateAttachmentIDs[0] != attachmentID {
-		t.Fatalf("quick-create attachment ids = %#v, want [%q]", task.QuickCreateAttachmentIDs, attachmentID)
+	if len(task.QuickCreateAttachmentIDs) != 2 ||
+		task.QuickCreateAttachmentIDs[0] != attachmentID ||
+		task.QuickCreateAttachmentIDs[1] != taskAttachmentID {
+		t.Fatalf("quick-create attachment ids = %#v, want [%q, %q]", task.QuickCreateAttachmentIDs, attachmentID, taskAttachmentID)
 	}
 	if task.QuickCreatePriority != "high" || task.QuickCreateDueDate != "2026-08-01" {
 		t.Fatalf("quick-create fields = {%q, %q}, want {high, 2026-08-01}", task.QuickCreatePriority, task.QuickCreateDueDate)

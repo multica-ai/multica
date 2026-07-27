@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -57,6 +58,9 @@ type TaskService struct {
 	// exactly as before. Wired in router.go after composiointeg.NewService
 	// succeeds; the concrete type is *composio.Service.
 	Composio ComposioOverlayBuilder
+	// AppURL is the web-app base URL used to build issue links posted back
+	// into channel conversations. Empty omits the link.
+	AppURL string
 	// QuickActions generates chat follow-up suggestions through the
 	// server-internal LLM layer. Optional: nil (or a disabled client) turns the
 	// whole feature off — no pending marker, no pills — which is the expected
@@ -1306,10 +1310,64 @@ type QuickCreateContext struct {
 	// pass `--parent <uuid>` so the sub-issue relationship is preserved
 	// across the manual→agent mode flip.
 	ParentIssueID string `json:"parent_issue_id,omitempty"`
+	// ChatSessionID is set for channel-originated /issue quick-create tasks so
+	// terminal outcomes can be appended and delivered to that conversation.
+	ChatSessionID string `json:"chat_session_id,omitempty"`
+	// ChatMessageID identifies the original channel user message. If every
+	// quick-create attempt fails, task-owned media is returned to this message
+	// instead of remaining permanently ownerless.
+	ChatMessageID string `json:"chat_message_id,omitempty"`
 }
 
 // QuickCreateContextType marks a task as a quick-create job.
 const QuickCreateContextType = "quick_create"
+
+type quickCreateEnqueueInput struct {
+	WorkspaceID   pgtype.UUID
+	RequesterID   pgtype.UUID
+	SquadID       pgtype.UUID
+	ProjectID     pgtype.UUID
+	ParentIssueID pgtype.UUID
+	ChatSessionID pgtype.UUID
+	ChatMessageID pgtype.UUID
+	Prompt        string
+	Priority      string
+	DueDate       string
+	AttachmentIDs []pgtype.UUID
+	MediaPending  bool
+}
+
+func buildQuickCreateContext(in quickCreateEnqueueInput) QuickCreateContext {
+	payload := QuickCreateContext{
+		Type:        QuickCreateContextType,
+		Prompt:      in.Prompt,
+		RequesterID: util.UUIDToString(in.RequesterID),
+		WorkspaceID: util.UUIDToString(in.WorkspaceID),
+		Priority:    in.Priority,
+		DueDate:     in.DueDate,
+	}
+	if in.ProjectID.Valid {
+		payload.ProjectID = util.UUIDToString(in.ProjectID)
+	}
+	if in.SquadID.Valid {
+		payload.SquadID = util.UUIDToString(in.SquadID)
+	}
+	if in.ParentIssueID.Valid {
+		payload.ParentIssueID = util.UUIDToString(in.ParentIssueID)
+	}
+	if in.ChatSessionID.Valid {
+		payload.ChatSessionID = util.UUIDToString(in.ChatSessionID)
+	}
+	if in.ChatMessageID.Valid {
+		payload.ChatMessageID = util.UUIDToString(in.ChatMessageID)
+	}
+	for _, id := range in.AttachmentIDs {
+		if id.Valid {
+			payload.AttachmentIDs = append(payload.AttachmentIDs, util.UUIDToString(id))
+		}
+	}
+	return payload
+}
 
 // EnqueueQuickCreateTask creates a queued task that has no issue / chat /
 // autopilot link — the user's natural-language prompt is stored in the
@@ -1331,6 +1389,35 @@ const QuickCreateContextType = "quick_create"
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
 func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID pgtype.UUID, attachmentIDs []pgtype.UUID) (db.AgentTaskQueue, error) {
+	return s.enqueueQuickCreate(ctx, agentID, quickCreateEnqueueInput{
+		WorkspaceID:   workspaceID,
+		RequesterID:   requesterID,
+		SquadID:       squadID,
+		ProjectID:     projectID,
+		ParentIssueID: parentIssueID,
+		Prompt:        prompt,
+		Priority:      priority,
+		DueDate:       dueDate,
+		AttachmentIDs: attachmentIDs,
+	})
+}
+
+// EnqueueQuickCreateChatTask creates the channel-chat variant of a quick-create
+// task. It remains context-owned (not a normal chat task), while ChatSessionID
+// routes terminal replies back to the conversation. Media-bearing tasks start
+// deferred until the channel media pipeline binds task-owned attachments.
+func (s *TaskService) EnqueueQuickCreateChatTask(ctx context.Context, workspaceID, requesterID, agentID pgtype.UUID, prompt string, chatSessionID, chatMessageID pgtype.UUID, mediaPending bool) (db.AgentTaskQueue, error) {
+	return s.enqueueQuickCreate(ctx, agentID, quickCreateEnqueueInput{
+		WorkspaceID:   workspaceID,
+		RequesterID:   requesterID,
+		ChatSessionID: chatSessionID,
+		ChatMessageID: chatMessageID,
+		Prompt:        prompt,
+		MediaPending:  mediaPending,
+	})
+}
+
+func (s *TaskService) enqueueQuickCreate(ctx context.Context, agentID pgtype.UUID, in quickCreateEnqueueInput) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -1342,45 +1429,24 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		return db.AgentTaskQueue{}, fmt.Errorf("agent has no runtime")
 	}
 
-	payload := QuickCreateContext{
-		Type:        QuickCreateContextType,
-		Prompt:      prompt,
-		RequesterID: util.UUIDToString(requesterID),
-		WorkspaceID: util.UUIDToString(workspaceID),
-		Priority:    priority,
-		DueDate:     dueDate,
-	}
-	if projectID.Valid {
-		payload.ProjectID = util.UUIDToString(projectID)
-	}
-	if squadID.Valid {
-		payload.SquadID = util.UUIDToString(squadID)
-	}
-	if parentIssueID.Valid {
-		payload.ParentIssueID = util.UUIDToString(parentIssueID)
-	}
-	if len(attachmentIDs) > 0 {
-		payload.AttachmentIDs = make([]string, 0, len(attachmentIDs))
-		for _, id := range attachmentIDs {
-			if id.Valid {
-				payload.AttachmentIDs = append(payload.AttachmentIDs, util.UUIDToString(id))
-			}
-		}
-	}
+	payload := buildQuickCreateContext(in)
 	contextJSON, err := json.Marshal(payload)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("marshal quick-create context: %w", err)
 	}
 
-	// The requester who submitted the quick-create modal is the direct_human
-	// originator and accountable. Quick-create is the ONE enqueue path with no
-	// antecedent row to point the uniform evidence pair at: the run's whole job is
-	// to CREATE the issue, so at enqueue time there is no comment / issue / session
-	// / run to reference (the issue is linked back later via LinkTaskToIssue).
-	// Evidence is therefore intentionally NULL; the accountable human is captured on
-	// originator/accountable_user_id, so this is not a NULL-source bypass — source
-	// is still stamped direct_human (MUL-4302 §2).
-	attr := attribution.DirectHumanRun(requesterID, "", pgtype.UUID{})
+	// The requester is the direct_human originator and accountable. Web modal
+	// quick-create has no antecedent row, so its evidence remains NULL until
+	// LinkTaskToIssue runs. A channel quick-create does have a durable
+	// chat_session and uses it as the uniform evidence pair, matching normal
+	// channel chat tasks (MUL-4302 §2).
+	var evidenceKind attribution.EvidenceKind
+	var evidenceRefID pgtype.UUID
+	if in.ChatSessionID.Valid {
+		evidenceKind = attribution.EvidenceChat
+		evidenceRefID = in.ChatSessionID
+	}
+	attr := attribution.DirectHumanRun(in.RequesterID, evidenceKind, evidenceRefID)
 	// An unresolved requester degrades to owner_fallback (accountable = agent
 	// owner), or is refused if the workspace is fail-closed (MUL-4302 §3.5).
 	attr, err = s.applyAttributionFallback(ctx, attr, agent)
@@ -1388,40 +1454,91 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 		return db.AgentTaskQueue{}, err
 	}
 	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, requesterID, agent)
-	task, err := s.Queries.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
+	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, in.RequesterID, agent)
+	var fireAt pgtype.Timestamptz
+	if in.MediaPending {
+		fireAt, err = s.Queries.GetChannelMediaPendingUntil(ctx, in.ChatSessionID)
+		if errors.Is(err, pgx.ErrNoRows) {
+			return db.AgentTaskQueue{}, errors.New("quick-create media marker missing")
+		}
+		if err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("load quick-create media pending deadline: %w", err)
+		}
+	}
+	q := s.Queries
+	var tx pgx.Tx
+	if in.ChatMessageID.Valid {
+		tx, err = s.TxStarter.Begin(ctx)
+		if err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("begin channel quick-create enqueue: %w", err)
+		}
+		defer tx.Rollback(ctx)
+		q = s.Queries.WithTx(tx)
+	}
+	task, err := q.CreateQuickCreateTask(ctx, db.CreateQuickCreateTaskParams{
 		AgentID:              agentID,
 		RuntimeID:            agent.RuntimeID,
 		Priority:             priorityToInt("high"),
 		Context:              contextJSON,
-		OriginatorUserID:     requesterID,
+		OriginatorUserID:     in.RequesterID,
 		AccountableUserID:    attr.AccountableUserID,
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 		OriginatorSource:     attrSource,
 		TriggerEvidenceKind:  attrEvidenceKind,
 		TriggerEvidenceRefID: attrEvidenceRef,
+		FireAt:               fireAt,
 	})
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("create quick-create task: %w", err)
+	}
+	if in.ChatMessageID.Valid {
+		if _, err := q.LinkChatMessageToTask(ctx, db.LinkChatMessageToTaskParams{
+			ID:     in.ChatMessageID,
+			TaskID: task.ID,
+		}); err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("link channel quick-create message: %w", err)
+		}
+		if err := tx.Commit(ctx); err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("commit channel quick-create enqueue: %w", err)
+		}
 	}
 
 	slog.Info("quick-create task enqueued",
 		"task_id", util.UUIDToString(task.ID),
 		"agent_id", util.UUIDToString(agentID),
 		"squad_id", payload.SquadID,
-		"requester_id", util.UUIDToString(requesterID),
-		"workspace_id", util.UUIDToString(workspaceID),
+		"requester_id", payload.RequesterID,
+		"workspace_id", payload.WorkspaceID,
 		"project_id", payload.ProjectID,
 		"parent_issue_id", payload.ParentIssueID,
+		"chat_session_id", payload.ChatSessionID,
+		"status", task.Status,
 	)
 	// Match every other Enqueue* path: kick the daemon WS so the task
 	// gets claimed promptly instead of waiting for the next 30 s poll
 	// cycle. Without this the user perceives "quick create never
 	// triggered" because the modal closes immediately and the task
 	// sits in 'queued' until the next sleepWithContextOrWakeup tick.
-	s.NotifyTaskEnqueued(ctx, task)
+	if task.Status == "queued" {
+		s.NotifyTaskEnqueued(ctx, task)
+	}
 	return task, nil
+}
+
+// PromoteQuickCreateChatTask releases a media-deferred channel quick-create.
+// If its deadline already promoted or claimed it, pgx.ErrNoRows is a no-op.
+func (s *TaskService) PromoteQuickCreateChatTask(ctx context.Context, taskID pgtype.UUID) error {
+	task, err := s.Queries.PromoteQuickCreateTaskAfterMedia(ctx, taskID)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("promote quick-create task after media: %w", err)
+	}
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.NotifyTaskEnqueued(ctx, task)
+	return nil
 }
 
 // ErrChatTaskAgentArchived signals that EnqueueChatTask refused to
@@ -4733,6 +4850,138 @@ func quickCreateFailureDetail(result []byte) string {
 	return body
 }
 
+const quickCreateReplyQuoteLimit = 1000
+
+const quickCreateChatFailedReasonText = "⚠️ I couldn't create the issue from your /issue request."
+
+const quickCreateChatFailedText = quickCreateChatFailedReasonText + " Please try again."
+
+func truncateRunes(s string, limit int) string {
+	runes := []rune(s)
+	if len(runes) <= limit {
+		return s
+	}
+	return string(runes[:limit]) + "…"
+}
+
+func buildQuickCreateDoneReply(identifier, title, link string) string {
+	var b strings.Builder
+	b.WriteString("✅ " + identifier)
+	if title != "" {
+		b.WriteString(" — " + title)
+	}
+	if link != "" {
+		b.WriteString("\n\n" + link)
+	}
+	return b.String()
+}
+
+func buildQuickCreateFailedReply(prompt, reason string) string {
+	reason = strings.TrimSpace(reason)
+	reply := quickCreateChatFailedText
+	if reason != "" {
+		reply = quickCreateChatFailedReasonText
+	}
+	if p := strings.TrimSpace(prompt); p != "" {
+		quoted := strings.ReplaceAll(truncateRunes(p, quickCreateReplyQuoteLimit), "\n", "\n> ")
+		reply += "\n\n> " + quoted
+	}
+	if reason != "" {
+		reply += "\n\n" + truncateRunes(reason, quickCreateReplyQuoteLimit)
+	}
+	return reply
+}
+
+func (s *TaskService) postQuickCreateChatReply(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateContext, content string) {
+	if qc.ChatSessionID == "" || content == "" {
+		return
+	}
+	sessionID, err := util.ParseUUID(qc.ChatSessionID)
+	if err != nil || !sessionID.Valid {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), quickCreateNotifyTimeout)
+	defer cancel()
+	if _, err := s.Queries.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ChatSessionID: sessionID,
+		Role:          "assistant",
+		Content:       content,
+		TaskID:        task.ID,
+		ElapsedMs:     computeChatElapsedMs(task),
+	}); err != nil {
+		slog.Warn("quick-create chat reply: transcript append failed",
+			"task_id", util.UUIDToString(task.ID), "error", err)
+	}
+	if s.Bus != nil {
+		s.Bus.Publish(events.Event{
+			Type:          protocol.EventQuickCreateDone,
+			WorkspaceID:   qc.WorkspaceID,
+			ActorType:     "agent",
+			ActorID:       util.UUIDToString(task.AgentID),
+			ChatSessionID: qc.ChatSessionID,
+			TaskID:        util.UUIDToString(task.ID),
+			Payload: protocol.QuickCreateDonePayload{
+				ChatSessionID: qc.ChatSessionID,
+				TaskID:        util.UUIDToString(task.ID),
+				Content:       content,
+			},
+		})
+	}
+}
+
+func (s *TaskService) listQuickCreateAttachmentIDs(ctx context.Context, taskID pgtype.UUID, qc QuickCreateContext) []pgtype.UUID {
+	workspaceID, err := util.ParseUUID(qc.WorkspaceID)
+	if err != nil || !workspaceID.Valid {
+		return nil
+	}
+	ids, err := s.Queries.ListUnboundAttachmentIDsByTaskLineage(ctx, db.ListUnboundAttachmentIDsByTaskLineageParams{
+		TaskID:      taskID,
+		WorkspaceID: workspaceID,
+	})
+	if err != nil {
+		slog.Warn("quick-create attachments: list task lineage failed",
+			"task_id", util.UUIDToString(taskID), "error", err)
+		return nil
+	}
+	return ids
+}
+
+func (s *TaskService) preserveFailedQuickCreateAttachments(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateContext) {
+	if qc.ChatSessionID == "" || qc.ChatMessageID == "" {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), quickCreateNotifyTimeout)
+	defer cancel()
+	sessionID, sessionErr := util.ParseUUID(qc.ChatSessionID)
+	messageID, messageErr := util.ParseUUID(qc.ChatMessageID)
+	workspaceID, workspaceErr := util.ParseUUID(qc.WorkspaceID)
+	requesterID, requesterErr := util.ParseUUID(qc.RequesterID)
+	if sessionErr != nil || messageErr != nil || workspaceErr != nil || requesterErr != nil {
+		return
+	}
+	ids := s.listQuickCreateAttachmentIDs(ctx, task.ID, qc)
+	if len(ids) == 0 {
+		return
+	}
+	bound, err := s.Queries.LinkAttachmentsToChatMessage(ctx, db.LinkAttachmentsToChatMessageParams{
+		ChatMessageID: messageID,
+		ChatSessionID: sessionID,
+		WorkspaceID:   workspaceID,
+		UploaderType:  "member",
+		UploaderID:    requesterID,
+		AttachmentIds: ids,
+	})
+	if err != nil {
+		slog.Warn("quick-create attachments: restore to chat message failed",
+			"task_id", util.UUIDToString(task.ID), "error", err)
+		return
+	}
+	if len(bound) != len(ids) {
+		slog.Warn("quick-create attachments: restore to chat message incomplete",
+			"task_id", util.UUIDToString(task.ID), "expected", len(ids), "bound", len(bound))
+	}
+}
+
 // notifyQuickCreateCompleted writes a success inbox notification to the
 // requester pointing at the issue the agent just created. The issue is
 // stamped with origin_type=quick_create + origin_id=<task_id> by the
@@ -4808,6 +5057,22 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		)
 	}
 
+	// The daemon normally links every supplied attachment during issue create.
+	// Recover any still-unbound lineage rows here so a partial/best-effort
+	// attachment-link failure cannot strand durable channel media.
+	if attachmentIDs := s.listQuickCreateAttachmentIDs(ctx, task.ID, qc); len(attachmentIDs) > 0 {
+		if err := s.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
+			IssueID:     issue.ID,
+			WorkspaceID: workspaceID,
+			Column3:     attachmentIDs,
+		}); err != nil {
+			slog.Warn("quick-create completion: link channel attachments failed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"error", err)
+		}
+	}
+
 	// Subscribing the requester used to happen here, at completion. It now
 	// happens at issue-creation time in the shared delegated-subscriber rule
 	// (cmd/server/subscriber_listeners.go → subscribeDelegatedHuman), which
@@ -4820,7 +5085,7 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 	// agent-created sub-issues). Keeping a second write here would leave the
 	// same decision encoded in two places that can drift.
 	prefix := s.getIssuePrefix(workspaceID)
-	identifier := fmt.Sprintf("%s-%d", prefix, issue.Number)
+	identifier := IssueIdentifier(prefix, issue.Number)
 	details, _ := json.Marshal(map[string]any{
 		"task_id":         util.UUIDToString(task.ID),
 		"agent_id":        util.UUIDToString(task.AgentID),
@@ -4843,9 +5108,16 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 	})
 	if err != nil {
 		slog.Error("quick-create completion: inbox write failed", "task_id", util.UUIDToString(task.ID), "error", err)
-		return
+	} else {
+		s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), issue.Status)
 	}
-	s.publishQuickCreateInbox(item, qc.WorkspaceID, util.UUIDToString(task.AgentID), issue.Status)
+	link := ""
+	if s.AppURL != "" && qc.ChatSessionID != "" && prefix != "" {
+		if ws, werr := s.Queries.GetWorkspace(ctx, workspaceID); werr == nil && ws.Slug != "" {
+			link = strings.TrimRight(s.AppURL, "/") + "/" + url.PathEscape(ws.Slug) + "/issues/" + url.PathEscape(identifier)
+		}
+	}
+	s.postQuickCreateChatReply(ctx, task, qc, buildQuickCreateDoneReply(identifier, issue.Title, link))
 }
 
 // Inbox types for the two non-success quick-create outcomes. They are distinct
@@ -4870,6 +5142,8 @@ func (s *TaskService) notifyQuickCreateFailed(ctx context.Context, task db.Agent
 		errMsg = "Quick create did not finish successfully"
 	}
 	s.writeQuickCreateOutcomeInbox(ctx, task, qc, inboxTypeQuickCreateFailed, "Quick create failed", errMsg)
+	s.preserveFailedQuickCreateAttachments(ctx, task, qc)
+	s.postQuickCreateChatReply(ctx, task, qc, buildQuickCreateFailedReply(qc.Prompt, redact.Text(errMsg)))
 }
 
 // quickCreateUnconfirmedDetail is the user-facing message for a quick-create
@@ -4891,6 +5165,8 @@ const quickCreateUnconfirmedDetail = "Couldn't confirm whether the issue was cre
 // Severity stays action_required because the user does need to look.
 func (s *TaskService) notifyQuickCreateUnconfirmed(ctx context.Context, task db.AgentTaskQueue, qc QuickCreateContext) {
 	s.writeQuickCreateOutcomeInbox(ctx, task, qc, inboxTypeQuickCreateUnconfirmed, "Quick create needs a check", quickCreateUnconfirmedDetail)
+	s.preserveFailedQuickCreateAttachments(ctx, task, qc)
+	s.postQuickCreateChatReply(ctx, task, qc, "⚠️ "+quickCreateUnconfirmedDetail)
 }
 
 // quickCreateNotifyTimeout bounds the detached terminal-notification write in

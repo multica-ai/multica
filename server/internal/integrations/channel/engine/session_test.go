@@ -380,6 +380,45 @@ func TestBindMediaRefs_CreatesAndLinksChatAttachments(t *testing.T) {
 	}
 }
 
+func TestBindMediaRefs_QuickCreateOwnsAttachmentsByTask(t *testing.T) {
+	f := newFake()
+	s := newTestSession(f)
+	err := s.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID:         uid(42),
+		SessionID:         uid(1),
+		WorkspaceID:       uid(9),
+		Sender:            uid(7),
+		QuickCreateTaskID: uid(8),
+		MediaRefs: []channel.MediaRef{{
+			Type:       channel.MsgTypeImage,
+			StorageKey: "channels/quick-create/image.png",
+			StorageURL: "https://cdn.example.test/quick-create/image.png",
+			Filename:   "screenshot.png",
+			MimeType:   "image/png",
+			SizeBytes:  3,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+	if len(f.attachments) != 1 {
+		t.Fatalf("attachments created = %d, want 1", len(f.attachments))
+	}
+	att := f.attachments[0]
+	if att.TaskID != uid(8) {
+		t.Fatalf("task_id = %v, want %v", att.TaskID, uid(8))
+	}
+	if att.ChatSessionID.Valid {
+		t.Fatalf("quick-create attachment must not carry cascade-prone chat_session_id: %v", att.ChatSessionID)
+	}
+	if f.linked.ChatMessageID.Valid {
+		t.Fatalf("quick-create attachment must not be linked to chat_message: %+v", f.linked)
+	}
+	if f.mediaCleared != 1 {
+		t.Fatalf("media marker clears = %d, want 1", f.mediaCleared)
+	}
+}
+
 func TestAppendUserMessage_BareIssueUsesPreviousMessage(t *testing.T) {
 	f := newFake()
 	prev := "Make the export button work"

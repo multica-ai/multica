@@ -134,9 +134,10 @@ type InboundMessage struct {
 	// itself is in MediaRefs.
 	Text string
 
-	// CommandText is the user's normalized text before command stripping or
-	// contextual enrichment. Shared command classifiers read this field so a
-	// rewritten Text is never interpreted as a second command. Empty means Text.
+	// CommandText is the user's normalized text before contextual enrichment.
+	// Shared command classifiers such as /new and /issue read this field so a
+	// rewritten Text is never interpreted as another command or handed to a
+	// background task as the user's prompt. Empty falls back to Text.
 	CommandText string
 
 	// MediaRefs is the OUTPUT channel of engine.MediaResolver.ResolveMedia:

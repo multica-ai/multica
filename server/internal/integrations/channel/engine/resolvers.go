@@ -58,6 +58,16 @@ type Result struct {
 	IssueNumber     int32
 	IssueIdentifier string
 	IssueTitle      string
+	// IssueQueued reports that /issue was accepted onto a background
+	// quick-create path. Direct-create channels populate IssueID instead.
+	IssueQueued bool
+	// IssueUsage reports a bare /issue with no prompt of its own.
+	IssueUsage bool
+	// IssueQueueFailed reports that the quick-create task could not be queued.
+	IssueQueueFailed bool
+	// RunScheduled reports whether this ingest scheduled a normal chat run.
+	// Non-run outcomes leave it false and must not start a typing indicator.
+	RunScheduled bool
 }
 
 // ResolvedInstallation is the channel-agnostic installation context the Router
@@ -119,11 +129,12 @@ type AppendResult struct {
 // attachment transaction. MessageID is the durable chat_message created by
 // AppendMessage; media downloads must never run inside this transaction.
 type BindMediaParams struct {
-	MessageID   pgtype.UUID
-	SessionID   pgtype.UUID
-	WorkspaceID pgtype.UUID
-	Sender      pgtype.UUID
-	MediaRefs   []channel.MediaRef
+	MessageID         pgtype.UUID
+	SessionID         pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	Sender            pgtype.UUID
+	MediaRefs         []channel.MediaRef
+	QuickCreateTaskID pgtype.UUID
 }
 
 // IssueCommand is the parsed /issue command.
@@ -299,12 +310,33 @@ type ResolverSet struct {
 	Replier      OutboundReplier
 	Typing       TypingNotifier
 	OriginType   string
+	// QuickCreate switches /issue from synchronous issue creation to a
+	// background agent-authored issue whose result is posted back into the
+	// originating conversation. Nil preserves the direct-create behavior.
+	// A channel enabling it must populate InboundMessage.CommandText with the
+	// same user-authored source AppendMessage parses into IssueCommand, because
+	// the Router removes the /issue token from CommandText to build the prompt.
+	QuickCreate QuickCreator
 }
 
 // IssueCreator is the narrow subset of service.IssueService the Router needs
 // for the /issue command. Shared across platforms.
 type IssueCreator interface {
 	Create(ctx context.Context, p service.IssueCreateParams, opts service.IssueCreateOpts) (service.IssueCreateResult, error)
+}
+
+// QuickCreator enqueues and promotes chat-originated quick-create tasks.
+// mediaPending asks the implementation to defer the task until the Router's
+// durable media pipeline has bound task-owned attachments or timed out.
+type QuickCreator interface {
+	EnqueueQuickCreateChatTask(ctx context.Context, workspaceID, requesterID, agentID pgtype.UUID, prompt string, chatSessionID, chatMessageID pgtype.UUID, mediaPending bool) (db.AgentTaskQueue, error)
+	PromoteQuickCreateChatTask(ctx context.Context, taskID pgtype.UUID) error
+}
+
+// MessageAppender writes Router-authored acknowledgement rows into the
+// transcript. *db.Queries satisfies it.
+type MessageAppender interface {
+	CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error)
 }
 
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to

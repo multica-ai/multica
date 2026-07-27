@@ -719,6 +719,9 @@ func TestChannelMessageFromLark_NormalizesAndStashesRaw(t *testing.T) {
 	if cm.EventID != "evt" || cm.MessageID != "om" || cm.Text != "enriched body" || cm.CommandText != "/issue do it" {
 		t.Fatalf("scalar fields not mapped: %+v", cm)
 	}
+	if cm.CommandText != "/issue do it" {
+		t.Fatalf("command fields not mapped: %+v", cm)
+	}
 	if cm.Type != channel.MsgTypeText {
 		t.Fatalf("post must normalize to text, got %q", cm.Type)
 	}
@@ -741,6 +744,31 @@ func TestChannelMessageFromLark_NormalizesAndStashesRaw(t *testing.T) {
 	}
 	if got.AppID != "cli" || got.CommandBody != "/issue do it" || got.MessageType != "post" {
 		t.Fatalf("raw round-trip lost platform fields: %+v", got)
+	}
+}
+
+func TestChannelMessageFromLark_PreservesFreshCommandBeforeEnrichment(t *testing.T) {
+	cm := channelMessageFromLark(InboundMessage{
+		Body:              "<quoted_message>old context</quoted_message>",
+		CommandBody:       "/new",
+		ForceFreshSession: true,
+	})
+	if !cm.ForceFresh {
+		t.Fatal("fresh flag was not mapped")
+	}
+	if cm.CommandText != "/new" {
+		t.Fatalf("command text = %q, want original command source", cm.CommandText)
+	}
+}
+
+func TestChannelMessageFromLark_PreservesFreshIssueCommandText(t *testing.T) {
+	cm := channelMessageFromLark(InboundMessage{
+		Body:              "<quoted_message>old context</quoted_message>\n/issue create follow-up",
+		CommandBody:       "/new /issue create follow-up",
+		ForceFreshSession: true,
+	})
+	if cm.CommandText != "/new /issue create follow-up" {
+		t.Fatalf("command text = %q", cm.CommandText)
 	}
 }
 

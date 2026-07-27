@@ -259,6 +259,15 @@ type ChatCancelFinalizedPayload struct {
 	ElapsedMs   int64  `json:"elapsed_ms,omitempty"`
 }
 
+// QuickCreateDonePayload is broadcast when a chat-originated quick-create task
+// reaches a terminal outcome. Content is ready for the channel outbound to
+// deliver into the originating conversation.
+type QuickCreateDonePayload struct {
+	ChatSessionID string `json:"chat_session_id"`
+	TaskID        string `json:"task_id,omitempty"`
+	Content       string `json:"content,omitempty"`
+}
+
 // ChatSessionReadPayload is broadcast when the creator marks a session as read.
 // Fires to other devices so their unread counts stay in sync.
 type ChatSessionReadPayload struct {

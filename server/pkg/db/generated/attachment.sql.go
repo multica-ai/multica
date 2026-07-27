@@ -685,6 +685,54 @@ func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachment
 	return items, nil
 }
 
+const listUnboundAttachmentIDsByTaskLineage = `-- name: ListUnboundAttachmentIDsByTaskLineage :many
+WITH RECURSIVE task_lineage AS (
+  SELECT task.id, task.parent_task_id
+  FROM agent_task_queue task
+  WHERE task.id = $2
+  UNION ALL
+  SELECT parent.id, parent.parent_task_id
+  FROM agent_task_queue parent
+  JOIN task_lineage child ON parent.id = child.parent_task_id
+)
+SELECT attachment.id FROM attachment
+WHERE attachment.task_id IN (SELECT task_lineage.id FROM task_lineage)
+  AND attachment.workspace_id = $1
+  AND attachment.issue_id IS NULL
+  AND attachment.comment_id IS NULL
+  AND attachment.chat_message_id IS NULL
+ORDER BY attachment.created_at ASC
+`
+
+type ListUnboundAttachmentIDsByTaskLineageParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	TaskID      pgtype.UUID `json:"task_id"`
+}
+
+// Channel quick-create media is durably owned by task_id while the background
+// agent authors the issue. Follow parent_task_id so an automatic retry sees
+// media owned by its failed ancestor; retries inherit the quick-create context
+// but intentionally receive a new task id.
+func (q *Queries) ListUnboundAttachmentIDsByTaskLineage(ctx context.Context, arg ListUnboundAttachmentIDsByTaskLineageParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listUnboundAttachmentIDsByTaskLineage, arg.WorkspaceID, arg.TaskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const replaceCommentAttachments = `-- name: ReplaceCommentAttachments :exec
 UPDATE attachment
 SET comment_id = CASE

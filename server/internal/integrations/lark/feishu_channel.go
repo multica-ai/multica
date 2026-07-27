@@ -127,6 +127,10 @@ func installationCredentialsFor(inst Installation, resolver CredentialsResolver)
 // the normalized CommandText field because command classification is shared.
 func channelMessageFromLark(lm InboundMessage) channel.InboundMessage {
 	raw, _ := json.Marshal(lm)
+	commandText := lm.CommandBody
+	if commandText == "" {
+		commandText = lm.Body
+	}
 	var reply *channel.ReplyCtx
 	if lm.ParentID != "" || lm.RootID != "" {
 		reply = &channel.ReplyCtx{MessageID: lm.ParentID, RootID: lm.RootID}
@@ -136,7 +140,7 @@ func channelMessageFromLark(lm InboundMessage) channel.InboundMessage {
 		MessageID:      lm.MessageID,
 		Type:           channelMsgType(lm.MessageType),
 		Text:           lm.Body,
-		CommandText:    lm.CommandBody,
+		CommandText:    commandText,
 		ReplyTo:        reply,
 		AddressedToBot: lm.AddressedToBot,
 		ForceFresh:     lm.ForceFreshSession,

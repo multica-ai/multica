@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -153,6 +154,76 @@ func TestBindMediaRefs_PersistsAndLinksAttachmentToDurableMessage(t *testing.T) 
 	}
 	if !channelIngested {
 		t.Fatal("channel append must stamp channel_ingested for the cancel-path provenance gate")
+	}
+}
+
+func TestBindMediaRefs_QuickCreatePersistsTaskOwnedAttachment(t *testing.T) {
+	pool := sessionPersistenceTestDB(t)
+	fixture := seedSessionPersistenceFixture(t, pool)
+	session := NewChatSession(db.New(pool), pool, channel.TypeFeishu, SessionTitles{})
+
+	appendRes, err := session.AppendUserMessage(context.Background(), AppendInput{
+		SessionID:           fixture.sessionID,
+		Sender:              fixture.userID,
+		Body:                "/issue Fix image upload",
+		MediaPendingSeconds: 60,
+	})
+	if err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	taskUUID, err := uuid.NewV7()
+	if err != nil {
+		t.Fatalf("new task UUID: %v", err)
+	}
+	taskID := pgtype.UUID{Bytes: taskUUID, Valid: true}
+	seedPendingMediaObject(t, pool, fixture, appendRes.MessageID, "workspaces/ws/lark/quick-create", "https://cdn.example.test/quick-create.png", "pending")
+
+	err = session.BindMediaRefs(context.Background(), BindMediaInput{
+		MessageID:         appendRes.MessageID,
+		SessionID:         fixture.sessionID,
+		WorkspaceID:       fixture.workspaceID,
+		Sender:            fixture.userID,
+		QuickCreateTaskID: taskID,
+		MediaRefs: []channel.MediaRef{{
+			Type:       channel.MsgTypeImage,
+			StorageKey: "workspaces/ws/lark/quick-create",
+			StorageURL: "https://cdn.example.test/quick-create.png",
+			Filename:   "quick-create.png",
+			MimeType:   "image/png",
+			SizeBytes:  5,
+		}},
+	})
+	if err != nil {
+		t.Fatalf("BindMediaRefs: %v", err)
+	}
+	if _, exists := pendingMediaObjectState(t, pool, "workspaces/ws/lark/quick-create"); exists {
+		t.Fatal("quick-create bind must clear the intent row in the same transaction")
+	}
+
+	var gotTaskID, chatSessionID, chatMessageID, issueID pgtype.UUID
+	if err := pool.QueryRow(context.Background(), `
+		SELECT task_id, chat_session_id, chat_message_id, issue_id
+		FROM attachment
+		WHERE task_id = $1`, taskID).
+		Scan(&gotTaskID, &chatSessionID, &chatMessageID, &issueID); err != nil {
+		t.Fatalf("load task-owned attachment: %v", err)
+	}
+	if gotTaskID != taskID {
+		t.Fatalf("task_id = %v, want %v", gotTaskID, taskID)
+	}
+	if chatSessionID.Valid || chatMessageID.Valid || issueID.Valid {
+		t.Fatalf("quick-create attachment has competing owner: session=%v message=%v issue=%v", chatSessionID, chatMessageID, issueID)
+	}
+
+	var mediaPendingUntil pgtype.Timestamptz
+	if err := pool.QueryRow(context.Background(), `
+		SELECT channel_media_pending_until
+		FROM chat_message
+		WHERE id = $1`, appendRes.MessageID).Scan(&mediaPendingUntil); err != nil {
+		t.Fatalf("load media marker: %v", err)
+	}
+	if mediaPendingUntil.Valid {
+		t.Fatalf("media pending deadline was not cleared: %v", mediaPendingUntil.Time)
 	}
 }
 

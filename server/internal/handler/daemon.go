@@ -2374,6 +2374,33 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
 
+			// Channel media is bound durably to the quick-create task after the
+			// context JSON is written. Read those task-owned rows at claim time
+			// so a crash between binding and promotion cannot lose attachments.
+			if workspaceID, err := util.ParseUUID(qc.WorkspaceID); err == nil {
+				ids, listErr := h.Queries.ListUnboundAttachmentIDsByTaskLineage(r.Context(), db.ListUnboundAttachmentIDsByTaskLineageParams{
+					TaskID:      task.ID,
+					WorkspaceID: workspaceID,
+				})
+				if listErr != nil {
+					slog.Warn("quick-create claim: list task attachments failed",
+						"task_id", uuidToString(task.ID), "error", listErr)
+				} else {
+					seen := make(map[string]struct{}, len(resp.QuickCreateAttachmentIDs)+len(ids))
+					for _, id := range resp.QuickCreateAttachmentIDs {
+						seen[id] = struct{}{}
+					}
+					for _, id := range ids {
+						value := uuidToString(id)
+						if _, ok := seen[value]; ok {
+							continue
+						}
+						seen[value] = struct{}{}
+						resp.QuickCreateAttachmentIDs = append(resp.QuickCreateAttachmentIDs, value)
+					}
+				}
+			}
+
 			// When the user picked a project in the modal, surface its title
 			// and resources to the daemon so the agent has the same context
 			// it would for an issue-bound task: the prompt template can name

@@ -274,11 +274,12 @@ type AppendInput struct {
 // short database-only transaction. Remote downloads/uploads happen before
 // this call and outside the connector ACK path.
 type BindMediaInput struct {
-	MessageID   pgtype.UUID
-	SessionID   pgtype.UUID
-	WorkspaceID pgtype.UUID
-	Sender      pgtype.UUID
-	MediaRefs   []channel.MediaRef
+	MessageID         pgtype.UUID
+	SessionID         pgtype.UUID
+	WorkspaceID       pgtype.UUID
+	Sender            pgtype.UUID
+	MediaRefs         []channel.MediaRef
+	QuickCreateTaskID pgtype.UUID
 }
 
 // AppendUserMessage writes the user message into the chat_session (touching it
@@ -364,10 +365,12 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	return AppendResult{MessageID: msg.ID, IssueCommand: cmd, DedupMarked: markedInTx}, nil
 }
 
-// BindMediaRefs creates attachment rows, links them to an existing durable chat
-// message, and clears its media-pending marker. A link failure rolls back the
-// attachment rows, then clears the marker separately so the placeholder can be
-// promoted immediately for graceful degradation.
+// BindMediaRefs creates attachment rows and clears the message's media-pending
+// marker. Normal chat media is linked to the durable chat message; quick-create
+// media remains task-owned until the issue is created or the terminal failure
+// path restores it to the original message. A bind failure rolls back the
+// attachment rows, then clears the marker separately so the task can fall back
+// to the persisted deadline.
 func (s *ChatSession) BindMediaRefs(ctx context.Context, in BindMediaInput) error {
 	tx, err := s.tx.Begin(ctx)
 	if err != nil {
@@ -461,7 +464,8 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 		att, err := qtx.CreateAttachment(ctx, db.CreateAttachmentParams{
 			ID:            pgtype.UUID{Bytes: id, Valid: true},
 			WorkspaceID:   in.WorkspaceID,
-			ChatSessionID: in.SessionID,
+			ChatSessionID: pgtype.UUID{Bytes: in.SessionID.Bytes, Valid: in.SessionID.Valid && !in.QuickCreateTaskID.Valid},
+			TaskID:        in.QuickCreateTaskID,
 			UploaderType:  "member",
 			UploaderID:    in.Sender,
 			Filename:      filename,
@@ -470,11 +474,11 @@ func (s *ChatSession) bindMediaRefs(ctx context.Context, qtx SessionQueries, in 
 			SizeBytes:     ref.SizeBytes,
 		})
 		if err != nil {
-			return fmt.Errorf("create chat attachment: %w", err)
+			return fmt.Errorf("create channel attachment: %w", err)
 		}
 		ids = append(ids, att.ID)
 	}
-	if len(ids) == 0 {
+	if len(ids) == 0 || in.QuickCreateTaskID.Valid {
 		return nil
 	}
 	if _, err := qtx.LinkAttachmentsToChatMessage(ctx, db.LinkAttachmentsToChatMessageParams{

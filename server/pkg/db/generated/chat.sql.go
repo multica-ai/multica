@@ -916,10 +916,11 @@ func (q *Queries) HasPendingChatTasksByCreator(ctx context.Context, arg HasPendi
 	return has_pending, err
 }
 
-const linkChatMessageToTask = `-- name: LinkChatMessageToTask :exec
+const linkChatMessageToTask = `-- name: LinkChatMessageToTask :one
 UPDATE chat_message
 SET task_id = $2
 WHERE id = $1 AND role = 'user'
+RETURNING id
 `
 
 type LinkChatMessageToTaskParams struct {
@@ -927,9 +928,11 @@ type LinkChatMessageToTaskParams struct {
 	TaskID pgtype.UUID `json:"task_id"`
 }
 
-func (q *Queries) LinkChatMessageToTask(ctx context.Context, arg LinkChatMessageToTaskParams) error {
-	_, err := q.db.Exec(ctx, linkChatMessageToTask, arg.ID, arg.TaskID)
-	return err
+func (q *Queries) LinkChatMessageToTask(ctx context.Context, arg LinkChatMessageToTaskParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, linkChatMessageToTask, arg.ID, arg.TaskID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const linkUnownedChannelChatMessagesToTask = `-- name: LinkUnownedChannelChatMessagesToTask :exec
@@ -1030,6 +1033,7 @@ type ListAgentBuilderSessionsByCreatorRow struct {
 // neither is also wrong: a session opened and abandoned untouched is not a
 // draft, and would put an empty row in front of the user on every accidental
 // entry into the flow.
+//
 // The stored draft rides along instead of needing its own fetch: the studio
 // renders this list beside the conversation it is switching between, so the
 // configuration for the row the user picks has to be in hand at click time.

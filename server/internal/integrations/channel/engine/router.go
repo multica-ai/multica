@@ -35,9 +35,10 @@ type Router struct {
 	mu   sync.RWMutex
 	sets map[channel.Type]ResolverSet
 
-	issues IssueCreator
-	tasks  TaskEnqueuer
-	reader SessionReader
+	issues   IssueCreator
+	tasks    TaskEnqueuer
+	reader   SessionReader
+	messages MessageAppender
 
 	batcher *pendingBatcher
 
@@ -77,6 +78,9 @@ type RouterConfig struct {
 	// Per-session ordering is unaffected. Defaults to 8.
 	MediaConcurrency int
 	Logger           *slog.Logger
+	// Messages writes Router-authored quick-create acknowledgement notes.
+	// Nil skips transcript notes.
+	Messages MessageAppender
 }
 
 // NewRouter builds a Router around the shared (platform-agnostic) services:
@@ -102,6 +106,7 @@ func NewRouter(issues IssueCreator, tasks TaskEnqueuer, reader SessionReader, cf
 		issues:       issues,
 		tasks:        tasks,
 		reader:       reader,
+		messages:     cfg.Messages,
 		replyTimeout: cfg.ReplyTimeout,
 		mediaTimeout: cfg.MediaTimeout,
 		mediaCtx:     mediaCtx,
@@ -223,7 +228,7 @@ func (r *Router) Handle(ctx context.Context, msg channel.InboundMessage) error {
 
 	// Typing indicator on ingest, detached so the reaction HTTP call never
 	// blocks the connector ACK path.
-	if res.Outcome == OutcomeIngested && set.Typing != nil {
+	if res.Outcome == OutcomeIngested && res.RunScheduled && set.Typing != nil {
 		go func() {
 			tctx, cancel := context.WithTimeout(context.Background(), r.replyTimeout)
 			defer cancel()
@@ -388,6 +393,14 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 
 	// 7. /issue command, if present. chat_message is already durable; all
 	//    error returns from here signal finalizeNone (or the defensive Mark).
+	if appendRes.IssueCommand != nil && set.QuickCreate != nil {
+		prompt := quickCreatePrompt(msg)
+		task, queued := r.handleQuickCreate(ctx, set, inst, identity.UserID, sessionID, appendRes.MessageID, prompt, resolveMedia, &res)
+		if queued && resolveMedia {
+			r.enqueueMedia(set, inst, identity, appendRes.MessageID, msg, sessionID, localMediaDeadline, task.ID)
+		}
+		return res, postAppendFinalize, nil
+	}
 	if appendRes.IssueCommand != nil {
 		// One lookup feeds both the broadcast payload's identifier and the
 		// chat reply's.
@@ -411,8 +424,9 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    in a window wins (MUL-2645).
 	r.scheduleRun(set, inst, msg, sessionID, identity.UserID)
 	if resolveMedia {
-		r.enqueueMedia(set, inst, identity, appendRes.MessageID, msg, sessionID, localMediaDeadline)
+		r.enqueueMedia(set, inst, identity, appendRes.MessageID, msg, sessionID, localMediaDeadline, pgtype.UUID{})
 	}
+	res.RunScheduled = true
 	return res, postAppendFinalize, nil
 }
 
@@ -420,7 +434,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 // order within a chat session. Run scheduling is independent and durable: the
 // task service defers a task to the persisted media deadline, then media
 // completion promotes it early.
-func (r *Router) enqueueMedia(set ResolverSet, inst ResolvedInstallation, identity ResolvedIdentity, chatMessageID pgtype.UUID, msg channel.InboundMessage, sessionID pgtype.UUID, deadline time.Time) {
+func (r *Router) enqueueMedia(set ResolverSet, inst ResolvedInstallation, identity ResolvedIdentity, chatMessageID pgtype.UUID, msg channel.InboundMessage, sessionID pgtype.UUID, deadline time.Time, quickCreateTaskID pgtype.UUID) {
 	key := keyForSession(sessionID)
 	done := make(chan struct{})
 
@@ -475,13 +489,13 @@ func (r *Router) enqueueMedia(set ResolverSet, inst ResolvedInstallation, identi
 				// sees the dead deadline and runs only the empty finalize.
 			}
 		}
-		r.resolveAndBindMedia(set, inst, identity, chatMessageID, msg, sessionID, deadline)
+		r.resolveAndBindMedia(set, inst, identity, chatMessageID, msg, sessionID, deadline, quickCreateTaskID)
 	}()
 }
 
 const mediaFinalizeTimeout = 5 * time.Second
 
-func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation, identity ResolvedIdentity, chatMessageID pgtype.UUID, msg channel.InboundMessage, sessionID pgtype.UUID, deadline time.Time) {
+func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation, identity ResolvedIdentity, chatMessageID pgtype.UUID, msg channel.InboundMessage, sessionID pgtype.UUID, deadline time.Time, quickCreateTaskID pgtype.UUID) {
 	ctx, cancel := context.WithDeadline(r.mediaCtx, deadline)
 	defer cancel()
 
@@ -506,13 +520,15 @@ func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation,
 			"message_id", msg.MessageID,
 			"error", err)
 	}
-	if err := set.Session.BindMedia(finalizeCtx, BindMediaParams{
-		MessageID:   chatMessageID,
-		SessionID:   sessionID,
-		WorkspaceID: inst.WorkspaceID,
-		Sender:      identity.UserID,
-		MediaRefs:   resolved.MediaRefs,
-	}); err != nil {
+	bindErr := set.Session.BindMedia(finalizeCtx, BindMediaParams{
+		MessageID:         chatMessageID,
+		SessionID:         sessionID,
+		WorkspaceID:       inst.WorkspaceID,
+		Sender:            identity.UserID,
+		MediaRefs:         resolved.MediaRefs,
+		QuickCreateTaskID: quickCreateTaskID,
+	})
+	if bindErr != nil {
 		// Never delete inline: the attachments may or may not have landed
 		// (an ambiguous commit), but the intent rows are deleted in the SAME
 		// transaction, so the ledger already reflects whichever outcome is
@@ -521,7 +537,24 @@ func (r *Router) resolveAndBindMedia(set ResolverSet, inst ResolvedInstallation,
 			"channel_type", string(msg.Source.ChannelType),
 			"event_id", msg.EventID,
 			"message_id", msg.MessageID,
-			"err", err)
+			"err", bindErr)
+	}
+	if quickCreateTaskID.Valid && set.QuickCreate != nil {
+		if bindErr != nil {
+			// Keep the task deferred. Its durable fire_at fallback will queue
+			// it after the media budget instead of racing a failed/ambiguous
+			// bind transaction.
+			return
+		}
+		if err := set.QuickCreate.PromoteQuickCreateChatTask(finalizeCtx, quickCreateTaskID); err != nil {
+			r.logger.Warn("channel router: quick-create media-ready promotion failed",
+				"channel_type", string(msg.Source.ChannelType),
+				"event_id", msg.EventID,
+				"message_id", msg.MessageID,
+				"task_id", uuidString(quickCreateTaskID),
+				"err", err)
+		}
+		return
 	}
 	if err := r.tasks.PromoteChannelChatTasksIfMediaReady(finalizeCtx, sessionID); err != nil {
 		r.logger.Warn("channel router: media-ready task promotion failed",

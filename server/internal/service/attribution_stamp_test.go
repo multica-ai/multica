@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -1264,6 +1265,145 @@ func TestEnqueueChatTaskStampsChatEvidence(t *testing.T) {
 	}
 	if !evidenceRef.Valid || evidenceRef.Bytes != util.MustParseUUID(chatSessionID).Bytes {
 		t.Errorf("trigger_evidence_ref_id = %s, want chat session %s", util.UUIDToString(evidenceRef), chatSessionID)
+	}
+}
+
+func TestEnqueueQuickCreateChatTaskPersistsRoutingEvidenceAndDeferral(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+
+	var chatSessionID, chatMessageID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id)
+		VALUES ($1, $2, $3) RETURNING id`, workspaceID, agentID, userID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("seed chat session: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, chatSessionID)
+	})
+	deadline := time.Now().Add(time.Minute)
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO chat_message (
+			chat_session_id, role, content, channel_media_pending_until, channel_ingested
+		)
+		VALUES ($1, 'user', '/issue inspect the screenshot', $2, true)
+		RETURNING id`, chatSessionID, deadline).Scan(&chatMessageID); err != nil {
+		t.Fatalf("seed channel message: %v", err)
+	}
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	task, err := svc.EnqueueQuickCreateChatTask(
+		ctx,
+		util.MustParseUUID(workspaceID),
+		util.MustParseUUID(userID),
+		util.MustParseUUID(agentID),
+		"inspect the screenshot",
+		util.MustParseUUID(chatSessionID),
+		util.MustParseUUID(chatMessageID),
+		true,
+	)
+	if err != nil {
+		t.Fatalf("EnqueueQuickCreateChatTask: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, task.ID)
+	})
+	if task.Status != "deferred" || !task.FireAt.Valid {
+		t.Fatalf("task = status %q fire_at %v, want deferred", task.Status, task.FireAt)
+	}
+	if task.FireAt.Time.Before(deadline.Add(-time.Second)) || task.FireAt.Time.After(deadline.Add(time.Second)) {
+		t.Fatalf("task fire_at = %v, want %v", task.FireAt.Time, deadline)
+	}
+
+	var linkedTaskID pgtype.UUID
+	if err := pool.QueryRow(ctx, `SELECT task_id FROM chat_message WHERE id = $1`, chatMessageID).Scan(&linkedTaskID); err != nil {
+		t.Fatalf("load linked message: %v", err)
+	}
+	if linkedTaskID != task.ID {
+		t.Fatalf("message task_id = %s, want %s", util.UUIDToString(linkedTaskID), util.UUIDToString(task.ID))
+	}
+
+	var qc QuickCreateContext
+	if err := json.Unmarshal(task.Context, &qc); err != nil {
+		t.Fatalf("decode quick-create context: %v", err)
+	}
+	if qc.ChatSessionID != chatSessionID || qc.ChatMessageID != chatMessageID {
+		t.Fatalf("quick-create routing = session:%q message:%q", qc.ChatSessionID, qc.ChatMessageID)
+	}
+
+	var source, evidenceKind pgtype.Text
+	var originator, accountable, evidenceRef pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT originator_source, originator_user_id, accountable_user_id,
+		       trigger_evidence_kind, trigger_evidence_ref_id
+		FROM agent_task_queue WHERE id = $1`, task.ID).
+		Scan(&source, &originator, &accountable, &evidenceKind, &evidenceRef); err != nil {
+		t.Fatalf("read stored attribution: %v", err)
+	}
+	if source.String != string(attribution.SourceDirectHuman) ||
+		originator != util.MustParseUUID(userID) ||
+		accountable != originator ||
+		evidenceKind.String != string(attribution.EvidenceChat) ||
+		evidenceRef != util.MustParseUUID(chatSessionID) {
+		t.Fatalf("stored attribution = source:%q originator:%s accountable:%s evidence:%q/%s",
+			source.String,
+			util.UUIDToString(originator),
+			util.UUIDToString(accountable),
+			evidenceKind.String,
+			util.UUIDToString(evidenceRef))
+	}
+
+	if err := svc.PromoteQuickCreateChatTask(ctx, task.ID); err != nil {
+		t.Fatalf("PromoteQuickCreateChatTask: %v", err)
+	}
+	var status string
+	var fireAt pgtype.Timestamptz
+	if err := pool.QueryRow(ctx, `SELECT status, fire_at FROM agent_task_queue WHERE id = $1`, task.ID).Scan(&status, &fireAt); err != nil {
+		t.Fatalf("load promoted task: %v", err)
+	}
+	if status != "queued" || fireAt.Valid {
+		t.Fatalf("promoted task = status %q fire_at %v, want queued without deadline", status, fireAt)
+	}
+
+	var retryTaskID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, status, priority, context, parent_task_id
+		)
+		SELECT agent_id, runtime_id, 'failed', priority, context, id
+		FROM agent_task_queue
+		WHERE id = $1
+		RETURNING id`, task.ID).Scan(&retryTaskID); err != nil {
+		t.Fatalf("seed failed retry: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, retryTaskID)
+	})
+	var attachmentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO attachment (
+			workspace_id, task_id, uploader_type, uploader_id,
+			filename, url, content_type, size_bytes
+		)
+		VALUES ($1, $2, 'member', $3, 'retry.png', 'https://example.test/retry.png', 'image/png', 3)
+		RETURNING id`, workspaceID, task.ID, userID).Scan(&attachmentID); err != nil {
+		t.Fatalf("seed ancestor-owned attachment: %v", err)
+	}
+
+	svc.preserveFailedQuickCreateAttachments(ctx, db.AgentTaskQueue{ID: retryTaskID}, qc)
+	var restoredSessionID, restoredMessageID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		SELECT chat_session_id, chat_message_id
+		FROM attachment
+		WHERE id = $1`, attachmentID).Scan(&restoredSessionID, &restoredMessageID); err != nil {
+		t.Fatalf("load restored attachment: %v", err)
+	}
+	if restoredSessionID != util.MustParseUUID(chatSessionID) ||
+		restoredMessageID != util.MustParseUUID(chatMessageID) {
+		t.Fatalf("restored attachment = session:%s message:%s",
+			util.UUIDToString(restoredSessionID), util.UUIDToString(restoredMessageID))
 	}
 }
 

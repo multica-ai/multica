@@ -309,6 +309,78 @@ func (f *fakeReader) GetWorkspace(_ context.Context, _ pgtype.UUID) (db.Workspac
 	return f.ws, nil
 }
 
+type fakeQuickCreator struct {
+	mu               sync.Mutex
+	task             db.AgentTaskQueue
+	enqueueErr       error
+	promoteErr       error
+	enqueueCalls     int
+	promoteCalls     int
+	prompt           string
+	chatSessionID    pgtype.UUID
+	chatMessageID    pgtype.UUID
+	mediaPending     bool
+	promotedTaskID   pgtype.UUID
+	promotionReached chan struct{}
+}
+
+func (f *fakeQuickCreator) EnqueueQuickCreateChatTask(_ context.Context, _, _, _ pgtype.UUID, prompt string, chatSessionID, chatMessageID pgtype.UUID, mediaPending bool) (db.AgentTaskQueue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.enqueueCalls++
+	f.prompt = prompt
+	f.chatSessionID = chatSessionID
+	f.chatMessageID = chatMessageID
+	f.mediaPending = mediaPending
+	return f.task, f.enqueueErr
+}
+
+func (f *fakeQuickCreator) messageID() pgtype.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.chatMessageID
+}
+
+func (f *fakeQuickCreator) PromoteQuickCreateChatTask(_ context.Context, taskID pgtype.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.promoteCalls++
+	f.promotedTaskID = taskID
+	if f.promotionReached != nil {
+		close(f.promotionReached)
+		f.promotionReached = nil
+	}
+	return f.promoteErr
+}
+
+func (f *fakeQuickCreator) snapshot() (enqueueCalls, promoteCalls int, prompt string, mediaPending bool, promotedTaskID pgtype.UUID) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.enqueueCalls, f.promoteCalls, f.prompt, f.mediaPending, f.promotedTaskID
+}
+
+type fakeMessageAppender struct {
+	mu     sync.Mutex
+	params []db.CreateChatMessageParams
+}
+
+func (f *fakeMessageAppender) CreateChatMessage(_ context.Context, p db.CreateChatMessageParams) (db.ChatMessage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.params = append(f.params, p)
+	return db.ChatMessage{}, nil
+}
+
+func (f *fakeMessageAppender) contents() []string {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]string, 0, len(f.params))
+	for _, p := range f.params {
+		out = append(out, p.Content)
+	}
+	return out
+}
+
 // ---- harness ----
 
 func activeResolved(t *testing.T) ResolvedInstallation {
@@ -337,18 +409,20 @@ func p2pMessage(t *testing.T) channel.InboundMessage {
 }
 
 type harness struct {
-	router  *Router
-	inst    *fakeInstaller
-	ident   *fakeIdentity
-	dedup   *fakeDedup
-	binder  *fakeBinder
-	audit   *fakeAuditor
-	replier *fakeReplier
-	typing  *fakeTyping
-	media   *fakeMedia
-	issues  *fakeIssues
-	tasks   *fakeTasks
-	reader  *fakeReader
+	router   *Router
+	inst     *fakeInstaller
+	ident    *fakeIdentity
+	dedup    *fakeDedup
+	binder   *fakeBinder
+	audit    *fakeAuditor
+	replier  *fakeReplier
+	typing   *fakeTyping
+	media    *fakeMedia
+	issues   *fakeIssues
+	tasks    *fakeTasks
+	reader   *fakeReader
+	quick    *fakeQuickCreator
+	messages *fakeMessageAppender
 }
 
 func newHarness(t *testing.T) *harness {
@@ -364,15 +438,17 @@ func newHarness(t *testing.T) *harness {
 				DedupMarked: true,
 			},
 		},
-		audit:   &fakeAuditor{},
-		replier: &fakeReplier{},
-		typing:  &fakeTyping{},
-		media:   &fakeMedia{},
-		issues:  &fakeIssues{},
-		tasks:   &fakeTasks{},
-		reader:  &fakeReader{ws: db.Workspace{IssuePrefix: "MUL"}},
+		audit:    &fakeAuditor{},
+		replier:  &fakeReplier{},
+		typing:   &fakeTyping{},
+		media:    &fakeMedia{},
+		issues:   &fakeIssues{},
+		tasks:    &fakeTasks{},
+		reader:   &fakeReader{ws: db.Workspace{IssuePrefix: "MUL"}},
+		quick:    &fakeQuickCreator{task: db.AgentTaskQueue{ID: uuidFromString(t, "77777777-7777-4777-8777-777777777777")}},
+		messages: &fakeMessageAppender{},
 	}
-	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{Logger: discardLogger()})
+	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{Logger: discardLogger(), Messages: h.messages})
 	h.router.Register(channel.TypeFeishu, ResolverSet{
 		Installation: h.inst,
 		Identity:     h.ident,
@@ -385,6 +461,21 @@ func newHarness(t *testing.T) *harness {
 		OriginType:   "lark_chat",
 	})
 	return h
+}
+
+func (h *harness) enableQuickCreate() {
+	h.router.Register(channel.TypeFeishu, ResolverSet{
+		Installation: h.inst,
+		Identity:     h.ident,
+		Dedup:        h.dedup,
+		Session:      h.binder,
+		Audit:        h.audit,
+		Replier:      h.replier,
+		Typing:       h.typing,
+		Media:        h.media,
+		OriginType:   "lark_chat",
+		QuickCreate:  h.quick,
+	})
 }
 
 func TestRouter_NoResolverSet_ReturnsError(t *testing.T) {
@@ -986,6 +1077,7 @@ func TestRouter_AdapterFreshBodyIsNotParsedAgain(t *testing.T) {
 	msg := p2pMessage(t)
 	msg.ForceFresh = true
 	msg.Text = "<recent_context>\n/new from history\n</recent_context>\n\ncurrent prompt"
+	msg.CommandText = "/new current prompt"
 
 	if err := h.router.Handle(context.Background(), msg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -1210,5 +1302,133 @@ func TestRouter_MediaDeadlineStartsBeforeAppend(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("resolver did not run")
+	}
+}
+
+func TestRouter_QuickCreateQueuesWithoutSchedulingChatRun(t *testing.T) {
+	h := newHarness(t)
+	h.enableQuickCreate()
+	h.media.noMedia = true
+	h.binder.appendResult.IssueCommand = &IssueCommand{Title: "fix login"}
+
+	msg := p2pMessage(t)
+	msg.Text = "/issue fix login"
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return len(h.replier.calls()) == 1 }) {
+		t.Fatal("quick-create outcome reply missing")
+	}
+	enqueues, promotions, prompt, mediaPending, _ := h.quick.snapshot()
+	if enqueues != 1 || promotions != 0 {
+		t.Fatalf("quick-create calls = enqueue %d, promote %d", enqueues, promotions)
+	}
+	if prompt != "fix login" || mediaPending {
+		t.Fatalf("quick-create prompt=%q mediaPending=%v", prompt, mediaPending)
+	}
+	if h.quick.messageID() != h.binder.appendResult.MessageID {
+		t.Fatalf("quick-create message = %v, want %v", h.quick.messageID(), h.binder.appendResult.MessageID)
+	}
+	if h.tasks.wasCalled() {
+		t.Fatal("quick-create must not also schedule a normal chat run")
+	}
+	if h.typing.calls() != 0 {
+		t.Fatal("quick-create acknowledgement must not start normal chat typing")
+	}
+	if got := h.messages.contents(); len(got) != 1 || got[0] != IssueQueuedAckText {
+		t.Fatalf("assistant notes = %#v", got)
+	}
+	if results := h.replier.calls(); !results[0].IssueQueued || results[0].RunScheduled {
+		t.Fatalf("result = %+v", results[0])
+	}
+}
+
+func TestRouter_QuickCreateBareIssueShowsUsage(t *testing.T) {
+	h := newHarness(t)
+	h.enableQuickCreate()
+	h.media.noMedia = true
+	h.binder.appendResult.IssueCommand = &IssueCommand{}
+
+	msg := p2pMessage(t)
+	msg.Text = "/issue"
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return len(h.replier.calls()) == 1 }) {
+		t.Fatal("usage outcome reply missing")
+	}
+	enqueues, _, _, _, _ := h.quick.snapshot()
+	if enqueues != 0 {
+		t.Fatalf("bare /issue enqueues = %d, want 0", enqueues)
+	}
+	if got := h.messages.contents(); len(got) != 1 || got[0] != IssueUsageText {
+		t.Fatalf("assistant notes = %#v", got)
+	}
+	if !h.replier.calls()[0].IssueUsage {
+		t.Fatalf("result = %+v", h.replier.calls()[0])
+	}
+}
+
+func TestRouter_QuickCreateMediaBindsToDeferredTaskThenPromotes(t *testing.T) {
+	h := newHarness(t)
+	h.enableQuickCreate()
+	h.binder.appendResult.IssueCommand = &IssueCommand{Title: "broken screenshot"}
+
+	msg := p2pMessage(t)
+	msg.Text = "/issue broken screenshot [Image]"
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !waitFor(2*time.Second, func() bool {
+		_, promotions, _, _, _ := h.quick.snapshot()
+		return promotions == 1
+	}) {
+		t.Fatal("media-ready quick-create promotion missing")
+	}
+	enqueues, promotions, _, mediaPending, promotedTaskID := h.quick.snapshot()
+	if enqueues != 1 || promotions != 1 || !mediaPending {
+		t.Fatalf("quick-create calls = enqueue %d, promote %d, mediaPending=%v", enqueues, promotions, mediaPending)
+	}
+	if promotedTaskID != h.quick.task.ID {
+		t.Fatalf("promoted task = %v, want %v", promotedTaskID, h.quick.task.ID)
+	}
+	bound := h.binder.boundMedia()
+	if bound.QuickCreateTaskID != h.quick.task.ID {
+		t.Fatalf("media quick-create task = %v, want %v", bound.QuickCreateTaskID, h.quick.task.ID)
+	}
+	if len(bound.MediaRefs) != 1 {
+		t.Fatalf("bound media refs = %d, want 1", len(bound.MediaRefs))
+	}
+	if h.tasks.promotionCalls() != 0 {
+		t.Fatal("quick-create media must not promote normal chat tasks")
+	}
+}
+
+func TestRouter_QuickCreateEnqueueFailureClearsMediaMarkerWithoutResolving(t *testing.T) {
+	h := newHarness(t)
+	h.enableQuickCreate()
+	h.quick.enqueueErr = errors.New("queue unavailable")
+	h.binder.appendResult.IssueCommand = &IssueCommand{Title: "broken screenshot"}
+
+	msg := p2pMessage(t)
+	msg.Text = "/issue broken screenshot [Image]"
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return len(h.replier.calls()) == 1 }) {
+		t.Fatal("failure outcome reply missing")
+	}
+	if h.media.calls() != 0 {
+		t.Fatal("media must not resolve when the owning quick-create task failed to enqueue")
+	}
+	bound := h.binder.boundMedia()
+	if bound.MessageID != h.binder.appendResult.MessageID || len(bound.MediaRefs) != 0 {
+		t.Fatalf("marker clear bind = %+v", bound)
+	}
+	if !h.replier.calls()[0].IssueQueueFailed {
+		t.Fatalf("result = %+v", h.replier.calls()[0])
+	}
+	if got := h.messages.contents(); len(got) != 1 || got[0] != IssueQueueFailedText {
+		t.Fatalf("assistant notes = %#v", got)
 	}
 }

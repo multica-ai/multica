@@ -145,3 +145,25 @@ DELETE FROM attachment WHERE id = $1 AND workspace_id = $2;
 SELECT * FROM attachment
 WHERE id = ANY(sqlc.arg(attachment_ids)::uuid[]) AND workspace_id = sqlc.arg(workspace_id)
 ORDER BY created_at ASC;
+
+-- name: ListUnboundAttachmentIDsByTaskLineage :many
+-- Channel quick-create media is durably owned by task_id while the background
+-- agent authors the issue. Follow parent_task_id so an automatic retry sees
+-- media owned by its failed ancestor; retries inherit the quick-create context
+-- but intentionally receive a new task id.
+WITH RECURSIVE task_lineage AS (
+  SELECT task.id, task.parent_task_id
+  FROM agent_task_queue task
+  WHERE task.id = sqlc.arg(task_id)
+  UNION ALL
+  SELECT parent.id, parent.parent_task_id
+  FROM agent_task_queue parent
+  JOIN task_lineage child ON parent.id = child.parent_task_id
+)
+SELECT attachment.id FROM attachment
+WHERE attachment.task_id IN (SELECT task_lineage.id FROM task_lineage)
+  AND attachment.workspace_id = sqlc.arg(workspace_id)
+  AND attachment.issue_id IS NULL
+  AND attachment.comment_id IS NULL
+  AND attachment.chat_message_id IS NULL
+ORDER BY attachment.created_at ASC;

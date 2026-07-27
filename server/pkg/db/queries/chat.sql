@@ -324,10 +324,11 @@ UPDATE chat_message
 SET channel_media_pending_until = NULL
 WHERE id = $1 AND chat_session_id = $2;
 
--- name: LinkChatMessageToTask :exec
+-- name: LinkChatMessageToTask :one
 UPDATE chat_message
 SET task_id = $2
-WHERE id = $1 AND role = 'user';
+WHERE id = $1 AND role = 'user'
+RETURNING id;
 
 -- name: LinkUnownedChannelChatMessagesToTask :exec
 -- Seals the trailing channel-message batch to its task. The task row and these
