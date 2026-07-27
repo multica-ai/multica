@@ -1551,15 +1551,15 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 //     (service.ErrDuplicatePendingTask, #5914).
 //
 // Both mean "a task now exists". INVARIANT: this never returns a success-shaped
-// outcome (coalesced / deferred / queued) without a COMPLETED backing operation
-// — an atomic head-scoped merge, a planned-id registration on a claim-receipt
-// task, a fresh enqueue, or a single-snapshot classification that PROVES a
-// different-head active task created strictly before this comment holds the slot
-// (so completion reconcile replays the comment by timestamp — coverage verified
-// by the query, not inferred from head difference). A duplicate that cannot yet
-// be durably resolved re-loops (bounded by maxAttempts); on genuine
-// non-convergence it returns a truthful internal_error, never a fabricated
-// deferred that would silently drop the comment.
+// outcome (coalesced / deferred / queued) without a COMPLETED backing WRITE — an
+// atomic head-scoped merge (coalesced), a planned-id registration on a same-head
+// claim-receipt task (deferred), or a fresh enqueue (queued). It never defers off
+// a mere classification of the current active tasks: a point-in-time snapshot
+// cannot prove a DIFFERENT-head task's reconcile will still cover the comment once
+// a newer blocker may have appeared before that task completes (Elon round 7). A
+// duplicate that cannot yet be backed by a completed write re-loops (bounded by
+// maxAttempts); on genuine non-convergence it returns a truthful internal_error,
+// never a fabricated deferred that would silently drop the comment.
 func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, triggerCommentID pgtype.UUID, getEscalationDelay func() time.Duration) (DispatchStatus, DispatchReasonCode) {
 	pending := trigger.AlreadyPending
 	lostRace := false
@@ -1628,50 +1628,22 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 				if registered {
 					return DispatchDeferred, ReasonDeferred
 				}
-				// (d) Nothing folded or registered. Classify the active tasks in a
-				// SINGLE atomic snapshot so we never derive "different-head" from
-				// two separate reads (Elon round 4 TOCTOU): a same-head sibling
-				// slipping in between a "no same-head pending" read and a later
-				// "any active" read would otherwise earn a fabricated deferred on
-				// top of a task that does not cover this comment.
-				class, err := h.Queries.ClassifyActiveTasksForIssueAndAgent(ctx, db.ClassifyActiveTasksForIssueAndAgentParams{
-					IssueID:          issue.ID,
-					AgentID:          trigger.Agent.ID,
-					HeadSha:          getHeadSha(),
-					TriggerCommentID: triggerCommentID,
-				})
-				if err != nil {
-					slog.Warn("classify active tasks failed",
-						"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID), "error", err)
-					return DispatchBlocked, ReasonInternalError
-				}
-				if class.HasSameHeadActive {
-					// A same-head queued/claimed sibling appeared after the merge/
-					// register miss — only the atomic merge/registration may cover
-					// this comment, so re-loop rather than defer on top of it.
-					continue
-				}
-				if class.HasNonCoveringDifferentHeadActive {
-					// A different-head task NEWER than this comment is active: its
-					// reconcile can never replay the comment (comment.created_at <
-					// task.created_at, and the comment is not in its planned ids),
-					// and while queued/dispatched it occupies the unique slot and
-					// would BLOCK a covering task's reconcile follow-up too. So a
-					// deferred here would be a fabricated success EVEN IF a covering
-					// task also exists (mixed state — Elon round 6). Re-loop for
-					// durable coverage (the newer task may finish and free the
-					// slot); sustained non-convergence falls through to a truthful
-					// internal_error, never a drop.
-					continue
-				}
-				if class.HasCoveringDifferentHeadActive {
-					// Every active different-head task was created STRICTLY BEFORE
-					// this comment (checked above: none newer), so a covering task's
-					// completion reconcile provably replays it by timestamp with no
-					// newer sibling to block the follow-up — a durable deferral.
-					return DispatchDeferred, ReasonDeferred
-				}
-				// No active task at all → a fresh enqueue is safe (below).
+				// (d) No same-head QUEUED task to fold (merge missed) and no
+				// same-head CLAIM-RECEIPT task to register on. Do NOT try to defer
+				// off a classification of the current active tasks: a snapshot only
+				// proves state NOW, and a DIFFERENT-head task's reconcile covering
+				// this comment can be defeated by a newer blocker that appears after
+				// the snapshot but before that task completes (its replay collides
+				// with the blocker and completion reconcile discards the failure —
+				// Elon round 7). Every success-shaped outcome must be backed by a
+				// COMPLETED write, never a prediction. So just fall through to a
+				// fresh enqueue: if the unique slot is still occupied — necessarily
+				// by a different-head task we can neither fold into nor durably cover
+				// — the insert re-raises ErrDuplicatePendingTask and we re-loop,
+				// converging to a truthful non-success; if the slot is free, the
+				// enqueue creates the covering task. (The occupant's own completion
+				// reconcile still replays this comment best-effort in the common
+				// no-blocker case; we simply never PROMISE it.)
 			}
 		}
 		if err := h.enqueueSingleCommentTrigger(ctx, issue, triggerCommentID, trigger, getEscalationDelay); err != nil {

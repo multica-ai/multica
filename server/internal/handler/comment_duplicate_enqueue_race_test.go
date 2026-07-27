@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -197,10 +196,12 @@ func TestCommentEnqueueRaceDispatchedWinnerDurablyCoversLoser(t *testing.T) {
 }
 
 // TestCommentEnqueueRaceDifferentHeadNotCoalesced is the regression for Elon
-// round-2 must-fix 2: the physical unique index is only (issue_id, agent_id), so
-// a comment for a NEW head (PR updated A→B) collides with the still-pending
-// head-A task. It must NOT be folded into the head-A run as coalesced (TEN-356),
-// and head B must still earn its own coverage after the head-A task completes.
+// round-2 must-fix 2 + round-7: a comment for a NEW head (PR updated A→B) collides
+// with the still-pending head-A task. It must NOT be folded into the head-A run
+// (TEN-356), and — per round 7 — it must NOT be reported as a fabricated deferred
+// either, since a point-in-time "an older task exists" cannot durably promise
+// coverage. The honest outcome is a non-success; the head-A task's completion
+// reconcile still covers the head-B comment best-effort, earning head-B coverage.
 func TestCommentEnqueueRaceDifferentHeadNotCoalesced(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -248,9 +249,15 @@ func TestCommentEnqueueRaceDifferentHeadNotCoalesced(t *testing.T) {
 	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
 	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(headBcommentID), []commentAgentTrigger{trigger})
 
-	// Not coalesced into the head-A run: deferred instead.
-	if res := results[agentID]; res.status != DispatchDeferred {
-		t.Fatalf("different-head race: got status %q reason %q, want deferred (not coalesced into old head)", res.status, res.reason)
+	// Not coalesced into the head-A run, and NOT a fabricated deferred either — a
+	// snapshot cannot durably promise the head-A task's reconcile will still cover
+	// this comment (Elon round 7). The honest outcome is a non-success; the head-A
+	// reconcile still covers it best-effort below.
+	if res := results[agentID]; res.status == DispatchDeferred || res.status == DispatchCoalesced || res.status == DispatchQueued {
+		t.Fatalf("different-head race: got success-shaped %q/%q, want a truthful non-success", res.status, res.reason)
+	}
+	if res := results[agentID]; res.status != DispatchBlocked || res.reason != ReasonInternalError {
+		t.Fatalf("different-head race: got %q/%q, want blocked/internal_error", res.status, res.reason)
 	}
 	// The head-A task is untouched: the head-B comment was NOT folded in, and the
 	// task still carries head A.
@@ -418,122 +425,6 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 	}
 }
 
-// TestClassifyActiveTasksForIssueAndAgent locks the single-snapshot classifier
-// used by the lost-race resolver (Elon rounds 4–5). From ONE read it reports:
-//   - has_same_head_active               — a same-head active task exists;
-//   - has_covering_different_head_active — a DIFFERENT-head active task created
-//     STRICTLY BEFORE the trigger comment (so completion reconcile provably
-//     replays the comment by timestamp — the only different-head shape that may
-//     defer);
-//   - has_active                         — any active task exists.
-//
-// The round-5 property: a NEWER different-head task must NOT count as covering,
-// because its `created_at > since` reconcile window would never match the older
-// comment — deferring on it would silently drop the comment.
-func TestClassifyActiveTasksForIssueAndAgent(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-	agentID, issueID, runtimeID := dupRaceFixture(t, "dup-race-classify", 999316)
-	issueUUID := util.MustParseUUID(issueID)
-	agentUUID := util.MustParseUUID(agentID)
-
-	// The trigger comment the classifier compares task timestamps against (3m old).
-	commentID := insertDupRaceComment(t, issueID, "trigger comment", "3 minutes")
-
-	// insertTask places a task `age` before now, so it can sit OLDER or NEWER than
-	// the 3-minute-old trigger comment.
-	insertTask := func(status, head, age string) {
-		t.Helper()
-		if head == "" {
-			if _, err := testPool.Exec(ctx, `
-				INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at)
-				VALUES ($1, $2, $3, $4, 0, now() - $5::interval)
-			`, agentID, runtimeID, issueID, status, age); err != nil {
-				t.Fatalf("insert %s task (no head): %v", status, err)
-			}
-			return
-		}
-		if _, err := testPool.Exec(ctx, `
-			INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, created_at, context)
-			VALUES ($1, $2, $3, $4, 0, now() - $6::interval, jsonb_build_object('head_sha', $5::text))
-		`, agentID, runtimeID, issueID, status, head, age); err != nil {
-			t.Fatalf("insert %s task (head %s): %v", status, head, err)
-		}
-	}
-	classify := func(head string) db.ClassifyActiveTasksForIssueAndAgentRow {
-		t.Helper()
-		row, err := testHandler.Queries.ClassifyActiveTasksForIssueAndAgent(ctx, db.ClassifyActiveTasksForIssueAndAgentParams{
-			IssueID:          issueUUID,
-			AgentID:          agentUUID,
-			HeadSha:          pgtype.Text{String: head, Valid: head != ""},
-			TriggerCommentID: util.MustParseUUID(commentID),
-		})
-		if err != nil {
-			t.Fatalf("classify(head=%q): %v", head, err)
-		}
-		return row
-	}
-	clear := func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) }
-
-	// No active task.
-	if c := classify(dupRaceHeadB); c.HasSameHeadActive || c.HasCoveringDifferentHeadActive || c.HasNonCoveringDifferentHeadActive {
-		t.Fatalf("no active: same=%v covering=%v noncovering=%v, want false/false/false", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasNonCoveringDifferentHeadActive)
-	}
-
-	// Same-head queued.
-	insertTask("queued", dupRaceHeadB, "5 minutes")
-	if c := classify(dupRaceHeadB); !c.HasSameHeadActive || c.HasCoveringDifferentHeadActive || c.HasNonCoveringDifferentHeadActive {
-		t.Fatalf("same-head: same=%v covering=%v noncovering=%v, want true/false/false", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasNonCoveringDifferentHeadActive)
-	}
-	clear()
-
-	// Different-head OLDER than the comment → covering (reconcile replays by ts).
-	insertTask("dispatched", dupRaceHeadA, "5 minutes")
-	if c := classify(dupRaceHeadB); c.HasSameHeadActive || !c.HasCoveringDifferentHeadActive || c.HasNonCoveringDifferentHeadActive {
-		t.Fatalf("different-head older: same=%v covering=%v noncovering=%v, want false/true/false", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasNonCoveringDifferentHeadActive)
-	}
-	clear()
-
-	// ROUND-5: different-head NEWER than the comment → NOT covering, non-covering.
-	insertTask("dispatched", dupRaceHeadA, "1 minute")
-	if c := classify(dupRaceHeadB); c.HasSameHeadActive || c.HasCoveringDifferentHeadActive || !c.HasNonCoveringDifferentHeadActive {
-		t.Fatalf("different-head newer: same=%v covering=%v noncovering=%v, want false/false/true", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasNonCoveringDifferentHeadActive)
-	}
-	clear()
-
-	// ROUND-6: an older COVERING different-head task and a newer NON-COVERING one
-	// coexist (running sits outside the unique index). Both flags MUST be set so
-	// the resolver refuses to defer on the covering one while the newer one can
-	// block its reconcile follow-up.
-	insertTask("running", dupRaceHeadA, "5 minutes")
-	insertTask("dispatched", dupRaceHeadA, "1 minute")
-	if c := classify(dupRaceHeadB); c.HasSameHeadActive || !c.HasCoveringDifferentHeadActive || !c.HasNonCoveringDifferentHeadActive {
-		t.Fatalf("mixed covering+non-covering: same=%v covering=%v noncovering=%v, want false/true/true", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasNonCoveringDifferentHeadActive)
-	}
-	clear()
-
-	// A head-less (no-PR) task older than the comment is a covering DIFFERENT head
-	// for a non-empty request head, but the SAME head for an empty request head.
-	insertTask("queued", "", "5 minutes")
-	if c := classify(dupRaceHeadB); c.HasSameHeadActive || !c.HasCoveringDifferentHeadActive {
-		t.Fatalf("head-less vs head B: same=%v covering=%v, want false/true", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive)
-	}
-	if c := classify(""); !c.HasSameHeadActive || c.HasCoveringDifferentHeadActive {
-		t.Fatalf("head-less vs empty head: same=%v covering=%v, want true/false", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive)
-	}
-	clear()
-
-	// Same-head coexisting with a covering different-head task (running sits
-	// outside the unique index): same-head MUST win so the resolver re-loops to
-	// fold, never defers on a task that does not cover the comment.
-	insertTask("queued", dupRaceHeadB, "5 minutes")
-	insertTask("running", dupRaceHeadA, "5 minutes")
-	if c := classify(dupRaceHeadB); !c.HasSameHeadActive || !c.HasCoveringDifferentHeadActive || c.HasNonCoveringDifferentHeadActive {
-		t.Fatalf("same-head + covering diff: same=%v covering=%v noncovering=%v, want true/true/false", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasNonCoveringDifferentHeadActive)
-	}
-}
 
 // TestCommentEnqueueRaceNewerDifferentHeadNotDeferred is the regression for Elon
 // round-5 must-fix: when the different-head task holding the slot is NEWER than
