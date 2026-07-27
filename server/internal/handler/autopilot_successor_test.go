@@ -21,7 +21,6 @@ func addAutopilotSuccessorViaAPI(t *testing.T, apID, successorID, onStatus strin
 	w := httptest.NewRecorder()
 	path := "/api/autopilots/" + apID + "/successors?workspace_id=" + testWorkspaceID
 	r := withURLParam(newRequest("POST", path, body), "id", apID)
-	r = withURLParam(r, "successorId", successorID)
 	testHandler.AddAutopilotSuccessor(w, r)
 	if w.Code != wantStatus {
 		t.Fatalf("AddAutopilotSuccessor: expected %d, got %d: %s", wantStatus, w.Code, w.Body.String())
@@ -84,7 +83,7 @@ func TestAutopilotSuccessorAddListDelete(t *testing.T) {
 	// Delete the edge.
 	w := httptest.NewRecorder()
 	path := "/api/autopilots/" + apA + "/successors/" + apB + "?workspace_id=" + testWorkspaceID
-	r := withURLParam(withURLParam(newRequest("DELETE", path, nil), "id", apA), "successorId", apB)
+	r := withURLParams(newRequest("DELETE", path, nil), "id", apA, "successorId", apB)
 	testHandler.DeleteAutopilotSuccessor(w, r)
 	if w.Code != http.StatusNoContent {
 		t.Fatalf("DeleteAutopilotSuccessor: expected 204, got %d: %s", w.Code, w.Body.String())
@@ -109,7 +108,6 @@ func TestAutopilotSuccessorDefaultOnStatus(t *testing.T) {
 	w := httptest.NewRecorder()
 	path := "/api/autopilots/" + apA + "/successors?workspace_id=" + testWorkspaceID
 	r := withURLParam(newRequest("POST", path, body), "id", apA)
-	r = withURLParam(r, "successorId", apB)
 	testHandler.AddAutopilotSuccessor(w, r)
 	if w.Code != http.StatusCreated {
 		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
