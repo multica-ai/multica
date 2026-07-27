@@ -195,6 +195,13 @@ export function DesktopNavigationProvider({
       back: () => {
         useTabStore.getState().goBack();
       },
+      // The active tab's virtual history, same source the shell's back button
+      // reads. A tab opened straight onto a destination sits at index 0 and
+      // has nothing behind it.
+      canGoBack: () => {
+        const active = getActiveTab(useTabStore.getState());
+        return (active?.history.index ?? 0) > 0;
+      },
       pathname: location.pathname,
       searchParams: new URLSearchParams(location.search),
       openInNewTab: (

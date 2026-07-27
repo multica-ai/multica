@@ -25,10 +25,12 @@
     "title_tokens": "일별 토큰",
     "title_time": "일별 실행 시간",
     "title_tasks": "일별 작업",
+    "title_errors": "일별 오류",
     "metric_cost": "비용",
     "metric_tokens": "토큰",
     "metric_time": "시간",
     "metric_tasks": "작업",
+    "metric_errors": "오류",
     "no_data": "이 기간에는 사용량이 없습니다."
   },
   "weekly": {
@@ -36,7 +38,31 @@
     "title_tokens": "주별 토큰",
     "title_time": "주별 실행 시간",
     "title_tasks": "주별 작업",
+    "title_errors": "주별 오류",
     "partial_label": "{{range}} (부분 · 7일 중 {{covered}}일)"
+  },
+  "errors": {
+    "tooltip_rate": "오류율",
+    "class": {
+      "auth": "인증",
+      "rate_limit": "속도 제한",
+      "timeout": "시간 초과",
+      "provider": "프로바이더",
+      "runtime": "런타임",
+      "agent": "에이전트",
+      "other": "기타"
+    },
+    "title": "오류",
+    "summary": "실행 {{total}}회 중 {{failed}}회 실패 · {{rate}}",
+    "by_class": "유형별",
+    "by_agent": "실패가 많은 에이전트",
+    "other_agents": "기타 에이전트",
+    "agent_rate": "{{failed}} / {{total}} · {{rate}}",
+    "no_data": "이 기간에는 실패한 실행이 없습니다.",
+    "show_reasons": "오류 코드 표시",
+    "hide_reasons": "오류 코드 숨기기",
+    "show_all": "전체 {{count}}개 보기",
+    "show_less": "상위 {{count}}개만"
   },
   "leaderboard": {
     "title": "리더보드",

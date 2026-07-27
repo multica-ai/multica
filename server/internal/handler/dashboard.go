@@ -12,14 +12,16 @@ import (
 // ---------------------------------------------------------------------------
 // Workspace / Project dashboard
 //
-// Three read endpoints power the workspace dashboard:
+// Six read endpoints power the workspace dashboard:
 //
-//   GET /api/dashboard/usage/daily       per-(date, model) token rows
-//   GET /api/dashboard/usage/by-agent    per-(agent, model) token rows
-//   GET /api/dashboard/agent-runtime     per-agent run-time + task counts
-//   GET /api/dashboard/runtime/daily     per-date run-time + task counts
+//   GET /api/dashboard/usage/daily        per-(date, model) token rows
+//   GET /api/dashboard/usage/by-agent     per-(agent, model) token rows
+//   GET /api/dashboard/agent-runtime      per-agent run-time + task counts
+//   GET /api/dashboard/runtime/daily      per-date run-time + task counts
+//   GET /api/dashboard/failures/daily     per-(date, failure_reason) counts
+//   GET /api/dashboard/failures/by-agent  per-(agent, failure_reason) counts
 //
-// All three accept ?days=N (defaults to 30, capped at 365) and an optional
+// All of them accept ?days=N (defaults to 30, capped at 365) and an optional
 // ?project_id=<uuid> to scope the rollup to a single project. With no
 // project_id the data spans the whole workspace.
 //
@@ -318,6 +320,121 @@ func (h *Handler) GetDashboardRunTimeDaily(w http.ResponseWriter, r *http.Reques
 			TotalSeconds: row.TotalSeconds,
 			TaskCount:    row.TaskCount,
 			FailedCount:  row.FailedCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// ---------------------------------------------------------------------------
+// Failure rollups
+//
+// Both endpoints return EVERY terminal task, not just the failed ones: the
+// row whose FailureReason is "" carries that bucket's succeeded count. The
+// client needs that denominator to render an error *rate*, and shipping it
+// in the same payload keeps numerator and denominator on identical filters —
+// deriving the denominator from the run-time endpoints instead would silently
+// disagree, because those require started_at IS NOT NULL and a task that
+// expired in the queue never started.
+//
+// FailureReason values are the canonical taxonomy from server/pkg/taskfailure
+// (21 reasons), plus "unclassified" for failed rows with a NULL / empty
+// column. The client folds them into a handful of display classes; the raw
+// reason stays on the wire so that mapping can change without a backend
+// deploy.
+// ---------------------------------------------------------------------------
+
+// DashboardFailureDailyResponse is one (date, failure_reason) bucket of
+// terminal-task counts. FailureReason == "" is the succeeded bucket.
+type DashboardFailureDailyResponse struct {
+	Date          string `json:"date"`
+	FailureReason string `json:"failure_reason"`
+	TaskCount     int32  `json:"task_count"`
+}
+
+// GetDashboardFailuresDaily returns per-(date, failure_reason) terminal-task
+// counts for the workspace, optionally scoped to a project. Powers the Usage
+// page's Errors trend and errors-by-class breakdown.
+func (h *Handler) GetDashboardFailuresDaily(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	// Same viewer-tz day boundary as every other daily series so the Errors
+	// tab lines up with Cost / Tokens / Time / Tasks.
+	tz := h.resolveViewingTZ(r)
+	since := parseSinceParamInTZ(r, 30, tz)
+
+	rows, err := h.Queries.ListDashboardFailuresDaily(r.Context(), db.ListDashboardFailuresDailyParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Tz:          tz,
+		Since:       since,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list daily failures")
+		return
+	}
+
+	resp := make([]DashboardFailureDailyResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardFailureDailyResponse{
+			Date:          row.Date.Time.Format("2006-01-02"),
+			FailureReason: row.FailureReason,
+			TaskCount:     row.TaskCount,
+		}
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// DashboardFailureByAgentResponse is one (agent, failure_reason) bucket of
+// terminal-task counts. FailureReason == "" is the succeeded bucket.
+type DashboardFailureByAgentResponse struct {
+	AgentID       string `json:"agent_id"`
+	FailureReason string `json:"failure_reason"`
+	TaskCount     int32  `json:"task_count"`
+}
+
+// GetDashboardFailuresByAgent returns per-(agent, failure_reason)
+// terminal-task counts for the workspace, optionally scoped to a project.
+// Powers the Usage page's "top offenders" list.
+func (h *Handler) GetDashboardFailuresByAgent(w http.ResponseWriter, r *http.Request) {
+	workspaceID := h.resolveWorkspaceID(r)
+	if _, ok := h.workspaceMember(w, r, workspaceID); !ok {
+		return
+	}
+	projectID, ok := parseProjectIDParam(w, r)
+	if !ok {
+		return
+	}
+	// No date grouping in the SQL, so the client cannot trim this response the
+	// way it trims the date-bucketed series. Close the window server-side to
+	// exactly `days` calendar buckets — the same span the Errors chart renders
+	// after its `-(days-1)` filter. With the default N+1 cutoff this list
+	// covered one extra day, so at days=1 the card could report yesterday's
+	// failures next to a chart showing none.
+	tz := h.resolveViewingTZ(r)
+	since := parseExactSinceParamInTZ(r, 30, tz)
+
+	rows, err := h.Queries.ListDashboardFailuresByAgent(r.Context(), db.ListDashboardFailuresByAgentParams{
+		WorkspaceID: parseUUID(workspaceID),
+		Since:       since,
+		ProjectID:   projectID,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list failures by agent")
+		return
+	}
+
+	resp := make([]DashboardFailureByAgentResponse, len(rows))
+	for i, row := range rows {
+		resp[i] = DashboardFailureByAgentResponse{
+			AgentID:       uuidToString(row.AgentID),
+			FailureReason: row.FailureReason,
+			TaskCount:     row.TaskCount,
 		}
 	}
 	writeJSON(w, http.StatusOK, resp)

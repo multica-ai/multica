@@ -587,6 +587,41 @@ func TestCreateAgent_RejectsDuplicateName(t *testing.T) {
 	}
 }
 
+// TestUpdateAgent_RejectsRenameToArchivedName is the regression for #5914: the
+// (workspace_id, name) unique constraint does not exclude archived agents, so a
+// rename that collides with an *archived* agent's still-reserved name used to
+// fall through UpdateAgent as a raw 500 that leaked the constraint name — while
+// CreateAgent already mapped the same collision to a clean 409. This asserts the
+// two entry points now agree: a structured 409, and no raw constraint in the body.
+func TestUpdateAgent_RejectsRenameToArchivedName(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	// Agent A holds the name, then is archived — the name stays reserved.
+	const heldName = "rename-collision-archived-name"
+	idA := createHandlerTestAgent(t, heldName, nil)
+	archiveReq := withURLParam(newRequest(http.MethodPost, "/api/agents/"+idA+"/archive", nil), "id", idA)
+	archiveW := httptest.NewRecorder()
+	testHandler.ArchiveAgent(archiveW, archiveReq)
+	if archiveW.Code != http.StatusOK {
+		t.Fatalf("ArchiveAgent: expected 200, got %d: %s", archiveW.Code, archiveW.Body.String())
+	}
+
+	// Agent B renames itself into the archived agent's name.
+	idB := createHandlerTestAgent(t, "rename-collision-source", nil)
+	w := httptest.NewRecorder()
+	testHandler.UpdateAgent(w, withURLParam(
+		newRequest(http.MethodPatch, "/api/agents/"+idB, map[string]any{"name": heldName}), "id", idB))
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("rename to archived agent's name: expected 409, got %d: %s", w.Code, w.Body.String())
+	}
+	if strings.Contains(w.Body.String(), "agent_workspace_name_unique") {
+		t.Fatalf("409 body leaked the raw constraint name: %s", w.Body.String())
+	}
+}
+
 func TestCreateAgent_AssignsAvatarDefault(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

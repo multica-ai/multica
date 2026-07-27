@@ -22,6 +22,8 @@ import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
 import { RESOURCES } from "@multica/views/locales";
 import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
+import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
+import { buildFreezeEventProps } from "./freeze-flush";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
 // apps/web/app/layout.tsx HTML_LANG. index.html ships a static lang="en";
@@ -381,16 +383,10 @@ export default function App() {
   useEffect(() => {
     const last = window.desktopAPI.getLastFreeze();
     if (!last) return;
-    const crashed = last.kind === "render-process-gone";
-    captureEvent(crashed ? "client_crash" : "client_unresponsive", {
-      // Spread context FIRST so our explicit fields below always win — a
-      // future context key (e.g. its own `source`) must not silently override.
-      ...last.context,
-      source: crashed ? "render-process-gone" : "main-unresponsive",
-      recovered: false,
-      breadcrumb_ts: last.ts,
-      crashed_version: last.version,
-    });
+    captureEvent(
+      last.kind === "render-process-gone" ? "client_crash" : "client_unresponsive",
+      buildFreezeEventProps(last),
+    );
   }, []);
 
   // Stable identity reference so downstream effects (WS reconnect) don't
@@ -453,6 +449,7 @@ export default function App() {
           localeAdapter={localeAdapter}
         >
           <DesktopAuthSessionBridge />
+          {windowContext.kind === "main" && <DiagnosticRouteReporter />}
           {windowContext.kind === "main" && (
             <DesktopClientUsageReporter
               apiUrl={runtimeConfigResult.config.apiUrl}

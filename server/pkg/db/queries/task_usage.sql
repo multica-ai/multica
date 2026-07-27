@@ -175,3 +175,71 @@ WHERE a.workspace_id = $1
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
 GROUP BY atq.agent_id
 ORDER BY total_seconds DESC;
+
+-- name: ListDashboardFailuresDaily :many
+-- Daily per-(date, failure_reason) terminal-task counts for the workspace,
+-- optionally scoped to a single project. Powers the workspace dashboard's
+-- "Errors" trend and the errors-by-class breakdown.
+--
+-- Shape note: this returns EVERY terminal task, not just the failures. The
+-- `failure_reason = ''` row of each date carries that date's succeeded
+-- count, which is the denominator the client needs for an error rate. A
+-- failed row whose failure_reason column is NULL or empty (pre-MUL-1949
+-- rows, or a failure path that forgot to classify) collapses into the
+-- 'unclassified' bucket so it stays countable instead of masquerading as a
+-- success. Cardinality is bounded by days x (21 reasons + 2), so the whole
+-- window fits in one small payload.
+--
+-- Unlike ListDashboardRunTimeDaily this does NOT require started_at — a task
+-- that expired in the queue (failure_reason='queued_expired') never started
+-- but is unambiguously a failure, and dropping it would under-report exactly
+-- the outage the Errors chart exists to surface. Every failure path sets
+-- completed_at, so bucketing on it covers all of them.
+--
+-- @since is already the viewer's local start-of-day-(N) (parseSinceParamInTZ)
+-- — passed straight through, NOT re-truncated; see ListDashboardUsageDaily.
+SELECT
+    DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) AS date,
+    CASE
+        WHEN atq.status = 'failed'
+            THEN COALESCE(NULLIF(atq.failure_reason, ''), 'unclassified')
+        ELSE ''
+    END AS failure_reason,
+    COUNT(*)::int AS task_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= sqlc.arg('since')::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY 1, 2
+ORDER BY 1 DESC, 2;
+
+-- name: ListDashboardFailuresByAgent :many
+-- Per-(agent, failure_reason) terminal-task counts — the "top offenders"
+-- half of the dashboard's errors breakdown. Same `failure_reason = ''`
+-- succeeded-bucket convention as ListDashboardFailuresDaily, so the client
+-- can rank agents by failure rate rather than raw count.
+--
+-- No date bucketing, so no @tz — @since is the viewer's local
+-- start-of-day-(N) so the window lines up with the per-agent run-time card.
+SELECT
+    atq.agent_id,
+    CASE
+        WHEN atq.status = 'failed'
+            THEN COALESCE(NULLIF(atq.failure_reason, ''), 'unclassified')
+        ELSE ''
+    END AS failure_reason,
+    COUNT(*)::int AS task_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY atq.agent_id, 2
+ORDER BY atq.agent_id, 2;

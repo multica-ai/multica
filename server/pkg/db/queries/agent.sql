@@ -1159,6 +1159,59 @@ WHERE id = (
     WHERE t.issue_id = @issue_id
       AND t.agent_id = @agent_id
       AND t.status = 'queued'
+      -- Head-scoped (TEN-356, #5914): never fold across HEADs. The physical
+      -- unique index is only (issue_id, agent_id), so an insert-race loser can
+      -- collide with a pending task stamped for a DIFFERENT head_sha; merging
+      -- into it would give a new-HEAD comment old-HEAD review coverage. Empty/
+      -- absent head_sha (no linked PR) matches any task, preserving coalescing.
+      AND (
+          COALESCE(sqlc.narg('head_sha')::text, '') = ''
+          OR t.context->>'head_sha' = sqlc.narg('head_sha')::text
+      )
+    ORDER BY t.created_at DESC
+    LIMIT 1
+)
+RETURNING id, coalesced_comment_ids;
+
+-- name: RegisterPlannedCommentForActiveTask :one
+-- #5914: durably register a comment that lost an enqueue race as a PLANNED
+-- (undelivered) input on the same-(issue, agent) ACTIVE task whose queued row
+-- MergeCommentIntoPendingTask could no longer target (it was claimed →
+-- dispatched/running). The losing comment can predate that task's created_at,
+-- so completion reconciliation's `created_at > since` window cannot see it;
+-- appending it to coalesced_comment_ids (the planned set) WITHOUT touching
+-- delivered_comment_ids makes reconcileCommentsOnCompletion replay it as a
+-- single bounded follow-up (planned-but-not-delivered ⇒ follow-up).
+--
+-- Head-scoped (TEN-356): only a task stamped with the SAME head_sha is a target,
+-- so a new-HEAD comment is never attached to an old-HEAD run. Returns
+-- pgx.ErrNoRows when no same-head active task exists (different HEAD, or the task
+-- just terminated) so the caller falls back to the active-task decision.
+--
+-- 'queued' is DELIBERATELY EXCLUDED (#5914, Elon round 3): a not-yet-claimed
+-- task has no claim receipt, so a comment merged into it WILL be recorded as
+-- delivered at claim time and never earns a completion follow-up under its own
+-- attribution. A queued target must therefore go through the ATOMIC
+-- MergeCommentIntoPendingTask (which re-stamps trigger/originator/accountable/
+-- overlay), never a bare planned append — otherwise a second member's comment
+-- could execute under the first member's identity/connected-apps (MUL-4302).
+-- Only claim-receipt statuses (already-built delivered set) are safe planned-id
+-- targets.
+UPDATE agent_task_queue
+SET coalesced_comment_ids = (
+        SELECT COALESCE(array_agg(DISTINCT e), '{}')
+        FROM unnest(array_append(coalesced_comment_ids, @comment_id::uuid)) AS e
+        WHERE e IS NOT NULL
+    )
+WHERE id = (
+    SELECT t.id FROM agent_task_queue t
+    WHERE t.issue_id = @issue_id
+      AND t.agent_id = @agent_id
+      AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
+      AND (
+          COALESCE(sqlc.narg('head_sha')::text, '') = ''
+          OR t.context->>'head_sha' = sqlc.narg('head_sha')::text
+      )
     ORDER BY t.created_at DESC
     LIMIT 1
 )

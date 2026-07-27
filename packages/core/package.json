@@ -115,6 +115,7 @@
     "./platform": "./platform/index.ts",
     "./shortcuts": "./shortcuts/index.ts",
     "./analytics": "./analytics/index.ts",
+    "./diagnostics": "./diagnostics/index.ts",
     "./client-usage": "./client-usage/index.ts",
     "./i18n": "./i18n/index.ts",
     "./i18n/react": "./i18n/react.ts",

@@ -64,6 +64,7 @@ const TYPE_LABEL: Record<InboxItemType, string> = {
   reaction_added: "Reaction added",
   quick_create_done: "Quick-create done",
   quick_create_failed: "Quick-create failed",
+  quick_create_unconfirmed: "Quick-create needs a check",
 };
 
 // due_date is a calendar day — format timezone-safely (no offset day shift).
@@ -144,6 +145,13 @@ export function InboxDetailLabel({
       case "quick_create_failed": {
         const detail = singleLine(details.error) || singleLine(item.body);
         return detail ? `Failed: ${detail}` : TYPE_LABEL[item.type];
+      }
+      // Mirrors packages/views/inbox/components/inbox-detail-label.tsx: the
+      // unconfirmed outcome deliberately drops the "Failed:" prefix, because
+      // the issue may actually have been created.
+      case "quick_create_unconfirmed": {
+        const detail = singleLine(details.error) || singleLine(item.body);
+        return detail || TYPE_LABEL[item.type];
       }
       default:
         return TYPE_LABEL[item.type] ?? item.type;

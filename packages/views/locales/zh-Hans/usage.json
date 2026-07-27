@@ -25,10 +25,12 @@
     "title_tokens": "每日 Token",
     "title_time": "每日运行时长",
     "title_tasks": "每日任务数",
+    "title_errors": "每日错误",
     "metric_cost": "费用",
     "metric_tokens": "Token",
     "metric_time": "运行时长",
     "metric_tasks": "任务数",
+    "metric_errors": "错误",
     "no_data": "所选时间范围内暂无消耗。"
   },
   "weekly": {
@@ -36,7 +38,31 @@
     "title_tokens": "每周 Token",
     "title_time": "每周运行时长",
     "title_tasks": "每周任务数",
+    "title_errors": "每周错误",
     "partial_label": "{{range}}（未满 · 已过 {{covered}} / 7 天）"
+  },
+  "errors": {
+    "tooltip_rate": "错误率",
+    "class": {
+      "auth": "认证",
+      "rate_limit": "限流",
+      "timeout": "超时",
+      "provider": "模型服务",
+      "runtime": "运行时",
+      "agent": "智能体",
+      "other": "其他"
+    },
+    "title": "错误",
+    "summary": "{{total}} 次运行中有 {{failed}} 次失败 · {{rate}}",
+    "by_class": "按类型",
+    "by_agent": "问题最多的智能体",
+    "other_agents": "其他智能体",
+    "agent_rate": "{{failed}} / {{total}} · {{rate}}",
+    "no_data": "所选时间范围内没有失败的运行。",
+    "show_reasons": "展开错误码",
+    "hide_reasons": "收起错误码",
+    "show_all": "展开全部 {{count}} 个",
+    "show_less": "只看前 {{count}} 个"
   },
   "leaderboard": {
     "title": "排行榜",

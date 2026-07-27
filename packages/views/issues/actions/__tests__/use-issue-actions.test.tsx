@@ -226,12 +226,12 @@ describe("useIssueActions", () => {
     });
 
     act(() => {
-      result.current.openDeleteConfirm({ onDeletedNavigateTo: "/test/issues" });
+      result.current.openDeleteConfirm({ onDeletedFallbackPath: "/test/issues" });
     });
     expect(mockOpenModal).toHaveBeenLastCalledWith("issue-delete-confirm", {
       issueId: "issue-1",
       identifier: "TES-1",
-      onDeletedNavigateTo: "/test/issues",
+      onDeletedFallbackPath: "/test/issues",
     });
   });
 

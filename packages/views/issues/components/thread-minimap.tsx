@@ -8,14 +8,19 @@ import { useT } from "../../i18n";
 // ThreadMinimap — Linear-style quick-jump rail for comment threads
 // ---------------------------------------------------------------------------
 //
-// A vertical column of tick marks overlaid on the left edge of the issue
-// detail scroll area, one tick per top-level comment thread (folded resolved
-// bars included — they are jump targets too). Ticks whose thread is currently
-// inside the scroll viewport render darker, so the rail doubles as a "you are
-// here" minimap. Hovering magnifies ticks in a Dock-style wave around the
-// cursor (the hovered tick peaks, neighbours taper off) and shows a preview
-// card (bold first line + muted body excerpt); clicking jumps the timeline
-// to that thread.
+// A vertical column of tick marks overlaid on the right edge of the issue
+// detail scroll area, just inside the scrollbar, one tick per top-level
+// comment thread (folded resolved bars included — they are jump targets too).
+// Ticks whose thread is currently inside the scroll viewport render darker, so
+// the rail doubles as a "you are here" minimap. Hovering magnifies ticks in a
+// Dock-style wave around the cursor (the hovered tick peaks, neighbours taper
+// off) and shows a preview card (bold first line + muted body excerpt);
+// clicking jumps the timeline to that thread.
+//
+// It rides the scrollbar side on purpose: it looks and behaves like a scroll
+// affordance, and every precedent for that (the scrollbar itself, editor
+// minimaps, floating outlines) lives on the right — so the pointer is already
+// there, and the travel from scrolling to jumping is short (MUL-4522).
 //
 // The preview is ONE card owned by the rail, not a popover per tick: the
 // open-intent delay is paid once when the pointer enters the rail, and while
@@ -111,7 +116,7 @@ interface ThreadMinimapProps {
   /** The issue detail scroll container; null until its callback ref populates. */
   scrollContainerEl: HTMLElement | null;
   onJump: (threadId: string) => void;
-  /** Positioning within the page (e.g. `absolute left-2 top-12 bottom-0`) — owned by the caller, like FindBar. */
+  /** Positioning within the page (e.g. `absolute right-3 top-12 bottom-0`) — owned by the caller, like FindBar. */
   className?: string;
 }
 
@@ -195,14 +200,21 @@ function MinimapTick({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="group/tick flex min-h-[5px] w-6 flex-[0_1_0.875rem] cursor-pointer items-center focus-visible:outline-none"
+      // 20px wide, tick flushed to the right end: with the rail inset 12px
+      // (see the caller's className) the strip spans 12–32px from the panel
+      // edge, which clears a classic scrollbar's ~11px gutter on one side and
+      // stops exactly at the content column's 32px padding on the other — so
+      // it never sits on the scrollbar nor on body text, in either scrollbar
+      // mode.
+      className="group/tick flex min-h-[5px] w-5 flex-[0_1_0.875rem] cursor-pointer items-center justify-end focus-visible:outline-none"
     >
       <span
         className={cn(
-          // Enlargement is a left-anchored `scale` (compositor-friendly, and
-          // what the JS wave writes inline). The 100ms ease-out doubles as
-          // smoothing between pointer samples and as the settle on leave.
-          "h-0.5 w-3 origin-left rounded-full transition-[scale,background-color] duration-100 ease-out",
+          // Enlargement is a right-anchored `scale` (compositor-friendly, and
+          // what the JS wave writes inline), so ticks grow inward, away from
+          // the scrollbar. The 100ms ease-out doubles as smoothing between
+          // pointer samples and as the settle on leave.
+          "h-0.5 w-3 origin-right rounded-full transition-[scale,background-color] duration-100 ease-out",
           inViewport ? "bg-foreground/70" : "bg-muted-foreground/30",
           "group-hover/tick:bg-foreground",
           // CSS floor states for when no inline wave value is present:
@@ -430,13 +442,15 @@ export function ThreadMinimap({ threads, scrollContainerEl, onJump, className }:
           (the open-intent delay already gates accidental flashes; once the
           user waited, showing content instantly is the responsive choice)
           and slid between ticks with a short transform transition. Hovering
-          the card keeps it open so its text stays selectable. */}
+          the card keeps it open so its text stays selectable. It opens
+          inward (leftward, over the content) — the only direction with room
+          next to the scrollbar. */}
       {preview && activeThread && activePreview && (
         <div
           ref={cardRef}
           onPointerEnter={cancelClose}
           onPointerLeave={scheduleClose}
-          className="pointer-events-auto absolute left-9 top-0 w-72 rounded-lg bg-popover p-2.5 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10 transition-transform duration-150 ease-out motion-reduce:transition-none"
+          className="pointer-events-auto absolute right-8 top-0 w-72 rounded-lg bg-popover p-2.5 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10 transition-transform duration-150 ease-out motion-reduce:transition-none"
           style={{ transform: `translateY(${preview.y}px) translateY(-50%)` }}
         >
           <p className="truncate text-sm font-semibold text-foreground">{activeTitle}</p>

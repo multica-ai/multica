@@ -233,7 +233,7 @@
   "detail": {
     "not_found": "This issue does not exist or has been deleted in this workspace.",
     "breadcrumb_project_unknown": "Unknown project",
-    "back_to_issues": "Back to Issues",
+    "back": "Back",
     "title_placeholder": "Issue title",
     "desc_placeholder": "Add description...",
     "sub_issues_label": "Sub-issues",

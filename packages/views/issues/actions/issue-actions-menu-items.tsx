@@ -86,8 +86,11 @@ interface IssueActionsMenuItemsProps {
    *  Decoupled this way so the same item can drive both the dropdown
    *  (3-dot button) and the context menu (right-click) wrappers. */
   onOpenAssignee: () => void;
-  /** If set, navigate here after the issue is deleted (used by the detail page). */
-  onDeletedNavigateTo?: string;
+  /** If set, leave the page after the issue is deleted (used by the detail
+   *  page, which renders the issue being deleted). The delete modal goes back
+   *  to the list the user came from and only falls back to this path when
+   *  there is no in-app history. List surfaces leave it unset and stay put. */
+  onDeletedFallbackPath?: string;
 }
 
 export function IssueActionsMenuItems({
@@ -95,7 +98,7 @@ export function IssueActionsMenuItems({
   actions,
   primitives: P,
   onOpenAssignee,
-  onDeletedNavigateTo,
+  onDeletedFallbackPath,
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const {
@@ -305,7 +308,7 @@ export function IssueActionsMenuItems({
 
       <P.Item
         variant="destructive"
-        onClick={() => openDeleteConfirm({ onDeletedNavigateTo })}
+        onClick={() => openDeleteConfirm({ onDeletedFallbackPath })}
       >
         <Trash2 className="h-3.5 w-3.5" />
         {t(($) => $.actions.delete_issue)}

@@ -1,6 +1,9 @@
 import { useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import {
+  bucketDiagnosticPath,
+  setDiagnosticRoute,
+} from "@multica/core/diagnostics";
 import {
   NavigationProvider,
   type NavigationAdapter,
@@ -56,17 +59,22 @@ export function IssueWindowNavigationProvider({
 }) {
   const location = useLocation();
   const navigate = useNavigate();
-  const workspace = useCurrentWorkspace();
   const runtimeConfig = window.desktopAPI.runtimeConfig;
   const currentPath = `${location.pathname}${location.search}${location.hash}`;
 
   useEffect(() => {
+    // Both freeze observers need the route: main for a hang this window never
+    // returns from, the in-renderer watchdog for one it survives (its
+    // `location.pathname` is the packaged index.html path).
+    // Bucketed template only — this payload ends up in a freeze report, so the
+    // workspace slug and the issue id must not travel with it.
+    const bucketed = bucketDiagnosticPath(currentPath);
+    setDiagnosticRoute(bucketed);
     window.desktopAPI.setRendererRouteContext({
       surface: "tab",
-      path: currentPath,
-      ...(workspace?.slug ? { workspaceSlug: workspace.slug } : {}),
+      path: bucketed,
     });
-  }, [currentPath, workspace?.slug]);
+  }, [currentPath]);
 
   useContentLinkHandler(navigate, runtimeConfig);
 

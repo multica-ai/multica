@@ -1407,3 +1407,247 @@ func TestRollupTaskUsageHourlyConvergesOnTaskUsageDelete(t *testing.T) {
 		t.Errorf("after delete: expected bucket recomputed to 0, got %d", got)
 	}
 }
+
+// TestDashboardFailuresCountNeverStartedTasks pins the reason the failure
+// rollups exist as their own queries rather than reusing the run-time ones:
+// ListDashboardRunTimeDaily / ListDashboardAgentRunTime require
+// `started_at IS NOT NULL`, so a task that expired in the queue — the exact
+// signature of a runtime outage — contributes nothing to their failed_count.
+// The failure endpoints must count it, and must report the succeeded tasks in
+// the same payload so the client's error rate has a matching denominator.
+func TestDashboardFailuresCountNeverStartedTasks(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'failures rollup test', $2, 'member',
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	now := time.Now().UTC()
+	started := now.Add(-30 * time.Minute)
+	completed := started.Add(10 * time.Minute)
+
+	// startedAt is nullable so the queue-expiry case can be modelled exactly:
+	// completed_at set, started_at absent.
+	mkTask := func(status string, failureReason any, startedAt any) {
+		var taskID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, failure_reason, created_at)
+			VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+			RETURNING id
+		`, agentID, issueID, runtimeID, status, startedAt, completed, failureReason).Scan(&taskID); err != nil {
+			t.Fatalf("insert task: %v", err)
+		}
+		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	}
+
+	mkTask("completed", nil, started)
+	mkTask("failed", "agent_error.provider_auth_or_access", started)
+	mkTask("failed", "queued_expired", nil) // never started
+	mkTask("failed", nil, started)          // unclassified: empty reason column
+
+	type failureRow struct {
+		Date          string `json:"date"`
+		AgentID       string `json:"agent_id"`
+		FailureReason string `json:"failure_reason"`
+		TaskCount     int32  `json:"task_count"`
+	}
+
+	// The fixture workspace is shared, so other tests' rows may be in the
+	// window too. Assert on the buckets this test wrote rather than on the
+	// whole payload.
+	collect := func(rows []failureRow) map[string]int32 {
+		byReason := map[string]int32{}
+		for _, r := range rows {
+			byReason[r.FailureReason] += r.TaskCount
+		}
+		return byReason
+	}
+
+	for _, tc := range []struct {
+		name string
+		call func(w *httptest.ResponseRecorder)
+	}{
+		{"daily", func(w *httptest.ResponseRecorder) {
+			testHandler.GetDashboardFailuresDaily(w, newRequest("GET", "/api/dashboard/failures/daily?days=1", nil))
+		}},
+		{"by-agent", func(w *httptest.ResponseRecorder) {
+			testHandler.GetDashboardFailuresByAgent(w, newRequest("GET", "/api/dashboard/failures/by-agent?days=1", nil))
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			tc.call(w)
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+			}
+			var rows []failureRow
+			if err := json.NewDecoder(w.Body).Decode(&rows); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+			byReason := collect(rows)
+
+			if byReason["agent_error.provider_auth_or_access"] < 1 {
+				t.Errorf("expected the classified failure to be counted, got %v", byReason)
+			}
+			// The point of the whole endpoint: a failure with no started_at
+			// still lands in a bucket.
+			if byReason["queued_expired"] < 1 {
+				t.Errorf("expected the never-started failure to be counted, got %v", byReason)
+			}
+			// A failed row with an empty failure_reason must not be mistaken
+			// for a success — that would deflate the error rate.
+			if byReason["unclassified"] < 1 {
+				t.Errorf("expected the reason-less failure to be counted as unclassified, got %v", byReason)
+			}
+			// Succeeded tasks ride along under the empty-string key so the
+			// client can compute a rate from one payload.
+			if byReason[""] < 1 {
+				t.Errorf("expected succeeded tasks in the denominator bucket, got %v", byReason)
+			}
+		})
+	}
+}
+
+// TestDashboardFailuresByAgentUsesExactWindow pins the cutoff difference
+// between the two failure endpoints.
+//
+// parseSinceParamInTZ deliberately returns N+1 calendar days of headroom, and
+// the workspace dashboard trims the surplus client-side with `-(days-1)`. The
+// by-agent rollup carries no date column, so it cannot be trimmed that way —
+// it must close its own window server-side. Before that fix, `days=1` served
+// the Errors card yesterday's failures while the chart beside it, correctly
+// trimmed, showed none.
+func TestDashboardFailuresByAgentUsesExactWindow(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'failures window test', $2, 'member',
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// One failure at noon YESTERDAY (UTC). days=1 means "today", so neither
+	// endpoint may count it. Noon avoids the midnight edge in either
+	// direction.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, failure_reason, created_at)
+		VALUES (
+			$1, $2, $3, 'failed',
+			((CURRENT_DATE - 1)::timestamp + interval '11 hours') AT TIME ZONE 'UTC',
+			((CURRENT_DATE - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC',
+			'timeout', now()
+		)
+		RETURNING id
+	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	type failureRow struct {
+		FailureReason string `json:"failure_reason"`
+		TaskCount     int32  `json:"task_count"`
+	}
+	countTimeouts := func(body []byte) int32 {
+		var rows []failureRow
+		if err := json.Unmarshal(body, &rows); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		var n int32
+		for _, r := range rows {
+			if r.FailureReason == "timeout" {
+				n += r.TaskCount
+			}
+		}
+		return n
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.GetDashboardFailuresByAgent(w, newRequest("GET", "/api/dashboard/failures/by-agent?days=1&tz=UTC", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("by-agent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countTimeouts(w.Body.Bytes()); got != 0 {
+		t.Errorf("days=1 must not reach yesterday's failure, but by-agent counted %d", got)
+	}
+
+	// days=2 covers today + yesterday, so the same row must now appear —
+	// proving the window was closed, not that the fixture is unreachable.
+	w = httptest.NewRecorder()
+	testHandler.GetDashboardFailuresByAgent(w, newRequest("GET", "/api/dashboard/failures/by-agent?days=2&tz=UTC", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("by-agent days=2: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countTimeouts(w.Body.Bytes()); got < 1 {
+		t.Errorf("days=2 must include yesterday's failure, got %d", got)
+	}
+}
+
+// TestDashboardFailureWireContractKeepsEmptyReason pins the success bucket's
+// wire form. The client's zod schema defaults a missing `failure_reason` to
+// "" — the succeeded bucket — which is only safe while the server always
+// emits the field. Adding `omitempty` to the struct tag would strip it from
+// exactly the success rows and silently turn every window into a 100% error
+// rate, so that regression is caught here rather than in a dashboard.
+func TestDashboardFailureWireContractKeepsEmptyReason(t *testing.T) {
+	// Each case decodes into its OWN map. json.Unmarshal merges into a
+	// non-nil map rather than resetting it, so sharing one across cases would
+	// leave the first payload's failure_reason in place and let a later
+	// omitempty regression pass unnoticed — the exact failure this test
+	// exists to catch.
+	for _, tc := range []struct {
+		name string
+		row  any
+	}{
+		{"daily", DashboardFailureDailyResponse{Date: "2026-05-19", TaskCount: 3}},
+		{"by-agent", DashboardFailureByAgentResponse{AgentID: "a", TaskCount: 3}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := json.Marshal(tc.row)
+			if err != nil {
+				t.Fatalf("marshal: %v", err)
+			}
+			decoded := map[string]any{}
+			if err := json.Unmarshal(body, &decoded); err != nil {
+				t.Fatalf("unmarshal: %v", err)
+			}
+			if _, present := decoded["failure_reason"]; !present {
+				t.Errorf("succeeded rows must serialize an explicit empty failure_reason, got %s", body)
+			}
+		})
+	}
+}

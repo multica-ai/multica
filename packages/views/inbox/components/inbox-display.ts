@@ -35,7 +35,7 @@ export function getInboxDisplayTitle(item: InboxItem): string {
     if (prompt) return prompt;
   }
 
-  if (item.type === "quick_create_failed") {
+  if (isQuickCreateOutcome(item.type)) {
     const prompt = singleLine(details.original_prompt);
     if (prompt) return prompt;
   }
@@ -43,7 +43,16 @@ export function getInboxDisplayTitle(item: InboxItem): string {
   return item.title;
 }
 
-export function getQuickCreateFailureDetail(item: InboxItem): string {
+/**
+ * The two non-success quick-create outcomes. They share a row shape (original
+ * prompt + recovery affordance) but must never share failure wording: the
+ * unconfirmed outcome means we could not verify the result, not that it failed.
+ */
+export function isQuickCreateOutcome(type: InboxItem["type"]): boolean {
+  return type === "quick_create_failed" || type === "quick_create_unconfirmed";
+}
+
+export function getQuickCreateOutcomeDetail(item: InboxItem): string {
   const details = item.details ?? {};
   return singleLine(details.error) || singleLine(item.body);
 }

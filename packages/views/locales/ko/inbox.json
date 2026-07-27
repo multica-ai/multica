@@ -49,7 +49,8 @@
     "agent_completed": "에이전트 완료됨",
     "reaction_added": "반응 추가됨",
     "quick_create_done": "에이전트로 생성됨",
-    "quick_create_failed": "에이전트 생성 실패"
+    "quick_create_failed": "에이전트 생성 실패",
+    "quick_create_unconfirmed": "에이전트 생성 결과 미확인"
   },
   "labels": {
     "set_status_to": "상태 변경:",

@@ -442,11 +442,11 @@ function createWindow(): BrowserWindow {
       dialog.showMessageBox(window, options),
     ),
     getDiagnosticContext: () => {
+      // No `windowUrl`: it is an absolute install path (`/Users/<name>/...`
+      // when installed per-user) and the bucketed route below already says
+      // which page the window was on, which is the part we can act on.
       const routeContext = rendererRouteContexts.get(window.webContents);
-      return {
-        windowUrl: window.webContents.getURL(),
-        ...(routeContext ? { desktopRoute: routeContext } : {}),
-      };
+      return routeContext ? { desktopRoute: routeContext } : {};
     },
     // Only persist in production: a true hang/crash can't report itself, so we
     // write a breadcrumb and the next renderer boot flushes it to PostHog. Dev
@@ -528,11 +528,11 @@ function createIssueWindow(context: IssueWindowContext): void {
       dialog.showMessageBox(window, options),
     ),
     getDiagnosticContext: () => {
+      // No `windowUrl`: it is an absolute install path (`/Users/<name>/...`
+      // when installed per-user) and the bucketed route below already says
+      // which page the window was on, which is the part we can act on.
       const routeContext = rendererRouteContexts.get(window.webContents);
-      return {
-        windowUrl: window.webContents.getURL(),
-        ...(routeContext ? { desktopRoute: routeContext } : {}),
-      };
+      return routeContext ? { desktopRoute: routeContext } : {};
     },
     persistBreadcrumb: is.dev
       ? undefined

@@ -1,11 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  aggregateAgentFailures,
+  anonymizeUnresolvedAgentRows,
+  UNRESOLVED_AGENTS_ROW_ID,
   aggregateAgentTokens,
   aggregateDailyCost,
+  aggregateDailyErrors,
+  aggregateFailureClasses,
+  aggregateFailureReasons,
+  aggregateWeeklyErrors,
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
   bucketUnknownAgentRows,
   computeDailyTotals,
+  computeFailureTotals,
   DELETED_AGENTS_ROW_ID,
   formatDuration,
   mergeAgentDashboardRows,
@@ -391,5 +399,214 @@ describe("aggregateWeeklyTasks", () => {
       failed: 0,
       partial: true,
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Failure aggregations
+//
+// The rollups ship succeeded rows too, marked by `failure_reason: ""`. Every
+// test below leans on that: the succeeded row is what makes an error *rate*
+// possible, and mishandling it is the failure mode with the worst blast
+// radius — a rate that reads 100% when nothing is wrong.
+// ---------------------------------------------------------------------------
+
+describe("aggregateDailyErrors", () => {
+  it("stacks failures by class and keeps the succeeded rows as the denominator", () => {
+    const result = aggregateDailyErrors([
+      { date: "2026-05-10", failure_reason: "", task_count: 8 },
+      {
+        date: "2026-05-10",
+        failure_reason: "agent_error.provider_auth_or_access",
+        task_count: 2,
+      },
+      { date: "2026-05-10", failure_reason: "timeout", task_count: 1 },
+      { date: "2026-05-09", failure_reason: "", task_count: 4 },
+    ]);
+
+    expect(result.map((r) => r.date)).toEqual(["2026-05-09", "2026-05-10"]);
+    expect(result[1]).toMatchObject({
+      auth: 2,
+      timeout: 1,
+      rate_limit: 0,
+      failed: 3,
+      total: 11,
+    });
+    // A day with only successes still renders a bar slot, at zero height.
+    expect(result[0]).toMatchObject({ failed: 0, total: 4 });
+  });
+
+  it("folds a reason this build has never seen into 'other' rather than dropping it", () => {
+    const [row] = aggregateDailyErrors([
+      { date: "2026-05-10", failure_reason: "agent_error.from_the_future", task_count: 5 },
+    ]);
+    expect(row).toMatchObject({ other: 5, failed: 5, total: 5 });
+  });
+});
+
+describe("aggregateWeeklyErrors", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("buckets per calendar week and pre-zeroes weeks with no terminal tasks", () => {
+    vi.setSystemTime(new Date("2026-05-19T12:00:00Z"));
+    const result = aggregateWeeklyErrors(
+      [
+        { date: "2026-05-12", failure_reason: "runtime_offline", task_count: 2 },
+        { date: "2026-05-12", failure_reason: "", task_count: 6 },
+      ],
+      "UTC",
+      2,
+    );
+
+    expect(result[0]).toMatchObject({
+      weekStart: "2026-05-11",
+      runtime: 2,
+      failed: 2,
+      total: 8,
+    });
+    expect(result[1]).toMatchObject({
+      weekStart: "2026-05-18",
+      failed: 0,
+      total: 0,
+      partial: true,
+    });
+  });
+});
+
+describe("computeFailureTotals", () => {
+  it("excludes the succeeded bucket from the numerator but not the denominator", () => {
+    expect(
+      computeFailureTotals([
+        { failure_reason: "", task_count: 9 },
+        { failure_reason: "timeout", task_count: 1 },
+      ]),
+    ).toEqual({ failed: 1, total: 10, rate: 0.1 });
+  });
+
+  it("reports rate 0 rather than dividing by zero on an empty window", () => {
+    expect(computeFailureTotals([])).toEqual({ failed: 0, total: 0, rate: 0 });
+  });
+});
+
+describe("aggregateFailureClasses / aggregateFailureReasons", () => {
+  const rows = [
+    { failure_reason: "", task_count: 20 },
+    { failure_reason: "agent_error.provider_quota_limit", task_count: 3 },
+    { failure_reason: "agent_error.provider_capacity_or_rate_limit", task_count: 4 },
+    { failure_reason: "timeout", task_count: 5 },
+  ];
+
+  it("merges reasons that share a class and ranks by count desc", () => {
+    expect(aggregateFailureClasses(rows)).toEqual([
+      { failureClass: "rate_limit", count: 7 },
+      { failureClass: "timeout", count: 5 },
+    ]);
+  });
+
+  it("keeps raw reasons separate so an operator can search the exact string", () => {
+    expect(aggregateFailureReasons(rows)).toEqual([
+      { reason: "timeout", failureClass: "timeout", count: 5 },
+      {
+        reason: "agent_error.provider_capacity_or_rate_limit",
+        failureClass: "rate_limit",
+        count: 4,
+      },
+      {
+        reason: "agent_error.provider_quota_limit",
+        failureClass: "rate_limit",
+        count: 3,
+      },
+    ]);
+  });
+});
+
+describe("aggregateAgentFailures", () => {
+  it("ranks by failure count, carries the rate, and names the dominant class", () => {
+    const result = aggregateAgentFailures([
+      { agent_id: "a", failure_reason: "", task_count: 90 },
+      { agent_id: "a", failure_reason: "timeout", task_count: 10 },
+      { agent_id: "b", failure_reason: "", task_count: 1 },
+      { agent_id: "b", failure_reason: "runtime_offline", task_count: 3 },
+      { agent_id: "b", failure_reason: "timeout", task_count: 1 },
+    ]);
+
+    // `a` fails 10% of the time, `b` fails 80% — but `a` is the bigger
+    // absolute problem, so it ranks first and the rate rides along.
+    expect(result).toEqual([
+      { agentId: "a", failed: 10, total: 100, rate: 0.1, topClass: "timeout" },
+      { agentId: "b", failed: 4, total: 5, rate: 0.8, topClass: "runtime" },
+    ]);
+  });
+
+  it("drops agents with no failures — the list is triage, not a census", () => {
+    expect(
+      aggregateAgentFailures([{ agent_id: "clean", failure_reason: "", task_count: 42 }]),
+    ).toEqual([]);
+  });
+});
+
+describe("anonymizeUnresolvedAgentRows", () => {
+  // Raw per-(agent, reason) rows, which is the shape this operates on. Two
+  // agents the viewer cannot resolve, with deliberately conflicting dominant
+  // classes — see the counterexample test below.
+  const rows = [
+    { agent_id: "visible", failure_reason: "", task_count: 5 },
+    { agent_id: "visible", failure_reason: "timeout", task_count: 5 },
+    {
+      agent_id: "private-a",
+      failure_reason: "agent_error.provider_auth_or_access",
+      task_count: 6,
+    },
+    { agent_id: "private-a", failure_reason: "timeout", task_count: 5 },
+    { agent_id: "private-b", failure_reason: "timeout", task_count: 10 },
+  ];
+
+  it("rewrites unresolvable ids to the sentinel and leaves resolvable ones alone", () => {
+    const result = anonymizeUnresolvedAgentRows(rows, new Set(["visible"]));
+
+    expect(result.map((r) => r.agent_id)).toEqual([
+      "visible",
+      "visible",
+      UNRESOLVED_AGENTS_ROW_ID,
+      UNRESOLVED_AGENTS_ROW_ID,
+      UNRESOLVED_AGENTS_ROW_ID,
+    ]);
+    // Counts are untouched — only identity is erased.
+    expect(result.map((r) => r.task_count)).toEqual([5, 5, 6, 5, 10]);
+  });
+
+  it("keeps the bucket's dominant class honest across merged agents", () => {
+    // This is why the rewrite happens on RAW rows. private-a is auth-dominant
+    // (6 vs 5) and private-b is timeout-only (10). Merging AFTER aggregation
+    // would see only each agent's top class and its total failure count —
+    // auth 11, timeout 10 — and label the bucket Auth. The true composition
+    // is timeout 15 / auth 6, so it must read Timeout.
+    const bucket = aggregateAgentFailures(
+      anonymizeUnresolvedAgentRows(rows, new Set(["visible"])),
+    ).find((r) => r.agentId === UNRESOLVED_AGENTS_ROW_ID);
+
+    expect(bucket).toMatchObject({ failed: 21, total: 21, topClass: "timeout" });
+  });
+
+  it("anonymizes everything while the agent list is still loading", () => {
+    // Deliberately stricter than bucketUnknownAgentRows, which passes rows
+    // through on null: a transient flash of raw UUIDs is precisely the leak
+    // this function exists to prevent.
+    const result = anonymizeUnresolvedAgentRows(rows, null);
+
+    expect(new Set(result.map((r) => r.agent_id))).toEqual(
+      new Set([UNRESOLVED_AGENTS_ROW_ID]),
+    );
+  });
+
+  it("returns the input untouched when every agent resolves", () => {
+    const known = new Set(["visible", "private-a", "private-b"]);
+    // Same reference, not just equal — nothing needed rewriting.
+    expect(anonymizeUnresolvedAgentRows(rows, known)).toBe(rows);
   });
 });

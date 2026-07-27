@@ -61,7 +61,7 @@ import { useTimeAgo } from "./inbox-list-item";
 import { InboxList } from "./inbox-list";
 import { ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
 import { useTypeLabels } from "./inbox-detail-label";
-import { getInboxDisplayTitle } from "./inbox-display";
+import { getInboxDisplayTitle, isQuickCreateOutcome } from "./inbox-display";
 import { useT } from "../../i18n";
 
 export function InboxPage() {
@@ -462,7 +462,7 @@ export function InboxPage() {
           {selected.body}
         </div>
       )}
-      {selected.type === "quick_create_failed" && selected.details?.original_prompt && (
+      {isQuickCreateOutcome(selected.type) && selected.details?.original_prompt && (
         <div className="mt-4 rounded-md border bg-muted/40 p-3">
           <p className="text-xs font-medium text-muted-foreground">
             {t(($) => $.detail.original_input)}
@@ -471,7 +471,7 @@ export function InboxPage() {
         </div>
       )}
       <div className="mt-4 flex gap-2">
-        {selected.type === "quick_create_failed" && (
+        {isQuickCreateOutcome(selected.type) && (
           <Button
             size="sm"
             onClick={() => {

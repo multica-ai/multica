@@ -3,8 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
-import { AppLink } from "../../navigation";
-import { useNavigation } from "../../navigation";
+import { AppLink, useBackOrReplace } from "../../navigation";
 import {
   Archive,
   Calendar,
@@ -904,7 +903,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const id = issueId;
-  const router = useNavigation();
+  const backOrReplace = useBackOrReplace();
   const user = useAuthStore((s) => s.user);
   const paths = useWorkspacePaths();
 
@@ -1105,7 +1104,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Fire `onDelete` once when the issue transitions from loaded to missing.
   // Delete goes through a shell-level modal, so the caller (e.g. inbox) can't
   // be notified directly — instead, the detail page observes its own cache
-  // clearing and runs the callback. We navigate via `onDeletedNavigateTo` on
+  // clearing and runs the callback. We navigate via `onDeletedFallbackPath` on
   // the actions menu when no callback is supplied (standalone routes).
   const hadIssueRef = useRef(false);
   const firedDeleteCallbackRef = useRef(false);
@@ -1754,9 +1753,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-sm text-muted-foreground">
         <p>{t(($) => $.detail.not_found)}</p>
         {!onDelete && (
-          <Button variant="outline" size="sm" onClick={() => router.push(paths.issues())}>
+          <Button variant="outline" size="sm" onClick={() => backOrReplace(paths.issues())}>
             <ChevronLeft className="mr-1 h-3.5 w-3.5" />
-            {t(($) => $.detail.back_to_issues)}
+            {t(($) => $.detail.back)}
           </Button>
         )}
       </div>
@@ -2200,9 +2199,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             z-30: must beat every sticky affordance pinned at the timeline's
             top-0 (comment headers z-10, resolve collapse bars z-20) — at equal
             z the later-in-DOM sticky bar paints over the find bar and orphans
-            its close button (MUL-4414). */}
+            its close button (MUL-4414). On desktop it also steps inside the
+            thread rail's right-edge strip, so an open find bar can't cover
+            the topmost ticks. */}
         {find.open && (
-          <FindBar find={find} className="absolute right-4 top-14 z-30" />
+          <FindBar
+            find={find}
+            className={cn("absolute top-14 z-30", isMobile ? "right-4" : "right-10")}
+          />
         )}
         <BreadcrumbHeader
           segments={breadcrumbSegments}
@@ -2275,8 +2279,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               issue={issue}
               align="end"
               // When a parent passes `onDelete`, we detect deletion via effect
-              // above and skip navigation. Otherwise the modal navigates for us.
-              onDeletedNavigateTo={onDelete ? undefined : paths.issues()}
+              // above and skip navigation. Otherwise the modal takes us back
+              // to the list we came from, falling back to all issues.
+              onDeletedFallbackPath={onDelete ? undefined : paths.issues()}
               trigger={
                 <Button variant="ghost" size="icon-sm" className="text-muted-foreground">
                   <MoreHorizontal />
@@ -2704,16 +2709,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         </div>
         </div>
 
-        {/* Thread quick-jump rail — overlays the scroll container's left
-            gutter (inside the px-8 content padding, so it never covers
-            text). Hover previews a thread, click jumps to it. Hidden on
-            mobile: no hover, and the gutter is too tight. */}
+        {/* Thread quick-jump rail — rides the scroll container's right edge,
+            next to the scrollbar, where the pointer already is while
+            scrolling (MUL-4522). right-3 is the inset that works in both
+            scrollbar modes: it clears a classic scrollbar's ~11px gutter,
+            and the rail's own 20px width lands it exactly on the content
+            column's px-8 padding when the gutter is 0 (overlay scrollbars),
+            so it covers neither the scrollbar nor body text. It also clears
+            the resize handle's 4px drag strip at the panel edge. Hover
+            previews a thread, click jumps to it. Hidden on mobile: no
+            hover, and the gutter is too tight. */}
         {!isMobile && (
           <ThreadMinimap
             threads={minimapThreads}
             scrollContainerEl={scrollContainerEl}
             onJump={jumpToThread}
-            className="absolute bottom-0 left-2 top-12"
+            className="absolute bottom-0 right-3 top-12"
           />
         )}
       </div>

@@ -1219,6 +1219,113 @@ func (d *Daemon) customProfileLaunchForRuntime(runtimeID string) (profileLaunchS
 // fan-out is safe even when a host has many agent CLIs installed.
 const runtimeVersionProbeConcurrency = 8
 
+// runtimeVersionProbeAttempts bounds how many times one provider's `<cli>
+// --version` probe runs inside a single probe round before that provider is
+// dropped from the registration payload.
+//
+// A round now serves a whole batch of workspace registrations (MUL-5225), so a
+// single failed attempt no longer costs one workspace its runtime — it costs
+// every workspace registered in that batch, and nothing re-probes until a
+// daemon restart or a standalone re-registration. That amplification is worth
+// one retry because the failure is usually transient: cfg.Agents only holds
+// CLIs that resolved when the daemon started, so a probe failing later is
+// typically a version manager swapping the binary in place (vanished path,
+// ETXTBSY) or fork/exec briefly failing under a startup burst. Retrying only
+// the failed providers keeps the round O(M) — it never reintroduces
+// per-workspace probing.
+const runtimeVersionProbeAttempts = 2
+
+// runtimeVersionProbeRetryDelay spaces a retry so an in-flight binary swap or a
+// momentary fork/exec failure has time to settle. Providers are probed
+// concurrently, so a round pays this once, not once per failed provider.
+// Overridable for tests.
+var runtimeVersionProbeRetryDelay = 500 * time.Millisecond
+
+// runtimeVersionProbeRetryWindow gates the retry on how quickly the failure
+// came back. A probe that burned its full timeout is a hung CLI, not a hiccup,
+// and retrying it would double the worst case for the whole round — the same
+// latency that used to push the desktop runtime step into its empty "no runtime
+// found" state before probes were parallelized (MUL-5119). Only fast failures,
+// which are the transient ones, are retried.
+//
+// The window is measured over the WHOLE attempt, self-heal included: a vanished
+// pinned path sends resolveAgentEntry through its own version probe of the
+// re-resolved candidate, so an attempt can spend its entire budget there and
+// still fail instantly on the outer probe of the stale path.
+//
+// One deterministic failure does slip through and get retried: a self-heal
+// candidate rejected by the minimum-version gate, whose stale path then fails
+// fast. It is not worth plumbing a reason out of resolveAgentEntry to catch —
+// the retry is bounded, and every probe in it fails fast by construction.
+//
+// Overridable for tests.
+var runtimeVersionProbeRetryWindow = time.Second
+
+// probeBuiltinRuntime resolves and version-detects one built-in provider,
+// retrying a fast failure up to runtimeVersionProbeAttempts times. It returns
+// false when the provider must be dropped from this round's registration
+// payload: its version could not be detected, or it is below the minimum
+// supported version.
+func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry AgentEntry) (string, bool) {
+	var (
+		lastErr  error
+		attempts int
+	)
+	for attempts < runtimeVersionProbeAttempts {
+		if attempts > 0 {
+			select {
+			case <-ctx.Done():
+			case <-time.After(runtimeVersionProbeRetryDelay):
+			}
+			// A cancelled round is shutting down or already past its deadline;
+			// keep lastErr pointing at the real probe failure rather than the
+			// cancellation that stopped us from retrying it.
+			if ctx.Err() != nil {
+				break
+			}
+		}
+		attempts++
+		// The attempt is timed from here, not from the detect call below:
+		// resolveAgentEntry runs a version probe of its own on the re-resolved
+		// candidate, and that probe can burn the whole timeout by itself. Timing
+		// only the outer call would read "slow self-heal, then an instant
+		// failure on the stale path" as a fast failure and retry it, paying the
+		// slow half twice.
+		startedAt := time.Now()
+		// Self-heal a pinned executable path an in-place upgrade deleted
+		// (MUL-4486) so version detection — and thus staying registered/online —
+		// recovers without a daemon restart. resolveAgentEntry already
+		// version-gates the healed binary; the detect + min-version check below
+		// still runs to produce the version string this registration reports.
+		// It is re-run per attempt because the heal itself can be what a retry
+		// fixes: the upgrade that removed the old path may not have published
+		// the new one yet on the first attempt.
+		resolved, _ := d.resolveAgentEntry(ctx, name, entry)
+		version, err := detectAgentVersion(ctx, resolved.Path)
+		if err != nil {
+			lastErr = err
+			if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
+				break
+			}
+			if attempts < runtimeVersionProbeAttempts {
+				d.logger.Debug("agent version probe failed; retrying", "name", name, "attempt", attempts, "error", err)
+			}
+			continue
+		}
+		// The min-version verdict is a pure function of the detected version,
+		// so a retry would reach the same conclusion — drop the provider now.
+		if err := checkAgentMinVersion(name, version); err != nil {
+			d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
+			return "", false
+		}
+		d.setAgentVersion(name, version)
+		d.logger.Debug("agent version detected", "name", name, "version", version, "path", resolved.Path)
+		return version, true
+	}
+	d.logger.Warn("skip registering runtime", "name", name, "attempts", attempts, "error", lastErr)
+	return "", false
+}
+
 // detectBuiltinRuntimes version-detects every configured built-in agent CLI and
 // returns a registration entry for each one that resolves and clears the
 // minimum-version gate. Probes run concurrently, bounded by
@@ -1234,10 +1341,15 @@ const runtimeVersionProbeConcurrency = 8
 // well inside the UI's scanning window.
 //
 // Each probe still self-heals a vanished pinned path (MUL-4486) and re-detects
-// the live version — no result is cached across registrations, so an in-place
-// CLI upgrade is still reported with its current version. A probe that fails to
-// detect a version or is below the minimum supported version is logged and
-// skipped, exactly as the serial loop did.
+// the live version — nothing is cached on the Daemon, so an in-place CLI
+// upgrade is still reported with its current version. A provider whose version
+// stays undetectable across probeBuiltinRuntime's bounded attempts, or which is
+// below the minimum supported version, is logged and skipped, exactly as the
+// serial loop did.
+//
+// The result describes the machine, not a workspace, so a caller registering a
+// batch of workspaces at once calls this ONCE and passes the payload to
+// registerRuntimesForWorkspaceBatch for each workspace (MUL-5225).
 func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string {
 	type detected struct {
 		name    string
@@ -1252,24 +1364,10 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string 
 	for name, entry := range d.cfg.Agents {
 		name, entry := name, entry
 		g.Go(func() error {
-			// Self-heal a pinned executable path an in-place upgrade deleted
-			// (MUL-4486) so version detection — and thus staying
-			// registered/online — recovers without a daemon restart.
-			// resolveAgentEntry already version-gates the healed binary; the
-			// detect + min-version check below still runs to produce the
-			// version string this registration reports.
-			entry, _ = d.resolveAgentEntry(ctx, name, entry)
-			version, err := detectAgentVersion(ctx, entry.Path)
-			if err != nil {
-				d.logger.Warn("skip registering runtime", "name", name, "error", err)
+			version, ok := d.probeBuiltinRuntime(ctx, name, entry)
+			if !ok {
 				return nil
 			}
-			if err := checkAgentMinVersion(name, version); err != nil {
-				d.logger.Warn("skip registering runtime: version too old", "name", name, "version", version, "error", err)
-				return nil
-			}
-			d.setAgentVersion(name, version)
-			d.logger.Debug("agent version detected", "name", name, "version", version, "path", entry.Path)
 			mu.Lock()
 			results = append(results, detected{name: name, version: version})
 			mu.Unlock()
@@ -1301,9 +1399,54 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) []map[string]string 
 	return runtimes
 }
 
+// cloneRuntimeEntries deep-copies a registration runtime payload. Callers that
+// receive a shared built-in payload (see registerRuntimesForWorkspaceBatch) use
+// this before appending their own workspace's custom runtime profiles, so one
+// workspace's profiles can never leak into another's registration.
+func cloneRuntimeEntries(in []map[string]string) []map[string]string {
+	out := make([]map[string]string, 0, len(in))
+	for _, entry := range in {
+		cp := make(map[string]string, len(entry))
+		for k, v := range entry {
+			cp[k] = v
+		}
+		out = append(out, cp)
+	}
+	return out
+}
+
+// registerRuntimesForWorkspace registers this host's runtimes for one
+// workspace, probing the built-in agent CLIs itself. This is the entry point
+// for every standalone registration — a runtime_gone re-register, a profile
+// drift refresh, a recovery retry — so each of those still re-detects versions
+// and picks up an in-place CLI upgrade.
+//
+// Registering a batch of workspaces at once (daemon startup) goes through
+// registerRuntimesForWorkspaceBatch instead, which shares one probe round
+// across the batch.
 func (d *Daemon) registerRuntimesForWorkspace(ctx context.Context, workspaceID string) (*RegisterResponse, string, error) {
+	return d.registerRuntimesForWorkspaceBatch(ctx, workspaceID, d.detectBuiltinRuntimes(ctx))
+}
+
+// registerRuntimesForWorkspaceBatch registers one workspace against an already
+// detected built-in runtime payload.
+//
+// Built-in CLIs are a machine-level fact, not a per-workspace one, but
+// registration is per-workspace — so probing inside every registration made a
+// daemon serving N workspaces spawn N×M `<cli> --version` processes at startup
+// (24 workspaces × 5 agents = 120 instead of 5, MUL-5225 / #5837). Beyond the
+// wasted startup time, some CLI wrappers have visible side effects when
+// executed, and a single slow probe gets multiplied by the workspace count.
+//
+// Taking the payload as a parameter lets one probe round serve a whole
+// registration batch while keeping the refresh semantics: nothing is cached on
+// the Daemon, so the next standalone registration re-probes.
+//
+// builtins is treated as read-only and is copied before this workspace's custom
+// runtime profiles are appended.
+func (d *Daemon) registerRuntimesForWorkspaceBatch(ctx context.Context, workspaceID string, builtins []map[string]string) (*RegisterResponse, string, error) {
 	d.logger.Debug("registering runtimes for workspace", "workspace_id", workspaceID, "agent_count", len(d.cfg.Agents))
-	runtimes := d.detectBuiltinRuntimes(ctx)
+	runtimes := cloneRuntimeEntries(builtins)
 	var failedProfiles []map[string]string
 
 	// Append any workspace custom runtime profiles whose command resolves on
@@ -2170,6 +2313,23 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 	}
 	d.mu.Unlock()
 
+	// Built-in agent CLIs are installed per machine, so one probe round serves
+	// every workspace this sync has to register (MUL-5225). Probing is lazy —
+	// a sync that finds nothing new to register never shells out at all, which
+	// is the common case for the periodic sync — and scoped to this call, so
+	// the next sync re-detects and an in-place CLI upgrade is still reported.
+	var (
+		builtins       []map[string]string
+		builtinsProbed bool
+	)
+	probeBuiltins := func() []map[string]string {
+		if !builtinsProbed {
+			builtins = d.detectBuiltinRuntimes(ctx)
+			builtinsProbed = true
+		}
+		return builtins
+	}
+
 	var registered int
 	var removed int
 	for id, name := range apiIDs {
@@ -2195,7 +2355,7 @@ func (d *Daemon) syncWorkspacesFromAPI(ctx context.Context, reconcileProfiles bo
 			registered++
 			continue
 		}
-		resp, profileSig, err := d.registerRuntimesForWorkspace(ctx, id)
+		resp, profileSig, err := d.registerRuntimesForWorkspaceBatch(ctx, id, probeBuiltins())
 		if err != nil {
 			d.logger.Error("failed to register runtimes", "workspace_id", id, "name", name, "error", err)
 			continue

@@ -19,12 +19,7 @@ import {
 import { NumberFlow } from "@multica/ui/components/ui/number-flow";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import type {
-  Agent,
-  AgentTask,
-  Issue,
-  TaskFailureReason,
-} from "@multica/core/types";
+import type { Agent, AgentTask, Issue } from "@multica/core/types";
 import {
   type AgentActivity,
   agentTaskSnapshotOptions,
@@ -589,12 +584,11 @@ function TaskRow({
         : "—";
 
   // Failure reason. The back-end emits "" on non-failed tasks (omitempty
-  // strips it on the wire) so the truthy guard is the right shape; the
-  // cast is safe because the back-end only emits one of the enum values.
+  // strips it on the wire) so the truthy guard is the right shape.
+  // failureReasonLabel takes the raw open string — the taxonomy has 21
+  // values and grows, so there is no enum to cast to.
   const failureLabel =
-    task.status === "failed" && task.failure_reason
-      ? failureReasonLabel[task.failure_reason as TaskFailureReason]
-      : null;
+    task.status === "failed" ? failureReasonLabel(task.failure_reason) : null;
 
   // Only show duration for terminal rows. An active row's duration is
   // inferred from the timeText already ("Started 2m ago") and adding a

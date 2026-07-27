@@ -231,7 +231,7 @@
   "detail": {
     "not_found": "이 워크스페이스에 해당 이슈가 없거나 삭제되었습니다.",
     "breadcrumb_project_unknown": "알 수 없는 프로젝트",
-    "back_to_issues": "이슈로 돌아가기",
+    "back": "뒤로",
     "title_placeholder": "이슈 제목",
     "desc_placeholder": "설명 추가...",
     "sub_issues_label": "하위 이슈",
