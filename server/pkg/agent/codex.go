@@ -20,6 +20,8 @@ import (
 	// CEREBRO-PATCH(agent-codex-provider-limit-output): cerebro classifier
 	// for short standalone Codex usage-limit replies (FIR-2388).
 	"github.com/multica-ai/multica/server/internal/cerebro/codexlimit"
+	// CEREBRO-PATCH(codex-self-mcp): Codex receives Multica's platform MCP channel.
+	"github.com/multica-ai/multica/server/internal/cerebro/daemonmcp"
 )
 
 // codexBlockedArgs are flags hardcoded by the daemon that must not be
@@ -197,6 +199,14 @@ var codexMcpBlockRe = regexp.MustCompile(
 var userCodexMcpServersTableHeaderRe = regexp.MustCompile(
 	`^\s*\[\s*mcp_servers\s*\.\s*(?:"[^"]*"|[^\]\s]+)\s*\]\s*(?:#.*)?$`)
 
+// CEREBRO-PATCH(codex-self-mcp): distinguish user-owned from daemon-managed MCP tables.
+func codexConfigHasMCPServer(content, name string) bool {
+	pattern := `(?m)^\s*\[\s*mcp_servers\s*\.\s*(?:"` +
+		regexp.QuoteMeta(name) + `"|` + regexp.QuoteMeta(name) +
+		`)\s*\]\s*(?:#.*)?$`
+	return regexp.MustCompile(pattern).MatchString(codexMcpBlockRe.ReplaceAllString(content, ""))
+}
+
 // ensureCodexMcpConfig writes (or clears) the daemon-managed
 // `[mcp_servers.*]` block in `$CODEX_HOME/config.toml`. The block is the
 // authoritative source of MCP servers for this run: with mcp_config set
@@ -213,6 +223,11 @@ var userCodexMcpServersTableHeaderRe = regexp.MustCompile(
 // whether to surface or warn — same fail-soft contract the prior argv
 // path had.
 func ensureCodexMcpConfig(configPath string, mcpConfig json.RawMessage, logger *slog.Logger) error {
+	return ensureCodexMcpConfigMode(configPath, mcpConfig, hasManagedCodexMcpConfig(mcpConfig), logger)
+}
+
+// CEREBRO-PATCH(codex-self-mcp): preserve user MCP tables for implicit platform injection.
+func ensureCodexMcpConfigMode(configPath string, mcpConfig json.RawMessage, strict bool, logger *slog.Logger) error {
 	data, err := os.ReadFile(configPath)
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read config.toml: %w", err)
@@ -244,7 +259,9 @@ func ensureCodexMcpConfig(configPath string, mcpConfig json.RawMessage, logger *
 		//   2. An admin saving an explicit list in the MCP Tab would
 		//      otherwise see user-global servers silently joined in,
 		//      which contradicts the UI affordance.
-		stripped = stripCodexUserMcpServerTables(stripped)
+		if strict { // CEREBRO-PATCH(codex-self-mcp): explicit managed sets remain authoritative.
+			stripped = stripCodexUserMcpServerTables(stripped)
+		}
 		stripped = strings.TrimRight(stripped, "\n")
 		// When the managed set is empty we still write the marker
 		// block (with no tables between). This pins "managed but
@@ -519,6 +536,32 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 	runCtx, cancel := runContext(ctx, timeout)
 
+	// CEREBRO-PATCH(codex-self-mcp): Codex does not inherit Multica's own MCP channel automatically. Inject it
+	// for every run so platform tools are present before the immutable task
+	// mandate is built. Preserve user-global MCP servers when the agent has no
+	// managed MCP configuration; an explicit managed set remains strict.
+	strictMCP := hasManagedCodexMcpConfig(opts.McpConfig)
+	argvOpts := opts
+	codexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"])
+	if strictMCP {
+		if _, _, err := renderCodexMcpServersBlock(opts.McpConfig); err != nil {
+			cancel()
+			return nil, fmt.Errorf("apply codex mcp_config: %w", err)
+		}
+	}
+	if codexHome != "" { // CEREBRO-PATCH(codex-self-mcp): write the merged platform/user set.
+		configPath := filepath.Join(codexHome, "config.toml")
+		existing, readErr := os.ReadFile(configPath)
+		hasUserSelf := readErr == nil && codexConfigHasMCPServer(string(existing), "multica")
+		if strictMCP || !hasUserSelf {
+			if selfEntry, err := selfMCPServerEntry(); err == nil {
+				opts.McpConfig = daemonmcp.Merge(selfEntry, opts.McpConfig)
+			} else if b.cfg.Logger != nil {
+				b.cfg.Logger.Warn("mcp: could not resolve multica binary path; platform tools unavailable", "error", err)
+			}
+		}
+	}
+
 	// Materialise the agent's MCP config into the per-task
 	// `$CODEX_HOME/config.toml`. Argv would be the simpler path, but
 	// `mcp_servers.<id>.env` is allowed to carry secrets (Codex docs:
@@ -528,8 +571,8 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	// echoed into the daemon's `agent command` log line below, so any
 	// inline env-bearing TOML would defeat the redaction. Writing through
 	// config.toml at 0o600 keeps the secret values out of argv and logs.
-	if codexHome := strings.TrimSpace(b.cfg.Env["CODEX_HOME"]); codexHome != "" {
-		if err := ensureCodexMcpConfig(filepath.Join(codexHome, "config.toml"), opts.McpConfig, b.cfg.Logger); err != nil {
+	if codexHome != "" { // CEREBRO-PATCH(codex-self-mcp): materialise the merged MCP configuration.
+		if err := ensureCodexMcpConfigMode(filepath.Join(codexHome, "config.toml"), opts.McpConfig, strictMCP, b.cfg.Logger); err != nil {
 			// Fail closed when we can't materialise the managed config.
 			// Warning-and-launching would silently fall back to the
 			// user's global `~/.codex/config.toml` MCP servers and
@@ -548,7 +591,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		return nil, fmt.Errorf("codex: mcp_config is set but CODEX_HOME env var is not configured; cannot apply managed MCP")
 	}
 
-	codexArgs := buildCodexArgs(opts, b.cfg.Logger)
+	codexArgs := buildCodexArgs(argvOpts, b.cfg.Logger) // CEREBRO-PATCH(codex-self-mcp): argv keeps the original task options.
 	cmd := exec.CommandContext(runCtx, execPath, codexArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", codexArgs)

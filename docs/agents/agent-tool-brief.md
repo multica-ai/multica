@@ -69,6 +69,14 @@ Because the **same** tool-policy resolution drives both this list and live call
 enforcement, the two can never disagree: remove a permission and the tool drops
 out of the resolved set and disappears from the brief automatically.
 
+The local provider must also connect Multica's own MCP channel before launch.
+Claude and Codex inject `multica mcp serve` into their task-scoped MCP
+configuration even when the agent has no saved `mcp_config`; otherwise the
+platform tools never enter the runtime inventory, so claim-time resolution has
+nothing to expose or snapshot. An explicitly saved MCP set remains authoritative.
+Codex preserves inherited user MCP servers only when no explicit managed set
+exists.
+
 ## Why it works across all (local) runtime providers
 
 `cerebroToolsBrief` is wired into `buildMetaSkillContent`, the single shared
