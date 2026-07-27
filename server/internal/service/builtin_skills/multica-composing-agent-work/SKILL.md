@@ -160,10 +160,18 @@ Available now: agent/model/thinking/skill inventory, runtime liveness,
 historical runtime usage, child issues, ordered stages, durable comments, and
 exactly-once guarded child dispatch on provider handoff.
 
+The backend also has a pure deterministic routing policy that can rank
+validated model/thinking candidates, enforce required skills/tools/authority,
+preserve a supplied provider reserve, consume only promoted evidence-backed
+skill affinity, and select a safe topology with one write owner. That policy is
+not yet connected to task admission or agent rebinding.
+
 Not automatically exposed by these commands: provider subscription allowance,
-reset windows, automatic per-task model rebinding, or automatic promotion of a
-new skill/model affinity. Treat those as router-policy inputs still requiring
-implementation and evidence; do not describe them as live.
+reset windows, automatic per-task model rebinding through routing-policy
+invocation, or automatic promotion of a new skill/model affinity. Treat live
+capacity and independently promoted evidence as router-policy inputs still
+requiring collectors and service integration; do not describe adaptive routing
+as live.
 
 If the user asks only for a design, return the proposed topology without
 creating work. If the user asks to execute, create only the authorized children,

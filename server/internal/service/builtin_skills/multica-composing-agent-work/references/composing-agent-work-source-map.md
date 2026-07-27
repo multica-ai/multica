@@ -48,6 +48,22 @@
 - Together those claims prevent original and fallback tasks from duplicating
   the same control-plane side effect.
 
+## Deterministic routing policy
+
+- `server/pkg/agentroute/policy.go` defines the pure workload, candidate,
+  provider-capacity, and promoted skill-affinity inputs.
+- `agentroute.Route` rejects unknown capacity and capability/authority gaps,
+  preserves an emergency reserve, ranks eligible candidates deterministically,
+  and chooses `solo`, `serial`, `bounded_parallel`, or
+  `cross_provider_review`.
+- The resulting assignments contain exactly one write-capable lead; explorers
+  and cross-provider critics are read-only.
+- `server/pkg/agentroute/policy_test.go` locks the fail-closed gates,
+  aggregate parallel budget, evidence promotion boundary, topology rules,
+  deterministic tie breaks, and cross-provider fallback ordering.
+- This package has no task-admission or dispatch side effects. Capacity
+  collection and service integration remain separate work.
+
 ## Skill conformance
 
 - `server/internal/service/builtin_skills_test.go` enforces strict YAML,
