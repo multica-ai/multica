@@ -1947,6 +1947,7 @@ The upstream files carry one-line field/call-site additions each. Behind
 |---|---|---|
 | `skill-always-on` | `server/pkg/db/queries/skill.sql` (2 marked lines) | `ListAgentSkills` and `ListAgentSkillSummaries` select `ask.always_on` so the runtime and the agent page read the flag alongside the skill. |
 | `skill-always-on` | `server/internal/handler/skill.go` + `agent.go` (2 marked lines) | `AgentSkillSummary` carries `always_on`; the agent page renders its checkbox from it. |
+| `skill-always-on` | `server/internal/handler/skill.go` (2 marked lines, FIR-3881) | `SkillSummaryResponse.AlwaysOn` (`omitempty`) + the `ListAgentSkills` call site, so `GET /api/agents/{id}/skills` answers the question `multica agent skills list` asks. Without it the CLI's `ALWAYS_ON` column read "no" for every skill while `multica agent get` said the opposite. The field is omitted where the concept does not apply (the workspace-wide skill list). |
 | `skill-always-on` | `server/internal/service/task.go` (2 marked lines) | `AgentSkillData` carries the flag from the DB into the task payload. |
 | `skill-always-on` | `server/internal/daemon/types.go` + `daemon.go` (2 marked lines) | `SkillData` → `SkillContextForEnv` keeps the flag across the wire into the brief builder. |
 | `skill-always-on` | `server/internal/daemon/execenv/execenv.go` (1 marked line) | `SkillContextForEnv.AlwaysOn`. |
