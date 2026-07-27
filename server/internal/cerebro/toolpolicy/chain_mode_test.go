@@ -2,56 +2,6 @@ package toolpolicy
 
 import "testing"
 
-// TestResolveWithMode_HardFloorMatchesResolve proves ResolveWithMode(ModeHardFloor, ...)
-// is byte-for-byte identical to the pre-unification Resolve on every case Resolve
-// itself is tested against (FIR-2351 unification: one function body per mode
-// instead of two hand-synced top-level algorithms).
-func TestResolveWithMode_HardFloorMatchesResolve(t *testing.T) {
-	cases := []Input{
-		{},
-		{Settings: set(LayerWorkspace, SettingDeny)},
-		{Settings: set(LayerWorkspace, SettingDeny, LayerGroup, SettingAllow, LayerUser, SettingAllow)},
-		{Settings: set(LayerRuntime, SettingAllow, LayerAgent, SettingAllow, LayerUser, SettingDeny)},
-		{Settings: set(LayerUser, SettingAsk), IsSystem: true},
-		{Settings: set(LayerAgent, SettingDeny, LayerOnBehalfOf, SettingAllow)},
-		{Base: SettingDeny},
-		{Base: SettingDeny, Settings: set(LayerUser, SettingAllow)},
-	}
-	for i, in := range cases {
-		want := Resolve(in)
-		got := ResolveWithMode(ModeHardFloor, in)
-		if got != want {
-			t.Fatalf("case %d: ResolveWithMode(ModeHardFloor) = %+v, want %+v (from Resolve)", i, got, want)
-		}
-	}
-}
-
-// TestResolveWithMode_OpenableMatchesResolveMemberOverride proves
-// ResolveWithMode(ModeOpenable, ...) is byte-for-byte identical to the
-// pre-unification ResolveMemberOverride on every case it is tested against.
-func TestResolveWithMode_OpenableMatchesResolveMemberOverride(t *testing.T) {
-	cases := []Input{
-		{},
-		{Settings: set(LayerWorkspace, SettingAllow, LayerUser, SettingAllow, LayerAgent, SettingDeny)},
-		{Settings: set(LayerGroup, SettingDeny, LayerUser, SettingAllow)},
-		{Settings: set(LayerWorkspace, SettingDeny, LayerGroup, SettingAllow)},
-		{Settings: set(LayerGroup, SettingDeny)},
-		{Settings: set(LayerWorkspace, SettingAsk)},
-		{Settings: set(LayerUser, SettingDeny, LayerAgent, SettingAllow)},
-		{Settings: set(LayerUser, SettingAllow, LayerRuntime, SettingAsk)},
-		{Settings: set(LayerUser, SettingAsk), IsSystem: true},
-		{Settings: set(LayerUser, SettingAllow, LayerOnBehalfOf, SettingDeny)},
-		{Settings: set(LayerAgent, SettingDeny, LayerOnBehalfOf, SettingAllow)},
-	}
-	for i, in := range cases {
-		want := ResolveMemberOverride(in)
-		got := ResolveWithMode(ModeOpenable, in)
-		if got != want {
-			t.Fatalf("case %d: ResolveWithMode(ModeOpenable) = %+v, want %+v (from ResolveMemberOverride)", i, got, want)
-		}
-	}
-}
-
 // TestResolveWithMode_ModesDivergeOnLoosening is the invariant the whole
 // unification protects: for the SAME input, hard_floor and openable can give
 // different answers only in the loosening direction (openable may grant what

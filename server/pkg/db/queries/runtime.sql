@@ -253,16 +253,8 @@ RETURNING *;
 -- name: DeleteAgentRuntime :exec
 DELETE FROM agent_runtime WHERE id = $1;
 
--- name: UpdateAgentRuntimePersonaSandbox :one
--- Sets the runtime-level persona sandbox upper bound (D5-runtime). The
--- empty value clears it. The daemon at spawn time uses the most-restrictive
--- of (agent.persona_sandbox, runtime.persona_sandbox).
-UPDATE agent_runtime
-SET persona_sandbox = NULLIF($2, ''), updated_at = now()
-WHERE id = $1
-RETURNING *;
-
 -- name: UpdateAgentRuntimeCapabilities :exec
+-- CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the runtime persona update query.
 -- Replaces the runtime's capability snapshot. Called by the daemon on
 -- registration; the JSONB column carries provider-specific shape.
 UPDATE agent_runtime

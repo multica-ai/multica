@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the persona sandbox icon and tab.
   BookOpenText,
   FileText,
   KeyRound,
   KeySquare,
-  Shield,
   ListTodo,
   Plug,
   Terminal,
@@ -41,17 +41,17 @@ import {
 import { ActivityTab } from "./tabs/activity-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
+// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed SandboxTab.
 // CEREBRO-PATCH(agent-infisical-secrets): Infisical folder grants tab in agent settings.
 import { InfisicalFoldersTab } from "./tabs/infisical-folders-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
-// CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — persona sandbox tab (cerebro-only)
-import { SandboxTab } from "./tabs/sandbox-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { IntegrationsTab } from "./tabs/integrations-tab";
 import { ActorIssuesPanel } from "../../common/actor-issues-panel";
 import { useT } from "../../i18n";
 
 export type DetailTab =
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the sandbox route.
   | "activity"
   | "tasks"
   | "instructions"
@@ -59,11 +59,11 @@ export type DetailTab =
   | "env"
   | "infisical"
   | "custom_args"
-  | "sandbox"
   | "mcp_config"
   | "integrations";
 
 type TabLabelKey =
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the sandbox label.
   | "activity"
   | "tasks"
   | "instructions"
@@ -71,12 +71,12 @@ type TabLabelKey =
   | "environment"
   | "infisical"
   | "custom_args"
-  | "sandbox"
   | "tools"
   | "mcp_config"
   | "integrations";
 
 const TAB_LABEL_KEY: Record<DetailTab, TabLabelKey> = {
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the sandbox mapping.
   activity: "activity",
   tasks: "tasks",
   instructions: "instructions",
@@ -84,7 +84,7 @@ const TAB_LABEL_KEY: Record<DetailTab, TabLabelKey> = {
   env: "environment",
   infisical: "infisical",
   custom_args: "custom_args",
-  sandbox: "sandbox",
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the sandbox mapping.
   mcp_config: "mcp_config",
   integrations: "integrations",
 };
@@ -94,6 +94,7 @@ const coreDetailTabs: {
   icon: typeof FileText;
   labelKey: TabLabelKey;
 }[] = [
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the sandbox tab definition.
   { id: "activity", icon: Activity, labelKey: TAB_LABEL_KEY.activity },
   { id: "tasks", icon: ListTodo, labelKey: TAB_LABEL_KEY.tasks },
   { id: "instructions", icon: FileText, labelKey: TAB_LABEL_KEY.instructions },
@@ -101,7 +102,7 @@ const coreDetailTabs: {
   { id: "env", icon: KeyRound, labelKey: TAB_LABEL_KEY.env },
   { id: "infisical", icon: KeySquare, labelKey: TAB_LABEL_KEY.infisical },
   { id: "custom_args", icon: Terminal, labelKey: TAB_LABEL_KEY.custom_args },
-  { id: "sandbox", icon: Shield, labelKey: TAB_LABEL_KEY.sandbox },
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the sandbox tab definition.
   { id: "mcp_config", icon: Plug, labelKey: TAB_LABEL_KEY.mcp_config },
   { id: "integrations", icon: Webhook, labelKey: TAB_LABEL_KEY.integrations },
 ];
@@ -297,6 +298,7 @@ export function AgentOverviewPane({
         </TabContent>
       )}
       {tabId === "custom_args" && (
+        // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the sandbox tab body.
         <TabContent>
           <CustomArgsTab
             agent={agent}
@@ -304,16 +306,6 @@ export function AgentOverviewPane({
             readOnly={!canEdit}
             onSave={(updates) => onUpdate(agent.id, updates)}
             onDirtyChange={setActiveDirty}
-          />
-        </TabContent>
-      )}
-      {tabId === "sandbox" && (
-        <TabContent>
-          {/* CEREBRO-PATCH(agent-sandbox-tab): JEH-1088 — sandbox tab body */}
-          <SandboxTab
-            agent={agent}
-            canEdit={canEdit}
-            onSave={(updates) => onUpdate(agent.id, updates)}
           />
         </TabContent>
       )}

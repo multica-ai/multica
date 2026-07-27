@@ -21,7 +21,6 @@ describe("context draft state", () => {
     instructions: "Current",
     model: "gpt-5",
     thinkingLevel: "high",
-    personaSandbox: "strict",
     workspaceBriefMode: "",
     toolsBriefMode: "",
   };

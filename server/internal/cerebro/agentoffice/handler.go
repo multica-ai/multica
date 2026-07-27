@@ -84,10 +84,9 @@ type CreateChangeRequestRequest struct {
 	ProposedSnapshot *ContextSnapshot `json:"proposed_snapshot"`
 	// Convenience overrides applied on top of the current snapshot when
 	// ProposedSnapshot is absent.
-	Instructions   *string `json:"instructions"`
-	Model          *string `json:"model"`
-	ThinkingLevel  *string `json:"thinking_level"`
-	PersonaSandbox *string `json:"persona_sandbox"`
+	Instructions  *string `json:"instructions"`
+	Model         *string `json:"model"`
+	ThinkingLevel *string `json:"thinking_level"`
 	// SystemPromptMode sets how the prompt reaches the model (append|replace|
 	// prepend); empty restores the runtime default. FIR-3212. It is stored inside
 	// runtime_config, so this is a typed shortcut past hand-editing that blob.
@@ -95,19 +94,19 @@ type CreateChangeRequestRequest struct {
 	// WorkspaceBriefMode ("off") and ToolsBriefMode ("summary") configure the
 	// two largest layers of the injected brief; empty or "full" restores the
 	// default. FIR-3212. Stored inside runtime_config like SystemPromptMode.
-	WorkspaceBriefMode *string          `json:"workspace_brief_mode"`
-	ToolsBriefMode     *string          `json:"tools_brief_mode"`
-	SkillIDs           *[]string        `json:"skill_ids"`
+	WorkspaceBriefMode *string   `json:"workspace_brief_mode"`
+	ToolsBriefMode     *string   `json:"tools_brief_mode"`
+	SkillIDs           *[]string `json:"skill_ids"`
 	// AlwaysOnSkillIDs (FIR-3805) is the subset of SkillIDs whose full text is
 	// pasted into the agent's instructions on every run. Proposed through the
 	// same versioned flow as the binding set itself: turning a skill "always on"
 	// is the stronger of the two actions, so it cannot bypass the review that
 	// merely binding the skill already requires.
-	AlwaysOnSkillIDs *[]string `json:"always_on_skill_ids"`
-	McpConfig          *json.RawMessage `json:"mcp_config"`
-	CustomArgs         *json.RawMessage `json:"custom_args"`
-	RuntimeConfig      *json.RawMessage `json:"runtime_config"`
-	WorkSessionID      *string          `json:"work_session_id"`
+	AlwaysOnSkillIDs *[]string        `json:"always_on_skill_ids"`
+	McpConfig        *json.RawMessage `json:"mcp_config"`
+	CustomArgs       *json.RawMessage `json:"custom_args"`
+	RuntimeConfig    *json.RawMessage `json:"runtime_config"`
+	WorkSessionID    *string          `json:"work_session_id"`
 }
 
 // ReviewChangeRequestRequest approves or rejects a pending proposal.
@@ -475,9 +474,6 @@ func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 		}
 		if req.ThinkingLevel != nil {
 			snap.ThinkingLevel = *req.ThinkingLevel
-		}
-		if req.PersonaSandbox != nil {
-			snap.PersonaSandbox = *req.PersonaSandbox
 		}
 		if req.SkillIDs != nil {
 			snap.SkillIDs = *req.SkillIDs

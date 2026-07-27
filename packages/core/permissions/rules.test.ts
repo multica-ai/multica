@@ -40,7 +40,6 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
     updated_at: "2026-04-01T00:00:00Z",
     archived_at: null,
     archived_by: null,
-    persona_sandbox: "",
     ...overrides,
   };
 }
@@ -103,7 +102,6 @@ function makeRuntime(ownerId: string | null): RuntimeDevice {
     timezone: "UTC",
     last_seen_at: null,
     sandbox_enabled: null,
-    persona_sandbox: "",
     capabilities: {},
     paused_at: null,
     unpause_at: null,

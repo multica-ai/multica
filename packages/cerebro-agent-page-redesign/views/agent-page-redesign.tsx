@@ -83,7 +83,6 @@ import { EnvTab } from "@multica/views/agents/components/tabs/env-tab";
 import { InfisicalFoldersTab } from "@multica/views/agents/components/tabs/infisical-folders-tab";
 import { IntegrationsTab } from "@multica/views/agents/components/tabs/integrations-tab";
 import { McpConfigTab } from "@multica/views/agents/components/tabs/mcp-config-tab";
-import { SandboxTab } from "@multica/views/agents/components/tabs/sandbox-tab";
 import { SkillsTab } from "@multica/views/agents/components/tabs/skills-tab";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { AppLink, useNavigation } from "@multica/views/navigation";
@@ -541,13 +540,6 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
                             readOnly={!canEdit}
                             onSave={(updates) => handleUpdate(updates)}
                             onDirtyChange={setActiveDirty}
-                          />
-                        )}
-                        {advancedTab === "sandbox" && (
-                          <SandboxTab
-                            agent={agent}
-                            canEdit={canEdit}
-                            onSave={(updates) => handleUpdate(updates)}
                           />
                         )}
                         {advancedTab === "mcp_config" && (

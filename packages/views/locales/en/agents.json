@@ -250,7 +250,7 @@
     "environment": "Environment",
     "infisical": "Infisical secrets",
     "custom_args": "Custom Args",
-    "sandbox": "Sandbox",
+    "_comment_sandbox_tab": "CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the Sandbox tab label.",
     "tools": "Tools",
     "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
     "capabilities": "Capabilities",
@@ -379,17 +379,10 @@
       "input_placeholder": "--flag value",
       "remove_aria": "Remove argument",
       "saved_toast": "Custom arguments saved",
-      "save_failed_toast": "Failed to save custom arguments"
+      "save_failed_toast": "Failed to save custom arguments",
+      "_comment": "CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed obsolete sandbox strings."
     },
-    "sandbox": {
-      "intro": "Bind this agent to a persona sandbox to gate which tools it may call. The choice applies from the next task spawn — no daemon restart needed.",
-      "label": "Persona sandbox",
-      "no_gating_option": "— No persona gating —",
-      "persona_not_configured": "Persona is not configured for this workspace. Sandbox bindings are unavailable until an admin enables persona.",
-      "admin_only_tooltip": "Only workspace admins or owners can change the sandbox binding.",
-      "saved_toast": "Sandbox binding saved",
-      "save_failed_toast": "Failed to save sandbox binding"
-    },
+    "_comment_sandbox_section": "CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the persona sandbox tab strings.",
     "mcp_config": {
       "intro": "MCP server configuration forwarded to the runtime CLI (Claude via --mcp-config, Codex via $CODEX_HOME/config.toml, Hermes/Kimi/Kiro via ACP mcpServers, OpenCode via OPENCODE_CONFIG_CONTENT, OpenClaw via the per-task config wrapper). Stored verbatim and may contain secrets — only the agent owner and workspace admins can read it. Leave empty to fall back to the CLI's own default. For OpenClaw HTTP/SSE entries use OpenClaw's own field name (e.g. \"transport\": \"streamable-http\") instead of Claude's \"type\".",
       "placeholder": "{\n  \"mcpServers\": {\n    \"fetch\": {\n      \"command\": \"uvx\",\n      \"args\": [\"mcp-server-fetch\"]\n    }\n  }\n}",

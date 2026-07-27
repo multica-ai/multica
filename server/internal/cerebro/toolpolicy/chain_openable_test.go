@@ -33,7 +33,7 @@ func TestEffective_Openable(t *testing.T) {
 				t.Fatalf("case %d: ResolveWithMode(ModeHardFloor).Openable = true, want false (%+v)", i, got)
 			}
 			// Resolve is the tighten-only wrapper — also never openable.
-			if got := Resolve(in); got.Openable {
+			if got := ResolveWithMode(ModeHardFloor, in); got.Openable {
 				t.Fatalf("case %d: Resolve().Openable = true, want false (%+v)", i, got)
 			}
 		}

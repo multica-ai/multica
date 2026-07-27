@@ -1969,13 +1969,7 @@ export class ApiClient {
     return res.folders ?? [];
   }
 
-  // Persona pass-through: lists sandboxes the operator can attach to an
-  // agent. Returns an empty list when persona is not configured server-side.
-  async listPersonaSandboxes(): Promise<{ name: string; description: string; system_owned: boolean }[]> {
-    const res = await this.fetch<{ sandboxes?: { name: string; description: string; system_owned: boolean }[] }>("/api/persona/sandboxes");
-    return res.sandboxes ?? [];
-  }
-
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the obsolete agent persona API.
   async archiveAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
   }
@@ -2331,20 +2325,7 @@ export class ApiClient {
     });
   }
 
-  // updateRuntimePersonaSandbox sets (or clears, via empty string) the
-// CEREBRO-PATCH(client): persona integration additions.
-  // runtime-level persona sandbox cap (E1). Server-side the field is gated to
-  // workspace owner/admin; non-admins get a 403 the UI surfaces inline.
-  async updateRuntimePersonaSandbox(
-    runtimeId: string,
-    personaSandbox: string,
-  ): Promise<AgentRuntime> {
-    return this.fetch(`/api/runtimes/${runtimeId}/persona-sandbox`, {
-      method: "PATCH",
-      body: JSON.stringify({ persona_sandbox: personaSandbox }),
-    });
-  }
-
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the obsolete runtime persona API.
   // Cascade variant of deleteRuntime. The strict DELETE refuses with
   // structured 409 (`code: "runtime_has_active_agents"`, body carries the
   // blocking agents) when active agents are bound; the front-end then opens

@@ -56,7 +56,6 @@ describe("snapshotToFields masking", () => {
     description: "",
     model: "opus",
     thinking_level: "",
-    persona_sandbox: "",
     skill_ids: [],
     custom_env_keys: ["OPENAI_API_KEY"],
     mcp_config: {

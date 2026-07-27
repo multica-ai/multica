@@ -51,7 +51,12 @@ jobs:
           # connectiontools/, approvals/, webfetchpolicy/, localtoolpolicy/, and
           # delegationorigin/ are live enforcement/decision surfaces documented in
           # permission-system.md that were missing from this list until this pass.
-          PERM_REGEX='^(server/internal/cerebro/(credentials|toolpolicy|grouppermissions|mentiongate|sandboxprofile|access|permissions|permgate|connections|connectiontools|approvals|webfetchpolicy|localtoolpolicy|delegationorigin)/|server/internal/cerebro/runtime/(tools_registry|approval_gate|firtal_gateway_tools_extended|firtal_gateway_config)\.go|server/internal/daemon/sandbox\.go|server/internal/handler/daemon\.go|server/internal/handler/daemon_tool_policy_cerebro\.go)'
+          # mcprelay/ was added by FIR-3820: it is the always-on Deny gate for local
+          # mcp_http calls (FIR-2441 #2) and is documented in permission-system.md,
+          # but it was missing here — so flipping its resolver-error path from
+          # fail-open to fail-closed shipped a stale doc that this guard should
+          # have caught.
+          PERM_REGEX='^(server/internal/cerebro/(credentials|toolpolicy|grouppermissions|mentiongate|sandboxprofile|access|permissions|permgate|connections|connectiontools|approvals|webfetchpolicy|localtoolpolicy|delegationorigin|mcprelay)/|server/internal/cerebro/runtime/(tools_registry|approval_gate|firtal_gateway_tools_extended|firtal_gateway_config)\.go|server/internal/daemon/sandbox\.go|server/internal/handler/daemon\.go|server/internal/handler/daemon_tool_policy_cerebro\.go)'
           DOC='docs/agents/permission-system.md'
 
           PERM_CHANGED=$(echo "$CHANGED" | grep -E "$PERM_REGEX" || true)

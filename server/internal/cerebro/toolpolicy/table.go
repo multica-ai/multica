@@ -519,7 +519,7 @@ func (s *Store) resolveTableResourcePermission(
 	if in.snapshot != nil {
 		return in.snapshot.resolve(query, tableRowMode(in.mode, key)), nil
 	}
-	return s.ResolveGeneral(ctx, query, tableRowMode(in.mode, key) == ModeOpenable)
+	return s.ResolveDeclared(ctx, query)
 }
 
 func tablePermissionActor(in TableQuery) platformaccess.Actor {

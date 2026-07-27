@@ -35,7 +35,6 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
   const [instructions, setInstructions] = useState(agent.instructions);
   const [model, setModel] = useState(agent.model ?? "");
   const [thinkingLevel, setThinkingLevel] = useState(agent.thinking_level ?? "");
-  const [personaSandbox, setPersonaSandbox] = useState(agent.persona_sandbox ?? "");
   const [workspaceBriefMode, setWorkspaceBriefMode] = useState(() =>
     readBriefLayerMode(agent.runtime_config, "workspace_brief_mode"),
   );
@@ -53,7 +52,6 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
     instructions: agent.instructions,
     model: agent.model ?? "",
     thinkingLevel: agent.thinking_level ?? "",
-    personaSandbox: agent.persona_sandbox ?? "",
     workspaceBriefMode: readBriefLayerMode(agent.runtime_config, "workspace_brief_mode"),
     toolsBriefMode: readBriefLayerMode(agent.runtime_config, "tools_brief_mode"),
   };
@@ -61,7 +59,6 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
     instructions,
     model,
     thinkingLevel,
-    personaSandbox,
     workspaceBriefMode,
     toolsBriefMode,
   };
@@ -74,7 +71,6 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
     setInstructions(agent.instructions);
     setModel(agent.model ?? "");
     setThinkingLevel(agent.thinking_level ?? "");
-    setPersonaSandbox(agent.persona_sandbox ?? "");
     setWorkspaceBriefMode(readBriefLayerMode(agent.runtime_config, "workspace_brief_mode"));
     setToolsBriefMode(readBriefLayerMode(agent.runtime_config, "tools_brief_mode"));
   };
@@ -89,7 +85,6 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
         instructions,
         model: model.trim(),
         thinking_level: thinkingLevel.trim(),
-        persona_sandbox: personaSandbox.trim(),
         // FIR-3212: sent on every proposal like the fields above. "" restores
         // the full default, so an untouched control is a safe no-op and a
         // cleared one genuinely resets the agent to today's brief.
@@ -141,12 +136,10 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
         agent={agent}
         model={model}
         thinkingLevel={thinkingLevel}
-        personaSandbox={personaSandbox}
         workspaceBriefMode={workspaceBriefMode}
         toolsBriefMode={toolsBriefMode}
         onModel={setModel}
         onThinkingLevel={setThinkingLevel}
-        onPersonaSandbox={setPersonaSandbox}
         onWorkspaceBriefMode={setWorkspaceBriefMode}
         onToolsBriefMode={setToolsBriefMode}
       />

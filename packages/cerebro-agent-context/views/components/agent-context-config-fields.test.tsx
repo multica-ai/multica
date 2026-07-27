@@ -11,9 +11,6 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent } from "@multica/core/types";
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
-vi.mock("@multica/core/api", () => ({
-  api: { listPersonaSandboxes: vi.fn().mockResolvedValue([]) },
-}));
 vi.mock("@multica/core/runtimes", () => ({
   runtimeListOptions: () => ({ queryKey: ["runtimes"], queryFn: async () => [] }),
   runtimeModelsOptions: () => ({
@@ -46,7 +43,6 @@ const agent = {
   updated_at: "2026-04-16T00:00:00Z",
   archived_at: null,
   archived_by: null,
-  persona_sandbox: "",
 } satisfies Agent;
 
 function renderFields(overrides: {
@@ -62,12 +58,10 @@ function renderFields(overrides: {
         agent={agent}
         model=""
         thinkingLevel=""
-        personaSandbox=""
         workspaceBriefMode={overrides.workspaceBriefMode ?? ""}
         toolsBriefMode={overrides.toolsBriefMode ?? ""}
         onModel={() => {}}
         onThinkingLevel={() => {}}
-        onPersonaSandbox={() => {}}
         onWorkspaceBriefMode={overrides.onWorkspaceBriefMode ?? (() => {})}
         onToolsBriefMode={overrides.onToolsBriefMode ?? (() => {})}
       />

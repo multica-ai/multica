@@ -254,10 +254,9 @@ func (h *Handler) ListWorkspaceActivity(w http.ResponseWriter, r *http.Request) 
 	// and focused. Operators on ListWorkspaceActivities can pass an empty
 	// list to skip filtering, which we surface as "no actions" so the
 	// query returns nothing — explicit allow-list keeps the surface
-	// auditable. Persona-sandbox events are the W4.6 baseline.
+	// auditable.
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona-sandbox audit actions.
 	actions := []string{
-		"agent_persona_sandbox_changed",
-		"runtime_persona_sandbox_changed",
 		"runtime_sandbox_policy_changed",
 		"runtime_sandbox_enforcement_decision",
 	}

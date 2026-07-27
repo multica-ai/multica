@@ -164,16 +164,11 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// No row carries an Expr today, so this is behaviour-preserving until enabled.
 	// Resolved once and reused across the capability-wide and per-resource calls.
 	celEval := h.daemonPolicyCELEvaluator(r.Context(), wsUUID)
-	// This is the local-runtime twin of the gateway's GENERAL tool-policy gate, so
-	// it resolves through ResolveGeneral behind the default-on cerebro_member_override
-	// flag: on → the member-override model (a member may loosen an inherited group/
-	// workspace default), off → identical to the tighten-only Resolve. Resolved once
-	// and reused across the capability-wide and per-resource calls so both see the
-	// same model. The deny-by-default agent-browser sandbox gate below keeps calling
-	// Resolve directly and never consults this flag.
-	memberOverride := h.daemonMemberOverrideEnabled(r.Context(), wsUUID)
+	// This is the local-runtime twin of the gateway's general tool-policy gate.
+	// ResolveDeclared selects the key's declared contract and applies the
+	// workspace member-override setting only to openable permissions.
 	resolveAt := func(pattern string) (toolpolicy.Effective, error) {
-		return store.ResolveGeneral(r.Context(), toolpolicy.Query{
+		return store.ResolveDeclared(r.Context(), toolpolicy.Query{
 			WorkspaceID:     wsUUID,
 			ToolKey:         toolKey,
 			ResourcePattern: pattern,
@@ -183,7 +178,7 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 			Eval:            celEval,
 			UserID:          ownerID,
 			Base:            toolpolicy.SettingAllow,
-		}, memberOverride)
+		})
 	}
 	eff, err := resolveAt("")
 	if err != nil {

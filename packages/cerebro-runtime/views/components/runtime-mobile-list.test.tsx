@@ -87,7 +87,6 @@ const runtime: AgentRuntime = {
   metadata: { version: "2.1.5", cli_version: "0.42.0" },
   owner_id: null,
   sandbox_enabled: null,
-  persona_sandbox: "",
   visibility: "private",
   timezone: "UTC",
   capabilities: {},
