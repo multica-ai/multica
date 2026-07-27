@@ -144,6 +144,19 @@ func (f reconcilerFixture) makeDue(t *testing.T, key string) {
 	}
 }
 
+// deadlines reads the row's lease/retry deadlines together with the DATABASE's
+// own now(), so a test can assert which clock produced them.
+func (f reconcilerFixture) deadlines(t *testing.T, key string) (lease, next, dbNow time.Time) {
+	t.Helper()
+	var l, n pgtype.Timestamptz
+	if err := f.pool.QueryRow(context.Background(), `
+		SELECT lease_expires_at, next_attempt_at, now() FROM channel_media_pending_object WHERE storage_key = $1
+	`, key).Scan(&l, &n, &dbNow); err != nil {
+		t.Fatalf("read deadlines: %v", err)
+	}
+	return l.Time, n.Time, dbNow
+}
+
 func (f reconcilerFixture) bindAttachment(t *testing.T, url string) {
 	t.Helper()
 	if _, err := f.pool.Exec(context.Background(), `
@@ -346,11 +359,11 @@ func TestChannelMediaReconciler_WrongWorkspaceCannotReleaseOrDelete(t *testing.T
 	otherWorkspace := util.MustParseUUID("77777777-7777-4777-8777-777777777777")
 
 	if err := q.ReleaseChannelMediaPendingObject(context.Background(), db.ReleaseChannelMediaPendingObjectParams{
-		StorageKey:    key,
-		WorkspaceID:   otherWorkspace,
-		LeaseToken:    lease,
-		NextAttemptAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
-		LastError:     pgtype.Text{String: "cross-tenant", Valid: true},
+		StorageKey:  key,
+		WorkspaceID: otherWorkspace,
+		LeaseToken:  lease,
+		Backoff:     pgInterval(time.Hour),
+		LastError:   pgtype.Text{String: "cross-tenant", Valid: true},
 	}); err != nil {
 		t.Fatalf("release: %v", err)
 	}
@@ -604,6 +617,47 @@ func TestChannelMediaReconciler_TombstoneKeepsReferencedObject(t *testing.T) {
 	}
 	if got := testutil.ToFloat64(m.TombstoneReferenced); got != 1 {
 		t.Fatalf("tombstone-referenced anomaly counter = %v, want 1", got)
+	}
+}
+
+// Every deadline the reconciler persists is computed by Postgres from its own
+// now(), not by the process: the queries take durations, so a replica whose
+// clock drifted cannot settle a row whose upload is still in flight, hand out
+// a lease that is born expired, or compress the tombstone schedule. This pins
+// that the persisted timestamps track the DATABASE clock.
+func TestChannelMediaReconciler_DeadlinesComeFromTheDatabaseClock(t *testing.T) {
+	pool := newCancelFinalizePool(t)
+	f := seedReconcilerFixture(t, pool)
+	key := "ws/lark/db-clock"
+	f.seedLedgerRow(t, key, "https://cdn.test/db-clock", "pending", ChannelMediaReconcileSettleDelay+time.Minute)
+
+	// Read the lease while the settle is in flight — it is cleared on release.
+	var leaseAhead time.Duration
+	deleter := &fakeObjectDeleter{err: errors.New("storage down")}
+	deleter.onDelete = func(string) {
+		lease, _, dbNow := f.deadlines(t, key)
+		leaseAhead = lease.Sub(dbNow)
+	}
+	rec := &ChannelMediaReconciler{Queries: db.New(pool), Storage: deleter}
+	rec.RunOnce(context.Background())
+
+	if leaseAhead <= 0 || leaseAhead > channelMediaReconcileLease {
+		t.Fatalf("lease expires %v after the database's now(), want (0, %v]", leaseAhead, channelMediaReconcileLease)
+	}
+	// The failed delete backed the row off by the base backoff, from now().
+	_, next, dbNow := f.deadlines(t, key)
+	if ahead := next.Sub(dbNow); ahead <= 0 || ahead > channelMediaReconcileBackoffBase {
+		t.Fatalf("backoff lands %v after the database's now(), want (0, %v]", ahead, channelMediaReconcileBackoffBase)
+	}
+
+	// And so does the tombstone's first re-delete pass.
+	deleter.err = nil
+	deleter.onDelete = nil
+	f.makeDue(t, key)
+	rec.RunOnce(context.Background())
+	_, next, dbNow = f.deadlines(t, key)
+	if ahead := next.Sub(dbNow); ahead <= 0 || ahead > channelMediaTombstoneRedelete[0] {
+		t.Fatalf("re-delete lands %v after the database's now(), want (0, %v]", ahead, channelMediaTombstoneRedelete[0])
 	}
 }
 

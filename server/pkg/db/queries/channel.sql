@@ -679,13 +679,13 @@ RETURNING storage_key;
 UPDATE channel_media_pending_object AS obj
 SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
     lease_token = @lease_token,
-    lease_expires_at = @lease_expires_at,
+    lease_expires_at = now() + @lease::interval,
     attempt = obj.attempt + 1
 FROM (
     SELECT cand.storage_key FROM channel_media_pending_object AS cand
     WHERE cand.next_attempt_at <= now()
       AND (
-          (cand.state = 'pending' AND cand.created_at <= @pending_settled_before)
+          (cand.state = 'pending' AND cand.created_at <= now() - @settle_delay::interval)
           OR (cand.state = 'deleting' AND (cand.lease_expires_at IS NULL OR cand.lease_expires_at <= now()))
           -- Tombstones: the object was deleted, but a PUT the client abandoned
           -- may still materialize it afterwards, so each due tombstone gets
@@ -708,7 +708,7 @@ RETURNING obj.*;
 -- this row: the caller must skip it. workspace_id explicit per the tenancy
 -- rule.
 UPDATE channel_media_pending_object
-SET lease_expires_at = @lease_expires_at
+SET lease_expires_at = now() + @lease::interval
 WHERE storage_key = @storage_key
   AND workspace_id = @workspace_id
   AND lease_token = @lease_token;
@@ -722,7 +722,7 @@ WHERE storage_key = @storage_key
 UPDATE channel_media_pending_object
 SET lease_token = NULL,
     lease_expires_at = NULL,
-    next_attempt_at = @next_attempt_at,
+    next_attempt_at = now() + @backoff::interval,
     last_error = @last_error
 WHERE storage_key = @storage_key
   AND workspace_id = @workspace_id
@@ -742,7 +742,7 @@ UPDATE channel_media_pending_object
 SET state = 'tombstoned',
     lease_token = NULL,
     lease_expires_at = NULL,
-    next_attempt_at = @next_attempt_at,
+    next_attempt_at = now() + @redelete_delay::interval,
     -- The pass index lives in its own column: a failed re-delete writes
     -- last_error, so carrying the schedule position there would reset the
     -- walk on every failure and a flaky store could keep the row alive

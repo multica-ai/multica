@@ -36,6 +36,12 @@ import (
 // only sets how long the reconciler waits before treating a pending row as
 // abandoned; the tested invariant is settle >> every media/HTTP/DB budget in
 // the pipeline (see cmd/server channel media invariant test).
+//
+// Every deadline below is a DURATION handed to SQL, never a timestamp computed
+// here: Postgres derives settle cutoffs, lease expiry, backoff and re-delete
+// times from its own now(), so replicas with drifting clocks all read the same
+// clock. An app-side timestamp would let a fast replica settle rows whose
+// upload is still in flight, or hand out a lease that is already expired.
 const (
 	// ChannelMediaReconcileSettleDelay is how long a 'pending' row must sit
 	// before the reconciler considers it abandoned. Exported for the
@@ -96,8 +102,7 @@ type ChannelMediaReconciler struct {
 	Logger  *slog.Logger
 	Metrics *metrics.ChannelMediaReconcilerMetrics
 
-	// now and deleteTimeout are overridable for deterministic tests.
-	now           func() time.Time
+	// deleteTimeout is overridable for deterministic tests.
 	deleteTimeout time.Duration
 }
 
@@ -108,11 +113,12 @@ func (r *ChannelMediaReconciler) logger() *slog.Logger {
 	return slog.Default()
 }
 
-func (r *ChannelMediaReconciler) clock() time.Time {
-	if r.now != nil {
-		return r.now()
-	}
-	return time.Now()
+// pgInterval carries a duration to SQL so Postgres computes the deadline
+// itself. Every settle/lease/retry decision compares against the database
+// clock, so a replica whose own clock has drifted cannot settle a row early,
+// hand out a lease that is born expired, or compress the tombstone schedule.
+func pgInterval(d time.Duration) pgtype.Interval {
+	return pgtype.Interval{Microseconds: d.Microseconds(), Valid: true}
 }
 
 // Run loops RunOnce until ctx ends. Started as its own goroutine from
@@ -144,12 +150,11 @@ func (r *ChannelMediaReconciler) RunOnce(ctx context.Context) {
 		return
 	}
 	leaseToken := pgtype.UUID{Bytes: uuid.New(), Valid: true}
-	now := r.clock()
 	rows, err := r.Queries.ClaimChannelMediaPendingObjectsForReconcile(ctx, db.ClaimChannelMediaPendingObjectsForReconcileParams{
-		LeaseToken:           leaseToken,
-		LeaseExpiresAt:       pgtype.Timestamptz{Time: now.Add(channelMediaReconcileLease), Valid: true},
-		PendingSettledBefore: pgtype.Timestamptz{Time: now.Add(-ChannelMediaReconcileSettleDelay), Valid: true},
-		BatchLimit:           channelMediaReconcileBatchLimit,
+		LeaseToken:  leaseToken,
+		Lease:       pgInterval(channelMediaReconcileLease),
+		SettleDelay: pgInterval(ChannelMediaReconcileSettleDelay),
+		BatchLimit:  channelMediaReconcileBatchLimit,
 	})
 	if err != nil {
 		r.logger().Warn("channel media reconciler: claim failed", "error", err)
@@ -174,10 +179,10 @@ func (r *ChannelMediaReconciler) settle(ctx context.Context, row db.ChannelMedia
 	// it; touching it now would duplicate its delete and fight the new
 	// owner's attempt/backoff accounting.
 	renewed, err := r.Queries.RenewChannelMediaPendingObjectLease(ctx, db.RenewChannelMediaPendingObjectLeaseParams{
-		StorageKey:     row.StorageKey,
-		WorkspaceID:    row.WorkspaceID,
-		LeaseToken:     leaseToken,
-		LeaseExpiresAt: pgtype.Timestamptz{Time: r.clock().Add(channelMediaReconcileLease), Valid: true},
+		StorageKey:  row.StorageKey,
+		WorkspaceID: row.WorkspaceID,
+		LeaseToken:  leaseToken,
+		Lease:       pgInterval(channelMediaReconcileLease),
 	})
 	if err != nil {
 		r.logger().Warn("channel media reconciler: lease renew failed; skipping row",
@@ -318,7 +323,7 @@ func (r *ChannelMediaReconciler) tombstoneRow(ctx context.Context, row db.Channe
 		StorageKey:    row.StorageKey,
 		WorkspaceID:   row.WorkspaceID,
 		LeaseToken:    leaseToken,
-		NextAttemptAt: pgtype.Timestamptz{Time: r.clock().Add(next), Valid: true},
+		RedeleteDelay: pgInterval(next),
 		TombstonePass: int32(idx),
 	})
 	if err != nil {
@@ -342,11 +347,11 @@ func (r *ChannelMediaReconciler) release(ctx context.Context, row db.ChannelMedi
 		"backoff", backoff,
 		"error", cause)
 	if err := r.Queries.ReleaseChannelMediaPendingObject(ctx, db.ReleaseChannelMediaPendingObjectParams{
-		StorageKey:    row.StorageKey,
-		WorkspaceID:   row.WorkspaceID,
-		LeaseToken:    leaseToken,
-		NextAttemptAt: pgtype.Timestamptz{Time: r.clock().Add(backoff), Valid: true},
-		LastError:     pgtype.Text{String: cause.Error(), Valid: true},
+		StorageKey:  row.StorageKey,
+		WorkspaceID: row.WorkspaceID,
+		LeaseToken:  leaseToken,
+		Backoff:     pgInterval(backoff),
+		LastError:   pgtype.Text{String: cause.Error(), Valid: true},
 	}); err != nil {
 		// The lease expiry reclaims the row regardless.
 		r.logger().Warn("channel media reconciler: release failed", "storage_key", row.StorageKey, "error", err)

@@ -91,7 +91,9 @@ type ChannelMediaObjectIsReferencedParams struct {
 // The post-claim reference check: an attachment row carrying this object's
 // URL on the intended message. Only meaningful AFTER the claim flipped the
 // row to 'deleting' — from that point a bind can no longer succeed on the
-// key, so a negative answer is terminal, not a snapshot race.
+// key, so a negative answer is terminal, not a snapshot race. Re-run on every
+// tombstone pass as well: a positive answer there is an invariant violation,
+// and the object is kept and reported rather than deleted.
 func (q *Queries) ChannelMediaObjectIsReferenced(ctx context.Context, arg ChannelMediaObjectIsReferencedParams) (bool, error) {
 	row := q.db.QueryRow(ctx, channelMediaObjectIsReferenced, arg.ChatMessageID, arg.WorkspaceID, arg.StorageUrl)
 	var referenced bool
@@ -180,13 +182,13 @@ const claimChannelMediaPendingObjectsForReconcile = `-- name: ClaimChannelMediaP
 UPDATE channel_media_pending_object AS obj
 SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
     lease_token = $1,
-    lease_expires_at = $2,
+    lease_expires_at = now() + $2::interval,
     attempt = obj.attempt + 1
 FROM (
     SELECT cand.storage_key FROM channel_media_pending_object AS cand
     WHERE cand.next_attempt_at <= now()
       AND (
-          (cand.state = 'pending' AND cand.created_at <= $3)
+          (cand.state = 'pending' AND cand.created_at <= now() - $3::interval)
           OR (cand.state = 'deleting' AND (cand.lease_expires_at IS NULL OR cand.lease_expires_at <= now()))
           -- Tombstones: the object was deleted, but a PUT the client abandoned
           -- may still materialize it afterwards, so each due tombstone gets
@@ -202,10 +204,10 @@ RETURNING obj.storage_key, obj.workspace_id, obj.chat_message_id, obj.storage_ur
 `
 
 type ClaimChannelMediaPendingObjectsForReconcileParams struct {
-	LeaseToken           pgtype.UUID        `json:"lease_token"`
-	LeaseExpiresAt       pgtype.Timestamptz `json:"lease_expires_at"`
-	PendingSettledBefore pgtype.Timestamptz `json:"pending_settled_before"`
-	BatchLimit           int32              `json:"batch_limit"`
+	LeaseToken  pgtype.UUID     `json:"lease_token"`
+	Lease       pgtype.Interval `json:"lease"`
+	SettleDelay pgtype.Interval `json:"settle_delay"`
+	BatchLimit  int32           `json:"batch_limit"`
 }
 
 // Short-transaction claim: flips due rows to 'deleting' under a fresh lease.
@@ -218,8 +220,8 @@ type ClaimChannelMediaPendingObjectsForReconcileParams struct {
 func (q *Queries) ClaimChannelMediaPendingObjectsForReconcile(ctx context.Context, arg ClaimChannelMediaPendingObjectsForReconcileParams) ([]ChannelMediaPendingObject, error) {
 	rows, err := q.db.Query(ctx, claimChannelMediaPendingObjectsForReconcile,
 		arg.LeaseToken,
-		arg.LeaseExpiresAt,
-		arg.PendingSettledBefore,
+		arg.Lease,
+		arg.SettleDelay,
 		arg.BatchLimit,
 	)
 	if err != nil {
@@ -1488,7 +1490,7 @@ const releaseChannelMediaPendingObject = `-- name: ReleaseChannelMediaPendingObj
 UPDATE channel_media_pending_object
 SET lease_token = NULL,
     lease_expires_at = NULL,
-    next_attempt_at = $1,
+    next_attempt_at = now() + $1::interval,
     last_error = $2
 WHERE storage_key = $3
   AND workspace_id = $4
@@ -1496,11 +1498,11 @@ WHERE storage_key = $3
 `
 
 type ReleaseChannelMediaPendingObjectParams struct {
-	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
-	LastError     pgtype.Text        `json:"last_error"`
-	StorageKey    string             `json:"storage_key"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	LeaseToken    pgtype.UUID        `json:"lease_token"`
+	Backoff     pgtype.Interval `json:"backoff"`
+	LastError   pgtype.Text     `json:"last_error"`
+	StorageKey  string          `json:"storage_key"`
+	WorkspaceID pgtype.UUID     `json:"workspace_id"`
+	LeaseToken  pgtype.UUID     `json:"lease_token"`
 }
 
 // Object-storage DELETE failed: keep the row in 'deleting' (bind must still
@@ -1510,7 +1512,7 @@ type ReleaseChannelMediaPendingObjectParams struct {
 // the key string.
 func (q *Queries) ReleaseChannelMediaPendingObject(ctx context.Context, arg ReleaseChannelMediaPendingObjectParams) error {
 	_, err := q.db.Exec(ctx, releaseChannelMediaPendingObject,
-		arg.NextAttemptAt,
+		arg.Backoff,
 		arg.LastError,
 		arg.StorageKey,
 		arg.WorkspaceID,
@@ -1541,17 +1543,17 @@ func (q *Queries) ReleaseChannelWSLease(ctx context.Context, arg ReleaseChannelW
 
 const renewChannelMediaPendingObjectLease = `-- name: RenewChannelMediaPendingObjectLease :execrows
 UPDATE channel_media_pending_object
-SET lease_expires_at = $1
+SET lease_expires_at = now() + $1::interval
 WHERE storage_key = $2
   AND workspace_id = $3
   AND lease_token = $4
 `
 
 type RenewChannelMediaPendingObjectLeaseParams struct {
-	LeaseExpiresAt pgtype.Timestamptz `json:"lease_expires_at"`
-	StorageKey     string             `json:"storage_key"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	LeaseToken     pgtype.UUID        `json:"lease_token"`
+	Lease       pgtype.Interval `json:"lease"`
+	StorageKey  string          `json:"storage_key"`
+	WorkspaceID pgtype.UUID     `json:"workspace_id"`
+	LeaseToken  pgtype.UUID     `json:"lease_token"`
 }
 
 // Per-row heartbeat: the batch shares one claim, so the lease must be
@@ -1563,7 +1565,7 @@ type RenewChannelMediaPendingObjectLeaseParams struct {
 // rule.
 func (q *Queries) RenewChannelMediaPendingObjectLease(ctx context.Context, arg RenewChannelMediaPendingObjectLeaseParams) (int64, error) {
 	result, err := q.db.Exec(ctx, renewChannelMediaPendingObjectLease,
-		arg.LeaseExpiresAt,
+		arg.Lease,
 		arg.StorageKey,
 		arg.WorkspaceID,
 		arg.LeaseToken,
@@ -1614,7 +1616,7 @@ UPDATE channel_media_pending_object
 SET state = 'tombstoned',
     lease_token = NULL,
     lease_expires_at = NULL,
-    next_attempt_at = $1,
+    next_attempt_at = now() + $1::interval,
     -- The pass index lives in its own column: a failed re-delete writes
     -- last_error, so carrying the schedule position there would reset the
     -- walk on every failure and a flaky store could keep the row alive
@@ -1628,23 +1630,25 @@ WHERE storage_key = $3
 `
 
 type TombstoneChannelMediaPendingObjectParams struct {
-	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
-	TombstonePass int32              `json:"tombstone_pass"`
-	StorageKey    string             `json:"storage_key"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	LeaseToken    pgtype.UUID        `json:"lease_token"`
+	RedeleteDelay pgtype.Interval `json:"redelete_delay"`
+	TombstonePass int32           `json:"tombstone_pass"`
+	StorageKey    string          `json:"storage_key"`
+	WorkspaceID   pgtype.UUID     `json:"workspace_id"`
+	LeaseToken    pgtype.UUID     `json:"lease_token"`
 }
 
 // The object was deleted, but the row is KEPT as a tombstone: a PUT the client
 // abandoned before the delete may still materialize the object afterwards, and
-// no DELETE can be ordered against it. Each due tombstone triggers another
-// idempotent delete, so a late materialization is reclaimed by a later pass;
+// no DELETE can be ordered against it. Each due tombstone re-runs the
+// reference check and, only if still unreferenced, triggers another idempotent
+// delete, so a late materialization is reclaimed by a later pass while an
+// object something durably reads is never removed;
 // only after the re-delete schedule is exhausted is the row dropped
 // (DeleteChannelMediaPendingObject). Lease-token guarded like every other
 // settle write; workspace_id explicit per the tenancy rule.
 func (q *Queries) TombstoneChannelMediaPendingObject(ctx context.Context, arg TombstoneChannelMediaPendingObjectParams) (int64, error) {
 	result, err := q.db.Exec(ctx, tombstoneChannelMediaPendingObject,
-		arg.NextAttemptAt,
+		arg.RedeleteDelay,
 		arg.TombstonePass,
 		arg.StorageKey,
 		arg.WorkspaceID,
