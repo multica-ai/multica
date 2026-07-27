@@ -367,7 +367,7 @@ func TestReadKimiWireUsageSumsRecentRecordsPerModel(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, foundWire := readKimiWireUsage("session-abc", now.Add(-10*time.Second), slog.Default())
+	got, foundWire := readKimiWireUsage("session-abc", now.Add(-10*time.Second), home, slog.Default())
 	if !foundWire {
 		t.Fatal("expected foundWire=true with a wire file present")
 	}
@@ -384,8 +384,7 @@ func TestReadKimiWireUsageSumsRecentRecordsPerModel(t *testing.T) {
 }
 
 func TestReadKimiWireUsageMissingSessionReturnsNil(t *testing.T) {
-	t.Setenv("KIMI_CODE_HOME", t.TempDir())
-	got, foundWire := readKimiWireUsage("session-nope", time.Now().Add(-time.Minute), slog.Default())
+	got, foundWire := readKimiWireUsage("session-nope", time.Now().Add(-time.Minute), t.TempDir(), slog.Default())
 	if got != nil {
 		t.Fatalf("expected nil for missing wire, got %+v", got)
 	}
@@ -408,7 +407,7 @@ func TestReadKimiWireUsageSumsAcrossAgentWires(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	got, foundWire := readKimiWireUsage("session-abc", now.Add(-10*time.Second), slog.Default())
+	got, foundWire := readKimiWireUsage("session-abc", now.Add(-10*time.Second), home, slog.Default())
 	if !foundWire {
 		t.Fatal("expected foundWire=true with wire files present")
 	}
@@ -424,7 +423,6 @@ func TestReadKimiWireUsageSumsAcrossAgentWires(t *testing.T) {
 // so the late second wire is counted too.
 func TestWaitKimiWireUsageSettlesAcrossAgentWires(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("KIMI_CODE_HOME", home)
 
 	now := time.Now()
 	mainDir := filepath.Join(home, "sessions", "wd_x_deadbeef", "session-abc", "agents", "main")
@@ -442,7 +440,7 @@ func TestWaitKimiWireUsageSettlesAcrossAgentWires(t *testing.T) {
 
 	resultCh := make(chan map[string]TokenUsage, 1)
 	go func() {
-		resultCh <- waitKimiWireUsage("session-abc", now, slog.Default())
+		resultCh <- waitKimiWireUsage("session-abc", now, home, slog.Default())
 	}()
 
 	// Main agent flushes first…
@@ -485,10 +483,8 @@ func TestWaitKimiWireUsageSettlesAcrossAgentWires(t *testing.T) {
 // writes none (older CLI, custom data dir). The wait must bail at once,
 // not burn the whole poll budget on every completed run.
 func TestWaitKimiWireUsageNoWireReturnsImmediately(t *testing.T) {
-	t.Setenv("KIMI_CODE_HOME", t.TempDir())
-
 	start := time.Now()
-	if got := waitKimiWireUsage("session-nope", start.Add(-time.Minute), slog.Default()); got != nil {
+	if got := waitKimiWireUsage("session-nope", start.Add(-time.Minute), t.TempDir(), slog.Default()); got != nil {
 		t.Fatalf("expected nil usage, got %+v", got)
 	}
 	if elapsed := time.Since(start); elapsed > kimiWireUsagePollTimeout/2 {
@@ -502,7 +498,6 @@ func TestWaitKimiWireUsageNoWireReturnsImmediately(t *testing.T) {
 // NOT be summed into the current task's usage.
 func TestReadKimiWireUsageIgnoresRecordsBeforeSnapshot(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("KIMI_CODE_HOME", home)
 
 	now := time.Now()
 	dir := filepath.Join(home, "sessions", "wd_x_deadbeef", "session-abc", "agents", "main")
@@ -517,7 +512,7 @@ func TestReadKimiWireUsageIgnoresRecordsBeforeSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, foundWire := readKimiWireUsage("session-abc", now, slog.Default())
+	got, foundWire := readKimiWireUsage("session-abc", now, home, slog.Default())
 	if !foundWire {
 		t.Fatal("expected foundWire=true with a wire file present")
 	}
@@ -883,13 +878,90 @@ func TestKimiBackendHealthyEmptyCompletionNotFlagged(t *testing.T) {
 	}
 }
 
+// fakeKimiACPChildEnvWireScript impersonates `kimi acp` and writes a
+// usage.record to the session wire using the child process's
+// KIMI_CODE_HOME. Used to prove that usage recovery reads from the child's
+// env, not the daemon's.
+func fakeKimiACPChildEnvWireScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_env_child"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      if [ -n "$KIMI_CODE_HOME" ]; then
+        wire_dir="$KIMI_CODE_HOME/sessions/wd_x_deadbeef/ses_env_child/agents/main"
+        mkdir -p "$wire_dir"
+        printf '{"type":"usage.record","model":"kimi-code/k3","usage":{"inputOther":42,"output":7,"inputCacheRead":0,"inputCacheCreation":0},"usageScope":"turn","time":%s}\n' "$(date +%s%3N)" >> "$wire_dir/wire.jsonl"
+      fi
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+// TestKimiBackendUsesChildEnvKimiCodeHome is the regression guard for
+// must-fix #2: usage recovery must resolve KIMI_CODE_HOME from the child
+// process's environment (built from Config.Env), not from the daemon's own
+// environment. The daemon env points to an empty directory, while Config.Env
+// points to the real session wire.
+func TestKimiBackendUsesChildEnvKimiCodeHome(t *testing.T) {
+	daemonHome := t.TempDir()
+	childHome := t.TempDir()
+	t.Setenv("KIMI_CODE_HOME", daemonHome)
+
+	fakePath := filepath.Join(t.TempDir(), "kimi")
+	writeTestExecutable(t, fakePath, []byte(fakeKimiACPChildEnvWireScript()))
+
+	backend, err := New("kimi", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"KIMI_CODE_HOME": childHome},
+	})
+	if err != nil {
+		t.Fatalf("new kimi backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "completed" {
+			t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+		}
+		if u := result.Usage["kimi-code/k3"]; u.InputTokens != 42 || u.OutputTokens != 7 {
+			t.Fatalf("expected usage from child-env KIMI_CODE_HOME, got %+v", result.Usage)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 // TestReadKimiTurnFailure pins the kimi-code.log cross-check itself:
 // in-window failures are found with the provider error extracted, stale
 // entries from previous runs are ignored, and a missing log means "no
 // signal" (older kimi builds), never a false positive.
 func TestReadKimiTurnFailure(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("KIMI_CODE_HOME", home)
 
 	now := time.Now()
 	providerMsg := "400 the message at position 168 with role 'assistant' must not be empty"
@@ -943,7 +1015,7 @@ func TestReadKimiTurnFailure(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			seedKimiSessionFiles(t, home, "ses_log", "", tt.log)
-			msg, found := readKimiTurnFailure("ses_log", now.Add(-time.Minute), slog.Default())
+			msg, found := readKimiTurnFailure("ses_log", now.Add(-time.Minute), home, slog.Default())
 			if found != tt.wantFound {
 				t.Fatalf("found = %v, want %v (msg=%q)", found, tt.wantFound, msg)
 			}
@@ -961,8 +1033,7 @@ func TestReadKimiTurnFailure(t *testing.T) {
 // TestReadKimiTurnFailureMissingLog pins the no-signal case: kimi builds
 // that write no session log (or a custom data dir) must not false-positive.
 func TestReadKimiTurnFailureMissingLog(t *testing.T) {
-	t.Setenv("KIMI_CODE_HOME", t.TempDir())
-	msg, found := readKimiTurnFailure("session-nope", time.Now().Add(-time.Minute), slog.Default())
+	msg, found := readKimiTurnFailure("session-nope", time.Now().Add(-time.Minute), t.TempDir(), slog.Default())
 	if found {
 		t.Fatalf("expected found=false for missing log, got msg=%q", msg)
 	}

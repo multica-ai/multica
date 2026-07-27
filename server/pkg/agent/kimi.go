@@ -72,6 +72,11 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
+	// Resolve the effective Kimi data directory from the child-process
+	// environment. The daemon's own KIMI_CODE_HOME may differ (custom_env,
+	// task-local overrides), and usage/failure recovery must read the files
+	// the child actually writes.
+	kimiHome := kimiHomeFromEnv(cmd.Env)
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -280,7 +285,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// recovery only counts records appended by this turn. On a resumed
 		// session the wire holds every past turn; without the snapshot we
 		// would double-bill tokens already billed to earlier tasks.
-		wireSnapshotMs = snapshotKimiWire(sessionID, b.cfg.Logger)
+		wireSnapshotMs = snapshotKimiWire(sessionID, kimiHome, b.cfg.Logger)
 
 		// 3. If the caller picked a model (via agent.model from the
 		// UI dropdown), ask kimi to switch the session to it before
@@ -420,7 +425,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				c.usage.CacheReadTokens == 0 && c.usage.CacheWriteTokens == 0
 			c.usageMu.Unlock()
 			if acpUsageEmpty && sessionID != "" && finalStatus == "completed" {
-				wireUsage = waitKimiWireUsage(sessionID, time.UnixMilli(wireSnapshotMs), b.cfg.Logger)
+				wireUsage = waitKimiWireUsage(sessionID, time.UnixMilli(wireSnapshotMs), kimiHome, b.cfg.Logger)
 			}
 		}
 
@@ -478,7 +483,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				// should carry what the run consumed. Still nil when
 				// nothing usable was found — the run then reports no
 				// usage, matching prior behavior.
-				usageMap, _ = readKimiWireUsage(sessionID, time.UnixMilli(wireSnapshotMs), b.cfg.Logger)
+				usageMap, _ = readKimiWireUsage(sessionID, time.UnixMilli(wireSnapshotMs), kimiHome, b.cfg.Logger)
 			}
 		}
 
@@ -497,7 +502,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// failure entries from previous runs out of the check.
 		if finalStatus == "completed" && finalOutput == "" && sessionID != "" &&
 			u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
-			if failMsg, failed := readKimiTurnFailure(sessionID, time.UnixMilli(wireSnapshotMs), b.cfg.Logger); failed {
+			if failMsg, failed := readKimiTurnFailure(sessionID, time.UnixMilli(wireSnapshotMs), kimiHome, b.cfg.Logger); failed {
 				b.cfg.Logger.Warn("kimi turn failed provider-side behind end_turn; failing the run and dropping the poisoned session",
 					"session_id", sessionID,
 					"error", failMsg,
@@ -578,16 +583,65 @@ const (
 	kimiWireUsagePollInterval = 100 * time.Millisecond
 )
 
+const (
+	// kimiLineBufSize is the chunk size used when scanning wire/log files.
+	// It is large enough to absorb most lines in one ReadSlice but small
+	// enough that a 5 MiB tool-output frame is never held whole.
+	kimiLineBufSize = 64 * 1024
+	// kimiMaxTargetLineBytes caps how much of a target line we are willing
+	// to buffer. Usage records and turn-failure log lines are well under
+	// this; oversized target lines are skipped rather than risking OOM.
+	kimiMaxTargetLineBytes = 1024 * 1024
+)
+
+// kimiReadLineBounded reads one line from r. If the line does not look like
+// a target line according to isTarget, it is discarded chunk by chunk without
+// ever buffering the whole line. Target lines are buffered only up to
+// kimiMaxTargetLineBytes; anything beyond that is discarded.
+func kimiReadLineBounded(r *bufio.Reader, isTarget func([]byte) bool) ([]byte, error) {
+	chunk, err := r.ReadSlice('\n')
+	if err != bufio.ErrBufferFull {
+		return chunk, err
+	}
+	// Line longer than the internal buffer. Decide from the leading chunk
+	// whether this is a line we care about.
+	if !isTarget(chunk) {
+		for err == bufio.ErrBufferFull {
+			chunk, err = r.ReadSlice('\n')
+		}
+		return nil, err
+	}
+	// Target line that exceeds the buffer: accumulate up to the cap.
+	var buf bytes.Buffer
+	buf.Grow(len(chunk))
+	buf.Write(chunk)
+	for err == bufio.ErrBufferFull {
+		chunk, err = r.ReadSlice('\n')
+		if buf.Len()+len(chunk) > kimiMaxTargetLineBytes {
+			// Too big: discard the remainder and treat as skipped.
+			for err == bufio.ErrBufferFull {
+				chunk, err = r.ReadSlice('\n')
+			}
+			return nil, err
+		}
+		buf.Write(chunk)
+	}
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+	return buf.Bytes(), err
+}
+
 // waitKimiWireUsage polls readKimiWireUsage until the turn's usage
 // totals settle — non-empty and unchanged across one more poll interval —
 // or the poll budget runs out, in which case the latest read wins (nil
 // when nothing was ever found).
-func waitKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) map[string]TokenUsage {
+func waitKimiWireUsage(sessionID string, since time.Time, home string, logger *slog.Logger) map[string]TokenUsage {
 	// Fast path: kimi creates the session wire at session start, long
 	// before this post-prompt poll. A first probe matching no wire file
 	// at all therefore means this build writes none (older CLI, custom
 	// data dir) — bail now instead of burning the whole budget per run.
-	usage, foundWire := readKimiWireUsage(sessionID, since, logger)
+	usage, foundWire := readKimiWireUsage(sessionID, since, home, logger)
 	if !foundWire {
 		return nil
 	}
@@ -601,7 +655,7 @@ func waitKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) m
 	for !time.Now().After(deadline) {
 		time.Sleep(kimiWireUsagePollInterval)
 		prev := usage
-		usage, _ = readKimiWireUsage(sessionID, since, logger)
+		usage, _ = readKimiWireUsage(sessionID, since, home, logger)
 		if usage != nil && maps.Equal(usage, prev) {
 			return usage
 		}
@@ -623,14 +677,13 @@ func waitKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) m
 // right after session/new or session/resume and passes that snapshot as
 // `since`, so previous task records are ignored regardless of clock skew.
 // Records are summed per model so multi-model runs attribute correctly.
-// The KIMI_CODE_HOME lookup uses the daemon process env, which is what the
-// child inherits in the common case. The second return value reports whether
-// any wire file matched at all — callers use it to tell "this kimi build
-// writes no wire" from "wire exists but the turn's record isn't flushed
-// yet". Totals are nil when nothing usable is found — the caller then
-// reports no usage, matching the pre-recovery behavior.
-func readKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) (map[string]TokenUsage, bool) {
-	home := kimiCodeHome()
+// The `home` argument must be the effective Kimi data directory (resolved
+// from the child-process environment by the caller). The second return value
+// reports whether any wire file matched at all — callers use it to tell
+// "this kimi build writes no wire" from "wire exists but the turn's record
+// isn't flushed yet". Totals are nil when nothing usable is found — the
+// caller then reports no usage, matching the pre-recovery behavior.
+func readKimiWireUsage(sessionID string, since time.Time, home string, logger *slog.Logger) (map[string]TokenUsage, bool) {
 	if home == "" {
 		return nil, false
 	}
@@ -655,19 +708,18 @@ func readKimiWireUsage(sessionID string, since time.Time, logger *slog.Logger) (
 // into totals, keyed by the record's model id. Malformed lines are
 // skipped — the wire is an append-only log best read leniently.
 //
-// Lines are read with an unbounded bufio.Reader on purpose: tool-output
-// frames on this log can exceed any fixed scanner buffer, and a capped
-// reader would stop at the oversized line and hide usage.record entries
-// appended after it.
+// Non-target lines are discarded chunk-by-chunk so a huge tool-output frame
+// never gets buffered whole; target lines are buffered only up to
+// kimiMaxTargetLineBytes.
 func accumulateKimiWireFile(path string, cutoffMs int64, totals map[string]TokenUsage) error {
 	fh, err := os.Open(path)
 	if err != nil {
 		return err
 	}
 	defer fh.Close()
-	r := bufio.NewReader(fh)
+	r := bufio.NewReaderSize(fh, kimiLineBufSize)
 	for {
-		line, err := r.ReadBytes('\n')
+		line, err := kimiReadLineBounded(r, isUsageRecordLine)
 		if len(line) > 0 {
 			accumulateKimiWireLine(line, cutoffMs, totals)
 		}
@@ -678,6 +730,13 @@ func accumulateKimiWireFile(path string, cutoffMs int64, totals map[string]Token
 			return err
 		}
 	}
+}
+
+// isUsageRecordLine reports whether a (possibly partial) line looks like a
+// usage.record entry. The marker sits near the start, so a leading chunk is
+// enough to decide.
+func isUsageRecordLine(line []byte) bool {
+	return bytes.Contains(line, []byte(`"usage.record"`))
 }
 
 // accumulateKimiWireLine folds one wire line into totals when it is a
@@ -714,17 +773,32 @@ func accumulateKimiWireLine(line []byte, cutoffMs int64, totals map[string]Token
 	totals[model] = u
 }
 
-// kimiCodeHome returns kimi-cli's data dir: $KIMI_CODE_HOME when set,
-// else ~/.kimi-code. The KIMI_CODE_HOME lookup uses the daemon process
-// env, which is what the child inherits in the common case.
+// kimiCodeHome returns kimi-cli's data dir from the daemon process env:
+// $KIMI_CODE_HOME when set, else ~/.kimi-code. It is a fallback for callers
+// that do not have a child-process env slice; the Execute path prefers
+// kimiHomeFromEnv(cmd.Env).
 func kimiCodeHome() string {
-	if home := os.Getenv("KIMI_CODE_HOME"); home != "" {
-		return home
+	return kimiHomeFromEnv(os.Environ())
+}
+
+// kimiHomeFromEnv extracts KIMI_CODE_HOME from an env slice (last wins),
+// falling back to ~/.kimi-code. This lets the kimi backend read session
+// files from the same directory the child process writes them to, even when
+// the daemon's own environment points elsewhere.
+func kimiHomeFromEnv(env []string) string {
+	prefix := "KIMI_CODE_HOME="
+	var home string
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			home = strings.TrimPrefix(e, prefix)
+		}
 	}
-	if h, err := os.UserHomeDir(); err == nil {
-		return filepath.Join(h, ".kimi-code")
+	if home == "" {
+		if h, err := os.UserHomeDir(); err == nil {
+			home = filepath.Join(h, ".kimi-code")
+		}
 	}
-	return ""
+	return home
 }
 
 // snapshotKimiWire returns the largest usage.record timestamp (epoch ms)
@@ -737,8 +811,7 @@ func kimiCodeHome() string {
 // the wire holds no usage.record, the snapshot falls back to the current
 // time. That keeps stale failure log entries from previous runs from
 // looking in-window when there is no usage record to anchor the cutoff.
-func snapshotKimiWire(sessionID string, logger *slog.Logger) int64 {
-	home := kimiCodeHome()
+func snapshotKimiWire(sessionID string, home string, logger *slog.Logger) int64 {
 	if home == "" {
 		return time.Now().UnixMilli()
 	}
@@ -772,9 +845,9 @@ func maxKimiWireRecordTime(path string) (int64, error) {
 	}
 	defer fh.Close()
 	var maxTime int64 = -1
-	r := bufio.NewReader(fh)
+	r := bufio.NewReaderSize(fh, kimiLineBufSize)
 	for {
-		line, err := r.ReadBytes('\n')
+		line, err := kimiReadLineBounded(r, isUsageRecordLine)
 		if len(line) > 0 {
 			if t := kimiWireRecordTime(line); t > maxTime {
 				maxTime = t
@@ -833,8 +906,7 @@ var kimiTurnFailedErrorRe = regexp.MustCompile(`\berror="((?:[^"\\]|\\.)*)"`)
 // ignored. Lines whose timestamp can't be parsed are skipped for the same
 // reason. Returns ("", false) when no log exists at all (older kimi builds,
 // custom data dir) — no signal, never a false positive.
-func readKimiTurnFailure(sessionID string, since time.Time, logger *slog.Logger) (string, bool) {
-	home := kimiCodeHome()
+func readKimiTurnFailure(sessionID string, since time.Time, home string, logger *slog.Logger) (string, bool) {
 	if home == "" {
 		return "", false
 	}
@@ -870,9 +942,8 @@ func readKimiTurnFailure(sessionID string, since time.Time, logger *slog.Logger)
 // scanKimiTurnFailureLog reads one kimi-code.log and reports whether it
 // holds an in-window turn failure, plus the extracted provider error
 // detail from the most recent matching WARN line ("" when only the bare
-// ERROR marker matched). Like the wire, the log is an append-only file
-// best read leniently, with an unbounded reader so an oversized line
-// can't hide failure entries appended after it.
+// ERROR marker matched). Non-target lines are discarded chunk-by-chunk so
+// an oversized line can't hide failure entries appended after it.
 func scanKimiTurnFailureLog(path string, cutoff time.Time) (string, bool, error) {
 	fh, err := os.Open(path)
 	if err != nil {
@@ -881,9 +952,9 @@ func scanKimiTurnFailureLog(path string, cutoff time.Time) (string, bool, error)
 	defer func() { _ = fh.Close() }()
 	found := false
 	detail := ""
-	r := bufio.NewReader(fh)
+	r := bufio.NewReaderSize(fh, kimiLineBufSize)
 	for {
-		line, err := r.ReadBytes('\n')
+		line, err := kimiReadLineBounded(r, isKimiTurnFailureLine)
 		if len(line) > 0 {
 			if d, ok := parseKimiTurnFailureLine(line, cutoff); ok {
 				found = true
@@ -900,6 +971,14 @@ func scanKimiTurnFailureLog(path string, cutoff time.Time) (string, bool, error)
 		}
 	}
 	return detail, found, nil
+}
+
+// isKimiTurnFailureLine reports whether a (possibly partial) line looks like
+// a turn-failure marker. Both the ERROR marker and the WARN detail marker
+// appear near the start of their lines.
+func isKimiTurnFailureLine(line []byte) bool {
+	return bytes.Contains(line, []byte(kimiTurnFailedMarker)) ||
+		bytes.Contains(line, []byte(kimiTurnFailedDetailMarker))
 }
 
 // parseKimiTurnFailureLine reports whether one kimi-code.log line records
