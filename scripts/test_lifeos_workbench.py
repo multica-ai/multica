@@ -257,6 +257,88 @@ class ContextDatabaseTests(unittest.TestCase):
                     "scripts/lifeos_workbench.py",
                 )
 
+    def test_commit_binding_uses_deployed_hash_when_linked_git_is_protected(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            implementation = repository / "scripts/lifeos_controller.py"
+            implementation.parent.mkdir()
+            implementation.write_text("# committed controller\n", encoding="utf-8")
+            deployed_sha256 = lifeos_workbench._sha256_file(implementation)
+            with mock.patch.object(
+                lifeos_workbench,
+                "_run",
+                side_effect=OSError("protected Git metadata"),
+            ):
+                revision = (
+                    lifeos_workbench._committed_implementation_revision(
+                        repository,
+                        "scripts/lifeos_controller.py",
+                        deployed_head="b" * 40,
+                        deployed_sha256=deployed_sha256,
+                    )
+                )
+
+        self.assertEqual(revision, "b" * 40)
+
+    def test_commit_binding_rejects_script_drift_without_git_access(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            repository = Path(temporary)
+            implementation = repository / "scripts/lifeos_controller.py"
+            implementation.parent.mkdir()
+            implementation.write_text("# changed controller\n", encoding="utf-8")
+            with mock.patch.object(
+                lifeos_workbench,
+                "_run",
+                side_effect=OSError("protected Git metadata"),
+            ):
+                with self.assertRaisesRegex(
+                    lifeos_workbench.WorkbenchError,
+                    "已部署提交绑定不一致",
+                ):
+                    lifeos_workbench._committed_implementation_revision(
+                        repository,
+                        "scripts/lifeos_controller.py",
+                        deployed_head="b" * 40,
+                        deployed_sha256="c" * 64,
+                    )
+
+    def test_autostart_deployment_environment_binds_both_scripts(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            controller_root = root / "controller"
+            with mock.patch.object(
+                lifeos_workbench,
+                "REPO",
+                root / "workbench",
+            ), mock.patch.object(
+                lifeos_workbench,
+                "_committed_implementation_revision",
+                side_effect=["a" * 40, "b" * 40],
+            ), mock.patch.object(
+                lifeos_workbench,
+                "_sha256_file",
+                side_effect=["c" * 64, "d" * 64],
+            ):
+                environment = (
+                    lifeos_workbench.implementation_deployment_environment(
+                        controller_root
+                    )
+                )
+
+        self.assertEqual(
+            environment,
+            {
+                lifeos_workbench.WORKBENCH_DEPLOYED_HEAD_ENV: "a" * 40,
+                lifeos_workbench.WORKBENCH_DEPLOYED_SHA_ENV: "c" * 64,
+                lifeos_workbench.CONTROLLER_DEPLOYED_HEAD_ENV: "b" * 40,
+                lifeos_workbench.CONTROLLER_DEPLOYED_SHA_ENV: "d" * 64,
+            },
+        )
+
     def test_admin_commands_require_explicit_private_inputs(self) -> None:
         reset_args = lifeos_workbench.build_parser().parse_args(
             [

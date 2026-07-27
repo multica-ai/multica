@@ -49,6 +49,10 @@ CLI_ALIAS = REPO / "server" / "bin" / "multica"
 STATE_ROOT = Path.home() / "Library/Application Support/LifeOS"
 CONTEXT_DB = STATE_ROOT / "data/lifeos-workbench.sqlite3"
 AUTOMATION_TOKEN_FILE = STATE_ROOT / "secrets/automation-token"
+WORKBENCH_DEPLOYED_HEAD_ENV = "LIFEOS_WORKBENCH_DEPLOYED_GIT_HEAD"
+WORKBENCH_DEPLOYED_SHA_ENV = "LIFEOS_WORKBENCH_DEPLOYED_SCRIPT_SHA256"
+CONTROLLER_DEPLOYED_HEAD_ENV = "LIFEOS_CONTROLLER_DEPLOYED_GIT_HEAD"
+CONTROLLER_DEPLOYED_SHA_ENV = "LIFEOS_CONTROLLER_DEPLOYED_SCRIPT_SHA256"
 
 
 class WorkbenchError(RuntimeError):
@@ -518,9 +522,15 @@ def _controller_json(
 def _committed_implementation_revision(
     repository: Path,
     protected_path: str,
+    *,
+    deployed_head: Optional[str] = None,
+    deployed_sha256: Optional[str] = None,
 ) -> str:
     """Bind a runtime implementation file to a durable Git commit."""
     environment = os.environ.copy()
+    environment["GIT_OPTIONAL_LOCKS"] = "0"
+    if bool(deployed_head) != bool(deployed_sha256):
+        raise WorkbenchError("LifeOS 后台实现部署绑定不完整")
     try:
         head = _run(
             ["git", "rev-parse", "HEAD"],
@@ -535,25 +545,73 @@ def _committed_implementation_revision(
             capture=True,
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError) as error:
-        raise WorkbenchError("LifeOS 后台实现无法绑定 Git 提交") from error
+        if not deployed_head or not deployed_sha256:
+            raise WorkbenchError("LifeOS 后台实现无法绑定 Git 提交") from error
+        if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", deployed_head):
+            raise WorkbenchError("LifeOS 后台实现部署提交格式无效") from error
+        if not re.fullmatch(r"[0-9a-f]{64}", deployed_sha256):
+            raise WorkbenchError("LifeOS 后台实现部署哈希格式无效") from error
+        implementation_path = repository / protected_path
+        if (
+            not implementation_path.is_file()
+            or _sha256_file(implementation_path) != deployed_sha256
+        ):
+            raise WorkbenchError("LifeOS 后台实现与已部署提交绑定不一致") from error
+        return deployed_head
     if not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", head):
         raise WorkbenchError("LifeOS 后台实现 Git 提交格式无效")
     if dirty:
         raise WorkbenchError("LifeOS 后台实现存在未提交改动，已停止同步")
+    if deployed_head and deployed_sha256:
+        implementation_path = repository / protected_path
+        if (
+            head != deployed_head
+            or not implementation_path.is_file()
+            or _sha256_file(implementation_path) != deployed_sha256
+        ):
+            raise WorkbenchError("LifeOS 后台实现与已部署提交绑定不一致")
     return head
 
 
+def implementation_deployment_environment(
+    controller_root: Path,
+) -> Dict[str, str]:
+    """Create a non-secret commit binding while Git metadata is accessible."""
+    workbench_path = REPO / "scripts/lifeos_workbench.py"
+    controller_path = controller_root / "scripts/lifeos_controller.py"
+    return {
+        WORKBENCH_DEPLOYED_HEAD_ENV: _committed_implementation_revision(
+            REPO,
+            "scripts/lifeos_workbench.py",
+        ),
+        WORKBENCH_DEPLOYED_SHA_ENV: _sha256_file(workbench_path),
+        CONTROLLER_DEPLOYED_HEAD_ENV: _committed_implementation_revision(
+            controller_root,
+            "scripts/lifeos_controller.py",
+        ),
+        CONTROLLER_DEPLOYED_SHA_ENV: _sha256_file(controller_path),
+    }
+
+
 def implementation_provenance(controller_root: Path) -> Dict[str, object]:
+    workbench_path = REPO / "scripts/lifeos_workbench.py"
+    controller_path = controller_root / "scripts/lifeos_controller.py"
     return {
         "status": "committed",
         "workbench_git_head": _committed_implementation_revision(
             REPO,
             "scripts/lifeos_workbench.py",
+            deployed_head=os.environ.get(WORKBENCH_DEPLOYED_HEAD_ENV),
+            deployed_sha256=os.environ.get(WORKBENCH_DEPLOYED_SHA_ENV),
         ),
+        "workbench_script_sha256": _sha256_file(workbench_path),
         "controller_git_head": _committed_implementation_revision(
             controller_root,
             "scripts/lifeos_controller.py",
+            deployed_head=os.environ.get(CONTROLLER_DEPLOYED_HEAD_ENV),
+            deployed_sha256=os.environ.get(CONTROLLER_DEPLOYED_SHA_ENV),
         ),
+        "controller_script_sha256": _sha256_file(controller_path),
     }
 
 
@@ -986,6 +1044,9 @@ def _write_plist(path: Path, payload: Mapping[str, object]) -> None:
 def install_autostart(lifeos_root: Path, controller_root: Path) -> None:
     environment = runtime_environment(lifeos_root, controller_root)
     database = ensure_context_database(lifeos_root)
+    deployment_environment = implementation_deployment_environment(
+        controller_root
+    )
     launch_dir = Path.home() / "Library/LaunchAgents"
     log_dir = Path.home() / "Library/Logs/LifeOS"
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -998,6 +1059,7 @@ def install_autostart(lifeos_root: Path, controller_root: Path) -> None:
         "LIFEOS_SERVER_URL": BACKEND_URL,
         "LIFEOS_WORKBENCH_DB": str(database),
         "LIFEOS_AUTOMATION_TOKEN_FILE": str(AUTOMATION_TOKEN_FILE),
+        **deployment_environment,
     }
     plists = {
         LAUNCH_LABEL: {
