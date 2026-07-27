@@ -544,7 +544,7 @@ func copyAgentTx(ctx context.Context, tx pgx.Tx, runID, targetWorkspace, sourceA
 				    runtime_config = src.runtime_config, visibility = src.visibility,
 				    max_concurrent_tasks = src.max_concurrent_tasks, description = src.description,
 				    instructions = src.instructions, custom_env = src.custom_env, custom_args = src.custom_args,
-				    mcp_config = src.mcp_config, model = src.model, persona_sandbox = src.persona_sandbox,
+				    mcp_config = src.mcp_config, model = src.model,
 				    thinking_level = src.thinking_level, updated_at = now()
 				FROM agent src WHERE tgt.id = $1 AND src.id = $2`,
 				existingTarget, sourceAgent); err != nil {
@@ -575,11 +575,11 @@ func copyAgentTx(ctx context.Context, tx pgx.Tx, runID, targetWorkspace, sourceA
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO agent (id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility,
 		                   status, max_concurrent_tasks, owner_id, description, runtime_id, instructions,
-		                   custom_env, custom_args, mcp_config, model, persona_sandbox,
+		                   custom_env, custom_args, mcp_config, model,
 		                   thinking_level, created_at, updated_at)
 		SELECT gen_random_uuid(), $1, $3, a.avatar_url, a.runtime_mode, a.runtime_config, a.visibility,
 		       'offline', a.max_concurrent_tasks, a.owner_id, a.description, NULL, a.instructions,
-		       a.custom_env, a.custom_args, a.mcp_config, a.model, a.persona_sandbox,
+		       a.custom_env, a.custom_args, a.mcp_config, a.model,
 		       a.thinking_level, a.created_at, now()
 		FROM agent a WHERE a.id = $2
 		RETURNING id`,

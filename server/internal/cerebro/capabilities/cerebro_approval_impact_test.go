@@ -99,14 +99,14 @@ func TestApprovalImpactSilentDropIsRankedAboveLoggedDrop(t *testing.T) {
 	}
 }
 
-// Multica applies the sandbox, the skill bundle and the secret names itself,
+// Multica applies the skill bundle and the secret names itself,
 // around the engine process. Those consequences hold on every engine — marking
 // them "engine honours it" would credit the engine for our own enforcement, and
 // marking them ineffective on a prepend-only engine would be a lie.
 func TestApprovalImpactMulticaEnforcedFieldsTakeEffectOnEveryEngine(t *testing.T) {
 	for _, provider := range []string{"claude", "hermes", "openclaw"} {
-		impact := ApprovalImpactFor(provider, []string{"persona_sandbox", "skill_ids", "custom_env_keys"})
-		for _, field := range []string{"persona_sandbox", "skill_ids", "custom_env_keys"} {
+		impact := ApprovalImpactFor(provider, []string{"skill_ids", "custom_env_keys"})
+		for _, field := range []string{"skill_ids", "custom_env_keys"} {
 			row := consequenceByField(t, impact, field)
 			if row.Consequence != ConsequenceTakesEffect {
 				t.Fatalf("%s on %s: consequence = %q, want %q", field, provider, row.Consequence, ConsequenceTakesEffect)

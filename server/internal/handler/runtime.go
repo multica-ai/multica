@@ -40,18 +40,13 @@ type AgentRuntimeResponse struct {
 	// SandboxPolicy is Multica-owned runtime policy that shapes daemon
 	// Seatbelt enforcement for shell, host and path controls.
 	SandboxPolicy any `json:"sandbox_policy"`
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona_sandbox from runtime responses.
 	// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 named isolation profile the stored policy currently equals (real status, not a default).
 	SandboxProfile string `json:"sandbox_profile"`
-	// CEREBRO-PATCH(runtime): persona integration additions.
-	// PersonaSandbox is the runtime-scoped persona sandbox (E1). When set it
-	// is the hard upper bound for every agent on this runtime — at spawn
-	// time the daemon uses it instead of the agent's own sandbox if both
-	// differ. Empty/null = no upper bound, agent-level sandbox decides alone.
-	PersonaSandbox string `json:"persona_sandbox"`
 	// Capabilities is the daemon-reported snapshot of what this runtime can
 	// actually do (Claude Code's tool list, MCP servers, etc.). The shape is
 	// loose so different providers can report what fits without a schema
-	// migration. Set on every register; persona's UI reads this to surface
+	// migration. Set on every register; the runtime UI reads this to surface
 	// "what your runtime can actually do" alongside the abstract sandbox.
 	Capabilities any     `json:"capabilities"`
 	LastSeenAt   *string `json:"last_seen_at"`
@@ -96,9 +91,9 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		OwnerID:        uuidToPtr(rt.OwnerID),
 		SandboxEnabled: boolToPtr(rt.SandboxEnabled),
 		SandboxPolicy:  unmarshalJSONMap(rt.SandboxPolicy),
+		// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 no longer maps runtime persona_sandbox.
 		// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 classify stored policy into its profile.
 		SandboxProfile: cerebrosandboxprofile.Classify(rt.SandboxPolicy),
-		PersonaSandbox: rt.PersonaSandbox.String,
 		Capabilities:   capabilities,
 		LastSeenAt:     timestampToPtr(rt.LastSeenAt),
 		// CEREBRO-PATCH(runtime-pause-response): expose pause state on the runtime API response.

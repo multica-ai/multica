@@ -7,7 +7,7 @@ package handler
 // claim time, so a workspace admin can declare MCP servers once on a runtime
 // instead of per-agent. Pass `tools_config: null` to clear.
 //
-// Auth: workspace owner/admin. Same threat model as persona_sandbox — a
+// Auth: workspace owner/admin. Runtime tool defaults are privileged because a
 // runtime owner shouldn't be able to silently install MCP servers (which
 // spawn subprocesses) without admin approval.
 
@@ -26,7 +26,7 @@ import (
 // UpdateRuntimeToolsConfigRequest carries the new tools_config JSON.
 //
 // `tools_config: null` (or omitted) is rejected — use the explicit body
-// `{"tools_config": null}` to clear, matching the persona_sandbox endpoint's
+// `{"tools_config": null}` to clear, matching the other nullable runtime fields.
 // nil-vs-empty distinction.
 type UpdateRuntimeToolsConfigRequest struct {
 	ToolsConfig *json.RawMessage `json:"tools_config"`

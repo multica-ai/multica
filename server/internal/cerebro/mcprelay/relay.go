@@ -84,9 +84,11 @@ type ConnActor struct {
 // agent- or member-level Deny is honored too — an actor with no fields set (a
 // workspace-scoped token) resolves exactly the workspace scope as before. A nil
 // resolver means "no server-side policy" (the pre-FIR-2441 pass-through
-// behavior), and the resolver only ever returns deny=true for an EXPLICIT Deny
-// verdict — any error or unknown verdict is fail-open, so a tool that works today
-// can never be broken by this gate.
+// behavior), and the resolver returns deny=true only for an EXPLICIT Deny
+// verdict. A resolver ERROR is FAIL-CLOSED (FIR-3820, audit finding A2): the
+// call is rejected with 503 rather than proxied. This gate is the only thing
+// enforcing a Deny for the CLIs named above, so proxying on a DB error would
+// silently un-enforce exactly the Denies it exists to protect.
 type toolPolicy interface {
 	ToolDenied(ctx context.Context, workspaceID pgtype.UUID, actor ConnActor, connName, toolName string) (denied bool, err error)
 }
@@ -295,10 +297,10 @@ func (rl *Relay) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				denied, derr := rl.policy.ToolDenied(r.Context(), wsID, payload.actor(), payload.Conn, tool)
 				switch {
 				case derr != nil:
-					// Fail open (don't break a working tool) but record it — a
-					// silently-skipped policy check is a security regression.
-					slog.Warn("mcp relay: tool policy resolve failed; proxying without enforcement",
+					slog.Error("mcp relay: tool policy resolve failed; rejecting call",
 						"workspace_id", payload.WS, "connection", payload.Conn, "tool", tool, "error", derr)
+					http.Error(w, "mcp relay: tool policy unavailable", http.StatusServiceUnavailable)
+					return
 				case denied:
 					http.Error(w, "mcp relay: tool denied by policy", http.StatusForbidden)
 					return

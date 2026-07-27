@@ -14,7 +14,7 @@ import (
 
 // FIR-3212: the agent_context_propose MCP tool must forward the two brief-layer
 // modes to the change-request endpoint the same way it forwards model /
-// thinking_level / persona_sandbox, so an agent author can set them the same way
+// thinking_level, so an agent author can set it the same way
 // as every other agent-config field. This is Tine's wiring gap — the backend
 // handler already accepts the fields; this asserts the tool actually sends them.
 func TestAgentContextProposeForwardsBriefLayerModes(t *testing.T) {

@@ -1002,6 +1002,7 @@ type UpdateAgentRuntimeCapabilitiesParams struct {
 	Capabilities []byte      `json:"capabilities"`
 }
 
+// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the runtime persona update query.
 // Replaces the runtime's capability snapshot. Called by the daemon on
 // registration; the JSONB column carries provider-specific shape.
 func (q *Queries) UpdateAgentRuntimeCapabilities(ctx context.Context, arg UpdateAgentRuntimeCapabilitiesParams) error {
@@ -1028,57 +1029,6 @@ type UpdateAgentRuntimeCliVersionParams struct {
 func (q *Queries) UpdateAgentRuntimeCliVersion(ctx context.Context, arg UpdateAgentRuntimeCliVersionParams) error {
 	_, err := q.db.Exec(ctx, updateAgentRuntimeCliVersion, arg.ID, arg.CliVersion)
 	return err
-}
-
-const updateAgentRuntimePersonaSandbox = `-- name: UpdateAgentRuntimePersonaSandbox :one
-UPDATE agent_runtime
-SET persona_sandbox = NULLIF($2, ''), updated_at = now()
-WHERE id = $1
-RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count
-`
-
-type UpdateAgentRuntimePersonaSandboxParams struct {
-	ID      pgtype.UUID `json:"id"`
-	Column2 interface{} `json:"column_2"`
-}
-
-// Sets the runtime-level persona sandbox upper bound (D5-runtime). The
-// empty value clears it. The daemon at spawn time uses the most-restrictive
-// of (agent.persona_sandbox, runtime.persona_sandbox).
-func (q *Queries) UpdateAgentRuntimePersonaSandbox(ctx context.Context, arg UpdateAgentRuntimePersonaSandboxParams) (AgentRuntime, error) {
-	row := q.db.QueryRow(ctx, updateAgentRuntimePersonaSandbox, arg.ID, arg.Column2)
-	var i AgentRuntime
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.DaemonID,
-		&i.Name,
-		&i.RuntimeMode,
-		&i.Provider,
-		&i.Status,
-		&i.DeviceInfo,
-		&i.Metadata,
-		&i.LastSeenAt,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.OwnerID,
-		&i.LegacyDaemonID,
-		&i.SandboxEnabled,
-		&i.Visibility,
-		&i.ProfileID,
-		&i.PausedAt,
-		&i.UnpauseAt,
-		&i.PauseReason,
-		&i.CurrentAccountID,
-		&i.PresentationMode,
-		&i.PersonaSandbox,
-		&i.Capabilities,
-		&i.CliVersion,
-		&i.ToolsConfig,
-		&i.SandboxPolicy,
-		&i.AutoPauseCount,
-	)
-	return i, err
 }
 
 const updateAgentRuntimeSandbox = `-- name: UpdateAgentRuntimeSandbox :one

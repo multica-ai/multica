@@ -631,7 +631,6 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   updated_at: z.string().default(""),
   archived_at: z.string().nullable().default(null),
   archived_by: z.string().nullable().default(null),
-  persona_sandbox: z.string().default(""),
 }).loose();
 
 export const AgentListSchema = z.array(AgentSchema).default([]);
@@ -664,7 +663,6 @@ export const RuntimeSchema: z.ZodType<RuntimeDevice> = z.object({
   sandbox_policy: z.unknown().optional() as unknown as z.ZodType<
     RuntimeDevice["sandbox_policy"]
   >,
-  persona_sandbox: z.string().default(""),
   capabilities: z.record(z.string(), z.unknown()).default({}),
   visibility: z.string().catch("private") as unknown as z.ZodType<
     RuntimeDevice["visibility"]

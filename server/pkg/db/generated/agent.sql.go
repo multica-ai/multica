@@ -720,53 +720,13 @@ func (q *Queries) ClearAgentMcpConfig(ctx context.Context, id pgtype.UUID) (Agen
 	return i, err
 }
 
-const clearAgentPersonaSandbox = `-- name: ClearAgentPersonaSandbox :one
-UPDATE agent SET persona_sandbox = NULL, updated_at = now()
-WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
-`
-
-func (q *Queries) ClearAgentPersonaSandbox(ctx context.Context, id pgtype.UUID) (Agent, error) {
-	row := q.db.QueryRow(ctx, clearAgentPersonaSandbox, id)
-	var i Agent
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.Name,
-		&i.AvatarUrl,
-		&i.RuntimeMode,
-		&i.RuntimeConfig,
-		&i.Visibility,
-		&i.Status,
-		&i.MaxConcurrentTasks,
-		&i.OwnerID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.Description,
-		&i.RuntimeID,
-		&i.Instructions,
-		&i.ArchivedAt,
-		&i.ArchivedBy,
-		&i.CustomEnv,
-		&i.CustomArgs,
-		&i.McpConfig,
-		&i.Model,
-		&i.ThinkingLevel,
-		&i.PersonaSandbox,
-		&i.SurfaceVisibility,
-		&i.ContextOwnerID,
-		&i.ContextApproverIds,
-		&i.ContextVersion,
-	)
-	return i, err
-}
-
 const clearAgentThinkingLevel = `-- name: ClearAgentThinkingLevel :one
 UPDATE agent SET thinking_level = NULL, updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
 `
 
+// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the persona_sandbox clear query.
 // Explicit NULL-clear for thinking_level. COALESCE-based UpdateAgent cannot
 // set the column back to NULL, so the API layer routes "user picked Default"
 // through this dedicated query.
@@ -885,9 +845,9 @@ const createAgent = `-- name: CreateAgent :one
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model, persona_sandbox, thinking_level,
+    instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     surface_visibility
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
 `
 
@@ -907,12 +867,12 @@ type CreateAgentParams struct {
 	CustomArgs         []byte      `json:"custom_args"`
 	McpConfig          []byte      `json:"mcp_config"`
 	Model              pgtype.Text `json:"model"`
-	PersonaSandbox     pgtype.Text `json:"persona_sandbox"`
 	ThinkingLevel      pgtype.Text `json:"thinking_level"`
 	SurfaceVisibility  []byte      `json:"surface_visibility"`
 }
 
 // CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — surface_visibility column.
+// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona_sandbox persistence.
 func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent, error) {
 	row := q.db.QueryRow(ctx, createAgent,
 		arg.WorkspaceID,
@@ -930,7 +890,6 @@ func (q *Queries) CreateAgent(ctx context.Context, arg CreateAgentParams) (Agent
 		arg.CustomArgs,
 		arg.McpConfig,
 		arg.Model,
-		arg.PersonaSandbox,
 		arg.ThinkingLevel,
 		arg.SurfaceVisibility,
 	)
@@ -3163,10 +3122,10 @@ UPDATE agent SET
     custom_args = COALESCE($13, custom_args),
     mcp_config = COALESCE($14, mcp_config),
     model = COALESCE($15, model),
-    persona_sandbox = COALESCE($16, persona_sandbox),
-    thinking_level = COALESCE($17, thinking_level),
+    thinking_level = COALESCE($16, thinking_level),
+    -- CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona_sandbox updates.
     -- CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — per-surface discovery visibility.
-    surface_visibility = COALESCE($18, surface_visibility),
+    surface_visibility = COALESCE($17, surface_visibility),
     updated_at = now()
 WHERE id = $1
 RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
@@ -3188,7 +3147,6 @@ type UpdateAgentParams struct {
 	CustomArgs         []byte      `json:"custom_args"`
 	McpConfig          []byte      `json:"mcp_config"`
 	Model              pgtype.Text `json:"model"`
-	PersonaSandbox     pgtype.Text `json:"persona_sandbox"`
 	ThinkingLevel      pgtype.Text `json:"thinking_level"`
 	SurfaceVisibility  []byte      `json:"surface_visibility"`
 }
@@ -3210,7 +3168,6 @@ func (q *Queries) UpdateAgent(ctx context.Context, arg UpdateAgentParams) (Agent
 		arg.CustomArgs,
 		arg.McpConfig,
 		arg.Model,
-		arg.PersonaSandbox,
 		arg.ThinkingLevel,
 		arg.SurfaceVisibility,
 	)

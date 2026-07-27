@@ -233,7 +233,6 @@ function runtimeFor(provider: string): AgentRuntime {
     owner_id: "owner-1",
     // CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — this fork's RuntimeDevice carries four extra required fields.
     sandbox_enabled: null,
-    persona_sandbox: "",
     capabilities: {},
     timezone: "UTC",
     visibility: "private",

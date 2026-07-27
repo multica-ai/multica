@@ -2,10 +2,9 @@ export interface ContextDraftFields {
   instructions: string;
   model: string;
   thinkingLevel: string;
-  personaSandbox: string;
   // FIR-3212 brief-layer modes. Stored inside the agent's runtime_config, but
   // tracked here as flat draft fields so a change to either counts as dirty and
-  // flows through the same propose→approve path as model / thinking / sandbox.
+  // flows through the same propose→approve path as model / thinking.
   workspaceBriefMode: string;
   toolsBriefMode: string;
   // FIR-3212: how the agent's prompt reaches the model — append to the

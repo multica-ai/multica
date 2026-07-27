@@ -250,7 +250,7 @@
     "environment": "环境变量",
     "infisical": "Infisical 密钥",
     "custom_args": "自定义参数",
-    "sandbox": "沙箱",
+    "_comment_sandbox_tab": "CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the Sandbox tab label.",
     "tools": "工具",
     "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
     "capabilities": "能力",
@@ -379,17 +379,10 @@
       "input_placeholder": "--flag 值",
       "remove_aria": "移除参数",
       "saved_toast": "已保存自定义参数",
-      "save_failed_toast": "保存自定义参数失败"
+      "save_failed_toast": "保存自定义参数失败",
+      "_comment": "CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed obsolete sandbox strings."
     },
-    "sandbox": {
-      "intro": "将该智能体绑定到一个 persona 沙箱，以限制它可以调用的 tool。该选择从下一次 task 启动开始生效 —— 无需重启 daemon。",
-      "label": "Persona 沙箱",
-      "no_gating_option": "— 不启用 persona 沙箱 —",
-      "persona_not_configured": "本工作区尚未配置 persona。管理员启用 persona 后才能进行沙箱绑定。",
-      "admin_only_tooltip": "只有工作区管理员或所有者可以修改沙箱绑定。",
-      "saved_toast": "已保存沙箱绑定",
-      "save_failed_toast": "保存沙箱绑定失败"
-    },
+    "_comment_sandbox_section": "CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the persona sandbox tab strings.",
     "tools": {
       "_comment": "CEREBRO-PATCH(agent-tools-tab): JEH-1290/1351/1353/1360 W8 — tools tab body strings",
       "intro": "切换此智能体可以使用的工具。工具凭证在工作区设置中配置。",

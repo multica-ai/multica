@@ -1,6 +1,6 @@
 "use client";
 
-// Agent Office (FIR-1775) — Model / Thinking level / Sandbox selectors for the
+// Agent Office (FIR-1775) — Model / Thinking level selectors for the
 // Propose-change modal. These were free-text inputs; this replaces them with
 // the same catalog-driven pickers the rest of the app uses:
 //   - Model: the runtime's daemon-discovered model catalog (falls back to a
@@ -8,7 +8,6 @@
 //     plus a "Custom…" escape hatch so any model id stays settable).
 //   - Thinking level: the supported reasoning levels of the selected model
 //     (empty = follow the local CLI config; hidden when the model has none).
-//   - Sandbox: the workspace persona-sandbox list (empty = no gating).
 //
 // Self-contained on purpose: cerebro-agent-context must not import from
 // @multica/views (that package imports this one via the tab extension, which
@@ -18,7 +17,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, RuntimeModel } from "@multica/core/types";
-import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   runtimeListOptions,
@@ -37,13 +35,11 @@ interface Props {
   agent: Agent;
   model: string;
   thinkingLevel: string;
-  personaSandbox: string;
   workspaceBriefMode: string;
   toolsBriefMode: string;
   systemPromptMode: string;
   onModel: (v: string) => void;
   onThinkingLevel: (v: string) => void;
-  onPersonaSandbox: (v: string) => void;
   onWorkspaceBriefMode: (v: string) => void;
   onToolsBriefMode: (v: string) => void;
   onSystemPromptMode: (v: string) => void;
@@ -53,13 +49,11 @@ export function AgentContextConfigFields({
   agent,
   model,
   thinkingLevel,
-  personaSandbox,
   workspaceBriefMode,
   toolsBriefMode,
   systemPromptMode,
   onModel,
   onThinkingLevel,
-  onPersonaSandbox,
   onWorkspaceBriefMode,
   onToolsBriefMode,
   onSystemPromptMode,
@@ -81,11 +75,6 @@ export function AgentContextConfigFields({
     [modelsQuery.data],
   );
 
-  const { data: sandboxes = [] } = useQuery({
-    queryKey: ["persona", "sandboxes"],
-    queryFn: () => api.listPersonaSandboxes(),
-  });
-
   // The catalog only drives the dropdown when we actually got models back;
   // otherwise fall back to the plain text field so an offline-runtime edit can
   // still set a model id manually (matches ModelDropdown's manual mode).
@@ -102,7 +91,7 @@ export function AgentContextConfigFields({
 
   return (
     <div className="space-y-3">
-    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
       {/* Model */}
       <div className="space-y-1.5">
         <Label htmlFor="ac-model" className="text-xs">
@@ -192,32 +181,6 @@ export function AgentContextConfigFields({
         )}
       </div>
 
-      {/* Sandbox */}
-      <div className="space-y-1.5">
-        <Label htmlFor="ac-sandbox" className="text-xs">
-          Sandbox
-        </Label>
-        <NativeSelect
-          id="ac-sandbox"
-          value={personaSandbox}
-          onChange={(e) => onPersonaSandbox(e.target.value)}
-          size="sm"
-          className="w-full"
-        >
-          <NativeSelectOption value="">No gating</NativeSelectOption>
-          {sandboxes.map((sb) => (
-            <NativeSelectOption key={sb.name} value={sb.name}>
-              {sb.name}
-            </NativeSelectOption>
-          ))}
-          {personaSandbox !== "" &&
-            !sandboxes.some((sb) => sb.name === personaSandbox) && (
-              <NativeSelectOption value={personaSandbox}>
-                {personaSandbox}
-              </NativeSelectOption>
-            )}
-        </NativeSelect>
-      </div>
     </div>
 
       {/* FIR-3212: brief-layer modes. What the agent reads before its task —

@@ -105,7 +105,6 @@ describe("isSelfHealingRuntime", () => {
       visibility: "private",
       timezone: "UTC",
       sandbox_enabled: null,
-      persona_sandbox: "",
       capabilities: {},
       last_seen_at: null,
       created_at: "2026-01-01T00:00:00Z",
