@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -123,10 +124,13 @@ func (s *Store) Authorize(ctx context.Context, taskID, workspaceID, agentID pgty
 	}
 	var expiresAt time.Time
 	var contains bool
+	serverWildcard := MCPServerWildcard(tool)
 	err := s.db.QueryRow(ctx, `
-		SELECT expires_at, allowed_tools ? $4
+		SELECT expires_at, allowed_tools ? $4 OR ($5 <> '' AND allowed_tools ? $5)
 		FROM cerebro_task_mandate
-		WHERE task_id=$1 AND workspace_id=$2 AND agent_id=$3`, taskID, workspaceID, agentID, tool).Scan(&expiresAt, &contains)
+		WHERE task_id=$1 AND workspace_id=$2 AND agent_id=$3`,
+		taskID, workspaceID, agentID, tool, serverWildcard,
+	).Scan(&expiresAt, &contains)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return ErrMissing
 	}
@@ -140,4 +144,22 @@ func (s *Store) Authorize(ctx context.Context, taskID, workspaceID, agentID pgty
 		return ErrToolDeny
 	}
 	return nil
+}
+
+// MCPServerWildcard is the immutable task capability for one raw MCP server.
+// A raw relay exposes the server's whole live tools/list surface, which may be
+// newer than the connection's last stored discovery manifest. The wildcard is
+// scoped to exactly one server and is issued only when the connection resolver
+// has admitted that whole server as Allow-only.
+func MCPServerWildcard(tool string) string {
+	name := strings.TrimSpace(tool)
+	if !strings.HasPrefix(name, "mcp__") {
+		return ""
+	}
+	rest := strings.TrimPrefix(name, "mcp__")
+	server, operation, ok := strings.Cut(rest, "__")
+	if !ok || server == "" || operation == "" {
+		return ""
+	}
+	return "mcp__" + server + "__*"
 }

@@ -399,6 +399,19 @@ func ApplyTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, 
 			card.Tools[i].HowToFix = "Start a new task whose issued mandate includes this capability."
 		}
 	}
+	for i := range card.Connections {
+		for j := range card.Connections[i].Tools {
+			tool := &card.Connections[i].Tools[j]
+			callableName := cerebrotoolpolicy.MCPToolToken(card.Connections[i].Name, tool.Name)
+			if err := mandates.Authorize(ctx, taskID, workspaceID, agentID, callableName); err != nil {
+				tool.Permission = "deny"
+				tool.Allowed = false
+				tool.Callable = false
+				tool.BlockedReason = fmt.Sprintf("task mandate denied the capability: %v", err)
+				tool.HowToFix = "Start a new task whose issued mandate includes this capability."
+			}
+		}
+	}
 }
 
 // BuildAgentCapabilitiesCard assembles the same card as the HTTP route for an

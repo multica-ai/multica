@@ -25,6 +25,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -79,10 +80,11 @@ type CerebroAPIConnectionBriefIdentity struct {
 // Name is the exact tool name the agent calls verbatim; Verdict is "allow" or
 // "ask".
 type CerebroAPIConnectionBriefTool struct {
-	Connection  string
-	Name        string
-	Description string
-	Verdict     string
+	Connection    string
+	Name          string
+	Description   string
+	Verdict       string
+	MandatePrefix string
 }
 
 // cerebroEffectiveToolsForBrief resolves the agent's exposed non-CLI tools for
@@ -235,9 +237,10 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 	// only on_behalf_of layer (FIR-2441), so the brief cannot show a tool the call
 	// path would then refuse — including a member-level Deny on the initiator.
 	if h.APIConnectionBrief != nil {
-		seen := make(map[string]struct{}, len(out))
-		for _, e := range out {
-			seen[e.Name] = struct{}{}
+		seen := make(map[string]struct{}, len(mandateTools))
+		mandatePrefixes := make([]string, 0)
+		for _, callableName := range mandateTools {
+			seen[callableName] = struct{}{}
 		}
 		apiTools := h.APIConnectionBrief.APIConnectionToolsForBrief(ctx, CerebroAPIConnectionBriefIdentity{
 			WorkspaceID: runtime.WorkspaceID,
@@ -250,6 +253,12 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 			name := strings.TrimSpace(t.Name)
 			if name == "" {
 				continue
+			}
+			if prefix := strings.TrimSpace(t.MandatePrefix); prefix != "" {
+				if _, dup := seen[prefix]; !dup {
+					seen[prefix] = struct{}{}
+					mandatePrefixes = append(mandatePrefixes, prefix)
+				}
 			}
 			if _, dup := seen[name]; dup {
 				continue
@@ -268,6 +277,11 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 				Connection:  strings.TrimSpace(t.Connection),
 			})
 		}
+		// Keep the exact callable names positionally aligned with out. Session
+		// filtering pairs those two slices by index; server wildcards are
+		// supplemental mandate entries and therefore belong after that aligned
+		// prefix.
+		mandateTools = append(mandateTools, mandatePrefixes...)
 	}
 	if h.ConnectionInstructionsBrief != nil {
 		// CEREBRO-PATCH(connection-instructions-claim): Never load guidance for a denied/hidden connection.
@@ -317,6 +331,30 @@ func filterClaimToolsForSessionMode(tools []AgentTaskToolEntry, mandateTools, al
 				filteredMandate = append(filteredMandate, callableName)
 			}
 		}
+	}
+	supplemental := make(map[string]struct{})
+	if len(mandateTools) > len(tools) {
+		for _, name := range mandateTools[len(tools):] {
+			supplemental[strings.TrimSpace(name)] = struct{}{}
+		}
+	}
+	seen := make(map[string]struct{}, len(filteredMandate))
+	for _, name := range filteredMandate {
+		seen[name] = struct{}{}
+	}
+	for _, callableName := range filteredMandate {
+		prefix := taskmandate.MCPServerWildcard(callableName)
+		if prefix == "" {
+			continue
+		}
+		if _, issued := supplemental[prefix]; !issued {
+			continue
+		}
+		if _, dup := seen[prefix]; dup {
+			continue
+		}
+		seen[prefix] = struct{}{}
+		filteredMandate = append(filteredMandate, prefix)
 	}
 	return filteredTools, filteredMandate
 }

@@ -131,6 +131,52 @@ func TestCerebroEffectiveToolsForClaimLocksInitialPolicyAndSessionIntersection(t
 	}
 }
 
+func TestCerebroEffectiveToolsForClaimSessionIntersectionKeepsDirectMCPMandateAligned(t *testing.T) {
+	brief := &fakeAPIConnBrief{tools: []CerebroAPIConnectionBriefTool{
+		{
+			Connection:    "atlas-mcp",
+			Name:          "mcp__atlas-mcp__search_registry",
+			Description:   "Search Atlas",
+			Verdict:       "allow",
+			MandatePrefix: "mcp__atlas-mcp__*",
+		},
+	}}
+	h := &Handler{
+		runtimeToolAccess: fakeRuntimeToolAccess{rows: []RuntimeToolEffectiveAccessView{
+			exposedToolView("Read", "runtime", "", "Read files", "allow", true),
+			exposedToolView("Write", "runtime", "", "Write files", "allow", true),
+		}},
+		APIConnectionBrief: brief,
+	}
+	agent := &TaskAgentData{ID: "11111111-1111-1111-1111-111111111111"}
+
+	tools, mandate, err := h.cerebroEffectiveToolsForClaim(context.Background(), db.AgentRuntime{}, agent, "agent", "")
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim: unexpected error %v", err)
+	}
+	tools, mandate = filterClaimToolsForSessionMode(tools, mandate, []string{"Read", "mcp__atlas-mcp__search_registry"})
+	if got, want := len(tools), 2; got != want {
+		t.Fatalf("session tools = %+v, want %d tools", tools, want)
+	}
+	for _, want := range []string{"Read", "mcp__atlas-mcp__search_registry", "mcp__atlas-mcp__*"} {
+		if !containsString(mandate, want) {
+			t.Fatalf("session mandate = %v, want %q", mandate, want)
+		}
+	}
+	if containsString(mandate, "Write") {
+		t.Fatalf("session mandate widened past the allowed tools: %v", mandate)
+	}
+
+	freshTools, freshMandate, err := h.cerebroEffectiveToolsForClaim(context.Background(), db.AgentRuntime{}, agent, "agent", "")
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim (fresh): unexpected error %v", err)
+	}
+	_, mandate = filterClaimToolsForSessionMode(freshTools, freshMandate, []string{"Read"})
+	if containsString(mandate, "mcp__atlas-mcp__*") {
+		t.Fatalf("server wildcard survived after its connection tool was filtered out: %v", mandate)
+	}
+}
+
 type fakeAPIConnBrief struct {
 	tools    []CerebroAPIConnectionBriefTool
 	gotIdent CerebroAPIConnectionBriefIdentity
@@ -202,6 +248,45 @@ func TestCerebroEffectiveToolsForClaimUsesConnectionDispatchMandateIdentity(t *t
 	hookTool := "mcp__multica__infisical_admin__get_api_v3_secrets_raw"
 	if got := localtoolpolicy.ProviderMandateToolKey(hookTool); got != mandate[0] {
 		t.Fatalf("local hook mandate identity = %q, want claimed identity %q", got, mandate[0])
+	}
+}
+
+func TestCerebroEffectiveToolsForClaimIncludesDirectMCPAndCapabilityDiagnosis(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	brief := &fakeAPIConnBrief{tools: []CerebroAPIConnectionBriefTool{
+		{
+			Connection:    "atlas-mcp",
+			Name:          "mcp__atlas-mcp__search_registry",
+			Description:   "Search Atlas",
+			Verdict:       "allow",
+			MandatePrefix: "mcp__atlas-mcp__*",
+		},
+	}}
+	h := &Handler{
+		runtimeToolAccess: fakeRuntimeToolAccess{rows: []RuntimeToolEffectiveAccessView{
+			exposedToolView("mcp__multica__get_agent_capabilities", "mcp", "", "Inspect effective access", "allow", true),
+		}},
+		APIConnectionBrief: brief,
+	}
+
+	_, mandate, err := h.cerebroEffectiveToolsForClaim(
+		context.Background(),
+		db.AgentRuntime{},
+		&TaskAgentData{ID: agentID},
+		"agent",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim: %v", err)
+	}
+	for _, want := range []string{
+		"mcp__atlas-mcp__search_registry",
+		"mcp__atlas-mcp__*",
+		"mcp__multica__get_agent_capabilities",
+	} {
+		if !containsString(mandate, want) {
+			t.Errorf("claim mandate = %v, want exact callable identity %q", mandate, want)
+		}
 	}
 }
 
