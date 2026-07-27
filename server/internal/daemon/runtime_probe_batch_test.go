@@ -6,6 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -427,6 +430,117 @@ func TestDetectBuiltinRuntimes_DoesNotRetrySlowProbe(t *testing.T) {
 	}
 	if got := fx.probeCount("/fake/codex"); got != 1 {
 		t.Errorf("probed /fake/codex %d times, want 1 (a probe that ran to its timeout is not retried)", got)
+	}
+}
+
+// vanishedPinnedPath lays out the MUL-4486 shape a probe retry has to reckon
+// with: a stable command name that resolves on PATH to a runnable stub, plus
+// the pinned absolute path an in-place upgrade already deleted. It returns the
+// missing pinned path and the path the self-heal re-resolves to.
+func vanishedPinnedPath(t *testing.T) (missing, healed string) {
+	t.Helper()
+	root := t.TempDir()
+	stableBin := filepath.Join(root, "bin")
+	writeExecStub(t, filepath.Join(stableBin, "codex"))
+	// Prepend rather than replace: exec.LookPath takes the first match, so the
+	// stub still wins deterministically over any codex installed on the host,
+	// while goroutines left running by earlier tests can still resolve git/sh.
+	t.Setenv("PATH", stableBin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	// An unsupported shell disables the login-shell fallback, which would only
+	// run if the lookup above missed.
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	return filepath.Join(root, "gone", "codex"), canonicalExecutablePath(filepath.Join(stableBin, "codex"))
+}
+
+// countingVersionProbe swaps detectAgentVersion for a stub that counts calls
+// and answers per path, so a test can assert how many `--version` executions a
+// probe round actually cost.
+func countingVersionProbe(t *testing.T, answer func(path string) (string, error)) *atomic.Int32 {
+	t.Helper()
+	origDetect := detectAgentVersion
+	origCheck := checkAgentMinVersion
+	t.Cleanup(func() {
+		detectAgentVersion = origDetect
+		checkAgentMinVersion = origCheck
+	})
+	var probes atomic.Int32
+	detectAgentVersion = func(_ context.Context, path string) (string, error) {
+		probes.Add(1)
+		return answer(path)
+	}
+	checkAgentMinVersion = func(_, _ string) error { return nil }
+	return &probes
+}
+
+// TestDetectBuiltinRuntimes_DoesNotRetryWhenSelfHealBurnsTheWindow keeps the
+// slow-probe guard honest about where an attempt's time actually goes. When the
+// pinned path has vanished, resolveAgentEntry runs its own version probe on the
+// re-resolved candidate (MUL-4486) — which can burn the full 10s timeout on its
+// own. Timing only the outer probe would read the attempt as a fast failure
+// (the stale path fails instantly), retry, and pay the slow self-heal a second
+// time — exactly the doubled worst case the guard exists to prevent.
+func TestDetectBuiltinRuntimes_DoesNotRetryWhenSelfHealBurnsTheWindow(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH/exec-bit stub layout is POSIX-specific")
+	}
+	const probeWindow = 20 * time.Millisecond
+	stubProbeRetry(t, time.Millisecond, probeWindow)
+	missing, _ := vanishedPinnedPath(t)
+	probes := countingVersionProbe(t, func(path string) (string, error) {
+		if path == missing {
+			// The stale pinned path is gone: this fails immediately.
+			return "", errors.New("no such file or directory")
+		}
+		// The re-resolved candidate hangs and dies on its own timeout.
+		time.Sleep(2 * probeWindow)
+		return "", errors.New("signal: killed")
+	})
+
+	d := freshDaemon("")
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: missing, Command: "codex"}}
+
+	if runtimes := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+		t.Fatalf("detected %v, want none", runtimes)
+	}
+	if got := probes.Load(); got != 2 {
+		t.Errorf("ran %d version probes, want 2 (one self-heal + one outer probe); the retry window must cover the whole attempt, not just the outer probe", got)
+	}
+}
+
+// TestDetectBuiltinRuntimes_BoundsRetryWhenSelfHealRejectsVersion documents the
+// cost of the case the retry cannot tell apart: a self-heal candidate rejected
+// by the min-version gate leaves the stale path in place, and the outer probe
+// then fails fast — indistinguishable from a transient failure, so the attempt
+// is retried. The verdict is deterministic, so that retry is wasted work; what
+// matters is that it stays bounded and cheap (every probe in it fails fast).
+func TestDetectBuiltinRuntimes_BoundsRetryWhenSelfHealRejectsVersion(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("PATH/exec-bit stub layout is POSIX-specific")
+	}
+	stubProbeRetry(t, time.Millisecond, time.Second)
+	missing, healed := vanishedPinnedPath(t)
+	probes := countingVersionProbe(t, func(path string) (string, error) {
+		if path == missing {
+			return "", errors.New("no such file or directory")
+		}
+		return "0.0.1", nil
+	})
+	checkAgentMinVersion = func(_, version string) error {
+		if version == "0.0.1" {
+			return errors.New("version too old")
+		}
+		return nil
+	}
+
+	d := freshDaemon("")
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: missing, Command: "codex"}}
+
+	if runtimes := d.detectBuiltinRuntimes(context.Background()); len(runtimes) != 0 {
+		t.Fatalf("detected %v (healed path %q), want none: a below-minimum candidate must not be adopted", runtimes, healed)
+	}
+	// Two attempts, each paying one self-heal probe plus one outer probe.
+	if got := probes.Load(); got != int32(2*runtimeVersionProbeAttempts) {
+		t.Errorf("ran %d version probes, want %d (%d bounded attempts)", got, 2*runtimeVersionProbeAttempts, runtimeVersionProbeAttempts)
 	}
 }
 

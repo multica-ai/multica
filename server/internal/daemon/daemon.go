@@ -1234,7 +1234,19 @@ var runtimeVersionProbeRetryDelay = 500 * time.Millisecond
 // and retrying it would double the worst case for the whole round — the same
 // latency that used to push the desktop runtime step into its empty "no runtime
 // found" state before probes were parallelized (MUL-5119). Only fast failures,
-// which are the transient ones, are retried. Overridable for tests.
+// which are the transient ones, are retried.
+//
+// The window is measured over the WHOLE attempt, self-heal included: a vanished
+// pinned path sends resolveAgentEntry through its own version probe of the
+// re-resolved candidate, so an attempt can spend its entire budget there and
+// still fail instantly on the outer probe of the stale path.
+//
+// One deterministic failure does slip through and get retried: a self-heal
+// candidate rejected by the minimum-version gate, whose stale path then fails
+// fast. It is not worth plumbing a reason out of resolveAgentEntry to catch —
+// the retry is bounded, and every probe in it fails fast by construction.
+//
+// Overridable for tests.
 var runtimeVersionProbeRetryWindow = time.Second
 
 // probeBuiltinRuntime resolves and version-detects one built-in provider,
@@ -1261,6 +1273,13 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 			}
 		}
 		attempts++
+		// The attempt is timed from here, not from the detect call below:
+		// resolveAgentEntry runs a version probe of its own on the re-resolved
+		// candidate, and that probe can burn the whole timeout by itself. Timing
+		// only the outer call would read "slow self-heal, then an instant
+		// failure on the stale path" as a fast failure and retry it, paying the
+		// slow half twice.
+		startedAt := time.Now()
 		// Self-heal a pinned executable path an in-place upgrade deleted
 		// (MUL-4486) so version detection — and thus staying registered/online —
 		// recovers without a daemon restart. resolveAgentEntry already
@@ -1270,7 +1289,6 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 		// fixes: the upgrade that removed the old path may not have published
 		// the new one yet on the first attempt.
 		resolved, _ := d.resolveAgentEntry(ctx, name, entry)
-		startedAt := time.Now()
 		version, err := detectAgentVersion(ctx, resolved.Path)
 		if err != nil {
 			lastErr = err
