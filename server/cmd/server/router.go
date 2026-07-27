@@ -29,6 +29,7 @@ import (
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -568,6 +569,35 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("slack integration disabled (MULTICA_SLACK_SECRET_KEY not set)")
 	}
 
+	// Telegram integration (BYO bot). Inbound is a webhook, so — unlike Slack's
+	// Socket Mode — it needs no Supervisor/Factory/lease: the webhook handler
+	// calls channelRouter.Handle directly. Gated by MULTICA_TELEGRAM_SECRET_KEY
+	// (at-rest bot-token encryption). The ResolverSet reuses the same channel_*
+	// tables, IssueService and TaskService as Slack/Feishu, so /issue, dedup, and
+	// run-triggering behave identically.
+	if tgKey, err := secretbox.LoadKey("MULTICA_TELEGRAM_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(tgKey)
+		if err != nil {
+			slog.Error("telegram: secretbox.New failed; telegram integration disabled", "error", err)
+		} else {
+			// Replier is nil in Plan 1 (no account-linking prompt / issue-created
+			// notice yet); Plan 2 passes a non-nil telegram.OutboundReplier.
+			channelRouter.Register(telegram.TypeTelegram, telegram.NewTelegramResolverSet(queries, pool, nil))
+			// The webhook handler routes through h.webhookChannelHandler (not
+			// h.ChannelRouter directly); channelRouter satisfies channelHandler.
+			h.SetWebhookChannelHandler(channelRouter)
+			installSvc, ierr := telegram.NewInstallService(queries, pool, box, signupConfig.PublicURL, slog.Default())
+			if ierr != nil {
+				slog.Error("telegram: InstallService init failed; install disabled", "error", ierr)
+			} else {
+				h.TelegramInstall = installSvc
+			}
+			slog.Info("telegram integration enabled (BYO webhook)")
+		}
+	} else {
+		slog.Info("telegram integration disabled (MULTICA_TELEGRAM_SECRET_KEY not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -787,6 +817,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// only forward the bytes + the Stripe-Signature header; see
 	// HandleCloudBillingStripeWebhook for the rationale).
 	r.Post("/api/webhooks/stripe", h.HandleCloudBillingStripeWebhook)
+	// Telegram Bot API webhook (no Multica auth — authenticated per-bot via the
+	// webhook_secret query/header check in the handler). {botId} selects the
+	// channel_installation config->>'app_id' to route by.
+	r.Post("/api/webhooks/telegram/{botId}", h.TelegramWebhook)
 
 	// Composio OAuth callback (MUL-3843). NOT under the Auth group on purpose:
 	// Composio 302-redirects the user's browser here at the end of the OAuth
@@ -991,6 +1025,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/slack/installations/{installationId}", h.RevokeSlackInstallation)
 					r.Post("/slack/install/byo", h.RegisterSlackBYO)
+				})
+
+				// Telegram integration. Same admin/member split as Slack: listing
+				// is member-visible; BYO install + revoke are admin-only. The
+				// inbound webhook itself is a public route registered outside this
+				// workspace group.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/telegram/installations", h.ListTelegramInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/telegram/installations/{installationId}", h.RevokeTelegramInstallation)
+					r.Post("/telegram/install/byo", h.RegisterTelegramBYO)
 				})
 			})
 		})

@@ -225,6 +225,15 @@ type channelHandler interface {
 	Handle(ctx context.Context, msg channel.InboundMessage) error
 }
 
+// SetWebhookChannelHandler wires the inbound seam the Telegram webhook routes
+// through. router.go calls this with the shared *engine.Router (the same
+// instance assigned to ChannelRouter) once Telegram is enabled
+// (MULTICA_TELEGRAM_SECRET_KEY set). The field itself stays unexported so
+// only this package's webhook handler and its tests touch it directly.
+func (h *Handler) SetWebhookChannelHandler(handler channelHandler) {
+	h.webhookChannelHandler = handler
+}
+
 // TelegramWebhook (POST /api/webhooks/telegram/{botId}) is the PUBLIC,
 // unauthenticated endpoint Telegram POSTs updates to. botId is the opaque
 // per-bot routing key (the numeric bot id from the token prefix, stored at
