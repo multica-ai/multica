@@ -250,20 +250,29 @@ func (h *Handler) SetWebhookChannelHandler(handler channelHandler) {
 func (h *Handler) TelegramWebhook(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
-	// Per-IP rate limit BEFORE the installation lookup. Mirrors
-	// HandleCloudBillingStripeWebhook: this is public unauthenticated ingress
-	// keyed on a raw, unauthenticated path param, so a spray of requests must
-	// not be allowed to force a DB query per request.
-	if h.WebhookIPRateLimiter != nil {
-		if ip := h.clientIPForRateLimit(r); ip != "" {
-			if !h.WebhookIPRateLimiter.Allow(ctx, ip) {
-				writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
-				return
-			}
-		}
+	botID := chi.URLParam(r, "botId")
+	if botID == "" {
+		w.WriteHeader(http.StatusOK)
+		return
 	}
 
-	botID := chi.URLParam(r, "botId")
+	// Per-installation rate limit BEFORE the DB lookup, keyed by botId
+	// rather than client IP. Unlike Stripe (HandleCloudBillingStripeWebhook),
+	// all Telegram webhook deliveries share Telegram's small pool of egress
+	// IPs (or a single edge proxy), so an IP key would collapse every bot in
+	// the deployment into one shared bucket and let one busy bot's traffic
+	// 429 every other workspace's bot. Keying by botId isolates one
+	// installation's burst from another's; the webhook secret check and the
+	// two-phase update dedup downstream remain the real authenticity/
+	// idempotency gates, not this coarse limiter. An unknown or sprayed
+	// botId still only costs one indexed installation lookup that returns
+	// 200 fast below; a stricter global cap is a possible follow-up.
+	if h.WebhookIPRateLimiter != nil {
+		if !h.WebhookIPRateLimiter.Allow(ctx, botID) {
+			writeError(w, http.StatusTooManyRequests, "rate limit exceeded")
+			return
+		}
+	}
 
 	inst, err := h.Queries.GetChannelInstallationByAppID(ctx, db.GetChannelInstallationByAppIDParams{
 		ChannelType: string(telegram.TypeTelegram),
