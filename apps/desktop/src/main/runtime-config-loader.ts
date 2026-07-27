@@ -1,10 +1,14 @@
 import { app } from "electron";
-import { readFile } from "fs/promises";
-import { join } from "path";
+import { mkdir, readFile, writeFile } from "fs/promises";
+import { dirname, join } from "path";
 import {
   DEFAULT_RUNTIME_CONFIG,
-  parseRuntimeConfig,
+  parseDesktopConfigFile,
+  resolveActiveConfig,
   runtimeConfigFromDevEnv,
+  serializeDesktopConfigFile,
+  serversStateFromConfig,
+  type DesktopServersState,
   type RuntimeConfig,
   type RuntimeConfigEnv,
   type RuntimeConfigResult,
@@ -17,7 +21,12 @@ export async function loadRuntimeConfig(options: {
 }): Promise<RuntimeConfigResult> {
   if (options.isDev) {
     try {
-      return { ok: true, config: runtimeConfigFromDevEnv(options.env) };
+      const config = runtimeConfigFromDevEnv(options.env);
+      return {
+        ok: true,
+        config,
+        servers: serversStateFromConfig(config, { editable: false }),
+      };
     } catch (err) {
       return { ok: false, error: { message: errorMessage(err) } };
     }
@@ -26,10 +35,16 @@ export async function loadRuntimeConfig(options: {
   const configPath = options.configPath ?? desktopConfigPath();
   try {
     const raw = await readFile(configPath, "utf-8");
-    return { ok: true, config: parseRuntimeConfig(raw) };
+    const { config, servers } = parseDesktopConfigFile(raw);
+    return { ok: true, config, servers: { ...servers, editable: true } };
   } catch (err) {
     if (isMissingFileError(err)) {
-      return { ok: true, config: { ...DEFAULT_RUNTIME_CONFIG } };
+      const config = { ...DEFAULT_RUNTIME_CONFIG };
+      return {
+        ok: true,
+        config,
+        servers: serversStateFromConfig(config, { editable: true }),
+      };
     }
     return {
       ok: false,
@@ -38,6 +53,34 @@ export async function loadRuntimeConfig(options: {
       },
     };
   }
+}
+
+/**
+ * Persist the multi-server list and active selection to desktop.json.
+ * Returns the active RuntimeConfig derived from the new state.
+ */
+export async function saveDesktopServersState(options: {
+  servers: DesktopServersState;
+  configPath?: string;
+}): Promise<{ config: RuntimeConfig; servers: DesktopServersState }> {
+  if (!options.servers.editable) {
+    throw new Error("Server list is not editable in this build (dev uses VITE_* env)");
+  }
+  if (options.servers.servers.length === 0) {
+    throw new Error("Server list cannot be empty");
+  }
+
+  const configPath = options.configPath ?? desktopConfigPath();
+  await mkdir(dirname(configPath), { recursive: true });
+  const normalized: DesktopServersState = {
+    ...options.servers,
+    editable: true,
+  };
+  await writeFile(configPath, serializeDesktopConfigFile(normalized), "utf-8");
+  return {
+    config: resolveActiveConfig(normalized),
+    servers: normalized,
+  };
 }
 
 export function desktopConfigPath(): string {
@@ -57,4 +100,4 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export type { RuntimeConfig, RuntimeConfigResult };
+export type { RuntimeConfig, RuntimeConfigResult, DesktopServersState };

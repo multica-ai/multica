@@ -22,6 +22,7 @@ import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
 import { RESOURCES } from "@multica/views/locales";
 import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
+import { createServerScopedTokenStorage, restoreServerSession } from "../../shared/server-session";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
 // apps/web/app/layout.tsx HTML_LANG. index.html ships a static lang="en";
@@ -373,6 +374,15 @@ export default function App() {
     window.desktopAPI.windowContext ?? { kind: "main" as const };
   useCmdWCloseTab();
 
+  // Hydrate the live multica_token / multica_tabs slots from the active
+  // backend's namespaced keys before CoreProvider initializes auth.
+  // Runs once per document load (including after a server switch reload).
+  const serverScopedStorage = useMemo(() => {
+    if (!runtimeConfigResult.ok) return undefined;
+    restoreServerSession(runtimeConfigResult.config.apiUrl);
+    return createServerScopedTokenStorage(runtimeConfigResult.config.apiUrl);
+  }, [runtimeConfigResult]);
+
   // Flush a freeze/crash breadcrumb the main process parked from a previous
   // session. A true hang or process death can't report itself when it happens
   // (the renderer is blocked or gone), so the main process persists it and we
@@ -444,6 +454,7 @@ export default function App() {
         <CoreProvider
           apiBaseUrl={runtimeConfigResult.config.apiUrl}
           wsUrl={runtimeConfigResult.config.wsUrl}
+          storage={serverScopedStorage}
           onLogout={
             windowContext.kind === "main" ? handleDaemonLogout : undefined
           }

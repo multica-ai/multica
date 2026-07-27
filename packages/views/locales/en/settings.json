@@ -660,7 +660,8 @@
   },
   "desktop": {
     "tabs": {
-      "updates": "Updates"
+      "updates": "Updates",
+      "servers": "Servers"
     },
     "updates": {
       "title": "Updates",
@@ -675,6 +676,36 @@
       "downloading": "v{{version}} is downloading in the background — you'll be notified when it's ready to install.",
       "check_now": "Check now",
       "checking": "Checking…"
+    },
+    "servers": {
+      "title": "Servers",
+      "description": "Connect Multica Desktop to Multica Cloud or any self-hosted backend. Sessions are kept per server so you can switch without re-entering credentials each time. Non-Cloud servers show their name under the workspace switcher and in the window title.",
+      "switch_menu": "Multica server",
+      "current_server_aria": "Current server: {{name}}",
+      "loading": "Loading servers…",
+      "active": "Active",
+      "switch": "Switch",
+      "edit": "Edit server",
+      "edit_title": "Edit server",
+      "edit_active_hint": "Changing the API URL of the active server reloads the app and may require signing in again if the host changes.",
+      "remove": "Remove server",
+      "added": "Server added",
+      "updated": "Server updated",
+      "updated_reloading": "Server updated — reloading…",
+      "removed": "Server removed",
+      "cannot_remove_last": "Keep at least one server configured",
+      "api_url_required": "API URL is required",
+      "dev_mode_hint": "Dev builds use VITE_API_URL and cannot switch servers from the UI. Packaged Desktop builds can manage multiple backends here.",
+      "add_title": "Add server",
+      "add_description": "Save another Multica Cloud or self-hosted API endpoint.",
+      "add": "Add server",
+      "name_label": "Display name",
+      "name_placeholder": "Personal / Company / Cloud",
+      "api_url_label": "API URL",
+      "app_url_label": "Web app URL (optional)",
+      "app_url_placeholder": "Derived from API URL when empty",
+      "cancel": "Cancel",
+      "save": "Save"
     }
   },
   "members": {

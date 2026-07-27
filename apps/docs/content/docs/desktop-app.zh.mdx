@@ -67,9 +67,19 @@ macOS 版本已经签名 + 公证，第一次打开不会有"未知开发者"的
 安装后第一次打开需要登录——和 Web 版一样的 email + 验证码流程。登录成功后 Desktop 自动把工作区列表同步下来。
 
 <Callout type="info">
-**Desktop 默认连接 Multica Cloud，但可以通过本地配置文件指向自部署实例。** 应用内仍然没有“连接自部署”的切换入口。Desktop 会在 renderer 启动前读取 `~/.multica/desktop.json`；如果这个文件不存在，就使用 Cloud 默认值。
+**Desktop 默认连接 Multica Cloud，也支持在应用内配置并切换多个后端**（官方 Cloud、个人自部署、公司实例等）。
 
-最小自部署配置：
+### 应用内切换（推荐）
+
+1. 打开 **设置 → 账户 → 服务器**
+2. 点击 **添加服务器**，填写显示名称和 API URL
+3. 在列表里点 **切换**，或在登录页顶部的服务器下拉菜单中切换
+
+每个服务器的登录 token 会按 API host 分开保存；切换回已登录过的服务器时不需要重新输入凭证。切换会重载应用窗口，并把 daemon 指到对应后端。
+
+### 配置文件（兼容旧方式）
+
+Desktop 仍会在启动时读取 `~/.multica/desktop.json`。单服务器最小配置：
 
 ```json
 {
@@ -78,18 +88,31 @@ macOS 版本已经签名 + 公证，第一次打开不会有"未知开发者"的
 }
 ```
 
-`apiUrl` 是必填项，必须使用 `http` 或 `https`。Desktop 会自动从它推导 `wsUrl`（同源 `/ws`，`https` 对应 `wss`，`http` 对应 `ws`）和 `appUrl`（API 的同源地址）。如果你的部署使用不同域名，可以显式设置：
+多服务器示例（与 UI 写入格式一致；顶层 `apiUrl` 表示当前激活的后端，旧版 Desktop 也能识别）：
 
 ```json
 {
   "schemaVersion": 1,
-  "apiUrl": "https://api.your-domain",
-  "wsUrl": "wss://api.your-domain/ws",
-  "appUrl": "https://your-domain"
+  "apiUrl": "http://127.0.0.1:28443",
+  "activeServerId": "personal",
+  "servers": [
+    {
+      "id": "cloud",
+      "name": "Multica Cloud",
+      "apiUrl": "https://api.multica.ai"
+    },
+    {
+      "id": "personal",
+      "name": "Personal",
+      "apiUrl": "http://127.0.0.1:28443"
+    }
+  ]
 }
 ```
 
-如果 `desktop.json` 存在但内容无效，Desktop 会 fail closed，显示阻塞式配置错误，而不是悄悄回退到 Cloud。开发构建里，`electron-vite dev` 仍然优先使用 `VITE_API_URL` / `VITE_WS_URL` / `VITE_APP_URL`。Desktop 运行时自部署配置能力对应 [issue #1371](https://github.com/multica-ai/multica/issues/1371)。
+`apiUrl` 必须使用 `http` 或 `https`。Desktop 会自动从它推导 `wsUrl`（同源 `/ws`）和 `appUrl`；跨域部署可显式设置 `wsUrl` / `appUrl`。
+
+如果 `desktop.json` 存在但内容无效，Desktop 会 fail closed，显示阻塞式配置错误，而不是悄悄回退到 Cloud。开发构建里，`electron-vite dev` 仍然优先使用 `VITE_API_URL` / `VITE_WS_URL` / `VITE_APP_URL`，此时 UI 不可切换服务器。相关讨论见 [issue #1371](https://github.com/multica-ai/multica/issues/1371)、[issue #5132](https://github.com/multica-ai/multica/issues/5132)。
 </Callout>
 
 ## Windows Defender 把 Multica 报成病毒

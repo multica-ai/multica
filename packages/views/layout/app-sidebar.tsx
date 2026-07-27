@@ -346,9 +346,23 @@ interface AppSidebarProps {
   headerClassName?: string;
   /** Extra style for SidebarHeader */
   headerStyle?: React.CSSProperties;
+  /**
+   * Optional muted environment line under the workspace name (Desktop
+   * multi-server). Read-only identity cue — not a control.
+   */
+  environmentHint?: string | null;
+  /** Tooltip / full detail for environmentHint (e.g. API URL). */
+  environmentHintTitle?: string | null;
 }
 
-export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }: AppSidebarProps = {}) {
+export function AppSidebar({
+  topSlot,
+  searchSlot,
+  headerClassName,
+  headerStyle,
+  environmentHint,
+  environmentHintTitle,
+}: AppSidebarProps = {}) {
   const { t } = useT("layout");
   const { pathname, push } = useNavigation();
   const user = useAuthStore((s) => s.user);
@@ -505,7 +519,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
               <DropdownMenu>
                 <DropdownMenuTrigger
                   render={
-                    <SidebarMenuButton>
+                    <SidebarMenuButton
+                      className={environmentHint ? "h-auto min-h-8 py-1.5" : undefined}
+                    >
                       <span className="relative">
                         <WorkspaceAvatar name={workspace?.name ?? "M"} avatarUrl={workspace?.avatar_url} size="sm" />
                         {/* Shared brand dot: a pending invitation OR another
@@ -516,10 +532,20 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           <span className="absolute -top-0.5 -right-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar" />
                         )}
                       </span>
-                      <span className="flex-1 truncate font-medium">
-                        {workspace?.name ?? "Multica"}
+                      <span className="flex min-w-0 flex-1 flex-col items-start gap-0">
+                        <span className="w-full truncate font-medium leading-tight">
+                          {workspace?.name ?? "Multica"}
+                        </span>
+                        {environmentHint ? (
+                          <span
+                            className="w-full truncate text-[10px] font-normal leading-tight text-muted-foreground"
+                            title={environmentHintTitle ?? undefined}
+                          >
+                            {environmentHint}
+                          </span>
+                        ) : null}
                       </span>
-                      <ChevronDown className="size-3 text-muted-foreground" />
+                      <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
                     </SidebarMenuButton>
                   }
                 />
@@ -543,6 +569,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       <p className="truncate text-xs text-muted-foreground leading-tight">
                         {user?.email}
                       </p>
+                      {environmentHint ? (
+                        <p
+                          className="mt-0.5 truncate text-[10px] text-muted-foreground/80 leading-tight"
+                          title={environmentHintTitle ?? undefined}
+                        >
+                          {environmentHint}
+                        </p>
+                      ) : null}
                     </div>
                   </div>
                   <DropdownMenuSeparator />
