@@ -191,6 +191,13 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 			qwenHome = filepath.Join(home, ".qwen")
 		}
 		providerRoot = filepath.Join(qwenHome, "skills")
+	case "qwenpaw":
+		// QWENPAW_HOME replaces QwenPaw's global ~/.qwenpaw directory.
+		qwenpawHome := strings.TrimSpace(os.Getenv("QWENPAW_HOME"))
+		if qwenpawHome == "" {
+			qwenpawHome = filepath.Join(home, ".qwenpaw")
+		}
+		providerRoot = filepath.Join(qwenpawHome, "skills")
 	default:
 		return nil, false, nil
 	}

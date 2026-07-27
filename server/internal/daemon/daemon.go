@@ -4331,7 +4331,7 @@ func providerDisplayName(name string) string {
 // 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
 func providerNeedsInlineSystemPrompt(provider string) bool {
 	switch provider {
-	case "openclaw", "kimi", "traecli":
+	case "openclaw", "kimi", "traecli", "qwenpaw":
 		return true
 	default:
 		return false
@@ -6748,6 +6748,8 @@ func defaultArgsForProvider(cfg Config, provider string) []string {
 		args = cfg.CodebuddyArgs
 	case "qwen":
 		args = cfg.QwenArgs
+	case "qwenpaw":
+		args = cfg.QwenpawArgs
 	default:
 		return nil
 	}
