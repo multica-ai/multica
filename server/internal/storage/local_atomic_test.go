@@ -59,6 +59,66 @@ func TestLocalStorageUploadStreamFailureKeepsPreviousObject(t *testing.T) {
 	}
 }
 
+// Both upload paths land 0644 objects. CreateTemp makes its file 0600, so
+// without the explicit mode the rename-into-place rewrite would have silently
+// narrowed permissions on deployments that serve the upload dir with a
+// front-end web server running as another user.
+func TestLocalStorageUploadsAreWorldReadable(t *testing.T) {
+	dir := t.TempDir()
+	s := &LocalStorage{uploadDir: dir}
+	if _, err := s.Upload(context.Background(), "buffered", []byte("a"), "text/plain", "a.txt"); err != nil {
+		t.Fatalf("Upload: %v", err)
+	}
+	if _, err := s.UploadStream(context.Background(), "streamed", strings.NewReader("a"), 1, "text/plain", "a.txt"); err != nil {
+		t.Fatalf("UploadStream: %v", err)
+	}
+	for _, key := range []string{"buffered", "streamed"} {
+		info, err := os.Stat(filepath.Join(dir, key))
+		if err != nil {
+			t.Fatalf("stat %s: %v", key, err)
+		}
+		if info.Mode().Perm() != 0644 {
+			t.Fatalf("%s mode = %o, want 0644", key, info.Mode().Perm())
+		}
+	}
+}
+
+// The buffered Upload now goes through the same temp-file rename as the
+// stream path. A byte slice cannot fail mid-copy, so what is observable here
+// is the tail: a failed write leaves no temp litter behind and no damage to a
+// previous object. (The truncate-up-front hazard itself is pinned on the
+// stream path, which is the one that can fail mid-body.)
+func TestLocalStorageUploadFailureLeavesNoTempFile(t *testing.T) {
+	dir := t.TempDir()
+	s := &LocalStorage{uploadDir: dir}
+	key := "workspaces/ws/lark/buffered-dup"
+	if _, err := s.Upload(context.Background(), key, []byte("first-upload"), "image/png", "a.png"); err != nil {
+		t.Fatalf("first Upload: %v", err)
+	}
+	// A destination the rename cannot replace (a non-empty directory) is the
+	// portable way to fail the write after the temp file is fully written.
+	blocked := filepath.Join(dir, "blocked")
+	if err := os.MkdirAll(filepath.Join(blocked, "child"), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if _, err := s.Upload(context.Background(), "blocked", []byte("nope"), "image/png", "a.png"); err == nil {
+		t.Fatal("Upload onto a non-empty directory must fail")
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	for _, e := range entries {
+		if strings.Contains(e.Name(), ".tmp-") {
+			t.Fatalf("leftover temp file %q", e.Name())
+		}
+	}
+	got, err := os.ReadFile(filepath.Join(dir, key))
+	if err != nil || string(got) != "first-upload" {
+		t.Fatalf("previous object = %q (err %v), want it intact", got, err)
+	}
+}
+
 // Sanity: a successful stream still lands the full body and stays readable.
 func TestLocalStorageUploadStreamAtomicSuccess(t *testing.T) {
 	dir := t.TempDir()

@@ -210,11 +210,11 @@ func writeAtomic(dest string, src io.Reader) error {
 	}
 	// CreateTemp makes the file 0600; objects are served by this process (and,
 	// in some deployments, a front-end web server) under the 0644 the direct
-	// write used before this path existed.
+	// write used before this path existed. Best-effort: an upload dir on a
+	// mount that ignores chmod (SMB/NFS/FUSE) used to accept the direct write
+	// fine, so a chmod refusal must not turn a working upload into a failure.
 	if err := f.Chmod(0644); err != nil {
-		_ = f.Close()
-		_ = os.Remove(tmp)
-		return fmt.Errorf("local storage Chmod: %w", err)
+		slog.Warn("local storage chmod failed; object keeps its temp-file mode", "dest", dest, "error", err)
 	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmp)
