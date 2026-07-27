@@ -897,29 +897,49 @@ func discoverKimiModels(ctx context.Context, executablePath string) ([]Model, er
 	return models, nil
 }
 
+// acpThoughtLevelOption is the configOptions/config_options entry shape
+// consumed by parseACPThoughtLevelOptions.
+type acpThoughtLevelOption struct {
+	Type              string `json:"type"`
+	ID                string `json:"id"`
+	Category          string `json:"category"`
+	CurrentValue      string `json:"currentValue"`
+	CurrentValueSnake string `json:"current_value"`
+	Options           []struct {
+		Value       string `json:"value"`
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	} `json:"options"`
+}
+
+func (o acpThoughtLevelOption) currentValue() string {
+	if v := strings.TrimSpace(o.CurrentValue); v != "" {
+		return v
+	}
+	return strings.TrimSpace(o.CurrentValueSnake)
+}
+
 // parseACPThoughtLevelOptions extracts the thinking-effort catalog from an
 // ACP session/new configOptions response. It looks for the select entry whose
 // category is "thought_level" (or id is "thinking" as a fallback) and returns
 // the advertised options as a ModelThinking catalog. nil means the runtime did
 // not surface a thinking control for this session/model.
+//
+// Like parseACPConfigOptionModels, this accepts both camelCase
+// (`configOptions`) and snake_case (`config_options`) top-level keys.
 func parseACPThoughtLevelOptions(raw json.RawMessage) *ModelThinking {
 	var resp struct {
-		ConfigOptions []struct {
-			Type         string `json:"type"`
-			ID           string `json:"id"`
-			Category     string `json:"category"`
-			CurrentValue string `json:"currentValue"`
-			Options      []struct {
-				Value       string `json:"value"`
-				Name        string `json:"name"`
-				Description string `json:"description"`
-			} `json:"options"`
-		} `json:"configOptions"`
+		ConfigOptions      []acpThoughtLevelOption `json:"configOptions"`
+		ConfigOptionsSnake []acpThoughtLevelOption `json:"config_options"`
 	}
 	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil
 	}
-	for _, opt := range resp.ConfigOptions {
+	configOptions := resp.ConfigOptions
+	if len(configOptions) == 0 {
+		configOptions = resp.ConfigOptionsSnake
+	}
+	for _, opt := range configOptions {
 		if opt.Type != "select" {
 			continue
 		}
@@ -956,7 +976,7 @@ func parseACPThoughtLevelOptions(raw json.RawMessage) *ModelThinking {
 		}
 		return &ModelThinking{
 			SupportedLevels: levels,
-			DefaultLevel:    strings.TrimSpace(opt.CurrentValue),
+			DefaultLevel:    opt.currentValue(),
 		}
 	}
 	return nil

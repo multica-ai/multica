@@ -1328,6 +1328,20 @@ func TestParseACPThoughtLevelOptions(t *testing.T) {
 			want: nil,
 		},
 		{
+			name: "snake_case config_options",
+			raw: `{
+				"config_options": [
+					{"type": "select", "id": "thinking", "category": "thought_level",
+					 "current_value": "max",
+					 "options": [
+						{"value": "on", "name": "On"},
+						{"value": "max", "name": "Max"}
+					 ]}
+				]
+			}`,
+			want: []string{"on", "max"},
+		},
+		{
 			name: "no configOptions",
 			raw:  `{"sessionId": "s1"}`,
 			want: nil,
@@ -1354,6 +1368,61 @@ func TestParseACPThoughtLevelOptions(t *testing.T) {
 				t.Errorf("got values %v, want %v", values, tc.want)
 			}
 		})
+	}
+}
+
+// TestParseACPSessionNewModelsAndThoughtLevelsSnakeCase verifies that both
+// the model catalog and the thinking-effort catalog can be parsed from a
+// session/new response that uses snake_case `config_options` keys.
+func TestParseACPSessionNewModelsAndThoughtLevelsSnakeCase(t *testing.T) {
+	raw := []byte(`{
+      "session_id": "session_abc",
+      "config_options": [
+        {
+          "id": "primary_model",
+          "category": "MODEL",
+          "current_value": "kimi-code/k3",
+          "options": [
+            {"value": "kimi-code/k3", "name": "K3"},
+            {"value": "kimi-code/kimi-for-coding", "name": "K2.7 Coding"}
+          ]
+        },
+        {
+          "type": "select",
+          "id": "thinking",
+          "category": "thought_level",
+          "current_value": "max",
+          "options": [
+            {"value": "on", "name": "On"},
+            {"value": "max", "name": "Max"},
+            {"value": "high", "name": "High"}
+          ]
+        }
+      ]
+    }`)
+
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models from snake_case config_options, got %d: %+v", len(models), models)
+	}
+	if !models[0].Default || models[0].ID != "kimi-code/k3" {
+		t.Errorf("expected k3 default, got %+v", models[0])
+	}
+
+	thinking := parseACPThoughtLevelOptions(raw)
+	if thinking == nil {
+		t.Fatal("expected thinking catalog from snake_case config_options, got nil")
+	}
+	if thinking.DefaultLevel != "max" {
+		t.Errorf("expected default thought level max, got %q", thinking.DefaultLevel)
+	}
+	if len(thinking.SupportedLevels) != 3 {
+		t.Fatalf("expected 3 thought levels, got %+v", thinking.SupportedLevels)
+	}
+	for i, want := range []string{"on", "max", "high"} {
+		if thinking.SupportedLevels[i].Value != want {
+			t.Errorf("thought level[%d] = %q, want %q", i, thinking.SupportedLevels[i].Value, want)
+		}
 	}
 }
 
