@@ -315,6 +315,12 @@ func (r *ChannelMediaReconciler) nextTombstonePass(row db.ChannelMediaPendingObj
 }
 
 func (r *ChannelMediaReconciler) tombstoneRow(ctx context.Context, row db.ChannelMediaPendingObject, leaseToken pgtype.UUID, next time.Duration, idx int) bool {
+	if ctx.Err() != nil {
+		// Same as release: a cancelled context cannot carry the write, and
+		// shutdown is not a failure. The row stays claimed until its lease
+		// expires, and the next pass re-deletes it idempotently.
+		return false
+	}
 	n, err := r.Queries.TombstoneChannelMediaPendingObject(ctx, db.TombstoneChannelMediaPendingObjectParams{
 		StorageKey:    row.StorageKey,
 		WorkspaceID:   row.WorkspaceID,
@@ -332,6 +338,13 @@ func (r *ChannelMediaReconciler) tombstoneRow(ctx context.Context, row db.Channe
 // release keeps the row in 'deleting' (a bind must still never attach it),
 // drops the lease, and backs off the next attempt.
 func (r *ChannelMediaReconciler) release(ctx context.Context, row db.ChannelMediaPendingObject, leaseToken pgtype.UUID, cause error) {
+	if ctx.Err() != nil {
+		// Shutdown cancelled the settle itself (a DELETE or a query in
+		// flight). The backoff write would fail on the same cancelled context,
+		// so there is nothing to record and nothing worth waking anyone for —
+		// the lease expiry reclaims the row like any other interrupted worker.
+		return
+	}
 	backoff := channelMediaReconcileBackoffBase << min(row.Attempt-1, 10)
 	if backoff > channelMediaReconcileBackoffCap || backoff <= 0 {
 		backoff = channelMediaReconcileBackoffCap
@@ -355,6 +368,11 @@ func (r *ChannelMediaReconciler) release(ctx context.Context, row db.ChannelMedi
 }
 
 func (r *ChannelMediaReconciler) clearRow(ctx context.Context, row db.ChannelMediaPendingObject, leaseToken pgtype.UUID) bool {
+	if ctx.Err() != nil {
+		// See release: shutdown mid-settle leaves the row to its lease expiry
+		// rather than logging a write that never had a chance to land.
+		return false
+	}
 	n, err := r.Queries.DeleteChannelMediaPendingObject(ctx, db.DeleteChannelMediaPendingObjectParams{
 		StorageKey:  row.StorageKey,
 		WorkspaceID: row.WorkspaceID,

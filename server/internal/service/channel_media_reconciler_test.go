@@ -434,7 +434,9 @@ func TestChannelMediaReconciler_CancelledSweepIsQuiet(t *testing.T) {
 	rec := &ChannelMediaReconciler{
 		Queries: db.New(pool),
 		Storage: deleter,
-		Logger:  slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})),
+		// Warn and above only: shutdown must not page anyone. Debug/info
+		// tracing a future RunOnce may add is not what this test guards.
+		Logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})),
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -442,13 +444,46 @@ func TestChannelMediaReconciler_CancelledSweepIsQuiet(t *testing.T) {
 	rec.RunOnce(ctx)
 
 	if logs.Len() != 0 {
-		t.Fatalf("cancelled sweep logged %q, want silence", logs.String())
+		t.Fatalf("cancelled sweep logged %q, want no warnings", logs.String())
 	}
 	if deleted := deleter.deletedKeys(); len(deleted) != 0 {
 		t.Fatalf("cancelled sweep deleted %v, want nothing", deleted)
 	}
 	if state, attempt, exists := f.rowState(t, key); !exists || state != "pending" || attempt != 0 {
 		t.Fatalf("row = (%q, attempt=%d, %v), want an untouched ('pending', 0)", state, attempt, exists)
+	}
+}
+
+// Cancellation that lands INSIDE a settle — the common case, since a sweep
+// spends its time in object-storage deletes — must be as quiet as one at the
+// claim boundary. The row keeps its lease and is reclaimed after expiry, so
+// there is nothing to record: writing the backoff would fail on the same
+// cancelled context and log twice per in-flight row on every shutdown.
+func TestChannelMediaReconciler_CancelledSettleIsQuiet(t *testing.T) {
+	pool := newCancelFinalizePool(t)
+	f := seedReconcilerFixture(t, pool)
+	key := "ws/lark/cancelled-mid-settle"
+	f.seedLedgerRow(t, key, "https://cdn.test/cancelled-mid-settle", "pending", ChannelMediaReconcileSettleDelay+time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
+	deleter := &fakeObjectDeleter{err: context.Canceled}
+	deleter.onDelete = func(string) { cancel() }
+	var logs bytes.Buffer
+	rec := &ChannelMediaReconciler{
+		Queries: db.New(pool),
+		Storage: deleter,
+		Logger:  slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	}
+	defer cancel()
+
+	rec.RunOnce(ctx)
+
+	if logs.Len() != 0 {
+		t.Fatalf("sweep cancelled during a delete logged %q, want no warnings", logs.String())
+	}
+	// The claim stands: the row waits for its lease to expire, exactly like a
+	// worker that crashed mid-delete.
+	if state, attempt, exists := f.rowState(t, key); !exists || state != "deleting" || attempt != 1 {
+		t.Fatalf("row = (%q, attempt=%d, %v), want a still-claimed ('deleting', 1)", state, attempt, exists)
 	}
 }
 
