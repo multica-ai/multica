@@ -211,14 +211,14 @@ func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.Append
 		return engine.AppendResult{}, err
 	}
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
-		SessionID:         p.SessionID,
-		Sender:            p.Sender,
-		InstallationID:    p.InstallationID,
-		Body:              p.Message.Text,
-		CommandText:       lm.CommandBody,
-		MessageID:         p.Message.MessageID,
-		ThreadID:          p.Message.Source.ThreadID,
-		ClaimToken:        p.ClaimToken,
+		SessionID:           p.SessionID,
+		Sender:              p.Sender,
+		InstallationID:      p.InstallationID,
+		Body:                p.Message.Text,
+		CommandText:         lm.CommandBody,
+		MessageID:           p.Message.MessageID,
+		ThreadID:            p.Message.Source.ThreadID,
+		ClaimToken:          p.ClaimToken,
 		MediaPendingSeconds: p.MediaPendingSeconds,
 	})
 }
