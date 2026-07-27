@@ -456,9 +456,20 @@ export function issueTableRowPageOptions(
     queryFn: () => api.listIssueTableRows(request),
     placeholderData: keepPreviousData,
     retry: false,
-    // Dynamic useQueries observers can detach/reinstall as sibling branches
-    // enter the viewport. An errored page stays errored until explicit Retry.
-    refetchOnMount: false,
+    // Dynamic useQueries observers detach/reinstall as sibling branches enter
+    // and leave the viewport. Keep an errored page errored until the user hits
+    // Retry — but still let a successful-but-invalidated page refetch on
+    // reattach, so a row page that gets WS-invalidated while its observer is
+    // detached doesn't stay stranded stale under the global `staleTime: Infinity`
+    // default (correct count, missing issue).
+    //
+    // Both guards are needed: `retryOnMount` covers a first-load error (no
+    // data), while the `refetchOnMount` guard covers a background-refetch error
+    // on a page that still holds data — TanStack flags such a page
+    // `isInvalidated`, so a plain `refetchOnMount: true` would re-fire the
+    // failing request on every reattach instead of waiting for explicit Retry.
+    retryOnMount: false,
+    refetchOnMount: (query) => query.state.status !== "error",
   });
 }
 

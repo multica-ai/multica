@@ -81,7 +81,7 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issue.ID)
 	})
 
-	if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", ""); err != nil {
+	if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", "", false); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 
@@ -138,7 +138,7 @@ func TestQuickCreateFailure_DoesNotSubscribeRequester(t *testing.T) {
 
 	// No issue with origin_type=quick_create + this task id exists. Completion
 	// hits the failure branch and writes a failure inbox; no subscriber row.
-	if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", ""); err != nil {
+	if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", "", false); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 

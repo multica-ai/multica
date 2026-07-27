@@ -1,0 +1,73 @@
+/*
+ * Shared pan/zoom canvas — the Mermaid viewer and the image attachment
+ * preview both render through `ZoomCanvas` (editor/zoom-canvas.tsx).
+ *
+ * Not scoped to `.rich-text-editor`: both viewers are portaled to
+ * document.body and never render inside the editor subtree. The background is
+ * deliberately left to the caller so each surface can pick its own backdrop.
+ */
+
+.zoom-canvas {
+  position: relative;
+  width: 100%;
+  /* Flex owns the height: the header is shrink-0 and the canvas takes the rest.
+     `min-height: 0` is what allows it to shrink below content size instead of
+     pushing the toolbar out of the dialog. */
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  /* Claim every touch gesture: browser pan/pinch would otherwise scroll or
+     zoom the page underneath instead of moving the content. */
+  touch-action: none;
+  /* A pan that leaves the canvas would otherwise start a native text selection
+     and highlight the toolbar text plus the whole content box. Done in CSS
+     rather than by preventDefault-ing pointerdown, which would also suppress
+     the default focus and silently kill the keyboard controls. */
+  user-select: none;
+  outline: none;
+}
+
+.zoom-canvas:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
+.zoom-canvas.is-panning {
+  cursor: grabbing;
+}
+
+.zoom-canvas-content {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+/* Only discrete controls (toolbar buttons, +/-/0, arrow keys) ease between
+   states. Drag and wheel/pinch set `is-animated` off so the content tracks the
+   input exactly — easing direct manipulation reads as lag, not polish. */
+.zoom-canvas-content.is-animated {
+  transition: transform 150ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zoom-canvas-content.is-animated {
+    transition: none;
+  }
+}
+
+/* Unmeasured fallback: content whose natural size can't be read (an SVG with
+   only a viewBox has no intrinsic size in Chromium) has nothing to build a
+   transform against. Keep the same element chain as the measured branch so
+   React swaps classes instead of remounting — a remount would drop a decoded
+   image and flash — and just letterbox the content in place. */
+.zoom-canvas-fit {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}

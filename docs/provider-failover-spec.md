@@ -50,7 +50,7 @@ extended to them, gated by an active-mode safety hold:
 Prevents a handed-off fallback from double-spawning children or
 double-promoting stages that the failed orchestrator already dispatched:
 
-- `migrations/229_control_plane_effect_ledger.up.sql`: table
+- `migrations/230_control_plane_effect_ledger.up.sql`: table
   `control_plane_effect_ledger` with `UNIQUE effect_key`.
 - `pkg/providerfailover/controlplane.go`: `EffectKey(chainRoot, effect, target)`
   (SHA256 of NUL-separated components), `ControlPlaneEffect` enum
@@ -156,10 +156,10 @@ The auditable core. Deterministic, table-tested, no I/O.
 
 ### New: persistence — migrations + sqlc
 
-- `server/migrations/224_provider_failover_handoff.{up,down}.sql` — the ledger &
+- `server/migrations/225_provider_failover_handoff.{up,down}.sql` — the ledger &
   ownership record `provider_failover_handoff`. No FKs (application-resolved),
   CHECK-constrained `state` and `mode`.
-- `225…228_provider_failover_*_index.{up,down}.sql` — one `CREATE INDEX
+- `226…229_provider_failover_*_index.{up,down}.sql` — one `CREATE INDEX
   CONCURRENTLY` per file:
   - `…_original_task_uidx` — unique on `original_task_id`: one ledger row per
     failed task (idempotent record).

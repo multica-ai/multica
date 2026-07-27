@@ -106,6 +106,192 @@ func TestGetLastTaskSessionExcludesPoisonedFailures(t *testing.T) {
 	}
 }
 
+// TestGetLastTaskSessionFallsBackWhenLatestSessionBlanked is the claim-side
+// half of MUL-5305: when the most recent task recorded NO session_id (the
+// daemon withheld an unresumable Codex session so it would not poison the next
+// follow-up), the resume lookup skips that row via `session_id IS NOT NULL`
+// and falls back to the most recent task that does have a session — so the next
+// follow-up continues from the last real conversation instead of the dropped
+// pointer that produced the reported regression.
+func TestGetLastTaskSessionFallsBackWhenLatestSessionBlanked(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	// Older completed task with a good, recorded session (its rollout is real).
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'OLD-GOOD-SESSION', '/tmp/good')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert older completed task: %v", err)
+	}
+
+	// Newer failed task whose unresumable session was withheld (session_id NULL).
+	// This is the row a naive lookup would return, cold-starting the next run.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', NULL, '/tmp/blanked', 'timeout')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert newer blanked task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if !prior.SessionID.Valid {
+		t.Fatal("expected fallback to the older recorded session, got no session")
+	}
+	if prior.SessionID.String != "OLD-GOOD-SESSION" {
+		t.Fatalf("expected OLD-GOOD-SESSION, got %q", prior.SessionID.String)
+	}
+}
+
+// TestCompletedTaskRolloutMissingWithholdsAndDisclosesGap is the cross-layer
+// regression for MUL-5305 Must-fix 1: a COMPLETED follow-up whose Codex rollout
+// is missing (the #5934 case — the user waits for each turn to finish) must (1)
+// NOT be handed to the next follow-up as its resume pointer, and (2) NOT be
+// resumed silently — the next claim must still disclose the continuity gap. It
+// drives the REAL terminal write (CompleteAgentTask with session_rollout_missing,
+// which clears session_id and flags the row in one statement) rather than a
+// manual marker, then checks GetLastTaskSession (falls back to the older good
+// session) + GetLatestTaskRolloutMissing (the disclosure signal
+// buildClaimedTaskResponse reads).
+func TestCompletedTaskRolloutMissingWithholdsAndDisclosesGap(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+	queries := db.New(testPool)
+
+	// Older completed turn with a real, recorded session.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'OLD-GOOD-SESSION', '/tmp/good')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert older completed task: %v", err)
+	}
+
+	// Newer turn still 'running' with a mid-flight-pinned session — exactly the
+	// pointer the reported bug propagates. CompleteAgentTask below finishes it
+	// with session_rollout_missing=true (the daemon found no rollout).
+	var newerTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'running', 0, now() - interval '1 minute', 'NEW-ROLLOUT-MISSING', '/tmp/newer')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&newerTaskID); err != nil {
+		t.Fatalf("insert newer running task: %v", err)
+	}
+
+	// The real terminal write withholds the session and flags the row atomically.
+	done, err := queries.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
+		ID:                    pgtype.UUID{Bytes: parseUUIDBytes(newerTaskID), Valid: true},
+		Result:                []byte(`{"output":"done"}`),
+		SessionID:             pgtype.Text{String: "NEW-ROLLOUT-MISSING", Valid: true},
+		WorkDir:               pgtype.Text{String: "/tmp/newer", Valid: true},
+		SessionRolloutMissing: true,
+	})
+	if err != nil {
+		t.Fatalf("CompleteAgentTask: %v", err)
+	}
+	// The terminal SQL forced the pinned session NULL and flagged the row in one
+	// statement — not two writes that a concurrent retry could interleave.
+	if done.SessionID.Valid {
+		t.Fatalf("expected withheld session_id to be NULL, got %q", done.SessionID.String)
+	}
+	if !done.SessionRolloutMissing {
+		t.Fatal("expected session_rollout_missing to be set on the terminal row")
+	}
+
+	// (1) The bad session is NOT handed out — resume falls back to the older good one.
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if !prior.SessionID.Valid || prior.SessionID.String != "OLD-GOOD-SESSION" {
+		t.Fatalf("expected fallback to OLD-GOOD-SESSION, got valid=%v %q", prior.SessionID.Valid, prior.SessionID.String)
+	}
+
+	// (2) The gap is disclosed — the resume is NOT silently claimed as complete.
+	missing, err := queries.GetLatestTaskRolloutMissing(ctx, db.GetLatestTaskRolloutMissingParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLatestTaskRolloutMissing failed: %v", err)
+	}
+	if !missing {
+		t.Fatal("expected the continuity gap to be flagged so the next claim discloses it")
+	}
+}
+
+// TestFailedTaskRolloutMissingForcesNullOverMidFlightPin covers the failure-path
+// half of MUL-5305 Must-fix 1: FailAgentTask normally COALESCE-preserves a
+// mid-flight-pinned session, which would let an auto-retry created in the SAME
+// transaction inherit a rollout-missing pointer. With session_rollout_missing
+// the terminal UPDATE forces session_id NULL and flags the row in ONE statement,
+// so there is no window between the fail committing and a separate marker where
+// the retry could observe the bad pointer or a false gap flag.
+func TestFailedTaskRolloutMissingForcesNullOverMidFlightPin(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+	queries := db.New(testPool)
+
+	// Running task with a mid-flight-pinned session, as UpdateAgentTaskSession
+	// would have left it before the run failed with no rollout on disk.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'running', 0, now() - interval '1 minute', 'PINNED-BUT-NO-ROLLOUT', '/tmp/wd')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
+		t.Fatalf("insert running task: %v", err)
+	}
+
+	// The daemon withheld it: FailTask sends an empty session_id (Valid:false)
+	// AND session_rollout_missing=true. The CASE must win over the COALESCE.
+	failed, err := queries.FailAgentTask(ctx, db.FailAgentTaskParams{
+		ID:                    pgtype.UUID{Bytes: parseUUIDBytes(taskID), Valid: true},
+		Error:                 pgtype.Text{String: "runtime went offline", Valid: true},
+		FailureReason:         pgtype.Text{String: "timeout", Valid: true},
+		SessionID:             pgtype.Text{Valid: false},
+		WorkDir:               pgtype.Text{Valid: false},
+		SessionRolloutMissing: true,
+	})
+	if err != nil {
+		t.Fatalf("FailAgentTask: %v", err)
+	}
+	if failed.SessionID.Valid {
+		t.Fatalf("expected the mid-flight pin to be forced NULL, got %q", failed.SessionID.String)
+	}
+	if !failed.SessionRolloutMissing {
+		t.Fatal("expected session_rollout_missing to be set on the failed row")
+	}
+}
+
 // TestGetLastTaskSessionFallbackPoisonedClassifier covers the second
 // poisoned classifier so adding a third doesn't silently break this rule.
 func TestGetLastTaskSessionFallbackPoisonedClassifier(t *testing.T) {

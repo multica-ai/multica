@@ -80,8 +80,11 @@ describe("useIssueStatusBranches", () => {
       },
     );
     setApiInstance({ listIssueTableRows } as unknown as ApiClient);
+    // Mirror the production client (createQueryClient): row pages stay fresh
+    // until explicitly invalidated, so re-expanding a collapsed section reuses
+    // settled cursor pages instead of refetching them on observer reattach.
     const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
     });
 
     const { result, rerender } = renderHook(

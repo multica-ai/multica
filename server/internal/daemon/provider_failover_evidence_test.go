@@ -153,7 +153,7 @@ func TestClientFailTask_EvidenceSerialization(t *testing.T) {
 	t.Cleanup(srv.Close)
 	c := NewClient(srv.URL)
 
-	if err := c.FailTask(context.Background(), "t1", "boom", "", "", "agent_error.provider_quota_limit", nil); err != nil {
+	if err := c.FailTask(context.Background(), "t1", "boom", "", "", "agent_error.provider_quota_limit", false, nil); err != nil {
 		t.Fatalf("FailTask(nil evidence): %v", err)
 	}
 	mu.Lock()
@@ -163,7 +163,7 @@ func TestClientFailTask_EvidenceSerialization(t *testing.T) {
 		t.Fatal("nil evidence must be omitted from the fail body (backward compatibility)")
 	}
 
-	if err := c.FailTask(context.Background(), "t1", "boom", "", "", "agent_error.provider_quota_limit",
+	if err := c.FailTask(context.Background(), "t1", "boom", "", "", "agent_error.provider_quota_limit", false,
 		&providerfailover.SideEffectEvidence{ObservedToolCalls: 1, PartialUserOutput: false, Complete: true}); err != nil {
 		t.Fatalf("FailTask(evidence): %v", err)
 	}

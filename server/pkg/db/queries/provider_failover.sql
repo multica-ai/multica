@@ -5,7 +5,7 @@
 -- (pgx.ErrNoRows), which callers treat as "already recorded".
 --
 -- For active-mode owning rows (state HANDOFF_PENDING) the chain-owner partial
--- unique index (migration 226) additionally enforces at-most-one owner per
+-- unique index (migration 227) additionally enforces at-most-one owner per
 -- chain: a concurrent claim raises a unique_violation the caller maps to the
 -- max-one-per-chain decline.
 INSERT INTO provider_failover_handoff (
@@ -37,7 +37,7 @@ WHERE fallback_task_id = $1;
 -- Reports whether another handoff already OWNS the given chain, excluding the
 -- row for the task being evaluated (so re-evaluating the same failed task never
 -- counts itself). Owning = PENDING/DISPATCHED/COMPLETED, mirroring the partial
--- unique index (migration 226). Pre-check for the policy; the unique index is
+-- unique index (migration 227). Pre-check for the policy; the unique index is
 -- the atomic backstop under concurrency.
 SELECT EXISTS (
     SELECT 1 FROM provider_failover_handoff

@@ -2,7 +2,7 @@
 -- bidirectional provider usage/rate-limit failover policy (td-836aa9). One row per failed
 -- task the policy evaluated: shadow-mode records what it WOULD do; active-mode
 -- rows additionally own the task chain (see the partial unique index in
--- migration 226) so a late primary completion can be discarded deterministically.
+-- migration 227) so a late primary completion can be discarded deterministically.
 --
 -- No foreign keys / cascades by repository rule: original_task_id,
 -- chain_root_task_id, issue_id, chat_session_id, source_agent_id, target_agent_id
