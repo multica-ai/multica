@@ -4149,7 +4149,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Hermes loads AGENTS.md / .agent_context itself. Prepending the full runtime
 	// brief into the ACP user prompt duplicates that context, bloats every turn,
 	// and has triggered upstream safety filters on harmless tasks.
-	if providerNeedsInlineSystemPrompt(provider) {
+	// CEREBRO-PATCH(agent-system-prompt-mode): FIR-3212 - also deliver the brief inline when an explicitly configured mode needs it; see cerebro_system_prompt_mode.go.
+	if needsInlineRuntimeBrief(provider, execOpts.SystemPromptMode) {
 		execOpts.SystemPrompt = runtimeBrief
 	}
 

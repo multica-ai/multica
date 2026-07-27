@@ -48,8 +48,10 @@ const agent = {
 function renderFields(overrides: {
   workspaceBriefMode?: string;
   toolsBriefMode?: string;
+  systemPromptMode?: string;
   onWorkspaceBriefMode?: (v: string) => void;
   onToolsBriefMode?: (v: string) => void;
+  onSystemPromptMode?: (v: string) => void;
 } = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -60,10 +62,12 @@ function renderFields(overrides: {
         thinkingLevel=""
         workspaceBriefMode={overrides.workspaceBriefMode ?? ""}
         toolsBriefMode={overrides.toolsBriefMode ?? ""}
+        systemPromptMode={overrides.systemPromptMode ?? ""}
         onModel={() => {}}
         onThinkingLevel={() => {}}
         onWorkspaceBriefMode={overrides.onWorkspaceBriefMode ?? (() => {})}
         onToolsBriefMode={overrides.onToolsBriefMode ?? (() => {})}
+        onSystemPromptMode={overrides.onSystemPromptMode ?? (() => {})}
       />
     </QueryClientProvider>,
   );
@@ -104,5 +108,45 @@ describe("AgentContextConfigFields brief-layer controls (FIR-3212)", () => {
       target: { value: "summary" },
     });
     expect(onToolsBriefMode).toHaveBeenCalledWith("summary");
+  });
+
+  // FIR-3212 was raised to get an agent off the engine's own coding-agent
+  // instruction. Until this control existed the mode could only be set by
+  // hand-writing the API payload, so the answer to the issue was unreachable
+  // from the product.
+  it("renders the engine system-prompt control at its current value", () => {
+    renderFields({ systemPromptMode: "replace" });
+
+    expect((screen.getByLabelText("Engine system prompt") as HTMLSelectElement).value).toBe(
+      "replace",
+    );
+  });
+
+  it("defaults the engine system-prompt control to the engine default", () => {
+    renderFields();
+
+    expect((screen.getByLabelText("Engine system prompt") as HTMLSelectElement).value).toBe("");
+  });
+
+  it("emits the chosen system-prompt mode", () => {
+    const onSystemPromptMode = vi.fn();
+    renderFields({ onSystemPromptMode });
+
+    fireEvent.change(screen.getByLabelText("Engine system prompt"), {
+      target: { value: "replace" },
+    });
+    expect(onSystemPromptMode).toHaveBeenCalledWith("replace");
+  });
+
+  // Clearing the control must be expressible: "" is what hands the engine's own
+  // system prompt back, so it cannot be a dead option.
+  it("can be cleared back to the engine default", () => {
+    const onSystemPromptMode = vi.fn();
+    renderFields({ systemPromptMode: "replace", onSystemPromptMode });
+
+    fireEvent.change(screen.getByLabelText("Engine system prompt"), {
+      target: { value: "" },
+    });
+    expect(onSystemPromptMode).toHaveBeenCalledWith("");
   });
 });

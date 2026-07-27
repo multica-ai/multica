@@ -151,6 +151,7 @@ func init() {
 	agentContextProposeCmd.Flags().String("thinking-level", "", "Thinking level override")
 	agentContextProposeCmd.Flags().String("workspace-brief-mode", "", "FIR-3212 shared-workspace-brief mode: off (strip the shared brief) or empty/full for the default")
 	agentContextProposeCmd.Flags().String("tools-brief-mode", "", "FIR-3212 tools-brief mode: summary (fold each connection to one line) or empty/full for the default")
+	agentContextProposeCmd.Flags().String("system-prompt-mode", "", "FIR-3212 system-prompt delivery: append, replace (drop the engine's own system prompt), prepend, or empty for the engine default")
 	agentContextProposeCmd.Flags().StringArray("skill-id", nil, "Full replacement set of bound skill ids (repeatable)")
 	agentContextProposeCmd.Flags().Bool("replace-skills", false, "Apply the --skill-id set even if empty (clears bindings)")
 	agentContextProposeCmd.Flags().String("mcp-config", "", "Full replacement MCP config as a JSON object string (mutually exclusive with --mcp-config-file)")
@@ -250,6 +251,14 @@ func runAgentContextPropose(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("tools-brief-mode") {
 		v, _ := cmd.Flags().GetString("tools-brief-mode")
 		body["tools_brief_mode"] = v
+	}
+	// Same Changed() rule: an explicit --system-prompt-mode "" is how you hand
+	// the engine's own system prompt back, so it must be distinguishable from
+	// "flag not passed". The server rejects a mode the agent's runtime cannot
+	// honour, so a typo fails loudly here instead of being approved and dropped.
+	if cmd.Flags().Changed("system-prompt-mode") {
+		v, _ := cmd.Flags().GetString("system-prompt-mode")
+		body["system_prompt_mode"] = v
 	}
 	skillIDs, _ := cmd.Flags().GetStringArray("skill-id")
 	replaceSkills, _ := cmd.Flags().GetBool("replace-skills")
