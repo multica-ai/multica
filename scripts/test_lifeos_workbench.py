@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -177,6 +178,10 @@ class ContextDatabaseTests(unittest.TestCase):
             "implementation_provenance",
             return_value=provenance,
         ) as provenance_check, mock.patch.object(
+            lifeos_workbench,
+            "persist_background_sync_receipt",
+            return_value=Path("/tmp/background-sync-receipt.json"),
+        ) as persist_receipt, mock.patch.object(
             lifeos_workbench, "ensure_running"
         ) as ensure, mock.patch.object(
             lifeos_workbench,
@@ -190,6 +195,7 @@ class ContextDatabaseTests(unittest.TestCase):
 
         ensure.assert_called_once_with(lifeos_root, controller_root)
         self.assertEqual(provenance_check.call_count, 2)
+        persist_receipt.assert_called_once()
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["summaries_processed"], 1)
         self.assertEqual(result["ceo_reviews_processed"], 1)
@@ -201,6 +207,37 @@ class ContextDatabaseTests(unittest.TestCase):
         )
         self.assertEqual(result["action_projection"], "deferred_to_visible_sync")
         self.assertEqual(result["implementation_provenance"], provenance)
+        self.assertEqual(
+            result["receipt_ref"],
+            "/tmp/background-sync-receipt.json",
+        )
+
+    def test_background_sync_receipt_is_private_and_commit_bound(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            state_root = Path(temporary)
+            result = {
+                "status": "completed",
+                "implementation_provenance": {
+                    "status": "committed",
+                    "workbench_git_head": "a" * 40,
+                    "controller_git_head": "b" * 40,
+                },
+                "raw_content_stored": False,
+            }
+            with mock.patch.object(
+                lifeos_workbench,
+                "STATE_ROOT",
+                state_root,
+            ):
+                path = lifeos_workbench.persist_background_sync_receipt(result)
+
+            self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            self.assertEqual(
+                payload["result"]["implementation_provenance"],
+                result["implementation_provenance"],
+            )
+            self.assertFalse(payload["result"]["raw_content_stored"])
 
     def test_background_sync_rejects_uncommitted_runtime_implementation(self) -> None:
         with mock.patch.object(

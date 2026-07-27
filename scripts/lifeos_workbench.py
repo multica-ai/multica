@@ -557,6 +557,41 @@ def implementation_provenance(controller_root: Path) -> Dict[str, object]:
     }
 
 
+def persist_background_sync_receipt(result: Mapping[str, object]) -> Path:
+    """Persist a private, source-free runtime receipt for commit binding."""
+    receipt_root = STATE_ROOT / "receipts/background-sync"
+    receipt_root.mkdir(parents=True, mode=0o700, exist_ok=True)
+    os.chmod(receipt_root.parent, 0o700)
+    os.chmod(receipt_root, 0o700)
+    completed_at = dt.datetime.now(dt.timezone.utc)
+    payload = {
+        "schema_version": 1,
+        "kind": "lifeos_background_sync_receipt",
+        "completed_at": completed_at.isoformat(),
+        "result": dict(result),
+    }
+    target = receipt_root / (
+        completed_at.strftime("%Y%m%dT%H%M%S.%fZ") + ".json"
+    )
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=receipt_root,
+        prefix=".background-sync-",
+        suffix=".tmp",
+    )
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chmod(temporary_name, 0o600)
+        os.replace(temporary_name, target)
+    except BaseException:
+        Path(temporary_name).unlink(missing_ok=True)
+        raise
+    return target
+
+
 def background_sync(
     lifeos_root: Path,
     controller_root: Path,
@@ -639,6 +674,8 @@ def background_sync(
         "action_projection": "deferred_to_visible_sync",
         "implementation_provenance": end_provenance,
     }
+    receipt_path = persist_background_sync_receipt(result)
+    result["receipt_ref"] = str(receipt_path)
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return result
 
