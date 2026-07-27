@@ -12,7 +12,9 @@
 -- materializations are re-deleted; see below).
 -- The reconciler checks for a durable attachment reference only AFTER winning
 -- the claim — at that point a bind can no longer succeed on the key, so the
--- check cannot race a late COMMIT.
+-- check cannot race a late COMMIT. Every tombstone pass re-checks before
+-- re-deleting: reclaiming an orphan must never outrank keeping an object an
+-- attachment durably reads.
 --
 -- The tombstone exists because a DELETE cannot be ordered against a PUT the
 -- client already abandoned: the store may still materialize that object after

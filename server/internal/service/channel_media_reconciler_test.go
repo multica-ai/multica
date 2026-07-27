@@ -10,7 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/prometheus/client_golang/prometheus/testutil"
 
+	"github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -568,16 +570,18 @@ func TestChannelMediaReconciler_TombstoneSchedulesThenClears(t *testing.T) {
 	}
 }
 
-// A tombstone must not re-ask the reference question: it was already judged
-// unreferenced and deleted, and it exists solely to re-delete whatever an
-// abandoned PUT may materialize later. If a re-ingested copy has since bound
-// an attachment carrying the same URL, honouring that as "keep it" would
-// abandon the schedule fencing the original object.
-func TestChannelMediaReconciler_TombstoneIgnoresLaterAttachmentWithSameURL(t *testing.T) {
+// A tombstone re-delete targets the same key an attachment would read, so the
+// reference check runs on every pass. Finding a reference here is an invariant
+// violation (per-message keys plus the bind state guard make it unreachable),
+// and the answer to a broken invariant is to keep the object and raise an
+// anomaly — deleting it would manufacture the dangling attachment the whole
+// ledger exists to prevent.
+func TestChannelMediaReconciler_TombstoneKeepsReferencedObject(t *testing.T) {
 	pool := newCancelFinalizePool(t)
 	f := seedReconcilerFixture(t, pool)
 	deleter := &fakeObjectDeleter{}
-	rec := &ChannelMediaReconciler{Queries: db.New(pool), Storage: deleter}
+	m := metrics.NewChannelMediaReconcilerMetrics()
+	rec := &ChannelMediaReconciler{Queries: db.New(pool), Storage: deleter, Metrics: m}
 	key := "ws/lark/tombstone-vs-attachment"
 	url := "https://cdn.test/tombstone-vs-attachment"
 	f.seedLedgerRow(t, key, url, "pending", ChannelMediaReconcileSettleDelay+time.Minute)
@@ -587,20 +591,19 @@ func TestChannelMediaReconciler_TombstoneIgnoresLaterAttachmentWithSameURL(t *te
 		t.Fatalf("row = (%q, %v), want 'tombstoned'", state, exists)
 	}
 
-	// A re-ingested copy binds an attachment carrying the same URL.
+	// An attachment now reads this object — a state that should be impossible.
 	f.bindAttachment(t, url)
-	if _, err := pool.Exec(context.Background(), `
-		UPDATE channel_media_pending_object SET next_attempt_at = now() - interval '1 second' WHERE storage_key = $1
-	`, key); err != nil {
-		t.Fatalf("make tombstone due: %v", err)
-	}
+	f.makeDue(t, key)
 	rec.RunOnce(context.Background())
 
-	if got := len(deleter.deletedKeys()); got != 2 {
-		t.Fatalf("delete calls = %d, want the tombstone to re-delete regardless of the new attachment", got)
+	if got := len(deleter.deletedKeys()); got != 1 {
+		t.Fatalf("delete calls = %d, want the referenced object left alone (only the first delete)", got)
 	}
-	if state, _, exists := f.rowState(t, key); !exists || state != "tombstoned" {
-		t.Fatalf("row = (%q, %v), want the re-delete schedule to continue", state, exists)
+	if state, _, exists := f.rowState(t, key); exists {
+		t.Fatalf("row = %q, want it cleared once the object is known to be referenced", state)
+	}
+	if got := testutil.ToFloat64(m.TombstoneReferenced); got != 1 {
+		t.Fatalf("tombstone-referenced anomaly counter = %v, want 1", got)
 	}
 }
 

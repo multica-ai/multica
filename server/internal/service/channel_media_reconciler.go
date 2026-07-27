@@ -29,6 +29,8 @@ import (
 //     object re-deleted on a widening schedule, so a late materialization is
 //     reclaimed by a later pass. Escaping requires the object to appear only
 //     after the whole schedule has elapsed (see channelMediaTombstoneRedelete).
+//     Every pass re-checks the reference first: reclaiming an orphan must
+//     never outrank keeping an object something durably reads.
 //
 // The settle delay therefore carries no correctness weight for bind/commit and
 // only sets how long the reconciler waits before treating a pending row as
@@ -187,19 +189,12 @@ func (r *ChannelMediaReconciler) settle(ctx context.Context, row db.ChannelMedia
 			"storage_key", row.StorageKey, "workspace_id", row.WorkspaceID)
 		return
 	}
-	if row.State == tombstonedState {
-		// A tombstone has already been judged unreferenced and deleted; it is
-		// only revisited to re-delete whatever an abandoned PUT may have
-		// materialized since. Re-asking the reference question here would be
-		// wrong: any attachment that now carries this URL belongs to a
-		// re-ingested copy of the object, and treating that as "keep it" would
-		// abandon the re-delete schedule for the object this row is fencing.
-		r.settleDeletedObject(ctx, row, leaseToken)
-		return
-	}
 	// The reference check runs AFTER the claim flipped the row to 'deleting':
 	// from that point BindMediaRefs cannot attach this key, so a negative
-	// answer is terminal, not a snapshot race.
+	// answer is terminal, not a snapshot race. It runs on tombstone passes too:
+	// the object a tombstone re-deletes and the object an attachment reads are
+	// the same key, so skipping the check would let a re-delete manufacture the
+	// dangling attachment this whole ledger exists to prevent.
 	referenced, err := r.Queries.ChannelMediaObjectIsReferenced(ctx, db.ChannelMediaObjectIsReferencedParams{
 		ChatMessageID: row.ChatMessageID,
 		WorkspaceID:   row.WorkspaceID,
@@ -210,6 +205,23 @@ func (r *ChannelMediaReconciler) settle(ctx context.Context, row db.ChannelMedia
 		return
 	}
 	if referenced {
+		if row.State == tombstonedState {
+			// Unreachable by design — the object key is per (chat message,
+			// resource), so a re-ingest gets its own key and a bind can never
+			// attach a key that has left 'pending'. Reaching it means one of
+			// those invariants broke, and the safe answer to a broken invariant
+			// is to keep the object and raise an anomaly, never to delete a live
+			// object and break the attachment reading it.
+			r.logger().Error("channel media reconciler: tombstoned object is referenced by an attachment; keeping it",
+				"storage_key", row.StorageKey,
+				"workspace_id", row.WorkspaceID,
+				"chat_message_id", row.ChatMessageID,
+				"storage_url", row.StorageUrl,
+				"tombstone_pass", row.TombstonePass)
+			if r.Metrics != nil {
+				r.Metrics.TombstoneReferenced.Inc()
+			}
+		}
 		// The bind landed (its transaction just lost the pending-row race to
 		// an earlier reconciler claim of a slow message, or a redelivered
 		// intent outlived the bind). Keep the object, clear the row.

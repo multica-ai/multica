@@ -731,8 +731,10 @@ WHERE storage_key = @storage_key
 -- name: TombstoneChannelMediaPendingObject :execrows
 -- The object was deleted, but the row is KEPT as a tombstone: a PUT the client
 -- abandoned before the delete may still materialize the object afterwards, and
--- no DELETE can be ordered against it. Each due tombstone triggers another
--- idempotent delete, so a late materialization is reclaimed by a later pass;
+-- no DELETE can be ordered against it. Each due tombstone re-runs the
+-- reference check and, only if still unreferenced, triggers another idempotent
+-- delete, so a late materialization is reclaimed by a later pass while an
+-- object something durably reads is never removed;
 -- only after the re-delete schedule is exhausted is the row dropped
 -- (DeleteChannelMediaPendingObject). Lease-token guarded like every other
 -- settle write; workspace_id explicit per the tenancy rule.
@@ -766,7 +768,9 @@ WHERE storage_key = @storage_key
 -- The post-claim reference check: an attachment row carrying this object's
 -- URL on the intended message. Only meaningful AFTER the claim flipped the
 -- row to 'deleting' — from that point a bind can no longer succeed on the
--- key, so a negative answer is terminal, not a snapshot race.
+-- key, so a negative answer is terminal, not a snapshot race. Re-run on every
+-- tombstone pass as well: a positive answer there is an invariant violation,
+-- and the object is kept and reported rather than deleted.
 SELECT EXISTS (
     SELECT 1 FROM attachment
     WHERE chat_message_id = @chat_message_id

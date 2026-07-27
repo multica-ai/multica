@@ -13,6 +13,11 @@ type ChannelMediaReconcilerMetrics struct {
 	DeleteFailures prometheus.Counter
 	Backlog        prometheus.Gauge
 	Tombstones     prometheus.Gauge
+	// TombstoneReferenced counts an invariant violation, not routine work:
+	// a tombstone pass found an attachment reading the object it was about to
+	// re-delete. The object is kept; a non-zero value means the per-message
+	// key or the bind's state guard stopped holding and needs investigation.
+	TombstoneReferenced prometheus.Counter
 }
 
 func NewChannelMediaReconcilerMetrics() *ChannelMediaReconcilerMetrics {
@@ -47,9 +52,15 @@ func NewChannelMediaReconcilerMetrics() *ChannelMediaReconcilerMetrics {
 			Name:      "tombstoned_objects",
 			Help:      "Deleted objects still tombstoned for scheduled re-deletion.",
 		}),
+		TombstoneReferenced: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "channel_media",
+			Name:      "reconciler_tombstone_referenced_total",
+			Help:      "Tombstone passes that found an attachment referencing the object (invariant violation; the object is kept).",
+		}),
 	}
 }
 
 func (m *ChannelMediaReconcilerMetrics) Collectors() []prometheus.Collector {
-	return []prometheus.Collector{m.ObjectsDeleted, m.RowsReferenced, m.DeleteFailures, m.Backlog, m.Tombstones}
+	return []prometheus.Collector{m.ObjectsDeleted, m.RowsReferenced, m.DeleteFailures, m.Backlog, m.Tombstones, m.TombstoneReferenced}
 }
