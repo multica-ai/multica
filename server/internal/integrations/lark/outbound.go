@@ -351,7 +351,9 @@ func (p *Patcher) processEvent(ctx context.Context, e events.Event) error {
 	return nil
 }
 
-// sendChatReply turns ChatDonePayload.Content into a Lark message.
+// sendChatReply turns the channel-deliverable ChatDonePayload text into a Lark
+// message. ReplyText is preferred so interim narration stays in Multica's
+// transcript; Content remains the compatibility fallback.
 // The wire shape is chosen per-reply based on whether the body
 // contains any markdown syntax:
 //
@@ -556,8 +558,14 @@ func taskAndSessionFromEvent(e events.Event) (taskID, chatSessionID pgtype.UUID,
 func chatDoneContent(payload any) string {
 	switch p := payload.(type) {
 	case protocol.ChatDonePayload:
+		if p.ReplyText != "" {
+			return p.ReplyText
+		}
 		return p.Content
 	case map[string]any:
+		if s, ok := p["reply_text"].(string); ok && s != "" {
+			return s
+		}
 		if s, ok := p["content"].(string); ok {
 			return s
 		}

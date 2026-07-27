@@ -4253,6 +4253,14 @@ func (s *TaskService) broadcastChatDone(ctx context.Context, task db.AgentTaskQu
 		payload.MessageID = util.UUIDToString(msg.ID)
 		payload.Content = msg.Content
 		payload.MessageKind = msg.MessageKind
+		// A no_response row carries a compatibility fallback in Content, but it
+		// has no transcript reply to derive. Channel outbounds already reject
+		// the direct-chat task origin that can produce this row.
+		if msg.MessageKind != protocol.ChatMessageKindNoResponse {
+			// Empty fallback is intentional: outbounds already fall back to
+			// Content when ReplyText is absent.
+			payload.ReplyText = s.replyTextForTask(ctx, task.ID, "")
+		}
 		if msg.CreatedAt.Valid {
 			payload.CreatedAt = msg.CreatedAt.Time.UTC().Format(time.RFC3339Nano)
 		}

@@ -165,9 +165,14 @@ type ChatDonePayload struct {
 	TaskID        string `json:"task_id"`
 	MessageID     string `json:"message_id,omitempty"`
 	Content       string `json:"content,omitempty"`
-	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
-	CreatedAt     string `json:"created_at,omitempty"`
-	MessageKind   string `json:"message_kind,omitempty"`
+	// ReplyText is the channel-deliverable reply: the final text block after
+	// the task's last non-text timeline row. Content remains the full
+	// accumulated output for transcript-shaped consumers. Channel outbounds
+	// prefer ReplyText and fall back to Content for legacy payloads.
+	ReplyText   string `json:"reply_text,omitempty"`
+	ElapsedMs   int64  `json:"elapsed_ms,omitempty"`
+	CreatedAt   string `json:"created_at,omitempty"`
+	MessageKind string `json:"message_kind,omitempty"`
 }
 
 // Outcome values carried by ChatCancelFinalizedPayload.

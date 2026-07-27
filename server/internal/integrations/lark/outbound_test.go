@@ -773,3 +773,23 @@ func TestPatcherThreadReplyDoesNotFallBackOnAmbiguousError(t *testing.T) {
 		t.Errorf("the single attempt should be the thread reply; got %+v", api.textSent[0].ReplyTarget)
 	}
 }
+
+func TestChatDoneContent_PrefersReplyText(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload any
+		want    string
+	}{
+		{"typed reply text", protocol.ChatDonePayload{Content: "narration + reply", ReplyText: "reply"}, "reply"},
+		{"typed fallback to content", protocol.ChatDonePayload{Content: "reply"}, "reply"},
+		{"map reply text", map[string]any{"content": "narration + reply", "reply_text": "reply"}, "reply"},
+		{"map fallback to content", map[string]any{"content": "reply"}, "reply"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := chatDoneContent(test.payload); got != test.want {
+				t.Fatalf("chatDoneContent() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}

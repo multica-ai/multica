@@ -187,8 +187,14 @@ func outboundTarget(b db.ChannelChatSessionBinding) (channelID, threadTS string)
 func chatDoneContent(payload any) string {
 	switch p := payload.(type) {
 	case protocol.ChatDonePayload:
+		if p.ReplyText != "" {
+			return p.ReplyText
+		}
 		return p.Content
 	case map[string]any:
+		if s, ok := p["reply_text"].(string); ok && s != "" {
+			return s
+		}
 		if s, ok := p["content"].(string); ok {
 			return s
 		}
