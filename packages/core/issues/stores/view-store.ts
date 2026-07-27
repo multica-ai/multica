@@ -240,7 +240,7 @@ export interface IssueViewState {
 export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): IssueViewState => ({
   viewMode: "board",
   grouping: "status",
-  statusFilters: ALL_STATUSES.filter((s) => s !== "archived"),
+  statusFilters: [],
   priorityFilters: [],
   assigneeFilters: [],
   includeNoAssignee: false,
@@ -370,7 +370,7 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
     }),
   clearFilters: () =>
     set({
-      statusFilters: ALL_STATUSES.filter((s) => s !== "archived"),
+      statusFilters: [],
       priorityFilters: [],
       assigneeFilters: [],
       includeNoAssignee: false,
