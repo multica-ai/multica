@@ -26,7 +26,11 @@ import {
   dashboardUsageByAgentOptions,
   dashboardAgentRunTimeOptions,
   dashboardRunTimeDailyOptions,
+  dashboardFailuresDailyOptions,
+  dashboardFailuresByAgentOptions,
+  type FailureClass,
 } from "@multica/core/dashboard";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { useViewingTimezone } from "../../common/use-viewing-timezone";
 import { PageHeader } from "../../layout/page-header";
@@ -36,13 +40,18 @@ import {
   DailyTokensChart,
   DailyTimeChart,
   DailyTasksChart,
+  DailyErrorsChart,
   WeeklyCostChart,
   WeeklyTokensChart,
   WeeklyTimeChart,
   WeeklyTasksChart,
+  WeeklyErrorsChart,
+  FAILURE_CLASS_COLOR,
+  formatRate,
 } from "../../runtimes/components/charts";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { AppLink } from "../../navigation";
 import {
   addDaysIso,
   aggregateByWeek,
@@ -51,19 +60,29 @@ import {
 } from "../../runtimes/utils";
 import { useT } from "../../i18n";
 import {
+  aggregateAgentFailures,
   aggregateAgentTokens,
   aggregateDailyCost,
+  aggregateDailyErrors,
   aggregateDailyTasks,
   aggregateDailyTime,
   aggregateDailyTokens,
+  aggregateFailureClasses,
+  aggregateFailureReasons,
+  aggregateWeeklyErrors,
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
   bucketUnknownAgentRows,
   computeDailyTotals,
+  computeFailureTotals,
   DELETED_AGENTS_ROW_ID,
   formatDuration,
   mergeAgentDashboardRows,
   type AgentDashboardRow,
+  type AgentFailureRow,
+  type FailureClassRow,
+  type FailureReasonRow,
+  type FailureTotals,
 } from "../utils";
 
 // Period selector — mirrors the runtime detail page so users see the same
@@ -107,6 +126,9 @@ const EMPTY_DAILY: import("@multica/core/types").DashboardUsageDaily[] = [];
 const EMPTY_BY_AGENT: import("@multica/core/types").DashboardUsageByAgent[] = [];
 const EMPTY_RUNTIME: import("@multica/core/types").DashboardAgentRunTime[] = [];
 const EMPTY_RUNTIME_DAILY: import("@multica/core/types").DashboardRunTimeDaily[] = [];
+const EMPTY_FAILURE_DAILY: import("@multica/core/types").DashboardFailureDaily[] = [];
+const EMPTY_FAILURE_BY_AGENT: import("@multica/core/types").DashboardFailureByAgent[] =
+  [];
 const EMPTY_AGENTS: Agent[] = [];
 
 // Local segmented control — same visual language the runtime usage section
@@ -247,11 +269,19 @@ export function DashboardPage() {
   const runTimeDailyQuery = useQuery(
     dashboardRunTimeDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
   );
+  const failuresDailyQuery = useQuery(
+    dashboardFailuresDailyOptions(wsId, chartFetchDays, projectId, viewTZ),
+  );
+  const failuresByAgentQuery = useQuery(
+    dashboardFailuresByAgentOptions(wsId, days, projectId, viewTZ),
+  );
 
   const dailyUsage = dailyQuery.data ?? EMPTY_DAILY;
   const byAgentUsage = byAgentQuery.data ?? EMPTY_BY_AGENT;
   const runTimeRows = runTimeQuery.data ?? EMPTY_RUNTIME;
   const runTimeDailyRows = runTimeDailyQuery.data ?? EMPTY_RUNTIME_DAILY;
+  const failureDailyRows = failuresDailyQuery.data ?? EMPTY_FAILURE_DAILY;
+  const failureByAgentRows = failuresByAgentQuery.data ?? EMPTY_FAILURE_BY_AGENT;
 
   // Daily-aggregation surfaces (cost/tokens/time/tasks KPIs and the Daily
   // trend chart) re-scope to the user-selected `days` even when we
@@ -272,14 +302,20 @@ export function DashboardPage() {
     () => runTimeDailyRows.filter((r) => r.date >= dailyCutoffIso),
     [runTimeDailyRows, dailyCutoffIso],
   );
+  const failureDailyInWindow = useMemo(
+    () => failureDailyRows.filter((r) => r.date >= dailyCutoffIso),
+    [failureDailyRows, dailyCutoffIso],
+  );
 
   const isLoading =
     dailyQuery.isLoading ||
     byAgentQuery.isLoading ||
     runTimeQuery.isLoading ||
-    runTimeDailyQuery.isLoading;
+    runTimeDailyQuery.isLoading ||
+    failuresDailyQuery.isLoading ||
+    failuresByAgentQuery.isLoading;
 
-  // Four independent rollups, but the empty-state is one decision — only
+  // Six independent rollups, but the empty-state is one decision — only
   // show "no data yet" when ALL came back empty so a project with tokens
   // but no runs (or vice-versa) doesn't look broken.
   const hasNoData =
@@ -287,7 +323,9 @@ export function DashboardPage() {
     dailyUsage.length === 0 &&
     byAgentUsage.length === 0 &&
     runTimeRows.length === 0 &&
-    runTimeDailyRows.length === 0;
+    runTimeDailyRows.length === 0 &&
+    failureDailyRows.length === 0 &&
+    failureByAgentRows.length === 0;
 
   // Cost / token math — re-derived when usage, days, or pricings change.
   const totals = useMemo(
@@ -310,6 +348,31 @@ export function DashboardPage() {
     () => aggregateDailyTasks(runTimeDailyInWindow),
     [runTimeDailyInWindow],
   );
+  const dailyErrors = useMemo(
+    () => aggregateDailyErrors(failureDailyInWindow),
+    [failureDailyInWindow],
+  );
+
+  // Failure summaries for the Errors breakdown card and the Tasks KPI hint.
+  // These use the per-agent rollup — already scoped to `days` server-side —
+  // so the card and the leaderboard above it cover the same window even when
+  // the weekly chart over-fetched.
+  const failureTotals = useMemo(
+    () => computeFailureTotals(failureByAgentRows),
+    [failureByAgentRows],
+  );
+  const failureClassRows = useMemo(
+    () => aggregateFailureClasses(failureByAgentRows),
+    [failureByAgentRows],
+  );
+  const failureReasonRows = useMemo(
+    () => aggregateFailureReasons(failureByAgentRows),
+    [failureByAgentRows],
+  );
+  const agentFailureRows = useMemo(
+    () => aggregateAgentFailures(failureByAgentRows),
+    [failureByAgentRows],
+  );
 
   // Weekly aggregates — built from the over-fetched per-date queries so the
   // leftmost trailing week always has data even when the user-selected `days`
@@ -330,6 +393,10 @@ export function DashboardPage() {
   const weeklyTasks = useMemo(
     () => aggregateWeeklyTasks(runTimeDailyRows, viewTZ, weekCount),
     [runTimeDailyRows, viewTZ, weekCount],
+  );
+  const weeklyErrors = useMemo(
+    () => aggregateWeeklyErrors(failureDailyRows, viewTZ, weekCount),
+    [failureDailyRows, viewTZ, weekCount],
   );
   const agentTokenRows = useMemo(
     () => aggregateAgentTokens(byAgentUsage),
@@ -473,6 +540,12 @@ export function DashboardPage() {
                       aria-label={String(runTimeTotals.taskCount)}
                     />
                   }
+                  // Deliberately still sourced from `runTimeTotals`, not the
+                  // failure rollup: the tile's own value counts started tasks
+                  // only, so quoting the failure rollup's larger failure count
+                  // here would put two different denominators in one tile. The
+                  // Errors card below states its rate with the denominator
+                  // spelled out instead.
                   hint={t(($) => $.kpi.tasks_hint, {
                     failed: runTimeTotals.failedCount,
                   })}
@@ -480,22 +553,36 @@ export function DashboardPage() {
                 />
               </div>
 
-              {/* Trend chart — toggle picks Tokens / Cost / Time / Tasks
-                  and the parent's dim selector decides whether the bars are
-                  per-day or per-calendar-week. All four metrics share the
-                  same x-axis so the user can mentally overlay them by
-                  flipping the toggle. */}
+              {/* Trend chart — toggle picks Tokens / Cost / Time / Tasks /
+                  Errors and the parent's dim selector decides whether the
+                  bars are per-day or per-calendar-week. All five metrics
+                  share the same x-axis so the user can mentally overlay them
+                  by flipping the toggle. */}
               <TrendBlock
                 dim={dim}
                 dailyCost={dailyCost}
                 dailyTokens={dailyTokens}
                 dailyTime={dailyTime}
                 dailyTasks={dailyTasks}
+                dailyErrors={dailyErrors}
                 weeklyCost={weeklyCost}
                 weeklyTokens={weeklyTokens}
                 weeklyTime={weeklyTime}
                 weeklyTasks={weeklyTasks}
+                weeklyErrors={weeklyErrors}
                 lessThanMinuteLabel={t(($) => $.duration.less_than_minute)}
+              />
+
+              {/* Failure breakdown — what broke and who it broke for. Rendered
+                  unconditionally (not only when failures exist) so "no failed
+                  runs" is an answer the page gives rather than an absence the
+                  reader has to infer. */}
+              <ErrorsBreakdown
+                totals={failureTotals}
+                classRows={failureClassRows}
+                reasonRows={failureReasonRows}
+                agentRows={agentFailureRows}
+                agents={agents}
               />
 
               {/* Per-agent leaderboard — user picks the ranking metric;
@@ -576,7 +663,7 @@ function ProjectFilter({
   );
 }
 
-type DailyMetric = "tokens" | "cost" | "time" | "tasks";
+type DailyMetric = "tokens" | "cost" | "time" | "tasks" | "errors";
 
 function TrendBlock({
   dim,
@@ -584,10 +671,12 @@ function TrendBlock({
   dailyTokens,
   dailyTime,
   dailyTasks,
+  dailyErrors,
   weeklyCost,
   weeklyTokens,
   weeklyTime,
   weeklyTasks,
+  weeklyErrors,
   lessThanMinuteLabel,
 }: {
   dim: Dim;
@@ -595,10 +684,12 @@ function TrendBlock({
   dailyTokens: ReturnType<typeof aggregateDailyTokens>;
   dailyTime: ReturnType<typeof aggregateDailyTime>;
   dailyTasks: ReturnType<typeof aggregateDailyTasks>;
+  dailyErrors: ReturnType<typeof aggregateDailyErrors>;
   weeklyCost: ReturnType<typeof aggregateByWeek>["weeklyCostStack"];
   weeklyTokens: ReturnType<typeof aggregateByWeek>["weeklyTokens"];
   weeklyTime: ReturnType<typeof aggregateWeeklyTime>;
   weeklyTasks: ReturnType<typeof aggregateWeeklyTasks>;
+  weeklyErrors: ReturnType<typeof aggregateWeeklyErrors>;
   lessThanMinuteLabel: string;
 }) {
   const { t } = useT("usage");
@@ -611,6 +702,7 @@ function TrendBlock({
   const tokensData = dim === "weekly" ? weeklyTokens : dailyTokens;
   const timeData = dim === "weekly" ? weeklyTime : dailyTime;
   const tasksData = dim === "weekly" ? weeklyTasks : dailyTasks;
+  const errorsData = dim === "weekly" ? weeklyErrors : dailyErrors;
 
   const totalCost = costData.reduce((sum, d) => sum + d.total, 0);
   const totalTokens = tokensData.reduce(
@@ -622,6 +714,10 @@ function TrendBlock({
     (sum, d) => sum + d.completed + d.failed,
     0,
   );
+  // A window with runs but zero failures is a *good* outcome, not missing
+  // data — but an all-zero bar chart says nothing a sentence can't say
+  // better, so it still routes to the empty state.
+  const totalFailed = errorsData.reduce((sum, d) => sum + d.failed, 0);
   const isEmpty =
     metric === "cost"
       ? totalCost === 0
@@ -629,7 +725,9 @@ function TrendBlock({
         ? totalTokens === 0
         : metric === "time"
           ? totalSeconds === 0
-          : totalTasks === 0;
+          : metric === "tasks"
+            ? totalTasks === 0
+            : totalFailed === 0;
 
   const title =
     dim === "weekly"
@@ -639,14 +737,18 @@ function TrendBlock({
           ? t(($) => $.weekly.title_tokens)
           : metric === "time"
             ? t(($) => $.weekly.title_time)
-            : t(($) => $.weekly.title_tasks)
+            : metric === "tasks"
+              ? t(($) => $.weekly.title_tasks)
+              : t(($) => $.weekly.title_errors)
       : metric === "cost"
         ? t(($) => $.daily.title_cost)
         : metric === "tokens"
           ? t(($) => $.daily.title_tokens)
           : metric === "time"
             ? t(($) => $.daily.title_time)
-            : t(($) => $.daily.title_tasks);
+            : metric === "tasks"
+              ? t(($) => $.daily.title_tasks)
+              : t(($) => $.daily.title_errors);
 
   return (
     <div className="rounded-lg border bg-card p-4">
@@ -660,6 +762,7 @@ function TrendBlock({
             { label: t(($) => $.daily.metric_cost), value: "cost" as const },
             { label: t(($) => $.daily.metric_time), value: "time" as const },
             { label: t(($) => $.daily.metric_tasks), value: "tasks" as const },
+            { label: t(($) => $.daily.metric_errors), value: "errors" as const },
           ]}
         />
       </div>
@@ -668,7 +771,9 @@ function TrendBlock({
           <div className="flex aspect-[3/1] flex-col items-center justify-center gap-2 rounded-md border border-dashed bg-muted/20 p-6 text-center">
             <BarChart3 className="h-5 w-5 text-muted-foreground/50" />
             <p className="text-xs text-muted-foreground">
-              {t(($) => $.daily.no_data)}
+              {metric === "errors"
+                ? t(($) => $.errors.no_data)
+                : t(($) => $.daily.no_data)}
             </p>
           </div>
         ) : dim === "weekly" ? (
@@ -682,8 +787,10 @@ function TrendBlock({
               formatY={(s) => formatDuration(s, lessThanMinuteLabel)}
               formatTooltip={(s) => formatDuration(s, lessThanMinuteLabel)}
             />
-          ) : (
+          ) : metric === "tasks" ? (
             <WeeklyTasksChart data={weeklyTasks} />
+          ) : (
+            <WeeklyErrorsChart data={weeklyErrors} />
           )
         ) : metric === "cost" ? (
           <DailyCostChart data={dailyCost} />
@@ -695,11 +802,239 @@ function TrendBlock({
             formatY={(s) => formatDuration(s, lessThanMinuteLabel)}
             formatTooltip={(s) => formatDuration(s, lessThanMinuteLabel)}
           />
-        ) : (
+        ) : metric === "tasks" ? (
           <DailyTasksChart data={dailyTasks} />
+        ) : (
+          <DailyErrorsChart data={dailyErrors} />
         )}
       </div>
     </div>
+  );
+}
+
+// Translated label for a failure class. The mapping is a switch rather than
+// an index into a lookup object so the type checker flags a class added to
+// FAILURE_CLASSES without matching copy.
+function useFailureClassLabel(): (c: FailureClass) => string {
+  const { t } = useT("usage");
+  return (c) => {
+    switch (c) {
+      case "auth":
+        return t(($) => $.errors.class.auth);
+      case "rate_limit":
+        return t(($) => $.errors.class.rate_limit);
+      case "timeout":
+        return t(($) => $.errors.class.timeout);
+      case "provider":
+        return t(($) => $.errors.class.provider);
+      case "runtime":
+        return t(($) => $.errors.class.runtime);
+      case "agent":
+        return t(($) => $.errors.class.agent);
+      case "other":
+        return t(($) => $.errors.class.other);
+    }
+  };
+}
+
+/**
+ * Failure breakdown for the selected window: what class of thing broke, and
+ * which agents it broke for.
+ *
+ * Two ranked lists rather than a second chart — with seven classes and an
+ * unbounded agent list, bar length plus an exact number is easier to read
+ * than more stacked colour, and it leaves room for the raw error codes
+ * behind a disclosure.
+ */
+function ErrorsBreakdown({
+  totals,
+  classRows,
+  reasonRows,
+  agentRows,
+  agents,
+}: {
+  totals: FailureTotals;
+  classRows: FailureClassRow[];
+  reasonRows: FailureReasonRow[];
+  agentRows: AgentFailureRow[];
+  agents: { id: string; name: string }[];
+}) {
+  const { t } = useT("usage");
+  const classLabel = useFailureClassLabel();
+  const [showReasons, setShowReasons] = useState(false);
+
+  const maxClass = classRows.reduce((m, r) => Math.max(m, r.count), 0);
+  const maxAgent = agentRows.reduce((m, r) => Math.max(m, r.failed), 0);
+
+  return (
+    <div className="rounded-lg border bg-card">
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b px-4 pt-4 pb-3">
+        <h4 className="text-sm font-semibold">{t(($) => $.errors.title)}</h4>
+        <span className="text-xs text-muted-foreground">
+          {totals.failed > 0
+            ? t(($) => $.errors.summary, {
+                failed: totals.failed,
+                total: totals.total,
+                rate: formatRate(totals.failed, totals.total),
+              })
+            : t(($) => $.errors.no_data)}
+        </span>
+      </div>
+
+      {totals.failed === 0 ? null : (
+        <div className="grid grid-cols-1 divide-y md:grid-cols-2 md:divide-x md:divide-y-0">
+          <div className="min-w-0 p-4">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <h5 className="text-xs font-medium text-muted-foreground">
+                {t(($) => $.errors.by_class)}
+              </h5>
+              <button
+                type="button"
+                onClick={() => setShowReasons((v) => !v)}
+                className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              >
+                {showReasons
+                  ? t(($) => $.errors.hide_reasons)
+                  : t(($) => $.errors.show_reasons)}
+              </button>
+            </div>
+            {showReasons ? (
+              // Raw failure_reason values, unlocalised on purpose: they are
+              // the backend's wire enum, and an operator pasting one into a
+              // log search or an issue needs the exact string.
+              <ul aria-label={t(($) => $.errors.by_class)} className="space-y-1.5">
+                {reasonRows.map((row) => (
+                  <li
+                    key={row.reason}
+                    className="flex items-center justify-between gap-2"
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span
+                        aria-hidden
+                        className="h-2 w-2 shrink-0 rounded-[2px]"
+                        style={{
+                          backgroundColor: FAILURE_CLASS_COLOR[row.failureClass],
+                        }}
+                      />
+                      <code className="truncate text-xs text-muted-foreground">
+                        {row.reason}
+                      </code>
+                    </span>
+                    <span className="shrink-0 text-xs tabular-nums">
+                      {row.count}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <ul aria-label={t(($) => $.errors.by_class)} className="space-y-2">
+                {classRows.map((row) => (
+                  <li key={row.failureClass} className="space-y-1">
+                    <div className="flex items-center justify-between gap-2 text-xs">
+                      <span className="truncate">{classLabel(row.failureClass)}</span>
+                      <span className="shrink-0 tabular-nums text-muted-foreground">
+                        {row.count}
+                      </span>
+                    </div>
+                    <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full transition-[width] duration-300 ease-out"
+                        style={{
+                          width: `${maxClass > 0 ? (row.count / maxClass) * 100 : 0}%`,
+                          backgroundColor: FAILURE_CLASS_COLOR[row.failureClass],
+                        }}
+                      />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          <div className="min-w-0 p-4">
+            <h5 className="mb-2 text-xs font-medium text-muted-foreground">
+              {t(($) => $.errors.by_agent)}
+            </h5>
+            <ul aria-label={t(($) => $.errors.by_agent)} className="space-y-2">
+              {agentRows.map((row) => (
+                <AgentFailureItem
+                  key={row.agentId}
+                  row={row}
+                  name={agents.find((a) => a.id === row.agentId)?.name ?? null}
+                  maxFailed={maxAgent}
+                  classLabel={classLabel}
+                />
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentFailureItem({
+  row,
+  name,
+  maxFailed,
+  classLabel,
+}: {
+  row: AgentFailureRow;
+  name: string | null;
+  maxFailed: number;
+  classLabel: (c: FailureClass) => string;
+}) {
+  const { t } = useT("usage");
+  const wsPaths = useWorkspacePaths();
+  const barColor = FAILURE_CLASS_COLOR[row.topClass ?? "other"];
+
+  // The row links into the agent's Work tab, which lists its recent tasks with
+  // each failure's reason — the drill-down from "this agent is the problem"
+  // to the actual failed runs. A hard-deleted agent has no page to open, so
+  // that row degrades to plain text rather than a dead link.
+  const label = (
+    <span className="flex min-w-0 items-center gap-2">
+      <span className="truncate text-xs">{name ?? row.agentId}</span>
+      {row.topClass ? (
+        <span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[10px] text-muted-foreground">
+          {classLabel(row.topClass)}
+        </span>
+      ) : null}
+    </span>
+  );
+
+  return (
+    <li className="space-y-1">
+      <div className="flex items-center justify-between gap-2">
+        {name ? (
+          <AppLink
+            href={`${wsPaths.agentDetail(row.agentId)}?view=work`}
+            newTabTitle={name}
+            className="min-w-0 hover:underline"
+          >
+            {label}
+          </AppLink>
+        ) : (
+          label
+        )}
+        <span className="shrink-0 text-xs tabular-nums text-muted-foreground">
+          {t(($) => $.errors.agent_rate, {
+            failed: row.failed,
+            total: row.total,
+            rate: formatRate(row.failed, row.total),
+          })}
+        </span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+        <div
+          className="h-full rounded-full transition-[width] duration-300 ease-out"
+          style={{
+            width: `${maxFailed > 0 ? (row.failed / maxFailed) * 100 : 0}%`,
+            backgroundColor: barColor,
+          }}
+        />
+      </div>
+    </li>
   );
 }
 

@@ -1,6 +1,9 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { cleanup } from "@testing-library/react";
+import { cleanup, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithI18n } from "../../test/i18n";
+import { NavigationProvider } from "../../navigation";
+import type { NavigationAdapter } from "../../navigation";
 
 // The viewing timezone flows: auth store `user.timezone` → useViewingTimezone()
 // → every dashboard query key. This test pins that chain: when the stored
@@ -26,6 +29,15 @@ vi.mock("@tanstack/react-query", async () => {
     useQuery: (opts: { queryKey: unknown[] }) => {
       queryKeys.push(opts.queryKey);
       if (dashboardDataRef.current) {
+        // ["workspaces", wsId, "agents"] — needed so the Errors breakdown can
+        // resolve agent-1 to a name and render its drill-down link.
+        if (opts.queryKey[0] === "workspaces" && opts.queryKey[2] === "agents") {
+          return {
+            data: [{ id: "agent-1", name: "Agent One" }],
+            isLoading: false,
+            isSuccess: true,
+          };
+        }
         const kind = opts.queryKey[2];
         const data =
           kind === "daily"
@@ -59,7 +71,33 @@ vi.mock("@tanstack/react-query", async () => {
                       failed_count: 1,
                     },
                   ]
-                : [];
+                : // `failure_reason: ""` is the succeeded bucket — the
+                  // denominator behind every rate the Errors surface shows.
+                  kind === "failures-daily"
+                  ? [
+                      { date: todayIso(), failure_reason: "", task_count: 6 },
+                      {
+                        date: todayIso(),
+                        failure_reason: "agent_error.provider_auth_or_access",
+                        task_count: 3,
+                      },
+                      { date: todayIso(), failure_reason: "timeout", task_count: 1 },
+                    ]
+                  : kind === "failures-by-agent"
+                    ? [
+                        { agent_id: "agent-1", failure_reason: "", task_count: 6 },
+                        {
+                          agent_id: "agent-1",
+                          failure_reason: "agent_error.provider_auth_or_access",
+                          task_count: 3,
+                        },
+                        {
+                          agent_id: "agent-1",
+                          failure_reason: "timeout",
+                          task_count: 1,
+                        },
+                      ]
+                    : [];
         return { data, isLoading: false, isSuccess: true };
       }
       return { data: undefined, isLoading: true };
@@ -69,6 +107,18 @@ vi.mock("@tanstack/react-query", async () => {
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
+}));
+
+// The leaderboard renders ActorAvatar, which resolves avatar URLs through
+// the api singleton. Only the base-URL read is exercised here.
+vi.mock("@multica/core/api", () => ({
+  api: { getBaseUrl: () => "https://example.test" },
+}));
+
+vi.mock("@multica/core/paths", () => ({
+  useWorkspacePaths: () => ({
+    agentDetail: (id: string) => `/acme/agents/${id}`,
+  }),
 }));
 
 const tzRef = vi.hoisted(() => ({ current: "UTC" as string | null }));
@@ -94,6 +144,27 @@ vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
 });
 
 import { DashboardPage } from "./dashboard-page";
+
+// A minimal adapter — the Errors breakdown's drill-down renders an <AppLink>,
+// which reads the navigation context. Asserting on the rendered href (rather
+// than a push spy) keeps the test on the contract that matters: the row points
+// at the agent's Work tab, where its failed runs are listed.
+const navAdapter: NavigationAdapter = {
+  push: vi.fn(),
+  replace: vi.fn(),
+  back: vi.fn(),
+  pathname: "/acme/usage",
+  searchParams: new URLSearchParams(),
+  getShareableUrl: (path: string) => `https://example.test${path}`,
+};
+
+function renderDashboard() {
+  return renderWithI18n(
+    <NavigationProvider value={navAdapter}>
+      <DashboardPage />
+    </NavigationProvider>,
+  );
+}
 
 describe("DashboardPage — viewing timezone drives the query key", () => {
   beforeEach(() => {
@@ -145,7 +216,7 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
     dashboardDataRef.current = true;
     tzRef.current = "UTC";
 
-    const { container } = renderWithI18n(<DashboardPage />);
+    const { container } = renderDashboard();
     const flows = Array.from(
       container.querySelectorAll("number-flow-react"),
     );
@@ -162,5 +233,71 @@ describe("DashboardPage — viewing timezone drives the query key", () => {
             .respectMotionPreference === true,
       ),
     ).toBe(true);
+  });
+});
+
+describe("DashboardPage — failure visibility", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+
+  it("states the error rate with its denominator spelled out", () => {
+    // The run-time rollup sees 1 failure out of 12 tasks — it only counts
+    // tasks that actually started. The failure rollup also sees tasks that
+    // never started, so it reports 4 out of 10. The Errors card quotes the
+    // latter *with* its denominator, which is what keeps it from reading as
+    // a contradiction of the Tasks tile above.
+    renderDashboard();
+
+    expect(screen.getByText("4 of 10 runs failed · 40%")).toBeInTheDocument();
+    // The Tasks tile keeps its own started-tasks-only figure.
+    expect(screen.getByText("1 failed")).toBeInTheDocument();
+  });
+
+  it("breaks failures down by class and links the offending agent to its runs", () => {
+    renderDashboard();
+
+    // Auth (3) outranks Timeout (1), and both are named by class rather than
+    // by the raw failure_reason enum.
+    const byClass = within(screen.getByRole("list", { name: "By class" }));
+    expect(byClass.getAllByRole("listitem").map((li) => li.textContent)).toEqual([
+      "Auth3",
+      "Timeout1",
+    ]);
+
+    const byAgent = within(screen.getByRole("list", { name: "Top offenders" }));
+    const link = byAgent.getByRole("link", { name: /Agent One/ });
+    expect(link).toHaveAttribute("href", "/acme/agents/agent-1?view=work");
+    // 4 of that agent's 10 terminal runs failed, and Auth is what dominates.
+    expect(byAgent.getByText("4 / 10 · 40%")).toBeInTheDocument();
+  });
+
+  it("reveals the raw failure_reason values behind the class summary", async () => {
+    const user = userEvent.setup();
+    renderDashboard();
+
+    expect(
+      screen.queryByText("agent_error.provider_auth_or_access"),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show error codes" }));
+
+    // Raw and unlocalised: an operator pastes this exact string into a log
+    // search, so it must not be translated or prettified.
+    expect(
+      screen.getByText("agent_error.provider_auth_or_access"),
+    ).toBeInTheDocument();
+  });
+
+  it("adds Errors to the trend toggle without disturbing the other metrics", async () => {
+    const user = userEvent.setup();
+    const { container } = renderDashboard();
+
+    await user.click(screen.getByRole("button", { name: "Errors" }));
+
+    expect(container).toHaveTextContent("Daily errors");
   });
 });

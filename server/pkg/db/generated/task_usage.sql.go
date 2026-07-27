@@ -166,6 +166,146 @@ func (q *Queries) ListDashboardAgentRunTime(ctx context.Context, arg ListDashboa
 	return items, nil
 }
 
+const listDashboardFailuresByAgent = `-- name: ListDashboardFailuresByAgent :many
+SELECT
+    atq.agent_id,
+    CASE
+        WHEN atq.status = 'failed'
+            THEN COALESCE(NULLIF(atq.failure_reason, ''), 'unclassified')
+        ELSE ''
+    END AS failure_reason,
+    COUNT(*)::int AS task_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY atq.agent_id, 2
+ORDER BY atq.agent_id, 2
+`
+
+type ListDashboardFailuresByAgentParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardFailuresByAgentRow struct {
+	AgentID       pgtype.UUID `json:"agent_id"`
+	FailureReason string      `json:"failure_reason"`
+	TaskCount     int32       `json:"task_count"`
+}
+
+// Per-(agent, failure_reason) terminal-task counts — the "top offenders"
+// half of the dashboard's errors breakdown. Same `failure_reason = ”`
+// succeeded-bucket convention as ListDashboardFailuresDaily, so the client
+// can rank agents by failure rate rather than raw count.
+//
+// No date bucketing, so no @tz — @since is the viewer's local
+// start-of-day-(N) so the window lines up with the per-agent run-time card.
+func (q *Queries) ListDashboardFailuresByAgent(ctx context.Context, arg ListDashboardFailuresByAgentParams) ([]ListDashboardFailuresByAgentRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardFailuresByAgent, arg.WorkspaceID, arg.Since, arg.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardFailuresByAgentRow{}
+	for rows.Next() {
+		var i ListDashboardFailuresByAgentRow
+		if err := rows.Scan(&i.AgentID, &i.FailureReason, &i.TaskCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDashboardFailuresDaily = `-- name: ListDashboardFailuresDaily :many
+SELECT
+    DATE(atq.completed_at AT TIME ZONE $2::text) AS date,
+    CASE
+        WHEN atq.status = 'failed'
+            THEN COALESCE(NULLIF(atq.failure_reason, ''), 'unclassified')
+        ELSE ''
+    END AS failure_reason,
+    COUNT(*)::int AS task_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= $3::timestamptz
+  AND ($4::uuid IS NULL OR i.project_id = $4)
+GROUP BY 1, 2
+ORDER BY 1 DESC, 2
+`
+
+type ListDashboardFailuresDailyParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Tz          string             `json:"tz"`
+	Since       pgtype.Timestamptz `json:"since"`
+	ProjectID   pgtype.UUID        `json:"project_id"`
+}
+
+type ListDashboardFailuresDailyRow struct {
+	Date          pgtype.Date `json:"date"`
+	FailureReason string      `json:"failure_reason"`
+	TaskCount     int32       `json:"task_count"`
+}
+
+// Daily per-(date, failure_reason) terminal-task counts for the workspace,
+// optionally scoped to a single project. Powers the workspace dashboard's
+// "Errors" trend and the errors-by-class breakdown.
+//
+// Shape note: this returns EVERY terminal task, not just the failures. The
+// `failure_reason = ”` row of each date carries that date's succeeded
+// count, which is the denominator the client needs for an error rate. A
+// failed row whose failure_reason column is NULL or empty (pre-MUL-1949
+// rows, or a failure path that forgot to classify) collapses into the
+// 'unclassified' bucket so it stays countable instead of masquerading as a
+// success. Cardinality is bounded by days x (21 reasons + 2), so the whole
+// window fits in one small payload.
+//
+// Unlike ListDashboardRunTimeDaily this does NOT require started_at — a task
+// that expired in the queue (failure_reason='queued_expired') never started
+// but is unambiguously a failure, and dropping it would under-report exactly
+// the outage the Errors chart exists to surface. Every failure path sets
+// completed_at, so bucketing on it covers all of them.
+//
+// @since is already the viewer's local start-of-day-(N) (parseSinceParamInTZ)
+// — passed straight through, NOT re-truncated; see ListDashboardUsageDaily.
+func (q *Queries) ListDashboardFailuresDaily(ctx context.Context, arg ListDashboardFailuresDailyParams) ([]ListDashboardFailuresDailyRow, error) {
+	rows, err := q.db.Query(ctx, listDashboardFailuresDaily,
+		arg.WorkspaceID,
+		arg.Tz,
+		arg.Since,
+		arg.ProjectID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDashboardFailuresDailyRow{}
+	for rows.Next() {
+		var i ListDashboardFailuresDailyRow
+		if err := rows.Scan(&i.Date, &i.FailureReason, &i.TaskCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardRunTimeDaily = `-- name: ListDashboardRunTimeDaily :many
 SELECT
     DATE(atq.completed_at AT TIME ZONE $2::text) AS date,

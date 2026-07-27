@@ -935,6 +935,32 @@ export interface DashboardRunTimeDaily {
   failed_count: number;
 }
 
+// One (date, failure_reason) bucket of terminal-task counts for the workspace
+// dashboard's Errors metric.
+//
+// `failure_reason` carries the backend's canonical failure taxonomy (the 21
+// `taskfailure.Reason` values, plus `"unclassified"` for failed rows with an
+// empty column) — EXCEPT for the empty string, which is the *succeeded*
+// bucket. Shipping successes in the same series is deliberate: the error rate
+// then has a denominator built on exactly the same filters as its numerator.
+// `DashboardRunTimeDaily.task_count` is NOT a safe denominator here, because
+// it only counts tasks that actually started and a queue-expired task never
+// does.
+export interface DashboardFailureDaily {
+  date: string;
+  failure_reason: string;
+  task_count: number;
+}
+
+// Per-(agent, failure_reason) terminal-task counts. Same succeeded-bucket
+// convention as DashboardFailureDaily, so the client can rank agents by
+// failure rate rather than by raw failure count.
+export interface DashboardFailureByAgent {
+  agent_id: string;
+  failure_reason: string;
+  task_count: number;
+}
+
 export type RuntimeUpdateStatus =
   | "pending"
   | "running"
