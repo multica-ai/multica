@@ -6,10 +6,11 @@
 
 ## Goal
 
-Let people submit tasks to Multica by messaging a Telegram bot. A message from a
-**linked Multica member** becomes a Multica issue — attributed to that member —
-assigned to a bound agent, which then starts working on it automatically (the
-channel framework's default behavior).
+Let people submit tasks to Multica by messaging a Telegram bot. A **linked Multica
+member** who sends `/issue <title>` creates a tracked Multica issue — attributed to
+that member — assigned to a bound agent, which then starts working on it
+automatically. Other messages chat with the agent (shared engine behavior; see
+"Task creation vs. chat").
 
 This is delivered as a **new adapter inside the existing channel framework**
 (`server/internal/integrations/channel/`), not a new subsystem. It mirrors the
@@ -32,8 +33,10 @@ cannot link.
   attribution, reusing the framework's `channel_user_binding` + `channel_binding_token`
   and the engine identity seam. Bot-initiated (Slack-mirror) link direction:
   unlinked sender is prompted with a one-time `/telegram/bind?token=…` link.
-- Issue creation via the existing engine `Router` → `IssueService.Create`, attributed
-  to the linked member and assigned to the bound agent, auto-enqueued to run.
+- Issue creation via the existing engine `Router` (`/issue` command) →
+  `IssueService.Create`, attributed to the linked member and assigned to the bound
+  agent, auto-enqueued to run. Plain messages start an agent chat run (engine
+  default, unchanged).
 - Outbound "issue created ✓ (link)" confirmation back into the Telegram chat.
 - BYO-token config UI (per-agent connect + workspace settings list/revoke),
   modeled on Slack.
@@ -125,12 +128,25 @@ New package `server/internal/integrations/telegram/`, alongside `slack/` and
 4. **Identity resolution (attribution + gate):** the Telegram `IdentityResolver`
    looks up `channel_user_binding` by `(installation_id, telegram_user_id)`.
    - **Bound:** re-verifies workspace membership, returns the member's
-     `multica_user_id`. The issue is created attributed to that member and assigned
-     to the installation's `agent_id`; since it's agent-assigned and not `backlog`,
-     `IssueService.Create` auto-enqueues the agent. Message text becomes the issue
-     title/description (framework's existing text→issue behavior).
+     `multica_user_id`. The message runs the engine's shared behavior (identical to
+     Slack/Lark), see "Task creation vs. chat" below.
    - **Unbound:** returns `ErrSenderUnbound` → outcome `NeedsBinding`; the message
      is not turned into an issue. See "Account linking flow."
+
+### Task creation vs. chat (shared engine behavior — no changes)
+
+This is a cross-platform rule baked into the engine (`engine.ParseIssueCommand`),
+identical for Slack and Lark. The Telegram adapter inherits it unchanged:
+
+- **`/issue <title>`** (exact, case-sensitive; optional description on following
+  lines) → creates a tracked Multica issue assigned to the bound agent, which
+  auto-runs. This is the "submit a task" path.
+- **Any other message** → appended to a chat session and the bound agent is enqueued
+  to reply in-chat (a conversation, not a tracked issue).
+
+v1 uses this default (chosen over an engine change that would make every message an
+issue — that would touch the shared cross-platform engine and diverge from Slack/
+Lark semantics). "Submit a task by messaging the bot" = send `/issue <title>`.
 
 ## Account linking flow (bot-initiated, Slack-mirror)
 
