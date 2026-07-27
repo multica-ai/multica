@@ -1599,6 +1599,8 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if composioMCPEnabled {
 		resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(task.RuntimeConnectedApps, task.ID)
 	}
+	var assignedSkills []service.AgentSkillData
+	var skillInvocationSourceTexts []string
 	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
 		useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 		var customEnv map[string]string
@@ -1652,14 +1654,20 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 		}
 		if useSkillRefs {
-			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
-			agentSkillCount = len(skillRefs)
+			assignedSkills = h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+			builtinSkills := h.TaskService.BuiltinSkills()
+			agentSkillCount = len(assignedSkills)
+			builtinSkillCount = len(builtinSkills)
+			allSkills := append([]service.AgentSkillData{}, assignedSkills...)
+			allSkills = append(allSkills, builtinSkills...)
+			_, skillRefs := service.BuildAgentSkillBundles(allSkills)
 			resp.Agent.SkillRefs = skillRefs
 		} else {
-			skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
-			agentSkillCount = len(skills)
+			assignedSkills = h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+			agentSkillCount = len(assignedSkills)
 			builtinSkills := h.TaskService.BuiltinSkills()
 			builtinSkillCount = len(builtinSkills)
+			skills := append([]service.AgentSkillData{}, assignedSkills...)
 			skills = append(skills, builtinSkills...)
 			resp.Agent.Skills = skills
 		}
@@ -1711,6 +1719,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
+			if issue.Description.Valid && !task.TriggerCommentID.Valid && len(task.CoalescedCommentIds) == 0 {
+				skillInvocationSourceTexts = append(skillInvocationSourceTexts, issue.Description.String)
+			}
 
 			// Squad-leader briefing injection: keyed off the task being a
 			// leader-task (is_leader_task) carrying a squad_id — NOT off the
@@ -1869,6 +1880,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// present in this payload, especially when the delivery budget truncates.
 		resp.CoalescedCommentIDs = nil
 		for _, comment := range deliveredComments {
+			if comment.Content != "" {
+				skillInvocationSourceTexts = append(skillInvocationSourceTexts, comment.Content)
+			}
 			if comment.ID == triggerCommentID {
 				// Populate the actual payload from the same successful read that
 				// earned the receipt. The richer GetComment lookup below resolves
@@ -1901,6 +1915,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				WorkspaceID: runtime.WorkspaceID,
 			}); err == nil {
 				resp.TriggerCommentContent = comment.Content
+				if comment.Content != "" {
+					skillInvocationSourceTexts = append(skillInvocationSourceTexts, comment.Content)
+				}
 				resp.TriggerThreadID = uuidToString(comment.ID)
 				if comment.ParentID.Valid {
 					resp.TriggerThreadID = uuidToString(comment.ParentID)
@@ -2205,6 +2222,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			for _, m := range unanswered {
 				if strings.TrimSpace(m.Content) != "" {
 					parts = append(parts, m.Content)
+					skillInvocationSourceTexts = append(skillInvocationSourceTexts, m.Content)
 				}
 				if atts, attErr := h.Queries.ListAttachmentsByChatMessage(r.Context(), db.ListAttachmentsByChatMessageParams{
 					ChatMessageID: m.ID,
@@ -2299,6 +2317,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
 			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
+			if resp.QuickCreatePrompt != "" {
+				skillInvocationSourceTexts = append(skillInvocationSourceTexts, resp.QuickCreatePrompt)
+			}
 
 			// When the user picked a project in the modal, surface its title
 			// and resources to the daemon so the agent has the same context
@@ -2449,6 +2470,31 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			status:  http.StatusInternalServerError,
 			message: "task workspace isolation check failed",
 		}
+	}
+
+	if selected, err := resolveSelectedSkillInvocations(skillInvocationSourceTexts, assignedSkills, runtime.Provider); err != nil {
+		msg := "invalid selected skill invocation: " + err.Error()
+		slog.Warn("task claim: selected skill validation failed",
+			"task_id", uuidToString(task.ID),
+			"runtime_provider", runtime.Provider,
+			"error", err,
+		)
+		if _, ferr := h.TaskService.FailTask(r.Context(), task.ID, msg, "", "", "agent_error"); ferr != nil {
+			slog.Error("task claim: fail after selected skill validation failed",
+				"task_id", uuidToString(task.ID), "error", ferr)
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_selected_skill_validation",
+				status:  http.StatusInternalServerError,
+				message: "failed to record selected skill validation error",
+			}
+		}
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+			outcome: "error_selected_skill_validation",
+			status:  http.StatusUnprocessableEntity,
+			message: msg,
+		}
+	} else if len(selected) > 0 {
+		resp.SelectedSkillInvocations = selected
 	}
 
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
