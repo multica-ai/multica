@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-07-26
+// Snapshot: 2026-07-27
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
