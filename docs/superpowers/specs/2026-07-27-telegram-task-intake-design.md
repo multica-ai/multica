@@ -6,9 +6,10 @@
 
 ## Goal
 
-Let people submit tasks to Multica by messaging a Telegram bot. A message from an
-approved sender becomes a Multica issue assigned to a bound agent, which then
-starts working on it automatically (the channel framework's default behavior).
+Let people submit tasks to Multica by messaging a Telegram bot. A message from a
+**linked Multica member** becomes a Multica issue — attributed to that member —
+assigned to a bound agent, which then starts working on it automatically (the
+channel framework's default behavior).
 
 This is delivered as a **new adapter inside the existing channel framework**
 (`server/internal/integrations/channel/`), not a new subsystem. It mirrors the
@@ -17,18 +18,22 @@ with no new database tables.
 
 ## Scope (v1)
 
-Level-1 "minimal binding": a workspace admin pastes a Telegram bot token, the
-install binds to one workspace + one agent, and every message from an allowlisted
-Telegram sender becomes an issue assigned to that agent.
+A workspace admin pastes a Telegram bot token; the install binds to one workspace +
+one agent. Any Telegram user who links their account to a Multica member (via the
+Slack-style token flow) can then submit issues, attributed to that member and
+assigned to the bound agent. Unlinked senders are prompted to link; non-members
+cannot link.
 
 ### In scope
 - Telegram `channel.Channel` adapter with webhook-based inbound.
 - Public webhook endpoint that verifies Telegram's secret token and routes to the
   correct installation.
-- Sender allowlist stored in installation config; non-allowlisted senders dropped
-  (and audited).
-- Issue creation via the existing engine `Router` → `IssueService.Create`, assigned
-  to the bound agent, auto-enqueued to run.
+- **Per-Telegram-user → Multica-member account linking** with real per-person
+  attribution, reusing the framework's `channel_user_binding` + `channel_binding_token`
+  and the engine identity seam. Bot-initiated (Slack-mirror) link direction:
+  unlinked sender is prompted with a one-time `/telegram/bind?token=…` link.
+- Issue creation via the existing engine `Router` → `IssueService.Create`, attributed
+  to the linked member and assigned to the bound agent, auto-enqueued to run.
 - Outbound "issue created ✓ (link)" confirmation back into the Telegram chat.
 - BYO-token config UI (per-agent connect + workspace settings list/revoke),
   modeled on Slack.
@@ -36,7 +41,12 @@ Telegram sender becomes an issue assigned to that agent.
 ### Non-goals (v1) — natural later additions on the same foundation
 - Structured/multi-field conversational intake.
 - Per-chat or per-command routing rules.
-- Per-Telegram-user → Multica-member account linking (real per-person attribution).
+- **Multica-initiated** deep-link linking (`t.me/<bot>?start=<token>` from a
+  "Connect Telegram" button in the profile) and surfacing Telegram as a connected
+  account in the profile UI. v1 uses the lower-footprint bot-initiated flow.
+- A free-text "Telegram ID" profile field (rejected: self-attested/spoofable, no
+  precedent — see Constraints).
+- Sender allowlist config (superseded: linking + workspace membership is the gate).
 - Long-polling delivery.
 - Hosted Telegram OAuth / bot provisioning.
 
@@ -47,12 +57,22 @@ Telegram sender becomes an issue assigned to that agent.
   diff contains only Telegram work. The channel framework already exists upstream,
   so the PR does not drag it in. `.mcp.json` stays untracked and is never committed
   on this branch.
-- **Creator attribution:** v1 attributes created issues to the **installer** (the
-  admin who set up the bot). The allowlist controls who may submit. Per-user
-  attribution is deferred (framework supports it later via account linking).
-- **No new DB tables or migrations.** Reuse `channel_installation` and existing
-  sqlc queries. Route inbound by `(channel_type='telegram', config->>'app_id')`,
-  which reuses `GetChannelInstallationByAppID`.
+- **Creator attribution:** created issues are attributed to the **real linked
+  member**, resolved via `channel_user_binding` through the engine identity seam
+  (same as Slack). No installer fallback and no allowlist. This is verified
+  attribution — the token is delivered through the Telegram account (proving control
+  of the Telegram id) and redeemed by a logged-in Multica user (proving the Multica
+  id), and redemption is workspace-membership-gated.
+- **Rejected: Telegram id on the user profile.** A free-text profile field is
+  self-attested and spoofable (a user could claim another person's Telegram id and
+  receive their attribution), and there is zero precedent for storing an external
+  chat id on the `user`/`member` record. The framework's `channel_user_binding`
+  achieves the same "any member can self-link and submit" outcome, verified, with
+  less new code.
+- **No new DB tables or migrations.** Reuse `channel_installation`,
+  `channel_user_binding`, `channel_binding_token`, and existing sqlc queries. Route
+  inbound by `(channel_type='telegram', config->>'app_id')`, which reuses
+  `GetChannelInstallationByAppID`.
 - **Webhook, not receive-loop.** Unlike Slack's Socket Mode, Telegram inbound
   arrives over HTTP webhook. The framework allows this: inbound is deliberately not
   on the `Channel` interface — the adapter owns how it receives.
@@ -82,7 +102,8 @@ New package `server/internal/integrations/telegram/`, alongside `slack/` and
   for Slack tokens.
 - `webhook_secret` — the secret token registered with `setWebhook` and verified on
   each inbound request.
-- `allowlist` — array of approved Telegram user/chat ids.
+
+(No allowlist — access is gated by whether the sender is a linked Multica member.)
 
 ## Inbound flow
 
@@ -93,20 +114,39 @@ New package `server/internal/integrations/telegram/`, alongside `slack/` and
 2. **Installation lookup:** by `(channel_type='telegram', config->>'app_id'=botId)`
    via the existing `GetChannelInstallationByAppID` query. Reject if not found or
    revoked.
-3. **Allowlist gate:** drop the update unless the sender's Telegram user/chat id is
-   in `config.allowlist`. Drops are recorded via the existing
-   `channel_inbound_audit`.
-4. **Normalize → engine:** build a `channel.InboundMessage` from the Telegram
-   update and hand it to `engine.Router.Handle`. The engine dedups, ensures a chat
-   session, parses `/issue` (or treats the message as issue intake per framework
-   behavior), and calls `Router.createIssue` → `IssueService.Create`, assigning the
-   issue to the installation's `agent_id`. Because the issue is assigned to an agent
-   and not in `backlog`, `IssueService.Create` auto-enqueues the agent to start
-   working.
-   - Message text becomes the issue title/description (following the framework's
-     existing text→issue behavior).
-   - **Creator:** the installer (resolved from the installation), per the v1
-     attribution decision.
+3. **Normalize → engine:** build a `channel.InboundMessage` from the Telegram
+   update and hand it to `engine.Router.Handle`. The engine runs its ordered
+   pipeline: dedup claim → group `@bot` filter → **identity resolution** → ensure
+   session → `/issue` parse → create issue → debounced agent run.
+4. **Identity resolution (attribution + gate):** the Telegram `IdentityResolver`
+   looks up `channel_user_binding` by `(installation_id, telegram_user_id)`.
+   - **Bound:** re-verifies workspace membership, returns the member's
+     `multica_user_id`. The issue is created attributed to that member and assigned
+     to the installation's `agent_id`; since it's agent-assigned and not `backlog`,
+     `IssueService.Create` auto-enqueues the agent. Message text becomes the issue
+     title/description (framework's existing text→issue behavior).
+   - **Unbound:** returns `ErrSenderUnbound` → outcome `NeedsBinding`; the message
+     is not turned into an issue. See "Account linking flow."
+
+## Account linking flow (bot-initiated, Slack-mirror)
+
+Reuses the framework's token machinery — no new tables.
+
+1. An unlinked Telegram user messages the bot → engine returns `NeedsBinding`.
+2. The Telegram `OutboundReplier` mints a single-use, 15-minute
+   `channel_binding_token` (only its SHA-256 hash stored) and replies in-chat with a
+   link: `<APP_URL>/telegram/bind?token=…` ("link your account, expires in 15 min").
+3. The user opens it. The bind page requires them to be **logged into Multica**
+   (redirects through `/login?next=/telegram/bind?token=…` if not).
+4. `POST /api/telegram/binding/redeem` — identity is taken from the **authenticated
+   session** (never the token); the endpoint is **workspace-membership-gated**
+   (non-member → 403) and single-use (atomic consume). It writes the
+   `channel_user_binding` row `(installation_id, telegram_user_id) → multica_user_id`.
+5. Subsequent messages from that Telegram user resolve to the member and create
+   attributed issues.
+
+Error mapping mirrors Slack: 410 invalid/consumed/expired token, 409 already bound
+to a different user, 403 not a workspace member.
 
 ## Outbound flow
 
@@ -127,16 +167,19 @@ Reuse `channel_installation` verbatim. New HTTP handlers, modeled on Slack's:
   — member-visible.
 - `RevokeTelegramInstallation` — `DELETE /api/workspaces/{id}/telegram/installations/{installationId}`
   — flips `status='revoked'`, clears the webhook. Owner/admin only.
-- Allowlist editing is part of the install config (edit the installation's
-  `allowlist`). Handler for updating allowlist (owner/admin only) — either folded
-  into a config-update handler or a dedicated endpoint; decided during planning.
+- `RedeemTelegramBindingToken` — `POST /api/telegram/binding/redeem` — account-link
+  redemption (session identity, membership-gated), mirroring
+  `RedeemSlackBindingToken`.
 
 Frontend, modeled on Slack:
 - Per-agent **Integrations** tab: paste bot token to connect
   (`packages/views/agents/components/tabs/integrations-tab.tsx` is the Slack
   precedent).
-- Workspace settings **Integrations** panel: list + disconnect + edit allowlist
+- Workspace settings **Integrations** panel: list + disconnect
   (`packages/views/settings/components/` Slack tab precedent).
+- **Bind page:** `apps/web/app/telegram/bind/page.tsx` →
+  `packages/views/telegram/bind-page.tsx` (mirror of the Slack bind page — reads
+  `?token=`, requires auth, POSTs to the redeem endpoint, renders done/error).
 - API client + query keys in `packages/core/` (Telegram equivalent of
   `packages/core/slack/queries.ts` + types).
 
@@ -144,8 +187,11 @@ Frontend, modeled on Slack:
 
 - Invalid/absent secret token header → `401`/drop, audited.
 - Unknown or revoked installation → drop, audited.
-- Non-allowlisted sender → drop, audited (no reply, to avoid confirming the bot to
-  strangers).
+- Unlinked sender → `NeedsBinding`: replied once with a bind link, dedup-marked so a
+  replay does not re-prompt. Non-members who attempt redemption are rejected (403) at
+  the redeem endpoint, so they never get a binding.
+- Redeem token errors → 410 invalid/consumed/expired, 409 bound to another user, 403
+  not a member (Slack-mirror mapping).
 - Malformed Telegram update JSON → parsed defensively, dropped with audit; never
   panics.
 - `setWebhook`/`getMe`/`sendMessage` failures during install → surfaced to the
@@ -157,11 +203,14 @@ Frontend, modeled on Slack:
 ## Testing
 
 Go (`server/internal/integrations/telegram/` + handler tests):
-- Webhook handler: valid secret creates an issue; wrong/missing secret is rejected;
-  non-allowlisted sender is dropped; malformed update is dropped without panic.
+- Webhook handler: valid secret from a **linked** member creates an attributed
+  issue; wrong/missing secret is rejected; malformed update is dropped without panic.
+- **Unlinked sender → `NeedsBinding`**: no issue created; bind link replied once.
+- **Redeem flow**: happy path writes the binding; expired/consumed → 410; already
+  bound to another user → 409; non-member → 403; single-use is atomic.
 - Config → credentials round-trip (encrypt/decrypt, `app_id` derivation from
   token).
-- Resolver lookup by bot id.
+- Resolver lookup by bot id; identity resolver bound vs unbound.
 - Inbound → `IssueService.Create` path with a **fake agent** (per repo testing
   rules — never resolve/execute real agent CLIs in default tests).
 - Dedup: duplicate delivery of the same update yields one issue.
@@ -170,12 +219,14 @@ Go (`server/internal/integrations/telegram/` + handler tests):
 Frontend (`packages/views/*.test.tsx`, `packages/core/*.test.ts`):
 - Config UI connect/list/revoke; malformed-response test for the new schema per the
   API-compatibility rules.
+- Bind page: needs-auth redirect, redeem success, and error states (410/409/403).
 
 ## Open items to resolve during planning
 
 - Exact `Capability` bitmask for Telegram.
-- Whether allowlist editing is a dedicated endpoint or folded into a config-update
-  handler.
+- Whether Telegram supports the Slack `FindReusableChannelUserBinding`
+  cross-installation reuse, or bindings are strictly per-installation (Telegram has
+  no "team" equivalent — likely per-installation only).
 - Precise mapping of a Telegram update to `InboundMessage` fields (group vs DM,
   `@bot` mention handling in groups — the engine already has a group `@bot` filter
-  step to reuse).
+  step to reuse), and how the sender's Telegram user id is carried as `SenderID`.
