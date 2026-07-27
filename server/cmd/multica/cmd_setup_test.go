@@ -131,9 +131,9 @@ func TestResolveSelfHostServerURL(t *testing.T) {
 	// must keep the configured remote server instead of probing localhost.
 	t.Run("falls back to existing config server_url when no flag, env, or --port", func(t *testing.T) {
 		t.Setenv("MULTICA_SERVER_URL", "")
-		existing := cli.CLIConfig{ServerURL: "https://multica-prod-alb.marmot-cloud.com"}
+		existing := cli.CLIConfig{ServerURL: "https://api.example.com"}
 		serverURL, userProvided := resolveSelfHostServerURL(newCmd(), existing)
-		if serverURL != "https://multica-prod-alb.marmot-cloud.com" {
+		if serverURL != "https://api.example.com" {
 			t.Fatalf("server_url: want existing config value, got %q", serverURL)
 		}
 		if !userProvided {
@@ -260,8 +260,8 @@ func TestResolveSelfHostAppURL(t *testing.T) {
 
 	t.Run("falls back to existing config when no flag, env, or --frontend-port", func(t *testing.T) {
 		t.Setenv("MULTICA_APP_URL", "")
-		existing := cli.CLIConfig{AppURL: "https://multica-console-fc.marmot-cloud.com"}
-		if got := resolveSelfHostAppURL(newCmd(), existing); got != "https://multica-console-fc.marmot-cloud.com" {
+		existing := cli.CLIConfig{AppURL: "https://app.example.com"}
+		if got := resolveSelfHostAppURL(newCmd(), existing); got != "https://app.example.com" {
 			t.Fatalf("app_url: want existing config value, got %q", got)
 		}
 	})

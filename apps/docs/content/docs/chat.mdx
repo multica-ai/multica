@@ -1,15 +1,15 @@
 ---
 title: Chat
-description: One-to-one conversation with an agent outside any issue — fully sandboxed. The agent cannot see or change issues, and nobody else can see the conversation.
+description: One-to-one, fully private conversation with an agent, outside any issue. The agent starts with no issue context and never auto-creates issues — but it acts with your workspace access when you explicitly ask it to.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-**Chat is a one-to-one conversation between you and an [agent](/agents)** — stepping outside the [issue](/issues) board. The agent sees no issues and cannot change any issue, and the entire conversation is **fully private** (nobody else in the [workspace](/workspaces), including admins, can see it). It fits discussing an approach with an agent, brainstorming, or asking a question that does not belong to any issue.
+**Chat is a one-to-one conversation between you and an [agent](/agents)** — stepping outside the [issue](/issues) board. The agent starts with **no issue context** — it isn't looking at your board and won't turn the conversation into issues on its own — and the entire conversation is **fully private** (nobody else in the [workspace](/workspaces), including admins, can see it). It fits discussing an approach with an agent, brainstorming, or asking a question that does not belong to any issue.
 
 ## Why not just @-mention the agent?
 
-[@-mention](/mentioning-agents) **pulls the agent into** an issue's context — it reads the issue description and every historical comment, and it can change the issue. Chat flips this: **it pulls you out of** the issue — the agent only sees this single conversation, has no awareness of any issue, and has no entry point to modify one.
+[@-mention](/mentioning-agents) **pulls the agent into** an issue's context — it reads the issue description and every historical comment, and it can change the issue. Chat flips this: **it pulls you out of** the issue — the agent sees only this single conversation and starts with no issue context, so it isn't reading or acting on any issue unless you explicitly ask it to.
 
 Two rules of thumb:
 
@@ -22,21 +22,20 @@ Open **Chat** from the sidebar, pick an agent, and start a new conversation. The
 
 ## What an agent can and cannot do in chat
 
-Agents run in a **fully sandboxed** mode inside a conversation.
+The isolation in Chat is about **context and privacy, not permissions**. The conversation is private and the agent starts with no issue context — but each reply still runs with **your workspace access**, acting on your behalf with the same permissions you have. So when you explicitly ask, the agent can use the `multica` CLI to act on your workspace, including creating or changing issues.
 
 **Can do:**
 
 - Answer the questions in your current message
 - Use its configured [skills](/skills) and MCP
 - Read and write files in its own working directory
-- Call `multica` CLI commands that do not need issue context (for example, querying basic workspace info)
+- Run `multica` CLI commands, **including ones that read or change workspace data** — for example, `multica issue list` returns your workspace's issues, and asking the agent to file one runs `multica issue create`, producing a real issue recorded with the agent as its creator. These act with your permissions in this workspace.
 
 **Cannot do:**
 
-- **See any issue** — the prompt the agent receives has no issue IDs, and commands like `multica issue list` return empty
-- **Change any issue** — without issue context, API calls are blocked by permission checks
-- **See other conversations** — conversations are fully isolated
-- **@-mention anyone or any agent** — chat is a private space with no path to notify others
+- **Auto-create or auto-surface issues** — the prompt has no issue IDs, and merely recognizing task-shaped content in the conversation does not, on its own, create or pull up anything; the agent only touches issues when you explicitly ask.
+- **Read your other conversations** — each run's prompt is scoped to this single chat; the contents of your other chat sessions are never given to it.
+- **Reach outside this workspace or your permissions** — every run is bound to this workspace and acts as you, so it can't touch another workspace or do anything your own account couldn't.
 
 ## How multi-turn context is preserved
 

@@ -12,8 +12,22 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
+
+// claudeTerminateGraceNanos optionally overrides, in nanoseconds, how long a
+// cancelled claude process group is given to exit after SIGTERM before it is
+// SIGKILLed. Set via atomic store in tests; zero keeps the default.
+var claudeTerminateGraceNanos atomic.Int64
+
+func claudeTerminateGrace() time.Duration {
+	if n := claudeTerminateGraceNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return 5 * time.Second
+}
 
 // claudeBackend implements Backend by spawning the Claude Code CLI
 // with --output-format stream-json.
@@ -59,6 +73,21 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
+	// Run claude in its own process group so cancellation can reach the whole
+	// tree — the claude CLI plus the MCP servers and tool subprocesses it
+	// spawns — not just the direct child. The default CommandContext behaviour
+	// SIGKILLs only the leader, which orphans those descendants; on a resumed
+	// stream-json session with no wall-clock timeout they then keep running and
+	// burning model budget long after the task was cancelled, and under
+	// --max-concurrent-tasks 1 starve every queued task (#5918). This mirrors
+	// the fix already made for codex (#4520) and opencode (#4533).
+	configureProcessGroup(cmd)
+	// Take over context cancellation: the default would SIGKILL only the leader
+	// the instant runCtx is done. We instead drive a graceful group-wide
+	// SIGTERM→SIGKILL from the cancellation goroutine below and close stdout
+	// only after the tree has been signalled. Returning nil keeps os/exec from
+	// racing us with its own kill; WaitDelay remains the hard backstop.
+	cmd.Cancel = func() error { return nil }
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
@@ -104,6 +133,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
+	// procDone closes once cmd.Wait() returns, letting the cancellation handler
+	// skip a process that already exited and avoid signalling a dead/reused pid.
+	procDone := make(chan struct{})
+
 	// writeClaudeInput runs in its own goroutine so it cannot deadlock
 	// against the stdout reader. With --verbose --output-format stream-json
 	// the CLI emits a startup banner before reading its first stdin frame;
@@ -148,10 +181,35 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		assistantEventCount := 0
 		toolUseCount := 0
 
-		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
+		// On cancellation / timeout, terminate claude (and every MCP server and
+		// tool subprocess it spawned) BEFORE unblocking the scanner. EOF stdin
+		// to nudge a clean exit, then SIGTERM the whole process group, give it a
+		// grace period, and SIGKILL the group if any member is still alive.
+		// SIGKILL is uncatchable, so once delivered no group member can write
+		// again — only then is it safe to close the stdout read end as a
+		// last-resort unblock for a scanner a wedged descendant still keeps
+		// open. WaitDelay is the final backstop (#5918).
 		go func() {
-			<-runCtx.Done()
+			select {
+			case <-procDone:
+				return // finished on its own; nothing to terminate
+			case <-runCtx.Done():
+			}
 			closeStdin()
+			if cmd.Process != nil {
+				signalProcessGroup(cmd.Process, syscall.SIGTERM)
+				// Escalate to a group SIGKILL unless the WHOLE process group has
+				// exited within the grace window. This must key off the process
+				// group, not procDone: procDone only means cmd.Wait() returned
+				// for the leader, so a SIGTERM-ignoring descendant that does not
+				// hold claude's stdout would let the leader exit, close procDone,
+				// and skip the SIGKILL — leaking exactly the orphan this fix
+				// targets. waitProcessGroupGone returns as soon as the group is
+				// empty, so the graceful case adds no latency.
+				if !waitProcessGroupGone(cmd.Process, claudeTerminateGrace()) {
+					signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				}
+			}
 			_ = stdout.Close()
 		}()
 
@@ -223,8 +281,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		closeStdin()
 
-		// Wait for process exit
+		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
+		close(procDone)
 		duration := time.Since(startTime)
 		// writeDone is buffered (cap 1) and the writer always sends — by the
 		// time cmd has exited, the prompt write has either succeeded, hit a

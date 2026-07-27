@@ -616,6 +616,7 @@ export function createMentionSuggestion(
 
   return {
     pluginKey,
+    allowSpaces: true,
     items: ({ query }) => {
       if (options.mode === "context") {
         const normalizedQuery = query.trim();

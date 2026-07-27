@@ -64,7 +64,37 @@ flags fall through to server defaults rather than sending empty strings.
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
 `instructions`, `avatar_url`, `runtime_id`, `runtime_config`, `custom_env`,
 `custom_args`, `model`, `thinking_level`, `service_tier`, `visibility`,
-`max_concurrent_tasks`, `mcp_config`.
+`max_concurrent_tasks`, `mcp_config`, `skill_ids`.
+
+## Copying an agent
+
+`multica agent copy <source-agent-id>` forks an existing agent's portable
+configuration into a brand-new agent, leaving the source untouched. It is the
+CLI/headless equivalent of the web "Duplicate" action. No dedicated server API
+is involved: `runAgentCopy` reads the source with `GET /api/agents/<id>`, then
+POSTs a `CreateAgentRequest` — passing the source's skill ids in `skill_ids` so
+the bindings attach in the SAME create transaction (unlike `agent create`, which
+binds nothing). The mutation is therefore a single atomic create.
+
+```bash
+multica agent copy <source-agent-id> --name "My Agent (copy)"   # same runtime
+multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cross-runtime fork
+```
+
+- Copied by default, each overridable with the matching flag: `name` (suffixed
+  `" (copy)"`), `description`, `instructions`, avatar, `custom_args`,
+  `max_concurrent_tasks`, invocation permission (`permission_mode` +
+  allow-list), and assigned workspace skills.
+- Runtime-specific fields (`model`, `thinking_level`, `service_tier`) are copied
+  ONLY when the target runtime is unchanged. `--runtime-id` selecting a
+  different runtime drops them and REQUIRES `--model` (pass `--model ""` to
+  accept the target runtime default), mirroring the web Duplicate clearing model
+  on a runtime switch.
+- Never copied: `custom_env`, `mcp_config`, `runtime_config` (secret /
+  machine-local; redacted or masked on read anyway). Supply fresh values with
+  the same secret-safe flags as `agent create` (`--custom-env*`, `--mcp-config*`,
+  `--runtime-config`), or with `agent env set` after the copy exists.
+- `--no-skills` skips copying the source's skill bindings.
 
 ## Field contracts
 
@@ -215,6 +245,8 @@ Read-only (safe): `agent get`, `agent skills list`, `agent env get`.
 State-changing (require an explicit instruction — do not run speculatively):
 
 - `multica agent create` — inserts a new agent row.
+- `multica agent copy` — inserts a new agent row (a fork of an existing agent);
+  the source is left untouched.
 - `multica agent skills add` / `set` — mutate bindings (`set` is destructive:
   it drops bindings not in the new list).
 - `multica agent env set` — overwrites the full `custom_env` map and writes an

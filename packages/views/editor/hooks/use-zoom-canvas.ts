@@ -1,15 +1,16 @@
 "use client";
 
 /**
- * Pan/zoom controller for a diagram rendered inside an empty-sandbox iframe.
+ * Pan/zoom controller for content that cannot zoom itself — a Mermaid diagram
+ * in an empty-sandbox iframe, or an image in the attachment preview.
  *
- * The iframe cannot script itself, so every gesture is captured on the host
- * viewport element and applied as a CSS transform on the wrapper around it.
- * That inversion is also what keeps Escape working: the iframe is
- * `pointer-events: none`, so it never takes focus, and key events always stay
- * in the host document where the Dialog can hear them.
+ * Every gesture is captured on the host viewport element and applied as a CSS
+ * transform on the wrapper around the content. For the Mermaid case that
+ * inversion is also what keeps Escape working: the iframe is `pointer-events:
+ * none`, so it never takes focus, and key events always stay in the host
+ * document where the Dialog can hear them.
  *
- * Transform math lives in `../utils/diagram-transform`; this hook owns only
+ * Transform math lives in `../utils/zoom-transform`; this hook owns only
  * event plumbing and state.
  */
 
@@ -17,37 +18,38 @@ import {
   useCallback,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type PointerEvent as ReactPointerEvent,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
 } from "react";
 import {
   MAX_SCALE,
-  MIN_SCALE,
   PAN_STEP_PX,
   ZOOM_STEP,
   centerTransform,
   clampTransform,
+  computeFitScale,
   computeFitTransform,
+  computeMinScale,
   distanceBetween,
   midpointOf,
   panBy,
   wheelZoomFactor,
   zoomByAtCenter,
   zoomToAt,
-  type DiagramTransform,
   type Point,
   type Size,
-} from "../utils/diagram-transform";
+  type ZoomTransform,
+} from "../utils/zoom-transform";
 
-interface UseDiagramCanvasOptions {
-  /** Natural (unscaled) size of the diagram, or null while it is unknown. */
+interface UseZoomCanvasOptions {
+  /** Natural (unscaled) size of the content, or null while it is unknown. */
   content: Size | null;
 }
 
-export interface DiagramCanvasApi {
+export interface ZoomCanvasApi {
   /**
    * Callback ref for the viewport element. Deliberately not a RefObject: the
    * canvas is portaled by the Dialog and attaches in a later commit than this
@@ -56,7 +58,7 @@ export interface DiagramCanvasApi {
    * permanently unfitted and inert.
    */
   setViewportNode: (node: HTMLDivElement | null) => void;
-  transform: DiagramTransform;
+  transform: ZoomTransform;
   /** Whole-percent zoom for the toolbar readout. */
   zoomPercent: number;
   canZoomIn: boolean;
@@ -68,30 +70,29 @@ export interface DiagramCanvasApi {
    * and wheel/pinch must track the input 1:1 and are never animated.
    */
   isAnimated: boolean;
-  /** True when the view already matches the default fit — lets Reset disable itself. */
-  isFitted: boolean;
   zoomIn: () => void;
   zoomOut: () => void;
   zoomToActualSize: () => void;
   fit: () => void;
-  reset: () => void;
   handlePointerDown: (event: ReactPointerEvent<HTMLElement>) => void;
   handlePointerMove: (event: ReactPointerEvent<HTMLElement>) => void;
   handlePointerUp: (event: ReactPointerEvent<HTMLElement>) => void;
   handleKeyDown: (event: ReactKeyboardEvent<HTMLElement>) => void;
+  /** Double-click / double-tap toggles between the default fit and 100%. */
+  handleDoubleClick: (event: ReactMouseEvent<HTMLElement>) => void;
 }
 
-const IDENTITY: DiagramTransform = { scale: 1, x: 0, y: 0 };
+const IDENTITY: ZoomTransform = { scale: 1, x: 0, y: 0 };
 const EMPTY_SIZE: Size = { width: 0, height: 0 };
 
 function nearlyEqual(a: number, b: number): boolean {
   return Math.abs(a - b) < 0.5;
 }
 
-export function useDiagramCanvas({ content }: UseDiagramCanvasOptions): DiagramCanvasApi {
+export function useZoomCanvas({ content }: UseZoomCanvasOptions): ZoomCanvasApi {
   const [viewportNode, setViewportNode] = useState<HTMLDivElement | null>(null);
   const [viewport, setViewport] = useState<Size>(EMPTY_SIZE);
-  const [transform, setTransform] = useState<DiagramTransform>(IDENTITY);
+  const [transform, setTransform] = useState<ZoomTransform>(IDENTITY);
   const [isPanning, setIsPanning] = useState(false);
   const [isAnimated, setIsAnimated] = useState(false);
 
@@ -99,7 +100,7 @@ export function useDiagramCanvas({ content }: UseDiagramCanvasOptions): DiagramC
   // computed would be against a 0x0 viewport and would have to be thrown away.
   const hasFittedRef = useRef(false);
   const activePointersRef = useRef(new Map<number, Point>());
-  const panOriginRef = useRef<{ pointer: Point; transform: DiagramTransform } | null>(null);
+  const panOriginRef = useRef<{ pointer: Point; transform: ZoomTransform } | null>(null);
   const pinchOriginRef = useRef<{ distance: number; scale: number } | null>(null);
 
   const contentSize = content ?? EMPTY_SIZE;
@@ -116,12 +117,20 @@ export function useDiagramCanvas({ content }: UseDiagramCanvasOptions): DiagramC
     const element = viewportNode;
     if (!element) return;
 
+    // offsetWidth/offsetHeight, NOT getBoundingClientRect: both viewers open
+    // inside a container that scales in (`zoom-in-95` on the shared Dialog,
+    // motion's scale(0.95) on the attachment modal). A client rect is
+    // transform-scaled, so measuring mid-animation would fit the content
+    // against a viewport a few percent too small — and because ResizeObserver
+    // reports the untransformed layout box, it never fires when the animation
+    // lands, leaving that mis-fit on screen for the whole session.
     const measure = () => {
-      const rect = element.getBoundingClientRect();
+      const width = element.offsetWidth;
+      const height = element.offsetHeight;
       setViewport((previous) =>
-        nearlyEqual(previous.width, rect.width) && nearlyEqual(previous.height, rect.height)
+        nearlyEqual(previous.width, width) && nearlyEqual(previous.height, height)
           ? previous
-          : { width: rect.width, height: rect.height },
+          : { width, height },
       );
     };
 
@@ -135,7 +144,7 @@ export function useDiagramCanvas({ content }: UseDiagramCanvasOptions): DiagramC
   }, [viewportNode]);
 
   // Fit once, on first open. Deliberately not re-fitting on later viewport
-  // changes: a theme switch re-renders the diagram at the same size, and
+  // changes: a theme switch re-renders the content at the same size, and
   // silently snapping the user's zoom back to fit would lose their place.
   useEffect(() => {
     if (!ready || hasFittedRef.current) return;
@@ -143,7 +152,7 @@ export function useDiagramCanvas({ content }: UseDiagramCanvasOptions): DiagramC
     setTransform(computeFitTransform(contentSize, viewport));
   }, [ready, contentSize, viewport]);
 
-  // A genuinely different diagram (new natural size) starts fresh.
+  // Genuinely different content (new natural size) starts fresh.
   const contentKey = `${contentSize.width}x${contentSize.height}`;
   const previousContentKeyRef = useRef(contentKey);
   useEffect(() => {
@@ -153,7 +162,7 @@ export function useDiagramCanvas({ content }: UseDiagramCanvasOptions): DiagramC
     setTransform(computeFitTransform(contentSize, viewport));
   }, [contentKey, ready, contentSize, viewport]);
 
-  // Keep the diagram in view when the window/pane is resized under it.
+  // Keep the content in view when the window/pane is resized under it.
   useEffect(() => {
     if (!ready) return;
     setTransform((current) => clampTransform(current, contentSize, viewport));
@@ -210,7 +219,7 @@ export function useDiagramCanvas({ content }: UseDiagramCanvasOptions): DiagramC
   }, [viewportNode]);
 
   const localPoint = useCallback(
-    (event: ReactPointerEvent<HTMLElement>): Point => {
+    (event: { clientX: number; clientY: number }): Point => {
       const rect = viewportNode?.getBoundingClientRect();
       return {
         x: event.clientX - (rect?.left ?? 0),
@@ -354,36 +363,48 @@ export function useDiagramCanvas({ content }: UseDiagramCanvasOptions): DiagramC
     [zoomIn, zoomOut, fit],
   );
 
-  const isFitted = useMemo(() => {
-    if (!ready) return true;
-    const fitted = computeFitTransform(contentSize, viewport);
-    return (
-      Math.abs(fitted.scale - transform.scale) < 0.001 &&
-      nearlyEqual(fitted.x, transform.x) &&
-      nearlyEqual(fitted.y, transform.y)
-    );
-  }, [ready, contentSize, viewport, transform]);
+  // Double-click toggles fit <-> 100%, anchored under the cursor on the way in.
+  // The universal image-viewer gesture (macOS Preview, browsers): one gesture
+  // gets from "the whole thing" to "readable detail" and back.
+  const handleDoubleClick = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      const { transform: t, contentSize: c, viewport: v, ready: r } = stateRef.current;
+      if (!r) return;
+
+      setIsAnimated(true);
+      const fitScale = computeFitScale(c, v);
+      if (Math.abs(t.scale - fitScale) >= 0.001) {
+        setTransform(computeFitTransform(c, v));
+        return;
+      }
+      // Already fitted. Go to 100% — or to 200% when fit already is 100%, so a
+      // small image still has somewhere to go instead of ignoring the gesture.
+      setTransform(zoomToAt(t, fitScale < 0.999 ? 1 : 2, localPoint(event), c, v));
+    },
+    [localPoint],
+  );
 
   return {
     setViewportNode,
     transform,
     zoomPercent: Math.round(transform.scale * 100),
     canZoomIn: transform.scale < MAX_SCALE - 0.001,
-    canZoomOut: transform.scale > MIN_SCALE + 0.001,
+    // Against the dynamic floor, not MIN_SCALE: for content that only fits
+    // below 25% the button must stay live all the way down to that fit scale.
+    canZoomOut: transform.scale > computeMinScale(contentSize, viewport) + 0.001,
     isPanning,
     isAnimated,
-    isFitted,
     zoomIn,
     zoomOut,
     zoomToActualSize,
     fit,
-    reset: fit,
     handlePointerDown,
     handlePointerMove,
     handlePointerUp,
     handleKeyDown,
+    handleDoubleClick,
   };
 }
 
-export type { DiagramTransform, Size };
-export { MIN_SCALE, MAX_SCALE };
+export type { Size, ZoomTransform };
+export { MAX_SCALE };

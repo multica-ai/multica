@@ -237,10 +237,16 @@ describe("TableView cell editors under data refresh", () => {
   });
 
   // Explicit timeout: this mounts the full TableView with every picker + a
-  // QueryClient, so it is heavier than a unit test. `delay: null` drives
-  // userEvent off fake-synchronous timing instead of the default real-timer
-  // gaps between events, which were what let the whole gesture blow past the
-  // 5s default under concurrent CI worker load (MUL-5108 review R1#1).
+  // QueryClient and drives three realistic userEvent click gestures, each
+  // re-rendering the whole table — far heavier than a unit test. `delay: null`
+  // strips the default real-timer gaps between events (MUL-5108 review R1#1).
+  // Even so, the frontend CI job runs the entire `turbo build typecheck lint
+  // test` pipeline on a 2-core runner, so builds/lints/typechecks and 258
+  // vitest files all oversubscribe both cores at once; at the worst-case
+  // scheduling peak this test's wall clock blew past the earlier 20s cap
+  // (MUL-5326). It runs in ~1s in isolation, so the generous 60s ceiling
+  // (matching the repo's heaviest FE tests) only absorbs CI CPU starvation —
+  // it never masks a real hang.
   it("keeps the status picker open and the row order frozen across a refresh, then catches up on close", async () => {
     const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
     const issueA = makeIssue("a", "Alpha task", "todo");
@@ -311,7 +317,7 @@ describe("TableView cell editors under data refresh", () => {
     await user.click(screen.getByRole("button", { name: /Backlog/ }));
     expect(screen.queryByRole("button", { name: /Backlog/ })).toBeNull();
     expect(identifiers()).toEqual(["MUL-b", "MUL-a"]);
-  }, 20_000);
+  }, 60_000);
 
   it("opens creation with the row as parent and inherits its project", async () => {
     const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });

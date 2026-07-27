@@ -33,6 +33,16 @@ go test ./internal/service -run TestBuiltinSkillsConformToTemplate
 | `agent env get` | 1018 | `GET /api/agents/{id}/env` (1028) | `multica agent env get --help` |
 | `agent env set` | 1053 | `PUT /api/agents/{id}/env` with full `custom_env` map (1073) | `multica agent env set --help` |
 
+## Copy command — `server/cmd/multica/cmd_agent_copy.go`
+
+| Contract | Line | Behavior | Safe check |
+|---|---|---|---|
+| `agentCopyCmd` (`copy <source-agent-id>`) + flag registrar | 21, 47, 54 | Own file with its own `init()` so `cmd_agent.go` line refs stay stable; `registerAgentCopyFlags` is shared with the tests | `multica agent copy --help` |
+| Reads source via `GET /api/agents/<id>` | 95 | Composes over existing endpoints — no dedicated copy API | read `runAgentCopy` |
+| Same-runtime vs cross-runtime rule | 114, 187 | `sameRuntime` copies `model`/`thinking_level`/`service_tier`; a different `--runtime-id` drops them and requires `--model` (empty allowed) | `multica agent copy --help` |
+| Skills copied in the create transaction | 239 | Source skill ids sent as `skill_ids`, bound in the same `POST /api/agents` tx (267); `--no-skills` opts out | read `runAgentCopy` |
+| Secrets never copied | 240–266 | `custom_env`/`mcp_config`/`runtime_config` set only from explicit secret-safe flags, never read from the source | `multica agent copy --help` |
+
 Note: the CLI no longer exposes `--from-template`. The agent-template backend
 still exists (registry `server/internal/agenttmpl/`, handler `agent_template.go`,
 routes `GET /api/agent-templates` and `POST /api/agents/from-template`, plus the

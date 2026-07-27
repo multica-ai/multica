@@ -2726,7 +2726,7 @@ func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID 
 // queued chat message could be claimed in the window between the task
 // flipping to 'completed' and chat_session.session_id being refreshed,
 // causing the new task to resume against a stale (or NULL) session.
-func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir string) (*db.AgentTaskQueue, error) {
+func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir string, sessionRolloutMissing bool) (*db.AgentTaskQueue, error) {
 	var task db.AgentTaskQueue
 	// chatAssistantMsg is the single assistant outcome row written for a chat
 	// task inside the completion transaction below. It is broadcast (chat:done)
@@ -2734,10 +2734,11 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	var chatAssistantMsg *db.ChatMessage
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		t, err := qtx.CompleteAgentTask(ctx, db.CompleteAgentTaskParams{
-			ID:        taskID,
-			Result:    result,
-			SessionID: pgtype.Text{String: sessionID, Valid: sessionID != ""},
-			WorkDir:   pgtype.Text{String: workDir, Valid: workDir != ""},
+			ID:                    taskID,
+			Result:                result,
+			SessionID:             pgtype.Text{String: sessionID, Valid: sessionID != ""},
+			WorkDir:               pgtype.Text{String: workDir, Valid: workDir != ""},
+			SessionRolloutMissing: sessionRolloutMissing,
 		})
 		if err != nil {
 			return err
@@ -3066,7 +3067,7 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 // coarse bucket. Daemon callers that already produced a refined reason
 // (via classifyPoisonedError, the timeout / runtime classifier, etc.)
 // will have their value preserved untouched.
-func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string) (*db.AgentTaskQueue, error) {
+func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string, sessionRolloutMissing bool) (*db.AgentTaskQueue, error) {
 	// MUL-2946: synthesise a refined reason from the error text whenever the
 	// caller didn't supply one. This is the last write-path guard against
 	// "agent_error" coarse rows ending up in agent_task_queue.failure_reason
@@ -3123,11 +3124,12 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	var retried *db.AgentTaskQueue
 	if err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		t, err := qtx.FailAgentTask(ctx, db.FailAgentTaskParams{
-			ID:            taskID,
-			Error:         pgtype.Text{String: errMsg, Valid: true},
-			FailureReason: pgtype.Text{String: failureReason, Valid: failureReason != ""},
-			SessionID:     pgtype.Text{String: sessionID, Valid: sessionID != ""},
-			WorkDir:       pgtype.Text{String: workDir, Valid: workDir != ""},
+			ID:                    taskID,
+			Error:                 pgtype.Text{String: errMsg, Valid: true},
+			FailureReason:         pgtype.Text{String: failureReason, Valid: failureReason != ""},
+			SessionID:             pgtype.Text{String: sessionID, Valid: sessionID != ""},
+			WorkDir:               pgtype.Text{String: workDir, Valid: workDir != ""},
+			SessionRolloutMissing: sessionRolloutMissing,
 		})
 		if err != nil {
 			return err

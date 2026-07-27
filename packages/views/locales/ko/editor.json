@@ -34,7 +34,14 @@
     "copy_link": "링크 복사",
     "delete": "삭제",
     "link_copied": "링크를 복사했습니다",
-    "copy_link_failed": "링크를 복사하지 못했습니다"
+    "copy_link_failed": "링크를 복사하지 못했습니다",
+    "canvas_label": "이미지 캔버스. 드래그하여 이동, 스크롤하여 확대/축소, 두 번 클릭하여 실제 크기로 전환할 수 있습니다."
+  },
+  "canvas": {
+    "zoom_in": "확대",
+    "zoom_out": "축소",
+    "zoom_fit": "화면에 맞추기",
+    "zoom_actual": "실제 크기"
   },
   "attachment": {
     "download_failed": "다운로드 링크를 가져오지 못했습니다. 잠시 후 다시 시도하세요.",
@@ -89,11 +96,6 @@
     "copy_source": "다이어그램 소스 복사",
     "show_source": "소스 표시",
     "show_diagram": "다이어그램 표시",
-    "zoom_in": "확대",
-    "zoom_out": "축소",
-    "zoom_fit": "화면에 맞추기",
-    "zoom_actual": "실제 크기",
-    "reset_view": "보기 초기화",
     "export": "내보내기",
     "export_png": "PNG 다운로드",
     "export_svg": "SVG 다운로드",
