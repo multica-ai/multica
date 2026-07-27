@@ -677,7 +677,7 @@ RETURNING storage_key;
 -- claiming the same rows; the object-storage DELETE happens outside any
 -- transaction, gated by the lease token.
 UPDATE channel_media_pending_object AS obj
-SET state = 'deleting',
+SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
     lease_token = @lease_token,
     lease_expires_at = @lease_expires_at,
     attempt = obj.attempt + 1
@@ -687,6 +687,10 @@ FROM (
       AND (
           (cand.state = 'pending' AND cand.created_at <= @pending_settled_before)
           OR (cand.state = 'deleting' AND (cand.lease_expires_at IS NULL OR cand.lease_expires_at <= now()))
+          -- Tombstones: the object was deleted, but a PUT the client abandoned
+          -- may still materialize it afterwards, so each due tombstone gets
+          -- another idempotent delete before the row is finally dropped.
+          OR (cand.state = 'tombstoned' AND (cand.lease_expires_at IS NULL OR cand.lease_expires_at <= now()))
       )
     ORDER BY cand.next_attempt_at
     LIMIT @batch_limit
@@ -724,6 +728,26 @@ WHERE storage_key = @storage_key
   AND workspace_id = @workspace_id
   AND lease_token = @lease_token;
 
+-- name: TombstoneChannelMediaPendingObject :execrows
+-- The object was deleted, but the row is KEPT as a tombstone: a PUT the client
+-- abandoned before the delete may still materialize the object afterwards, and
+-- no DELETE can be ordered against it. Each due tombstone triggers another
+-- idempotent delete, so a late materialization is reclaimed by a later pass;
+-- only after the re-delete schedule is exhausted is the row dropped
+-- (DeleteChannelMediaPendingObject). Lease-token guarded like every other
+-- settle write; workspace_id explicit per the tenancy rule.
+UPDATE channel_media_pending_object
+SET state = 'tombstoned',
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    next_attempt_at = @next_attempt_at,
+    -- last_error doubles as the tombstone's schedule position (a tombstoned
+    -- row has no failure to report); see tombstonePassMarker.
+    last_error = @pass_marker
+WHERE storage_key = @storage_key
+  AND workspace_id = @workspace_id
+  AND lease_token = @lease_token;
+
 -- name: DeleteChannelMediaPendingObject :execrows
 -- Settles a claimed row (object deleted, or a durable attachment reference
 -- was found). Lease-token guarded so an expired-lease reclaim by another
@@ -746,5 +770,10 @@ SELECT EXISTS (
 ) AS referenced;
 
 -- name: CountChannelMediaPendingObjects :one
--- Ledger backlog gauge for the reconciler's observability.
-SELECT count(*) FROM channel_media_pending_object;
+-- Ledger backlog gauge for the reconciler's observability. Tombstones are
+-- reported separately: they are bounded bookkeeping for already-deleted
+-- objects, not a backlog of objects awaiting reclaim.
+SELECT
+    count(*) FILTER (WHERE state <> 'tombstoned') AS pending_objects,
+    count(*) FILTER (WHERE state = 'tombstoned') AS tombstoned_objects
+FROM channel_media_pending_object;

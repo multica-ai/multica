@@ -178,7 +178,7 @@ func (q *Queries) ClaimChannelMediaPendingObjectsForBind(ctx context.Context, ar
 
 const claimChannelMediaPendingObjectsForReconcile = `-- name: ClaimChannelMediaPendingObjectsForReconcile :many
 UPDATE channel_media_pending_object AS obj
-SET state = 'deleting',
+SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
     lease_token = $1,
     lease_expires_at = $2,
     attempt = obj.attempt + 1
@@ -188,6 +188,10 @@ FROM (
       AND (
           (cand.state = 'pending' AND cand.created_at <= $3)
           OR (cand.state = 'deleting' AND (cand.lease_expires_at IS NULL OR cand.lease_expires_at <= now()))
+          -- Tombstones: the object was deleted, but a PUT the client abandoned
+          -- may still materialize it afterwards, so each due tombstone gets
+          -- another idempotent delete before the row is finally dropped.
+          OR (cand.state = 'tombstoned' AND (cand.lease_expires_at IS NULL OR cand.lease_expires_at <= now()))
       )
     ORDER BY cand.next_attempt_at
     LIMIT $4
@@ -277,15 +281,25 @@ func (q *Queries) ConsumeChannelBindingToken(ctx context.Context, tokenHash stri
 }
 
 const countChannelMediaPendingObjects = `-- name: CountChannelMediaPendingObjects :one
-SELECT count(*) FROM channel_media_pending_object
+SELECT
+    count(*) FILTER (WHERE state <> 'tombstoned') AS pending_objects,
+    count(*) FILTER (WHERE state = 'tombstoned') AS tombstoned_objects
+FROM channel_media_pending_object
 `
 
-// Ledger backlog gauge for the reconciler's observability.
-func (q *Queries) CountChannelMediaPendingObjects(ctx context.Context) (int64, error) {
+type CountChannelMediaPendingObjectsRow struct {
+	PendingObjects    int64 `json:"pending_objects"`
+	TombstonedObjects int64 `json:"tombstoned_objects"`
+}
+
+// Ledger backlog gauge for the reconciler's observability. Tombstones are
+// reported separately: they are bounded bookkeeping for already-deleted
+// objects, not a backlog of objects awaiting reclaim.
+func (q *Queries) CountChannelMediaPendingObjects(ctx context.Context) (CountChannelMediaPendingObjectsRow, error) {
 	row := q.db.QueryRow(ctx, countChannelMediaPendingObjects)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+	var i CountChannelMediaPendingObjectsRow
+	err := row.Scan(&i.PendingObjects, &i.TombstonedObjects)
+	return i, err
 }
 
 const createChannelBindingToken = `-- name: CreateChannelBindingToken :one
@@ -1591,6 +1605,49 @@ type SetChannelInstallationStatusParams struct {
 func (q *Queries) SetChannelInstallationStatus(ctx context.Context, arg SetChannelInstallationStatusParams) error {
 	_, err := q.db.Exec(ctx, setChannelInstallationStatus, arg.ID, arg.Status)
 	return err
+}
+
+const tombstoneChannelMediaPendingObject = `-- name: TombstoneChannelMediaPendingObject :execrows
+UPDATE channel_media_pending_object
+SET state = 'tombstoned',
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    next_attempt_at = $1,
+    -- last_error doubles as the tombstone's schedule position (a tombstoned
+    -- row has no failure to report); see tombstonePassMarker.
+    last_error = $2
+WHERE storage_key = $3
+  AND workspace_id = $4
+  AND lease_token = $5
+`
+
+type TombstoneChannelMediaPendingObjectParams struct {
+	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
+	PassMarker    pgtype.Text        `json:"pass_marker"`
+	StorageKey    string             `json:"storage_key"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	LeaseToken    pgtype.UUID        `json:"lease_token"`
+}
+
+// The object was deleted, but the row is KEPT as a tombstone: a PUT the client
+// abandoned before the delete may still materialize the object afterwards, and
+// no DELETE can be ordered against it. Each due tombstone triggers another
+// idempotent delete, so a late materialization is reclaimed by a later pass;
+// only after the re-delete schedule is exhausted is the row dropped
+// (DeleteChannelMediaPendingObject). Lease-token guarded like every other
+// settle write; workspace_id explicit per the tenancy rule.
+func (q *Queries) TombstoneChannelMediaPendingObject(ctx context.Context, arg TombstoneChannelMediaPendingObjectParams) (int64, error) {
+	result, err := q.db.Exec(ctx, tombstoneChannelMediaPendingObject,
+		arg.NextAttemptAt,
+		arg.PassMarker,
+		arg.StorageKey,
+		arg.WorkspaceID,
+		arg.LeaseToken,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const updateChannelChatSessionBindingReplyTarget = `-- name: UpdateChannelChatSessionBindingReplyTarget :exec

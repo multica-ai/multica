@@ -150,8 +150,10 @@ func TestChannelMediaReconciler_SettlesThreeStates(t *testing.T) {
 	if _, _, exists := f.rowState(t, "ws/lark/referenced"); exists {
 		t.Fatal("referenced row must be cleared")
 	}
-	if _, _, exists := f.rowState(t, "ws/lark/orphan"); exists {
-		t.Fatal("orphan row must be cleared after its object is deleted")
+	// The deleted orphan is kept as a tombstone (scheduled re-delete) rather
+	// than cleared, so an abandoned PUT materializing later is still reclaimed.
+	if state, _, exists := f.rowState(t, "ws/lark/orphan"); !exists || state != "tombstoned" {
+		t.Fatalf("orphan row = (%q, %v), want a 'tombstoned' row after its delete", state, exists)
 	}
 	if state, _, exists := f.rowState(t, "ws/lark/young"); !exists || state != "pending" {
 		t.Fatalf("young row = (%q, %v), want untouched 'pending'", state, exists)
@@ -181,8 +183,8 @@ func TestChannelMediaReconciler_ReclaimsExpiredLease(t *testing.T) {
 
 	rec.RunOnce(context.Background())
 
-	if _, _, exists := f.rowState(t, "ws/lark/crashed"); exists {
-		t.Fatal("expired-lease row must be reclaimed and settled")
+	if state, _, exists := f.rowState(t, "ws/lark/crashed"); !exists || state != "tombstoned" {
+		t.Fatalf("expired-lease row = (%q, %v), want reclaimed and settled to 'tombstoned'", state, exists)
 	}
 	if deleted := deleter.deletedKeys(); len(deleted) != 1 || deleted[0] != "ws/lark/crashed" {
 		t.Fatalf("deleted keys = %v, want the reclaimed key", deleted)
@@ -228,8 +230,8 @@ func TestChannelMediaReconciler_DeleteFailureBacksOffThenRetries(t *testing.T) {
 	deleter.err = nil
 	deleter.mu.Unlock()
 	rec.RunOnce(context.Background())
-	if _, _, exists := f.rowState(t, "ws/lark/flaky"); exists {
-		t.Fatal("retried delete must settle the row")
+	if state, _, exists := f.rowState(t, "ws/lark/flaky"); !exists || state != "tombstoned" {
+		t.Fatalf("retried delete row = (%q, %v), want settled to 'tombstoned'", state, exists)
 	}
 }
 
@@ -426,5 +428,120 @@ func TestChannelMediaReconciler_SkipsRowReclaimedMidBatch(t *testing.T) {
 	}
 	if token != foreign {
 		t.Fatalf("lease token = %v, want the new owner's %v", token, foreign)
+	}
+}
+
+// reappearingDeleter models an object store where a PUT the client had already
+// abandoned materializes the object AFTER the reconciler's DELETE completed —
+// the interleaving no DELETE can be ordered against. present tracks whether
+// the object currently exists.
+type reappearingDeleter struct {
+	mu           sync.Mutex
+	present      bool
+	deleteCalls  int
+	lateMaterial func(call int) bool
+}
+
+func (d *reappearingDeleter) DeleteObject(_ context.Context, _ string) error {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.deleteCalls++
+	d.present = false
+	// The abandoned PUT lands right after this delete returned.
+	if d.lateMaterial != nil && d.lateMaterial(d.deleteCalls) {
+		d.present = true
+	}
+	return nil
+}
+
+func (d *reappearingDeleter) state(t *testing.T) (present bool, calls int) {
+	t.Helper()
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.present, d.deleteCalls
+}
+
+// The blocking gap the reviewer identified: DELETE completes, the ledger row
+// would be cleared, and only then does the abandoned PUT materialize the
+// object — leaving an orphan nothing could reclaim. The tombstone schedule
+// closes it: the row survives the delete and each due pass re-deletes, so a
+// late materialization is reclaimed by a later pass and no object survives.
+func TestChannelMediaReconciler_LatePutAfterDeleteIsReclaimedByTombstone(t *testing.T) {
+	pool := newCancelFinalizePool(t)
+	f := seedReconcilerFixture(t, pool)
+	// The object reappears exactly once, right after the first delete.
+	deleter := &reappearingDeleter{present: true, lateMaterial: func(call int) bool { return call == 1 }}
+	rec := &ChannelMediaReconciler{Queries: db.New(pool), Storage: deleter}
+	key := "ws/lark/late-put"
+	f.seedLedgerRow(t, key, "https://cdn.test/late-put", "pending", ChannelMediaReconcileSettleDelay+time.Minute)
+
+	// Pass 1: deletes the orphan; the abandoned PUT lands immediately after.
+	rec.RunOnce(context.Background())
+	present, calls := deleter.state(t)
+	if calls != 1 || !present {
+		t.Fatalf("after first pass: calls=%d present=%v, want 1/true (late PUT landed)", calls, present)
+	}
+	state, _, exists := f.rowState(t, key)
+	if !exists || state != "tombstoned" {
+		t.Fatalf("row = (%q, %v), want a surviving 'tombstoned' row to catch the late object", state, exists)
+	}
+
+	// Walk the whole re-delete schedule; each pass must re-delete.
+	for pass := 2; pass <= len(channelMediaTombstoneRedelete); pass++ {
+		if _, err := pool.Exec(context.Background(), `
+			UPDATE channel_media_pending_object SET next_attempt_at = now() - interval '1 second' WHERE storage_key = $1
+		`, key); err != nil {
+			t.Fatalf("make tombstone due: %v", err)
+		}
+		rec.RunOnce(context.Background())
+		if _, calls := deleter.state(t); calls != pass {
+			t.Fatalf("pass %d: delete calls = %d, want %d", pass, calls, pass)
+		}
+	}
+
+	// The late object is gone and the schedule is exhausted, so the row clears.
+	if present, _ := deleter.state(t); present {
+		t.Fatal("late-materialized object survived the tombstone schedule")
+	}
+	if _, err := pool.Exec(context.Background(), `
+		UPDATE channel_media_pending_object SET next_attempt_at = now() - interval '1 second' WHERE storage_key = $1
+	`, key); err != nil {
+		t.Fatalf("make tombstone due: %v", err)
+	}
+	rec.RunOnce(context.Background())
+	if state, _, exists := f.rowState(t, key); exists {
+		t.Fatalf("row = %q, want cleared once the re-delete schedule is exhausted", state)
+	}
+}
+
+// A tombstone whose object stayed gone still walks its schedule and then
+// clears, and the object-deleted metric counts the object once (not once per
+// re-delete pass).
+func TestChannelMediaReconciler_TombstoneSchedulesThenClears(t *testing.T) {
+	pool := newCancelFinalizePool(t)
+	f := seedReconcilerFixture(t, pool)
+	deleter := &fakeObjectDeleter{}
+	rec := &ChannelMediaReconciler{Queries: db.New(pool), Storage: deleter}
+	key := "ws/lark/tombstone-walk"
+	f.seedLedgerRow(t, key, "https://cdn.test/tombstone-walk", "pending", ChannelMediaReconcileSettleDelay+time.Minute)
+
+	for pass := 1; pass <= len(channelMediaTombstoneRedelete); pass++ {
+		rec.RunOnce(context.Background())
+		state, _, exists := f.rowState(t, key)
+		if !exists || state != "tombstoned" {
+			t.Fatalf("pass %d: row = (%q, %v), want 'tombstoned'", pass, state, exists)
+		}
+		if _, err := pool.Exec(context.Background(), `
+			UPDATE channel_media_pending_object SET next_attempt_at = now() - interval '1 second' WHERE storage_key = $1
+		`, key); err != nil {
+			t.Fatalf("make tombstone due: %v", err)
+		}
+	}
+	rec.RunOnce(context.Background())
+	if _, _, exists := f.rowState(t, key); exists {
+		t.Fatal("row must clear after the schedule is exhausted")
+	}
+	if got := len(deleter.deletedKeys()); got != len(channelMediaTombstoneRedelete)+1 {
+		t.Fatalf("delete calls = %d, want one per pass plus the final one", got)
 	}
 }

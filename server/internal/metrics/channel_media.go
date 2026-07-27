@@ -12,6 +12,7 @@ type ChannelMediaReconcilerMetrics struct {
 	RowsReferenced prometheus.Counter
 	DeleteFailures prometheus.Counter
 	Backlog        prometheus.Gauge
+	Tombstones     prometheus.Gauge
 }
 
 func NewChannelMediaReconcilerMetrics() *ChannelMediaReconcilerMetrics {
@@ -38,11 +39,17 @@ func NewChannelMediaReconcilerMetrics() *ChannelMediaReconcilerMetrics {
 			Namespace: "multica",
 			Subsystem: "channel_media",
 			Name:      "pending_objects",
-			Help:      "Rows currently in the media intent ledger.",
+			Help:      "Live intent rows awaiting bind or reclaim (excludes tombstones).",
+		}),
+		Tombstones: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "multica",
+			Subsystem: "channel_media",
+			Name:      "tombstoned_objects",
+			Help:      "Deleted objects still tombstoned for scheduled re-deletion.",
 		}),
 	}
 }
 
 func (m *ChannelMediaReconcilerMetrics) Collectors() []prometheus.Collector {
-	return []prometheus.Collector{m.ObjectsDeleted, m.RowsReferenced, m.DeleteFailures, m.Backlog}
+	return []prometheus.Collector{m.ObjectsDeleted, m.RowsReferenced, m.DeleteFailures, m.Backlog, m.Tombstones}
 }

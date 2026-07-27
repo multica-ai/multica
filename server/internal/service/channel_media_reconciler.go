@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"log/slog"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -14,13 +16,25 @@ import (
 
 // The channel-media intent ledger's reconciler settings are fixed constants,
 // not configuration: whether they ever need tuning is decided from the
-// reconciler metrics, and — the load-bearing property — the settle delay
-// carries NO correctness weight. Correctness comes from the ledger state
-// machine: once a claim flips a row to 'deleting', BindMediaRefs can never
-// attach that key, so the post-claim reference check cannot race a late
-// COMMIT. The settle delay is only an operational buffer that keeps the
-// reconciler from doing wasted work while the normal pipeline is still
-// running; the tested invariant is settle >> every media/HTTP/DB budget in
+// reconciler metrics.
+//
+// What the state machine fences, and what the schedule fences:
+//
+//   - bind vs. delete is fenced by STATE. Once a claim flips a row to
+//     'deleting', neither a new upload nor BindMediaRefs can resurrect or
+//     attach that key, so the post-claim reference check cannot race a late
+//     COMMIT. No timing assumption is involved.
+//   - a PUT the client already abandoned cannot be ordered against a DELETE at
+//     all: the store may materialize the object after the delete completes.
+//     That is fenced by the TOMBSTONE schedule instead of by a single timing
+//     bet: after deleting an unreferenced object the row is kept and the
+//     object re-deleted on a widening schedule, so a late materialization is
+//     reclaimed by a later pass. Escaping requires the object to appear only
+//     after the whole schedule has elapsed (see channelMediaTombstoneRedelete).
+//
+// The settle delay therefore carries no correctness weight for bind/commit and
+// only sets how long the reconciler waits before treating a pending row as
+// abandoned; the tested invariant is settle >> every media/HTTP/DB budget in
 // the pipeline (see cmd/server channel media invariant test).
 const (
 	// ChannelMediaReconcileSettleDelay is how long a 'pending' row must sit
@@ -47,6 +61,19 @@ const (
 	// before any replica could reclaim the row.
 	channelMediaReconcileDeleteTimeout = 30 * time.Second
 )
+
+// channelMediaTombstoneRedelete is the widening re-delete schedule for a
+// tombstoned row, indexed by how many settle passes it has already had. A PUT
+// abandoned by its client can still materialize the object after the delete,
+// so each entry triggers another idempotent delete; the row is dropped only
+// after the last one. Total coverage ~31h, versus the ~seconds a store keeps
+// an abandoned request alive.
+var channelMediaTombstoneRedelete = []time.Duration{
+	15 * time.Minute,
+	time.Hour,
+	6 * time.Hour,
+	24 * time.Hour,
+}
 
 // MediaObjectDeleter is the single storage capability the reconciler needs —
 // Delete with the error surfaced so failures go to backoff instead of being
@@ -132,8 +159,9 @@ func (r *ChannelMediaReconciler) RunOnce(ctx context.Context) {
 		r.settle(ctx, row, leaseToken)
 	}
 	if r.Metrics != nil {
-		if backlog, err := r.Queries.CountChannelMediaPendingObjects(ctx); err == nil {
-			r.Metrics.Backlog.Set(float64(backlog))
+		if counts, err := r.Queries.CountChannelMediaPendingObjects(ctx); err == nil {
+			r.Metrics.Backlog.Set(float64(counts.PendingObjects))
+			r.Metrics.Tombstones.Set(float64(counts.TombstonedObjects))
 		}
 	}
 }
@@ -206,16 +234,87 @@ func (r *ChannelMediaReconciler) settle(ctx context.Context, row db.ChannelMedia
 		r.release(ctx, row, leaseToken, err)
 		return
 	}
+	// The delete succeeded, but an abandoned PUT may still materialize this
+	// object afterwards. Keep the row as a tombstone and re-delete on the
+	// widening schedule; drop it only once the schedule is exhausted.
+	if next, idx, ok := r.nextTombstonePass(row); ok {
+		if r.tombstoneRow(ctx, row, leaseToken, next, idx) {
+			r.logger().Info("channel media reconciler: deleted unreferenced object; tombstoned for re-delete",
+				"storage_key", row.StorageKey,
+				"workspace_id", row.WorkspaceID,
+				"chat_message_id", row.ChatMessageID,
+				"attempt", row.Attempt,
+				"next_redelete_in", next)
+			if r.Metrics != nil && row.State != tombstonedState {
+				// Count the object once, on the delete that first removed it.
+				r.Metrics.ObjectsDeleted.Inc()
+			}
+		}
+		return
+	}
 	if r.clearRow(ctx, row, leaseToken) {
-		r.logger().Info("channel media reconciler: deleted unreferenced object",
+		r.logger().Info("channel media reconciler: tombstone schedule exhausted; ledger row cleared",
 			"storage_key", row.StorageKey,
 			"workspace_id", row.WorkspaceID,
 			"chat_message_id", row.ChatMessageID,
 			"attempt", row.Attempt)
-		if r.Metrics != nil {
-			r.Metrics.ObjectsDeleted.Inc()
-		}
 	}
+}
+
+const tombstonedState = "tombstoned"
+
+// nextTombstoneDelay returns the delay before this row's next re-delete pass,
+// or ok=false when the schedule is exhausted and the row may be dropped.
+//
+// The pass index is carried by last_error: a tombstone stores its schedule
+// position there (the column is otherwise only used for failure diagnostics,
+// and a tombstoned row has no failure). A row deleted for the first time
+// (state 'deleting') starts at index 0.
+func (r *ChannelMediaReconciler) nextTombstonePass(row db.ChannelMediaPendingObject) (delay time.Duration, idx int, ok bool) {
+	idx = 0
+	if row.State == tombstonedState {
+		idx = tombstonePassFromMarker(row.LastError) + 1
+	}
+	if idx >= len(channelMediaTombstoneRedelete) {
+		return 0, 0, false
+	}
+	return channelMediaTombstoneRedelete[idx], idx, true
+}
+
+// tombstonePassMarker/tombstonePassFromMarker encode the tombstone's schedule
+// position in last_error. An unparseable or absent marker restarts the
+// schedule, which is the safe direction (one extra re-delete beats dropping
+// the tombstone early).
+const tombstonePassPrefix = "tombstone_pass="
+
+func tombstonePassMarker(idx int) string {
+	return tombstonePassPrefix + strconv.Itoa(idx)
+}
+
+func tombstonePassFromMarker(marker pgtype.Text) int {
+	if !marker.Valid || !strings.HasPrefix(marker.String, tombstonePassPrefix) {
+		return 0
+	}
+	n, err := strconv.Atoi(strings.TrimPrefix(marker.String, tombstonePassPrefix))
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+func (r *ChannelMediaReconciler) tombstoneRow(ctx context.Context, row db.ChannelMediaPendingObject, leaseToken pgtype.UUID, next time.Duration, idx int) bool {
+	n, err := r.Queries.TombstoneChannelMediaPendingObject(ctx, db.TombstoneChannelMediaPendingObjectParams{
+		StorageKey:    row.StorageKey,
+		WorkspaceID:   row.WorkspaceID,
+		LeaseToken:    leaseToken,
+		NextAttemptAt: pgtype.Timestamptz{Time: r.clock().Add(next), Valid: true},
+		PassMarker:    pgtype.Text{String: tombstonePassMarker(idx), Valid: true},
+	})
+	if err != nil {
+		r.logger().Warn("channel media reconciler: tombstone failed", "storage_key", row.StorageKey, "error", err)
+		return false
+	}
+	return n > 0
 }
 
 // release keeps the row in 'deleting' (a bind must still never attach it),
