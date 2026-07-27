@@ -53,7 +53,7 @@ UPDATE agent SET
     context_version = $9,
     updated_at      = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
 `
 
 type ApplyAgentContextSnapshotParams struct {
@@ -109,6 +109,7 @@ func (q *Queries) ApplyAgentContextSnapshot(ctx context.Context, arg ApplyAgentC
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.PersonaSandbox,
 		&i.SurfaceVisibility,
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
@@ -122,7 +123,7 @@ UPDATE agent SET
     context_version = $2,
     updated_at      = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
 `
 
 type BumpAgentContextVersionParams struct {
@@ -159,6 +160,7 @@ func (q *Queries) BumpAgentContextVersion(ctx context.Context, arg BumpAgentCont
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.PersonaSandbox,
 		&i.SurfaceVisibility,
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
@@ -327,7 +329,7 @@ func (q *Queries) GetAgentChangeRequestForUpdate(ctx context.Context, id pgtype.
 const getAgentContext = `-- name: GetAgentContext :one
 
 
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
 WHERE id = $1
 `
 
@@ -365,6 +367,7 @@ func (q *Queries) GetAgentContext(ctx context.Context, id pgtype.UUID) (Agent, e
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.PersonaSandbox,
 		&i.SurfaceVisibility,
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
@@ -374,7 +377,7 @@ func (q *Queries) GetAgentContext(ctx context.Context, id pgtype.UUID) (Agent, e
 }
 
 const getAgentContextInWorkspace = `-- name: GetAgentContextInWorkspace :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -409,6 +412,7 @@ func (q *Queries) GetAgentContextInWorkspace(ctx context.Context, arg GetAgentCo
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.PersonaSandbox,
 		&i.SurfaceVisibility,
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
@@ -899,7 +903,7 @@ func (q *Queries) ListAgentSkillsForContextLint(ctx context.Context, agentID pgt
 }
 
 const listAgentsForContextLint = `-- name: ListAgentsForContextLint :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
 WHERE workspace_id = $1 AND archived_at IS NULL
 ORDER BY name
 `
@@ -938,6 +942,7 @@ func (q *Queries) ListAgentsForContextLint(ctx context.Context, workspaceID pgty
 			&i.McpConfig,
 			&i.Model,
 			&i.ThinkingLevel,
+			&i.PersonaSandbox,
 			&i.SurfaceVisibility,
 			&i.ContextOwnerID,
 			&i.ContextApproverIds,
@@ -1132,7 +1137,7 @@ UPDATE agent SET
     context_approver_ids = $3,
     updated_at           = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
 `
 
 type UpdateAgentContextOwnershipParams struct {
@@ -1168,6 +1173,7 @@ func (q *Queries) UpdateAgentContextOwnership(ctx context.Context, arg UpdateAge
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
+		&i.PersonaSandbox,
 		&i.SurfaceVisibility,
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,

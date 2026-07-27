@@ -53,6 +53,7 @@ type Agent struct {
 	McpConfig          []byte             `json:"mcp_config"`
 	Model              pgtype.Text        `json:"model"`
 	ThinkingLevel      pgtype.Text        `json:"thinking_level"`
+	PersonaSandbox     pgtype.Text        `json:"persona_sandbox"`
 	SurfaceVisibility  []byte             `json:"surface_visibility"`
 	ContextOwnerID     pgtype.UUID        `json:"context_owner_id"`
 	ContextApproverIds []pgtype.UUID      `json:"context_approver_ids"`
@@ -120,6 +121,7 @@ type AgentRuntime struct {
 	PauseReason      pgtype.Text        `json:"pause_reason"`
 	CurrentAccountID pgtype.UUID        `json:"current_account_id"`
 	PresentationMode string             `json:"presentation_mode"`
+	PersonaSandbox   pgtype.Text        `json:"persona_sandbox"`
 	Capabilities     []byte             `json:"capabilities"`
 	CliVersion       pgtype.Text        `json:"cli_version"`
 	ToolsConfig      []byte             `json:"tools_config"`

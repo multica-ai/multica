@@ -110,7 +110,7 @@ func (q *Queries) ClaimFirtalGatewayTask(ctx context.Context, runtimeID pgtype.U
 }
 
 const listFirtalGatewayRuntimes = `-- name: ListFirtalGatewayRuntimes :many
-SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, sandbox_enabled, visibility, profile_id, paused_at, unpause_at, pause_reason, current_account_id, presentation_mode, persona_sandbox, capabilities, cli_version, tools_config, sandbox_policy, auto_pause_count FROM agent_runtime
 WHERE provider = $1
   AND daemon_id = $2
   AND status = 'online'
@@ -154,6 +154,7 @@ func (q *Queries) ListFirtalGatewayRuntimes(ctx context.Context, arg ListFirtalG
 			&i.PauseReason,
 			&i.CurrentAccountID,
 			&i.PresentationMode,
+			&i.PersonaSandbox,
 			&i.Capabilities,
 			&i.CliVersion,
 			&i.ToolsConfig,
