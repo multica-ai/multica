@@ -331,6 +331,7 @@ type ChannelMediaPendingObject struct {
 	Attempt        int32              `json:"attempt"`
 	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
 	LastError      pgtype.Text        `json:"last_error"`
+	TombstonePass  int32              `json:"tombstone_pass"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 

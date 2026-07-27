@@ -3,8 +3,6 @@ package service
 import (
 	"context"
 	"log/slog"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -63,11 +61,11 @@ const (
 )
 
 // channelMediaTombstoneRedelete is the widening re-delete schedule for a
-// tombstoned row, indexed by how many settle passes it has already had. A PUT
-// abandoned by its client can still materialize the object after the delete,
-// so each entry triggers another idempotent delete; the row is dropped only
-// after the last one. Total coverage ~31h, versus the ~seconds a store keeps
-// an abandoned request alive.
+// tombstoned row, indexed by the row's tombstone_pass. A PUT abandoned by its
+// client can still materialize the object after the delete, so each entry
+// triggers another idempotent delete; the row is dropped only after the last
+// one. Total coverage ~31h, versus the ~seconds a store keeps an abandoned
+// request alive.
 var channelMediaTombstoneRedelete = []time.Duration{
 	15 * time.Minute,
 	time.Hour,
@@ -256,11 +254,17 @@ func (r *ChannelMediaReconciler) settleDeletedObject(ctx context.Context, row db
 	// widening schedule; drop it only once the schedule is exhausted.
 	if next, idx, ok := r.nextTombstonePass(row); ok {
 		if r.tombstoneRow(ctx, row, leaseToken, next, idx) {
-			r.logger().Info("channel media reconciler: deleted unreferenced object; tombstoned for re-delete",
+			msg := "channel media reconciler: deleted unreferenced object; tombstoned for re-delete"
+			if row.State == tombstonedState {
+				// Re-delete passes are idempotent: usually nothing was there.
+				msg = "channel media reconciler: tombstone re-delete pass done"
+			}
+			r.logger().Info(msg,
 				"storage_key", row.StorageKey,
 				"workspace_id", row.WorkspaceID,
 				"chat_message_id", row.ChatMessageID,
 				"attempt", row.Attempt,
+				"tombstone_pass", idx,
 				"next_redelete_in", next)
 			if r.Metrics != nil && row.State != tombstonedState {
 				// Count the object once, on the delete that first removed it.
@@ -280,43 +284,21 @@ func (r *ChannelMediaReconciler) settleDeletedObject(ctx context.Context, row db
 
 const tombstonedState = "tombstoned"
 
-// nextTombstoneDelay returns the delay before this row's next re-delete pass,
-// or ok=false when the schedule is exhausted and the row may be dropped.
-//
-// The pass index is carried by last_error: a tombstone stores its schedule
-// position there (the column is otherwise only used for failure diagnostics,
-// and a tombstoned row has no failure). A row deleted for the first time
-// (state 'deleting') starts at index 0.
+// nextTombstonePass returns the delay before this row's next re-delete pass
+// and the schedule position to record, or ok=false when the schedule is
+// exhausted and the row may be dropped. A row deleted for the first time
+// (state 'deleting') starts at index 0; a tombstone advances from the
+// tombstone_pass its last successful delete recorded, so a failed re-delete
+// in between (which only writes last_error/attempt) cannot restart the walk.
 func (r *ChannelMediaReconciler) nextTombstonePass(row db.ChannelMediaPendingObject) (delay time.Duration, idx int, ok bool) {
 	idx = 0
 	if row.State == tombstonedState {
-		idx = tombstonePassFromMarker(row.LastError) + 1
+		idx = int(row.TombstonePass) + 1
 	}
 	if idx >= len(channelMediaTombstoneRedelete) {
 		return 0, 0, false
 	}
 	return channelMediaTombstoneRedelete[idx], idx, true
-}
-
-// tombstonePassMarker/tombstonePassFromMarker encode the tombstone's schedule
-// position in last_error. An unparseable or absent marker restarts the
-// schedule, which is the safe direction (one extra re-delete beats dropping
-// the tombstone early).
-const tombstonePassPrefix = "tombstone_pass="
-
-func tombstonePassMarker(idx int) string {
-	return tombstonePassPrefix + strconv.Itoa(idx)
-}
-
-func tombstonePassFromMarker(marker pgtype.Text) int {
-	if !marker.Valid || !strings.HasPrefix(marker.String, tombstonePassPrefix) {
-		return 0
-	}
-	n, err := strconv.Atoi(strings.TrimPrefix(marker.String, tombstonePassPrefix))
-	if err != nil || n < 0 {
-		return 0
-	}
-	return n
 }
 
 func (r *ChannelMediaReconciler) tombstoneRow(ctx context.Context, row db.ChannelMediaPendingObject, leaseToken pgtype.UUID, next time.Duration, idx int) bool {
@@ -325,7 +307,7 @@ func (r *ChannelMediaReconciler) tombstoneRow(ctx context.Context, row db.Channe
 		WorkspaceID:   row.WorkspaceID,
 		LeaseToken:    leaseToken,
 		NextAttemptAt: pgtype.Timestamptz{Time: r.clock().Add(next), Valid: true},
-		PassMarker:    pgtype.Text{String: tombstonePassMarker(idx), Valid: true},
+		TombstonePass: int32(idx),
 	})
 	if err != nil {
 		r.logger().Warn("channel media reconciler: tombstone failed", "storage_key", row.StorageKey, "error", err)

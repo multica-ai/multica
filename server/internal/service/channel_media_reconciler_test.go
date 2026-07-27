@@ -120,6 +120,28 @@ func (f reconcilerFixture) rowState(t *testing.T, key string) (state string, att
 	return state, attempt, true
 }
 
+func (f reconcilerFixture) tombstonePass(t *testing.T, key string) int {
+	t.Helper()
+	var pass int
+	if err := f.pool.QueryRow(context.Background(), `
+		SELECT tombstone_pass FROM channel_media_pending_object WHERE storage_key = $1
+	`, key).Scan(&pass); err != nil {
+		t.Fatalf("read tombstone_pass: %v", err)
+	}
+	return pass
+}
+
+// makeDue moves a row's next_attempt_at into the past so the next sweep claims
+// it, without waiting out the real schedule.
+func (f reconcilerFixture) makeDue(t *testing.T, key string) {
+	t.Helper()
+	if _, err := f.pool.Exec(context.Background(), `
+		UPDATE channel_media_pending_object SET next_attempt_at = now() - interval '1 second' WHERE storage_key = $1
+	`, key); err != nil {
+		t.Fatalf("make row due: %v", err)
+	}
+}
+
 func (f reconcilerFixture) bindAttachment(t *testing.T, url string) {
 	t.Helper()
 	if _, err := f.pool.Exec(context.Background(), `
@@ -579,5 +601,61 @@ func TestChannelMediaReconciler_TombstoneIgnoresLaterAttachmentWithSameURL(t *te
 	}
 	if state, _, exists := f.rowState(t, key); !exists || state != "tombstoned" {
 		t.Fatalf("row = (%q, %v), want the re-delete schedule to continue", state, exists)
+	}
+}
+
+// A failed re-delete must not restart the tombstone schedule. The failure
+// writes last_error, so a schedule position carried there would be erased and
+// the walk would begin again — with a store failing intermittently the row
+// would never reach the end of the schedule and never be dropped. The position
+// lives in its own column, so a failure only costs one backed-off retry.
+func TestChannelMediaReconciler_TombstonePassSurvivesDeleteFailure(t *testing.T) {
+	pool := newCancelFinalizePool(t)
+	f := seedReconcilerFixture(t, pool)
+	deleter := &fakeObjectDeleter{}
+	rec := &ChannelMediaReconciler{Queries: db.New(pool), Storage: deleter}
+	key := "ws/lark/tombstone-pass-survives"
+	f.seedLedgerRow(t, key, "https://cdn.test/tombstone-pass-survives", "pending", ChannelMediaReconcileSettleDelay+time.Minute)
+
+	// First settle deletes the object and starts the schedule at pass 0.
+	rec.RunOnce(context.Background())
+	if got := f.tombstonePass(t, key); got != 0 {
+		t.Fatalf("tombstone_pass = %d after the first delete, want 0", got)
+	}
+
+	// One re-delete pass lands, advancing the schedule.
+	f.makeDue(t, key)
+	rec.RunOnce(context.Background())
+	if got := f.tombstonePass(t, key); got != 1 {
+		t.Fatalf("tombstone_pass = %d after one re-delete, want 1", got)
+	}
+
+	// The next re-delete fails: the row backs off, keeps its position, and
+	// records the failure in last_error.
+	deleter.err = errors.New("storage unavailable")
+	f.makeDue(t, key)
+	rec.RunOnce(context.Background())
+	if state, _, exists := f.rowState(t, key); !exists || state != "tombstoned" {
+		t.Fatalf("row = (%q, %v), want the failed re-delete to leave a tombstone", state, exists)
+	}
+	if got := f.tombstonePass(t, key); got != 1 {
+		t.Fatalf("tombstone_pass = %d after a failed re-delete, want it held at 1", got)
+	}
+
+	// Recovery resumes the walk instead of restarting it.
+	deleter.err = nil
+	f.makeDue(t, key)
+	rec.RunOnce(context.Background())
+	if got := f.tombstonePass(t, key); got != 2 {
+		t.Fatalf("tombstone_pass = %d after recovery, want the schedule to resume at 2", got)
+	}
+
+	// And the remaining passes still terminate the row.
+	for range channelMediaTombstoneRedelete[2:] {
+		f.makeDue(t, key)
+		rec.RunOnce(context.Background())
+	}
+	if state, _, exists := f.rowState(t, key); exists {
+		t.Fatalf("row = %q, want it dropped once the schedule is exhausted", state)
 	}
 }

@@ -198,7 +198,7 @@ FROM (
     FOR UPDATE SKIP LOCKED
 ) AS due
 WHERE obj.storage_key = due.storage_key
-RETURNING obj.storage_key, obj.workspace_id, obj.chat_message_id, obj.storage_url, obj.installation_id, obj.state, obj.lease_token, obj.lease_expires_at, obj.attempt, obj.next_attempt_at, obj.last_error, obj.created_at
+RETURNING obj.storage_key, obj.workspace_id, obj.chat_message_id, obj.storage_url, obj.installation_id, obj.state, obj.lease_token, obj.lease_expires_at, obj.attempt, obj.next_attempt_at, obj.last_error, obj.tombstone_pass, obj.created_at
 `
 
 type ClaimChannelMediaPendingObjectsForReconcileParams struct {
@@ -241,6 +241,7 @@ func (q *Queries) ClaimChannelMediaPendingObjectsForReconcile(ctx context.Contex
 			&i.Attempt,
 			&i.NextAttemptAt,
 			&i.LastError,
+			&i.TombstonePass,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -626,8 +627,9 @@ type DeleteChannelMediaPendingObjectParams struct {
 	LeaseToken  pgtype.UUID `json:"lease_token"`
 }
 
-// Settles a claimed row (object deleted, or a durable attachment reference
-// was found). Lease-token guarded so an expired-lease reclaim by another
+// Drops a claimed row for good: a durable attachment reference was found, or
+// the tombstone's re-delete schedule is exhausted. Lease-token guarded so an
+// expired-lease reclaim by another
 // replica cannot be clobbered; workspace_id explicit per the tenancy rule.
 func (q *Queries) DeleteChannelMediaPendingObject(ctx context.Context, arg DeleteChannelMediaPendingObjectParams) (int64, error) {
 	result, err := q.db.Exec(ctx, deleteChannelMediaPendingObject, arg.StorageKey, arg.WorkspaceID, arg.LeaseToken)
@@ -1613,9 +1615,13 @@ SET state = 'tombstoned',
     lease_token = NULL,
     lease_expires_at = NULL,
     next_attempt_at = $1,
-    -- last_error doubles as the tombstone's schedule position (a tombstoned
-    -- row has no failure to report); see tombstonePassMarker.
-    last_error = $2
+    -- The pass index lives in its own column: a failed re-delete writes
+    -- last_error, so carrying the schedule position there would reset the
+    -- walk on every failure and a flaky store could keep the row alive
+    -- indefinitely. The delete that got here succeeded, so any previous
+    -- failure text is stale.
+    tombstone_pass = $2,
+    last_error = NULL
 WHERE storage_key = $3
   AND workspace_id = $4
   AND lease_token = $5
@@ -1623,7 +1629,7 @@ WHERE storage_key = $3
 
 type TombstoneChannelMediaPendingObjectParams struct {
 	NextAttemptAt pgtype.Timestamptz `json:"next_attempt_at"`
-	PassMarker    pgtype.Text        `json:"pass_marker"`
+	TombstonePass int32              `json:"tombstone_pass"`
 	StorageKey    string             `json:"storage_key"`
 	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
 	LeaseToken    pgtype.UUID        `json:"lease_token"`
@@ -1639,7 +1645,7 @@ type TombstoneChannelMediaPendingObjectParams struct {
 func (q *Queries) TombstoneChannelMediaPendingObject(ctx context.Context, arg TombstoneChannelMediaPendingObjectParams) (int64, error) {
 	result, err := q.db.Exec(ctx, tombstoneChannelMediaPendingObject,
 		arg.NextAttemptAt,
-		arg.PassMarker,
+		arg.TombstonePass,
 		arg.StorageKey,
 		arg.WorkspaceID,
 		arg.LeaseToken,

@@ -20,7 +20,8 @@
 -- ledger row and nothing to reclaim it, which would make the settle delay the
 -- de-facto correctness barrier for the PUT/DELETE race. Instead the row stays
 -- as a tombstone and the object is re-deleted on a widening schedule
--- (attempt-indexed), so a late materialization is caught by a later pass.
+-- (tombstone_pass-indexed), so a late materialization is caught by a later
+-- pass.
 -- storage_key is the logical primary key, attached in migration 228 via a
 -- CONCURRENTLY-built unique index (227) per the repo convention that every
 -- migration index — including a new table's unique index — is created
@@ -40,5 +41,10 @@ CREATE TABLE channel_media_pending_object (
     attempt          INT NOT NULL DEFAULT 0,
     next_attempt_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     last_error       TEXT,
+    -- Position in the tombstone re-delete schedule. Its own column rather
+    -- than a marker inside last_error: a failed re-delete writes last_error,
+    -- which would erase the schedule position and restart the walk, so a
+    -- store failing intermittently could keep a tombstone alive forever.
+    tombstone_pass   INT NOT NULL DEFAULT 0,
     created_at       TIMESTAMPTZ NOT NULL DEFAULT now()
 );

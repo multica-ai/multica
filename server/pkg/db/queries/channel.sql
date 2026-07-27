@@ -741,16 +741,21 @@ SET state = 'tombstoned',
     lease_token = NULL,
     lease_expires_at = NULL,
     next_attempt_at = @next_attempt_at,
-    -- last_error doubles as the tombstone's schedule position (a tombstoned
-    -- row has no failure to report); see tombstonePassMarker.
-    last_error = @pass_marker
+    -- The pass index lives in its own column: a failed re-delete writes
+    -- last_error, so carrying the schedule position there would reset the
+    -- walk on every failure and a flaky store could keep the row alive
+    -- indefinitely. The delete that got here succeeded, so any previous
+    -- failure text is stale.
+    tombstone_pass = @tombstone_pass,
+    last_error = NULL
 WHERE storage_key = @storage_key
   AND workspace_id = @workspace_id
   AND lease_token = @lease_token;
 
 -- name: DeleteChannelMediaPendingObject :execrows
--- Settles a claimed row (object deleted, or a durable attachment reference
--- was found). Lease-token guarded so an expired-lease reclaim by another
+-- Drops a claimed row for good: a durable attachment reference was found, or
+-- the tombstone's re-delete schedule is exhausted. Lease-token guarded so an
+-- expired-lease reclaim by another
 -- replica cannot be clobbered; workspace_id explicit per the tenancy rule.
 DELETE FROM channel_media_pending_object
 WHERE storage_key = @storage_key
