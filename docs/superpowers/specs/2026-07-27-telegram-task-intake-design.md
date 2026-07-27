@@ -48,7 +48,11 @@ cannot link.
   precedent — see Constraints).
 - Sender allowlist config (superseded: linking + workspace membership is the gate).
 - Long-polling delivery.
-- Hosted Telegram OAuth / bot provisioning.
+- A single Multica-operated shared bot identity (e.g. one `@MulticaBot`). v1 is
+  **BYO token** — the admin creates the bot with @BotFather and pastes the token;
+  Multica still hosts and runs the bot (webhook endpoint + replies). A shared hosted
+  bot doesn't fit self-hosted deployments and complicates routing (one bot id, no
+  per-install routing key), so it's a later Multica-cloud-only addition.
 
 ## Constraints & decisions
 
