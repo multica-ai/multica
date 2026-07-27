@@ -178,7 +178,7 @@ func (q *Queries) ClaimChannelMediaPendingObjectsForBind(ctx context.Context, ar
 	return items, nil
 }
 
-const claimChannelMediaPendingObjectsForReconcile = `-- name: ClaimChannelMediaPendingObjectsForReconcile :many
+const claimNextChannelMediaPendingObjectForReconcile = `-- name: ClaimNextChannelMediaPendingObjectForReconcile :one
 UPDATE channel_media_pending_object AS obj
 SET state = CASE WHEN obj.state = 'tombstoned' THEN 'tombstoned' ELSE 'deleting' END,
     lease_token = $1,
@@ -190,70 +190,57 @@ FROM (
       AND (
           (cand.state = 'pending' AND cand.created_at <= now() - $3::interval)
           OR (cand.state = 'deleting' AND (cand.lease_expires_at IS NULL OR cand.lease_expires_at <= now()))
-          -- Tombstones: the object was deleted, but a PUT the client abandoned
-          -- may still materialize it afterwards, so each due tombstone gets
-          -- another idempotent delete before the row is finally dropped.
           OR (cand.state = 'tombstoned' AND (cand.lease_expires_at IS NULL OR cand.lease_expires_at <= now()))
       )
     ORDER BY cand.next_attempt_at
-    LIMIT $4
+    LIMIT 1
     FOR UPDATE SKIP LOCKED
 ) AS due
 WHERE obj.storage_key = due.storage_key
 RETURNING obj.storage_key, obj.workspace_id, obj.chat_message_id, obj.storage_url, obj.installation_id, obj.state, obj.lease_token, obj.lease_expires_at, obj.attempt, obj.next_attempt_at, obj.last_error, obj.tombstone_pass, obj.created_at
 `
 
-type ClaimChannelMediaPendingObjectsForReconcileParams struct {
+type ClaimNextChannelMediaPendingObjectForReconcileParams struct {
 	LeaseToken  pgtype.UUID     `json:"lease_token"`
 	Lease       pgtype.Interval `json:"lease"`
 	SettleDelay pgtype.Interval `json:"settle_delay"`
-	BatchLimit  int32           `json:"batch_limit"`
 }
 
-// Short-transaction claim: flips due rows to 'deleting' under a fresh lease.
+// Short-transaction claim of ONE due row, taken immediately before that row is
+// settled. Claiming a whole batch up front made the claim a promise the sweep
+// might not keep: a tail row sat in 'deleting' with attempt already bumped
+// while earlier rows ran, and could expire and be reclaimed before its own
+// DELETE was ever tried, inflating attempt/backoff for work that never
+// happened. One row per claim means attempt counts attempts.
+//
 // Due means (a) 'pending' rows older than the settle delay — an operational
 // buffer only; correctness comes from the state flip, after which a bind can
 // never succeed on the key — or (b) 'deleting' rows whose lease expired (a
-// crashed or failed worker). FOR UPDATE SKIP LOCKED keeps replicas from
-// claiming the same rows; the object-storage DELETE happens outside any
-// transaction, gated by the lease token.
-func (q *Queries) ClaimChannelMediaPendingObjectsForReconcile(ctx context.Context, arg ClaimChannelMediaPendingObjectsForReconcileParams) ([]ChannelMediaPendingObject, error) {
-	rows, err := q.db.Query(ctx, claimChannelMediaPendingObjectsForReconcile,
-		arg.LeaseToken,
-		arg.Lease,
-		arg.SettleDelay,
-		arg.BatchLimit,
+// crashed or failed worker) — or (c) tombstones: the object was deleted, but a
+// PUT the client abandoned may still materialize it afterwards, so each due
+// tombstone gets another idempotent delete before the row is finally dropped.
+// FOR UPDATE SKIP LOCKED keeps replicas off each other's row; the
+// object-storage DELETE happens outside any transaction, gated by the lease
+// token. No row (ErrNoRows) means nothing is due — the sweep is done.
+func (q *Queries) ClaimNextChannelMediaPendingObjectForReconcile(ctx context.Context, arg ClaimNextChannelMediaPendingObjectForReconcileParams) (ChannelMediaPendingObject, error) {
+	row := q.db.QueryRow(ctx, claimNextChannelMediaPendingObjectForReconcile, arg.LeaseToken, arg.Lease, arg.SettleDelay)
+	var i ChannelMediaPendingObject
+	err := row.Scan(
+		&i.StorageKey,
+		&i.WorkspaceID,
+		&i.ChatMessageID,
+		&i.StorageUrl,
+		&i.InstallationID,
+		&i.State,
+		&i.LeaseToken,
+		&i.LeaseExpiresAt,
+		&i.Attempt,
+		&i.NextAttemptAt,
+		&i.LastError,
+		&i.TombstonePass,
+		&i.CreatedAt,
 	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []ChannelMediaPendingObject{}
-	for rows.Next() {
-		var i ChannelMediaPendingObject
-		if err := rows.Scan(
-			&i.StorageKey,
-			&i.WorkspaceID,
-			&i.ChatMessageID,
-			&i.StorageUrl,
-			&i.InstallationID,
-			&i.State,
-			&i.LeaseToken,
-			&i.LeaseExpiresAt,
-			&i.Attempt,
-			&i.NextAttemptAt,
-			&i.LastError,
-			&i.TombstonePass,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
+	return i, err
 }
 
 const consumeChannelBindingToken = `-- name: ConsumeChannelBindingToken :one
@@ -1539,41 +1526,6 @@ type ReleaseChannelWSLeaseParams struct {
 func (q *Queries) ReleaseChannelWSLease(ctx context.Context, arg ReleaseChannelWSLeaseParams) error {
 	_, err := q.db.Exec(ctx, releaseChannelWSLease, arg.ID, arg.CurrentToken)
 	return err
-}
-
-const renewChannelMediaPendingObjectLease = `-- name: RenewChannelMediaPendingObjectLease :execrows
-UPDATE channel_media_pending_object
-SET lease_expires_at = now() + $1::interval
-WHERE storage_key = $2
-  AND workspace_id = $3
-  AND lease_token = $4
-`
-
-type RenewChannelMediaPendingObjectLeaseParams struct {
-	Lease       pgtype.Interval `json:"lease"`
-	StorageKey  string          `json:"storage_key"`
-	WorkspaceID pgtype.UUID     `json:"workspace_id"`
-	LeaseToken  pgtype.UUID     `json:"lease_token"`
-}
-
-// Per-row heartbeat: the batch shares one claim, so the lease must be
-// extended before EACH row's settle work — otherwise a few storage deletes
-// running at their full timeout could outlive the lease mid-batch and a
-// second replica would reclaim the tail, duplicating deletes and inflating
-// attempt/backoff. Zero rows affected means another worker already reclaimed
-// this row: the caller must skip it. workspace_id explicit per the tenancy
-// rule.
-func (q *Queries) RenewChannelMediaPendingObjectLease(ctx context.Context, arg RenewChannelMediaPendingObjectLeaseParams) (int64, error) {
-	result, err := q.db.Exec(ctx, renewChannelMediaPendingObjectLease,
-		arg.Lease,
-		arg.StorageKey,
-		arg.WorkspaceID,
-		arg.LeaseToken,
-	)
-	if err != nil {
-		return 0, err
-	}
-	return result.RowsAffected(), nil
 }
 
 const setChannelInstallationConfig = `-- name: SetChannelInstallationConfig :exec
