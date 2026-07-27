@@ -1125,23 +1125,31 @@ RETURNING id, coalesced_comment_ids;
 --   has_covering_different_head_active — a DIFFERENT-head active task exists that
 --                                        was created STRICTLY BEFORE the comment,
 --                                        so its completion reconcile DOES replay
---                                        the comment by timestamp — the only
---                                        different-head shape that may defer.
---   has_active                         — any active task exists at all, so the
---                                        caller can tell "no active → fresh
---                                        enqueue" apart from "only NEWER
---                                        different-head tasks → keep trying".
+--                                        the comment by timestamp.
+--   has_non_covering_different_head_active — a DIFFERENT-head active task exists
+--                                        that was created AT OR AFTER the comment.
+--                                        Its reconcile can never see the comment,
+--                                        AND (when queued/dispatched) it occupies
+--                                        the unique slot and would block a covering
+--                                        task's reconcile follow-up (Elon round 6).
+--                                        So the caller must NOT defer while one of
+--                                        these is active, even if a covering task
+--                                        also exists — it re-loops / fails closed.
 --
--- Head match is NULL-safe (a head-less task is a different head for a non-empty
--- request head, matching HasPendingTaskForIssueAndAgent). The comment lookup is a
--- scalar subquery on the trigger comment's created_at.
+-- Defer is durable ONLY when has_covering is set AND has_non_covering is NOT (no
+-- same head either). Head match is NULL-safe (a head-less task is a different head
+-- for a non-empty request head, matching HasPendingTaskForIssueAndAgent). The
+-- comment lookup is a scalar subquery on the trigger comment's created_at.
 SELECT
     COALESCE(bool_or(t.same_head), false)::boolean AS has_same_head_active,
     COALESCE(bool_or(
         NOT t.same_head
         AND t.created_at < (SELECT c.created_at FROM comment c WHERE c.id = @trigger_comment_id::uuid)
     ), false)::boolean AS has_covering_different_head_active,
-    (count(*) > 0)::boolean AS has_active
+    COALESCE(bool_or(
+        NOT t.same_head
+        AND t.created_at >= (SELECT c.created_at FROM comment c WHERE c.id = @trigger_comment_id::uuid)
+    ), false)::boolean AS has_non_covering_different_head_active
 FROM (
     SELECT
         atq.created_at AS created_at,

@@ -1651,23 +1651,25 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 					// this comment, so re-loop rather than defer on top of it.
 					continue
 				}
-				if class.HasCoveringDifferentHeadActive {
-					// A DIFFERENT-head active task created STRICTLY BEFORE this
-					// comment holds the slot, so its completion reconcile DOES
-					// replay this comment by timestamp (comment.created_at >
-					// task.created_at). Coverage is PROVEN by the query, not
-					// inferred from head difference (Elon round 5) — a durable
-					// deferral.
-					return DispatchDeferred, ReasonDeferred
-				}
-				if class.HasActive {
-					// The only active tasks are NEWER different-head ones: their
-					// reconcile cannot see this (older) comment and it is not in
-					// their planned ids, so a deferred here would be a fabricated
-					// success. Re-loop to keep trying for durable coverage (a newer
-					// task may finish and free the slot); sustained non-convergence
-					// falls through to a truthful internal_error, never a drop.
+				if class.HasNonCoveringDifferentHeadActive {
+					// A different-head task NEWER than this comment is active: its
+					// reconcile can never replay the comment (comment.created_at <
+					// task.created_at, and the comment is not in its planned ids),
+					// and while queued/dispatched it occupies the unique slot and
+					// would BLOCK a covering task's reconcile follow-up too. So a
+					// deferred here would be a fabricated success EVEN IF a covering
+					// task also exists (mixed state — Elon round 6). Re-loop for
+					// durable coverage (the newer task may finish and free the
+					// slot); sustained non-convergence falls through to a truthful
+					// internal_error, never a drop.
 					continue
+				}
+				if class.HasCoveringDifferentHeadActive {
+					// Every active different-head task was created STRICTLY BEFORE
+					// this comment (checked above: none newer), so a covering task's
+					// completion reconcile provably replays it by timestamp with no
+					// newer sibling to block the follow-up — a durable deferral.
+					return DispatchDeferred, ReasonDeferred
 				}
 				// No active task at all → a fresh enqueue is safe (below).
 			}

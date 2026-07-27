@@ -478,28 +478,39 @@ func TestClassifyActiveTasksForIssueAndAgent(t *testing.T) {
 	clear := func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) }
 
 	// No active task.
-	if c := classify(dupRaceHeadB); c.HasSameHeadActive || c.HasCoveringDifferentHeadActive || c.HasActive {
-		t.Fatalf("no active: same=%v covering=%v active=%v, want false/false/false", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasActive)
+	if c := classify(dupRaceHeadB); c.HasSameHeadActive || c.HasCoveringDifferentHeadActive || c.HasNonCoveringDifferentHeadActive {
+		t.Fatalf("no active: same=%v covering=%v noncovering=%v, want false/false/false", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasNonCoveringDifferentHeadActive)
 	}
 
 	// Same-head queued.
 	insertTask("queued", dupRaceHeadB, "5 minutes")
-	if c := classify(dupRaceHeadB); !c.HasSameHeadActive || c.HasCoveringDifferentHeadActive || !c.HasActive {
-		t.Fatalf("same-head: same=%v covering=%v active=%v, want true/false/true", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasActive)
+	if c := classify(dupRaceHeadB); !c.HasSameHeadActive || c.HasCoveringDifferentHeadActive || c.HasNonCoveringDifferentHeadActive {
+		t.Fatalf("same-head: same=%v covering=%v noncovering=%v, want true/false/false", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasNonCoveringDifferentHeadActive)
 	}
 	clear()
 
 	// Different-head OLDER than the comment → covering (reconcile replays by ts).
 	insertTask("dispatched", dupRaceHeadA, "5 minutes")
-	if c := classify(dupRaceHeadB); c.HasSameHeadActive || !c.HasCoveringDifferentHeadActive || !c.HasActive {
-		t.Fatalf("different-head older: same=%v covering=%v active=%v, want false/true/true", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasActive)
+	if c := classify(dupRaceHeadB); c.HasSameHeadActive || !c.HasCoveringDifferentHeadActive || c.HasNonCoveringDifferentHeadActive {
+		t.Fatalf("different-head older: same=%v covering=%v noncovering=%v, want false/true/false", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasNonCoveringDifferentHeadActive)
 	}
 	clear()
 
-	// ROUND-5 KEY: different-head NEWER than the comment → active but NOT covering.
+	// ROUND-5: different-head NEWER than the comment → NOT covering, non-covering.
 	insertTask("dispatched", dupRaceHeadA, "1 minute")
-	if c := classify(dupRaceHeadB); c.HasSameHeadActive || c.HasCoveringDifferentHeadActive || !c.HasActive {
-		t.Fatalf("different-head newer: same=%v covering=%v active=%v, want false/false/true", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasActive)
+	if c := classify(dupRaceHeadB); c.HasSameHeadActive || c.HasCoveringDifferentHeadActive || !c.HasNonCoveringDifferentHeadActive {
+		t.Fatalf("different-head newer: same=%v covering=%v noncovering=%v, want false/false/true", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasNonCoveringDifferentHeadActive)
+	}
+	clear()
+
+	// ROUND-6: an older COVERING different-head task and a newer NON-COVERING one
+	// coexist (running sits outside the unique index). Both flags MUST be set so
+	// the resolver refuses to defer on the covering one while the newer one can
+	// block its reconcile follow-up.
+	insertTask("running", dupRaceHeadA, "5 minutes")
+	insertTask("dispatched", dupRaceHeadA, "1 minute")
+	if c := classify(dupRaceHeadB); c.HasSameHeadActive || !c.HasCoveringDifferentHeadActive || !c.HasNonCoveringDifferentHeadActive {
+		t.Fatalf("mixed covering+non-covering: same=%v covering=%v noncovering=%v, want false/true/true", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasNonCoveringDifferentHeadActive)
 	}
 	clear()
 
@@ -519,8 +530,8 @@ func TestClassifyActiveTasksForIssueAndAgent(t *testing.T) {
 	// fold, never defers on a task that does not cover the comment.
 	insertTask("queued", dupRaceHeadB, "5 minutes")
 	insertTask("running", dupRaceHeadA, "5 minutes")
-	if c := classify(dupRaceHeadB); !c.HasSameHeadActive || !c.HasCoveringDifferentHeadActive || !c.HasActive {
-		t.Fatalf("coexisting: same=%v covering=%v active=%v, want true/true/true", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasActive)
+	if c := classify(dupRaceHeadB); !c.HasSameHeadActive || !c.HasCoveringDifferentHeadActive || c.HasNonCoveringDifferentHeadActive {
+		t.Fatalf("same-head + covering diff: same=%v covering=%v noncovering=%v, want true/true/false", c.HasSameHeadActive, c.HasCoveringDifferentHeadActive, c.HasNonCoveringDifferentHeadActive)
 	}
 }
 
@@ -594,5 +605,108 @@ func TestCommentEnqueueRaceNewerDifferentHeadNotDeferred(t *testing.T) {
 	}
 	if folded {
 		t.Fatal("losing comment was wrongly attached to the newer different-head task")
+	}
+}
+
+// TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred is the regression for
+// Elon round-6 must-fix: an OLDER covering different-head task and a NEWER
+// non-covering different-head task can coexist (running is outside the unique
+// index). Deferring on the covering one is a fabricated success — the newer task
+// occupies the queued slot and blocks the covering task's reconcile follow-up,
+// and the newer task's own reconcile never sees the (older) comment, so the
+// comment is dropped. The resolver must return a truthful non-success instead,
+// and completing both tasks must leave the comment genuinely uncovered (proving a
+// deferred would have lied).
+func TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, issueID, runtimeID := dupRaceFixture(t, "dup-race-mixed", 999318)
+	agentUUID := util.MustParseUUID(agentID)
+
+	// PR at head B so the request resolves head B; both tasks are at head A.
+	var prID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO github_pull_request (workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, pr_created_at, pr_updated_at, head_sha)
+		VALUES ($1, 1, 'multica-ai', 'multica', 999318, 'review PR', 'open', 'https://example.test/pr', now(), now(), $2)
+		RETURNING id
+	`, testWorkspaceID, dupRaceHeadB).Scan(&prID); err != nil {
+		t.Fatalf("seed PR: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, prID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`, issueID, prID); err != nil {
+		t.Fatalf("link PR: %v", err)
+	}
+
+	issue, err := testHandler.Queries.GetIssue(ctx, util.MustParseUUID(issueID))
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+	agent, err := testHandler.Queries.GetAgent(ctx, agentUUID)
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+
+	// T0: A (head-A) running, OLDER than the comment. T1: comment C. T2: B
+	// (head-A) queued, NEWER than C — it occupies the unique slot.
+	aTrigger := insertDupRaceComment(t, issueID, "A trigger", "11 minutes")
+	var taskA string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at, context)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '9 minutes', jsonb_build_object('head_sha', $5::text))
+		RETURNING id
+	`, agentID, runtimeID, issueID, aTrigger, dupRaceHeadA).Scan(&taskA); err != nil {
+		t.Fatalf("insert running task A: %v", err)
+	}
+	loserCommentID := insertDupRaceComment(t, issueID, "losing comment C", "5 minutes")
+	bTrigger := insertDupRaceComment(t, issueID, "B trigger", "2 minutes")
+	var taskB string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, context)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'queued', 0, now() - interval '1 minute', jsonb_build_object('head_sha', $5::text))
+		RETURNING id
+	`, agentID, runtimeID, issueID, bTrigger, dupRaceHeadA).Scan(&taskB); err != nil {
+		t.Fatalf("insert queued task B: %v", err)
+	}
+
+	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceMentionAgent}
+	results := testHandler.enqueueCommentAgentTriggers(ctx, issue, util.MustParseUUID(loserCommentID), []commentAgentTrigger{trigger})
+
+	// Even though a covering (older) task exists, the newer one forbids deferral.
+	res := results[agentID]
+	if res.status == DispatchDeferred || res.status == DispatchCoalesced || res.status == DispatchQueued {
+		t.Fatalf("mixed covering+newer: got success-shaped %q/%q, want a truthful non-success", res.status, res.reason)
+	}
+	if res.status != DispatchBlocked || res.reason != ReasonInternalError {
+		t.Fatalf("mixed covering+newer: got %q/%q, want blocked/internal_error", res.status, res.reason)
+	}
+
+	// Complete A, then B. Neither reconcile can durably cover C: A's follow-up
+	// collides with the still-queued newer B, and B never sees the older C. So no
+	// task ends up covering C — exactly why a deferred here would have lied.
+	if w := completeTaskViaHandler(t, taskA, "done"); w.Code != 200 {
+		t.Fatalf("complete A: %d: %s", w.Code, w.Body.String())
+	}
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, taskB); err != nil {
+		t.Fatalf("advance B to running: %v", err)
+	}
+	if w := completeTaskViaHandler(t, taskB, "done"); w.Code != 200 {
+		t.Fatalf("complete B: %d: %s", w.Code, w.Body.String())
+	}
+	var covered bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM agent_task_queue
+			WHERE issue_id = $1 AND agent_id = $2
+			  AND status IN ('queued','dispatched','running','waiting_local_directory')
+			  AND ($3::uuid = trigger_comment_id OR $3::uuid = ANY(coalesced_comment_ids))
+		)
+	`, issueID, agentID, loserCommentID).Scan(&covered); err != nil {
+		t.Fatalf("check coverage: %v", err)
+	}
+	if covered {
+		t.Fatal("unexpected coverage — the scenario should drop C, confirming deferred would have lied")
 	}
 }
