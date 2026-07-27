@@ -3136,7 +3136,22 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		// The first qualifying comment enqueues the follow-up task; later ones
 		// find it AlreadyPending and merge in, so all undelivered comments end
 		// up covered by a single bounded run.
-		h.enqueueCommentAgentTriggers(ctx, issue, c.ID, scoped)
+		//
+		// A BLOCKED replay must not be discarded (#5914, Elon round 8): the slot
+		// can be held by a task that will never see this comment (it predates that
+		// task and is not in its planned ids), so dropping the failure here is
+		// exactly how a promised follow-up is lost. Hand the obligation to that
+		// blocker instead, keeping it alive until some run provably covers it.
+		if res := h.enqueueCommentAgentTriggers(ctx, issue, c.ID, scoped)[agentID]; res.status == DispatchBlocked {
+			if h.propagateUncoveredCommentObligation(ctx, issue, scoped[0], c.ID) {
+				slog.Info("reconcile comments on completion: replay blocked, obligation handed to the active task",
+					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID))
+			} else {
+				slog.Warn("reconcile comments on completion: replay blocked and obligation could not be handed off",
+					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID),
+					"reason", res.reason)
+			}
+		}
 		scheduled++
 	}
 	if scheduled > 0 {

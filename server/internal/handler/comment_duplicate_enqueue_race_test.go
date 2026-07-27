@@ -499,15 +499,13 @@ func TestCommentEnqueueRaceNewerDifferentHeadNotDeferred(t *testing.T) {
 	}
 }
 
-// TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred is the regression for
-// Elon round-6 must-fix: an OLDER covering different-head task and a NEWER
-// non-covering different-head task can coexist (running is outside the unique
-// index). Deferring on the covering one is a fabricated success — the newer task
-// occupies the queued slot and blocks the covering task's reconcile follow-up,
-// and the newer task's own reconcile never sees the (older) comment, so the
-// comment is dropped. The resolver must return a truthful non-success instead,
-// and completing both tasks must leave the comment genuinely uncovered (proving a
-// deferred would have lied).
+// TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred covers Elon rounds 6+8:
+// an OLDER different-head task and a NEWER one can coexist (running sits outside
+// the unique index). At decision time nothing has attached the comment, so the
+// resolver must return a truthful non-success rather than a fabricated deferred
+// (round 6). Draining the chain then proves the comment is still not lost: the
+// older task's blocked replay is handed to the newer blocker instead of being
+// discarded, so the comment ends up covered (round 8).
 func TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -574,11 +572,16 @@ func TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred(t *testing.T) {
 		t.Fatalf("mixed covering+newer: got %q/%q, want blocked/internal_error", res.status, res.reason)
 	}
 
-	// Complete A, then B. Neither reconcile can durably cover C: A's follow-up
-	// collides with the still-queued newer B, and B never sees the older C. So no
-	// task ends up covering C — exactly why a deferred here would have lied.
+	// Draining the chain: A completes and its replay of C collides with the still-
+	// queued newer B. That failure is NOT discarded — the obligation is handed to B
+	// (Elon round 8), so C ends up covered even though the initial call correctly
+	// refused to promise it. The initial non-success and the eventual coverage are
+	// both required: we never claim more than we have done, and we never drop.
 	if w := completeTaskViaHandler(t, taskA, "done"); w.Code != 200 {
 		t.Fatalf("complete A: %d: %s", w.Code, w.Body.String())
+	}
+	if !commentCoveredByAnyActiveTask(t, issueID, agentID, loserCommentID) {
+		t.Fatal("A's blocked replay was discarded — C is covered by no active task")
 	}
 	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, taskB); err != nil {
 		t.Fatalf("advance B to running: %v", err)
@@ -586,18 +589,164 @@ func TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred(t *testing.T) {
 	if w := completeTaskViaHandler(t, taskB, "done"); w.Code != 200 {
 		t.Fatalf("complete B: %d: %s", w.Code, w.Body.String())
 	}
-	var covered bool
-	if err := testPool.QueryRow(ctx, `
+	if !commentCoveredByAnyActiveTask(t, issueID, agentID, loserCommentID) {
+		t.Fatal("after the blocker chain drained, no task covers C — the obligation was lost")
+	}
+}
+
+// commentCoveredByAnyActiveTask reports whether ANY active task for (issue, agent)
+// has the comment as its trigger or in its planned (coalesced) batch.
+func commentCoveredByAnyActiveTask(t *testing.T, issueID, agentID, commentID string) bool {
+	t.Helper()
+	var ok bool
+	if err := testPool.QueryRow(context.Background(), `
 		SELECT EXISTS (
 			SELECT 1 FROM agent_task_queue
 			WHERE issue_id = $1 AND agent_id = $2
 			  AND status IN ('queued','dispatched','running','waiting_local_directory')
 			  AND ($3::uuid = trigger_comment_id OR $3::uuid = ANY(coalesced_comment_ids))
 		)
-	`, issueID, agentID, loserCommentID).Scan(&covered); err != nil {
+	`, issueID, agentID, commentID).Scan(&ok); err != nil {
 		t.Fatalf("check coverage: %v", err)
 	}
-	if covered {
-		t.Fatal("unexpected coverage — the scenario should drop C, confirming deferred would have lied")
+	return ok
+}
+
+// seedDupRacePR links a PR at head B so the reviewed head resolves to head B.
+func seedDupRacePR(t *testing.T, issueID string, prNumber int) {
+	t.Helper()
+	ctx := context.Background()
+	var prID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO github_pull_request (workspace_id, installation_id, repo_owner, repo_name, pr_number, title, state, html_url, pr_created_at, pr_updated_at, head_sha)
+		VALUES ($1, 1, 'multica-ai', 'multica', $2, 'review PR', 'open', 'https://example.test/pr', now(), now(), $3)
+		RETURNING id
+	`, testWorkspaceID, prNumber, dupRaceHeadB).Scan(&prID); err != nil {
+		t.Fatalf("seed PR: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID) })
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, prID) })
+	if _, err := testPool.Exec(ctx, `INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`, issueID, prID); err != nil {
+		t.Fatalf("link PR: %v", err)
+	}
+}
+
+// TestReconcileBlockedReplayPropagatesToClaimedBlocker is the regression for Elon
+// round-8 must-fix 2 (planned-registration path): a planned-id obligation must not
+// be consumed once. C is registered as a planned input on running task A; before A
+// completes, a NEWER different-head task B is claimed and holds the unique slot. A's
+// completion replay of C is therefore blocked — and must be HANDED to B rather than
+// discarded, so completing B finally covers C.
+func TestReconcileBlockedReplayPropagatesToClaimedBlocker(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, issueID, runtimeID := dupRaceFixture(t, "dup-race-propagate-claimed", 999319)
+	seedDupRacePR(t, issueID, 999319)
+
+	aTrigger := insertDupRaceComment(t, issueID, "A trigger", "11 minutes")
+	loserCommentID := insertDupRaceComment(t, issueID, "comment C needing coverage", "8 minutes")
+	bTrigger := insertDupRaceComment(t, issueID, "B trigger", "6 minutes")
+
+	// A: running (outside the unique index), head A, with C already registered as a
+	// planned-but-NOT-delivered input — the exact state the lost-race path leaves.
+	var taskA string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, coalesced_comment_ids, delivered_comment_ids, status, priority, created_at, started_at, context)
+		VALUES ($1, $2, $3, $4, ARRAY[$5::uuid], ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '9 minutes', jsonb_build_object('head_sha', $6::text))
+		RETURNING id
+	`, agentID, runtimeID, issueID, aTrigger, loserCommentID, dupRaceHeadA).Scan(&taskA); err != nil {
+		t.Fatalf("insert running task A: %v", err)
+	}
+	// B: a NEWER different-head task, already claimed (dispatched) — it holds the slot
+	// and its own reconcile can never see the older C.
+	var taskB string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, dispatched_at, context)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'dispatched', 0, now() - interval '5 minutes', now() - interval '4 minutes', jsonb_build_object('head_sha', $5::text))
+		RETURNING id
+	`, agentID, runtimeID, issueID, bTrigger, dupRaceHeadA).Scan(&taskB); err != nil {
+		t.Fatalf("insert dispatched blocker B: %v", err)
+	}
+
+	// A completes: its replay of C collides with B and must be handed to B.
+	if w := completeTaskViaHandler(t, taskA, "done"); w.Code != 200 {
+		t.Fatalf("complete A: %d: %s", w.Code, w.Body.String())
+	}
+	var plannedOnB, deliveredOnB bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT $2::uuid = ANY(coalesced_comment_ids), $2::uuid = ANY(delivered_comment_ids)
+		FROM agent_task_queue WHERE id = $1
+	`, taskB, loserCommentID).Scan(&plannedOnB, &deliveredOnB); err != nil {
+		t.Fatalf("read blocker B: %v", err)
+	}
+	if !plannedOnB {
+		t.Fatal("blocked replay was discarded — C was not handed to the blocker, so it is lost")
+	}
+	if deliveredOnB {
+		t.Fatal("C must not be faked as delivered on the already-claimed blocker")
+	}
+
+	// B completes: C is in its planned ids, so it is replayed and finally covered.
+	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, taskB); err != nil {
+		t.Fatalf("advance B to running: %v", err)
+	}
+	if w := completeTaskViaHandler(t, taskB, "done"); w.Code != 200 {
+		t.Fatalf("complete B: %d: %s", w.Code, w.Body.String())
+	}
+	if !commentCoveredByAnyActiveTask(t, issueID, agentID, loserCommentID) {
+		t.Fatal("after the blocker chain drained, no task covers C — the deferral was not durable")
+	}
+}
+
+// TestReconcileBlockedReplayPropagatesToQueuedBlocker is the regression for Elon
+// round-8 must-fix 1 (AlreadyPending path): C arrives while A is running, so A's
+// reconcile finds it by timestamp — but a NEWER different-head task B is QUEUED when
+// A completes, blocking the replay. The obligation must be handed to B through the
+// ATOMIC merge (a queued task must never be bare-appended), so C ends up covered.
+func TestReconcileBlockedReplayPropagatesToQueuedBlocker(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, issueID, runtimeID := dupRaceFixture(t, "dup-race-propagate-queued", 999320)
+	seedDupRacePR(t, issueID, 999320)
+
+	aTrigger := insertDupRaceComment(t, issueID, "A trigger", "11 minutes")
+	// C lands while A is running (newer than A) and is NOT in A's arrays — the
+	// AlreadyPending shape, covered by reconcile's timestamp window alone.
+	loserCommentID := insertDupRaceComment(t, issueID, "comment C posted during the run", "5 minutes")
+	bTrigger := insertDupRaceComment(t, issueID, "B trigger", "2 minutes")
+
+	var taskA string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at, context)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '9 minutes', jsonb_build_object('head_sha', $5::text))
+		RETURNING id
+	`, agentID, runtimeID, issueID, aTrigger, dupRaceHeadA).Scan(&taskA); err != nil {
+		t.Fatalf("insert running task A: %v", err)
+	}
+	// B: NEWER than C, different head, and QUEUED — it occupies the unique slot and
+	// its reconcile can never see C.
+	var taskB string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, context)
+		VALUES ($1, $2, $3, $4, 'queued', 0, now() - interval '1 minute', jsonb_build_object('head_sha', $5::text))
+		RETURNING id
+	`, agentID, runtimeID, issueID, bTrigger, dupRaceHeadA).Scan(&taskB); err != nil {
+		t.Fatalf("insert queued blocker B: %v", err)
+	}
+
+	if w := completeTaskViaHandler(t, taskA, "done"); w.Code != 200 {
+		t.Fatalf("complete A: %d: %s", w.Code, w.Body.String())
+	}
+	// The obligation must have been folded into the queued blocker.
+	if !commentCoveredByAnyActiveTask(t, issueID, agentID, loserCommentID) {
+		t.Fatal("blocked replay was discarded — C is covered by no active task, so it is lost")
+	}
+	// The fold went through the ATOMIC merge, so B still covers its own trigger too.
+	if !commentCoveredByAnyActiveTask(t, issueID, agentID, bTrigger) {
+		t.Fatal("the blocker's own trigger comment lost coverage during the hand-off")
 	}
 }

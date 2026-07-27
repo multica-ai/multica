@@ -1550,16 +1550,28 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 //     idx_one_pending_task_per_issue_agent unique index rejected the insert
 //     (service.ErrDuplicatePendingTask, #5914).
 //
-// Both mean "a task now exists". INVARIANT: this never returns a success-shaped
-// outcome (coalesced / deferred / queued) without a COMPLETED backing WRITE — an
-// atomic head-scoped merge (coalesced), a planned-id registration on a same-head
-// claim-receipt task (deferred), or a fresh enqueue (queued). It never defers off
-// a mere classification of the current active tasks: a point-in-time snapshot
-// cannot prove a DIFFERENT-head task's reconcile will still cover the comment once
-// a newer blocker may have appeared before that task completes (Elon round 7). A
-// duplicate that cannot yet be backed by a completed write re-loops (bounded by
-// maxAttempts); on genuine non-convergence it returns a truthful internal_error,
-// never a fabricated deferred that would silently drop the comment.
+// Both mean "a task now exists". INVARIANT: a success-shaped outcome (coalesced /
+// deferred / queued) is returned only when the comment is provably attached to a
+// run that will address it:
+//
+//   - coalesced — an atomic head-scoped merge folded it into a queued task;
+//   - queued    — a fresh task was created for it;
+//   - deferred  — an active task's completion reconcile will replay it, either
+//     because a planned-id write landed on a claim-receipt task
+//     (lost-race path, where the comment may PREDATE the task) or
+//     because the comment is newer than that task and therefore
+//     inside reconcile's `created_at > since` window (AlreadyPending
+//     path, where the task existed before the comment).
+//
+// The deferral is durable rather than a one-shot prediction: if a replay is later
+// blocked by a task that cannot cover the comment, reconcileCommentsOnCompletion
+// hands the obligation to that blocker (propagateUncoveredCommentObligation)
+// instead of discarding it, so it survives an arbitrary chain of blockers (#5914,
+// Elon round 8). It never defers off a mere classification of the current active
+// tasks — a snapshot cannot prove anything about state after it is read (round 7).
+// A duplicate that cannot yet be resolved re-loops (bounded by maxAttempts); on
+// genuine non-convergence it returns a truthful internal_error, never a fabricated
+// deferred that would silently drop the comment.
 func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, triggerCommentID pgtype.UUID, getEscalationDelay func() time.Duration) (DispatchStatus, DispatchReasonCode) {
 	pending := trigger.AlreadyPending
 	lostRace := false
@@ -1933,6 +1945,48 @@ func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue
 		"comment_id", uuidToString(commentID),
 		"coalesced_count", len(row.CoalescedCommentIds))
 	return true, nil
+}
+
+// propagateUncoveredCommentObligation hands an UNCOVERED comment's replay
+// obligation to whichever active task now occupies the (issue, agent) slot, so a
+// blocked completion replay is never silently dropped (#5914, Elon round 8).
+//
+// Without this, a deferral is only ever consumed ONCE: task A's completion
+// reconcile replays comment C, the enqueue collides with a newer blocker B, the
+// failure is discarded, and B never sees C (C predates B and is not in its
+// planned ids) — so C is lost even though the original response promised it would
+// be handled. Propagating turns "consumed once" into "handed along" until some
+// task provably covers C.
+//
+// Both attachment writes are deliberately HEAD-AGNOSTIC here, unlike the
+// enqueue-time path. Head scoping (TEN-356) governs the DEDUP decision — whether
+// an old-head run may satisfy a new-head review request — and that decision has
+// already been made. This is the opposite direction: attaching an unaddressed
+// comment to the only run that will execute, which never removes the blocker's
+// own head coverage. Preference order:
+//
+//  1. a CLAIM-RECEIPT task (dispatched/running/waiting): a planned id added after
+//     the claim is not delivered to that run, so this purely schedules the
+//     comment for that task's completion reconcile;
+//  2. a QUEUED task: the atomic merge, which re-stamps trigger/originator/overlay
+//     to C, so the coalescing run carries the right identity (MUL-4302). Never a
+//     bare append on a queued task.
+//
+// Returns false only when neither landed (no active task, or the merge refused),
+// which the caller logs — the comment row still persists for a later trigger.
+func (h *Handler) propagateUncoveredCommentObligation(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID) bool {
+	registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, commentID, pgtype.Text{})
+	if err != nil {
+		slog.Warn("propagate comment obligation: register on active task failed",
+			"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID),
+			"comment_id", uuidToString(commentID), "error", err)
+	} else if registered {
+		return true
+	}
+	if h.mergeCommentIntoPendingTask(ctx, issue, trigger, commentID, pgtype.Text{}) == commentMergeSucceeded {
+		return true
+	}
+	return false
 }
 
 // logCommentEnqueueFailure logs a failed comment-trigger enqueue. A benign
