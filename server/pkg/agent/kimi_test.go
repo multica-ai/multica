@@ -858,9 +858,12 @@ func TestKimiBackendHealthyEmptyCompletionNotFlagged(t *testing.T) {
 	// Only stale (previous run) failure entries in the log; the current
 	// turn's usage.record is written by the fake script during
 	// session/prompt, strictly after the wire snapshot.
-	seedKimiSessionFiles(t, home, "ses_swallowed",
-		"",
-		kimiTurnFailedLogLines(now.Add(-time.Hour), 1, "400 the message at position 168 with role 'assistant' must not be empty"))
+	logLines := kimiTurnFailedLogLines(now.Add(-time.Hour), 1, "400 the message at position 168 with role 'assistant' must not be empty")
+	// In-window echoed content containing the substring "turn failed" must
+	// not be misread as a failure marker — the bare marker requires the
+	// ERROR level prefix.
+	logLines += fmt.Sprintf("%s INFO  echo: user said 'turn failed' in the prompt\n", now.UTC().Format("2006-01-02T15:04:05.000Z07:00"))
+	seedKimiSessionFiles(t, home, "ses_swallowed", "", logLines)
 
 	fakePath := filepath.Join(t.TempDir(), "kimi")
 	writeTestExecutable(t, fakePath, []byte(fakeKimiACPHealthyEmptyCompletionScript()))

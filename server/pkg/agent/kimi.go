@@ -773,14 +773,6 @@ func accumulateKimiWireLine(line []byte, cutoffMs int64, totals map[string]Token
 	totals[model] = u
 }
 
-// kimiCodeHome returns kimi-cli's data dir from the daemon process env:
-// $KIMI_CODE_HOME when set, else ~/.kimi-code. It is a fallback for callers
-// that do not have a child-process env slice; the Execute path prefers
-// kimiHomeFromEnv(cmd.Env).
-func kimiCodeHome() string {
-	return kimiHomeFromEnv(os.Environ())
-}
-
 // kimiHomeFromEnv extracts KIMI_CODE_HOME from an env slice (last wins),
 // falling back to ~/.kimi-code. This lets the kimi backend read session
 // files from the same directory the child process writes them to, even when
@@ -887,6 +879,7 @@ func kimiWireRecordTime(line []byte) int64 {
 //	2026-07-19T15:03:24.933Z WARN  acp: turn ended with failed reason  error="{...}"
 const (
 	kimiTurnFailedMarker       = "turn failed"
+	kimiTurnFailedErrorPrefix  = " ERROR turn failed"
 	kimiTurnFailedDetailMarker = "acp: turn ended with failed reason"
 )
 
@@ -974,10 +967,11 @@ func scanKimiTurnFailureLog(path string, cutoff time.Time) (string, bool, error)
 }
 
 // isKimiTurnFailureLine reports whether a (possibly partial) line looks like
-// a turn-failure marker. Both the ERROR marker and the WARN detail marker
-// appear near the start of their lines.
+// a turn-failure marker. Both markers appear near the start of their lines;
+// the bare ERROR marker requires the level prefix so echoed content does not
+// false-match.
 func isKimiTurnFailureLine(line []byte) bool {
-	return bytes.Contains(line, []byte(kimiTurnFailedMarker)) ||
+	return bytes.Contains(line, []byte(kimiTurnFailedErrorPrefix)) ||
 		bytes.Contains(line, []byte(kimiTurnFailedDetailMarker))
 }
 
@@ -986,8 +980,9 @@ func isKimiTurnFailureLine(line []byte) bool {
 // ("<rfc3339> <LEVEL> <msg> key=value …"); the leading timestamp decides
 // whether the entry belongs to the current run.
 func parseKimiTurnFailureLine(line []byte, cutoff time.Time) (string, bool) {
-	if !bytes.Contains(line, []byte(kimiTurnFailedMarker)) &&
-		!bytes.Contains(line, []byte(kimiTurnFailedDetailMarker)) {
+	hasErrorMarker := bytes.Contains(line, []byte(kimiTurnFailedErrorPrefix))
+	hasDetailMarker := bytes.Contains(line, []byte(kimiTurnFailedDetailMarker))
+	if !hasErrorMarker && !hasDetailMarker {
 		return "", false
 	}
 	sp := bytes.IndexByte(line, ' ')
@@ -998,7 +993,7 @@ func parseKimiTurnFailureLine(line []byte, cutoff time.Time) (string, bool) {
 	if err != nil || ts.Before(cutoff) {
 		return "", false
 	}
-	if !bytes.Contains(line, []byte(kimiTurnFailedDetailMarker)) {
+	if !hasDetailMarker {
 		// Bare ERROR marker; the paired WARN detail line carries the cause.
 		return "", true
 	}
