@@ -101,7 +101,7 @@ func TestTelegramWebhook_ValidSecretRoutesToEngine(t *testing.T) {
 	insertTelegramWebhookInstallation(t, botID, "correct-secret", "acme_bot", "active")
 
 	fake := &fakeTelegramChannelHandler{}
-	h := &Handler{Queries: db.New(testPool), testChannelHandler: fake}
+	h := &Handler{Queries: db.New(testPool), webhookChannelHandler: fake}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/telegram/"+botID, bytes.NewReader(validTelegramUpdateBody(555)))
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "correct-secret")
@@ -130,7 +130,7 @@ func TestTelegramWebhook_WrongSecretDoesNotRoute(t *testing.T) {
 	insertTelegramWebhookInstallation(t, botID, "correct-secret", "acme_bot", "active")
 
 	fake := &fakeTelegramChannelHandler{}
-	h := &Handler{Queries: db.New(testPool), testChannelHandler: fake}
+	h := &Handler{Queries: db.New(testPool), webhookChannelHandler: fake}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/telegram/"+botID, bytes.NewReader(validTelegramUpdateBody(555)))
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "wrong-secret")
@@ -149,7 +149,7 @@ func TestTelegramWebhook_WrongSecretDoesNotRoute(t *testing.T) {
 
 func TestTelegramWebhook_UnknownBotIDDoesNotRoute(t *testing.T) {
 	fake := &fakeTelegramChannelHandler{}
-	h := &Handler{Queries: db.New(testPool), testChannelHandler: fake}
+	h := &Handler{Queries: db.New(testPool), webhookChannelHandler: fake}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/telegram/does-not-exist", bytes.NewReader(validTelegramUpdateBody(555)))
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "anything")
@@ -171,7 +171,7 @@ func TestTelegramWebhook_MalformedJSONDoesNotRouteOrPanic(t *testing.T) {
 	insertTelegramWebhookInstallation(t, botID, "correct-secret", "acme_bot", "active")
 
 	fake := &fakeTelegramChannelHandler{}
-	h := &Handler{Queries: db.New(testPool), testChannelHandler: fake}
+	h := &Handler{Queries: db.New(testPool), webhookChannelHandler: fake}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/telegram/"+botID, bytes.NewReader([]byte("{not json")))
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "correct-secret")
@@ -193,7 +193,7 @@ func TestTelegramWebhook_InactiveInstallationDoesNotRoute(t *testing.T) {
 	insertTelegramWebhookInstallation(t, botID, "correct-secret", "acme_bot", "revoked")
 
 	fake := &fakeTelegramChannelHandler{}
-	h := &Handler{Queries: db.New(testPool), testChannelHandler: fake}
+	h := &Handler{Queries: db.New(testPool), webhookChannelHandler: fake}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/webhooks/telegram/"+botID, bytes.NewReader(validTelegramUpdateBody(555)))
 	req.Header.Set("X-Telegram-Bot-Api-Secret-Token", "correct-secret")
