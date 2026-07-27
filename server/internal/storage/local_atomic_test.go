@@ -83,6 +83,63 @@ func TestLocalStorageUploadsAreWorldReadable(t *testing.T) {
 	}
 }
 
+// A crash between the staging write and the rename leaves the temp file
+// behind — no defer can cover that. The name is derived from the object key,
+// so the delete path reclaims it: the media ledger records the intent before
+// the upload, so the reconciler always reaches DeleteObject for an abandoned
+// key. A randomized temp name would leave an orphan nothing could name.
+func TestLocalStorageDeleteObjectReclaimsCrashLeftoverTemp(t *testing.T) {
+	dir := t.TempDir()
+	s := &LocalStorage{uploadDir: dir}
+	key := "workspaces/ws/lark/crashed"
+	dest := filepath.Join(dir, key)
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	// The crash shape: a staging file, no object, no sidecar.
+	leftover := tempPath(dest)
+	if err := os.WriteFile(leftover, []byte("half-written body"), 0644); err != nil {
+		t.Fatalf("plant leftover: %v", err)
+	}
+
+	if err := s.DeleteObject(context.Background(), key); err != nil {
+		t.Fatalf("DeleteObject: %v", err)
+	}
+	if _, err := os.Stat(leftover); !os.IsNotExist(err) {
+		t.Fatalf("crash leftover survived the delete path (stat err = %v)", err)
+	}
+}
+
+// The staging file must not be readable through the object read paths: keys
+// come straight from the request URL, so a half-written body would otherwise
+// be exposed under a guessable name.
+func TestLocalStorageRefusesToServeStagingFile(t *testing.T) {
+	dir := t.TempDir()
+	s := &LocalStorage{uploadDir: dir}
+	key := "workspaces/ws/lark/staged"
+	dest := filepath.Join(dir, key)
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(tempPath(dest), []byte("half"), 0644); err != nil {
+		t.Fatalf("plant staging file: %v", err)
+	}
+	stagingKey := "workspaces/ws/lark/." + filepath.Base(key) + ".tmp"
+	if _, err := s.GetReader(context.Background(), stagingKey); err == nil {
+		t.Fatal("GetReader must refuse the staging file")
+	}
+	// A user-supplied ".tmp" extension is still a normal object: the key is a
+	// generated UUID, so it never collides with the dot-prefixed staging name.
+	if _, err := s.Upload(context.Background(), "workspaces/ws/0198-abc.tmp", []byte("real"), "application/octet-stream", "notes.tmp"); err != nil {
+		t.Fatalf("Upload of a .tmp-extension object: %v", err)
+	}
+	rc, err := s.GetReader(context.Background(), "workspaces/ws/0198-abc.tmp")
+	if err != nil {
+		t.Fatalf("a .tmp-extension object must stay readable: %v", err)
+	}
+	rc.Close()
+}
+
 // The buffered Upload now goes through the same temp-file rename as the
 // stream path. A byte slice cannot fail mid-copy, so what is observable here
 // is the tail: a failed write leaves no temp litter behind and no damage to a

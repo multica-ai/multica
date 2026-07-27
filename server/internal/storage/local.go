@@ -26,6 +26,11 @@ type LocalStorage struct {
 // to the storage-key basename for the download filename.
 const metaSuffix = ".meta.json"
 
+// tempSuffix is the on-disk extension of the staging file writeAtomic renames
+// into place. Deterministic per key so a crash leftover stays reclaimable —
+// see tempPath.
+const tempSuffix = ".tmp"
+
 type localMeta struct {
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
@@ -91,8 +96,8 @@ func (s *LocalStorage) GetReader(ctx context.Context, key string) (io.ReadCloser
 	if key == "" {
 		return nil, fmt.Errorf("local GetReader: empty key")
 	}
-	if strings.HasSuffix(key, metaSuffix) {
-		return nil, fmt.Errorf("local GetReader: refusing to serve sidecar key %q", key)
+	if isInternalLocalPath(key) {
+		return nil, fmt.Errorf("local GetReader: refusing to serve internal key %q", key)
 	}
 	filePath := filepath.Join(s.uploadDir, key)
 	if !isUnder(s.uploadDir, filePath) {
@@ -113,17 +118,19 @@ func (s *LocalStorage) Delete(ctx context.Context, key string) {
 
 // DeleteObject is Delete with the error surfaced — the media reconciler needs
 // it to keep the ledger row and schedule a retry instead of assuming success.
-// A missing file is success (the delete is idempotent).
+// A missing file is success (the delete is idempotent). The staging file is
+// removed too: a crash between write and rename leaves one behind, and this is
+// what reclaims it (the media ledger records the intent before the upload, so
+// the reconciler always reaches this delete for an abandoned key).
 func (s *LocalStorage) DeleteObject(_ context.Context, key string) error {
 	if key == "" {
 		return nil
 	}
 	filePath := filepath.Join(s.uploadDir, key)
-	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
-		return err
-	}
-	if err := os.Remove(filePath + metaSuffix); err != nil && !os.IsNotExist(err) {
-		return err
+	for _, p := range []string{filePath, filePath + metaSuffix, tempPath(filePath)} {
+		if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+			return err
+		}
 	}
 	return nil
 }
@@ -198,23 +205,17 @@ func writeAtomic(dest string, src io.Reader) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
 		return fmt.Errorf("local storage MkdirAll: %w", err)
 	}
-	f, err := os.CreateTemp(filepath.Dir(dest), "."+filepath.Base(dest)+".tmp-*")
+	tmp := tempPath(dest)
+	// 0644 at open, matching the mode the direct write used (os.CreateTemp
+	// would make it 0600 and need a chmod that some mounts refuse).
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0644)
 	if err != nil {
-		return fmt.Errorf("local storage CreateTemp: %w", err)
+		return fmt.Errorf("local storage create temp: %w", err)
 	}
-	tmp := f.Name()
 	if _, err := io.Copy(f, src); err != nil {
 		_ = f.Close()
 		_ = os.Remove(tmp)
 		return fmt.Errorf("local storage stream copy: %w", err)
-	}
-	// CreateTemp makes the file 0600; objects are served by this process (and,
-	// in some deployments, a front-end web server) under the 0644 the direct
-	// write used before this path existed. Best-effort: an upload dir on a
-	// mount that ignores chmod (SMB/NFS/FUSE) used to accept the direct write
-	// fine, so a chmod refusal must not turn a working upload into a failure.
-	if err := f.Chmod(0644); err != nil {
-		slog.Warn("local storage chmod failed; object keeps its temp-file mode", "dest", dest, "error", err)
 	}
 	if err := f.Close(); err != nil {
 		_ = os.Remove(tmp)
@@ -227,16 +228,48 @@ func writeAtomic(dest string, src io.Reader) error {
 	return nil
 }
 
+// tempPath is the staging file writeAtomic renames into place. It is derived
+// from the object key rather than randomized (os.CreateTemp) so a crash
+// between the write and the rename leaves a file the delete path can still
+// find: DeleteObject removes it alongside the object, which means the media
+// intent ledger reclaims it too — the ledger row is written before the upload,
+// so the reconciler deletes the key and the leftover goes with it. A random
+// suffix would leave an orphan nothing could name, up to the 100 MiB resource
+// cap each, with no bound across crashes.
+//
+// The name is stable per key, so two concurrent writers of the SAME key would
+// share it. That does not occur here — media keys are per (chat message,
+// resource) and resolved once, and every other upload path mints a fresh UUID
+// key — and such writers already raced on the destination itself.
+func tempPath(dest string) string {
+	return filepath.Join(filepath.Dir(dest), "."+filepath.Base(dest)+tempSuffix)
+}
+
+// isInternalLocalPath reports whether key names one of the local backend's own
+// files — the .meta.json sidecar or a .<name>.tmp staging file — rather than an
+// object. Read paths take the key straight from the request URL, so both must
+// be unreachable: a staging file would otherwise expose a half-written body.
+// Object keys are server-generated (UUID or hash basenames) and never start
+// with a dot, so a user uploading "notes.tmp" (key "<uuid>.tmp") is unaffected.
+func isInternalLocalPath(key string) bool {
+	if strings.HasSuffix(key, metaSuffix) {
+		return true
+	}
+	base := filepath.Base(key)
+	return strings.HasPrefix(base, ".") && strings.HasSuffix(base, tempSuffix)
+}
+
 func (s *LocalStorage) GetFilePath(key string) string {
 	return filepath.Join(s.uploadDir, key)
 }
 
 func (s *LocalStorage) ServeFile(w http.ResponseWriter, r *http.Request, filename string) {
-	// The sidecar is an implementation detail of the local backend; refuse
-	// to serve it directly so /uploads/<key>.meta.json doesn't become a
-	// stable read API. Comes before any disk work so a path-traversal
-	// attempt at a .meta.json sibling can't trigger an out-of-tree read.
-	if strings.HasSuffix(filename, metaSuffix) {
+	// The sidecar and the staging file are implementation details of the local
+	// backend; refuse to serve them directly so /uploads/<key>.meta.json (or a
+	// half-written .<key>.tmp) doesn't become a stable read API. Comes before
+	// any disk work so a path-traversal attempt at a sibling can't trigger an
+	// out-of-tree read.
+	if isInternalLocalPath(filename) {
 		http.NotFound(w, r)
 		return
 	}
