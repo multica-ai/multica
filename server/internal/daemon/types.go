@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/providerfailover"
 )
 
 // AgentEntry describes a single available agent CLI.
@@ -259,4 +260,12 @@ type TaskResult struct {
 	EnvRoot       string           `json:"-"`                    // env root dir for writing GC metadata (not sent to server)
 	FailureReason string           `json:"-"`                    // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
 	Usage         []TaskUsageEntry `json:"usage,omitempty"`      // per-model token usage
+	// FailoverEvidence is the daemon-observed side-effect evidence for a
+	// terminal provider-run failure (observed tool-call count + partial-output
+	// presence + a completeness marker), forwarded to the server fail callback
+	// so provider failover can decide whether a GPT->Claude retry is safe. Nil
+	// for completed/cancelled dispositions and for failures observed before the
+	// run streamed, which keeps active failover fail-closed. Forwarded
+	// explicitly via FailTask, not serialized on TaskResult itself.
+	FailoverEvidence *providerfailover.SideEffectEvidence `json:"-"`
 }

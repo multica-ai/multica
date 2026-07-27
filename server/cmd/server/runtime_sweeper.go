@@ -51,6 +51,19 @@ const (
 	// liveness + DB stale + FailTasksForOfflineRuntimes), which typically
 	// reclaims orphaned tasks within ~180s.
 	runningTimeoutSeconds = 9000.0
+	// codexLivenessSecs is the provider-specific wall-clock liveness deadline
+	// for the OpenAI/codex runtime (td-836aa9). A running codex task whose
+	// runtime stopped heartbeating for staleThresholdSeconds AND which has been
+	// running for more than this duration is treated as a SILENT HANG and failed
+	// with failure_reason='provider_liveness_timeout', triggering a failover
+	// evaluation. 3600s (1h) matches the maximum expected GPT run duration;
+	// tasks that regularly need more than 1h are out of scope for this watchdog.
+	codexLivenessSecs = 3600.0
+	// claudeLivenessSecs is the provider-specific liveness deadline for the
+	// Anthropic/claude runtime. Claude Code exits more promptly on errors, so
+	// 180s is a conservative upper bound — longer than any healthy turn but short
+	// enough to detect a wedged daemon within half a sweeper cycle.
+	claudeLivenessSecs = 180.0
 	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup
 	// arm of the MUL-1899 backlog fix: even with the dispatch-time
@@ -99,6 +112,7 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 			return
 		case <-ticker.C:
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
+			sweepSilentHangTasks(ctx, queries, taskSvc)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			sweepDeferredChatFinalizations(ctx, queries, taskSvc)
@@ -255,6 +269,39 @@ func gcRuntimes(ctx context.Context, queries *db.Queries, bus *events.Bus) {
 	}
 }
 
+// sweepSilentHangTasks implements the provider-specific liveness watchdog
+// (td-836aa9 invariant 1). It fails RUNNING tasks whose owning runtime has
+// gone stale AND which have exceeded their provider-specific wall-clock
+// deadline (codexLivenessSecs for GPT, claudeLivenessSecs for Claude).
+//
+// This fires BEFORE the general sweepStaleTasks backstop (2.5h) so that
+// a silently-wedged provider run hands off via EvaluateLivenessFailover
+// instead of silently stalling until the 2.5-hour wall clock trips.
+//
+// The caller order matters: sweepSilentHangTasks runs first in the tick so
+// that a task already claimed by the liveness watchdog is already 'failed'
+// when sweepStaleTasks runs and is not double-processed.
+func sweepSilentHangTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService) {
+	failedTasks, err := queries.FailSilentHangTasks(ctx, db.FailSilentHangTasksParams{
+		RuntimeStaleSecs:   staleThresholdSeconds,
+		CodexLivenessSecs:  codexLivenessSecs,
+		ClaudeLivenessSecs: claudeLivenessSecs,
+	})
+	if err != nil {
+		slog.Warn("task sweeper: failed to sweep silent hang tasks", "error", err)
+		return
+	}
+	if len(failedTasks) == 0 {
+		return
+	}
+
+	slog.Info("task sweeper: failed silent hang tasks", "count", len(failedTasks))
+	taskSvc.HandleFailedTasks(ctx, failedTasks)
+	// Liveness watchdog is the primary failover trigger path (td-836aa9): ALL
+	// tasks reaped here are potential handoff candidates; the policy decides.
+	taskSvc.EvaluateLivenessFailover(ctx, failedTasks)
+}
+
 // sweepStaleTasks fails tasks stuck in dispatched/running for too long,
 // even when the runtime is still online at the row level. Each branch pairs
 // the wall clock with a task-appropriate liveness signal so healthy long
@@ -287,6 +334,11 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
 	taskSvc.CaptureLeaseExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
+	// Provider-failover liveness watchdog (td-836aa9): a running task the wall
+	// clock reaped whose runtime stopped proving liveness is a SILENT HANG.
+	// Reclassify that subset as a failover trigger so it can hand off instead of
+	// silently stalling. No-op when the failover feature is off.
+	taskSvc.EvaluateLivenessFailover(ctx, failedTasks)
 }
 
 // sweepExpiredQueuedTasks fails tasks that have been sitting in 'queued' for

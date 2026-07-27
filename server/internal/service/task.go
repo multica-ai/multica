@@ -25,6 +25,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/providerfailover"
 	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
@@ -2601,6 +2602,31 @@ func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID 
 // flipping to 'completed' and chat_session.session_id being refreshed,
 // causing the new task to resume against a stale (or NULL) session.
 func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, result []byte, sessionID, workDir string) (*db.AgentTaskQueue, error) {
+	// Provider failover supersede guard (td-836aa9): once a failover handoff owns
+	// this task's chain, a late primary completion callback is discarded so it
+	// cannot post a duplicate outcome or resurrect the chain the Claude fallback
+	// now owns. Active mode only — zero overhead when the feature is off/shadow.
+	// The status-CAS below already rejects a second terminal transition; this is
+	// the explicit, chain-level backstop. Fail-closed: if ownership cannot be
+	// determined (lookup error), we do NOT complete — the error propagates and
+	// the completion callback is retried rather than risking a duplicate outcome.
+	if s.failoverMode(ctx) == providerfailover.ModeActive {
+		superseded, err := s.OriginalTaskSuperseded(ctx, taskID)
+		if err != nil {
+			return nil, fmt.Errorf("complete task: %w", err)
+		}
+		if superseded {
+			existing, err := s.Queries.GetAgentTask(ctx, taskID)
+			if err != nil {
+				return nil, fmt.Errorf("complete task: superseded lookup: %w", err)
+			}
+			slog.Info("complete task: discarded, chain superseded by provider failover",
+				"task_id", util.UUIDToString(taskID),
+				"current_status", existing.Status)
+			return &existing, nil
+		}
+	}
+
 	var task db.AgentTaskQueue
 	// chatAssistantMsg is the single assistant outcome row written for a chat
 	// task inside the completion transaction below. It is broadcast (chat:done)
@@ -2764,6 +2790,14 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 	// Broadcast
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
 
+	// Provider failover (td-836aa9): if this task IS a dispatched Claude
+	// fallback, advance its handoff ledger row DISPATCHED -> COMPLETED so the
+	// ledger reflects the fallback finished. No-op for non-fallback tasks and
+	// when the feature is off.
+	if s.failoverMode(ctx) != providerfailover.ModeOff {
+		s.FinalizeFailoverForFallbackOutcome(ctx, taskID, providerfailover.StateCompleted)
+	}
+
 	return &task, nil
 }
 
@@ -2926,7 +2960,7 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 // coarse bucket. Daemon callers that already produced a refined reason
 // (via classifyPoisonedError, the timeout / runtime classifier, etc.)
 // will have their value preserved untouched.
-func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string) (*db.AgentTaskQueue, error) {
+func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string, failoverEvidence *providerfailover.SideEffectEvidence) (*db.AgentTaskQueue, error) {
 	// MUL-2946: synthesise a refined reason from the error text whenever the
 	// caller didn't supply one. This is the last write-path guard against
 	// "agent_error" coarse rows ending up in agent_task_queue.failure_reason
@@ -3126,6 +3160,23 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 
 	// Broadcast
 	s.broadcastTaskEvent(ctx, protocol.EventTaskFailed, task)
+
+	// Provider failover (td-836aa9): evaluate a GPT->Claude usage/rate-limit
+	// handoff. Best-effort and post-commit — it never affects the fail outcome,
+	// and the fast path returns immediately unless the failure is a provider
+	// usage/rate-limit trigger and the feature is enabled. failoverEvidence is
+	// the daemon's observed side-effect surface (nil for older daemons / paths
+	// that never observed the run, which holds active handoffs fail-closed).
+	s.EvaluateFailover(ctx, task, failureReason, failoverEvidence)
+
+	// If this failed task IS a dispatched Claude fallback, advance its handoff
+	// ledger row DISPATCHED -> FAILED (independent of the reason — any terminal
+	// failure of the fallback ends the handoff). Distinct from EvaluateFailover,
+	// which is the primary-side trigger; a fallback never re-fails-over (loop
+	// guard). No-op for non-fallback tasks and when the feature is off.
+	if s.failoverMode(ctx) != providerfailover.ModeOff {
+		s.FinalizeFailoverForFallbackOutcome(ctx, task.ID, providerfailover.StateFailed)
+	}
 
 	return &task, nil
 }

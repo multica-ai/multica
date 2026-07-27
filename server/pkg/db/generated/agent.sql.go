@@ -2295,6 +2295,118 @@ func (q *Queries) FailAgentTask(ctx context.Context, arg FailAgentTaskParams) (A
 	return i, err
 }
 
+const failSilentHangTasks = `-- name: FailSilentHangTasks :many
+UPDATE agent_task_queue atq
+SET status = 'failed',
+    completed_at = now(),
+    error = 'provider silent hang: no activity past liveness deadline',
+    failure_reason = 'provider_liveness_timeout',
+    prepare_lease_expires_at = NULL
+FROM agent_runtime r
+WHERE atq.runtime_id = r.id
+  AND atq.status = 'running'
+  AND r.last_seen_at < now() - make_interval(secs => $1::double precision)
+  AND (
+    (r.provider = 'codex'  AND atq.started_at < now() - make_interval(secs => $2::double precision))
+    OR
+    (r.provider = 'claude' AND atq.started_at < now() - make_interval(secs => $3::double precision))
+  )
+RETURNING atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id, atq.runtime_mcp_overlay, atq.escalation_for_task_id, atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps, atq.coalesced_comment_ids, atq.delivered_comment_ids, atq.chat_input_task_id, atq.chat_finalize_deferred_at, atq.originator_source, atq.delegated_from_task_id, atq.retry_of_task_id, atq.rerun_of_task_id, atq.rule_version_id, atq.trigger_evidence_kind, atq.trigger_evidence_ref_id, atq.accountable_user_id
+`
+
+type FailSilentHangTasksParams struct {
+	RuntimeStaleSecs   float64 `json:"runtime_stale_secs"`
+	CodexLivenessSecs  float64 `json:"codex_liveness_secs"`
+	ClaudeLivenessSecs float64 `json:"claude_liveness_secs"`
+}
+
+// Fails RUNNING tasks that have been silent past their provider's specific
+// liveness deadline AND whose owning runtime is no longer proving liveness.
+// Fires EARLIER than FailStaleTasks (which uses a 2.5-hour general backstop)
+// to catch the provider-specific silent-hang case at 60min (codex) or 180s
+// (claude) — the td-836aa9 watchdog targets.
+//
+// Unlike FailStaleTasks this query:
+//   - targets only 'running' tasks (the dispatched branch is handled by FailStaleTasks)
+//   - requires a runtime JOIN for the provider discriminator
+//   - applies provider-specific deadlines (@codex_liveness_secs / @claude_liveness_secs)
+//     rather than a single wall-clock cap
+//   - sets failure_reason = 'provider_liveness_timeout' (not 'timeout'), which
+//     IsFailoverTrigger accepts as a cross-provider handoff trigger
+//   - uses the same @runtime_stale_secs guard so a heartbeating runtime is
+//     never reaped by this watchdog (same invariant as FailStaleTasks)
+//
+// The service's EvaluateLivenessFailover is invoked on the returned rows in
+// sweepSilentHangTasks; the failover policy then determines whether a real
+// handoff fires or is merely recorded in shadow mode.
+func (q *Queries) FailSilentHangTasks(ctx context.Context, arg FailSilentHangTasksParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, failSilentHangTasks, arg.RuntimeStaleSecs, arg.CodexLivenessSecs, arg.ClaudeLivenessSecs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const failStaleTasks = `-- name: FailStaleTasks :many
 UPDATE agent_task_queue
 SET status = 'failed', completed_at = now(), error = 'task timed out',

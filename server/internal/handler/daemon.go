@@ -29,6 +29,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/providerfailover"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
@@ -3503,6 +3504,11 @@ type TaskFailRequest struct {
 	SessionID     string `json:"session_id,omitempty"`
 	WorkDir       string `json:"work_dir,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`
+	// FailoverEvidence is the daemon-observed side-effect evidence for provider
+	// failover (td-836aa9). Absent from older daemons; a nil pointer here keeps
+	// active failover fail-closed because completeness is never proven. New
+	// fields decode to nil on old clients, preserving API backward compatibility.
+	FailoverEvidence *providerfailover.SideEffectEvidence `json:"failover_evidence,omitempty"`
 }
 
 func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
@@ -3520,7 +3526,7 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason)
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason, req.FailoverEvidence)
 	if err != nil {
 		slog.Warn("fail task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())

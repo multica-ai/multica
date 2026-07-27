@@ -151,7 +151,7 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 				Bus:     events.New(),
 			}
 
-			got, err := svc.FailTask(context.Background(), taskID, "agent crashed", "", "", "")
+			got, err := svc.FailTask(context.Background(), taskID, "agent crashed", "", "", "", nil)
 			if err != nil {
 				t.Fatalf("expected no error, got %v", err)
 			}

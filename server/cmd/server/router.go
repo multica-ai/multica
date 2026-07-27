@@ -1172,6 +1172,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Squad leader evaluation (writes to activity_log)
 			r.Post("/api/issues/{id}/squad-evaluated", h.RecordSquadLeaderEvaluation)
 
+			// Provider failover ledger (td-836aa9): observable GPT->Claude
+			// usage/rate-limit handoff decisions recorded against the issue.
+			r.Get("/api/issues/{id}/failover-handoffs", h.ListIssueFailoverHandoffs)
+
 			// Autopilots
 			r.Route("/api/autopilots", func(r chi.Router) {
 				r.Get("/", h.ListAutopilots)

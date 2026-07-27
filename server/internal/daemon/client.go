@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/providerfailover"
 )
 
 // requestError is returned by postJSON/getJSON when the server responds with an error status.
@@ -393,7 +394,7 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
-func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string) error {
+func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string, failoverEvidence *providerfailover.SideEffectEvidence) error {
 	body := map[string]any{"error": errMsg}
 	if sessionID != "" {
 		body["session_id"] = sessionID
@@ -403,6 +404,13 @@ func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDi
 	}
 	if failureReason != "" {
 		body["failure_reason"] = failureReason
+	}
+	// Provider-failover side-effect evidence (td-836aa9). Sent only when the
+	// run was observed to a terminal end; omitted otherwise so an older server
+	// simply ignores the unknown field and a newer server keeps active failover
+	// fail-closed for runs whose side-effect surface was never proven.
+	if failoverEvidence != nil {
+		body["failover_evidence"] = failoverEvidence
 	}
 	return c.postJSONWithRetry(ctx, fmt.Sprintf("/api/daemon/tasks/%s/fail", taskID), body, nil, defaultTerminalRetrySchedule)
 }

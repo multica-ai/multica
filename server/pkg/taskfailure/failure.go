@@ -80,6 +80,21 @@ const (
 	// agent timeout path.
 	ReasonTimeout Reason = "timeout"
 
+	// ReasonProviderLivenessTimeout: a run went SILENT past its
+	// provider-specific wall-clock liveness deadline — the owning
+	// runtime stopped proving it was alive (stale heartbeat / no
+	// per-task lease) while a task was still 'running'. This is the
+	// silent-hang case the GPT-60min / Claude-180s watchdog targets
+	// (td-836aa9): distinct from ReasonTimeout (an actively-working run
+	// that hit a hard cap) because here the process is WEDGED, not
+	// working. It is a provider-failover trigger (see
+	// providerfailover.IsFailoverTrigger) whereas plain ReasonTimeout is
+	// not, so a hang can hand off while a busy run cannot. The stored
+	// agent_task_queue.failure_reason for a swept row stays 'timeout';
+	// this refined reason is what the sweeper hands to the failover
+	// evaluator to classify the silent-hang subset.
+	ReasonProviderLivenessTimeout Reason = "provider_liveness_timeout"
+
 	// ReasonIterationLimit: the agent reached its per-run iteration
 	// cap and emitted a fallback "I reached the iteration limit"
 	// message. Treated as platform-side because it is a Multica-imposed
@@ -174,7 +189,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 21 reasons. Order is
+// allReasons is the canonical ordered list of the 22 reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -189,6 +204,7 @@ var allReasons = []Reason{
 	ReasonRuntimeOffline,
 	ReasonRuntimeRecovery,
 	ReasonTimeout,
+	ReasonProviderLivenessTimeout,
 	ReasonIterationLimit,
 	ReasonAgentBlocked,
 	ReasonAPIInvalidRequest,
@@ -231,7 +247,7 @@ func (r Reason) IsAgentError() bool {
 	return strings.HasPrefix(string(r), agentErrorPrefix)
 }
 
-// AllReasons returns the canonical 21 reasons in a stable order. The
+// AllReasons returns the canonical 22 reasons in a stable order. The
 // caller MUST NOT mutate the returned slice; a copy is returned so
 // concurrent callers can append to their local copy without corrupting
 // the package-level fixture.

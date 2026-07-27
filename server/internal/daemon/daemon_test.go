@@ -1464,7 +1464,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	}
 
 	// Mirrors the retry in runTask, gated on the same production predicate.
-	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools, "claude") {
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools.toolCalls, "claude") {
 		firstUsage := result.Usage
 		opts.ResumeSessionID = ""
 		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", &msgSeq)
@@ -1684,7 +1684,7 @@ func TestExecuteAndDrain_NoRetryAfterToolsExecuted(t *testing.T) {
 	// opened a PR, written commits into the reused workdir). Re-running it
 	// from scratch would duplicate those side effects, so the fallback must
 	// stay out regardless of what the backend reported as SessionID.
-	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools+1, "claude") {
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools.toolCalls+1, "claude") {
 		t.Fatal("should not retry once tools have executed")
 	}
 	if int(fb.idx.Load()) != 1 {
@@ -1720,7 +1720,7 @@ func TestExecuteAndDrain_NetworkFailureKeepsResumeSession(t *testing.T) {
 	if result.ResumeRejected {
 		t.Fatal("a network drop must not be reported as a rejected resume")
 	}
-	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools, "claude") {
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools.toolCalls, "claude") {
 		t.Fatal("network failure must not trigger a fresh-session retry")
 	}
 	if int(fb.idx.Load()) != 1 {
@@ -2065,8 +2065,8 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 	if result.Status != "timeout" {
 		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
 	}
-	if tools != 1 {
-		t.Fatalf("expected one tool use, got %d", tools)
+	if tools.toolCalls != 1 {
+		t.Fatalf("expected one tool use, got %d", tools.toolCalls)
 	}
 
 	deadline := time.Now().Add(2 * time.Second)
