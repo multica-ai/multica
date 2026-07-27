@@ -9,7 +9,7 @@ import (
 )
 
 // This file holds the platform-neutral translation from a Telegram webhook
-// Update to the engine's normalized channel.InboundMessage. inboundFromUpdate
+// Update to the engine's normalized channel.InboundMessage. InboundFromUpdate
 // is a free function parameterized by the bot identity (rather than a method
 // on the channel) so the per-installation webhook handler threads in its own
 // installed bot's id/username when translating each update.
@@ -81,7 +81,7 @@ func telegramChatType(t string) channel.ChatType {
 	}
 }
 
-// inboundFromUpdate normalizes a Telegram webhook Update. It returns
+// InboundFromUpdate normalizes a Telegram webhook Update. It returns
 // ok=false for updates that must not reach the core: non-message updates,
 // the bot's own messages (loop guard), empty text, and channel posts
 // (broadcast channels are not conversations).
@@ -90,7 +90,7 @@ func telegramChatType(t string) channel.ChatType {
 // is addressed to the bot only when it carries an explicit @botusername
 // mention entity, or is a reply to a message the bot itself sent.
 // Mention-free follow-ups are not auto-addressed here.
-func inboundFromUpdate(u Update, botID, botUsername string) (channel.InboundMessage, bool) {
+func InboundFromUpdate(u Update, botID, botUsername string) (channel.InboundMessage, bool) {
 	m := u.Message
 	if m == nil || m.From == nil || m.From.IsBot || strings.TrimSpace(m.Text) == "" {
 		return channel.InboundMessage{}, false

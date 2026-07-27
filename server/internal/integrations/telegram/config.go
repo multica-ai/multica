@@ -83,6 +83,17 @@ func DecodePublicConfig(raw json.RawMessage) PublicConfig {
 	return PublicConfig{AppID: cfg.AppID, BotUsername: cfg.BotUsername}
 }
 
+// WebhookSecret extracts the per-installation webhook verification token
+// (installConfig.WebhookSecret) from a stored config blob. It is stored in
+// plaintext (it is not a credential — see the installConfig doc comment) so
+// this is a plain decode, not a decrypt. A decode miss yields "", which the
+// public webhook handler treats as "never matches" rather than panicking.
+func WebhookSecret(raw json.RawMessage) string {
+	var cfg installConfig
+	_ = json.Unmarshal(raw, &cfg)
+	return cfg.WebhookSecret
+}
+
 // decryptToken base64-decodes the stored ciphertext (tolerating the MIME
 // newline wrapping PostgreSQL's encode(...,'base64') emits) and runs it through
 // the injected Decrypter. An empty stored value decodes to an empty token; a

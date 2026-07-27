@@ -221,6 +221,13 @@ type Handler struct {
 	// delivering events, to flush debounced run triggers and join in-flight
 	// reply goroutines. Built unconditionally (even without Lark).
 	ChannelRouter *engine.Router
+	// testChannelHandler overrides ChannelRouter as the destination for
+	// normalized Telegram inbound messages in TelegramWebhook. Production
+	// code (New / cmd/server/router.go) leaves this nil, in which case
+	// TelegramWebhook routes through ChannelRouter; tests inject a fake
+	// channelHandler here so the webhook handler is testable as a pure HTTP
+	// handler without standing up a full Router + resolver set.
+	testChannelHandler channelHandler
 	// ChannelMediaReconciler settles the channel-media intent ledger
 	// (uploaded-but-unbound object reclaim). Built in cmd/server/router.go
 	// where the storage backend exists; main.go starts it as an independent

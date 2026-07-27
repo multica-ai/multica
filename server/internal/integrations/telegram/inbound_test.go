@@ -13,7 +13,7 @@ func TestInboundFromUpdate_PrivateIssueCommand(t *testing.T) {
 		Chat:      Chat{ID: 555, Type: "private"},
 		Text:      "/issue Fix login\nit crashes",
 	}}
-	msg, ok := inboundFromUpdate(u, "123", "acme_bot")
+	msg, ok := InboundFromUpdate(u, "123", "acme_bot")
 	if !ok {
 		t.Fatal("expected ok")
 	}
@@ -32,13 +32,13 @@ func TestInboundFromUpdate_GroupRequiresMention(t *testing.T) {
 	base := Message{MessageID: 5, From: &User{ID: 1}, Chat: Chat{ID: -100, Type: "supergroup"}}
 	noMention := base
 	noMention.Text = "hello team"
-	if msg, ok := inboundFromUpdate(Update{Message: &noMention}, "123", "acme_bot"); !ok || msg.AddressedToBot {
+	if msg, ok := InboundFromUpdate(Update{Message: &noMention}, "123", "acme_bot"); !ok || msg.AddressedToBot {
 		t.Fatalf("group without mention should be ok but not addressed; got ok=%v addressed=%v", ok, msg.AddressedToBot)
 	}
 	withMention := base
 	withMention.Text = "@acme_bot /issue Ship it"
 	withMention.Entities = []Entity{{Type: "mention", Offset: 0, Length: 9}}
-	msg, ok := inboundFromUpdate(Update{Message: &withMention}, "123", "acme_bot")
+	msg, ok := InboundFromUpdate(Update{Message: &withMention}, "123", "acme_bot")
 	if !ok || !msg.AddressedToBot {
 		t.Fatalf("group with mention should be addressed; got ok=%v addressed=%v", ok, msg.AddressedToBot)
 	}
@@ -48,23 +48,23 @@ func TestInboundFromUpdate_GroupRequiresMention(t *testing.T) {
 }
 
 func TestInboundFromUpdate_DropsBotAndEmptyAndChannel(t *testing.T) {
-	if _, ok := inboundFromUpdate(Update{Message: &Message{From: &User{ID: 1, IsBot: true}, Chat: Chat{Type: "private"}, Text: "hi"}}, "123", "b"); ok {
+	if _, ok := InboundFromUpdate(Update{Message: &Message{From: &User{ID: 1, IsBot: true}, Chat: Chat{Type: "private"}, Text: "hi"}}, "123", "b"); ok {
 		t.Fatal("bot sender should drop")
 	}
-	if _, ok := inboundFromUpdate(Update{Message: &Message{From: &User{ID: 1}, Chat: Chat{Type: "private"}, Text: "   "}}, "123", "b"); ok {
+	if _, ok := InboundFromUpdate(Update{Message: &Message{From: &User{ID: 1}, Chat: Chat{Type: "private"}, Text: "   "}}, "123", "b"); ok {
 		t.Fatal("empty text should drop")
 	}
-	if _, ok := inboundFromUpdate(Update{Message: &Message{From: &User{ID: 1}, Chat: Chat{Type: "channel"}, Text: "x"}}, "123", "b"); ok {
+	if _, ok := InboundFromUpdate(Update{Message: &Message{From: &User{ID: 1}, Chat: Chat{Type: "channel"}, Text: "x"}}, "123", "b"); ok {
 		t.Fatal("channel post should drop")
 	}
-	if _, ok := inboundFromUpdate(Update{Message: nil}, "123", "b"); ok {
+	if _, ok := InboundFromUpdate(Update{Message: nil}, "123", "b"); ok {
 		t.Fatal("no message should drop")
 	}
 }
 
 func TestInboundFromUpdate_StripsCommandBotSuffix(t *testing.T) {
 	u := Update{Message: &Message{MessageID: 9, From: &User{ID: 2}, Chat: Chat{ID: 5, Type: "private"}, Text: "/issue@acme_bot Do the thing"}}
-	msg, _ := inboundFromUpdate(u, "123", "acme_bot")
+	msg, _ := InboundFromUpdate(u, "123", "acme_bot")
 	if msg.Text != "/issue Do the thing" {
 		t.Fatalf("command suffix not normalized: %q", msg.Text)
 	}

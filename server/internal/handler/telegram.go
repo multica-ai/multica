@@ -1,14 +1,19 @@
 package handler
 
 import (
+	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -212,4 +217,90 @@ func (h *Handler) RevokeTelegramInstallation(w http.ResponseWriter, r *http.Requ
 		"id": uuidToString(instUUID),
 	})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// channelHandler is the narrow surface TelegramWebhook needs from the
+// shared channel-agnostic engine (*engine.Router.Handle). Depending on it
+// as an interface — rather than the concrete *engine.Router — lets tests
+// inject a fake via Handler.testChannelHandler and exercise TelegramWebhook
+// as a pure HTTP handler.
+type channelHandler interface {
+	Handle(ctx context.Context, msg channel.InboundMessage) error
+}
+
+// channelHandlerFor returns the destination TelegramWebhook routes
+// normalized inbound messages to: the test override when set, else
+// ChannelRouter (nil if the engine isn't wired, in which case the caller
+// drops the message after ACKing Telegram).
+func (h *Handler) channelHandlerFor() channelHandler {
+	if h.testChannelHandler != nil {
+		return h.testChannelHandler
+	}
+	if h.ChannelRouter != nil {
+		return h.ChannelRouter
+	}
+	return nil
+}
+
+// TelegramWebhook (POST /api/webhooks/telegram/{botId}) is the PUBLIC,
+// unauthenticated endpoint Telegram POSTs updates to. botId is the opaque
+// per-bot routing key (the numeric bot id from the token prefix, stored at
+// config->>'app_id') — not a UUID, so it is read as a raw path param, never
+// parsed/loaded through the UUID resolvers.
+//
+// This handler always ACKs with 200 OK, even for drops: Telegram retries
+// non-2xx responses aggressively (indefinitely, by webhook contract), and a
+// 401/404 here would also reveal whether a given bot id is installed to an
+// unauthenticated caller. Every early-return path below is a deliberate
+// silent drop, not an error: unknown/inactive installation, secret
+// mismatch, malformed body, and updates InboundFromUpdate filters out
+// (non-message updates, the bot's own messages, channel posts, etc).
+func (h *Handler) TelegramWebhook(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	botID := chi.URLParam(r, "botId")
+
+	inst, err := h.Queries.GetChannelInstallationByAppID(ctx, db.GetChannelInstallationByAppIDParams{
+		ChannelType: string(telegram.TypeTelegram),
+		AppID:       botID,
+	})
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			slog.ErrorContext(ctx, "telegram webhook: load installation failed", "bot_id", botID, "error", err)
+		}
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+	if inst.Status != "active" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	want := telegram.WebhookSecret(inst.Config)
+	got := r.Header.Get("X-Telegram-Bot-Api-Secret-Token")
+	if want == "" || subtle.ConstantTimeCompare([]byte(got), []byte(want)) != 1 {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	var update telegram.Update
+	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	msg, ok := telegram.InboundFromUpdate(update, botID, telegram.DecodePublicConfig(inst.Config).BotUsername)
+	if !ok {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Product outcomes (unbound sender, no membership, etc.) are not errors
+	// here — the Router's resolver pipeline owns those decisions and any
+	// user-facing reply. Only an infra failure is worth logging.
+	if handler := h.channelHandlerFor(); handler != nil {
+		if err := handler.Handle(ctx, msg); err != nil {
+			slog.ErrorContext(ctx, "telegram webhook: router handle failed", "bot_id", botID, "error", err)
+		}
+	}
+	w.WriteHeader(http.StatusOK)
 }
