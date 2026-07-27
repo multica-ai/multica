@@ -3143,11 +3143,17 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		// exactly how a promised follow-up is lost. Hand the obligation to that
 		// blocker instead, keeping it alive until some run provably covers it.
 		if res := h.enqueueCommentAgentTriggers(ctx, issue, c.ID, scoped)[agentID]; res.status == DispatchBlocked {
-			if h.propagateUncoveredCommentObligation(ctx, issue, scoped[0], c.ID) {
+			headSha := h.TaskService.ResolveIssueReviewSHAParam(ctx, task.IssueID)
+			if h.propagateUncoveredCommentObligation(ctx, issue, scoped[0], c.ID, headSha) {
 				slog.Info("reconcile comments on completion: replay blocked, obligation handed to the active task",
 					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID))
 			} else {
-				slog.Warn("reconcile comments on completion: replay blocked and obligation could not be handed off",
+				// The slot is held by a DIFFERENT-head queued task: it can neither
+				// cover this comment nor accept it (merging would let an old-head
+				// run consume a new-head request — TEN-356). Today's schema has no
+				// safe place to park the obligation, so surface it loudly rather
+				// than let it disappear quietly.
+				slog.Error("reconcile comments on completion: replay blocked and obligation could not be handed off; comment needs a durable obligation record",
 					"issue_id", uuidToString(task.IssueID), "agent_id", agentID, "comment_id", uuidToString(c.ID),
 					"reason", res.reason)
 			}

@@ -1563,12 +1563,16 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 //     inside reconcile's `created_at > since` window (AlreadyPending
 //     path, where the task existed before the comment).
 //
-// The deferral is durable rather than a one-shot prediction: if a replay is later
-// blocked by a task that cannot cover the comment, reconcileCommentsOnCompletion
-// hands the obligation to that blocker (propagateUncoveredCommentObligation)
-// instead of discarding it, so it survives an arbitrary chain of blockers (#5914,
-// Elon round 8). It never defers off a mere classification of the current active
-// tasks — a snapshot cannot prove anything about state after it is read (round 7).
+// The deferral is not a one-shot prediction: if a replay is later blocked by a
+// task that cannot cover the comment, reconcileCommentsOnCompletion hands the
+// obligation on (propagateUncoveredCommentObligation) instead of discarding it,
+// and that hand-off retries across the blocker's state changes (#5914, Elon
+// rounds 8–9). It is best-effort in exactly one shape — a DIFFERENT-head QUEUED
+// blocker, which can neither cover the comment nor accept it without violating
+// TEN-356 — and that case is logged at error rather than hidden; closing it needs
+// a durable obligation record, which is deliberately out of scope here.
+// It never defers off a mere classification of the current active tasks — a
+// snapshot cannot prove anything about state after it is read (round 7).
 // A duplicate that cannot yet be resolved re-loops (bounded by maxAttempts); on
 // genuine non-convergence it returns a truthful internal_error, never a fabricated
 // deferred that would silently drop the comment.
@@ -1958,33 +1962,54 @@ func (h *Handler) registerPlannedCommentForActiveTask(ctx context.Context, issue
 // be handled. Propagating turns "consumed once" into "handed along" until some
 // task provably covers C.
 //
-// Both attachment writes are deliberately HEAD-AGNOSTIC here, unlike the
-// enqueue-time path. Head scoping (TEN-356) governs the DEDUP decision — whether
-// an old-head run may satisfy a new-head review request — and that decision has
-// already been made. This is the opposite direction: attaching an unaddressed
-// comment to the only run that will execute, which never removes the blocker's
-// own head coverage. Preference order:
+// Each attempt tries, in order, the three writes that can durably cover the
+// comment, and RETRIES when the slot's occupant changes state under us — the
+// hand-off is not one atomic statement, so a blocker that completes or gets
+// claimed between two steps must be re-observed rather than lost (Elon round 9):
 //
-//  1. a CLAIM-RECEIPT task (dispatched/running/waiting): a planned id added after
-//     the claim is not delivered to that run, so this purely schedules the
-//     comment for that task's completion reconcile;
-//  2. a QUEUED task: the atomic merge, which re-stamps trigger/originator/overlay
-//     to C, so the coalescing run carries the right identity (MUL-4302). Never a
-//     bare append on a queued task.
+//  1. a CLAIM-RECEIPT task (dispatched/running/waiting), ANY head: a planned id
+//     added after the claim is never delivered to that run, so it cannot consume
+//     the comment under the wrong head — it purely schedules the comment for that
+//     task's own completion reconcile, which re-enqueues at the head current then;
+//  2. a SAME-HEAD queued task: the atomic merge, which re-stamps trigger /
+//     originator / overlay (MUL-4302). This is HEAD-SCOPED on purpose: merging
+//     into a different-head queued task would make the comment that run's trigger
+//     and mark it delivered at claim time, so an old-head run would consume a
+//     new-head request and no new-head follow-up would ever be created — the
+//     TEN-356 violation (Elon round 9, must-fix 2);
+//  3. a fresh enqueue: correct precisely when the blocker has finished and freed
+//     the unique slot, which is the state a mid-hand-off completion leaves behind.
 //
-// Returns false only when neither landed (no active task, or the merge refused),
-// which the caller logs — the comment row still persists for a later trigger.
-func (h *Handler) propagateUncoveredCommentObligation(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID) bool {
-	registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, commentID, pgtype.Text{})
-	if err != nil {
-		slog.Warn("propagate comment obligation: register on active task failed",
-			"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID),
-			"comment_id", uuidToString(commentID), "error", err)
-	} else if registered {
-		return true
-	}
-	if h.mergeCommentIntoPendingTask(ctx, issue, trigger, commentID, pgtype.Text{}) == commentMergeSucceeded {
-		return true
+// A duplicate-key error from (3) means the slot is still held, so the loop
+// re-observes and tries again. Returns false only when every attempt found the
+// slot held by a task that can neither cover nor accept the comment (a
+// different-head QUEUED blocker); the caller logs that loudly — it is the one
+// shape today's schema has no safe place to park, and closing it needs a durable
+// obligation record rather than an in-request hand-off.
+func (h *Handler) propagateUncoveredCommentObligation(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, commentID pgtype.UUID, headSha pgtype.Text) bool {
+	noEscalation := func() time.Duration { return 0 }
+	const maxAttempts = 3
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		registered, err := h.registerPlannedCommentForActiveTask(ctx, issue, trigger.Agent.ID, commentID, pgtype.Text{})
+		if err != nil {
+			slog.Warn("propagate comment obligation: register on active task failed",
+				"issue_id", uuidToString(issue.ID), "agent_id", uuidToString(trigger.Agent.ID),
+				"comment_id", uuidToString(commentID), "error", err)
+		} else if registered {
+			return true
+		}
+		if h.mergeCommentIntoPendingTask(ctx, issue, trigger, commentID, headSha) == commentMergeSucceeded {
+			return true
+		}
+		err = h.enqueueSingleCommentTrigger(ctx, issue, commentID, trigger, noEscalation)
+		if err == nil {
+			return true
+		}
+		if !errors.Is(err, service.ErrDuplicatePendingTask) {
+			return false
+		}
+		// The slot is still occupied; its occupant may have changed state between
+		// the steps above, so re-observe and try again.
 	}
 	return false
 }

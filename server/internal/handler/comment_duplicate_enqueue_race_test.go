@@ -499,13 +499,15 @@ func TestCommentEnqueueRaceNewerDifferentHeadNotDeferred(t *testing.T) {
 	}
 }
 
-// TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred covers Elon rounds 6+8:
+// TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred covers Elon rounds 6+9:
 // an OLDER different-head task and a NEWER one can coexist (running sits outside
 // the unique index). At decision time nothing has attached the comment, so the
 // resolver must return a truthful non-success rather than a fabricated deferred
-// (round 6). Draining the chain then proves the comment is still not lost: the
-// older task's blocked replay is handed to the newer blocker instead of being
-// discarded, so the comment ends up covered (round 8).
+// (round 6). Draining the chain then pins the boundary of the hand-off: the newer
+// blocker is at a DIFFERENT head, so the obligation is NOT folded into it — that
+// would let an old-head run consume a current-head request (TEN-356, round 9).
+// This is the one documented best-effort shape; correctness rests on the fact
+// that nothing ever promised coverage here.
 func TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -573,24 +575,16 @@ func TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred(t *testing.T) {
 	}
 
 	// Draining the chain: A completes and its replay of C collides with the still-
-	// queued newer B. That failure is NOT discarded — the obligation is handed to B
-	// (Elon round 8), so C ends up covered even though the initial call correctly
-	// refused to promise it. The initial non-success and the eventual coverage are
-	// both required: we never claim more than we have done, and we never drop.
+	// queued newer B, which is at a DIFFERENT head. The hand-off correctly declines
+	// to fold C there (that would let an old-head run consume it — TEN-356), so this
+	// is the one documented best-effort shape: C stays uncovered and the failure is
+	// logged at error. What matters for correctness is that the initial call never
+	// PROMISED coverage — it returned a non-success above.
 	if w := completeTaskViaHandler(t, taskA, "done"); w.Code != 200 {
 		t.Fatalf("complete A: %d: %s", w.Code, w.Body.String())
 	}
-	if !commentCoveredByAnyActiveTask(t, issueID, agentID, loserCommentID) {
-		t.Fatal("A's blocked replay was discarded — C is covered by no active task")
-	}
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, taskB); err != nil {
-		t.Fatalf("advance B to running: %v", err)
-	}
-	if w := completeTaskViaHandler(t, taskB, "done"); w.Code != 200 {
-		t.Fatalf("complete B: %d: %s", w.Code, w.Body.String())
-	}
-	if !commentCoveredByAnyActiveTask(t, issueID, agentID, loserCommentID) {
-		t.Fatal("after the blocker chain drained, no task covers C — the obligation was lost")
+	if commentCovered(t, issueID, agentID, loserCommentID, "queued") {
+		t.Fatal("C was folded into the different-head queued blocker (TEN-356 violation)")
 	}
 }
 
@@ -610,6 +604,24 @@ func commentCoveredByAnyActiveTask(t *testing.T, issueID, agentID, commentID str
 		t.Fatalf("check coverage: %v", err)
 	}
 	return ok
+}
+
+// coveringTaskHead returns the head_sha of the active task that covers the comment
+// (empty when none does), so a test can assert WHICH head finally covers it.
+func coveringTaskHead(t *testing.T, issueID, agentID, commentID string) string {
+	t.Helper()
+	var head string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT COALESCE(context->>'head_sha','')
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2
+		  AND status IN ('queued','dispatched','running','waiting_local_directory')
+		  AND ($3::uuid = trigger_comment_id OR $3::uuid = ANY(coalesced_comment_ids))
+		ORDER BY created_at DESC LIMIT 1
+	`, issueID, agentID, commentID).Scan(&head); err != nil {
+		t.Fatalf("read covering task head: %v", err)
+	}
+	return head
 }
 
 // seedDupRacePR links a PR at head B so the reviewed head resolves to head B.
@@ -698,13 +710,18 @@ func TestReconcileBlockedReplayPropagatesToClaimedBlocker(t *testing.T) {
 	if !commentCoveredByAnyActiveTask(t, issueID, agentID, loserCommentID) {
 		t.Fatal("after the blocker chain drained, no task covers C — the deferral was not durable")
 	}
+	// The hand-off never let an old-head run consume C: the follow-up that finally
+	// covers it is stamped for the CURRENT head (TEN-356).
+	if head := coveringTaskHead(t, issueID, agentID, loserCommentID); head != dupRaceHeadB {
+		t.Fatalf("covering task head_sha = %q, want the current head %q", head, dupRaceHeadB)
+	}
 }
 
 // TestReconcileBlockedReplayPropagatesToQueuedBlocker is the regression for Elon
 // round-8 must-fix 1 (AlreadyPending path): C arrives while A is running, so A's
-// reconcile finds it by timestamp — but a NEWER different-head task B is QUEUED when
-// A completes, blocking the replay. The obligation must be handed to B through the
-// ATOMIC merge (a queued task must never be bare-appended), so C ends up covered.
+// reconcile finds it by timestamp — but a NEWER task B is QUEUED when A completes,
+// blocking the replay. When B is at the CURRENT head the obligation is handed to it
+// through the ATOMIC merge (never a bare append), so C ends up covered at that head.
 func TestReconcileBlockedReplayPropagatesToQueuedBlocker(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -727,14 +744,14 @@ func TestReconcileBlockedReplayPropagatesToQueuedBlocker(t *testing.T) {
 	`, agentID, runtimeID, issueID, aTrigger, dupRaceHeadA).Scan(&taskA); err != nil {
 		t.Fatalf("insert running task A: %v", err)
 	}
-	// B: NEWER than C, different head, and QUEUED — it occupies the unique slot and
-	// its reconcile can never see C.
+	// B: NEWER than C, QUEUED, and at the CURRENT head — it occupies the unique slot
+	// and its own reconcile can never see the older C.
 	var taskB string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, context)
 		VALUES ($1, $2, $3, $4, 'queued', 0, now() - interval '1 minute', jsonb_build_object('head_sha', $5::text))
 		RETURNING id
-	`, agentID, runtimeID, issueID, bTrigger, dupRaceHeadA).Scan(&taskB); err != nil {
+	`, agentID, runtimeID, issueID, bTrigger, dupRaceHeadB).Scan(&taskB); err != nil {
 		t.Fatalf("insert queued blocker B: %v", err)
 	}
 
@@ -745,8 +762,71 @@ func TestReconcileBlockedReplayPropagatesToQueuedBlocker(t *testing.T) {
 	if !commentCoveredByAnyActiveTask(t, issueID, agentID, loserCommentID) {
 		t.Fatal("blocked replay was discarded — C is covered by no active task, so it is lost")
 	}
-	// The fold went through the ATOMIC merge, so B still covers its own trigger too.
+	// The fold went through the ATOMIC merge, so B still covers its own trigger too,
+	// and the covering run is at the current head.
 	if !commentCoveredByAnyActiveTask(t, issueID, agentID, bTrigger) {
 		t.Fatal("the blocker's own trigger comment lost coverage during the hand-off")
+	}
+	if head := coveringTaskHead(t, issueID, agentID, loserCommentID); head != dupRaceHeadB {
+		t.Fatalf("covering task head_sha = %q, want the current head %q", head, dupRaceHeadB)
+	}
+}
+
+// TestReconcileBlockedReplayNeverFoldsIntoDifferentHeadQueuedBlocker is the
+// regression for Elon round-9 must-fix 2: the hand-off must NOT merge across heads.
+// A different-head QUEUED blocker would make the comment that run's trigger and mark
+// it delivered at claim time, so an old-head run would consume a new-head request and
+// no new-head follow-up would ever exist (TEN-356). The hand-off must decline instead
+// — leaving the blocker untouched — rather than "cover" the comment incorrectly.
+func TestReconcileBlockedReplayNeverFoldsIntoDifferentHeadQueuedBlocker(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, issueID, runtimeID := dupRaceFixture(t, "dup-race-propagate-crosshead", 999321)
+	seedDupRacePR(t, issueID, 999321) // current head = head B
+
+	aTrigger := insertDupRaceComment(t, issueID, "A trigger", "11 minutes")
+	loserCommentID := insertDupRaceComment(t, issueID, "comment C posted during the run", "5 minutes")
+	bTrigger := insertDupRaceComment(t, issueID, "B trigger", "2 minutes")
+
+	var taskA string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, delivered_comment_ids, status, priority, created_at, started_at, context)
+		VALUES ($1, $2, $3, $4, ARRAY[$4::uuid], 'running', 0, now() - interval '10 minutes', now() - interval '9 minutes', jsonb_build_object('head_sha', $5::text))
+		RETURNING id
+	`, agentID, runtimeID, issueID, aTrigger, dupRaceHeadA).Scan(&taskA); err != nil {
+		t.Fatalf("insert running task A: %v", err)
+	}
+	// B: QUEUED at the OLD head — folding C into it would hand a current-head
+	// request to an old-head run.
+	var taskB string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, trigger_comment_id, status, priority, created_at, context)
+		VALUES ($1, $2, $3, $4, 'queued', 0, now() - interval '1 minute', jsonb_build_object('head_sha', $5::text))
+		RETURNING id
+	`, agentID, runtimeID, issueID, bTrigger, dupRaceHeadA).Scan(&taskB); err != nil {
+		t.Fatalf("insert queued cross-head blocker B: %v", err)
+	}
+
+	if w := completeTaskViaHandler(t, taskA, "done"); w.Code != 200 {
+		t.Fatalf("complete A: %d: %s", w.Code, w.Body.String())
+	}
+
+	// C must NOT have been consumed by the old-head run, and B's own trigger and
+	// head must be untouched.
+	var folded bool
+	var bHead string
+	if err := testPool.QueryRow(ctx, `
+		SELECT $2::uuid = trigger_comment_id OR $2::uuid = ANY(coalesced_comment_ids), COALESCE(context->>'head_sha','')
+		FROM agent_task_queue WHERE id = $1
+	`, taskB, loserCommentID).Scan(&folded, &bHead); err != nil {
+		t.Fatalf("read cross-head blocker: %v", err)
+	}
+	if folded {
+		t.Fatal("C was folded into a DIFFERENT-head queued run — an old-head run would consume a current-head request (TEN-356)")
+	}
+	if bHead != dupRaceHeadA {
+		t.Fatalf("blocker head_sha = %q, want unchanged %q", bHead, dupRaceHeadA)
 	}
 }
