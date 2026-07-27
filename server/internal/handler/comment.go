@@ -1553,11 +1553,13 @@ func (h *Handler) enqueueCommentAgentTriggers(ctx context.Context, issue db.Issu
 // Both mean "a task now exists". INVARIANT: this never returns a success-shaped
 // outcome (coalesced / deferred / queued) without a COMPLETED backing operation
 // — an atomic head-scoped merge, a planned-id registration on a claim-receipt
-// task, a fresh enqueue, or a single-snapshot classification that CONFIRMS only
-// different-head active tasks hold the slot (their reconcile covers this newer
-// comment). A duplicate that cannot yet be durably resolved re-loops (bounded by
-// maxAttempts); on genuine non-convergence it returns a truthful internal_error,
-// never a fabricated deferred that would silently drop the comment.
+// task, a fresh enqueue, or a single-snapshot classification that PROVES a
+// different-head active task created strictly before this comment holds the slot
+// (so completion reconcile replays the comment by timestamp — coverage verified
+// by the query, not inferred from head difference). A duplicate that cannot yet
+// be durably resolved re-loops (bounded by maxAttempts); on genuine
+// non-convergence it returns a truthful internal_error, never a fabricated
+// deferred that would silently drop the comment.
 func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Issue, trigger commentAgentTrigger, triggerCommentID pgtype.UUID, getEscalationDelay func() time.Duration) (DispatchStatus, DispatchReasonCode) {
 	pending := trigger.AlreadyPending
 	lostRace := false
@@ -1633,9 +1635,10 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 				// "any active" read would otherwise earn a fabricated deferred on
 				// top of a task that does not cover this comment.
 				class, err := h.Queries.ClassifyActiveTasksForIssueAndAgent(ctx, db.ClassifyActiveTasksForIssueAndAgentParams{
-					IssueID: issue.ID,
-					AgentID: trigger.Agent.ID,
-					HeadSha: getHeadSha(),
+					IssueID:          issue.ID,
+					AgentID:          trigger.Agent.ID,
+					HeadSha:          getHeadSha(),
+					TriggerCommentID: triggerCommentID,
 				})
 				if err != nil {
 					slog.Warn("classify active tasks failed",
@@ -1648,12 +1651,23 @@ func (h *Handler) resolveCommentTriggerEnqueue(ctx context.Context, issue db.Iss
 					// this comment, so re-loop rather than defer on top of it.
 					continue
 				}
-				if class.HasDifferentHeadActive {
-					// ONLY different-head tasks hold the slot. This comment is
-					// newer than each (HEAD advanced after they enqueued), so their
-					// completion reconcile covers it by timestamp — a durable
-					// deferral, independent of anything enqueued afterward.
+				if class.HasCoveringDifferentHeadActive {
+					// A DIFFERENT-head active task created STRICTLY BEFORE this
+					// comment holds the slot, so its completion reconcile DOES
+					// replay this comment by timestamp (comment.created_at >
+					// task.created_at). Coverage is PROVEN by the query, not
+					// inferred from head difference (Elon round 5) — a durable
+					// deferral.
 					return DispatchDeferred, ReasonDeferred
+				}
+				if class.HasActive {
+					// The only active tasks are NEWER different-head ones: their
+					// reconcile cannot see this (older) comment and it is not in
+					// their planned ids, so a deferred here would be a fabricated
+					// success. Re-loop to keep trying for durable coverage (a newer
+					// task may finish and free the slot); sustained non-convergence
+					// falls through to a truthful internal_error, never a drop.
+					continue
 				}
 				// No active task at all → a fresh enqueue is safe (below).
 			}

@@ -1038,58 +1038,77 @@ func (q *Queries) ClaimChatFinalizeDeferred(ctx context.Context, id pgtype.UUID)
 
 const classifyActiveTasksForIssueAndAgent = `-- name: ClassifyActiveTasksForIssueAndAgent :one
 SELECT
+    COALESCE(bool_or(t.same_head), false)::boolean AS has_same_head_active,
     COALESCE(bool_or(
-        COALESCE($1::text, '') = ''
-        OR COALESCE(context->>'head_sha', '') = COALESCE($1::text, '')
-    ), false)::boolean AS has_same_head_active,
-    COALESCE(bool_or(
-        NOT (
-            COALESCE($1::text, '') = ''
-            OR COALESCE(context->>'head_sha', '') = COALESCE($1::text, '')
-        )
-    ), false)::boolean AS has_different_head_active
-FROM agent_task_queue
-WHERE issue_id = $2
-  AND agent_id = $3
-  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+        NOT t.same_head
+        AND t.created_at < (SELECT c.created_at FROM comment c WHERE c.id = $1::uuid)
+    ), false)::boolean AS has_covering_different_head_active,
+    (count(*) > 0)::boolean AS has_active
+FROM (
+    SELECT
+        atq.created_at AS created_at,
+        (
+            COALESCE($2::text, '') = ''
+            OR COALESCE(atq.context->>'head_sha', '') = COALESCE($2::text, '')
+        ) AS same_head
+    FROM agent_task_queue atq
+    WHERE atq.issue_id = $3
+      AND atq.agent_id = $4
+      AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+) t
 `
 
 type ClassifyActiveTasksForIssueAndAgentParams struct {
-	HeadSha pgtype.Text `json:"head_sha"`
-	IssueID pgtype.UUID `json:"issue_id"`
-	AgentID pgtype.UUID `json:"agent_id"`
+	TriggerCommentID pgtype.UUID `json:"trigger_comment_id"`
+	HeadSha          pgtype.Text `json:"head_sha"`
+	IssueID          pgtype.UUID `json:"issue_id"`
+	AgentID          pgtype.UUID `json:"agent_id"`
 }
 
 type ClassifyActiveTasksForIssueAndAgentRow struct {
-	HasSameHeadActive      bool `json:"has_same_head_active"`
-	HasDifferentHeadActive bool `json:"has_different_head_active"`
+	HasSameHeadActive              bool `json:"has_same_head_active"`
+	HasCoveringDifferentHeadActive bool `json:"has_covering_different_head_active"`
+	HasActive                      bool `json:"has_active"`
 }
 
-// #5914 (Elon round 4): classify the active tasks for (issue, agent) in ONE
-// consistent snapshot, so the lost-race resolver never derives "different-head"
-// from two separate reads (a TOCTOU where a same-head sibling slips in between
-// "no same-head pending" and "any active task exists"). From a single read of
-// the queued/dispatched/running/waiting rows it returns:
+// #5914 (Elon rounds 4–5): classify the active tasks for (issue, agent) in ONE
+// consistent snapshot AND against the triggering comment's OWN timestamp, so the
+// lost-race resolver never (a) derives "different-head" from two separate reads
+// (round 4 TOCTOU), nor (b) infers time order from head difference (round 5): a
+// different head does NOT prove the task predates the comment — HEAD is resolved
+// independently at several points, so a different-head task can be NEWER than the
+// comment, and completion reconcile (`comment.created_at > task.created_at` OR
+// planned id) would then never replay it. From one read of the queued/dispatched/
+// running/waiting rows it returns:
 //
-//	has_same_head_active      — a same-head active task exists (or, for a
-//	                            PR-less issue with empty head, any active task).
-//	                            The comment must fold into it via the atomic
-//	                            merge (queued) or planned registration (claimed),
-//	                            so the caller RE-LOOPS rather than defers on top
-//	                            of a task that does not yet cover it.
-//	has_different_head_active  — an active task exists whose head differs. The
-//	                            comment is newer than it (HEAD advanced after it
-//	                            enqueued), so its completion reconcile covers the
-//	                            comment by timestamp — a DURABLE deferral,
-//	                            independent of anything that appears afterward.
+//	has_same_head_active               — a same-head active task exists (or, for
+//	                                     a PR-less issue with empty head, any
+//	                                     active task). The comment must fold into
+//	                                     it via the atomic merge (queued) or
+//	                                     planned registration (claimed), so the
+//	                                     caller RE-LOOPS rather than defers.
+//	has_covering_different_head_active — a DIFFERENT-head active task exists that
+//	                                     was created STRICTLY BEFORE the comment,
+//	                                     so its completion reconcile DOES replay
+//	                                     the comment by timestamp — the only
+//	                                     different-head shape that may defer.
+//	has_active                         — any active task exists at all, so the
+//	                                     caller can tell "no active → fresh
+//	                                     enqueue" apart from "only NEWER
+//	                                     different-head tasks → keep trying".
 //
-// With neither flag set there is no active task and a fresh enqueue is safe. The
-// head match is NULL-safe (a task with no stamped head_sha counts as a different
-// head for a non-empty request head, matching HasPendingTaskForIssueAndAgent).
+// Head match is NULL-safe (a head-less task is a different head for a non-empty
+// request head, matching HasPendingTaskForIssueAndAgent). The comment lookup is a
+// scalar subquery on the trigger comment's created_at.
 func (q *Queries) ClassifyActiveTasksForIssueAndAgent(ctx context.Context, arg ClassifyActiveTasksForIssueAndAgentParams) (ClassifyActiveTasksForIssueAndAgentRow, error) {
-	row := q.db.QueryRow(ctx, classifyActiveTasksForIssueAndAgent, arg.HeadSha, arg.IssueID, arg.AgentID)
+	row := q.db.QueryRow(ctx, classifyActiveTasksForIssueAndAgent,
+		arg.TriggerCommentID,
+		arg.HeadSha,
+		arg.IssueID,
+		arg.AgentID,
+	)
 	var i ClassifyActiveTasksForIssueAndAgentRow
-	err := row.Scan(&i.HasSameHeadActive, &i.HasDifferentHeadActive)
+	err := row.Scan(&i.HasSameHeadActive, &i.HasCoveringDifferentHeadActive, &i.HasActive)
 	return i, err
 }
 
