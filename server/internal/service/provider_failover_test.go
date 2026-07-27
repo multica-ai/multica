@@ -12,7 +12,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
-func uuid(b byte) pgtype.UUID {
+func failoverTestUUID(b byte) pgtype.UUID {
 	var u pgtype.UUID
 	u.Valid = true
 	u.Bytes[0] = b
@@ -23,8 +23,8 @@ func uuid(b byte) pgtype.UUID {
 // task is its own chain root. This underpins at-most-one-per-chain.
 func TestChainRootForTask(t *testing.T) {
 	t.Parallel()
-	self := uuid(1)
-	chatInput := uuid(2)
+	self := failoverTestUUID(1)
+	chatInput := failoverTestUUID(2)
 
 	issueTask := db.AgentTaskQueue{ID: self}
 	if got := chainRootForTask(issueTask); got != self {
@@ -68,8 +68,8 @@ func TestAgentAuthoritySensitive(t *testing.T) {
 
 func TestFailoverTargetRequiresSameOwnerAndExplicitOptIn(t *testing.T) {
 	t.Parallel()
-	owner := uuid(1)
-	otherOwner := uuid(2)
+	owner := failoverTestUUID(1)
+	otherOwner := failoverTestUUID(2)
 	source := db.Agent{OwnerID: owner}
 
 	cases := []struct {
@@ -204,7 +204,7 @@ func TestFailoverActive_NewDaemonZeroToolsNoPartialProceeds(t *testing.T) {
 	t.Parallel()
 	s := &TaskService{}
 	ev := &providerfailover.SideEffectEvidence{ObservedToolCalls: 0, PartialUserOutput: false, Complete: true}
-	se := s.gatherFailoverSideEffects(t.Context(), db.AgentTaskQueue{ID: uuid(1)}, ev)
+	se := s.gatherFailoverSideEffects(t.Context(), db.AgentTaskQueue{ID: failoverTestUUID(1)}, ev)
 	in := providerfailover.Input{
 		FailureReason:       taskfailure.ReasonAgentProviderQuotaLimit,
 		SourceProvider:      "codex",
@@ -224,7 +224,7 @@ func TestFailoverEvidence_AnyToolBlocks(t *testing.T) {
 	t.Parallel()
 	s := &TaskService{}
 	ev := &providerfailover.SideEffectEvidence{ObservedToolCalls: 1, Complete: true}
-	se := s.gatherFailoverSideEffects(t.Context(), db.AgentTaskQueue{ID: uuid(1)}, ev)
+	se := s.gatherFailoverSideEffects(t.Context(), db.AgentTaskQueue{ID: failoverTestUUID(1)}, ev)
 	if !se.HasObservableSideEffects() {
 		t.Fatal("a non-zero observed tool count must be an observable side effect")
 	}
@@ -250,7 +250,7 @@ func TestFailoverEvidence_AnyPartialOutputBlocks(t *testing.T) {
 	t.Parallel()
 	s := &TaskService{}
 	ev := &providerfailover.SideEffectEvidence{ObservedToolCalls: 0, PartialUserOutput: true, Complete: true}
-	se := s.gatherFailoverSideEffects(t.Context(), db.AgentTaskQueue{ID: uuid(1)}, ev)
+	se := s.gatherFailoverSideEffects(t.Context(), db.AgentTaskQueue{ID: failoverTestUUID(1)}, ev)
 	if !se.HasObservableSideEffects() {
 		t.Fatal("partial user output must be an observable side effect")
 	}
@@ -310,9 +310,9 @@ func TestGatherSideEffects_ChatTask(t *testing.T) {
 	t.Parallel()
 	s := &TaskService{}
 	task := db.AgentTaskQueue{
-		ID:                  uuid(9),
-		ChatSessionID:       uuid(8),
-		DeliveredCommentIds: []pgtype.UUID{uuid(3), uuid(4)},
+		ID:                  failoverTestUUID(9),
+		ChatSessionID:       failoverTestUUID(8),
+		DeliveredCommentIds: []pgtype.UUID{failoverTestUUID(3), failoverTestUUID(4)},
 	}
 	se := s.gatherFailoverSideEffects(t.Context(), task, nil)
 	if se.DeliveredCommentIDs != 2 {
