@@ -298,6 +298,11 @@ export interface IssueTableQuerySpec {
     field: IssueTableSortField;
     direction: "asc" | "desc";
   };
+  /** Surface archived rows. Defaults to false so the default table payload
+   *  never carries archived rows unless the caller explicitly opts in (R11).
+   *  Independent of filters.statuses — an explicit status filter is a subset
+   *  request, not an opt-in toggle for archived. */
+  include_archived?: boolean;
 }
 
 export type IssueTableGroupSpec =

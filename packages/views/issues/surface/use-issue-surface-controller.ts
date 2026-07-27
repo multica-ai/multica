@@ -398,6 +398,7 @@ export function useIssueSurfaceController({
         include_sub_issues: showSubIssues,
       },
       ...(debouncedActiveSearch ? { search: debouncedActiveSearch } : {}),
+      include_archived: statusFilters.includes("archived"),
       sort: {
         field: sort.sort_by ?? "position",
         direction: sort.sort_direction ?? "asc",
