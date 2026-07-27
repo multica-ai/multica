@@ -854,3 +854,209 @@ func TestEnqueueTaskForIssueDoesNotForceFreshSession(t *testing.T) {
 		t.Fatal("expected normal enqueue to leave force_fresh_session=false")
 	}
 }
+
+
+// TestGetLastTaskSessionExcludesPoisonedOriginSession is the GH #5975 core
+// regression: the SAME session_id appears on an older 'completed' row (the turn
+// that first baked the oversized image into history) AND a newer poisoned
+// 'failed' row (a later text-only turn that resumed it and hit the same
+// rejection). A row-level filter would drop the poisoned row and fall back to
+// the completed row — which points at the exact same dead session. The
+// per-session-latest-state selection must invalidate the whole session.
+func TestGetLastTaskSessionExcludesPoisonedOriginSession(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	// Older completed row: the successful turn that consumed the oversized
+	// screenshot and stored the session id.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'POISON-ORIGIN', '/tmp/origin')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert completed origin task: %v", err)
+	}
+
+	// Newer poisoned row on the SAME session: a later text-only turn resumed
+	// it and hit the oversized-history-image rejection.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'POISON-ORIGIN', '/tmp/origin', 'api_invalid_request',
+		        'kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=Encountered an error in the response stream: messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert poisoned resume task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err == nil && prior.SessionID.Valid {
+		t.Fatalf("expected the poisoned session to be fully invalidated, but query returned %q", prior.SessionID.String)
+	}
+}
+
+// TestGetLastTaskSessionFallsBackToHealthyDistinctSession asserts that while a
+// poisoned session (completed origin + newer poisoned resume, same id) is
+// invalidated, a DIFFERENT healthy session on the same issue is still eligible.
+func TestGetLastTaskSessionFallsBackToHealthyDistinctSession(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '3 minutes', now() - interval '3 minutes', 'POISON-ORIGIN', '/tmp/origin')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert completed origin task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'POISON-ORIGIN', '/tmp/origin', 'api_invalid_request',
+		        'session/prompt: Internal error (code=-32603, data=messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert poisoned resume task: %v", err)
+	}
+	// A separate, healthy session (distinct id) — the eligible fallback.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 minute', now() - interval '1 minute', 'HEALTHY-DISTINCT', '/tmp/healthy')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert healthy distinct task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if prior.SessionID.String != "HEALTHY-DISTINCT" {
+		t.Fatalf("expected fallback to HEALTHY-DISTINCT, got %q", prior.SessionID.String)
+	}
+}
+
+// TestGetLastTaskSessionExcludesKiroOversizedImageByText is the GH #5975
+// defense-in-depth: a row that escaped the daemon classifier (still tagged
+// 'agent_error', e.g. a new-server + old-daemon deploy window) must still be
+// excluded on error-text shape alone via the oversized-image ILIKE clause.
+func TestGetLastTaskSessionExcludesKiroOversizedImageByText(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '1 minute', now() - interval '1 minute', 'KIRO-OVERSIZED', '/tmp/kiro', 'agent_error',
+		        'kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=Encountered an error in the response stream: messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert unclassified kiro oversized task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err == nil && prior.SessionID.Valid {
+		t.Fatalf("expected the oversized-image session to be filtered by text, got %q", prior.SessionID.String)
+	}
+}
+
+// TestGetLastTaskSessionRestoresRecoveredSession asserts the per-session-latest
+// rule is symmetric: if a session that once failed poisoned later terminates
+// cleanly again (a newer 'completed' row on the same id), it becomes resumable
+// once more.
+func TestGetLastTaskSessionRestoresRecoveredSession(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '2 minutes', now() - interval '2 minutes', 'RECOVER-SESS', '/tmp/recover', 'api_invalid_request',
+		        'session/prompt: Internal error (code=-32603, data=messages.0.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert earlier poisoned task: %v", err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir)
+		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 minute', now() - interval '1 minute', 'RECOVER-SESS', '/tmp/recover')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert later completed task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if prior.SessionID.String != "RECOVER-SESS" {
+		t.Fatalf("expected the recovered session to be resumable again, got %q", prior.SessionID.String)
+	}
+}
+
+
+// TestGetLastTaskSessionKeepsDimensionPhraseWithoutImageMarker is the
+// review-tightening negative control: the oversized-image ILIKE now requires
+// BOTH the dimension phrase AND the image-content marker, matching the Kiro
+// detector / classifyPoisonedError precision. An unrelated error that merely
+// mentions image dimensions (without the image.source.base64.data marker) must
+// NOT be filtered — otherwise a benign failure would needlessly drop a
+// resumable session.
+func TestGetLastTaskSessionKeepsDimensionPhraseWithoutImageMarker(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, runtimeID := setupRerunTestFixture(t)
+	t.Cleanup(func() { cleanupRerunFixture(t, issueID) })
+
+	ctx := context.Background()
+
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at, session_id, work_dir, failure_reason, error)
+		VALUES ($1, $2, $3, 'failed', 0, now() - interval '30 seconds', now() - interval '30 seconds', 'DIM-ONLY-RESUMABLE', '/tmp/dim', 'agent_error',
+		        'tool reported: image dimensions exceed max allowed size: 8000 pixels while generating a thumbnail')
+	`, agentID, runtimeID, issueID); err != nil {
+		t.Fatalf("insert dimension-phrase-only task: %v", err)
+	}
+
+	queries := db.New(testPool)
+	prior, err := queries.GetLastTaskSession(ctx, db.GetLastTaskSessionParams{
+		AgentID: pgtype.UUID{Bytes: parseUUIDBytes(agentID), Valid: true},
+		IssueID: pgtype.UUID{Bytes: parseUUIDBytes(issueID), Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("GetLastTaskSession failed: %v", err)
+	}
+	if !prior.SessionID.Valid || prior.SessionID.String != "DIM-ONLY-RESUMABLE" {
+		t.Fatalf("expected the dimension-phrase-only session to stay resumable, got %q (valid=%v)", prior.SessionID.String, prior.SessionID.Valid)
+	}
+}

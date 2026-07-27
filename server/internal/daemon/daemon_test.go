@@ -636,6 +636,131 @@ func TestBuildPromptContainsIssueID(t *testing.T) {
 	}
 }
 
+// TestFreshSessionRetryPrompt asserts the daemon's single fresh-session retry
+// preserves the current prompt verbatim and prefixes an explicit context-loss
+// disclosure (GH #5975), so the new provider session does not assume continuity
+// with the conversation that could not be resumed.
+func TestFreshSessionRetryPrompt(t *testing.T) {
+	t.Parallel()
+
+	base := BuildPrompt(Task{
+		IssueID:          "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		TriggerCommentID: "c0ffee00-0000-0000-0000-000000000000",
+		Agent:            &AgentData{Name: "Local Kiro"},
+	}, "kiro")
+
+	got := freshSessionRetryPrompt(base)
+
+	// The disclosure must come first and clearly signal a brand-new session
+	// with no prior provider context.
+	for _, want := range []string{
+		"brand-new session",
+		"could not be resumed",
+		"re-read the issue",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("fresh-retry prompt missing disclosure %q; got:\n%s", want, got)
+		}
+	}
+	if !strings.HasSuffix(got, base) {
+		t.Fatal("fresh-retry prompt must preserve the current prompt verbatim as its suffix")
+	}
+	if strings.Index(got, "brand-new session") > strings.Index(got, base) {
+		t.Fatal("context-loss disclosure must precede the preserved prompt")
+	}
+}
+
+// TestReconcileFreshRetryResult locks the GH #5975 review must-fix: the
+// poisoned prior session id (carried only on the first result) must never be
+// grafted onto the fresh retry's result, and a fresh retry that does not
+// establish a new session must not relabel the poisoned session as resumable.
+func TestReconcileFreshRetryResult(t *testing.T) {
+	t.Parallel()
+
+	firstUsage := map[string]agent.TokenUsage{"m1": {InputTokens: 5}}
+	// The first (poisoned) result keeps its id for classification/auditing;
+	// its failure is classified unrecoverable elsewhere.
+	first := agent.Result{Status: "failed", Error: "oversized history image", SessionID: "ses_poisoned", Usage: firstUsage}
+	firstTools := drainObservation{}
+
+	tests := []struct {
+		name        string
+		retry       agent.Result
+		retryTools  drainObservation
+		retryErr    error
+		wantStatus  string
+		wantSession string
+		wantTools   int32
+	}{
+		{
+			// Fresh attempt never produced a result — keep the poisoned first
+			// result so the bad session stays recorded as unrecoverable.
+			name:        "retryErr keeps first poisoned result",
+			retry:       agent.Result{},
+			retryErr:    context.DeadlineExceeded,
+			wantStatus:  "failed",
+			wantSession: "ses_poisoned",
+			wantTools:   firstTools.toolCalls,
+		},
+		{
+			// Fresh session established — new result wins with its OWN id.
+			name:        "new session id wins",
+			retry:       agent.Result{Status: "completed", Output: "done", SessionID: "ses_new", Usage: map[string]agent.TokenUsage{"m1": {OutputTokens: 7}}},
+			retryTools:  drainObservation{toolCalls: 2},
+			wantStatus:  "completed",
+			wantSession: "ses_new",
+			wantTools:   2,
+		},
+		{
+			// Fresh attempt failed/timed out WITHOUT a new session id — the
+			// poisoned id must NOT be resurrected; keep the first result.
+			name:        "failed retry without new session keeps first",
+			retry:       agent.Result{Status: "failed", Error: "connection refused", SessionID: ""},
+			retryTools:  drainObservation{},
+			wantStatus:  "failed",
+			wantSession: "ses_poisoned",
+			wantTools:   firstTools.toolCalls,
+		},
+		{
+			name:        "timeout retry without new session keeps first",
+			retry:       agent.Result{Status: "timeout", Error: "timed out", SessionID: ""},
+			wantStatus:  "failed",
+			wantSession: "ses_poisoned",
+			wantTools:   firstTools.toolCalls,
+		},
+		{
+			// Fresh attempt succeeded but produced no resumable session id —
+			// take the success but keep the id EMPTY, never the poisoned one.
+			name:        "completed retry with empty session id keeps empty id",
+			retry:       agent.Result{Status: "completed", Output: "ok", SessionID: "", Usage: map[string]agent.TokenUsage{"m1": {OutputTokens: 3}}},
+			retryTools:  drainObservation{toolCalls: 1},
+			wantStatus:  "completed",
+			wantSession: "",
+			wantTools:   1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, gotTools := reconcileFreshRetryResult(first, firstUsage, firstTools, tt.retry, tt.retryTools, tt.retryErr)
+			if got.Status != tt.wantStatus {
+				t.Fatalf("status = %q, want %q", got.Status, tt.wantStatus)
+			}
+			if got.SessionID != tt.wantSession {
+				t.Fatalf("session id = %q, want %q (the poisoned id must never leak onto a resumable result)", got.SessionID, tt.wantSession)
+			}
+			if gotTools.toolCalls != tt.wantTools {
+				t.Fatalf("tools = %d, want %d", gotTools.toolCalls, tt.wantTools)
+			}
+			// Usage is always merged so billing is complete.
+			if got.Usage["m1"].InputTokens != 5 {
+				t.Fatalf("expected first-attempt input usage to be preserved, got %+v", got.Usage["m1"])
+			}
+		})
+	}
+}
+
 func TestBuildPromptNoIssueDetails(t *testing.T) {
 	t.Parallel()
 
@@ -2175,6 +2300,38 @@ func TestShouldRetryWithFreshSession(t *testing.T) {
 			name:           "cancelled terminal does not retry",
 			result:         agent.Result{Status: "cancelled"},
 			priorSessionID: "stale-id",
+			want:           false,
+		},
+		{
+			// GH #5975: the Kiro backend reports ResumeRejected for an
+			// oversized historical image while KEEPING the poisoned session
+			// id for auditing. The gate reads the boolean, not an empty id,
+			// so a non-empty SessionID must still allow the fresh retry.
+			name: "kiro oversized history image retries despite non-empty session id",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          "kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)",
+				SessionID:      "ses_poisoned",
+				ResumeRejected: true,
+			},
+			priorSessionID: "ses_poisoned",
+			provider:       "kiro",
+			want:           true,
+		},
+		{
+			// Same oversized-image rejection, but a tool already ran this
+			// attempt — the retry could duplicate external side effects
+			// (comments, commits), so the single-retry gate must refuse.
+			name: "kiro oversized history image after a tool ran never retries",
+			result: agent.Result{
+				Status:         "failed",
+				Error:          "kiro session/prompt failed: session/prompt: Internal error (code=-32603, data=messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels)",
+				SessionID:      "ses_poisoned",
+				ResumeRejected: true,
+			},
+			priorSessionID: "ses_poisoned",
+			tools:          1,
+			provider:       "kiro",
 			want:           false,
 		},
 	}

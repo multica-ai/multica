@@ -4850,17 +4850,55 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools.toolCalls, provider) {
+		firstResult := result
 		firstUsage := result.Usage
+		firstTools := tools
 		taskLog.Warn("session resume failed, retrying with fresh session", "error", result.Error)
+
+		// Rebuild cold-session context before the single retry. The prior
+		// provider transcript is gone (missing, account-mismatched, or —
+		// GH #5975 — carrying history the provider now refuses), so the
+		// fresh process must NOT be told it is resuming a conversation:
+		//   - taskCtx.PriorSessionResumed=false + re-injecting the runtime
+		//     brief rewrites the on-disk AGENTS.md so it no longer claims
+		//     "You're resuming the prior session" (which file-based backends
+		//     like Kiro load themselves).
+		//   - clearing task.PriorSessionID rebuilds the prompt on the cold
+		//     comment-reading path instead of the warm resumed one.
+		// The current user prompt is preserved and prefixed with an explicit
+		// context-loss disclosure so the agent re-reads the issue/thread
+		// instead of assuming continuity it no longer has.
+		// task and taskCtx are local (runTask takes task by value), so these
+		// mutations only affect the retry.
 		execOpts.ResumeSessionID = ""
-		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
-		if retryErr != nil {
-			taskLog.Error("fresh session also failed to start", "error", retryErr)
+		task.PriorSessionID = ""
+		taskCtx.PriorSessionResumed = false
+		if freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); briefErr != nil {
+			taskLog.Warn("execenv: re-inject cold runtime config for fresh retry failed (non-fatal)", "error", briefErr)
 		} else {
-			result = retryResult
-			result.Usage = mergeUsage(firstUsage, result.Usage)
-			tools = retryTools
+			runtimeBrief = freshBrief
+			if providerNeedsInlineSystemPrompt(provider) {
+				execOpts.SystemPrompt = runtimeBrief
+			}
 		}
+		freshPrompt := freshSessionRetryPrompt(BuildPrompt(task, provider))
+
+		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
+		if retryErr != nil {
+			taskLog.Error("fresh session also failed to start; keeping the original poisoned result", "error", retryErr)
+		} else if retryResult.Status != "completed" && retryResult.SessionID == "" {
+			taskLog.Warn("fresh session retry also failed without establishing a new session; keeping the original poisoned result",
+				"retry_status", retryResult.Status,
+				"retry_error", retryResult.Error,
+			)
+		}
+		// The poisoned prior session id lives ONLY on firstResult (classified
+		// unrecoverable, so GetLastTaskSession excludes it). reconcile never
+		// grafts it onto the retry result: a retry that establishes a new
+		// session wins with its own id; a retry that fails without a new
+		// session keeps firstResult so the bad session stays excluded rather
+		// than being relabeled resumable by a benign-looking second error.
+		result, tools = reconcileFreshRetryResult(firstResult, firstUsage, firstTools, retryResult, retryTools, retryErr)
 	}
 
 	elapsed := time.Since(taskStart).Round(time.Second)
@@ -5147,6 +5185,45 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 	// and it is worse: no real output has been captured for any of them, and
 	// a false positive discards a recoverable session pointer.
 	return result.SessionID == "" && freshSessionMayHelp(result.Error)
+}
+
+// reconcileFreshRetryResult picks the authoritative result after the single
+// fresh-session retry (see the retry block in runTask). Its one hard invariant:
+// the poisoned prior session id — carried only on `first`, whose failure is
+// classified unrecoverable so GetLastTaskSession excludes it — must NEVER be
+// grafted onto the retry's result, or a later task would resume the bad
+// session again and re-form the loop this fix exists to break (GH #5975 review).
+//
+//   - retryErr != nil: the fresh attempt never produced a result. Keep `first`
+//     so the poisoned session stays recorded as unrecoverable.
+//   - retry established a new session id: it fully wins, carrying its OWN id.
+//     A benign retry failure on a real new session is fine to record — it is
+//     not the poisoned one.
+//   - retry completed without a session id (e.g. all work via tools): take it,
+//     but keep the id EMPTY. Never resurrect the poisoned id as a resumable
+//     success.
+//   - retry failed AND established no new session: keep `first`. Adopting the
+//     second result here is exactly the bug — a second error lacking the
+//     oversized-image markers would be classified resume-safe and the poisoned
+//     id (were it attached) would be re-selected. We keep the unrecoverable
+//     first result and only merge usage.
+//
+// Usage is merged across both attempts in every branch so billing is complete.
+func reconcileFreshRetryResult(first agent.Result, firstUsage map[string]agent.TokenUsage, firstTools drainObservation, retry agent.Result, retryTools drainObservation, retryErr error) (agent.Result, drainObservation) {
+	switch {
+	case retryErr != nil:
+		first.Usage = firstUsage
+		return first, firstTools
+	case retry.SessionID != "":
+		retry.Usage = mergeUsage(firstUsage, retry.Usage)
+		return retry, retryTools
+	case retry.Status == "completed":
+		retry.Usage = mergeUsage(firstUsage, retry.Usage)
+		return retry, retryTools
+	default:
+		first.Usage = mergeUsage(firstUsage, retry.Usage)
+		return first, firstTools
+	}
 }
 
 // freshSessionMayHelp reports whether restarting the conversation could

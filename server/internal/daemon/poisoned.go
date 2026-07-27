@@ -106,6 +106,20 @@ func classifyPoisonedError(errMsg string) (string, bool) {
 		return "", false
 	}
 	lowered := strings.ToLower(errMsg)
+	// Kiro/ACP replays images baked into a resumed conversation's history;
+	// one exceeding the provider's max pixel dimensions is rejected on every
+	// session/prompt and cannot be resumed away (GH #5975). The daemon's
+	// in-task fresh-session retry recovers the CURRENT turn, but this marks
+	// the conversation resume-unsafe so GetLastTaskSession excludes it and no
+	// later task re-selects the poisoned session. The offending
+	// messages[n].content[m] path and the pixel limit stay in the surfaced
+	// error; base64 payloads are never logged. Requiring the image-content
+	// marker alongside the dimension phrase keeps this narrow — an unrelated
+	// error mentioning dimensions won't trip it.
+	if strings.Contains(lowered, "image dimensions exceed max allowed size") &&
+		strings.Contains(lowered, "image.source.base64.data") {
+		return FailureReasonAPIInvalidRequest, true
+	}
 	// Both markers must be present: "400" alone is too generic (a tool
 	// could surface a 400 from anywhere) and "invalid_request_error"
 	// alone could in theory appear in non-poisoning contexts. The
