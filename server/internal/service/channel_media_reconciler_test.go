@@ -545,3 +545,39 @@ func TestChannelMediaReconciler_TombstoneSchedulesThenClears(t *testing.T) {
 		t.Fatalf("delete calls = %d, want one per pass plus the final one", got)
 	}
 }
+
+// A tombstone must not re-ask the reference question: it was already judged
+// unreferenced and deleted, and it exists solely to re-delete whatever an
+// abandoned PUT may materialize later. If a re-ingested copy has since bound
+// an attachment carrying the same URL, honouring that as "keep it" would
+// abandon the schedule fencing the original object.
+func TestChannelMediaReconciler_TombstoneIgnoresLaterAttachmentWithSameURL(t *testing.T) {
+	pool := newCancelFinalizePool(t)
+	f := seedReconcilerFixture(t, pool)
+	deleter := &fakeObjectDeleter{}
+	rec := &ChannelMediaReconciler{Queries: db.New(pool), Storage: deleter}
+	key := "ws/lark/tombstone-vs-attachment"
+	url := "https://cdn.test/tombstone-vs-attachment"
+	f.seedLedgerRow(t, key, url, "pending", ChannelMediaReconcileSettleDelay+time.Minute)
+
+	rec.RunOnce(context.Background())
+	if state, _, exists := f.rowState(t, key); !exists || state != "tombstoned" {
+		t.Fatalf("row = (%q, %v), want 'tombstoned'", state, exists)
+	}
+
+	// A re-ingested copy binds an attachment carrying the same URL.
+	f.bindAttachment(t, url)
+	if _, err := pool.Exec(context.Background(), `
+		UPDATE channel_media_pending_object SET next_attempt_at = now() - interval '1 second' WHERE storage_key = $1
+	`, key); err != nil {
+		t.Fatalf("make tombstone due: %v", err)
+	}
+	rec.RunOnce(context.Background())
+
+	if got := len(deleter.deletedKeys()); got != 2 {
+		t.Fatalf("delete calls = %d, want the tombstone to re-delete regardless of the new attachment", got)
+	}
+	if state, _, exists := f.rowState(t, key); !exists || state != "tombstoned" {
+		t.Fatalf("row = (%q, %v), want the re-delete schedule to continue", state, exists)
+	}
+}

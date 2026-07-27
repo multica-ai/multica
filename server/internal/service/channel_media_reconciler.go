@@ -189,6 +189,16 @@ func (r *ChannelMediaReconciler) settle(ctx context.Context, row db.ChannelMedia
 			"storage_key", row.StorageKey, "workspace_id", row.WorkspaceID)
 		return
 	}
+	if row.State == tombstonedState {
+		// A tombstone has already been judged unreferenced and deleted; it is
+		// only revisited to re-delete whatever an abandoned PUT may have
+		// materialized since. Re-asking the reference question here would be
+		// wrong: any attachment that now carries this URL belongs to a
+		// re-ingested copy of the object, and treating that as "keep it" would
+		// abandon the re-delete schedule for the object this row is fencing.
+		r.settleDeletedObject(ctx, row, leaseToken)
+		return
+	}
 	// The reference check runs AFTER the claim flipped the row to 'deleting':
 	// from that point BindMediaRefs cannot attach this key, so a negative
 	// answer is terminal, not a snapshot race.
@@ -216,16 +226,23 @@ func (r *ChannelMediaReconciler) settle(ctx context.Context, row db.ChannelMedia
 		}
 		return
 	}
-	// Unreferenced: delete the object OUTSIDE any transaction (no DB
-	// connection or row lock held across storage I/O), gated by the lease and
-	// bounded by its own timeout so one stalled connection cannot wedge the
-	// sequential sweep loop.
+	// Unreferenced: hand off to the shared delete + tombstone tail.
+	r.settleDeletedObject(ctx, row, leaseToken)
+}
+
+// settleDeletedObject deletes the object and then either tombstones the row
+// for a later re-delete pass or, once the schedule is exhausted, clears it.
+// Shared by the first (unreferenced) settle and every tombstone revisit.
+func (r *ChannelMediaReconciler) settleDeletedObject(ctx context.Context, row db.ChannelMediaPendingObject, leaseToken pgtype.UUID) {
+	// The delete runs OUTSIDE any transaction (no DB connection or row lock
+	// held across storage I/O), gated by the lease and bounded by its own
+	// timeout so one stalled connection cannot wedge the sequential sweep.
 	delTimeout := r.deleteTimeout
 	if delTimeout == 0 {
 		delTimeout = channelMediaReconcileDeleteTimeout
 	}
 	delCtx, delCancel := context.WithTimeout(ctx, delTimeout)
-	err = r.Storage.DeleteObject(delCtx, row.StorageKey)
+	err := r.Storage.DeleteObject(delCtx, row.StorageKey)
 	delCancel()
 	if err != nil {
 		if r.Metrics != nil {
