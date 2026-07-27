@@ -40,11 +40,13 @@ interface Props {
   personaSandbox: string;
   workspaceBriefMode: string;
   toolsBriefMode: string;
+  systemPromptMode: string;
   onModel: (v: string) => void;
   onThinkingLevel: (v: string) => void;
   onPersonaSandbox: (v: string) => void;
   onWorkspaceBriefMode: (v: string) => void;
   onToolsBriefMode: (v: string) => void;
+  onSystemPromptMode: (v: string) => void;
 }
 
 export function AgentContextConfigFields({
@@ -54,11 +56,13 @@ export function AgentContextConfigFields({
   personaSandbox,
   workspaceBriefMode,
   toolsBriefMode,
+  systemPromptMode,
   onModel,
   onThinkingLevel,
   onPersonaSandbox,
   onWorkspaceBriefMode,
   onToolsBriefMode,
+  onSystemPromptMode,
 }: Props) {
   const wsId = useWorkspaceId();
 
@@ -264,6 +268,41 @@ export function AgentContextConfigFields({
           <p className="text-[10px] text-muted-foreground">
             Summary folds each connection&apos;s generated tools to a single
             line to shrink the brief.
+          </p>
+        </div>
+
+        {/* FIR-3212: system-prompt delivery. The layer BEFORE the two briefs
+            above — whether the engine's own system prompt (e.g. Claude Code's
+            coding-agent instruction) still applies at all. Which modes an
+            engine accepts is decided server-side by the support matrix, the
+            single source of truth; picking one it cannot honour is rejected on
+            submit with the accepted list, rather than being mirrored into a
+            second table here that could drift out of sync. */}
+        <div className="space-y-1.5">
+          <Label htmlFor="ac-system-prompt-mode" className="text-xs">
+            Engine system prompt
+          </Label>
+          <NativeSelect
+            id="ac-system-prompt-mode"
+            value={systemPromptMode}
+            onChange={(e) => onSystemPromptMode(e.target.value)}
+            size="sm"
+            className="w-full"
+          >
+            <NativeSelectOption value="">Engine default</NativeSelectOption>
+            <NativeSelectOption value="append">
+              Append — keep the engine&apos;s prompt, add ours
+            </NativeSelectOption>
+            <NativeSelectOption value="replace">
+              Replace — drop the engine&apos;s own prompt
+            </NativeSelectOption>
+            <NativeSelectOption value="prepend">
+              Prepend — splice into the first message
+            </NativeSelectOption>
+          </NativeSelect>
+          <p className="text-[10px] text-muted-foreground">
+            Replace drops the engine&apos;s built-in instruction, so a support
+            or finance agent is not also told it is a coding agent.
           </p>
         </div>
       </div>

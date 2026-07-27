@@ -4,6 +4,7 @@ import {
   isContextDraftDirty,
   canSubmitContextDraft,
   readBriefLayerMode,
+  readSystemPromptMode,
 } from "./context-draft";
 
 describe("bumpPatch", () => {
@@ -24,6 +25,7 @@ describe("context draft state", () => {
     personaSandbox: "strict",
     workspaceBriefMode: "",
     toolsBriefMode: "",
+    systemPromptMode: "",
   };
 
   it("detects a changed instruction", () => {
@@ -40,6 +42,10 @@ describe("context draft state", () => {
 
   it("detects a changed tools brief mode (FIR-3212)", () => {
     expect(isContextDraftDirty(current, { ...current, toolsBriefMode: "summary" })).toBe(true);
+  });
+
+  it("detects a changed system prompt mode (FIR-3212)", () => {
+    expect(isContextDraftDirty(current, { ...current, systemPromptMode: "replace" })).toBe(true);
   });
 
   it("requires both a change and a title before submission", () => {
@@ -65,5 +71,34 @@ describe("readBriefLayerMode (FIR-3212)", () => {
   it("normalises the explicit 'full' spelling back to the default", () => {
     expect(readBriefLayerMode({ workspace_brief_mode: "full" }, "workspace_brief_mode")).toBe("");
     expect(readBriefLayerMode({ tools_brief_mode: "full" }, "tools_brief_mode")).toBe("");
+  });
+});
+
+describe("readSystemPromptMode (FIR-3212)", () => {
+  it("reads each mode the server accepts", () => {
+    expect(readSystemPromptMode({ system_prompt_mode: "replace" })).toBe("replace");
+    expect(readSystemPromptMode({ system_prompt_mode: "append" })).toBe("append");
+    expect(readSystemPromptMode({ system_prompt_mode: "prepend" })).toBe("prepend");
+  });
+
+  it("treats a missing key, null config, or non-string value as the engine default", () => {
+    expect(readSystemPromptMode(undefined)).toBe("");
+    expect(readSystemPromptMode(null)).toBe("");
+    expect(readSystemPromptMode({})).toBe("");
+    expect(readSystemPromptMode({ system_prompt_mode: 7 })).toBe("");
+  });
+
+  // The daemon reads an unrecognised value as the default, so the dialog must
+  // show the default too — otherwise the control claims a behaviour no run has.
+  it("treats a mode the daemon would ignore as the engine default", () => {
+    expect(readSystemPromptMode({ system_prompt_mode: "replace-all" })).toBe("");
+    expect(readSystemPromptMode({ system_prompt_mode: "full" })).toBe("");
+  });
+
+  // runtime_config is shared with the brief-layer knobs and openclaw's mode.
+  it("reads its own key out of a shared runtime_config", () => {
+    expect(
+      readSystemPromptMode({ workspace_brief_mode: "off", system_prompt_mode: "replace" }),
+    ).toBe("replace");
   });
 });

@@ -8,6 +8,26 @@ export interface ContextDraftFields {
   // flows through the same propose→approve path as model / thinking / sandbox.
   workspaceBriefMode: string;
   toolsBriefMode: string;
+  // FIR-3212: how the agent's prompt reaches the model — append to the
+  // runtime's own system prompt, replace it, or splice it into the user
+  // message. Stored in runtime_config next to the two brief-layer modes.
+  systemPromptMode: string;
+}
+
+// FIR-3212: read the system-prompt delivery mode out of runtime_config.
+//
+// Kept separate from readBriefLayerMode because the vocabularies differ: the
+// brief layers spell their default "full", this one has no such alias and its
+// only valid non-default values are append / replace / prepend. Anything else —
+// a number, a mode a later server version dropped — reads as the default, so
+// the dialog shows the agent's real behaviour rather than a value the daemon
+// would ignore. Mirrors SystemPromptModeOf on the server.
+export function readSystemPromptMode(
+  runtimeConfig: Record<string, unknown> | undefined | null,
+): string {
+  const raw = runtimeConfig?.["system_prompt_mode"];
+  if (raw !== "append" && raw !== "replace" && raw !== "prepend") return "";
+  return raw;
 }
 
 // FIR-3212: read a brief-layer mode out of an agent's runtime_config for the

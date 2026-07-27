@@ -58,6 +58,54 @@ func TestSystemPromptModeForTaskReadsAgentRuntimeConfig(t *testing.T) {
 	}
 }
 
+// The mode reaching ExecOptions is only half the trip. Until the brief itself
+// travels inline, ClaudeSystemPromptArgs gets an empty prompt and emits no flag
+// at all — so a configured mode was stored, versioned and rendered while
+// changing nothing at run time. This is the regression guard for that gap.
+func TestNeedsInlineRuntimeBriefForConfiguredMode(t *testing.T) {
+	for name, tc := range map[string]struct {
+		provider string
+		mode     agent.SystemPromptMode
+		want     bool
+	}{
+		// The reason FIR-3212 was raised: replace the full Claude Code
+		// instruction. Before this predicate the answer here was false.
+		"claude replaces its own prompt": {"claude", agent.SystemPromptModeReplace, true},
+		"claude appends":                 {"claude", agent.SystemPromptModeAppend, true},
+		"codex replaces":                 {"codex", agent.SystemPromptModeReplace, true},
+		"pi appends":                     {"pi", agent.SystemPromptModeAppend, true},
+
+		// Unconfigured agents — the whole live fleet today — must not change.
+		"claude default": {"claude", agent.SystemPromptModeDefault, false},
+		"codex default":  {"codex", agent.SystemPromptModeDefault, false},
+
+		// A mode the provider cannot honour must not drag the brief inline:
+		// the run would carry the payload and still not do what was asked.
+		"claude cannot prepend": {"claude", agent.SystemPromptModePrepend, false},
+		"codex cannot append":   {"codex", agent.SystemPromptModeAppend, false},
+
+		// No authoritative entry means unknown, never "inject and hope".
+		"uncatalogued provider": {"brand-new-cli", agent.SystemPromptModeReplace, false},
+
+		// Providers that ignore the system prompt entirely.
+		"gemini ignores it": {"gemini", agent.SystemPromptModeReplace, false},
+	} {
+		if got := needsInlineRuntimeBrief(tc.provider, tc.mode); got != tc.want {
+			t.Errorf("%s: needsInlineRuntimeBrief(%q, %q) = %v, want %v", name, tc.provider, tc.mode, got, tc.want)
+		}
+	}
+}
+
+// The five providers that cannot be trusted to read the workdir config file got
+// the brief inline before this change and must keep getting it, mode or no mode.
+func TestNeedsInlineRuntimeBriefKeepsFileUnreliableProviders(t *testing.T) {
+	for _, provider := range []string{"openclaw", "opencode", "hermes", "kiro", "kimi"} {
+		if !needsInlineRuntimeBrief(provider, agent.SystemPromptModeDefault) {
+			t.Errorf("%s lost its inline brief", provider)
+		}
+	}
+}
+
 // runtime_config is shared with openclaw's own knob. Reading ours must not
 // depend on being the only key present.
 func TestDecodeSystemPromptModeCoexistsWithOpenclawMode(t *testing.T) {

@@ -20,6 +20,7 @@ import {
   canSubmitContextDraft,
   isContextDraftDirty,
   readBriefLayerMode,
+  readSystemPromptMode,
 } from "../../core/context-draft";
 import { AgentContextConfigFields } from "./agent-context-config-fields";
 
@@ -42,6 +43,9 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
   const [toolsBriefMode, setToolsBriefMode] = useState(() =>
     readBriefLayerMode(agent.runtime_config, "tools_brief_mode"),
   );
+  const [systemPromptMode, setSystemPromptMode] = useState(() =>
+    readSystemPromptMode(agent.runtime_config),
+  );
 
   const { data: versions = [] } = useQuery(agentContextVersionsOptions(agent.id));
   const currentVersion = versions[0]?.version ?? "1.0.0";
@@ -56,6 +60,7 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
     personaSandbox: agent.persona_sandbox ?? "",
     workspaceBriefMode: readBriefLayerMode(agent.runtime_config, "workspace_brief_mode"),
     toolsBriefMode: readBriefLayerMode(agent.runtime_config, "tools_brief_mode"),
+    systemPromptMode: readSystemPromptMode(agent.runtime_config),
   };
   const draft = {
     instructions,
@@ -64,6 +69,7 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
     personaSandbox,
     workspaceBriefMode,
     toolsBriefMode,
+    systemPromptMode,
   };
   const dirty = isContextDraftDirty(current, draft);
   const canSubmit = canSubmitContextDraft(title, dirty) && !busy;
@@ -77,6 +83,7 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
     setPersonaSandbox(agent.persona_sandbox ?? "");
     setWorkspaceBriefMode(readBriefLayerMode(agent.runtime_config, "workspace_brief_mode"));
     setToolsBriefMode(readBriefLayerMode(agent.runtime_config, "tools_brief_mode"));
+    setSystemPromptMode(readSystemPromptMode(agent.runtime_config));
   };
 
   const submit = async (approve: boolean) => {
@@ -95,6 +102,10 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
         // cleared one genuinely resets the agent to today's brief.
         workspace_brief_mode: workspaceBriefMode as "" | "off",
         tools_brief_mode: toolsBriefMode as "" | "summary",
+        // FIR-3212: same contract as the two brief modes — "" restores the
+        // engine default, so an untouched control is a no-op and a cleared one
+        // genuinely hands the engine's own system prompt back.
+        system_prompt_mode: systemPromptMode as "" | "append" | "replace" | "prepend",
       });
       if (approve) {
         await reviewMutation.mutateAsync({
@@ -144,11 +155,13 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
         personaSandbox={personaSandbox}
         workspaceBriefMode={workspaceBriefMode}
         toolsBriefMode={toolsBriefMode}
+        systemPromptMode={systemPromptMode}
         onModel={setModel}
         onThinkingLevel={setThinkingLevel}
         onPersonaSandbox={setPersonaSandbox}
         onWorkspaceBriefMode={setWorkspaceBriefMode}
         onToolsBriefMode={setToolsBriefMode}
+        onSystemPromptMode={setSystemPromptMode}
       />
 
       {dirty && (
