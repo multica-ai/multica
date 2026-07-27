@@ -54,9 +54,12 @@ const (
 	// channelMediaReconcileLease bounds how long a claimed row stays owned by
 	// a worker before another replica may reclaim it (crash recovery).
 	channelMediaReconcileLease = 2 * time.Minute
-	// channelMediaReconcileSweepLimit bounds how many rows one sweep settles
-	// (and thus its object-storage work). Rows are claimed one at a time and
-	// settled sequentially; the limit just keeps a sweep from running away.
+	// channelMediaReconcileSweepLimit bounds how many settle operations one
+	// sweep performs (and thus its object-storage work). Rows are claimed one
+	// at a time and settled sequentially, so a row released early with a
+	// 1-minute backoff can be re-claimed within a long sweep — the limit
+	// counts settles, not distinct rows, and just keeps a sweep from running
+	// away.
 	channelMediaReconcileSweepLimit = 50
 	// Backoff for failed object-storage deletes: base << (attempt-1), capped.
 	channelMediaReconcileBackoffBase = time.Minute
@@ -155,7 +158,7 @@ func (r *ChannelMediaReconciler) RunOnce(ctx context.Context) {
 		r.logger().Error("channel media reconciler: no storage backend; skipping sweep")
 		return
 	}
-	for settled := 0; settled < channelMediaReconcileSweepLimit; settled++ {
+	for settles := 0; settles < channelMediaReconcileSweepLimit; settles++ {
 		leaseToken := pgtype.UUID{Bytes: uuid.New(), Valid: true}
 		row, err := r.Queries.ClaimNextChannelMediaPendingObjectForReconcile(ctx, db.ClaimNextChannelMediaPendingObjectForReconcileParams{
 			LeaseToken:  leaseToken,
