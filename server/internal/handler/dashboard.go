@@ -410,10 +410,14 @@ func (h *Handler) GetDashboardFailuresByAgent(w http.ResponseWriter, r *http.Req
 	if !ok {
 		return
 	}
-	// No date grouping in the SQL — tz only moves the cutoff boundary so the
-	// window matches the per-agent run-time card.
+	// No date grouping in the SQL, so the client cannot trim this response the
+	// way it trims the date-bucketed series. Close the window server-side to
+	// exactly `days` calendar buckets — the same span the Errors chart renders
+	// after its `-(days-1)` filter. With the default N+1 cutoff this list
+	// covered one extra day, so at days=1 the card could report yesterday's
+	// failures next to a chart showing none.
 	tz := h.resolveViewingTZ(r)
-	since := parseSinceParamInTZ(r, 30, tz)
+	since := parseExactSinceParamInTZ(r, 30, tz)
 
 	rows, err := h.Queries.ListDashboardFailuresByAgent(r.Context(), db.ListDashboardFailuresByAgentParams{
 		WorkspaceID: parseUUID(workspaceID),

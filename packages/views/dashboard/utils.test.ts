@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   aggregateAgentFailures,
+  bucketUnresolvedAgentFailures,
+  UNRESOLVED_AGENTS_ROW_ID,
   aggregateAgentTokens,
   aggregateDailyCost,
   aggregateDailyErrors,
@@ -545,5 +547,50 @@ describe("aggregateAgentFailures", () => {
     expect(
       aggregateAgentFailures([{ agent_id: "clean", failure_reason: "", task_count: 42 }]),
     ).toEqual([]);
+  });
+});
+
+describe("bucketUnresolvedAgentFailures", () => {
+  const rows = [
+    { agentId: "visible", failed: 5, total: 10, rate: 0.5, topClass: "timeout" as const },
+    { agentId: "private-1", failed: 3, total: 4, rate: 0.75, topClass: "auth" as const },
+    { agentId: "private-2", failed: 2, total: 6, rate: 1 / 3, topClass: "auth" as const },
+  ];
+
+  it("folds agents the viewer cannot resolve into one anonymous row", () => {
+    // The failure rollup is workspace-scoped and does NOT apply per-agent
+    // visibility, but the agent list does. Anything in the difference is
+    // either deleted or private to someone else — rendering its id would
+    // leak a private agent's existence and failure profile.
+    const result = bucketUnresolvedAgentFailures(rows, new Set(["visible"]));
+
+    expect(result).toEqual([
+      { agentId: "visible", failed: 5, total: 10, rate: 0.5, topClass: "timeout" },
+      {
+        agentId: UNRESOLVED_AGENTS_ROW_ID,
+        failed: 5,
+        total: 10,
+        rate: 0.5,
+        topClass: "auth",
+      },
+    ]);
+    expect(result.map((r) => r.agentId)).not.toContain("private-1");
+    expect(result.map((r) => r.agentId)).not.toContain("private-2");
+  });
+
+  it("buckets everything while the agent list is still loading", () => {
+    // Deliberately stricter than bucketUnknownAgentRows, which passes rows
+    // through on null: a transient flash of raw UUIDs is precisely the leak
+    // this function exists to prevent.
+    const result = bucketUnresolvedAgentFailures(rows, null);
+
+    expect(result).toHaveLength(1);
+    expect(result[0]?.agentId).toBe(UNRESOLVED_AGENTS_ROW_ID);
+    expect(result[0]?.failed).toBe(10);
+  });
+
+  it("leaves the list alone when every agent resolves", () => {
+    const known = new Set(["visible", "private-1", "private-2"]);
+    expect(bucketUnresolvedAgentFailures(rows, known)).toEqual(rows);
   });
 });

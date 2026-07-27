@@ -12,6 +12,7 @@ export {
   FAILURE_CLASS_COLOR,
   activeFailureClasses,
   formatRate,
+  labelOf,
   useFailureClassConfig,
   type FailureBucketTotals,
   type FailureClassCounts,

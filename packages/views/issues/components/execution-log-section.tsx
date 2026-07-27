@@ -6,7 +6,7 @@ import { Ban, CheckCircle2, ChevronRight, Loader2, RotateCcw, Square, XCircle } 
 import { toast } from "sonner";
 import { api, dispatchReasonCode } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
-import type { AgentTask, TaskFailureReason } from "@multica/core/types";
+import type { AgentTask } from "@multica/core/types";
 import { useTimeAgo } from "../../i18n";
 import {
   Tooltip,
@@ -370,9 +370,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   const trigger = useTriggerText(task);
   const time = task.completed_at ? timeAgo(task.completed_at) : "—";
   const failureLabel =
-    task.status === "failed" && task.failure_reason
-      ? failureReasonLabel[task.failure_reason as TaskFailureReason]
-      : null;
+    task.status === "failed" ? failureReasonLabel(task.failure_reason) : null;
 
   // Retry only makes sense for terminal-but-not-success rows. Passing
   // task.id targets this specific row's agent — without it, the rerun

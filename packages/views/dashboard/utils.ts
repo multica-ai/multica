@@ -592,6 +592,17 @@ export function aggregateFailureReasons(
     .toSorted((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
 }
 
+// Synthetic agentId for the row aggregating every agent the viewer can't
+// resolve to a name. Distinct from DELETED_AGENTS_ROW_ID because this bucket
+// covers two populations at once: hard-deleted agents, and agents that are
+// private to someone else. The failure rollups are workspace-scoped and do
+// NOT apply per-agent visibility (see the access-control note on
+// server/internal/handler/dashboard.go), while the agent list the client
+// joins against DOES — members only see a private agent when they own it or
+// are workspace owner/admin. Naming the bucket after deletion would be a lie
+// for the second group.
+export const UNRESOLVED_AGENTS_ROW_ID = "__unresolved_agents__";
+
 export interface AgentFailureRow {
   agentId: string;
   failed: number;
@@ -645,4 +656,61 @@ export function aggregateAgentFailures(
       };
     })
     .toSorted((a, b) => b.failed - a.failed || b.rate - a.rate);
+}
+
+// Fold rows whose agent the viewer cannot resolve into one aggregated bucket
+// so the Errors list never renders a bare agent UUID.
+//
+// This is a privacy boundary, not just a cosmetic one. The failure rollups
+// return every agent in the workspace — deliberately, since failure volume is
+// a workspace-level operational metric — but the agent list is filtered by
+// per-agent visibility. Rendering `agentId` for the difference would tell a
+// member that a private agent exists, how often it runs, how often it fails,
+// and what it fails on.
+//
+// `knownAgentIds` is null while the agent list is still loading. Unlike
+// `bucketUnknownAgentRows`, which passes rows through in that window, this
+// one buckets them: a transient flash of UUIDs is exactly the leak the
+// function exists to prevent, and one merged row for a few hundred
+// milliseconds is the cheaper failure.
+export function bucketUnresolvedAgentFailures(
+  rows: AgentFailureRow[],
+  knownAgentIds: ReadonlySet<string> | null,
+): AgentFailureRow[] {
+  const known: AgentFailureRow[] = [];
+  const bucket: AgentFailureRow = {
+    agentId: UNRESOLVED_AGENTS_ROW_ID,
+    failed: 0,
+    total: 0,
+    rate: 0,
+    topClass: null,
+  };
+  const bucketClasses = emptyClassCounts();
+  let hasUnresolved = false;
+
+  for (const r of rows) {
+    if (knownAgentIds?.has(r.agentId)) {
+      known.push(r);
+      continue;
+    }
+    hasUnresolved = true;
+    bucket.failed += r.failed;
+    bucket.total += r.total;
+    // The bucket's own dominant class is recomputed from its members' —
+    // weighted by each member's failure count, since that is all the row
+    // carries once aggregated.
+    if (r.topClass) bucketClasses[r.topClass] += r.failed;
+  }
+  if (!hasUnresolved) return known;
+
+  bucket.rate = bucket.total > 0 ? bucket.failed / bucket.total : 0;
+  for (const c of FAILURE_CLASSES) {
+    if (
+      bucketClasses[c] > 0 &&
+      (bucket.topClass === null || bucketClasses[c] > bucketClasses[bucket.topClass])
+    ) {
+      bucket.topClass = c;
+    }
+  }
+  return [...known, bucket].toSorted((a, b) => b.failed - a.failed || b.rate - a.rate);
 }

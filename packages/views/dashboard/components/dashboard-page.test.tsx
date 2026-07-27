@@ -96,6 +96,14 @@ vi.mock("@tanstack/react-query", async () => {
                           failure_reason: "timeout",
                           task_count: 1,
                         },
+                        // Not in the agent list below — a private agent this
+                        // member cannot see, or a deleted one. The rollup
+                        // still returns it.
+                        {
+                          agent_id: "0f9d1c2e-private-agent-uuid",
+                          failure_reason: "agent_error.provider_auth_or_access",
+                          task_count: 2,
+                        },
                       ]
                     : [];
         return { data, isLoading: false, isSuccess: true };
@@ -270,7 +278,10 @@ describe("DashboardPage — failure visibility", () => {
 
     const byAgent = within(screen.getByRole("list", { name: "Top offenders" }));
     const link = byAgent.getByRole("link", { name: /Agent One/ });
-    expect(link).toHaveAttribute("href", "/acme/agents/agent-1?view=work");
+    // Overview, NOT ?view=work: Work lists the issues assigned to the agent,
+    // while its recent runs (and each failure's reason) live in the Overview
+    // pane's ActivityTab.
+    expect(link).toHaveAttribute("href", "/acme/agents/agent-1?view=overview");
     // 4 of that agent's 10 terminal runs failed, and Auth is what dominates.
     expect(byAgent.getByText("4 / 10 · 40%")).toBeInTheDocument();
   });
@@ -299,5 +310,31 @@ describe("DashboardPage — failure visibility", () => {
     await user.click(screen.getByRole("button", { name: "Errors" }));
 
     expect(container).toHaveTextContent("Daily errors");
+  });
+});
+
+describe("DashboardPage — the Errors list never exposes an agent the viewer can't see", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+
+  it("folds an unresolvable agent into an anonymous row instead of printing its UUID", () => {
+    // The failure rollups are workspace-scoped and deliberately skip
+    // per-agent visibility, but the agent list does not: a private agent
+    // this member can't see never appears there. Rendering `row.agentId`
+    // would leak its existence, failure count and failure rate.
+    const { container } = renderDashboard();
+
+    expect(container).not.toHaveTextContent("0f9d1c2e-private-agent-uuid");
+
+    const byAgent = within(screen.getByRole("list", { name: "Top offenders" }));
+    expect(byAgent.getByText("Other agents")).toBeInTheDocument();
+    // Anonymous, and therefore not a link — there is no page to open.
+    expect(
+      byAgent.queryByRole("link", { name: /Other agents/ }),
+    ).not.toBeInTheDocument();
   });
 });

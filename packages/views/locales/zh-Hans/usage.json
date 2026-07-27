@@ -56,6 +56,7 @@
     "summary": "{{total}} 次运行中有 {{failed}} 次失败 · {{rate}}",
     "by_class": "按类型",
     "by_agent": "问题最多的智能体",
+    "other_agents": "其他智能体",
     "agent_rate": "{{failed}} / {{total}} · {{rate}}",
     "no_data": "所选时间范围内没有失败的运行。",
     "show_reasons": "展开错误码",

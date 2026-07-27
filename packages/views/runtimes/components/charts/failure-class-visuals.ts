@@ -66,6 +66,23 @@ export function formatRate(failed: number, total: number): string {
   return `${pct >= 10 || pct === 0 ? Math.round(pct) : pct.toFixed(1)}%`;
 }
 
+/**
+ * Translated label for a Recharts series name.
+ *
+ * Recharts passes the `dataKey` through as the tooltip item's `name`, so a
+ * formatter that echoes it renders the raw class id ("rate_limit"). Look it
+ * up in the same config that drives the legend, and fall back to the key
+ * itself if the config ever loses an entry.
+ */
+export function labelOf(
+  config: ChartConfig,
+  name: string | number | undefined,
+): string {
+  const key = String(name ?? "");
+  const label = config[key]?.label;
+  return typeof label === "string" ? label : key;
+}
+
 /** Translated Recharts config for the failure-class series. */
 export function useFailureClassConfig(): ChartConfig {
   const { t } = useT("usage");

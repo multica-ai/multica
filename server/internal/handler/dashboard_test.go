@@ -1525,3 +1525,128 @@ func TestDashboardFailuresCountNeverStartedTasks(t *testing.T) {
 		})
 	}
 }
+
+// TestDashboardFailuresByAgentUsesExactWindow pins the cutoff difference
+// between the two failure endpoints.
+//
+// parseSinceParamInTZ deliberately returns N+1 calendar days of headroom, and
+// the workspace dashboard trims the surplus client-side with `-(days-1)`. The
+// by-agent rollup carries no date column, so it cannot be trimmed that way —
+// it must close its own window server-side. Before that fix, `days=1` served
+// the Errors card yesterday's failures while the chart beside it, correctly
+// trimmed, showed none.
+func TestDashboardFailuresByAgentUsesExactWindow(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	var runtimeID, agentID string
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent_runtime WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&runtimeID); err != nil {
+		t.Fatalf("fetch runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("fetch agent: %v", err)
+	}
+
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, creator_id, creator_type, number)
+		VALUES ($1, 'failures window test', $2, 'member',
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+
+	// One failure at noon YESTERDAY (UTC). days=1 means "today", so neither
+	// endpoint may count it. Noon avoids the midnight edge in either
+	// direction.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, started_at, completed_at, failure_reason, created_at)
+		VALUES (
+			$1, $2, $3, 'failed',
+			((CURRENT_DATE - 1)::timestamp + interval '11 hours') AT TIME ZONE 'UTC',
+			((CURRENT_DATE - 1)::timestamp + interval '12 hours') AT TIME ZONE 'UTC',
+			'timeout', now()
+		)
+		RETURNING id
+	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("insert task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+
+	type failureRow struct {
+		FailureReason string `json:"failure_reason"`
+		TaskCount     int32  `json:"task_count"`
+	}
+	countTimeouts := func(body []byte) int32 {
+		var rows []failureRow
+		if err := json.Unmarshal(body, &rows); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		var n int32
+		for _, r := range rows {
+			if r.FailureReason == "timeout" {
+				n += r.TaskCount
+			}
+		}
+		return n
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.GetDashboardFailuresByAgent(w, newRequest("GET", "/api/dashboard/failures/by-agent?days=1&tz=UTC", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("by-agent: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countTimeouts(w.Body.Bytes()); got != 0 {
+		t.Errorf("days=1 must not reach yesterday's failure, but by-agent counted %d", got)
+	}
+
+	// days=2 covers today + yesterday, so the same row must now appear —
+	// proving the window was closed, not that the fixture is unreachable.
+	w = httptest.NewRecorder()
+	testHandler.GetDashboardFailuresByAgent(w, newRequest("GET", "/api/dashboard/failures/by-agent?days=2&tz=UTC", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("by-agent days=2: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := countTimeouts(w.Body.Bytes()); got < 1 {
+		t.Errorf("days=2 must include yesterday's failure, got %d", got)
+	}
+}
+
+// TestDashboardFailureWireContractKeepsEmptyReason pins the success bucket's
+// wire form. The client's zod schema defaults a missing `failure_reason` to
+// "" — the succeeded bucket — which is only safe while the server always
+// emits the field. Adding `omitempty` to the struct tag would strip it from
+// exactly the success rows and silently turn every window into a 100% error
+// rate, so that regression is caught here rather than in a dashboard.
+func TestDashboardFailureWireContractKeepsEmptyReason(t *testing.T) {
+	body, err := json.Marshal(DashboardFailureDailyResponse{
+		Date:      "2026-05-19",
+		TaskCount: 3,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if _, present := decoded["failure_reason"]; !present {
+		t.Errorf("succeeded rows must serialize an explicit empty failure_reason, got %s", body)
+	}
+
+	body, err = json.Marshal(DashboardFailureByAgentResponse{AgentID: "a", TaskCount: 3})
+	if err != nil {
+		t.Fatalf("marshal by-agent: %v", err)
+	}
+	if err := json.Unmarshal(body, &decoded); err != nil {
+		t.Fatalf("unmarshal by-agent: %v", err)
+	}
+	if _, present := decoded["failure_reason"]; !present {
+		t.Errorf("succeeded rows must serialize an explicit empty failure_reason, got %s", body)
+	}
+}

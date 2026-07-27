@@ -56,6 +56,7 @@
     "summary": "실행 {{total}}회 중 {{failed}}회 실패 · {{rate}}",
     "by_class": "유형별",
     "by_agent": "실패가 많은 에이전트",
+    "other_agents": "기타 에이전트",
     "agent_rate": "{{failed}} / {{total}} · {{rate}}",
     "no_data": "이 기간에는 실패한 실행이 없습니다.",
     "show_reasons": "오류 코드 표시",

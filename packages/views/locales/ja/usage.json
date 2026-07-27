@@ -56,6 +56,7 @@
     "summary": "{{total}} 回中 {{failed}} 回が失敗 · {{rate}}",
     "by_class": "種類別",
     "by_agent": "失敗の多いエージェント",
+    "other_agents": "その他のエージェント",
     "agent_rate": "{{failed}} / {{total}} · {{rate}}",
     "no_data": "この期間に失敗した実行はありません。",
     "show_reasons": "エラーコードを表示",

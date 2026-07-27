@@ -665,6 +665,14 @@ describe("dashboard + runtime usage schema drift", () => {
     expect(daily).toHaveLength(1);
     // "" is the succeeded bucket, so a reason-less row lands in the
     // denominator instead of inventing a failure that never happened.
+    //
+    // Defaulting to a failure bucket instead was considered and rejected: the
+    // realistic drift here is someone adding `omitempty` to the Go struct
+    // tag, which would strip the field from exactly the SUCCESS rows and turn
+    // every window into a 100% error rate. Deflating a rate under drift is
+    // the milder failure. TestDashboardFailureWireContractKeepsEmptyReason
+    // (server/internal/handler/dashboard_test.go) guards the other side by
+    // pinning that the server always emits the field.
     expect(daily[0]?.failure_reason).toBe("");
     expect(daily[0]?.task_count).toBe(0);
 

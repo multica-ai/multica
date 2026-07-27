@@ -8,6 +8,7 @@ import { useT } from "../../../i18n";
 import {
   activeFailureClasses,
   formatRate,
+  labelOf,
   useFailureClassConfig,
   type FailureBucketTotals,
   type FailureClassCounts,
@@ -52,7 +53,10 @@ export function DailyErrorsChart({ data }: { data: DailyErrorsData[] }) {
         <ChartTooltip
           content={
             <ChartTooltipContent
-              formatter={(value, name) => `${value} ${name}`}
+              // `name` is the Recharts dataKey — the raw class id
+              // ("rate_limit"). Resolve it through the chart config so the
+              // tooltip shows the translated label the legend already uses.
+              formatter={(value, name) => `${value} ${labelOf(config, name)}`}
               footer={(payload) => {
                 const row = payload[0]?.payload as DailyErrorsData | undefined;
                 if (!row) return null;

@@ -73,6 +73,7 @@ import {
   aggregateWeeklyTasks,
   aggregateWeeklyTime,
   bucketUnknownAgentRows,
+  bucketUnresolvedAgentFailures,
   computeDailyTotals,
   computeFailureTotals,
   DELETED_AGENTS_ROW_ID,
@@ -353,22 +354,31 @@ export function DashboardPage() {
     [failureDailyInWindow],
   );
 
-  // Failure summaries for the Errors breakdown card and the Tasks KPI hint.
-  // These use the per-agent rollup — already scoped to `days` server-side —
-  // so the card and the leaderboard above it cover the same window even when
-  // the weekly chart over-fetched.
+  // Failure summaries for the Errors breakdown card.
+  //
+  // Totals / classes / reasons are derived from the DATE-BUCKETED rollup after
+  // the same `dailyCutoffIso` trim the charts use, not from the per-agent one.
+  // `parseSinceParamInTZ` deliberately returns N+1 calendar days of headroom
+  // (see sinceFromDays in server/internal/handler/runtime.go), and only a
+  // series carrying a date can trim that back client-side. Reading these off
+  // the per-agent rollup put the card one calendar day wider than the chart
+  // directly above it — at 1D the chart could show no failures while the card
+  // counted yesterday's.
   const failureTotals = useMemo(
-    () => computeFailureTotals(failureByAgentRows),
-    [failureByAgentRows],
+    () => computeFailureTotals(failureDailyInWindow),
+    [failureDailyInWindow],
   );
   const failureClassRows = useMemo(
-    () => aggregateFailureClasses(failureByAgentRows),
-    [failureByAgentRows],
+    () => aggregateFailureClasses(failureDailyInWindow),
+    [failureDailyInWindow],
   );
   const failureReasonRows = useMemo(
-    () => aggregateFailureReasons(failureByAgentRows),
-    [failureByAgentRows],
+    () => aggregateFailureReasons(failureDailyInWindow),
+    [failureDailyInWindow],
   );
+  // The per-agent split has no date to trim on, so its window is closed
+  // server-side instead — GetDashboardFailuresByAgent uses the exact N-day
+  // cutoff rather than the N+1 one.
   const agentFailureRows = useMemo(
     () => aggregateAgentFailures(failureByAgentRows),
     [failureByAgentRows],
@@ -436,6 +446,12 @@ export function DashboardPage() {
   const visibleAgentRows = useMemo(
     () => bucketUnknownAgentRows(agentRows, knownAgentIds),
     [agentRows, knownAgentIds],
+  );
+  // Same treatment for the Errors top-offenders list, but stricter while the
+  // agent list loads — see bucketUnresolvedAgentFailures.
+  const visibleAgentFailureRows = useMemo(
+    () => bucketUnresolvedAgentFailures(agentFailureRows, knownAgentIds),
+    [agentFailureRows, knownAgentIds],
   );
   // Distinct hard-deleted agents folded into the bucket — drives the caption's
   // "· N deleted" suffix (the bucket itself is a single row).
@@ -581,7 +597,7 @@ export function DashboardPage() {
                 totals={failureTotals}
                 classRows={failureClassRows}
                 reasonRows={failureReasonRows}
-                agentRows={agentFailureRows}
+                agentRows={visibleAgentFailureRows}
                 agents={agents}
               />
 
@@ -988,13 +1004,23 @@ function AgentFailureItem({
   const wsPaths = useWorkspacePaths();
   const barColor = FAILURE_CLASS_COLOR[row.topClass ?? "other"];
 
-  // The row links into the agent's Work tab, which lists its recent tasks with
-  // each failure's reason — the drill-down from "this agent is the problem"
-  // to the actual failed runs. A hard-deleted agent has no page to open, so
-  // that row degrades to plain text rather than a dead link.
+  // The row links into the agent's Overview, whose ActivityTab lists recent
+  // runs with each failure's reason — the drill-down from "this agent is the
+  // problem" to the actual failed runs. NOT the Work tab: that one lists the
+  // issues assigned to the agent, which is a different question entirely.
+  //
+  // An agent with no resolvable name is either hard-deleted or private to
+  // someone else; either way there is no page to open and no name to show,
+  // so the row degrades to a neutral placeholder. Rendering `row.agentId`
+  // here would leak a bare UUID — and, for a private agent, leak its
+  // existence and failure profile to a member who cannot see it.
   const label = (
     <span className="flex min-w-0 items-center gap-2">
-      <span className="truncate text-xs">{name ?? row.agentId}</span>
+      <span
+        className={`truncate text-xs${name ? "" : " italic text-muted-foreground"}`}
+      >
+        {name ?? t(($) => $.errors.other_agents)}
+      </span>
       {row.topClass ? (
         <span className="shrink-0 rounded-sm bg-muted px-1 py-px text-[10px] text-muted-foreground">
           {classLabel(row.topClass)}
@@ -1008,7 +1034,7 @@ function AgentFailureItem({
       <div className="flex items-center justify-between gap-2">
         {name ? (
           <AppLink
-            href={`${wsPaths.agentDetail(row.agentId)}?view=work`}
+            href={`${wsPaths.agentDetail(row.agentId)}?view=overview`}
             newTabTitle={name}
             className="min-w-0 hover:underline"
           >
