@@ -357,7 +357,6 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 		taskPrepareLeaseTimeout = oldTimeout
 	})
 
-	var leaseCalls atomic.Int64
 	startEntered := make(chan struct{})
 	var closeStartOnce sync.Once
 	releaseStart := make(chan struct{})
@@ -366,7 +365,6 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/prepare-lease"):
-			leaseCalls.Add(1)
 			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/start"):
 			closeStartOnce.Do(func() { close(startEntered) })
@@ -383,8 +381,18 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
 		t.Fatalf("write fake agent: %v", err)
 	}
+	// Count prepare-lease requests the daemon *initiates*, not the ones the
+	// test server happens to have handled. The extender's stop function waits
+	// for its goroutine to exit, so this counter is final the moment runTask
+	// returns. Counting server-side handler entries instead is racy: the last
+	// request fired just before the prepare deadline can be handled after
+	// runTask returns, which looks identical to a leaked extender (MUL-5218).
+	client := NewClient(srv.URL)
+	leaseRequests := &prepareLeaseCountingTransport{base: client.client.Transport}
+	client.client.Transport = leaseRequests
+
 	d := &Daemon{
-		client:             NewClient(srv.URL),
+		client:             client,
 		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
 		workspaces:         make(map[string]*workspaceState),
 		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
@@ -419,18 +427,33 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 	default:
 		t.Fatal("runTask did not reach /start")
 	}
+	requestsAtReturn := leaseRequests.starts.Load()
 	releaseStartOnce.Do(func() { close(releaseStart) })
-	if got := leaseCalls.Load(); got == 0 {
+	if requestsAtReturn == 0 {
 		t.Fatal("prepare lease was never extended while /start was blocked")
 	}
-	leaseCallsAtReturn := leaseCalls.Load()
 	time.Sleep(4 * taskPrepareLeaseRefresh)
-	if got := leaseCalls.Load(); got != leaseCallsAtReturn {
-		t.Fatalf("prepare lease kept extending after timeout: calls %d -> %d", leaseCallsAtReturn, got)
+	if got := leaseRequests.starts.Load(); got != requestsAtReturn {
+		t.Fatalf("prepare lease kept extending after timeout: requests %d -> %d", requestsAtReturn, got)
 	}
 	if got := taskRunFailureReason(err); got != "timeout" {
 		t.Fatalf("taskRunFailureReason = %q, want retryable platform timeout", got)
 	}
+}
+
+// prepareLeaseCountingTransport counts prepare-lease requests as the daemon
+// hands them to the transport, giving tests a client-side count that is settled
+// as soon as the lease extender goroutine has exited.
+type prepareLeaseCountingTransport struct {
+	base   http.RoundTripper
+	starts atomic.Int64
+}
+
+func (t *prepareLeaseCountingTransport) RoundTrip(r *http.Request) (*http.Response, error) {
+	if strings.HasSuffix(r.URL.Path, "/prepare-lease") {
+		t.starts.Add(1)
+	}
+	return t.base.RoundTrip(r)
 }
 
 // TestHandleTask_KeepsEnvRootActiveAcrossCompletion is the regression guard
