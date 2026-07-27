@@ -15,6 +15,12 @@ export const dashboardKeys = {
     projectId: string | null,
     tz: string,
   ) => [...dashboardKeys.all(wsId), "by-agent", days, projectId, tz] as const,
+  byModel: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "by-model", days, projectId, tz] as const,
   agentRuntime: (
     wsId: string,
     days: number,
@@ -27,6 +33,24 @@ export const dashboardKeys = {
     projectId: string | null,
     tz: string,
   ) => [...dashboardKeys.all(wsId), "runtime-daily", days, projectId, tz] as const,
+  runtimeDuration: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "runtime-duration", days, projectId, tz] as const,
+  modelRunTime: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "model-runtime", days, projectId, tz] as const,
+  usageByRuntime: (
+    wsId: string,
+    days: number,
+    projectId: string | null,
+    tz: string,
+  ) => [...dashboardKeys.all(wsId), "by-runtime", days, projectId, tz] as const,
 };
 
 // 5-min rollup cadence on the server, 60s background refetch on the client.
@@ -143,5 +167,81 @@ export function dashboardRunTimeDailyOptions(
       isSameDashboardScope(previousQuery?.queryKey, queryKey)
         ? keepPreviousData(previousData)
         : undefined,
+  });
+}
+
+export function dashboardUsageByModelOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.byModel(wsId, days, projectId, tz),
+    queryFn: () =>
+      api.getDashboardUsageByModel({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function dashboardRuntimeDurationOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.runtimeDuration(wsId, days, projectId, tz),
+    queryFn: () =>
+      api.getDashboardRuntimeDuration({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function dashboardModelRunTimeOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.modelRunTime(wsId, days, projectId, tz),
+    queryFn: () =>
+      api.getDashboardModelRunTime({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
+  });
+}
+
+export function dashboardUsageByRuntimeOptions(
+  wsId: string,
+  days: number,
+  projectId: string | null,
+  tz: string,
+) {
+  return queryOptions({
+    queryKey: dashboardKeys.usageByRuntime(wsId, days, projectId, tz),
+    queryFn: () =>
+      api.getDashboardUsageByRuntime({
+        days,
+        project_id: projectId ?? undefined,
+        tz,
+      }),
+    enabled: !!wsId,
+    staleTime: STALE_TIME,
   });
 }
