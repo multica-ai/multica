@@ -307,6 +307,50 @@ func TestFeishuMediaResolver_RecordsIntentBeforeUpload(t *testing.T) {
 	}
 }
 
+// The object key is per CHAT message, not per platform message. The same
+// Feishu message can be ingested twice (its inbound dedup claim is reclaimable
+// once 60s stale, and the dedup row is vacuumed after 24h), and a shared key
+// would run the second ingest into the first one's ledger row — which may be a
+// tombstone that the intent upsert refuses to resurrect, silently dropping the
+// second ingest's media for as long as the re-delete schedule runs.
+func TestFeishuMediaResolver_KeyIsPerChatMessageSoReingestIsNotBlocked(t *testing.T) {
+	lm := InboundMessage{
+		MessageID:   "om_reingest",
+		MessageType: "image",
+		Body:        "[Image]",
+		Content:     `{"image_key":"img_reingest"}`,
+	}
+	inst := testMediaInstallation(t)
+	sessionID := uuidFromString(t, "22222222-2222-2222-2222-222222222222")
+	newResolver := func(ledger *fakeMediaLedger, storage *fakeMediaStorage) engine.MediaResolver {
+		sender := &fakeSender{downloaded: DownloadedResource{Data: []byte{1}, ContentType: "image/png", SizeBytes: 1}}
+		return NewFeishuMediaResolver(sender, fakeCreds{secret: "plain"}, storage, ledger, newDiscardLogger())
+	}
+
+	firstStorage := &fakeMediaStorage{}
+	firstLedger := &fakeMediaLedger{}
+	newResolver(firstLedger, firstStorage).ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{},
+		sessionID, uuidFromString(t, "33333333-3333-4333-8333-333333333333"), channelMessageFromLark(lm))
+	if len(firstStorage.uploads) != 1 {
+		t.Fatalf("first ingest uploads = %d, want 1", len(firstStorage.uploads))
+	}
+	firstKey := firstStorage.uploads[0].key
+
+	// The first ingest's key is now owned by the reconciler (deleting or
+	// tombstoned); the redelivered ingest must not collide with it.
+	secondStorage := &fakeMediaStorage{}
+	secondLedger := &fakeMediaLedger{ownedKeys: map[string]bool{firstKey: true}}
+	got := newResolver(secondLedger, secondStorage).ResolveMedia(context.Background(), inst, engine.ResolvedIdentity{},
+		sessionID, uuidFromString(t, "44444444-4444-4444-8444-444444444444"), channelMessageFromLark(lm))
+	if len(secondStorage.uploads) != 1 || len(got.MediaRefs) != 1 {
+		t.Fatalf("re-ingest uploads=%d refs=%d, want 1/1 — a tombstoned first ingest must not gag it",
+			len(secondStorage.uploads), len(got.MediaRefs))
+	}
+	if secondStorage.uploads[0].key == firstKey {
+		t.Fatalf("both ingests used key %q; the key must be derived per chat message", firstKey)
+	}
+}
+
 // A key the reconciler owns must not be uploaded at all — the state-guarded
 // upsert refuses to resurrect it and the resolver skips the resource.
 func TestFeishuMediaResolver_ReconcilerOwnedKeySkipsUpload(t *testing.T) {

@@ -85,7 +85,7 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 		return msg
 	}
 	for _, res := range resources {
-		key := mediaObjectKey(inst, res)
+		key := mediaObjectKey(inst, chatMessageID, res)
 		link := r.storage.ObjectURL(key)
 		// Persist the upload intent BEFORE any write can happen. Every
 		// failure from here on — download error, upload error (even one the
@@ -149,8 +149,17 @@ func (r *feishuMediaResolver) ResolveMedia(ctx context.Context, inst engine.Reso
 	return msg
 }
 
-func mediaObjectKey(inst engine.ResolvedInstallation, res larkMediaResource) string {
-	sum := sha256.Sum256([]byte(res.messageID + "\x00" + res.fetchType + "\x00" + res.key))
+// mediaObjectKey derives the object key from the CHAT message the object will
+// be attached to, not from the platform message alone: a platform message can
+// be ingested twice (the inbound dedup row is reclaimable once its claim is 60s
+// stale, and vacuumed after 24h), and a shared key would run the second ingest
+// into the first one's ledger row. That row may be a tombstone — the intent
+// upsert refuses anything that has left 'pending', so the second ingest would
+// silently drop its media for as long as the re-delete schedule runs. A key
+// per chat message keeps the ingests independent; nothing leaks, because each
+// one's objects are covered by its own ledger row.
+func mediaObjectKey(inst engine.ResolvedInstallation, chatMessageID pgtype.UUID, res larkMediaResource) string {
+	sum := sha256.Sum256([]byte(uuidString(chatMessageID) + "\x00" + res.messageID + "\x00" + res.fetchType + "\x00" + res.key))
 	return path.Join(
 		"workspaces",
 		uuidString(inst.WorkspaceID),
