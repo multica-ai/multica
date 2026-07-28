@@ -430,7 +430,8 @@ func TestVerifyCodeNewUserHasNoWorkspace(t *testing.T) {
 }
 
 func TestProtectedRoutesRequireAuth(t *testing.T) {
-	paths := []string{"/api/me", "/api/issues", "/api/agents", "/api/inbox", "/api/workspaces"}
+	// CEREBRO-PATCH(issue-properties-release-gates): keep the property catalog behind authentication.
+	paths := []string{"/api/me", "/api/issues", "/api/properties", "/api/agents", "/api/inbox", "/api/workspaces"}
 
 	for _, path := range paths {
 		resp, err := http.Get(testServer.URL + path)
