@@ -104,6 +104,10 @@ export type CerebroFlagKey =
   //   - interim single-writer edit lock (stops two people overwriting each
   //     other until full live co-editing lands).
   | "cerebro_note_lock"
+  // FIR-1317: live co-editing — several people type in the same note at
+  // once and see each other's caret. Replaces the single-writer lock and
+  // the conflict dialog while it is on. Default off until QA'd on staging.
+  | "cerebro_note_live_collab"
   // TECH-3690 (Jesper): clicking a note in the inbox Notes box opens it in the
   // same detail pane messages use, with an "Åbn fuldt" button to the full Notes
   // surface — instead of navigating straight away. Default on; off reverts to
@@ -525,6 +529,8 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-2697 part 4: attach ⇒ always has a folder + card links to it — off until QA'd.
   cerebro_attachment_folder: false,
   cerebro_note_lock: false,
+  // FIR-1317: OFF until live co-editing is verified with two browsers on staging.
+  cerebro_note_live_collab: false,
   // TECH-3690: on by default — only takes effect where cerebro_notes is on.
   cerebro_note_inbox_pane: true,
   // FIR-1621: ON (FIR-1647) — coupling + send-to-agent flow shipped.

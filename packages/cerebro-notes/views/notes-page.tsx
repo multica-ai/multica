@@ -107,6 +107,10 @@ import { NoteLockBanner } from "./note-lock-banner";
 import { NoteCommentsPanel } from "./note-comments-panel";
 import { NoteVersionsDialog } from "./note-versions-dialog";
 import { NoteConflictDialog } from "./note-conflict-dialog";
+// FIR-1317 Plan B: live co-editing — several people type at once and see
+// each other's caret, instead of taking turns behind the edit lock.
+import { useNoteLiveCollab } from "./use-note-live-collab";
+import { presenceLabel } from "./note-live-collab-protocol";
 import type { NoteConflict } from "./note-conflict-dialog";
 import { useCommentAnchors } from "./use-comment-anchors";
 import { useFindHighlight } from "./use-find-highlight";
@@ -859,6 +863,10 @@ export function NoteEditor({
 
   // Wave 3 (TECH-3556): each surface is independently feature-flagged.
   const lockEnabled = useFeatureFlag("cerebro_note_lock");
+  // FIR-1317 Plan B: when live editing is on it REPLACES the single-writer
+  // lock and the conflict dialog — taking turns and merging afterwards only
+  // exist because people could not write at the same time.
+  const liveCollabEnabled = useFeatureFlag("cerebro_note_live_collab");
   const commentsEnabled = useFeatureFlag("cerebro_note_comments");
   const versionsEnabled = useFeatureFlag("cerebro_note_versions");
   // FIR-2595 point 3: scope the note's @mention picker to people with access.
@@ -1006,7 +1014,16 @@ export function NoteEditor({
   // access. It is also read-only while another user holds the live edit lock.
   const { data: noteDetail } = useQuery(noteDetailOptions(wsId, note.id));
   const canEdit = isOwner || noteDetail?.can_edit === true;
-  const readOnly = !canEdit || (lockEnabled && editLock.blockedByOther);
+  const readOnly =
+    !canEdit ||
+    (lockEnabled && !liveCollabEnabled && editLock.blockedByOther);
+  // Join the note's live room. A viewer joins too — they watch other people
+  // write in real time; the server refuses their steps.
+  const live = useNoteLiveCollab({
+    editor,
+    noteId: note.id,
+    enabled: liveCollabEnabled,
+  });
 
   // FIR-2810: line attribution + author codes. The single-note read carries
   // the per-line attribution and the note's author-codes toggle; member names
@@ -1226,7 +1243,7 @@ export function NoteEditor({
 
   return (
     <div className="flex h-full min-h-0 w-full flex-col">
-      {readOnly && editLock.lock && (
+      {!liveCollabEnabled && readOnly && editLock.lock && (
         <NoteLockBanner
           lock={editLock.lock}
           acquiring={editLock.acquiring}
@@ -1560,6 +1577,21 @@ export function NoteEditor({
                   }}
                 />
               )}
+              {liveCollabEnabled && live.peers.length > 0 && (
+                <div className="flex items-center gap-2 px-1 pb-2 text-xs text-muted-foreground">
+                  <span className="flex -space-x-1">
+                    {live.peers.slice(0, 4).map((p) => (
+                      <span
+                        key={p.id}
+                        title={p.name}
+                        className="inline-block size-4 rounded-full border border-background"
+                        style={{ backgroundColor: p.color }}
+                      />
+                    ))}
+                  </span>
+                  <span>{presenceLabel(live.peers)}</span>
+                </div>
+              )}
               <EditorImageTray
                 key={`${note.id}:${replaceToken}`}
                 ref={editorRef}
@@ -1680,7 +1712,7 @@ export function NoteEditor({
 
       {/* FIR-1317 Plan A: conflict merge dialog. Shown when two people save
           the same note at the same time and the backend returns 409. */}
-      {conflictMergeEnabled && (
+      {conflictMergeEnabled && !liveCollabEnabled && (
         <NoteConflictDialog
           conflict={conflict}
           onResolve={(resolvedBody) => {

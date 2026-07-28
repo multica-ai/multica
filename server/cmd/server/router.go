@@ -85,6 +85,7 @@ import (
 	// CEREBRO-PATCH(cerebro-group-permissions-routes): JEH-1008 permission model handler import
 	cerebrogrouppermissions "github.com/multica-ai/multica/server/internal/cerebro/grouppermissions"
 	// CEREBRO-PATCH(cerebro-github-pr-heal): JEH-1919 PR-card self-heal service import.
+	cerebrocollab "github.com/multica-ai/multica/server/internal/cerebro/collab"             // CEREBRO-PATCH(cerebro-note-collab): FIR-1317 live co-editing engine for notes.
 	cerebrocommentguard "github.com/multica-ai/multica/server/internal/cerebro/commentguard" // CEREBRO-PATCH(router-comment-target-guard-import): FIR-2674.
 	cerebrogithubprheal "github.com/multica-ai/multica/server/internal/cerebro/githubprheal"
 	cerebroinbox "github.com/multica-ai/multica/server/internal/cerebro/inbox"
@@ -604,6 +605,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(cerebro-inbox-realtime): FIR-2394 event bus fans inbox metadata mutations out to other sessions; FIR-2385 task service backs the owner-run endpoint.
 	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries, bus, h.TaskService)
 	cerebroNoteHandler := cerebronote.New(queries, cerebroQueries, bus, h.TaskService) // CEREBRO-PATCH(cerebro-notes-handler): TECH-3421 Notes + FIR-1621 send-to-agent dispatch.
+	// CEREBRO-PATCH(cerebro-note-collab): FIR-1317 live co-editing rooms; reuses the Notes see/edit rules.
+	cerebroCollabHandler := cerebrocollab.New(pool, cerebronote.CollabAccess{Cerebro: cerebroQueries})
 	// CEREBRO-PATCH(handler-chat-mute-wire): TECH-3352 — chat-snooze seam.
 	h.ChatMute = cerebroInboxHandler
 	// CEREBRO-PATCH(chat-run-stream-wire): FIR-2835 Phase 1 — chat run SSE stream broker.
@@ -993,6 +996,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// CEREBRO-PATCH(terminal-ws-auth): terminal session WS handles its own auth (cookie or
 	// first-message) and must be outside all auth middleware so browsers can upgrade.
 	r.Get("/api/cerebro/terminal/sessions/{sessionId}/ws", cerebroTerminalHandler.AttachWS)
+	// CEREBRO-PATCH(cerebro-note-collab): FIR-1317 note co-editing WS authenticates itself, so it sits outside the auth middleware like the terminal WS.
+	r.Get("/api/cerebro/notes/{id}/collab", cerebroCollabHandler.ServeWS)
 
 	// Local file serving (when using local storage)
 	if local, ok := store.(*storage.LocalStorage); ok {

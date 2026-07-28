@@ -2053,3 +2053,26 @@ The upstream files carry one-line field/call-site additions each. Behind
 hold all the way through a very long run — the context is compacted and the earliest
 instructions dilute first. Enough for style and form rules. A watertight
 check-before-you-send gate has to run as a check at send time; that is a separate build.
+
+## FIR-1317 — live co-editing rooms for notes
+
+Track "B" from FIR-3601 point 1: several people type in the same note at once
+and see each other's caret, replacing the single-writer lock plus the conflict
+dialog that shipped as track "A".
+
+The engine lives entirely in the cerebro zone
+(`server/internal/cerebro/collab/`) and reuses the Notes access rules through
+`server/internal/cerebro/note/collab_access.go`, so a live session can never
+grant more than saving already does. The server is a dumb prosemirror-collab
+authority: it hands out version numbers, keeps the ordered step log and relays
+steps/carets/presence. It never transforms a step and never renders the
+document, which is what keeps this inside the existing Go server and the
+existing WebSocket stack — no Yjs, no Hocuspocus container, no extra hosting.
+
+Persistence is deliberately untouched: the note body in the database stays the
+source of truth and is still written through the normal `UpdateNote` path, so
+version history, Line history and search keep working exactly as before.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `cerebro-note-collab` | `server/cmd/server/router.go` (3 marked lines) | Import, handler construction, and the `GET /api/cerebro/notes/{id}/collab` route. The route sits next to the terminal WS, outside the auth middleware, because a browser cannot set headers on a WebSocket upgrade — the handler authenticates itself from the auth cookie or a first-frame token, exactly like `terminal-ws-auth`. |

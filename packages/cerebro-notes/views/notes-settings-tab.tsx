@@ -39,6 +39,12 @@ const NOTE_FLAGS: { key: CerebroFlagKey; label: string; description: string }[] 
         "Hold a single-writer lock while editing so two people don't overwrite each other.",
     },
     {
+      key: "cerebro_note_live_collab",
+      label: "Live editing",
+      description:
+        "Several people write in the same note at the same time and see each other's caret live. Replaces the edit lock and the conflict dialog while it is on.",
+    },
+    {
       key: "cerebro_note_types",
       label: "Recurring notes",
       description:
