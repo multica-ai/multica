@@ -250,6 +250,8 @@ type Daemon struct {
 	pauseClaims    bool // when true, runRuntimePoller skips ClaimTask
 	claimsInFlight int  // pollers that have decided to claim but haven't yet handed the task off to handleTask
 
+	drain cerebroDrainState // CEREBRO-PATCH(daemon-graceful-drain): FIR-3758 graceful-drain runtime state; see cerebro_graceful_drain.go
+
 	activeEnvRootsMu sync.Mutex
 	activeEnvRoots   map[string]int // env root path -> reference count (handles reuse paths marked twice)
 
@@ -2637,9 +2639,10 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			wakeup := make(chan struct{}, 1)
 			pollers[rid] = &pollerHandle{cancel: pcancel, wakeup: wakeup}
 			pollerWG.Add(1)
+			taskCtx := d.taskParentCtx(ctx) // CEREBRO-PATCH(daemon-graceful-drain): FIR-3758 task lifetime is decoupled from SIGTERM so drain can outlive shutdown; see cerebro_graceful_drain.go
 			go func(rid string, pctx context.Context, wakeup <-chan struct{}) {
 				defer pollerWG.Done()
-				d.runRuntimePoller(pctx, ctx, rid, sem, wakeup, &taskWG)
+				d.runRuntimePoller(pctx, taskCtx, rid, sem, wakeup, &taskWG)
 			}(rid, pctx, wakeup)
 		}
 	}
@@ -2649,7 +2652,7 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 	for {
 		select {
 		case <-ctx.Done():
-			d.logger.Info("poll loop stopping, waiting for in-flight tasks", "max_wait", "30s")
+			// CEREBRO-PATCH(daemon-graceful-drain): FIR-3758 shutdown-wait logging moved into drainInFlightTasks (drain window vs legacy 30s differ); see cerebro_graceful_drain.go
 			for _, h := range pollers {
 				h.cancel()
 			}
@@ -2658,14 +2661,7 @@ func (d *Daemon) pollLoop(ctx context.Context, taskWakeups <-chan taskWakeup) er
 			// could race with taskWG.Wait when the counter is zero, which
 			// is an undefined sync.WaitGroup misuse.
 			pollerWG.Wait()
-
-			waitDone := make(chan struct{})
-			go func() { taskWG.Wait(); close(waitDone) }()
-			select {
-			case <-waitDone:
-			case <-time.After(30 * time.Second):
-				d.logger.Warn("timed out waiting for in-flight tasks")
-			}
+			d.drainInFlightTasks(&taskWG) // CEREBRO-PATCH(daemon-graceful-drain): FIR-3758 bounded graceful drain replaces the fixed 30s wait; see cerebro_graceful_drain.go
 			return ctx.Err()
 		case <-runtimeSetCh:
 			syncPollers()

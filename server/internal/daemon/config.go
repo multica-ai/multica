@@ -115,6 +115,8 @@ type Config struct {
 	CodexArgs           []string
 	CodebuddyArgs       []string
 
+	GracefulDrain GracefulDrainConfig // CEREBRO-PATCH(daemon-graceful-drain): FIR-3758 SIGTERM/restart drain window (default OFF); see cerebro_graceful_drain.go
+
 	// CEREBRO-PATCH(daemon-config): cerebro sandbox config (EnableSandbox,
 	// SandboxAllowlist) is embedded so callers continue to access fields
 	// directly via cfg.EnableSandbox / cfg.SandboxAllowlist.
@@ -506,6 +508,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexArgs:           codexArgs,
 		// CEREBRO-PATCH(daemon-config): embedded sandbox config.
 		SandboxConfig: cerebroSandbox,
+		// CEREBRO-PATCH(daemon-graceful-drain): FIR-3758 — see cerebro_graceful_drain.go
+		GracefulDrain: loadGracefulDrainConfig(),
 	}, nil
 }
 
