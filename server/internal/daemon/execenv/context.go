@@ -395,8 +395,10 @@ func skillsDirPath(workDir, provider string) string {
 		// Qwen Code discovers project-level skills from .qwen/skills/ in the workdir.
 		return filepath.Join(workDir, ".qwen", "skills")
 	case "qwenpaw":
-		// QwenPaw discovers project-level skills from .qwenpaw/skills/ in the workdir.
-		return filepath.Join(workDir, ".qwenpaw", "skills")
+		// QwenPaw discovers workspace-level skills from <workDir>/skills/
+		// (legacy <workDir>/skill). See get_workspace_skills_dir in
+		// QwenPaw's skill_system/store.py.
+		return filepath.Join(workDir, "skills")
 	case "traecli":
 		// Official TRAE CLI discovers project-level skills from .traecli/skills/
 		// in the workdir (global skills live in ~/.traecli/skills). See

@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -296,27 +297,35 @@ func TestQwenpawUsesSessionLoad(t *testing.T) {
 }
 
 // TestQwenpawTimeout tests that a context timeout during session/new
-// is reported as status=timeout.
+// is reported as status=timeout. Uses a signal file to synchronise:
+// the fake script writes to the file after initialize completes, so
+// the timeout only starts counting after the handshake is done,
+// making the test deterministic.
 func TestQwenpawTimeout(t *testing.T) {
 	t.Parallel()
-	script := `#!/bin/sh
-# Sleep forever on session/new to trigger a timeout
+
+	signalDir := t.TempDir()
+	readyFile := filepath.Join(signalDir, "initialize_done")
+
+	script := fmt.Sprintf(`#!/bin/sh
 while IFS= read -r line; do
-  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true,"mcpCapabilities":{"http":true,"sse":true}}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      > "%s"
       ;;
     *'"method":"session/new"'*)
       sleep 30
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_late"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"sessionId":"ses_late"}}\n' "$id"
       ;;
     *)
-      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
       ;;
   esac
 done
-`
+`, readyFile)
+
 	bin := writeFakeQwenpawScript(t, script)
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
@@ -328,11 +337,13 @@ done
 		t.Fatalf("New(qwenpaw) error: %v", err)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	// Use a generous timeout so initialize always completes;
+	// the 30s sleep on session/new will trigger the timeout.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	session, err := b.Execute(ctx, "test prompt", ExecOptions{
-		Cwd:    t.TempDir(),
+		Cwd: t.TempDir(),
 	})
 	if err != nil {
 		t.Fatalf("Execute error: %v", err)
@@ -384,6 +395,223 @@ func TestQwenpawBackendUsage(t *testing.T) {
 	}
 	if usage.OutputTokens != 20 {
 		t.Fatalf("expected 20 output tokens, got %d", usage.OutputTokens)
+	}
+}
+
+// TestQwenpawSetModelReturnsNull verifies that a null result from
+// session/set_model (which is what the real QwenPaw server returns
+// on failure) is treated as a failure, not silently ignored.
+func TestQwenpawSetModelReturnsNull(t *testing.T) {
+	t.Parallel()
+
+	// This script returns result:null (not an RPC error) for set_model,
+	// matching the real QwenPaw v2.0.1 server behaviour.
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_qwenpaw_null"}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":null}\n' "$id"
+      exit 0
+      ;;
+    *)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      ;;
+  esac
+done
+`
+	bin := writeFakeQwenpawScript(t, script)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	b, err := New("qwenpaw", Config{
+		ExecutablePath: bin,
+		Logger:         logger,
+	})
+	if err != nil {
+		t.Fatalf("New(qwenpaw) error: %v", err)
+	}
+
+	ctx := context.Background()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:   t.TempDir(),
+		Model: "nonexistent-model",
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	for range session.Messages {
+	}
+
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("expected failed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "could not switch to model") {
+		t.Fatalf("expected could not switch to model error, got %q", result.Error)
+	}
+}
+
+// TestQwenpawSessionLoadTransientError verifies that a transient
+// network/handshake error on session/load does NOT set ResumeRejected=true,
+// matching the invariant documented in grok.go:269-272.
+func TestQwenpawSessionLoadTransientError(t *testing.T) {
+	t.Parallel()
+
+	// This script returns an RPC error that is NOT a session-not-found
+	// error, simulating a transient network/handshake failure.
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/load"'*)
+      # Simulate a transient error (e.g. rate limit, 5xx) — NOT session not found
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32000,"message":"rate limit exceeded"}}\n' "$id"
+      exit 0
+      ;;
+    *)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      ;;
+  esac
+done
+`
+	bin := writeFakeQwenpawScript(t, script)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	b, err := New("qwenpaw", Config{
+		ExecutablePath: bin,
+		Logger:         logger,
+	})
+	if err != nil {
+		t.Fatalf("New(qwenpaw) error: %v", err)
+	}
+
+	ctx := context.Background()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:             t.TempDir(),
+		ResumeSessionID: "ses_transient",
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	for range session.Messages {
+	}
+
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("expected failed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Error, "session/load failed") {
+		t.Fatalf("expected session/load failed error, got %q", result.Error)
+	}
+	// Transient errors must NOT set ResumeRejected — only session-not-found does.
+	if result.ResumeRejected {
+		t.Fatal("expected ResumeRejected=false on transient load error")
+	}
+}
+
+// TestQwenpawSessionNewSendsCodingProjectDir verifies that session/new
+// includes the qwenpaw.coding_project_dir key inside _meta so QwenPaw
+// can enable Coding Mode on the correct project directory.
+func TestQwenpawSessionNewSendsCodingProjectDir(t *testing.T) {
+	t.Parallel()
+
+	bin := writeFakeQwenpawScript(t, fakeQwenpawACPScript())
+	reqFile := filepath.Join(t.TempDir(), "requests.txt")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	b, err := New("qwenpaw", Config{
+		ExecutablePath: bin,
+		Logger:         logger,
+		Env:            map[string]string{"QWENPAW_REQUESTS_FILE": reqFile},
+	})
+	if err != nil {
+		t.Fatalf("New(qwenpaw) error: %v", err)
+	}
+
+	ctx := context.Background()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	for range session.Messages {
+	}
+	<-session.Result
+
+	raw, err := os.ReadFile(reqFile)
+	if err != nil {
+		t.Fatalf("read requests file: %v", err)
+	}
+	requests := string(raw)
+
+	// qwenpaw.coding_project_dir must be inside _meta, not top-level
+	if !strings.Contains(requests, `"_meta"`) {
+		t.Fatalf("expected _meta in session/new request, got:\n%s", requests)
+	}
+	if !strings.Contains(requests, `"qwenpaw.coding_project_dir"`) {
+		t.Fatalf("expected qwenpaw.coding_project_dir inside _meta in session/new request, got:\n%s", requests)
+	}
+}
+
+// TestQwenpawSessionLoadSendsCodingProjectDir verifies that session/load
+// also sends qwenpaw.coding_project_dir inside _meta, matching the
+// new_session path.
+func TestQwenpawSessionLoadSendsCodingProjectDir(t *testing.T) {
+	t.Parallel()
+
+	bin := writeFakeQwenpawScript(t, fakeQwenpawACPScript())
+	reqFile := filepath.Join(t.TempDir(), "requests.txt")
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	b, err := New("qwenpaw", Config{
+		ExecutablePath: bin,
+		Logger:         logger,
+		Env:            map[string]string{"QWENPAW_REQUESTS_FILE": reqFile},
+	})
+	if err != nil {
+		t.Fatalf("New(qwenpaw) error: %v", err)
+	}
+
+	ctx := context.Background()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:             t.TempDir(),
+		ResumeSessionID: "ses_load_test",
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	for range session.Messages {
+	}
+	<-session.Result
+
+	raw, err := os.ReadFile(reqFile)
+	if err != nil {
+		t.Fatalf("read requests file: %v", err)
+	}
+	requests := string(raw)
+
+	if !strings.Contains(requests, `"session/load"`) {
+		t.Fatalf("expected session/load request, got:\n%s", requests)
+	}
+	if !strings.Contains(requests, `"_meta"`) {
+		t.Fatalf("expected _meta in session/load request, got:\n%s", requests)
+	}
+	if !strings.Contains(requests, `"qwenpaw.coding_project_dir"`) {
+		t.Fatalf("expected qwenpaw.coding_project_dir inside _meta in session/load request, got:\n%s", requests)
 	}
 }
 

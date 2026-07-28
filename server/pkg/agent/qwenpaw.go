@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -178,11 +179,17 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		}
 
 		if opts.ResumeSessionID != "" {
-			result, err := c.request(runCtx, "session/load", map[string]any{
+			loadParams := map[string]any{
 				"cwd":        cwd,
 				"sessionId":  opts.ResumeSessionID,
 				"mcpServers": mcpServers,
-			})
+			}
+			if cwd != "." {
+				loadParams["_meta"] = map[string]any{
+					"qwenpaw.coding_project_dir": cwd,
+				}
+			}
+			result, err := c.request(runCtx, "session/load", loadParams)
 			if err != nil {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("qwenpaw session/load failed: %v", err)
@@ -203,10 +210,16 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 				)
 			}
 		} else {
-			result, err := c.request(runCtx, "session/new", map[string]any{
+			newParams := map[string]any{
 				"cwd":        cwd,
 				"mcpServers": mcpServers,
-			})
+			}
+			if cwd != "." {
+				newParams["_meta"] = map[string]any{
+					"qwenpaw.coding_project_dir": cwd,
+				}
+			}
+			result, err := c.request(runCtx, "session/new", newParams)
 			if err != nil {
 				// Handle context timeout as "session/new failed"
 				if runCtx.Err() == context.DeadlineExceeded {
@@ -244,10 +257,19 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 
 		// 3. Optional model override via session/set_model.
 		if opts.Model != "" {
-			if _, err := c.request(runCtx, "session/set_model", map[string]any{
+			setModelResult, err := c.request(runCtx, "session/set_model", map[string]any{
 				"sessionId": sessionID,
 				"modelId":   opts.Model,
-			}); err != nil {
+			})
+			// QwenPaw's real server returns result: null (not an RPC error)
+			// when the model switch fails (swallows the exception and returns
+			// None), so we must check for a nil result as well.
+			// json.RawMessage("null") is a non-nil 4-byte slice, so we
+			// must also check for the JSON null literal.
+			if err != nil || setModelResult == nil || bytes.Equal(setModelResult, []byte("null")) {
+				if err == nil {
+					err = fmt.Errorf("model %q not available (server returned null)", opts.Model)
+				}
 				b.cfg.Logger.Warn("qwenpaw set_session_model failed", "error", err, "requested_model", opts.Model)
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("qwenpaw could not switch to model %q: %v", opts.Model, err)
