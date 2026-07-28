@@ -4052,6 +4052,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("prepare Pi harness: %w", err)
 	}
+	// CEREBRO-PATCH(daemon-opencode-harness): FIR-3876 OpenCode's tool-policy adapter is a plugin; refuse the spawn without it.
+	if err := prepareOpenCodeHarness(provider, env.WorkDir); err != nil {
+		return TaskResult{}, err
+	}
 	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — pass the tool-policy
 	// PreToolUse hook to Claude Code via --settings on customArgs (the args the
 	// CLI actually consumes). No-op unless prepareToolPolicySpawn wired a settings file.

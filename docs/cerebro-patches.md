@@ -3,6 +3,31 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-3876 — ACP tool-policy seam (hermes, kimi, kiro)
+
+- `server/pkg/agent/cerebro_acp_tool_policy.go` (fork-owned) resolves every ACP
+  `session/request_permission` request against the task's tool policy and
+  returns the JSON-RPC outcome to answer with.
+- `server/pkg/agent/hermes.go` keeps two seams: it no longer sets
+  `HERMES_YOLO_MODE`, and the `session/request_permission` case delegates to
+  the fork-owned resolver instead of auto-approving.
+- `server/pkg/agent/kiro.go` no longer launches with `--trust-all-tools`.
+- **Why:** hermes, kimi and kiro have no provider-native hook file and no
+  Firtal harness, so the daemon refused to start them at all — every task died
+  at dispatch with `does not support mandatory tool-policy enforcement`, which
+  took 3 Hermes agents offline. They do not need an extension: ACP already
+  defines the seam. The agent asks its CLIENT for permission before running a
+  tool, and the daemon IS that client, so the gate is in-process and cannot be
+  removed from the workdir. `HERMES_YOLO_MODE` and `--trust-all-tools`
+  suppressed that request entirely and were the actual hole.
+- **Enforcement properties:** the gate answers only once-scoped options, never
+  an `allow_always` kind — an always-scoped approval tells the agent to stop
+  asking and would end enforcement for the rest of the session. A missing
+  policy callback, unparseable params, or an options list with no usable
+  answer all deny.
+- Adapter registration lives in
+  `server/internal/cerebro/localtoolpolicy/provider_adapter.go` (`ACPClient`).
+
 ## FIR-3774 — Static login limited to Cerebro staging
 
 - `server/internal/handler/auth.go` delegates the explicitly configured static
