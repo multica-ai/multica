@@ -555,7 +555,7 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		hasUserSelf := readErr == nil && codexConfigHasMCPServer(string(existing), "multica")
 		if strictMCP || !hasUserSelf {
 			if selfEntry, err := selfMCPServerEntry(); err == nil {
-				opts.McpConfig = daemonmcp.Merge(selfEntry, opts.McpConfig)
+				opts.McpConfig = daemonmcp.Merge(daemonmcp.WithTaskEnv(selfEntry, b.cfg.Env), opts.McpConfig) // CEREBRO-PATCH(codex-self-mcp-task-env): pass only task-bound Multica identity to Codex's MCP child.
 			} else if b.cfg.Logger != nil {
 				b.cfg.Logger.Warn("mcp: could not resolve multica binary path; platform tools unavailable", "error", err)
 			}
