@@ -254,9 +254,13 @@ function useStatusLabel(status: AgentTask["status"]): string {
 export function ActiveTaskRow({
   task,
   issueId,
+  transcriptOpen,
+  onTranscriptOpenChange,
 }: {
   task: AgentTask;
   issueId: string;
+  transcriptOpen?: boolean;
+  onTranscriptOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useT("issues");
   const [cancelling, setCancelling] = useState(false);
@@ -323,6 +327,8 @@ export function ActiveTaskRow({
             agentName=""
             isLive={task.status === "running"}
             title={t(($) => $.execution_log.transcript_tooltip)}
+            open={transcriptOpen}
+            onOpenChange={onTranscriptOpenChange}
           />
         )}
         <Tooltip>

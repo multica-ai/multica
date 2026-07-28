@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentTask } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
@@ -57,8 +57,26 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
 });
 
 vi.mock("./execution-log-section", () => ({
-  ActiveTaskRow: ({ task }: { task: AgentTask }) => (
-    <div data-testid="active-task-row">{task.id}</div>
+  ActiveTaskRow: ({
+    task,
+    transcriptOpen,
+    onTranscriptOpenChange,
+  }: {
+    task: AgentTask;
+    transcriptOpen?: boolean;
+    onTranscriptOpenChange?: (open: boolean) => void;
+  }) => (
+    <div data-testid="active-task-row">
+      <span>{task.id}</span>
+      <button
+        type="button"
+        aria-label={`open transcript ${task.id}`}
+        onClick={() => onTranscriptOpenChange?.(true)}
+      >
+        Open transcript
+      </button>
+      {transcriptOpen ? <div role="dialog">Transcript for {task.id}</div> : null}
+    </div>
   ),
 }));
 
@@ -132,6 +150,20 @@ describe("IssueAgentHeaderChip", () => {
       "task-running",
     );
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
+  });
+
+  it("keeps the transcript open after the clicked task row unmounts", () => {
+    mockState.tasks = [makeTask({ id: "task-running" })];
+
+    const { rerender } = renderWithI18n(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    fireEvent.click(screen.getByRole("button", { name: "open transcript task-running" }));
+    expect(screen.getByRole("dialog")).toHaveTextContent("Transcript for task-running");
+
+    mockState.tasks = [];
+    rerender(<IssueAgentHeaderChip issueId="issue-1" />);
+
+    expect(screen.getByRole("dialog")).toHaveTextContent("Transcript for task-running");
   });
 
   it("opens the activity card on hover, not only on click", () => {

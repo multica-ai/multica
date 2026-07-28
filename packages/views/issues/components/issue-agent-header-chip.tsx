@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo } from "react";
+import { memo, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Popover,
@@ -89,6 +89,7 @@ interface ActiveChipProps {
 function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
+  const [openTranscriptTaskId, setOpenTranscriptTaskId] = useState<string | null>(null);
 
   const activeTasks = [...running, ...queued];
   const agentIds = [...new Set(activeTasks.map((task) => task.agent_id))];
@@ -167,7 +168,15 @@ function ActiveChip({ issueId, running, queued }: ActiveChipProps) {
           </div>
           <div className="flex flex-col gap-0.5">
             {activeTasks.map((task) => (
-              <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
+              <ActiveTaskRow
+                key={task.id}
+                task={task}
+                issueId={issueId}
+                transcriptOpen={openTranscriptTaskId === task.id}
+                onTranscriptOpenChange={(open) => {
+                  setOpenTranscriptTaskId(open ? task.id : null);
+                }}
+              />
             ))}
           </div>
         </PopoverContent>
