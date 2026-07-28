@@ -33,7 +33,8 @@
     "changelog": "変更ログ",
     "discord": "Discord",
     "feedback": "フィードバック",
-    "server_version": "サーバーバージョン {{version}}"
+    "server_version": "サーバーバージョン {{version}}",
+    "server_version_too_old": "Multica サーバー（{{current}}）がデスクトップアプリ（{{min}}）より古いです。看板などの一部の機能が動作しない可能性があります。セルフホストサーバーをアップグレードしてください："
   },
   "workspace_loader": {
     "loading_workspace": "ワークスペースを読み込み中…",

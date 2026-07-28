@@ -11,9 +11,11 @@ import {
   resetAnalytics,
 } from "../analytics";
 import { configStore } from "../config";
+import { checkServerVersion } from "../runtimes/server-version";
 import { workspaceKeys } from "../workspace/queries";
 import { createLogger } from "../logger";
 import { defaultStorage } from "./storage";
+import { ServerVersionBanner } from "./server-version-banner";
 import { setCurrentWorkspace } from "./workspace-storage";
 import type { ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
@@ -62,8 +64,6 @@ export function AuthInitializer({
           // Old servers omit this field — treat that as "creation allowed"
           // (the managed-cloud default) rather than blocking the UI.
           workspaceCreationDisabled: cfg.workspace_creation_disabled === true,
-          // Absent/false on the managed cloud and older servers → section hidden.
-          vcsIntegrationAvailable: cfg.vcs_integration_available === true,
         });
         configStore.getState().setDaemonConfig({
           daemonServerUrl: cfg.daemon_server_url,
@@ -71,6 +71,12 @@ export function AuthInitializer({
         });
         configStore.getState().setFeatureFlags(cfg.feature_flags);
         configStore.getState().setServerVersion(cfg.server_version);
+        // Surface a server/app version mismatch so self-hosters who update the
+        // desktop app but not the server get an upgrade banner instead of
+        // opaque "load more failed" errors on version-gated features.
+        configStore.getState().setServerVersionCompat(
+          checkServerVersion(cfg.server_version, identity?.version ?? ""),
+        );
         if (cfg.posthog_key) {
           initAnalytics({
             key: cfg.posthog_key,
@@ -143,5 +149,10 @@ export function AuthInitializer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  return <>{children}</>;
+  return (
+    <>
+      <ServerVersionBanner />
+      {children}
+    </>
+  );
 }

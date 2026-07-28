@@ -33,7 +33,8 @@
     "changelog": "Change log",
     "discord": "Discord",
     "feedback": "Feedback",
-    "server_version": "Server version {{version}}"
+    "server_version": "Server version {{version}}",
+    "server_version_too_old": "Your Multica server ({{current}}) is older than the desktop app ({{min}}). Some features like the issue board may fail. Upgrade the self-hosted server:"
   },
   "workspace_loader": {
     "loading_workspace": "Loading workspace…",

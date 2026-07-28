@@ -33,7 +33,8 @@
     "changelog": "更新日志",
     "discord": "Discord",
     "feedback": "反馈",
-    "server_version": "服务器版本 {{version}}"
+    "server_version": "服务器版本 {{version}}",
+    "server_version_too_old": "你的 Multica 服务器版本（{{current}}）低于桌面端（{{min}}）。部分功能（如看板）可能异常。请升级自托管服务器："
   },
   "workspace_loader": {
     "loading_workspace": "正在加载工作区...",
