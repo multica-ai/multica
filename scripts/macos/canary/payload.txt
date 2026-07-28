@@ -1,0 +1,1 @@
+KAP-1184 capacity-loop canary

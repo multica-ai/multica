@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -u
+
+PROFILE=""
+OWNER=""
+TTL_HOURS="8"
+DOCKER_BIN="${MULTICA_PREVIEW_DOCKER_BIN:-$(command -v docker 2>/dev/null || true)}"
+EXPECTED_PROFILE=""
+
+usage() {
+  printf '%s\n' \
+    "usage: multica-preview-run --profile NAME --owner KAP-NNN [--ttl-hours N] -- docker-run-args..."
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --profile) shift; PROFILE="${1:-}" ;;
+    --owner) shift; OWNER="${1:-}" ;;
+    --ttl-hours) shift; TTL_HOURS="${1:-}" ;;
+    --) shift; break ;;
+    -h|--help) usage; exit 0 ;;
+    *) usage >&2; exit 64 ;;
+  esac
+  shift
+done
+
+[ -n "$PROFILE" ] || { printf 'empty profile forbidden\n' >&2; exit 64; }
+EXPECTED_PROFILE="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]' | tr -d '-')-amd64"
+[ "$PROFILE" = "$EXPECTED_PROFILE" ] || {
+  printf 'profile owner mismatch: %s (want %s)\n' "$PROFILE" "$EXPECTED_PROFILE" >&2
+  exit 64
+}
+[[ "$OWNER" =~ ^KAP-[0-9]+$ ]] || { printf 'invalid owner\n' >&2; exit 64; }
+case "$TTL_HOURS" in ''|*[!0-9]*) printf 'invalid ttl\n' >&2; exit 64 ;; esac
+[ "$#" -gt 0 ] || { usage >&2; exit 64; }
+[ -n "$DOCKER_BIN" ] || { printf 'docker unavailable\n' >&2; exit 69; }
+
+EXPIRES_AT="$(date -u -v+"${TTL_HOURS}"H '+%Y-%m-%dT%H:%M:%SZ')"
+SOCKET="unix://${HOME}/.colima/${PROFILE}/docker.sock"
+
+exec "$DOCKER_BIN" --host "$SOCKET" run \
+  --label ai.multica.preview=true \
+  --label "ai.multica.owner=${OWNER}" \
+  --label "ai.multica.expires-at=${EXPIRES_AT}" \
+  "$@"

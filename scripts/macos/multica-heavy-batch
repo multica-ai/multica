@@ -1,0 +1,283 @@
+#!/usr/bin/env bash
+set -u
+
+PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:/usr/local/bin:${HOME}/.local/bin"
+export PATH
+umask 077
+
+OPERATION=""
+OWNER=""
+PROFILE=""
+REQUIRED_GIB=""
+TEMP_ROOTS=("")
+CLEANUP_IMAGES=("")
+COMMAND=()
+STATE_DIR="${MULTICA_HEAVY_BATCH_STATE_DIR:-${HOME}/.multica/local-ops/state}"
+LOCK_DIR="${STATE_DIR}/heavy-batch.lock"
+DATA_VOLUME="${MULTICA_HEAVY_BATCH_VOLUME:-/System/Volumes/Data}"
+FREE_GIB_OVERRIDE="${MULTICA_HEAVY_BATCH_FREE_GIB_OVERRIDE:-}"
+COLIMA_BIN="${MULTICA_HEAVY_BATCH_COLIMA_BIN:-$(command -v colima 2>/dev/null || true)}"
+DOCKER_BIN="${MULTICA_HEAVY_BATCH_DOCKER_BIN:-$(command -v docker 2>/dev/null || true)}"
+PROFILE_WAS_RUNNING=0
+PROFILE_EXISTED=0
+LOCKED=0
+EXPECTED_PROFILE=""
+
+usage() {
+  printf '%s\n' \
+    "usage: multica-heavy-batch --operation TYPE --owner KAP-NNN [options] -- command [args...]" \
+    "" \
+    "operations: release-amd64, preview-amd64, docker-build, next-build, multica-release" \
+    "options:" \
+    "  --profile NAME         dedicated Colima profile; never default" \
+    "  --required-gib N       may raise, but not lower, the operation budget" \
+    "  --temp-root PATH       batch-owned temporary root to delete on exit (repeatable)" \
+    "  --cleanup-image REF    exact batch-owned local image to remove on exit (repeatable)"
+}
+
+default_budget() {
+  case "$1" in
+    release-amd64) printf '22' ;;
+    preview-amd64) printf '22' ;;
+    docker-build) printf '22' ;;
+    next-build) printf '12' ;;
+    multica-release) printf '16' ;;
+    *) return 1 ;;
+  esac
+}
+
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --operation)
+      shift
+      [ "$#" -gt 0 ] || { usage >&2; exit 64; }
+      OPERATION="$1"
+      ;;
+    --owner)
+      shift
+      [ "$#" -gt 0 ] || { usage >&2; exit 64; }
+      OWNER="$1"
+      ;;
+    --profile)
+      shift
+      [ "$#" -gt 0 ] || { usage >&2; exit 64; }
+      PROFILE="$1"
+      ;;
+    --required-gib)
+      shift
+      [ "$#" -gt 0 ] || { usage >&2; exit 64; }
+      REQUIRED_GIB="$1"
+      ;;
+    --temp-root)
+      shift
+      [ "$#" -gt 0 ] || { usage >&2; exit 64; }
+      TEMP_ROOTS+=("$1")
+      ;;
+    --cleanup-image)
+      shift
+      [ "$#" -gt 0 ] || { usage >&2; exit 64; }
+      CLEANUP_IMAGES+=("$1")
+      ;;
+    --)
+      shift
+      COMMAND=("$@")
+      break
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      usage >&2
+      exit 64
+      ;;
+  esac
+  shift
+done
+
+BASE_BUDGET="$(default_budget "$OPERATION")" || {
+  printf 'result=BLOCKED reason=unknown_operation operation=%s\n' "$OPERATION" >&2
+  exit 64
+}
+[[ "$OWNER" =~ ^KAP-[0-9]+$ ]] || {
+  printf 'result=BLOCKED reason=invalid_owner owner=%s\n' "$OWNER" >&2
+  exit 64
+}
+[ "${#COMMAND[@]}" -gt 0 ] || {
+  printf 'result=BLOCKED reason=command_missing\n' >&2
+  exit 64
+}
+
+if [ -z "$REQUIRED_GIB" ]; then
+  REQUIRED_GIB="$BASE_BUDGET"
+fi
+case "$REQUIRED_GIB" in
+  ''|*[!0-9]*)
+    printf 'result=BLOCKED reason=invalid_budget required_gib=%s\n' "$REQUIRED_GIB" >&2
+    exit 64
+    ;;
+esac
+if [ "$REQUIRED_GIB" -lt "$BASE_BUDGET" ]; then
+  printf 'result=BLOCKED reason=budget_below_operation_floor required_gib=%s floor_gib=%s\n' \
+    "$REQUIRED_GIB" "$BASE_BUDGET" >&2
+  exit 64
+fi
+
+if [ -n "$PROFILE" ]; then
+  EXPECTED_PROFILE="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]' | tr -d '-')-amd64"
+  if [ "$PROFILE" != "$EXPECTED_PROFILE" ]; then
+    printf 'result=BLOCKED reason=profile_owner_mismatch profile=%s expected_profile=%s\n' \
+      "$PROFILE" "$EXPECTED_PROFILE" >&2
+    exit 64
+  fi
+fi
+
+if [ -n "$FREE_GIB_OVERRIDE" ]; then
+  case "$FREE_GIB_OVERRIDE" in
+    ''|*[!0-9]*)
+      printf 'result=BLOCKED reason=invalid_free_override\n' >&2
+      exit 64
+      ;;
+  esac
+  FREE_KIB=$((FREE_GIB_OVERRIDE * 1024 * 1024))
+else
+  FREE_KIB="$(df -Pk "$DATA_VOLUME" | awk 'NR == 2 {print $4}')"
+  case "$FREE_KIB" in
+    ''|*[!0-9]*)
+      printf 'result=PARKED reason=df_failed volume=%s\n' "$DATA_VOLUME" >&2
+      exit 75
+      ;;
+  esac
+fi
+REQUIRED_KIB=$((REQUIRED_GIB * 1024 * 1024))
+if [ "$FREE_KIB" -lt "$REQUIRED_KIB" ]; then
+  printf 'result=PARKED reason=insufficient_headroom operation=%s owner=%s free_kib=%s required_gib=%s side_effects=none\n' \
+    "$OPERATION" "$OWNER" "$FREE_KIB" "$REQUIRED_GIB"
+  exit 75
+fi
+
+mkdir -p "$STATE_DIR"
+if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+  printf 'result=PARKED reason=another_heavy_batch_running owner=%s\n' "$OWNER"
+  exit 75
+fi
+LOCKED=1
+
+if [ -n "$PROFILE" ] && [ -n "$COLIMA_BIN" ]; then
+  if "$COLIMA_BIN" list 2>/dev/null | awk -v profile="$PROFILE" 'NR > 1 && $1 == profile { found=1 } END { exit found ? 0 : 1 }'; then
+    PROFILE_EXISTED=1
+  fi
+  if "$COLIMA_BIN" status --profile "$PROFILE" >/dev/null 2>&1; then
+    PROFILE_WAS_RUNNING=1
+  else
+    if ! "$COLIMA_BIN" start --profile "$PROFILE" --arch x86_64 --cpus 4 --memory 6 --disk 30 --dns 8.8.8.8 --dns 1.1.1.1; then
+      printf 'result=BLOCKED reason=profile_start_failed profile=%s\n' "$PROFILE" >&2
+      exit 1
+    fi
+  fi
+fi
+
+safe_remove_temp_root() {
+  local target="$1"
+  TARGET_TO_REMOVE="$target" EXPECTED_OWNER="$(printf '%s' "$OWNER" | tr '[:upper:]' '[:lower:]')" \
+    /usr/bin/python3 - <<'PY'
+import os
+import shutil
+import tempfile
+from pathlib import Path
+
+target = Path(os.environ["TARGET_TO_REMOVE"]).expanduser().resolve()
+owner = os.environ["EXPECTED_OWNER"]
+temp_root = Path(tempfile.gettempdir()).resolve()
+mac_temp_parent = any(
+    parent.name == "T" and str(parent).startswith("/private/var/folders/")
+    for parent in target.parents
+)
+under_temp_root = target != temp_root and temp_root in target.parents
+under_private_tmp = target != Path("/private/tmp") and Path("/private/tmp") in target.parents
+if not (under_temp_root or under_private_tmp or mac_temp_parent):
+    raise SystemExit(f"refuse temp cleanup outside approved temp roots: {target}")
+if owner not in target.name.lower():
+    raise SystemExit(f"refuse temp cleanup without owner {owner}: {target}")
+if target.exists():
+    shutil.rmtree(target)
+PY
+}
+
+external_build_running() {
+  ps -axo pid=,command= | awk -v self="$$" '
+    $1 != self && $0 ~ /docker([[:space:]].*)?(buildx[[:space:]]+build|[[:space:]]build[[:space:]])/ { found=1 }
+    END { exit found ? 0 : 1 }
+  '
+}
+
+runtime_cleanup() {
+  local socket running_count image protected_match
+  [ -n "$PROFILE" ] || return 0
+  [ -n "$COLIMA_BIN" ] || return 0
+  [ -n "$DOCKER_BIN" ] || return 0
+  "$COLIMA_BIN" status --profile "$PROFILE" >/dev/null 2>&1 || return 0
+  socket="unix://${HOME}/.colima/${PROFILE}/docker.sock"
+
+  if external_build_running; then
+    printf 'cleanup=SKIP reason=external_build_running profile=%s\n' "$PROFILE"
+    return 0
+  fi
+
+  for image in "${CLEANUP_IMAGES[@]}"; do
+    [ -n "$image" ] || continue
+    "$DOCKER_BIN" --host "$socket" image rm "$image" >/dev/null 2>&1 || true
+  done
+  "$DOCKER_BIN" --host "$socket" builder prune -af >/dev/null 2>&1 || true
+
+  GUEST_BEFORE="$("$COLIMA_BIN" ssh --profile "$PROFILE" -- df -Pk / 2>/dev/null | awk 'NR == 2 {print $4}' || true)"
+  TRIM_OUTPUT="$("$COLIMA_BIN" ssh --profile "$PROFILE" -- sudo fstrim -av 2>&1 || true)"
+  GUEST_AFTER="$("$COLIMA_BIN" ssh --profile "$PROFILE" -- df -Pk / 2>/dev/null | awk 'NR == 2 {print $4}' || true)"
+  HOST_AFTER="$(df -Pk "$DATA_VOLUME" | awk 'NR == 2 {print $4}')"
+  printf 'cleanup=fstrim profile=%s guest_before_kib=%s guest_after_kib=%s host_after_kib=%s output=%q\n' \
+    "$PROFILE" "${GUEST_BEFORE:-unknown}" "${GUEST_AFTER:-unknown}" "${HOST_AFTER:-unknown}" "$TRIM_OUTPUT"
+
+  running_count="$("$DOCKER_BIN" --host "$socket" ps -q 2>/dev/null | awk 'NF {count++} END {print count+0}')"
+  protected_match="$("$DOCKER_BIN" --host "$socket" images --no-trunc --format '{{.Repository}}:{{.Tag}}|{{.ID}}' 2>/dev/null \
+    | grep -E 'sha-ab9c9122|sha-01c29e12|sha256:a0c66125' || true)"
+  if [ -n "$protected_match" ]; then
+    printf 'cleanup=profile_preserved profile=%s reason=protected_baseline_present\n' "$PROFILE"
+  elif [ "$PROFILE_EXISTED" -eq 0 ] && [ "$running_count" -eq 0 ]; then
+    "$COLIMA_BIN" delete --force --profile "$PROFILE" >/dev/null 2>&1 || true
+    printf 'cleanup=profile_deleted profile=%s reason=batch_owned_no_active_containers\n' "$PROFILE"
+  elif [ "$PROFILE_WAS_RUNNING" -eq 0 ] && [ "$running_count" -eq 0 ]; then
+    "$COLIMA_BIN" stop --profile "$PROFILE" >/dev/null 2>&1 || true
+    printf 'cleanup=profile_stopped profile=%s reason=preexisting_idle_profile\n' "$PROFILE"
+  elif [ "$running_count" -gt 0 ]; then
+    printf 'cleanup=profile_preserved profile=%s reason=active_containers count=%s\n' \
+      "$PROFILE" "$running_count"
+  fi
+}
+
+cleanup() {
+  local rc="$?"
+  local target
+  trap - EXIT INT TERM
+  for target in "${TEMP_ROOTS[@]}"; do
+    [ -n "$target" ] || continue
+    if safe_remove_temp_root "$target"; then
+      printf 'cleanup=temp_root_removed path=%s\n' "$target"
+    else
+      printf 'cleanup=SKIP reason=temp_root_guard path=%s\n' "$target" >&2
+    fi
+  done
+  runtime_cleanup
+  if [ "$LOCKED" -eq 1 ]; then
+    rmdir "$LOCK_DIR" 2>/dev/null || true
+  fi
+  printf 'result=%s operation=%s owner=%s command_rc=%s\n' \
+    "$([ "$rc" -eq 0 ] && printf PASS || printf FAIL)" "$OPERATION" "$OWNER" "$rc"
+  exit "$rc"
+}
+trap cleanup EXIT INT TERM
+
+HOST_BEFORE_KIB="$(df -Pk "$DATA_VOLUME" | awk 'NR == 2 {print $4}')"
+printf 'result=START operation=%s owner=%s free_kib=%s required_gib=%s profile=%s\n' \
+  "$OPERATION" "$OWNER" "$HOST_BEFORE_KIB" "$REQUIRED_GIB" "${PROFILE:-none}"
+
+"${COMMAND[@]}"

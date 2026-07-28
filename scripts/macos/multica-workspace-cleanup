@@ -1,0 +1,468 @@
+#!/usr/bin/env python3
+"""Threshold-triggered, fail-closed GC for terminal Multica task workdirs."""
+
+from __future__ import annotations
+
+import argparse
+import datetime as dt
+import json
+import os
+import re
+import shutil
+import subprocess
+import sys
+from dataclasses import dataclass
+from pathlib import Path
+
+
+GIB_KIB = 1024 * 1024
+TASK_RE = re.compile(r"^[0-9a-f]{8}$")
+WORKSPACE_RE = re.compile(r"^[0-9a-f-]{36}$")
+REGENERABLE = {
+    "node_modules",
+    ".next",
+    ".turbo",
+    "dist",
+    "build",
+    "coverage",
+}
+TERMINAL_KINDS = {"issue", "chat", "autopilot_run", "quick_create"}
+
+
+@dataclass
+class RepoAudit:
+    path: Path
+    safe: bool
+    reason: str
+
+
+@dataclass
+class Candidate:
+    task_root: Path
+    action: str
+    reason: str
+    completed_at: str | None
+    repos: list[RepoAudit]
+    regenerable: list[Path]
+
+
+def emit(event: str, **fields: object) -> None:
+    payload = {"event": event, **fields}
+    print(json.dumps(payload, ensure_ascii=False, sort_keys=True))
+
+
+def command(args: list[str], *, timeout: int = 30) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        args,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+
+
+def parse_roots() -> list[Path]:
+    configured = os.environ.get("MULTICA_CLEANUP_ROOTS", "")
+    values = configured.split(os.pathsep) if configured else [
+        "~/multica_workspaces",
+        "~/multica_workspaces_desktop-api.multica.ai",
+    ]
+    roots: list[Path] = []
+    for value in values:
+        if not value:
+            continue
+        path = Path(value).expanduser().resolve()
+        if path.is_dir():
+            roots.append(path)
+    return roots
+
+
+def available_kib(path: Path) -> int:
+    override = os.environ.get("MULTICA_CLEANUP_FREE_GIB_OVERRIDE")
+    if override is not None:
+        return int(override) * GIB_KIB
+    usage = shutil.disk_usage(path)
+    return usage.free // 1024
+
+
+def completed_at(meta: dict[str, object]) -> dt.datetime | None:
+    raw = meta.get("completed_at")
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        return dt.datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def task_roots(roots: list[Path]) -> list[Path]:
+    found: list[Path] = []
+    for root in roots:
+        for workspace in root.iterdir():
+            if not workspace.is_dir() or not WORKSPACE_RE.fullmatch(workspace.name):
+                continue
+            for task in workspace.iterdir():
+                if task.is_dir() and TASK_RE.fullmatch(task.name):
+                    found.append(task.resolve())
+    return sorted(found)
+
+
+def active_task_roots(roots: list[Path]) -> tuple[set[Path], str | None]:
+    override = os.environ.get("MULTICA_CLEANUP_ACTIVE_PATHS")
+    if override is not None:
+        paths = [Path(value).expanduser().resolve() for value in override.split(os.pathsep) if value]
+        return map_paths_to_tasks(paths, roots), None
+
+    lsof_bin = os.environ.get("MULTICA_CLEANUP_LSOF_BIN", "/usr/sbin/lsof")
+    try:
+        result = command([lsof_bin, "-nP", "-F", "n"], timeout=30)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return set(), f"lsof_failed:{type(exc).__name__}"
+    if result.returncode not in (0, 1):
+        return set(), f"lsof_rc:{result.returncode}"
+    paths = [
+        Path(line[1:]).resolve()
+        for line in result.stdout.splitlines()
+        if line.startswith("n/") and "(deleted)" not in line
+    ]
+    paths.append(Path.cwd().resolve())
+    return map_paths_to_tasks(paths, roots), None
+
+
+def map_paths_to_tasks(paths: list[Path], roots: list[Path]) -> set[Path]:
+    active: set[Path] = set()
+    for path in paths:
+        for root in roots:
+            try:
+                rel = path.relative_to(root)
+            except ValueError:
+                continue
+            parts = rel.parts
+            if len(parts) >= 2 and WORKSPACE_RE.fullmatch(parts[0]) and TASK_RE.fullmatch(parts[1]):
+                active.add(root / parts[0] / parts[1])
+    return active
+
+
+def nested_repos(workdir: Path) -> list[Path]:
+    if not workdir.is_dir():
+        return []
+    repos: list[Path] = []
+    for current, dirs, files in os.walk(workdir, topdown=True):
+        has_git = ".git" in dirs or ".git" in files
+        dirs[:] = [name for name in dirs if name not in REGENERABLE and name != ".git"]
+        if has_git:
+            repos.append(Path(current).resolve())
+            dirs[:] = []
+    return repos
+
+
+def regenerable_dirs(workdir: Path) -> list[Path]:
+    if not workdir.is_dir():
+        return []
+    found: list[Path] = []
+    for current, dirs, _files in os.walk(workdir, topdown=True, followlinks=False):
+        retained: list[str] = []
+        for name in dirs:
+            path = Path(current) / name
+            if name in REGENERABLE:
+                if not path.is_symlink():
+                    found.append(path.resolve())
+                continue
+            retained.append(name)
+        dirs[:] = retained
+    return sorted(found)
+
+
+def dirty_paths(repo: Path) -> tuple[list[str], str | None]:
+    result = command(
+        ["git", "-C", str(repo), "status", "--porcelain=v1", "-z", "--untracked-files=all"]
+    )
+    if result.returncode != 0:
+        return [], "git_status_failed"
+    dirty: list[str] = []
+    for record in result.stdout.split("\0"):
+        if not record:
+            continue
+        path = record[3:] if len(record) > 3 else record
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        parts = Path(path).parts
+        if not any(part in REGENERABLE for part in parts):
+            dirty.append(path)
+    return dirty, None
+
+
+def audit_repo(repo: Path) -> RepoAudit:
+    dirty, error = dirty_paths(repo)
+    if error:
+        return RepoAudit(repo, False, error)
+    if dirty:
+        return RepoAudit(repo, False, f"dirty:{len(dirty)}")
+
+    upstream = command(
+        ["git", "-C", str(repo), "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"]
+    )
+    if upstream.returncode != 0 or not upstream.stdout.strip():
+        return RepoAudit(repo, False, "upstream_missing")
+    ahead = command(
+        ["git", "-C", str(repo), "rev-list", "--count", "@{upstream}..HEAD"]
+    )
+    if ahead.returncode != 0:
+        return RepoAudit(repo, False, "ahead_check_failed")
+    try:
+        ahead_count = int(ahead.stdout.strip())
+    except ValueError:
+        return RepoAudit(repo, False, "ahead_check_invalid")
+    if ahead_count > 0:
+        return RepoAudit(repo, False, f"ahead:{ahead_count}")
+    return RepoAudit(repo, True, "clean_ahead_0")
+
+
+def audit_task(
+    task_root: Path,
+    *,
+    active: set[Path],
+    process_scan_error: str | None,
+    ttl: dt.timedelta,
+    now: dt.datetime,
+) -> Candidate:
+    if process_scan_error:
+        return Candidate(task_root, "protect", process_scan_error, None, [], [])
+    if task_root in active:
+        return Candidate(task_root, "protect", "active_path", None, [], [])
+
+    meta_path = task_root / ".gc_meta.json"
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return Candidate(task_root, "protect", "terminal_metadata_missing", None, [], [])
+    if meta.get("kind") not in TERMINAL_KINDS:
+        return Candidate(task_root, "protect", "unknown_task_kind", None, [], [])
+    finished = completed_at(meta)
+    if finished is None:
+        return Candidate(task_root, "protect", "run_not_terminal", None, [], [])
+    if finished.tzinfo is None:
+        finished = finished.replace(tzinfo=dt.timezone.utc)
+    if now - finished < ttl:
+        return Candidate(task_root, "protect", "ttl_not_elapsed", finished.isoformat(), [], [])
+
+    workdir = task_root / "workdir"
+    audits = [audit_repo(repo) for repo in nested_repos(workdir)]
+    unsafe = [audit for audit in audits if not audit.safe]
+    if unsafe:
+        reasons = ",".join(sorted({audit.reason for audit in unsafe}))
+        return Candidate(
+            task_root,
+            "prune",
+            f"repo_guard:{reasons}",
+            finished.isoformat(),
+            audits,
+            regenerable_dirs(workdir),
+        )
+    return Candidate(
+        task_root,
+        "delete",
+        "terminal_ttl_git_safe",
+        finished.isoformat(),
+        audits,
+        [],
+    )
+
+
+def recheck_inactive(task_root: Path) -> tuple[bool, str]:
+    lsof_bin = os.environ.get("MULTICA_CLEANUP_LSOF_BIN", "/usr/sbin/lsof")
+    if os.environ.get("MULTICA_CLEANUP_ACTIVE_PATHS") is not None:
+        active = [
+            Path(value).expanduser().resolve()
+            for value in os.environ["MULTICA_CLEANUP_ACTIVE_PATHS"].split(os.pathsep)
+            if value
+        ]
+        if any(path == task_root or task_root in path.parents for path in active):
+            return False, "active_path_recheck"
+        return True, "inactive"
+    try:
+        result = command([lsof_bin, "-nP", "-F", "n", "+D", str(task_root)], timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return False, f"lsof_recheck_failed:{type(exc).__name__}"
+    if any(
+        line.startswith("n/") and "(deleted)" not in line
+        for line in result.stdout.splitlines()
+    ):
+        return False, "active_path_recheck"
+    if result.returncode not in (0, 1):
+        return False, f"lsof_recheck_rc:{result.returncode}"
+    return True, "inactive"
+
+
+def safe_delete(task_root: Path, roots: list[Path]) -> tuple[bool, str]:
+    resolved = task_root.resolve()
+    if not any(
+        resolved.parent.parent == root
+        and WORKSPACE_RE.fullmatch(resolved.parent.name)
+        and TASK_RE.fullmatch(resolved.name)
+        for root in roots
+    ):
+        return False, "path_allowlist_failed"
+    inactive, reason = recheck_inactive(resolved)
+    if not inactive:
+        return False, reason
+    shutil.rmtree(resolved)
+    return not resolved.exists(), "deleted"
+
+
+def safe_prune(path: Path, task_root: Path) -> tuple[bool, str]:
+    resolved = path.resolve()
+    workdir = (task_root / "workdir").resolve()
+    if (
+        path.is_symlink()
+        or resolved.name not in REGENERABLE
+        or resolved == workdir
+        or workdir not in resolved.parents
+    ):
+        return False, "regenerable_allowlist_failed"
+    inactive, reason = recheck_inactive(resolved)
+    if not inactive:
+        return False, reason
+    if resolved.is_dir():
+        shutil.rmtree(resolved)
+    return not resolved.exists(), "pruned"
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--force", action="store_true", help="run audit even above threshold")
+    args = parser.parse_args()
+
+    roots = parse_roots()
+    if not roots:
+        emit("summary", result="SKIP", reason="no_roots")
+        return 0
+
+    threshold_gib = int(os.environ.get("MULTICA_CLEANUP_MIN_FREE_GIB", "22"))
+    ttl_minutes = int(os.environ.get("MULTICA_CLEANUP_AGE_MINUTES", "1440"))
+    before_kib = min(available_kib(root) for root in roots)
+    if not args.force and before_kib >= threshold_gib * GIB_KIB:
+        emit(
+            "summary",
+            result="SKIP",
+            reason="enough_free",
+            free_kib=before_kib,
+            threshold_gib=threshold_gib,
+        )
+        return 0
+
+    active, scan_error = active_task_roots(roots)
+    now = dt.datetime.now(dt.timezone.utc)
+    candidates = [
+        audit_task(
+            task_root,
+            active=active,
+            process_scan_error=scan_error,
+            ttl=dt.timedelta(minutes=ttl_minutes),
+            now=now,
+        )
+        for task_root in task_roots(roots)
+    ]
+
+    deleted = 0
+    pruned = 0
+    protected = 0
+    failed = 0
+    for candidate in candidates:
+        repos = [
+            {"path": str(audit.path), "safe": audit.safe, "reason": audit.reason}
+            for audit in candidate.repos
+        ]
+        if candidate.action == "delete" and not args.dry_run:
+            ok, reason = safe_delete(candidate.task_root, roots)
+            if ok:
+                deleted += 1
+                emit(
+                    "task",
+                    action="deleted",
+                    path=str(candidate.task_root),
+                    reason=candidate.reason,
+                    completed_at=candidate.completed_at,
+                    repos=repos,
+                )
+            else:
+                failed += 1
+                emit(
+                    "task",
+                    action="protect",
+                    path=str(candidate.task_root),
+                    reason=reason,
+                    completed_at=candidate.completed_at,
+                    repos=repos,
+                )
+        elif candidate.action == "prune" and not args.dry_run:
+            protected += 1
+            for path in candidate.regenerable:
+                ok, reason = safe_prune(path, candidate.task_root)
+                if ok:
+                    pruned += 1
+                    emit(
+                        "artifact",
+                        action="pruned",
+                        path=str(path),
+                        task_path=str(candidate.task_root),
+                        reason=candidate.reason,
+                    )
+                else:
+                    failed += 1
+                    emit(
+                        "artifact",
+                        action="protect",
+                        path=str(path),
+                        task_path=str(candidate.task_root),
+                        reason=reason,
+                    )
+            emit(
+                "task",
+                action="protected_after_prune",
+                path=str(candidate.task_root),
+                reason=candidate.reason,
+                completed_at=candidate.completed_at,
+                repos=repos,
+                regenerable=[str(path) for path in candidate.regenerable],
+            )
+        else:
+            if candidate.action in {"protect", "prune"}:
+                protected += 1
+            emit(
+                "task",
+                action={
+                    "delete": "would_delete",
+                    "prune": "would_prune",
+                    "protect": "protect",
+                }[candidate.action],
+                path=str(candidate.task_root),
+                reason=candidate.reason,
+                completed_at=candidate.completed_at,
+                repos=repos,
+                regenerable=[str(path) for path in candidate.regenerable],
+            )
+
+    after_kib = min(available_kib(root) for root in roots)
+    emit(
+        "summary",
+        result="DRY_RUN" if args.dry_run else ("PASS" if failed == 0 else "PASS_WITH_NOTES"),
+        scanned=len(candidates),
+        would_delete=sum(candidate.action == "delete" for candidate in candidates),
+        would_prune=sum(len(candidate.regenerable) for candidate in candidates),
+        deleted=deleted,
+        pruned=pruned,
+        protected=protected,
+        failed=failed,
+        free_before_kib=before_kib,
+        free_after_kib=after_kib,
+        threshold_gib=threshold_gib,
+        ttl_minutes=ttl_minutes,
+        process_scan_error=scan_error,
+    )
+    return 0 if failed == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
