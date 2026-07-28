@@ -3,6 +3,25 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-3986 — Names are copied, never translated
+
+- `server/internal/daemon/execenv/runtime_config_names_verbatim_cerebro.go`
+  (fork-owned) adds a standing `## Names` section to the runtime brief.
+- `server/internal/daemon/execenv/runtime_config.go` emits it for every task —
+  one line, outside the `hasIssueContext` gate, because a chat session or a DM
+  can invent a name just as easily as an issue comment can.
+- **Why:** the prohibition already existed in three places (agent instructions,
+  the requesting user's profile, the `plain-dansk-gate` skill) and an agent still
+  invented Danish names for `issue`, `run`, `handoff`, `slice` and `wakeup`
+  across a whole thread. Each existing wording asks the writer to classify every
+  word mid-sentence — "is this a name that has a real name?" — and that judgement
+  loses to fluency when the surrounding prose is Danish. The new wording removes
+  the judgement: one mechanical test on the finished text (can the noun be found
+  in the product's search?). The closing line names the precedence over
+  `plain-dansk-gate` and `caveman`, which pull the other way; with no stated
+  winner the product names lost. A translated name cannot be searched or matched
+  to an issue, which is the failure — not the style.
+
 ## FIR-3876 — ACP tool-policy seam (hermes, kimi, kiro)
 
 - `server/pkg/agent/cerebro_acp_tool_policy.go` (fork-owned) resolves every ACP

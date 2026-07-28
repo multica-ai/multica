@@ -604,7 +604,8 @@ func buildMetaSkillContent(provider string, ctx TaskContextForEnv) string {
 		b.WriteString("If a workflow step conflicts with Agent Identity, skip the conflicting action and continue with the remaining compatible steps. ")
 		b.WriteString("Never treat this runtime workflow as permission to change issue status, investigate, implement, or otherwise act beyond your Agent Identity.\n\n")
 	}
-	if hasIssueContext { // CEREBRO-PATCH(runtime-config-wakeup-dedup): FIR-1585 — never-busy-wait + wakeup rule, emitted ONCE (was duplicated by TECH-3121 + TECH-3038)
+	b.WriteString(cerebroNamesVerbatimRule()) // CEREBRO-PATCH(runtime-config-names-verbatim): FIR-3986 — never translate a product name; emitted for every task, not only issue ones
+	if hasIssueContext {                      // CEREBRO-PATCH(runtime-config-wakeup-dedup): FIR-1585 — never-busy-wait + wakeup rule, emitted ONCE (was duplicated by TECH-3121 + TECH-3038)
 		b.WriteString(cerebroNoBusyWaitRule())
 		b.WriteString(cerebroWakeupMandatoryRule())
 		b.WriteString(cerebroClaudeMdScopeRule()) // CEREBRO-PATCH(runtime-config-claudemd-scope): FIR-1585 — repo CLAUDE.md/AGENTS.md is repo-only; keep workspace/agent/process content out
