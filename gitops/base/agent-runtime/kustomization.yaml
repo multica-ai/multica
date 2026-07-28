@@ -6,3 +6,4 @@ resources:
   - service-account.yaml
   - external-secret.yaml
   - deployment.yaml
+  - pdb.yaml

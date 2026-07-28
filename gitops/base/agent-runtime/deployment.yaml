@@ -6,6 +6,10 @@ metadata:
     reloader.stakater.com/auto: "true"
 spec:
   replicas: 1
+  # Default (600s) is shorter than preflight can legitimately take (~20 min) —
+  # without this, a normal slow start reports as a stalled/degraded rollout
+  # (ArgoCD, kubectl rollout status) even though the pod is fine.
+  progressDeadlineSeconds: 1800
   selector:
     matchLabels:
       app.kubernetes.io/name: agentrunner
@@ -13,6 +17,14 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/name: agentrunner
+      annotations:
+        # Each pod is a singleton, in-memory coding session with no
+        # checkpoint/resume — cluster-autoscaler consolidation looks only at
+        # requested cpu/memory (never live usage), so a node hosting an
+        # actively-spiking session can still be picked as underutilized and
+        # drained. This stops that: never a scale-down eviction target.
+        # Paired with the PDB in pdb.yaml (belt-and-suspenders — see AIPLAT-153).
+        cluster-autoscaler.kubernetes.io/safe-to-evict: "false"
     spec:
       serviceAccountName: agentrunner
       imagePullSecrets:
@@ -60,6 +72,27 @@ spec:
               memory: 2Gi
           securityContext:
             allowPrivilegeEscalation: false
+          readinessProbe:
+            # The daemon's health port is loopback-only (it also carries
+            # unauthenticated /shutdown and /repo/checkout — see
+            # server/internal/daemon/health.go), so the kubelet's httpGet can't
+            # reach it from the pod IP. Uses the daemon's own CLI instead of
+            # hand-rolled curl, so it stays correct if the health port or
+            # response shape ever changes. "starting" (PAT renew + workspace
+            # sync + runtime registration) can take 10-20 min; no livenessProbe,
+            # since that window would otherwise crash-loop the pod.
+            exec:
+              command:
+                - sh
+                - -c
+                - '[ "$(multica daemon status --output json | jq -r .status)" = "running" ]'
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            # Default (1s) is tight for spawning two processes plus a loopback
+            # HTTP round-trip, especially under the CPU spikes an active
+            # session causes — avoid flapping an already-Ready pod on that.
+            timeoutSeconds: 5
+            failureThreshold: 3
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:

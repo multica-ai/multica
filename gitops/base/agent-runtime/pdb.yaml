@@ -1,0 +1,15 @@
+---
+# Denies voluntary eviction of the agentrunner pod (cluster-autoscaler
+# consolidation, node drains). A 1-replica singleton with maxUnavailable=1
+# (the Kubernetes default) still permits eviction; maxUnavailable=0 is what
+# actually blocks it. Paired with the safe-to-evict annotation in
+# deployment.yaml — see AIPLAT-153.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: agentrunner
+spec:
+  maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: agentrunner
