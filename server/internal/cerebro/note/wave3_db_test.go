@@ -97,6 +97,7 @@ func setupW3(ctx context.Context, pool *pgxpool.Pool) error {
 
 func cleanupW3(ctx context.Context, pool *pgxpool.Pool) error {
 	stmts := []string{
+		`DELETE FROM cerebro_feature_flags WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM cerebro_note_comment WHERE note_id IN (SELECT id FROM artifact WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1))`,
 		`DELETE FROM cerebro_note_version WHERE note_id IN (SELECT id FROM artifact WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1))`,
 		`DELETE FROM cerebro_note WHERE artifact_id IN (SELECT id FROM artifact WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1))`,

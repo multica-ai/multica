@@ -295,6 +295,20 @@ func (q *Queries) GetNoteLineAttr(ctx context.Context, artifactID pgtype.UUID) (
 	return i, err
 }
 
+const getNoteWorkspaceID = `-- name: GetNoteWorkspaceID :one
+SELECT workspace_id FROM artifact WHERE id = $1
+`
+
+// The live-collaboration WebSocket authenticates itself outside workspace
+// middleware, so its authoritative feature-flag gate resolves the workspace
+// from the note rather than trusting a caller-supplied workspace id.
+func (q *Queries) GetNoteWorkspaceID(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, getNoteWorkspaceID, id)
+	var workspace_id pgtype.UUID
+	err := row.Scan(&workspace_id)
+	return workspace_id, err
+}
+
 const listNoteShares = `-- name: ListNoteShares :many
 SELECT user_id, created_at
 FROM cerebro_note_share

@@ -33,6 +33,9 @@ type Access interface {
 	// room — they see other people's carets and text live — but their steps are
 	// refused, so read-only stays read-only.
 	CanEdit(ctx context.Context, noteID, userID string) (bool, error)
+	// LiveEnabled applies the effective workspace/member feature-flag
+	// precedence. The server enforces the flag; hiding the UI is not a gate.
+	LiveEnabled(ctx context.Context, noteID, userID string) (bool, error)
 }
 
 // Handler serves the live co-editing WebSocket for notes.
@@ -144,6 +147,11 @@ func (h *Handler) ServeWS(w http.ResponseWriter, r *http.Request) {
 	canSee, err := h.Access.CanSee(r.Context(), noteID, userID)
 	if err != nil || !canSee {
 		h.writeNow(conn, encode(SimpleMessage{Type: MsgAuthError, Reason: "no access to this note"}))
+		return
+	}
+	liveEnabled, err := h.Access.LiveEnabled(r.Context(), noteID, userID)
+	if err != nil || !liveEnabled {
+		h.writeNow(conn, encode(SimpleMessage{Type: MsgAuthError, Reason: "live editing is disabled"}))
 		return
 	}
 	canEdit, err := h.Access.CanEdit(r.Context(), noteID, userID)
@@ -258,6 +266,10 @@ func (h *Handler) readPump(_ context.Context, conn *websocket.Conn, room *Room, 
 			}
 
 		case MsgSnapshot:
+			if !peer.CanEdit {
+				peer.Send(encode(SimpleMessage{Type: MsgError, Reason: "read-only: snapshots are refused"}))
+				continue
+			}
 			if len(msg.Doc) == 0 {
 				continue
 			}
