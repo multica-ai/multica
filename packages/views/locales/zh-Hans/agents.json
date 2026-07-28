@@ -422,6 +422,35 @@
       "remove_aria": "移除头像",
       "select_image_toast": "请选择图片文件。",
       "upload_failed_toast": "头像上传失败"
+    },
+    "execution_picker": {
+      "device_title": "选择运行设备",
+      "device_description": "先选择实际运行这个智能体的设备。",
+      "cloud_device_description": "由 Multica 托管，随时可用",
+      "cloud_not_enabled": "尚未开启",
+      "cloud_enable_dialog": {
+        "title": "开启 Multica Cloud？",
+        "description": "开启后即可使用托管 Runtime，无需连接本地设备。",
+        "cancel": "取消",
+        "confirm": "开启并继续"
+      },
+      "computer_description": "已连接到工作区的电脑",
+      "recommended": "推荐",
+      "change_device": "重新选择设备",
+      "runtime_title": "选择运行时",
+      "runtime_description": "选择这台设备上可用的智能体运行时。",
+      "runtime_ready": "在线，可立即使用",
+      "runtime_offline": "当前离线",
+      "runtime_summary": "{{online}} / {{total}} 个运行时在线",
+      "model_title": "选择模型",
+      "model_description": "选择模型后，只显示该模型支持的配置。",
+      "model_parameters": "模型参数",
+      "model_parameters_description": "这些配置只对当前智能体生效。",
+      "thinking_label": "思考等级",
+      "thinking_default": "默认",
+      "fast_mode": "快速模式",
+      "fast_mode_description": "优先降低当前智能体的响应延迟。",
+      "fast_mode_badge": "优先"
     }
   },
   "tab_body": {

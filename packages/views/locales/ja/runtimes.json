@@ -428,5 +428,18 @@
     "table_cache_r": "キャッシュ R",
     "table_cache_w": "キャッシュ W",
     "no_data": "まだ使用量データがありません"
+  },
+  "cloud_preview": {
+    "title": "Multica Cloud",
+    "tagline": "ローカルマシン不要のマネージドクラウド Runtime。",
+    "status_ready": "準備完了",
+    "enable": "有効にする",
+    "disable": "無効にする",
+    "advanced": "詳細設定",
+    "stats": {
+      "credits": "残りクレジット"
+    },
+    "machines_title": "自分のコンピュータ",
+    "machines_hint": "デーモンを動かしているマシンです。コードと API キーはそこに留まります。"
   }
 }

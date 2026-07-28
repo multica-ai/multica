@@ -17,7 +17,6 @@ import { runtimeProfileListOptions } from "@multica/core/runtimes";
 import { runtimeListOptions, runtimeKeys } from "@multica/core/runtimes/queries";
 import { useWSEvent } from "@multica/core/realtime";
 import { agentListOptions } from "@multica/core/workspace/queries";
-import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
   CollectionPageHeader,
@@ -27,7 +26,7 @@ import {
 import { PageHeader } from "../../layout/page-header";
 import { AppLink } from "../../navigation";
 import { ConnectRemoteDialog } from "./connect-remote-dialog";
-import { CloudRuntimeDialog } from "./cloud-runtime-dialog";
+import { CloudCapabilityCard } from "./cloud-capability-card";
 import { ProviderLogo } from "./provider-logo";
 import { buildWorkloadIndex, RuntimeList } from "./runtime-list";
 import { pendingRuntimeFromProfile } from "./pending-runtime";
@@ -45,7 +44,8 @@ export interface RuntimesPageProps {
   hasLocalMachine?: boolean;
   /** The bundled daemon is starting but has not registered yet. */
   bootstrapping?: boolean;
-  /** Web SaaS-only Cloud Runtime entrypoint. */
+  /** Web SaaS-only: makes the raw Fleet node list reachable from the Cloud
+   *  card's "Advanced" action. */
   cloudRuntimeEnabled?: boolean;
 }
 
@@ -70,7 +70,6 @@ export function RuntimesPage({
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const [showConnectDialog, setShowConnectDialog] = useState(false);
-  const [showCloudRuntimeDialog, setShowCloudRuntimeDialog] = useState(false);
 
   const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
     runtimeListOptions(wsId),
@@ -127,50 +126,34 @@ export function RuntimesPage({
     return <RuntimesPageSkeleton />;
   }
 
-  const showEmpty =
-    machines.length === 0 &&
-    orphanProfileRuntimes.length === 0 &&
-    !bootstrapping &&
-    hasLocalMachine !== true;
-
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <PageHeaderBar
         totalCount={machines.length}
         onConnectRemote={() => setShowConnectDialog(true)}
-        cloudRuntimeEnabled={cloudRuntimeEnabled}
-        onOpenCloudRuntime={() => setShowCloudRuntimeDialog(true)}
       />
 
-      {showEmpty ? (
-        <div className="flex flex-1 items-center justify-center p-6">
-          <EmptyState onConnectRemote={() => setShowConnectDialog(true)} />
-        </div>
-      ) : (
-        <div className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto flex w-full max-w-[1440px] flex-col p-4 sm:p-6">
-            {(machines.length > 0 || bootstrapping) && (
-              <MachineList
-                machines={machines}
-                bootstrapping={bootstrapping}
-              />
-            )}
-            {orphanProfileRuntimes.length > 0 && (
-              <OrphanRuntimeProfiles
-                runtimes={orphanProfileRuntimes}
-                now={now}
-                hasMachines={machines.length > 0}
-              />
-            )}
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[1440px] flex-col p-4 sm:p-6">
+          <div className="mb-6">
+            <CloudCapabilityCard nodeInspectorAvailable={cloudRuntimeEnabled} />
           </div>
+          <LocalMachinesSection
+            machines={machines}
+            bootstrapping={bootstrapping}
+          />
+          {orphanProfileRuntimes.length > 0 && (
+            <OrphanRuntimeProfiles
+              runtimes={orphanProfileRuntimes}
+              now={now}
+              hasMachines={machines.length > 0}
+            />
+          )}
         </div>
-      )}
+      </div>
 
       {showConnectDialog && (
         <ConnectRemoteDialog onClose={() => setShowConnectDialog(false)} />
-      )}
-      {cloudRuntimeEnabled && showCloudRuntimeDialog && (
-        <CloudRuntimeDialog onClose={() => setShowCloudRuntimeDialog(false)} />
       )}
     </div>
   );
@@ -203,16 +186,40 @@ function OrphanRuntimeProfiles({
   );
 }
 
+/**
+ * Under the MUL-5385 preview the flat machine list gets an explicit heading:
+ * "machine" is only an honest word for hardware the user actually owns, so it
+ * is scoped to this section instead of naming the whole page.
+ */
+function LocalMachinesSection({
+  machines,
+  bootstrapping,
+}: {
+  machines: RuntimeMachine[];
+  bootstrapping?: boolean;
+}) {
+  const { t } = useT("runtimes");
+  return (
+    <section>
+      <div className="mb-3">
+        <h2 className="text-sm font-semibold">
+          {t(($) => $.cloud_preview.machines_title)}
+        </h2>
+        <p className="mt-1 text-xs text-muted-foreground">
+          {t(($) => $.cloud_preview.machines_hint)}
+        </p>
+      </div>
+      <MachineList machines={machines} bootstrapping={bootstrapping} />
+    </section>
+  );
+}
+
 function PageHeaderBar({
   totalCount,
   onConnectRemote,
-  cloudRuntimeEnabled,
-  onOpenCloudRuntime,
 }: {
   totalCount: number;
   onConnectRemote: () => void;
-  cloudRuntimeEnabled: boolean;
-  onOpenCloudRuntime: () => void;
 }) {
   const { t, i18n } = useT("runtimes");
   return (
@@ -226,20 +233,11 @@ function PageHeaderBar({
         label: t(($) => $.page.learn_more),
       }}
       actions={
-        <>
-          {cloudRuntimeEnabled && (
-            <CollectionPageHeaderAction
-              icon={Cloud}
-              label={t(($) => $.cloud_runtime.action)}
-              onClick={onOpenCloudRuntime}
-            />
-          )}
-          <CollectionPageHeaderAction
-            icon={Plus}
-            label={t(($) => $.page.connect_remote)}
-            onClick={onConnectRemote}
-          />
-        </>
+        <CollectionPageHeaderAction
+          icon={Plus}
+          label={t(($) => $.page.connect_remote)}
+          onClick={onConnectRemote}
+        />
       }
     />
   );
@@ -380,23 +378,6 @@ function ProviderIconStack({ providers }: { providers: string[] }) {
         </span>
       )}
     </span>
-  );
-}
-
-function EmptyState({ onConnectRemote }: { onConnectRemote: () => void }) {
-  const { t } = useT("runtimes");
-  return (
-    <CollectionPageState
-      icon={Server}
-      title={t(($) => $.page.empty.title)}
-      description={t(($) => $.page.empty.hint)}
-      actions={
-        <Button type="button" size="sm" onClick={onConnectRemote}>
-          <Plus aria-hidden="true" className="size-3" />
-          {t(($) => $.page.connect_remote)}
-        </Button>
-      }
-    />
   );
 }
 

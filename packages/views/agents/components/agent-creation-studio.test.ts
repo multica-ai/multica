@@ -187,6 +187,8 @@ const draft = (): AgentDraft => ({
   avatarUrl: null,
   runtimeId: "runtime-1",
   model: "model-1",
+  thinkingLevel: "",
+  serviceTier: "",
   skillIds: new Set(["skill-1"]),
   permissionScope: "private",
   memberIds: new Set(),

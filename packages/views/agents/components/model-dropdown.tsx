@@ -13,6 +13,10 @@ import {
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { useT } from "../../i18n";
+import {
+  getCloudPreviewModels,
+  isCloudPreviewRuntimeId,
+} from "../../runtimes/components/cloud-preview";
 
 // ModelDropdown renders a searchable, creatable model picker for an agent.
 // It fetches the supported-model catalog from the selected runtime — the
@@ -38,17 +42,25 @@ export function ModelDropdown({
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
+  const usesMockCatalog = isCloudPreviewRuntimeId(runtimeId);
 
   const modelsQuery = useQuery(
-    runtimeModelsOptions(runtimeOnline ? runtimeId : null),
+    runtimeModelsOptions(
+      runtimeOnline && !usesMockCatalog ? runtimeId : null,
+    ),
   );
 
-  const supported = modelsQuery.data?.supported ?? true;
+  const supported = usesMockCatalog
+    ? true
+    : (modelsQuery.data?.supported ?? true);
   // Stable reference for the model list — `?? []` would mint a fresh
   // array each render and force every downstream useMemo to invalidate.
   const models = useMemo(
-    () => modelsQuery.data?.models ?? [],
-    [modelsQuery.data],
+    () =>
+      usesMockCatalog
+        ? getCloudPreviewModels(runtimeId)
+        : (modelsQuery.data?.models ?? []),
+    [modelsQuery.data, runtimeId, usesMockCatalog],
   );
   const grouped = useMemo(() => groupByProvider(models), [models]);
 
@@ -81,6 +93,9 @@ export function ModelDropdown({
     (m) => m.id === trimmedSearch || m.label === trimmedSearch,
   );
   const canCreate = trimmedSearch.length > 0 && !exactMatch;
+  const selectedModel = value
+    ? models.find((model) => model.id === value) ?? null
+    : null;
 
   const select = (id: string) => {
     onChange(id);
@@ -89,6 +104,7 @@ export function ModelDropdown({
   };
 
   const triggerLabel =
+    selectedModel?.label ||
     value ||
     (disabled
       ? t(($) => $.model_dropdown.select_runtime_first)
@@ -96,14 +112,17 @@ export function ModelDropdown({
         ? t(($) => $.model_dropdown.default_provider)
         : t(($) => $.model_dropdown.runtime_offline_manual));
 
-  if (!supported && !modelsQuery.isLoading) {
+  const modelsLoading = !usesMockCatalog && modelsQuery.isLoading;
+  const modelsError = !usesMockCatalog && modelsQuery.isError;
+
+  if (!supported && !modelsLoading) {
     return (
       <div className="flex flex-col min-w-0">
         <div className="flex h-6 items-center">
           <Label className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
         </div>
         <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
-          <Info className="mt-0.5 h-4 w-4 shrink-0" />
+          <Info aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="min-w-0">
             <div>{t(($) => $.model_dropdown.managed_by_runtime_title)}</div>
             <div className="mt-0.5 text-xs">
@@ -119,30 +138,33 @@ export function ModelDropdown({
     <div className="flex flex-col min-w-0">
       <div className="flex h-6 items-center justify-between">
         <Label className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
-        {modelsQuery.isError && (
+        {modelsError && (
           <span className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.discovery_failed)}</span>
         )}
       </div>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           disabled={disabled}
-          className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+          className="mt-1.5 flex w-full min-w-0 touch-manipulation items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50"
         >
-          <Cpu className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <Cpu
+            aria-hidden="true"
+            className="h-4 w-4 shrink-0 text-muted-foreground"
+          />
           <div className="min-w-0 flex-1">
-            {/* Wrapped in flex to mirror RuntimePicker's trigger DOM. The
-                two pickers sit side-by-side; inline-in-flex vs block-line-
-                box height calc would otherwise leave them ~1px misaligned. */}
             <div className="flex items-center gap-2">
               <span className="truncate font-medium">{triggerLabel}</span>
             </div>
-            {value && (
+            {selectedModel && (
               <div className="truncate text-xs text-muted-foreground">
-                {modelLabel(models, value)}
+                {[selectedModel.provider, selectedModel.id]
+                  .filter(Boolean)
+                  .join(" · ")}
               </div>
             )}
           </div>
           <ChevronDown
+            aria-hidden="true"
             className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`}
           />
         </PopoverTrigger>
@@ -153,6 +175,9 @@ export function ModelDropdown({
           <div className="border-b border-border p-2">
             <Input
               autoFocus
+              name="model-search"
+              autoComplete="off"
+              aria-label={t(($) => $.pickers.model_search_placeholder)}
               placeholder={t(($) => $.pickers.model_search_placeholder)}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -160,14 +185,17 @@ export function ModelDropdown({
             />
           </div>
           <div className="max-h-72 overflow-y-auto p-1">
-            {modelsQuery.isLoading && (
+            {modelsLoading && (
               <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
+                <Loader2
+                  aria-hidden="true"
+                  className="h-4 w-4 animate-spin"
+                />
                 {t(($) => $.pickers.model_discovering)}
               </div>
             )}
 
-            {!modelsQuery.isLoading &&
+            {!modelsLoading &&
               Object.entries(filtered).map(([provider, list]) => (
                 <div key={provider} className="mb-1">
                   {provider && (
@@ -180,7 +208,7 @@ export function ModelDropdown({
                       type="button"
                       key={m.id}
                       onClick={() => select(m.id)}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                      className={`flex w-full touch-manipulation items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
                         m.id === value ? "bg-accent" : "hover:bg-accent/50"
                       }`}
                     >
@@ -193,14 +221,17 @@ export function ModelDropdown({
                         )}
                       </div>
                       {m.id === value && (
-                        <Check className="h-4 w-4 shrink-0 text-primary" />
+                        <Check
+                          aria-hidden="true"
+                          className="h-4 w-4 shrink-0 text-primary"
+                        />
                       )}
                     </button>
                   ))}
                 </div>
               ))}
 
-            {!modelsQuery.isLoading &&
+            {!modelsLoading &&
               Object.keys(filtered).length === 0 &&
               !canCreate && (
                 <div className="px-3 py-6 text-center text-sm text-muted-foreground">
@@ -212,9 +243,9 @@ export function ModelDropdown({
               <button
                 type="button"
                 onClick={() => select(trimmedSearch)}
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-primary transition-colors hover:bg-accent/50"
+                className="flex w-full touch-manipulation items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-primary transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               >
-                <Plus className="h-4 w-4 shrink-0" />
+                <Plus aria-hidden="true" className="h-4 w-4 shrink-0" />
                 <span className="truncate">
                   {t(($) => $.pickers.model_custom_use, { value: trimmedSearch })}
                 </span>
@@ -225,7 +256,7 @@ export function ModelDropdown({
               <button
                 type="button"
                 onClick={() => select("")}
-                className="mt-1 flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50"
+                className="mt-1 flex w-full touch-manipulation items-center gap-2 border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
               >
                 {t(($) => $.model_dropdown.clear_full)}
               </button>
@@ -245,10 +276,4 @@ function groupByProvider(models: RuntimeModel[]): Record<string, RuntimeModel[]>
     out[key].push(m);
   }
   return out;
-}
-
-function modelLabel(models: RuntimeModel[], id: string): string {
-  const found = models.find((m) => m.id === id);
-  if (!found) return "custom";
-  return found.provider ? found.provider : "model";
 }

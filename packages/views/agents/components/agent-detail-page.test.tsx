@@ -63,6 +63,7 @@ vi.mock("@multica/core/runtimes", () => ({
     queryKey: ["runtimes", wsId],
     queryFn: () => Promise.resolve([]),
   }),
+  runtimeDisplayLabel: (runtime: { name: string }) => runtime.name,
 }));
 vi.mock("@multica/core/auth", () => {
   type AuthState = { user: { id: string } | null };
@@ -103,6 +104,12 @@ vi.mock("sonner", () => ({
 }));
 
 import { AgentDetailPage } from "./agent-detail-page";
+import {
+  CLOUD_PREVIEW_RUNTIME_ID,
+  createCloudPreviewAgent,
+  registerCloudPreviewAgent,
+  resetCloudPreview,
+} from "../../runtimes/components/cloud-preview";
 
 const baseAgent: Agent = {
   id: "agent-1",
@@ -129,7 +136,7 @@ const baseAgent: Agent = {
   archived_by: null,
 };
 
-function renderPage() {
+function renderPage(agentId = "agent-1") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -138,7 +145,7 @@ function renderPage() {
     push,
     replace: vi.fn(),
     back: vi.fn(),
-    pathname: "/acme/agents/agent-1",
+    pathname: `/acme/agents/${agentId}`,
     searchParams: new URLSearchParams(),
     getShareableUrl: (path) => path,
   };
@@ -146,7 +153,7 @@ function renderPage() {
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <NavigationProvider value={navigation}>
         <QueryClientProvider client={queryClient}>
-          <AgentDetailPage agentId="agent-1" />
+          <AgentDetailPage agentId={agentId} />
         </QueryClientProvider>
       </NavigationProvider>
     </I18nProvider>,
@@ -160,6 +167,7 @@ beforeEach(() => {
   membersRef.current = [{ user_id: "user-1", role: "member" }];
   membersPendingRef.current = false;
   agentsRef.current = [baseAgent];
+  resetCloudPreview();
 });
 
 describe("AgentDetailPage DM button", () => {
@@ -207,5 +215,30 @@ describe("AgentDetailPage DM button", () => {
     // The archived banner is the signal the page has settled past loading.
     await screen.findByText(/This agent is archived/);
     expect(screen.queryByRole("button", { name: "DM" })).not.toBeInTheDocument();
+  });
+
+  it("renders a mock Cloud agent after the local create redirect", async () => {
+    agentsRef.current = [];
+    const mockAgent = createCloudPreviewAgent({
+      workspaceId: "ws-1",
+      runtimeId: CLOUD_PREVIEW_RUNTIME_ID,
+      ownerId: "user-1",
+      name: "Mock Cloud Agent",
+      description: "",
+      instructions: "",
+      avatarUrl: null,
+      model: "gpt-5.4",
+      permissionMode: "private",
+      invocationTargets: [],
+      skills: [],
+    });
+    registerCloudPreviewAgent(mockAgent);
+
+    renderPage(mockAgent.id);
+
+    expect(
+      await screen.findByRole("heading", { name: "Mock Cloud Agent" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Agent not found")).toBeNull();
   });
 });

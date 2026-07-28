@@ -1,15 +1,23 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Globe, Lock, Users } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { ModelDropdown } from "./model-dropdown";
+import { ModelConfiguration } from "./model-configuration";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
+import {
+  createCloudPreviewAgent,
+  enableCloudPreviewAfterCreate,
+  isCloudPreviewRuntimeId,
+  registerCloudPreviewAgent,
+  withCloudPreviewRuntime,
+} from "../../runtimes/components/cloud-preview";
 import { InstructionsEditor } from "./instructions-editor";
 import { SkillMultiSelect } from "./skill-multi-select";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
 import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useWorkspacePaths } from "@multica/core/paths";
 import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { workspaceKeys } from "@multica/core/workspace/queries";
@@ -43,9 +51,10 @@ import {
 import { ActorAvatar } from "../../common/actor-avatar";
 import { CharCounter } from "./char-counter";
 import { useT } from "../../i18n";
+import { useNavigation } from "../../navigation";
 
 export function CreateAgentDialog({
-  runtimes,
+  runtimes: providedRuntimes,
   runtimesLoading,
   members,
   currentUserId,
@@ -83,6 +92,17 @@ export function CreateAgentDialog({
   const isDuplicate = !!template;
   const queryClient = useQueryClient();
   const wsId = useWorkspaceId();
+  const paths = useWorkspacePaths();
+  const navigation = useNavigation();
+  const runtimes = useMemo(
+    () =>
+      withCloudPreviewRuntime(
+        providedRuntimes,
+        wsId,
+        currentUserId,
+      ),
+    [currentUserId, providedRuntimes, wsId],
+  );
   // MUL-4010: rolls out the private / public_to access model in the create
   // flow to match the AccessPicker on the agent detail page. Shares the
   // `composio_mcp_apps` switch with the Composio rollout — the MUL-3963
@@ -140,6 +160,12 @@ export function CreateAgentDialog({
     }));
 
   const [model, setModel] = useState(template?.model ?? "");
+  const [thinkingLevel, setThinkingLevel] = useState(
+    template?.thinking_level ?? "",
+  );
+  const [serviceTier, setServiceTier] = useState(
+    template?.service_tier ?? "",
+  );
   const [instructions, setInstructions] = useState(template?.instructions ?? "");
   const [avatarUrl, setAvatarUrl] = useState<string | null>(template?.avatar_url ?? null);
   const [selectedSkillIds, setSelectedSkillIds] = useState<Set<string>>(
@@ -225,6 +251,8 @@ export function CreateAgentDialog({
         description: description.trim(),
         runtime_id: selectedRuntime.id,
         model: model.trim() || undefined,
+        thinking_level: thinkingLevel || undefined,
+        service_tier: serviceTier || undefined,
         instructions: trimmedInstructions || undefined,
         avatar_url: avatarUrl ?? undefined,
         skill_ids: [...selectedSkillIds],
@@ -272,7 +300,59 @@ export function CreateAgentDialog({
           data.max_concurrent_tasks = template.max_concurrent_tasks;
         }
       }
+      if (isCloudPreviewRuntimeId(selectedRuntime.id)) {
+        const legacyWorkspaceVisible =
+          !accessPickerEnabled && data.visibility === "workspace";
+        const mockPermissionMode =
+          data.permission_mode ??
+          (legacyWorkspaceVisible ? "public_to" : "private");
+        const mockInvocationTargets =
+          data.invocation_targets ??
+          (legacyWorkspaceVisible
+            ? [{ target_type: "workspace" as const }]
+            : []);
+        const mockAgent = createCloudPreviewAgent({
+          workspaceId: wsId,
+          runtimeId: selectedRuntime.id,
+          ownerId: currentUserId,
+          name: data.name,
+          description: data.description ?? "",
+          instructions: data.instructions ?? "",
+          avatarUrl: data.avatar_url ?? null,
+          model: data.model ?? "",
+          thinkingLevel: data.thinking_level,
+          serviceTier: data.service_tier,
+          permissionMode: mockPermissionMode,
+          invocationTargets: mockInvocationTargets,
+          skills:
+            template?.skills
+              .filter((skill) => selectedSkillIds.has(skill.id))
+              .map((skill) => ({
+                id: skill.id,
+                name: skill.name,
+                description: skill.description,
+              })) ?? [],
+          customArgs: data.custom_args,
+          maxConcurrentTasks: data.max_concurrent_tasks,
+        });
+        registerCloudPreviewAgent(mockAgent);
+        queryClient.setQueryData<Agent[]>(
+          workspaceKeys.agents(wsId),
+          (current = []) => [
+            ...current.filter((agent) => agent.id !== mockAgent.id),
+            mockAgent,
+          ],
+          { updatedAt: Date.now() + 60 * 60 * 1000 },
+        );
+        toast.success(
+          t(($) => $.creation_studio.created, { name: mockAgent.name }),
+        );
+        onClose();
+        navigation.push(paths.agentDetail(mockAgent.id));
+        return;
+      }
       const createdAgent = await onCreate(data);
+      enableCloudPreviewAfterCreate(selectedRuntime.runtime_mode);
       // Squad context: attach the agent after skills land so the
       // squad's Members tab shows the agent with its skills already
       // in place. Atomicity is best-effort by design (see plan in
@@ -416,27 +496,41 @@ export function CreateAgentDialog({
               </div>
             )}
 
-            <RuntimePicker
-              runtimes={runtimes}
-              runtimesLoading={runtimesLoading}
-              members={members}
-              currentUserId={currentUserId}
-              selectedRuntimeId={selectedRuntimeId}
-              onSelect={(id) => {
-                // Models are per-runtime; a value picked for the old runtime
-                // may not exist on the new one, so drop it on runtime change.
-                if (id !== selectedRuntimeId) setModel("");
-                setSelectedRuntimeId(id);
-              }}
-            />
+            <div className="overflow-hidden rounded-xl border">
+              <RuntimePicker
+                runtimes={runtimes}
+                runtimesLoading={runtimesLoading}
+                members={members}
+                currentUserId={currentUserId}
+                selectedRuntimeId={selectedRuntimeId}
+                onSelect={(id) => {
+                  // Models and their options belong to one runtime catalog.
+                  if (id !== selectedRuntimeId) {
+                    setModel("");
+                    setThinkingLevel("");
+                    setServiceTier("");
+                  }
+                  setSelectedRuntimeId(id);
+                }}
+              />
 
-            <ModelDropdown
-              runtimeId={selectedRuntime?.id ?? null}
-              runtimeOnline={selectedRuntime?.status === "online"}
-              value={model}
-              onChange={setModel}
-              disabled={!selectedRuntime}
-            />
+              {selectedRuntime ? (
+                <ModelConfiguration
+                  runtimeId={selectedRuntime.id}
+                  runtimeOnline={selectedRuntime.status === "online"}
+                  model={model}
+                  thinkingLevel={thinkingLevel}
+                  serviceTier={serviceTier}
+                  onModelChange={(value) => {
+                    setModel(value);
+                    setThinkingLevel("");
+                    setServiceTier("");
+                  }}
+                  onThinkingLevelChange={setThinkingLevel}
+                  onServiceTierChange={setServiceTier}
+                />
+              ) : null}
+            </div>
 
             {/* --- Optional sections (instructions / skills) ---
                 Collapsed by default so quick-create stays fast.

@@ -318,6 +318,35 @@
       "remove_aria": "アバターを削除",
       "select_image_toast": "画像ファイルを選択してください。",
       "upload_failed_toast": "アバターのアップロードに失敗しました"
+    },
+    "execution_picker": {
+      "device_title": "実行デバイスを選択",
+      "device_description": "このエージェントを実行するデバイスを最初に選択します。",
+      "cloud_device_description": "Multica が管理し、いつでも利用可能",
+      "cloud_not_enabled": "未有効",
+      "cloud_enable_dialog": {
+        "title": "Multica Cloud を有効にしますか？",
+        "description": "有効にすると、ローカルデバイスを接続せずにマネージド Runtime を使用できます。",
+        "cancel": "キャンセル",
+        "confirm": "有効にして続ける"
+      },
+      "computer_description": "ワークスペースに接続されたコンピューター",
+      "recommended": "推奨",
+      "change_device": "別のデバイスを選択",
+      "runtime_title": "ランタイムを選択",
+      "runtime_description": "このデバイスで利用できるエージェントランタイムを選択します。",
+      "runtime_ready": "オンライン、利用可能",
+      "runtime_offline": "現在オフライン",
+      "runtime_summary": "{{total}} 件中 {{online}} 件のランタイムがオンライン",
+      "model_title": "モデルを選択",
+      "model_description": "モデルを選択すると、対応する設定だけが表示されます。",
+      "model_parameters": "モデル設定",
+      "model_parameters_description": "これらの設定はこのエージェントにのみ適用されます。",
+      "thinking_label": "思考レベル",
+      "thinking_default": "デフォルト",
+      "fast_mode": "高速モード",
+      "fast_mode_description": "このエージェントの低レイテンシーを優先します。",
+      "fast_mode_badge": "優先"
     }
   },
   "tab_body": {

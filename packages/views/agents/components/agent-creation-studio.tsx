@@ -73,8 +73,16 @@ import {
   SettingsSection,
 } from "../../settings/components/settings-layout";
 import { ModelDropdown } from "./model-dropdown";
+import { ModelConfiguration } from "./model-configuration";
 import { RuntimePicker, isRuntimeUsableForUser } from "./runtime-picker";
 import { SkillMultiSelect } from "./skill-multi-select";
+import {
+  createCloudPreviewAgent,
+  enableCloudPreviewAfterCreate,
+  isCloudPreviewRuntimeId,
+  registerCloudPreviewAgent,
+  withCloudPreviewRuntime,
+} from "../../runtimes/components/cloud-preview";
 
 type StudioMode = "choose" | "templates" | "blank" | "template" | "ai";
 type StudioScreenKey =
@@ -102,6 +110,8 @@ export interface AgentDraft {
   avatarUrl: string | null;
   runtimeId: string;
   model: string;
+  thinkingLevel: string;
+  serviceTier: string;
   skillIds: Set<string>;
   permissionScope: PermissionScope;
   memberIds: Set<string>;
@@ -145,6 +155,8 @@ const EMPTY_DRAFT: AgentDraft = {
   avatarUrl: null,
   runtimeId: "",
   model: "",
+  thinkingLevel: "",
+  serviceTier: "",
   skillIds: new Set(),
   permissionScope: "private",
   memberIds: new Set(),
@@ -163,13 +175,22 @@ export function AgentCreationStudio() {
   const shouldReduceMotion = useReducedMotion() ?? false;
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
-  const { data: runtimes = [], isLoading: runtimesLoading } = useQuery(
+  const { data: serverRuntimes = [], isLoading: runtimesLoading } = useQuery(
     runtimeListOptions(wsId),
   );
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
   const { data: templates = [], isLoading: templatesLoading } = useQuery(
     agentTemplateListOptions(),
+  );
+  const runtimes = useMemo(
+    () =>
+      withCloudPreviewRuntime(
+        serverRuntimes,
+        wsId,
+        currentUser?.id ?? null,
+      ),
+    [currentUser?.id, serverRuntimes, wsId],
   );
 
   const duplicateAgent = duplicateId
@@ -286,15 +307,6 @@ export function AgentCreationStudio() {
     [builderMessages],
   );
 
-  const usableRuntimes = useMemo(
-    () =>
-      runtimes.filter(
-        (runtime) =>
-          runtime.status === "online" &&
-          isRuntimeUsableForUser(runtime, currentUser?.id ?? null),
-      ),
-    [currentUser?.id, runtimes],
-  );
   const selectedRuntime =
     runtimes.find((runtime) => runtime.id === draft.runtimeId) ?? null;
   const builderModelsQuery = useQuery(
@@ -325,11 +337,6 @@ export function AgentCreationStudio() {
   );
 
   useEffect(() => {
-    if (draft.runtimeId || usableRuntimes.length === 0) return;
-    setDraft((current) => ({ ...current, runtimeId: usableRuntimes[0]?.id ?? "" }));
-  }, [draft.runtimeId, usableRuntimes]);
-
-  useEffect(() => {
     if (!duplicateAgent || duplicateAppliedRef.current) return;
     duplicateAppliedRef.current = true;
     const duplicateAccess = deriveDuplicateAccess(duplicateAgent);
@@ -344,14 +351,16 @@ export function AgentCreationStudio() {
           (runtime) =>
             runtime.id === duplicateAgent.runtime_id &&
             isRuntimeUsableForUser(runtime, currentUser?.id ?? null),
-        )
+          )
           ? duplicateAgent.runtime_id
-          : usableRuntimes[0]?.id ?? "",
+          : "",
       model: duplicateAgent.model ?? "",
+      thinkingLevel: duplicateAgent.thinking_level ?? "",
+      serviceTier: duplicateAgent.service_tier ?? "",
       skillIds: new Set(duplicateAgent.skills.map((skill) => skill.id)),
       ...duplicateAccess,
     });
-  }, [currentUser?.id, duplicateAgent, runtimes, t, usableRuntimes]);
+  }, [currentUser?.id, duplicateAgent, runtimes, t]);
 
   const skillIdSet = useMemo(
     () => new Set(workspaceSkills.map((skill) => skill.id)),
@@ -484,9 +493,8 @@ export function AgentCreationStudio() {
 
   const chooseBlank = () => {
     setSourceTemplate(null);
-    setDraft((current) => ({
+    setDraft(() => ({
       ...EMPTY_DRAFT,
-      runtimeId: current.runtimeId || usableRuntimes[0]?.id || "",
     }));
     setTransitionDirection(1);
     setMode("blank");
@@ -501,12 +509,11 @@ export function AgentCreationStudio() {
     const detail = templateDetailQuery.data;
     if (!selectedTemplate || !detail) return;
     setSourceTemplate(selectedTemplate);
-    setDraft((current) => ({
+    setDraft(() => ({
       ...EMPTY_DRAFT,
       name: detail.name,
       description: detail.description,
       instructions: detail.instructions,
-      runtimeId: current.runtimeId || usableRuntimes[0]?.id || "",
     }));
     setTransitionDirection(1);
     setMode("template");
@@ -542,7 +549,13 @@ export function AgentCreationStudio() {
     // Before the conversation exists there is no carrier to rebind, so the
     // picker is still plain draft state.
     if (!builderSessionId) {
-      setDraft((current) => ({ ...current, runtimeId, model: "" }));
+      setDraft((current) => ({
+        ...current,
+        runtimeId,
+        model: "",
+        thinkingLevel: "",
+        serviceTier: "",
+      }));
       return;
     }
     if (builderSwitchingRuntime) return;
@@ -560,7 +573,13 @@ export function AgentCreationStudio() {
       const boundRuntimeId = result.runtime_id || runtimeId;
       // Model ids are per-runtime; clear it so the new runtime resolves its own
       // default instead of keeping one it may not serve.
-      setDraft((current) => ({ ...current, runtimeId: boundRuntimeId, model: "" }));
+      setDraft((current) => ({
+        ...current,
+        runtimeId: boundRuntimeId,
+        model: "",
+        thinkingLevel: "",
+        serviceTier: "",
+      }));
       toast.success(t(($) => $.creation_studio.builder.switch_runtime_success));
     } catch (error) {
       setBuilderError(
@@ -664,7 +683,43 @@ export function AgentCreationStudio() {
     try {
       const invocationTargets = buildInvocationTargets(draft);
       let agent: Agent;
-      if (sourceTemplate) {
+      if (isCloudPreviewRuntimeId(selectedRuntime.id)) {
+        const permissionMode =
+          draft.permissionScope === "private" ? "private" : "public_to";
+        agent = createCloudPreviewAgent({
+          workspaceId: wsId,
+          runtimeId: selectedRuntime.id,
+          ownerId: currentUser?.id ?? null,
+          name: draft.name.trim(),
+          description: draft.description.trim(),
+          instructions: draft.instructions.trim(),
+          avatarUrl: draft.avatarUrl,
+          model: draft.model.trim(),
+          thinkingLevel: draft.thinkingLevel,
+          serviceTier: draft.serviceTier,
+          permissionMode,
+          invocationTargets,
+          skills: workspaceSkills
+            .filter((skill) => draft.skillIds.has(skill.id))
+            .map((skill) => ({
+              id: skill.id,
+              name: skill.name,
+              description: skill.description,
+            })),
+          customArgs: duplicateAgent?.custom_args ?? [],
+          maxConcurrentTasks:
+            duplicateAgent?.max_concurrent_tasks ?? 1,
+        });
+        registerCloudPreviewAgent(agent);
+        qc.setQueryData<Agent[]>(
+          workspaceKeys.agents(wsId),
+          (current = []) => [
+            ...current.filter((item) => item.id !== agent.id),
+            agent,
+          ],
+          { updatedAt: Date.now() + 60 * 60 * 1000 },
+        );
+      } else if (sourceTemplate) {
         const response = await api.createAgentFromTemplate({
           template_slug: sourceTemplate.slug,
           name: draft.name.trim(),
@@ -687,6 +742,8 @@ export function AgentCreationStudio() {
           avatar_url: draft.avatarUrl ?? undefined,
           runtime_id: selectedRuntime.id,
           model: draft.model.trim() || undefined,
+          thinking_level: draft.thinkingLevel || undefined,
+          service_tier: draft.serviceTier || undefined,
           permission_mode:
             draft.permissionScope === "private" ? "private" : "public_to",
           invocation_targets: invocationTargets,
@@ -703,7 +760,9 @@ export function AgentCreationStudio() {
       }
 
       if (!agent.id) throw new Error(t(($) => $.creation_studio.create_failed));
-      if (squadId) {
+      enableCloudPreviewAfterCreate(selectedRuntime.runtime_mode);
+      const isMockCloudAgent = isCloudPreviewRuntimeId(agent.runtime_id);
+      if (squadId && !isMockCloudAgent) {
         try {
           await api.addSquadMember(squadId, {
             member_type: "agent",
@@ -726,7 +785,7 @@ export function AgentCreationStudio() {
           );
         }
       }
-      if (builderSessionId) {
+      if (builderSessionId && !isMockCloudAgent) {
         // The Agent is already committed. Builder cleanup is best-effort and
         // must never turn a successful create into a retryable create error.
         try {
@@ -736,9 +795,17 @@ export function AgentCreationStudio() {
           // Runtime teardown also removes orphaned system builders.
         }
       }
-      await qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      if (!isMockCloudAgent) {
+        await qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+      }
       toast.success(t(($) => $.creation_studio.created, { name: agent.name || draft.name.trim() }));
-      navigation.push(squadId ? paths.squadDetail(squadId) : paths.agentDetail(agent.id));
+      navigation.push(
+        isMockCloudAgent
+          ? paths.agentDetail(agent.id)
+          : squadId
+            ? paths.squadDetail(squadId)
+            : paths.agentDetail(agent.id),
+      );
     } catch (error) {
       const nextErrors = classifyAgentCreateError(
         error,
@@ -1177,7 +1244,13 @@ function ConfigurationPanel({
     }
     // Model is per-runtime; clear it on runtime change so the new
     // runtime resolves its own default instead of a stale value.
-    onChange({ ...draft, runtimeId: id, model: "" });
+    onChange({
+      ...draft,
+      runtimeId: id,
+      model: "",
+      thinkingLevel: "",
+      serviceTier: "",
+    });
   };
 
   return (
@@ -1265,36 +1338,44 @@ function ConfigurationPanel({
         description={t(($) => $.creation_studio.sections.execution_hint)}
       >
         <SettingsCard>
-          <div className={cn("grid gap-4 px-4 py-4", !compact && "sm:grid-cols-2")}>
-            <div className="min-w-0">
-              <RuntimePicker
-                runtimes={runtimes}
-                runtimesLoading={runtimesLoading}
-                members={members}
-                currentUserId={currentUserId}
-                selectedRuntimeId={draft.runtimeId}
-                onSelect={handleRuntimeSelect}
-                disabled={runtimeLocked}
-              />
-              {/* A silently greyed-out picker is the worst version of this: the
-                  user reaches for it exactly when the current runtime has gone
-                  wrong, so say what unblocks it instead of just refusing. */}
-              {runtimeSwitchPending && (
-                <p className="mt-1.5 text-xs text-muted-foreground">
-                  {t(($) => $.creation_studio.builder.switch_runtime_pending)}
-                </p>
-              )}
-            </div>
-            <ModelDropdown
-              runtimeId={selectedRuntime?.id ?? null}
-              runtimeOnline={selectedRuntime?.status === "online"}
-              value={draft.model}
-              onChange={(value) => set("model", value)}
-              // A successful switch clears the model, so an edit made while the
-              // rebind is in flight would be silently discarded.
-              disabled={!selectedRuntime || runtimeSwitchInFlight}
+          <RuntimePicker
+            runtimes={runtimes}
+            runtimesLoading={runtimesLoading}
+            members={members}
+            currentUserId={currentUserId}
+            selectedRuntimeId={draft.runtimeId}
+            onSelect={handleRuntimeSelect}
+            disabled={runtimeLocked}
+          />
+          {runtimeSwitchPending && (
+            <p className="border-t px-4 py-2 text-xs text-muted-foreground">
+              {t(($) => $.creation_studio.builder.switch_runtime_pending)}
+            </p>
+          )}
+          {selectedRuntime ? (
+            <ModelConfiguration
+              runtimeId={selectedRuntime.id}
+              runtimeOnline={selectedRuntime.status === "online"}
+              model={draft.model}
+              thinkingLevel={draft.thinkingLevel}
+              serviceTier={draft.serviceTier}
+              onModelChange={(model) =>
+                onChange({
+                  ...draft,
+                  model,
+                  thinkingLevel: "",
+                  serviceTier: "",
+                })
+              }
+              onThinkingLevelChange={(thinkingLevel) =>
+                set("thinkingLevel", thinkingLevel)
+              }
+              onServiceTierChange={(serviceTier) =>
+                set("serviceTier", serviceTier)
+              }
+              disabled={runtimeSwitchInFlight}
             />
-          </div>
+          ) : null}
         </SettingsCard>
       </SettingsSection>
 

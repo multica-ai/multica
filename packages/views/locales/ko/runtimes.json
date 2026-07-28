@@ -428,5 +428,18 @@
     "table_cache_r": "캐시 R",
     "table_cache_w": "캐시 W",
     "no_data": "아직 사용량 데이터가 없습니다"
+  },
+  "cloud_preview": {
+    "title": "Multica Cloud",
+    "tagline": "로컬 머신이 필요 없는 관리형 클라우드 Runtime.",
+    "status_ready": "준비됨",
+    "enable": "켜기",
+    "disable": "끄기",
+    "advanced": "고급",
+    "stats": {
+      "credits": "남은 크레딧"
+    },
+    "machines_title": "내 컴퓨터",
+    "machines_hint": "데몬을 실행하는 머신입니다. 코드와 API 키는 그곳에 남습니다."
   }
 }

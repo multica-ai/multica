@@ -432,6 +432,35 @@
       "remove_aria": "Remove avatar",
       "select_image_toast": "Please select an image file.",
       "upload_failed_toast": "Avatar upload failed"
+    },
+    "execution_picker": {
+      "device_title": "Choose a device",
+      "device_description": "Start with the machine that will run this agent.",
+      "cloud_device_description": "Managed infrastructure, always available",
+      "cloud_not_enabled": "Not turned on",
+      "cloud_enable_dialog": {
+        "title": "Turn on Multica Cloud?",
+        "description": "Use managed runtimes without connecting a local machine.",
+        "cancel": "Cancel",
+        "confirm": "Turn on and continue"
+      },
+      "computer_description": "A computer connected to this workspace",
+      "recommended": "Recommended",
+      "change_device": "Choose a different device",
+      "runtime_title": "Choose a runtime",
+      "runtime_description": "Select the agent runtime available on this device.",
+      "runtime_ready": "Online and ready",
+      "runtime_offline": "Currently offline",
+      "runtime_summary": "{{online}} of {{total}} runtimes online",
+      "model_title": "Choose a model",
+      "model_description": "Select a model, then tune only the options it supports.",
+      "model_parameters": "Model options",
+      "model_parameters_description": "These settings apply to this agent only.",
+      "thinking_label": "Thinking level",
+      "thinking_default": "Default",
+      "fast_mode": "Fast Mode",
+      "fast_mode_description": "Prioritize lower latency for this agent.",
+      "fast_mode_badge": "Priority"
     }
   },
   "tab_body": {

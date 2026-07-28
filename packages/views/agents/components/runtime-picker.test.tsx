@@ -1,32 +1,31 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, cleanup } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
 import enIssues from "../../locales/en/issues.json";
 
-// ActorAvatar pulls workspace context this unit test doesn't provide.
-vi.mock("../../common/actor-avatar", () => ({
-  ActorAvatar: () => null,
-}));
-
-// Provider logos are inline SVGs with no behavior under test.
 vi.mock("../../runtimes/components/provider-logo", () => ({
   ProviderLogo: () => null,
 }));
 
+import {
+  CLOUD_PREVIEW_RUNTIME_ID,
+  cloudPreviewStore,
+  resetCloudPreview,
+} from "../../runtimes/components/cloud-preview";
 import { RuntimePicker } from "./runtime-picker";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, agents: enAgents, issues: enIssues },
 };
-
 const ME = "user-me";
-
-const MEMBERS = [{ user_id: ME, name: "Me", role: "member" }] as unknown as MemberWithUser[];
+const MEMBERS = [
+  { user_id: ME, name: "Me", role: "member" },
+] as unknown as MemberWithUser[];
 
 function makeRuntime(overrides: Partial<RuntimeDevice>): RuntimeDevice {
   return {
@@ -50,11 +49,17 @@ function makeRuntime(overrides: Partial<RuntimeDevice>): RuntimeDevice {
 }
 
 const RUNTIMES = [
-  makeRuntime({ id: "rt-a", name: "Claude (a.local)" }),
-  makeRuntime({ id: "rt-b", name: "Claude (b.local)", provider: "codex" }),
+  makeRuntime({ id: "rt-claude" }),
+  makeRuntime({
+    id: "rt-codex",
+    name: "Codex (host.local)",
+    provider: "codex",
+  }),
 ];
 
-function renderPicker(props: Partial<React.ComponentProps<typeof RuntimePicker>> = {}) {
+function renderPicker(
+  props: Partial<React.ComponentProps<typeof RuntimePicker>> = {},
+) {
   const onSelect = vi.fn();
   const utils = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
@@ -62,7 +67,7 @@ function renderPicker(props: Partial<React.ComponentProps<typeof RuntimePicker>>
         runtimes={RUNTIMES}
         members={MEMBERS}
         currentUserId={ME}
-        selectedRuntimeId="rt-a"
+        selectedRuntimeId=""
         onSelect={onSelect}
         {...props}
       />
@@ -71,52 +76,112 @@ function renderPicker(props: Partial<React.ComponentProps<typeof RuntimePicker>>
   return { ...utils, onSelect };
 }
 
-function trigger(container: HTMLElement): HTMLButtonElement {
-  const element = container.querySelector<HTMLButtonElement>('[data-slot="popover-trigger"]');
-  if (!element) throw new Error("runtime picker trigger not rendered");
-  return element;
-}
-
-describe("RuntimePicker (creation studio)", () => {
-  beforeEach(() => cleanup());
-  afterEach(() => cleanup());
-
-  it("opens the runtime list on click", () => {
-    const { container } = renderPicker();
-    fireEvent.click(trigger(container));
-    expect(trigger(container).getAttribute("aria-expanded")).toBe("true");
+describe("RuntimePicker hierarchical execution flow", () => {
+  beforeEach(() => {
+    cleanup();
+    resetCloudPreview();
+  });
+  afterEach(() => {
+    cleanup();
+    resetCloudPreview();
   });
 
-  // A builder session rebinds its execution runtime on the server. While that
-  // request is in flight the selection cannot be honoured yet, so the picker
-  // must refuse to open rather than let the user queue a second, conflicting
-  // choice (MUL-5163).
-  it("cannot be opened while disabled", () => {
-    const { container, onSelect } = renderPicker({ disabled: true });
-    expect(trigger(container).disabled).toBe(true);
-    fireEvent.click(trigger(container));
-    expect(trigger(container).getAttribute("aria-expanded")).not.toBe("true");
-    expect(onSelect).not.toHaveBeenCalled();
+  it("starts with device selection and includes Multica Cloud", () => {
+    renderPicker();
+
+    expect(screen.getByText("Choose a device")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /Multica Cloud/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Not turned on")).toBeInTheDocument();
+    expect(screen.queryByText("Choose a runtime")).toBeNull();
   });
 
-  // Switching the Mine/All tab re-selects the first usable runtime in the new
-  // list, so it is a second path into onSelect. Leaving it live while disabled
-  // would let a locked picker start a switch the server then has to refuse.
-  it("does not select through the Mine/All filter while disabled", () => {
-    const { container, onSelect } = renderPicker({
-      runtimes: [
-        ...RUNTIMES,
-        makeRuntime({ id: "rt-other", name: "Claude (other.local)", owner_id: "user-other", visibility: "public" }),
-      ],
+  it("asks to turn on Cloud before opening the second level", () => {
+    renderPicker();
+
+    fireEvent.click(screen.getByRole("button", { name: /Multica Cloud/ }));
+
+    expect(
+      screen.getByRole("alertdialog", { name: "Turn on Multica Cloud?" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Choose a runtime")).toBeNull();
+    expect(cloudPreviewStore.getState().cloudOn).toBe(false);
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(screen.getByText("Choose a device")).toBeInTheDocument();
+  });
+
+  it("turns on Cloud and continues to runtime selection", () => {
+    const { onSelect } = renderPicker();
+
+    fireEvent.click(screen.getByRole("button", { name: /Multica Cloud/ }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Turn on and continue" }),
+    );
+
+    expect(
+      screen.getByRole("radiogroup", { name: "Choose a runtime" }),
+    ).toBeInTheDocument();
+    expect(cloudPreviewStore.getState().cloudOn).toBe(true);
+    expect(screen.getByRole("radio", { name: /Codex/ })).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: /Claude Code/ }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("radio", { name: /Gemini CLI/ }),
+    ).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("radio", { name: /Codex/ }));
+    expect(onSelect).toHaveBeenLastCalledWith(CLOUD_PREVIEW_RUNTIME_ID);
+  });
+
+  it("opens Cloud directly when it is already turned on", () => {
+    cloudPreviewStore.getState().setCloudOn(true);
+    renderPicker();
+
+    fireEvent.click(screen.getByRole("button", { name: /Multica Cloud/ }));
+
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(
+      screen.getByRole("radiogroup", { name: "Choose a runtime" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps runtimes scoped to the selected computer", () => {
+    renderPicker({ selectedRuntimeId: "rt-claude" });
+
+    expect(
+      screen.getByRole("radiogroup", { name: "Choose a runtime" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Claude/ })).toBeInTheDocument();
+    expect(screen.getByRole("radio", { name: /Codex/ })).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /Gemini CLI/ })).toBeNull();
+  });
+
+  it("clears the runtime when returning to device selection", () => {
+    const { onSelect } = renderPicker({ selectedRuntimeId: "rt-claude" });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Choose a different device" }),
+    );
+
+    expect(onSelect).toHaveBeenCalledWith("");
+  });
+
+  it("locks both navigation and runtime selection while disabled", () => {
+    const { onSelect } = renderPicker({
+      selectedRuntimeId: "rt-claude",
       disabled: true,
     });
-    const filters = [...container.querySelectorAll("button")].filter(
-      (button) => button.getAttribute("data-slot") !== "popover-trigger",
-    );
-    expect(filters.length).toBeGreaterThan(0);
-    for (const button of filters) {
-      expect(button.disabled).toBe(true);
-      fireEvent.click(button);
+
+    expect(
+      screen.getByRole("button", { name: "Choose a different device" }),
+    ).toBeDisabled();
+    for (const runtime of screen.getAllByRole("radio")) {
+      expect(runtime).toBeDisabled();
+      fireEvent.click(runtime);
     }
     expect(onSelect).not.toHaveBeenCalled();
   });

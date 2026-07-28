@@ -306,8 +306,9 @@ Run the local daemon:
 make daemon
 ```
 
-The daemon authenticates using the CLI's stored token (`multica login`).
-It registers runtimes for all watched workspaces from the CLI config.
+The command refreshes the `local` CLI profile through browser login, then
+restarts the daemon. It registers runtimes for all watched workspaces from the
+CLI config.
 
 ## Full-Stack Isolated Testing
 
@@ -318,10 +319,9 @@ human intervention.
 
 ### Why Not Just `make daemon`?
 
-`make daemon` uses the system-installed CLI's stored token and connects to
-whatever server is configured in `~/.multica/config.json`. That's fine for
-day-to-day development against a shared server, but for fully isolated testing
-you need:
+`make daemon` uses an interactive browser login for the `local` CLI profile.
+That's fine for day-to-day development, but for fully isolated testing you
+need:
 
 - a local backend and frontend (from source)
 - a local daemon (from source) with its own profile

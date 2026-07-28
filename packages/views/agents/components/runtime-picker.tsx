@@ -1,354 +1,488 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Cloud, Loader2, Lock, Search } from "lucide-react";
-import { ProviderLogo } from "../../runtimes/components/provider-logo";
-import { ActorAvatar } from "../../common/actor-avatar";
-import { runtimeDisplayName } from "@multica/core/runtimes";
+import {
+  Check,
+  ChevronLeft,
+  Cloud,
+  Loader2,
+  Lock,
+  Monitor,
+} from "lucide-react";
 import type { MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import {
-  Popover,
-  PopoverTrigger,
-  PopoverContent,
-} from "@multica/ui/components/ui/popover";
-import { Label } from "@multica/ui/components/ui/label";
-import { useT } from "../../i18n";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@multica/ui/components/ui/alert-dialog";
+import { cn } from "@multica/ui/lib/utils";
+import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import {
   buildRuntimeMachines,
-  filterRuntimeMachines,
   runtimeRowLabel,
+  type RuntimeMachine,
 } from "../../runtimes/components/runtime-machines";
+import {
+  useCloudPreview,
+  withCloudPreviewRuntime,
+} from "../../runtimes/components/cloud-preview";
+import { useT } from "../../i18n";
 
-export type RuntimeFilter = "mine" | "all";
-
-// Above this many runtimes the flat list becomes hard to scan, so we surface
-// a search box. Machine grouping kicks in independently whenever more than one
-// machine is present.
-const SEARCH_THRESHOLD = 6;
-
-export function RuntimePicker({
-  runtimes,
-  runtimesLoading,
-  members,
-  currentUserId,
-  selectedRuntimeId,
-  onSelect,
-  disabled = false,
-}: {
+export interface RuntimePickerProps {
   runtimes: RuntimeDevice[];
   runtimesLoading?: boolean;
   members: MemberWithUser[];
   currentUserId: string | null;
   selectedRuntimeId: string;
   onSelect: (id: string) => void;
-  /** Blocks opening the picker while the selection cannot be honoured yet
-   *  (e.g. a builder reply or a runtime rebind is in flight). */
   disabled?: boolean;
-}) {
+}
+
+/**
+ * Two-level execution picker used by agent creation.
+ *
+ * Level one selects a physical or managed machine. Level two only shows the
+ * runtimes installed on that machine. Keeping those concepts separate avoids
+ * presenting a cloud location and a machine/runtime tuple as peers.
+ */
+export function RuntimePicker({
+  runtimes: providedRuntimes,
+  runtimesLoading = false,
+  members,
+  currentUserId,
+  selectedRuntimeId,
+  onSelect,
+  disabled = false,
+}: RuntimePickerProps) {
   const { t } = useT("agents");
-  const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState<RuntimeFilter>("mine");
-  const [search, setSearch] = useState("");
-
-  const getOwnerMember = (ownerId: string | null) => {
-    if (!ownerId) return null;
-    return members.find((m) => m.user_id === ownerId) ?? null;
-  };
-
-  const hasOtherRuntimes = runtimes.some((r) => r.owner_id !== currentUserId);
-
-  // Base list honours the mine/all toggle and drives auto-selection; it is
-  // intentionally independent of the search box so typing never changes the
-  // seeded selection.
-  const filteredRuntimes = useMemo(
-    () => computeFilteredRuntimes(runtimes, filter, currentUserId),
-    [runtimes, filter, currentUserId],
+  const cloudOn = useCloudPreview((state) => state.cloudOn);
+  const setCloudOn = useCloudPreview((state) => state.setCloudOn);
+  const [pendingCloudMachineId, setPendingCloudMachineId] = useState<
+    string | null
+  >(null);
+  const workspaceId = providedRuntimes[0]?.workspace_id ?? "cloud-preview";
+  const runtimes = useMemo(
+    () =>
+      withCloudPreviewRuntime(
+        providedRuntimes,
+        workspaceId,
+        currentUserId,
+      ),
+    [currentUserId, providedRuntimes, workspaceId],
   );
-
-  // Group the (searched) base list by machine so 20+ runtimes read as a
-  // handful of named machines, online-first, current machine first.
   const machines = useMemo(() => {
-    const all = buildRuntimeMachines(filteredRuntimes, {
-      now: Date.now(),
-      currentUserId,
+    const grouped = buildRuntimeMachines(
+      runtimes.filter(
+        (runtime) =>
+          runtime.runtime_mode !== "cloud" ||
+          isRuntimeUsableForUser(runtime, currentUserId),
+      ),
+      { now: Date.now(), currentUserId },
+    );
+    return grouped.toSorted((left, right) => {
+      const leftCloud = left.mode === "cloud";
+      const rightCloud = right.mode === "cloud";
+      if (leftCloud !== rightCloud) return leftCloud ? -1 : 1;
+      if (left.isCurrent !== right.isCurrent) return left.isCurrent ? -1 : 1;
+      return left.title.localeCompare(right.title);
     });
-    return filterRuntimeMachines(all, search, "all");
-  }, [filteredRuntimes, search, currentUserId]);
-
-  const showSearch = runtimes.length > SEARCH_THRESHOLD;
-
+  }, [currentUserId, runtimes]);
   const selectedRuntime =
-    runtimes.find((d) => d.id === selectedRuntimeId) ?? null;
+    runtimes.find((runtime) => runtime.id === selectedRuntimeId) ?? null;
+  const selectedRuntimeMachine = selectedRuntime
+    ? machines.find((machine) =>
+        machine.runtimes.some((runtime) => runtime.id === selectedRuntime.id),
+      ) ?? null
+    : null;
+  const [selectedMachineId, setSelectedMachineId] = useState<string | null>(
+    () => selectedRuntimeMachine?.id ?? null,
+  );
+  const selectedMachine =
+    machines.find((machine) => machine.id === selectedMachineId) ?? null;
 
-  // Sole source of truth for seeding the parent's selection when it's empty
-  // — first mount with no template runtime, runtimes arriving later over
-  // WS, or filter toggle clearing to a set with no usable item. Only fires
-  // when `selectedRuntimeId === ""` so a duplicate-mode pre-fill (template
-  // runtime) is never silently overwritten.
   useEffect(() => {
-    if (selectedRuntimeId !== "") return;
-    const firstUsable = filteredRuntimes.find((r) =>
-      isRuntimeUsableForUser(r, currentUserId),
-    );
-    if (firstUsable) onSelect(firstUsable.id);
-  }, [filteredRuntimes, selectedRuntimeId, currentUserId, onSelect]);
+    if (
+      selectedRuntimeMachine &&
+      selectedRuntimeMachine.id !== selectedMachineId
+    ) {
+      setSelectedMachineId(selectedRuntimeMachine.id);
+    }
+  }, [selectedMachineId, selectedRuntimeMachine]);
 
-  // On filter toggle, recompute the picker's selection to a usable item
-  // in the new filter set. Pushes `""` when nothing matches; the seeding
-  // effect above is a no-op in that case (correct: no usable item to pick).
-  const handleFilterChange = (next: RuntimeFilter) => {
-    if (next === filter) return;
-    setFilter(next);
-    const nextList = computeFilteredRuntimes(runtimes, next, currentUserId);
-    const firstUsable = nextList.find((r) =>
-      isRuntimeUsableForUser(r, currentUserId),
-    );
-    onSelect(firstUsable?.id ?? "");
+  useEffect(() => {
+    if (selectedMachineId && !selectedMachine) {
+      setSelectedMachineId(null);
+      if (selectedRuntimeId) onSelect("");
+    }
+  }, [onSelect, selectedMachine, selectedMachineId, selectedRuntimeId]);
+
+  const commitMachineSelection = (machine: RuntimeMachine) => {
+    setSelectedMachineId(machine.id);
+    if (
+      !machine.runtimes.some((runtime) => runtime.id === selectedRuntimeId)
+    ) {
+      onSelect("");
+    }
   };
+
+  const chooseMachine = (machine: RuntimeMachine) => {
+    if (disabled || !machineHasUsableRuntime(machine, currentUserId)) return;
+    if (machine.mode === "cloud" && !cloudOn) {
+      setPendingCloudMachineId(machine.id);
+      return;
+    }
+    commitMachineSelection(machine);
+  };
+
+  const enableCloudAndContinue = () => {
+    const machine = machines.find(
+      (candidate) => candidate.id === pendingCloudMachineId,
+    );
+    setPendingCloudMachineId(null);
+    if (!machine || disabled) return;
+    setCloudOn(true);
+    commitMachineSelection(machine);
+  };
+
+  const returnToMachines = () => {
+    if (disabled) return;
+    setSelectedMachineId(null);
+    onSelect("");
+  };
+
+  if (!selectedMachine) {
+    return (
+      <>
+        <div className="min-w-0 px-4 py-4">
+          <StepHeading
+            number={1}
+            title={t(($) => $.create_dialog.execution_picker.device_title)}
+            description={t(
+              ($) => $.create_dialog.execution_picker.device_description,
+            )}
+          />
+          {runtimesLoading && providedRuntimes.length === 0 ? (
+            <div className="mt-4 flex min-h-32 items-center justify-center rounded-xl border border-dashed text-sm text-muted-foreground">
+              <Loader2
+                aria-hidden="true"
+                className="mr-2 size-4 animate-spin"
+              />
+              {t(($) => $.create_dialog.runtime_loading)}
+            </div>
+          ) : (
+            <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {machines.map((machine) => (
+                <MachineChoice
+                  key={machine.id}
+                  machine={machine}
+                  ownerName={machineOwnerName(machine, members)}
+                  cloudOn={cloudOn}
+                  disabled={
+                    disabled ||
+                    !machineHasUsableRuntime(machine, currentUserId)
+                  }
+                  onSelect={() => chooseMachine(machine)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+
+        <AlertDialog
+          open={pendingCloudMachineId !== null}
+          onOpenChange={(open) => {
+            if (!open) setPendingCloudMachineId(null);
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {t(
+                  ($) =>
+                    $.create_dialog.execution_picker.cloud_enable_dialog.title,
+                )}
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {t(
+                  ($) =>
+                    $.create_dialog.execution_picker.cloud_enable_dialog
+                      .description,
+                )}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>
+                {t(
+                  ($) =>
+                    $.create_dialog.execution_picker.cloud_enable_dialog.cancel,
+                )}
+              </AlertDialogCancel>
+              <AlertDialogAction onClick={enableCloudAndContinue}>
+                {t(
+                  ($) =>
+                    $.create_dialog.execution_picker.cloud_enable_dialog
+                      .confirm,
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </>
+    );
+  }
+
+  const isCloudMachine = selectedMachine.mode === "cloud";
+  const machineTitle = isCloudMachine
+    ? "Multica Cloud"
+    : selectedMachine.title;
 
   return (
-    <div className="flex flex-col min-w-0">
-      <div className="flex h-6 items-center justify-between">
-        <Label className="text-xs text-muted-foreground">
-          {t(($) => $.create_dialog.runtime_label)}
-        </Label>
-        {hasOtherRuntimes && (
-          // These are not just a view filter: changing tab re-selects the first
-          // usable runtime in the new list, so they are a second way to fire
-          // onSelect and must honour `disabled` alongside the trigger.
-          <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => handleFilterChange("mine")}
-              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
-                filter === "mine"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t(($) => $.create_dialog.runtime_filter_mine)}
-            </button>
-            <button
-              type="button"
-              disabled={disabled}
-              onClick={() => handleFilterChange("all")}
-              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
-                filter === "all"
-                  ? "bg-background text-foreground shadow-sm"
-                  : "text-muted-foreground hover:text-foreground"
-              }`}
-            >
-              {t(($) => $.create_dialog.runtime_filter_all)}
-            </button>
-          </div>
-        )}
-      </div>
-      <Popover
-        open={open && !disabled}
-        onOpenChange={(next) => {
-          if (disabled) return;
-          setOpen(next);
-          if (!next) setSearch("");
-        }}
-      >
-        <PopoverTrigger
-          disabled={disabled || (runtimes.length === 0 && !runtimesLoading)}
-          className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+    <div className="min-w-0">
+      <div className="border-b px-4 py-3">
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={returnToMachines}
+          className="inline-flex touch-manipulation items-center gap-1.5 rounded-md text-sm font-medium text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50"
         >
-          {runtimesLoading ? (
-            <Loader2 className="h-4 w-4 shrink-0 animate-spin text-muted-foreground" />
-          ) : selectedRuntime ? (
-            <ProviderLogo
-              provider={selectedRuntime.provider}
-              className="h-4 w-4 shrink-0"
-            />
-          ) : (
-            <Cloud className="h-4 w-4 shrink-0 text-muted-foreground" />
-          )}
-          <div className="min-w-0 flex-1">
-            <div className="flex items-center gap-2">
-              <span className="truncate font-medium">
-                {runtimesLoading
-                  ? t(($) => $.create_dialog.runtime_loading)
-                  : selectedRuntime
-                    ? runtimeDisplayName(selectedRuntime)
-                    : t(($) => $.create_dialog.runtime_none)}
-              </span>
-              {selectedRuntime?.runtime_mode === "cloud" && (
-                <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                  {t(($) => $.create_dialog.runtime_cloud_badge)}
-                </span>
-              )}
-            </div>
-            {selectedRuntime && (
-              <div className="truncate text-xs text-muted-foreground">
-                {getOwnerMember(selectedRuntime.owner_id)?.name ??
-                  selectedRuntime.device_info}
-              </div>
-            )}
-          </div>
-          <ChevronDown
-            className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform ${
-              open ? "rotate-180" : ""
-            }`}
-          />
-        </PopoverTrigger>
-        <PopoverContent
-          align="start"
-          className="w-[var(--anchor-width)] p-1 flex flex-col max-h-72"
-        >
-          {showSearch && (
-            <div className="relative mb-1 shrink-0">
-              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                type="text"
-                autoFocus
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-                placeholder={t(($) => $.create_dialog.runtime_search_placeholder)}
-                className="w-full rounded-md border border-border bg-background py-1.5 pl-8 pr-2 text-sm outline-none focus:ring-1 focus:ring-ring"
+          <ChevronLeft aria-hidden="true" className="size-4" />
+          {t(($) => $.create_dialog.execution_picker.change_device)}
+        </button>
+        <div className="mt-3 flex min-w-0 items-center gap-3">
+          <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border bg-muted/40">
+            {isCloudMachine ? (
+              <Cloud
+                aria-hidden="true"
+                className="size-5 text-muted-foreground"
               />
-            </div>
-          )}
-          <div className="min-h-0 flex-1 overflow-y-auto">
-            {machines.length === 0 ? (
-              <div className="px-3 py-6 text-center text-xs text-muted-foreground">
-                {t(($) => $.create_dialog.runtime_no_results)}
-              </div>
             ) : (
-              machines.map((machine) => (
-                <div key={machine.id}>
-                  {/* Always show the machine header — even when a search or a
-                      single-machine workspace narrows it to one group — so the
-                      grouping stays consistent instead of collapsing to a flat
-                      list. */}
-                  <div className="flex items-center justify-between gap-2 px-2 pb-0.5 pt-2 text-[11px] font-medium text-muted-foreground">
-                    <span className="truncate">{machine.title}</span>
-                    <span className="shrink-0 tabular-nums">
-                      {t(($) => $.create_dialog.runtime_group_online, {
-                        online: machine.onlineCount,
-                        total: machine.runtimes.length,
-                      })}
-                    </span>
-                  </div>
-                  {machine.runtimes.map((device) => {
-                    const ownerMember = getOwnerMember(device.owner_id);
-                    const disabled = !isRuntimeUsableForUser(
-                      device,
-                      currentUserId,
-                    );
-                    const disabledTitle = disabled
-                      ? t(($) => $.create_dialog.runtime_private_locked_tooltip)
-                      : undefined;
-                    return (
-                      <button
-                        key={device.id}
-                        type="button"
-                        disabled={disabled}
-                        title={disabledTitle}
-                        onClick={() => {
-                          if (disabled) return;
-                          onSelect(device.id);
-                          setOpen(false);
-                        }}
-                        className={`flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-left text-sm transition-colors ${
-                          disabled
-                            ? "cursor-not-allowed opacity-50"
-                            : device.id === selectedRuntimeId
-                              ? "bg-accent"
-                              : "hover:bg-accent/50"
-                        }`}
-                      >
-                        <ProviderLogo
-                          provider={device.provider}
-                          className="h-4 w-4 shrink-0"
-                        />
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate font-medium">
-                              {runtimeRowLabel(device, machine.title)}
-                            </span>
-                            {device.runtime_mode === "cloud" && (
-                              <span className="shrink-0 rounded bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
-                                {t(($) => $.create_dialog.runtime_cloud_badge)}
-                              </span>
-                            )}
-                            {disabled && (
-                              <span className="shrink-0 inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                                <Lock className="h-3 w-3" />
-                                {t(($) => $.create_dialog.runtime_private_badge)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
-                            {ownerMember ? (
-                              <>
-                                <ActorAvatar
-                                  actorType="member"
-                                  actorId={ownerMember.user_id}
-                                  size="xs"
-                                />
-                                <span className="truncate">
-                                  {ownerMember.name}
-                                </span>
-                              </>
-                            ) : (
-                              <span className="truncate">
-                                {device.device_info}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <span
-                          className={`h-2 w-2 shrink-0 rounded-full ${
-                            device.status === "online"
-                              ? "bg-success"
-                              : "bg-muted-foreground/40"
-                          }`}
-                        />
-                      </button>
-                    );
-                  })}
-                </div>
-              ))
+              <Monitor
+                aria-hidden="true"
+                className="size-5 text-muted-foreground"
+              />
             )}
+          </span>
+          <div className="min-w-0">
+            <div className="truncate font-semibold">{machineTitle}</div>
+            <div className="truncate text-xs text-muted-foreground">
+              {isCloudMachine
+                ? t(
+                    ($) =>
+                      $.create_dialog.execution_picker.cloud_device_description,
+                  )
+                : selectedMachine.subtitle ??
+                  machineOwnerName(selectedMachine, members) ??
+                  t(
+                    ($) =>
+                      $.create_dialog.execution_picker.computer_description,
+                  )}
+            </div>
           </div>
-        </PopoverContent>
-      </Popover>
+        </div>
+      </div>
+
+      <fieldset disabled={disabled} className="px-4 py-4">
+        <legend className="sr-only">
+          {t(($) => $.create_dialog.execution_picker.runtime_title)}
+        </legend>
+        <StepHeading
+          number={2}
+          title={t(($) => $.create_dialog.execution_picker.runtime_title)}
+          description={t(
+            ($) => $.create_dialog.execution_picker.runtime_description,
+          )}
+        />
+        <div
+          className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3"
+          role="radiogroup"
+          aria-label={t(
+            ($) => $.create_dialog.execution_picker.runtime_title,
+          )}
+        >
+          {selectedMachine.runtimes.map((runtime) => {
+            const locked = !isRuntimeUsableForUser(runtime, currentUserId);
+            const offline = runtime.status !== "online";
+            const unavailable = locked || offline;
+            const selected = runtime.id === selectedRuntimeId;
+            return (
+              <button
+                key={runtime.id}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                disabled={disabled || unavailable}
+                onClick={() => onSelect(runtime.id)}
+                className={cn(
+                  "group relative flex min-h-28 touch-manipulation items-start gap-3 rounded-xl border p-4 text-left transition-colors",
+                  "hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
+                  selected
+                    ? "border-foreground bg-muted/40"
+                    : "border-border bg-background",
+                  unavailable && "cursor-not-allowed opacity-50",
+                )}
+              >
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-lg border bg-background">
+                  <ProviderLogo
+                    provider={runtime.provider}
+                    className="size-4"
+                  />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">
+                    {runtimeRowLabel(runtime, machineTitle)}
+                  </span>
+                  <span className="mt-1 block text-xs leading-5 text-muted-foreground">
+                    {offline
+                      ? t(
+                          ($) =>
+                            $.create_dialog.execution_picker.runtime_offline,
+                        )
+                      : t(
+                          ($) =>
+                            $.create_dialog.execution_picker.runtime_ready,
+                        )}
+                  </span>
+                </span>
+                {locked ? (
+                  <Lock
+                    aria-hidden="true"
+                    className="mt-1 size-4 shrink-0 text-muted-foreground"
+                  />
+                ) : selected ? (
+                  <span className="flex size-5 shrink-0 items-center justify-center rounded-full bg-foreground text-background">
+                    <Check aria-hidden="true" className="size-3" />
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+      </fieldset>
     </div>
   );
 }
 
-// Visibility gate exposed so the parent can defend Create against a locked
-// selection (e.g. duplicate of an agent whose runtime is now private).
+function StepHeading({
+  number,
+  title,
+  description,
+}: {
+  number: number;
+  title: string;
+  description: string;
+}) {
+  return (
+    <div className="flex min-w-0 items-start gap-3">
+      <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-foreground text-xs font-semibold text-background">
+        {number}
+      </span>
+      <div className="min-w-0">
+        <div className="font-semibold">{title}</div>
+        <p className="mt-0.5 text-pretty text-sm leading-5 text-muted-foreground">
+          {description}
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function MachineChoice({
+  machine,
+  ownerName,
+  cloudOn,
+  disabled,
+  onSelect,
+}: {
+  machine: RuntimeMachine;
+  ownerName: string | null;
+  cloudOn: boolean;
+  disabled: boolean;
+  onSelect: () => void;
+}) {
+  const { t } = useT("agents");
+  const isCloud = machine.mode === "cloud";
+  const title = isCloud ? "Multica Cloud" : machine.title;
+  const onlineCount = machine.runtimes.filter(
+    (runtime) => runtime.status === "online",
+  ).length;
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onSelect}
+      className="group flex min-h-36 touch-manipulation flex-col rounded-xl border bg-background p-4 text-left transition-colors hover:border-foreground/40 hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+    >
+      <span className="flex w-full items-start justify-between gap-3">
+        <span className="flex size-10 items-center justify-center rounded-xl border bg-muted/30">
+          {isCloud ? (
+            <Cloud aria-hidden="true" className="size-5 text-muted-foreground" />
+          ) : (
+            <Monitor
+              aria-hidden="true"
+              className="size-5 text-muted-foreground"
+            />
+          )}
+        </span>
+        {isCloud ? (
+          <span className="rounded-md bg-info/10 px-2 py-1 text-[11px] font-medium text-info">
+            {t(($) => $.create_dialog.execution_picker.recommended)}
+          </span>
+        ) : null}
+      </span>
+      <span className="mt-4 block w-full truncate font-semibold">{title}</span>
+      <span className="mt-1 block w-full truncate text-xs text-muted-foreground">
+        {isCloud
+          ? t(
+              ($) =>
+                $.create_dialog.execution_picker.cloud_device_description,
+            )
+          : ownerName ??
+            machine.subtitle ??
+            t(($) => $.create_dialog.execution_picker.computer_description)}
+      </span>
+      <span className="mt-auto pt-3 text-xs tabular-nums text-muted-foreground">
+        {isCloud && !cloudOn
+          ? t(($) => $.create_dialog.execution_picker.cloud_not_enabled)
+          : t(($) => $.create_dialog.execution_picker.runtime_summary, {
+              online: onlineCount,
+              total: machine.runtimes.length,
+            })}
+      </span>
+    </button>
+  );
+}
+
+function machineHasUsableRuntime(
+  machine: RuntimeMachine,
+  currentUserId: string | null,
+): boolean {
+  return machine.runtimes.some(
+    (runtime) =>
+      runtime.status === "online" &&
+      isRuntimeUsableForUser(runtime, currentUserId),
+  );
+}
+
+function machineOwnerName(
+  machine: RuntimeMachine,
+  members: MemberWithUser[],
+): string | null {
+  const ownerId = machine.runtimes.find((runtime) => runtime.owner_id)?.owner_id;
+  if (!ownerId) return null;
+  return members.find((member) => member.user_id === ownerId)?.name ?? null;
+}
+
 export function isRuntimeUsableForUser(
-  r: RuntimeDevice,
+  runtime: RuntimeDevice,
   currentUserId: string | null,
 ): boolean {
   if (!currentUserId) return true;
-  if (r.owner_id === currentUserId) return true;
-  return r.visibility === "public";
-}
-
-function computeFilteredRuntimes(
-  runtimes: RuntimeDevice[],
-  filter: RuntimeFilter,
-  currentUserId: string | null,
-): RuntimeDevice[] {
-  const filtered =
-    filter === "mine" && currentUserId
-      ? runtimes.filter((r) => r.owner_id === currentUserId)
-      : runtimes;
-  return filtered.toSorted((a, b) => {
-    const aMine = a.owner_id === currentUserId;
-    const bMine = b.owner_id === currentUserId;
-    if (aMine && !bMine) return -1;
-    if (!aMine && bMine) return 1;
-    const aUsable = isRuntimeUsableForUser(a, currentUserId);
-    const bUsable = isRuntimeUsableForUser(b, currentUserId);
-    if (aUsable && !bUsable) return -1;
-    if (!aUsable && bUsable) return 1;
-    return 0;
-  });
+  if (runtime.owner_id === currentUserId) return true;
+  return runtime.visibility === "public";
 }

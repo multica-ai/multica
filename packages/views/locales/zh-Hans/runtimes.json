@@ -428,5 +428,18 @@
     "table_cache_r": "缓存读",
     "table_cache_w": "缓存写",
     "no_data": "还没有使用数据"
+  },
+  "cloud_preview": {
+    "title": "Multica Cloud",
+    "tagline": "托管云端 Runtime，无需本地设备。",
+    "status_ready": "就绪",
+    "enable": "开启",
+    "disable": "关闭",
+    "advanced": "高级",
+    "stats": {
+      "credits": "剩余额度"
+    },
+    "machines_title": "我的电脑",
+    "machines_hint": "你自己运行 daemon 的机器。代码和 API key 只留在这些机器上。"
   }
 }

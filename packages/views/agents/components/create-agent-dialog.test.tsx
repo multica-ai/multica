@@ -2,7 +2,13 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import {
+  render,
+  screen,
+  fireEvent,
+  cleanup,
+  waitFor,
+} from "@testing-library/react";
 import type { Agent, MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
@@ -48,6 +54,10 @@ vi.mock("sonner", () => ({
 }));
 
 import { CreateAgentDialog } from "./create-agent-dialog";
+import {
+  cloudPreviewStore,
+  resetCloudPreview,
+} from "../../runtimes/components/cloud-preview";
 
 const ME = "user-me";
 const OTHER = "user-other";
@@ -150,16 +160,34 @@ function renderDialog(runtimes: RuntimeDevice[], template?: Agent) {
   return { onCreate, onClose };
 }
 
+function selectComputerRuntime(name: RegExp | string): void {
+  fireEvent.click(screen.getByRole("button", { name: /host\.local/i }));
+  fireEvent.click(screen.getByRole("radio", { name }));
+}
+
+function selectCloudRuntime(name: RegExp | string = /Codex/i): void {
+  fireEvent.click(screen.getByRole("button", { name: /Multica Cloud/i }));
+  const enableButton = screen.queryByRole("button", {
+    name: "Turn on and continue",
+  });
+  if (enableButton) fireEvent.click(enableButton);
+  fireEvent.click(screen.getByRole("radio", { name }));
+}
+
 describe("CreateAgentDialog runtime visibility gate", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetCloudPreview();
+  });
   // Base UI Dialog renders into a portal on document.body and leaves
   // focus-guard / inert wrapper divs around after the React tree unmounts.
   // The auto-cleanup from @testing-library/react drops the container but
   // not the portal residue, so two-tests-in-a-row queries see double
-  // matches ("All", "My Runtime"). Force cleanup + wipe body between tests.
+  // matches from multiple dialogs. Force cleanup + wipe body between tests.
   afterEach(() => {
     cleanup();
     document.body.innerHTML = "";
+    resetCloudPreview();
   });
 
   it("disables another member's private runtime in the picker", () => {
@@ -172,19 +200,13 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     });
     renderDialog([mine, othersPrivate]);
 
-    // Flip to "All" so other-owned runtimes show.
-    fireEvent.click(screen.getByText("All"));
-    // Open the picker.
-    fireEvent.click(
-      screen.getByText("My Runtime", { selector: "span.truncate" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /host\.local/i }));
 
-    const disabledRow = screen
-      .getByText("Others Private")
-      .closest("button") as HTMLButtonElement;
+    const disabledRow = screen.getByRole("radio", {
+      name: /Others Private/,
+    }) as HTMLButtonElement;
     expect(disabledRow).not.toBeNull();
     expect(disabledRow.disabled).toBe(true);
-    expect(disabledRow.title).toMatch(/Private runtime/i);
   });
 
   it("lets a plain member pick another member's public runtime", () => {
@@ -197,19 +219,16 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     });
     renderDialog([mine, othersPublic]);
 
-    fireEvent.click(screen.getByText("All"));
-    fireEvent.click(
-      screen.getByText("My Runtime", { selector: "span.truncate" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: /host\.local/i }));
 
-    const publicRow = screen
-      .getByText("Others Public")
-      .closest("button") as HTMLButtonElement;
+    const publicRow = screen.getByRole("radio", {
+      name: /Others Public/,
+    }) as HTMLButtonElement;
     expect(publicRow).not.toBeNull();
     expect(publicRow.disabled).toBe(false);
   });
 
-  it("defaults the selected runtime to a usable one, not a locked private", () => {
+  it("requires an explicit device selection instead of guessing a runtime", () => {
     const othersPrivate = makeRuntime({
       id: "rt-others-private",
       name: "Others Private",
@@ -224,18 +243,14 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     });
     renderDialog([othersPrivate, mine]);
 
-    // The trigger label shows the selected runtime name. The picker must
-    // not seed with the other-owned private runtime even if it sorted
-    // first in the input list.
-    expect(screen.queryByText("Others Private", { selector: "span.truncate" })).toBeNull();
-    expect(screen.getByText("My Runtime", { selector: "span.truncate" })).toBeInTheDocument();
+    expect(screen.getByText("Choose a device")).toBeInTheDocument();
+    expect(screen.queryByRole("radio", { name: /My Runtime/ })).toBeNull();
+    expect(screen.getByText("Create").closest("button")).toBeDisabled();
   });
 
   it("in duplicate mode, does not pre-fill the template's runtime when it's now locked", async () => {
-    // Template runtime is owned by someone else and now private — the
-    // duplicate flow used to seed with it anyway, leaving the user with
-    // a Create button that 403s server-side. Now we fall back to the
-    // first usable runtime instead.
+    // A locked duplicate source returns to the explicit device selection
+    // level instead of seeding an unusable runtime.
     const othersPrivate = makeRuntime({
       id: "rt-others-private",
       name: "Others Private",
@@ -251,42 +266,101 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     const template = makeTemplate("rt-others-private");
     const { onCreate } = renderDialog([othersPrivate, mine], template);
 
-    expect(
-      screen.getByText("My Runtime", { selector: "span.truncate" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.queryByText("Others Private", { selector: "span.truncate" }),
-    ).toBeNull();
+    selectComputerRuntime(/My Runtime/);
 
-    // Sanity check: with a usable selection seeded, Create should submit.
     fireEvent.click(screen.getByText("Create"));
     await new Promise((r) => setTimeout(r, 0));
     expect(onCreate).toHaveBeenCalledTimes(1);
     expect(onCreate.mock.calls[0]?.[0].runtime_id).toBe("rt-mine");
   });
 
-  it("disables Create when the selected runtime is locked (template + no usable fallback)", () => {
-    // Edge case: template points at a locked runtime AND the workspace
-    // has no usable alternatives in scope. The defense-in-depth gate on
-    // the Create button must keep the user from submitting a 403.
+  it("lets a locked duplicate source continue through Cloud", async () => {
     const onlyOthersPrivate = makeRuntime({
       id: "rt-only-others-private",
       name: "Only Others Private",
       owner_id: OTHER,
       visibility: "private",
     });
-    // Flip the picker to "All" so the locked runtime is at least
-    // visible — that's the scope where the selected-but-locked state
-    // can persist after the initial seed search returns nothing.
     const template = makeTemplate("rt-only-others-private");
     renderDialog([onlyOthersPrivate], template);
 
-    // The Create button is rendered by lucide-free CTA text "Create".
+    selectCloudRuntime();
     const createBtn = screen
       .getAllByRole("button")
       .find((b) => b.textContent === "Create");
     expect(createBtn).toBeDefined();
-    expect((createBtn as HTMLButtonElement).disabled).toBe(true);
+    await waitFor(() =>
+      expect((createBtn as HTMLButtonElement).disabled).toBe(false),
+    );
+  });
+
+  it("enables Cloud before selecting a Cloud-backed runtime", async () => {
+    const cloud = makeRuntime({
+      id: "rt-cloud",
+      name: "Multica Cloud",
+      runtime_mode: "cloud",
+      owner_id: null,
+      visibility: "public",
+    });
+    const { onCreate } = renderDialog([cloud]);
+
+    expect(cloudPreviewStore.getState().cloudOn).toBe(false);
+    selectCloudRuntime(/Multica Cloud/);
+    expect(cloudPreviewStore.getState().cloudOn).toBe(true);
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Cloud Agent" },
+    });
+    const createButton = screen
+      .getAllByRole("button")
+      .find((button) => button.textContent === "Create") as HTMLButtonElement;
+    await waitFor(() => expect(createButton.disabled).toBe(false));
+
+    fireEvent.click(createButton);
+
+    await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+    expect(onCreate.mock.calls[0]?.[0].runtime_id).toBe("rt-cloud");
+    expect(cloudPreviewStore.getState().cloudOn).toBe(true);
+  });
+
+  it("creates a local mock agent and navigates when mock Cloud is selected", async () => {
+    const local = makeRuntime({
+      id: "rt-local",
+      name: "My Runtime",
+      owner_id: ME,
+    });
+    const { onCreate, onClose } = renderDialog([local]);
+
+    selectCloudRuntime();
+    fireEvent.click(
+      screen.getByRole("radio", { name: /GPT-5\.6 Sol/i }),
+    );
+    fireEvent.click(screen.getByRole("radio", { name: "High" }));
+    fireEvent.click(screen.getByRole("button", { name: /Fast Mode/i }));
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Mock Cloud Agent" },
+    });
+
+    const createButton = screen
+      .getAllByRole("button")
+      .find((button) => button.textContent === "Create") as HTMLButtonElement;
+    await waitFor(() => expect(createButton.disabled).toBe(false));
+    fireEvent.click(createButton);
+
+    await waitFor(() =>
+      expect(cloudPreviewStore.getState().createdAgents).toHaveLength(1),
+    );
+    const mockAgent = cloudPreviewStore.getState().createdAgents[0]!;
+    expect(mockAgent.name).toBe("Mock Cloud Agent");
+    expect(mockAgent.runtime_mode).toBe("cloud");
+    expect(mockAgent.model).toBe("gpt-5.6-sol");
+    expect(mockAgent.thinking_level).toBe("high");
+    expect(mockAgent.service_tier).toBe("priority");
+    expect(onCreate).not.toHaveBeenCalled();
+    expect(onClose).toHaveBeenCalledTimes(1);
+    expect(navigationStub.push).toHaveBeenCalledWith(
+      `/test-ws/agents/${mockAgent.id}`,
+    );
   });
 });
 
@@ -309,6 +383,7 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
     configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: false });
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
     const { onCreate } = renderDialog([mine]);
+    selectComputerRuntime(/My Runtime/);
 
     // Legacy copy is rendered — matches VISIBILITY_DESCRIPTION.
     expect(screen.getByText(/All members can assign/i)).toBeInTheDocument();
@@ -331,6 +406,7 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
     configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
     const { onCreate } = renderDialog([mine]);
+    selectComputerRuntime(/My Runtime/);
 
     // New copy replaces the old one.
     expect(screen.getByText("Only you can run this agent")).toBeInTheDocument();
@@ -357,6 +433,7 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
     configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
     const { onCreate } = renderDialog([mine]);
+    selectComputerRuntime(/My Runtime/);
 
     fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
       target: { value: "Private Agent" },
@@ -377,6 +454,7 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
     configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
     const { onCreate } = renderDialog([mine]);
+    selectComputerRuntime(/My Runtime/);
 
     fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
       target: { value: "Empty Public Agent" },
@@ -392,6 +470,7 @@ describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () =>
     configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
     const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
     const { onCreate } = renderDialog([mine]);
+    selectComputerRuntime(/My Runtime/);
 
     fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
       target: { value: "Shared Agent" },

@@ -443,5 +443,18 @@
     "table_cache_r": "Cache R",
     "table_cache_w": "Cache W",
     "no_data": "No usage data yet"
+  },
+  "cloud_preview": {
+    "title": "Multica Cloud",
+    "tagline": "Managed cloud runtime, no local machine required.",
+    "status_ready": "Ready",
+    "enable": "Turn on",
+    "disable": "Turn off",
+    "advanced": "Advanced",
+    "stats": {
+      "credits": "Credits left"
+    },
+    "machines_title": "My computers",
+    "machines_hint": "Machines you run the daemon on. Your code and API keys stay there."
   }
 }

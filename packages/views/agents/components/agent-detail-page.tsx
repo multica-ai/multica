@@ -60,6 +60,11 @@ import { AgentPresenceIndicator } from "./agent-presence-indicator";
 import { VisibilityBadge } from "./visibility-badge";
 import { AgentOverviewPane, type DetailTab } from "./agent-overview-pane";
 import { useT, useTimeAgo } from "../../i18n";
+import {
+  createCloudPreviewRuntime,
+  isCloudPreviewRuntimeId,
+  useCloudPreview,
+} from "../../runtimes/components/cloud-preview";
 
 interface AgentDetailPageProps {
   agentId: string;
@@ -81,12 +86,16 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   } = useQuery(agentListOptions(wsId));
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
+  const mockAgent = useCloudPreview(
+    (state) =>
+      state.createdAgents.find((candidate) => candidate.id === agentId) ?? null,
+  );
 
   // Single workspace-level presence pass; this page just reads its slot.
   // The hook owns the 30s tick so the failed-window auto-clears here too.
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
 
-  const agent = agents.find((a) => a.id === agentId) ?? null;
+  const agent = agents.find((a) => a.id === agentId) ?? mockAgent;
   const presence: AgentPresenceDetail | null =
     agent ? presenceMap.get(agent.id) ?? null : null;
 
@@ -97,7 +106,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   const { error: detailError } = useQuery({
     queryKey: ["agent-detail-probe", wsId, agentId],
     queryFn: () => api.getAgent(agentId),
-    enabled: !agentsLoading && !agent && !!agentId,
+    enabled: !agentsLoading && !agent && !mockAgent && !!agentId,
     retry: false,
   });
   const isForbidden =
@@ -252,7 +261,10 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
 
   const isArchived = !!agent.archived_at;
   const runtime = agent.runtime_id
-    ? runtimes.find((r) => r.id === agent.runtime_id) ?? null
+    ? runtimes.find((r) => r.id === agent.runtime_id) ??
+      (isCloudPreviewRuntimeId(agent.runtime_id)
+        ? createCloudPreviewRuntime(wsId, agent.runtime_id)
+        : null)
     : null;
   const owner = agent.owner_id
     ? members.find((m) => m.user_id === agent.owner_id) ?? null

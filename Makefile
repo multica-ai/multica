@@ -306,7 +306,8 @@ server: ## Run only the Go server for the current checkout
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	cd server && go run ./cmd/server
 
-daemon: ## Restart the local agent daemon using the CLI's stored auth/session
+daemon: ## Re-authenticate the local CLI profile, then restart the agent daemon
+	@$(MAKE) multica MULTICA_ARGS="login --profile local"
 	@$(MAKE) multica MULTICA_ARGS="daemon restart --profile local"
 
 cli: ## Run the multica CLI with ARGS or MULTICA_ARGS from source
