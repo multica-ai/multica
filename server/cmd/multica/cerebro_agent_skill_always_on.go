@@ -46,7 +46,11 @@ Examples:
 
 func init() {
 	agentSkillsCmd.AddCommand(agentSkillsAlwaysOnCmd)
-	agentSkillsAlwaysOnCmd.Flags().String("skill-ids", "", "Comma-separated skill IDs to mark always-on (replaces the current set; use --skill-ids '' to clear)")
+	// StringSlice, not String: cleanSkillIDsFlag reads this with GetStringSlice,
+	// the same as `agent skills set` and `agent skills add`. A plain String flag
+	// makes that read return nothing, and the command then silently sends an
+	// empty set (FIR-3881).
+	agentSkillsAlwaysOnCmd.Flags().StringSlice("skill-ids", nil, "Comma-separated skill IDs to mark always-on (replaces the current set; use --skill-ids '' to clear)")
 	agentSkillsAlwaysOnCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
