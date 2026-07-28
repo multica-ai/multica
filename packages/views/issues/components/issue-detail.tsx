@@ -7,6 +7,7 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useDescriptionDraft, DescriptionDraftBanner } from "@multica/cerebro-description-draft";
 // CEREBRO-PATCH(display-currency-issue-detail): FIR-40 cost in workspace currency.
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
+import { formatPromptCacheHitRatio } from "@multica/cerebro-format-cost";
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
@@ -2016,6 +2017,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
                 </PropRow>
                 {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
+                  <>
                   <PropRow label={t(($) => $.detail.prop_cache)}>
                     <span className="text-muted-foreground">
                       {t(($) => $.detail.prop_cache_value, {
@@ -2024,6 +2026,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                       })}
                     </span>
                   </PropRow>
+                  <PropRow label="Cache hit ratio">
+                    <span className="text-muted-foreground">{formatPromptCacheHitRatio(usage.total_input_tokens, usage.total_cache_read_tokens, usage.total_cache_write_tokens)}</span>
+                  </PropRow>
+                  </>
                 )}
                 <PropRow label={t(($) => $.detail.prop_runs)}>
                   <span className="text-muted-foreground">{usage.task_count}</span>

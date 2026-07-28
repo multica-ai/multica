@@ -125,6 +125,7 @@ type AgentRuntime struct {
 	ToolsConfig      []byte             `json:"tools_config"`
 	SandboxPolicy    []byte             `json:"sandbox_policy"`
 	AutoPauseCount   int32              `json:"auto_pause_count"`
+	CustomName       pgtype.Text        `json:"custom_name"`
 }
 
 type AgentSkill struct {

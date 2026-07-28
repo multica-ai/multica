@@ -253,20 +253,60 @@ var codexEffortLabel = map[string]string{
 	"medium":  "Medium",
 	"high":    "High",
 	"xhigh":   "Extra high",
+	"max":     "Max",
+	"ultra":   "Ultra",
 }
+
+const minCodexDebugModelsVersion = "0.122.0"
 
 // codexDebugModelsResponse mirrors the JSON shape emitted by
 // `codex debug models` (Codex 0.131.0+). Only the fields we
 // consume are typed; unknown keys are ignored.
 type codexDebugModelsResponse struct {
-	Models []struct {
-		Slug                    string `json:"slug"`
-		DefaultReasoningLevel   string `json:"default_reasoning_level"`
-		SupportedReasoningLevel []struct {
-			Effort      string `json:"effort"`
-			Description string `json:"description"`
-		} `json:"supported_reasoning_levels"`
-	} `json:"models"`
+	Models []codexDebugModel `json:"models"`
+}
+
+type codexDebugModel struct {
+	Slug                    string                     `json:"slug"`
+	DisplayName             string                     `json:"display_name"`
+	Visibility              string                     `json:"visibility"`
+	DefaultReasoningLevel   string                     `json:"default_reasoning_level"`
+	SupportedReasoningLevel []codexDebugReasoningLevel `json:"supported_reasoning_levels"`
+}
+
+type codexDebugReasoningLevel struct {
+	Effort      string `json:"effort"`
+	Description string `json:"description"`
+}
+
+func discoverCodexModels(ctx context.Context, executablePath string) []Model {
+	if executablePath == "" {
+		executablePath = "codex"
+	}
+	version, err := DetectVersion(ctx, executablePath)
+	if err != nil || !codexSupportsDebugModels(version) {
+		models := codexStaticModels()
+		annotateCodexThinking(ctx, models, executablePath)
+		return models
+	}
+	raw, err := runCodexDebugModels(ctx, executablePath)
+	if err != nil {
+		return codexStaticModels()
+	}
+	models, err := parseCodexModelCatalog(raw)
+	if err != nil || len(models) == 0 {
+		return codexStaticModels()
+	}
+	return models
+}
+
+func codexSupportsDebugModels(version string) bool {
+	parsed, err := parseSemver(version)
+	if err != nil {
+		return false
+	}
+	minimum, err := parseSemver(minCodexDebugModelsVersion)
+	return err == nil && !parsed.lessThan(minimum)
 }
 
 // annotateCodexThinking decorates each model entry with its reasoning
@@ -356,6 +396,37 @@ func parseCodexDebugModels(raw []byte) map[string]*ModelThinking {
 		}
 	}
 	return out
+}
+
+func parseCodexModelCatalog(raw []byte) ([]Model, error) {
+	var resp codexDebugModelsResponse
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, err
+	}
+	models := make([]Model, 0, len(resp.Models))
+	for _, model := range resp.Models {
+		if model.Slug == "" || model.Visibility == "hide" {
+			continue
+		}
+		label := model.DisplayName
+		if label == "" {
+			label = model.Slug
+		}
+		thinking := parseCodexDebugModelsForModel(model)
+		models = append(models, Model{ID: model.Slug, Label: label, Provider: "openai", Thinking: thinking})
+	}
+	if len(models) > 0 {
+		models[0].Default = true
+	}
+	return models, nil
+}
+
+func parseCodexDebugModelsForModel(model codexDebugModel) *ModelThinking {
+	raw, err := json.Marshal(codexDebugModelsResponse{Models: []codexDebugModel{model}})
+	if err != nil {
+		return nil
+	}
+	return parseCodexDebugModels(raw)[model.Slug]
 }
 
 // ── Shared validation ────────────────────────────────────────────────

@@ -111,10 +111,11 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		annotateModelSpeed(models, "claude")
 		return models, nil
 	case "codex":
-		models := codexStaticModels()
-		annotateCodexThinking(ctx, models, executablePath)
-		annotateModelSpeed(models, "codex")
-		return models, nil
+		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() ([]Model, error) {
+			models := discoverCodexModels(ctx, executablePath)
+			annotateModelSpeed(models, "codex")
+			return models, nil
+		})
 	case "gemini":
 		return geminiStaticModels(), nil
 	case "antigravity":
