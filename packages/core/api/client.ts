@@ -2784,11 +2784,22 @@ export class ApiClient {
     });
   }
 
-  async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
+  // CEREBRO-PATCH(resume-failed-run-client): FIR-3901 — resume continues the failed run's conversation.
+  async rerunIssue(issueId: string, taskId?: string, resume?: boolean): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
-      body: taskId ? JSON.stringify({ task_id: taskId }) : undefined,
+      body: taskId || resume ? JSON.stringify({ task_id: taskId, resume: resume === true }) : undefined,
     });
+  }
+
+  // CEREBRO-PATCH(dead-failed-runs-client): FIR-3901 — failed runs nothing will pick up again; drives the red bar.
+  async listIssueFailedRuns<T = unknown>(issueId: string): Promise<T> {
+    return this.fetch<T>(`/api/issues/${issueId}/failed-runs`);
+  }
+
+  // CEREBRO-PATCH(dead-failed-runs-client): FIR-3901 — same, workspace-wide, for the inbox pip.
+  async listWorkspaceFailedRuns<T = unknown>(): Promise<T> {
+    return this.fetch<T>(`/api/inbox/failed-issue-tasks`);
   }
 
   // Inbox

@@ -157,6 +157,7 @@ import { CommentCard, isWakeupComment } from "./comment-card"; // CEREBRO-PATCH(
 // CEREBRO-PATCH(issue-description-image-tray): FIR-2693 — numbered image tray on the description editor.
 import { CommentComposer, EditorImageTray } from "@multica/cerebro-composer";
 import { AgentLiveCard, TaskRunHistory, WorkSessionHistory } from "./agent-live-card";
+import { FailedRunBar as CerebroFailedRunBar } from "@multica/cerebro-runtime/views"; // CEREBRO-PATCH(issue-failed-run-bar): FIR-3901
 // CEREBRO-PATCH(rounds-answer-snapshots): FIR-3179 — Round membership no longer injects a held-reply banner into issue detail.
 import { PullRequestList } from "./pull-request-list";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
@@ -1262,6 +1263,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   // When feature is disabled, fall back to plain issue rendering so direct URLs still resolve,
   // just without channel chrome.
   const channelsEnabled = useFeatureFlag("cerebro_channels");
+  const failedRunBarEnabled = useFeatureFlag("cerebro_failed_run_bar"); // CEREBRO-PATCH(issue-failed-run-bar): FIR-3901
   // CEREBRO-PATCH(comments-move-to-subissue-ui): JEH-1309 gate the thread lift UI.
   const moveCommentToSubIssueEnabled = useFeatureFlag("cerebro_move_comment_to_subissue");
   // CEREBRO-PATCH(comments-move-to-thread-ui): JEH-2488 gate the new-thread action.
@@ -2692,6 +2694,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 bar instead of a separate banner. wakeupIssueId is the issue UUID (issue.id),
                 not the route identifier (id): the wakeups list endpoint requires a UUID. */}
             {!isChat && <AgentLiveCard key={id} issueId={id} wakeupIssueId={issue?.id} />}
+            {/* CEREBRO-PATCH(issue-failed-run-bar): FIR-3901 — red bar when the last run failed and nothing will retry it. */}
+            {!isChat && issue?.id ? <CerebroFailedRunBar issueId={issue.id} enabled={failedRunBarEnabled} /> : null}
             {/* CEREBRO-PATCH(rounds-held-reply-bar): FIR-3114 — a member reply held for a batch Round renders a wakeup-style banner here. */}
 
             {/* CEREBRO-PATCH(issue-detail-tabs-anchor): JEH-1518 — scroll anchor for NavOverlayButton tab-section scroll */}

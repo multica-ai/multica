@@ -233,6 +233,8 @@ export type CerebroFlagKey =
   | "cerebro_cli_runs_tab"
   // FIR-3782: failure summary card at the top of a failed run's transcript.
   | "cerebro_run_failure_card"
+  // FIR-3901: red bar on an issue whose last run failed and that nothing will pick up again, plus the matching red pip in the inbox.
+  | "cerebro_failed_run_bar"
   // FIR-3782: the run's Initial prompt disclosure shows the byte-exact prompt the model read, not just the triggering comment.
   | "cerebro_run_full_prompt"
   // FIR-2827: sidebar "Subscribers" section on regular issues — subscribers split by type (Members / Agents) with the add/remove popover, replacing the avatar stack next to the Activity header.
@@ -665,6 +667,10 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-3782: ON. Shows the reason, the last step and the tail of its output
   // at the top of a failed run, so "why did this fail" needs no scrolling.
   cerebro_run_failure_card: true,
+  // FIR-3901: ON. A failed run nothing will retry shows a red bar on the issue
+  // and a red pip in the inbox; off hides both and the run is only visible
+  // under the Runs tab, as before.
+  cerebro_failed_run_bar: true,
   // FIR-3782: ON. The Initial prompt disclosure reads the run's recorded
   // prompt snapshot instead of only the triggering comment. Off falls back to
   // the triggering comment, which is also what a run without a snapshot shows.
