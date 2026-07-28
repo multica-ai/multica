@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS provider_failover_original_task_uidx;

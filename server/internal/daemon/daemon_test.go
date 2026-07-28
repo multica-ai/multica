@@ -681,12 +681,12 @@ func TestReconcileFreshRetryResult(t *testing.T) {
 	// The first (poisoned) result keeps its id for classification/auditing;
 	// its failure is classified unrecoverable elsewhere.
 	first := agent.Result{Status: "failed", Error: "oversized history image", SessionID: "ses_poisoned", Usage: firstUsage}
-	const firstTools = int32(0)
+	firstTools := drainObservation{}
 
 	tests := []struct {
 		name        string
 		retry       agent.Result
-		retryTools  int32
+		retryTools  drainObservation
 		retryErr    error
 		wantStatus  string
 		wantSession string
@@ -700,13 +700,13 @@ func TestReconcileFreshRetryResult(t *testing.T) {
 			retryErr:    context.DeadlineExceeded,
 			wantStatus:  "failed",
 			wantSession: "ses_poisoned",
-			wantTools:   firstTools,
+			wantTools:   firstTools.toolCalls,
 		},
 		{
 			// Fresh session established — new result wins with its OWN id.
 			name:        "new session id wins",
 			retry:       agent.Result{Status: "completed", Output: "done", SessionID: "ses_new", Usage: map[string]agent.TokenUsage{"m1": {OutputTokens: 7}}},
-			retryTools:  2,
+			retryTools:  drainObservation{toolCalls: 2},
 			wantStatus:  "completed",
 			wantSession: "ses_new",
 			wantTools:   2,
@@ -716,24 +716,24 @@ func TestReconcileFreshRetryResult(t *testing.T) {
 			// poisoned id must NOT be resurrected; keep the first result.
 			name:        "failed retry without new session keeps first",
 			retry:       agent.Result{Status: "failed", Error: "connection refused", SessionID: ""},
-			retryTools:  0,
+			retryTools:  drainObservation{},
 			wantStatus:  "failed",
 			wantSession: "ses_poisoned",
-			wantTools:   firstTools,
+			wantTools:   firstTools.toolCalls,
 		},
 		{
 			name:        "timeout retry without new session keeps first",
 			retry:       agent.Result{Status: "timeout", Error: "timed out", SessionID: ""},
 			wantStatus:  "failed",
 			wantSession: "ses_poisoned",
-			wantTools:   firstTools,
+			wantTools:   firstTools.toolCalls,
 		},
 		{
 			// Fresh attempt succeeded but produced no resumable session id —
 			// take the success but keep the id EMPTY, never the poisoned one.
 			name:        "completed retry with empty session id keeps empty id",
 			retry:       agent.Result{Status: "completed", Output: "ok", SessionID: "", Usage: map[string]agent.TokenUsage{"m1": {OutputTokens: 3}}},
-			retryTools:  1,
+			retryTools:  drainObservation{toolCalls: 1},
 			wantStatus:  "completed",
 			wantSession: "",
 			wantTools:   1,
@@ -750,8 +750,8 @@ func TestReconcileFreshRetryResult(t *testing.T) {
 			if got.SessionID != tt.wantSession {
 				t.Fatalf("session id = %q, want %q (the poisoned id must never leak onto a resumable result)", got.SessionID, tt.wantSession)
 			}
-			if gotTools != tt.wantTools {
-				t.Fatalf("tools = %d, want %d", gotTools, tt.wantTools)
+			if gotTools.toolCalls != tt.wantTools {
+				t.Fatalf("tools = %d, want %d", gotTools.toolCalls, tt.wantTools)
 			}
 			// Usage is always merged so billing is complete.
 			if got.Usage["m1"].InputTokens != 5 {
@@ -1819,7 +1819,7 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	}
 
 	// Mirrors the retry in runTask, gated on the same production predicate.
-	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools, "claude") {
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools.toolCalls, "claude") {
 		firstUsage := result.Usage
 		opts.ResumeSessionID = ""
 		retryResult, _, retryErr := d.executeAndDrain(ctx, fb, "prompt", opts, taskLog, "task-1", "", &msgSeq)
@@ -2039,7 +2039,7 @@ func TestExecuteAndDrain_NoRetryAfterToolsExecuted(t *testing.T) {
 	// opened a PR, written commits into the reused workdir). Re-running it
 	// from scratch would duplicate those side effects, so the fallback must
 	// stay out regardless of what the backend reported as SessionID.
-	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools+1, "claude") {
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools.toolCalls+1, "claude") {
 		t.Fatal("should not retry once tools have executed")
 	}
 	if int(fb.idx.Load()) != 1 {
@@ -2075,7 +2075,7 @@ func TestExecuteAndDrain_NetworkFailureKeepsResumeSession(t *testing.T) {
 	if result.ResumeRejected {
 		t.Fatal("a network drop must not be reported as a rejected resume")
 	}
-	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools, "claude") {
+	if shouldRetryWithFreshSession(result, opts.ResumeSessionID, tools.toolCalls, "claude") {
 		t.Fatal("network failure must not trigger a fresh-session retry")
 	}
 	if int(fb.idx.Load()) != 1 {
@@ -2452,8 +2452,8 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 	if result.Status != "timeout" {
 		t.Fatalf("expected timeout, got status=%q error=%q", result.Status, result.Error)
 	}
-	if tools != 1 {
-		t.Fatalf("expected one tool use, got %d", tools)
+	if tools.toolCalls != 1 {
+		t.Fatalf("expected one tool use, got %d", tools.toolCalls)
 	}
 
 	deadline := time.Now().Add(2 * time.Second)

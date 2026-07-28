@@ -859,6 +859,28 @@ type ProjectResource struct {
 	CreatedBy    pgtype.UUID        `json:"created_by"`
 }
 
+type ProviderFailoverHandoff struct {
+	ID              pgtype.UUID        `json:"id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	OriginalTaskID  pgtype.UUID        `json:"original_task_id"`
+	ChainRootTaskID pgtype.UUID        `json:"chain_root_task_id"`
+	IssueID         pgtype.UUID        `json:"issue_id"`
+	ChatSessionID   pgtype.UUID        `json:"chat_session_id"`
+	SourceAgentID   pgtype.UUID        `json:"source_agent_id"`
+	SourceProvider  string             `json:"source_provider"`
+	TargetProvider  string             `json:"target_provider"`
+	TargetAgentID   pgtype.UUID        `json:"target_agent_id"`
+	FallbackTaskID  pgtype.UUID        `json:"fallback_task_id"`
+	TriggerReason   string             `json:"trigger_reason"`
+	State           string             `json:"state"`
+	Mode            string             `json:"mode"`
+	WouldFailOver   bool               `json:"would_fail_over"`
+	DeclineReason   pgtype.Text        `json:"decline_reason"`
+	SideEffects     []byte             `json:"side_effects"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type RuntimeProfile struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`

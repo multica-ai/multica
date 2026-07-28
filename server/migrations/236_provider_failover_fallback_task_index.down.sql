@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS provider_failover_fallback_task_idx;

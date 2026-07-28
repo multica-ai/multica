@@ -80,6 +80,15 @@ const (
 	// agent timeout path.
 	ReasonTimeout Reason = "timeout"
 
+	// ReasonProviderLivenessTimeout is an internal failover-policy signal for
+	// a started task whose owning runtime stopped proving liveness. The runtime
+	// sweeper derives it only after the hot LivenessStore confirms a stale
+	// runtime is dead. The stored agent_task_queue.failure_reason remains
+	// 'runtime_offline', preserving the existing bounded same-provider retry.
+	// The failover service forces this refined signal to shadow mode because a
+	// dead runtime cannot provide complete terminal side-effect evidence.
+	ReasonProviderLivenessTimeout Reason = "provider_liveness_timeout"
+
 	// ReasonIterationLimit: the agent reached its per-run iteration
 	// cap and emitted a fallback "I reached the iteration limit"
 	// message. Treated as platform-side because it is a Multica-imposed
@@ -174,7 +183,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 21 reasons. Order is
+// allReasons is the canonical ordered list of the 22 reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -189,6 +198,7 @@ var allReasons = []Reason{
 	ReasonRuntimeOffline,
 	ReasonRuntimeRecovery,
 	ReasonTimeout,
+	ReasonProviderLivenessTimeout,
 	ReasonIterationLimit,
 	ReasonAgentBlocked,
 	ReasonAPIInvalidRequest,
@@ -231,7 +241,7 @@ func (r Reason) IsAgentError() bool {
 	return strings.HasPrefix(string(r), agentErrorPrefix)
 }
 
-// AllReasons returns the canonical 21 reasons in a stable order. The
+// AllReasons returns the canonical 22 reasons in a stable order. The
 // caller MUST NOT mutate the returned slice; a copy is returned so
 // concurrent callers can append to their local copy without corrupting
 // the package-level fixture.

@@ -27,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/providerfailover"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
@@ -133,6 +134,13 @@ type terminalTaskReport struct {
 	sessionID     string
 	workDir       string
 	failureReason string
+	// failoverEvidence is the daemon-observed side-effect evidence for a fail
+	// report (td-836aa9), forwarded to the server so provider failover can
+	// decide whether a cross-provider retry is safe. Only set on fail reports
+	// whose run was observed to a terminal end; nil on complete reports and on
+	// failures observed before the run streamed, which keeps active failover
+	// fail-closed.
+	failoverEvidence *providerfailover.SideEffectEvidence
 	// sessionRolloutMissing is true when the daemon withheld this task's Codex
 	// session because its rollout was not in the store (MUL-5305). The server
 	// clears the resume pointer and flags the continuity gap for the next claim.
@@ -3503,11 +3511,19 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// classifier so the failure_reason column reflects the actual
 		// shape of the failure (provider 5xx, network, process crash,
 		// …) rather than the coarse legacy "agent_error" bucket.
+		//
+		// td-836aa9: forward result.FailoverEvidence when runTask attached it.
+		// It is non-nil only on the backend-failed-to-start path, where the
+		// observed tool count is authoritative (the run never streamed). Every
+		// other error return from runTask happens before execution and carries
+		// no evidence (nil), so the server keeps active failover fail-closed
+		// rather than falsely claiming a complete, empty side-effect surface.
 		if failErr := d.reportTerminalTask(ctx, terminalTaskReport{
-			kind:          terminalTaskReportFail,
-			taskID:        task.ID,
-			errorMessage:  err.Error(),
-			failureReason: taskRunFailureReason(err),
+			kind:             terminalTaskReportFail,
+			taskID:           task.ID,
+			errorMessage:     err.Error(),
+			failureReason:    taskRunFailureReason(err),
+			failoverEvidence: result.FailoverEvidence,
 		}); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
@@ -3793,6 +3809,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			workDir:               result.WorkDir,
 			failureReason:         failureReason,
 			sessionRolloutMissing: result.SessionRolloutMissing,
+			failoverEvidence:      result.FailoverEvidence,
 		}); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
 		}
@@ -3812,7 +3829,7 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 	case terminalTaskReportComplete:
 		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing)
 	case terminalTaskReportFail:
-		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.failureReason, report.sessionRolloutMissing)
+		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.failureReason, report.sessionRolloutMissing, report.failoverEvidence)
 	default:
 		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}
@@ -4975,10 +4992,24 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var msgSeq atomic.Int32
 	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 	if err != nil {
-		return TaskResult{}, err
+		// executeAndDrain only errors when backend.Execute fails before the
+		// stream opens, so the run never invoked a tool and produced no
+		// user-facing output. `tools` is authoritative here (always the
+		// observed count, i.e. zero), which is exactly the completeness
+		// provider failover needs: this failure (which may itself be a
+		// provider rate limit surfaced as a start error) left no side effect.
+		// Attach the evidence even though we return an error — handleTask reads
+		// it off the returned TaskResult on the fail path (td-836aa9).
+		return TaskResult{
+			FailoverEvidence: &providerfailover.SideEffectEvidence{
+				ObservedToolCalls: int(tools.toolCalls),
+				PartialUserOutput: tools.partialUserOutput,
+				Complete:          true,
+			},
+		}, err
 	}
 
-	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {
+	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools.toolCalls, provider) {
 		firstResult := result
 		firstUsage := result.Usage
 		firstTools := tools
@@ -5034,7 +5065,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	taskLog.Info("agent finished",
 		"status", result.Status,
 		"duration", elapsed.String(),
-		"tools", tools,
+		"tools", tools.toolCalls,
 	)
 	taskLog.Debug("agent result detail",
 		"status", result.Status,
@@ -5059,6 +5090,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			CacheWriteTokens: u.CacheWriteTokens,
 			CostUSDTicks:     u.CostUSDTicks,
 		})
+	}
+
+	// Daemon-observed side-effect evidence for provider failover (td-836aa9).
+	// The run drained to a terminal result, so `tools` is the full observed
+	// tool-call count and result.Output is any user-facing text streamed before
+	// the disposition — a complete picture. Attached below to the terminal
+	// FAILURE dispositions (blocked / timeout / idle_watchdog / default) that
+	// reach the server fail path; deliberately NOT to the completed disposition
+	// (no fail callback) nor the cancelled one (a cancelled run may have been
+	// interrupted mid-tool, and cancelled never triggers failover anyway).
+	failoverEvidence := &providerfailover.SideEffectEvidence{
+		ObservedToolCalls: int(tools.toolCalls),
+		PartialUserOutput: tools.partialUserOutput || strings.TrimSpace(result.Output) != "",
+		Complete:          true,
 	}
 
 	// MUL-5305: withhold a Codex session whose rollout never reached the per-issue
@@ -5112,13 +5157,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				"failure_reason", reason,
 			)
 			return TaskResult{
-				Status:        "blocked",
-				Comment:       result.Output,
-				SessionID:     result.SessionID,
-				WorkDir:       env.WorkDir,
-				EnvRoot:       env.RootDir,
-				Usage:         usageEntries,
-				FailureReason: reason,
+				Status:           "blocked",
+				Comment:          result.Output,
+				SessionID:        result.SessionID,
+				WorkDir:          env.WorkDir,
+				EnvRoot:          env.RootDir,
+				Usage:            usageEntries,
+				FailureReason:    reason,
+				FailoverEvidence: failoverEvidence,
 			}, nil
 		}
 		return TaskResult{
@@ -5146,13 +5192,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			failureReason = reason
 		}
 		return TaskResult{
-			Status:        "blocked",
-			Comment:       comment,
-			SessionID:     result.SessionID,
-			WorkDir:       env.WorkDir,
-			EnvRoot:       env.RootDir,
-			FailureReason: failureReason,
-			Usage:         usageEntries,
+			Status:           "blocked",
+			Comment:          comment,
+			SessionID:        result.SessionID,
+			WorkDir:          env.WorkDir,
+			EnvRoot:          env.RootDir,
+			FailureReason:    failureReason,
+			Usage:            usageEntries,
+			FailoverEvidence: failoverEvidence,
 		}, nil
 	case "idle_watchdog":
 		// The idle watchdog force-stopped the run because the backend
@@ -5165,13 +5212,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			comment = idleWatchdogReason(d.cfg.AgentIdleWatchdog)
 		}
 		return TaskResult{
-			Status:        "blocked",
-			Comment:       comment,
-			SessionID:     result.SessionID,
-			WorkDir:       env.WorkDir,
-			EnvRoot:       env.RootDir,
-			FailureReason: "idle_watchdog",
-			Usage:         usageEntries,
+			Status:           "blocked",
+			Comment:          comment,
+			SessionID:        result.SessionID,
+			WorkDir:          env.WorkDir,
+			EnvRoot:          env.RootDir,
+			FailureReason:    "idle_watchdog",
+			Usage:            usageEntries,
+			FailoverEvidence: failoverEvidence,
 		}, nil
 	case "cancelled":
 		// Server cancelled the task (e.g. issue reassignment, user cancel).
@@ -5223,13 +5271,14 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			failureReason = taskfailure.Classify(errMsg).String()
 		}
 		return TaskResult{
-			Status:        "blocked",
-			Comment:       errMsg,
-			SessionID:     result.SessionID,
-			WorkDir:       env.WorkDir,
-			EnvRoot:       env.RootDir,
-			Usage:         usageEntries,
-			FailureReason: failureReason,
+			Status:           "blocked",
+			Comment:          errMsg,
+			SessionID:        result.SessionID,
+			WorkDir:          env.WorkDir,
+			EnvRoot:          env.RootDir,
+			Usage:            usageEntries,
+			FailureReason:    failureReason,
+			FailoverEvidence: failoverEvidence,
 		}, nil
 	}
 }
@@ -5319,21 +5368,38 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 //     id (were it attached) would be re-selected. We keep the unrecoverable
 //     first result and only merge usage.
 //
-// Usage is merged across both attempts in every branch so billing is complete.
-func reconcileFreshRetryResult(first agent.Result, firstUsage map[string]agent.TokenUsage, firstTools int32, retry agent.Result, retryTools int32, retryErr error) (agent.Result, int32) {
+// Usage and side-effect observations are merged across both attempts in every
+// branch so billing and failover evidence are complete. The result/session
+// winner does not erase tools or partial output observed during the other
+// process: both attempts actually ran, so both belong to the task's safety
+// surface.
+func reconcileFreshRetryResult(first agent.Result, firstUsage map[string]agent.TokenUsage, firstTools drainObservation, retry agent.Result, retryTools drainObservation, retryErr error) (agent.Result, drainObservation) {
+	combinedTools := mergeDrainObservations(firstTools, retryTools)
 	switch {
 	case retryErr != nil:
 		first.Usage = firstUsage
-		return first, firstTools
+		return first, combinedTools
 	case retry.SessionID != "":
 		retry.Usage = mergeUsage(firstUsage, retry.Usage)
-		return retry, retryTools
+		return retry, combinedTools
 	case retry.Status == "completed":
 		retry.Usage = mergeUsage(firstUsage, retry.Usage)
-		return retry, retryTools
+		return retry, combinedTools
 	default:
 		first.Usage = mergeUsage(firstUsage, retry.Usage)
-		return first, firstTools
+		return first, combinedTools
+	}
+}
+
+func mergeDrainObservations(first, second drainObservation) drainObservation {
+	const maxInt32 = int64(1<<31 - 1)
+	toolCalls := int64(first.toolCalls) + int64(second.toolCalls)
+	if toolCalls > maxInt32 {
+		toolCalls = maxInt32
+	}
+	return drainObservation{
+		toolCalls:         int32(toolCalls),
+		partialUserOutput: first.partialUserOutput || second.partialUserOutput,
 	}
 }
 
@@ -5375,7 +5441,23 @@ func freshSessionMayHelp(errText string) bool {
 // messages and is owned by the caller so a same-task retry continues the
 // sequence instead of restarting at 1 — the server orders the transcript by
 // seq alone, and duplicate seqs would interleave the two attempts' rows.
-func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID, codexHome string, msgSeq *atomic.Int32) (agent.Result, int32, error) {
+// drainObservation is what executeAndDrain observed of a run's side-effect
+// surface, forwarded to provider failover so it can decide whether a
+// cross-provider retry is safe (td-836aa9).
+type drainObservation struct {
+	// toolCalls is the number of tool_use messages observed. Any agent mutation
+	// (file write, shell/git command, comment post, code push) goes through a
+	// tool, so this is the authoritative "did the run change anything" signal.
+	toolCalls int32
+	// partialUserOutput is true when the run streamed any assistant text before
+	// terminating. Tracked from the observed message stream rather than the
+	// final Result.Output, because a hard failure surfaces no Output even when a
+	// partial answer was already streamed — re-running would risk a
+	// contradictory second answer.
+	partialUserOutput bool
+}
+
+func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, prompt string, opts agent.ExecOptions, taskLog *slog.Logger, taskID, codexHome string, msgSeq *atomic.Int32) (agent.Result, drainObservation, error) {
 	// Wrap the caller's ctx so the idle watchdog (below) can interrupt both
 	// the agent subprocess (via the ctx passed to backend.Execute) AND the
 	// drain loop with a single cancel. Without this layer the backend would
@@ -5387,7 +5469,10 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	session, err := backend.Execute(agentCtx, prompt, opts)
 	if err != nil {
 		taskLog.Debug("backend execute returned error", "error", err)
-		return agent.Result{}, 0, err
+		// The stream never opened: no tools ran and no output streamed. The
+		// zero observation is authoritative, which is what makes the fail path
+		// able to prove an empty side-effect surface.
+		return agent.Result{}, drainObservation{}, err
 	}
 	taskLog.Debug("backend started, draining messages")
 
@@ -5409,6 +5494,11 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	defer drainCancel()
 
 	var toolCount atomic.Int32
+	// sawText records whether the run streamed any assistant text. Provider
+	// failover reads this as the partial-user-output signal (td-836aa9): a
+	// re-run after a partial answer risks a contradictory second answer, and the
+	// final Result.Output is empty on a hard failure even when text was streamed.
+	var sawText atomic.Bool
 	// lastActivityAt records (as unix nanos) when the drain loop most
 	// recently received a message from the backend. The idle watchdog
 	// reads this to decide whether the agent has gone silent for too long.
@@ -5612,6 +5702,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					}
 				case agent.MessageText:
 					if msg.Content != "" {
+						sawText.Store(true)
 						taskLog.Debug("agent", "text", truncateLog(msg.Content, 200))
 						mu.Lock()
 						pendingText.WriteString(msg.Content)
@@ -5678,7 +5769,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 				result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
 			}
 		}
-		return result, toolCount.Load(), nil
+		return result, drainObservation{toolCalls: toolCount.Load(), partialUserOutput: sawText.Load()}, nil
 	case <-drainCtx.Done():
 		// The drain loop is exiting on this same Done signal; wait for its
 		// final flush so the timeout/watchdog/cancel terminals below cannot
@@ -5693,7 +5784,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			return agent.Result{
 				Status: "idle_watchdog",
 				Error:  idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load())),
-			}, toolCount.Load(), nil
+			}, drainObservation{toolCalls: toolCount.Load(), partialUserOutput: sawText.Load()}, nil
 		}
 		// Distinguish external cancellation (e.g. server-initiated cancel
 		// because the issue was reassigned, or the user invoked CancelTask)
@@ -5704,12 +5795,12 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 			return agent.Result{
 				Status: "cancelled",
 				Error:  "task cancelled by upstream context (server cancel or daemon shutdown)",
-			}, toolCount.Load(), nil
+			}, drainObservation{toolCalls: toolCount.Load(), partialUserOutput: sawText.Load()}, nil
 		}
 		return agent.Result{
 			Status: "timeout",
 			Error:  "agent did not produce result within drain timeout",
-		}, toolCount.Load(), nil
+		}, drainObservation{toolCalls: toolCount.Load(), partialUserOutput: sawText.Load()}, nil
 	}
 }
 

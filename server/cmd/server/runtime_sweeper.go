@@ -173,7 +173,16 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, liveness handl
 		slog.Warn("runtime sweeper: failed to clean up stale tasks", "error", err)
 	} else if len(failedTasks) > 0 {
 		slog.Info("runtime sweeper: failed orphaned tasks", "count", len(failedTasks))
-		taskSvc.HandleFailedTasks(ctx, failedTasks)
+		if taskSvc != nil {
+			// Runtime liveness is authoritative here because candidates have
+			// already passed the hot LivenessStore filter. Record the refined
+			// provider-liveness signal in shadow before ordinary
+			// runtime_offline recovery creates retry children. The persisted
+			// reason intentionally remains runtime_offline so this path keeps
+			// its existing bounded same-provider retry behavior.
+			taskSvc.EvaluateLivenessFailover(ctx, failedTasks)
+			taskSvc.HandleFailedTasks(ctx, failedTasks)
+		}
 	}
 
 	// Notify frontend clients so they re-fetch runtime list.
@@ -287,6 +296,11 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 	slog.Info("task sweeper: failed stale tasks", "count", len(failedTasks))
 	taskSvc.CaptureLeaseExpiredTasks(ctx, failedTasks)
 	taskSvc.HandleFailedTasks(ctx, failedTasks)
+	// Provider-failover liveness watchdog (td-836aa9): a running task the wall
+	// clock reaped whose runtime stopped proving liveness is a SILENT HANG.
+	// Reclassify that subset as a failover trigger so it can hand off instead of
+	// silently stalling. No-op when the failover feature is off.
+	taskSvc.EvaluateLivenessFailover(ctx, failedTasks)
 }
 
 // sweepExpiredQueuedTasks fails tasks that have been sitting in 'queued' for

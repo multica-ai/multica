@@ -391,7 +391,7 @@ func TestCompleteTask_BindsChatAttachments(t *testing.T) {
 		taskID := seedRunningChatTask(t, agentID, sessionID)
 		attID := seedAgentChatAttachment(t, agentID, sessionID, taskID)
 		if _, err := testHandler.TaskService.FailTask(context.Background(),
-			parseUUID(taskID), "agent crashed", "", "", "", false); err != nil {
+			parseUUID(taskID), "agent crashed", "", "", "", false, nil); err != nil {
 			t.Fatalf("FailTask: %v", err)
 		}
 		if got := attachmentMessageID(t, attID); got != nil {

@@ -233,7 +233,7 @@ func TestFailTask_ChatRetryInheritsInputOwnerAndPriority(t *testing.T) {
 	rootID := sendDirectChat(t, ctx, agentID, sessionID, "root question")
 	markTaskRunning(t, ctx, rootID)
 
-	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(rootID), "runtime went away", "", "", "runtime_offline", false); err != nil {
+	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(rootID), "runtime went away", "", "", "runtime_offline", false, nil); err != nil {
 		t.Fatalf("fail task: %v", err)
 	}
 

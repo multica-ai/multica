@@ -50,6 +50,11 @@ services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       PORT: "8080"
+      # Provider failover (VIS-11041 / td-836aa9). The self-host default records
+      # shadow decisions only. Promote to real handoffs only after reviewing the
+      # ledger and explicitly setting FF_PROVIDER_FAILOVER_ACTIVE=true.
+      FF_PROVIDER_FAILOVER: ${FF_PROVIDER_FAILOVER:-true}
+      FF_PROVIDER_FAILOVER_ACTIVE: ${FF_PROVIDER_FAILOVER_ACTIVE:-false}
       METRICS_ADDR: ${METRICS_ADDR:-}
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}

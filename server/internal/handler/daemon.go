@@ -29,6 +29,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/providerfailover"
 	"github.com/multica-ai/multica/server/pkg/redact"
 )
 
@@ -3571,6 +3572,11 @@ type TaskFailRequest struct {
 	SessionID     string `json:"session_id,omitempty"`
 	WorkDir       string `json:"work_dir,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`
+	// FailoverEvidence is the daemon-observed side-effect evidence for provider
+	// failover (td-836aa9). Absent from older daemons; a nil pointer here keeps
+	// active failover fail-closed because completeness is never proven. New
+	// fields decode to nil on old clients, preserving API backward compatibility.
+	FailoverEvidence *providerfailover.SideEffectEvidence `json:"failover_evidence,omitempty"`
 	// SessionRolloutMissing: the daemon withheld this task's Codex session
 	// because its rollout was missing (MUL-5305). Clear the resume pointer and
 	// flag the continuity gap for the next claim.
@@ -3597,7 +3603,7 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason, req.SessionRolloutMissing)
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason, req.SessionRolloutMissing, req.FailoverEvidence)
 	if err != nil {
 		// A FailTask error is an infrastructure failure (the terminal
 		// transaction that also clears the withheld session, writes the
