@@ -38,22 +38,48 @@ func TestValidateStrategyInput(t *testing.T) {
 	}
 }
 
+const pageUUID = "550e8400-e29b-41d4-a716-446655440000"
+
 func TestValidateVisionPlanSectionInput(t *testing.T) {
 	tests := []struct {
 		name    string
 		input   VisionPlanSectionInput
 		wantErr bool
 	}{
-		{name: "list", input: VisionPlanSectionInput{Name: "Core Values", SectionType: "list"}},
-		{name: "structured", input: VisionPlanSectionInput{Name: "Marketing Strategy", SectionType: "structured"}},
-		{name: "process", input: VisionPlanSectionInput{Name: "Core Processes", SectionType: "process"}},
-		{name: "missing name", input: VisionPlanSectionInput{SectionType: "list"}, wantErr: true},
-		{name: "invalid type", input: VisionPlanSectionInput{Name: "Custom", SectionType: "cards"}, wantErr: true},
+		{name: "list", input: VisionPlanSectionInput{Name: "Core Values", SectionType: "list", PageID: pageUUID}},
+		{name: "structured", input: VisionPlanSectionInput{Name: "Marketing Strategy", SectionType: "structured", PageID: pageUUID}},
+		{name: "process", input: VisionPlanSectionInput{Name: "Core Processes", SectionType: "process", PageID: pageUUID}},
+		{name: "goals", input: VisionPlanSectionInput{Name: "Goals", SectionType: "goals", PageID: pageUUID, ColumnIndex: 2}},
+		{name: "missing name", input: VisionPlanSectionInput{SectionType: "list", PageID: pageUUID}, wantErr: true},
+		{name: "invalid type", input: VisionPlanSectionInput{Name: "Custom", SectionType: "cards", PageID: pageUUID}, wantErr: true},
+		{name: "missing page", input: VisionPlanSectionInput{Name: "Custom", SectionType: "list"}, wantErr: true},
+		{name: "column out of range", input: VisionPlanSectionInput{Name: "Custom", SectionType: "list", PageID: pageUUID, ColumnIndex: 3}, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := ValidateVisionPlanSectionInput(tt.input); (err != nil) != tt.wantErr {
 				t.Fatalf("ValidateVisionPlanSectionInput(%#v) error = %v", tt.input, err)
+			}
+		})
+	}
+}
+
+func TestValidateVisionPlanPageInput(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   VisionPlanPageInput
+		wantErr bool
+	}{
+		{name: "three columns", input: VisionPlanPageInput{Name: "Traction", ColumnCount: 3}},
+		{name: "one column", input: VisionPlanPageInput{Name: "Vision", ColumnCount: 1}},
+		{name: "missing name", input: VisionPlanPageInput{ColumnCount: 2}, wantErr: true},
+		{name: "no columns", input: VisionPlanPageInput{Name: "Traction"}, wantErr: true},
+		{name: "too many columns", input: VisionPlanPageInput{Name: "Traction", ColumnCount: 4}, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := ValidateVisionPlanPageInput(tt.input); (err != nil) != tt.wantErr {
+				t.Fatalf("ValidateVisionPlanPageInput(%#v) error = %v", tt.input, err)
 			}
 		})
 	}

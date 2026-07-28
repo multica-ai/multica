@@ -62,10 +62,32 @@ type StrategyItemInput struct {
 	State        string `json:"state,omitempty"`
 }
 
+// A page is one arrangeable surface in the Vision/Traction organiser. Vision
+// and Traction are seeded pages, not code — a workspace can rename them, change
+// how many columns they have, or add pages of its own.
+type VisionPlanPageInput struct {
+	Name        string `json:"name"`
+	ColumnCount int32  `json:"column_count"`
+	Position    int32  `json:"position"`
+}
+
+type VisionPlanPageResponse struct {
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	Key         string `json:"key"`
+	Name        string `json:"name"`
+	ColumnCount int32  `json:"column_count"`
+	Position    int32  `json:"position"`
+	CreatedAt   string `json:"created_at"`
+	UpdatedAt   string `json:"updated_at"`
+}
+
 type VisionPlanSectionInput struct {
 	Name        string `json:"name"`
 	SectionType string `json:"section_type"`
 	Position    int32  `json:"position"`
+	PageID      string `json:"page_id"`
+	ColumnIndex int32  `json:"column_index"`
 }
 
 type VisionPlanItemInput struct {
@@ -119,12 +141,15 @@ type VisionPlanSectionResponse struct {
 	Name        string                   `json:"name"`
 	SectionType string                   `json:"section_type"`
 	Position    int32                    `json:"position"`
+	PageID      string                   `json:"page_id"`
+	ColumnIndex int32                    `json:"column_index"`
 	Items       []VisionPlanItemResponse `json:"items"`
 	CreatedAt   string                   `json:"created_at"`
 	UpdatedAt   string                   `json:"updated_at"`
 }
 
 type VisionPlanResponse struct {
+	Pages    []VisionPlanPageResponse    `json:"pages"`
 	Sections []VisionPlanSectionResponse `json:"sections"`
 }
 

@@ -8,9 +8,12 @@ const item = (id: string, sectionId: string, position: number, state: "active" |
   position, state, goal_connections: [], links: [], created_at: "", updated_at: "",
 });
 
-const section = (id: string, position: number, items: VisionPlanItem[]): VisionPlanSection => ({
-  id, workspace_id: "ws", key: id, name: id, section_type: "list", position, items,
-  created_at: "", updated_at: "",
+const section = (
+  id: string, position: number, items: VisionPlanItem[],
+  { page = "vision", column = 0 }: { page?: string; column?: number } = {},
+): VisionPlanSection => ({
+  id, workspace_id: "ws", key: id, name: id, section_type: "list", position,
+  page_id: page, column_index: column, items, created_at: "", updated_at: "",
 });
 
 const sections = (): VisionPlanSection[] => [
@@ -19,25 +22,41 @@ const sections = (): VisionPlanSection[] => [
   section("c", 2, []),
 ];
 
+// Two blocks in column 0 and one in column 1 of the same page.
+const blocks = (): VisionPlanSection[] => [
+  section("a", 0, [], { column: 0 }),
+  section("b", 1, [], { column: 0 }),
+  section("c", 0, [], { column: 1 }),
+];
+
 describe("moveSection", () => {
-  it("renumbers only the columns that shifted when moving right", () => {
-    expect(moveSection(sections(), "a", "c")).toEqual([
-      { id: "b", position: 0 },
-      { id: "c", position: 1 },
-      { id: "a", position: 2 },
+  it("reorders blocks inside one column", () => {
+    expect(moveSection(blocks(), "b", "vision", 0, "a")).toEqual([
+      { id: "b", page_id: "vision", column_index: 0, position: 0 },
+      { id: "a", page_id: "vision", column_index: 0, position: 1 },
     ]);
   });
 
-  it("renumbers when moving left", () => {
-    expect(moveSection(sections(), "c", "a")).toEqual([
-      { id: "c", position: 0 },
-      { id: "a", position: 1 },
-      { id: "b", position: 2 },
-    ]);
+  it("moves a block to another column and renumbers both", () => {
+    expect(moveSection(blocks(), "a", "vision", 1, "c")).toEqual(expect.arrayContaining([
+      { id: "a", page_id: "vision", column_index: 1, position: 0 },
+      { id: "c", page_id: "vision", column_index: 1, position: 1 },
+      { id: "b", page_id: "vision", column_index: 0, position: 0 },
+    ]));
+  });
+
+  it("moves a block to another page", () => {
+    expect(moveSection(blocks(), "c", "traction", 2)).toEqual(expect.arrayContaining([
+      { id: "c", page_id: "traction", column_index: 2, position: 0 },
+    ]));
   });
 
   it("returns nothing for a no-op drop", () => {
-    expect(moveSection(sections(), "a", "a")).toEqual([]);
+    expect(moveSection(blocks(), "a", "vision", 0, "a")).toEqual([]);
+  });
+
+  it("returns nothing for an unknown block", () => {
+    expect(moveSection(blocks(), "missing", "vision", 0)).toEqual([]);
   });
 });
 
@@ -70,7 +89,7 @@ describe("moveItem", () => {
   });
 
   it("ignores archived items when renumbering", () => {
-    const withArchived = [
+    const withArchived: VisionPlanSection[] = [
       section("a", 0, [item("a1", "a", 0), item("gone", "a", 1, "archived"), item("a2", "a", 2)]),
       section("b", 1, []),
     ];

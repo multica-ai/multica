@@ -95,6 +95,7 @@ func cleanupVPL(ctx context.Context, pool *pgxpool.Pool) error {
 		`DELETE FROM cerebro_object_connection WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM cerebro_strategy_item WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM cerebro_vision_plan_section WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
+		`DELETE FROM cerebro_vision_plan_page WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM issue WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM project WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,
 		`DELETE FROM member WHERE workspace_id IN (SELECT id FROM workspace WHERE slug = $1)`,

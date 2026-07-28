@@ -2016,6 +2016,17 @@ type CerebroUserInfisicalIdentity struct {
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
 
+type CerebroVisionPlanPage struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Key         string             `json:"key"`
+	Name        string             `json:"name"`
+	ColumnCount int32              `json:"column_count"`
+	Position    int32              `json:"position"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type CerebroVisionPlanSection struct {
 	ID          pgtype.UUID        `json:"id"`
 	WorkspaceID pgtype.UUID        `json:"workspace_id"`
@@ -2025,6 +2036,8 @@ type CerebroVisionPlanSection struct {
 	Position    int32              `json:"position"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	PageID      pgtype.UUID        `json:"page_id"`
+	ColumnIndex int32              `json:"column_index"`
 }
 
 type CerebroWebFetchPolicy struct {

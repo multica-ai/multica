@@ -234,8 +234,24 @@ func ValidateVisionPlanSectionInput(input VisionPlanSectionInput) error {
 	if strings.TrimSpace(input.Name) == "" {
 		return errors.New("name is required")
 	}
-	if input.SectionType != "list" && input.SectionType != "structured" && input.SectionType != "process" {
-		return errors.New("section_type must be list, structured, or process")
+	if input.SectionType != "list" && input.SectionType != "structured" && input.SectionType != "process" && input.SectionType != "goals" {
+		return errors.New("section_type must be list, structured, process, or goals")
+	}
+	if _, err := util.ParseUUID(input.PageID); err != nil {
+		return errors.New("page_id must be a UUID")
+	}
+	if input.ColumnIndex < 0 || input.ColumnIndex > 2 {
+		return errors.New("column_index must be between 0 and 2")
+	}
+	return nil
+}
+
+func ValidateVisionPlanPageInput(input VisionPlanPageInput) error {
+	if strings.TrimSpace(input.Name) == "" {
+		return errors.New("name is required")
+	}
+	if input.ColumnCount < 1 || input.ColumnCount > 3 {
+		return errors.New("column_count must be between 1 and 3")
 	}
 	return nil
 }
@@ -899,6 +915,22 @@ func (s *Service) ListVisionPlan(ctx context.Context, workspaceID pgtype.UUID) (
 	if err := s.queries.AssignLegacyVisionPlanItems(ctx, workspaceID); err != nil {
 		return VisionPlanResponse{}, err
 	}
+	if err := s.queries.EnsureDefaultVisionPlanPages(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.EnsureDefaultVisionPlanGoalsBlock(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.AssignDefaultVisionPlanSectionPages(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	if err := s.queries.AssignRemainingVisionPlanSectionPages(ctx, workspaceID); err != nil {
+		return VisionPlanResponse{}, err
+	}
+	pageRows, err := s.queries.ListVisionPlanPages(ctx, workspaceID)
+	if err != nil {
+		return VisionPlanResponse{}, err
+	}
 	sectionRows, err := s.queries.ListVisionPlanSections(ctx, workspaceID)
 	if err != nil {
 		return VisionPlanResponse{}, err
@@ -951,14 +983,60 @@ func (s *Service) ListVisionPlan(ctx context.Context, workspaceID pgtype.UUID) (
 	}
 	sections := make([]VisionPlanSectionResponse, 0, len(sectionRows))
 	for _, row := range sectionRows {
-		section := visionPlanSectionResponse(row)
+		section := visionPlanSectionResponse(row.ID, row.WorkspaceID, row.Key, row.Name, row.SectionType, row.Position, row.PageID, row.ColumnIndex, row.CreatedAt, row.UpdatedAt)
 		section.Items = items[section.ID]
 		if section.Items == nil {
 			section.Items = []VisionPlanItemResponse{}
 		}
 		sections = append(sections, section)
 	}
-	return VisionPlanResponse{Sections: sections}, nil
+	pages := make([]VisionPlanPageResponse, 0, len(pageRows))
+	for _, row := range pageRows {
+		pages = append(pages, visionPlanPageResponse(row))
+	}
+	return VisionPlanResponse{Pages: pages, Sections: sections}, nil
+}
+
+func (s *Service) CreateVisionPlanPage(ctx context.Context, workspaceID pgtype.UUID, input VisionPlanPageInput) (VisionPlanPageResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	if err := ValidateVisionPlanPageInput(input); err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	row, err := s.queries.CreateVisionPlanPage(ctx, cerebrodb.CreateVisionPlanPageParams{
+		WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), ColumnCount: input.ColumnCount, Position: input.Position,
+	})
+	if err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	return visionPlanPageResponse(row), nil
+}
+
+func (s *Service) UpdateVisionPlanPage(ctx context.Context, workspaceID, id pgtype.UUID, input VisionPlanPageInput) (VisionPlanPageResponse, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	if err := ValidateVisionPlanPageInput(input); err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	row, err := s.queries.UpdateVisionPlanPage(ctx, cerebrodb.UpdateVisionPlanPageParams{
+		ID: id, WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), ColumnCount: input.ColumnCount, Position: input.Position,
+	})
+	if err != nil {
+		return VisionPlanPageResponse{}, err
+	}
+	return visionPlanPageResponse(row), nil
+}
+
+// Deleting a page takes its blocks with it, so the last page is never removable
+// — a workspace always keeps somewhere to put a block.
+func (s *Service) DeleteVisionPlanPage(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
+	if err := s.ensureVisionPlanEnabled(ctx, workspaceID); err != nil {
+		return false, err
+	}
+	count, err := s.queries.DeleteVisionPlanPage(ctx, cerebrodb.DeleteVisionPlanPageParams{ID: id, WorkspaceID: workspaceID})
+	return count > 0, err
 }
 
 func (s *Service) CreateVisionPlanSection(ctx context.Context, workspaceID pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
@@ -968,13 +1046,18 @@ func (s *Service) CreateVisionPlanSection(ctx context.Context, workspaceID pgtyp
 	if err := ValidateVisionPlanSectionInput(input); err != nil {
 		return VisionPlanSectionResponse{}, err
 	}
+	pageID, err := util.ParseUUID(input.PageID)
+	if err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
 	row, err := s.queries.CreateVisionPlanSection(ctx, cerebrodb.CreateVisionPlanSectionParams{
-		WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType, Position: input.Position,
+		WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType,
+		Position: input.Position, PageID: pageID, ColumnIndex: input.ColumnIndex,
 	})
 	if err != nil {
 		return VisionPlanSectionResponse{}, err
 	}
-	return visionPlanSectionResponse(row), nil
+	return visionPlanSectionResponse(row.ID, row.WorkspaceID, row.Key, row.Name, row.SectionType, row.Position, row.PageID, row.ColumnIndex, row.CreatedAt, row.UpdatedAt), nil
 }
 
 func (s *Service) UpdateVisionPlanSection(ctx context.Context, workspaceID, id pgtype.UUID, input VisionPlanSectionInput) (VisionPlanSectionResponse, error) {
@@ -984,13 +1067,18 @@ func (s *Service) UpdateVisionPlanSection(ctx context.Context, workspaceID, id p
 	if err := ValidateVisionPlanSectionInput(input); err != nil {
 		return VisionPlanSectionResponse{}, err
 	}
+	pageID, err := util.ParseUUID(input.PageID)
+	if err != nil {
+		return VisionPlanSectionResponse{}, err
+	}
 	row, err := s.queries.UpdateVisionPlanSection(ctx, cerebrodb.UpdateVisionPlanSectionParams{
-		ID: id, WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType, Position: input.Position,
+		ID: id, WorkspaceID: workspaceID, Name: strings.TrimSpace(input.Name), SectionType: input.SectionType,
+		Position: input.Position, PageID: pageID, ColumnIndex: input.ColumnIndex,
 	})
 	if err != nil {
 		return VisionPlanSectionResponse{}, err
 	}
-	return visionPlanSectionResponse(row), nil
+	return visionPlanSectionResponse(row.ID, row.WorkspaceID, row.Key, row.Name, row.SectionType, row.Position, row.PageID, row.ColumnIndex, row.CreatedAt, row.UpdatedAt), nil
 }
 
 func (s *Service) DeleteVisionPlanSection(ctx context.Context, workspaceID, id pgtype.UUID) (bool, error) {
@@ -1564,11 +1652,20 @@ func strategyResponse(id, workspaceID pgtype.UUID, kind, title, description stri
 	}
 }
 
-func visionPlanSectionResponse(row cerebrodb.CerebroVisionPlanSection) VisionPlanSectionResponse {
+func visionPlanSectionResponse(id, workspaceID pgtype.UUID, key, name, sectionType string, position int32, pageID pgtype.UUID, columnIndex int32, createdAt, updatedAt pgtype.Timestamptz) VisionPlanSectionResponse {
 	return VisionPlanSectionResponse{
+		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID),
+		Key: key, Name: name, SectionType: sectionType, Position: position,
+		PageID: util.UUIDToString(pageID), ColumnIndex: columnIndex,
+		Items: []VisionPlanItemResponse{}, CreatedAt: timestamp(createdAt), UpdatedAt: timestamp(updatedAt),
+	}
+}
+
+func visionPlanPageResponse(row cerebrodb.CerebroVisionPlanPage) VisionPlanPageResponse {
+	return VisionPlanPageResponse{
 		ID: util.UUIDToString(row.ID), WorkspaceID: util.UUIDToString(row.WorkspaceID),
-		Key: row.Key, Name: row.Name, SectionType: row.SectionType, Position: row.Position,
-		Items: []VisionPlanItemResponse{}, CreatedAt: timestamp(row.CreatedAt), UpdatedAt: timestamp(row.UpdatedAt),
+		Key: row.Key, Name: row.Name, ColumnCount: row.ColumnCount, Position: row.Position,
+		CreatedAt: timestamp(row.CreatedAt), UpdatedAt: timestamp(row.UpdatedAt),
 	}
 }
 

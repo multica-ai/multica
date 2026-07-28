@@ -8,6 +8,8 @@ import type { VisionPlanItem, VisionPlanSection } from "./types";
 
 export interface SectionMove {
   id: string;
+  page_id: string;
+  column_index: number;
   position: number;
 }
 
@@ -17,27 +19,55 @@ export interface ItemMove {
   position: number;
 }
 
-const orderedSections = (sections: VisionPlanSection[]): VisionPlanSection[] =>
-  [...sections].sort((a, b) => a.position - b.position);
-
 const activeItems = (section: VisionPlanSection): VisionPlanItem[] =>
   section.items.filter((item) => item.state === "active").sort((a, b) => a.position - b.position);
 
-/** Reorder columns: move section `activeId` to the slot of section `overId`. */
-export function moveSection(sections: VisionPlanSection[], activeId: string, overId: string): SectionMove[] {
-  if (activeId === overId) return [];
-  const ordered = orderedSections(sections);
-  const from = ordered.findIndex((section) => section.id === activeId);
-  const to = ordered.findIndex((section) => section.id === overId);
-  if (from === -1 || to === -1) return [];
-  const next = [...ordered];
-  const [moved] = next.splice(from, 1);
-  if (!moved) return [];
-  next.splice(to, 0, moved);
+/** The blocks of one column, in the order they are drawn. */
+export function columnSections(sections: VisionPlanSection[], pageId: string, columnIndex: number): VisionPlanSection[] {
+  return sections
+    .filter((section) => section.page_id === pageId && section.column_index === columnIndex)
+    .sort((a, b) => a.position - b.position);
+}
+
+/**
+ * Move block `activeId` into the column (`pageId`, `columnIndex`), inserting it
+ * before `beforeSectionId` (or appending when that is undefined / not found).
+ * Renumbers the source and destination columns and returns every block whose
+ * page, column, or position changed.
+ */
+export function moveSection(
+  sections: VisionPlanSection[],
+  activeId: string,
+  pageId: string,
+  columnIndex: number,
+  beforeSectionId?: string,
+): SectionMove[] {
+  const moved = sections.find((section) => section.id === activeId);
+  if (!moved || activeId === beforeSectionId) return [];
+
+  const source = { pageId: moved.page_id, columnIndex: moved.column_index };
+  const dest = columnSections(sections, pageId, columnIndex).filter((section) => section.id !== activeId);
+  let insertAt = dest.length;
+  if (beforeSectionId) {
+    const target = dest.findIndex((section) => section.id === beforeSectionId);
+    if (target !== -1) insertAt = target;
+  }
+  dest.splice(insertAt, 0, moved);
+
+  const columns = [{ pageId, columnIndex }];
+  if (source.pageId !== pageId || source.columnIndex !== columnIndex) columns.push(source);
+
   const changes: SectionMove[] = [];
-  next.forEach((section, index) => {
-    if (section.position !== index) changes.push({ id: section.id, position: index });
-  });
+  for (const column of columns) {
+    const list = column.pageId === pageId && column.columnIndex === columnIndex
+      ? dest
+      : columnSections(sections, column.pageId, column.columnIndex).filter((section) => section.id !== activeId);
+    list.forEach((section, index) => {
+      if (section.position !== index || section.page_id !== column.pageId || section.column_index !== column.columnIndex) {
+        changes.push({ id: section.id, page_id: column.pageId, column_index: column.columnIndex, position: index });
+      }
+    });
+  }
   return changes;
 }
 

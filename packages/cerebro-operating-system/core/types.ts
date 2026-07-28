@@ -21,7 +21,7 @@ export interface OperatingPeriod { id: string; workspace_id: string; name: strin
 export interface OperatingPeriodList { periods: OperatingPeriod[] }
 export interface StrategyItem { id: string; workspace_id: string; kind: StrategyKind; title: string; description: string; horizon_unit?: HorizonUnit; horizon_count?: number; horizon_label?: string; position: number; state: StrategyState; created_at: string; updated_at: string }
 export interface StrategyItemInput { kind: Exclude<StrategyKind, "unknown">; title: string; description?: string; horizon_unit?: HorizonUnit; horizon_count?: number; horizon_label?: string; position: number; state?: Exclude<StrategyState, "unknown"> }
-export type VisionPlanSectionType = "list" | "structured" | "process";
+export type VisionPlanSectionType = "list" | "structured" | "process" | "goals";
 export interface VisionPlanGoalConnection { connection_id: string; goal_id: string }
 export interface VisionPlanObjectLink { connection_id: string; target_type: "project" | "issue"; target_id: string; title: string; identifier: string }
 export interface VisionPlanItem {
@@ -37,10 +37,17 @@ export interface VisionPlanItemInput {
 }
 export interface VisionPlanSection {
   id: string; workspace_id: string; key: string; name: string; section_type: VisionPlanSectionType;
-  position: number; items: VisionPlanItem[]; created_at: string; updated_at: string;
+  position: number; page_id: string; column_index: number; items: VisionPlanItem[]; created_at: string; updated_at: string;
 }
-export interface VisionPlanSectionInput { name: string; section_type: VisionPlanSectionType; position: number }
-export interface VisionPlan { sections: VisionPlanSection[] }
+export interface VisionPlanSectionInput { name: string; section_type: VisionPlanSectionType; position: number; page_id: string; column_index: number }
+// A page is one arrangeable surface. Vision and Traction are seeded pages, so a
+// workspace can rename them, change their column count, or add pages of its own.
+export interface VisionPlanPage {
+  id: string; workspace_id: string; key: string; name: string;
+  column_count: number; position: number; created_at: string; updated_at: string;
+}
+export interface VisionPlanPageInput { name: string; column_count: number; position: number }
+export interface VisionPlan { pages: VisionPlanPage[]; sections: VisionPlanSection[] }
 export interface DerivedHealth { state: HealthState; reason: string; calculated_at: string }
 export interface RockProject { id: string; title: string; issue_count: number; done_issue_count: number }
 export interface RockIssue { id: string; identifier: string; title: string; status: string; project_id?: string; project_title?: string }

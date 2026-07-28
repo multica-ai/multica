@@ -118,7 +118,34 @@ describe("operating system API schemas", () => {
     }] });
     expect(parsed.sections[0]?.items[0]).toMatchObject({ part_label: "Target market", owner_name: "Lone", goal_connections: [{ goal_id: "g1" }] });
     expect(visionPlanSchema.safeParse({ sections: null }).success).toBe(false);
-    expect(EMPTY_VISION_PLAN).toEqual({ sections: [] });
+    expect(EMPTY_VISION_PLAN).toEqual({ pages: [], sections: [] });
+  });
+
+  it("parses Vision Plan pages and survives a server that has not shipped them yet", () => {
+    const parsed = visionPlanSchema.parse({
+      pages: [{ id: "p1", workspace_id: "w1", key: "traction", name: "Traction", column_count: 3, position: 1, created_at: "", updated_at: "" }],
+      sections: [{
+        id: "s1", workspace_id: "w1", key: "goals-board", name: "Goals", section_type: "goals",
+        position: 0, page_id: "p1", column_index: 1, created_at: "", updated_at: "", items: [],
+      }],
+    });
+    expect(parsed.pages[0]).toMatchObject({ key: "traction", column_count: 3 });
+    expect(parsed.sections[0]).toMatchObject({ section_type: "goals", page_id: "p1", column_index: 1 });
+
+    // An older backend sends no pages and no page fields — the board must not crash.
+    const legacy = visionPlanSchema.parse({ sections: [{
+      id: "s1", workspace_id: "w1", key: "core-values", name: "Core Values",
+      section_type: "list", position: 0, created_at: "", updated_at: "", items: [],
+    }] });
+    expect(legacy.pages).toEqual([]);
+    expect(legacy.sections[0]).toMatchObject({ page_id: "", column_index: 0 });
+
+    // Drifted values downgrade instead of throwing.
+    const drifted = visionPlanSchema.parse({
+      pages: [{ id: "p1", workspace_id: "w1", key: "vision", name: "Vision", column_count: 9, position: 0, created_at: "", updated_at: "" }],
+      sections: [],
+    });
+    expect(drifted.pages[0]?.column_count).toBe(3);
   });
 
   it("parses meeting configuration and safely downgrades new enum values", () => {
