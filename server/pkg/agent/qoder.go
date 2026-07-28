@@ -146,8 +146,10 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	// Qoder emits interim narration and the final answer as the same ACP
 	// AgentMessageChunk type, with tool calls as the only reliable boundary.
 	// Keep the complete text for provider-error detection, while deliverable
-	// holds only the text block after the latest tool call.
+	// holds only the text block after the latest tool call. This boundary is a
+	// heuristic until Qoder exposes an explicit final-answer marker.
 	var fullOutput, deliverableOutput strings.Builder
+	var lastTextBlock string
 	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
@@ -173,6 +175,9 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 				fullOutput.WriteString(msg.Content)
 				deliverableOutput.WriteString(msg.Content)
 			case MessageToolUse:
+				if block := deliverableOutput.String(); strings.TrimSpace(block) != "" {
+					lastTextBlock = block
+				}
 				deliverableOutput.Reset()
 			}
 			outputMu.Unlock()
@@ -416,6 +421,9 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 		outputMu.Lock()
 		finalOutput := deliverableOutput.String()
+		if strings.TrimSpace(finalOutput) == "" {
+			finalOutput = lastTextBlock
+		}
 		providerErrorOutput := fullOutput.String()
 		outputMu.Unlock()
 
