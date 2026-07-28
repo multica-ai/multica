@@ -106,41 +106,68 @@ func askContext(toolName, connName, taskID, issueID, triggerUserID, triggerUserN
 // this runtime, so the daemon's --disallowedTools never sees them — this is the
 // firtal-gateway half of connection enforcement (TECH-3174 Deny, TECH-3498 Ask).
 //
-// Fail-open to Allow on a DB/lookup error (logged at warn): an always-on
-// per-call check must not take the whole gateway fleet offline on a transient
-// error. A genuine Deny/Ask holds in every non-error case, which is the
-// requirement. The caller decides what to do with each verdict.
+// Fail closed on a missing resolver or DB/lookup error. This is the authoritative
+// call-time gate, so an unresolved connection verdict must produce a visible
+// denial instead of silently granting the call.
 // It returns the resolved setting plus the connection name of the deciding row
 // ("" when the tool is not a connection tool), so the caller can surface "which
 // integration" in the approval context (TECH-3498).
 func (e *FirtalGatewayExecutor) connectionToolSetting(
 	ctx context.Context,
 	agentID, workspaceID pgtype.UUID,
+	reg *Registry,
 	toolName string,
 	meta GatewayRequestMeta,
 ) (toolpolicy.Setting, string) {
-	if e.connDeny == nil || !agentID.Valid || toolName == "" {
+	if !agentID.Valid || toolName == "" {
 		return toolpolicy.SettingAllow, ""
+	}
+	resourceName, connectionName, connectionTool := connectionPolicyTarget(reg, toolName)
+	if !connectionTool {
+		return toolpolicy.SettingAllow, ""
+	}
+	if e.connDeny == nil || e.queries == nil {
+		e.logger.Warn("connection policy: resolver unavailable — blocking",
+			"agent_id", meta.AgentID, "tool", toolName)
+		return toolpolicy.SettingDeny, connectionName
 	}
 	agent, err := e.queries.GetAgent(ctx, agentID)
 	if err != nil {
-		e.logger.Warn("connection policy: agent lookup failed — allowing",
+		e.logger.Warn("connection policy: agent lookup failed — blocking",
 			"agent_id", meta.AgentID, "tool", toolName, "error", err)
-		return toolpolicy.SettingAllow, ""
+		return toolpolicy.SettingDeny, connectionName
 	}
-	eff, connName, err := e.connDeny.ConnectionToolEffective(ctx, workspaceID, agent.RuntimeID, agentID, agent.OwnerID, toolName)
+	eff, connName, err := e.connDeny.ConnectionToolEffective(ctx, workspaceID, agent.RuntimeID, agentID, agent.OwnerID, resourceName)
 	if err != nil {
-		e.logger.Warn("connection policy: resolve failed — allowing",
+		e.logger.Warn("connection policy: resolve failed — blocking",
 			"agent_id", meta.AgentID, "tool", toolName, "error", err)
-		return toolpolicy.SettingAllow, ""
+		return toolpolicy.SettingDeny, connectionName
 	}
 	return eff, connName
 }
 
+func connectionPolicyTarget(reg *Registry, toolName string) (resourceName, connectionName string, ok bool) {
+	if reg == nil {
+		return "", "", false
+	}
+	tool, found := reg.Get(toolName)
+	if !found {
+		return "", "", false
+	}
+	switch concrete := tool.(type) {
+	case *gatewayMCPTool:
+		return concrete.toolName, concrete.connectionName, true
+	case *CustomerServiceMCPTool:
+		return concrete.Name(), "customer-service-mcp", true
+	default:
+		return "", "", false
+	}
+}
+
 // guardConnectionAsk routes an Ask verdict on a workspace-connection tool through
 // the shared approval gate: it creates an inbox request and BLOCKS until a human
-// approves (continue) or rejects/expires (stop), reusing exactly the same
-// GuardDecision machinery as guardToolCallViaPolicy. A gate error fails closed —
+// approves (continue) or rejects/expires (stop), reusing the canonical
+// GuardDecision machinery. A gate error fails closed —
 // an Ask is never silently downgraded to allow (TECH-3498).
 func (e *FirtalGatewayExecutor) guardConnectionAsk(
 	ctx context.Context,
@@ -217,7 +244,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	var decision, connNameLog string
 	if toolName == "create_issue" {
 		entry := e.decideAccess(ctx, agentID, workspaceID, toolName, reg, meta, gatewayPolicyRequestContext(toolName, args))
-		if entry.ShadowDecision != accessdecision.DecisionAllow {
+		if entry.Decision != accessdecision.DecisionAllow {
 			return false, entry.Reason
 		}
 		decision = "policy_decision_service+platform_action"
@@ -237,7 +264,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// --disallowedTools. A Deny here makes the tool uncallable regardless of the
 	// approval-gate rollout. Ask needs the approval inbox, so it is routed below
 	// alongside the rest of the Ask machinery (a no-op when the gate is off).
-	connSetting, connName := e.connectionToolSetting(ctx, agentID, workspaceID, toolName, meta)
+	connSetting, connName := e.connectionToolSetting(ctx, agentID, workspaceID, reg, toolName, meta)
 	// FIR-2166 C PR3: fold in the API-connection ENDPOINT verdict for API-type
 	// connection tools (api_connection_tools.go), resolved through the same chain
 	// via ConnectionEndpointEffective. connectionToolSetting above keys on the bare
@@ -258,7 +285,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// FIR-3091 punkt 8 fase 3: usage log — a connection rule that decided this
 	// call (connName is only set when a rule tightened past the allow baseline)
 	// is recorded under its connection:<name> permission key. Best-effort.
-	if connName != "" {
+	if connName != "" && e.connDeny != nil {
 		e.connDeny.RecordUsage(ctx, toolpolicy.UsageParams{
 			WorkspaceID:      workspaceID,
 			ToolKey:          toolpolicy.ConnectionToolKey(connName),
@@ -278,7 +305,11 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 
 	entry := e.decideAccess(ctx, agentID, workspaceID, toolName, reg, meta, gatewayPolicyRequestContext(toolName, args))
 	decision = "policy_decision_service"
-	if entry.ShadowDecision != accessdecision.DecisionAllow {
+	if entry.PolicyDecision == accessdecision.PolicyAsk {
+		decision = "policy_decision_service+ask"
+		return e.guardCanonicalAsk(ctx, agentID, workspaceID, toolName, args, meta, entry.Reason)
+	}
+	if entry.Decision != accessdecision.DecisionAllow {
 		return false, entry.Reason
 	}
 	// Connection Ask remains a safety floor on top of the authoritative Policy
@@ -304,6 +335,47 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool", toolName, "connection", connName)
 		decision = "deny_ask_inbox_inactive"
 		return false, fmt.Sprintf("tool %q requires human approval, which is not available for this run", toolName)
+	}
+	return true, ""
+}
+
+func (e *FirtalGatewayExecutor) guardCanonicalAsk(
+	ctx context.Context,
+	agentID, workspaceID pgtype.UUID,
+	toolName string,
+	args map[string]any,
+	meta GatewayRequestMeta,
+	reason string,
+) (bool, string) {
+	if e.gate == nil || meta.TriggerUserID == "" {
+		return false, "tool requires human approval, which is not available for this run"
+	}
+	res, err := e.gate.GuardDecision(ctx, permgate.Request{
+		Permission: permissions.Request{
+			WorkspaceID: workspaceID,
+			Actor:       permissions.Actor{Type: "agent", ID: agentID},
+			Agent:       agentID,
+			Capability:  toolName,
+		},
+		RequesterType: approvals.RequesterAgent,
+		RequesterID:   agentID,
+		Surface:       approvals.SurfaceSystem,
+		Context: map[string]any{
+			"tool_name": toolName,
+			"task_id":   meta.TaskID,
+			"issue_id":  meta.IssueID,
+			"args":      args,
+			"reason":    reason,
+		},
+	}, permissions.Decision{Kind: permissions.DecisionNeedsApproval, Reason: reason})
+	if err != nil {
+		return false, fmt.Sprintf("permission gate error: %v", err)
+	}
+	if res.Outcome.Stops() {
+		if res.Reason != "" {
+			return false, res.Reason
+		}
+		return false, reason
 	}
 	return true, ""
 }
@@ -336,10 +408,10 @@ func (e *FirtalGatewayExecutor) guardPlatformAction(ctx context.Context, agentID
 	if err != nil {
 		return false, err.Error()
 	}
-	effective, err := e.toolPolicy.ResolveGeneral(ctx, toolpolicy.Query{
+	effective, err := e.toolPolicy.ResolveDeclared(ctx, toolpolicy.Query{
 		WorkspaceID: workspaceID, ToolKey: toolName, RuntimeID: agent.RuntimeID,
 		AgentID: agentID, UserID: agent.OwnerID, Base: toolpolicy.SettingAllow,
-	}, e.toolPolicy.MemberOverrideEnabled(ctx, workspaceID))
+	})
 	if err != nil {
 		return false, err.Error()
 	}
@@ -383,176 +455,6 @@ func (e *FirtalGatewayExecutor) logToolDecision(meta GatewayRequestMeta, toolNam
 		return
 	}
 	e.logger.Warn("runtime tool decision (FIR-2243 B1)", append(attrs, "reason", reason)...)
-}
-
-// guardToolCallViaPolicy enforces the FIR-2230 per-tool permission chain for one
-// tool call. It resolves the tool through Runtime › Agent › Group › User for the
-// agent's owner — the principal whose ceiling the agent runs under — and maps
-// the Effective verdict: Allow proceeds immediately, Deny stops, Ask creates an
-// inbox request and BLOCKS until a human approves (continue) or rejects/expires
-// (stop), reusing the same gate machinery as the capability path. Any lookup or
-// gate error fails closed.
-func (e *FirtalGatewayExecutor) guardToolCallViaPolicy(
-	ctx context.Context,
-	agentID, workspaceID pgtype.UUID,
-	toolName string,
-	args map[string]any,
-	meta GatewayRequestMeta,
-) (bool, string) {
-	// The chain's user ceiling is the agent's owner; the runtime layer is the
-	// agent's runtime. Both come from the agent row. resolveGroupIDs (in the
-	// store) expands the owner's real groups for the Group layer.
-	var runtimeID, ownerID pgtype.UUID
-	if agentID.Valid {
-		agent, err := e.queries.GetAgent(ctx, agentID)
-		if err != nil {
-			e.logger.Warn("tool-policy gate: agent lookup failed — failing closed",
-				"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName, "error", err)
-			return false, fmt.Sprintf("tool-policy gate error: %v", err)
-		}
-		runtimeID = agent.RuntimeID
-		ownerID = agent.OwnerID
-	}
-
-	// A run with no triggering human is a System run (autopilot / system-triggered):
-	// there is no one to answer an approval prompt, so the chain treats any Ask it
-	// would resolve to as Deny — fail-safe (FIR-1609). The owner's User ceiling is
-	// still loaded below, so a System run is never looser than the same agent driven
-	// by its owner; IsSystem only adds the Ask→Deny safety on top.
-	isSystemRun := meta.TriggerUserID == ""
-
-	// The System layer's subject is the autopilot that drives the human-less run —
-	// the autopilot is the System actor, born from its owner (FIR-1609). It only
-	// enters resolution for a system run that carries one; a malformed id is left
-	// absent (the layer inherits) rather than failing the gate, since the owner's
-	// User ceiling plus the Ask→Deny fail-safe already bound the run.
-	var systemID pgtype.UUID
-	if isSystemRun && meta.AutopilotID != "" {
-		if id, perr := util.ParseUUID(meta.AutopilotID); perr == nil {
-			systemID = id
-		}
-	}
-
-	// The request attributes a Condition (the WHEN layer) is matched against: the
-	// host the call targets (parsed from a url arg when the tool carries one,
-	// web_fetch and the like) and the action verb derived from the tool key. The
-	// tool names this gate sees are the runtime's own snake_case names (web_fetch,
-	// credential_list …), not verbed dotted capability keys, so ActionOf yields ""
-	// here today — the derivation is wired for when repo/credential capabilities
-	// resolve through this chain. A rule with a host- or action-scoped Condition
-	// only bites when those match; rows without a Condition (every row today)
-	// ignore this entirely, so it is behaviour-preserving until conditions exist.
-	reqCtx := toolpolicy.RequestContext{Action: toolpolicy.ActionOf(toolName)}
-	if u, ok := args["url"].(string); ok {
-		reqCtx.Host = toolpolicy.HostOf(u)
-	}
-
-	// This is the GENERAL tool-policy gate, so it resolves through ResolveGeneral:
-	// when cerebro_member_override is on for the workspace it
-	// uses the member-override model (a member may loosen an inherited group/
-	// workspace default), otherwise it is identical to the tighten-only Resolve.
-	// The deny-by-default floors (credentials, sandbox, repo checkout, repo-
-	// approval cap) resolve through Resolve elsewhere and never reach this path.
-	eff, err := e.toolPolicy.ResolveGeneral(ctx, toolpolicy.Query{
-		WorkspaceID:    workspaceID,
-		ToolKey:        toolName,
-		RuntimeID:      runtimeID,
-		AgentID:        agentID,
-		UserID:         ownerID,
-		SystemID:       systemID,
-		IsSystem:       isSystemRun,
-		RequestContext: reqCtx,
-		// The CEL evaluator for the Expr escape hatch is injected only when the
-		// default-OFF cerebro_policy_cel flag is on for the workspace. While off,
-		// Eval stays nil — a row with a non-empty Expr is undecidable and fails
-		// closed by effect (ConditionedSetting). No row carries an Expr today, so
-		// the flag's default keeps behaviour identical until it is turned on.
-		Eval: e.policyCELEvaluator(ctx, workspaceID),
-	}, e.memberOverrideEnabled(ctx, workspaceID))
-	if err != nil {
-		e.logger.Warn("tool-policy gate: resolve failed — failing closed",
-			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName, "error", err)
-		return false, fmt.Sprintf("tool-policy gate error: %v", err)
-	}
-
-	// FIR-3091 punkt 8 fase 3: usage log — one row per applied gateway verdict,
-	// so the permission detail page can show every time this tool's policy was
-	// enforced on the gateway. Best-effort after the decision resolved.
-	e.toolPolicy.RecordUsage(ctx, toolpolicy.UsageParams{
-		WorkspaceID:      workspaceID,
-		ToolKey:          toolName,
-		EnforcementPoint: "gateway_tool",
-		SubjectType:      "agent",
-		SubjectID:        agentID,
-		Resource:         reqCtx.Host,
-		Decision:         eff.Setting,
-		DecidedBy:        string(eff.DecidedBy),
-	})
-
-	decision := toolPolicyDecision(eff)
-	if decision.Kind == permissions.DecisionAllow {
-		// Fast path: no ask, no await, no inbox row for an allowed tool.
-		return true, ""
-	}
-
-	req := permgate.Request{
-		Permission: permissions.Request{
-			WorkspaceID: workspaceID,
-			Actor:       permissions.Actor{Type: "agent", ID: agentID},
-			Agent:       agentID,
-			Capability:  toolName,
-		},
-		RequesterType: approvals.RequesterAgent,
-		RequesterID:   agentID,
-		Surface:       approvals.SurfaceSystem,
-		Context: map[string]any{
-			"tool_name": toolName,
-			"task_id":   meta.TaskID,
-			"issue_id":  meta.IssueID,
-			"args":      args,
-			"effective": string(eff.Setting),
-			"reason":    eff.Reason,
-		},
-	}
-
-	res, err := e.gate.GuardDecision(ctx, req, decision)
-	if err != nil {
-		e.logger.Warn("tool-policy gate error — failing closed",
-			"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName,
-			"effective", string(eff.Setting), "error", err)
-		return false, fmt.Sprintf("permission gate error: %v", err)
-	}
-	e.logger.Info("tool-policy gate decision",
-		"task_id", meta.TaskID, "agent_id", meta.AgentID, "tool_name", toolName,
-		"effective", string(eff.Setting), "system_run", isSystemRun,
-		"outcome", string(res.Outcome), "reason", eff.Reason)
-	if res.Outcome.Stops() {
-		reason := res.Reason
-		if reason == "" {
-			reason = eff.Reason
-		}
-		if reason == "" {
-			reason = string(res.Outcome)
-		}
-		return false, reason
-	}
-	return true, ""
-}
-
-// toolPolicyDecision maps a resolved tool-policy verdict to the permission
-// decision the gate acts on: Allow → allow, Ask → needs_approval (inbox + wait),
-// Deny → deny. Resolve never returns Inherit; any unexpected value fails closed.
-func toolPolicyDecision(eff toolpolicy.Effective) permissions.Decision {
-	switch eff.Setting {
-	case toolpolicy.SettingAllow:
-		return permissions.Decision{Kind: permissions.DecisionAllow, Reason: eff.Reason}
-	case toolpolicy.SettingAsk:
-		return permissions.Decision{Kind: permissions.DecisionNeedsApproval, Reason: eff.Reason}
-	case toolpolicy.SettingDeny:
-		return permissions.Decision{Kind: permissions.DecisionDeny, Reason: eff.Reason}
-	default:
-		return permissions.Decision{Kind: permissions.DecisionDeny, Reason: "unresolved tool policy"}
-	}
 }
 
 // workspaceApprovalGateEnabled checks the cerebro_approval_gate workspace
@@ -616,8 +518,8 @@ func (e *FirtalGatewayExecutor) memberOverrideEnabled(ctx context.Context, works
 // cerebro_policy_cel flag is enabled for the workspace, else nil. Returning nil
 // leaves Query.Eval unset, so an Expr condition is undecidable and fails closed —
 // the behaviour-preserving default. A DB lookup miss or error resolves to OFF
-// (the flag's default), unlike the always-on gates which fail open: an unproven
-// expression-evaluation path must not switch itself on by accident.
+// (the flag's default): an unproven expression-evaluation path must not switch
+// itself on by accident.
 func (e *FirtalGatewayExecutor) policyCELEvaluator(ctx context.Context, workspaceID pgtype.UUID) toolpolicy.ExprEvaluator {
 	if e == nil || e.cerebro == nil {
 		return nil
@@ -663,9 +565,8 @@ const (
 // credential governance, so a needs-approval verdict
 // from any of them lands in the one /approvals inbox instead of a silent block.
 func BuildApprovalGate(cerebroQueries *cerebrodb.Queries, tx approvals.TxStarter, bus *events.Bus) *permgate.Gate {
-	resolver := permissions.New(cerebroQueries)
 	approvalsSvc := approvals.New(cerebroQueries, tx, bus)
-	gate := permgate.New(resolver, approvalsSvc)
+	gate := permgate.New(approvalsSvc)
 	gate.WaitTimeout = durationFromEnv(defaultApprovalGateWait, envApprovalGateWait)
 	gate.ApprovalTTL = durationFromEnv(defaultApprovalGateTTL, envApprovalGateTTL)
 	return gate

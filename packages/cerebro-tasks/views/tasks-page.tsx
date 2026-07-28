@@ -14,7 +14,6 @@ import { useCerebroTasksStore } from "../core/store";
 import { cerebroTasksListOptions } from "../core/queries";
 import {
   parseTasksFilterFromSearchParams,
-  replaceBrowserHistoryPath,
   tasksFilterPath,
 } from "../core/url-state";
 
@@ -91,8 +90,7 @@ export function TasksPage() {
 
   useEffect(() => {
     if (!hydrated || filterPath === currentPath) return;
-    replaceBrowserHistoryPath(filterPath);
-    navigation.replace(filterPath);
+    (navigation.replaceSilent ?? navigation.replace)(filterPath);
   }, [currentPath, filterPath, hydrated, navigation]);
 
   const wsId = workspace?.id ?? "";

@@ -20,6 +20,7 @@ export type CerebroFlagKey =
   | "cerebro_web_push"
   | "cerebro_browser_push_prompt"
   | "cerebro_dashboard"
+  | "cerebro_ai_impact"
   | "cerebro_inbox_row_actions"
   | "cerebro_channel_row_actions"
   // FIR-407: in-conversation message search for channels + DMs.
@@ -174,7 +175,6 @@ export type CerebroFlagKey =
   | "cerebro_workflow_step_model_override"
   | "cerebro_skill_mention"
   | "cerebro_tool_policy"
-  | "cerebro_simple_tool_policy"
   // FIR-1771: the "Test as user" profile-menu entry that resolves another
   // user+agent's effective tool verdict. The real gate is the
   // tools:test-as-user permission (default Allow for the owner only); this flag
@@ -188,7 +188,6 @@ export type CerebroFlagKey =
   // turns it on, and access is deny-by-default until a box is granted.
   | "cerebro_credentials_per_actor"
   | "cerebro_web_fetch_policy"
-  | "cerebro_platform_capabilities"
   | "cerebro_approvals"
   | "cerebro_move_comment_to_subissue"
   | "cerebro_move_comment_to_thread"
@@ -232,6 +231,10 @@ export type CerebroFlagKey =
   | "cerebro_session_context_hairline"
   // FIR-1839: the "CLI runs" tab (the local Claude Code / CLI work-sessions list, formerly the "Sessions" tab). OFF by default — hidden unless a workspace opts in.
   | "cerebro_cli_runs_tab"
+  // FIR-3782: failure summary card at the top of a failed run's transcript.
+  | "cerebro_run_failure_card"
+  // FIR-3782: the run's Initial prompt disclosure shows the byte-exact prompt the model read, not just the triggering comment.
+  | "cerebro_run_full_prompt"
   // FIR-2827: sidebar "Subscribers" section on regular issues — subscribers split by type (Members / Agents) with the add/remove popover, replacing the avatar stack next to the Activity header.
   | "cerebro_issue_sidebar_subscribers"
   // FIR-1597: optional time-of-day on an issue's start/due date; start time auto-starts an agent, due time times the reminder.
@@ -271,6 +274,9 @@ export type CerebroFlagKey =
   // TECH-3761: sub-toggle of cerebro_comment_target_guard. Exempt an agent from
   // the recipient requirement when it already has an active wakeup on the issue.
   | "cerebro_comment_target_guard_wakeup_exempt"
+  // FIR-3308: reject an agent comment that promises the agent will carry on
+  // while no wakeup is scheduled to deliver it. Independent of the target guard.
+  | "cerebro_comment_no_unbacked_promise"
   // FIR-2409: friendly "Agent-start" permission tab — who may trigger an agent they don't own.
   | "cerebro_agent_trigger_permissions"
   // FIR-3091 slice 5: surface the web_fetch host allow/deny list inside the unified
@@ -412,6 +418,9 @@ export type CerebroFlagKey =
   // aggregated per config version over the runs that actually used it.
   // Default OFF until QA'd on staging.
   | "cerebro_agent_quality"
+  // FIR-3805: per-binding "always on" checkbox on the agent Skills tab — pastes
+  // the skill's full text into the agent's instructions on every run.
+  | "cerebro_agent_skill_always_on"
   // FIR-3212: Engine support panel on the agent Instructions tab — which run
   // settings the agent's runtime actually honours, which it drops silently,
   // and how it accepts a system prompt. Default OFF until QA'd on staging.
@@ -424,7 +433,16 @@ export type CerebroFlagKey =
   // product stays dormant until local + CI verification is complete.
   | "cerebro_mini_apps"
   // FIR-2835: verified on-behalf-of chat sessions created by external apps.
-  | "cerebro_embedded_chat";
+  | "cerebro_embedded_chat"
+  // FIR-3659: Workpad — agents keep a plan checklist at the top of the issue
+  // description (created before in_progress, maintained for the life of the
+  // issue). ON injects the Workpad protocol into every agent's runtime brief so
+  // agents create and keep the checklist updated. Default OFF until QA'd on
+  // staging; enforcement (the status-change gate) is a separate hook policy.
+  | "cerebro_workpad"
+  // FIR-3608: scoped, non-personal, workspace-bound service tokens (`msv_`)
+  // managed from Settings → Tokens.
+  | "cerebro_service_tokens";
 
 /**
  * Default value for each flag. Applied at read time when no override exists.
@@ -443,6 +461,7 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_web_push: true,
   cerebro_browser_push_prompt: true,
   cerebro_dashboard: true,
+  cerebro_ai_impact: false,
   cerebro_inbox_row_actions: true,
   cerebro_channel_row_actions: true,
   cerebro_channel_message_search: true,
@@ -488,7 +507,13 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // TECH-3556 (Wave 3): comments + suggestions on notes/documents. ON (FIR-1647):
   // shared surface + the comment composer can @-tag people/agents/issues.
   cerebro_note_comments: true,
-  cerebro_note_versions: false,
+  // FIR-3601 item 6: ON by default. Note version history is fully built and
+  // server-tested (note/versions.go + wave3_db_test.go) and the "History"
+  // action + restore sheet are wired in the note ⋯ menu — it was only ever
+  // hidden because this flag defaulted off, which read to users as "version
+  // history doesn't work". Matches its completed siblings (comments,
+  // line_authors) which are on. The document-history flag below stays off.
+  cerebro_note_versions: true,
   // FIR-2697: document version history — off until QA'd on staging.
   cerebro_document_versions: false,
   // FIR-2697 part 2: folder suggestions with accept — off until QA'd on staging.
@@ -548,7 +573,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   cerebro_workflow_step_model_override: true,
   cerebro_skill_mention: true,
   cerebro_tool_policy: true,
-  cerebro_simple_tool_policy: true,
   // FIR-1771: Test as user. Default ON — the feature is still locked down by the
   // tools:test-as-user permission (default Allow for the workspace owner only),
   // so turning the flag on exposes nothing to members who lack the permission.
@@ -561,7 +585,6 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // trigger autopilot, manage agents/runtimes/grants) in the tool-policy table
   // so they are settable Allow/Ask/Deny on every layer. Default OFF — nothing
   // new appears until an admin turns it on.
-  cerebro_platform_capabilities: false,
   // Deliberately ON (FIR-2230 phase 5): the legacy duplicate "Pending" tab on
   // the Access page was removed, so the approvals inbox is now the ONLY surface
   // for needs_approval asks. Leaving this off would leave prod with no approvals
@@ -639,6 +662,13 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-1839: OFF by default — the "CLI runs" tab (local CLI work-sessions) is
   // hidden unless a workspace opts in.
   cerebro_cli_runs_tab: false,
+  // FIR-3782: ON. Shows the reason, the last step and the tail of its output
+  // at the top of a failed run, so "why did this fail" needs no scrolling.
+  cerebro_run_failure_card: true,
+  // FIR-3782: ON. The Initial prompt disclosure reads the run's recorded
+  // prompt snapshot instead of only the triggering comment. Off falls back to
+  // the triggering comment, which is also what a run without a snapshot shows.
+  cerebro_run_full_prompt: true,
   // FIR-2827: ON by default — subscribers listed in the issue sidebar, split by
   // type. Off falls back to the avatar stack next to the Activity header.
   cerebro_issue_sidebar_subscribers: true,
@@ -700,6 +730,12 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // recipient requirement — the wakeup is the follow-up action, so the comment
   // need not also tag a human. Off keeps the base guard's behaviour unchanged.
   cerebro_comment_target_guard_wakeup_exempt: false,
+  // FIR-3308: OFF by default. When on, an agent comment that says the agent
+  // itself will continue — while it has no active wakeup on the issue — is
+  // rejected with a message telling it to schedule the wakeup first or to state
+  // a delivered result instead. Independent of cerebro_comment_target_guard.
+  // Members are never affected. Off restores the prior behaviour.
+  cerebro_comment_no_unbacked_promise: false,
   // FIR-2409: opt-in until the Agent-start tab + per-agent rows are reviewed.
   cerebro_agent_trigger_permissions: false,
   // FIR-3091 slice 5: OFF by default. When on, the web_fetch host list moves
@@ -826,12 +862,19 @@ export const CEREBRO_FLAG_DEFAULTS: Record<CerebroFlagKey, boolean> = {
   // FIR-3212: default OFF until QA'd on staging.
   cerebro_agent_production_prompt: false,
   cerebro_agent_quality: false,
+  // FIR-3805: default ON — an agent with no skill flagged always-on behaves
+  // exactly as before, so the only thing the flag gates is whether the
+  // checkbox is reachable at all.
+  cerebro_agent_skill_always_on: true,
   cerebro_agent_setup_capabilities: false,
   // FIR-2698: default OFF until QA'd on staging.
   cerebro_model_registry: false,
   // FIR-3172: default OFF. Enabling is a separate release decision.
   cerebro_mini_apps: false,
   cerebro_embedded_chat: false,
+  // FIR-3659: default OFF. Enabling injects the Workpad protocol into agent briefs.
+  cerebro_workpad: false,
+  cerebro_service_tokens: true,
 };
 
 /**
@@ -917,6 +960,13 @@ export interface CerebroFlagDefinition {
  */
 export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
   {
+    key: "cerebro_service_tokens",
+    label: "Service tokens",
+    group: "permissions",
+    description:
+      "Add a Service tokens section to Settings → Tokens: owners and admins mint workspace-bound, read-only, expiring and revocable API keys (msv_) for external systems and agents. Off disables management and every existing token immediately.",
+  },
+  {
     key: "cerebro_embedded_chat",
     label: "Embedded Chat API",
     group: "workspace",
@@ -950,6 +1000,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "agents",
     description:
       "Add a Quality tab on the agent page measuring each configuration version on the runs that actually used it: judge verdicts (solution) and human signals like reactions and approvals (satisfaction), always with sample sizes and honest missing states. Off hides the tab; measurements are kept.",
+  },
+  {
+    key: "cerebro_agent_skill_always_on",
+    label: "Always-on skills",
+    group: "agents",
+    description:
+      "Add an 'Always on' checkbox to each skill on the agent Skills tab. A skill marked always on has its full text pasted into the agent's instructions on every run, so rules that must hold for every response apply without the agent choosing to open the skill first. Off hides the checkbox; skills already marked stay marked and keep working.",
   },
   {
     key: "cerebro_agent_setup_capabilities",
@@ -1076,6 +1133,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Enable the cerebro workspace operations dashboard at /:workspace/dashboard (agent strip, KPI cards, recent tasks).",
+  },
+  {
+    key: "cerebro_ai_impact",
+    label: "AI Impact",
+    group: "workspace",
+    description:
+      "Enable the evidence-backed AI Impact control room inside Dashboard.",
   },
   {
     key: "cerebro_inbox_row_actions",
@@ -1327,13 +1391,6 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Enable the capability catalog on agent and runtime pages: one flat, filterable list of every tool (Tool · Class · Side effect · Decision · Resolved by), narrowed by combinable class / side-effect / decision filters + search, with one editable decision pill per row and a mobile card layout. Backed by the four-layer Runtime › Agent › Group › User chain. GET /api/workspaces/{id}/tool-policy (member) + PUT/DELETE (admin/owner). FIR-2284 (redesign of FIR-2230).",
   },
   {
-    key: "cerebro_simple_tool_policy",
-    label: "Simple tool permissions",
-    group: "permissions",
-    description:
-      "Show the simplified, user-facing tool permission table on the agent Tools tab: one Allow/Ask/Block toggle per tool, grouped into Read · Execute · Fetch · Destructive. Reuses the cerebro_tool_policy data layer — writes the agent layer only. The rich Effective-chain table stays behind cerebro_tool_policy as a power-view. FIR-2358.",
-  },
-  {
     key: "cerebro_test_as_user",
     label: "Test as user",
     group: "permissions",
@@ -1348,18 +1405,11 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
       "Let workspace admins control which URLs agents may fetch with the web_fetch tool. Choose a mode — allow-list (only listed hosts) or disallow-list (everything except listed hosts) — and manage the host rules (github.com, *.github.com). The active list is shown to agents so they can explain to the user when a host is blocked. When off, the legacy hardcoded allow-list applies. Default ON. TECH-3522.",
   },
   {
-    key: "cerebro_platform_capabilities",
-    label: "Platform actions in permissions",
-    group: "permissions",
-    description:
-      "Add the Multica platform actions to the tool-policy table alongside reported runtime tools: create/edit/delete issues, comments, sub-issues, autopilots, artifacts, and the management of agents, runtimes, groups, grants, and projects. Each becomes a settable Allow/Ask/Deny row on every layer (workspace › runtime › agent › group › user). Actions governed elsewhere (membership ACL, daemon token, webhook secret) are listed but marked as managed externally. Catalog is code-owned (server platformcatalog package, traceable to permguard/inventory.json). FIR-2594 phase 1.",
-  },
-  {
     key: "cerebro_approvals",
     label: "Approval inbox",
     group: "permissions",
     description:
-      "Enable the approval inbox at /:workspace/approvals — when the permission engine returns needs_approval, the ask lands here for a human to approve, reject, or delegate, with an audit trail per decision. Owner/admin only. FIR-2131.",
+      "Enable the approval inbox at /:workspace/approvals — when the permission engine returns needs_approval, the ask lands here for a human to approve, reject, or delegate, with an audit trail per decision. Owner/admin only. The inbox remains visible whenever Tool approval enforcement is on, so an Ask can never wait without a human decision path. FIR-2131, FIR-3388.",
   },
   {
     key: "cerebro_move_comment_to_subissue",
@@ -1564,6 +1614,20 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "workspace",
     description:
       "Show the \"CLI runs\" tab on an issue — the list of local Claude Code / CLI work-sessions started from a terminal (start, stop, resume, fork, transcript). This was previously the \"Sessions\" tab; renamed to avoid colliding with comment sessions. OFF by default — hidden unless a workspace opts in. FIR-1839.",
+  },
+  {
+    key: "cerebro_run_failure_card",
+    label: "Run failure card",
+    group: "workspace",
+    description:
+      "Show a summary card at the top of a failed run's execution log: the failure reason in plain words, the last step the agent took, and the end of that step's output. Everything on the card already exists in the run timeline — the card just stops you scrolling to find it. ON by default. FIR-3782.",
+  },
+  {
+    key: "cerebro_run_full_prompt",
+    label: "Full run prompt",
+    group: "workspace",
+    description:
+      "Show the \"Initial prompt\" panel on a run, carrying the byte-exact prompt the model actually read — every layer in the order it was delivered, with secrets redacted — instead of only the comment that triggered the run. The prompt is already recorded per run; this only decides where you can read it. Runs with no recorded prompt, and runs from a runtime that does not report one, still show the triggering comment and say so. Off hides the panel. ON by default. FIR-3782.",
   },
   {
     key: "cerebro_issue_sidebar_subscribers",
@@ -1837,7 +1901,7 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     label: "Tool approval enforcement",
     group: "permissions",
     description:
-      "When on, tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off keeps Ask blocked without opening an inbox request. Allow / Ask / Block access is always enforced from Settings → Permissions. FIR-3403.",
+      "When on, tools marked Ask route to the approval inbox and block until a human approves or rejects. The inbox navigation, inline cards and live updates stay visible while this gate is on, even if the separate inbox presentation flag is off. Turning this off keeps Ask blocked without opening an inbox request. Allow / Ask / Block access is always enforced from Settings → Permissions. FIR-3403, FIR-3388.",
   },
   // FIR-1914: firtal_registry per-agent access summary in the system prompt.
   {
@@ -1910,6 +1974,13 @@ export const CEREBRO_FLAGS: CerebroFlagDefinition[] = [
     group: "permissions",
     description:
       "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: workspace is the default, the highest permission across groups wins, and a member's own setting wins over both. On by default. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so it can never widen access to a secret, the sandbox, or a repo. FIR-2175, FIR-3062.",
+  },
+  {
+    key: "cerebro_workpad",
+    label: "Workpad",
+    group: "issues",
+    description:
+      "Ask agents to keep a Workpad — a plan checklist at the top of the issue description, created before they start and kept updated as they work, so you can follow the plan from the issue. On injects the Workpad protocol into every agent's runtime brief. Off by default; the existing checklist rendering is unchanged and enforcement (blocking an agent from starting without a Workpad) is a separate hook policy. FIR-3659.",
   },
 ];
 
@@ -1996,11 +2067,9 @@ export const CEREBRO_FLAG_SUBGROUP_OF: Partial<Record<CerebroFlagKey, string>> =
   cerebro_scheduled_messages: "channels",
   // Tool permissions — the tool-policy chain and everything that feeds it.
   cerebro_tool_policy: "tool_permissions",
-  cerebro_simple_tool_policy: "tool_permissions",
   cerebro_web_fetch_policy: "tool_permissions",
   cerebro_web_fetch_permissions: "tool_permissions",
   cerebro_permission_detail: "tool_permissions",
-  cerebro_platform_capabilities: "tool_permissions",
   cerebro_approval_gate: "tool_permissions",
   cerebro_policy_cel: "tool_permissions",
   cerebro_credential_chain_grant: "tool_permissions",

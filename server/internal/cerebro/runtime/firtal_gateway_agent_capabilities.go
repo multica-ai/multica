@@ -42,7 +42,7 @@ type FirtalGetAgentCapabilitiesTool struct {
 func (t *FirtalGetAgentCapabilitiesTool) Name() string { return "get_agent_capabilities" }
 
 func (t *FirtalGetAgentCapabilitiesTool) Description() string {
-	return "Get YOUR OWN capabilities card — what you can do (skills), may use (tools, with allow/ask/deny), have access to (credentials/data by name only, never secret values), and are limited by (sandbox + MCP). Omit agent_id to inspect yourself. Call this whenever you are unsure what you are allowed to do."
+	return "Get YOUR OWN capabilities card — what you can do (skills), which actions are allowed, available, enforced, callable, and verified, why a call is blocked, how to fix it, what credentials/data you can reference by name only (never secret values), and what limits apply. Tool registration is not permission. Omit agent_id to inspect yourself. Call this whenever you are unsure what you are allowed to do."
 }
 
 func (t *FirtalGetAgentCapabilitiesTool) InputSchema() map[string]any {

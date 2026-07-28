@@ -117,6 +117,36 @@ test("D2 enforces Allow Ask and Deny decisions", async () => {
 	}
 });
 
+// The server answers 400 when task_id is missing and the daemon turns any
+// non-200 into a fail-closed deny, so dropping this field would block every Pi
+// tool call instead of gating it. Pin the identity fields the resolve needs.
+test("D2b sends the task identity the policy resolve requires", async () => {
+	const seen = [];
+	const policy = createServer((request, response) => {
+		let body = "";
+		request.on("data", (chunk) => { body += chunk; });
+		request.on("end", () => {
+			seen.push(JSON.parse(body));
+			response.setHeader("content-type", "application/json");
+			response.end(JSON.stringify({ allowed: true }));
+		});
+	});
+	await new Promise((resolve) => policy.listen(0, "127.0.0.1", resolve));
+	const previous = process.env.MULTICA_TASK_ID;
+	process.env.MULTICA_TASK_ID = "task-uuid-1";
+	try {
+		const port = policy.address().port;
+		await resolvePolicy("bash", { command: "ls" }, { stage: "enforce", port });
+		assert.equal(seen.length, 1);
+		assert.equal(seen[0].task_id, "task-uuid-1");
+		assert.equal(seen[0].tool_name, "bash");
+	} finally {
+		if (previous === undefined) delete process.env.MULTICA_TASK_ID;
+		else process.env.MULTICA_TASK_ID = previous;
+		await new Promise((resolve) => policy.close(resolve));
+	}
+});
+
 test("D4 does not retry an ambiguous mutation", async () => {
 	const mutationTool = tools.find((tool) => tool.name === "mcp__weather__charge");
 	const mutationResult = await mutationTool.execute("call-3", {});

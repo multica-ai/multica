@@ -14,8 +14,11 @@
     "channels-and-dms",
     "dashboard",
     "autopilots",
+    "agent-capabilities",
+    "service-tokens",
     "permissions-ui",
     "daemon-setup",
+    "update-daemon",
     "pwa",
     "..."
   ]

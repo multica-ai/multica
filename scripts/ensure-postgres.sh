@@ -62,6 +62,10 @@ if [ -n "$DATABASE_URL" ]; then
   parse_database_url
 fi
 
+# DATABASE_URL is authoritative for worktrees, whose database name differs
+# from the shared POSTGRES_DB default.
+POSTGRES_DB="$db_name"
+
 is_local() {
   [ -z "$DATABASE_URL" ] || [ "$db_host" = "localhost" ] || [ "$db_host" = "127.0.0.1" ] || [ "$db_host" = "::1" ]
 }

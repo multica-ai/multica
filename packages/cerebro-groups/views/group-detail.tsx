@@ -1059,7 +1059,7 @@ function AgentsSection({
   );
 }
 
-// FIR-3091 slice 2 — the four group capabilities are a boolean-grant system
+// FIR-3091 slice 2 — group capabilities are a boolean-grant system
 // (present/absent), separate from the tool-policy chain. We render them in the
 // same catalog card skin used by the Permissions section below, so the Groups
 // page shows one consistent card design instead of a switch-stripe stacked on
@@ -1084,6 +1084,27 @@ const GROUP_CAPABILITIES: {
     tooltip:
       "Members of this group can create their own agents. They automatically get access to agents they created themselves, regardless of other group permissions.",
     testId: "capability-create-agent",
+  },
+  {
+    key: "apps.create",
+    label: "Create apps",
+    tooltip:
+      "Members of this group can create workspace apps without receiving permission to publish, retry or delete them.",
+    testId: "capability-apps-create",
+  },
+  {
+    key: "apps.manage",
+    label: "Manage apps",
+    tooltip:
+      "Members of this group can preview, publish, retry, roll back and approve scopes for workspace apps they can see through Collections.",
+    testId: "capability-apps-manage",
+  },
+  {
+    key: "apps.delete",
+    label: "Delete apps",
+    tooltip:
+      "Members of this group can permanently delete workspace apps and their app-owned data.",
+    testId: "capability-apps-delete",
   },
   {
     key: "create_shared_filters",
@@ -1144,7 +1165,7 @@ function CapabilitiesSection({
       className="overflow-hidden rounded-xl border bg-background shadow-sm"
       data-testid="capabilities-section"
     >
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b bg-muted/40 px-4 py-3">
+      <header className="border-b bg-muted/40 px-4 py-3">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <KeyRound className="size-[15px] text-muted-foreground" />
           Capabilities
@@ -1153,6 +1174,10 @@ function CapabilitiesSection({
             {GROUP_CAPABILITIES.length === 1 ? "capability" : "capabilities"}
           </span>
         </div>
+        <p className="mt-1 max-w-2xl text-xs text-muted-foreground">
+          These switches decide what group members may create or manage in
+          Multica. Tool access is governed by Permissions below.
+        </p>
       </header>
       <div>
         {GROUP_CAPABILITIES.map((cap) => (

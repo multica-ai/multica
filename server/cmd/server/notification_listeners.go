@@ -565,10 +565,11 @@ func archiveStaleTaskFailedInbox(
 // allowlist (parentBubbleNotifTypes), parent issue subscribers are also
 // notified (deduplicated against direct subscribers).
 //
+// CEREBRO-PATCH(notification-audience-split): FIR-3650 applies role-aware routing to every split type.
 // assigneeMemberID is the user_id of the (member) assignee on the changed
-// issue, used to disambiguate split notification types (priority_changed,
-// due_date_changed) — assignees get a stronger default routing than passive
-// subscribers. Pass "" when the issue has no member assignee.
+// issue, used to disambiguate split notification types — assignees get a
+// stronger default routing than passive subscribers. Pass "" when the issue
+// has no member assignee.
 func notifySubscribers(
 	ctx context.Context,
 	queries *db.Queries,
@@ -711,9 +712,9 @@ func notifyIssueSubscribers(
 // recipient is the actor or if their routing preference resolved to 'off'.
 // Publishes an inbox:new event on success.
 //
-// recipientIsAssignee disambiguates split notification types
-// (priority_changed, due_date_changed). For non-split types it has no effect
-// — pass false when not applicable.
+// CEREBRO-PATCH(notification-audience-split): FIR-3650 expands role-aware routing to comments and status changes.
+// recipientIsAssignee disambiguates every split notification type. For
+// non-split types it has no effect — pass false when not applicable.
 func notifyDirect(
 	ctx context.Context,
 	queries *db.Queries,
@@ -1107,9 +1108,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries, pushSvc
 			})
 		}
 
+		// CEREBRO-PATCH(notification-audience-split): FIR-3650 comments now use the assignee/follower choice.
 		// Look up the issue to know who the current assignee is — needed for
-		// split-type routing on subscribers (new_comment isn't split, but we
-		// pass it for consistency and so future split types Just Work).
+		// split-type routing on comment subscribers.
 		// CEREBRO-PATCH(dm-push): FIR-308 — also capture the issue kind so a
 		// comment on a kind='dm' issue (a direct message) routes under the
 		// dedicated "dm_message" key instead of generic comment traffic.

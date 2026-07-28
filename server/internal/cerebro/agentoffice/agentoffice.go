@@ -2,7 +2,7 @@
 // versioning + governance for an agent's full runtime context, mirroring the
 // skill-governance model (skill_version / skill_change_request) but for the
 // agent COMPOSITE — instructions, bound skills, model, thinking_level,
-// mcp_config, custom_args, runtime_config, persona_sandbox, and the NAMES (never
+// mcp_config, custom_args, runtime_config, and the NAMES (never
 // values) of custom_env keys.
 //
 // It lives in the cerebro zone so it survives upstream syncs. The HTTP layer is
@@ -53,16 +53,21 @@ func New(cerebro *cerebrodb.Queries, tx TxStarter, bus *events.Bus) *Service {
 // mirrors the JSONB built by the backfill in the 9100 migration. custom_env
 // holds key NAMES only — secret values are never versioned here.
 type ContextSnapshot struct {
-	Instructions   string          `json:"instructions"`
-	Description    string          `json:"description"`
-	Model          string          `json:"model"`
-	ThinkingLevel  string          `json:"thinking_level"`
-	McpConfig      json.RawMessage `json:"mcp_config"`
-	CustomArgs     json.RawMessage `json:"custom_args"`
-	RuntimeConfig  json.RawMessage `json:"runtime_config"`
-	PersonaSandbox string          `json:"persona_sandbox"`
-	SkillIDs       []string        `json:"skill_ids"`
-	CustomEnvKeys  []string        `json:"custom_env_keys"`
+	Instructions  string          `json:"instructions"`
+	Description   string          `json:"description"`
+	Model         string          `json:"model"`
+	ThinkingLevel string          `json:"thinking_level"`
+	McpConfig     json.RawMessage `json:"mcp_config"`
+	CustomArgs    json.RawMessage `json:"custom_args"`
+	RuntimeConfig json.RawMessage `json:"runtime_config"`
+	SkillIDs      []string        `json:"skill_ids"`
+	CustomEnvKeys []string        `json:"custom_env_keys"`
+	// AlwaysOnSkillIDs (FIR-3805) is the subset of SkillIDs whose full text is
+	// pasted into the agent's instructions on every run instead of being listed
+	// as a one-line, load-on-demand entry. It is a parallel list rather than a
+	// richer SkillIDs element so existing snapshots decode unchanged and the
+	// versioned diff of "which skills are bound" stays readable on its own.
+	AlwaysOnSkillIDs []string `json:"always_on_skill_ids,omitempty"`
 }
 
 // --- Snapshot compose / encode ---
@@ -70,23 +75,55 @@ type ContextSnapshot struct {
 // ComposeCurrentSnapshot builds a ContextSnapshot from the live agent row plus
 // its currently bound skill ids. It is the source of truth for "what does the
 // agent look like right now" — used to seed a propose flow and to diff against.
-func ComposeCurrentSnapshot(agent cerebrodb.Agent, skillIDs []pgtype.UUID) ContextSnapshot {
-	ids := make([]string, 0, len(skillIDs))
-	for _, s := range skillIDs {
-		ids = append(ids, util.UUIDToString(s))
+func ComposeCurrentSnapshot(agent cerebrodb.Agent, bindings []cerebrodb.ListAgentSkillIDsForContextRow) ContextSnapshot {
+	ids := make([]string, 0, len(bindings))
+	var alwaysOn []string
+	for _, b := range bindings {
+		id := util.UUIDToString(b.SkillID)
+		ids = append(ids, id)
+		if b.AlwaysOn {
+			alwaysOn = append(alwaysOn, id)
+		}
 	}
 	return ContextSnapshot{
-		Instructions:   agent.Instructions,
-		Description:    agent.Description,
-		Model:          agent.Model.String,
-		ThinkingLevel:  agent.ThinkingLevel.String,
-		McpConfig:      rawOrEmpty(agent.McpConfig),
-		CustomArgs:     rawOrEmpty(agent.CustomArgs),
-		RuntimeConfig:  rawOrEmpty(agent.RuntimeConfig),
-		PersonaSandbox: agent.PersonaSandbox.String,
-		SkillIDs:       ids,
-		CustomEnvKeys:  customEnvKeys(agent.CustomEnv),
+		Instructions:  agent.Instructions,
+		Description:   agent.Description,
+		Model:         agent.Model.String,
+		ThinkingLevel: agent.ThinkingLevel.String,
+		McpConfig:     rawOrEmpty(agent.McpConfig),
+		CustomArgs:    rawOrEmpty(agent.CustomArgs),
+		RuntimeConfig: rawOrEmpty(agent.RuntimeConfig),
+		SkillIDs:      ids,
+		CustomEnvKeys: customEnvKeys(agent.CustomEnv),
+
+		AlwaysOnSkillIDs: alwaysOn,
 	}
+}
+
+// NormalizeAlwaysOnSkills (FIR-3805) drops any always-on id that is not in the
+// snapshot's bound skill set, de-duplicates the rest, and orders it like
+// SkillIDs so two snapshots describing the same state compare equal. Callers
+// that assemble a snapshot from client input run it before storing; snapshots
+// composed from the live rows are already consistent by construction.
+func NormalizeAlwaysOnSkills(s ContextSnapshot) ContextSnapshot {
+	if len(s.AlwaysOnSkillIDs) == 0 {
+		s.AlwaysOnSkillIDs = nil
+		return s
+	}
+	flagged := make(map[string]bool, len(s.AlwaysOnSkillIDs))
+	for _, id := range s.AlwaysOnSkillIDs {
+		flagged[id] = true
+	}
+	var out []string
+	seen := make(map[string]bool, len(flagged))
+	for _, id := range s.SkillIDs {
+		if flagged[id] && !seen[id] {
+			seen[id] = true
+			out = append(out, id)
+		}
+	}
+	s.AlwaysOnSkillIDs = out
+	return s
 }
 
 // EncodeSnapshot marshals a snapshot to JSONB bytes, never returning nil so the
@@ -171,7 +208,6 @@ func (s *Service) ApplySnapshotTx(ctx context.Context, qtx *cerebrodb.Queries, a
 		Description:    snap.Description,
 		Model:          textOrNull(snap.Model),
 		ThinkingLevel:  textOrNull(snap.ThinkingLevel),
-		PersonaSandbox: textOrNull(snap.PersonaSandbox),
 		McpConfig:      jsonOrEmpty(snap.McpConfig),
 		CustomArgs:     jsonOrEmpty(snap.CustomArgs),
 		RuntimeConfig:  jsonOrEmpty(snap.RuntimeConfig),
@@ -183,6 +219,10 @@ func (s *Service) ApplySnapshotTx(ctx context.Context, qtx *cerebrodb.Queries, a
 	if err := qtx.DeleteAgentSkillsForContext(ctx, agentID); err != nil {
 		return cerebrodb.Agent{}, fmt.Errorf("clear skill bindings: %w", err)
 	}
+	alwaysOn := make(map[string]bool, len(snap.AlwaysOnSkillIDs))
+	for _, raw := range snap.AlwaysOnSkillIDs {
+		alwaysOn[raw] = true
+	}
 	for _, raw := range snap.SkillIDs {
 		sid, err := util.ParseUUID(raw)
 		if err != nil {
@@ -191,8 +231,9 @@ func (s *Service) ApplySnapshotTx(ctx context.Context, qtx *cerebrodb.Queries, a
 			continue
 		}
 		if err := qtx.InsertAgentSkillForContext(ctx, cerebrodb.InsertAgentSkillForContextParams{
-			AgentID: agentID,
-			SkillID: sid,
+			AgentID:  agentID,
+			SkillID:  sid,
+			AlwaysOn: alwaysOn[raw],
 		}); err != nil {
 			return cerebrodb.Agent{}, fmt.Errorf("rebind skill %s: %w", raw, err)
 		}
@@ -242,8 +283,10 @@ func RenderSnapshot(s ContextSnapshot) string {
 	// whole sections of what the agent reads must be legible to a reviewer.
 	fmt.Fprintf(&b, "workspace_brief_mode: %s\n", WorkspaceBriefModeOf(s))
 	fmt.Fprintf(&b, "tools_brief_mode: %s\n", ToolsBriefModeOf(s))
-	fmt.Fprintf(&b, "persona_sandbox: %s\n", s.PersonaSandbox)
 	fmt.Fprintf(&b, "skills: %s\n", strings.Join(s.SkillIDs, ", "))
+	// FIR-3805: rendered on its own line so flipping "always on" for one skill
+	// shows up in review as its own change, not as noise inside the skills line.
+	fmt.Fprintf(&b, "always_on_skills: %s\n", strings.Join(s.AlwaysOnSkillIDs, ", "))
 	fmt.Fprintf(&b, "custom_env_keys: %s\n", strings.Join(s.CustomEnvKeys, ", "))
 	fmt.Fprintf(&b, "mcp_config: %s\n", compactJSON(s.McpConfig))
 	fmt.Fprintf(&b, "custom_args: %s\n", compactJSON(s.CustomArgs))

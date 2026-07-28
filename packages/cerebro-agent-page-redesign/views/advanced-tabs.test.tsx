@@ -22,8 +22,8 @@ it("switches between the grouped advanced settings", async () => {
   render(<Harness />);
 
   expect(screen.getByRole("tabpanel")).toHaveTextContent("infisical content");
-  await user.click(screen.getByRole("tab", { name: "Sandbox" }));
-  expect(screen.getByRole("tabpanel")).toHaveTextContent("sandbox content");
+  await user.click(screen.getByRole("tab", { name: "Custom args" }));
+  expect(screen.getByRole("tabpanel")).toHaveTextContent("custom_args content");
   await user.click(screen.getByRole("tab", { name: "MCP Config" }));
   expect(screen.getByRole("tabpanel")).toHaveTextContent("mcp_config content");
 });

@@ -18,10 +18,13 @@ package handler
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -76,10 +79,11 @@ type CerebroAPIConnectionBriefIdentity struct {
 // Name is the exact tool name the agent calls verbatim; Verdict is "allow" or
 // "ask".
 type CerebroAPIConnectionBriefTool struct {
-	Connection  string
-	Name        string
-	Description string
-	Verdict     string
+	Connection    string
+	Name          string
+	Description   string
+	Verdict       string
+	MandatePrefix string
 }
 
 // cerebroEffectiveToolsForBrief resolves the agent's exposed non-CLI tools for
@@ -145,6 +149,12 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 		}
 	}
 
+	// FIR-3781 instrumentation: ListEffectiveTools resolves the tool-policy chain
+	// once per capability, so its cost is N x (per-capability DB work). build_ms on
+	// the claim endpoint brackets the whole response build; this line isolates the
+	// resolver's share and reports N, which is what tells N-grew apart from
+	// per-item-got-slower. Logged above 250ms so a healthy claim stays quiet.
+	resolveStart := time.Now()
 	rows, err := h.runtimeToolAccess.ListEffectiveTools(ctx, RuntimeToolAccessQuery{
 		WorkspaceID:         runtime.WorkspaceID,
 		RuntimeID:           runtime.ID,
@@ -162,6 +172,19 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 		// task retries, rather than issuing a silent total-lockout mandate.
 		return nil, nil, fmt.Errorf("cerebro effective tools: list effective tools: %w", err)
 	}
+	if elapsed := time.Since(resolveStart); elapsed > 250*time.Millisecond {
+		perTool := int64(0)
+		if len(rows) > 0 {
+			perTool = elapsed.Milliseconds() / int64(len(rows))
+		}
+		slog.Info("claim tool resolve slow",
+			"runtime_id", uuidToString(runtime.ID),
+			"agent_id", agent.ID,
+			"total_ms", elapsed.Milliseconds(),
+			"capabilities", len(rows),
+			"per_capability_ms", perTool,
+		)
+	}
 
 	out := make([]AgentTaskToolEntry, 0, len(rows))
 	mandateTools := make([]string, 0, len(rows))
@@ -177,6 +200,9 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 			continue
 		}
 		callableName := strings.TrimSpace(v.Inventory.ToolName)
+		if strings.EqualFold(v.Descriptor.Source, "mcp") {
+			callableName = claudehook.CanonicalToolName(callableName)
+		}
 		if callableName == "" {
 			callableName = name
 		}
@@ -210,9 +236,9 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 	// only on_behalf_of layer (FIR-2441), so the brief cannot show a tool the call
 	// path would then refuse — including a member-level Deny on the initiator.
 	if h.APIConnectionBrief != nil {
-		seen := make(map[string]struct{}, len(out))
-		for _, e := range out {
-			seen[e.Name] = struct{}{}
+		seen := make(map[string]struct{}, len(mandateTools))
+		for _, callableName := range mandateTools {
+			seen[callableName] = struct{}{}
 		}
 		apiTools := h.APIConnectionBrief.APIConnectionToolsForBrief(ctx, CerebroAPIConnectionBriefIdentity{
 			WorkspaceID: runtime.WorkspaceID,
@@ -225,6 +251,12 @@ func (h *Handler) cerebroEffectiveToolsForClaim(ctx context.Context, runtime db.
 			name := strings.TrimSpace(t.Name)
 			if name == "" {
 				continue
+			}
+			if prefix := strings.TrimSpace(t.MandatePrefix); prefix != "" {
+				if _, dup := seen[prefix]; !dup {
+					seen[prefix] = struct{}{}
+					mandateTools = append(mandateTools, prefix)
+				}
 			}
 			if _, dup := seen[name]; dup {
 				continue

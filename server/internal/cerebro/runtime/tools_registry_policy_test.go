@@ -1,6 +1,6 @@
 package runtime
 
-// FIR-1512 Step 1 — unit tests for Registry.GetToolPolicyEnabledToolsForAgent,
+// FIR-1512 Step 1 — unit tests for Registry.GetToolPolicyExecutableToolsForAgent,
 // the engine-flip that builds an agent's tool list from the unified per-tool
 // permission chain (Allow/Ask/Deny) instead of the legacy grant cascade.
 //
@@ -8,8 +8,8 @@ package runtime
 // toolPolicyResolver so the build path is verified without a database. The
 // real DB-backed resolver (*toolpolicy.Store) is covered by the toolpolicy
 // package's own tests; here we only assert the registry's list-building rules:
-// Allow and Ask surface a tool, Deny hides it, and a resolve error fails closed
-// (excludes that one tool rather than leaking it).
+// Only Allow can execute. Ask and Deny stay blocked on this direct invocation
+// path, and a resolve error fails closed.
 
 import (
 	"context"
@@ -19,6 +19,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
@@ -26,8 +27,20 @@ import (
 // from verdicts resolves to Allow (mirroring the chain's default-Allow base);
 // a key present in errs returns an error instead.
 type fakeToolPolicyResolver struct {
-	verdicts map[string]toolpolicy.Setting
-	errs     map[string]error
+	verdicts           map[string]toolpolicy.Setting
+	permissionVerdicts map[string]toolpolicy.Setting
+	errs               map[string]error
+}
+
+type capturingToolPolicyResolver struct {
+	query toolpolicy.Query
+	actor platformaccess.Actor
+}
+
+func (r *capturingToolPolicyResolver) ResolvePermission(_ context.Context, q toolpolicy.Query, actor platformaccess.Actor) (toolpolicy.Effective, error) {
+	r.query = q
+	r.actor = actor
+	return toolpolicy.Effective{Setting: toolpolicy.SettingAllow}, nil
 }
 
 func (f fakeToolPolicyResolver) Resolve(_ context.Context, q toolpolicy.Query) (toolpolicy.Effective, error) {
@@ -35,6 +48,20 @@ func (f fakeToolPolicyResolver) Resolve(_ context.Context, q toolpolicy.Query) (
 		return toolpolicy.Effective{}, err
 	}
 	s, ok := f.verdicts[q.ToolKey]
+	if !ok {
+		s = toolpolicy.SettingAllow
+	}
+	return toolpolicy.Effective{Setting: s}, nil
+}
+
+func (f fakeToolPolicyResolver) ResolvePermission(_ context.Context, q toolpolicy.Query, _ platformaccess.Actor) (toolpolicy.Effective, error) {
+	if err, ok := f.errs[q.ToolKey]; ok {
+		return toolpolicy.Effective{}, err
+	}
+	s, ok := f.permissionVerdicts[q.ToolKey]
+	if !ok {
+		s, ok = f.verdicts[q.ToolKey]
+	}
 	if !ok {
 		s = toolpolicy.SettingAllow
 	}
@@ -58,41 +85,41 @@ func newPolicyTestRegistry(names ...string) *Registry {
 	return r
 }
 
-func TestGetToolPolicyEnabledToolsForAgent_AllowAndAskSurface_DenyHidden(t *testing.T) {
+func TestGetToolPolicyExecutableToolsForAgent_OnlyAllowExecutes(t *testing.T) {
 	reg := newPolicyTestRegistry("lookup_order", "draft_reply", "issue_refund")
 	resolver := fakeToolPolicyResolver{
 		verdicts: map[string]toolpolicy.Setting{
 			"lookup_order": toolpolicy.SettingAllow,
-			"draft_reply":  toolpolicy.SettingAsk,  // Ask still surfaces — it only pauses at call time.
-			"issue_refund": toolpolicy.SettingDeny, // Deny is the only verdict that hides a tool.
+			"draft_reply":  toolpolicy.SettingAsk,
+			"issue_refund": toolpolicy.SettingDeny,
 		},
 	}
 
-	got := reg.GetToolPolicyEnabledToolsForAgent(context.Background(), resolver,
-		pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{})
+	got := reg.GetToolPolicyExecutableToolsForAgent(context.Background(), resolver,
+		pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{})
 
-	want := []string{"draft_reply", "lookup_order"}
+	want := []string{"lookup_order"}
 	if names := sortedToolNames(got); !equalStrings(names, want) {
 		t.Fatalf("expected %v, got %v", want, names)
 	}
 }
 
-func TestGetToolPolicyEnabledToolsForAgent_NoRowsDefaultsAllow(t *testing.T) {
+func TestGetToolPolicyExecutableToolsForAgent_NoRowsDefaultsAllow(t *testing.T) {
 	// An empty verdict map means no explicit policy rows; the chain's default
 	// Allow base surfaces every registered tool. The default-deny posture is
 	// authored as rows, not assumed by the engine.
 	reg := newPolicyTestRegistry("a", "b", "c")
 	resolver := fakeToolPolicyResolver{}
 
-	got := reg.GetToolPolicyEnabledToolsForAgent(context.Background(), resolver,
-		pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{})
+	got := reg.GetToolPolicyExecutableToolsForAgent(context.Background(), resolver,
+		pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{})
 
 	if names := sortedToolNames(got); !equalStrings(names, []string{"a", "b", "c"}) {
 		t.Fatalf("expected all tools, got %v", names)
 	}
 }
 
-func TestGetToolPolicyEnabledToolsForAgent_ResolveErrorFailsClosed(t *testing.T) {
+func TestGetToolPolicyExecutableToolsForAgent_ResolveErrorFailsClosed(t *testing.T) {
 	// A resolve error for one tool excludes only that tool — the rest still
 	// resolve normally. The failing tool must not leak into the toolset.
 	reg := newPolicyTestRegistry("safe", "broken")
@@ -100,18 +127,51 @@ func TestGetToolPolicyEnabledToolsForAgent_ResolveErrorFailsClosed(t *testing.T)
 		errs: map[string]error{"broken": errors.New("db down")},
 	}
 
-	got := reg.GetToolPolicyEnabledToolsForAgent(context.Background(), resolver,
-		pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{})
+	got := reg.GetToolPolicyExecutableToolsForAgent(context.Background(), resolver,
+		pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{})
 
 	if names := sortedToolNames(got); !equalStrings(names, []string{"safe"}) {
 		t.Fatalf("expected only [safe] (broken excluded), got %v", names)
 	}
 }
 
-func TestGetToolPolicyEnabledToolsForAgent_NilResolver(t *testing.T) {
+func TestGetToolPolicyExecutableToolsForAgent_UsesDeclaredPermissionContract(t *testing.T) {
+	reg := newPolicyTestRegistry("ordinary_tool")
+	resolver := fakeToolPolicyResolver{
+		verdicts:           map[string]toolpolicy.Setting{"ordinary_tool": toolpolicy.SettingAllow},
+		permissionVerdicts: map[string]toolpolicy.Setting{"ordinary_tool": toolpolicy.SettingDeny},
+	}
+
+	got := reg.GetToolPolicyExecutableToolsForAgent(context.Background(), resolver,
+		pgtype.UUID{}, pgtype.UUID{Valid: true}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{})
+
+	if names := sortedToolNames(got); len(names) != 0 {
+		t.Fatalf("declared permission contract denied ordinary_tool, but registry exposed %v", names)
+	}
+}
+
+func TestGetToolPolicyExecutableToolsForAgent_ForwardsDelegatedActorContext(t *testing.T) {
+	reg := newPolicyTestRegistry("ordinary_tool")
+	resolver := &capturingToolPolicyResolver{}
+	agentID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	ownerID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	onBehalfOfID := pgtype.UUID{Bytes: [16]byte{3}, Valid: true}
+
+	reg.GetToolPolicyExecutableToolsForAgent(context.Background(), resolver,
+		pgtype.UUID{}, agentID, pgtype.UUID{}, ownerID, onBehalfOfID)
+
+	if resolver.query.UserID != ownerID || resolver.query.OnBehalfOfID != onBehalfOfID {
+		t.Fatalf("delegated identity drift: owner=%v on_behalf_of=%v", resolver.query.UserID, resolver.query.OnBehalfOfID)
+	}
+	if !resolver.actor.Authenticated || !resolver.actor.Agent {
+		t.Fatalf("agent actor context missing: %#v", resolver.actor)
+	}
+}
+
+func TestGetToolPolicyExecutableToolsForAgent_NilResolver(t *testing.T) {
 	reg := newPolicyTestRegistry("a")
-	if got := reg.GetToolPolicyEnabledToolsForAgent(context.Background(), nil,
-		pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}); got != nil {
+	if got := reg.GetToolPolicyExecutableToolsForAgent(context.Background(), nil,
+		pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}, pgtype.UUID{}); got != nil {
 		t.Fatalf("nil resolver should return nil, got %v", sortedToolNames(got))
 	}
 }

@@ -458,11 +458,12 @@
       "success_toast": "已移到 {{identifier}}",
       "failed_toast": "移动线程失败"
     },
-    "_move_thread": "CEREBRO-PATCH(i18n-comment-move-thread): JEH-2488 move picked comments to a new thread UI",
+    "_move_thread": "CEREBRO-PATCH(i18n-comment-move-thread): JEH-2488 move picked comments to a new thread UI; FIR-3880 adds the select-all-after action",
     "move_thread": {
       "action": "在新线程中回复",
       "breadcrumb": "已移到新线程",
       "select_hint": "选择要移到新线程的评论",
+      "select_after_action": "选择之后的全部评论",
       "move_action_one": "将 {{count}} 条评论移到新线程",
       "move_action_other": "将 {{count}} 条评论移到新线程",
       "moving_action": "正在移动...",

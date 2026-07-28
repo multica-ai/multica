@@ -204,12 +204,16 @@ export function CerebroInboxRowActions({ item, onArchive }: Props) {
     (mutedUntil: Date) => {
       // Hide the row now (mute) AND record it as a reminder so it surfaces in
       // the unified reminder overview and re-fires at the chosen time (FIR-394).
+      // The reminder carries this row's id (FIR-3918) so firing it brings THIS
+      // row back — marked as a reminder — instead of adding a second row with
+      // the same title.
       mute.mutate({ id: item.id, mutedUntil });
       snoozeAsReminder.mutate({
         remindAt: mutedUntil,
         text: item.title,
         issueId: item.issue_id,
         projectId: item.project_id,
+        inboxItemId: item.id,
       });
       setReminderOpen(false);
       setCustomReminder(toDateTimeLocalValue(mutedUntil));

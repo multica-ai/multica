@@ -86,6 +86,16 @@ export function flattenReplies(
   return flat;
 }
 
+// CEREBRO-PATCH(comments-move-to-thread-ui): FIR-3880 — the anchor comment and
+// every comment below it in the thread, which is what the select-mode action
+// bar's "Select all after this" adds to the picked set. `orderedIds` is the
+// thread in render order (root first, then replies); an anchor that is no
+// longer in the thread (a concurrent delete) selects nothing.
+export function commentIdsFromAnchor(orderedIds: string[], anchorId: string): string[] {
+  const from = orderedIds.indexOf(anchorId);
+  return from < 0 ? [] : orderedIds.slice(from);
+}
+
 // CEREBRO-PATCH(issue-ask-ui): JEH-1576 renders `multica issue ask` comments as user questions in the browser.
 export function isUserQuestionComment(entry: Pick<TimelineEntry, "type" | "comment_type">): boolean {
   return entry.type === "comment" && entry.comment_type === "question";
@@ -684,10 +694,29 @@ function CommentCardImpl({
     [entry.id, allNestedReplies],
   );
   const canStartNewThread = canMoveToNewThread && !!onMoveToNewThread;
+  // The comment the select mode was started from. Splitting a thread almost
+  // always means "this comment and everything after it", so the action bar
+  // offers that in one click instead of a checkbox per comment (FIR-3880).
+  const [anchorId, setAnchorId] = useState<string | null>(null);
   const startNewThread = useCallback((seedId: string) => {
+    setAnchorId(seedId);
     setSelectedIds(new Set([seedId]));
     setSelectMode(true);
   }, []);
+  const idsFromAnchor = useMemo(
+    () => (anchorId ? commentIdsFromAnchor(orderedIds, anchorId) : []),
+    [orderedIds, anchorId],
+  );
+  const selectFromAnchor = useCallback(
+    () => setSelectedIds((prev) => new Set([...prev, ...idsFromAnchor])),
+    [idsFromAnchor],
+  );
+  // Hidden once every comment from the anchor down is already picked, so the
+  // button never sits there as a no-op.
+  const hasUnselectedAfterAnchor = useMemo(
+    () => idsFromAnchor.some((id) => !selectedIds.has(id)),
+    [idsFromAnchor, selectedIds],
+  );
   const toggleSelect = useCallback((id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -699,6 +728,7 @@ function CommentCardImpl({
   const cancelSelect = useCallback(() => {
     setSelectMode(false);
     setSelectedIds(new Set());
+    setAnchorId(null);
   }, []);
   const confirmMoveThread = useCallback(async () => {
     if (!onMoveToNewThread || selectedIds.size === 0) return;
@@ -708,6 +738,7 @@ function CommentCardImpl({
       await onMoveToNewThread(ids);
       setSelectMode(false);
       setSelectedIds(new Set());
+      setAnchorId(null);
     } catch {
       toast.error(t(($) => $.comment.move_thread.failed_toast));
     } finally {
@@ -1035,6 +1066,12 @@ function CommentCardImpl({
                   {t(($) => $.comment.move_thread.select_hint)}
                 </span>
                 <div className="flex items-center gap-2">
+                  {/* CEREBRO-PATCH(comments-move-to-thread-ui): FIR-3880 pick everything from the anchor comment down in one click. */}
+                  {hasUnselectedAfterAnchor && (
+                    <Button size="sm" variant="outline" onClick={selectFromAnchor} disabled={movingThread}>
+                      {t(($) => $.comment.move_thread.select_after_action)}
+                    </Button>
+                  )}
                   <Button size="sm" variant="ghost" onClick={cancelSelect} disabled={movingThread}>
                     {t(($) => $.comment.cancel_action)}
                   </Button>

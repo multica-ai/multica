@@ -32,7 +32,7 @@ interface DetectedLink {
   end: number
 }
 
-interface CodeRange {
+export interface CodeRange {
   start: number
   end: number
 }
@@ -41,7 +41,7 @@ interface CodeRange {
  * Find all code block and inline code ranges in text
  * These ranges should be excluded from link detection
  */
-function findCodeRanges(text: string): CodeRange[] {
+export function findCodeRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = []
 
   // Find fenced code blocks (```...```)
@@ -89,7 +89,7 @@ function findCodeRanges(text: string): CodeRange[] {
 /**
  * Check if a position is inside any code range
  */
-function isInsideCode(pos: number, ranges: CodeRange[]): boolean {
+export function isInsideCode(pos: number, ranges: CodeRange[]): boolean {
   return ranges.some((r) => pos >= r.start && pos < r.end)
 }
 
@@ -141,7 +141,7 @@ function findInlineLinkEnd(text: string, openParenIndex: number): number {
  * Find existing markdown link/image spans so auto-linkification does not create
  * nested links inside their labels or destinations.
  */
-function findMarkdownLinkRanges(text: string): CodeRange[] {
+export function findMarkdownLinkRanges(text: string): CodeRange[] {
   const ranges: CodeRange[] = []
 
   for (let i = 0; i < text.length; i++) {
@@ -200,7 +200,7 @@ function isAlreadyLinked(text: string, linkStart: number, linkEnd: number): bool
 /**
  * Check if ranges overlap
  */
-function rangesOverlap(
+export function rangesOverlap(
   a: { start: number; end: number },
   b: { start: number; end: number }
 ): boolean {

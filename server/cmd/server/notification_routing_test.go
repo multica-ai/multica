@@ -612,9 +612,10 @@ func TestRouting_ReactionOffStillLandsSoftRow(t *testing.T) {
 	}
 }
 
-// TestRouting_StatusChangedDefaultsToNotifications verifies that the default
-// route for a non-overridden subscriber lands on the 'notifications' page.
-func TestRouting_StatusChangedDefaultsToNotifications(t *testing.T) {
+// CEREBRO-PATCH(notification-audience-split-tests): FIR-3650 changes the follower status default.
+// TestRouting_StatusChangedFollowerDefaultsToInboxAndNotifications verifies
+// that a non-overridden follower gets Inbox plus the existing Notifications default.
+func TestRouting_StatusChangedFollowerDefaultsToInboxAndNotifications(t *testing.T) {
 	queries := db.New(testPool)
 	bus := newNotificationBus(t, queries)
 
@@ -657,9 +658,10 @@ func TestRouting_StatusChangedDefaultsToNotifications(t *testing.T) {
 	if len(notifs) != 1 || notifs[0].Type != "status_changed" {
 		t.Fatalf("expected 1 notifications-routed status_changed, got %+v", notifs)
 	}
+	// CEREBRO-PATCH(notification-audience-split-tests): FIR-3650 adds the follower Inbox default.
 	inbox := inboxItemsByRoute(t, subID, routeInbox)
-	if len(inbox) != 0 {
-		t.Fatalf("expected 0 inbox-routed items, got %+v", inbox)
+	if len(inbox) != 1 || inbox[0].Type != "status_changed" {
+		t.Fatalf("expected 1 inbox-routed status_changed, got %+v", inbox)
 	}
 }
 
@@ -993,7 +995,8 @@ func stringPtr(s string) *string { return &s }
 // guard: ensure the routing key shape stays in sync with what the routing
 // helper expects — catching any future rename of split keys.
 func TestRouteKey_FormatStaysStable(t *testing.T) {
-	if k := routeKey("status_changed", true); k != "status_changed" {
+	// CEREBRO-PATCH(notification-audience-split-tests): FIR-3650 moves status_changed into the split set.
+	if k := routeKey("assignee_changed", true); k != "assignee_changed" {
 		t.Errorf("non-split should ignore isAssignee, got %q", k)
 	}
 	if k := routeKey("due_date_changed", true); !strings.HasSuffix(k, ".assignee") {

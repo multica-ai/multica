@@ -3,6 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
@@ -63,7 +64,6 @@ const agent: Agent = {
   updated_at: "2026-04-16T00:00:00Z",
   archived_at: null,
   archived_by: null,
-  persona_sandbox: "",
 };
 
 function renderSkillsTab(opts: { agent?: Agent; canEdit?: boolean } = {}) {
@@ -141,5 +141,68 @@ describe("SkillsTab", () => {
     expect(
       screen.queryByRole("button", { name: /Remove/i }),
     ).not.toBeInTheDocument();
+  });
+
+  // FIR-3805 — the "Always on" checkbox lives on the skill's own row, so the
+  // row is both the control and the answer to "which skills are always on".
+  describe("always-on skills", () => {
+    it("renders a checkbox per bound skill, ticked from the binding", async () => {
+      renderSkillsTab({
+        agent: {
+          ...agent,
+          skills: [
+            { id: "skill-1", name: "Caveman", description: "", always_on: true },
+            { id: "skill-2", name: "Deploy", description: "" },
+          ],
+        },
+      });
+
+      expect(await screen.findByText("Caveman")).toBeInTheDocument();
+      const boxes = screen.getAllByRole("checkbox", { name: /Always on/i });
+      expect(boxes).toHaveLength(2);
+      expect(boxes[0]).toBeChecked();
+      expect(boxes[1]).not.toBeChecked();
+    });
+
+    it("disables the checkbox when the user cannot manage the agent", async () => {
+      renderSkillsTab({
+        canEdit: false,
+        agent: {
+          ...agent,
+          skills: [{ id: "skill-1", name: "Caveman", description: "" }],
+        },
+      });
+
+      expect(await screen.findByText("Caveman")).toBeInTheDocument();
+      // Base UI renders the checkbox as a span with role=checkbox, so the
+      // disabled state is aria-disabled rather than the native attribute.
+      expect(screen.getByRole("checkbox", { name: /Always on/i })).toHaveAttribute(
+        "aria-disabled",
+        "true",
+      );
+    });
+
+    it("offers Propose change once a box is ticked", async () => {
+      const user = userEvent.setup();
+      renderSkillsTab({
+        agent: {
+          ...agent,
+          skills: [{ id: "skill-1", name: "Caveman", description: "" }],
+        },
+      });
+
+      expect(await screen.findByText("Caveman")).toBeInTheDocument();
+      // Ticking the box is a proposable change on its own — no skill was
+      // added or removed, so this is what proves the flag is versioned.
+      expect(
+        screen.queryByRole("button", { name: /Propose change/i }),
+      ).not.toBeInTheDocument();
+
+      await user.click(screen.getByRole("checkbox", { name: /Always on/i }));
+
+      expect(
+        await screen.findByRole("button", { name: /Propose change/i }),
+      ).toBeInTheDocument();
+    });
   });
 });

@@ -69,6 +69,6 @@ describe("OverviewControlRoom", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Filter Dashboard by Lone" }));
-    expect(onSelectActor).toHaveBeenCalledWith("agent-1", "Lone");
+    expect(onSelectActor).toHaveBeenCalledWith("agent-1", "Lone", "agent");
   });
 });

@@ -9,6 +9,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -18,7 +19,7 @@ import (
 // FIR-1512). Kept as an interface so the resolution loop is unit-testable with
 // a fake and without a database. Satisfied by *toolpolicy.Store.
 type toolPolicyResolver interface {
-	Resolve(ctx context.Context, q toolpolicy.Query) (toolpolicy.Effective, error)
+	ResolvePermission(ctx context.Context, q toolpolicy.Query, actor platformaccess.Actor) (toolpolicy.Effective, error)
 }
 
 // Tool is the interface every in-process tool must implement.
@@ -69,36 +70,36 @@ func (r *Registry) Get(name string) (Tool, bool) {
 	return t, ok
 }
 
-// GetToolPolicyEnabledToolsForAgent builds an agent's tool list from the
-// unified per-tool permission chain (FIR-2230) instead of the legacy grant
-// cascade — this is the engine-flip (FIR-1512 Step 1). Every registered tool
-// whose Effective verdict is not Deny is offered; Allow and Ask both surface
-// the tool, because Ask only pauses at call time (the approval gate), it does
-// not hide the tool from the model.
+// GetToolPolicyExecutableToolsForAgent builds the tools a direct executor may
+// call from the unified per-tool permission chain (FIR-2230). Only Allow is
+// executable here. Ask requires an approval-aware path and must never degrade
+// into Allow merely because this invocation endpoint cannot carry approval
+// state.
 //
-// It resolves the identical chain query as guardToolCallViaPolicy — same tool
-// key, same (workspace, runtime, agent, owner) context, same default-Allow base
-// — so for UNCONDITIONED rows the tool LIST an agent is given and the per-call
-// GATE that guards each invocation are decided by one engine and cannot disagree.
+// It resolves the identical chain query as the Policy Decision Service — same
+// tool key, same (workspace, runtime, agent, owner) context, same default-Allow
+// base — so for UNCONDITIONED rows the direct executor and the per-call gate
+// cannot disagree.
 // The default-deny posture (an agent only gets explicitly-allowed tools) is
 // authored as policy rows (a workspace/runtime Deny base + per-tool Allow),
 // exactly as the gate expects; the engine itself stays faithful to the stored
 // chain.
 //
 // Conditioned rows (the FIR-1609 WHEN layer — host/action/Expr) are the one place
-// the list and the gate legitimately differ: list-time has no live request, so it
+// resolution can legitimately differ: this path has no live request, so it
 // passes an empty RequestContext and no CEL evaluator. A conditioned row therefore
-// resolves here as not-applicable (it drops, fail-closed), so a tool gated only by
-// a conditioned Allow is conservatively HIDDEN from the model rather than offered;
-// the gate then makes the real per-call decision against the live host/action. The
-// divergence is one-directional (the list never offers more than the gate allows),
-// so it can only hide a usable tool, never leak a forbidden one.
+// resolves here as not-applicable (it drops, fail-closed); the approval-aware gate
+// makes the real decision against the live host/action.
 //
 // runtimeID is the agent's runtime; ownerID is the agent's owner — the chain's
 // user ceiling. The caller resolves both from the agent row. Resolution is
 // fail-closed per tool: a resolve error excludes that one tool rather than
 // leaking it into the toolset.
-func (r *Registry) GetToolPolicyEnabledToolsForAgent(ctx context.Context, resolver toolPolicyResolver, workspaceID, agentID, runtimeID, ownerID pgtype.UUID) []Tool {
+func (r *Registry) GetToolPolicyExecutableToolsForAgent(
+	ctx context.Context,
+	resolver toolPolicyResolver,
+	workspaceID, agentID, runtimeID, ownerID, onBehalfOfID pgtype.UUID,
+) []Tool {
 	if resolver == nil {
 		return nil
 	}
@@ -116,13 +117,14 @@ func (r *Registry) GetToolPolicyEnabledToolsForAgent(ctx context.Context, resolv
 
 	out := make([]Tool, 0, len(names))
 	for _, name := range names {
-		eff, err := resolver.Resolve(ctx, toolpolicy.Query{
-			WorkspaceID: workspaceID,
-			ToolKey:     name,
-			RuntimeID:   runtimeID,
-			AgentID:     agentID,
-			UserID:      ownerID,
-		})
+		eff, err := resolver.ResolvePermission(ctx, toolpolicy.Query{
+			WorkspaceID:  workspaceID,
+			ToolKey:      name,
+			RuntimeID:    runtimeID,
+			AgentID:      agentID,
+			UserID:       ownerID,
+			OnBehalfOfID: onBehalfOfID,
+		}, platformaccess.Actor{Authenticated: true, Agent: agentID.Valid})
 		if err != nil {
 			slog.Warn("tool registry: tool-policy resolve failed — excluding tool",
 				"agent_id", util.UUIDToString(agentID),
@@ -131,7 +133,7 @@ func (r *Registry) GetToolPolicyEnabledToolsForAgent(ctx context.Context, resolv
 			)
 			continue
 		}
-		if eff.Setting == toolpolicy.SettingDeny {
+		if eff.Setting != toolpolicy.SettingAllow {
 			continue
 		}
 		r.mu.RLock()
@@ -247,6 +249,7 @@ var legacyGatewayToolMeta = []ToolMeta{
 	{Name: "firtal_registry", Description: "Query the Firtal Data Registry: discover data sources, fetch schema, and execute structured queries.", Status: ToolStatusImplemented},
 	{Name: "gogcli_sheets_write", Description: "Write data to a Google Sheets spreadsheet range.", Status: ToolStatusImplemented},
 	{Name: "create_file", Description: "Create a file from inline content (md, txt, csv, json, html, svg, xml) and attach it to the current chat or issue.", Status: ToolStatusNewlyImplemented},
+	{Name: "assign_issue", Description: "Assign an issue to a workspace member or agent.", Status: ToolStatusImplemented},
 }
 
 var multicaMCPToolMatrix = []ToolMeta{
@@ -274,6 +277,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "create_artifact", Description: "Create a workspace artifact.", Status: ToolStatusExcluded},
 	{Name: "create_artifact_folder", Description: "Create an artifact folder.", Status: ToolStatusExcluded},
 	{Name: "create_connection", Description: "Create a workspace connection. Requires the manage_connections capability.", Status: ToolStatusNewlyImplemented},
+	{Name: "create_command", Description: "Create a reusable workflow command. CLI-runtime MCP tool over POST /api/cerebro/commands.", Status: ToolStatusNewlyImplemented},
 	{Name: "create_eval", Description: "Create a versioned eval contract. CLI-runtime MCP tool over POST /api/cerebro/evals.", Status: ToolStatusExcluded},
 	{Name: "create_group", Description: "Create a workspace group.", Status: ToolStatusExcluded},
 	{Name: "create_issue", Description: "Create a new issue in the current workspace.", Status: ToolStatusImplemented},
@@ -287,15 +291,17 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "delete_artifact", Description: "Delete an artifact.", Status: ToolStatusExcluded},
 	{Name: "delete_artifact_folder", Description: "Delete an artifact folder.", Status: ToolStatusExcluded},
 	{Name: "delete_connection", Description: "Delete a workspace connection by UUID. Requires the manage_connections capability.", Status: ToolStatusNewlyImplemented},
+	{Name: "delete_command", Description: "Delete a reusable workflow command. CLI-runtime MCP tool over DELETE /api/cerebro/commands/{id}.", Status: ToolStatusNewlyImplemented},
 	{Name: "delete_eval", Description: "Delete a versioned eval contract. CLI-runtime MCP tool over DELETE /api/cerebro/evals/{id}.", Status: ToolStatusExcluded},
 	{Name: "delete_eval_schedule", Description: "Switch an eval back to manual-only runs. CLI-runtime MCP tool over DELETE /api/cerebro/evals/{id}/schedule.", Status: ToolStatusExcluded},
 	{Name: "delete_group", Description: "Delete a workspace group.", Status: ToolStatusExcluded},
 	{Name: "delete_workflow", Description: "Delete a workflow by UUID. CLI-runtime MCP tool over DELETE /api/cerebro/workflows/{id}.", Status: ToolStatusExcluded},
 	{Name: "fork_session", Description: "Fork an attached work session for a subtask.", Status: ToolStatusExcluded},
-	{Name: "get_agent_capabilities", Description: "Get YOUR OWN capabilities card — what you can do (skills), may use (tools, with allow/ask/deny), have access to (credentials/data by name only, never secret values), and are limited by (sandbox + MCP). Omit agent_id to inspect yourself. Call this whenever you are unsure what you are allowed to do. CLI-runtime MCP tool over GET /api/agents/{id}/capabilities.", Status: ToolStatusNewlyImplemented},
+	{Name: "get_agent_capabilities", Description: "Get YOUR OWN capabilities card — what you can do (skills), which actions are allowed, available, enforced, callable, and verified, why a call is blocked, how to fix it, and what limits apply. Tool registration is not permission. Omit agent_id to inspect yourself. CLI-runtime MCP tool over GET /api/agents/{id}/capabilities.", Status: ToolStatusNewlyImplemented},
 	{Name: "get_active_workflow", Description: "Get the Issue workflow currently active on an issue. CLI-runtime MCP tool over GET /api/cerebro/workflows/for-issue/{issueId}.", Status: ToolStatusExcluded},
 	{Name: "get_artifact", Description: "Fetch one artifact with metadata and content.", Status: ToolStatusExcluded},
 	{Name: "get_connection", Description: "Get one workspace connection by UUID. Auth secrets are returned masked.", Status: ToolStatusNewlyImplemented},
+	{Name: "get_command", Description: "Get one reusable workflow command. CLI-runtime MCP tool over GET /api/cerebro/commands/{id}.", Status: ToolStatusNewlyImplemented},
 	{Name: "get_eval", Description: "Get one versioned eval contract. CLI-runtime MCP tool over GET /api/cerebro/evals/{id}.", Status: ToolStatusExcluded},
 	{Name: "get_eval_schedule", Description: "Get one eval's recurring schedule. CLI-runtime MCP tool over GET /api/cerebro/evals/{id}/schedule.", Status: ToolStatusExcluded},
 	{Name: "get_group", Description: "Fetch one workspace group.", Status: ToolStatusExcluded},
@@ -310,6 +316,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "list_attachments", Description: "List file attachments on a Multica issue or chat message.", Status: ToolStatusNewlyImplemented},
 	{Name: "list_comments", Description: "List all comments on a Multica issue in chronological order.", Status: ToolStatusImplemented},
 	{Name: "list_connections", Description: "List the workspace's connections.", Status: ToolStatusNewlyImplemented},
+	{Name: "list_commands", Description: "List reusable workflow commands. CLI-runtime MCP tool over GET /api/cerebro/commands.", Status: ToolStatusNewlyImplemented},
 	{Name: "list_eval_bindings", Description: "List workflow-to-eval gate bindings. CLI-runtime MCP tool over GET /api/cerebro/evals/bindings.", Status: ToolStatusExcluded},
 	{Name: "list_eval_runs", Description: "List immutable runs for one eval. CLI-runtime MCP tool over GET /api/cerebro/evals/{id}/runs.", Status: ToolStatusExcluded},
 	{Name: "list_evals", Description: "List versioned eval contracts. CLI-runtime MCP tool over GET /api/cerebro/evals.", Status: ToolStatusExcluded},
@@ -378,6 +385,7 @@ var multicaMCPToolMatrix = []ToolMeta{
 	{Name: "toggle_workflow", Description: "Enable or disable a workflow. CLI-runtime MCP tool over POST /api/cerebro/workflows/{id}/toggle.", Status: ToolStatusExcluded},
 	{Name: "test_workflow_hook", Description: "Test a Workflow hook without side effects and refresh its baseline. CLI-runtime MCP tool over POST /api/cerebro/workflow-hooks/{id}/test.", Status: ToolStatusExcluded},
 	{Name: "update_connection", Description: "Update a workspace connection. Requires the manage_connections capability.", Status: ToolStatusNewlyImplemented},
+	{Name: "update_command", Description: "Replace a reusable workflow command. CLI-runtime MCP tool over PUT /api/cerebro/commands/{id}.", Status: ToolStatusNewlyImplemented},
 	{Name: "update_eval", Description: "Replace a versioned eval contract. CLI-runtime MCP tool over PUT /api/cerebro/evals/{id}.", Status: ToolStatusExcluded},
 	{Name: "update_artifact", Description: "Update artifact metadata or content.", Status: ToolStatusExcluded},
 	{Name: "update_artifact_folder", Description: "Update an artifact folder.", Status: ToolStatusExcluded},

@@ -1,14 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useCurrentWorkspace } from "@multica/core/paths";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { DashboardTabBar } from "./components/dashboard-tab-bar";
 import { useDashboardStore } from "../core/store";
-import { dashboardOverviewOptions } from "../core/queries";
+import {
+  aiImpactFunctionsOptions,
+  aiImpactOverviewOptions,
+  aiImpactQualityRiskOptions,
+  aiImpactPeopleOptions,
+  dashboardOverviewOptions,
+} from "../core/queries";
 import { AnalyticsDashboard } from "./components/analytics-dashboard";
+import { AIImpactControlRoom } from "./components/ai-impact-control-room";
+import { PeopleControlRoom, type PeopleImpactPeriod } from "./components/people-control-room";
 import { MessagesControlRoom } from "./components/messages-control-room";
 import { OverviewControlRoom } from "./components/overview-control-room";
 import { RunsControlRoom } from "./components/runs-control-room";
@@ -17,6 +25,7 @@ import { filtersFromSearchParams, type AnalyticsFilter } from "../core/analytics
 // One Dashboard shell and filter state for the three FIR-2996 control rooms.
 export function DashboardPage() {
   const enabled = useFeatureFlag("cerebro_dashboard");
+  const aiImpactEnabled = useFeatureFlag("cerebro_ai_impact");
   const workspace = useCurrentWorkspace();
   const range = useDashboardStore((s) => s.range);
   const scope = useDashboardStore((s) => s.scope);
@@ -24,12 +33,35 @@ export function DashboardPage() {
   const actorName = useDashboardStore((s) => s.actorName);
   const tab = useDashboardStore((s) => s.tab);
   const setActor = useDashboardStore((s) => s.setActor);
+  const setScope = useDashboardStore((s) => s.setScope);
   const [visualBuilderOpen, setVisualBuilderOpen] = useState(false);
+  const [peoplePeriod, setPeoplePeriod] = useState<PeopleImpactPeriod>("day");
   const [analyticsFilters, setAnalyticsFilters] = useState<AnalyticsFilter[]>(() =>
     typeof window === "undefined" ? [] : filtersFromSearchParams(new URLSearchParams(window.location.search)),
   );
   const wsId = workspace?.id ?? "";
   const overview = useQuery(dashboardOverviewOptions(wsId, range, scope, actorId));
+  const aiImpactWsId = tab === "ai-impact" && aiImpactEnabled ? wsId : "";
+  const aiImpactOverview = useQuery(aiImpactOverviewOptions(aiImpactWsId));
+  const aiImpactFunctions = useQuery(aiImpactFunctionsOptions(aiImpactWsId));
+  const aiImpactQualityRisk = useQuery(aiImpactQualityRiskOptions(aiImpactWsId));
+  const people = useQuery(aiImpactPeopleOptions(tab === "people" && aiImpactEnabled ? wsId : "", peoplePeriod));
+
+  const selectActor = (id: string, name: string, type: "member" | "agent") => {
+    setScope(type === "agent" ? "agents" : "members");
+    setActor(id, name);
+    setAnalyticsFilters((current) => [
+      ...current.filter((filter) => filter.dimension !== "person" && filter.dimension !== "agent"),
+      { dimension: type === "agent" ? "agent" : "person", operator: "in", values: [name] },
+    ]);
+  };
+
+  useEffect(() => {
+    const hasActorFilter = analyticsFilters.some((filter) =>
+      (filter.dimension === "person" || filter.dimension === "agent") && filter.values.length > 0,
+    );
+    if (actorId && !hasActorFilter) setActor(null);
+  }, [actorId, analyticsFilters, setActor]);
 
   if (!enabled) return null;
 
@@ -68,7 +100,7 @@ export function DashboardPage() {
               {actorName ?? "Actor"} x
             </button>
           )}
-          <DashboardTabBar />
+          <DashboardTabBar showAIImpact={aiImpactEnabled} />
         </div>
       </PageHeader>
 
@@ -81,7 +113,7 @@ export function DashboardPage() {
             </p>
           )}
 
-          {tab === "overview" && <OverviewControlRoom workspaceId={workspace.id} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={(id, name) => setActor(id, name)} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
+          {tab === "overview" && <OverviewControlRoom workspaceId={workspace.id} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={selectActor} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
 
           {tab === "runs" && (
             <>
@@ -108,7 +140,26 @@ export function DashboardPage() {
             </>
           )}
 
-          {tab === "messages" && <MessagesControlRoom workspaceId={workspace.id} workspaceSlug={workspace.slug} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={(id, name) => setActor(id, name)} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
+          {tab === "messages" && <MessagesControlRoom workspaceId={workspace.id} workspaceSlug={workspace.slug} data={data} isLoading={overview.isLoading} filters={analyticsFilters} onFiltersChange={setAnalyticsFilters} onNewVisual={() => setVisualBuilderOpen(true)} onSelectActor={selectActor} builderOpen={visualBuilderOpen} onBuilderOpenChange={setVisualBuilderOpen} />}
+
+          {tab === "ai-impact" && aiImpactEnabled && (
+            <AIImpactControlRoom
+              overview={aiImpactOverview.data}
+              functions={aiImpactFunctions.data}
+              qualityRisk={aiImpactQualityRisk.data}
+              isLoading={{
+                overview: aiImpactOverview.isLoading,
+                functions: aiImpactFunctions.isLoading,
+                qualityRisk: aiImpactQualityRisk.isLoading,
+              }}
+            />
+          )}
+          {tab === "people" && aiImpactEnabled && (
+            <>
+              {people.isError && <p className="mx-6 mt-4 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">Failed to load People.</p>}
+              <PeopleControlRoom people={people.data?.people ?? []} period={peoplePeriod} onPeriodChange={setPeoplePeriod} loading={people.isLoading} />
+            </>
+          )}
         </div>
       </div>
     </div>

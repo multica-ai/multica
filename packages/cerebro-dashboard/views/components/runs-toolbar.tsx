@@ -1,8 +1,14 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { Plus } from "lucide-react";
+import { MoreHorizontal, Plus } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { analyticsQueryOptions, type AnalyticsDimension, type AnalyticsOperator } from "@multica/cerebro-usage";
 import type { AnalyticsFilter } from "../../core/analytics";
 import { dimensionLabel, ENUMERABLE_DIMENSIONS, operatorLabel, valueLabel } from "../../core/dimension-labels";
@@ -98,8 +104,19 @@ export function RunsToolbar({
         <button type="button" aria-expanded={adding} onClick={() => setAdding((open) => !open)} className="flex h-8 items-center gap-1.5 rounded-md bg-[#6557d8] px-3 text-xs font-semibold text-white hover:bg-[#5749c7] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6557d8]">
           <Plus className="size-3.5" /> Add filter
         </button>
-        <button type="button" onClick={onCustomize} className="h-8 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">Customize layout</button>
-        <button type="button" onClick={onNewVisual} className="flex h-8 items-center gap-1.5 rounded-md border bg-background px-3 text-xs font-medium hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><Plus className="size-3.5" /> New visual</button>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            render={
+              <button type="button" aria-label="Dashboard actions" className="grid size-8 place-items-center rounded-md border bg-background hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                <MoreHorizontal className="size-4" />
+              </button>
+            }
+          />
+          <DropdownMenuContent align="start">
+            <DropdownMenuItem onClick={onCustomize}>Customize layout</DropdownMenuItem>
+            <DropdownMenuItem onClick={onNewVisual}>New visual</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
         {chips.map((chip) => (
           <button
             key={`${chip.dimension}:${chip.operator}:${chip.value}`}

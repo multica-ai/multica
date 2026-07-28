@@ -54,9 +54,12 @@ describe("RunsToolbar", () => {
     fireEvent.change(screen.getByLabelText("Time range"), { target: { value: "7d" } });
     expect(props.onRangeChange).toHaveBeenCalledWith("7d");
     expect(screen.getByRole("button", { name: "Member is Lone ×" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Customize layout" }));
+    expect(screen.queryByRole("button", { name: "Customize layout" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Dashboard actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Customize layout" }));
     expect(props.onCustomize).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole("button", { name: "New visual" }));
+    fireEvent.click(screen.getByRole("button", { name: "Dashboard actions" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New visual" }));
     expect(props.onNewVisual).toHaveBeenCalledOnce();
     fireEvent.click(screen.getByRole("button", { name: "Clear all" }));
     expect(props.onClear).toHaveBeenCalledOnce();

@@ -15,6 +15,12 @@ import (
 type HookFeature struct {
 	API            *HookAPI
 	CompletionGate *TaskCompletionGate
+	// StatusGate fires before.issue.status_change for agent actors (FIR-3659);
+	// wired into UpdateIssue via the handler's cerebro sibling file.
+	StatusGate *IssueStatusGate
+	// FailureGate fires on.task.failure from the task:failed bus broadcast;
+	// attached to the bus in router.go.
+	FailureGate *TaskFailureGate
 }
 
 func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store, evalStore EvalStore) *HookFeature {
@@ -33,6 +39,8 @@ func NewHookFeature(db cerebrodb.DBTX, policies *toolpolicy.Store, evalStore Eva
 	return &HookFeature{
 		API:            NewHookAPI(repository, authorizer),
 		CompletionGate: NewTaskCompletionGate(NewPostgresTaskCompletionStore(db), engine, hookFeatureEnabled()),
+		StatusGate:     NewIssueStatusGate(engine),
+		FailureGate:    NewTaskFailureGate(NewPostgresTaskFailureStore(db), engine, hookFeatureEnabled()),
 	}
 }
 

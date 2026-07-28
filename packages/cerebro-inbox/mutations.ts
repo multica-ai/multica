@@ -333,11 +333,18 @@ export function useSnoozeAsReminder() {
       text,
       issueId,
       projectId,
+      inboxItemId,
     }: {
       remindAt: Date;
       text: string;
       issueId?: string | null;
       projectId?: string | null;
+      // FIR-3918 — the inbox row being snoozed, when there is one. That row is
+      // only hidden until remindAt and comes back on its own, so telling the
+      // server about it lets the reminder BE that row instead of adding a second
+      // one with the same title. Absent for a channel/DM snooze (the mute sits on
+      // the channel, not an inbox row) — those keep their standalone row.
+      inboxItemId?: string | null;
     }) => {
       // Idempotent per row: snoozing the same row again replaces its reminder
       // instead of stacking a second one.
@@ -352,6 +359,7 @@ export function useSnoozeAsReminder() {
             : projectId
               ? { project_id: projectId }
               : {}),
+          ...(inboxItemId ? { inbox_item_id: inboxItemId } : {}),
         }),
       });
     },

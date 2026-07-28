@@ -119,8 +119,8 @@ func TestAsMap_LegacyShape(t *testing.T) {
 	if back["tools"] == nil {
 		t.Error("tools must serialise as an array, not null")
 	}
-	if back["supports_ask"] != false {
-		t.Errorf("supports_ask: got %v, want false for claude", back["supports_ask"])
+	if back["supports_ask"] != true {
+		t.Errorf("supports_ask: got %v, want true for enforced local approval flow", back["supports_ask"])
 	}
 }
 

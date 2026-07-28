@@ -162,7 +162,11 @@ func TestKiroBackendSetModelFailureFailsTask(t *testing.T) {
 	}
 }
 
-func TestKiroBackendInvokesACPWithTrustAllTools(t *testing.T) {
+// CEREBRO-PATCH(acp-tool-policy-seam): Kiro must launch without --trust-all-tools so its ACP gate fires.
+// Kiro must be launched WITHOUT --trust-all-tools: that flag suppresses the ACP
+// permission round-trip, which is Kiro's mandatory before-call gate. The flag
+// also stays blocked as a custom arg so an agent cannot re-enable it.
+func TestKiroBackendInvokesACPWithoutTrustAllTools(t *testing.T) {
 	t.Parallel()
 
 	tempDir := t.TempDir()
@@ -201,23 +205,18 @@ func TestKiroBackendInvokesACPWithTrustAllTools(t *testing.T) {
 		t.Fatalf("read args file: %v", err)
 	}
 	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	wantPrefix := []string{"acp", "--trust-all-tools"}
-	if len(lines) < len(wantPrefix) {
-		t.Fatalf("expected at least %d args, got %d: %q", len(wantPrefix), len(lines), lines)
+	// CEREBRO-PATCH(acp-tool-policy-seam): --trust-all-tools must no longer appear in the launch.
+	if len(lines) == 0 || lines[0] != "acp" {
+		t.Fatalf("arg[0] = %q, want %q (full: %q)", lines, "acp", lines)
 	}
-	for i, want := range wantPrefix {
-		if lines[i] != want {
-			t.Fatalf("arg[%d] = %q, want %q (full: %q)", i, lines[i], want, lines)
-		}
-	}
-	for _, blocked := range []string{"--trust-tools", "shell", "-a"} {
+	for _, blocked := range []string{"--trust-tools", "shell", "-a", "--trust-all-tools"} {
 		for _, got := range lines {
 			if got == blocked {
-				t.Errorf("protocol-critical custom arg %q was not filtered: %q", blocked, lines)
+				t.Errorf("tool-gate-bypassing arg %q reached the launch: %q", blocked, lines)
 			}
 		}
 	}
-	if strings.Join(lines, "\n") != strings.Join([]string{"acp", "--trust-all-tools", "--agent", "multica"}, "\n") {
+	if strings.Join(lines, "\n") != strings.Join([]string{"acp", "--agent", "multica"}, "\n") {
 		t.Errorf("unexpected argv after filtering: %q", lines)
 	}
 }

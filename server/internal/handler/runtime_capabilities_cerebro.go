@@ -13,12 +13,16 @@ func normalizedRuntimeCapabilities(provider string, rawCapabilities, rawToolsCon
 	out := cerebrocapabilities.LegacyProviderMap(provider)
 
 	var reported map[string]any
+	reportedSnapshot := false
+	reportedSupportsAsk := false
 	if len(rawCapabilities) > 0 && json.Unmarshal(rawCapabilities, &reported) == nil {
+		reportedSnapshot = true
 		for key, value := range reported {
 			if shouldKeepReportedCapabilityValue(out, key, value) {
 				out[key] = value
 			}
 		}
+		_, reportedSupportsAsk = reported["supports_ask"].(bool)
 	}
 
 	if servers := mcpServerNamesFromToolsConfig(rawToolsConfig); len(servers) > 0 {
@@ -28,6 +32,9 @@ func normalizedRuntimeCapabilities(provider string, rawCapabilities, rawToolsCon
 	ensureCapabilityStringSlice(out, "tools", "")
 	ensureCapabilityStringSlice(out, "mcp_servers", "")
 	ensureCapabilityStringSlice(out, "tool_protocols", "")
+	if reportedSnapshot && !reportedSupportsAsk {
+		out["supports_ask"] = false
+	}
 	ensureCapabilityBool(out, "supports_ask", false)
 	return out
 }

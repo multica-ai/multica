@@ -160,6 +160,13 @@ on it. These are the contracts, not advice:
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
   the assigned agent then.
+- **`in_progress` / `in_review` on assignment runs** are agent-managed CLI
+  mutations, not `StartTask` / `CompleteTask` side effects. The assignment <!-- CEREBRO-PATCH(squad-parent-status): MUL-5156 -->
+  runtime brief asks ordinary agents for `todo`/`backlog` → `in_progress` then
+  `in_review` when they have delivered. Squad leaders share the opening
+  `in_progress` step on the first assignment turn, keep the parent there while
+  members work, and only move to `in_review` when a later re-trigger confirms
+  the overall goal is met.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
 - **`done`** on a child issue posts a system comment on its parent. If a PR

@@ -43,7 +43,7 @@ func TestResolveHookConditions(t *testing.T) {
 
 	t.Run("resolver true", func(t *testing.T) {
 		r := &fakeEvalResolver{passed: true}
-		if !resolveHookConditions(context.Background(), r, conds, event) {
+		if !resolveHookConditions(context.Background(), r, HookPolicy{}, conds, event) {
 			t.Fatal("expected true when resolver passes")
 		}
 		if r.calls != 1 {
@@ -52,33 +52,104 @@ func TestResolveHookConditions(t *testing.T) {
 	})
 
 	t.Run("resolver false", func(t *testing.T) {
-		if resolveHookConditions(context.Background(), &fakeEvalResolver{passed: false}, conds, event) {
+		if resolveHookConditions(context.Background(), &fakeEvalResolver{passed: false}, HookPolicy{}, conds, event) {
 			t.Fatal("expected false when resolver rejects")
 		}
 	})
 
 	t.Run("resolver error fails closed", func(t *testing.T) {
-		if resolveHookConditions(context.Background(), &fakeEvalResolver{err: errors.New("boom")}, conds, event) {
+		if resolveHookConditions(context.Background(), &fakeEvalResolver{err: errors.New("boom")}, HookPolicy{}, conds, event) {
 			t.Fatal("expected false on resolver error")
 		}
 	})
 
 	t.Run("nil resolver fails closed", func(t *testing.T) {
-		if resolveHookConditions(context.Background(), nil, conds, event) {
+		if resolveHookConditions(context.Background(), nil, HookPolicy{}, conds, event) {
 			t.Fatal("expected false with nil resolver")
 		}
 	})
 
 	t.Run("no deferred conditions is vacuously true", func(t *testing.T) {
-		if !resolveHookConditions(context.Background(), nil, nil, event) {
+		if !resolveHookConditions(context.Background(), nil, HookPolicy{}, nil, event) {
 			t.Fatal("expected true with no deferred conditions")
 		}
 	})
 
 	t.Run("missing issue context fails closed", func(t *testing.T) {
 		noIssue := HookEvent{WorkspaceID: ws.String()}
-		if resolveHookConditions(context.Background(), &fakeEvalResolver{passed: true}, conds, noIssue) {
+		if resolveHookConditions(context.Background(), &fakeEvalResolver{passed: true}, HookPolicy{}, conds, noIssue) {
 			t.Fatal("expected false without issue context")
+		}
+	})
+}
+
+type fakeFreshRunner struct {
+	fakeEvalResolver
+	runStatus string
+	runErr    error
+	runCalls  int
+}
+
+func (f *fakeFreshRunner) RunForIssue(context.Context, uuid.UUID, uuid.UUID, uuid.UUID, uuid.UUID, string) (string, string, error) {
+	f.runCalls++
+	return "run-id", f.runStatus, f.runErr
+}
+
+func evalFailedCondition(evalID uuid.UUID) Condition {
+	return Condition{Field: "eval", Op: OpEvalFailed, Value: evalID.String()}
+}
+
+func TestResolveEvalFailedCondition(t *testing.T) {
+	ws, evalID, issue := uuid.New(), uuid.New(), uuid.New()
+	event := HookEvent{WorkspaceID: ws.String(), IssueID: issue.String()}
+	conds := []Condition{evalFailedCondition(evalID)}
+	policy := HookPolicy{CreatedByID: uuid.New().String(), CreatedByType: "member"}
+
+	t.Run("eval failed holds", func(t *testing.T) {
+		if !resolveHookConditions(context.Background(), &fakeEvalResolver{passed: false}, policy, conds, event) {
+			t.Fatal("expected eval_failed to hold when eval fails")
+		}
+	})
+
+	t.Run("eval passed does not hold", func(t *testing.T) {
+		if resolveHookConditions(context.Background(), &fakeEvalResolver{passed: true}, policy, conds, event) {
+			t.Fatal("expected eval_failed not to hold when eval passes")
+		}
+	})
+
+	t.Run("nil resolver fails closed toward the gate", func(t *testing.T) {
+		if !resolveHookConditions(context.Background(), nil, policy, conds, event) {
+			t.Fatal("expected eval_failed to hold with nil resolver")
+		}
+	})
+
+	t.Run("resolver error fails closed toward the gate", func(t *testing.T) {
+		if !resolveHookConditions(context.Background(), &fakeEvalResolver{err: errors.New("boom")}, policy, conds, event) {
+			t.Fatal("expected eval_failed to hold on resolver error")
+		}
+	})
+
+	t.Run("fresh run passed unblocks immediately", func(t *testing.T) {
+		r := &fakeFreshRunner{fakeEvalResolver: fakeEvalResolver{passed: false}, runStatus: "passed"}
+		if resolveHookConditions(context.Background(), r, policy, conds, event) {
+			t.Fatal("fresh passing run must override the stale stored verdict")
+		}
+		if r.runCalls != 1 {
+			t.Fatalf("fresh run calls = %d", r.runCalls)
+		}
+	})
+
+	t.Run("fresh run failed holds", func(t *testing.T) {
+		r := &fakeFreshRunner{fakeEvalResolver: fakeEvalResolver{passed: true}, runStatus: "failed"}
+		if !resolveHookConditions(context.Background(), r, policy, conds, event) {
+			t.Fatal("fresh failing run must hold the gate")
+		}
+	})
+
+	t.Run("fresh run error falls back to stored verdict", func(t *testing.T) {
+		r := &fakeFreshRunner{fakeEvalResolver: fakeEvalResolver{passed: true}, runErr: errors.New("no executor")}
+		if resolveHookConditions(context.Background(), r, policy, conds, event) {
+			t.Fatal("stored pass must clear the gate when the fresh run cannot execute")
 		}
 	})
 }
@@ -99,7 +170,9 @@ func TestHookEngineEvalPassedConditionGatesActions(t *testing.T) {
 
 	run := func(passed bool) HookResult {
 		registry := NewActionRegistry()
-		registry.Register("audit.record", func(context.Context, ActionInvocation) (map[string]any, error) { return map[string]any{"ok": true}, nil })
+		registry.Register("audit.record", func(context.Context, ActionInvocation) (map[string]any, error) {
+			return map[string]any{"ok": true}, nil
+		})
 		engine := NewHookEngine(true, NewMemoryHookStore([]HookPolicy{policy})).
 			WithActionRegistry(registry).
 			WithConditionResolver(&fakeEvalResolver{passed: passed})

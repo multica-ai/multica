@@ -413,6 +413,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				WorkspaceID:    prow.WorkspaceID,
 				DaemonID:       prow.DaemonID,
 				Name:           prow.Name,
+				CustomName:     prow.CustomName,
 				RuntimeMode:    prow.RuntimeMode,
 				Provider:       prow.Provider,
 				Status:         prow.Status,
@@ -457,6 +458,7 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				WorkspaceID:    row.WorkspaceID,
 				DaemonID:       row.DaemonID,
 				Name:           row.Name,
+				CustomName:     row.CustomName,
 				RuntimeMode:    row.RuntimeMode,
 				Provider:       row.Provider,
 				Status:         row.Status,
@@ -1480,6 +1482,10 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
 			resp.ThreadName = issue.Title
+			resp.IssueTitle = issue.Title                                                                                       // CEREBRO-PATCH(agent-task-issue-title): FIR-3708 — the M1 fields existed but were never assigned, so every trace row landed with a NULL issue title
+			if parent, perr := h.Queries.GetIssue(r.Context(), issue.ParentIssueID); issue.ParentIssueID.Valid && perr == nil { // CEREBRO-PATCH(agent-task-issue-title)
+				resp.ParentIssueTitle = parent.Title // CEREBRO-PATCH(agent-task-issue-title)
+			} // CEREBRO-PATCH(agent-task-issue-title)
 
 			// Squad-leader briefing injection: keyed off the task being a
 			// leader-task (is_leader_task) carrying a squad_id — NOT off the
@@ -1522,7 +1528,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 					ID:          task.SquadID,
 					WorkspaceID: issue.WorkspaceID,
 				}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+					// CEREBRO-PATCH(squad-parent-status): MUL-5156 — parent-status
+					// authority is narrower than briefing injection. Injection fires
+					// on the MUL-3724 path too (issue owned by a plain agent, squad
+					// only @mentioned for help); granting status ownership there would
+					// let a guest squad push someone else's in-flight issue to
+					// in_review. Gate it on the issue actually being assigned to this
+					// squad.
+					ownsIssueStatus := issue.AssigneeType.Valid && issue.AssigneeType.String == "squad" && uuidToString(issue.AssigneeID) == uuidToString(squad.ID) // CEREBRO-PATCH(squad-parent-status)
+					briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, ownsIssueStatus)                                                            // CEREBRO-PATCH(squad-parent-status): MUL-5156
 					if strings.TrimSpace(resp.Agent.Instructions) == "" {
 						resp.Agent.Instructions = briefing
 					} else {
@@ -1532,6 +1546,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						"squad_id", uuidToString(squad.ID),
 						"squad_name", squad.Name,
 						"leader_agent_id", resp.Agent.ID,
+						"owns_issue_status", ownsIssueStatus,
 					)
 				}
 			}
@@ -1599,6 +1614,8 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 			h.applyContextDuplicationSaving(r.Context(), &resp, issue, task.ID)
 			// CEREBRO-PATCH(daemon-graphify-nudge): nudge agents to use the graphify code graph when the saving is on (FIR-1311)
 			h.applyGraphifyNudge(r.Context(), &resp, issue)
+			// CEREBRO-PATCH(daemon-workpad-brief): include the Workpad protocol section when cerebro_workpad is on (FIR-3659)
+			h.applyWorkpadBrief(r.Context(), &resp, issue)
 		}
 
 		// Fetch the triggering comment content so the daemon can embed it
@@ -1985,7 +2002,11 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 						ID:          squadUUID,
 						WorkspaceID: wsUUID,
 					}); err == nil && uuidToString(squad.LeaderID) == resp.Agent.ID {
-						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad)
+						// CEREBRO-PATCH(squad-parent-status): MUL-5156 — quick-create has
+						// no issue yet, so there is no parent status to own on this turn.
+						// Ownership is granted later by the issue-bound path once the
+						// leader opens the issue with the squad as assignee.
+						briefing := buildSquadLeaderBriefing(r.Context(), h.Queries, squad, false) // CEREBRO-PATCH(squad-parent-status): MUL-5156
 						if strings.TrimSpace(resp.Agent.Instructions) == "" {
 							resp.Agent.Instructions = briefing
 						} else {
@@ -2518,6 +2539,24 @@ func (h *Handler) ReportTaskUsage(w http.ResponseWriter, r *http.Request) {
 			h.recordUsageBudgetAndAccount(r.Context(), task, u)
 		}
 		h.recordCerebroTaskContextFootprint(r.Context(), taskID, u) // CEREBRO-PATCH(handler-daemon-context-footprint): FIR-1856 persist last-turn footprint for the window indicator.
+
+		// Surface prompt-cache effectiveness per run so cache hit rates are
+		// observable in logs, not just queryable from runtime_usage. The ratio
+		// is cached input over total input-side tokens; a persistently low
+		// value flags a prompt prefix that is not being reused across runs
+		// (e.g. volatile values poisoning the cacheable prefix). MUL-3887.
+		if totalInput := u.InputTokens + u.CacheReadTokens + u.CacheWriteTokens; totalInput > 0 {
+			slog.Info("task prompt-cache usage",
+				"task_id", taskID,
+				"provider", provider,
+				"model", u.Model,
+				"input_tokens", u.InputTokens,
+				"output_tokens", u.OutputTokens,
+				"cache_read_tokens", u.CacheReadTokens,
+				"cache_write_tokens", u.CacheWriteTokens,
+				"cache_read_ratio", float64(u.CacheReadTokens)/float64(totalInput),
+			)
+		}
 		h.projectAnalyticsRun(r.Context(), taskID)                  // CEREBRO-PATCH(analytics-projection): FIR-2996 refresh canonical usage after cost writes.
 	}
 	if len(normalizedEvents) > 0 {

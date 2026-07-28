@@ -544,8 +544,10 @@ func translateAllowlistToTCPRules(in []string) []string {
 	for _, p := range sortedKeys(loopbackPorts) {
 		out = append(out, fmt.Sprintf("(allow network-outbound (remote tcp %s))", schemeString("localhost:"+p)))
 	}
-	for _, p := range sortedKeys(publicPorts) {
-		out = append(out, fmt.Sprintf("(allow network-outbound (remote tcp %s))", schemeString("*:"+p)))
+	// CEREBRO-PATCH(macos26-seatbelt-port-glob): macOS 26 seatbelt silently drops
+	// port-scoped (remote tcp "*:<port>") rules → FailedToOpenSocket; "*:*" is the only accepted all-ports form.
+	if len(publicPorts) > 0 {
+		out = append(out, `(allow network-outbound (remote tcp "*:*"))`)
 	}
 	return out
 }

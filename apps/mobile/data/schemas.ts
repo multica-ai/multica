@@ -39,6 +39,7 @@ import type {
   Workspace,
 } from "@multica/core/types";
 import { IssueSchema } from "@multica/core/api/schemas";
+import type { WorkpadArtifact } from "@/lib/workpad";
 
 /** Upload response. Only fields mobile actually consumes — `url` to put
  *  into the markdown link, `filename` for the `[📎 name](url)` form, `id`
@@ -630,7 +631,6 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   updated_at: z.string().default(""),
   archived_at: z.string().nullable().default(null),
   archived_by: z.string().nullable().default(null),
-  persona_sandbox: z.string().default(""),
 }).loose();
 
 export const AgentListSchema = z.array(AgentSchema).default([]);
@@ -663,7 +663,6 @@ export const RuntimeSchema: z.ZodType<RuntimeDevice> = z.object({
   sandbox_policy: z.unknown().optional() as unknown as z.ZodType<
     RuntimeDevice["sandbox_policy"]
   >,
-  persona_sandbox: z.string().default(""),
   capabilities: z.record(z.string(), z.unknown()).default({}),
   visibility: z.string().catch("private") as unknown as z.ZodType<
     RuntimeDevice["visibility"]
@@ -749,3 +748,28 @@ export const EMPTY_FEATURE_FLAGS: FeatureFlagsResponse = {
 
 // Helpers re-exported for ergonomic single-import at the call site.
 export type { Label, Project, ProjectResource };
+
+// FIR-3765 — the issue's artifacts, trimmed to the fields the Workpad panel
+// reads. `GET /api/issues/:id/artifacts` returns an array of full artifacts;
+// unknown keys are stripped and title/body coalesce to null so downstream
+// parsing never sees undefined. Mirrors web's `Artifact` (packages/core/types/
+// artifact.ts) for the subset the plan view needs.
+export const WorkpadArtifactListSchema = z
+  .array(
+    z.object({
+      id: z.string(),
+      kind: z.string().default(""),
+      title: z
+        .string()
+        .nullish()
+        .transform((v) => v ?? null),
+      body: z
+        .string()
+        .nullish()
+        .transform((v) => v ?? null),
+      updated_at: z.string().default(""),
+    }),
+  )
+  .default([]);
+
+export const EMPTY_WORKPAD_ARTIFACTS: WorkpadArtifact[] = [];

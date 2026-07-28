@@ -61,12 +61,11 @@ jobs:
   release:
     needs: verify
     # Runs on the canonical upstream repo (multica-ai) AND the Firtal fork
-    # (firtal-group). Upstream publishes to multica-ai/homebrew-tap; the fork
-    # publishes its binaries to its own GitHub Release and its formula to
-    # firtal-group/homebrew-tap (see .goreleaser.yml). When HOMEBREW_TAP_GITHUB_TOKEN
-    # is not configured, the GoReleaser run passes --skip=homebrew so the
-    # per-os/arch binaries still ship and only the formula publish is deferred
-    # (instead of failing the whole release on a 401 against the tap).
+    # (firtal-group). Upstream publishes its formula to multica-ai/homebrew-tap.
+    # The fork publishes ONLY binaries here, to its own GitHub Release: the
+    # public firtal-group/homebrew-tap owns both the formula and the mirrored
+    # CLI assets via its own scheduled workflow, so this job passes
+    # --skip=homebrew on the fork (see "Decide GoReleaser flags" below).
     if: github.repository_owner == 'multica-ai' || github.repository_owner == 'firtal-group'
     runs-on: ubuntu-latest
     steps:
@@ -83,28 +82,26 @@ jobs:
 
       - name: Decide GoReleaser flags
         id: gr
-        env:
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
         run: |
-          # Publish the Homebrew formula only when the tap token is present AND
-          # actually has write access to firtal-group/homebrew-tap. A present
-          # but expired/under-scoped token used to fail the WHOLE release on a
-          # 403 ("Resource not accessible by personal access token") from the
-          # GoReleaser brews step — which then skipped the desktop / helm /
-          # tap-mirror jobs that depend on this one, so e.g. the macOS app never
-          # shipped (FIR-2286). Treat "can't write the tap" exactly like "no
-          # token": skip only the formula, still ship binaries + downstream jobs.
-          skip_homebrew=1
-          if [ -n "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
-            if GH_TOKEN="$HOMEBREW_TAP_GITHUB_TOKEN" gh api repos/firtal-group/homebrew-tap \
-                 --jq '[.permissions.push, .permissions.admin, .permissions.maintain] | any' 2>/dev/null \
-               | grep -qx true; then
-              skip_homebrew=0
-            fi
-          fi
-          if [ "$skip_homebrew" = "1" ]; then
+          # Fork (firtal-group): never publish the Homebrew formula from here.
+          # firtal-group/homebrew-tap owns that end-to-end via its own scheduled
+          # workflow (.github/workflows/mirror-cli-from-cerebro.yml, every 20
+          # min): it regenerates Formula/multica.rb AND mirrors the CLI assets
+          # to the public tap release, using its own credential. GoReleaser's
+          # brews step duplicated that work with HOMEBREW_TAP_GITHUB_TOKEN and
+          # failed the WHOLE release on 403 when that token lacked
+          # contents:write, which then skipped desktop/helm (FIR-2286, FIR-2107).
+          #
+          # NOTE: the guard this replaces probed
+          #   gh api repos/firtal-group/homebrew-tap --jq '.permissions.push'
+          # That field reports the token IDENTITY's role on the repo, NOT
+          # whether the token carries contents:write — so it returned true and
+          # the formula PUT still 403'd. Do not reinstate it; it cannot detect
+          # the failure it was added to guard against.
+          #
+          # Upstream (multica-ai) publishes its own tap and is left untouched.
+          if [ "${{ github.repository_owner }}" = "firtal-group" ]; then
             echo "args=release --clean --skip=homebrew" >> "$GITHUB_OUTPUT"
-            echo "::warning::HOMEBREW_TAP_GITHUB_TOKEN missing or lacks write access to firtal-group/homebrew-tap — skipping Homebrew formula publish; binaries still ship to the GitHub Release. Fix the token to restore brew + 'multica update' self-update (FIR-2107)."
           else
             echo "args=release --clean" >> "$GITHUB_OUTPUT"
           fi
@@ -116,75 +113,11 @@ jobs:
           args: ${{ steps.gr.outputs.args }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
 
-  # Fork-only: mirror the CLI binaries to the PUBLIC homebrew-tap release so
-  # local runtimes self-update. GoReleaser uploads the per-os/arch CLI
-  # archives + checksums.txt to THIS repo's GitHub Release, but firtal-cerebro
-  # is private — and the fork self-updater (server/internal/cli/update.go via
-  # internal/cerebro/forkdist) downloads those assets UNAUTHENTICATED from the
-  # public firtal-group/homebrew-tap releases. Without this mirror the tap goes
-  # stale and `multica update` on local Macs is stuck on the last hand-mirrored
-  # version (the recurring breakage behind FIR-2107). The GoReleaser `brews:`
-  # block only publishes the Homebrew formula, not these release assets, so the
-  # mirror is a separate step. Needs HOMEBREW_TAP_GITHUB_TOKEN with
-  # contents:write on firtal-group/homebrew-tap; skips gracefully when the
-  # secret is absent, exactly like the `--skip=homebrew` path above.
-  tap-mirror:
-    needs: [verify, release]
-    if: github.repository_owner == 'firtal-group'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check tap token presence
-        id: tok
-        env:
-          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-        run: |
-          # "present" means the token exists AND can write firtal-group/homebrew-tap.
-          # An expired/under-scoped token would 403 on the upload below; gate on
-          # real write access so the mirror skips gracefully instead of failing
-          # the job (same intent as the absent-token path).
-          present=false
-          if [ -n "$HOMEBREW_TAP_GITHUB_TOKEN" ]; then
-            if GH_TOKEN="$HOMEBREW_TAP_GITHUB_TOKEN" gh api repos/firtal-group/homebrew-tap \
-                 --jq '[.permissions.push, .permissions.admin, .permissions.maintain] | any' 2>/dev/null \
-               | grep -qx true; then
-              present=true
-            fi
-          fi
-          echo "present=$present" >> "$GITHUB_OUTPUT"
-          if [ "$present" != "true" ]; then
-            echo "::warning::HOMEBREW_TAP_GITHUB_TOKEN missing or lacks write access — skipping public-tap binary mirror. Local runtimes will NOT self-update past the last hand-mirrored release until this secret is fixed (FIR-2107)."
-          fi
-
-      - name: Download CLI assets from this repo's release
-        if: steps.tok.outputs.present == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAG: ${{ needs.verify.outputs.tag_name }}
-        run: |
-          mkdir -p dist-tap && cd dist-tap
-          # The forkdist updater looks up `multica-cli-<ver>-<os>-<arch>` and the
-          # `multica_<os>_<arch>` legacy name; both, plus checksums.txt, ship here.
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" \
-            --pattern 'multica-cli-*' --pattern 'multica_*' --pattern 'checksums.txt'
-          echo "Downloaded:" && ls -1
-
-      - name: Mirror to the public homebrew-tap release
-        if: steps.tok.outputs.present == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
-          TAG: ${{ needs.verify.outputs.tag_name }}
-        run: |
-          cd dist-tap
-          notes="CLI binaries for the fork self-update channel, mirrored automatically from the firtal-cerebro release of ${TAG} so \`multica update\` on local runtimes self-heals (see .github/workflows/release.yml, tap-mirror job; FIR-2107)."
-          if gh release view "$TAG" --repo firtal-group/homebrew-tap >/dev/null 2>&1; then
-            gh release upload "$TAG" --repo firtal-group/homebrew-tap --clobber ./*
-          else
-            gh release create "$TAG" --repo firtal-group/homebrew-tap \
-              --title "$TAG" --notes "$notes" ./*
-          fi
-          echo "Mirrored ${TAG} CLI assets to firtal-group/homebrew-tap"
+  # The public-tap mirror intentionally lives in firtal-group/homebrew-tap.
+  # It pulls every asset from this release, including Desktop installers that
+  # can arrive after the CLI archives, and writes with that repository's native
+  # GITHUB_TOKEN. This source workflow needs no cross-repo write credential.
 
   # Multi-arch images are built natively per platform on dedicated runners
   # (amd64 on ubuntu-latest, arm64 on ubuntu-24.04-arm) and merged into a
@@ -473,7 +406,7 @@ jobs:
   # notarized only when its Apple credentials are configured. Linux packages
   # do not require platform signing.
   desktop:
-    needs: [release, tap-mirror]
+    needs: release
     strategy:
       fail-fast: false
       matrix:
@@ -513,15 +446,38 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Package Desktop installers (${{ matrix.target }})
+      - name: Package Desktop installers (linux)
+        if: matrix.target == 'linux'
         working-directory: apps/desktop
         env:
-          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # electron-builder's GitHub publisher reads this:
-          GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # electron-builder's dependency collector exceeded Node's 2 GB
+          # default heap on every release runner (FIR-3801).
+          NODE_OPTIONS: --max-old-space-size=4096
+        # Each architecture is uploaded before its local output is removed.
+        # Keeping both unpacked apps exhausted the runner disk (FIR-3847).
+        run: |
+          node scripts/package.mjs --linux --x64 --publish always --config electron-builder.release.yml
+          rm -rf dist
+          node scripts/package.mjs --linux --arm64 --publish always --config electron-builder.release.yml
+
+      - name: Package Desktop installers (${{ matrix.target }})
+        if: matrix.target != 'linux'
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # electron-builder's GitHub publisher reads this:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # electron-builder's dependency collector exceeded Node's 2 GB
+          # default heap on every release runner (FIR-3801).
+          NODE_OPTIONS: --max-old-space-size=4096
           CSC_LINK: ${{ matrix.target == 'mac' && secrets.MACOS_CSC_LINK || matrix.target == 'win' && secrets.WINDOWS_CSC_LINK || '' }}
           CSC_KEY_PASSWORD: ${{ matrix.target == 'mac' && secrets.MACOS_CSC_KEY_PASSWORD || matrix.target == 'win' && secrets.WINDOWS_CSC_KEY_PASSWORD || '' }}
           APPLE_ID: ${{ matrix.target == 'mac' && secrets.APPLE_ID || '' }}
           APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.target == 'mac' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
           APPLE_TEAM_ID: ${{ matrix.target == 'mac' && secrets.APPLE_TEAM_ID || '' }}
-        run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always
+        # Publish to this private source release. The public tap mirror copies
+        # the installers and update metadata after each platform job uploads.
+        run: node scripts/package.mjs --${{ matrix.target }} --x64 --arm64 --publish always --config electron-builder.release.yml

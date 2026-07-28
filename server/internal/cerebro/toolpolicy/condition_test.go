@@ -150,7 +150,7 @@ func TestConditionedAllow_IsWhitelist_ThroughResolve(t *testing.T) {
 		if applies {
 			in.Settings[LayerAgent] = setting
 		}
-		return Resolve(in)
+		return ResolveWithMode(ModeHardFloor, in)
 	}
 	if eff := resolveForAction("get_schema"); eff.Setting != SettingAllow {
 		t.Fatalf("condition met must allow; got %q (%s)", eff.Setting, eff.Reason)

@@ -2,12 +2,187 @@ package toolpolicy
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"sync/atomic"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 )
+
+type connectionQueryCounter struct {
+	count atomic.Int64
+}
+
+func (c *connectionQueryCounter) TraceQueryStart(ctx context.Context, _ *pgx.Conn, _ pgx.TraceQueryStartData) context.Context {
+	c.count.Add(1)
+	return ctx
+}
+
+func (*connectionQueryCounter) TraceQueryEnd(context.Context, *pgx.Conn, pgx.TraceQueryEndData) {}
+
+func TestConnectionDefaultBaseMatchesCallTimeContract(t *testing.T) {
+	tests := []struct {
+		name     string
+		conn     connectionRow
+		fallback Setting
+		want     Setting
+	}{
+		{"mcp keeps allow baseline", connectionRow{kind: "mcp_http", defaultAccess: "deny"}, SettingAllow, SettingAllow},
+		{"api allow", connectionRow{kind: "api", defaultAccess: "allow"}, SettingDeny, SettingAllow},
+		{"api ask", connectionRow{kind: "api", defaultAccess: "ask"}, SettingAllow, SettingAsk},
+		{"api deny", connectionRow{kind: "api", defaultAccess: "deny"}, SettingAllow, SettingDeny},
+		{"api empty fails closed", connectionRow{kind: "api"}, SettingAllow, SettingDeny},
+		{"api invalid fails closed", connectionRow{kind: "api", defaultAccess: "unknown"}, SettingAllow, SettingDeny},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := connectionDefaultBase(tt.conn, tt.fallback); got != tt.want {
+				t.Fatalf("connectionDefaultBase() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestConnectionToolVerdictsHasBoundedQueryCost is the production regression
+// for FIR-3388. Claim-time connection resolution used to re-read the complete
+// policy chain for every discovered tool. A connection with dozens of tools
+// therefore consumed the whole database pool and made daemon claims time out.
+//
+// The exact query count may grow when another fixed-cost actor source is added,
+// but it must not grow with the number of connection tools.
+func TestConnectionToolVerdictsHasBoundedQueryCost(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	const toolCount = 60
+	tools := make([]connectionTool, 0, toolCount)
+	for i := 0; i < toolCount; i++ {
+		tools = append(tools, connectionTool{Name: fmt.Sprintf("tool_%02d", i)})
+	}
+	toolsJSON, err := json.Marshal(tools)
+	if err != nil {
+		t.Fatalf("marshal connection tools: %v", err)
+	}
+
+	const conn = "claim-query-cost"
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, tools, enabled)
+		VALUES ($1, $2, $3, 'mcp_http', 'http://internal:3000', $4, true)
+	`, tpTestWorkspaceID, conn, "Claim query cost", toolsJSON); err != nil {
+		if isUndefinedTable(err) {
+			t.Skip("workspace_connection table not present; skipping query-cost test")
+		}
+		t.Fatalf("seed connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1 AND name = $2`,
+			tpTestWorkspaceID, conn)
+	})
+
+	counter := &connectionQueryCounter{}
+	cfg := tpTestPool.Config().Copy()
+	cfg.ConnConfig.Tracer = counter
+	tracedPool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("create traced pool: %v", err)
+	}
+	t.Cleanup(tracedPool.Close)
+	if err := tracedPool.Ping(ctx); err != nil {
+		t.Fatalf("ping traced pool: %v", err)
+	}
+	counter.count.Store(0)
+
+	verdicts, err := NewStore(tracedPool).ConnectionToolVerdicts(ctx, TableQuery{
+		WorkspaceID: tpTestWorkspaceID,
+		AgentID:     uuidByte(91),
+	})
+	if err != nil {
+		t.Fatalf("resolve connection verdicts: %v", err)
+	}
+	if len(verdicts) != toolCount {
+		t.Fatalf("resolved %d connection tools, want %d", len(verdicts), toolCount)
+	}
+	if got := counter.count.Load(); got > 15 {
+		t.Fatalf("claim-time connection resolution used %d database queries for %d tools; want at most 15 fixed-cost queries", got, toolCount)
+	}
+}
+
+func TestConnectionEndpointVerdictsHasBoundedQueryCost(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	clearCaps(t, s)
+	ctx := context.Background()
+
+	const endpointCount = 60
+	endpoints := make([]endpointPermission, 0, endpointCount)
+	targets := make([]ConnectionEndpointTarget, 0, endpointCount)
+	for i := 0; i < endpointCount; i++ {
+		path := fmt.Sprintf("/endpoint/%02d", i)
+		endpoints = append(endpoints, endpointPermission{Path: path, Methods: []string{"GET"}})
+		targets = append(targets, ConnectionEndpointTarget{
+			Connection: "claim-endpoint-cost",
+			Method:     "GET",
+			Path:       path,
+		})
+	}
+	endpointsJSON, err := json.Marshal(endpoints)
+	if err != nil {
+		t.Fatalf("marshal connection endpoints: %v", err)
+	}
+
+	const conn = "claim-endpoint-cost"
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, endpoint_permissions, default_access, enabled)
+		VALUES ($1, $2, $3, 'api', 'http://internal:3000', $4, 'allow', true)
+	`, tpTestWorkspaceID, conn, "Claim endpoint cost", endpointsJSON); err != nil {
+		if isUndefinedTable(err) {
+			t.Skip("workspace_connection table not present; skipping endpoint query-cost test")
+		}
+		t.Fatalf("seed connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1 AND name = $2`,
+			tpTestWorkspaceID, conn)
+	})
+
+	counter := &connectionQueryCounter{}
+	cfg := tpTestPool.Config().Copy()
+	cfg.ConnConfig.Tracer = counter
+	tracedPool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		t.Fatalf("create traced pool: %v", err)
+	}
+	t.Cleanup(tracedPool.Close)
+	if err := tracedPool.Ping(ctx); err != nil {
+		t.Fatalf("ping traced pool: %v", err)
+	}
+	counter.count.Store(0)
+
+	verdicts, err := NewStore(tracedPool).ConnectionEndpointVerdicts(ctx, TableQuery{
+		WorkspaceID: tpTestWorkspaceID,
+		AgentID:     uuidByte(92),
+	}, targets)
+	if err != nil {
+		t.Fatalf("resolve endpoint verdicts: %v", err)
+	}
+	if len(verdicts) != endpointCount {
+		t.Fatalf("resolved %d endpoints, want %d", len(verdicts), endpointCount)
+	}
+	if got := counter.count.Load(); got > 18 {
+		t.Fatalf("claim-time endpoint resolution used %d database queries for %d endpoints; want at most 18 fixed-cost queries", got, endpointCount)
+	}
+}
 
 // TestDeniedConnectionTools_AgentDenyProducesToken seeds an MCP connection with
 // two tools, denies one at the agent layer, and asserts only that tool surfaces
@@ -63,6 +238,48 @@ func TestDeniedConnectionTools_AgentDenyProducesToken(t *testing.T) {
 	if len(tokens) != 1 || tokens[0] != want {
 		t.Fatalf("got %v, want exactly [%q]", tokens, want)
 	}
+}
+
+// TestDeniedConnectionTools_ResourceScopedRoleProducesToken proves Roles and
+// direct per-tool policy share the exact same MCP enforcement path. A role may
+// deny one discovered tool without hiding or denying its sibling.
+func TestDeniedConnectionTools_ResourceScopedRoleProducesToken(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	ctx := context.Background()
+
+	agent := uuidByte(72)
+	const (
+		conn    = "role-connection"
+		toolKey = "connection:" + conn
+	)
+	if _, err := s.pool.Exec(ctx, `
+		INSERT INTO workspace_connection
+		  (workspace_id, name, display_name, type, url, tools, enabled)
+		VALUES ($1, $2, $3, 'mcp_http', 'http://internal:3000',
+		        '[{"name":"restricted_action"},{"name":"open_action"}]'::jsonb, true)
+	`, tpTestWorkspaceID, conn, "Role Connection"); err != nil {
+		if isUndefinedTable(err) {
+			t.Skip("workspace_connection table not present; skipping role connection test")
+		}
+		t.Fatalf("seed connection: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(),
+			`DELETE FROM workspace_connection WHERE workspace_id = $1 AND name = $2`, tpTestWorkspaceID, conn)
+	})
+	assignResourceRole(t, s, "Connection operator", agent, toolKey, "restricted_action", SettingDeny)
+
+	tokens, err := s.DeniedConnectionTools(ctx, TableQuery{
+		WorkspaceID: tpTestWorkspaceID,
+		AgentID:     agent,
+	})
+	if err != nil {
+		t.Fatalf("denied connection tools: %v", err)
+	}
+	assertSameTokens(t, "role-scoped connection tool", tokens, []string{
+		"mcp__role-connection__restricted_action",
+	})
 }
 
 // TestDeniedConnectionTools_ConnectionWideDenyScopedPerRuntimeAndAgent is the

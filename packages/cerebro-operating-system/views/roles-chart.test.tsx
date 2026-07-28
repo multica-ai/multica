@@ -33,13 +33,56 @@ describe("RolesChart", () => {
     expect(screen.getByRole("img", { name: "Ava" })).toHaveAttribute("src", "https://pics/ava.png");
   });
 
-  it("offers above, beside, and below inserts and reports the chosen direction", () => {
+  it("offers above, beside, and below as small plus buttons without a popover first", () => {
     const onInsert = vi.fn();
     render(<RolesChart onEdit={vi.fn()} onInsert={onInsert} seats={[seat("lead", "Leadership")]} />);
-    fireEvent.click(screen.getByRole("button", { name: "Add a role near Leadership" }));
+    // No "Add role" toggle to open first — the three plusses sit on the lines.
+    expect(screen.queryByRole("button", { name: /Add a role near/ })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add role above Leadership" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add role beside Leadership" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Add role below Leadership" }));
     expect(onInsert).toHaveBeenCalledWith("lead", "below");
+  });
+
+  it("gives every card the same fixed size so a level reads as one row", () => {
+    const { container } = render(<RolesChart onEdit={vi.fn()} seats={[
+      seat("lead", "Leadership", { owner_type: "member", owner_id: "m1", owner_name: "Ava", vacant: false, responsibilities: ["One", "Two", "Three", "Four", "Five", "Six"] }),
+      seat("ops", "Operations", { parent_id: "lead", position: 1 }),
+    ]} />);
+    const cards = [...container.querySelectorAll("article")];
+    expect(cards).toHaveLength(2);
+    for (const card of cards) expect(card.className).toContain("h-60 w-64");
+    // The overflow collapses instead of growing the card.
+    expect(screen.getByText("+2 more")).toBeInTheDocument();
+  });
+
+  it("labels the name and accountability blocks on each card", () => {
+    render(<RolesChart onEdit={vi.fn()} seats={[
+      seat("lead", "Leadership", { owner_type: "member", owner_id: "m1", owner_name: "Ava", vacant: false, responsibilities: ["Vision"] }),
+    ]} />);
+    expect(screen.getByText("Name(s)")).toBeInTheDocument();
+    expect(screen.getByText("Accountabilities")).toBeInTheDocument();
+    expect(screen.getByText("Vision")).toBeInTheDocument();
+  });
+
+  it("collapses a parent so its reports disappear until expanded again", () => {
+    render(<RolesChart onEdit={vi.fn()} seats={[
+      seat("lead", "Leadership"),
+      seat("ops", "Operations", { parent_id: "lead", position: 1 }),
+    ]} />);
+    expect(screen.getByRole("heading", { name: "Operations" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Collapse Leadership" }));
+    expect(screen.queryByRole("heading", { name: "Operations" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand Leadership" }));
+    expect(screen.getByRole("heading", { name: "Operations" })).toBeInTheDocument();
+  });
+
+  it("edits from anywhere on the card, not only a small pencil", () => {
+    const onEdit = vi.fn();
+    render(<RolesChart onEdit={onEdit} seats={[seat("lead", "Leadership")]} />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit Leadership" }));
+    expect(onEdit).toHaveBeenCalledWith("lead");
   });
 });

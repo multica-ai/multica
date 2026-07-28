@@ -13,7 +13,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
-	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 )
@@ -30,18 +29,6 @@ func (f *gateFakeTaskMandates) Issue(context.Context, pgtype.UUID, pgtype.UUID, 
 func (f *gateFakeTaskMandates) Authorize(_ context.Context, _, _, _ pgtype.UUID, tool string) error {
 	f.calls = append(f.calls, tool)
 	return f.authorizeErr
-}
-
-// --- fakes (assignable to permgate.Gate's exported interface fields) --------
-
-type gateFakeResolver struct {
-	decision permissions.Decision
-	calls    int
-}
-
-func (f *gateFakeResolver) Can(_ context.Context, _ permissions.Request) (permissions.Decision, error) {
-	f.calls++
-	return f.decision, nil
 }
 
 type gateFakeApprovals struct {
@@ -87,9 +74,34 @@ func gateTestUUID(seed byte) pgtype.UUID {
 	return u
 }
 
-func newGatedExecutor(res *gateFakeResolver, ap *gateFakeApprovals) *FirtalGatewayExecutor {
+func TestConnectionToolSettingBlocksWhenResolverIsUnavailable(t *testing.T) {
 	e := &FirtalGatewayExecutor{logger: slog.Default()}
-	gate := &permgate.Gate{Resolver: res, Approvals: ap, PollInterval: time.Millisecond, WaitTimeout: time.Second}
+	reg := NewRegistry(nil)
+	reg.Register(&gatewayMCPTool{
+		exposedName:    "mcp__customer_service__draft_reply",
+		connectionName: "customer_service",
+		toolName:       "draft_reply",
+	})
+	got, conn := e.connectionToolSetting(
+		context.Background(),
+		gateTestUUID(1),
+		gateTestUUID(2),
+		reg,
+		"mcp__customer_service__draft_reply",
+		GatewayRequestMeta{AgentID: "agent-1"},
+	)
+	if got != toolpolicy.SettingDeny || conn != "customer_service" {
+		t.Fatalf("missing connection resolver = %s/%q, want Deny/customer_service", got, conn)
+	}
+	resource, connection, ok := connectionPolicyTarget(reg, "mcp__customer_service__draft_reply")
+	if !ok || resource != "draft_reply" || connection != "customer_service" {
+		t.Fatalf("connection policy target = %q/%q/%v, want draft_reply/customer_service/true", resource, connection, ok)
+	}
+}
+
+func newGatedExecutor(ap *gateFakeApprovals) *FirtalGatewayExecutor {
+	e := &FirtalGatewayExecutor{logger: slog.Default()}
+	gate := &permgate.Gate{Approvals: ap, PollInterval: time.Millisecond, WaitTimeout: time.Second}
 	e.EnableApprovalGate(gate)
 	return e
 }
@@ -135,16 +147,46 @@ func TestGuardToolCallTaskMandateDeniesEveryCallPathBeforePolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		tool string
+		reg  *Registry
 		err  error
 	}{
 		{name: "expired ordinary tool", tool: "web_fetch", err: errors.New("task mandate expired")},
 		{name: "tool outside mandate", tool: "web_fetch", err: errors.New("tool is outside task mandate")},
 		{name: "expired create_issue early path", tool: "create_issue", err: errors.New("task mandate expired")},
+		{
+			name: "MCP connection tool outside mandate",
+			tool: "mcp__customer_service__draft_reply",
+			reg: func() *Registry {
+				reg := NewRegistry(nil)
+				reg.Register(&gatewayMCPTool{
+					exposedName:    "mcp__customer_service__draft_reply",
+					connectionName: "customer_service",
+					toolName:       "draft_reply",
+				})
+				return reg
+			}(),
+			err: errors.New("tool is outside task mandate"),
+		},
+		{
+			name: "API connection tool outside mandate",
+			tool: "infisical_admin__get_secrets",
+			reg: func() *Registry {
+				reg := NewRegistry(nil)
+				reg.Register(&APIConnectionTool{
+					toolName: "infisical_admin__get_secrets",
+					connName: "infisical-admin",
+					method:   "GET",
+					path:     "/secrets",
+				})
+				return reg
+			}(),
+			err: errors.New("tool is outside task mandate"),
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mandates := &gateFakeTaskMandates{authorizeErr: tc.err}
 			e := (&FirtalGatewayExecutor{logger: slog.Default()}).SetTaskMandates(mandates)
-			allowed, reason := e.guardToolCall(context.Background(), gateTestUUID(1), gateTestUUID(9), tc.tool, nil, nil, meta)
+			allowed, reason := e.guardToolCall(context.Background(), gateTestUUID(1), gateTestUUID(9), tc.tool, nil, tc.reg, meta)
 			if allowed || !strings.Contains(reason, tc.err.Error()) {
 				t.Fatalf("guardToolCall() = (%v, %q), want denial containing %q", allowed, reason, tc.err)
 			}
@@ -189,7 +231,7 @@ func TestApprovalInboxActive(t *testing.T) {
 	}
 
 	// Gate on, cerebro nil → workspace approval flag defaults ON → inbox active.
-	e1 := newGatedExecutor(&gateFakeResolver{}, &gateFakeApprovals{})
+	e1 := newGatedExecutor(&gateFakeApprovals{})
 	if !e1.approvalInboxActive(context.Background(), ws) {
 		t.Fatalf("gate on + flag default-on must report inbox active")
 	}
@@ -253,31 +295,6 @@ func (h *decisionCaptureHandler) Handle(_ context.Context, r slog.Record) error 
 }
 func (h *decisionCaptureHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
 func (h *decisionCaptureHandler) WithGroup(string) slog.Handler      { return h }
-
-// --- toolPolicyDecision (FIR-2230 chain verdict → gate decision) ------------
-
-func TestToolPolicyDecision(t *testing.T) {
-	cases := []struct {
-		setting toolpolicy.Setting
-		want    permissions.DecisionKind
-	}{
-		{toolpolicy.SettingAllow, permissions.DecisionAllow},
-		{toolpolicy.SettingAsk, permissions.DecisionNeedsApproval},
-		{toolpolicy.SettingDeny, permissions.DecisionDeny},
-		// Resolve never yields Inherit; an unexpected value must fail closed.
-		{toolpolicy.SettingInherit, permissions.DecisionDeny},
-	}
-	for _, c := range cases {
-		got := toolPolicyDecision(toolpolicy.Effective{Setting: c.setting, Reason: "r"})
-		if got.Kind != c.want {
-			t.Errorf("toolPolicyDecision(%q).Kind = %q, want %q", c.setting, got.Kind, c.want)
-		}
-	}
-	// The Effective reason is carried through for the audit trail.
-	if got := toolPolicyDecision(toolpolicy.Effective{Setting: toolpolicy.SettingDeny, Reason: "Capped by user"}); got.Reason != "Capped by user" {
-		t.Errorf("reason not carried through, got %q", got.Reason)
-	}
-}
 
 func TestBuildApprovalGateIsAlwaysAvailable(t *testing.T) {
 	if gate := BuildApprovalGate(nil, nil, nil); gate == nil {

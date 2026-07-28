@@ -1,8 +1,8 @@
 -- Agent Office (FIR-1775): versioning + governance for an agent's full runtime
 -- context, mirroring the skill-governance model (skill_version /
 -- skill_change_request) but for the agent COMPOSITE: instructions, bound skills,
--- model, thinking_level, mcp_config, custom_args, runtime_config,
--- persona_sandbox, and the NAMES (never values) of custom_env keys.
+-- model, thinking_level, mcp_config, custom_args, runtime_config, and the
+-- NAMES (never values) of custom_env keys.
 --
 -- Schema lives in 9100_cerebro_agent_context_versioning.{up,down}.sql.
 
@@ -32,8 +32,11 @@ WHERE a.id = $1;
 -- ListAgentSkillIDsForContext returns the skill ids currently bound to the
 -- agent, in a stable order so two snapshots of the same binding set compare
 -- equal byte-for-byte.
+--
+-- FIR-3805: always_on rides along because it is a property of the BINDING, not
+-- of the skill, and it is versioned exactly like the binding set itself.
 -- name: ListAgentSkillIDsForContext :many
-SELECT skill_id FROM agent_skill
+SELECT skill_id, always_on FROM agent_skill
 WHERE agent_id = $1
 ORDER BY skill_id;
 
@@ -58,11 +61,10 @@ UPDATE agent SET
     description     = $3,
     model           = $4,
     thinking_level  = $5,
-    persona_sandbox = $6,
-    mcp_config      = $7,
-    custom_args     = $8,
-    runtime_config  = $9,
-    context_version = $10,
+    mcp_config      = $6,
+    custom_args     = $7,
+    runtime_config  = $8,
+    context_version = $9,
     updated_at      = now()
 WHERE id = $1
 RETURNING *;
@@ -70,10 +72,19 @@ RETURNING *;
 -- name: DeleteAgentSkillsForContext :exec
 DELETE FROM agent_skill WHERE agent_id = $1;
 
+-- SetAgentSkillAlwaysOn (FIR-3805) replaces the agent's whole always-on set in
+-- one statement: every binding named in the list is flagged, every other
+-- binding is cleared. Ids that are not bound to this agent simply match no row,
+-- so the always-on set can never drift out of the bound set.
+-- name: SetAgentSkillAlwaysOn :exec
+UPDATE agent_skill
+SET always_on = (skill_id = ANY(@always_on_skill_ids::uuid[]))
+WHERE agent_id = $1;
+
 -- name: InsertAgentSkillForContext :exec
-INSERT INTO agent_skill (agent_id, skill_id)
-VALUES ($1, $2)
-ON CONFLICT (agent_id, skill_id) DO NOTHING;
+INSERT INTO agent_skill (agent_id, skill_id, always_on)
+VALUES ($1, $2, $3)
+ON CONFLICT (agent_id, skill_id) DO UPDATE SET always_on = EXCLUDED.always_on;
 
 -- --- Version snapshots (append-only) ---
 

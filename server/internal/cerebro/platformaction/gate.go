@@ -9,6 +9,7 @@ import (
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
 	"github.com/multica-ai/multica/server/internal/cerebro/permissions"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -72,12 +73,12 @@ func (g *Gate) Authorize(ctx context.Context, in Request) (permgate.Result, erro
 		in.Context = authoritativeTaskContext(ctx, g.Queries, in.Context, task)
 	}
 
-	effective, err := g.Policy.ResolveGeneral(ctx, toolpolicy.Query{
+	effective, err := g.Policy.ResolvePermission(ctx, toolpolicy.Query{
 		WorkspaceID: in.WorkspaceID, ToolKey: in.Capability, RuntimeID: agent.RuntimeID,
 		AgentID: in.AgentID, UserID: agent.OwnerID, OnBehalfOfID: onBehalfOfID,
 		SystemID: systemID, Base: toolpolicy.SettingAllow, IsSystem: isSystem,
 		RequestContext: toolpolicy.RequestContext{Action: toolpolicy.ActionOf(in.Capability)},
-	}, g.Policy.MemberOverrideEnabled(ctx, in.WorkspaceID))
+	}, platformaccess.Actor{Authenticated: true, Agent: true})
 	if err != nil {
 		return denied("permission lookup failed"), err
 	}

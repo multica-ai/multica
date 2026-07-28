@@ -10,6 +10,7 @@
   "exports": {
     ".": "./index.ts",
     "./views": "./views/index.ts",
+    "./views/components/run-failure-card": "./views/components/run-failure-card.tsx",
     "./views/docs": "./views/docs/index.ts"
   },
   "dependencies": {

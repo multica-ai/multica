@@ -68,3 +68,22 @@ export {
   coupledNotesForIssueOptions,
   type CoupledNote,
 } from "./coupled-notes";
+export {
+  selectIssuePlan,
+  parseWorkpadChecklist,
+  workpadProgress,
+  parseWorkpadPhases,
+  namedPhases,
+  phaseStatus,
+  type WorkpadItem,
+  type WorkpadProgress,
+  type WorkpadPhase,
+} from "./workpad";
+export {
+  PlanVersionSchema,
+  PlanVersionsListSchema,
+  safeParsePlanVersions,
+  planVersionKeys,
+  planVersionsOptions,
+  type PlanVersion,
+} from "./plan-versions";

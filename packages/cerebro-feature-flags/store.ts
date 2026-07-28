@@ -90,6 +90,18 @@ export function resolveFlag(
   return overrides[key] ?? ws ?? CEREBRO_FLAG_DEFAULTS[key];
 }
 
+/**
+ * Resolve the workspace-authoritative value without personal overrides.
+ * Security boundaries such as service-token authentication use this value so
+ * their UI and backend kill switch cannot disagree.
+ */
+export function resolveWorkspaceFlag(
+  key: CerebroFlagKey,
+  workspaceOverrides: Partial<Record<CerebroFlagKey, boolean>>,
+): boolean {
+  return workspaceOverrides[key] ?? CEREBRO_FLAG_DEFAULTS[key];
+}
+
 /** Resolve the effective value of a flag (see {@link resolveFlag}). */
 export function useFlagValue(key: CerebroFlagKey): boolean {
   return useCerebroFeatureFlagsStore((s) =>

@@ -38,6 +38,14 @@ const mockIssuePropertyCatalog = vi.hoisted(() => [
 const mockSetIssueProperty = vi.hoisted(() => vi.fn());
 const mockUnsetIssueProperty = vi.hoisted(() => vi.fn());
 
+// FIR-3765 — the Workpad is stubbed so the assertion below is about WHERE
+// issue-detail mounts it (below the composer), not about the panel's own
+// internals, which are covered in packages/cerebro-artifacts.
+vi.mock("@multica/cerebro-artifacts/views/components", () => ({
+  ArtifactList: () => null,
+  WorkpadPanel: () => <div data-testid="workpad-panel-stub" />,
+}));
+
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
 }));
@@ -650,6 +658,29 @@ describe("IssueDetail (shared)", () => {
 
     expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
   });
+
+  // FIR-3765 (Jesper's review): the Workpad sits at the very BOTTOM of the
+  // issue, below the comment input — it used to render above it.
+  it("mounts the Workpad below the bottom comment composer", async () => {
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+    });
+
+    const workpad = screen.getByTestId("workpad-panel-stub");
+    // Threads carry their own composers; the page's bottom composer is the last
+    // one in the document, and the Workpad must come after it.
+    const composers = screen.getAllByTestId("composer-input");
+    const bottomComposer = composers[composers.length - 1];
+
+    expect(bottomComposer).toBeTruthy();
+    expect(
+      bottomComposer!.compareDocumentPosition(workpad) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
 
   it("renders the issue title leaf as a context trigger even when linkSelfInBreadcrumb=true", async () => {
     renderIssueDetail("issue-1", { linkSelfInBreadcrumb: true });

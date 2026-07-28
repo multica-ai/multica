@@ -2,5 +2,10 @@ export { Markdown, MemoizedMarkdown, type MarkdownProps, type RenderMode } from 
 export { CodeBlock, InlineCode, type CodeBlockProps } from './CodeBlock'
 export { StreamingMarkdown, type StreamingMarkdownProps } from './StreamingMarkdown'
 export { preprocessLinks, detectLinks, hasLinks } from './linkify'
+export {
+  preprocessIssueIdentifiers,
+  isIssueIdentifier,
+  ISSUE_IDENTIFIER_PATTERN,
+} from './issue-identifiers'
 export { preprocessMentionShortcodes } from './mentions'
 export { preprocessFileCards, isCdnUrl, isFileCardUrl, isImageUrl, FILE_CARD_URL_PATTERN, isAllowedFileCardHref } from './file-cards'

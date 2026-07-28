@@ -69,7 +69,7 @@
 ;; Network (deny by default; allow specific ports)
 ;; Seatbelt cannot match hostnames; rules are port-scoped.
 (allow network-outbound (remote tcp "localhost:19514"))
-(allow network-outbound (remote tcp "*:443"))
+(allow network-outbound (remote tcp "*:*"))
 (allow network-outbound (literal "/private/var/run/mDNSResponder"))
 (allow network-outbound (remote udp "*:53"))
 (allow network-bind (local ip "localhost:*"))

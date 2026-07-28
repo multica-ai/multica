@@ -979,7 +979,7 @@ func TestOpencodeBackendInjectsThinkingVariant(t *testing.T) {
 	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
 		Model:         "opencode/deepseek-v4",
 		ThinkingLevel: "max",
-		CustomArgs:    []string{"--variant", "low", "--keep-me"},
+		CustomArgs:    []string{"--variant", "low", "--auto", "--keep-me"}, // CEREBRO-PATCH(opencode-permission-flag): the daemon, not an agent, owns this flag.
 		Timeout:       5 * time.Second,
 	})
 	if err != nil {
@@ -1016,6 +1016,15 @@ func TestOpencodeBackendInjectsThinkingVariant(t *testing.T) {
 	}
 	if argIndexOf(args, "low") >= 0 {
 		t.Errorf("filtered user --variant value still appears: %v", args)
+	}
+	autoCount := 0 // CEREBRO-PATCH(opencode-permission-flag): the daemon injects the supported non-interactive flag exactly once.
+	for _, arg := range args {
+		if arg == "--auto" {
+			autoCount++
+		}
+	}
+	if autoCount != 1 {
+		t.Errorf("expected exactly one daemon-injected --auto, got %d: %v", autoCount, args)
 	}
 	if argIndexOf(args, "--keep-me") < 0 {
 		t.Errorf("non-blocked custom arg was dropped: %v", args)
@@ -1117,7 +1126,7 @@ func TestOpencodeBackendQuestionDenySurvivesUserConfig(t *testing.T) {
 		t.Fatalf("read args file: %v", err)
 	}
 	args := strings.Split(strings.TrimSpace(string(raw)), "\n")
-	if !containsString(args, "--auto") { // CEREBRO-PATCH(opencode-daemon-auto): FIR-3403 removes the retired permission bypass.
+	if !containsString(args, "--auto") { // CEREBRO-PATCH(opencode-permission-flag): pin the installed CLI contract.
 		t.Fatalf("expected daemon-mode argv to include --auto, got %q", args)
 	}
 }

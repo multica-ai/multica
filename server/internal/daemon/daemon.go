@@ -46,9 +46,23 @@ var ErrRepoNotConfigured = errors.New("repo is not configured for this workspace
 // stale-heartbeat sweep.
 var ErrNoRuntimesToRegister = errors.New("no agent runtimes could be registered")
 
+// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
+// errTaskPrepareTimeout distinguishes the daemon's dispatched -> running
+// startup deadline from provider execution timeouts. handleTask maps it to the
+// platform-side timeout failure reason so the server's existing retry path can
+// recover the task on a fresh attempt.
+var errTaskPrepareTimeout = errors.New("task preparation timed out")
+
 const (
 	taskSlotWaitTimeout     = 2 * time.Second
 	taskSlotCapacityBackoff = 5 * time.Second
+	// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
+	// defaultTaskPrepareTimeout is a hard liveness bound for everything after
+	// claim and before StartTask succeeds: runtime resolution, skill bundles,
+	// execution-environment setup, and the StartTask request itself. It is
+	// intentionally independent from AgentTimeout, which only governs the
+	// provider process after the task reaches running.
+	defaultTaskPrepareTimeout = 5 * time.Minute
 )
 
 var (
@@ -79,6 +93,20 @@ type taskRunnerFunc func(context.Context, Task, string, int, *slog.Logger) (Task
 
 func (f taskRunnerFunc) run(ctx context.Context, task Task, provider string, slot int, log *slog.Logger) (TaskResult, error) {
 	return f(ctx, task, provider, slot, log)
+}
+
+// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
+// executionEnvironmentCommand resolves the killable helper used for
+// Prepare/Reuse. Upstream resolves the self binary via selfexec.Resolve; the
+// fork uses os.Executable() directly, matching its other self-binary lookups.
+type executionEnvironmentCommand func() ([]string, error)
+
+func defaultExecutionEnvironmentCommand() ([]string, error) {
+	executable, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve execution-environment helper: %w", err)
+	}
+	return []string{executable, execenv.PreparationHelperArg}, nil
 }
 
 var (
@@ -241,6 +269,14 @@ type Daemon struct {
 
 	runner             taskRunner    // executes agent tasks; set to d.runTask by New(), overridable in tests
 	cancelPollInterval time.Duration // how often handleTask polls for server-side cancellation; overridable in tests
+	// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
+	// executionEnvironmentCommand resolves the killable helper used for
+	// Prepare/Reuse. New always sets it; nil keeps focused unit tests in-process.
+	executionEnvironmentCommand executionEnvironmentCommand
+	// taskPrepareTimeout is the dispatched -> running hard deadline. New sets
+	// the production default; zero-valued test daemons fall back to the same
+	// default in effectiveTaskPrepareTimeout.
+	taskPrepareTimeout time.Duration
 	// runUpdateFn executes the brew-or-download upgrade. Set to d.runUpdate by
 	// New() and overridable in tests so the auto-update poller can be exercised
 	// without touching the real network or the brew CLI.
@@ -284,7 +320,11 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
 		cancelPollInterval:        5 * time.Second,
+		// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
+		taskPrepareTimeout: defaultTaskPrepareTimeout,
 	}
+	// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
+	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
 	return d
@@ -2028,7 +2068,7 @@ func (d *Daemon) runHeartbeatTick(ctx context.Context, rid string) {
 	if rt := d.findRuntime(rid); rt != nil {
 		if v := d.agentVersion(rt.Provider); v != "" {
 			opts.CLIVersion = v
-			opts.Capabilities = providerCapabilities(rt.Provider)
+			opts.Capabilities = providerCapabilities(rt.Provider, d.cfg.Agents[rt.Provider].Path) // CEREBRO-PATCH(daemon-capability-probe): include the configured binary in capability discovery.
 		}
 	}
 	resp, err := d.client.SendHeartbeat(ctx, rid, opts)
@@ -3017,7 +3057,8 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		// classifier so the failure_reason column reflects the actual
 		// shape of the failure (provider 5xx, network, process crash,
 		// …) rather than the coarse legacy "agent_error" bucket.
-		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", taskfailure.Classify(err.Error()).String()); failErr != nil {
+		// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
+		if failErr := d.client.FailTask(ctx, task.ID, err.Error(), "", "", taskRunFailureReason(err)); failErr != nil {
 			taskLog.Error("fail task callback failed", "error", failErr)
 		}
 		return
@@ -3504,7 +3545,50 @@ func skillRefFromBundle(bundle SkillData) SkillRefData {
 	}
 }
 
-func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (TaskResult, error) {
+// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
+func taskRunFailureReason(err error) string {
+	if errors.Is(err, errTaskPrepareTimeout) {
+		return taskfailure.ReasonTimeout.String()
+	}
+	return taskfailure.Classify(err.Error()).String()
+}
+
+// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
+func (d *Daemon) prepareExecutionEnvironment(ctx context.Context, params execenv.PrepareParams) (*execenv.Environment, error) {
+	if d.executionEnvironmentCommand == nil {
+		// Focused runTask tests construct a zero-valued Daemon and keep setup
+		// in-process. Production Daemons created by New always use isolation.
+		return execenv.Prepare(params, d.logger)
+	}
+	command, err := d.executionEnvironmentCommand()
+	if err != nil {
+		return nil, err
+	}
+	return execenv.PrepareIsolated(ctx, command, params, d.logger)
+}
+
+// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
+func (d *Daemon) reuseExecutionEnvironment(ctx context.Context, params execenv.ReuseParams) (*execenv.Environment, error) {
+	if d.executionEnvironmentCommand == nil {
+		return execenv.Reuse(params, d.logger), nil
+	}
+	command, err := d.executionEnvironmentCommand()
+	if err != nil {
+		return nil, err
+	}
+	return execenv.ReuseIsolated(ctx, command, params, d.logger)
+}
+
+// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
+func (d *Daemon) effectiveTaskPrepareTimeout() time.Duration {
+	if d.taskPrepareTimeout > 0 {
+		return d.taskPrepareTimeout
+	}
+	return defaultTaskPrepareTimeout
+}
+
+// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); named returns let the deferred timeout collapse below rewrite the result. Drop on next upstream sync.
+func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (taskResult TaskResult, returnErr error) {
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
 	// CLI would otherwise silently fall back to the user-global config — a
@@ -3513,6 +3597,22 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.WorkspaceID == "" {
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
+
+	// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); drop on next upstream sync.
+	prepareTimeout := d.effectiveTaskPrepareTimeout()
+	prepareCtx, cancelPrepare := context.WithTimeoutCause(ctx, prepareTimeout, errTaskPrepareTimeout)
+	prepareComplete := false
+	defer func() {
+		cancelPrepare()
+		if prepareComplete || returnErr == nil || !errors.Is(context.Cause(prepareCtx), errTaskPrepareTimeout) {
+			return
+		}
+		// Collapse every deadline shape (context deadline, HTTP cancellation,
+		// or the explicit waitForExecutionEnvironment cause) into one sentinel
+		// that handleTask can classify as a retryable platform timeout.
+		taskResult = TaskResult{}
+		returnErr = fmt.Errorf("%w after %s", errTaskPrepareTimeout, prepareTimeout)
+	}()
 
 	// task.Repos is the authoritative repo list for this task — when the
 	// claimed task belongs to a project with github_repo resources the server
@@ -3545,10 +3645,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("no agent configured for provider %q", provider)
 	}
 
-	stopPrepareLease := d.startTaskPrepareLeaseExtender(ctx, task, taskLog)
+	// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); prepareCtx bounds pre-start setup. Drop on next upstream sync.
+	stopPrepareLease := d.startTaskPrepareLeaseExtender(prepareCtx, task, taskLog)
 	defer stopPrepareLease()
 
-	if err := d.ensureTaskSkillBundles(ctx, &task); err != nil {
+	if err := d.ensureTaskSkillBundles(prepareCtx, &task); err != nil {
 		return TaskResult{}, err
 	}
 
@@ -3612,6 +3713,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		InitiatorEmail:                   task.InitiatorEmail,
 		WorkspaceContext:                 task.WorkspaceContext,
 		EffectiveTools:                   effectiveToolsForEnv(task.EffectiveTools), // CEREBRO-PATCH(daemon-task-effective-tools-ctx): FIR-2312 carry resolved non-CLI tools into the brief
+		WorkpadBriefEnabled:              task.WorkpadBriefEnabled,                  // CEREBRO-PATCH(daemon-task-workpad-brief): FIR-3659 carry the cerebro_workpad verdict into the brief
 	}
 	taskCtx.WorkspaceBriefMode, taskCtx.ToolsBriefMode = briefLayerModesForTask(task) // CEREBRO-PATCH(brief-layer-modes): FIR-3212 nil-agent safe.
 
@@ -3658,35 +3760,74 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil && provider == "openclaw" {
 		openclawMode, openclawGateway = decodeOpenclawRuntimeConfig(task.Agent.RuntimeConfig, d.logger)
 	}
+	// Resolve the selected Hermes profile before preparing the per-task home.
+	// The parsed selection is stripped from launch args because every Hermes
+	// task receives an overlay seeded from that selected profile.
+	var hermesSourceHome string
+	var hermesSourceMustExist bool
+	var hermesEnv map[string]string
+	if provider == "hermes" {
+		var customEnv map[string]string
+		var customArgs []string
+		if task.Agent != nil {
+			customEnv = task.Agent.CustomEnv
+			customArgs = task.Agent.CustomArgs
+		}
+		sel := agent.ParseHermesProfileArgs(customArgs)
+		res := execenv.ResolveHermesProfile(customEnv["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
+		if res.Err != nil {
+			return TaskResult{}, fmt.Errorf("resolve hermes profile: %w", res.Err)
+		}
+		hermesSourceHome = res.SourceHome
+		hermesSourceMustExist = res.MustExist
+		hermesEnv = sanitizeAgentEnv(customEnv)
+		if hermesEnv == nil {
+			hermesEnv = map[string]string{}
+		}
+		hermesEnv["HERMES_HOME"] = res.SourceHome
+	}
 	if task.PriorWorkDir != "" && localAssignment == nil {
-		env = execenv.Reuse(execenv.ReuseParams{
-			WorkDir:         task.PriorWorkDir,
-			Provider:        provider,
-			CodexVersion:    codexVersion,
-			OpenclawBin:     openclawBin,
-			McpConfig:       agentMcpConfig,
-			OpenclawGateway: openclawGateway,
-			Task:            taskCtx,
-		}, d.logger)
+		// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); reuse runs in the killable helper under prepareCtx. Drop on next upstream sync.
+		var err error
+		env, err = d.reuseExecutionEnvironment(prepareCtx, execenv.ReuseParams{
+			WorkDir:               task.PriorWorkDir,
+			Provider:              provider,
+			CodexVersion:          codexVersion,
+			OpenclawBin:           openclawBin,
+			McpConfig:             agentMcpConfig,
+			OpenclawGateway:       openclawGateway,
+			HermesSourceHome:      hermesSourceHome,
+			HermesSourceMustExist: hermesSourceMustExist,
+			HermesEnv:             hermesEnv,
+			Task:                  taskCtx,
+		})
+		// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); reuse now returns an error (killable helper). Drop on next upstream sync.
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("reuse execution environment: %w", err)
+		}
 	}
 	if env == nil {
 		var err error
 		prepParams := execenv.PrepareParams{
-			WorkspacesRoot:  d.cfg.WorkspacesRoot,
-			WorkspaceID:     task.WorkspaceID,
-			TaskID:          task.ID,
-			AgentName:       agentName,
-			Provider:        provider,
-			CodexVersion:    codexVersion,
-			OpenclawBin:     openclawBin,
-			McpConfig:       agentMcpConfig,
-			OpenclawGateway: openclawGateway,
-			Task:            taskCtx,
+			WorkspacesRoot:        d.cfg.WorkspacesRoot,
+			WorkspaceID:           task.WorkspaceID,
+			TaskID:                task.ID,
+			AgentName:             agentName,
+			Provider:              provider,
+			CodexVersion:          codexVersion,
+			OpenclawBin:           openclawBin,
+			McpConfig:             agentMcpConfig,
+			OpenclawGateway:       openclawGateway,
+			HermesSourceHome:      hermesSourceHome,
+			HermesSourceMustExist: hermesSourceMustExist,
+			HermesEnv:             hermesEnv,
+			Task:                  taskCtx,
 		}
 		if localAssignment != nil {
 			prepParams.LocalWorkDir = localAssignment.AbsPath
 		}
-		env, err = execenv.Prepare(prepParams, d.logger)
+		// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); prepare runs in the killable helper under prepareCtx. Drop on next upstream sync.
+		env, err = d.prepareExecutionEnvironment(prepareCtx, prepParams)
 		if err != nil {
 			return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 		}
@@ -3709,11 +3850,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// taskfailure.Classify path records the failure with the same
 	// "start task failed: <…>" string and the same failure_reason
 	// taxonomy as before — see MUL-2946 for the classifier contract.
-	if err := d.client.StartTask(ctx, task.ID); err != nil {
+	// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); StartTask is the last pre-start step bounded by prepareCtx. Drop on next upstream sync.
+	if err := d.client.StartTask(prepareCtx, task.ID); err != nil {
 		stopPrepareLease()
 		return TaskResult{}, fmt.Errorf("start task failed: %w", err)
 	}
 	stopPrepareLease()
+	// CEREBRO-PATCH(mul-4923-prepare-timeout): backport of upstream MUL-4923 (#5584); task is running — release the preparation deadline. Drop on next upstream sync.
+	prepareComplete = true
+	cancelPrepare()
 	_ = d.client.ReportProgress(ctx, task.ID, fmt.Sprintf("Launching %s", provider), 1, 2)
 
 	reused := gateResumeToReusedWorkdir(&task, &taskCtx, env.WorkDir, taskLog)
@@ -3840,20 +3985,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Bedrock). These are set per-agent via the agent settings UI.
 	// Critical internal variables are blocklisted to prevent accidental or
 	// malicious override of daemon-set values.
+	var agentCustomEnv map[string]string
 	if task.Agent != nil {
-		for k, v := range task.Agent.CustomEnv {
-			if isBlockedEnvKey(k) {
-				d.logger.Warn("custom_env: blocked key skipped", "key", k)
-				continue
-			}
-			agentEnv[k] = v
-		}
+		agentCustomEnv = task.Agent.CustomEnv
 	}
+	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
 	// CEREBRO-PATCH(daemon-tool-policy-ipc): FIR-3401 — wire every supported
 	// local provider to the mandatory tool-policy resolve IPC. Claude's combined
 	// settings document must retain the task's fast-mode choice.
 	speedMode := speedModeForTask(task)
-	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(provider, env.WorkDir, provider == "claude" && speedMode == "fast")
+	toolPolicySpawn, tperr := d.prepareToolPolicySpawn(provider, env.WorkDir, env.CodexHome, provider == "claude" && speedMode == "fast") // CEREBRO-PATCH(codex-tool-policy-home): route Codex through its generated policy home.
 	if tperr != nil {
 		return TaskResult{}, fmt.Errorf("tool-policy prep: %w", tperr)
 	}
@@ -3903,10 +4044,17 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = task.Agent.McpConfig
 	}
+	if provider == "hermes" {
+		customArgs = hermesLaunchArgs(customArgs, env != nil && env.HermesHome != "")
+	}
 	// CEREBRO-PATCH(daemon-pi-harness): FIR-3272 lock Pi to the Firtal Connections + policy extension.
 	customArgs, err = preparePiHarness(task.PiHarnessEnabled, provider, env.WorkDir, "enforce", customArgs, mcpConfig, agentEnv) // CEREBRO-PATCH(daemon-policy-switch-retirement): FIR-3403 policy enforcement is mandatory.
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("prepare Pi harness: %w", err)
+	}
+	// CEREBRO-PATCH(daemon-opencode-harness): FIR-3876 OpenCode's tool-policy adapter is a plugin; refuse the spawn without it.
+	if err := prepareOpenCodeHarness(provider, env.WorkDir); err != nil {
+		return TaskResult{}, err
 	}
 	// CEREBRO-PATCH(daemon-tool-policy-ipc): TECH-2563 — pass the tool-policy
 	// PreToolUse hook to Claude Code via --settings on customArgs (the args the
@@ -4005,7 +4153,8 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// Hermes loads AGENTS.md / .agent_context itself. Prepending the full runtime
 	// brief into the ACP user prompt duplicates that context, bloats every turn,
 	// and has triggered upstream safety filters on harmless tasks.
-	if providerNeedsInlineSystemPrompt(provider) {
+	// CEREBRO-PATCH(agent-system-prompt-mode): FIR-3212 - also deliver the brief inline when an explicitly configured mode needs it; see cerebro_system_prompt_mode.go.
+	if needsInlineRuntimeBrief(provider, execOpts.SystemPromptMode) {
 		execOpts.SystemPrompt = runtimeBrief
 	}
 
@@ -4426,10 +4575,8 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 						}
 					}
 					s := seq.Add(1)
-					output := msg.Output
-					if len(output) > 8192 {
-						output = output[:8192]
-					}
+					// CEREBRO-PATCH(tool-output-keep-tail): FIR-3782 — head-only truncation discarded the error at the end of a failing command's output.
+					output := clipToolOutput(msg.Output, 8192)
 					toolName := msg.Tool
 					if toolName == "" && msg.CallID != "" {
 						mu.Lock()
@@ -4482,9 +4629,7 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	case result := <-session.Result:
 		if toolCallWatchdogFired.Load() {
 			result.Status = "tool_timeout"
-			if result.Error == "" {
-				result.Error = toolCallWatchdogReason(d.cfg.MaxToolCallDuration)
-			}
+			result.Error = toolCallWatchdogReason(d.cfg.MaxToolCallDuration) // CEREBRO-PATCH(daemon-per-tool-call-timeout): watchdog ownership overrides a backend cancellation race.
 		} else if idleWatchdogFired.Load() {
 			// The backend's wait goroutine (e.g. claude.go) translates the
 			// SIGKILL we delivered via agentCancel into Status="aborted".
@@ -4774,6 +4919,7 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 			Name:        s.Name,
 			Description: s.Description,
 			Content:     s.Content,
+			AlwaysOn:    s.AlwaysOn, // CEREBRO-PATCH(skill-always-on): FIR-3805 carry the binding flag into the brief builder
 		}
 		for _, f := range s.Files {
 			result[i].Files = append(result[i].Files, execenv.SkillFileContextForEnv{
@@ -4817,6 +4963,66 @@ func composeOpenclawIncludeRoots(addRoot, userValue string) (string, bool) {
 		parts = append(parts, p)
 	}
 	return strings.Join(parts, string(os.PathListSeparator)), true
+}
+
+// sanitizeAgentEnv returns the agent custom_env after applying the same
+// daemon blocklist used for the child process. Hermes uses this effective view
+// when expanding external skill directories in its per-task config.
+func sanitizeAgentEnv(customEnv map[string]string) map[string]string {
+	if len(customEnv) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(customEnv))
+	for k, v := range customEnv {
+		if isBlockedEnvKey(k) {
+			continue
+		}
+		out[k] = v
+	}
+	return out
+}
+
+// hermesLaunchArgs strips exactly the profile selection already resolved into
+// an active per-task overlay. Without an overlay, args pass through unchanged.
+func hermesLaunchArgs(customArgs []string, overlayActive bool) []string {
+	if !overlayActive {
+		return customArgs
+	}
+	sel := agent.ParseHermesProfileArgs(customArgs)
+	return agent.StripHermesProfileArgs(customArgs, sel)
+}
+
+// layerCustomEnvAndHermesHome applies user custom_env first, then pins an
+// active Hermes overlay so a user-set HERMES_HOME cannot bypass task isolation.
+// Windows treats environment keys case-insensitively, so any spelling of
+// HERMES_HOME must be removed before the pinned overlay value is written.
+func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayHome string, logger *slog.Logger) {
+	if overlayHome != "" {
+		deleteEnvKeyFold(agentEnv, "HERMES_HOME")
+	}
+	for k, v := range customEnv {
+		if isBlockedEnvKey(k) {
+			if logger != nil {
+				logger.Warn("custom_env: blocked key skipped", "key", k)
+			}
+			continue
+		}
+		if overlayHome != "" && strings.EqualFold(k, "HERMES_HOME") {
+			continue
+		}
+		agentEnv[k] = v
+	}
+	if overlayHome != "" {
+		agentEnv["HERMES_HOME"] = overlayHome
+	}
+}
+
+func deleteEnvKeyFold(env map[string]string, key string) {
+	for k := range env {
+		if strings.EqualFold(k, key) {
+			delete(env, k)
+		}
+	}
 }
 
 // isBlockedEnvKey returns true if the key must not be overridden by user-

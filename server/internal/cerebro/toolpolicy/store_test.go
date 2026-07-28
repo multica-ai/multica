@@ -11,6 +11,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -131,6 +132,40 @@ func clearAll(t *testing.T, s *Store) {
 	}
 }
 
+// assignResourceRole creates one active agent role whose permission is scoped
+// to an exact resource. Synthetic table rows (repos, credentials and connection
+// tools) must expand this package through the same resolver as ordinary rows.
+func assignResourceRole(t *testing.T, s *Store, name string, agent pgtype.UUID, toolKey, resource string, setting Setting) {
+	t.Helper()
+	var roleID pgtype.UUID
+	if err := s.pool.QueryRow(context.Background(), `
+		INSERT INTO cerebro_role (workspace_id, name, description, created_by, permissions)
+		VALUES (
+		  $1, $2, 'resource-role parity fixture', $3,
+		  jsonb_build_object(
+		    $4::text,
+		    jsonb_build_array(jsonb_build_object(
+		      'setting', $5::text,
+		      'resource_pattern', $6::text,
+		      'conditions', NULL
+		    ))
+		  )
+		)
+		RETURNING id
+	`, tpTestWorkspaceID, name, tpTestUserID, toolKey, string(setting), resource).Scan(&roleID); err != nil {
+		t.Fatalf("create resource role: %v", err)
+	}
+	if _, err := s.pool.Exec(context.Background(), `
+		INSERT INTO cerebro_role_assignment (role_id, subject_type, subject_id, added_by)
+		VALUES ($1, 'agent', $2, $3)
+	`, roleID, agent, tpTestUserID); err != nil {
+		t.Fatalf("assign resource role: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = s.pool.Exec(context.Background(), `DELETE FROM cerebro_role WHERE id=$1`, roleID)
+	})
+}
+
 // TestStoreFromQueries_ResolvesActiveRoleAssignments pins the public Resolve
 // seam used by handlers and runtimes that already own generated queries. Role
 // bindings must not disappear merely because the caller chose this constructor.
@@ -173,6 +208,30 @@ func TestStoreFromQueries_ResolvesActiveRoleAssignments(t *testing.T) {
 	}
 	if effective.Setting != SettingDeny {
 		t.Fatalf("setting = %q, want %q from active role binding", effective.Setting, SettingDeny)
+	}
+	if !strings.Contains(effective.Reason, "via role StoreFromQueries role v1") {
+		t.Fatalf("reason = %q, want role name and version provenance", effective.Reason)
+	}
+
+	if _, err := tpTestPool.Exec(ctx, `
+		UPDATE cerebro_role SET archived_at=now(), version=version+1 WHERE id=$1
+	`, roleID); err != nil {
+		t.Fatalf("archive role: %v", err)
+	}
+	effective, err = store.Resolve(ctx, Query{
+		WorkspaceID: tpTestWorkspaceID,
+		ToolKey:     tool,
+		AgentID:     agent,
+		UserID:      tpTestUserID,
+	})
+	if err != nil {
+		t.Fatalf("resolve after archive: %v", err)
+	}
+	if effective.Setting != SettingAllow {
+		t.Fatalf("setting after archive = %q, want base %q", effective.Setting, SettingAllow)
+	}
+	if strings.Contains(effective.Reason, "via role") {
+		t.Fatalf("reason after archive = %q, archived role must not participate", effective.Reason)
 	}
 }
 
@@ -387,14 +446,7 @@ func TestStore_GroupsCombineThenUserCaps(t *testing.T) {
 	}
 }
 
-// TestStore_ResolveGeneralDispatchesByFlag proves the FIR-2175 phase-2 wiring at
-// the store seam: ResolveGeneral routes to the tighten-only Resolve when
-// memberOverride is false and to ResolveMemberOverride when it is true, against
-// the SAME stored rows. The fixture is the canonical case — a group Deny with a
-// member Allow — where the two models diverge: tighten-only caps to Deny by
-// group; member-override lets the member open it to Allow. Same inputs, two
-// verdicts, selected purely by the flag the handler passes in.
-func TestStore_ResolveGeneralDispatchesByFlag(t *testing.T) {
+func TestStoreResolveDeclaredDispatchesByWorkspaceFlag(t *testing.T) {
 	s := newTPStore(t)
 	clearAll(t, s)
 	ctx := context.Background()
@@ -412,8 +464,12 @@ func TestStore_ResolveGeneralDispatchesByFlag(t *testing.T) {
 
 	q := Query{WorkspaceID: tpTestWorkspaceID, ToolKey: tool, UserID: user, GroupIDs: []pgtype.UUID{group}}
 
-	// Flag OFF → tighten-only: the group Deny caps the member Allow.
-	off, err := s.ResolveGeneral(ctx, q, false)
+	if err := s.q.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: tpTestWorkspaceID, FlagKey: FlagMemberOverride, Enabled: false,
+	}); err != nil {
+		t.Fatalf("disable member override: %v", err)
+	}
+	off, err := s.ResolveDeclared(ctx, q)
 	if err != nil {
 		t.Fatalf("resolve general (off): %v", err)
 	}
@@ -421,8 +477,12 @@ func TestStore_ResolveGeneralDispatchesByFlag(t *testing.T) {
 		t.Fatalf("flag OFF: setting=%q cappedBy=%q, want deny/group (tighten-only)", off.Setting, off.CappedBy)
 	}
 
-	// Flag ON → member-override: the member's Allow wins over the group Deny.
-	on, err := s.ResolveGeneral(ctx, q, true)
+	if err := s.q.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: tpTestWorkspaceID, FlagKey: FlagMemberOverride, Enabled: true,
+	}); err != nil {
+		t.Fatalf("enable member override: %v", err)
+	}
+	on, err := s.ResolveDeclared(ctx, q)
 	if err != nil {
 		t.Fatalf("resolve general (on): %v", err)
 	}
@@ -430,14 +490,52 @@ func TestStore_ResolveGeneralDispatchesByFlag(t *testing.T) {
 		t.Fatalf("flag ON: setting=%q decidedBy=%q cappedBy=%q, want allow/user/none (member override)", on.Setting, on.DecidedBy, on.CappedBy)
 	}
 
-	// And the flag-OFF path must stay byte-for-byte identical to a plain Resolve —
-	// ResolveGeneral(false) is not allowed to drift from the floor resolver.
 	plain, err := s.Resolve(ctx, q)
 	if err != nil {
 		t.Fatalf("resolve baseline: %v", err)
 	}
 	if plain.Setting != off.Setting || plain.CappedBy != off.CappedBy {
-		t.Fatalf("ResolveGeneral(false) drifted from Resolve: %+v vs %+v", off, plain)
+		t.Fatalf("ResolveDeclared with flag off drifted from hard-floor Resolve: %+v vs %+v", off, plain)
+	}
+}
+
+func TestStoreResolveDeclaredNeverOpensHardFloorKeyClasses(t *testing.T) {
+	s := newTPStore(t)
+	clearAll(t, s)
+	ctx := context.Background()
+	agent := uuidByte(41)
+	if err := s.q.UpsertCerebroWorkspaceFeatureFlag(ctx, cerebrodb.UpsertCerebroWorkspaceFeatureFlagParams{
+		WorkspaceID: tpTestWorkspaceID, FlagKey: FlagMemberOverride, Enabled: true,
+	}); err != nil {
+		t.Fatalf("enable member override: %v", err)
+	}
+	for _, key := range []string{
+		"credential.reveal",
+		"tools:agent-browser",
+		RegistryToolKey,
+		"repo.checkout",
+		"repo.push",
+	} {
+		t.Run(key, func(t *testing.T) {
+			clearAll(t, s)
+			if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: key, Layer: LayerWorkspace, SubjectID: tpTestWorkspaceID, Setting: SettingDeny}); err != nil {
+				t.Fatalf("set workspace deny: %v", err)
+			}
+			if _, err := s.Set(ctx, SetParams{WorkspaceID: tpTestWorkspaceID, ToolKey: key, Layer: LayerAgent, SubjectID: agent, Setting: SettingAllow}); err != nil {
+				t.Fatalf("set agent allow: %v", err)
+			}
+			effective, err := s.ResolveDeclared(ctx, Query{
+				WorkspaceID: tpTestWorkspaceID,
+				ToolKey:     key,
+				AgentID:     agent,
+			})
+			if err != nil {
+				t.Fatalf("resolve declared: %v", err)
+			}
+			if effective.Openable || effective.Setting != SettingDeny {
+				t.Fatalf("hard-floor key resolved openable: %+v", effective)
+			}
+		})
 	}
 }
 

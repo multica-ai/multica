@@ -269,7 +269,11 @@ LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE cs.workspace_id = $1
   AND cm.role = 'user'
   AND cm.created_at >= $2 AND cm.created_at < $3
-  AND ($4::text = '' OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid)))
+  AND (
+    $4::text = ''
+    OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid))
+    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR a.id = $5::uuid))
+  )
 ORDER BY cm.created_at DESC
 LIMIT 200
 `
@@ -834,7 +838,11 @@ JOIN "user" u ON u.id = cs.creator_id
 WHERE cs.workspace_id = $1
   AND cm.role = 'user'
   AND cm.created_at >= $2 AND cm.created_at < $3
-  AND ($4::text = '' OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid)))
+  AND (
+    $4::text = ''
+    OR ($4::text = 'member' AND ($5::uuid IS NULL OR u.id = $5::uuid))
+    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR cs.agent_id = $5::uuid))
+  )
 GROUP BY day
 ORDER BY day
 `
@@ -1282,53 +1290,6 @@ func (q *Queries) DashboardSessionMessages(ctx context.Context, arg DashboardSes
 	return items, nil
 }
 
-const dashboardSpendCentsInPeriod = `-- name: DashboardSpendCentsInPeriod :one
-SELECT COALESCE(SUM(tu.cost_cents), 0)::bigint AS cents
-FROM model_usage_task_rollup tu
-JOIN agent_task_queue atq ON atq.id = tu.task_id
-JOIN agent a ON a.id = atq.agent_id
-WHERE a.workspace_id = $1
-  AND tu.created_at >= $2::timestamptz
-  AND tu.created_at < $3::timestamptz
-  AND (
-    $4::text IS NULL
-    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR atq.agent_id = $5::uuid))
-    OR ($4::text = 'member' AND atq.original_user_id IS NOT NULL AND ($5::uuid IS NULL OR atq.original_user_id = $5::uuid))
-  )
-`
-
-type DashboardSpendCentsInPeriodParams struct {
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	CreatedAt2  pgtype.Timestamptz `json:"created_at_2"`
-	ActorType   pgtype.Text        `json:"actor_type"`
-	ActorID     pgtype.UUID        `json:"actor_id"`
-}
-
-// Sum of task_usage.cost_cents for tasks billed in the dashboard period,
-// restricted to the workspace and optionally the actor scope. Replaces the
-// previous GetWorkspaceUsageSummary path which (a) ignored the actor scope
-// entirely, (b) had no upper time bound, and (c) returned 0 for the prior
-// period because the handler bailed out whenever `end` was not "near now".
-//
-// Scope semantics:
-//   - actor_type IS NULL → whole workspace
-//   - 'agent'            → spend attributed to the agent that ran the task
-//   - 'member'           → spend attributed to the human that originated the
-//     task via agent_task_queue.original_user_id
-func (q *Queries) DashboardSpendCentsInPeriod(ctx context.Context, arg DashboardSpendCentsInPeriodParams) (int64, error) {
-	row := q.db.QueryRow(ctx, dashboardSpendCentsInPeriod,
-		arg.WorkspaceID,
-		arg.CreatedAt,
-		arg.CreatedAt2,
-		arg.ActorType,
-		arg.ActorID,
-	)
-	var cents int64
-	err := row.Scan(&cents)
-	return cents, err
-}
-
 const dashboardTopAgentsByActivityInPeriod = `-- name: DashboardTopAgentsByActivityInPeriod :many
 SELECT a.id::uuid AS actor_id, a.name, COUNT(*)::int AS activity_count
 FROM agent_task_queue atq
@@ -1600,6 +1561,85 @@ func (q *Queries) DashboardTopMessageSendersInPeriod(ctx context.Context, arg Da
 			&i.Name,
 			&i.Count,
 			&i.SpendCents,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const dashboardUsageCostRowsInPeriod = `-- name: DashboardUsageCostRowsInPeriod :many
+SELECT tu.model, tu.input_tokens, tu.output_tokens, tu.cache_read_tokens,
+       tu.cache_write_tokens, tu.cost_cents
+FROM model_usage_task_rollup tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= $2::timestamptz
+  AND tu.created_at < $3::timestamptz
+  AND (
+    $4::text IS NULL
+    OR ($4::text = 'agent' AND ($5::uuid IS NULL OR atq.agent_id = $5::uuid))
+    OR ($4::text = 'member' AND atq.original_user_id IS NOT NULL AND ($5::uuid IS NULL OR atq.original_user_id = $5::uuid))
+  )
+`
+
+type DashboardUsageCostRowsInPeriodParams struct {
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	CreatedAt2  pgtype.Timestamptz `json:"created_at_2"`
+	ActorType   pgtype.Text        `json:"actor_type"`
+	ActorID     pgtype.UUID        `json:"actor_id"`
+}
+
+type DashboardUsageCostRowsInPeriodRow struct {
+	Model            string `json:"model"`
+	InputTokens      int64  `json:"input_tokens"`
+	OutputTokens     int64  `json:"output_tokens"`
+	CacheReadTokens  int64  `json:"cache_read_tokens"`
+	CacheWriteTokens int64  `json:"cache_write_tokens"`
+	CostCents        int64  `json:"cost_cents"`
+}
+
+// Usage rows for tasks billed in the dashboard period. The handler preserves
+// exact gateway charges and calculates a price from tokens when a runtime did
+// not persist a charge.
+// restricted to the workspace and optionally the actor scope. Replaces the
+// previous GetWorkspaceUsageSummary path which (a) ignored the actor scope
+// entirely, (b) had no upper time bound, and (c) returned 0 for the prior
+// period because the handler bailed out whenever `end` was not "near now".
+//
+// Scope semantics:
+//   - actor_type IS NULL → whole workspace
+//   - 'agent'            → spend attributed to the agent that ran the task
+//   - 'member'           → spend attributed to the human that originated the
+//     task via agent_task_queue.original_user_id
+func (q *Queries) DashboardUsageCostRowsInPeriod(ctx context.Context, arg DashboardUsageCostRowsInPeriodParams) ([]DashboardUsageCostRowsInPeriodRow, error) {
+	rows, err := q.db.Query(ctx, dashboardUsageCostRowsInPeriod,
+		arg.WorkspaceID,
+		arg.CreatedAt,
+		arg.CreatedAt2,
+		arg.ActorType,
+		arg.ActorID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DashboardUsageCostRowsInPeriodRow{}
+	for rows.Next() {
+		var i DashboardUsageCostRowsInPeriodRow
+		if err := rows.Scan(
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostCents,
 		); err != nil {
 			return nil, err
 		}

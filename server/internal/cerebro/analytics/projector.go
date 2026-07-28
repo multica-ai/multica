@@ -22,7 +22,7 @@ type RunProjection struct {
 	DurationSeconds                                              int64
 	InputTokens, OutputTokens, CacheReadTokens, CacheWriteTokens int64
 	CostCents                                                    *int64
-	Provider, Model                                              string
+	CostKind, Provider, Model                                    string
 	Savings                                                      []SavingProjection
 	Quality                                                      []QualityProjection
 	Skills                                                       []SkillProjection

@@ -36,6 +36,15 @@ describe("cerebro feature flag grouping", () => {
     expect(CEREBRO_FLAG_DEFAULTS.cerebro_member_override).toBe(true);
   });
 
+  it("ships the complete permission decision path on by default", () => {
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_approvals).toBe(true);
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_approval_gate).toBe(true);
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_service_tokens).toBe(true);
+    expect(CEREBRO_FLAGS.find((flag) => flag.key === "cerebro_service_tokens")?.group).toBe(
+      "permissions",
+    );
+  });
+
   it("keeps mini apps unavailable until an admin enables the product", () => {
     expect(CEREBRO_FLAGS.some((flag) => flag.key === "cerebro_mini_apps")).toBe(true);
     expect(CEREBRO_FLAG_DEFAULTS.cerebro_mini_apps).toBe(false);
@@ -58,6 +67,13 @@ describe("cerebro feature flag grouping", () => {
     expect(CEREBRO_FLAGS.find((flag) => flag.key === "cerebro_projects_tree")?.group).toBe(
       "workspace",
     );
+  });
+
+  it("ships note version history on (FIR-3601 item 6 — built + server-tested)", () => {
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_note_versions).toBe(true);
+    // Document-level history is a separate, still-gated rollout — keep it off
+    // so flipping notes on does not silently enable documents too.
+    expect(CEREBRO_FLAG_DEFAULTS.cerebro_document_versions).toBe(false);
   });
 
   it("has unique group keys", () => {

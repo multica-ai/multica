@@ -37,6 +37,10 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { toast } from "sonner";
 import { api } from "@multica/core/api";
 import { useT } from "../../i18n";
+// CEREBRO-PATCH(tokens-tab-service-tokens): FIR-3608 — reuse Settings → Tokens
+// for scoped, non-personal service tokens (msv_), gated by its own flag.
+import { ServiceTokensSection } from "@multica/cerebro-service-tokens/views";
+import { useWorkspaceEffectiveFlag } from "@multica/cerebro-feature-flags";
 
 const EXPIRY_KEYS = ["30", "90", "365", "never"] as const;
 
@@ -196,6 +200,9 @@ export function TokensTab() {
         )}
       </section>
 
+      {/* CEREBRO-PATCH(tokens-tab-service-tokens): FIR-3608 scoped service-token section */}
+      <ServiceTokensWorkspaceGate />
+
       <AlertDialog open={!!revokeConfirmId} onOpenChange={(v) => { if (!v) setRevokeConfirmId(null); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -249,4 +256,11 @@ export function TokensTab() {
       </Dialog>
     </div>
   );
+}
+
+// CEREBRO-PATCH(tokens-tab-service-tokens): FIR-3754 — the management surface
+// follows the same workspace-authoritative kill switch as backend auth.
+export function ServiceTokensWorkspaceGate() {
+  const enabled = useWorkspaceEffectiveFlag("cerebro_service_tokens");
+  return enabled ? <ServiceTokensSection /> : null;
 }

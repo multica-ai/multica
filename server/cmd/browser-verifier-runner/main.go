@@ -35,9 +35,25 @@ func main() {
 		log.Fatal(err)
 	}
 	handler := internalbrowserqa.NewRunnerHTTPHandler(cfg.token, internalbrowserqa.NewRunner(internalbrowserqa.ExecCommander{}))
-	server := &http.Server{Addr: cfg.addr, Handler: handler, ReadHeaderTimeout: internalBrowserHTTPTimeout, ReadTimeout: internalBrowserHTTPTimeout, WriteTimeout: 2 * internalBrowserHTTPTimeout}
+	server := newBrowserVerifierServer(cfg.addr, handler)
 	log.Printf("browser verifier runner listening on %s", cfg.addr)
 	log.Fatal(server.ListenAndServe())
 }
 
-const internalBrowserHTTPTimeout = 65 * time.Second
+const (
+	internalBrowserRequestReadTimeout = 65 * time.Second
+	internalBrowserWriteMargin        = 30 * time.Second
+)
+
+// CEREBRO-PATCH(internal-agent-browser-qa): Keep the private runner alive for the full browser flow.
+func newBrowserVerifierServer(addr string, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              addr,
+		Handler:           handler,
+		ReadHeaderTimeout: internalBrowserRequestReadTimeout,
+		ReadTimeout:       internalBrowserRequestReadTimeout,
+		// The response contains the final screenshot or classified failure.
+		// Never close the socket before the runner's own legitimate ceiling.
+		WriteTimeout: internalbrowserqa.MaxVerificationDuration + internalBrowserWriteMargin,
+	}
+}

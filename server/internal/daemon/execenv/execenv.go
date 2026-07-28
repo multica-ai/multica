@@ -26,11 +26,15 @@ type RepoContextForEnv struct {
 // resources.json on disk for the full structure. This struct only carries
 // fields the meta-skill template needs to render a human-readable summary
 // (URL for github_repo, generic label otherwise).
+// CEREBRO-PATCH(mul-5038-project-resource-decode): backport of upstream MUL-5038 (#5688); drop on next upstream sync.
+// The tags mirror what MarshalJSON emits (context.go). The preparation helper
+// decodes with DisallowUnknownFields, so a name mismatch kills every task whose
+// project has a resource attached.
 type ProjectResourceForEnv struct {
-	ID           string          // server-assigned UUID
-	ResourceType string          // e.g. "github_repo"
-	ResourceRef  json.RawMessage // raw JSONB payload from the API
-	Label        string          // optional user-supplied label
+	ID           string          `json:"id"`              // server-assigned UUID
+	ResourceType string          `json:"resource_type"`   // e.g. "github_repo"
+	ResourceRef  json.RawMessage `json:"resource_ref"`    // raw JSONB payload from the API
+	Label        string          `json:"label,omitempty"` // optional user-supplied label
 }
 
 // PrepareParams holds all inputs needed to set up an execution environment.
@@ -56,7 +60,20 @@ type PrepareParams struct {
 	// substituted. Used by the local_directory project_resource flow
 	// (MUL-2663). When set, the envRoot/workdir directory is not created.
 	LocalWorkDir string
-	Task         TaskContextForEnv // context data for writing files
+	// HermesSourceHome is the shared Hermes home the per-task overlay is seeded
+	// from — resolved by the daemon via ResolveHermesProfile so it honors the
+	// agent's custom_env HERMES_HOME and any -p/--profile or sticky selection.
+	// Only used for the hermes provider; empty falls back to the platform default.
+	HermesSourceHome string
+	// HermesSourceMustExist fails the overlay build closed when HermesSourceHome
+	// is absent — set when an explicit named profile was requested so a typo
+	// doesn't silently seed from an empty home and drop the user's auth/config.
+	HermesSourceMustExist bool
+	// HermesEnv is the sanitized effective env (agent custom_env minus the daemon
+	// blocklisted keys) used to expand ${VAR} in Hermes external_dirs so it
+	// matches what the Hermes child process actually sees. Only used for hermes.
+	HermesEnv map[string]string
+	Task      TaskContextForEnv // context data for writing files
 }
 
 // TaskContextForEnv is the subset of task context used for writing context files.
@@ -140,6 +157,10 @@ type TaskContextForEnv struct {
 	// CEREBRO-PATCH(brief-layer-modes): FIR-3212 per-agent brief-layer config from runtime_config — see cerebro_brief_layers.go. Empty = full brief, exactly as today.
 	WorkspaceBriefMode string // CEREBRO-PATCH(brief-layer-modes): "off" keeps identity layers only
 	ToolsBriefMode     string // CEREBRO-PATCH(brief-layer-modes): "summary" folds connection tool lists
+	// CEREBRO-PATCH(execenv-workpad-brief): FIR-3659 — true when the workspace's
+	// cerebro_workpad flag is on (resolved server-side at claim), so the runtime
+	// brief includes the Workpad protocol section.
+	WorkpadBriefEnabled bool
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
@@ -148,6 +169,7 @@ type SkillContextForEnv struct {
 	Description string
 	Content     string
 	Files       []SkillFileContextForEnv
+	AlwaysOn    bool // CEREBRO-PATCH(skill-always-on): FIR-3805 paste this skill's full text into the brief on every run
 }
 
 // SkillFileContextForEnv represents a supporting file within a skill.
@@ -185,6 +207,12 @@ type Environment struct {
 	// directory holding the wrapper file. Empty when no $include is
 	// emitted (fresh install).
 	OpenclawIncludeRoot string
+	// HermesHome is the path to the per-task HERMES_HOME overlay for the hermes
+	// provider. It mirrors ~/.hermes/
+	// via symlink, derives a config.yaml that references the user's real skills
+	// as an external root, and holds the bound skills in its skills/ subdir. The
+	// daemon exports it as HERMES_HOME so Hermes discovers those skills natively.
+	HermesHome string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -273,6 +301,17 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		env.CodexHome = codexHome
 	}
 
+	// Hermes has no workspace-relative skill discovery. Every Hermes task gets
+	// a per-task overlay so its memories and SQLite state stay isolated; bound
+	// skills are materialized into that overlay when present.
+	if params.Provider == "hermes" { // CEREBRO-PATCH(hermes-all-task-isolation): FIR-3482 isolate skill-less tasks too.
+		hermesHome := filepath.Join(envRoot, "hermes-home")
+		if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
+			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
+		}
+		env.HermesHome = hermesHome
+	}
+
 	// For OpenClaw, synthesize a per-task config that pins workspace to
 	// workDir. The skill scanner then reads {workDir}/skills/ (written by
 	// writeContextFiles above). Fail closed on errors: a malformed user
@@ -315,7 +354,13 @@ type ReuseParams struct {
 	// loop) keep the "never delete the user's directory" invariant on
 	// reuse paths.
 	LocalDirectory bool
-	Task           TaskContextForEnv // refreshed context files / skills
+	// HermesSourceHome and HermesEnv mirror PrepareParams on reuse so the Hermes
+	// overlay re-derives against the agent's current source home / profile and
+	// external_dirs vars.
+	HermesSourceHome      string
+	HermesSourceMustExist bool
+	HermesEnv             map[string]string
+	Task                  TaskContextForEnv // refreshed context files / skills
 }
 
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
@@ -412,6 +457,18 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 				logger.Warn("execenv: refresh codex skills failed", "error", err)
 			}
 		}
+	}
+
+	// Rebuild the Hermes overlay on reuse so its source config and bound skills
+	// stay current while every task retains isolated memory and SQLite state. A
+	// failed refresh forces the caller through Prepare, which fails closed.
+	if params.Provider == "hermes" && env.RootDir != "" { // CEREBRO-PATCH(hermes-all-task-isolation): FIR-3482 preserve isolation on reuse.
+		hermesHome := filepath.Join(env.RootDir, "hermes-home")
+		if err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, logger); err != nil {
+			logger.Warn("execenv: refresh hermes-home failed; forcing fresh prepare", "error", err)
+			return nil
+		}
+		env.HermesHome = hermesHome
 	}
 
 	// Refresh the per-task OpenClaw config on reuse — the user may have

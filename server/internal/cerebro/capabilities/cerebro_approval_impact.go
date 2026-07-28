@@ -103,7 +103,6 @@ var fieldDelivery = map[string]struct {
 	"custom_args":    {by: DeliveryEngine, execField: agent.FieldCustomArgs},
 
 	// Applied by Multica around the engine process, so they hold everywhere.
-	"persona_sandbox": {by: DeliveryMultica},
 	"skill_ids":       {by: DeliveryMultica},
 	"custom_env_keys": {by: DeliveryMultica},
 

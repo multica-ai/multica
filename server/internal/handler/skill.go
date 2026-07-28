@@ -73,6 +73,7 @@ type SkillSummaryResponse struct {
 	CreatedBy   *string `json:"created_by"`
 	CreatedAt   string  `json:"created_at"`
 	UpdatedAt   string  `json:"updated_at"`
+	AlwaysOn    bool    `json:"always_on,omitempty"` // CEREBRO-PATCH(skill-always-on): FIR-3881 agent-scoped listings carry the per-binding flag; omitted where the concept does not apply
 }
 
 // AgentSkillSummary is the still-narrower shape used for skills embedded in
@@ -84,6 +85,7 @@ type AgentSkillSummary struct {
 	ID          string `json:"id"`
 	Name        string `json:"name"`
 	Description string `json:"description"`
+	AlwaysOn    bool   `json:"always_on"` // CEREBRO-PATCH(skill-always-on): FIR-3805 per-binding "paste full text into instructions every run"
 }
 
 type SkillFileResponse struct {
@@ -1989,6 +1991,7 @@ func (h *Handler) ListAgentSkills(w http.ResponseWriter, r *http.Request) {
 			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
 			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
 		)
+		resp[i].AlwaysOn = s.AlwaysOn // CEREBRO-PATCH(skill-always-on): FIR-3881 `agent skills list` renders its ALWAYS_ON column from this
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

@@ -43,6 +43,13 @@
   ],
   "flags": [
     {
+      "key": "cerebro_service_tokens",
+      "label": "Service tokens",
+      "description": "Add a Service tokens section to Settings → Tokens: owners and admins mint workspace-bound, read-only, expiring and revocable API keys (msv_) for external systems and agents. Off disables management and every existing token immediately.",
+      "group": "permissions",
+      "default": true
+    },
+    {
       "key": "cerebro_embedded_chat",
       "label": "Embedded Chat API",
       "description": "Allow configured applications to create API conversations on behalf of a verified workspace member. API conversations stay out of Inbox by default but remain searchable.",
@@ -76,6 +83,13 @@
       "description": "Add a Quality tab on the agent page measuring each configuration version on the runs that actually used it: judge verdicts (solution) and human signals like reactions and approvals (satisfaction), always with sample sizes and honest missing states. Off hides the tab; measurements are kept.",
       "group": "agents",
       "default": false
+    },
+    {
+      "key": "cerebro_agent_skill_always_on",
+      "label": "Always-on skills",
+      "description": "Add an 'Always on' checkbox to each skill on the agent Skills tab. A skill marked always on has its full text pasted into the agent's instructions on every run, so rules that must hold for every response apply without the agent choosing to open the skill first. Off hides the checkbox; skills already marked stay marked and keep working.",
+      "group": "agents",
+      "default": true
     },
     {
       "key": "cerebro_agent_setup_capabilities",
@@ -202,6 +216,13 @@
       "description": "Enable the cerebro workspace operations dashboard at /:workspace/dashboard (agent strip, KPI cards, recent tasks).",
       "group": "workspace",
       "default": true
+    },
+    {
+      "key": "cerebro_ai_impact",
+      "label": "AI Impact",
+      "description": "Enable the evidence-backed AI Impact control room inside Dashboard.",
+      "group": "workspace",
+      "default": false
     },
     {
       "key": "cerebro_inbox_row_actions",
@@ -449,13 +470,6 @@
       "default": true
     },
     {
-      "key": "cerebro_simple_tool_policy",
-      "label": "Simple tool permissions",
-      "description": "Show the simplified, user-facing tool permission table on the agent Tools tab: one Allow/Ask/Block toggle per tool, grouped into Read · Execute · Fetch · Destructive. Reuses the cerebro_tool_policy data layer — writes the agent layer only. The rich Effective-chain table stays behind cerebro_tool_policy as a power-view. FIR-2358.",
-      "group": "permissions",
-      "default": true
-    },
-    {
       "key": "cerebro_test_as_user",
       "label": "Test as user",
       "description": "Show the 'Test as user' entry in the profile menu: pick a user + an agent and see how every tool resolves for that combination — the same answer as the tool-policy explain CLI, with the user's real groups resolved automatically. The feature is locked behind the tools:test-as-user permission (default Allow for the workspace owner only), so turning this flag on exposes nothing to members who lack the permission. FIR-1771.",
@@ -470,16 +484,9 @@
       "default": true
     },
     {
-      "key": "cerebro_platform_capabilities",
-      "label": "Platform actions in permissions",
-      "description": "Add the Multica platform actions to the tool-policy table alongside reported runtime tools: create/edit/delete issues, comments, sub-issues, autopilots, artifacts, and the management of agents, runtimes, groups, grants, and projects. Each becomes a settable Allow/Ask/Deny row on every layer (workspace › runtime › agent › group › user). Actions governed elsewhere (membership ACL, daemon token, webhook secret) are listed but marked as managed externally. Catalog is code-owned (server platformcatalog package, traceable to permguard/inventory.json). FIR-2594 phase 1.",
-      "group": "permissions",
-      "default": false
-    },
-    {
       "key": "cerebro_approvals",
       "label": "Approval inbox",
-      "description": "Enable the approval inbox at /:workspace/approvals — when the permission engine returns needs_approval, the ask lands here for a human to approve, reject, or delegate, with an audit trail per decision. Owner/admin only. FIR-2131.",
+      "description": "Enable the approval inbox at /:workspace/approvals — when the permission engine returns needs_approval, the ask lands here for a human to approve, reject, or delegate, with an audit trail per decision. Owner/admin only. The inbox remains visible whenever Tool approval enforcement is on, so an Ask can never wait without a human decision path. FIR-2131, FIR-3388.",
       "group": "permissions",
       "default": true
     },
@@ -685,6 +692,20 @@
       "description": "Show the \"CLI runs\" tab on an issue — the list of local Claude Code / CLI work-sessions started from a terminal (start, stop, resume, fork, transcript). This was previously the \"Sessions\" tab; renamed to avoid colliding with comment sessions. OFF by default — hidden unless a workspace opts in. FIR-1839.",
       "group": "workspace",
       "default": false
+    },
+    {
+      "key": "cerebro_run_failure_card",
+      "label": "Run failure card",
+      "description": "Show a summary card at the top of a failed run's execution log: the failure reason in plain words, the last step the agent took, and the end of that step's output. Everything on the card already exists in the run timeline — the card just stops you scrolling to find it. ON by default. FIR-3782.",
+      "group": "workspace",
+      "default": true
+    },
+    {
+      "key": "cerebro_run_full_prompt",
+      "label": "Full run prompt",
+      "description": "Show the \"Initial prompt\" panel on a run, carrying the byte-exact prompt the model actually read — every layer in the order it was delivered, with secrets redacted — instead of only the comment that triggered the run. The prompt is already recorded per run; this only decides where you can read it. Runs with no recorded prompt, and runs from a runtime that does not report one, still show the triggering comment and say so. Off hides the panel. ON by default. FIR-3782.",
+      "group": "workspace",
+      "default": true
     },
     {
       "key": "cerebro_issue_sidebar_subscribers",
@@ -948,7 +969,7 @@
     {
       "key": "cerebro_approval_gate",
       "label": "Tool approval enforcement",
-      "description": "When on, tools marked Ask route to the approval inbox and block until a human approves or rejects. Turning this off keeps Ask blocked without opening an inbox request. Allow / Ask / Block access is always enforced from Settings → Permissions. FIR-3403.",
+      "description": "When on, tools marked Ask route to the approval inbox and block until a human approves or rejects. The inbox navigation, inline cards and live updates stay visible while this gate is on, even if the separate inbox presentation flag is off. Turning this off keeps Ask blocked without opening an inbox request. Allow / Ask / Block access is always enforced from Settings → Permissions. FIR-3403, FIR-3388.",
       "group": "permissions",
       "default": true
     },
@@ -1021,6 +1042,13 @@
       "description": "Resolve the visible per-tool Allow / Ask / Block policy with the member-override model: workspace is the default, the highest permission across groups wins, and a member's own setting wins over both. On by default. This only affects the general tool-policy permissions an operator sees in the table; the deny-by-default floors (credentials, OS sandbox, repo checkout, the repo-approval cap) are never resolved through it and stay strictly tighten-only, so it can never widen access to a secret, the sandbox, or a repo. FIR-2175, FIR-3062.",
       "group": "permissions",
       "default": true
+    },
+    {
+      "key": "cerebro_workpad",
+      "label": "Workpad",
+      "description": "Ask agents to keep a Workpad — a plan checklist at the top of the issue description, created before they start and kept updated as they work, so you can follow the plan from the issue. On injects the Workpad protocol into every agent's runtime brief. Off by default; the existing checklist rendering is unchanged and enforcement (blocking an agent from starting without a Workpad) is a separate hook policy. FIR-3659.",
+      "group": "issues",
+      "default": false
     }
   ]
 }

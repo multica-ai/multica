@@ -23,6 +23,9 @@ func TestIsKnownCapability(t *testing.T) {
 	}{
 		{CapabilityCreateRuntime, true},
 		{CapabilityCreateAgent, true},
+		{CapabilityAppsCreate, true},
+		{CapabilityAppsManage, true},
+		{CapabilityAppsDelete, true},
 		{CapabilityCreateSharedFilters, true},
 		{CapabilityCreateMemory, true},
 		{CapabilitySetBlockingGate, true},

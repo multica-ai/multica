@@ -51,7 +51,7 @@ func runPruneLoopWithTexts(t *testing.T, texts []string, pruneOn bool) GatewayCo
 
 	e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
 	setAgentToolPolicy(t, agentID, "get_issue", toolpolicy.SettingAllow)
-	e.SetAccessDecisionObserver(accessdecision.NewObserver(e.toolPolicy, shadowEvidence{
+	e.SetAccessDecisionService(accessdecision.NewService(e.toolPolicy, shadowEvidence{
 		capabilitycatalog.PlatformTool("get_issue").ID: {Level: availabilityevidence.LevelVerified},
 	}, &shadowLedgerWriter{}))
 	e.gateway = gateway
@@ -89,7 +89,7 @@ func runAnthropicPruneLoop(t *testing.T, texts []string, pruneOn bool) GatewayCo
 
 	e, agentID := newToolPolicyGatedExecutor(t, &gateFakeApprovals{})
 	setAgentToolPolicy(t, agentID, "get_issue", toolpolicy.SettingAllow)
-	e.SetAccessDecisionObserver(accessdecision.NewObserver(e.toolPolicy, shadowEvidence{
+	e.SetAccessDecisionService(accessdecision.NewService(e.toolPolicy, shadowEvidence{
 		capabilitycatalog.PlatformTool("get_issue").ID: {Level: availabilityevidence.LevelVerified},
 	}, &shadowLedgerWriter{}))
 	e.gateway = gateway

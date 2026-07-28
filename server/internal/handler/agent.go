@@ -63,14 +63,14 @@ type AgentResponse struct {
 	// ThinkingLevel is the runtime-native reasoning/effort token persisted
 	// for this agent (empty = use runtime default). The picker is per-runtime
 	// per-model; the API never normalizes across providers. See MUL-2339.
-	ThinkingLevel  string              `json:"thinking_level"`
-	OwnerID        *string             `json:"owner_id"`
-	Skills         []AgentSkillSummary `json:"skills"`
-	CreatedAt      string              `json:"created_at"`
-	UpdatedAt      string              `json:"updated_at"`
-	ArchivedAt     *string             `json:"archived_at"`
-	ArchivedBy     *string             `json:"archived_by"`
-	PersonaSandbox string              `json:"persona_sandbox"`
+	ThinkingLevel string              `json:"thinking_level"`
+	OwnerID       *string             `json:"owner_id"`
+	Skills        []AgentSkillSummary `json:"skills"`
+	CreatedAt     string              `json:"created_at"`
+	UpdatedAt     string              `json:"updated_at"`
+	ArchivedAt    *string             `json:"archived_at"`
+	ArchivedBy    *string             `json:"archived_by"`
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona_sandbox from agent responses.
 	// CEREBRO-PATCH(agent-infisical-secrets): per-agent Infisical folder grants in agent response.
 	InfisicalFolders []AgentInfisicalFolderResponse `json:"infisical_folders,omitempty"`
 	// CEREBRO-PATCH(agent-can-trigger): JEH-1066 — visibility/trigger split.
@@ -142,7 +142,7 @@ func agentToResponse(a db.Agent) AgentResponse {
 		UpdatedAt:          timestampToString(a.UpdatedAt),
 		ArchivedAt:         timestampToPtr(a.ArchivedAt),
 		ArchivedBy:         uuidToPtr(a.ArchivedBy),
-		PersonaSandbox:     a.PersonaSandbox.String,
+		// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 no longer maps persona_sandbox.
 		// CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — expose per-surface flags.
 		SurfaceVisibility: surfaceVisibilityResponse(a.SurfaceVisibility),
 	}
@@ -242,13 +242,14 @@ type AgentTaskResponse struct {
 	WakeupPrompt      string `json:"wakeup_prompt,omitempty"`       // prompt stored on a platform wakeup task
 	WakeupTriggerType string `json:"wakeup_trigger_type,omitempty"` // time, issue_status, or github_ci for wakeup tasks
 
-	TriggerUserID     string `json:"trigger_user_id,omitempty"`     // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggering comment author — trace user-label (FIR-2438)
-	TriggerUserName   string `json:"trigger_user_name,omitempty"`   // CEREBRO-PATCH(agent-task-trigger-user-name): TECH-3295 R3 — display name of the chain's human origin for the trace user-label
-	IssueKind         string `json:"issue_kind,omitempty"`          // CEREBRO-PATCH(agent-task-issue-kind): issue.kind ('channel'/'dm'/'') so trace upload can label the surface (FIR-2438)
-	IssueSnapshot     string `json:"issue_snapshot,omitempty"`      // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
-	BundleContextHint bool   `json:"bundle_context_hint,omitempty"` // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
-	GraphifyNudge     string `json:"graphify_nudge,omitempty"`      // CEREBRO-PATCH(agent-task-graphify-nudge): FIR-1311 — standing "use the graphify code graph" instruction inlined into the start prompt when the graphify saving is on
-	MemoryContext     string `json:"memory_context,omitempty"`      // CEREBRO-PATCH(agent-task-memory-context): FIR-1794 layer 3 — automatically recalled memories inlined into the start prompt when cerebro_memory is on
+	TriggerUserID       string `json:"trigger_user_id,omitempty"`       // CEREBRO-PATCH(agent-task-trigger-user-id): UUID of the triggering comment author — trace user-label (FIR-2438)
+	TriggerUserName     string `json:"trigger_user_name,omitempty"`     // CEREBRO-PATCH(agent-task-trigger-user-name): TECH-3295 R3 — display name of the chain's human origin for the trace user-label
+	IssueKind           string `json:"issue_kind,omitempty"`            // CEREBRO-PATCH(agent-task-issue-kind): issue.kind ('channel'/'dm'/'') so trace upload can label the surface (FIR-2438)
+	IssueSnapshot       string `json:"issue_snapshot,omitempty"`        // CEREBRO-PATCH(agent-task-issue-snapshot): FIR-2384 — pre-rendered issue+thread inlined into the start prompt when the snapshot_prompt cost saving is on
+	BundleContextHint   bool   `json:"bundle_context_hint,omitempty"`   // CEREBRO-PATCH(agent-task-bundle-context-hint): FIR-2384 — point the start prompt at a single `multica issue context` call when the bundled_read cost saving is on
+	GraphifyNudge       string `json:"graphify_nudge,omitempty"`        // CEREBRO-PATCH(agent-task-graphify-nudge): FIR-1311 — standing "use the graphify code graph" instruction inlined into the start prompt when the graphify saving is on
+	MemoryContext       string `json:"memory_context,omitempty"`        // CEREBRO-PATCH(agent-task-memory-context): FIR-1794 layer 3 — automatically recalled memories inlined into the start prompt when cerebro_memory is on
+	WorkpadBriefEnabled bool   `json:"workpad_brief_enabled,omitempty"` // CEREBRO-PATCH(agent-task-workpad-brief): FIR-3659 — carries the workspace cerebro_workpad verdict so the daemon brief includes the Workpad protocol
 
 	NewCommentCount          int                  `json:"new_comment_count,omitempty"`         // trigger-thread comments since last run; excludes injected trigger + own comments; omitempty so old daemons ignore it
 	NewCommentsSince         string               `json:"new_comments_since,omitempty"`        // RFC3339 anchor (last run's started_at) the count is measured from; omitempty so old daemons ignore it
@@ -281,21 +282,21 @@ type AgentTaskResponse struct {
 	Kind                             string  `json:"kind"`            // discriminator: "comment" | "autopilot" | "chat" | "quick_create" | "direct" — used by the activity row to label tasks that have no linked issue
 	Title                            *string `json:"title,omitempty"` // CEREBRO-PATCH(task-title-builder): short generated headline.
 	// CEREBRO-PATCH(runtime-pause-wait-reason): FIR-2717 — queued-task hint while runtime is paused (runtime_paused|reason|unpause_at).
-	WaitReason            *string              `json:"wait_reason,omitempty"`
-	ModelOverride         string               `json:"model_override,omitempty"`    // CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
-	ThinkingOverride      string               `json:"thinking_override,omitempty"` // CEREBRO-PATCH(agent-task-thinking-override): per-task thinking override for issue workflow steps.
-	SandboxEnabled        *bool                `json:"sandbox_enabled,omitempty"`
-	RuntimeSandboxPolicy  json.RawMessage      `json:"runtime_sandbox_policy,omitempty"`
-	RuntimePersonaSandbox string               `json:"runtime_persona_sandbox,omitempty"`
-	RuntimeToolsConfig    json.RawMessage      `json:"runtime_tools_config,omitempty"`
-	PiHarnessEnabled      bool                 `json:"pi_harness_enabled,omitempty"`   // CEREBRO-PATCH(agent-task-pi-harness-flag): FIR-3272 workspace kill switch.
-	DisallowedMCPTools    []string             `json:"disallowed_mcp_tools,omitempty"` // CEREBRO-PATCH(agent-task-disallowed-mcp-tools): TECH-3156 per-tool connection denies passed to the agent at spawn.
-	EffectiveTools        []AgentTaskToolEntry `json:"effective_tools,omitempty"`      // CEREBRO-PATCH(agent-task-effective-tools): FIR-2312 non-CLI tools (MCP + connections) the agent may use, resolved from the tool-policy chain, for the brief.
-	PersonaSpawnUserID    string               `json:"persona_spawn_user_id,omitempty"`
-	PersonaSpawnGroupIDs  []string             `json:"persona_spawn_group_ids,omitempty"`
-	ChatHistory           []ChatHistoryMessage `json:"chat_history,omitempty"`
-	ChatMessages          []string             `json:"chat_messages,omitempty"`
-	ChatMessageID         string               `json:"chat_message_id,omitempty"`
+	WaitReason           *string         `json:"wait_reason,omitempty"`
+	ModelOverride        string          `json:"model_override,omitempty"`    // CEREBRO-PATCH(agent-task-model-override): per-task model override that wins over agent.model (JEH-1310).
+	ThinkingOverride     string          `json:"thinking_override,omitempty"` // CEREBRO-PATCH(agent-task-thinking-override): per-task thinking override for issue workflow steps.
+	SandboxEnabled       *bool           `json:"sandbox_enabled,omitempty"`
+	RuntimeSandboxPolicy json.RawMessage `json:"runtime_sandbox_policy,omitempty"`
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed runtime persona data from claims.
+	RuntimeToolsConfig   json.RawMessage      `json:"runtime_tools_config,omitempty"`
+	PiHarnessEnabled     bool                 `json:"pi_harness_enabled,omitempty"`   // CEREBRO-PATCH(agent-task-pi-harness-flag): FIR-3272 workspace kill switch.
+	DisallowedMCPTools   []string             `json:"disallowed_mcp_tools,omitempty"` // CEREBRO-PATCH(agent-task-disallowed-mcp-tools): TECH-3156 per-tool connection denies passed to the agent at spawn.
+	EffectiveTools       []AgentTaskToolEntry `json:"effective_tools,omitempty"`      // CEREBRO-PATCH(agent-task-effective-tools): FIR-2312 non-CLI tools (MCP + connections) the agent may use, resolved from the tool-policy chain, for the brief.
+	PersonaSpawnUserID   string               `json:"persona_spawn_user_id,omitempty"`
+	PersonaSpawnGroupIDs []string             `json:"persona_spawn_group_ids,omitempty"`
+	ChatHistory          []ChatHistoryMessage `json:"chat_history,omitempty"`
+	ChatMessages         []string             `json:"chat_messages,omitempty"`
+	ChatMessageID        string               `json:"chat_message_id,omitempty"`
 	// Initiator* identify the actor who triggered THIS task — the real
 	// requester behind the current comment/mention or chat message — as
 	// distinct from the runtime owner whose credentials the agent runs with.
@@ -755,10 +756,7 @@ type CreateAgentRequest struct {
 	// event still fires with `template=""`, which is the correct signal
 	// for "manually authored agent".
 	Template string `json:"template"`
-	// PersonaSandbox names a persona sandbox (e.g. "claude-developer") to
-	// gate this agent's tool calls. Empty = no persona gating; the daemon
-	// falls back to its existing per-runtime sandbox config.
-	PersonaSandbox string `json:"persona_sandbox"`
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona_sandbox from create requests.
 }
 
 func decodeJSONBodyWithRawFields(body io.Reader, dst any) (map[string]json.RawMessage, error) {
@@ -993,8 +991,8 @@ type UpdateAgentRequest struct {
 	//   - field present with non-empty value → set (validated server-side)
 	// Distinguishing those modes is why this is a pointer; the raw-fields
 	// map captured at decode time tells us whether the key was sent.
-	ThinkingLevel  *string `json:"thinking_level"`
-	PersonaSandbox *string `json:"persona_sandbox"`
+	ThinkingLevel *string `json:"thinking_level"`
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona_sandbox from update requests.
 }
 
 // workspaceAlwaysRedactSecrets reports whether the workspace has opted
@@ -1129,6 +1127,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona-specific update authorization.
 	var req UpdateAgentRequest
 	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
 	if err != nil {
@@ -1136,16 +1135,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// E2: persona_sandbox is workspace-scoped policy, not per-agent config.
-	// Kept explicit even though canManageAgent is now owner/admin-only, so
-	// future permission changes cannot accidentally widen this field.
-	if _, hasPersonaSandboxField := rawFields["persona_sandbox"]; hasPersonaSandboxField {
-		if !roleAllowed(member.Role, "owner", "admin") {
-			writeError(w, http.StatusForbidden, "only workspace owner/admin can change persona_sandbox")
-			return
-		}
-	}
-
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona-specific update authorization.
 	// Hard-reject any attempt to write custom_env through the generic
 	// update endpoint. Silently dropping the field (which is what an
 	// `omitempty` field would do) was the pre-PR behaviour and led to
@@ -1245,14 +1235,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	if req.Model != nil {
 		params.Model = pgtype.Text{String: *req.Model, Valid: true}
 	}
-	// persona_sandbox: nil pointer = leave alone, "" = clear (handled below
-	// because COALESCE can't set NULL), otherwise = update to the named value.
-	rawPersonaSandbox, hasPersonaSandbox := rawFields["persona_sandbox"]
-	shouldClearPersonaSandbox := hasPersonaSandbox && (bytes.Equal(bytes.TrimSpace(rawPersonaSandbox), []byte("null")) || bytes.Equal(bytes.TrimSpace(rawPersonaSandbox), []byte(`""`)))
-	if req.PersonaSandbox != nil && !shouldClearPersonaSandbox {
-		params.PersonaSandbox = pgtype.Text{String: *req.PersonaSandbox, Valid: *req.PersonaSandbox != ""}
-	}
-
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona persistence updates.
 	// thinking_level handling (MUL-2339). Tri-state semantics:
 	//   - field omitted  → leave column alone (COALESCE narg), but if a
 	//     runtime change in this same request would make the *existing*
@@ -1333,39 +1316,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	if shouldClearPersonaSandbox {
-		updated, err = h.Queries.ClearAgentPersonaSandbox(r.Context(), updated.ID)
-		if err != nil {
-			slog.Warn("clear agent persona_sandbox failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-			writeError(w, http.StatusInternalServerError, "failed to clear persona_sandbox: "+err.Error())
-			return
-		}
-	}
-	if hasPersonaSandbox {
-		oldValue := ""
-		if existing.PersonaSandbox.Valid {
-			oldValue = existing.PersonaSandbox.String
-		}
-		newValue := ""
-		if updated.PersonaSandbox.Valid {
-			newValue = updated.PersonaSandbox.String
-		}
-		if oldValue != newValue {
-			details, _ := json.Marshal(map[string]string{
-				"agent_id": id,
-				"old":      oldValue,
-				"new":      newValue,
-			})
-			_, _ = h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
-				WorkspaceID: updated.WorkspaceID,
-				ActorType:   pgtype.Text{String: "member", Valid: true},
-				ActorID:     parseUUID(requestUserID(r)),
-				Action:      "agent_persona_sandbox_changed",
-				Details:     details,
-			})
-		}
-	}
-
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona clearing and audit writes.
 	// CEREBRO-PATCH(agent-office-direct-edit-version): FIR-1775 Phase 2 — a direct edit (outside the change-request flow) records an agent_context_version so version history stays complete. Best-effort; logic in agent_context_direct_edit_cerebro.go.
 	h.recordAgentContextDirectEdit(r, updated)
 
@@ -1408,6 +1359,7 @@ func (h *Handler) attachAgentSkills(ctx context.Context, resp *AgentResponse, ag
 			ID:          uuidToString(s.ID),
 			Name:        s.Name,
 			Description: s.Description,
+			AlwaysOn:    s.AlwaysOn, // CEREBRO-PATCH(skill-always-on): FIR-3805 the agent page renders the checkbox from this
 		}
 	}
 	resp.Skills = out

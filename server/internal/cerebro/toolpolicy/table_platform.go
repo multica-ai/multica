@@ -17,118 +17,12 @@ package toolpolicy
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"log/slog"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
-	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 )
-
-// FlagPlatformCapabilities is the cerebro feature flag (registry.ts) that gates
-// whether the platform-capability rows appear in the table. Default OFF: with no
-// override row the platform actions stay hidden, so prod behaviour is unchanged
-// until an admin deliberately turns the flag on (FIR-2594).
-const FlagPlatformCapabilities = "cerebro_platform_capabilities"
-
-// FlagAgentStartCapabilities is the cerebro feature flag that gates the light
-// "agent-start" surface: the Permissions table shows the surfaced platform
-// capabilities (platformcatalog.SurfacedKeys — the "start someone else's agent"
-// family) when it is on, WITHOUT opening the whole platform catalog. It is the
-// same flag that gates the friendly Agent-start tab (agent-trigger-tab.tsx), so
-// turning it on gives an admin both surfaces. Default OFF (FIR-3091 slice 4).
-const FlagAgentStartCapabilities = "cerebro_agent_trigger_permissions"
-
-// PlatformCapabilitiesEnabled reports whether the platform-capability catalog
-// should be appended to the table for this (workspace, user). The flag defaults
-// OFF, so with no override anywhere it stays hidden; a DB error fails closed
-// (show nothing new) and is logged.
-//
-// FIR-2672: resolution MUST mirror the canonical client precedence in
-// packages/cerebro-feature-flags/store.ts (resolveFlag):
-//
-//  1. a LOCKED workspace override wins outright;
-//  2. otherwise a personal override wins;
-//  3. otherwise an unlocked workspace override (a soft workspace default);
-//  4. otherwise the registry default (false for this flag).
-//
-// The earlier implementation read only the per-user row, so the workspace-level
-// "Force on for the whole workspace" override (stored under the all-zero
-// sentinel user_id, NOT the requester's id) was silently ignored — the toggle
-// the admin screen offers for this flag had no effect on the server gate, so
-// platform actions never surfaced. Honoring the sentinel row fixes that.
-func (s *Store) PlatformCapabilitiesEnabled(ctx context.Context, workspaceID, userID pgtype.UUID) bool {
-	return s.cerebroFlagEnabled(ctx, workspaceID, userID, FlagPlatformCapabilities)
-}
-
-// AgentStartCapabilitiesEnabled reports whether the light agent-start surface
-// (platformcatalog.SurfacedKeys) should be appended to the table for this
-// (workspace, user). Gated by FlagAgentStartCapabilities with the same
-// precedence as the full-catalog flag, so the two surfaces resolve identically;
-// default OFF (FIR-3091 slice 4).
-func (s *Store) AgentStartCapabilitiesEnabled(ctx context.Context, workspaceID, userID pgtype.UUID) bool {
-	return s.cerebroFlagEnabled(ctx, workspaceID, userID, FlagAgentStartCapabilities)
-}
-
-// cerebroFlagEnabled resolves one cerebro feature flag for a (workspace, user)
-// with the canonical client precedence in packages/cerebro-feature-flags
-// (resolveFlag), so a server-side gate agrees with the admin toggle:
-//
-//  1. a LOCKED workspace override wins outright;
-//  2. otherwise a personal override wins;
-//  3. otherwise an unlocked workspace override (a soft workspace default);
-//  4. otherwise the registry default (false for the gate flags here).
-//
-// The workspace-level override lives under the all-zero sentinel user_id, NOT
-// the requester's id, so it must be read from the workspace list — reading only
-// the per-user row silently ignores a "Force on for the whole workspace" toggle.
-// A DB error fails closed (return false) and is logged.
-func (s *Store) cerebroFlagEnabled(ctx context.Context, workspaceID, userID pgtype.UUID, flagKey string) bool {
-	if s.q == nil {
-		return false
-	}
-	// Workspace-level override lives under the all-zero sentinel user_id.
-	var wsEnabled, wsLocked, wsFound bool
-	wsRows, err := s.q.ListCerebroWorkspaceFeatureFlags(ctx, workspaceID)
-	if err != nil {
-		slog.Error("toolpolicy: workspace feature flag lookup failed", "flag", flagKey, "error", err)
-	} else {
-		for _, r := range wsRows {
-			if r.FlagKey == flagKey {
-				wsEnabled, wsLocked, wsFound = r.Enabled, r.Locked, true
-				break
-			}
-		}
-	}
-	// 1. A locked workspace override wins outright.
-	if wsFound && wsLocked {
-		return wsEnabled
-	}
-	// 2. Otherwise a personal override wins.
-	if userID.Valid {
-		on, perr := s.q.GetCerebroFeatureFlag(ctx, cerebrodb.GetCerebroFeatureFlagParams{
-			WorkspaceID: workspaceID,
-			UserID:      userID,
-			FlagKey:     flagKey,
-		})
-		if perr == nil {
-			return on
-		}
-		if !errors.Is(perr, pgx.ErrNoRows) {
-			slog.Error("toolpolicy: feature flag lookup failed", "flag", flagKey, "error", perr)
-			return false
-		}
-	}
-	// 3. Otherwise an unlocked workspace override (soft default).
-	if wsFound {
-		return wsEnabled
-	}
-	// 4. Otherwise the registry default — OFF for these gate flags.
-	return false
-}
 
 // appendPlatformRows adds one row per platform capability (platformcatalog.All)
 // with the explicit per-layer settings authored for it in the query's context
@@ -157,88 +51,44 @@ func (s *Store) appendPlatformRows(ctx context.Context, in TableQuery, groupIDs 
 	for i, c := range caps {
 		keys[i] = c.Key
 	}
-	settings, err := s.loadPlatformPolicySettings(ctx, in, groupIDs, keys)
+	settings, err := s.loadResourcePolicySettings(ctx, in, groupIDs, resourcePolicyFilter{
+		toolKeys: keys,
+		scope:    resourcePatternEmpty,
+	})
 	if err != nil {
 		return nil, err
 	}
 
 	for _, c := range caps {
 		row := TableRow{
-			ToolKey:           c.Key,
-			Title:             c.Title,
-			Category:          c.Category,
-			Source:            platformcatalog.Source,
-			ManagedExternally: c.ManagedExternally,
-			Layers:            map[Layer]Setting{},
+			ToolKey:               c.Key,
+			Title:                 c.Title,
+			Category:              c.Category,
+			Source:                platformcatalog.Source,
+			ManagedExternally:     c.ManagedExternally,
+			ExternalSecurityOwner: c.ExternalSecurityOwner,
+			Layers:                map[Layer]Setting{},
+			Conditions:            map[Layer]*Condition{},
 		}
-		if cell, ok := settings[c.Key]; ok {
+		// Externally enforced capabilities are visible for auditability but never
+		// read a stored policy row. Legacy advisory rows must not make Settings
+		// imply that an Allow/Ask/Deny choice changes the live security boundary.
+		if cell, ok := settings[resourcePolicyKey{toolKey: c.Key}]; ok && !c.ManagedExternally {
 			for l, set := range cell.layers {
 				row.Layers[l] = set
+			}
+			for l, cond := range cell.conditions {
+				row.Conditions[l] = cond
 			}
 			if len(cell.groups) > 0 {
 				row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 			}
 		}
-		row.Effective = Resolve(Input{Settings: row.Layers, Base: in.Base})
+		row.Effective, err = s.resolveTablePermission(ctx, in, c.Key, row.Layers)
+		if err != nil {
+			return nil, fmt.Errorf("toolpolicy: resolve platform permission %q: %w", c.Key, err)
+		}
 		out = append(out, row)
 	}
 	return out, nil
-}
-
-// platformPolicyLayers holds the explicit per-layer settings authored for one
-// platform capability. group settings accumulate separately and combine with
-// CombineGroups, mirroring how table.go folds the capability-wide rows.
-type platformPolicyLayers struct {
-	layers map[Layer]Setting
-	groups []Setting
-}
-
-// loadPlatformPolicySettings fetches every explicit per-layer setting authored
-// for the given platform capability keys (capability-wide rows, resource_pattern
-// = ”) in the query's context, bucketed by tool_key. It mirrors the subject
-// predicates of the capability-wide query in table.go so an absent (Valid=false)
-// subject id never matches and that layer stays Inherit.
-func (s *Store) loadPlatformPolicySettings(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID, keys []string) (map[string]*platformPolicyLayers, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT p.tool_key, p.layer, p.setting
-		FROM cerebro_tool_policy p
-		WHERE p.workspace_id = $1
-		  AND p.resource_pattern = ''
-		  AND p.tool_key = ANY($6::text[])
-		  AND (
-		    (p.layer = 'workspace' AND p.subject_id = $1) OR
-		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
-		    (p.layer = 'agent'     AND p.subject_id = $3) OR
-		    (p.layer = 'user'      AND p.subject_id = $4) OR
-		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[]))
-		  )
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, keys)
-	if err != nil {
-		return nil, fmt.Errorf("toolpolicy: load platform policy settings: %w", err)
-	}
-	defer rows.Close()
-
-	settings := map[string]*platformPolicyLayers{}
-	for rows.Next() {
-		var toolKey, layer, setting string
-		if err := rows.Scan(&toolKey, &layer, &setting); err != nil {
-			return nil, fmt.Errorf("toolpolicy: scan platform policy setting: %w", err)
-		}
-		cell, ok := settings[toolKey]
-		if !ok {
-			cell = &platformPolicyLayers{layers: map[Layer]Setting{}}
-			settings[toolKey] = cell
-		}
-		l := Layer(layer)
-		set := Setting(setting)
-		if l == LayerGroup {
-			cell.groups = append(cell.groups, set)
-		} else {
-			cell.layers[l] = set
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("toolpolicy: iterate platform policy settings: %w", err)
-	}
-	return settings, nil
 }

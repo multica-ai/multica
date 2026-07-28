@@ -215,3 +215,20 @@ func TestPermExplainCommandFlags(t *testing.T) {
 		}
 	}
 }
+
+func TestPermissionCLISurfacesShareCanonicalEndpoint(t *testing.T) {
+	client := cli.NewAPIClient("https://example.invalid", permTestWorkspaceID, "test-token")
+	permissionsPath, err := permBasePath(client)
+	if err != nil {
+		t.Fatalf("permissions endpoint: %v", err)
+	}
+	toolPolicyPath, err := tpBasePath(client)
+	if err != nil {
+		t.Fatalf("tool-policy endpoint: %v", err)
+	}
+	want := "/api/workspaces/" + permTestWorkspaceID + "/tool-policy"
+	if permissionsPath != want || toolPolicyPath != want {
+		t.Fatalf("CLI permission surfaces drifted: permissions=%q tool-policy=%q want=%q",
+			permissionsPath, toolPolicyPath, want)
+	}
+}

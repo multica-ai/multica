@@ -63,10 +63,8 @@ const section = (partial: Partial<VisionPlanSection>): VisionPlanSection => ({
 });
 
 describe("Vision Plan", () => {
-  const renderEdit = () => {
-    render(<StrategyPage />);
-    fireEvent.click(screen.getByRole("button", { name: "Edit plan" }));
-  };
+  const renderEdit = () => render(<StrategyPage />);
+  const openTraction = () => fireEvent.click(screen.getByRole("tab", { name: "Traction" }));
 
   beforeEach(() => {
     state.enabled = true; state.loading = false; state.error = false; state.rocks = [];
@@ -88,14 +86,42 @@ describe("Vision Plan", () => {
     for (const fn of [state.createItem, state.updateItem, state.deleteItem, state.createSection, state.updateSection, state.deleteSection, state.createConnection, state.deleteConnection]) fn.mockReset();
   });
 
-  it("renders the editable Vision Plan as an ordered strategy canvas", () => {
+  it("lays Vision out as labelled rows with the 3-Year Picture beside them", () => {
+    state.sections = [...state.sections, section({ id: "picture", key: "three-year-picture", name: "Three-Year Picture", position: 4 })];
+
     renderEdit();
+
     expect(screen.getByRole("heading", { name: "Strategy Map" })).toBeInTheDocument();
-    expect(screen.getByDisplayValue("Core Values")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Core Values" })).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Marketing Strategy" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Three-Year Picture" })).toBeInTheDocument();
     expect(screen.getByDisplayValue("Own the outcome")).toBeInTheDocument();
-    expect(screen.getByText(/Target market/)).toBeInTheDocument();
+    // The named blanks the paper organiser asks for are offered as one-click chips.
+    expect(screen.getByRole("button", { name: /Target Market \/ The List/ })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Add section" })).toBeInTheDocument();
   }, 30_000);
+
+  it("lays Traction out as 1-Year Plan, Goals with a Who column, and Issues List", () => {
+    state.sections = [...state.sections, section({ id: "issues", key: "issues-list", name: "Issues List", position: 5 })];
+    state.rocks = [{ id: "rock-1", title: "Launch Denmark", owner_name: "Maja" } as Rock];
+
+    renderEdit();
+    openTraction();
+
+    expect(screen.getByRole("region", { name: "One-Year Plan" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Goals" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Issues List" })).toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Who" })).toBeInTheDocument();
+    expect(screen.getByRole("cell", { name: "Maja" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Launch Denmark" })).toBeInTheDocument();
+  }, 30_000);
+
+  it("keeps sections outside the organiser visible instead of dropping them", () => {
+    renderEdit();
+    // Core Processes is not one of the six V/TO slots.
+    expect(screen.getByRole("region", { name: "Other sections" })).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Core Processes")).toBeInTheDocument();
+  });
 
   it("adds and updates inline content without opening a modal", () => {
     renderEdit();
@@ -112,27 +138,27 @@ describe("Vision Plan", () => {
     expect(state.updateItem).toHaveBeenCalledWith(expect.objectContaining({ id: "item-1", input: expect.objectContaining({ position: 1 }) }));
   });
 
-  it("renames and reorders sections inline", () => {
+  it("renames an extra section inline", () => {
     renderEdit();
-    fireEvent.change(screen.getByDisplayValue("Core Values"), { target: { value: "Operating Principles" } });
-    fireEvent.blur(screen.getByDisplayValue("Operating Principles"));
-    expect(state.updateSection).toHaveBeenCalledWith(expect.objectContaining({ id: "values", input: expect.objectContaining({ name: "Operating Principles" }) }));
-
-    fireEvent.click(screen.getByRole("button", { name: "Move Core Values down" }));
-    expect(state.updateSection).toHaveBeenCalledWith(expect.objectContaining({ id: "values", input: expect.objectContaining({ position: 1 }) }));
+    fireEvent.change(screen.getByDisplayValue("Core Processes"), { target: { value: "Our Processes" } });
+    fireEvent.blur(screen.getByDisplayValue("Our Processes"));
+    expect(state.updateSection).toHaveBeenCalledWith(expect.objectContaining({ id: "processes", input: expect.objectContaining({ name: "Our Processes" }) }));
   });
 
-  it("renders drag grips so columns and cards can be reordered on the canvas", () => {
+  it("renders drag grips so cards and extra columns can be reordered", () => {
     renderEdit();
-    expect(screen.getByRole("button", { name: "Reorder Core Values" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Reorder Own the outcome" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Reorder Core Processes" })).toBeInTheDocument();
+    // The six fixed V/TO slots are part of the organiser and cannot be dragged away.
+    expect(screen.queryByRole("button", { name: "Reorder Core Values" })).not.toBeInTheDocument();
   });
 
   it("offers Goal connections only for One-Year Plan items", () => {
     renderEdit();
-
     expect(screen.queryByRole("button", { name: "Own the outcome Goals" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Care deeply Goals" })).not.toBeInTheDocument();
+
+    openTraction();
     expect(screen.getByRole("button", { name: "Reach 100m revenue Goals" })).toBeInTheDocument();
   });
 });

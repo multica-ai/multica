@@ -48,9 +48,18 @@ describe("Hooks UX contract", () => {
 
   it("provides useful starter recipes plus a scratch option", () => {
     expect(HOOK_TEMPLATES.length).toBeGreaterThanOrEqual(5);
-    expect(HOOK_TEMPLATES.length).toBeLessThanOrEqual(7);
+    expect(HOOK_TEMPLATES.length).toBeLessThanOrEqual(8);
     expect(HOOK_TEMPLATES.some((template) => template.id === "scratch")).toBe(true);
     expect(HOOK_TEMPLATES.filter((template) => template.id !== "scratch").every((template) => template.hook.events.length > 0)).toBe(true);
+  });
+
+  it("ships the no-silent-failure recipe guarding terminal task failures", () => {
+    const recipe = HOOK_TEMPLATES.find((template) => template.id === "no-silent-failure");
+    expect(recipe?.hook.events).toEqual(["on.task.failure"]);
+    expect(recipe?.hook.conditions).toEqual([{ field: "retry.pending", operator: "eq", value: "false" }]);
+    const actionTypes = recipe?.hook.actions.map((action) => action.type);
+    expect(actionTypes).toEqual(["issue.comment", "issue.status"]);
+    expect(recipe?.hook.actions.at(1)?.config.status).toBe("blocked");
   });
 
   it("ships the think-before-comment recipe wiring before.message.send to a judge gate", () => {

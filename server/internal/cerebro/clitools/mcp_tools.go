@@ -134,6 +134,8 @@ func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState
 	registerCerebroConnectionAdminTools(srv, client)
 	// CEREBRO-PATCH(cerebro-workflow-mcp): FIR-2937 workflow management tools.
 	registerWorkflowTools(srv, client)
+	// CEREBRO-PATCH(cerebro-command-mcp): FIR-3493 reusable workflow command tools.
+	registerCommandTools(srv, client)
 	registerMiniAppTools(srv, client)
 
 	// -----------------------------------------------------------------------

@@ -22,10 +22,21 @@ import {
 } from "../core/queries";
 import { moveItem, moveSection } from "../core/strategy-board";
 import type { Rock, VisionPlanItem, VisionPlanItemInput, VisionPlanSection } from "../core/types";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { SearchSelect, type SearchSelectOption } from "./search-select";
-import { StrategyMap } from "./strategy-map";
+import { TractionBoard, VisionBoard, extraSections } from "./vto-board";
 
-const MARKETING_PARTS = ["Target market", "Differentiators", "Proven process", "Guarantee"];
+// The named blanks each V/TO block asks for, offered as one-click chips so the
+// page fills in like the paper organiser instead of an empty list.
+const WIREFRAME_PARTS: Record<string, string[]> = {
+  "core-focus": ["Purpose/Cause/Passion", "Our Niche"],
+  "marketing-strategy": ["Target Market / The List", "Three Uniques", "Proven Process", "Guarantee"],
+  "three-year-picture": ["Future Date", "Revenue", "Profit", "Measurables"],
+  "one-year-plan": ["Future Date", "Revenue", "Profit"],
+};
+
+const usesPartLabels = (section: VisionPlanSection) => section.section_type === "structured" || Boolean(WIREFRAME_PARTS[section.key]);
+
 const SECTION_PREFIX = "section-";
 const ITEM_PREFIX = "item-";
 const COLUMN_PREFIX = "column-";
@@ -101,7 +112,7 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
       <div className="flex items-start gap-2">
         <button type="button" aria-label={`Reorder ${item.title}`} className="mt-0.5 grid size-8 shrink-0 cursor-grab touch-none place-items-center rounded text-muted-foreground opacity-40 hover:bg-muted group-hover:opacity-100" {...attributes} {...listeners}><GripVertical aria-hidden className="size-4" /></button>
         <div className="min-w-0 flex-1">
-          {section.section_type === "structured" && (
+          {usesPartLabels(section) && (
             <input aria-label={`${item.title} part`} value={partLabel} onChange={(event) => setPartLabel(event.target.value)} onBlur={() => save()} placeholder="Part label" className="mb-1 w-full bg-transparent text-xs font-semibold uppercase tracking-wide text-muted-foreground outline-none" />
           )}
           <input aria-label={`${item.title} title`} value={title} onChange={(event) => setTitle(event.target.value)} onBlur={() => save()} className="w-full bg-transparent text-sm font-medium outline-none focus:ring-1 focus:ring-ring" />
@@ -141,23 +152,19 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
   );
 }
 
-interface PlanSectionProps {
+interface SectionBodyProps {
   section: VisionPlanSection;
-  index: number;
-  sections: VisionPlanSection[];
   wsId: string;
   goals: Rock[];
   ownerOptions: SearchSelectOption[];
   currentPeriodId?: string;
 }
 
-function PlanSection({ section, index, sections, wsId, goals, ownerOptions, currentPeriodId }: PlanSectionProps) {
+// The contents of one V/TO block: its cards, the named blanks it still wants,
+// and the add row. Shared by the board cells and the extra-section columns.
+function SectionBody({ section, wsId, goals, ownerOptions, currentPeriodId }: SectionBodyProps) {
   const createItem = useCreateVisionPlanItem(wsId);
-  const updateSection = useUpdateVisionPlanSection(wsId);
-  const deleteSection = useDeleteVisionPlanSection(wsId);
-  const [name, setName] = useState(section.name);
   const [newItem, setNewItem] = useState("");
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `${SECTION_PREFIX}${section.id}` });
   const { setNodeRef: setDropRef } = useDroppable({ id: `${COLUMN_PREFIX}${section.id}` });
 
   function addItem(title: string, partLabel?: string) {
@@ -170,6 +177,35 @@ function PlanSection({ section, index, sections, wsId, goals, ownerOptions, curr
     if (event.key === "Enter") { event.preventDefault(); addItem(newItem); }
   }
 
+  const parts = WIREFRAME_PARTS[section.key] ?? (section.section_type === "structured" ? WIREFRAME_PARTS["marketing-strategy"] ?? [] : []);
+  const missingParts = parts.filter((part) => !section.items.some((item) => item.part_label === part));
+  const activeItems = section.items.filter((item) => item.state === "active").sort((a, b) => a.position - b.position);
+  const allowGoalConnections = section.key === "one-year-plan";
+
+  return (
+    <div ref={setDropRef} className="grid flex-1 content-start gap-2">
+      <SortableContext items={activeItems.map((item) => `${ITEM_PREFIX}${item.id}`)} strategy={verticalListSortingStrategy}>
+        {activeItems.map((item, itemIndex) => <PlanItem key={item.id} item={item} itemIndex={itemIndex} siblingItems={activeItems} section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} allowGoalConnections={allowGoalConnections} />)}
+      </SortableContext>
+      {missingParts.length > 0 && <div className="flex flex-wrap gap-1.5">{missingParts.map((part) => <button key={part} type="button" onClick={() => addItem(part, part)} className="flex min-h-8 items-center gap-1 rounded-full border border-dashed px-3 text-xs text-muted-foreground hover:border-foreground hover:text-foreground"><Plus aria-hidden className="size-3.5" />{part}</button>)}</div>}
+      <input aria-label={`Add item to ${section.name}`} value={newItem} onChange={(event) => setNewItem(event.target.value)} onKeyDown={onNewItemKeyDown} placeholder={section.section_type === "process" ? "+ Add process and press Enter" : "+ Add item and press Enter"} className="min-h-11 rounded-md border border-dashed bg-transparent px-3 text-sm text-muted-foreground outline-none focus:border-ring focus:text-foreground" />
+    </div>
+  );
+}
+
+interface PlanSectionProps extends SectionBodyProps {
+  index: number;
+  sections: VisionPlanSection[];
+}
+
+// A standalone, reorderable column — used for the sections that sit outside the
+// six fixed V/TO slots (Core Processes, Quarterly Goals, anything custom).
+function PlanSection({ section, index, sections, ...body }: PlanSectionProps) {
+  const updateSection = useUpdateVisionPlanSection(body.wsId);
+  const deleteSection = useDeleteVisionPlanSection(body.wsId);
+  const [name, setName] = useState(section.name);
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `${SECTION_PREFIX}${section.id}` });
+
   function move(direction: -1 | 1) {
     const other = sections[index + direction];
     if (!other) return;
@@ -177,9 +213,6 @@ function PlanSection({ section, index, sections, wsId, goals, ownerOptions, curr
     updateSection.mutate({ id: other.id, input: sectionInputFrom(other, section.position) });
   }
 
-  const missingParts = section.section_type === "structured" ? MARKETING_PARTS.filter((part) => !section.items.some((item) => item.part_label === part)) : [];
-  const activeItems = section.items.filter((item) => item.state === "active").sort((a, b) => a.position - b.position);
-  const allowGoalConnections = section.key === "one-year-plan";
   const style = { transform: CSS.Transform.toString(transform), transition };
   return (
     <section ref={setNodeRef} style={style} className={`flex w-full shrink-0 flex-col rounded-xl border bg-card p-4 shadow-sm md:w-80 ${isDragging ? "opacity-50" : ""}`}>
@@ -190,13 +223,7 @@ function PlanSection({ section, index, sections, wsId, goals, ownerOptions, curr
         <button type="button" aria-label={`Move ${section.name} down`} disabled={index === sections.length - 1} onClick={() => move(1)} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30"><ChevronDown aria-hidden className="size-4" /></button>
         <button type="button" aria-label={`Delete ${section.name} section`} onClick={() => { if (window.confirm(`Delete ${section.name} and its items?`)) deleteSection.mutate(section.id); }} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"><Trash2 aria-hidden className="size-4" /></button>
       </header>
-      <div ref={setDropRef} className="mt-3 grid flex-1 content-start gap-2">
-        <SortableContext items={activeItems.map((item) => `${ITEM_PREFIX}${item.id}`)} strategy={verticalListSortingStrategy}>
-          {activeItems.map((item, itemIndex) => <PlanItem key={item.id} item={item} itemIndex={itemIndex} siblingItems={activeItems} section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} allowGoalConnections={allowGoalConnections} />)}
-        </SortableContext>
-        {missingParts.length > 0 && <div className="flex flex-wrap gap-1.5">{missingParts.map((part) => <button key={part} type="button" onClick={() => addItem(part, part)} className="flex min-h-8 items-center gap-1 rounded-full border border-dashed px-3 text-xs text-muted-foreground hover:border-foreground hover:text-foreground"><Plus aria-hidden className="size-3.5" />{part}</button>)}</div>}
-        <input aria-label={`Add item to ${section.name}`} value={newItem} onChange={(event) => setNewItem(event.target.value)} onKeyDown={onNewItemKeyDown} placeholder={section.section_type === "process" ? "+ Add process and press Enter" : "+ Add item and press Enter"} className="min-h-11 rounded-md border border-dashed bg-transparent px-3 text-sm text-muted-foreground outline-none focus:border-ring focus:text-foreground" />
-      </div>
+      <div className="mt-3 flex flex-1 flex-col"><SectionBody section={section} {...body} /></div>
     </section>
   );
 }
@@ -223,8 +250,6 @@ export function StrategyPage() {
   const createSection = useCreateVisionPlanSection(wsId);
   const updateSection = useUpdateVisionPlanSection(wsId);
   const updateItem = useUpdateVisionPlanItem(wsId);
-  const [mode, setMode] = useState<"overview" | "edit">("overview");
-  const [focusedSectionId, setFocusedSectionId] = useState<string>();
   const [addingSection, setAddingSection] = useState(false);
   const [sectionName, setSectionName] = useState("");
   const [dragLabel, setDragLabel] = useState<string>();
@@ -247,12 +272,6 @@ export function StrategyPage() {
     if (!sectionName.trim()) return;
     createSection.mutate({ name: sectionName.trim(), section_type: "list", position: sections.length });
     setSectionName(""); setAddingSection(false);
-  }
-
-  function editSection(sectionId: string) {
-    setFocusedSectionId(sectionId);
-    setMode("edit");
-    window.requestAnimationFrame(() => document.getElementById(`vision-section-${sectionId}`)?.scrollIntoView({ block: "start", inline: "start" }));
   }
 
   function openRock(rockId: string) {
@@ -306,26 +325,45 @@ export function StrategyPage() {
     }
   }
 
+  const currentPeriodId = periods.data?.periods[0]?.id;
+  const extras = extraSections(sections);
+  const renderSection = (section: VisionPlanSection) => <SectionBody section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} />;
+
   return (
     <main className="h-full min-w-0 overflow-y-auto bg-muted/20">
-      <div className="mx-auto flex w-full max-w-6xl min-w-0 flex-col gap-5 p-4 sm:p-6">
+      <div className="flex w-full min-w-0 flex-col gap-5 p-4 sm:p-6">
         <header className="flex flex-wrap items-end justify-between gap-4 border-b pb-5">
-          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Company direction</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">{terminology.strategy_map}</h1><p className="mt-1 text-sm text-muted-foreground">Connect long-term direction to current {terminology.rocks.toLowerCase()} in one scan.</p></div>
-          <div className="flex gap-2"><button type="button" aria-pressed={mode === "overview"} onClick={() => setMode("overview")} className="h-11 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted">Overview</button><button type="button" aria-pressed={mode === "edit"} onClick={() => setMode("edit")} className="h-11 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted">Edit plan</button>{mode === "edit" && <button type="button" aria-label="Add section" onClick={() => setAddingSection(true)} className="h-11 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted">+ Add section</button>}</div>
+          <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Vision/Traction Organizer</p><h1 className="mt-1 text-3xl font-semibold tracking-tight">{terminology.strategy_map}</h1><p className="mt-1 text-sm text-muted-foreground">Connect long-term direction to current {terminology.rocks.toLowerCase()} in one scan.</p></div>
+          <button type="button" aria-label="Add section" onClick={() => setAddingSection(true)} className="h-11 rounded-md border bg-background px-4 text-sm font-medium hover:bg-muted">+ Add section</button>
         </header>
-        {mode === "edit" && addingSection && <div className="flex gap-2 rounded-xl border border-dashed bg-card p-3"><input autoFocus aria-label="New section name" value={sectionName} onChange={(event) => setSectionName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addSection(); }} placeholder="Section name" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" /><button type="button" onClick={addSection} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Add</button><button type="button" onClick={() => setAddingSection(false)} className="h-10 rounded-md border px-4 text-sm">Cancel</button></div>}
-        {mode === "edit" && <p className="text-xs text-muted-foreground">Drag the grip to reorder columns, or drag a card between columns to reshape the plan. One-Year Plan items connect to {terminology.rocks} and their issues.</p>}
-        {plan.isLoading ? <p>Loading {terminology.vision_plan}…</p> : plan.isError ? <p role="alert">{terminology.vision_plan} could not be loaded</p> : mode === "overview" ? <StrategyMap sections={sections} rocks={goals} terminology={terminology} onEditSection={editSection} onOpenRock={openRock} /> : (
+
+        {addingSection && <div className="flex gap-2 rounded-xl border border-dashed bg-card p-3"><input autoFocus aria-label="New section name" value={sectionName} onChange={(event) => setSectionName(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") addSection(); }} placeholder="Section name" className="h-10 min-w-0 flex-1 rounded-md border bg-background px-3 text-sm" /><button type="button" onClick={addSection} className="h-10 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground">Add</button><button type="button" onClick={() => setAddingSection(false)} className="h-10 rounded-md border px-4 text-sm">Cancel</button></div>}
+
+        {plan.isLoading ? <p>Loading {terminology.vision_plan}…</p> : plan.isError ? <p role="alert">{terminology.vision_plan} could not be loaded</p> : (
           <DndContext sensors={sensors} collisionDetection={boardCollision} onDragStart={onDragStart} onDragEnd={onDragEnd} onDragCancel={() => setDragLabel(undefined)}>
-            <SortableContext items={sections.map((section) => `${SECTION_PREFIX}${section.id}`)} strategy={horizontalListSortingStrategy}>
-              <div className="flex flex-col gap-4 md:flex-row md:items-start md:overflow-x-auto md:pb-2">
-                {sections.map((section, index) => <div id={`vision-section-${section.id}`} key={section.id} className={`flex ${focusedSectionId === section.id ? "scroll-mt-4 rounded-xl ring-2 ring-primary/30" : "scroll-mt-4"}`}><PlanSection section={section} index={index} sections={sections} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={periods.data?.periods[0]?.id} /></div>)}
-              </div>
-            </SortableContext>
+            <Tabs defaultValue="vision" className="gap-4">
+              <TabsList>
+                <TabsTrigger value="vision">Vision</TabsTrigger>
+                <TabsTrigger value="traction">Traction</TabsTrigger>
+              </TabsList>
+              <TabsContent value="vision"><VisionBoard sections={sections} renderSection={renderSection} /></TabsContent>
+              <TabsContent value="traction"><TractionBoard sections={sections} rocks={goals} rocksLabel={terminology.rocks} renderSection={renderSection} onOpenRock={openRock} /></TabsContent>
+            </Tabs>
+
+            {extras.length > 0 && (
+              <section aria-label="Other sections" className="grid gap-3">
+                <h2 className="text-sm font-semibold">Other sections</h2>
+                <SortableContext items={extras.map((section) => `${SECTION_PREFIX}${section.id}`)} strategy={horizontalListSortingStrategy}>
+                  <div className="flex flex-col gap-4 md:flex-row md:items-start md:overflow-x-auto md:pb-2">
+                    {extras.map((section, index) => <PlanSection key={section.id} section={section} index={index} sections={extras} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} />)}
+                  </div>
+                </SortableContext>
+              </section>
+            )}
+
             <DragOverlay>{dragLabel ? <div className="rounded-lg border bg-card px-3 py-2 text-sm font-medium shadow-lg">{dragLabel}</div> : null}</DragOverlay>
           </DndContext>
         )}
-        <footer className="rounded-xl border border-dashed bg-card px-5 py-4 text-sm text-muted-foreground"><strong className="text-foreground">One plan, shared context.</strong> Items in One-Year Plan can connect to {terminology.rocks}; the remaining sections stay focused on the written plan.</footer>
       </div>
     </main>
   );

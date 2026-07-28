@@ -26,6 +26,7 @@ type AgentRuntimeResponse struct {
 	WorkspaceID  string  `json:"workspace_id"`
 	DaemonID     *string `json:"daemon_id"`
 	Name         string  `json:"name"`
+	CustomName   *string `json:"custom_name"`
 	RuntimeMode  string  `json:"runtime_mode"`
 	Provider     string  `json:"provider"`
 	LaunchHeader string  `json:"launch_header"`
@@ -40,18 +41,13 @@ type AgentRuntimeResponse struct {
 	// SandboxPolicy is Multica-owned runtime policy that shapes daemon
 	// Seatbelt enforcement for shell, host and path controls.
 	SandboxPolicy any `json:"sandbox_policy"`
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona_sandbox from runtime responses.
 	// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 named isolation profile the stored policy currently equals (real status, not a default).
 	SandboxProfile string `json:"sandbox_profile"`
-	// CEREBRO-PATCH(runtime): persona integration additions.
-	// PersonaSandbox is the runtime-scoped persona sandbox (E1). When set it
-	// is the hard upper bound for every agent on this runtime — at spawn
-	// time the daemon uses it instead of the agent's own sandbox if both
-	// differ. Empty/null = no upper bound, agent-level sandbox decides alone.
-	PersonaSandbox string `json:"persona_sandbox"`
 	// Capabilities is the daemon-reported snapshot of what this runtime can
 	// actually do (Claude Code's tool list, MCP servers, etc.). The shape is
 	// loose so different providers can report what fits without a schema
-	// migration. Set on every register; persona's UI reads this to surface
+	// migration. Set on every register; the runtime UI reads this to surface
 	// "what your runtime can actually do" alongside the abstract sandbox.
 	Capabilities any     `json:"capabilities"`
 	LastSeenAt   *string `json:"last_seen_at"`
@@ -87,6 +83,7 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		WorkspaceID:    uuidToString(rt.WorkspaceID),
 		DaemonID:       textToPtr(rt.DaemonID),
 		Name:           rt.Name,
+		CustomName:     textToPtr(rt.CustomName),
 		RuntimeMode:    rt.RuntimeMode,
 		Provider:       rt.Provider,
 		LaunchHeader:   agent.LaunchHeader(rt.Provider),
@@ -96,9 +93,9 @@ func runtimeToResponse(rt db.AgentRuntime) AgentRuntimeResponse {
 		OwnerID:        uuidToPtr(rt.OwnerID),
 		SandboxEnabled: boolToPtr(rt.SandboxEnabled),
 		SandboxPolicy:  unmarshalJSONMap(rt.SandboxPolicy),
+		// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 no longer maps runtime persona_sandbox.
 		// CEREBRO-PATCH(runtime-sandbox-profile): FIR-2230 classify stored policy into its profile.
 		SandboxProfile: cerebrosandboxprofile.Classify(rt.SandboxPolicy),
-		PersonaSandbox: rt.PersonaSandbox.String,
 		Capabilities:   capabilities,
 		LastSeenAt:     timestampToPtr(rt.LastSeenAt),
 		// CEREBRO-PATCH(runtime-pause-response): expose pause state on the runtime API response.
@@ -490,8 +487,12 @@ type UpdateAgentRuntimeRequest struct {
 	// Visibility flips a runtime between "private" (default — only the owner
 	// or workspace admins can bind agents) and "public" (any workspace
 	// member can). Owner / workspace admin only, gated by canEditRuntime.
-	Visibility *string `json:"visibility,omitempty"`
+	Visibility     *string `json:"visibility,omitempty"`
+	CustomName     *string `json:"custom_name,omitempty"`
+	ApplyToMachine bool    `json:"apply_to_machine,omitempty"`
 }
+
+const maxRuntimeCustomNameLen = 100
 
 // UpdateAgentRuntime handles PATCH /api/runtimes/:id. Currently visibility
 // is editable; the request shape is open-ended so future fields (display
@@ -540,7 +541,12 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 			needVisibility = true
 		}
 	}
+	if req.CustomName != nil && len([]rune(strings.TrimSpace(*req.CustomName))) > maxRuntimeCustomNameLen {
+		writeError(w, http.StatusBadRequest, "custom name is too long")
+		return
+	}
 
+	changed := false
 	if needVisibility {
 		updated, err := h.Queries.UpdateAgentRuntimeVisibility(r.Context(), db.UpdateAgentRuntimeVisibilityParams{
 			ID:         runtimeUUID,
@@ -552,9 +558,42 @@ func (h *Handler) UpdateAgentRuntime(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		rt = updated
-		// Notify connected clients that runtime metadata changed so the
-		// list/detail pages refresh — matches the pattern used by
-		// DeleteAgentRuntime.
+		changed = true
+	}
+
+	if req.CustomName != nil {
+		trimmed := strings.TrimSpace(*req.CustomName)
+		customName := pgtype.Text{String: trimmed, Valid: trimmed != ""}
+		if req.ApplyToMachine && rt.DaemonID.Valid {
+			var ownerFilter pgtype.UUID
+			if !roleAllowed(member.Role, "owner", "admin") {
+				ownerFilter = member.UserID
+			}
+			rows, err := h.Queries.UpdateAgentRuntimeCustomNameByDaemon(r.Context(), db.UpdateAgentRuntimeCustomNameByDaemonParams{
+				CustomName: customName, WorkspaceID: rt.WorkspaceID, DaemonID: rt.DaemonID, OwnerID: ownerFilter,
+			})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update runtime")
+				return
+			}
+			for _, row := range rows {
+				if row.ID == runtimeUUID {
+					rt = row
+					break
+				}
+			}
+		} else {
+			updated, err := h.Queries.UpdateAgentRuntimeCustomName(r.Context(), db.UpdateAgentRuntimeCustomNameParams{CustomName: customName, ID: runtimeUUID})
+			if err != nil {
+				writeError(w, http.StatusInternalServerError, "failed to update runtime")
+				return
+			}
+			rt = updated
+		}
+		changed = true
+	}
+
+	if changed {
 		h.publish(protocol.EventDaemonRegister, uuidToString(rt.WorkspaceID), "member", uuidToString(member.UserID), map[string]any{
 			"action": "update",
 		})

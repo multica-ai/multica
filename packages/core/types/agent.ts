@@ -26,6 +26,13 @@ export interface RuntimeDevice {
   workspace_id: string;
   daemon_id: string | null;
   name: string;
+  /**
+   * Optional user-set display name override (MUL-4217). Overrides `name` for
+   * display; the daemon never writes it, so it survives heartbeats. Older
+   * backends omit the field — consumers must treat missing / empty as "use
+   * name" (see runtimeDisplayName).
+   */
+  custom_name?: string | null;
   runtime_mode: AgentRuntimeMode;
   provider: string;
   launch_header: string;
@@ -37,11 +44,7 @@ export interface RuntimeDevice {
   // MULTICA_ENABLE_SANDBOX env var; true/false = explicit on/off override.
   sandbox_enabled: boolean | null;
   sandbox_policy?: RuntimeSandboxPolicy;
-  // Runtime-level persona sandbox upper bound (E1). Empty string means
-// CEREBRO-PATCH(agent): persona integration additions.
-  // the agent's own sandbox decides alone; non-empty (e.g. "claude-readonly")
-  // caps every agent on this runtime regardless of their per-agent setting.
-  persona_sandbox: string;
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 keeps runtime contracts free of persona_sandbox.
   // Daemon-reported capability snapshot (E3). Shape is loose — different
   // providers report what they have (Claude Code's tool list, MCP servers,
   // etc.) without requiring a schema migration per provider.
@@ -207,6 +210,18 @@ export interface AgentTask {
   relative_work_dir?: string;
 }
 
+// CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 immutable task permission snapshot.
+// Immutable tool allowlist issued when a task starts. This is the same
+// snapshot enforced at every tool call, exposed for the transcript and CLI.
+export interface TaskAccessSnapshot {
+  task_id: string;
+  agent_id: string;
+  allowed_tools: string[];
+  issued_at: string;
+  expires_at: string;
+  status: "active" | "expired";
+}
+
 export interface WorkSession {
   id: string;
   issue_id: string;
@@ -297,12 +312,7 @@ export interface Agent {
   updated_at: string;
   archived_at: string | null;
   archived_by: string | null;
-  /**
-   * Name of the persona sandbox that gates this agent's tool calls
-   * (e.g. "claude-developer"). Empty string means no persona gating —
-   * the daemon falls back to its existing per-runtime sandbox config.
-   */
-  persona_sandbox: string;
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 keeps agent contracts free of persona_sandbox.
   /**
    * CEREBRO-PATCH(agent-can-trigger): JEH-1066 — true when the caller is
    * allowed to trigger this agent under the cerebro group-permission model.
@@ -468,13 +478,9 @@ export interface UpdateAgentRequest {
   mcp_config?: unknown | null;
   visibility?: AgentVisibility;
   status?: AgentStatus;
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona_sandbox updates.
   max_concurrent_tasks?: number;
   model?: string;
-  /**
-   * Persona sandbox name (e.g. "claude-developer"). Empty string clears
-   * the assignment; omit the field to leave it unchanged.
-   */
-  persona_sandbox?: string;
   /**
    * Runtime-native reasoning/effort token. Tri-state semantics (MUL-2339):
    *   - field omitted → no change
@@ -661,10 +667,10 @@ export interface AgentContextSnapshot {
   description: string;
   model: string;
   thinking_level: string;
-  persona_sandbox: string;
   mcp_config?: unknown;
   custom_args?: unknown;
   runtime_config?: unknown;
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona_sandbox snapshots.
   skill_ids: string[];
   custom_env_keys: string[];
 }
@@ -706,8 +712,8 @@ export interface CreateAgentContextChangeRequestRequest {
   instructions?: string;
   model?: string;
   thinking_level?: string;
-  persona_sandbox?: string;
   skill_ids?: string[];
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona_sandbox proposals.
   // CEREBRO-PATCH(agent-office-skills-mcp-versioned): FIR-1775 2b — config overrides on a change request.
   /** Full replacement MCP config; null clears it. Omit to leave unchanged. */
   mcp_config?: unknown;

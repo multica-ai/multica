@@ -116,8 +116,10 @@ var providerRegistry = map[string]Set{
 			"MultiEdit",
 			"NotebookEdit",
 			"Read",
+			"Skill",
 			"Task",
 			"TodoWrite",
+			"ToolSearch",
 			"WebFetch",
 			"WebSearch",
 			"Write",
@@ -143,7 +145,7 @@ var providerRegistry = map[string]Set{
 		},
 		MCPServers:      []string{},
 		ToolProtocols:   []string{"mcp_stdio"},
-		SupportsAsk:     false,
+		SupportsAsk:     true,
 		Skills:          []string{},
 		Subagents:       []string{"Task"},
 		Hooks:           []string{"PreToolUse", "PostToolUse", "Stop", "SubagentStop", "Notification"},
@@ -162,9 +164,9 @@ var providerRegistry = map[string]Set{
 		},
 		MCPServers:      []string{},
 		ToolProtocols:   []string{"mcp_stdio"},
-		SupportsAsk:     false,
+		SupportsAsk:     true,
 		Subagents:       []string{},
-		Hooks:           []string{"OnTaskStart", "OnTaskEnd"},
+		Hooks:           []string{"PreToolUse", "PostToolUse", "Stop"},
 		SecretBindings:  []string{"OPENAI_API_KEY"},
 		DiscoveryMethod: "static",
 	},
@@ -183,7 +185,7 @@ var providerRegistry = map[string]Set{
 		},
 		MCPServers:      []string{},
 		ToolProtocols:   []string{"mcp_stdio"},
-		SupportsAsk:     false,
+		SupportsAsk:     true,
 		Subagents:       []string{},
 		Hooks:           []string{},
 		SecretBindings:  []string{"CURSOR_API_KEY"},
@@ -201,7 +203,7 @@ var providerRegistry = map[string]Set{
 		},
 		MCPServers:      []string{},
 		ToolProtocols:   []string{"mcp_stdio"},
-		SupportsAsk:     false,
+		SupportsAsk:     true,
 		Subagents:       []string{},
 		Hooks:           []string{},
 		SecretBindings:  []string{"GOOGLE_API_KEY", "GEMINI_API_KEY"},
@@ -220,6 +222,138 @@ var providerRegistry = map[string]Set{
 		// real capabilities live on the agent's MCP config and are merged in
 		// at spawn time via the Enrich path. The static row carries only the
 		// secret binding so an admin can govern key-attachment.
+		DiscoveryMethod: "static",
+	},
+
+	// FIR-3762: Pi's surface is entirely MCP pass-through — the Firtal Pi harness
+	// (packages/cerebro-pi-harness/multica-harness.ts) starts an `multica mcp serve`
+	// stdio client on session_start and registers every listed tool into Pi's own
+	// registry, then gates each call through /tool-policy/resolve. Without a row
+	// here Pi resolves to staticFallback, whose empty ToolProtocols fails the
+	// protocol check in toolaccess.exposureEffective for EVERY tool. Nothing is
+	// then exposed at claim time, the task mandate is issued empty, and
+	// taskmandate.Authorize denies every call — Pi starts but cannot act.
+	// SupportsAsk stays false: the harness can only allow or block a call, it has
+	// no way to park one pending a human approval.
+	"pi": {
+		Providers:       []string{"pi"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	// FIR-3762 follow-up: the eight providers below were supported by agent.New
+	// but had NO row here, so For() fell through to staticFallback and its empty
+	// ToolProtocols failed the protocol check in toolaccess.exposureEffective for
+	// every capability — a silent total lockout, the same failure mode the Pi
+	// outage above was. Live evidence when this landed: 14 of 39 runtimes in the
+	// Firtal workspace reported discovery_method="unmapped" with zero tools
+	// (4 pi, 4 hermes, 4 opencode, 2 antigravity).
+	//
+	// Each row declares only what is traceable to the backend implementation:
+	//   - ToolProtocols follows execOptionsSupport in
+	//     server/pkg/agent/cerebro_exec_options_matrix.go. A backend that honours
+	//     FieldMCPConfig speaks mcp_stdio (opencode, hermes, kimi, kiro); one that
+	//     drops it has no MCP surface and carries native_tool_loop only
+	//     (copilot, openclaw, antigravity, openai-eu).
+	//   - Tools stays empty on purpose. A hand-typed tool list drifts from the
+	//     runtime the day the CLI adds a tool, and fabricating entries here would
+	//     surface bogus rows in the permission UI. The inventory belongs to the
+	//     measured path (daemon probe / MCP tools-list scan), which writes the
+	//     capability register; this row only unblocks the protocol gate.
+	//   - SupportsAsk stays false unless the backend can actually park a call
+	//     pending a human decision. None of these can.
+	// TestEveryAgentProviderIsMapped guards the invariant so a new provider can
+	// never ship without a row again.
+	"copilot": {
+		Providers:       []string{"copilot"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"native_tool_loop"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"opencode": {
+		Providers:       []string{"opencode"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"openclaw": {
+		Providers:       []string{"openclaw"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"native_tool_loop"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"hermes": {
+		Providers:       []string{"hermes"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"kimi": {
+		Providers:       []string{"kimi"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"kiro": {
+		Providers:       []string{"kiro"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"mcp_stdio"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"antigravity": {
+		Providers:       []string{"antigravity"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"native_tool_loop"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
+		DiscoveryMethod: "static",
+	},
+
+	"openai-eu": {
+		Providers:       []string{"openai-eu"},
+		Tools:           []string{},
+		MCPServers:      []string{},
+		ToolProtocols:   []string{"native_tool_loop"},
+		SupportsAsk:     false,
+		Hooks:           []string{},
+		SecretBindings:  []string{},
 		DiscoveryMethod: "static",
 	},
 

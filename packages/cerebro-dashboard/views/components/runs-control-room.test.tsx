@@ -112,6 +112,8 @@ describe("ActivityHeatmap", () => {
     expect(screen.getByText("Runs")).toBeTruthy();
     expect(screen.getByText("Savings")).toBeTruthy();
     expect(screen.getByLabelText("Runs and savings trend")).toBeTruthy();
+    expect(screen.getByLabelText("Runs point 4")).toBeTruthy();
+    expect(screen.getByLabelText("Runs point 8")).toBeTruthy();
   });
 
   it("shows a colored initial before each person", () => {

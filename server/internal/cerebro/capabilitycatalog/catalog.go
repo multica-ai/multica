@@ -442,14 +442,84 @@ func APIConnectionEndpoint(connection, method, path, exposedName string) Capabil
 // tools:<Name> policy key. Provider qualification prevents equal raw names on
 // different runtimes from being declared identical accidentally.
 func RuntimeNativeTool(provider, name, policyToolKey string) Capability {
+	name = CanonicalRuntimeToolName(provider, name)
+	forms := []Form{
+		Canonical(RuntimeKey(provider, name)),
+		Alias(RuntimePolicyKey(provider, policyToolKey, "runtime_report")),
+	}
+	for _, alias := range RuntimeToolAliases(provider, name) {
+		forms = append(forms,
+			Alias(RuntimeKey(provider, alias)),
+			Alias(RuntimePolicyKey(provider, runtimePolicyToolKey(alias), "runtime_report")),
+		)
+	}
 	return Capability{
 		ID:     "runtime:" + idSegment(provider) + ":" + idSegment(name),
 		Family: FamilyRuntime,
-		Forms: []Form{
-			Canonical(RuntimeKey(provider, name)),
-			Alias(RuntimePolicyKey(provider, policyToolKey, "runtime_report")),
-		},
+		Forms:  forms,
 	}
+}
+
+// CanonicalRuntimeToolName maps the provider-native names emitted by live tool
+// calls to the name used by runtime inventory, policy rows, and task mandates.
+// Keeping this in the identity catalog makes display, observed-access drift,
+// and call-time enforcement consume the same alias contract.
+func CanonicalRuntimeToolName(provider, name string) string {
+	switch provider {
+	case "codex":
+		switch name {
+		case "exec_command", "shell":
+			return "bash"
+		case "patch_apply", "apply-patch":
+			return "apply_patch"
+		}
+	case "cursor":
+		switch name {
+		case "Shell":
+			return "run_terminal_cmd"
+		case "Read":
+			return "read_file"
+		case "Write", "StrReplace", "Delete":
+			return "edit_file"
+		case "Grep":
+			return "grep_search"
+		case "Glob":
+			return "file_search"
+		case "WebSearch":
+			return "web_search"
+		}
+	}
+	return name
+}
+
+// RuntimeToolAliases returns every live provider spelling that resolves to one
+// runtime inventory name. The returned slice excludes the canonical name.
+func RuntimeToolAliases(provider, canonicalName string) []string {
+	switch provider {
+	case "codex":
+		switch canonicalName {
+		case "bash":
+			return []string{"exec_command", "shell"}
+		case "apply_patch":
+			return []string{"patch_apply", "apply-patch"}
+		}
+	case "cursor":
+		switch canonicalName {
+		case "run_terminal_cmd":
+			return []string{"Shell"}
+		case "read_file":
+			return []string{"Read"}
+		case "edit_file":
+			return []string{"Write", "StrReplace", "Delete"}
+		case "grep_search":
+			return []string{"Grep"}
+		case "file_search":
+			return []string{"Glob"}
+		case "web_search":
+			return []string{"WebSearch"}
+		}
+	}
+	return nil
 }
 
 func runtimePolicyToolKey(toolName string) string {

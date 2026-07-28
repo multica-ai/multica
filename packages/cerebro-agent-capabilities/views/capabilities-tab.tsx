@@ -23,6 +23,7 @@ import {
   Lock,
   Activity,
   AlertTriangle,
+  Settings2,
 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -116,6 +117,8 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
       runtime_type: "",
       status: "unknown",
       verified: 0,
+      discovered: 0,
+      declared: 0,
       unproven: 0,
     },
     limits: { mcp_servers: [], has_mcp_config: false },
@@ -133,10 +136,41 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
 
   return (
     <div className="flex flex-col gap-5">
+      <section
+        className="overflow-hidden rounded-lg border bg-card"
+        aria-labelledby="agent-access-guide"
+      >
+        <div className="border-b px-4 py-3">
+          <h2 id="agent-access-guide" className="text-sm font-semibold">
+            What can this agent do?
+          </h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            This page is the agent&apos;s current general access. Use Task access
+            on a run for the narrower answer on one task.
+          </p>
+        </div>
+        <div className="grid gap-px bg-border md:grid-cols-3">
+          <AccessGuideItem
+            icon={Activity}
+            title="General access"
+            body="Read the lists below. Green is callable, amber needs Approval, and red is blocked."
+          />
+          <AccessGuideItem
+            icon={Lock}
+            title="One task"
+            body="Open the task run and expand Task access. Its locked list is checked on every tool call."
+          />
+          <AccessGuideItem
+            icon={Settings2}
+            title="Change access"
+            body="Use Settings → Permissions for defaults and Roles, or the agent's Tools page for its specific rule."
+          />
+        </div>
+      </section>
+
       <p className="text-sm text-muted-foreground">
         Registered and observed access for this agent — the same fields agents
-        read via the CLI and MCP. Unknown sources are marked explicitly. Green =
-        allowed, amber = needs approval, red = blocked.
+        read via the CLI and MCP. Unknown sources are marked explicitly.
       </p>
 
       {/* Skills — two layers the runtime loads: workspace-bound + built-in */}
@@ -268,8 +302,30 @@ export function CerebroCapabilitiesTab({ agent }: { agent: Agent }) {
   );
 }
 
+function AccessGuideItem({
+  icon: Icon,
+  title,
+  body,
+}: {
+  icon: ComponentType<{ className?: string }>;
+  title: string;
+  body: string;
+}) {
+  return (
+    <div className="min-w-0 bg-card p-4">
+      <div className="flex items-center gap-2 text-sm font-medium">
+        <Icon className="size-4 text-muted-foreground" />
+        {title}
+      </div>
+      <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
+        {body}
+      </p>
+    </div>
+  );
+}
+
 // permissionPill maps the effective verdict to pill colours, reusing the cerebro
-// fork's emerald/amber/destructive palette (see simple-tool-policy-table). Enum
+// fork's emerald/amber/destructive permission palette. Enum
 // drift downgrades to a neutral pill (API Response Compatibility rule).
 function permissionPill(permission: string): string {
   switch (permission) {
@@ -298,6 +354,8 @@ function toolTitle(t: AgentCapabilityTool): string {
   const parts = [t.permission || "unknown"];
   if (t.decided_by) parts.push(`via ${t.decided_by}`);
   if (t.reason) parts.push(t.reason);
+  if (t.managed_externally)
+    parts.push(`managed by ${t.external_security_owner || "an external security gate"}`);
   if (t.capped_by_groups.length > 0)
     parts.push(`capped by ${t.capped_by_groups.join(", ")}`);
   // FIR-3398: fold the tool's runtime-availability proof into the tooltip, so a
@@ -308,7 +366,26 @@ function toolTitle(t: AgentCapabilityTool): string {
       ? "proved on runtime"
       : `not proved on runtime: ${t.availability.reason}`,
   );
+  if (hasEffectiveTruth(t)) {
+    parts.push(`allowed: ${yesNo(t.allowed)}`);
+    parts.push(`available: ${yesNo(t.available)}`);
+    parts.push(`enforced: ${yesNo(t.enforced)}`);
+    parts.push(`callable: ${yesNo(t.callable)}`);
+    parts.push(`verified: ${yesNo(t.verified)}`);
+    if (t.blocked_reason) parts.push(`blocked: ${t.blocked_reason}`);
+    if (t.how_to_fix) parts.push(`how to fix: ${t.how_to_fix}`);
+  }
   return parts.join(" · ");
+}
+
+function hasEffectiveTruth(t: AgentCapabilityTool): boolean {
+  return [t.allowed, t.available, t.enforced, t.callable, t.verified].some(
+    (value) => typeof value === "boolean",
+  );
+}
+
+function yesNo(value: boolean | undefined): string {
+  return typeof value === "boolean" ? (value ? "yes" : "no") : "unknown";
 }
 
 // ToolsAvailabilitySummary is the FIR-3398 headline for the Tools section: of the
@@ -333,8 +410,11 @@ function ToolsAvailabilitySummary({
       {availability.status === "known" ? (
         <span className="text-xs text-muted-foreground">
           {availability.verified} of {total} proved on the{runtime} runtime
-          {availability.unproven > 0
-            ? ` · ${availability.unproven} only declared`
+          {availability.discovered > 0
+            ? ` · ${availability.discovered} discovered`
+            : ""}
+          {availability.declared > 0
+            ? ` · ${availability.declared} only declared`
             : ""}
         </span>
       ) : (
@@ -350,13 +430,32 @@ function ToolPill({ tool }: { tool: AgentCapabilityTool }) {
   // FIR-3398: an unproved tool (policy allows it but the runtime has not shown it
   // exists) renders with a dashed border, so "granted" and "actually there" read
   // differently at a glance. The permission colour is unchanged.
-  const availabilityCue = tool.availability.proven ? "" : "border-dashed";
+  const truthPresent = hasEffectiveTruth(tool);
+  const verified = tool.verified ?? tool.availability.proven;
+  const availabilityCue = verified ? "" : "border-dashed";
+  const verdictClass = truthPresent
+    ? tool.callable
+      ? permissionPill("allow")
+      : tool.allowed === false
+        ? permissionPill("deny")
+        : permissionPill("ask")
+    : permissionPill(tool.permission);
   return (
     <Pill
-      className={`${permissionPill(tool.permission)} ${availabilityCue}`}
+      className={`${verdictClass} ${availabilityCue}`}
       title={toolTitle(tool)}
     >
       {tool.title || tool.key}
+      {tool.managed_externally && (
+        <span className="text-muted-foreground">
+          · managed by {tool.external_security_owner || "external security gate"}
+        </span>
+      )}
+      {truthPresent && (
+        <span className="text-muted-foreground">
+          · {tool.callable ? "callable" : "blocked"}
+        </span>
+      )}
     </Pill>
   );
 }
@@ -368,13 +467,7 @@ function RepoRow({ repo }: { repo: AgentCapabilityRepo }) {
         {shortRepo(repo.url)}
       </span>
       {repo.permissions.map((p) => (
-        <Pill
-          key={p.key}
-          className={permissionPill(p.permission)}
-          title={toolTitle(p)}
-        >
-          {p.title || p.key}
-        </Pill>
+        <ToolPill key={p.key} tool={p} />
       ))}
     </div>
   );
@@ -407,10 +500,15 @@ function ConnectionRow({
           {connection.tools.map((t) => (
             <Pill
               key={t.name}
-              className={permissionPill(t.permission)}
-              title={`${t.permission || "no policy"}${t.description ? " · " + t.description : ""}`}
+              className={capabilityTruthPill(t.callable, t.permission)}
+              title={connectionActionTitle(t)}
             >
               {t.name}
+              {t.callable !== undefined && (
+                <span className="text-muted-foreground">
+                  · {t.callable ? "callable" : "blocked"}
+                </span>
+              )}
             </Pill>
           ))}
         </PillRow>
@@ -418,17 +516,59 @@ function ConnectionRow({
       {connection.endpoints.length > 0 && (
         <PillRow>
           {connection.endpoints.map((ep) => (
-            <Pill key={ep.path} mono title={ep.methods.join(", ")}>
+            <Pill
+              key={`${ep.methods.join("/")}:${ep.path}`}
+              mono
+              className={capabilityTruthPill(ep.callable, ep.permission)}
+              title={connectionActionTitle(ep)}
+            >
               <span className="text-muted-foreground">
                 {ep.methods.join("/")}
               </span>
               {ep.path}
+              {ep.callable !== undefined && (
+                <span className="text-muted-foreground">
+                  · {ep.callable ? "callable" : "blocked"}
+                </span>
+              )}
             </Pill>
           ))}
         </PillRow>
       )}
     </div>
   );
+}
+
+function capabilityTruthPill(callable: boolean | undefined, permission: string): string {
+  if (callable === undefined) return permissionPill(permission);
+  if (callable) return permissionPill("allow");
+  return permission === "deny" ? permissionPill("deny") : permissionPill("ask");
+}
+
+function connectionActionTitle(action: {
+  permission: string;
+  allowed?: boolean;
+  available?: boolean;
+  enforced?: boolean;
+  callable?: boolean;
+  verified?: boolean;
+  blocked_reason?: string;
+  how_to_fix?: string;
+  description?: string;
+  summary?: string;
+}): string {
+  const lines = [
+    `Permission: ${action.permission || "unknown"}`,
+    `Allowed: ${yesNo(action.allowed)}`,
+    `Available: ${yesNo(action.available)}`,
+    `Enforced: ${yesNo(action.enforced)}`,
+    `Callable: ${yesNo(action.callable)}`,
+    `Verified: ${yesNo(action.verified)}`,
+  ];
+  if (action.description || action.summary) lines.push(action.description || action.summary || "");
+  if (action.blocked_reason) lines.push(`Blocked: ${action.blocked_reason}`);
+  if (action.how_to_fix) lines.push(`How to fix: ${action.how_to_fix}`);
+  return lines.join("\n");
 }
 
 function Section({

@@ -22,6 +22,9 @@ type roundRequest struct {
 type memberRequest struct {
 	IssueID string `json:"issue_id"`
 }
+type reorderRequest struct {
+	RoundIDs []string `json:"round_ids"`
+}
 
 func parseContext(w http.ResponseWriter, r *http.Request) (pgtype.UUID, pgtype.UUID, bool) {
 	ws, err := util.ParseUUID(middleware.WorkspaceIDFromContext(r.Context()))
@@ -88,6 +91,32 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, 201, row)
+}
+func (h *Handler) Reorder(w http.ResponseWriter, r *http.Request) {
+	ws, u, ok := parseContext(w, r)
+	if !ok {
+		return
+	}
+	var q reorderRequest
+	if json.NewDecoder(r.Body).Decode(&q) != nil {
+		writeError(w, 400, "invalid JSON")
+		return
+	}
+	ids := make([]pgtype.UUID, 0, len(q.RoundIDs))
+	for _, raw := range q.RoundIDs {
+		id, err := util.ParseUUID(raw)
+		if err != nil {
+			writeError(w, 400, "invalid round id")
+			return
+		}
+		ids = append(ids, id)
+	}
+	rows, err := h.Service.Reorder(r.Context(), ws, u, ids)
+	if err != nil {
+		handleErr(w, err)
+		return
+	}
+	writeJSON(w, 200, map[string]any{"rounds": rows})
 }
 func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 	ws, u, ok := parseContext(w, r)

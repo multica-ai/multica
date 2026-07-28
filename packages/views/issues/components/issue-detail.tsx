@@ -7,6 +7,7 @@ import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useDescriptionDraft, DescriptionDraftBanner } from "@multica/cerebro-description-draft";
 // CEREBRO-PATCH(display-currency-issue-detail): FIR-40 cost in workspace currency.
 import { useCostFormatter } from "@multica/cerebro-display-currency/views";
+import { formatPromptCacheHitRatio } from "@multica/cerebro-format-cost";
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from "react";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
 import { AppLink } from "../../navigation";
@@ -92,7 +93,7 @@ import { IssueAttachmentsSlot, AttachmentsTab, AttachmentsTabLabel } from "@mult
 import { ApprovalRealtime, InlineApprovalCards } from "@multica/cerebro-approvals/views";
 // CEREBRO-PATCH(description-image-gallery): FIR-2710 — one image gallery for the description (inline + attachments).
 import { ImageGalleryProvider } from "@multica/cerebro-attachments/views";
-import { ArtifactList } from "@multica/cerebro-artifacts/views/components";
+import { ArtifactList, WorkpadPanel } from "@multica/cerebro-artifacts/views/components"; // CEREBRO-PATCH(issue-workpad-panel): FIR-3659 — WorkpadPanel added to the existing cerebro-artifacts import.
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import {
   Tooltip,
@@ -2091,6 +2092,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                   <span className="text-muted-foreground">{formatTokenCount(usage.total_output_tokens)}</span>
                 </PropRow>
                 {(usage.total_cache_read_tokens > 0 || usage.total_cache_write_tokens > 0) && (
+                  <>
                   <PropRow label={t(($) => $.detail.prop_cache)}>
                     <span className="text-muted-foreground">
                       {t(($) => $.detail.prop_cache_value, {
@@ -2099,6 +2101,10 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                       })}
                     </span>
                   </PropRow>
+                  <PropRow label="Cache hit ratio">
+                    <span className="text-muted-foreground">{formatPromptCacheHitRatio(usage.total_input_tokens, usage.total_cache_read_tokens, usage.total_cache_write_tokens)}</span>
+                  </PropRow>
+                  </>
                 )}
                 <PropRow label={t(($) => $.detail.prop_runs)}>
                   <span className="text-muted-foreground">{usage.task_count}</span>
@@ -2994,6 +3000,9 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                 topBanner={sessionsEnabled && armedHandoff ? <HandoffArmedBanner name={armedHandoff.name} onCancel={() => setArmedHandoff(null)} /> : undefined}
               />
             </div>
+
+            {/* CEREBRO-PATCH(issue-workpad-panel): FIR-3659 — the Workpad renders the issue's plan (a kind:"plan" artifact) as a checklist BELOW the composer, at the very bottom of the issue (Jesper, FIR-3765 review: under the input, not above it). No plan → nothing renders. Gated inside WorkpadPanel by cerebro_workpad; uses issue.id (UUID) like ArtifactList, not the route id. */}
+            {!isChat && <WorkpadPanel issueId={issue.id} className="mt-4" />}
               </TabsContent>
             </Tabs>
           </div>

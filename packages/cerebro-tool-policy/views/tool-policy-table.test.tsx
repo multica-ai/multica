@@ -671,6 +671,7 @@ describe("ToolPolicyTable (Condition editor)", () => {
           category: "Runtimes",
           source: "platform",
           managed_externally: true,
+          external_security_owner: "Daemon token middleware",
           enforced_conditions: [],
           layers: { runtime: null, agent: null, group: null, user: null },
           effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
@@ -680,6 +681,42 @@ describe("ToolPolicyTable (Condition editor)", () => {
     renderCondTable();
     const row = await screen.findByTestId("tool-row-manage_runtime");
     expect(within(row).queryByTestId("condition-control-manage_runtime")).not.toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: /Decision:/ })).toBeDisabled();
+    expect(within(row).getByTitle(/Daemon token middleware/)).toBeInTheDocument();
+  });
+
+  it("shows the external security owner and blocks every catalog write", async () => {
+    const user = userEvent.setup();
+    mockUseFeatureFlag.mockImplementation((key: string) => key === "cerebro_tool_policy");
+    mockCerebroRequest.mockResolvedValueOnce({
+      tools: [
+        {
+          tool_key: "rerun_issue",
+          title: "Re-run / cancel issue agent",
+          category: "Issues",
+          source: "platform",
+          managed_externally: true,
+          external_security_owner: "Issue access and task ownership gates",
+          enforced_conditions: [],
+          layers: { runtime: null, agent: null, group: null, user: null },
+          effective: { setting: "allow", decided_by: "", capped_by: "", reason: "" },
+        },
+      ],
+    });
+    mockToast.info.mockClear();
+
+    renderCondTable();
+    const row = await screen.findByTestId("tool-card-rerun_issue");
+    expect(within(row).getByText("Managed externally", { exact: true })).toBeInTheDocument();
+    expect(within(row).getByTitle(/Issue access and task ownership gates/)).toBeInTheDocument();
+    expect(within(row).getByRole("button", { name: /Decision:/ })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Allow all" }));
+    expect(findPutCalls()).toHaveLength(0);
+    expect(mockToast.info).toHaveBeenCalledWith(
+      expect.stringContaining("externally managed permission was left unchanged"),
+      expect.any(Object),
+    );
   });
 
   it("renders only the server-reported condition kinds (action hidden, CEL shown)", async () => {
@@ -1460,7 +1497,7 @@ describe("silent-failure feedback (FIR-2706 follow-up)", () => {
       expect(msg).toContain('"Allow" was saved on the Agent layer');
       expect(msg).toContain('the decision stays "Deny"');
       expect(msg).toContain("User blocks it");
-      expect(msg).toContain("ceiling");
+      expect(msg).toContain("member's own permissions");
     });
 
     it("names the blocking group and its owner", () => {

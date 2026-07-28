@@ -164,7 +164,9 @@ SELECT EXISTS (
 -- A document is writable when the caller reaches its folder (or an ancestor) via
 -- a Collections grant, OR authored the document themselves (covers a root
 -- document with no folder — e.g. a member restoring a version of a doc they
--- created). Deny-by-default otherwise.
+-- created), OR is the human an agent wrote it for (requester_user_id, FIR-3778 —
+-- an agent stays the author, so without this the person it was made for could
+-- never edit it). Deny-by-default otherwise.
 SELECT EXISTS (
     SELECT 1 FROM artifact a
     LEFT JOIN cerebro_note n ON n.artifact_id = a.id
@@ -174,6 +176,7 @@ SELECT EXISTS (
         OR (n.artifact_id IS NULL AND (
               cerebro_artifact_folder_grant_visible(a.folder_id, sqlc.arg(p_user))
               OR (a.author_type = 'member' AND a.author_id = sqlc.arg(p_user))
+              OR a.requester_user_id = sqlc.arg(p_user)
         ))
       )
 ) AS allowed;

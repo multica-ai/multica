@@ -1,6 +1,10 @@
 package toolpolicy
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
+)
 
 // set is a tiny helper to build a chain from named layers in tests.
 func set(pairs ...any) map[Layer]Setting {
@@ -11,17 +15,63 @@ func set(pairs ...any) map[Layer]Setting {
 	return m
 }
 
+func TestResolvePermissionUsesDeclaredContractsForAllEightSpecialKeys(t *testing.T) {
+	agent := platformaccess.Actor{Authenticated: true, Agent: true}
+	human := platformaccess.Actor{Authenticated: true}
+	admin := platformaccess.Actor{Authenticated: true, Admin: true}
+	owner := platformaccess.Actor{Authenticated: true, Owner: true, Admin: true}
+
+	assert := func(key string, input Input, actor platformaccess.Actor, want Setting) {
+		t.Helper()
+		if got := ResolvePermission(input, key, actor); got.Setting != want {
+			t.Errorf("%s = %q (%s), want %q", key, got.Setting, got.Reason, want)
+		}
+	}
+
+	assert("hooks:read", Input{}, agent, SettingAllow)
+	for _, key := range []string{
+		"hooks:write",
+		"hooks:enforce",
+		"hooks:manage_managed",
+		"tools:personal-browser",
+		"tools:test-as-user",
+		"manage_workspace_overrides",
+		"manage_group_overrides",
+	} {
+		assert(key, Input{}, agent, SettingDeny)
+	}
+
+	agentGrant := Input{Settings: set(LayerAgent, SettingAllow)}
+	assert("hooks:write", agentGrant, agent, SettingAllow)
+	assert("tools:personal-browser", agentGrant, agent, SettingAllow)
+	assert("hooks:enforce", agentGrant, agent, SettingDeny)
+
+	humanGrant := Input{Settings: set(LayerUser, SettingAllow)}
+	assert("hooks:write", humanGrant, human, SettingAllow)
+	assert("hooks:enforce", humanGrant, human, SettingAllow)
+	assert("tools:test-as-user", humanGrant, human, SettingAllow)
+	assert("manage_workspace_overrides", humanGrant, human, SettingAllow)
+	assert("manage_group_overrides", humanGrant, human, SettingAllow)
+	assert("tools:personal-browser", humanGrant, human, SettingDeny)
+
+	assert("manage_workspace_overrides", Input{}, admin, SettingAllow)
+	assert("manage_group_overrides", Input{}, admin, SettingAllow)
+	assert("tools:test-as-user", Input{}, admin, SettingDeny)
+	assert("hooks:manage_managed", Input{}, owner, SettingAllow)
+}
+
 // TestResolve_IssueCheck is the live check from the FIR-2230 plan:
 // Allow on the agent + Deny on the user for the same tool → Effective Deny,
 // attributed to the user ceiling ("Capped by user").
 func TestResolve_IssueCheck(t *testing.T) {
-	e := Resolve(Input{
+	e := ResolveWithMode(ModeHardFloor, Input{
 		Settings: set(
 			LayerRuntime, SettingAllow,
 			LayerAgent, SettingAllow,
 			LayerUser, SettingDeny,
 		),
 	})
+
 	if e.Setting != SettingDeny {
 		t.Fatalf("expected Deny, got %s", e.Setting)
 	}
@@ -46,7 +96,7 @@ func TestResolve_IssueCheck(t *testing.T) {
 func TestResolve_WorkspaceRoot(t *testing.T) {
 	// Workspace Deny with everything above inheriting → Deny, decided by
 	// workspace, and NOT capped (workspace is a root default, not a cap).
-	root := Resolve(Input{Settings: set(LayerWorkspace, SettingDeny)})
+	root := ResolveWithMode(ModeHardFloor, Input{Settings: set(LayerWorkspace, SettingDeny)})
 	if root.Setting != SettingDeny {
 		t.Fatalf("expected workspace Deny to stand, got %s", root.Setting)
 	}
@@ -58,13 +108,13 @@ func TestResolve_WorkspaceRoot(t *testing.T) {
 	}
 
 	// A more permissive runtime below the workspace Deny cannot loosen it.
-	loosen := Resolve(Input{Settings: set(LayerWorkspace, SettingDeny, LayerRuntime, SettingAllow)})
+	loosen := ResolveWithMode(ModeHardFloor, Input{Settings: set(LayerWorkspace, SettingDeny, LayerRuntime, SettingAllow)})
 	if loosen.Setting != SettingDeny {
 		t.Fatalf("runtime Allow must not loosen workspace Deny, got %s", loosen.Setting)
 	}
 
 	// Workspace Ask, then a user Deny above → the user caps it ("Capped by user").
-	capped := Resolve(Input{Settings: set(LayerWorkspace, SettingAsk, LayerUser, SettingDeny)})
+	capped := ResolveWithMode(ModeHardFloor, Input{Settings: set(LayerWorkspace, SettingAsk, LayerUser, SettingDeny)})
 	if capped.Setting != SettingDeny || capped.CappedBy != LayerUser {
 		t.Fatalf("expected Deny capped by user, got %s capped %q", capped.Setting, capped.CappedBy)
 	}
@@ -73,13 +123,14 @@ func TestResolve_WorkspaceRoot(t *testing.T) {
 // TestResolve_CeilingCannotBeLoosened proves the ceiling only tightens: a
 // permissive user setting cannot raise an agent's Deny back to Allow.
 func TestResolve_CeilingCannotBeLoosened(t *testing.T) {
-	e := Resolve(Input{
+	e := ResolveWithMode(ModeHardFloor, Input{
 		Settings: set(
 			LayerRuntime, SettingAllow,
 			LayerAgent, SettingDeny,
-			LayerUser, SettingAllow, // tries to loosen — must be ignored
+			LayerUser, SettingAllow,
 		),
 	})
+
 	if e.Setting != SettingDeny {
 		t.Fatalf("agent Deny must stand against a permissive user, got %s", e.Setting)
 	}
@@ -96,10 +147,11 @@ func TestResolve_CeilingCannotBeLoosened(t *testing.T) {
 // without ever being able to widen access.
 func TestResolve_OnBehalfOfTightensOnly(t *testing.T) {
 	// A member Deny tightens an otherwise-allowed tool.
-	e := Resolve(Input{Settings: set(
+	e := ResolveWithMode(ModeHardFloor, Input{Settings: set(
 		LayerRuntime, SettingAllow,
 		LayerOnBehalfOf, SettingDeny,
 	)})
+
 	if e.Setting != SettingDeny {
 		t.Fatalf("on_behalf_of Deny must tighten, got %s", e.Setting)
 	}
@@ -108,16 +160,17 @@ func TestResolve_OnBehalfOfTightensOnly(t *testing.T) {
 	}
 
 	// A member Allow can NOT loosen a tighter agent Deny.
-	e = Resolve(Input{Settings: set(
+	e = ResolveWithMode(ModeHardFloor, Input{Settings: set(
 		LayerAgent, SettingDeny,
-		LayerOnBehalfOf, SettingAllow, // tries to loosen — must be ignored
+		LayerOnBehalfOf, SettingAllow,
 	)})
+
 	if e.Setting != SettingDeny {
 		t.Fatalf("on_behalf_of Allow must not loosen an agent Deny, got %s", e.Setting)
 	}
 
 	// Absent on_behalf_of leaves resolution exactly as before (non-delegated path).
-	e = Resolve(Input{Settings: set(LayerRuntime, SettingAllow)})
+	e = ResolveWithMode(ModeHardFloor, Input{Settings: set(LayerRuntime, SettingAllow)})
 	if e.Setting != SettingAllow {
 		t.Fatalf("absent on_behalf_of must not change resolution, got %s", e.Setting)
 	}
@@ -147,7 +200,7 @@ func TestResolve_MockupRows(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			e := Resolve(Input{Settings: tc.settings})
+			e := ResolveWithMode(ModeHardFloor, Input{Settings: tc.settings})
 			if e.Setting != tc.want {
 				t.Fatalf("setting: got %s want %s (reason %q)", e.Setting, tc.want, e.Reason)
 			}
@@ -164,7 +217,7 @@ func TestResolve_MockupRows(t *testing.T) {
 // TestResolve_GroupTightensUnderUser checks the middle layers: a group Deny
 // caps even when runtime and agent allow, attributed to the group.
 func TestResolve_GroupTightensUnderUser(t *testing.T) {
-	e := Resolve(Input{
+	e := ResolveWithMode(ModeHardFloor, Input{
 		Settings: set(
 			LayerRuntime, SettingAllow,
 			LayerAgent, SettingAllow,
@@ -172,6 +225,7 @@ func TestResolve_GroupTightensUnderUser(t *testing.T) {
 			LayerUser, SettingInherit,
 		),
 	})
+
 	if e.Setting != SettingDeny || e.CappedBy != LayerGroup {
 		t.Fatalf("expected Deny capped by group, got %s capped by %q", e.Setting, e.CappedBy)
 	}
@@ -183,11 +237,11 @@ func TestResolve_GroupTightensUnderUser(t *testing.T) {
 // TestResolve_AllInheritFallsToBase confirms an all-Inherit chain resolves to
 // the supplied base default and is not attributed to any layer.
 func TestResolve_AllInheritFallsToBase(t *testing.T) {
-	allow := Resolve(Input{Settings: set(LayerAgent, SettingInherit), Base: SettingAllow})
+	allow := ResolveWithMode(ModeHardFloor, Input{Settings: set(LayerAgent, SettingInherit), Base: SettingAllow})
 	if allow.Setting != SettingAllow || allow.DecidedBy != "" {
 		t.Fatalf("expected Allow by default, got %s decidedBy %q", allow.Setting, allow.DecidedBy)
 	}
-	deny := Resolve(Input{Settings: nil, Base: SettingDeny})
+	deny := ResolveWithMode(ModeHardFloor, Input{Settings: nil, Base: SettingDeny})
 	if deny.Setting != SettingDeny || deny.CappedBy != "" {
 		t.Fatalf("expected base Deny with no cap, got %s capped %q", deny.Setting, deny.CappedBy)
 	}
@@ -195,7 +249,7 @@ func TestResolve_AllInheritFallsToBase(t *testing.T) {
 
 // TestResolve_EmptyBaseDefaultsToAllow documents the default starting point.
 func TestResolve_EmptyBaseDefaultsToAllow(t *testing.T) {
-	e := Resolve(Input{})
+	e := ResolveWithMode(ModeHardFloor, Input{})
 	if e.Setting != SettingAllow {
 		t.Fatalf("empty input should default to Allow, got %s", e.Setting)
 	}
@@ -227,13 +281,14 @@ func TestCombineGroups(t *testing.T) {
 // a user Deny above still caps the whole chain.
 func TestCombineGroups_CeilingStillApplies(t *testing.T) {
 	group := CombineGroups(SettingDeny, SettingAllow) // Allow
-	e := Resolve(Input{
+	e := ResolveWithMode(ModeHardFloor, Input{
 		Settings: set(
 			LayerRuntime, SettingAllow,
 			LayerGroup, group,
 			LayerUser, SettingDeny,
 		),
 	})
+
 	if e.Setting != SettingDeny || e.CappedBy != LayerUser {
 		t.Fatalf("user ceiling must cap the permissive group, got %s capped %q", e.Setting, e.CappedBy)
 	}
@@ -262,10 +317,11 @@ func TestMoreRestrictive(t *testing.T) {
 // TestResolve_SystemDowngradesAskToDeny: a System actor has no human to answer
 // an approval prompt, so an effective Ask becomes Deny, attributed to system.
 func TestResolve_SystemDowngradesAskToDeny(t *testing.T) {
-	e := Resolve(Input{
+	e := ResolveWithMode(ModeHardFloor, Input{
 		Settings: set(LayerAgent, SettingAsk),
 		IsSystem: true,
 	})
+
 	if e.Setting != SettingDeny {
 		t.Fatalf("expected Deny for system Ask, got %s", e.Setting)
 	}
@@ -280,10 +336,11 @@ func TestResolve_SystemDowngradesAskToDeny(t *testing.T) {
 // TestResolve_SystemKeepsAllow: the downgrade only touches Ask. A System actor
 // that resolves to Allow stays Allow — no spurious tightening.
 func TestResolve_SystemKeepsAllow(t *testing.T) {
-	e := Resolve(Input{
+	e := ResolveWithMode(ModeHardFloor, Input{
 		Settings: set(LayerAgent, SettingAllow),
 		IsSystem: true,
 	})
+
 	if e.Setting != SettingAllow {
 		t.Fatalf("expected Allow to survive, got %s", e.Setting)
 	}
@@ -291,10 +348,11 @@ func TestResolve_SystemKeepsAllow(t *testing.T) {
 
 // TestResolve_SystemKeepsDeny: an explicit Deny stays Deny under a System actor.
 func TestResolve_SystemKeepsDeny(t *testing.T) {
-	e := Resolve(Input{
+	e := ResolveWithMode(ModeHardFloor, Input{
 		Settings: set(LayerAgent, SettingDeny),
 		IsSystem: true,
 	})
+
 	if e.Setting != SettingDeny {
 		t.Fatalf("expected Deny, got %s", e.Setting)
 	}
@@ -303,7 +361,7 @@ func TestResolve_SystemKeepsDeny(t *testing.T) {
 // TestResolve_NonSystemAskUnchanged: the same chain for a human run keeps Ask —
 // the downgrade must not leak into normal (User) resolution.
 func TestResolve_NonSystemAskUnchanged(t *testing.T) {
-	e := Resolve(Input{Settings: set(LayerAgent, SettingAsk)})
+	e := ResolveWithMode(ModeHardFloor, Input{Settings: set(LayerAgent, SettingAsk)})
 	if e.Setting != SettingAsk {
 		t.Fatalf("expected Ask to survive for human run, got %s", e.Setting)
 	}
@@ -312,13 +370,14 @@ func TestResolve_NonSystemAskUnchanged(t *testing.T) {
 // TestResolve_SystemLayerCaps: the System layer acts as a ceiling like User —
 // a Deny authored at LayerSystem caps an Allow below it.
 func TestResolve_SystemLayerCaps(t *testing.T) {
-	e := Resolve(Input{
+	e := ResolveWithMode(ModeHardFloor, Input{
 		Settings: set(
 			LayerAgent, SettingAllow,
 			LayerSystem, SettingDeny,
 		),
 		IsSystem: true,
 	})
+
 	if e.Setting != SettingDeny {
 		t.Fatalf("expected Deny, got %s", e.Setting)
 	}
@@ -349,7 +408,7 @@ func TestResolveOptIn(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := ResolveOptIn(Input{Settings: tc.settings})
+			got := resolveOptIn(Input{Settings: tc.settings})
 			if got != tc.want {
 				t.Fatalf("ResolveOptIn(%v) = %v, want %v", tc.settings, got, tc.want)
 			}
@@ -358,19 +417,19 @@ func TestResolveOptIn(t *testing.T) {
 }
 
 func TestResolveActorOptIn(t *testing.T) {
-	if ResolveActorOptIn(Input{}, true) {
+	if resolveActorOptIn(Input{}, true) {
 		t.Fatal("a fresh agent must not receive opt-in access")
 	}
-	if !ResolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow}}, true) {
+	if !resolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow}}, true) {
 		t.Fatal("an explicit agent grant should enable the opt-in capability")
 	}
-	if ResolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow, LayerUser: SettingDeny}}, true) {
+	if resolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow, LayerUser: SettingDeny}}, true) {
 		t.Fatal("a user ceiling must revoke an agent grant")
 	}
-	if ResolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow, LayerWorkspace: SettingDisable}}, true) {
+	if resolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow, LayerWorkspace: SettingDisable}}, true) {
 		t.Fatal("workspace Disable must remain an unopenable floor")
 	}
-	if ResolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow}}, false) {
+	if resolveActorOptIn(Input{Settings: map[Layer]Setting{LayerAgent: SettingAllow}}, false) {
 		t.Fatal("member checks must not inherit an agent-layer grant")
 	}
 }

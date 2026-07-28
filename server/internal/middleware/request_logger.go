@@ -55,6 +55,7 @@ const webhookIngressPathPrefix = "/api/webhooks/autopilots/"
 // only credential gating the route. Without redaction, every successful
 // delivery prints a replayable URL into the structured log stream.
 func redactWebhookPath(path string) string {
+	// CEREBRO-PATCH(ios-shortcut-authenticated-share): FIR-3545 — the removed public iOS ingress leaves autopilot as the only bearer path requiring redaction.
 	if !strings.HasPrefix(path, webhookIngressPathPrefix) {
 		return path
 	}

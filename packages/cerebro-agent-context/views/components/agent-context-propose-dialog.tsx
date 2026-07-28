@@ -20,6 +20,7 @@ import {
   canSubmitContextDraft,
   isContextDraftDirty,
   readBriefLayerMode,
+  readSystemPromptMode,
 } from "../../core/context-draft";
 import { AgentContextConfigFields } from "./agent-context-config-fields";
 
@@ -35,12 +36,14 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
   const [instructions, setInstructions] = useState(agent.instructions);
   const [model, setModel] = useState(agent.model ?? "");
   const [thinkingLevel, setThinkingLevel] = useState(agent.thinking_level ?? "");
-  const [personaSandbox, setPersonaSandbox] = useState(agent.persona_sandbox ?? "");
   const [workspaceBriefMode, setWorkspaceBriefMode] = useState(() =>
     readBriefLayerMode(agent.runtime_config, "workspace_brief_mode"),
   );
   const [toolsBriefMode, setToolsBriefMode] = useState(() =>
     readBriefLayerMode(agent.runtime_config, "tools_brief_mode"),
+  );
+  const [systemPromptMode, setSystemPromptMode] = useState(() =>
+    readSystemPromptMode(agent.runtime_config),
   );
 
   const { data: versions = [] } = useQuery(agentContextVersionsOptions(agent.id));
@@ -53,17 +56,17 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
     instructions: agent.instructions,
     model: agent.model ?? "",
     thinkingLevel: agent.thinking_level ?? "",
-    personaSandbox: agent.persona_sandbox ?? "",
     workspaceBriefMode: readBriefLayerMode(agent.runtime_config, "workspace_brief_mode"),
     toolsBriefMode: readBriefLayerMode(agent.runtime_config, "tools_brief_mode"),
+    systemPromptMode: readSystemPromptMode(agent.runtime_config),
   };
   const draft = {
     instructions,
     model,
     thinkingLevel,
-    personaSandbox,
     workspaceBriefMode,
     toolsBriefMode,
+    systemPromptMode,
   };
   const dirty = isContextDraftDirty(current, draft);
   const canSubmit = canSubmitContextDraft(title, dirty) && !busy;
@@ -74,9 +77,9 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
     setInstructions(agent.instructions);
     setModel(agent.model ?? "");
     setThinkingLevel(agent.thinking_level ?? "");
-    setPersonaSandbox(agent.persona_sandbox ?? "");
     setWorkspaceBriefMode(readBriefLayerMode(agent.runtime_config, "workspace_brief_mode"));
     setToolsBriefMode(readBriefLayerMode(agent.runtime_config, "tools_brief_mode"));
+    setSystemPromptMode(readSystemPromptMode(agent.runtime_config));
   };
 
   const submit = async (approve: boolean) => {
@@ -89,12 +92,15 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
         instructions,
         model: model.trim(),
         thinking_level: thinkingLevel.trim(),
-        persona_sandbox: personaSandbox.trim(),
         // FIR-3212: sent on every proposal like the fields above. "" restores
         // the full default, so an untouched control is a safe no-op and a
         // cleared one genuinely resets the agent to today's brief.
         workspace_brief_mode: workspaceBriefMode as "" | "off",
         tools_brief_mode: toolsBriefMode as "" | "summary",
+        // FIR-3212: same contract as the two brief modes — "" restores the
+        // engine default, so an untouched control is a no-op and a cleared one
+        // genuinely hands the engine's own system prompt back.
+        system_prompt_mode: systemPromptMode as "" | "append" | "replace" | "prepend",
       });
       if (approve) {
         await reviewMutation.mutateAsync({
@@ -141,14 +147,14 @@ export function AgentContextProposeDialog({ agent, canReview = false }: Props) {
         agent={agent}
         model={model}
         thinkingLevel={thinkingLevel}
-        personaSandbox={personaSandbox}
         workspaceBriefMode={workspaceBriefMode}
         toolsBriefMode={toolsBriefMode}
+        systemPromptMode={systemPromptMode}
         onModel={setModel}
         onThinkingLevel={setThinkingLevel}
-        onPersonaSandbox={setPersonaSandbox}
         onWorkspaceBriefMode={setWorkspaceBriefMode}
         onToolsBriefMode={setToolsBriefMode}
+        onSystemPromptMode={setSystemPromptMode}
       />
 
       {dirty && (

@@ -2542,6 +2542,7 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 			Name:        sk.Name,
 			Description: sk.Description,
 			Content:     sk.Content,
+			AlwaysOn:    sk.AlwaysOn, // CEREBRO-PATCH(skill-always-on): FIR-3805 carry the binding flag to the runtime
 		}
 		files, _ := s.Queries.ListSkillFiles(ctx, sk.ID)
 		for _, f := range files {
@@ -2588,6 +2589,7 @@ type AgentSkillData struct {
 	Description string               `json:"description,omitempty"`
 	Content     string               `json:"content"`
 	Files       []AgentSkillFileData `json:"files,omitempty"`
+	AlwaysOn    bool                 `json:"always_on,omitempty"` // CEREBRO-PATCH(skill-always-on): FIR-3805 inline this skill's full text in the brief
 }
 
 // AgentSkillFileData represents a supporting file within a skill.

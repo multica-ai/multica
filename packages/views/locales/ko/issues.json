@@ -458,11 +458,12 @@
       "failed_toast": "Failed to move thread",
       "description_one": "This comment will become a new sub-issue. The original comment will be replaced with a link."
     },
-    "_move_thread": "CEREBRO-PATCH(i18n-comment-move-thread): JEH-2488 move picked comments to a new thread UI",
+    "_move_thread": "CEREBRO-PATCH(i18n-comment-move-thread): JEH-2488 move picked comments to a new thread UI; FIR-3880 adds the select-all-after action",
     "move_thread": {
       "action": "Reply in new thread",
       "breadcrumb": "Moved to new thread",
       "select_hint": "Pick the comments to move into a new thread",
+      "select_after_action": "Select all after this",
       "move_action_other": "Move {{count}} comments to new thread",
       "moving_action": "Moving...",
       "success_toast": "Moved to a new thread",

@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/internalbrowserqa"
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
@@ -94,10 +95,13 @@ func TestVerifyInternalAgentBrowserPrintsOnlySanitizedResult(t *testing.T) {
 		if body.App != "registry" {
 			t.Fatalf("app = %q", body.App)
 		}
+		if !body.Async {
+			t.Fatal("new CLI must opt into asynchronous verification")
+		}
 		_ = json.NewEncoder(w).Encode(internalBrowserVerifyResponse{
 			App: "registry", InternalHost: "firtal-data-registry-private.internal:3000",
 			FinalURL: "http://firtal-data-registry-private.internal:3000/", Markers: []string{"Dashboard"},
-			Errors: []string{}, ScreenshotPNG: screenshot,
+			Errors: []string{}, ScreenshotPNG: screenshot, VersionCommit: "abcdef0123456789",
 		})
 	}))
 	defer server.Close()
@@ -110,6 +114,9 @@ func TestVerifyInternalAgentBrowserPrintsOnlySanitizedResult(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte(`"app":"registry"`)) {
 		t.Fatalf("missing sanitized result: %s", out.String())
+	}
+	if !bytes.Contains(out.Bytes(), []byte(`"version_commit":"abcdef0123456789"`)) {
+		t.Fatalf("missing safe version commit: %s", out.String())
 	}
 	if bytes.Contains(out.Bytes(), []byte("password")) || bytes.Contains(out.Bytes(), []byte("username")) {
 		t.Fatalf("credential field leaked to output: %s", out.String())
@@ -136,6 +143,43 @@ func TestVerifyInternalAgentBrowserPrintsOnlySanitizedResult(t *testing.T) {
 	}
 }
 
+func TestVerifyInternalAgentBrowserPollsAsyncJob(t *testing.T) {
+	screenshot := []byte("\x89PNG\r\n\x1a\nasync-result")
+	polls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case req.Method == http.MethodPost:
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(internalBrowserVerifyResponse{JobID: "job-123", State: "pending"})
+		case req.Method == http.MethodGet && req.URL.Path == "/api/cerebro/agent-browser/internal-verify/job-123":
+			polls++
+			if polls == 1 {
+				w.WriteHeader(http.StatusAccepted)
+				_ = json.NewEncoder(w).Encode(internalBrowserVerifyResponse{State: "pending"})
+				return
+			}
+			_ = json.NewEncoder(w).Encode(internalBrowserVerifyResponse{App: "registry", ScreenshotPNG: screenshot})
+		default:
+			http.NotFound(w, req)
+		}
+	}))
+	defer server.Close()
+
+	client := cli.NewAPIClient(server.URL, "workspace-id", "task-token")
+	path := filepath.Join(t.TempDir(), "registry.png")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := verifyInternalAgentBrowser(ctx, client, io.Discard, "registry", path); err != nil {
+		t.Fatal(err)
+	}
+	if polls != 2 {
+		t.Fatalf("polls = %d, want 2", polls)
+	}
+	if written, err := os.ReadFile(path); err != nil || !bytes.Equal(written, screenshot) {
+		t.Fatalf("written screenshot = %q, err = %v", written, err)
+	}
+}
+
 func TestVerifyInternalAgentBrowserRejectsInvalidScreenshot(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_ = json.NewEncoder(w).Encode(internalBrowserVerifyResponse{ScreenshotPNG: []byte("not-a-png")})
@@ -156,7 +200,17 @@ func TestVerifyInternalAgentBrowserRejectsInvalidScreenshot(t *testing.T) {
 func TestConfigureInternalBrowserVerifyClientAllowsBrowserStartup(t *testing.T) {
 	client := cli.NewAPIClient("https://example.invalid", "workspace-id", "task-token")
 	configureInternalBrowserVerifyClient(client)
-	if client.HTTPClient.Timeout != 2*time.Minute {
-		t.Fatalf("timeout = %s, want 2m", client.HTTPClient.Timeout)
+	if client.HTTPClient.Timeout != internalBrowserVerifyTimeout {
+		t.Fatalf("timeout = %s, want %s", client.HTTPClient.Timeout, internalBrowserVerifyTimeout)
+	}
+}
+
+// The CLI deadline must outlast the verifier's own worst case. When it did not,
+// the cold-start retry was unreachable: the CLI hung up 40s into the second open
+// attempt and reported a transport deadline instead of the app's real verdict.
+func TestInternalBrowserVerifyTimeoutOutlastsVerifier(t *testing.T) {
+	if internalBrowserVerifyTimeout <= internalbrowserqa.MaxVerificationDuration {
+		t.Fatalf("CLI timeout %s must exceed verifier worst case %s",
+			internalBrowserVerifyTimeout, internalbrowserqa.MaxVerificationDuration)
 	}
 }

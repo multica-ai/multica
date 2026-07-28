@@ -88,10 +88,11 @@ type endpointPermission struct {
 // "api"), and the per-tool rows (MCP tools, or synthesized "<METHOD> <path>"
 // entries for API endpoints).
 type connectionRow struct {
-	name        string
-	displayName string
-	kind        string
-	tools       []connectionTool
+	name          string
+	displayName   string
+	kind          string
+	defaultAccess string
+	tools         []connectionTool
 }
 
 // sourceForKind maps a connection type to the row Source the UI groups on.
@@ -122,30 +123,10 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 		return out, nil
 	}
 
-	settings, err := s.loadConnectionPolicySettings(ctx, in, groupIDs)
-	if err != nil {
-		return nil, err
-	}
-
-	// The connection-wide row (source 'connection', resource_pattern '') is the
-	// control for the WHOLE connection — its Deny/Ask must cascade to every tool
-	// on that connection so "deny the connection for this runtime/agent" actually
-	// blocks the tools, not just the (display-only) wide row (TECH-3180). The
-	// connection-wide rows were already resolved into `out` by Table(); reuse each
-	// one's Effective setting as the BASE for its per-tool resolution so a per-tool
-	// choice can only tighten the connection-wide one, never loosen it.
-	connWideBase := connectionWideBases(out)
-
-	// Fallback when no capability-wide row is in `out`. Table() only emits a
-	// source='connection' wide row when a cerebro_capability row exists for the
-	// connection (MCP connections register one; an API connection authored only in
-	// workspace_connection has none). Without that row the connection-wide
-	// Deny/Ask authored on `connection:<name>` (resource_pattern '') would never
-	// reach the per-endpoint rows, so a workspace/agent-level "deny this whole
-	// connection" would silently fail to cap its endpoints (FIR-2166). Resolve the
-	// authored wide settings straight from cerebro_tool_policy and use them as the
-	// base wherever the capability-derived base is absent.
-	authoredWideBase, err := s.connectionWideAuthoredBases(ctx, in, groupIDs)
+	settings, err := s.loadResourcePolicySettings(ctx, in, groupIDs, resourcePolicyFilter{
+		toolPrefix: connectionToolKeyPrefix + "%",
+		scope:      resourcePatternNonEmpty,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -153,13 +134,17 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 	for _, conn := range conns {
 		toolKey := connectionToolKeyPrefix + conn.name
 		source := sourceForKind(conn.kind)
-		base := in.Base
-		if w, ok := authoredWideBase[toolKey]; ok && rank(w) >= 0 {
-			base = w
+		// The whole-Connection control is resolved through the canonical store,
+		// not a table-only fold. This includes direct policy, active Roles, WHEN
+		// rules and the same member-override mode as call time even when an API
+		// Connection has no capability-register row.
+		wide, err := s.resolveTableResourcePermission(
+			ctx, in, toolKey, "", nil, connectionDefaultBase(conn, in.Base),
+		)
+		if err != nil {
+			return nil, fmt.Errorf("toolpolicy: resolve connection-wide permission %q: %w", toolKey, err)
 		}
-		if w, ok := connWideBase[toolKey]; ok && rank(w) >= 0 {
-			base = w
-		}
+		base := wide.Setting
 		for _, t := range conn.tools {
 			row := TableRow{
 				ToolKey:         toolKey,
@@ -170,7 +155,7 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 				Layers:          map[Layer]Setting{},
 				Conditions:      map[Layer]*Condition{},
 			}
-			if cell, ok := settings[repoPolicyKey{toolKey, t.Name}]; ok {
+			if cell, ok := settings[resourcePolicyKey{toolKey: toolKey, resourcePattern: t.Name}]; ok {
 				for l, set := range cell.layers {
 					row.Layers[l] = set
 				}
@@ -181,98 +166,17 @@ func (s *Store) appendConnectionToolRows(ctx context.Context, in TableQuery, gro
 					row.Layers[LayerGroup] = CombineGroups(cell.groups...)
 				}
 			}
-			row.Effective = ResolveWithMode(tableRowMode(in.mode, row.ToolKey), Input{Settings: row.Layers, Base: base})
+			row.Effective, err = s.resolveTableResourcePermission(
+				ctx, in, row.ToolKey, row.ResourcePattern, row.Layers, base,
+			)
+			if err != nil {
+				return nil, fmt.Errorf(
+					"toolpolicy: resolve connection permission %q on %q: %w",
+					row.ToolKey, row.ResourcePattern, err,
+				)
+			}
 			out = append(out, row)
 		}
-	}
-	return out, nil
-}
-
-// connectionWideBases maps each connection's policy key to the resolved Effective
-// setting of its connection-wide row (source 'connection', empty resource
-// pattern) already present in out. It is the per-connection floor every per-tool
-// row inherits from: the connection-wide chain (Workspace › Runtime › Agent ›
-// Group › User) decides the connection default, and per-tool rows tighten under
-// it. A connection with no capability-wide row contributes nothing (callers fall
-// back to the workspace Base).
-func connectionWideBases(out []TableRow) map[string]Setting {
-	bases := map[string]Setting{}
-	for _, r := range out {
-		if r.Source == "connection" && r.ResourcePattern == "" {
-			bases[r.ToolKey] = r.Effective.Setting
-		}
-	}
-	return bases
-}
-
-// connectionWideAuthoredBases resolves, per connection policy key, the effective
-// connection-wide setting from the authored rows in cerebro_tool_policy
-// (tool_key 'connection:%', resource_pattern ”) folded through the same
-// Workspace › Runtime › Agent › Group › User chain as every other layer. It is
-// the fallback for connectionWideBases: it does NOT depend on a cerebro_capability
-// row existing, so a connection authored only in workspace_connection (no
-// capability row — the common case for API connections) still propagates its
-// connection-wide cap to its per-endpoint rows. The subject predicates mirror
-// loadConnectionPolicySettings so an absent subject never matches and that layer
-// stays Inherit. Keys with no authored wide row are simply absent (callers keep
-// the query Base).
-func (s *Store) connectionWideAuthoredBases(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID) (map[string]Setting, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT p.tool_key, p.layer, p.setting
-		FROM cerebro_tool_policy p
-		WHERE p.workspace_id = $1
-		  AND p.resource_pattern = ''
-		  AND p.tool_key LIKE 'connection:%'
-		  AND (
-		    (p.layer = 'workspace' AND p.subject_id = $1) OR
-		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
-		    (p.layer = 'agent'     AND p.subject_id = $3) OR
-		    (p.layer = 'user'      AND p.subject_id = $4) OR
-		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
-		    (p.layer = 'on_behalf_of' AND p.subject_id = $6)
-		  )
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.OnBehalfOfID)
-	if err != nil {
-		if isUndefinedTable(err) {
-			return nil, nil
-		}
-		return nil, fmt.Errorf("toolpolicy: load connection-wide settings: %w", err)
-	}
-	defer rows.Close()
-
-	type wideAcc struct {
-		layers map[Layer]Setting
-		groups []Setting
-	}
-	byKey := map[string]*wideAcc{}
-	for rows.Next() {
-		var toolKey, layer, setting string
-		if err := rows.Scan(&toolKey, &layer, &setting); err != nil {
-			return nil, fmt.Errorf("toolpolicy: scan connection-wide setting: %w", err)
-		}
-		a, ok := byKey[toolKey]
-		if !ok {
-			a = &wideAcc{layers: map[Layer]Setting{}}
-			byKey[toolKey] = a
-		}
-		l := Layer(layer)
-		set := Setting(setting)
-		if l == LayerGroup {
-			a.groups = append(a.groups, set)
-		} else {
-			a.layers[l] = set
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("toolpolicy: iterate connection-wide settings: %w", err)
-	}
-
-	out := map[string]Setting{}
-	for key, a := range byKey {
-		if len(a.groups) > 0 {
-			a.layers[LayerGroup] = CombineGroups(a.groups...)
-		}
-		out[key] = ResolveWithMode(tableRowMode(in.mode, key), Input{Settings: a.layers, Base: in.Base}).Setting
 	}
 	return out, nil
 }
@@ -284,7 +188,7 @@ func (s *Store) connectionWideAuthoredBases(ctx context.Context, in TableQuery, 
 // from endpoint_permissions, so the same Configure sheet drives CRUD control.
 func (s *Store) discoverConnectionTools(ctx context.Context, workspaceID pgtype.UUID) ([]connectionRow, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT name, display_name, type, tools, endpoint_permissions
+		SELECT name, display_name, type, tools, endpoint_permissions, default_access
 		FROM workspace_connection
 		WHERE workspace_id = $1 AND enabled = true AND type IN ('mcp_http', 'api')
 		ORDER BY created_at ASC
@@ -299,9 +203,9 @@ func (s *Store) discoverConnectionTools(ctx context.Context, workspaceID pgtype.
 
 	var out []connectionRow
 	for rows.Next() {
-		var name, displayName, kind string
+		var name, displayName, kind, defaultAccess string
 		var toolsRaw, endpointsRaw []byte
-		if err := rows.Scan(&name, &displayName, &kind, &toolsRaw, &endpointsRaw); err != nil {
+		if err := rows.Scan(&name, &displayName, &kind, &toolsRaw, &endpointsRaw, &defaultAccess); err != nil {
 			return nil, fmt.Errorf("toolpolicy: scan connection: %w", err)
 		}
 		var tools []connectionTool
@@ -313,12 +217,29 @@ func (s *Store) discoverConnectionTools(ctx context.Context, workspaceID pgtype.
 		if len(tools) == 0 {
 			continue
 		}
-		out = append(out, connectionRow{name: name, displayName: displayName, kind: kind, tools: tools})
+		out = append(out, connectionRow{name: name, displayName: displayName, kind: kind, defaultAccess: defaultAccess, tools: tools})
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("toolpolicy: iterate connections: %w", err)
 	}
 	return out, nil
+}
+
+// connectionDefaultBase mirrors the call-time API connection baseline. MCP
+// connections keep their historical allow baseline; API connections use the
+// configured default_access, with an empty or invalid value failing closed.
+// Without this, the capabilities table could show Allow while the actual API
+// call gate correctly denied the same endpoint.
+func connectionDefaultBase(conn connectionRow, fallback Setting) Setting {
+	if conn.kind != "api" {
+		return fallback
+	}
+	switch Setting(conn.defaultAccess) {
+	case SettingAllow, SettingAsk, SettingDeny:
+		return Setting(conn.defaultAccess)
+	default:
+		return SettingDeny
+	}
 }
 
 // endpointMethodTools expands an api connection's endpoint_permissions JSON into
@@ -467,7 +388,7 @@ func (s *Store) ConnectionToolEffective(ctx context.Context, workspaceID, runtim
 // "C" v2. Each connection carries a default_access mode (allow/ask/deny) chosen
 // when it is created/edited (connections.DefaultAccess*); per-actor tool-policy
 // rows override that default. This is NOT the tighten-only Resolve, for the same
-// reason tools:test-as-user uses ResolveOptIn (FIR-1771): the tighten chain only
+// reason tools:test-as-user uses an opt-in contract (FIR-1771): the tighten chain only
 // ever tightens below its Base and refuses to loosen, so a Deny base could never
 // be lifted by an Allow grant. The rule, over all of the above rows/layers:
 //
@@ -505,8 +426,23 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 		// that ignores the error.
 		return SettingDeny, connName, err
 	}
+	return connectionEndpointEffectiveFromRows(
+		rows,
+		connName,
+		method+" "+path,
+		s.MemberOverrideEnabled(ctx, workspaceID),
+		s.connectionDefaultAccess(ctx, workspaceID, connName),
+	)
+}
+
+func connectionEndpointEffectiveFromRows(
+	rows []TableRow,
+	connName string,
+	wantPattern string,
+	openableWS bool,
+	defaultSetting Setting,
+) (Setting, string, error) {
 	wantKey := connectionToolKeyPrefix + connName
-	wantPattern := method + " " + path
 	// Workspace-Deny-as-default (FIR-2351, product decision 2026-07-06): with the
 	// workspace member-override flag on, an explicit WORKSPACE-layer setting on a
 	// connection is a workspace-authored DEFAULT, not an instant global verdict —
@@ -515,7 +451,6 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 	// like the connection's own default_access=deny. Who may author those rows is
 	// the write path's job. With the flag off, behavior is unchanged: an explicit
 	// Deny at ANY layer (workspace included) wins immediately.
-	openableWS := s.MemberOverrideEnabled(ctx, workspaceID)
 	var hasAllow, hasAsk bool
 	var wsWide, wsEndpoint Setting
 	for _, r := range rows {
@@ -609,7 +544,7 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 	// No explicit per-actor row — fall back to the connection's configured default
 	// access (allow/ask/deny), chosen when the connection was created/edited. A
 	// missing row or column (mid-migration) resolves to Deny (fail closed).
-	switch s.connectionDefaultAccess(ctx, workspaceID, connName) {
+	switch defaultSetting {
 	case SettingAllow:
 		return SettingAllow, "", nil
 	case SettingAsk:
@@ -617,6 +552,65 @@ func (s *Store) ConnectionEndpointEffective(ctx context.Context, workspaceID, ru
 	default:
 		return SettingDeny, connName, nil
 	}
+}
+
+// ConnectionEndpointVerdict is one discovered API endpoint paired with the
+// same effective setting ConnectionEndpointEffective would return for it.
+type ConnectionEndpointVerdict struct {
+	Connection string
+	Method     string
+	Path       string
+	Setting    Setting
+}
+
+type ConnectionEndpointTarget struct {
+	Connection string
+	Method     string
+	Path       string
+}
+
+// ConnectionEndpointVerdicts resolves every discovered API endpoint for one
+// actor in a single permission-table snapshot. Claim-time tool discovery must
+// use this bulk path: calling ConnectionEndpointEffective once per endpoint
+// repeats the complete table read and scales database work with endpoint count.
+// Call-time enforcement intentionally keeps the single-endpoint method above.
+func (s *Store) ConnectionEndpointVerdicts(ctx context.Context, in TableQuery, targets []ConnectionEndpointTarget) ([]ConnectionEndpointVerdict, error) {
+	rows, err := s.Table(ctx, in)
+	if err != nil {
+		return nil, err
+	}
+	conns, err := s.discoverConnectionTools(ctx, in.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defaults := make(map[string]Setting, len(conns))
+	for _, conn := range conns {
+		if conn.kind != "api" {
+			continue
+		}
+		defaults[conn.name] = connectionDefaultBase(conn, SettingDeny)
+	}
+	openableWS := s.MemberOverrideEnabled(ctx, in.WorkspaceID)
+	out := make([]ConnectionEndpointVerdict, 0, len(targets))
+	for _, target := range targets {
+		if target.Connection == "" || target.Method == "" || target.Path == "" {
+			continue
+		}
+		pattern := target.Method + " " + target.Path
+		setting, _, err := connectionEndpointEffectiveFromRows(
+			rows, target.Connection, pattern, openableWS, defaults[target.Connection],
+		)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, ConnectionEndpointVerdict{
+			Connection: target.Connection,
+			Method:     target.Method,
+			Path:       target.Path,
+			Setting:    setting,
+		})
+	}
+	return out, nil
 }
 
 // connectionDefaultAccess reads a connection's configured default access mode
@@ -755,68 +749,6 @@ func (s *Store) ConnectionToolVerdicts(ctx context.Context, in TableQuery) ([]Co
 			Tool:       r.ResourcePattern,
 			Setting:    r.Effective.Setting,
 		})
-	}
-	return out, nil
-}
-
-// loadConnectionPolicySettings fetches every explicit per-layer setting authored
-// for a connection tool (tool_key 'connection:%', resource_pattern non-empty) in
-// the query's context, bucketed by (tool_key, tool). It mirrors the subject
-// predicates of table_repo.go's loader so an absent subject id never matches and
-// that layer stays Inherit.
-func (s *Store) loadConnectionPolicySettings(ctx context.Context, in TableQuery, groupIDs []pgtype.UUID) (map[repoPolicyKey]*repoPolicyLayers, error) {
-	rows, err := s.pool.Query(ctx, `
-		SELECT p.tool_key, p.resource_pattern, p.layer, p.setting, p.conditions
-		FROM cerebro_tool_policy p
-		WHERE p.workspace_id = $1
-		  AND p.resource_pattern <> ''
-		  AND p.tool_key LIKE 'connection:%'
-		  AND (
-		    (p.layer = 'workspace' AND p.subject_id = $1) OR
-		    (p.layer = 'runtime'   AND p.subject_id = $2) OR
-		    (p.layer = 'agent'     AND p.subject_id = $3) OR
-		    (p.layer = 'user'      AND p.subject_id = $4) OR
-		    (p.layer = 'group'     AND p.subject_id = ANY($5::uuid[])) OR
-		    (p.layer = 'on_behalf_of' AND p.subject_id = $6)
-		  )
-	`, in.WorkspaceID, in.RuntimeID, in.AgentID, in.UserID, groupIDs, in.OnBehalfOfID)
-	if err != nil {
-		return nil, fmt.Errorf("toolpolicy: load connection policy settings: %w", err)
-	}
-	defer rows.Close()
-
-	out := map[repoPolicyKey]*repoPolicyLayers{}
-	for rows.Next() {
-		var toolKey, resourcePattern, layer, setting string
-		var conditions []byte
-		if err := rows.Scan(&toolKey, &resourcePattern, &layer, &setting, &conditions); err != nil {
-			return nil, fmt.Errorf("toolpolicy: scan connection policy setting: %w", err)
-		}
-		key := repoPolicyKey{toolKey, resourcePattern}
-		cell, ok := out[key]
-		if !ok {
-			cell = &repoPolicyLayers{layers: map[Layer]Setting{}, conditions: map[Layer]*Condition{}}
-			out[key] = cell
-		}
-		l := Layer(layer)
-		set := Setting(setting)
-		if l == LayerGroup {
-			cell.groups = append(cell.groups, set)
-		} else {
-			cell.layers[l] = set
-			// Surface the rule's WHEN layer for single-subject layers only,
-			// mirroring table_repo.go and the capability-wide decode (FIR-1708 D).
-			cond, err := decodeCondition(conditions)
-			if err != nil {
-				return nil, fmt.Errorf("toolpolicy: decode connection conditions for %q at %s: %w", toolKey, l, err)
-			}
-			if cond != nil {
-				cell.conditions[l] = cond
-			}
-		}
-	}
-	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("toolpolicy: iterate connection policy settings: %w", err)
 	}
 	return out, nil
 }

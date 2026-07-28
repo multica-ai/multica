@@ -39,7 +39,18 @@ const AgentCapabilityToolSchema = z
     decided_by: z.string().default(""),
     reason: z.string().default(""),
     managed_externally: z.boolean().default(false),
+    external_security_owner: z.string().default(""),
     capped_by_groups: z.array(z.string()).default([]),
+    // FIR-3388 — keep the five different capability questions separate.
+    // They are optional for rolling deploy compatibility with an older API;
+    // invalid values are discarded, never coerced into a positive verdict.
+    allowed: z.boolean().optional().catch(undefined),
+    available: z.boolean().optional().catch(undefined),
+    enforced: z.boolean().optional().catch(undefined),
+    callable: z.boolean().optional().catch(undefined),
+    verified: z.boolean().optional().catch(undefined),
+    blocked_reason: z.string().catch("").default(""),
+    how_to_fix: z.string().catch("").default(""),
     availability: z
       .object({
         level: z.enum(["declared", "discovered", "verified"]).catch("declared"),
@@ -65,15 +76,26 @@ const AgentCapabilityAvailabilitySummarySchema = z
     runtime_type: z.string().catch(""),
     status: z.enum(["known", "unknown"]).catch("unknown"),
     verified: z.number().int().nonnegative().catch(0),
+    discovered: z.number().int().nonnegative().catch(0),
+    declared: z.number().int().nonnegative().catch(0),
     unproven: z.number().int().nonnegative().catch(0),
   })
   .loose()
-  .catch({ runtime_type: "", status: "unknown", verified: 0, unproven: 0 });
+  .catch({
+    runtime_type: "",
+    status: "unknown",
+    verified: 0,
+    discovered: 0,
+    declared: 0,
+    unproven: 0,
+  });
 
 const EMPTY_AVAILABILITY = {
   runtime_type: "",
   status: "unknown" as const,
   verified: 0,
+  discovered: 0,
+  declared: 0,
   unproven: 0,
 };
 
@@ -81,6 +103,15 @@ const AgentCapabilityConnEndpointSchema = z
   .object({
     path: z.string().default(""),
     methods: z.array(z.string()).default([]),
+    summary: z.string().default(""),
+    permission: z.string().default(""),
+    allowed: z.boolean().optional().catch(undefined),
+    available: z.boolean().optional().catch(undefined),
+    enforced: z.boolean().optional().catch(undefined),
+    callable: z.boolean().optional().catch(undefined),
+    verified: z.boolean().optional().catch(undefined),
+    blocked_reason: z.string().catch("").default(""),
+    how_to_fix: z.string().catch("").default(""),
   })
   .loose();
 
@@ -89,6 +120,13 @@ const AgentCapabilityConnToolSchema = z
     name: z.string().default(""),
     description: z.string().default(""),
     permission: z.string().default(""),
+    allowed: z.boolean().optional().catch(undefined),
+    available: z.boolean().optional().catch(undefined),
+    enforced: z.boolean().optional().catch(undefined),
+    callable: z.boolean().optional().catch(undefined),
+    verified: z.boolean().optional().catch(undefined),
+    blocked_reason: z.string().catch("").default(""),
+    how_to_fix: z.string().catch("").default(""),
   })
   .loose();
 

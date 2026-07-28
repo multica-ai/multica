@@ -4,11 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/capabilityregistry"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
@@ -31,6 +35,7 @@ type CapabilityLister interface {
 
 type PolicyResolver interface {
 	Resolve(ctx context.Context, in toolpolicy.Query) (toolpolicy.Effective, error)
+	ResolvePermission(ctx context.Context, in toolpolicy.Query, actor platformaccess.Actor) (toolpolicy.Effective, error)
 }
 
 type Service struct {
@@ -116,16 +121,19 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 		return nil, fmt.Errorf("toolaccess: service not configured")
 	}
 	subject := capabilityregistry.Subject{Type: "runtime", ID: uuidString(q.RuntimeID)}
+	listStart := time.Now()
 	tools, err := s.capabilities.List(ctx, q.WorkspaceID, &subject, nil)
 	if err != nil {
 		return nil, err
 	}
+	listElapsed := time.Since(listStart)
+	resolveStart := time.Now()
 
 	runtimeProtocols := RuntimeProtocols(q.RuntimeMode, q.RuntimeProvider, q.RuntimeCapabilities)
 	out := make([]EffectiveTool, 0, len(tools))
 	for _, t := range tools {
 		desc := DescriptorForCapability(t)
-		policy, err := s.policy.Resolve(ctx, toolpolicy.Query{
+		policyQuery := toolpolicy.Query{
 			WorkspaceID:  q.WorkspaceID,
 			ToolKey:      desc.ToolKey,
 			RuntimeID:    q.RuntimeID,
@@ -133,7 +141,8 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 			UserID:       q.UserID,
 			OnBehalfOfID: q.OnBehalfOfID,
 			Base:         toolpolicy.SettingAllow,
-		})
+		}
+		policy, err := s.resolvePolicy(ctx, policyQuery, q.AgentID.Valid)
 		if err != nil {
 			return nil, fmt.Errorf("resolve policy for %s: %w", desc.ToolKey, err)
 		}
@@ -153,13 +162,53 @@ func (s *Service) ListEffectiveTools(ctx context.Context, q Query) ([]EffectiveT
 			Layers:            layerMap(policy),
 		})
 	}
+	// FIR-3781 instrumentation: separate the one catalog read from the
+	// per-capability policy resolution, so a regression can be attributed to a
+	// bigger N or a costlier resolve rather than inferred from the total.
+	if resolveElapsed := time.Since(resolveStart); listElapsed+resolveElapsed > 250*time.Millisecond {
+		slog.Info("effective tools resolve slow",
+			"workspace_id", uuidString(q.WorkspaceID),
+			"runtime_id", uuidString(q.RuntimeID),
+			"capabilities", len(tools),
+			"catalog_list_ms", listElapsed.Milliseconds(),
+			"policy_resolve_ms", resolveElapsed.Milliseconds(),
+		)
+	}
 	return out, nil
+}
+
+func (s *Service) resolvePolicy(ctx context.Context, query toolpolicy.Query, agentActor bool) (toolpolicy.Effective, error) {
+	permissionKey := query.ToolKey
+	capability, bound := platformcatalog.ByToolBinding(query.ToolKey)
+	if bound {
+		permissionKey = capability.Key
+	}
+	query.ToolKey = permissionKey
+
+	// FIR-3781: ordinary tools must retain the tighten-only security floor, and
+	// that is a security requirement, not an implementation detail. Routing every
+	// key through ResolvePermission looks like a simplification, but it sends a
+	// non-special key to ResolveDeclared, which selects ModeOpenable whenever
+	// cerebro_member_override is on (the default) — and openable lets a member row
+	// LOOSEN a workspace/group restriction. Measured on production, same runtime
+	// and same agent, that routing grew the claim's effective tool list from ~34KB
+	// to ~68KB: agents were handed roughly twice the tools their administrators
+	// had granted. Platform keys genuinely need the declared contract, because
+	// their key-specific rules are enforced there — so they keep it.
+	if _, special := platformaccess.ForKey(permissionKey); !special {
+		return s.policy.Resolve(ctx, query)
+	}
+
+	return s.policy.ResolvePermission(ctx, query, platformaccess.Actor{
+		Authenticated: true,
+		Agent:         agentActor,
+	})
 }
 
 func DescriptorForCapability(t capabilityregistry.View) Descriptor {
 	protocols := []string{"native_tool_loop", "mcp_stdio", "mcp_http_sse", "managed_http_tool_loop"}
 	source := "platform"
-	if t.Source == "scan" {
+	if t.Source == "scan" || strings.HasPrefix(t.Key, "mcp__") {
 		source = "mcp"
 		protocols = []string{"mcp_stdio", "mcp_http_sse"}
 	}
@@ -279,9 +328,6 @@ func exposureEffective(enabled bool, policy toolpolicy.Effective, protocol Proto
 	}
 	if credential.Effective == CredentialRequired {
 		return ExposureEffective{Effective: false, Reason: credential.Reason}
-	}
-	if policy.Setting == toolpolicy.SettingAsk && !protocol.SupportsAsk {
-		return ExposureEffective{Effective: false, Reason: "policy requires Ask, but runtime does not support approval waiting"}
 	}
 	if policy.Setting == toolpolicy.SettingAsk {
 		return ExposureEffective{Effective: true, Reason: policy.Reason}

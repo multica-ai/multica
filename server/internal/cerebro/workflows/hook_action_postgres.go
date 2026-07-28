@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -144,6 +145,46 @@ VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, workspaceID, policy.CreatedByTyp
 			optionalHookUUID(event.AgentID), hookConfigString(action.Config, "capability", "workflow_hook_action"),
 			hookConfigString(action.Config, "resource", policy.ID), hookConfigString(action.Config, "reason", "Workflow hook requires approval"), configJSON).Scan(&id)
 		return hookIDResult(id), err
+	case "issue.comment":
+		issueID := optionalHookUUID(hookConfigString(action.Config, "issue_id", event.IssueID))
+		if !issueID.Valid {
+			return nil, errors.New("issue.comment requires an issue")
+		}
+		body := renderHookTemplate(hookConfigString(action.Config, "body", ""), event)
+		// The failing run's agent authors the comment so the message reads as
+		// that agent reporting its own stop; fall back to the policy creator
+		// when the event has no agent (e.g. a test fire).
+		authorType, authorID := "agent", optionalHookUUID(event.AgentID)
+		if !authorID.Valid {
+			authorType, authorID = policy.CreatedByType, actorID
+		}
+		var id pgtype.UUID
+		err = e.db.QueryRow(ctx, `INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
+SELECT i.id, i.workspace_id, $3, $4, $5, 'comment' FROM issue i WHERE i.id=$1 AND i.workspace_id=$2
+RETURNING id`, issueID, workspaceID, authorType, authorID, body).Scan(&id)
+		return hookIDResult(id), err
+
+	case "issue.status":
+		issueID := optionalHookUUID(hookConfigString(action.Config, "issue_id", event.IssueID))
+		if !issueID.Valid {
+			return nil, errors.New("issue.status requires an issue")
+		}
+		status := hookConfigString(action.Config, "status", "")
+		valid := false
+		for _, allowed := range issueStatusActionValues {
+			if status == allowed {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return nil, fmt.Errorf("issue.status status %q is not a valid issue status", status)
+		}
+		var id pgtype.UUID
+		err = e.db.QueryRow(ctx, `UPDATE issue SET status=$3, updated_at=now()
+WHERE id=$1 AND workspace_id=$2 RETURNING id`, issueID, workspaceID, status).Scan(&id)
+		return hookIDResult(id), err
+
 	case "audit.record", "metric.increment":
 		var id pgtype.UUID
 		details, _ := json.Marshal(map[string]any{"policy_id": policy.ID, "event_id": event.EventID, "config": action.Config})
@@ -460,4 +501,25 @@ func optionalHookUUID(value string) pgtype.UUID {
 
 func hookIDResult(id pgtype.UUID) map[string]any {
 	return map[string]any{"id": util.UUIDToString(id)}
+}
+
+// hookTemplateToken matches {{dotted.path}} placeholders in action config text.
+var hookTemplateToken = regexp.MustCompile(`\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}`)
+
+// renderHookTemplate substitutes {{dotted.path}} placeholders with values from
+// the hook event's condition context (e.g. {{task.failure_reason}},
+// {{issue.id}}, {{attempt}}). Unknown placeholders are left verbatim so a
+// typo is visible in the output instead of silently vanishing.
+func renderHookTemplate(input string, event HookEvent) string {
+	if !strings.Contains(input, "{{") {
+		return input
+	}
+	ctx := hookConditionContext(event)
+	return hookTemplateToken.ReplaceAllStringFunc(input, func(token string) string {
+		key := strings.TrimSpace(strings.Trim(token, "{}"))
+		if value, ok := lookup(key, ctx); ok && value != nil {
+			return fmt.Sprint(value)
+		}
+		return token
+	})
 }

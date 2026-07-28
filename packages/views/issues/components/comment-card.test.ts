@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import type { TimelineEntry } from "@multica/core/types";
-import { flattenReplies, isUserQuestionComment } from "./comment-card";
+import { commentIdsFromAnchor, flattenReplies, isUserQuestionComment } from "./comment-card";
 
 function reply(id: string, parentId: string, createdAt: string): TimelineEntry {
   return {
@@ -93,5 +93,26 @@ describe("isUserQuestionComment", () => {
     expect(isUserQuestionComment({ type: "comment", comment_type: "question" })).toBe(true);
     expect(isUserQuestionComment({ type: "comment", comment_type: "comment" })).toBe(false);
     expect(isUserQuestionComment({ type: "activity", comment_type: "question" })).toBe(false);
+  });
+});
+
+describe("commentIdsFromAnchor", () => {
+  // Thread in render order: root first, then its replies.
+  const thread = ["root", "a", "b", "c"];
+
+  it("takes the anchor and everything after it", () => {
+    expect(commentIdsFromAnchor(thread, "b")).toEqual(["b", "c"]);
+  });
+
+  it("takes the whole thread when the anchor is the root", () => {
+    expect(commentIdsFromAnchor(thread, "root")).toEqual(["root", "a", "b", "c"]);
+  });
+
+  it("takes only the anchor when it is the last comment", () => {
+    expect(commentIdsFromAnchor(thread, "c")).toEqual(["c"]);
+  });
+
+  it("takes nothing when the anchor is no longer in the thread", () => {
+    expect(commentIdsFromAnchor(thread, "gone")).toEqual([]);
   });
 });

@@ -91,6 +91,14 @@ Contracts:
   (daemon.go:1187, 1530);
 - briefing includes operating protocol, roster, and optional instructions
   (squad_briefing.go:104-117);
+- `buildSquadLeaderBriefing` takes an `ownsIssueStatus` argument selecting
+  responsibility 6 via `squadOperatingProtocolFor`: the status grant
+  (`squadParentStatusOwned`) only when `issue.assignee_type == "squad"` and
+  `issue.assignee_id == squad.id` (computed at the daemon.go call site),
+  otherwise an explicit prohibition (`squadParentStatusNotOwned`). Quick-create
+  passes `false` — no issue exists yet. Injection is broader than authority on
+  purpose: it is keyed off `is_leader_task`, which also fires for `@squad`
+  mentions on issues owned by someone else (MUL-3724);
 - `instructions` section appears only when non-empty (squad_briefing.go:110-112);
 - archived agent members are skipped from roster (squad_briefing.go:178-179);
 - agent member roster rows list assigned workspace skills via
@@ -118,7 +126,18 @@ Contracts:
 - private leader access is checked at assign-time (issue.go:2629-2632) and at
   enqueue-time via `canEnqueueSquadLeader` (squad.go:1037);
 - archived squad / archived leader rejected at assign-time (issue.go:2622-2627);
-- pending task dedup is applied (squad.go:1042-1048).
+- pending task dedup is applied (squad.go:1042-1048); <!-- CEREBRO-PATCH(squad-parent-status): MUL-5156 -->
+- parent status is agent-managed: the assignment brief step 8
+  (`cerebroAssignmentStatusStep` with `IsSquadLeader`, in
+  `runtime_config_squad_status_cerebro.go`) keeps the parent `in_progress` and
+  forbids unconditional `in_review` on the first dispatch turn; the Squad
+  Operating Protocol (`squad_briefing.go`, `squadParentStatusOwned`) owns the
+  ongoing `in_progress` → later `in_review` contract. `StartTask` /
+  `CompleteTask` do not write issue status. On comment-triggered leader turns
+  `cerebroCommentStatusStep` names that protocol responsibility as the one
+  exception to "do not change status unless the comment asks" — without it the
+  @mention-dispatch shape (no child issues, so no child-done ask) would strand
+  the parent in `in_progress`.
 
 ## Comment / Mention
 

@@ -24,6 +24,8 @@ package toolpolicy
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 )
 
 // TestAsUserToolKey is the capability key that gates the Test as user feature.
@@ -50,16 +52,16 @@ func (h *Handler) TestAsUserAccess(w http.ResponseWriter, r *http.Request) {
 	// user or group layer. This is NOT Resolve(Base: Deny) — the tighten-only
 	// chain can never loosen a Deny base back to Allow, so that always returns
 	// Deny and hides the entry for everyone, grant or no grant (FIR-1771).
-	allowed, err := h.Store.ResolveOptIn(r.Context(), Query{
+	effective, err := h.Store.ResolvePermission(r.Context(), Query{
 		WorkspaceID: workspaceID,
 		ToolKey:     TestAsUserToolKey,
 		UserID:      member.UserID,
-	})
+	}, platformaccess.Actor{Authenticated: true})
 	if err != nil {
 		h.serverError(w, r, "resolve test-as-user access", err)
 		return
 	}
-	writeJSON(w, http.StatusOK, testAsUserAccessResponse{Allowed: allowed})
+	writeJSON(w, http.StatusOK, testAsUserAccessResponse{Allowed: effective.Setting == SettingAllow})
 }
 
 // testAsUserRequest is the POST body: which (user, agent, runtime) combination
@@ -90,17 +92,17 @@ func (h *Handler) TestAsUser(w http.ResponseWriter, r *http.Request) {
 
 	// Gate the caller: only an explicit Allow grant on tools:test-as-user (user or
 	// group layer) lets anyone look up another user's permissions. Opt-in, no
-	// admin shortcut — see ResolveOptIn for why this is not Resolve(Base: Deny).
-	allowed, err := h.Store.ResolveOptIn(r.Context(), Query{
+	// admin shortcut — declared by the shared tools:test-as-user contract.
+	effective, err := h.Store.ResolvePermission(r.Context(), Query{
 		WorkspaceID: workspaceID,
 		ToolKey:     TestAsUserToolKey,
 		UserID:      member.UserID,
-	})
+	}, platformaccess.Actor{Authenticated: true})
 	if err != nil {
 		h.serverError(w, r, "resolve test-as-user access", err)
 		return
 	}
-	if !allowed {
+	if effective.Setting != SettingAllow {
 		writeError(w, http.StatusForbidden, "the Test as user feature is not enabled for you — ask a workspace admin")
 		return
 	}

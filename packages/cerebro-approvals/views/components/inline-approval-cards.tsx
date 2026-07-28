@@ -1,10 +1,10 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { useFlagValue } from "@multica/cerebro-feature-flags";
 import { useCurrentMember } from "@multica/core/permissions";
 import { approvalsOriginOptions } from "../../core/queries";
 import type { Approval, ApprovalOriginFilter } from "../../core/types";
+import { useApprovalExperienceEnabled } from "../../core/availability";
 import { InlineApprovalCard } from "./inline-approval-card";
 
 export interface InlineApprovalCardsProps {
@@ -55,7 +55,7 @@ function EnabledInlineApprovalCards({ wsId, origin, match = {} }: InlineApproval
 }
 
 export function InlineApprovalCards(props: InlineApprovalCardsProps) {
-  const enabled = useFlagValue("cerebro_approvals");
+  const enabled = useApprovalExperienceEnabled();
   if (!enabled) return null;
   return <EnabledInlineApprovalCards {...props} />;
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -34,6 +35,8 @@ type fakeEndpointPolicy struct {
 	verdicts     map[string]toolpolicy.Setting
 	toolVerdicts map[string]toolpolicy.Setting
 	err          error
+	singleCalls  *int
+	bulkCalls    *int
 }
 
 func (f fakeEndpointPolicy) ConnectionToolEffective(_ context.Context, _, _, _, _ pgtype.UUID, toolName string) (toolpolicy.Setting, string, error) {
@@ -47,6 +50,9 @@ func (f fakeEndpointPolicy) ConnectionToolEffective(_ context.Context, _, _, _, 
 }
 
 func (f fakeEndpointPolicy) ConnectionEndpointEffective(ctx context.Context, workspaceID, runtimeID, agentID, userID, onBehalfOfID pgtype.UUID, connName, method, path string) (toolpolicy.Setting, string, error) {
+	if f.singleCalls != nil {
+		(*f.singleCalls)++
+	}
 	if f.err != nil {
 		return toolpolicy.SettingDeny, connName, f.err
 	}
@@ -54,6 +60,29 @@ func (f fakeEndpointPolicy) ConnectionEndpointEffective(ctx context.Context, wor
 		return s, connName, nil
 	}
 	return toolpolicy.SettingDeny, connName, nil
+}
+
+func (f fakeEndpointPolicy) ConnectionEndpointVerdicts(context.Context, toolpolicy.TableQuery, []toolpolicy.ConnectionEndpointTarget) ([]toolpolicy.ConnectionEndpointVerdict, error) {
+	if f.bulkCalls != nil {
+		(*f.bulkCalls)++
+	}
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make([]toolpolicy.ConnectionEndpointVerdict, 0, len(f.verdicts))
+	for key, setting := range f.verdicts {
+		parts := strings.SplitN(key, " ", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		out = append(out, toolpolicy.ConnectionEndpointVerdict{
+			Connection: parts[0],
+			Method:     parts[1],
+			Path:       parts[2],
+			Setting:    setting,
+		})
+	}
+	return out, nil
 }
 
 type fakeFlag struct {
@@ -116,6 +145,40 @@ func TestResolverIncludesAllowAndAskDropsDeny(t *testing.T) {
 	}
 	if _, present := verdictByName["c__get_deny"]; present {
 		t.Errorf("c__get_deny must be dropped, but it was listed")
+	}
+}
+
+func TestResolverBatchesClaimTimeEndpointPolicy(t *testing.T) {
+	const endpointCount = 60
+	endpoints := make([]connections.EndpointPermission, 0, endpointCount)
+	verdicts := make(map[string]toolpolicy.Setting, endpointCount)
+	for i := 0; i < endpointCount; i++ {
+		path := fmt.Sprintf("/endpoint/%02d", i)
+		endpoints = append(endpoints, connections.EndpointPermission{Path: path, Methods: []string{"GET"}})
+		verdicts["c GET "+path] = toolpolicy.SettingAllow
+	}
+	var singleCalls, bulkCalls int
+	r := NewAPIConnectionResolver(
+		fakeConnLister{conns: []connections.Connection{{
+			Name: "c", Type: connections.TypeAPI, URL: "http://c.internal", Enabled: true,
+			EndpointPermissions: endpoints,
+		}}},
+		fakeEndpointPolicy{
+			verdicts:    verdicts,
+			singleCalls: &singleCalls,
+			bulkCalls:   &bulkCalls,
+		},
+		fakeFlag{on: true},
+		slog.Default(),
+	)
+
+	got := r.ListForAgent(context.Background(), resolverIdent())
+
+	if len(got) != endpointCount {
+		t.Fatalf("resolved %d endpoint tools, want %d", len(got), endpointCount)
+	}
+	if bulkCalls != 1 || singleCalls != 0 {
+		t.Fatalf("claim-time endpoint policy used bulk=%d single=%d calls; want bulk=1 single=0", bulkCalls, singleCalls)
 	}
 }
 

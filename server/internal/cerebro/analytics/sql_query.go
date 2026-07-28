@@ -106,6 +106,11 @@ func BuildSQL(query Query, workspaceID string) (SQLPlan, error) {
 	if queryUsesDimension(query, DimensionIssue) {
 		joins += " LEFT JOIN cerebro_analytics_reference ref_issue ON ref_issue.analytics_run_id=r.id AND ref_issue.reference_kind IN ('issue','dm','channel')"
 	}
+	if queryUsesDimension(query, DimensionFunction, DimensionOperatingLoop) {
+		joins += " LEFT JOIN cerebro_ai_impact_project_binding ai_binding ON ai_binding.workspace_id=r.workspace_id AND ai_binding.project_id=r.project_id AND ai_binding.active"
+		joins += " LEFT JOIN cerebro_ai_impact_operating_loop ai_loop ON ai_loop.workspace_id=ai_binding.workspace_id AND ai_loop.id=ai_binding.operating_loop_id AND ai_loop.active"
+		joins += " LEFT JOIN cerebro_ai_impact_function ai_function ON ai_function.workspace_id=ai_loop.workspace_id AND ai_function.id=ai_loop.function_id AND ai_function.active"
+	}
 	sql := `SELECT ` + strings.Join(selects, ", ") + ` FROM cerebro_analytics_run r` + joins + ` WHERE ` + strings.Join(where, " AND ")
 	if len(groups) > 0 {
 		sql += " GROUP BY " + strings.Join(groups, ", ")
@@ -151,7 +156,7 @@ func parseOffsetCursor(cursor string) (int, bool) {
 }
 
 var filterDimensionSQL = map[Dimension]string{
-	DimensionPerson: "r.person_label", DimensionAgent: "r.agent_label", DimensionProject: "r.project_label", DimensionRuntime: "r.runtime_label", DimensionSource: "r.source_type", DimensionProvider: "r.provider", DimensionModel: "r.model", DimensionSkill: "sk.skill_name", DimensionStatus: "r.status", DimensionCostKind: "r.cost_kind", DimensionQualityType: "q.measurement_type", DimensionQualityCategory: "q.category", DimensionContext: "ref.reference_kind",
+	DimensionPerson: "r.person_label", DimensionAgent: "r.agent_label", DimensionProject: "r.project_label", DimensionFunction: "ai_function.name", DimensionOperatingLoop: "ai_loop.name", DimensionRuntime: "r.runtime_label", DimensionSource: "r.source_type", DimensionProvider: "r.provider", DimensionModel: "r.model", DimensionSkill: "sk.skill_name", DimensionStatus: "r.status", DimensionCostKind: "r.cost_kind", DimensionQualityType: "q.measurement_type", DimensionQualityCategory: "q.category", DimensionContext: "ref.reference_kind",
 	DimensionRun: "r.run_id::text", DimensionIssue: "ref_issue.label", DimensionSourceID: "r.source_id::text", DimensionReference: "ref.reference_id", DimensionReferenceLabel: "ref.label", DimensionDebugLink: "ref.href", DimensionTrace: "r.trace_id",
 }
 

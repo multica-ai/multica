@@ -30,14 +30,12 @@ describe("agentPageTabIds", () => {
   it("groups runtime settings in Advanced in their requested order", () => {
     expect(advancedTabIds({ mcpConfig: true })).toEqual([
       "infisical",
-      "sandbox",
       "mcp_config",
       "custom_args",
       "env",
     ]);
     expect(advancedTabIds({ mcpConfig: false })).toEqual([
       "infisical",
-      "sandbox",
       "custom_args",
       "env",
     ]);

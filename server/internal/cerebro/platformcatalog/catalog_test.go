@@ -7,6 +7,8 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 )
 
 // TestCatalogInvariants guards the shape every catalog entry must hold: a stable
@@ -53,9 +55,72 @@ func TestCatalogInvariants(t *testing.T) {
 		if len(c.Ops) == 0 && len(c.Evidence) == 0 {
 			t.Errorf("capability %q has neither Ops (route) nor Evidence (internal check)", c.Key)
 		}
+		hasExternalOwner := strings.TrimSpace(c.ExternalSecurityOwner) != ""
+		if c.ManagedExternally != hasExternalOwner {
+			t.Errorf(
+				"capability %q managed_externally=%v but external security owner=%q",
+				c.Key, c.ManagedExternally, c.ExternalSecurityOwner,
+			)
+		}
 		for _, e := range c.Evidence {
 			if !evidenceRe.MatchString(e) {
 				t.Errorf("capability %q evidence %q must point at a .go file (file.go:line)", c.Key, e)
+			}
+		}
+	}
+}
+
+func TestWorkflowHookCapabilityContracts(t *testing.T) {
+	byKey := map[string]Capability{}
+	for _, c := range All() {
+		byKey[c.Key] = c
+	}
+
+	want := map[string]struct {
+		enforcement platformaccess.Enforcement
+		tools       []string
+	}{
+		"hooks:read": {
+			enforcement: platformaccess.EnforcementAuthenticatedRead,
+			tools:       []string{"get_effective_workflow_hooks", "get_workflow_hook", "list_workflow_hook_runs", "list_workflow_hooks"},
+		},
+		"hooks:write": {
+			enforcement: platformaccess.EnforcementActorOptIn,
+			tools:       []string{"create_workflow_hook", "test_workflow_hook", "update_workflow_hook"},
+		},
+		"hooks:enforce": {
+			enforcement: platformaccess.EnforcementHumanOptIn,
+			tools:       []string{"publish_workflow_hook"},
+		},
+		"hooks:manage_managed": {
+			enforcement: platformaccess.EnforcementOwnerOnly,
+		},
+	}
+
+	for key, expected := range want {
+		capability, ok := byKey[key]
+		if !ok {
+			t.Fatalf("capability %q missing", key)
+		}
+		contract, ok := platformaccess.ForKey(key)
+		if !ok || contract.Enforcement != expected.enforcement {
+			t.Errorf("%s enforcement = %+v, %v; want %q", key, contract, ok, expected.enforcement)
+		}
+		if strings.Join(capability.ToolBindings, ",") != strings.Join(expected.tools, ",") {
+			t.Errorf("%s tool bindings = %v, want %v", key, capability.ToolBindings, expected.tools)
+		}
+	}
+
+	owners := map[string]string{}
+	for _, capability := range All() {
+		for _, tool := range capability.ToolBindings {
+			if previous, duplicate := owners[tool]; duplicate {
+				t.Errorf("tool binding %q is owned by both %q and %q", tool, previous, capability.Key)
+			}
+			owners[tool] = capability.Key
+			resolved, ok := ByToolBinding(tool)
+			if !ok || resolved.Key != capability.Key {
+				t.Errorf("ByToolBinding(%q) = %+v, %v; want %q", tool, resolved, ok, capability.Key)
 			}
 		}
 	}

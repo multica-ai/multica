@@ -293,6 +293,7 @@ export interface TaskMessagePayload {
   content?: string;
   input?: Record<string, unknown>;
   output?: string;
+  created_at?: string; // CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — the server already sends created_at (protocol.TaskMessagePayload); the upstream type addition has not synced down yet.
 }
 
 export interface TaskQueuedPayload {

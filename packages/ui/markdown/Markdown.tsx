@@ -14,6 +14,7 @@ import { CodeBlock, InlineCode } from './CodeBlock'
 import { rehypeStackedDataTables } from './cerebro-stacked-tables'
 import { preprocessFileCards } from './file-cards'
 import { preprocessLinks } from './linkify'
+import { preprocessIssueIdentifiers } from './issue-identifiers'
 import { preprocessMentionShortcodes } from './mentions'
 import 'katex/dist/katex.min.css'
 import './markdown.css'
@@ -79,6 +80,15 @@ export interface MarkdownProps {
   renderFileCard?: (props: { href: string; filename: string }) => React.ReactNode
   // CEREBRO-PATCH(chat-mermaid-html): FIR-2372 override fenced code-block rendering (mermaid→diagram, html→preview) for chat parity with comments; return null to fall back to CodeBlock.
   renderCodeBlock?: (props: { language?: string; code: string }) => React.ReactNode
+  /**
+   * When true, bare issue identifiers (e.g. `MUL-123`, `TES-1`) are rewritten
+   * to `mention://issue/<identifier>` links so `renderMention` can resolve them
+   * to a navigable issue chip. Off by default — enable only on surfaces whose
+   * `renderMention` knows how to resolve an identifier (see the app wrapper in
+   * packages/views/common/markdown.tsx). Detection is markdown-aware: code,
+   * existing links, URLs, and file/path tokens are skipped.
+   */
+  autolinkIssueIdentifiers?: boolean
 }
 
 // Sanitization schema — extends GitHub defaults to allow code highlighting classes
@@ -450,22 +460,27 @@ export function Markdown({
   renderFileCard,
   // CEREBRO-PATCH(chat-mermaid-html): FIR-2372 forward renderCodeBlock override.
   renderCodeBlock,
-  cdnDomain
+  cdnDomain,
+  autolinkIssueIdentifiers
 }: MarkdownProps): React.JSX.Element {
   const components = React.useMemo(
     () => createComponents(mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard, renderCodeBlock),
     [mode, onUrlClick, onFileClick, renderMention, renderImage, renderFileCard, renderCodeBlock]
   )
 
-  // Preprocess: convert mention shortcodes, raw URLs, and file cards to renderable content
+  // Preprocess: convert mention shortcodes, bare issue identifiers, raw URLs,
+  // and file cards to renderable content. Issue-identifier autolinking runs
+  // BEFORE linkify/file-card so those passes treat the rewritten spans as
+  // existing markdown links and skip them.
   const processedContent = React.useMemo(
     () => {
       let result = preprocessMentionShortcodes(children)
+      if (autolinkIssueIdentifiers) result = preprocessIssueIdentifiers(result)
       result = preprocessLinks(result)
       result = preprocessFileCards(result, cdnDomain ?? '')
       return result
     },
-    [children, cdnDomain]
+    [children, cdnDomain, autolinkIssueIdentifiers]
   )
 
   return (

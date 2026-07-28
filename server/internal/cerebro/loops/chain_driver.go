@@ -47,10 +47,11 @@ type ChainDecision struct {
 // chain driver. Adapters may enqueue an issue task or return a waiting state
 // for an external decision such as a member approval or eval run.
 type BlockDispatch struct {
-	Run   ChainRun
-	Phase Phase
-	Block Block
-	Step  ChainStep
+	Run           ChainRun
+	Phase         Phase
+	Block         Block
+	Step          ChainStep
+	PreviousSteps []ChainStep
 }
 
 // BlockDispatchResult is the durable state immediately after dispatch.
@@ -93,11 +94,17 @@ func (d *ChainDriver) Advance(ctx context.Context, chain *Chain, run ChainRun) (
 		return ChainDecision{}, errors.New("chain run needs issue and workflow ids")
 	}
 
+	previousSteps := make([]ChainStep, 0)
 	for _, phase := range chain.Phases {
 		key := PhaseRunKey{IssueID: run.IssueID, WorkflowID: run.WorkflowID, PhaseID: phase.ID}
 		state, err := d.store.LoadPhaseRun(ctx, key)
 		switch {
 		case err == nil && state.Status == PhaseCompleted:
+			steps, listErr := d.store.ListSteps(ctx, key)
+			if listErr != nil {
+				return ChainDecision{}, listErr
+			}
+			previousSteps = append(previousSteps, steps...)
 			continue
 		case err == nil && state.Status == PhaseFailed:
 			return ChainDecision{Kind: ChainFailed, Reason: state.FailureReason}, nil
@@ -105,7 +112,7 @@ func (d *ChainDriver) Advance(ctx context.Context, chain *Chain, run ChainRun) (
 			return ChainDecision{}, err
 		}
 
-		decision, complete, err := d.advancePhase(ctx, run, phase)
+		decision, complete, err := d.advancePhase(ctx, run, phase, previousSteps)
 		if err != nil {
 			return ChainDecision{}, err
 		}
@@ -115,6 +122,11 @@ func (d *ChainDriver) Advance(ctx context.Context, chain *Chain, run ChainRun) (
 		if _, err := d.store.CompletePhase(ctx, key); err != nil {
 			return ChainDecision{}, err
 		}
+		steps, err := d.store.ListSteps(ctx, key)
+		if err != nil {
+			return ChainDecision{}, err
+		}
+		previousSteps = append(previousSteps, steps...)
 	}
 
 	status := chain.DoneStatus
@@ -124,7 +136,7 @@ func (d *ChainDriver) Advance(ctx context.Context, chain *Chain, run ChainRun) (
 	return ChainDecision{Kind: ChainDone, Status: status}, nil
 }
 
-func (d *ChainDriver) advancePhase(ctx context.Context, run ChainRun, phase Phase) (ChainDecision, bool, error) {
+func (d *ChainDriver) advancePhase(ctx context.Context, run ChainRun, phase Phase, previousPhaseSteps []ChainStep) (ChainDecision, bool, error) {
 	key := PhaseRunKey{IssueID: run.IssueID, WorkflowID: run.WorkflowID, PhaseID: phase.ID}
 	steps, err := d.store.ListSteps(ctx, key)
 	if err != nil {
@@ -211,7 +223,10 @@ func (d *ChainDriver) advancePhase(ctx context.Context, run ChainRun, phase Phas
 			return ChainDecision{Kind: ChainWait, Step: step}, false, nil
 		}
 
-		result, err := d.dispatcher.DispatchBlock(ctx, BlockDispatch{Run: run, Phase: phase, Block: block, Step: step})
+		previousSteps := make([]ChainStep, 0, len(previousPhaseSteps)+len(steps))
+		previousSteps = append(previousSteps, previousPhaseSteps...)
+		previousSteps = append(previousSteps, steps...)
+		result, err := d.dispatcher.DispatchBlock(ctx, BlockDispatch{Run: run, Phase: phase, Block: block, Step: step, PreviousSteps: previousSteps})
 		if err != nil {
 			outcome, _ := json.Marshal(map[string]any{"error": err.Error()})
 			_ = d.store.RecordStepOutcome(ctx, step.StepRef, StepFailed, outcome)

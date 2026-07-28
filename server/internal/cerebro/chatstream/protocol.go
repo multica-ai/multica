@@ -4,10 +4,10 @@
 // (useChat + DefaultChatTransport) can consume a Multica agent without a
 // poll loop.
 //
-// Today Multica's internal chat events are message-granular (chat:done
-// carries the whole assistant reply), so a run streams as one text-delta.
-// The wire contract is already the token-granular protocol — when the
-// runtime starts relaying token deltas the clients need no change.
+// Assistant text remains message-granular (chat:done carries the whole final
+// reply), while the daemon's persisted task transcript supplies live tool
+// input/result chunks. The wire contract is already token-granular, so a
+// future runtime text-delta relay will not require client changes.
 //
 // Delivery rides the in-process event bus (server/internal/events), same as
 // the realtime WS hub: the daemon's complete/fail call publishes on the bus
@@ -22,6 +22,8 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // UIMessageStreamHeader / UIMessageStreamVersion mark the response as a
@@ -121,6 +123,68 @@ type ToolApprovalRequestChunk struct {
 	Type       string `json:"type"`
 	ApprovalID string `json:"approvalId"`
 	ToolCallID string `json:"toolCallId"`
+}
+
+// ToolPartBuilder converts the daemon's persisted task transcript into AI SDK
+// dynamic-tool chunks. Runtime adapters do not all expose provider call IDs,
+// so calls are paired with their results by tool name and transcript order.
+type ToolPartBuilder struct {
+	pending map[string][]string
+}
+
+func NewToolPartBuilder() *ToolPartBuilder {
+	return &ToolPartBuilder{pending: make(map[string][]string)}
+}
+
+func (b *ToolPartBuilder) Parts(message protocol.TaskMessagePayload) []any {
+	switch message.Type {
+	case "tool_use":
+		callID := fmt.Sprintf("task-tool-%d", message.Seq)
+		b.pending[message.Tool] = append(b.pending[message.Tool], callID)
+		input := any(message.Input)
+		if message.Input == nil {
+			input = map[string]any{}
+		}
+		return []any{ToolInputAvailableChunk{
+			Type:       ChunkTypeToolInputAvailable,
+			ToolCallID: callID,
+			ToolName:   message.Tool,
+			Input:      input,
+		}}
+	case "tool_result":
+		callID := ""
+		queue := b.pending[message.Tool]
+		if len(queue) > 0 {
+			callID = queue[0]
+			b.pending[message.Tool] = queue[1:]
+		}
+		parts := make([]any, 0, 2)
+		if callID == "" {
+			callID = fmt.Sprintf("task-tool-result-%d", message.Seq)
+			parts = append(parts, ToolInputAvailableChunk{
+				Type:       ChunkTypeToolInputAvailable,
+				ToolCallID: callID,
+				ToolName:   message.Tool,
+				Input:      map[string]any{},
+			})
+		}
+		parts = append(parts, ToolOutputAvailableChunk{
+			Type:       ChunkTypeToolOutputAvailable,
+			ToolCallID: callID,
+			Output:     parseToolOutput(message.Output),
+		})
+		return parts
+	default:
+		return nil
+	}
+}
+
+func parseToolOutput(output string) any {
+	var value any
+	if output != "" && json.Unmarshal([]byte(output), &value) == nil {
+		return value
+	}
+	return output
 }
 
 // DataChunk is the protocol escape hatch for typed application data. Type
@@ -228,9 +292,22 @@ func (s *Writer) WriteAssistantMessage(messageID, content string, meta FinishMet
 // WriteAssistantMessageWithParts adds validated application data immediately
 // after the text part and before finish, preserving the AI SDK message order.
 func (s *Writer) WriteAssistantMessageWithParts(messageID, content string, parts []any, meta FinishMetadata) error {
+	if err := s.WriteStart(messageID); err != nil {
+		return err
+	}
+	return s.WriteAssistantMessageTail(content, parts, meta)
+}
+
+// WriteStart opens one assistant message before live tool chunks arrive.
+func (s *Writer) WriteStart(messageID string) error {
+	return s.WriteChunk(StartChunk{Type: ChunkTypeStart, MessageID: messageID})
+}
+
+// WriteAssistantMessageTail appends the final text and terminates a message
+// whose start and live tool chunks have already been emitted.
+func (s *Writer) WriteAssistantMessageTail(content string, parts []any, meta FinishMetadata) error {
 	const textPartID = "text-0"
 	chunks := []any{
-		StartChunk{Type: ChunkTypeStart, MessageID: messageID},
 		TextStartChunk{Type: ChunkTypeTextStart, ID: textPartID},
 		TextDeltaChunk{Type: ChunkTypeTextDelta, ID: textPartID, Delta: content},
 		TextEndChunk{Type: ChunkTypeTextEnd, ID: textPartID},

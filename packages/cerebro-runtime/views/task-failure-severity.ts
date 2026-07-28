@@ -1,5 +1,3 @@
-import type { TaskFailureReason } from "@multica/core/types";
-
 // Classifies a task `failure_reason` as a transient *interruption* — the
 // runtime or provider stopped the run and the platform auto-retries it —
 // versus a genuine failure the user should act on.
@@ -14,22 +12,30 @@ import type { TaskFailureReason } from "@multica/core/types";
 // use this predicate to render interruptions as an amber "Interrupted"
 // state instead, so only real failures read as red.
 //
+// FIR-3782: the previous set keyed on "runtime_paused" and "rate_limit".
+// Neither string is emitted any more — the in-flight classifier
+// (server/pkg/taskfailure/classify.go) resolves a provider stall to one of
+// the agent_error.* sub-reasons below, and Classify never returns a
+// platform-side reason. Keying on the dead strings meant an auto-retried
+// rate limit rendered as a hard red failure with no explanation.
+//
 // Keep this list in sync with the failure reasons the resume path treats
-// as transient (resume_scope / ListResumableTasksForRuntime category 2):
-// runtime_recovery, runtime_paused, runtime_offline, rate_limit.
-const INTERRUPTION_REASONS: ReadonlySet<TaskFailureReason> = new Set<TaskFailureReason>([
+// as transient (resume_scope / ListResumableTasksForRuntime category 2).
+const INTERRUPTION_REASONS: ReadonlySet<string> = new Set<string>([
   "runtime_recovery", // daemon restarted mid-run (e.g. binary auto-update)
-  "runtime_paused", // runtime paused (manual or auto); resumes on unpause
   "runtime_offline", // daemon went offline mid-run
-  "rate_limit", // provider usage/rate limit; auto-retried when it clears
+  "agent_error.provider_capacity_or_rate_limit", // provider rate-limited or at capacity
+  "agent_error.provider_server_error", // provider 5xx; retried when it clears
+  "agent_error.provider_network", // stream disconnected mid-run
 ]);
 
 // True when a failed task ended because the runtime/provider interrupted
 // it (and it is auto-retried), not because the agent's work failed.
-// Accepts the wire shape of `failure_reason`, which the back-end emits as
-// "" (omitempty) on non-failed tasks.
+// Accepts a plain string: the wire shape is "" (omitempty) on non-failed
+// tasks, and a reason the front-end type does not know about must not
+// break the call site.
 export function isInterruptionReason(
-  reason: TaskFailureReason | "" | undefined | null,
+  reason: string | null | undefined,
 ): boolean {
   return reason != null && reason !== "" && INTERRUPTION_REASONS.has(reason);
 }

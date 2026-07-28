@@ -185,6 +185,35 @@ multica agent skills add <agent-id> --skill-ids <skill-id> --output json
 multica agent skills list <agent-id> --output json
 ```
 
+<!-- CEREBRO-PATCH(skill-always-on): FIR-3805 — document the always_on binding flag in the canonical agent-creation skill. -->
+### Always-on bindings (FIR-3805)
+
+A binding carries an `always_on` flag. It is a property of the BINDING, not of
+the skill — the same skill can be always-on for one agent and load-on-demand
+for another.
+
+- `always_on: false` (the default) — the skill reaches the agent as ONE LINE in
+  its brief (name + description). The agent opens it when it judges it needs it.
+- `always_on: true` — the skill's FULL TEXT is pasted into the agent's brief on
+  every run. Use it for rules that must hold on every response (writing style,
+  check-before-you-send gates), which an agent otherwise never applies because
+  it never had a reason to open the skill before it started writing.
+
+```bash
+# Replace the whole always-on set; every id must already be bound
+multica agent skills always-on <agent-id> --skill-ids <id-a>,<id-b>
+# Clear it (skills stay bound, just no longer always-on)
+multica agent skills always-on <agent-id> --skill-ids ''
+```
+
+`agent skills list` shows an `ALWAYS_ON` column, and each row carries
+`always_on` in `--output json`. In the UI the flag is proposed through the same
+versioned change-request flow as the binding set itself.
+
+Known limitation: "always in the instructions" does not survive an arbitrarily
+long run — the context is compacted and the earliest instructions dilute first.
+Enough for style and form rules; not a watertight gate.
+
 At claim time the daemon assembles the agent's skills as workspace-bound skills
 FIRST, then appends the platform built-in skills. `LoadAgentSkills` loads each
 bound skill's content plus its supporting files; built-in skills are embedded
@@ -201,6 +230,9 @@ State-changing (require an explicit instruction — do not run speculatively):
 - `multica agent create` — inserts a new agent row.
 - `multica agent skills add` / `set` — mutate bindings (`set` is destructive:
   it drops bindings not in the new list).
+- `multica agent skills always-on` — replaces the whole always-on set, changing
+  what the agent reads on EVERY run. Destructive in the same way as `set`.
+  <!-- CEREBRO-PATCH(skill-always-on): FIR-3805 — list the always-on write path with the other state-changing commands. -->
 - `multica agent env set` — overwrites the full `custom_env` map and writes an
   audit row.
 

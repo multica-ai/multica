@@ -8,6 +8,7 @@ import { TranscriptButton } from "./transcript-button";
 
 const mockApi = vi.hoisted(() => ({
   listTaskMessages: vi.fn(),
+  getTaskAccess: vi.fn(),
   getAgent: vi.fn(),
   listRuntimes: vi.fn(),
 }));
@@ -18,6 +19,27 @@ vi.mock("@multica/core/api", () => ({
 
 vi.mock("../actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
+}));
+
+// CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — the ported dialog virtualizes
+// its event list, and real react-virtuoso renders no rows in jsdom's zero-height
+// viewport. Flat-render stub, same as the upstream dialog test uses.
+vi.mock("react-virtuoso", () => ({
+  Virtuoso: ({
+    data,
+    itemContent,
+    computeItemKey,
+  }: {
+    data: unknown[];
+    itemContent: (i: number, item: never) => React.ReactNode;
+    computeItemKey: (i: number, item: never) => number;
+  }) => (
+    <div>
+      {data.map((item, i) => (
+        <div key={computeItemKey(i, item as never)}>{itemContent(i, item as never)}</div>
+      ))}
+    </div>
+  ),
 }));
 
 // CEREBRO-PATCH(transcript-dialog-runprompt-stub): the dialog hard-imports the
@@ -69,6 +91,14 @@ describe("TranscriptButton", () => {
     ]);
     mockApi.getAgent.mockResolvedValue({ id: "agent-1", name: "Charlene" });
     mockApi.listRuntimes.mockResolvedValue([]);
+    mockApi.getTaskAccess.mockResolvedValue({
+      task_id: "task-1",
+      agent_id: "agent-1",
+      allowed_tools: ["tools:Read", "firtal_registry"],
+      issued_at: "2026-06-05T19:02:00Z",
+      expires_at: "2026-06-05T20:02:00Z",
+      status: "expired",
+    });
   });
 
   afterEach(() => {
@@ -100,6 +130,10 @@ describe("TranscriptButton", () => {
     expect(await screen.findByRole("dialog", { name: "Agent Execution Transcript" })).toBeInTheDocument();
     expect(screen.getByText("Starter run")).toBeInTheDocument();
     expect(screen.getByText("Command failed with exit code 1")).toBeInTheDocument();
+    expect(await screen.findByText("Task access · 2 allowed")).toBeInTheDocument();
     expect(stopPropagation).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("Task access · 2 allowed"));
+    expect(await screen.findByText("tools:Read")).toBeInTheDocument();
+    expect(screen.getByText(/Every tool call is checked against this exact list/)).toBeInTheDocument();
   });
 });

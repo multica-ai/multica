@@ -39,7 +39,7 @@ export function OverviewControlRoom({
   filters: AnalyticsFilter[];
   onFiltersChange: Dispatch<SetStateAction<AnalyticsFilter[]>>;
   onNewVisual: () => void;
-  onSelectActor: (actorId: string, actorName: string) => void;
+  onSelectActor: (actorId: string, actorName: string, actorType: "member" | "agent") => void;
   builderOpen?: boolean;
   onBuilderOpenChange?: (open: boolean) => void;
 }) {
@@ -87,7 +87,7 @@ export function OverviewControlRoom({
         <ControlRoomKpi label="Tasks failed" value={formatCompact(data?.tasks_failed.value ?? 0)} note="needs attention" tone={(data?.tasks_failed.value ?? 0) > 0 ? "warning" : "positive"} />
         <ControlRoomKpi label="Active agents" value={formatCompact(data?.agents_active.value ?? 0)} note="contributors" />
         <ControlRoomKpi label="Active members" value={formatCompact(data?.members_active.value ?? 0)} note="human collaborators" />
-        <ControlRoomKpi label="Gateway cost" value={formatDollars(data?.spend_cents.value ?? 0)} note="measured spend" />
+        <ControlRoomKpi label="Runtime cost" value={formatDollars(data?.spend_cents.value ?? 0)} note="exact charges plus token estimates" />
       </section>
 
       <div className="grid gap-3 xl:grid-cols-[minmax(0,2fr)_minmax(300px,1fr)]">
@@ -125,10 +125,10 @@ export function OverviewControlRoom({
 
       <div className="grid gap-3 lg:grid-cols-2">
         <ControlRoomPanel title="People driving work" meta="Agents · click a person to filter the complete Dashboard">
-          <PeopleRows rows={data?.top_agents ?? []} loading={isLoading} onSelect={onSelectActor} />
+          <PeopleRows rows={data?.top_agents ?? []} loading={isLoading} actorType="agent" onSelect={onSelectActor} />
         </ControlRoomPanel>
         <ControlRoomPanel title="Human collaboration" meta="Members · click a person to filter the complete Dashboard">
-          <PeopleRows rows={data?.top_members ?? []} loading={isLoading} onSelect={onSelectActor} />
+          <PeopleRows rows={data?.top_members ?? []} loading={isLoading} actorType="member" onSelect={onSelectActor} />
         </ControlRoomPanel>
       </div>
 
@@ -164,14 +164,14 @@ function RankedBuckets({ rows, loading, onSelect }: { rows: { key: string; count
   );
 }
 
-function PeopleRows({ rows, loading, onSelect }: { rows: TopActor[]; loading: boolean; onSelect: (id: string, name: string) => void }) {
+function PeopleRows({ rows, loading, actorType, onSelect }: { rows: TopActor[]; loading: boolean; actorType: "member" | "agent"; onSelect: (id: string, name: string, actorType: "member" | "agent") => void }) {
   if (loading) return <ControlRoomLoading />;
   if (rows.length === 0) return <ControlRoomEmpty>No people activity in the selected range.</ControlRoomEmpty>;
   const maximum = Math.max(...rows.map((row) => row.count), 1);
   return (
     <div className="space-y-1 p-3">
       {rows.map((row) => (
-        <button key={row.id} type="button" onClick={() => onSelect(row.id, row.name)} className="grid w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Filter Dashboard by ${row.name}`}>
+        <button key={row.id} type="button" onClick={() => onSelect(row.id, row.name, actorType)} className="grid w-full grid-cols-[28px_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-2 text-left hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label={`Filter Dashboard by ${row.name}`}>
           <span className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">{row.name.slice(0, 1).toUpperCase()}</span>
           <span className="min-w-0">
             <span className="mb-1 block truncate text-xs font-medium">{row.name}</span>

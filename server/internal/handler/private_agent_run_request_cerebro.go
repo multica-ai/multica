@@ -56,7 +56,6 @@ func redactLockedPrivateAgent(resp *AgentResponse) {
 	resp.CustomEnvKeyCount = 0
 	resp.Model = ""
 	resp.ThinkingLevel = ""
-	resp.PersonaSandbox = ""
 	resp.InfisicalFolders = nil
 	resp.Skills = nil
 	resp.CanTrigger = false

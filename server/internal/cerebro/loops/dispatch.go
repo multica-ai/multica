@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -123,7 +124,7 @@ type DispatchQueries interface {
 	GetAgent(ctx context.Context, id pgtype.UUID) (db.Agent, error)
 	GetAgentRuntime(ctx context.Context, id pgtype.UUID) (db.AgentRuntime, error)
 	CountRunningTasks(ctx context.Context, agentID pgtype.UUID) (int64, error)
-	ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]db.Skill, error)
+	ListAgentSkills(ctx context.Context, agentID pgtype.UUID) ([]db.ListAgentSkillsRow, error)
 	CreateQuickCreateTask(ctx context.Context, arg db.CreateQuickCreateTaskParams) (db.AgentTaskQueue, error)
 	SetAgentTaskModelOverride(ctx context.Context, arg db.SetAgentTaskModelOverrideParams) error
 	SetAgentTaskThinkingOverride(ctx context.Context, arg db.SetAgentTaskThinkingOverrideParams) error
@@ -205,10 +206,11 @@ func (t *TaskDispatcher) DispatchBlock(ctx context.Context, d BlockDispatch) (Bl
 		return BlockDispatchResult{Status: status, Outcome: outcome}, err
 	case BlockHuman:
 		if d.Block.ApproverType == AssigneeMember {
-			if err := t.notifyMember(ctx, d, d.Block.ApproverID, "workflow_human_approval", "Workflow approval needed", d.Block.Prompt); err != nil {
+			prompt := renderApprovalPrompt(d.Block.Prompt, d.PreviousSteps)
+			if err := t.notifyMember(ctx, d, d.Block.ApproverID, "workflow_human_approval", "Workflow approval needed", prompt); err != nil {
 				return BlockDispatchResult{}, err
 			}
-			outcome, _ := json.Marshal(map[string]any{"approver_id": d.Block.ApproverID})
+			outcome, _ := json.Marshal(map[string]any{"approver_id": d.Block.ApproverID, "prompt": prompt})
 			return BlockDispatchResult{Status: StepWaiting, Outcome: outcome}, nil
 		}
 	}
@@ -230,7 +232,7 @@ func (t *TaskDispatcher) DispatchBlock(ctx context.Context, d BlockDispatch) (Bl
 	if !found {
 		return t.applyAllBusyPolicy(ctx, d)
 	}
-	prompt, err := buildBlockPrompt(d.Block)
+	prompt, err := buildBlockPrompt(d.Block, d.PreviousSteps)
 	if err != nil {
 		return BlockDispatchResult{}, err
 	}
@@ -272,13 +274,16 @@ func (t *TaskDispatcher) firstAvailableRunner(ctx context.Context, block Block, 
 		if running >= int64(limit) {
 			continue
 		}
-		if block.Skill != "" {
+		configuredSkills := block.ConfiguredSkills()
+		if len(configuredSkills) > 0 {
 			skills, err := t.queries.ListAgentSkills(ctx, agentID)
 			if err != nil {
 				return AgentRef{}, db.Agent{}, false, fmt.Errorf("dispatch block: list agent skills: %w", err)
 			}
-			if !hasAttachedSkill(skills, block.Skill) {
-				return AgentRef{}, db.Agent{}, false, fmt.Errorf("dispatch block: agent does not have skill %q attached", block.Skill)
+			for _, required := range configuredSkills {
+				if !hasAttachedSkill(skills, required) {
+					return AgentRef{}, db.Agent{}, false, fmt.Errorf("dispatch block: agent does not have skill %q attached", required)
+				}
 			}
 		}
 		return runner, agent, true, nil
@@ -286,7 +291,7 @@ func (t *TaskDispatcher) firstAvailableRunner(ctx context.Context, block Block, 
 	return AgentRef{}, db.Agent{}, false, nil
 }
 
-func hasAttachedSkill(skills []db.Skill, name string) bool {
+func hasAttachedSkill(skills []db.ListAgentSkillsRow, name string) bool {
 	for _, skill := range skills {
 		if skill.Name == name {
 			return true
@@ -402,7 +407,7 @@ func (t *TaskDispatcher) dispatchIssueBoundBlock(ctx context.Context, d BlockDis
 	contextJSON, err := json.Marshal(map[string]any{
 		"type":                     "workflow_block",
 		"workflow_target_issue_id": util.UUIDToString(issue.ID),
-		"workflow_skill_name":      d.Block.Skill,
+		"workflow_skill_names":     d.Block.ConfiguredSkills(),
 		"loop_step": map[string]any{
 			"workflow_id":  util.UUIDToString(d.Run.WorkflowID),
 			"phase_id":     d.Phase.ID,
@@ -437,10 +442,11 @@ func (t *TaskDispatcher) dispatchIssueBoundBlock(ctx context.Context, d BlockDis
 	return t.applyTaskOverrides(ctx, task.ID, runner.Model, runner.ThinkingLevel, "dispatch block")
 }
 
-func buildBlockPrompt(block Block) (string, error) {
+func buildBlockPrompt(block Block, previousSteps []ChainStep) (string, error) {
 	switch block.Type {
 	case BlockSession:
-		prompt := fmt.Sprintf("Use the %q skill to run workflow block %q on this issue.", block.Skill, block.ID)
+		skills := block.ConfiguredSkills()
+		prompt := fmt.Sprintf("Run workflow block %q on this issue using every explicitly selected skill:\n- %s", block.ID, strings.Join(skills, "\n- "))
 		if block.Goal != "" {
 			prompt += "\n\nGoal:\n" + block.Goal
 		}
@@ -449,15 +455,87 @@ func buildBlockPrompt(block Block) (string, error) {
 		return appendOpenStepInstruction(fmt.Sprintf("Run this workflow command exactly as given and leave the result on this issue:\n\n    %s", strings.Join(block.Check, " ")), block), nil
 	case BlockReview:
 		prompt := fmt.Sprintf("Review the actual delivered work on this issue against workflow block %q. Do not accept the builder's summary as proof.", block.ID)
-		if block.Skill != "" {
-			prompt = fmt.Sprintf("Use the %q skill to review the actual delivered work on this issue against workflow block %q. Do not accept the builder's summary as proof.", block.Skill, block.ID)
+		if skills := block.ConfiguredSkills(); len(skills) > 0 {
+			prompt = fmt.Sprintf("Review the actual delivered work on this issue against workflow block %q using every explicitly selected skill:\n- %s\n\nDo not accept the builder's summary as proof.", block.ID, strings.Join(skills, "\n- "))
 		}
 		return appendOpenStepInstruction(prompt+"\n\nRubric:\n"+block.Rubric, block), nil
 	case BlockHuman:
-		return appendOpenStepInstruction("Review the actual delivered work on this issue and make the requested approval decision.\n\nApproval:\n"+block.Prompt, block), nil
+		return appendOpenStepInstruction("Review the actual delivered work on this issue and make the requested approval decision.\n\nApproval:\n"+renderApprovalPrompt(block.Prompt, previousSteps), block), nil
 	default:
 		return "", fmt.Errorf("dispatch block %s: unsupported type %q", block.ID, block.Type)
 	}
+}
+
+var approvalPlaceholderRE = regexp.MustCompile(`\{\{[^{}]+\}\}`)
+
+// renderApprovalPrompt turns the author-defined template into the concrete
+// request an approver sees. Outcomes are generated by the preceding agent task;
+// missing or unknown placeholders disappear instead of leaking template syntax.
+func renderApprovalPrompt(template string, steps []ChainStep) string {
+	var previous *ChainStep
+	for i := range steps {
+		if steps[i].Status == StepCompleted {
+			previous = &steps[i]
+		}
+	}
+	values := map[string]string{}
+	if previous != nil {
+		values["{{previous.block}}"] = previous.BlockID
+		values["{{previous.outcome}}"] = formatOutcome(previous.Outcome)
+		var outcome map[string]any
+		if json.Unmarshal(previous.Outcome, &outcome) == nil {
+			values["{{previous.output}}"] = formatTemplateValue(firstOutcomeValue(outcome, "output", "result", "summary"))
+			values["{{previous.evidence}}"] = formatTemplateValue(outcome["evidence"])
+		}
+	}
+	result := template
+	for placeholder, value := range values {
+		result = strings.ReplaceAll(result, placeholder, value)
+	}
+	result = approvalPlaceholderRE.ReplaceAllString(result, "")
+	lines := strings.Split(result, "\n")
+	for len(lines) > 0 && strings.TrimSpace(lines[len(lines)-1]) == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+func firstOutcomeValue(outcome map[string]any, keys ...string) any {
+	for _, key := range keys {
+		if value, ok := outcome[key]; ok {
+			return value
+		}
+	}
+	return nil
+}
+
+func formatOutcome(raw json.RawMessage) string {
+	var value any
+	if json.Unmarshal(raw, &value) != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	return formatTemplateValue(value)
+}
+
+func formatTemplateValue(value any) string {
+	if value == nil {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	raw, _ := json.MarshalIndent(value, "", "  ")
+	return string(raw)
+}
+
+func approvalPromptFromOutcome(fallback string, outcome json.RawMessage) string {
+	var value struct {
+		Prompt string `json:"prompt"`
+	}
+	if json.Unmarshal(outcome, &value) == nil && value.Prompt != "" {
+		return value.Prompt
+	}
+	return fallback
 }
 
 func appendOpenStepInstruction(prompt string, block Block) string {

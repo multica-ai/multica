@@ -28,6 +28,7 @@ import type {
   AgentEnvResponse,
   UpdateAgentEnvRequest,
   AgentTask,
+  TaskAccessSnapshot,
   AgentActivityBucket,
   AgentRunCount,
   AgentRuntime,
@@ -1079,12 +1080,16 @@ export class ApiClient {
     });
   }
 
-  // CEREBRO-PATCH(cerebro-roles-client): FIR-2130 role subject CRUD + assignment.
+  // CEREBRO-PATCH(cerebro-roles-client): FIR-2130/FIR-3388 role CRUD, versioning, and assignment.
   // Server routes are mounted by `cerebro-roles-routes` in router.go on the
   // generic /api/workspaces/{id}/roles (workspace-scoped) and /api/roles/{id}
   // (workspace-membership-gated) paths.
-  async listCerebroRoles<T = unknown>(wsId: string): Promise<T> {
-    return this.fetch<T>(`/api/workspaces/${wsId}/roles`);
+  async listCerebroRoles<T = unknown>(
+    wsId: string,
+    includeArchived = false,
+  ): Promise<T> {
+    const suffix = includeArchived ? "?include_archived=true" : "";
+    return this.fetch<T>(`/api/workspaces/${wsId}/roles${suffix}`);
   }
 
   async getCerebroRole<T = unknown>(roleId: string): Promise<T> {
@@ -1093,7 +1098,12 @@ export class ApiClient {
 
   async createCerebroRole<T = unknown>(
     wsId: string,
-    body: { name: string; description?: string | null },
+    // CEREBRO-PATCH(cerebro-role-permissions): FIR-3388 create versioned role permissions.
+    body: {
+      name: string;
+      description?: string | null;
+      permissions?: Record<string, unknown>;
+    },
   ): Promise<T> {
     return this.fetch<T>(`/api/workspaces/${wsId}/roles`, {
       method: "POST",
@@ -1103,7 +1113,12 @@ export class ApiClient {
 
   async updateCerebroRole<T = unknown>(
     roleId: string,
-    body: { name?: string; description?: string | null },
+    // CEREBRO-PATCH(cerebro-role-permissions): FIR-3388 update versioned role permissions.
+    body: {
+      name?: string;
+      description?: string | null;
+      permissions?: Record<string, unknown>;
+    },
   ): Promise<T> {
     return this.fetch<T>(`/api/roles/${roleId}`, {
       method: "PATCH",
@@ -1121,7 +1136,8 @@ export class ApiClient {
 
   async assignCerebroRole<T = unknown>(
     roleId: string,
-    body: { subject_type: string; subject_id: string },
+    // CEREBRO-PATCH(cerebro-role-assignment-expiry): FIR-3388 preserve bounded role grants.
+    body: { subject_type: string; subject_id: string; expires_at?: string | null },
   ): Promise<T> {
     return this.fetch<T>(`/api/roles/${roleId}/assignments`, {
       method: "POST",
@@ -2004,13 +2020,7 @@ export class ApiClient {
     return res.folders ?? [];
   }
 
-  // Persona pass-through: lists sandboxes the operator can attach to an
-  // agent. Returns an empty list when persona is not configured server-side.
-  async listPersonaSandboxes(): Promise<{ name: string; description: string; system_owned: boolean }[]> {
-    const res = await this.fetch<{ sandboxes?: { name: string; description: string; system_owned: boolean }[] }>("/api/persona/sandboxes");
-    return res.sandboxes ?? [];
-  }
-
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the obsolete agent persona API.
   async archiveAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
   }
@@ -2366,20 +2376,7 @@ export class ApiClient {
     });
   }
 
-  // updateRuntimePersonaSandbox sets (or clears, via empty string) the
-// CEREBRO-PATCH(client): persona integration additions.
-  // runtime-level persona sandbox cap (E1). Server-side the field is gated to
-  // workspace owner/admin; non-admins get a 403 the UI surfaces inline.
-  async updateRuntimePersonaSandbox(
-    runtimeId: string,
-    personaSandbox: string,
-  ): Promise<AgentRuntime> {
-    return this.fetch(`/api/runtimes/${runtimeId}/persona-sandbox`, {
-      method: "PATCH",
-      body: JSON.stringify({ persona_sandbox: personaSandbox }),
-    });
-  }
-
+  // CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the obsolete runtime persona API.
   // Cascade variant of deleteRuntime. The strict DELETE refuses with
   // structured 409 (`code: "runtime_has_active_agents"`, body carries the
   // blocking agents) when active agents are bound; the front-end then opens
@@ -2400,7 +2397,12 @@ export class ApiClient {
 
   async updateRuntime(
     runtimeId: string,
-    patch: { timezone?: string; visibility?: "private" | "public" },
+    patch: {
+      timezone?: string;
+      visibility?: "private" | "public";
+      custom_name?: string;
+      apply_to_machine?: boolean;
+    },
   ): Promise<AgentRuntime> {
     return this.fetch(`/api/runtimes/${runtimeId}`, {
       method: "PATCH",
@@ -2606,6 +2608,11 @@ export class ApiClient {
 
   async listTaskMessages(taskId: string): Promise<TaskMessagePayload[]> {
     return this.fetch(`/api/tasks/${taskId}/messages`);
+  }
+
+  // CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 expose the task-scoped permission snapshot.
+  async getTaskAccess(taskId: string): Promise<TaskAccessSnapshot> {
+    return this.fetch(`/api/tasks/${taskId}/access`);
   }
 
   async listTasksByIssue(issueId: string): Promise<AgentTask[]> {
@@ -3408,6 +3415,27 @@ export class ApiClient {
 
   async revokePersonalAccessToken(id: string): Promise<void> {
     await this.fetch(`/api/tokens/${id}`, { method: "DELETE" });
+  }
+
+  // CEREBRO-PATCH(cerebro-service-tokens-client): FIR-3608 scoped, non-personal
+  // service-token management (`msv_`). Bodies are `unknown` so the
+  // cerebro-service-tokens package owns the schema via parseWithFallback
+  // (the API Response Compatibility rule in CLAUDE.md).
+  async listServiceTokens<T = unknown>(): Promise<T> {
+    return this.fetch<T>("/api/service-tokens");
+  }
+  async createServiceToken<T = unknown>(body: {
+    name: string;
+    scopes: string[];
+    expires_in_days?: number;
+  }): Promise<T> {
+    return this.fetch<T>("/api/service-tokens", {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+  async revokeServiceToken(id: string): Promise<void> {
+    await this.fetch(`/api/service-tokens/${id}`, { method: "DELETE" });
   }
 
   // Runtime setup tokens — bootstraps a new daemon via one-line installer.

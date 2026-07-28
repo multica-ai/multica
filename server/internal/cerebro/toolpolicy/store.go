@@ -4,8 +4,7 @@ package toolpolicy
 // phase 1, persistence). chain.go holds the pure resolution logic; Store loads
 // the per-layer settings one context needs and folds them through Resolve.
 //
-// The split mirrors permissions.Resolver (Can hits the DB, Decide stays pure):
-// the interesting decision logic lives in the pure Resolve and is exhaustively
+// The interesting decision logic lives in the pure Resolve and is exhaustively
 // unit-tested without a database, while Store is the thin seam that assembles a
 // chain Input from stored rows.
 
@@ -21,6 +20,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/agentvault"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
@@ -164,54 +164,42 @@ type Query struct {
 	Eval ExprEvaluator
 }
 
-// Resolve loads the explicit per-layer settings for the query and folds them
-// into one Effective verdict. A query with no stored rows resolves to Base
-// (Allow by default), so an unconfigured workspace keeps working unchanged.
+// Resolve loads and folds a hard-floor policy chain. Callers for ordinary,
+// authorable permissions must use ResolveDeclared so the key classification
+// selects the contract.
 func (s *Store) Resolve(ctx context.Context, in Query) (Effective, error) {
 	input, err := s.loadInput(ctx, in)
 	if err != nil {
 		return Effective{}, err
 	}
-	return Resolve(input), nil
+	return ResolveWithMode(ModeHardFloor, input), nil
 }
 
 // FlagMemberOverride is the workspace feature-flag key that switches the GENERAL
-// tool-policy gate from the pure tighten-only Resolve to ResolveMemberOverride
+// tool-policy gate from the tighten-only mode to the openable mode
 // (FIR-2175 / FIR-3062). Registry default is ON (`true` in
 // packages/cerebro-feature-flags/registry.ts): a workspace with no explicit
 // flag row uses the member-override model unless an admin opts back out. The
-// handlers read it next to their policyCELEvaluator flag read and pass the
-// result into ResolveGeneral. Note: MemberOverrideEnabled below still resolves
+// handlers read it next to their policyCELEvaluator flag read. Note:
+// MemberOverrideEnabled below still resolves
 // a missing/errored workspace row to OFF, not the registry default — see its
 // doc comment.
 const FlagMemberOverride = "cerebro_member_override"
 
-// ResolveGeneral folds the chain for the GENERAL tool-policy gate — the visible
-// per-tool Allow / Ask / Deny permissions an operator authors in the policy
-// table. When memberOverride is true (the workspace cerebro_member_override flag
-// is on) it resolves through ResolveMemberOverride, the two-stage model where a
-// member's own setting overrides an inherited group/workspace default by
-// specificity and can therefore LOOSEN a group Deny. When false it is identical
-// to Resolve (pure most-restrictive-wins), so the flag's default is a no-op.
-//
-// SECURITY — read before adding a caller. Only the general tool-policy gate may
-// pass memberOverride=true. The deny-by-default FLOORS — credentials, the OS
-// sandbox, repo checkout, and the repo-approval cap — MUST keep calling Resolve
-// directly and MUST NEVER reach this method, because ResolveMemberOverride can
-// loosen and a floor that can be loosened is not a floor: a member could grant
-// themselves access to a secret their group denied. Resolve stays the single
-// load-bearing resolver for every floor; this method is for the visible gate
-// only. See ResolveMemberOverride for the model and chain.go for the contrast.
-func (s *Store) ResolveGeneral(ctx context.Context, in Query, memberOverride bool) (Effective, error) {
+// ResolveDeclared resolves one ordinary permission with its declared
+// resolution contract. Callers no longer choose between Resolve and
+// an openable resolver themselves: hard-floor keys stay tighten-only, while ordinary
+// permissions follow the workspace member-override setting.
+func (s *Store) ResolveDeclared(ctx context.Context, in Query) (Effective, error) {
 	input, err := s.loadInput(ctx, in)
 	if err != nil {
 		return Effective{}, err
 	}
-	mode := ModeHardFloor
-	if memberOverride {
-		mode = ModeOpenable
+	generalMode := ModeHardFloor
+	if s.MemberOverrideEnabled(ctx, in.WorkspaceID) {
+		generalMode = ModeOpenable
 	}
-	return ResolveWithMode(mode, input), nil
+	return ResolveWithMode(DeclaredResolutionMode(in.ToolKey, generalMode), input), nil
 }
 
 // MemberOverrideEnabled reports whether cerebro_member_override is on for the
@@ -239,29 +227,44 @@ func (s *Store) MemberOverrideEnabled(ctx context.Context, workspaceID pgtype.UU
 	return true
 }
 
-// ResolveOptIn loads the explicit settings for the query's (workspace, user,
-// groups, tool) context and decides an OFF-by-default capability gate: false
-// unless an explicit Allow has been granted at the user or group layer. Unlike
-// Resolve (tighten-only, default Allow), this cannot be expressed by the chain
-// — see ResolveOptIn for why a Deny base can never be lifted by a grant. in.Base
-// is ignored; the gate is opt-in by definition.
-func (s *Store) ResolveOptIn(ctx context.Context, in Query) (bool, error) {
+// ResolvePermission applies the one declared contract for in.ToolKey. Read
+// surfaces and enforcement points call this method instead of choosing a
+// resolver themselves. Static authenticated/owner/admin contracts do not need
+// policy rows; opt-in contracts load and condition-filter the same authored
+// layers as the ordinary chain.
+func (s *Store) ResolvePermission(ctx context.Context, in Query, actor platformaccess.Actor) (Effective, error) {
+	contract, special := platformaccess.ForKey(in.ToolKey)
+	if !special {
+		return s.ResolveDeclared(ctx, in)
+	}
+	if contract.Enforcement == platformaccess.EnforcementAuthenticatedRead ||
+		contract.Enforcement == platformaccess.EnforcementOwnerOnly ||
+		(contract.Enforcement == platformaccess.EnforcementHumanOptInOrAdmin && (actor.Admin || actor.Owner)) {
+		return ResolvePermission(Input{}, in.ToolKey, actor), nil
+	}
 	input, err := s.loadInput(ctx, in)
 	if err != nil {
-		return false, err
+		return Effective{}, err
 	}
-	return ResolveOptIn(input), nil
+	return ResolvePermission(input, in.ToolKey, actor), nil
 }
 
-// ResolveActorOptIn is the database-backed form of ResolveActorOptIn. It is
-// used by opt-in capabilities that may be granted directly to one agent while
-// preserving every tighter human/runtime/system ceiling.
-func (s *Store) ResolveActorOptIn(ctx context.Context, in Query, agentActor bool) (bool, error) {
-	input, err := s.loadInput(ctx, in)
-	if err != nil {
-		return false, err
+func (s *Store) workspaceActorIsOwner(ctx context.Context, workspaceID, userID pgtype.UUID) bool {
+	return s.workspaceActorRole(ctx, workspaceID, userID) == "owner"
+}
+
+func (s *Store) workspaceActorRole(ctx context.Context, workspaceID, userID pgtype.UUID) string {
+	if s == nil || s.pool == nil || !workspaceID.Valid || !userID.Valid {
+		return ""
 	}
-	return ResolveActorOptIn(input, agentActor), nil
+	var role string
+	if err := s.pool.QueryRow(ctx, `
+		SELECT role FROM member
+		WHERE workspace_id = $1 AND user_id = $2
+	`, workspaceID, userID).Scan(&role); err != nil {
+		return ""
+	}
+	return role
 }
 
 // loadInput fetches the rows for the query and assembles a chain Input. Several
@@ -316,25 +319,39 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 	if len(groupSettings) > 0 {
 		input.Settings[LayerGroup] = CombineGroups(groupSettings...)
 	}
-	roleSettings, err := s.activeRoleSettings(ctx, in, reqCtx)
-	if err != nil {
+	if err := s.applyActiveRoles(ctx, in, reqCtx, &input); err != nil {
 		return Input{}, err
 	}
-	if len(roleSettings) > 0 {
-		roleSetting := CombineGroups(roleSettings...)
-		if existing, ok := input.Settings[LayerAgent]; ok {
-			// A role grant folds into the agent layer, but it may only TIGHTEN an
-			// explicit agent-layer choice, never loosen it. CombineGroups is most-
-			// permissive (allow<ask<deny), so combining a role `allow` with an
-			// explicit agent `deny` here silently erased the deny — a role could
-			// cancel an administrator's "Deny this tool for this agent" (FIR-3403).
-			// Where the agent has no explicit row the role setting applies verbatim
-			// (this branch is skipped), so a role still grants access as intended.
-			roleSetting = MoreRestrictive(existing, roleSetting)
-		}
-		input.Settings[LayerAgent] = roleSetting
-	}
 	return input, nil
+}
+
+func (s *Store) applyActiveRoles(ctx context.Context, in Query, reqCtx RequestContext, input *Input) error {
+	roleSettings, roleSources, err := s.activeRoleSettings(ctx, in, reqCtx)
+	if err != nil {
+		return err
+	}
+	applyResolvedRoles(input, roleSettings, roleSources)
+	return nil
+}
+
+func applyResolvedRoles(input *Input, roleSettings []Setting, roleSources []RoleSource) {
+	if len(roleSettings) == 0 {
+		return
+	}
+	roleSetting := CombineGroups(roleSettings...)
+	roleDecides := true
+	if existing, ok := input.Settings[LayerAgent]; ok {
+		// A role grant folds into the agent layer, but it may only TIGHTEN an
+		// explicit agent-layer choice, never loosen it. CombineGroups is most-
+		// permissive (allow<ask<deny), so combining a role `allow` with an
+		// explicit agent `deny` here silently erased the deny — a role could
+		// cancel an administrator's "Deny this tool for this agent" (FIR-3403).
+		roleSetting = MoreRestrictive(existing, roleSetting)
+		roleDecides = roleSetting != existing
+	}
+	input.Settings[LayerAgent] = roleSetting
+	input.RoleSources = roleSources
+	input.RoleDecidesAgent = roleDecides
 }
 
 // activeRoleSettings expands unexpired member/agent bindings into the policy
@@ -346,32 +363,42 @@ func (s *Store) loadInput(ctx context.Context, in Query) (Input, error) {
 // like ListCerebroToolPolicyForContext) and conditions (evaluated through
 // ConditionedSetting). Reading only 'setting' let a resource- or
 // condition-scoped allow act as a whole-tool allow (FIR-3403 finding 2).
-func (s *Store) activeRoleSettings(ctx context.Context, in Query, reqCtx RequestContext) ([]Setting, error) {
+func (s *Store) activeRoleSettings(ctx context.Context, in Query, reqCtx RequestContext) ([]Setting, []RoleSource, error) {
 	if s == nil || s.pool == nil {
-		return nil, errors.New("toolpolicy: role binding store is not configured")
+		return nil, nil, errors.New("toolpolicy: role binding store is not configured")
+	}
+	// Workspace-wide catalog views carry no concrete actor. Avoid a role query
+	// for every catalog row when there cannot be an active assignment to expand.
+	if !in.AgentID.Valid && !in.UserID.Valid {
+		return nil, nil, nil
 	}
 	rows, err := s.pool.Query(ctx, `
-		SELECT r.permissions -> $4
+		SELECT r.id, r.name, r.version, r.permissions -> $4
 		FROM cerebro_role_assignment b
 		JOIN cerebro_role r ON r.id=b.role_id
 		WHERE r.workspace_id=$1
+		  AND r.archived_at IS NULL
 		  AND (b.expires_at IS NULL OR b.expires_at > now())
 		  AND ((b.subject_type='agent' AND b.subject_id=$2)
 		    OR (b.subject_type='member' AND b.subject_id=$3))
 		  AND r.permissions ? $4`, in.WorkspaceID, in.AgentID, in.UserID, in.ToolKey)
 	if err != nil {
-		return nil, fmt.Errorf("toolpolicy: load role bindings: %w", err)
+		return nil, nil, fmt.Errorf("toolpolicy: load role bindings: %w", err)
 	}
 	defer rows.Close()
 	var out []Setting
+	var sources []RoleSource
 	for rows.Next() {
+		var id pgtype.UUID
+		var name string
+		var version int32
 		var raw []byte
-		if err := rows.Scan(&raw); err != nil {
-			return nil, err
+		if err := rows.Scan(&id, &name, &version, &raw); err != nil {
+			return nil, nil, err
 		}
 		rules, err := decodeRolePermission(raw)
 		if err != nil {
-			return nil, fmt.Errorf("toolpolicy: decode role permission for %q: %w", in.ToolKey, err)
+			return nil, nil, fmt.Errorf("toolpolicy: decode role permission for %q: %w", in.ToolKey, err)
 		}
 		for _, rule := range rules {
 			if rule.ResourcePattern != in.ResourcePattern {
@@ -386,9 +413,15 @@ func (s *Store) activeRoleSettings(ctx context.Context, in Query, reqCtx Request
 				continue
 			}
 			out = append(out, setting)
+			sources = append(sources, RoleSource{
+				ID:      util.UUIDToString(id),
+				Name:    name,
+				Version: version,
+				Setting: setting,
+			})
 		}
 	}
-	return out, rows.Err()
+	return out, sources, rows.Err()
 }
 
 // rolePermissionRule is one rule inside a role's per-tool permission list —

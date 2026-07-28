@@ -47,14 +47,13 @@ UPDATE agent SET
     description     = $3,
     model           = $4,
     thinking_level  = $5,
-    persona_sandbox = $6,
-    mcp_config      = $7,
-    custom_args     = $8,
-    runtime_config  = $9,
-    context_version = $10,
+    mcp_config      = $6,
+    custom_args     = $7,
+    runtime_config  = $8,
+    context_version = $9,
     updated_at      = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
 `
 
 type ApplyAgentContextSnapshotParams struct {
@@ -63,7 +62,6 @@ type ApplyAgentContextSnapshotParams struct {
 	Description    string      `json:"description"`
 	Model          pgtype.Text `json:"model"`
 	ThinkingLevel  pgtype.Text `json:"thinking_level"`
-	PersonaSandbox pgtype.Text `json:"persona_sandbox"`
 	McpConfig      []byte      `json:"mcp_config"`
 	CustomArgs     []byte      `json:"custom_args"`
 	RuntimeConfig  []byte      `json:"runtime_config"`
@@ -82,7 +80,6 @@ func (q *Queries) ApplyAgentContextSnapshot(ctx context.Context, arg ApplyAgentC
 		arg.Description,
 		arg.Model,
 		arg.ThinkingLevel,
-		arg.PersonaSandbox,
 		arg.McpConfig,
 		arg.CustomArgs,
 		arg.RuntimeConfig,
@@ -112,7 +109,6 @@ func (q *Queries) ApplyAgentContextSnapshot(ctx context.Context, arg ApplyAgentC
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
-		&i.PersonaSandbox,
 		&i.SurfaceVisibility,
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
@@ -126,7 +122,7 @@ UPDATE agent SET
     context_version = $2,
     updated_at      = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
 `
 
 type BumpAgentContextVersionParams struct {
@@ -163,7 +159,6 @@ func (q *Queries) BumpAgentContextVersion(ctx context.Context, arg BumpAgentCont
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
-		&i.PersonaSandbox,
 		&i.SurfaceVisibility,
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
@@ -332,15 +327,15 @@ func (q *Queries) GetAgentChangeRequestForUpdate(ctx context.Context, id pgtype.
 const getAgentContext = `-- name: GetAgentContext :one
 
 
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
 WHERE id = $1
 `
 
 // Agent Office (FIR-1775): versioning + governance for an agent's full runtime
 // context, mirroring the skill-governance model (skill_version /
 // skill_change_request) but for the agent COMPOSITE: instructions, bound skills,
-// model, thinking_level, mcp_config, custom_args, runtime_config,
-// persona_sandbox, and the NAMES (never values) of custom_env keys.
+// model, thinking_level, mcp_config, custom_args, runtime_config, and the
+// NAMES (never values) of custom_env keys.
 //
 // Schema lives in 9100_cerebro_agent_context_versioning.{up,down}.sql.
 // --- Agent row reads (context governance columns + composite source) ---
@@ -370,7 +365,6 @@ func (q *Queries) GetAgentContext(ctx context.Context, id pgtype.UUID) (Agent, e
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
-		&i.PersonaSandbox,
 		&i.SurfaceVisibility,
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
@@ -380,7 +374,7 @@ func (q *Queries) GetAgentContext(ctx context.Context, id pgtype.UUID) (Agent, e
 }
 
 const getAgentContextInWorkspace = `-- name: GetAgentContextInWorkspace :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -415,7 +409,6 @@ func (q *Queries) GetAgentContextInWorkspace(ctx context.Context, arg GetAgentCo
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
-		&i.PersonaSandbox,
 		&i.SurfaceVisibility,
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,
@@ -511,18 +504,19 @@ func (q *Queries) GetWorkspaceReposForContextLint(ctx context.Context, id pgtype
 }
 
 const insertAgentSkillForContext = `-- name: InsertAgentSkillForContext :exec
-INSERT INTO agent_skill (agent_id, skill_id)
-VALUES ($1, $2)
-ON CONFLICT (agent_id, skill_id) DO NOTHING
+INSERT INTO agent_skill (agent_id, skill_id, always_on)
+VALUES ($1, $2, $3)
+ON CONFLICT (agent_id, skill_id) DO UPDATE SET always_on = EXCLUDED.always_on
 `
 
 type InsertAgentSkillForContextParams struct {
-	AgentID pgtype.UUID `json:"agent_id"`
-	SkillID pgtype.UUID `json:"skill_id"`
+	AgentID  pgtype.UUID `json:"agent_id"`
+	SkillID  pgtype.UUID `json:"skill_id"`
+	AlwaysOn bool        `json:"always_on"`
 }
 
 func (q *Queries) InsertAgentSkillForContext(ctx context.Context, arg InsertAgentSkillForContextParams) error {
-	_, err := q.db.Exec(ctx, insertAgentSkillForContext, arg.AgentID, arg.SkillID)
+	_, err := q.db.Exec(ctx, insertAgentSkillForContext, arg.AgentID, arg.SkillID, arg.AlwaysOn)
 	return err
 }
 
@@ -829,27 +823,35 @@ func (q *Queries) ListAgentContextVersions(ctx context.Context, agentID pgtype.U
 }
 
 const listAgentSkillIDsForContext = `-- name: ListAgentSkillIDsForContext :many
-SELECT skill_id FROM agent_skill
+SELECT skill_id, always_on FROM agent_skill
 WHERE agent_id = $1
 ORDER BY skill_id
 `
 
+type ListAgentSkillIDsForContextRow struct {
+	SkillID  pgtype.UUID `json:"skill_id"`
+	AlwaysOn bool        `json:"always_on"`
+}
+
 // ListAgentSkillIDsForContext returns the skill ids currently bound to the
 // agent, in a stable order so two snapshots of the same binding set compare
 // equal byte-for-byte.
-func (q *Queries) ListAgentSkillIDsForContext(ctx context.Context, agentID pgtype.UUID) ([]pgtype.UUID, error) {
+//
+// FIR-3805: always_on rides along because it is a property of the BINDING, not
+// of the skill, and it is versioned exactly like the binding set itself.
+func (q *Queries) ListAgentSkillIDsForContext(ctx context.Context, agentID pgtype.UUID) ([]ListAgentSkillIDsForContextRow, error) {
 	rows, err := q.db.Query(ctx, listAgentSkillIDsForContext, agentID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []pgtype.UUID{}
+	items := []ListAgentSkillIDsForContextRow{}
 	for rows.Next() {
-		var skill_id pgtype.UUID
-		if err := rows.Scan(&skill_id); err != nil {
+		var i ListAgentSkillIDsForContextRow
+		if err := rows.Scan(&i.SkillID, &i.AlwaysOn); err != nil {
 			return nil, err
 		}
-		items = append(items, skill_id)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -897,7 +899,7 @@ func (q *Queries) ListAgentSkillsForContextLint(ctx context.Context, agentID pgt
 }
 
 const listAgentsForContextLint = `-- name: ListAgentsForContextLint :many
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version FROM agent
 WHERE workspace_id = $1 AND archived_at IS NULL
 ORDER BY name
 `
@@ -936,7 +938,6 @@ func (q *Queries) ListAgentsForContextLint(ctx context.Context, workspaceID pgty
 			&i.McpConfig,
 			&i.Model,
 			&i.ThinkingLevel,
-			&i.PersonaSandbox,
 			&i.SurfaceVisibility,
 			&i.ContextOwnerID,
 			&i.ContextApproverIds,
@@ -1104,6 +1105,26 @@ func (q *Queries) ReviewAgentChangeRequest(ctx context.Context, arg ReviewAgentC
 	return i, err
 }
 
+const setAgentSkillAlwaysOn = `-- name: SetAgentSkillAlwaysOn :exec
+UPDATE agent_skill
+SET always_on = (skill_id = ANY($2::uuid[]))
+WHERE agent_id = $1
+`
+
+type SetAgentSkillAlwaysOnParams struct {
+	AgentID          pgtype.UUID   `json:"agent_id"`
+	AlwaysOnSkillIds []pgtype.UUID `json:"always_on_skill_ids"`
+}
+
+// SetAgentSkillAlwaysOn (FIR-3805) replaces the agent's whole always-on set in
+// one statement: every binding named in the list is flagged, every other
+// binding is cleared. Ids that are not bound to this agent simply match no row,
+// so the always-on set can never drift out of the bound set.
+func (q *Queries) SetAgentSkillAlwaysOn(ctx context.Context, arg SetAgentSkillAlwaysOnParams) error {
+	_, err := q.db.Exec(ctx, setAgentSkillAlwaysOn, arg.AgentID, arg.AlwaysOnSkillIds)
+	return err
+}
+
 const updateAgentContextOwnership = `-- name: UpdateAgentContextOwnership :one
 
 UPDATE agent SET
@@ -1111,7 +1132,7 @@ UPDATE agent SET
     context_approver_ids = $3,
     updated_at           = now()
 WHERE id = $1
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, persona_sandbox, surface_visibility, context_owner_id, context_approver_ids, context_version
+RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, surface_visibility, context_owner_id, context_approver_ids, context_version
 `
 
 type UpdateAgentContextOwnershipParams struct {
@@ -1147,7 +1168,6 @@ func (q *Queries) UpdateAgentContextOwnership(ctx context.Context, arg UpdateAge
 		&i.McpConfig,
 		&i.Model,
 		&i.ThinkingLevel,
-		&i.PersonaSandbox,
 		&i.SurfaceVisibility,
 		&i.ContextOwnerID,
 		&i.ContextApproverIds,

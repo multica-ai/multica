@@ -23,7 +23,7 @@ import (
 // ChatRunStreamBroker is the seam the handler uses to receive chat-run
 // events; satisfied by *chatstream.Broker, wired by the router.
 type ChatRunStreamBroker interface {
-	Subscribe(sessionID string) (<-chan chatstream.Event, func())
+	Subscribe(sessionID, taskID string) (<-chan chatstream.Event, func())
 }
 
 // chatStreamMaxWait caps how long a single stream request stays open waiting
@@ -42,7 +42,8 @@ const chatStreamPingInterval = 15 * time.Second
 //     current pending task is used, and 204 No Content is returned when no
 //     run is active (mirrors the AI SDK resume contract).
 //   - 200 responses are `text/event-stream` carrying UI-message-stream v1
-//     chunks: start → text-start → text-delta → text-end → finish
+//     chunks: start → live tool input/result chunks → text-start →
+//     text-delta → text-end → finish
 //     (messageMetadata: taskId, messageId, elapsedMs, model, usage) →
 //     `[DONE]`. Failures surface as an in-stream `error` chunk with the real
 //     failure text — never a silently dropped socket.
@@ -96,7 +97,8 @@ func (h *Handler) StreamChatSessionRun(w http.ResponseWriter, r *http.Request) {
 
 	// Subscribe before the terminal re-check so a run finishing between the
 	// check and the subscription cannot slip through unobserved.
-	sub, cancelSub := h.ChatStream.Subscribe(resolvedSessionID)
+	taskID := uuidToString(task.ID)
+	sub, cancelSub := h.ChatStream.Subscribe(resolvedSessionID, taskID)
 	defer cancelSub()
 
 	sw, err := chatstream.NewWriter(w)
@@ -118,7 +120,19 @@ func (h *Handler) StreamChatSessionRun(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	taskID := uuidToString(task.ID)
+	messageID := ""
+	if msg, err := h.Queries.GetAssistantChatMessageByTaskID(r.Context(), task.ID); err == nil {
+		messageID = uuidToString(msg.ID)
+	}
+	if sw.WriteStart(messageID) != nil {
+		return
+	}
+	toolParts := chatstream.NewToolPartBuilder()
+	lastSeq, err := h.writeChatTaskToolParts(r.Context(), sw, toolParts, task.ID, 0)
+	if err != nil {
+		sw.WriteError("failed to load task progress")
+		return
+	}
 	ping := time.NewTicker(chatStreamPingInterval)
 	defer ping.Stop()
 	maxWait := time.NewTimer(chatStreamMaxWait)
@@ -134,9 +148,22 @@ func (h *Handler) StreamChatSessionRun(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			switch ev.Type {
+			case chatstream.EventMessage:
+				if ev.Message == nil || ev.Message.Seq <= lastSeq {
+					continue
+				}
+				if sw.WriteParts(toolParts.Parts(*ev.Message)) != nil {
+					return
+				}
+				lastSeq = ev.Message.Seq
+				continue
 			case chatstream.EventDone:
+				if _, err := h.writeChatTaskToolParts(r.Context(), sw, toolParts, task.ID, lastSeq); err != nil {
+					sw.WriteError("failed to load final task progress")
+					return
+				}
 				parts := h.chatStreamArtifactParts(r, ev.Content, workspaceID)
-				sw.WriteAssistantMessageWithParts(ev.MessageID, ev.Content, parts, h.chatStreamFinishMetadata(r.Context(), task.ID, ev.MessageID, ev.ElapsedMs))
+				sw.WriteAssistantMessageTail(ev.Content, parts, h.chatStreamFinishMetadata(r.Context(), task.ID, ev.MessageID, ev.ElapsedMs))
 			case chatstream.EventFailed, chatstream.EventCancelled:
 				if t, err := h.Queries.GetAgentTask(r.Context(), task.ID); err == nil {
 					task = t
@@ -177,8 +204,44 @@ func (h *Handler) replayCompletedChatTask(r *http.Request, sw *chatstream.Writer
 		elapsedMs = msg.ElapsedMs.Int64
 	}
 	messageID := uuidToString(msg.ID)
+	if sw.WriteStart(messageID) != nil {
+		return
+	}
+	toolParts := chatstream.NewToolPartBuilder()
+	if _, err := h.writeChatTaskToolParts(ctx, sw, toolParts, task.ID, 0); err != nil {
+		sw.WriteError("failed to load task progress")
+		return
+	}
 	parts := h.chatStreamArtifactParts(r, msg.Content, ctxWorkspaceID(ctx))
-	sw.WriteAssistantMessageWithParts(messageID, msg.Content, parts, h.chatStreamFinishMetadata(ctx, task.ID, messageID, elapsedMs))
+	sw.WriteAssistantMessageTail(msg.Content, parts, h.chatStreamFinishMetadata(ctx, task.ID, messageID, elapsedMs))
+}
+
+// writeChatTaskToolParts catches a stream up from the persisted, redacted task
+// transcript. Reading before live events and once more at completion closes
+// both the subscribe race and the broker's deliberate slow-client drop path.
+func (h *Handler) writeChatTaskToolParts(
+	ctx context.Context,
+	sw *chatstream.Writer,
+	builder *chatstream.ToolPartBuilder,
+	taskID pgtype.UUID,
+	afterSeq int,
+) (int, error) {
+	messages, err := h.Queries.ListTaskMessagesSince(ctx, db.ListTaskMessagesSinceParams{
+		TaskID: taskID,
+		Seq:    int32(afterSeq),
+	})
+	if err != nil {
+		return afterSeq, err
+	}
+	lastSeq := afterSeq
+	for _, message := range messages {
+		payload := taskMessageToPayload(message, uuidToString(taskID), "")
+		if err := sw.WriteParts(builder.Parts(payload)); err != nil {
+			return lastSeq, err
+		}
+		lastSeq = int(message.Seq)
+	}
+	return lastSeq, nil
 }
 
 // chatTaskFailureText resolves the most useful failure text for a terminal

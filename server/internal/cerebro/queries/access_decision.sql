@@ -8,19 +8,3 @@ INSERT INTO cerebro_access_decision_ledger (
     $7, $8, $9, $10,
     $11, $12, $13, $14, $15
 );
-
--- name: ReportCerebroAccessDecisionLedger :many
-SELECT
-    agent_id,
-    runtime_id,
-    COALESCE(canonical_capability_id, observed_tool_name) AS tool,
-    CASE
-        WHEN COUNT(DISTINCT policy_decision) = 1 THEN MIN(policy_decision)
-        ELSE ''::text
-    END AS policy_decision,
-    COUNT(*)::bigint AS total,
-    COUNT(*) FILTER (WHERE differs)::bigint AS diffs
-FROM cerebro_access_decision_ledger
-WHERE workspace_id = $1
-GROUP BY agent_id, runtime_id, COALESCE(canonical_capability_id, observed_tool_name)
-ORDER BY agent_id, runtime_id, tool;

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const invalidateQueries = vi.fn();
 const handlers = new Map<string, () => void>();
-const featureFlagState = { enabled: true };
+const featureFlagState = { inbox: true, gate: true };
 
 vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ invalidateQueries }),
@@ -14,7 +14,8 @@ vi.mock("@multica/core/realtime", () => ({
 }));
 
 vi.mock("@multica/cerebro-feature-flags", () => ({
-  useFlagValue: () => featureFlagState.enabled,
+  useFlagValue: (key: string) =>
+    key === "cerebro_approval_gate" ? featureFlagState.gate : featureFlagState.inbox,
 }));
 
 import { ApprovalRealtime } from "./use-approval-realtime";
@@ -22,14 +23,23 @@ import { ApprovalRealtime } from "./use-approval-realtime";
 beforeEach(() => {
   invalidateQueries.mockReset();
   handlers.clear();
-  featureFlagState.enabled = true;
+  featureFlagState.inbox = true;
+  featureFlagState.gate = true;
 });
 
 describe("ApprovalRealtime", () => {
   it("does not subscribe when the approvals feature flag is off", () => {
-    featureFlagState.enabled = false;
+    featureFlagState.inbox = false;
+    featureFlagState.gate = false;
     render(<ApprovalRealtime wsId="workspace-1" />);
     expect(handlers).toHaveLength(0);
+  });
+
+  it("subscribes while Ask enforcement is on even if the inbox flag is off", () => {
+    featureFlagState.inbox = false;
+    featureFlagState.gate = true;
+    render(<ApprovalRealtime wsId="workspace-1" />);
+    expect(handlers.has("approval:created")).toBe(true);
   });
 
   it.each([

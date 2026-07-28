@@ -44,8 +44,9 @@ export function useArchiveAgentsAndDeleteRuntime(wsId: string) {
   });
 }
 
-// useUpdateRuntime patches editable fields on a runtime (visibility).
-// Invalidates the runtime list so the picker disabled-state recomputes.
+// useUpdateRuntime patches editable fields on a runtime (visibility, custom
+// name). Invalidates the runtime list so the picker disabled-state and
+// display names recompute.
 export function useUpdateRuntime(wsId: string) {
   const qc = useQueryClient();
   return useMutation({
@@ -54,50 +55,13 @@ export function useUpdateRuntime(wsId: string) {
       patch,
     }: {
       runtimeId: string;
-      patch: { visibility?: "private" | "public" };
+      patch: {
+        visibility?: "private" | "public";
+        // Empty string clears the custom name; omit to leave unchanged.
+        custom_name?: string;
+        apply_to_machine?: boolean;
+      };
     }) => api.updateRuntime(runtimeId, patch),
-    onSettled: () => {
-      qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
-    },
-  });
-}
-
-// CEREBRO-PATCH(mutations): persona integration additions.
-// useUpdateRuntimePersonaSandbox sets/clears the runtime-level persona
-// sandbox cap (E1). Optimistic update for snappy UX; rollback on failure
-// matches the per-runtime sandbox toggle pattern next door so the dropdown
-// behaves identically. Server gates the field to workspace owner/admin —
-// non-admins see a 403 surfaced inline.
-export function useUpdateRuntimePersonaSandbox(wsId: string) {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (params: { runtimeId: string; personaSandbox: string }) =>
-      api.updateRuntimePersonaSandbox(params.runtimeId, params.personaSandbox),
-    onMutate: async (params) => {
-      const keys = [runtimeKeys.list(wsId), runtimeKeys.listMine(wsId)];
-      await Promise.all(keys.map((k) => qc.cancelQueries({ queryKey: k })));
-      const snapshots = keys.map(
-        (k) => [k, qc.getQueryData<AgentRuntime[]>(k)] as const,
-      );
-      for (const [k, list] of snapshots) {
-        if (!list) continue;
-        qc.setQueryData<AgentRuntime[]>(
-          k,
-          list.map((r) =>
-            r.id === params.runtimeId
-              ? { ...r, persona_sandbox: params.personaSandbox }
-              : r,
-          ),
-        );
-      }
-      return { snapshots };
-    },
-    onError: (_err, _params, context) => {
-      if (!context) return;
-      for (const [k, value] of context.snapshots) {
-        qc.setQueryData(k, value);
-      }
-    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     },

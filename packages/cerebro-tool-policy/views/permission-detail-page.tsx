@@ -9,7 +9,14 @@
 
 import { useMemo, useState } from "react";
 import { useQueries, useQuery } from "@tanstack/react-query";
-import { ArrowLeft, ChevronDown, Search } from "lucide-react";
+import {
+  ArrowLeft,
+  Bot,
+  ChevronDown,
+  Search,
+  ShieldCheck,
+  Users,
+} from "lucide-react";
 
 import {
   Tabs,
@@ -39,7 +46,11 @@ import {
   getPermissionUsage,
 } from "../api";
 import type { PermissionChange, PermissionUsageRow } from "../api";
-import { fetchToolPolicyTable } from "../core";
+import {
+  fetchToolPolicyTable,
+  permissionRoleAssignmentsOptions,
+  permissionRolesOptions,
+} from "../core";
 import {
   buildPermissionAuditContexts,
   buildPermissionAuditRows,
@@ -439,6 +450,23 @@ export function PermissionDetailPage({
     queryFn: () => getPermissionUsage(wsId, toolKey),
     enabled: enabled && !!wsId && !!toolKey,
   });
+  const rolesQuery = useQuery({
+    ...permissionRolesOptions(wsId),
+    enabled: enabled && !!wsId,
+  });
+  const applicableRoles = useMemo(
+    () =>
+      (rolesQuery.data ?? []).filter((role) =>
+        Object.prototype.hasOwnProperty.call(role.permissions, toolKey),
+      ),
+    [rolesQuery.data, toolKey],
+  );
+  const roleAssignmentQueries = useQueries({
+    queries: applicableRoles.map((role) => ({
+      ...permissionRoleAssignmentsOptions(wsId, role.id),
+      enabled: enabled && !!wsId,
+    })),
+  });
 
   const directory = useHolderDirectory(wsId, enabled);
   const [activeTab, setActiveTab] = useState("audit");
@@ -598,6 +626,39 @@ export function PermissionDetailPage({
     [agentUserContexts, agentUserQueries, directory.members],
   );
   const agentUsersLoading = agentUserQueries.some((query) => query.isLoading);
+  const permissionQuestions = [
+    {
+      tab: "audit",
+      icon: Users,
+      title: "What can each person do?",
+      body: "See every member's effective decision and the layers behind it.",
+    },
+    {
+      tab: "roles",
+      icon: ShieldCheck,
+      title: "Which Roles and assignments apply?",
+      body: "See the Roles that include this permission and who receives them.",
+    },
+    {
+      tab: "agents",
+      icon: Bot,
+      title: "What can people do through one agent?",
+      body: "Choose an agent and compare every member's effective access through it.",
+    },
+  ] as const;
+  const detailTabs = [
+    { tab: "audit", label: "Permission audit" },
+    { tab: "roles", label: `Roles ${applicableRoles.length}` },
+    { tab: "agents", label: `Agents ${directory.agents.length}` },
+    {
+      tab: "changes",
+      label: `Changes ${(changesQuery.data?.changes ?? []).length}`,
+    },
+    {
+      tab: "usage",
+      label: `Usage ${(usageQuery.data?.usage ?? []).length}`,
+    },
+  ] as const;
 
   // Safety fallback: the route always registers, so guard the flag here. Nothing
   // links to the page while off, so this is only reached by a hand-typed URL.
@@ -624,7 +685,7 @@ export function PermissionDetailPage({
     resolvedQueries.some((query) => query.isLoading);
 
   return (
-    <main className="mx-auto w-full max-w-[1400px] p-4 sm:p-6">
+    <main className="mx-auto h-full min-h-0 w-full max-w-[1400px] overflow-y-auto p-4 sm:p-6">
       <Button variant="ghost" size="sm" onClick={onBack} className="mb-4">
         <ArrowLeft className="size-4" /> Back
       </Button>
@@ -643,17 +704,80 @@ export function PermissionDetailPage({
         </div>
       </header>
 
+      <div className="mb-4 rounded-lg border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+        Roles are evaluated together with Workspace, Runtime, Agent, Group and
+        Member rules. The live result follows this permission&apos;s declared
+        override and safety-floor contract.
+      </div>
+
+      <section
+        className="mb-4 overflow-hidden rounded-xl border bg-card"
+        aria-labelledby="permission-detail-questions"
+      >
+        <div className="border-b px-4 py-3">
+          <h2 id="permission-detail-questions" className="font-semibold">
+            Choose the question you want to answer
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
+            This page turns one permission around so you can inspect people,
+            Roles or agents.
+          </p>
+        </div>
+        <div className="grid gap-px bg-border md:grid-cols-3">
+          {permissionQuestions.map(
+            ({ tab, icon: Icon, title, body }) => (
+              <button
+                key={tab}
+                type="button"
+                aria-pressed={activeTab === tab}
+                onClick={() => setActiveTab(tab)}
+                className={`min-w-0 bg-card p-4 text-left transition-colors hover:bg-muted/60 ${
+                  activeTab === tab ? "ring-2 ring-inset ring-primary" : ""
+                }`}
+              >
+                <span className="flex items-center gap-2 text-sm font-medium">
+                  <Icon className="size-4 text-muted-foreground" />
+                  {title}
+                </span>
+                <span className="mt-1.5 block text-xs leading-relaxed text-muted-foreground">
+                  {body}
+                </span>
+              </button>
+            ),
+          )}
+        </div>
+      </section>
+
       <Tabs value={activeTab} onValueChange={setActiveTab}>
-        <TabsList variant="line" className="mb-3">
-          <TabsTrigger value="audit">Permission audit</TabsTrigger>
-          <TabsTrigger value="agents">Agents {directory.agents.length}</TabsTrigger>
-          <TabsTrigger value="changes">
-            Changes {(changesQuery.data?.changes ?? []).length}
-          </TabsTrigger>
-          <TabsTrigger value="usage">
-            Usage {(usageQuery.data?.usage ?? []).length}
-          </TabsTrigger>
+        <TabsList className="hidden" hidden>
+          {detailTabs.map(({ tab, label }) => (
+            <TabsTrigger key={tab} value={tab}>
+              {label}
+            </TabsTrigger>
+          ))}
         </TabsList>
+        <div
+          role="tablist"
+          aria-label="Permission detail views"
+          className="mb-3 flex w-full gap-1 overflow-x-auto rounded-lg bg-muted p-1"
+        >
+          {detailTabs.map(({ tab, label }) => (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              aria-selected={activeTab === tab}
+              onClick={() => setActiveTab(tab)}
+              className={`shrink-0 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                activeTab === tab
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
 
         <TabsContent value="audit" className="pt-2">
           <section
@@ -725,6 +849,80 @@ export function PermissionDetailPage({
             ) : (
               <div className={!isEnforced ? "opacity-60" : ""}>
                 <PermissionAuditMatrix rows={filteredAuditRows} />
+              </div>
+            )}
+          </section>
+        </TabsContent>
+
+        <TabsContent value="roles" className="pt-2">
+          <section className="overflow-hidden rounded-xl border bg-card">
+            <div className="border-b p-4">
+              <h2 className="font-semibold">Roles</h2>
+              <p className="text-sm text-muted-foreground">
+                Reusable profiles that include this permission and the agents or
+                members currently assigned to them.
+              </p>
+            </div>
+            {rolesQuery.isLoading ||
+            roleAssignmentQueries.some((query) => query.isLoading) ? (
+              <p className="p-6 text-sm text-muted-foreground">Loading Roles…</p>
+            ) : applicableRoles.length === 0 ? (
+              <p className="p-6 text-sm text-muted-foreground">
+                No Role includes this permission.
+              </p>
+            ) : (
+              <div className="divide-y">
+                {applicableRoles.map((role, index) => {
+                  const assignments = roleAssignmentQueries[index]?.data ?? [];
+                  const decisions = (role.permissions[toolKey] ?? []).map(
+                    (rule) => rule.setting,
+                  );
+                  const decision = decisions.includes("deny")
+                    ? "deny"
+                    : decisions.includes("ask")
+                      ? "ask"
+                      : "allow";
+                  return (
+                    <article key={role.id} className="space-y-3 p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="font-medium">{role.name}</h3>
+                            <Badge variant="secondary">Version {role.version}</Badge>
+                          </div>
+                          {role.description ? (
+                            <p className="mt-1 text-sm text-muted-foreground">
+                              {role.description}
+                            </p>
+                          ) : null}
+                        </div>
+                        <DecisionBadge setting={decision} />
+                      </div>
+                      {assignments.length === 0 ? (
+                        <p className="text-sm text-muted-foreground">
+                          Not assigned.
+                        </p>
+                      ) : (
+                        <div className="flex flex-wrap gap-2">
+                          {assignments.map((assignment) => (
+                            <span
+                              key={`${assignment.subject_type}:${assignment.subject_id}`}
+                              className="inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-xs"
+                            >
+                              <Badge variant="outline">
+                                {assignment.subject_type}
+                              </Badge>
+                              <span className="truncate">
+                                {assignment.subject_display_name ||
+                                  assignment.subject_id}
+                              </span>
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </article>
+                  );
+                })}
               </div>
             )}
           </section>

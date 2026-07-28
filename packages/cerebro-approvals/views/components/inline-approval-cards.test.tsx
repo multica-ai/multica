@@ -4,7 +4,7 @@ import { approvalSchema } from "../../core/types";
 
 const useQueryMock = vi.fn();
 const memberState = { role: "member" };
-const featureFlagState = { enabled: true };
+const featureFlagState = { inbox: true, gate: true };
 
 vi.mock("@tanstack/react-query", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@tanstack/react-query")>()),
@@ -16,7 +16,8 @@ vi.mock("@multica/core/permissions", () => ({
 }));
 
 vi.mock("@multica/cerebro-feature-flags", () => ({
-  useFlagValue: () => featureFlagState.enabled,
+  useFlagValue: (key: string) =>
+    key === "cerebro_approval_gate" ? featureFlagState.gate : featureFlagState.inbox,
 }));
 
 vi.mock("./inline-approval-card", () => ({
@@ -41,12 +42,14 @@ const approval = (id: string, taskId: string) =>
 describe("InlineApprovalCards", () => {
   beforeEach(() => {
     useQueryMock.mockReset();
-    featureFlagState.enabled = true;
+    featureFlagState.inbox = true;
+    featureFlagState.gate = true;
     memberState.role = "member";
   });
 
   it("does not start the approvals query when the feature flag is off", () => {
-    featureFlagState.enabled = false;
+    featureFlagState.inbox = false;
+    featureFlagState.gate = false;
 
     const { container } = render(
       <InlineApprovalCards wsId="workspace-1" origin={{ issue_id: "issue-1" }} />,
@@ -54,6 +57,19 @@ describe("InlineApprovalCards", () => {
 
     expect(container).toBeEmptyDOMElement();
     expect(useQueryMock).not.toHaveBeenCalled();
+  });
+
+  it("stays visible when Ask enforcement is on even if the inbox flag is off", () => {
+    featureFlagState.inbox = false;
+    featureFlagState.gate = true;
+    useQueryMock.mockReturnValue({
+      data: { approvals: [approval("approval-a", "task-a")] },
+      isLoading: false,
+    });
+
+    render(<InlineApprovalCards wsId="workspace-1" origin={{ issue_id: "issue-1" }} />);
+
+    expect(screen.getByText("approval-a")).toBeInTheDocument();
   });
 
   it("queries once for the origin scope and renders only approvals matching the turn", () => {

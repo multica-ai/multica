@@ -15,8 +15,8 @@ Multica backend, so it needs no inbound port, DNS, domain, or tunnel.
 
 - the cerebro `multica` binary (from `server/`, so it carries our patches — not
   the upstream GitHub release),
-- the **Claude Code CLI**, pinned **Pi Coding Agent** and pinned **Hermes Agent**
-  that the daemon shells out to,
+- the **Claude Code CLI**, pinned **Cursor Agent CLI**, pinned **Pi Coding
+  Agent**, and pinned **Hermes Agent** that the daemon shells out to,
 - `git` (per-task repo checkouts), `ripgrep`, `curl`, `jq`,
 - a non-root `multica` user.
 
@@ -33,6 +33,7 @@ with a 30-minute TTL and will fail on the next restart.
 |---|---|---|
 | `CLAUDE_AUTH_MODE` | no | `api_key` (use `ANTHROPIC_API_KEY`) or `max` (use a persisted Claude Max/OAuth login). Defaults to `api_key` when a key is set, else `max`. See the auth note below. |
 | `ANTHROPIC_API_KEY` | for api_key mode | Auth for Claude Code in `api_key` mode. |
+| `CURSOR_API_KEY` | for Cursor Agent | API key for headless Cursor Agent runs. Store it as a secret in the runtime environment. |
 | `MULTICA_SERVER_URL` | yes | Backend API base URL the daemon connects to. |
 | `MULTICA_DAEMON_TOKEN` | one path | Long-lived daemon token (a Multica PAT, `mul_…`). Pair with `MULTICA_WORKSPACE_ID`. |
 | `MULTICA_WORKSPACE_ID` | with token | Workspace the runtime serves. |
@@ -71,8 +72,8 @@ issue.
 3. Set the env vars above from Infisical.
 4. Attach the two persistent volumes.
 5. Deploy. Confirm it comes online in the workspace's **Runtimes** list and that
-   `multica daemon status` (via Sliplane shell) shows `running` with `claude`
-   and `pi` detected.
+   `multica daemon status` (via Sliplane shell) shows `running` with `claude`,
+   `cursor`, and `pi` detected.
 
 ## ChatGPT Pro primary, Firtal AI Gateway backup
 
@@ -95,6 +96,27 @@ backup in both agents. Hermes uses its native fallback chain. Multica retries a
 failed Pi call through the gateway only before Pi has emitted text or started a
 tool; it never retries after a possible side effect. The gateway credential is
 read from `FIRTAL_REGISTRY_KEY` at runtime and is not persisted in agent config.
+
+Both agents also register the gateway as a **selectable** provider, not just a
+backup, and both discover the model list the same way: they ask the gateway
+which models the key may call (`GET /api/ai/proxy/v1/models`) and register every
+chat model it returns. A grant added on **AI Proxy → Permissions** in the
+registry therefore shows up as `firtal-gateway/<model-id>` in Pi and under
+**Firtal AI Gateway** in `hermes model` after the next task — no image change.
+
+- **Pi** — `docker/pi-firtal-gateway.ts`, installed into Pi's extensions dir.
+- **Hermes** — `docker/configure-hermes-fallback.py` writes both
+  `providers.firtal-gateway` (selectable) and one `fallback_providers` entry
+  (the retry chain). The two are not interchangeable: the fallback chain holds a
+  single model and only fires when the primary fails.
+
+Grants are the only control surface. Embeddings are filtered out of both lists,
+and `FIRTAL_REGISTRY_MODEL` is listed first and stays registered even when the
+gateway is unreachable, because the retry path always targets that model.
+
+Neither agent persists the key: the Hermes provider entry references it by
+environment-variable name (`key_env: FIRTAL_REGISTRY_KEY`) and Pi reads
+`$FIRTAL_REGISTRY_KEY` at call time.
 
 Do not replace this flow with `OPENAI_API_KEY`: that is a separate API-billing
 identity and does not use the requested ChatGPT subscription.

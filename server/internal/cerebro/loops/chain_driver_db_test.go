@@ -27,6 +27,46 @@ type retryingBlockDispatcher struct {
 	calls int
 }
 
+type completingBlockDispatcher struct {
+	dispatches []BlockDispatch
+}
+
+func (d *completingBlockDispatcher) DispatchBlock(_ context.Context, dispatch BlockDispatch) (BlockDispatchResult, error) {
+	d.dispatches = append(d.dispatches, dispatch)
+	outcome, _ := json.Marshal(map[string]any{"output": dispatch.Block.ID + " output"})
+	return BlockDispatchResult{Status: StepCompleted, Outcome: outcome}, nil
+}
+
+func TestChainDriver_CarriesPreviousStepsAcrossPhases(t *testing.T) {
+	if loopTestPool == nil {
+		t.Skip("no test DB")
+	}
+
+	ctx := context.Background()
+	issueID := seedIssue(t)
+	workflowID := seedLoopWorkflow(t, issueID)
+	dispatcher := &completingBlockDispatcher{}
+	driver := NewChainDriver(NewStore(loopTestPool), dispatcher)
+	limits := PhaseLimits{MaxSteps: 2, MaxRounds: 1, NoProgressStalls: 1}
+	chain := &Chain{Version: ChainVersion, Phases: []Phase{
+		{ID: "build", Limits: limits, Blocks: []Block{{ID: "builder", Type: BlockSession, Skill: "build"}}},
+		{ID: "approval", Limits: limits, Blocks: []Block{{ID: "approver", Type: BlockHuman, Prompt: "Approve {{previous.output}}", ApproverType: AssigneeMember, ApproverID: "member"}}},
+	}}
+	run := ChainRun{IssueID: issueID, WorkflowID: workflowID, IssueStatus: "in_progress", AgentID: "agent"}
+
+	decision, err := driver.Advance(ctx, chain, run)
+	if err != nil || decision.Kind != ChainDone {
+		t.Fatalf("advance = %+v, error = %v", decision, err)
+	}
+	if len(dispatcher.dispatches) != 2 {
+		t.Fatalf("dispatches = %+v", dispatcher.dispatches)
+	}
+	previous := dispatcher.dispatches[1].PreviousSteps
+	if len(previous) != 1 || previous[0].BlockID != "builder" || !strings.Contains(string(previous[0].Outcome), "builder output") {
+		t.Fatalf("approval previous steps = %+v", previous)
+	}
+}
+
 func (d *retryingBlockDispatcher) DispatchBlock(context.Context, BlockDispatch) (BlockDispatchResult, error) {
 	d.calls++
 	if d.calls == 1 {
@@ -60,7 +100,7 @@ func TestChainDriver_RunsEveryBlockThroughOneIssueBoundPath(t *testing.T) {
 		runtimes: map[[16]byte]db.AgentRuntime{
 			runtimeID.Bytes: {ID: runtimeID, Status: "online"},
 		},
-		agentSkills: map[[16]byte][]db.Skill{
+		agentSkills: map[[16]byte][]db.ListAgentSkillsRow{
 			agentID.Bytes: {{Name: "build-skill"}, {Name: "review-skill"}},
 		},
 		issue: db.Issue{

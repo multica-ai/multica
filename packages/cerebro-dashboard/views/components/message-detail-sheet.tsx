@@ -74,7 +74,7 @@ export function MessageDetailSheet({
 
   return (
     <Sheet open={message !== null} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <SheetContent side="right" className="flex flex-col gap-0 p-0 sm:max-w-md">
+      <SheetContent side="right" className="flex flex-col gap-0 p-0 data-[side=right]:w-full data-[side=right]:max-w-full sm:data-[side=right]:max-w-md">
         {message && (
           <>
             <SheetHeader className="shrink-0 border-b px-5 py-4">

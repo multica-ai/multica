@@ -53,6 +53,21 @@ describe("Issue workflow chain editor", () => {
     expect(chainSpecFromForm(chainFormFromSpec(apiChain))).toEqual(apiChain);
   });
 
+  it("round-trips command snapshots and multiple slash-selected skills", () => {
+    const chain: LoopChainSpec = {
+      version: 2,
+      phases: [{
+        id: "delivery",
+        limits: { max_steps: 3, max_rounds: 1, no_progress_stalls: 1 },
+        blocks: [
+          { id: "build", type: "session", goal: "Use [/plan](slash://skill/a) and [/review](slash://skill/b)", skills: ["plan", "review"] },
+          { id: "tests", type: "command", command_id: "command-1", check: ["pnpm", "test"], expect: "exit_zero" },
+        ],
+      }],
+    };
+    expect(chainSpecFromForm(chainFormFromSpec(chain))).toEqual(chain);
+  });
+
   it("shows information when the chain has no machine-controlled block", () => {
     const chain: LoopChainSpec = {
       version: 2,

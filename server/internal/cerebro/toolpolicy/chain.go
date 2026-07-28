@@ -1,13 +1,11 @@
 // Package toolpolicy implements the unified per-tool permission chain for the
 // cerebro control plane (FIR-2230, phase 1 — "the engine").
 //
-// Before this package, three separate systems decided whether an agent could
-// use a tool: the workspace-grant resolver (capability patterns), the per-tool
-// runtime grant tables (boolean enabled + user/group access), and the group
-// permission service (capability whitelists). Each computed its own answer and
-// none expressed the product's actual model: every individual CLI tool and
-// every individual MCP action is governed on its own, at five stacked layers,
-// where each layer can only tighten the one below it.
+// Before this package, separate systems decided whether an agent could use a
+// tool: a workspace-grant resolver, per-tool runtime grants, and group
+// capability whitelists. The obsolete grant resolver is now retired; this chain
+// is the canonical decision path for individual CLI, MCP, and Registry actions
+// across five stacked layers.
 //
 // The layers, from base to ceiling, are:
 //
@@ -32,24 +30,17 @@
 // loosen it. This makes resolution a pure, order-independent fold — the layer
 // ordering matters only for attribution (which layer to blame in the reason).
 //
-// Resolve is pure: settings in, decision out. It has no database dependency so
-// it is exhaustively unit-testable.
-//
-// Resolve's pure tighten-only fold is the model for the deny-by-default FLOORS
-// (credentials, the OS sandbox, repo checkout, the repo-approval cap) — those
-// must never be loosened by a lower layer and always call Resolve directly.
-// It is NOT the live default for the GENERAL tool-policy gate (the visible
-// per-tool Allow/Ask/Deny an operator authors in the policy table): that gate
-// calls ResolveGeneral, which as of FIR-2175/FIR-3062 resolves through
-// ResolveMemberOverride by default (registry flag cerebro_member_override,
-// default ON) — a two-stage model where a member's own setting can LOOSEN an
-// inherited group/workspace default by specificity. Resolve stays reachable
-// under ResolveGeneral only as the fallback when member-override is off for a
-// workspace. See ResolveGeneral (store.go) and ResolveMemberOverride below for
-// the two models side by side.
+// Resolution is pure: settings in, decision out. It has no database dependency,
+// so each declared mode is exhaustively unit-testable through ResolveWithMode.
+// Hard-floor keys use the tighten-only model; ordinary permissions may use the
+// openable model when the workspace member-override flag is enabled.
 package toolpolicy
 
-import "fmt"
+import (
+	"fmt"
+
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
+)
 
 // Setting is the per-layer choice for a single tool.
 type Setting string
@@ -188,6 +179,22 @@ type Input struct {
 	// would resolve to is treated as Deny — fail-safe (FIR-1609). Default false
 	// preserves existing human-run behavior for every current caller.
 	IsSystem bool
+	// RoleSources records the active, versioned permission profiles that
+	// contributed an Agent-layer opinion. The resolver still folds one Agent
+	// setting; this metadata only makes the resulting Why Access answer name the
+	// profile that produced it.
+	RoleSources []RoleSource
+	// RoleDecidesAgent is true when the Agent-layer setting came from Roles
+	// rather than an explicit per-agent row.
+	RoleDecidesAgent bool
+}
+
+// RoleSource identifies one durable permission profile behind a verdict.
+type RoleSource struct {
+	ID      string
+	Name    string
+	Version int32
+	Setting Setting
 }
 
 // Effective is the resolved verdict for one tool.
@@ -223,11 +230,10 @@ func (e Effective) Allowed() bool { return e.Setting == SettingAllow }
 // Mode selects which resolution semantics a call site needs (FIR-2351). It is
 // the single switch that keeps chain resolution to ONE function body per
 // semantics instead of two hand-synced top-level algorithms: the on_behalf_of
-// parity gap between Resolve and ResolveMemberOverride (fixed just before this
-// change) drifted in precisely because the two were separate functions that
-// had to be updated in lockstep by hand. ResolveWithMode is now the single
-// place either algorithm is read or changed; Resolve and ResolveMemberOverride
-// below are thin, behavior-preserving wrappers kept for every existing caller.
+// parity gap between the two resolution semantics (fixed just before this
+// change) drifted in precisely because the algorithms were separate functions
+// that had to be updated in lockstep by hand. ResolveWithMode is now the single
+// place either algorithm is read or changed.
 type Mode string
 
 const (
@@ -235,12 +241,12 @@ const (
 	// member layers — Workspace (as the root default), Group, User — may OPEN a
 	// closed floor, the most specific explicit member setting winning. Runtime,
 	// Agent, on_behalf_of, and System sit above the member ceiling and may only
-	// TIGHTEN it, never loosen it. See ResolveMemberOverride for the full model.
+	// TIGHTEN it, never loosen it. See resolveOpenable for the full model.
 	ModeOpenable Mode = "openable"
 	// ModeHardFloor is the deny-by-default floors' semantics — credentials, the
 	// OS sandbox, repo checkout, the repo-approval cap. Every layer may only
 	// tighten below Base; a Base=Deny floor can never be loosened from below by
-	// any layer, member or not. See Resolve for the full model.
+	// any layer, member or not. See resolveHardFloor for the full model.
 	ModeHardFloor Mode = "hard_floor"
 )
 
@@ -248,37 +254,15 @@ const (
 // mode selects. It is the only resolution algorithm in this package —
 // ModeHardFloor and ModeOpenable are two branches of one function, not two
 // independently maintained ones. New call sites should call this directly
-// with an explicit mode; Resolve and ResolveMemberOverride remain for the
-// existing call sites and are equivalent to ResolveWithMode(ModeHardFloor, in)
-// and ResolveWithMode(ModeOpenable, in) respectively.
+// with an explicit mode.
 func ResolveWithMode(mode Mode, in Input) Effective {
+	var out Effective
 	if mode == ModeOpenable {
-		return resolveOpenable(in)
+		out = resolveOpenable(in)
+	} else {
+		out = resolveHardFloor(in)
 	}
-	return resolveHardFloor(in)
-}
-
-// Resolve folds the chain into a single Effective verdict using the
-// tighten-only, deny-by-default-floor semantics (ModeHardFloor).
-//
-// Algorithm (walk base → ceiling):
-//
-//  1. Start from Base (the system/workspace default below the runtime).
-//  2. For each layer, an Inherit setting passes the running value through.
-//  3. A concrete setting can only tighten: the running value becomes the more
-//     restrictive of (running, layer). A layer trying to loosen is ignored.
-//  4. On a tie at the current restrictiveness, the higher layer becomes the
-//     decider, so attribution flows toward the ceiling.
-//
-// Because step 3 is a monotonic max over restrictiveness, the effective setting
-// is independent of layer order; only DecidedBy / CappedBy depend on the walk.
-//
-// This is the load-bearing resolver for every deny-by-default floor —
-// credentials, the OS sandbox, repo checkout, the approval cap. It MUST NEVER
-// loosen a Base=Deny floor from below. See ResolveMemberOverride for the
-// openable, member-layer counterpart used by the general tool-policy gate.
-func Resolve(in Input) Effective {
-	return resolveHardFloor(in)
+	return decorateRoleSources(out, in)
 }
 
 func resolveHardFloor(in Input) Effective {
@@ -338,7 +322,7 @@ func resolveHardFloor(in Input) Effective {
 	}
 }
 
-// ResolveMemberOverride folds the chain using the member-override model
+// resolveOpenable folds the chain using the member-override model
 // (FIR-2175): a two-stage resolution that matches how an operator intuitively
 // reasons about access.
 //
@@ -374,9 +358,23 @@ func resolveHardFloor(in Input) Effective {
 // credentials, the OS sandbox, repo checkout, the approval cap. Because this
 // function can LOOSEN (member overrides group), it MUST NOT be used to gate any
 // deny-by-default floor. It is for the general tool-policy chain only, behind the
-// member-override feature flag. Keep credentials/sandbox/etc. on Resolve.
-func ResolveMemberOverride(in Input) Effective {
-	return resolveOpenable(in)
+// member-override feature flag. Keep credentials/sandbox/etc. on the hard-floor
+// mode.
+func decorateRoleSources(out Effective, in Input) Effective {
+	if len(in.RoleSources) == 0 {
+		return out
+	}
+	if !in.RoleDecidesAgent || out.DecidedBy != LayerAgent {
+		return out
+	}
+	for _, source := range in.RoleSources {
+		if source.Setting != out.Setting {
+			continue
+		}
+		out.Reason = fmt.Sprintf("%s via role %s v%d", out.Reason, source.Name, source.Version)
+		break
+	}
+	return out
 }
 
 func resolveOpenable(in Input) Effective {
@@ -483,7 +481,7 @@ func resolveOpenable(in Input) Effective {
 	}
 }
 
-// ResolveOptIn decides an OFF-by-default capability gate from the explicit
+// resolveOptIn decides an OFF-by-default capability gate from the explicit
 // per-layer settings. It exists because Resolve (the tighten-only chain) cannot
 // express opt-in: Resolve only ever TIGHTENS below its Base and refuses to
 // loosen ("Loosening is not permitted; the running value stands"), so a Deny
@@ -498,20 +496,20 @@ func resolveOpenable(in Input) Effective {
 // LayerGroup has already been collapsed to its single most-permissive value by
 // CombineGroups before it reaches here, so a User with no row inherits any
 // group grant. Used by capability gates such as tools:test-as-user (FIR-1771).
-func ResolveOptIn(in Input) bool {
+func resolveOptIn(in Input) bool {
 	if in.Settings[LayerUser] == SettingDeny {
 		return false
 	}
 	return in.Settings[LayerUser] == SettingAllow || in.Settings[LayerGroup] == SettingAllow
 }
 
-// ResolveActorOptIn extends the existing human opt-in contract to an agent
+// resolveActorOptIn extends the existing human opt-in contract to an agent
 // actor without turning the workspace default into access. Agent access needs
 // an explicit Agent-layer Allow and remains capped by the human, runtime,
 // delegation, system, and workspace-Disable safety layers.
-func ResolveActorOptIn(in Input, agentActor bool) bool {
+func resolveActorOptIn(in Input, agentActor bool) bool {
 	if !agentActor {
-		return ResolveOptIn(in)
+		return resolveOptIn(in)
 	}
 	if in.Settings[LayerWorkspace] == SettingDisable {
 		return false
@@ -523,6 +521,85 @@ func ResolveActorOptIn(in Input, agentActor bool) bool {
 		}
 	}
 	return in.Settings[LayerAgent] == SettingAllow
+}
+
+// ResolvePermission is the pure effective decision shared by every read surface
+// and call-time authorizer. The permission key selects its one declared
+// contract from platformaccess; keys without a special contract use the
+// ordinary policy chain.
+func ResolvePermission(in Input, key string, actor platformaccess.Actor) Effective {
+	contract, special := platformaccess.ForKey(key)
+	if !special {
+		return ResolveWithMode(ModeHardFloor, in)
+	}
+	if !actor.Authenticated {
+		return Effective{Setting: SettingDeny, Reason: "Authenticated actor required"}
+	}
+	enforcement := contract.Enforcement
+	switch enforcement {
+	case platformaccess.EnforcementPolicy:
+		return ResolveWithMode(ModeHardFloor, in)
+	case platformaccess.EnforcementAuthenticatedRead:
+		if actor.Authenticated {
+			return Effective{Setting: SettingAllow, Reason: "Available to authenticated members and agents"}
+		}
+		return Effective{Setting: SettingDeny, Reason: "Authenticated actor required"}
+	case platformaccess.EnforcementOwnerOnly:
+		if actor.Owner {
+			return Effective{Setting: SettingAllow, Reason: "Workspace owner"}
+		}
+		return Effective{Setting: SettingDeny, Reason: "Workspace owner only"}
+	case platformaccess.EnforcementHumanOptIn:
+		if actor.Agent {
+			return Effective{Setting: SettingDeny, Reason: "Human-only capability"}
+		}
+		return resolveActorOptInEffective(in, false)
+	case platformaccess.EnforcementHumanOptInOrAdmin:
+		if actor.Agent {
+			return Effective{Setting: SettingDeny, Reason: "Human-only capability"}
+		}
+		if actor.Admin || actor.Owner {
+			return Effective{Setting: SettingAllow, Reason: "Workspace owner or administrator"}
+		}
+		return resolveActorOptInEffective(in, false)
+	case platformaccess.EnforcementActorOptIn:
+		return resolveActorOptInEffective(in, actor.Agent)
+	case platformaccess.EnforcementAgentOptIn:
+		if !actor.Agent {
+			return Effective{Setting: SettingDeny, Reason: "Agent-only capability"}
+		}
+		return resolveActorOptInEffective(in, true)
+	default:
+		return Effective{Setting: SettingDeny, Reason: "Unknown platform enforcement model"}
+	}
+}
+
+func resolveActorOptInEffective(in Input, agentActor bool) Effective {
+	if !resolveActorOptIn(in, agentActor) {
+		if in.Settings[LayerWorkspace] == SettingDisable {
+			return Effective{Setting: SettingDeny, DecidedBy: LayerWorkspace, Reason: "Disabled by workspace"}
+		}
+		for _, layer := range []Layer{LayerUser, LayerGroup, LayerRuntime, LayerOnBehalfOf, LayerSystem} {
+			if setting := in.Settings[layer]; setting == SettingDeny || setting == SettingAsk || setting == SettingDisable {
+				verdict := SettingDeny
+				if setting == SettingAsk {
+					verdict = SettingAsk
+				}
+				return Effective{Setting: verdict, DecidedBy: layer, CappedBy: layer, Reason: "Explicit opt-in is capped by " + string(layer)}
+			}
+		}
+		if agentActor {
+			return Effective{Setting: SettingDeny, Reason: "Explicit agent grant required"}
+		}
+		return Effective{Setting: SettingDeny, Reason: "Explicit user or group grant required"}
+	}
+	if agentActor {
+		return Effective{Setting: SettingAllow, DecidedBy: LayerAgent, Reason: "Allowed by explicit agent grant"}
+	}
+	if in.Settings[LayerUser] == SettingAllow {
+		return Effective{Setting: SettingAllow, DecidedBy: LayerUser, Reason: "Allowed by explicit user grant"}
+	}
+	return Effective{Setting: SettingAllow, DecidedBy: LayerGroup, Reason: "Allowed by explicit group grant"}
 }
 
 // CombineGroups collapses the settings from every group a user belongs to into

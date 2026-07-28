@@ -36,6 +36,10 @@ export function CerebroMobileTabNav({
   onValueChange,
   groups,
 }: CerebroMobileTabNavProps) {
+  const selectedLabel = groups
+    .flatMap((group) => group.items)
+    .find((item) => item.value === value)?.label ?? value;
+
   return (
     <div className="sticky top-0 z-20 flex items-center gap-2 border-b bg-background p-3 md:hidden">
       <MobileSidebarTrigger className="mr-0 shrink-0" />
@@ -46,7 +50,8 @@ export function CerebroMobileTabNav({
         }}
       >
         <SelectTrigger className="min-w-0 flex-1">
-          <SelectValue />
+          {/* CEREBRO-PATCH(settings-mobile-nav-label): show the selected tab's human label in the collapsed mobile picker. */}
+          <SelectValue>{selectedLabel}</SelectValue>
         </SelectTrigger>
         <SelectContent align="start" className="max-h-[min(28rem,var(--available-height))]">
           {groups.map((group) => (

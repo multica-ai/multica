@@ -15,7 +15,7 @@ func TestDefaultConfigsCoverFixedModes(t *testing.T) {
 		if !ok {
 			t.Fatalf("default config missing %q", mode)
 		}
-		if config.Mode != mode || config.Instruction == "" || config.TimeoutMinutes <= 0 || config.MaxTurns <= 0 {
+		if config.Mode != mode || config.Instruction == "" || config.TimeoutMinutes < 0 || config.MaxTurns < 0 {
 			t.Fatalf("invalid default config for %q: %+v", mode, config)
 		}
 	}
@@ -51,10 +51,8 @@ func TestValidateConfigRejectsUnsafeOrIncompleteValues(t *testing.T) {
 	}{
 		{"missing instruction", func(c *Config) { c.Instruction = "" }},
 		{"invalid thinking", func(c *Config) { c.ThinkingLevel = "turbo" }},
-		{"zero timeout", func(c *Config) { c.TimeoutMinutes = 0 }},
-		{"excessive timeout", func(c *Config) { c.TimeoutMinutes = 1441 }},
-		{"zero max turns", func(c *Config) { c.MaxTurns = 0 }},
-		{"excessive max turns", func(c *Config) { c.MaxTurns = 201 }},
+		{"negative timeout", func(c *Config) { c.TimeoutMinutes = -1 }},
+		{"negative max turns", func(c *Config) { c.MaxTurns = -1 }},
 		{"invalid approval policy", func(c *Config) { c.ApprovalPolicy = "sometimes" }},
 	}
 	for _, tc := range tests {
@@ -68,5 +66,20 @@ func TestValidateConfigRejectsUnsafeOrIncompleteValues(t *testing.T) {
 	}
 	if err := ValidateConfig(valid); err != nil {
 		t.Fatalf("valid config rejected: %v", err)
+	}
+}
+
+func TestValidateConfigAllowsUnlimitedOrLargeRuntimeLimits(t *testing.T) {
+	config := DefaultConfigs()[Build]
+	config.TimeoutMinutes = 0
+	config.MaxTurns = 0
+	if err := ValidateConfig(config); err != nil {
+		t.Fatalf("unlimited config rejected: %v", err)
+	}
+
+	config.TimeoutMinutes = 100_000
+	config.MaxTurns = 100_000
+	if err := ValidateConfig(config); err != nil {
+		t.Fatalf("large config rejected: %v", err)
 	}
 }

@@ -12,6 +12,7 @@
     "./task-transcript-safety": "./task-transcript-safety.ts"
   },
   "dependencies": {
+    "@multica/cerebro-agent-prompt": "workspace:*",
     "@multica/cerebro-tool-policy": "workspace:*",
     "@multica/cerebro-feature-flags": "workspace:*",
     "@multica/core": "workspace:*",

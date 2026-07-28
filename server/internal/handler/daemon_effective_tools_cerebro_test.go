@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
+	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -61,6 +63,37 @@ func TestCerebroEffectiveToolsForBriefMapsAndFilters(t *testing.T) {
 	}
 	if e := byName["customer-service / draft_reply"]; e.Verdict != "ask" {
 		t.Errorf("expected ask verdict carried through, got %q", e.Verdict)
+	}
+}
+
+func TestRuntimeToolDecisionParityAcrossInventoryCapabilitiesMandateAndCall(t *testing.T) {
+	row := exposedToolView("customer-service.lookup_order", "mcp", "customer-service", "Look up order", "ask", true)
+	h := &Handler{runtimeToolAccess: fakeRuntimeToolAccess{rows: []RuntimeToolEffectiveAccessView{row}}}
+	tools, mandate, err := h.cerebroEffectiveToolsForClaim(context.Background(), db.AgentRuntime{}, &TaskAgentData{ID: "11111111-1111-1111-1111-111111111111"}, "agent", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tools) != 1 || tools[0].Verdict != "ask" {
+		t.Fatalf("inventory tools = %+v, want one Ask tool", tools)
+	}
+	if len(mandate) != 1 || mandate[0] != "mcp__customer-service__lookup_order" {
+		t.Fatalf("mandate = %v, want canonical callable MCP name", mandate)
+	}
+
+	// The Capabilities card is a projection of this same effective row.
+	capability := AgentCapabilityTool{
+		Key:        row.Descriptor.ToolKey,
+		Source:     row.Descriptor.Source,
+		Permission: row.Policy.Effective,
+	}
+	if capability.Permission != tools[0].Verdict {
+		t.Fatalf("Capabilities permission = %q, inventory verdict = %q", capability.Permission, tools[0].Verdict)
+	}
+
+	// The local hook's call-time lookup must hit the exact key in the issued
+	// mandate; otherwise inventory, UI and execution would disagree.
+	if callKey := claudehook.PolicyToolKey("mcp__customer-service__lookup_order"); callKey != mandate[0] {
+		t.Fatalf("call key = %q, mandate key = %q", callKey, mandate[0])
 	}
 }
 
@@ -139,6 +172,108 @@ func TestCerebroEffectiveToolsForBriefIncludesAPIConnectionTools(t *testing.T) {
 	}
 	if _, ok := byName["schedule_wakeup"]; !ok {
 		t.Errorf("tool-policy chain tools must remain alongside api-connection tools")
+	}
+}
+
+func TestCerebroEffectiveToolsForClaimUsesConnectionDispatchMandateIdentity(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	brief := &fakeAPIConnBrief{tools: []CerebroAPIConnectionBriefTool{
+		{Name: "infisical_admin__get_api_v3_secrets_raw", Description: "Read a secret", Verdict: "allow"},
+	}}
+	h := &Handler{
+		runtimeToolAccess:  fakeRuntimeToolAccess{},
+		APIConnectionBrief: brief,
+	}
+
+	_, mandate, err := h.cerebroEffectiveToolsForClaim(
+		context.Background(),
+		db.AgentRuntime{},
+		&TaskAgentData{ID: agentID},
+		"agent",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim: %v", err)
+	}
+	if !containsString(mandate, "infisical_admin__get_api_v3_secrets_raw") {
+		t.Fatalf("claim mandate = %v, want connection dispatch identity", mandate)
+	}
+
+	hookTool := "mcp__multica__infisical_admin__get_api_v3_secrets_raw"
+	if got := localtoolpolicy.ProviderMandateToolKey(hookTool); got != mandate[0] {
+		t.Fatalf("local hook mandate identity = %q, want claimed identity %q", got, mandate[0])
+	}
+}
+
+func TestCerebroEffectiveToolsForClaimIncludesDirectMCPAndCapabilityDiagnosis(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	brief := &fakeAPIConnBrief{tools: []CerebroAPIConnectionBriefTool{
+		{
+			Connection:    "atlas-mcp",
+			Name:          "mcp__atlas-mcp__search_registry",
+			Description:   "Search Atlas",
+			Verdict:       "allow",
+			MandatePrefix: "mcp__atlas-mcp__*",
+		},
+	}}
+	h := &Handler{
+		runtimeToolAccess: fakeRuntimeToolAccess{rows: []RuntimeToolEffectiveAccessView{
+			exposedToolView("mcp__multica__get_agent_capabilities", "mcp", "", "Inspect effective access", "allow", true),
+		}},
+		APIConnectionBrief: brief,
+	}
+
+	_, mandate, err := h.cerebroEffectiveToolsForClaim(
+		context.Background(),
+		db.AgentRuntime{},
+		&TaskAgentData{ID: agentID},
+		"agent",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim: %v", err)
+	}
+	for _, want := range []string{
+		"mcp__atlas-mcp__search_registry",
+		"mcp__atlas-mcp__*",
+		"mcp__multica__get_agent_capabilities",
+	} {
+		if !containsString(mandate, want) {
+			t.Errorf("claim mandate = %v, want exact callable identity %q", mandate, want)
+		}
+	}
+}
+
+func TestCerebroEffectiveToolsForClaimIncludesAllowedPlatformTools(t *testing.T) {
+	agentID := "11111111-1111-1111-1111-111111111111"
+	wants := []string{
+		"mcp__multica__list_evals",
+		"mcp__multica__list_eval_bindings",
+		"mcp__multica__list_commands",
+		"mcp__multica__get_agent_capabilities",
+		"mcp__multica__get_me",
+		"mcp__multica__list_issues",
+	}
+	rows := make([]RuntimeToolEffectiveAccessView, 0, len(wants))
+	for _, name := range wants {
+		rows = append(rows, exposedToolView(name, "mcp", "", "Allowed platform tool", "allow", true))
+	}
+	h := &Handler{runtimeToolAccess: fakeRuntimeToolAccess{rows: rows}}
+
+	_, mandate, err := h.cerebroEffectiveToolsForClaim(
+		context.Background(),
+		db.AgentRuntime{},
+		&TaskAgentData{ID: agentID},
+		"agent",
+		"",
+	)
+	if err != nil {
+		t.Fatalf("cerebroEffectiveToolsForClaim: %v", err)
+	}
+	for _, want := range wants {
+		if !containsString(mandate, want) {
+			t.Errorf("claim mandate = %v, want allowed platform tool %q", mandate, want)
+		}
 	}
 }
 

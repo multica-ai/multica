@@ -3,12 +3,12 @@ package handler
 // CEREBRO-PATCH(daemon-tool-policy-cerebro): TECH-3173 — per-tool enforcement for
 // LOCAL CLI runtimes (Claude, Codex, Cursor, Gemini) spawned by the daemon.
 //
-// The gateway executor already gates every tool call through the unified
-// tool-policy chain (guardToolCallViaPolicy). Local CLIs run on a Mac and never
+// The gateway executor already gates every tool call through the authoritative
+// Policy Decision Service. Local CLIs run on a Mac and never
 // pass through that executor, so an Ask/Deny row in the permission table never
 // reaches them. This file is the daemon-side seam that closes that gap: a local
-// runtime's PreToolUse hook (Claude) or native approval channel (Codex) calls
-// ResolveDaemonToolPolicy, which resolves the SAME toolpolicy.Store chain and,
+// runtime's provider-native before-call hook calls ResolveDaemonToolPolicy,
+// which resolves the SAME toolpolicy.Store chain and,
 // on Ask, raises an approval in the SAME inbox the gateway gate uses — one
 // model, not a parallel one.
 //
@@ -27,7 +27,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
-	"github.com/multica-ai/multica/server/internal/cerebro/claudehook"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
@@ -103,7 +102,9 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// CEREBRO-PATCH(daemon-tool-policy-mandate-key): FIR-3403 — the mandate snapshots
 	// canonical capability keys (built-ins as "tools:<Name>"); match under the same
 	// PolicyToolKey the policy-chain resolve below uses, not the bare hook tool name.
-	if err := taskmandate.NewStoreDB(h.DB).Authorize(r.Context(), taskID, wsUUID, agentID, claudehook.PolicyToolKey(req.ToolName)); err != nil {
+	toolKey, resourcePattern := localtoolpolicy.ProviderToolCallForAgent(r.Context(), h.DB, wsUUID, agentID, req.ToolName, req.ResourcePattern, req.Args) // CEREBRO-PATCH(cursor-tool-policy-key): FIR-3729 normalize Cursor hook names/resources to its runtime inventory.
+	req.ResourcePattern = resourcePattern
+	if err := taskmandate.NewStoreDB(h.DB).Authorize(r.Context(), taskID, wsUUID, agentID, localtoolpolicy.ProviderMandateToolKey(toolKey)); err != nil { // CEREBRO-PATCH(connection-task-mandate-key): FIR-3828 match local workspace Connection hooks to the shared dispatch identity.
 		writeJSON(w, http.StatusOK, map[string]any{
 			"allowed": false, "decision": string(localtoolpolicy.KindDeny),
 			"mode": mode, "enforced": true, "would_block": true,
@@ -113,8 +114,8 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	}
 
 	// The chain's Runtime and User/Group layers key on the agent's runtime and
-	// owner. Resolve them server-side from the agent row (never trust the
-	// caller), exactly as guardToolCallViaPolicy does. Lookup failure fails closed.
+	// owner. Resolve them server-side from the agent row (never trust the caller),
+	// matching the canonical Gateway decision context. Lookup failure fails closed.
 	var runtimeID, ownerID pgtype.UUID
 	if agentID.Valid {
 		agent, err := h.Queries.GetAgent(r.Context(), agentID)
@@ -139,7 +140,6 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// .PolicyToolKey); a bare-name lookup never matched it, so a Deny on Bash/
 	// WebFetch/Edit silently let the tool through on local runtimes.
 	store := toolpolicy.NewStoreDB(h.DB, h.CerebroQueries)
-	toolKey := claudehook.PolicyToolKey(req.ToolName)
 	// Capability-wide row (resource_pattern "") — the shape an "All tools" Deny is
 	// written under, and the same shape the gateway gate resolves. A concrete
 	// resource (a Bash binary, a WebFetch URL) additionally resolves its exact
@@ -164,16 +164,11 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	// No row carries an Expr today, so this is behaviour-preserving until enabled.
 	// Resolved once and reused across the capability-wide and per-resource calls.
 	celEval := h.daemonPolicyCELEvaluator(r.Context(), wsUUID)
-	// This is the local-runtime twin of the gateway's GENERAL tool-policy gate, so
-	// it resolves through ResolveGeneral behind the default-on cerebro_member_override
-	// flag: on → the member-override model (a member may loosen an inherited group/
-	// workspace default), off → identical to the tighten-only Resolve. Resolved once
-	// and reused across the capability-wide and per-resource calls so both see the
-	// same model. The deny-by-default agent-browser sandbox gate below keeps calling
-	// Resolve directly and never consults this flag.
-	memberOverride := h.daemonMemberOverrideEnabled(r.Context(), wsUUID)
+	// This is the local-runtime twin of the gateway's general tool-policy gate.
+	// ResolveDeclared selects the key's declared contract and applies the
+	// workspace member-override setting only to openable permissions.
 	resolveAt := func(pattern string) (toolpolicy.Effective, error) {
-		return store.ResolveGeneral(r.Context(), toolpolicy.Query{
+		return store.ResolveDeclared(r.Context(), toolpolicy.Query{
 			WorkspaceID:     wsUUID,
 			ToolKey:         toolKey,
 			ResourcePattern: pattern,
@@ -183,7 +178,7 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 			Eval:            celEval,
 			UserID:          ownerID,
 			Base:            toolpolicy.SettingAllow,
-		}, memberOverride)
+		})
 	}
 	eff, err := resolveAt("")
 	if err != nil {

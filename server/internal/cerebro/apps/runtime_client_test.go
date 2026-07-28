@@ -12,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-chi/chi/v5"
 )
 
 func TestRuntimeClientSignsDeploymentRequest(t *testing.T) {
@@ -139,6 +141,93 @@ func TestRuntimeClientHonorsRequestTimeout(t *testing.T) {
 	if err := client.Deploy(context.Background(), RuntimeDeploymentRequest{}); err == nil {
 		t.Fatal("timed out deployment was accepted")
 	}
+}
+
+func TestRuntimeClientFetchesImmutableFrontendAsset(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet ||
+			r.URL.Path != "/apps/f1540000-0000-4154-8154-000000000001/1.0.0/index.html" ||
+			r.URL.Query().Get("view") != "default" {
+			t.Fatalf("unexpected runtime asset request: %s %s", r.Method, r.URL.String())
+		}
+		w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'")
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Access-Control-Allow-Origin", "null")
+		w.Header().Set("Access-Control-Allow-Credentials", "true")
+		_, _ = w.Write([]byte("<h1>Allergen Formatter</h1>"))
+	}))
+	defer server.Close()
+
+	asset, err := NewRuntimeClient(server.URL, "secret").Asset(
+		context.Background(),
+		"apps/f1540000-0000-4154-8154-000000000001/1.0.0/index.html",
+		"view=default",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if asset.Status != http.StatusOK || string(asset.Body) != "<h1>Allergen Formatter</h1>" {
+		t.Fatalf("unexpected runtime asset: %+v", asset)
+	}
+	if asset.Headers.Get("Content-Type") != "text/html; charset=utf-8" ||
+		asset.Headers.Get("Content-Security-Policy") != "default-src 'self'" ||
+		asset.Headers.Get("Access-Control-Allow-Origin") != "null" ||
+		asset.Headers.Get("Access-Control-Allow-Credentials") != "true" {
+		t.Fatalf("runtime response headers were not preserved: %v", asset.Headers)
+	}
+}
+
+func TestRuntimeAssetHandlerOnlyProxiesFrontendAndSDK(t *testing.T) {
+	runtime := &fakeRuntimeAssetFetcher{
+		asset: RuntimeAsset{
+			Status: http.StatusOK,
+			Headers: http.Header{
+				"Content-Type":                     []string{"text/html; charset=utf-8"},
+				"Access-Control-Allow-Origin":      []string{"null"},
+				"Access-Control-Allow-Credentials": []string{"true"},
+			},
+			Body: []byte("<h1>Allergen Formatter</h1>"),
+		},
+	}
+	handler := &Handler{runtimeAssets: runtime}
+	router := chi.NewRouter()
+	router.Get("/api/cerebro/apps-runtime/*", handler.RuntimeAsset)
+
+	allowed := httptest.NewRecorder()
+	router.ServeHTTP(allowed, httptest.NewRequest(
+		http.MethodGet,
+		"/api/cerebro/apps-runtime/apps/f1540000-0000-4154-8154-000000000001/1.0.0/index.html",
+		nil,
+	))
+	if allowed.Code != http.StatusOK || !strings.Contains(allowed.Body.String(), "Allergen Formatter") {
+		t.Fatalf("frontend asset returned %d: %s", allowed.Code, allowed.Body.String())
+	}
+	if allowed.Header().Get("Access-Control-Allow-Origin") != "null" ||
+		allowed.Header().Get("Access-Control-Allow-Credentials") != "true" {
+		t.Fatalf("frontend asset CORS headers were dropped: %v", allowed.Header())
+	}
+	if runtime.path != "apps/f1540000-0000-4154-8154-000000000001/1.0.0/index.html" {
+		t.Fatalf("unexpected proxied path %q", runtime.path)
+	}
+
+	blocked := httptest.NewRecorder()
+	router.ServeHTTP(blocked, httptest.NewRequest(http.MethodGet, "/api/cerebro/apps-runtime/deployments", nil))
+	if blocked.Code != http.StatusNotFound || runtime.calls != 1 {
+		t.Fatalf("control-plane route was proxied: status=%d calls=%d", blocked.Code, runtime.calls)
+	}
+}
+
+type fakeRuntimeAssetFetcher struct {
+	asset RuntimeAsset
+	path  string
+	calls int
+}
+
+func (f *fakeRuntimeAssetFetcher) Asset(_ context.Context, path, _ string) (RuntimeAsset, error) {
+	f.calls++
+	f.path = path
+	return f.asset, nil
 }
 
 func TestRuntimeSignatureRejectsReplayAndTampering(t *testing.T) {

@@ -30,6 +30,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	// CEREBRO-PATCH(create-local-runtime-policy-gate): FIR-2672 tool-policy resolve for local runtime creation.
+	"github.com/multica-ai/multica/server/internal/cerebro/platformaccess"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated" // CEREBRO-PATCH(delegated-override-grant): FIR-2351 workspace-membership check for workspace-scope overrides.
@@ -210,12 +211,12 @@ func (h *Handler) cerebroRequireLocalRuntimePolicy(w http.ResponseWriter, r *htt
 		return false
 	}
 	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
-	eff, err := store.Resolve(r.Context(), toolpolicy.Query{
+	eff, err := store.ResolvePermission(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     "create_local_runtime",
 		UserID:      viewer.UserID,
 		Base:        toolpolicy.SettingAllow,
-	})
+	}, platformaccess.Actor{Authenticated: true})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
@@ -273,12 +274,12 @@ func (h *Handler) cerebroRequireConnectionsPolicy(w http.ResponseWriter, r *http
 		return false
 	}
 	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
-	eff, err := store.Resolve(r.Context(), toolpolicy.Query{
+	eff, err := store.ResolvePermission(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     "manage_connections",
 		UserID:      viewer.UserID,
 		Base:        toolpolicy.SettingAllow,
-	})
+	}, platformaccess.Actor{Authenticated: true})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
@@ -352,12 +353,12 @@ func (h *Handler) cerebroRequireCredentialGrantPolicy(w http.ResponseWriter, r *
 		return false
 	}
 	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
-	eff, err := store.Resolve(r.Context(), toolpolicy.Query{
+	eff, err := store.ResolvePermission(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     "manage_credential_access",
 		UserID:      viewer.UserID,
 		Base:        toolpolicy.SettingAllow,
-	})
+	}, platformaccess.Actor{Authenticated: true})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
@@ -455,15 +456,11 @@ func (h *Handler) toolPolicyWriteIsCredential(r *http.Request) bool {
 // and manage_workspace_overrides, resolved through the unified tool-policy
 // chain exactly like manage_credential_access.
 //
-// DELIBERATE, DOCUMENTED EXCEPTION: workspace owner/admin bypasses this gate
-// entirely, INCLUDING when subjectID == the admin's own user id — same as
-// every other capability gate in this file (cerebroRequireCredentialGrantPolicy,
-// cerebroRequireConnectionsPolicy, cerebroRequireLocalRuntimePolicy all check
-// IsAdmin first). The self-target ban below is a property of the two NEW
-// delegated capabilities, not a blanket rule over every actor in the system —
-// Jesper's rule was scoped to "andre brugere MED DEN PERMISSION" (other users
-// WITH THAT PERMISSION), i.e. capability holders, not admins who already hold
-// unrestricted authority here. See TestCerebroRequireDelegatedOverridePolicy_AdminCanTargetSelf.
+// Workspace owner/admin authority is declared by the permission contract and
+// resolved through the same path as Explain and capabilities. Once that shared
+// resolver confirms the shortcut, owners/admins retain their existing ability
+// to target any row, including their own. See
+// TestCerebroRequireDelegatedOverridePolicy_AdminCanTargetSelf.
 //
 // For everyone else: this is the ONLY place the self-target rule from the
 // product decision is enforced ("en bruger skal ikke kunne override sin egen
@@ -485,31 +482,31 @@ func (h *Handler) cerebroRequireDelegatedOverridePolicy(w http.ResponseWriter, r
 	if !ok {
 		return false
 	}
-	if viewer.IsAdmin {
-		return true
-	}
 	wsUUID, perr := util.ParseUUID(workspaceID)
 	if perr != nil {
 		writeError(w, http.StatusBadRequest, "invalid workspace id")
 		return false
 	}
 
-	// FIR-2351 fix (Tine, adversarial review, finding 1): these are OPT-IN
-	// capabilities — nobody holds either until an explicit Allow is authored
-	// at the User or Group layer. ResolveOptIn (not Resolve/Base=Allow) is the
-	// correct primitive: Resolve's Base=Allow default would make every
-	// workspace member hold override power by default with no row at all,
-	// which is exactly backwards for "a permission you GIVE to users."
+	// FIR-2351 fix (Tine, adversarial review, finding 1): these are opt-in
+	// capabilities for ordinary members, with an owner/admin shortcut declared
+	// by the shared contract. ResolvePermission is the same primitive used by
+	// Explain and capabilities, so the permission shown and enforced cannot
+	// diverge.
 	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
-	hasWorkspaceScope, err := store.ResolveOptIn(r.Context(), toolpolicy.Query{
+	workspaceEffective, err := store.ResolvePermission(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     toolpolicy.CapabilityManageWorkspaceOverrides,
 		UserID:      viewer.UserID,
-	})
+	}, platformaccess.Actor{Authenticated: true, Admin: viewer.IsAdmin})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
 	}
+	if viewer.IsAdmin {
+		return workspaceEffective.Setting == toolpolicy.SettingAllow
+	}
+	hasWorkspaceScope := workspaceEffective.Setting == toolpolicy.SettingAllow
 
 	// FIR-2351 fix (Tine, adversarial review, finding 2): workspace-scope must
 	// resolve to a REAL member of THIS workspace, not any syntactically valid
@@ -553,19 +550,19 @@ func (h *Handler) cerebroRequireDelegatedOverridePolicy(w http.ResponseWriter, r
 			if !t.Valid || !shared[t] {
 				continue
 			}
-			granted, gerr := store.ResolveOptIn(r.Context(), toolpolicy.Query{
+			groupEffective, gerr := store.ResolvePermission(r.Context(), toolpolicy.Query{
 				WorkspaceID: wsUUID,
 				ToolKey:     toolpolicy.CapabilityManageGroupOverrides,
 				UserID:      viewer.UserID,
 				RequestContext: toolpolicy.RequestContext{
 					ArgValues: map[string]string{"group_id": util.UUIDToString(t)},
 				},
-			})
+			}, platformaccess.Actor{Authenticated: true})
 			if gerr != nil {
 				writeError(w, http.StatusInternalServerError, "permission check failed")
 				return false
 			}
-			if granted {
+			if groupEffective.Setting == toolpolicy.SettingAllow {
 				hasGroupScope = true
 				break
 			}
@@ -605,25 +602,22 @@ func (h *Handler) cerebroRequireManagePermissionsPolicy(w http.ResponseWriter, r
 	if !ok {
 		return false
 	}
-	if viewer.IsAdmin {
-		return true
-	}
 	wsUUID, perr := util.ParseUUID(workspaceID)
 	if perr != nil {
 		writeError(w, http.StatusBadRequest, "invalid workspace id")
 		return false
 	}
 	store := toolpolicy.NewStoreFromQueries(h.CerebroQueries)
-	granted, err := store.ResolveOptIn(r.Context(), toolpolicy.Query{
+	effective, err := store.ResolvePermission(r.Context(), toolpolicy.Query{
 		WorkspaceID: wsUUID,
 		ToolKey:     toolpolicy.CapabilityManageWorkspaceOverrides,
 		UserID:      viewer.UserID,
-	})
+	}, platformaccess.Actor{Authenticated: true, Admin: viewer.IsAdmin})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "permission check failed")
 		return false
 	}
-	if !granted {
+	if effective.Setting != toolpolicy.SettingAllow {
 		writeError(w, http.StatusForbidden, "changing group or agent permission rows requires the Manage permissions capability — ask a workspace admin")
 		return false
 	}

@@ -61,6 +61,7 @@ describe("MessageDetailSheet", () => {
 
     const link = screen.getByRole("link", { name: "Open full conversation in Inbox" });
     expect(link.getAttribute("href")).toBe("/firtal/inbox?chat=session-1");
+    expect(screen.getByRole("dialog").className).toContain("data-[side=right]:w-full");
 
     fireEvent.click(link);
     expect(push).toHaveBeenCalledWith("/firtal/inbox?chat=session-1");

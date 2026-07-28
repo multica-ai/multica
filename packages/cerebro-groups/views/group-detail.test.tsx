@@ -201,7 +201,6 @@ describe("GroupDetailView", () => {
         metadata: {},
         owner_id: null,
         sandbox_enabled: null,
-        persona_sandbox: "",
         capabilities: {},
         last_seen_at: null,
         created_at: "",
@@ -227,7 +226,6 @@ describe("GroupDetailView", () => {
         model: "claude",
         owner_id: null,
         skills: [],
-        persona_sandbox: "",
         created_at: "",
         updated_at: "",
         archived_at: null,
@@ -280,7 +278,6 @@ describe("GroupDetailView", () => {
         metadata: {},
         owner_id: null,
         sandbox_enabled: null,
-        persona_sandbox: "",
         capabilities: {},
         last_seen_at: null,
         created_at: "",
@@ -306,7 +303,6 @@ describe("GroupDetailView", () => {
         model: "claude",
         owner_id: null,
         skills: [],
-        persona_sandbox: "",
         created_at: "",
         updated_at: "",
         archived_at: null,
@@ -344,7 +340,6 @@ describe("GroupDetailView", () => {
         metadata: {},
         owner_id: null,
         sandbox_enabled: null,
-        persona_sandbox: "",
         capabilities: {},
         last_seen_at: null,
         created_at: "",
@@ -370,7 +365,6 @@ describe("GroupDetailView", () => {
         model: "claude",
         owner_id: null,
         skills: [],
-        persona_sandbox: "",
         created_at: "",
         updated_at: "",
         archived_at: null,
@@ -442,12 +436,15 @@ describe("GroupDetailView", () => {
     for (const testId of [
       "capability-create-runtime",
       "capability-create-agent",
+      "capability-apps-create",
+      "capability-apps-manage",
+      "capability-apps-delete",
       "capability-create-shared-filters",
       "capability-create-memory",
       "capability-set-blocking-gate",
     ]) {
       expect(screen.getByTestId(testId)).toBeInTheDocument();
     }
-    expect(screen.getAllByRole("switch")).toHaveLength(5);
+    expect(screen.getAllByRole("switch")).toHaveLength(8);
   });
 });

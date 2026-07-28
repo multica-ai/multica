@@ -10,6 +10,7 @@ export type {
   AgentRuntimeMode,
   AgentVisibility,
   AgentTask,
+  TaskAccessSnapshot, // CEREBRO-PATCH(unified-permissions-task-access): FIR-3388 export task permission snapshots.
   AgentActivityBucket,
   AgentRunCount,
   TaskFailureReason,

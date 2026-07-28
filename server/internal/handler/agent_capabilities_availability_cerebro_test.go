@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
+	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 )
 
 // fakeEvidence is a ledger stand-in keyed by canonical capability ID. Only the
@@ -24,7 +25,7 @@ func (f fakeEvidence) Lookup(capabilityID string, rt availabilityevidence.Runtim
 }
 
 func builtinTool(key string) AgentCapabilityTool {
-	return AgentCapabilityTool{Key: key, Source: capSourceBuiltin, Permission: "allow"}
+	return AgentCapabilityTool{Key: key, Source: capSourceBuiltin, Permission: "allow", Allowed: true, Available: true, Enforced: true}
 }
 
 // The requirement this whole step exists for: a tool a probe PROVED is the only
@@ -82,6 +83,19 @@ func TestAvailabilityMarksUnprobedToolNotProven(t *testing.T) {
 	if tools[0].Permission != "deny" {
 		t.Errorf("permission = %q, want deny when the access engine rejects missing runtime evidence", tools[0].Permission)
 	}
+	if tools[0].Allowed || tools[0].Callable {
+		t.Errorf("effective truth = %+v, want denied and not callable", tools[0])
+	}
+}
+
+func TestAvailabilityUsesPlatformCatalogRowsAsCanonicalCapabilities(t *testing.T) {
+	tools, _ := applyAgentCapabilityAvailability(
+		[]AgentCapabilityTool{{Key: "create_workflow_hook", Source: platformcatalog.Source, Permission: "allow", Allowed: true, Available: true, Enforced: true}},
+		availabilityevidence.RuntimeFirtalGateway, fakeEvidence{})
+
+	if tools[0].Permission != "deny" || tools[0].Allowed || tools[0].Callable {
+		t.Fatalf("platform catalog row escaped missing-evidence gate: %+v", tools[0])
+	}
 }
 
 // discovered means the capability was found but the gate was never proved. Found
@@ -105,6 +119,32 @@ func TestAvailabilityMarksDiscoveredToolNotProven(t *testing.T) {
 	}
 	if tools[0].Permission != "allow" {
 		t.Errorf("permission = %q, want allow because discovered is present on the live surface", tools[0].Permission)
+	}
+}
+
+func TestAvailabilityRecomputesCallabilityAndClearsStaleBlockExplanation(t *testing.T) {
+	evidence := fakeEvidence{
+		"platform:get_agent_capabilities": {
+			CapabilityID: "platform:get_agent_capabilities",
+			RuntimeType:  availabilityevidence.RuntimeLocal,
+			Level:        availabilityevidence.LevelDiscovered,
+			Reason:       "found on runtime",
+		},
+	}
+	tool := builtinTool("get_agent_capabilities")
+	tool.Allowed = true
+	tool.Enforced = true
+	tool.BlockedReason = "The action is not available on this runtime"
+	tool.HowToFix = "stale"
+
+	tools, _ := applyAgentCapabilityAvailability(
+		[]AgentCapabilityTool{tool}, availabilityevidence.RuntimeLocal, evidence)
+
+	if !tools[0].Available || !tools[0].Callable {
+		t.Fatalf("effective truth = %+v, want available and callable", tools[0])
+	}
+	if tools[0].BlockedReason != "" || tools[0].HowToFix != "" {
+		t.Fatalf("callable tool retained stale block explanation: %+v", tools[0])
 	}
 }
 
@@ -145,22 +185,25 @@ func TestAvailabilityReportsUnknownWithoutEvidenceSource(t *testing.T) {
 	}
 }
 
-// A row with no canonical name cannot be keyed to a probe. Say so plainly
-// instead of implying the probe ran and found nothing.
-func TestAvailabilityExplainsToolWithNoCanonicalName(t *testing.T) {
+// A live scan is discovery evidence even before an identity alias is known. It
+// must be available/callable when policy allows, but never presented as verified.
+func TestAvailabilityUsesLiveScanAsDiscoveredEvidenceWithoutCanonicalName(t *testing.T) {
 	tools, _ := applyAgentCapabilityAvailability(
-		[]AgentCapabilityTool{{Key: "some_scanned_tool", Source: capSourceScan, Permission: "allow"}},
+		[]AgentCapabilityTool{{Key: "some_scanned_tool", Source: capSourceScan, Permission: "allow", Enforced: true}},
 		availabilityevidence.RuntimeFirtalGateway, fakeEvidence{})
 
 	got := tools[0].Availability
 	if got.Proven {
 		t.Error("an unmappable tool must not be proven")
 	}
-	if got.Reason != capAvailabilityNoCanonicalName {
-		t.Errorf("reason = %q, want %q", got.Reason, capAvailabilityNoCanonicalName)
+	if got.Level != string(availabilityevidence.LevelDiscovered) {
+		t.Errorf("level = %q, want discovered", got.Level)
 	}
 	if tools[0].Permission != "allow" {
 		t.Errorf("permission = %q, want policy answer preserved outside the canonical engine", tools[0].Permission)
+	}
+	if !tools[0].Available || !tools[0].Callable {
+		t.Errorf("live scanned tool = %+v, want available and callable", tools[0])
 	}
 }
 
@@ -168,5 +211,32 @@ func TestAvailabilitySummaryNamesTheRuntimeItJudged(t *testing.T) {
 	_, summary := applyAgentCapabilityAvailability(nil, availabilityevidence.RuntimeClaudeCode, fakeEvidence{})
 	if summary.RuntimeType != string(availabilityevidence.RuntimeClaudeCode) {
 		t.Errorf("runtime_type = %q, want %q", summary.RuntimeType, availabilityevidence.RuntimeClaudeCode)
+	}
+}
+
+func TestAvailabilityTreatsRuntimeInventoryAsDiscoveredAndCallable(t *testing.T) {
+	tools, summary := applyAgentCapabilityAvailabilityForProvider(
+		[]AgentCapabilityTool{{
+			Key:        "tools:bash",
+			Title:      "bash",
+			Source:     capSourceRuntimeReport,
+			Permission: "allow",
+			Allowed:    true,
+			Enforced:   true,
+		}},
+		availabilityevidence.RuntimeLocal,
+		"codex",
+		fakeEvidence{},
+	)
+
+	got := tools[0]
+	if got.Availability.Level != string(availabilityevidence.LevelDiscovered) {
+		t.Fatalf("runtime inventory availability = %+v, want discovered", got.Availability)
+	}
+	if !got.Available || !got.Callable {
+		t.Fatalf("runtime-reported allowed tool = %+v, want available and callable", got)
+	}
+	if summary.Discovered != 1 || summary.Declared != 0 || summary.Unproven != 1 {
+		t.Fatalf("availability summary = %+v, want one discovered unproven tool", summary)
 	}
 }

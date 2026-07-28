@@ -204,7 +204,6 @@ function makeAgent(overrides: Partial<Agent> & { id: string; name: string; owner
     runtime_config: {},
     custom_args: [],
     visibility: "private",
-    persona_sandbox: "",
     status: "idle",
     max_concurrent_tasks: 1,
     model: "",

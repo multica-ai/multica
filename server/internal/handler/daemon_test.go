@@ -31,16 +31,34 @@ import (
 // the heartbeat — the bound context must cut it short — while the ack-safe
 // PopPending path is never reached because HasPending returns an error, not
 // true.
-type slowProbeLocalSkillListStore struct{ LocalSkillListStore }
+type slowProbeLocalSkillListStore struct {
+	LocalSkillListStore
+	deadlineObserved chan time.Duration
+}
 
 func (s slowProbeLocalSkillListStore) HasPending(ctx context.Context, _ string) (bool, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		s.deadlineObserved <- -1
+		return false, errors.New("slow probe received an unbounded context")
+	}
+	s.deadlineObserved <- time.Until(deadline)
 	<-ctx.Done()
 	return false, ctx.Err()
 }
 
-type slowProbeLocalSkillImportStore struct{ LocalSkillImportStore }
+type slowProbeLocalSkillImportStore struct {
+	LocalSkillImportStore
+	deadlineObserved chan time.Duration
+}
 
 func (s slowProbeLocalSkillImportStore) HasPending(ctx context.Context, _ string) (bool, error) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		s.deadlineObserved <- -1
+		return false, errors.New("slow probe received an unbounded context")
+	}
+	s.deadlineObserved <- time.Until(deadline)
 	<-ctx.Done()
 	return false, ctx.Err()
 }
@@ -370,6 +388,82 @@ func TestClaimTaskByRuntime_PopulatesWorkspaceContext(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(issue-title-tracing): TestClaimTaskByRuntime_PopulatesIssueTitles verifies every issue-bound local
+// runtime claim carries the current issue and parent titles. The trace-upload
+// sidecar copies these fields into Registry; if either assignment disappears,
+// new Sessions and Traces regress to raw UUIDs.
+func TestClaimTaskByRuntime_PopulatesIssueTitles(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Issue title claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Current issue title")
+
+	var parentIssueID string
+	const parentTitle = "Parent issue title"
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_id, creator_type,
+			number, position
+		)
+		VALUES (
+			$1, $2, 'in_progress', 'none', $3, 'member',
+			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1),
+			0
+		)
+		RETURNING id
+	`, testWorkspaceID, parentTitle, testUserID).Scan(&parentIssueID); err != nil {
+		t.Fatalf("setup: create parent issue: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parentIssueID) })
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE issue SET parent_issue_id = $1 WHERE id = $2
+	`, parentIssueID, issueID); err != nil {
+		t.Fatalf("setup: attach parent issue: %v", err)
+	}
+
+	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest(
+		"POST",
+		"/api/daemon/runtimes/"+runtimeID+"/tasks/claim",
+		nil,
+		testWorkspaceID,
+		"issue-title-claim",
+	)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.ClaimTaskByRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Task *struct {
+			ID               string `json:"id"`
+			IssueTitle       string `json:"issue_title"`
+			ParentIssueTitle string `json:"parent_issue_title"`
+		} `json:"task"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	if resp.Task == nil {
+		t.Fatalf("expected dispatched task %s to be claimed, got nil: %s", taskID, w.Body.String())
+	}
+	if resp.Task.ID != taskID {
+		t.Fatalf("claimed task id = %s, want %s", resp.Task.ID, taskID)
+	}
+	if resp.Task.IssueTitle != "Current issue title issue" {
+		t.Errorf("issue_title = %q, want %q", resp.Task.IssueTitle, "Current issue title issue")
+	}
+	if resp.Task.ParentIssueTitle != parentTitle {
+		t.Errorf("parent_issue_title = %q, want %q", resp.Task.ParentIssueTitle, parentTitle)
+	}
+}
+
 // TestClaimTaskByRuntime_WorkspaceContextEmptyWhenUnset verifies the field
 // is omitted (empty string after JSON decode) when the workspace owner has
 // not set a context. Important because the daemon's brief skips the heading
@@ -663,8 +757,16 @@ func TestDaemonHeartbeat_SlowProbeDoesNotWedge(t *testing.T) {
 
 	origList := testHandler.LocalSkillListStore
 	origImport := testHandler.LocalSkillImportStore
-	testHandler.LocalSkillListStore = slowProbeLocalSkillListStore{origList}
-	testHandler.LocalSkillImportStore = slowProbeLocalSkillImportStore{origImport}
+	listDeadline := make(chan time.Duration, 1)
+	importDeadline := make(chan time.Duration, 1)
+	testHandler.LocalSkillListStore = slowProbeLocalSkillListStore{
+		LocalSkillListStore: origList,
+		deadlineObserved:    listDeadline,
+	}
+	testHandler.LocalSkillImportStore = slowProbeLocalSkillImportStore{
+		LocalSkillImportStore: origImport,
+		deadlineObserved:      importDeadline,
+	}
 	t.Cleanup(func() {
 		testHandler.LocalSkillListStore = origList
 		testHandler.LocalSkillImportStore = origImport
@@ -675,16 +777,21 @@ func TestDaemonHeartbeat_SlowProbeDoesNotWedge(t *testing.T) {
 		"runtime_id": runtimeID,
 	}, testWorkspaceID, "runtime-local-skills-daemon")
 
-	start := time.Now()
 	testHandler.DaemonHeartbeat(w, req)
-	elapsed := time.Since(start)
 
 	if w.Code != http.StatusOK {
 		t.Fatalf("DaemonHeartbeat with slow probes: expected 200, got %d: %s", w.Code, w.Body.String())
 	}
-	// Two bounded probes at 1s each + enough fixed slack for a loaded CI runner.
-	if elapsed > 6*time.Second {
-		t.Fatalf("DaemonHeartbeat took %s; expected fast return despite slow probes", elapsed)
+	// Assert the contract at the probe seam instead of timing the whole handler:
+	// unrelated DB setup can be delayed when the complete suite saturates CI,
+	// while these captured deadlines prove both slow stores were actually bounded.
+	for name, observed := range map[string]time.Duration{
+		"local skill list":   <-listDeadline,
+		"local skill import": <-importDeadline,
+	} {
+		if observed <= 0 || observed > heartbeatHasPendingTimeout+100*time.Millisecond {
+			t.Errorf("%s probe deadline = %s, want a positive duration no greater than %s", name, observed, heartbeatHasPendingTimeout)
+		}
 	}
 }
 
