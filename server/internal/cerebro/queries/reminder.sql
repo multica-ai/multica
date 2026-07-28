@@ -61,13 +61,16 @@ WHERE r.id = $1;
 -- name: CreateReminder :one
 -- Create a reminder for any recipient, anchored to any (or no) entity. user_id
 -- is kept populated (= creator) for back-compat with the v1 column; recipient_id
--- is the authority. Returns the id; the handler re-reads via GetReminder.
+-- is the authority. source_inbox_item_id is set only when the reminder came from
+-- snoozing an inbox row, so the sweeper can let that row be the reminder instead
+-- of creating a duplicate (FIR-3918). Returns the id; the handler re-reads via
+-- GetReminder.
 INSERT INTO cerebro_reminder (
     workspace_id, user_id, creator_id, recipient_type, recipient_id,
     remind_at, text, anchor_type, message_id, conversation_id, project_id,
-    chat_message_id
+    chat_message_id, source_inbox_item_id
 )
-VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING id;
 
 -- name: SnoozeReminder :one
@@ -112,7 +115,7 @@ WHERE id IN (
 )
 RETURNING id, workspace_id, creator_id, recipient_type, recipient_id,
           remind_at, text, anchor_type, message_id, conversation_id, project_id,
-          chat_message_id;
+          chat_message_id, source_inbox_item_id;
 
 -- name: SetReminderFiredInboxItem :exec
 -- Record which inbox row the sweeper surfaced/created for a fired reminder, so a

@@ -86,7 +86,9 @@ func fireAgentReminder(ctx context.Context, cerebro *cerebrodb.Queries, rem cere
 // surfaceFiredReminder makes a fired member reminder land in the inbox. Every
 // reminder type — free, project, issue-, comment-, or chat-anchored — gets a
 // standalone unread `reminder` inbox row so it always shows in the inbox's
-// Reminders section (FIR-2278). Before dropping that row we additionally bring
+// Reminders section (FIR-2278), with one exception: a reminder set by snoozing
+// an inbox row re-surfaces that row instead, because it comes back by itself and
+// would otherwise show the same message twice (FIR-3918). Before either, we bring
 // the reminder's source back into view when there is one: un-archive the linked
 // issue/conversation, or re-surface the chat in the inbox's chat list.
 //
@@ -124,7 +126,70 @@ func surfaceFiredReminder(ctx context.Context, cerebro *cerebrodb.Queries, bus *
 		}
 	}
 
+	// FIR-3918: a reminder set by snoozing an inbox row must not come back as two
+	// rows. That row was only hidden (muted_until) and resurfaces on its own, so
+	// when it is still there it IS the reminder — it already renders the reminder
+	// mark from its overdue muted_until. Bring it back unread and stop; only when
+	// the link is missing or the row is gone do we fall through to a standalone
+	// row (a free/project/comment/chat reminder always does).
+	if resurfacedSnoozedInboxRow(ctx, cerebro, bus, rem) {
+		return
+	}
+
 	surfaceReminderInboxRow(ctx, cerebro, bus, rem)
+}
+
+// resurfacedSnoozedInboxRow re-surfaces the inbox row a reminder was snoozed from
+// and reports whether it did, so the caller can skip the standalone reminder row
+// (FIR-3918). The row un-mutes by itself when muted_until passes; what it needs
+// from us is to arrive unread, the way any fired reminder does — otherwise the
+// reminder returns as a grey, already-read row and never rings.
+//
+// Unread is set per issue because muting is per issue (SetInboxMutedUntilByIssue):
+// every sibling shares one muted_until, so the row the deduplicated inbox shows is
+// not necessarily the one that was clicked. The inbox groups by issue, so this
+// stays one unread signal.
+//
+// fired_inbox_item_id is deliberately NOT set here: the reminder handler archives
+// that row on done/snooze/delete, and this row is the user's own message — quite
+// possibly unread — not something we created.
+func resurfacedSnoozedInboxRow(ctx context.Context, cerebro *cerebrodb.Queries, bus *events.Bus, rem cerebrodb.ClaimDueRemindersRow) bool {
+	if !rem.SourceInboxItemID.Valid {
+		return false
+	}
+	row, err := cerebro.FindLiveInboxItemForRecipient(ctx, cerebrodb.FindLiveInboxItemForRecipientParams{
+		ID:          rem.SourceInboxItemID,
+		RecipientID: rem.RecipientID,
+	})
+	if err != nil {
+		// Archived, deleted, or no longer this member's row — fall back to the
+		// standalone reminder row so the reminder is never silently lost.
+		return false
+	}
+	if !row.IssueID.Valid {
+		return false
+	}
+	if _, err := cerebro.SetInboxUnreadByIssue(ctx, cerebrodb.SetInboxUnreadByIssueParams{
+		WorkspaceID:   row.WorkspaceID,
+		RecipientType: "member",
+		RecipientID:   rem.RecipientID,
+		IssueID:       row.IssueID,
+	}); err != nil {
+		slog.Warn("cerebro reminder sweeper: failed to mark snoozed inbox row unread", "error", err)
+		return false
+	}
+	if bus != nil {
+		bus.Publish(events.Event{
+			Type:        protocol.EventInboxNew,
+			WorkspaceID: util.UUIDToString(rem.WorkspaceID),
+			ActorType:   "system",
+			Payload: map[string]any{
+				"recipient_id": util.UUIDToString(rem.RecipientID),
+				"type":         "reminder",
+			},
+		})
+	}
+	return true
 }
 
 // surfaceReminderInboxRow drops a fresh, unread `reminder` inbox row carrying
