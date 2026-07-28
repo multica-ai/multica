@@ -89,6 +89,31 @@ EXECUTE FUNCTION mark_adaptive_agent_task_pending();
 
 -- Forecast reservations protect plan headroom only while work is in flight.
 -- Provider telemetry remains the source of truth for actual consumption.
+CREATE OR REPLACE FUNCTION clear_adaptive_route_reservation_marker()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF OLD.route_reserved_permille > 0
+       AND OLD.status NOT IN ('completed', 'failed', 'cancelled')
+       AND NEW.status IN ('completed', 'failed', 'cancelled')
+    THEN
+        -- Clear the durable marker on the task tuple before it becomes
+        -- terminal. The capacity mutation happens in a separate AFTER trigger,
+        -- so concurrent updates cannot apply it for a tuple write that loses
+        -- an EvalPlanQual recheck.
+        NEW.route_reserved_permille := 0;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS trg_clear_adaptive_route_reservation_marker_update ON agent_task_queue;
+CREATE TRIGGER trg_clear_adaptive_route_reservation_marker_update
+BEFORE UPDATE OF status ON agent_task_queue
+FOR EACH ROW
+EXECUTE FUNCTION clear_adaptive_route_reservation_marker();
+
 CREATE OR REPLACE FUNCTION release_adaptive_route_reservation()
 RETURNS TRIGGER
 LANGUAGE plpgsql
@@ -116,12 +141,6 @@ BEGIN
             updated_at = now()
         WHERE owner_id = OLD.route_capacity_owner_id
           AND provider = OLD.route_provider;
-        IF TG_OP = 'UPDATE' THEN
-            -- Clear the durable reservation marker in the same transaction.
-            -- This makes any future terminal -> non-terminal -> terminal
-            -- lifecycle unable to release the same forecast twice.
-            NEW.route_reserved_permille := 0;
-        END IF;
     END IF;
     IF TG_OP = 'DELETE' THEN
         RETURN OLD;
@@ -132,7 +151,7 @@ $$;
 
 DROP TRIGGER IF EXISTS trg_release_adaptive_route_reservation_update ON agent_task_queue;
 CREATE TRIGGER trg_release_adaptive_route_reservation_update
-BEFORE UPDATE OF status ON agent_task_queue
+AFTER UPDATE OF status ON agent_task_queue
 FOR EACH ROW
 EXECUTE FUNCTION release_adaptive_route_reservation();
 

@@ -385,6 +385,81 @@ func TestAdaptiveAdmissionConcurrentReservationsPreserveHeadroom(t *testing.T) {
 	}
 }
 
+func TestAdaptiveConcurrentTerminalUpdatesReleaseReservationOnce(t *testing.T) {
+	fixture := newAdaptiveRoutingFixture(t, 150, false, false)
+	fixture.seedCapacity(t, "claude", 900, 200, time.Now().UTC())
+	first := fixture.seedTask(t, "adaptive concurrent terminal one")
+	second := fixture.seedTask(t, "adaptive concurrent terminal two")
+
+	svc := NewTaskService(fixture.queries, fixture.pool, nil, events.New())
+	svc.FeatureFlags = adaptiveRoutingFlags(true)
+	svc.NotifyTaskEnqueued(context.Background(), first)
+	svc.NotifyTaskEnqueued(context.Background(), second)
+
+	var reserved int
+	if err := fixture.pool.QueryRow(context.Background(), `
+		SELECT reserved_inflight_permille
+		FROM provider_plan_capacity
+		WHERE owner_id = $1 AND provider = 'claude'
+	`, fixture.userID).Scan(&reserved); err != nil {
+		t.Fatalf("read initial concurrent terminal reservation: %v", err)
+	}
+	if reserved != 300 {
+		t.Fatalf("initial reservation = %d, want two 150-permille forecasts", reserved)
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, err := fixture.pool.Exec(context.Background(), `
+				UPDATE agent_task_queue
+				SET status = 'completed', completed_at = now()
+				WHERE id = $1
+			`, util.UUIDToString(first.ID))
+			errs <- err
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("concurrent terminal update: %v", err)
+		}
+	}
+
+	if err := fixture.pool.QueryRow(context.Background(), `
+		SELECT reserved_inflight_permille
+		FROM provider_plan_capacity
+		WHERE owner_id = $1 AND provider = 'claude'
+	`, fixture.userID).Scan(&reserved); err != nil {
+		t.Fatalf("read reservation after concurrent terminal updates: %v", err)
+	}
+	if reserved != 150 {
+		t.Fatalf("concurrent terminal updates left reservation = %d, want unrelated task's 150", reserved)
+	}
+	firstCurrent, err := fixture.queries.GetAgentTask(context.Background(), first.ID)
+	if err != nil {
+		t.Fatalf("load first terminal task: %v", err)
+	}
+	secondCurrent, err := fixture.queries.GetAgentTask(context.Background(), second.ID)
+	if err != nil {
+		t.Fatalf("load second routed task: %v", err)
+	}
+	if firstCurrent.RouteReservedPermille != 0 || secondCurrent.RouteReservedPermille != 150 {
+		t.Fatalf(
+			"reservation markers after concurrent terminal updates = first:%d second:%d, want 0/150",
+			firstCurrent.RouteReservedPermille,
+			secondCurrent.RouteReservedPermille,
+		)
+	}
+}
+
 func TestAdaptiveRuntimeClaimCannotDispatchAnotherRuntimeTask(t *testing.T) {
 	fixture := newAdaptiveRoutingFixture(t, 100, true, false)
 	codexTask := fixture.seedTask(t, "adaptive codex runtime fence")

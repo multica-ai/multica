@@ -1,6 +1,8 @@
 DROP TRIGGER IF EXISTS trg_release_adaptive_route_reservation_delete ON agent_task_queue;
 DROP TRIGGER IF EXISTS trg_release_adaptive_route_reservation_update ON agent_task_queue;
 DROP FUNCTION IF EXISTS release_adaptive_route_reservation();
+DROP TRIGGER IF EXISTS trg_clear_adaptive_route_reservation_marker_update ON agent_task_queue;
+DROP FUNCTION IF EXISTS clear_adaptive_route_reservation_marker();
 
 DROP TRIGGER IF EXISTS trg_mark_adaptive_agent_task_pending ON agent_task_queue;
 DROP FUNCTION IF EXISTS mark_adaptive_agent_task_pending();
