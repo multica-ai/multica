@@ -97,13 +97,26 @@ failed Pi call through the gateway only before Pi has emitted text or started a
 tool; it never retries after a possible side effect. The gateway credential is
 read from `FIRTAL_REGISTRY_KEY` at runtime and is not persisted in agent config.
 
-The Pi provider extension asks the gateway which models the key may call
-(`GET /api/ai/proxy/v1/models`) and registers every chat model it returns, so a
-grant added on **AI Proxy → Permissions** in the registry shows up as
-`firtal-gateway/<model-id>` in Pi after the next task — no image change. Grants
-are the only control surface: embeddings are filtered out, and
-`FIRTAL_REGISTRY_MODEL` stays registered even when the gateway is unreachable,
-because the Pi retry path always targets that model.
+Both agents also register the gateway as a **selectable** provider, not just a
+backup, and both discover the model list the same way: they ask the gateway
+which models the key may call (`GET /api/ai/proxy/v1/models`) and register every
+chat model it returns. A grant added on **AI Proxy → Permissions** in the
+registry therefore shows up as `firtal-gateway/<model-id>` in Pi and under
+**Firtal AI Gateway** in `hermes model` after the next task — no image change.
+
+- **Pi** — `docker/pi-firtal-gateway.ts`, installed into Pi's extensions dir.
+- **Hermes** — `docker/configure-hermes-fallback.py` writes both
+  `providers.firtal-gateway` (selectable) and one `fallback_providers` entry
+  (the retry chain). The two are not interchangeable: the fallback chain holds a
+  single model and only fires when the primary fails.
+
+Grants are the only control surface. Embeddings are filtered out of both lists,
+and `FIRTAL_REGISTRY_MODEL` is listed first and stays registered even when the
+gateway is unreachable, because the retry path always targets that model.
+
+Neither agent persists the key: the Hermes provider entry references it by
+environment-variable name (`key_env: FIRTAL_REGISTRY_KEY`) and Pi reads
+`$FIRTAL_REGISTRY_KEY` at call time.
 
 Do not replace this flow with `OPENAI_API_KEY`: that is a separate API-billing
 identity and does not use the requested ChatGPT subscription.
