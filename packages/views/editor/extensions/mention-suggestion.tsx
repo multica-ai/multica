@@ -42,7 +42,11 @@ import {
   sortUserItemsByRecency,
 } from "./mention-recency";
 import { matchesPinyin } from "./pinyin-match";
-import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
+import {
+  createSuggestionPopupRender,
+  isPickerAcceptKey,
+  preventSuggestionBlur,
+} from "./suggestion-popup";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -403,6 +407,7 @@ function MentionRow({
         className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors ${
           selected ? "bg-accent" : "hover:bg-accent/50"
         } ${isClosed ? "opacity-60" : ""}`}
+        onMouseDown={preventSuggestionBlur}
         onClick={onSelect}
       >
         <span className="flex h-7 w-7 shrink-0 items-center justify-center">
@@ -437,6 +442,7 @@ function MentionRow({
         className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-xs transition-colors ${
           selected ? "bg-accent" : "hover:bg-accent/50"
         }`}
+        onMouseDown={preventSuggestionBlur}
         onClick={onSelect}
       >
         <span className="flex h-7 w-7 shrink-0 items-center justify-center">
@@ -464,6 +470,7 @@ function MentionRow({
       className={`flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-xs transition-colors ${
         selected ? "bg-accent" : "hover:bg-accent/50"
       }`}
+      onMouseDown={preventSuggestionBlur}
       onClick={onSelect}
     >
       <ActorAvatar
