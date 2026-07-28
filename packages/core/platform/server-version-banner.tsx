@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslation } from "react-i18next";
-import { useConfigStore, type ServerVersionCompat } from "../config";
+import { useConfigStore } from "../config";
 
 // Generic upgrade command for self-hosted operators. The exact compose file
 // varies by deployment, so we keep it to the standard `docker compose` form
