@@ -203,7 +203,7 @@ COPY --from=uv-dist /uv /uvx /usr/local/bin/
 # (devenv overlays uid=1000 onto the EFS PVC owner).
 RUN groupadd -g "${GID}" agent \
  && useradd -m -d /home/agent -s /bin/bash -u "${UID}" -g agent agent \
- && mkdir -p /home/agent/.multica /home/agent/multica_workspaces \
+ && mkdir -p /home/agent/.multica /home/agent/multica_workspaces /home/agent/.npm-global \
  && chown -R agent:agent /home/agent
 
 # multica lives in its own agent-owned directory, not the shared /usr/local/bin
@@ -224,6 +224,21 @@ COPY --chown=agent:agent --from=multica-builder /out/multica /opt/multica/bin/mu
 # common tool path so `multica ...` resolves inside agent terminals.
 RUN ln -sf /opt/multica/bin/multica /usr/local/bin/multica
 ENV PATH="/opt/multica/bin:${PATH}"
+
+# Redirect npm's global-install prefix for the `agent` user. The bundled npm
+# CLIs (claude/codex/opencode/pi) are installed as root above, before `USER
+# agent`, which leaves npm's default global prefix (wherever the NodeSource
+# package put it — /usr, i.e. /usr/lib/node_modules + /usr/bin) root-owned.
+# Any later `npm install -g <pkg>` run as `agent` (an ad hoc task install, or
+# agentrunner-runtime's EXTRA_NPX_TOOLS boot hook) hits EACCES against that
+# dir. NPM_CONFIG_PREFIX points npm's global installs at an agent-owned dir
+# instead — created + chowned above alongside the other agent dirs — so
+# `npm install -g` works unmodified for the agent user. Doesn't touch the
+# CLIs already baked into /usr/bin above; only affects installs the agent
+# user performs itself. bin/ goes on PATH so installed executables resolve by
+# bare name the same way /opt/multica/bin does.
+ENV NPM_CONFIG_PREFIX=/home/agent/.npm-global
+ENV PATH="/home/agent/.npm-global/bin:${PATH}"
 
 # G2 LLM proxy defaults — route Anthropic + OpenAI through llmproxy.g2.com.
 # Per-CLI override surface (most authoritative one is seeded):

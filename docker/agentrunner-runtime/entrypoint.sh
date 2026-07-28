@@ -89,6 +89,36 @@ fi
 # before the final exec, makes it inherited by the whole process tree.
 export PATH="${HOME}/.local/bin:${PATH}"
 
+# EXTRA_NPX_TOOLS is the npm/npx analog of EXTRA_UV_TOOLS: same one-off/
+# custom-need opt-in for a single workspace, for npm-distributed CLIs instead
+# of PyPI ones. Space-separated `npm install -g` targets, always
+# version-pinned using npm's native `pkg@x.y.z` syntax (no `uv`-style `==`
+# translation needed) for the same reason EXTRA_UV_TOOLS pins: this path is
+# best-effort and untested by CI, so an unpinned entry can silently resolve
+# to a different release on the next pod boot. Lands as an SSM param under
+# this workspace's slug
+# (/agentfarm/development/agentrunner/<slug>/EXTRA_NPX_TOOLS) and arrives
+# here the same way EXTRA_UV_TOOLS does, via the existing ExternalSecret
+# sweep — no image change, no per-workspace Dockerfile.
+#
+# `npm install -g` ordinarily fails EACCES for the non-root `agent` user
+# because the bundled npm CLIs (claude/codex/opencode/pi) are installed as
+# root before `USER agent` in agent-runtime-base/Dockerfile, leaving npm's
+# default global prefix root-owned. That Dockerfile now redirects npm's
+# global prefix to an agent-owned dir (`NPM_CONFIG_PREFIX=~/.npm-global`,
+# its `bin/` already on `PATH` via the base image's own `ENV PATH`, so no
+# export is needed here the way there is for `uv`) specifically so this
+# install works unmodified for the agent user — see that Dockerfile's
+# "Redirect npm's global-install prefix" comment. Best-effort: a failed
+# install logs a warning and does not block pod boot, same as
+# EXTRA_UV_TOOLS.
+if [ -n "${EXTRA_NPX_TOOLS:-}" ]; then
+  echo "entrypoint: installing extra npm tools: ${EXTRA_NPX_TOOLS}"
+  for tool in ${EXTRA_NPX_TOOLS}; do
+    npm install -g "${tool}" || echo "entrypoint: WARNING failed to install extra npm tool '${tool}' (continuing)" >&2
+  done
+fi
+
 # ── Materialize PEM secrets as files ───────────────────────────────────────────
 # gitops/base/agent-runtime/external-secret.yaml sweeps every SSM param under
 # the workspace's slug (and /shared/*) into this container as a plain env var —

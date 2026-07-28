@@ -280,8 +280,9 @@ the error.
 
 ## Toolchain gotchas for agent tasks
 
-Two tool-install paths that look obvious don't work in this image, plus one
-that was considered and deliberately left out:
+One tool-install path that looks obvious doesn't work in this image, plus one
+that was fixed after initially not working, plus one that was considered and
+deliberately left out:
 
 - **No `pip`/`venv`.** `python3` is present (whatever apt pulled in
   transitively — it isn't a first-class citizen of this image's documented
@@ -292,15 +293,24 @@ that was considered and deliberately left out:
   write to an agent-owned dir (`~/.local/share/uv`), no permission issues.
   A skill that assumes `pip install` works (e.g. one written against a
   normal devbox) will not work here without switching to `uv`.
-- **`npm install -g <pkg>` fails for the non-root `agent` user.** The
-  bundled npm CLIs (`claude`/`codex`/`opencode`/`pi`) are installed as
-  root *before* `USER agent`, so the global prefix
-  (`/usr/lib/node_modules`) stays root-owned — `agent` gets `EACCES` on
-  any `-g` install. **Use `npx <pkg>` instead** — it doesn't write into
-  the global prefix, so it works unmodified for the non-root user. If a
-  task genuinely needs a persistent global install, that's a signal the
-  package belongs in this Dockerfile (see "Bump procedure" above), not in
-  a per-task `npm install -g`.
+- **`npm install -g <pkg>` now works for the non-root `agent` user** — but
+  didn't originally. The bundled npm CLIs (`claude`/`codex`/`opencode`/`pi`)
+  are installed as root *before* `USER agent`, so npm's default global
+  prefix (wherever the NodeSource package put it — `/usr`, i.e.
+  `/usr/lib/node_modules` + `/usr/bin`) stays root-owned; `agent` used to
+  get `EACCES` on any `-g` install. This Dockerfile now sets
+  `NPM_CONFIG_PREFIX=/home/agent/.npm-global` (an agent-owned dir, `bin/`
+  on `PATH`) after the baked CLIs are installed, so `agent`'s own
+  `npm install -g` calls land there instead — see the "Redirect npm's
+  global-install prefix" comment above the `ENV NPM_CONFIG_PREFIX` line.
+  This doesn't touch the CLIs already baked into `/usr/bin`, only installs
+  the agent user performs itself (a one-off task install, or
+  agentrunner-runtime's `EXTRA_NPX_TOOLS` boot hook — see that image's
+  README). For a single ad hoc invocation with no need to persist,
+  `npx <pkg>` is still simpler — it doesn't touch the global prefix at
+  all. If a tool is needed by every workspace, that's still a signal it
+  belongs baked into this Dockerfile (see "Bump procedure" above) rather
+  than installed per-task or per-workspace.
 - **No `mise`.** Some downstream consumers (e.g. `sem_agent_squad`)
   optionally shell out to `mise` for local-dev env hydration, with a
   fallback that skips silently when it's absent — that fallback is what

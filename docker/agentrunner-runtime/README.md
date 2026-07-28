@@ -35,6 +35,7 @@ netcat-openbsd, the agentfarm bootstrap, agent templates, and opencode config.
 | `OPENCODE_PORT`        | `4096`                          | Port for `opencode serve`.                                                 |
 | `OPENCODE_EXTRA_ARGS`  | (empty)                         | Appended verbatim to `opencode serve`, e.g. `--cors https://...`.          |
 | `EXTRA_UV_TOOLS`       | (empty)                         | Space-separated `uv tool install` targets, **always version-pinned** (e.g. `EXTRA_UV_TOOLS="snowflake-cli==3.23.0"`), installed once at pod boot. A one-off/custom-need opt-in for a single workspace without changing the shared image — see "One-off tool needs" below. Best-effort: a failed install warns and does not block boot. |
+| `EXTRA_NPX_TOOLS`      | (empty)                         | npm/npx analog of `EXTRA_UV_TOOLS`: space-separated `npm install -g` targets, **always version-pinned** (e.g. `EXTRA_NPX_TOOLS="cowsay@1.6.0"`), installed once at pod boot. See "One-off tool needs" below. Best-effort: a failed install warns and does not block boot. |
 
 ## One-off tool needs
 
@@ -78,6 +79,32 @@ This is scoped to `uv`-installable Python packages for now. A tool that isn't
 on PyPI (or needs OS packages) still needs a base-image change or a
 workspace-specific downstream image layer — this hook doesn't attempt to
 solve that case.
+
+`EXTRA_NPX_TOOLS` is the same mechanism for npm-distributed CLIs: set it as
+an SSM param under the workspace's slug
+(`/agentfarm/development/agentrunner/<slug>/EXTRA_NPX_TOOLS`), and
+`entrypoint.sh` runs `npm install -g` for each space-separated entry once at
+pod boot.
+
+This only works because `agent-runtime-base`'s Dockerfile redirects npm's
+global-install prefix to an agent-owned directory
+(`NPM_CONFIG_PREFIX=~/.npm-global`, its `bin/` on `PATH`) — see that
+Dockerfile's "Redirect npm's global-install prefix" comment and its README's
+"Toolchain gotchas" section. Without that redirect, `npm install -g` fails
+`EACCES` for the non-root `agent` user, because the npm CLIs baked into this
+image (`claude`/`codex`/`opencode`/`pi`) are installed as root before `USER
+agent`, leaving npm's default global prefix root-owned.
+
+**Always pin an exact version**, e.g. `EXTRA_NPX_TOOLS="cowsay@1.6.0"` rather
+than bare `cowsay` — npm's native pin syntax is `pkg@x.y.z` (no `uv`-style
+`==` translation needed). Pinning matters here for the same reason it does
+for `EXTRA_UV_TOOLS`: this path is best-effort and untested by CI, so an
+unpinned entry can resolve to a different (possibly breaking) release the
+next time a pod boots, with no build or review to catch it.
+
+Unlike the `EXTRA_UV_TOOLS` block, `entrypoint.sh` doesn't need its own
+`PATH` export for this — `NPM_CONFIG_PREFIX`'s `bin/` dir is already on
+`PATH` via the base image's `ENV PATH`, not computed at runtime.
 
 ## PEM / private-key secrets
 
