@@ -55,15 +55,23 @@ LANGUAGE plpgsql
 AS $$
 BEGIN
     IF NEW.status = 'queued'
-       AND NEW.route_admission_state IN ('not_applicable', 'deferred')
-       AND EXISTS (
-           SELECT 1
-           FROM agent a
-           WHERE a.id = NEW.agent_id
-             AND COALESCE(
-                 a.runtime_config #>> '{adaptive_routing,enabled}',
-                 'false'
-             ) = 'true'
+       AND (
+           -- A previously adaptive-deferred task must always pass through the
+           -- admission controller again. If the agent opted out while it was
+           -- waiting, the controller resolves it onto the original route.
+           NEW.route_admission_state = 'deferred'
+           OR (
+               NEW.route_admission_state = 'not_applicable'
+               AND EXISTS (
+                   SELECT 1
+                   FROM agent a
+                   WHERE a.id = NEW.agent_id
+                     AND COALESCE(
+                         a.runtime_config #>> '{adaptive_routing,enabled}',
+                         'false'
+                     ) = 'true'
+               )
+           )
        )
     THEN
         NEW.route_admission_state := 'pending';
@@ -108,6 +116,12 @@ BEGIN
             updated_at = now()
         WHERE owner_id = OLD.route_capacity_owner_id
           AND provider = OLD.route_provider;
+        IF TG_OP = 'UPDATE' THEN
+            -- Clear the durable reservation marker in the same transaction.
+            -- This makes any future terminal -> non-terminal -> terminal
+            -- lifecycle unable to release the same forecast twice.
+            NEW.route_reserved_permille := 0;
+        END IF;
     END IF;
     IF TG_OP = 'DELETE' THEN
         RETURN OLD;
@@ -118,7 +132,7 @@ $$;
 
 DROP TRIGGER IF EXISTS trg_release_adaptive_route_reservation_update ON agent_task_queue;
 CREATE TRIGGER trg_release_adaptive_route_reservation_update
-AFTER UPDATE OF status ON agent_task_queue
+BEFORE UPDATE OF status ON agent_task_queue
 FOR EACH ROW
 EXECUTE FUNCTION release_adaptive_route_reservation();
 

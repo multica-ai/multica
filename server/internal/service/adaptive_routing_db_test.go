@@ -272,6 +272,13 @@ func TestAdaptiveAdmissionFencesRoutesAndReleasesReservation(t *testing.T) {
 	if reserved != 0 {
 		t.Fatalf("terminal transition left reservation = %d, want 0", reserved)
 	}
+	terminal, err := fixture.queries.GetAgentTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("load terminal routed task: %v", err)
+	}
+	if terminal.RouteReservedPermille != 0 {
+		t.Fatalf("terminal task retained reservation marker = %d, want 0", terminal.RouteReservedPermille)
+	}
 	if _, err := fixture.pool.Exec(context.Background(), `
 		DELETE FROM agent_task_queue WHERE id = $1
 	`, util.UUIDToString(task.ID)); err != nil {
@@ -559,6 +566,63 @@ func TestAdaptiveAdmissionFailsClosedOnStaleCapacity(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("missing stale-capacity rejection in %+v", record.Rejections)
+	}
+}
+
+func TestAdaptiveDeferredTaskOptOutReturnsToOriginalRoute(t *testing.T) {
+	fixture := newAdaptiveRoutingFixture(t, 100, false, false)
+	fixture.seedCapacity(t, "claude", 900, 200, time.Now().UTC().Add(-adaptiveCapacityMaxAge-time.Minute))
+	task := fixture.seedTask(t, "adaptive deferred opt out")
+
+	svc := NewTaskService(fixture.queries, fixture.pool, nil, events.New())
+	svc.FeatureFlags = adaptiveRoutingFlags(true)
+	svc.NotifyTaskEnqueued(context.Background(), task)
+
+	if _, err := fixture.pool.Exec(context.Background(), `
+		UPDATE agent
+		SET runtime_config = jsonb_set(
+			runtime_config,
+			'{adaptive_routing,enabled}',
+			'false'::jsonb
+		)
+		WHERE id = $1
+	`, fixture.agentID); err != nil {
+		t.Fatalf("disable adaptive routing while deferred: %v", err)
+	}
+	if _, err := fixture.pool.Exec(context.Background(), `
+		UPDATE agent_task_queue
+		SET fire_at = now() - interval '1 second'
+		WHERE id = $1
+	`, util.UUIDToString(task.ID)); err != nil {
+		t.Fatalf("make opted-out deferred task due: %v", err)
+	}
+	if err := svc.PromoteDueDeferredTasksForRuntime(
+		context.Background(),
+		util.MustParseUUID(fixture.codexRuntimeID),
+	); err != nil {
+		t.Fatalf("promote opted-out deferred task: %v", err)
+	}
+
+	resolved, err := fixture.queries.GetAgentTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("load opted-out task: %v", err)
+	}
+	if resolved.Status != "queued" ||
+		resolved.RouteAdmissionState != "not_applicable" ||
+		util.UUIDToString(resolved.RuntimeID) != fixture.codexRuntimeID {
+		t.Fatalf(
+			"opted-out task stranded: status=%q state=%q runtime=%s",
+			resolved.Status,
+			resolved.RouteAdmissionState,
+			util.UUIDToString(resolved.RuntimeID),
+		)
+	}
+	if _, err := fixture.queries.ClaimAgentTask(context.Background(), db.ClaimAgentTaskParams{
+		AgentID:          util.MustParseUUID(fixture.agentID),
+		PrepareLeaseSecs: 45,
+		RuntimeID:        util.MustParseUUID(fixture.codexRuntimeID),
+	}); err != nil {
+		t.Fatalf("opted-out task was not claimable on original runtime: %v", err)
 	}
 }
 

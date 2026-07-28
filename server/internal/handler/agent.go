@@ -276,9 +276,10 @@ type AgentTaskResponse struct {
 	RuntimeID   string `json:"runtime_id"`
 	IssueID     string `json:"issue_id"`
 	WorkspaceID string `json:"workspace_id"`
-	// Adaptive admission is persisted per task. The decision is non-secret
-	// evidence (capacity/headroom, selected candidate, and rejection reasons);
-	// provider-specific runtime config and custom args remain claim-only.
+	// Adaptive admission is persisted per task. Generic responses retain the
+	// selected candidate and rejection evidence but redact owner-plan capacity
+	// and projected headroom. Provider-specific runtime config and custom args
+	// remain claim-only.
 	RouteAdmissionState string `json:"route_admission_state,omitempty"`
 	RouteDecision       any    `json:"route_decision,omitempty"`
 	RouteProvider       string `json:"route_provider,omitempty"`
@@ -607,10 +608,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
 	}
-	var routeDecision any
-	if t.RouteDecision != nil {
-		json.Unmarshal(t.RouteDecision, &routeDecision)
-	}
+	routeDecision := routeDecisionForResponse(t.RouteDecision)
 	failureReason := ""
 	if t.FailureReason.Valid {
 		failureReason = t.FailureReason.String
@@ -663,6 +661,45 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		// Attribution labels + evidence + lineage + raw user ids (pure). Names are
 		// hydrated separately on user-facing surfaces (MUL-4302 §9).
 		Attribution: taskAttributionBase(t),
+	}
+}
+
+// routeDecisionForResponse removes paid-plan telemetry from the generic task
+// wire shape. The persisted JSON remains complete for owner-authorized audit
+// and transactional diagnosis, but workspace-scoped task readers and daemons
+// do not need exact capacity, reserve, or projected-headroom values.
+func routeDecisionForResponse(raw []byte) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var decision any
+	if err := json.Unmarshal(raw, &decision); err != nil {
+		return nil
+	}
+	redactRouteCapacityEvidence(decision)
+	return decision
+}
+
+func redactRouteCapacityEvidence(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		for _, key := range []string{
+			"capacities",
+			"remaining_permille",
+			"reserve_permille",
+			"reserved_inflight_permille",
+			"projected_remaining_permille",
+			"projected_headroom_permille",
+		} {
+			delete(typed, key)
+		}
+		for _, child := range typed {
+			redactRouteCapacityEvidence(child)
+		}
+	case []any:
+		for _, child := range typed {
+			redactRouteCapacityEvidence(child)
+		}
 	}
 }
 

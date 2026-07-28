@@ -51,8 +51,9 @@ It emits:
 9. Capacity is owner-scoped across workspaces. Admission batch-resolves
     candidate runtimes, locks only their current provider rows, and reserves
     forecast usage in the same transaction as the task route. Every terminal
-    transition releases that forecast reservation exactly once, including when
-    terminal history is later deleted.
+    transition releases that forecast reservation exactly once, clears the
+    task's durable reservation marker, and remains safe when terminal history
+    is later deleted or a future workflow reopens a task.
 10. An opted-in task is fenced at insert and cannot be claimed while admission
     is pending. A sweeper repairs the insert-to-admission crash window. Runtime
     pollers claim with both agent and routed-runtime identity, so one provider
@@ -89,6 +90,17 @@ and terminal-state triggers. Active routing depends on this external publisher;
 without a fresh row the task follows the bounded defer/terminal path. The server
 does not invent capacity from task history or treat a missing publisher as
 headroom.
+
+`FF_ADAPTIVE_AGENT_ROUTING_ACTIVE=true` is therefore a deployment-gated
+actuator, not a standalone switch. Before enabling it, the operator must prove
+that the publisher has populated fresh rows for every candidate provider and
+that freshness alerts are live. If that preflight fails, active stays false;
+shadow evaluation and the original execution route remain available.
+
+Stored admission evidence contains exact owner-plan capacity for audit and
+transactional diagnosis. Generic task API responses redact those capacity
+snapshots and projected remaining/headroom values so workspace members cannot
+observe another account owner's paid-plan telemetry.
 
 Owner scope is atomic only inside one database. When separate Multica
 deployments consume the same paid provider plans, their publishers must use
