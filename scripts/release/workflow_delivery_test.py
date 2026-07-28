@@ -42,6 +42,19 @@ class WorkflowDeliveryTest(unittest.TestCase):
         self.assertIn("extends: electron-builder.yml", desktop_release_config)
         self.assertIn("repo: firtal-cerebro", desktop_release_config)
 
+    def test_linux_desktop_frees_output_between_architectures(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        desktop = release[release.index("\n  desktop:\n") :]
+
+        x64 = desktop.index("node scripts/package.mjs --linux --x64")
+        cleanup = desktop.index("rm -rf dist")
+        arm64 = desktop.index("node scripts/package.mjs --linux --arm64")
+
+        self.assertLess(x64, cleanup)
+        self.assertLess(cleanup, arm64)
+        self.assertNotIn("--linux --x64 --arm64", desktop)
+        self.assertIn("if: matrix.target != 'linux'", desktop)
+
     def test_desktop_avoids_monorepo_dependency_collection(self) -> None:
         package = json.loads((ROOT / "apps/desktop/package.json").read_text())
 

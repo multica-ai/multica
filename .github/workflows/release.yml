@@ -446,7 +446,25 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Package Desktop installers (linux)
+        if: matrix.target == 'linux'
+        working-directory: apps/desktop
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # electron-builder's GitHub publisher reads this:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # electron-builder's dependency collector exceeded Node's 2 GB
+          # default heap on every release runner (FIR-3801).
+          NODE_OPTIONS: --max-old-space-size=4096
+        # Each architecture is uploaded before its local output is removed.
+        # Keeping both unpacked apps exhausted the runner disk (FIR-3847).
+        run: |
+          node scripts/package.mjs --linux --x64 --publish always --config electron-builder.release.yml
+          rm -rf dist
+          node scripts/package.mjs --linux --arm64 --publish always --config electron-builder.release.yml
+
       - name: Package Desktop installers (${{ matrix.target }})
+        if: matrix.target != 'linux'
         working-directory: apps/desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
