@@ -159,6 +159,12 @@ RUN npm install -g \
       @earendil-works/pi-coding-agent@${PI_VERSION} \
  && npm cache clean --force
 
+# Disable pi's startup network operations (update check / package updates /
+# install telemetry / model-catalog refresh). We pin PI_VERSION at image
+# build time and handle pi versioning separately in the build, so runtime
+# update-checks add seconds to boot per pod without value. See AIPLAT-162.
+ENV PI_OFFLINE=1
+
 # Hermes — when invoked as root on Linux, the official installer lays out
 # code under /usr/local/lib/hermes-agent and links the entry point into
 # /usr/local/bin/hermes (FHS, same as claude-code / codex). Runtime data
