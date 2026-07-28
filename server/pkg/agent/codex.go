@@ -199,14 +199,6 @@ var codexMcpBlockRe = regexp.MustCompile(
 var userCodexMcpServersTableHeaderRe = regexp.MustCompile(
 	`^\s*\[\s*mcp_servers\s*\.\s*(?:"[^"]*"|[^\]\s]+)\s*\]\s*(?:#.*)?$`)
 
-// CEREBRO-PATCH(codex-self-mcp): distinguish user-owned from daemon-managed MCP tables.
-func codexConfigHasMCPServer(content, name string) bool {
-	pattern := `(?m)^\s*\[\s*mcp_servers\s*\.\s*(?:"` +
-		regexp.QuoteMeta(name) + `"|` + regexp.QuoteMeta(name) +
-		`)\s*\]\s*(?:#.*)?$`
-	return regexp.MustCompile(pattern).MatchString(codexMcpBlockRe.ReplaceAllString(content, ""))
-}
-
 // ensureCodexMcpConfig writes (or clears) the daemon-managed
 // `[mcp_servers.*]` block in `$CODEX_HOME/config.toml`. The block is the
 // authoritative source of MCP servers for this run: with mcp_config set
@@ -551,14 +543,14 @@ func (b *codexBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}
 	if codexHome != "" { // CEREBRO-PATCH(codex-self-mcp): write the merged platform/user set.
 		configPath := filepath.Join(codexHome, "config.toml")
-		existing, readErr := os.ReadFile(configPath)
-		hasUserSelf := readErr == nil && codexConfigHasMCPServer(string(existing), "multica")
-		if strictMCP || !hasUserSelf {
-			if selfEntry, err := selfMCPServerEntry(); err == nil {
-				opts.McpConfig = daemonmcp.Merge(daemonmcp.WithTaskEnv(selfEntry, b.cfg.Env), opts.McpConfig) // CEREBRO-PATCH(codex-self-mcp-task-env): pass only task-bound Multica identity to Codex's MCP child.
-			} else if b.cfg.Logger != nil {
-				b.cfg.Logger.Warn("mcp: could not resolve multica binary path; platform tools unavailable", "error", err)
+		if selfEntry, err := selfMCPServerEntry(); err == nil {
+			opts.McpConfig, err = daemonmcp.BindCodexPlatformServer(configPath, selfEntry, opts.McpConfig, strictMCP, b.cfg.Env) // CEREBRO-PATCH(codex-self-mcp-reserved-name): replace inherited identity, preserve other user servers.
+			if err != nil {
+				cancel()
+				return nil, fmt.Errorf("bind Codex Multica MCP entry: %w", err)
 			}
+		} else if b.cfg.Logger != nil {
+			b.cfg.Logger.Warn("mcp: could not resolve multica binary path; platform tools unavailable", "error", err)
 		}
 	}
 

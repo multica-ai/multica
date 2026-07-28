@@ -2090,23 +2090,7 @@ func TestEnsureCodexMcpConfigModeInjectsSelfWithoutRemovingUserServers(t *testin
 	}
 }
 
-func TestCodexConfigHasMCPServerIgnoresPriorManagedBlock(t *testing.T) {
-	t.Parallel()
-
-	content := multicaCodexMcpBeginMarker + "\n" +
-		"[mcp_servers.multica]\ncommand = \"/old/multica\"\n" +
-		multicaCodexMcpEndMarker + "\n\n" +
-		"[mcp_servers.user_global]\ncommand = \"keep\"\n"
-	if codexConfigHasMCPServer(content, "multica") {
-		t.Fatal("prior daemon-managed block must not suppress fresh self injection")
-	}
-
-	content += "\n[mcp_servers.\"multica\"]\ncommand = \"/user/multica\"\n"
-	if !codexConfigHasMCPServer(content, "multica") {
-		t.Fatal("user-defined multica server should suppress duplicate self injection")
-	}
-}
-
+// CEREBRO-PATCH(codex-self-mcp-reserved-name-test): stale self-entry coverage moved to the task-env integration test.
 // CEREBRO-PATCH(codex-mcp-http-headers-test): Regression proof for the Codex-specific HTTP header key.
 func TestEnsureCodexMcpConfigTranslatesHTTPHeaders(t *testing.T) {
 	t.Parallel()

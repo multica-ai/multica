@@ -75,10 +75,12 @@ configuration even when the agent has no saved `mcp_config`; otherwise the
 platform tools never enter the runtime inventory, so claim-time resolution has
 nothing to expose or snapshot. An explicitly saved MCP set remains authoritative.
 Codex preserves inherited user MCP servers only when no explicit managed set
-exists. Claude's MCP child inherits the task environment directly. Codex does
-not, so its generated task-scoped entry carries only the five Multica values
-needed to preserve task identity: token, server URL, workspace ID, agent ID,
-and task ID.
+exists, except that `multica` is a reserved platform server name: an inherited
+entry with that name is replaced by the task-scoped entry while every unrelated
+user server remains intact. Claude's MCP child inherits the task environment
+directly. Codex does not, so its generated task-scoped entry carries only the
+five Multica values needed to preserve task identity: token, server URL,
+workspace ID, agent ID, and task ID.
 
 ## Why it works across all (local) runtime providers
 
