@@ -43,6 +43,10 @@ type Target struct {
 	PasswordSelector string
 	SubmitSelector   string
 	NavigateLinkName string
+	// NavigatePath opens a fixed same-origin route after authentication. Use it
+	// when the app's navigation has no stable accessible label, such as an
+	// icon-only sidebar.
+	NavigatePath     string
 	NavigateSelector string
 	NavigateTabName  string
 	ExpectedURLPart  string
@@ -123,7 +127,7 @@ var targets = map[string]Target{
 	"finance": {
 		Name: "finance", URL: "http://firtal-agents-private.internal:3000/auth/login?manual=true",
 		Vault: "Shared/browser-login/finance", UsernameSelector: "#email", PasswordSelector: "#password",
-		SubmitSelector: "button[type=submit]", NavigateLinkName: "AI CFO",
+		SubmitSelector: "button[type=submit]", NavigatePath: "/cfo", ExpectedPathSuffix: "/cfo",
 		ExpectedText: []string{"Monthly overview", "Controllership review", "Versus budget"},
 	},
 	"pricing": {
@@ -194,6 +198,9 @@ func TargetFor(name string) (Target, error) {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	if target.VersionPath != "" && (!strings.HasPrefix(target.VersionPath, "/") || strings.Contains(target.VersionPath, "://")) {
+		return Target{}, fmt.Errorf("internal browser target is misconfigured")
+	}
+	if target.NavigatePath != "" && (!strings.HasPrefix(target.NavigatePath, "/") || strings.Contains(target.NavigatePath, "://")) {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	if target.ExpectedPathSuffix != "" && (!strings.HasPrefix(target.ExpectedPathSuffix, "/") || strings.Contains(target.ExpectedPathSuffix, "://")) {
@@ -881,6 +888,16 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	}
 	if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
 		return r.failure(target, baseArgs, target.URL, err)
+	}
+	if target.NavigatePath != "" {
+		parsed, _ := url.Parse(target.URL)
+		navigationURL := parsed.Scheme + "://" + parsed.Host + target.NavigatePath
+		if _, err := r.runStage(ctx, target, "navigation", "", append(baseArgs, "open", navigationURL)...); err != nil {
+			return r.failure(target, baseArgs, navigationURL, err)
+		}
+		if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
+			return r.failure(target, baseArgs, navigationURL, err)
+		}
 	}
 	if target.NavigateLinkName != "" {
 		r.dismissBlockingDialog(ctx, target, baseArgs)

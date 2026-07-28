@@ -378,8 +378,14 @@ func TestFinanceTargetReachesTheAiCfoScreenOnTheFinanceApp(t *testing.T) {
 	if target.Host() != "firtal-agents-private.internal:3000" {
 		t.Fatalf("host = %q, want firtal-agents-private.internal:3000", target.Host())
 	}
-	if target.NavigateLinkName != "AI CFO" {
-		t.Fatalf("navigate link = %q, want AI CFO", target.NavigateLinkName)
+	if target.NavigatePath != "/cfo" {
+		t.Fatalf("navigate path = %q, want /cfo", target.NavigatePath)
+	}
+	if target.NavigateLinkName != "" {
+		t.Fatalf("navigate link = %q, want no dependency on the icon-only sidebar", target.NavigateLinkName)
+	}
+	if target.ExpectedPathSuffix != "/cfo" {
+		t.Fatalf("expected path suffix = %q, want /cfo", target.ExpectedPathSuffix)
 	}
 	want := []string{"Monthly overview", "Controllership review", "Versus budget"}
 	if strings.Join(target.ExpectedText, "|") != strings.Join(want, "|") {
@@ -391,6 +397,46 @@ func TestFinanceTargetReachesTheAiCfoScreenOnTheFinanceApp(t *testing.T) {
 		if marker == "Your roles:" {
 			t.Fatal("finance is matching the employee portal marker again")
 		}
+	}
+}
+
+type financeCommander struct {
+	recordingCommander
+}
+
+func (c *financeCommander) Run(ctx context.Context, stdin string, args ...string) ([]byte, error) {
+	if len(args) > 0 && args[len(args)-1] == "snapshot" {
+		c.calls = append(c.calls, commandCall{args: append([]string(nil), args...), stdin: stdin})
+		return []byte("Monthly overview\nControllership review\nVersus budget\n"), nil
+	}
+	if len(args) > 0 && args[len(args)-1] == "url" {
+		c.calls = append(c.calls, commandCall{args: append([]string(nil), args...), stdin: stdin})
+		return []byte("http://firtal-agents-private.internal:3000/cfo\n"), nil
+	}
+	return c.recordingCommander.Run(ctx, stdin, args...)
+}
+
+func TestRunnerNavigatesFinanceDirectlyToCfoBeforeSnapshot(t *testing.T) {
+	commander := &financeCommander{}
+	if _, err := testRunner(commander).Verify(context.Background(), "finance", Credential{
+		Username: "finance@example.com",
+		Password: "secret",
+	}); err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+
+	var navigateIndex, snapshotIndex = -1, -1
+	for i, call := range commander.calls {
+		joined := strings.Join(call.args, " ")
+		if strings.Contains(joined, "open http://firtal-agents-private.internal:3000/cfo") {
+			navigateIndex = i
+		}
+		if len(call.args) > 0 && call.args[len(call.args)-1] == "snapshot" {
+			snapshotIndex = i
+		}
+	}
+	if navigateIndex < 0 || snapshotIndex <= navigateIndex {
+		t.Fatalf("navigate/snapshot order = %d/%d, want direct /cfo navigation before snapshot", navigateIndex, snapshotIndex)
 	}
 }
 
