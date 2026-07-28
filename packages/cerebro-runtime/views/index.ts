@@ -45,6 +45,16 @@ export { isInterruptionReason } from "./task-failure-severity";
 export { resolveFailureReasonLabel } from "./failure-reason-label";
 // FIR-3782: failure summary card for a failed run's transcript.
 export { RunFailureCard } from "./components/run-failure-card";
+// FIR-3901: red bar for a failed run nothing will pick up again, with Resume.
+export { FailedRunBar, toFailureTimeline } from "./components/failed-run-bar";
+export {
+  useIssueFailedRuns,
+  useInboxFailedRunStates,
+  buildInboxFailedRunHints,
+  ISSUE_FAILED_RUNS_KEY,
+  INBOX_FAILED_RUNS_KEY,
+  type DeadFailedRun,
+} from "./dead-failed-runs";
 export { RuntimeToolsCard, SandboxCard } from "@multica/cerebro-runtime-tools/views";
 export { AgentToolsCard } from "@multica/cerebro-agent-tools/views";
 export * from "./docs";

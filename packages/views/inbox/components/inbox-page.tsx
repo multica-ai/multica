@@ -26,6 +26,7 @@ import {
 } from "@multica/core/inbox/mutations";
 // CEREBRO-PATCH(channels-flag-gate): hide channel/dm view options + new-message when feature is disabled
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
+import { useInboxFailedRunStates } from "@multica/cerebro-runtime/views"; // CEREBRO-PATCH(inbox-failed-run-pip): FIR-3901
 // CEREBRO-PATCH(inbox-keyboard-shortcuts): cerebro keyboard shortcuts (e = archive)
 // CEREBRO-PATCH(inbox-unarchive-mount): JEH-1166 — useUnarchiveInbox for archived view
 // CEREBRO-PATCH(inbox-muted-filter): JEH-663 — `isMuted` powers the muted/non-muted view filter
@@ -262,6 +263,8 @@ export function InboxPage() {
   const wakeupRunningEnabled = useFeatureFlag("cerebro_inbox_wakeup_running");
   const wakeupStates = useInboxWakeupStates(wsId, wakeupRunningEnabled);
   const wakeupIssueIds = useMemo(() => new Set(wakeupStates.keys()), [wakeupStates]);
+  // CEREBRO-PATCH(inbox-failed-run-pip): FIR-3901 — issues whose last run failed with nothing to retry it.
+  const failedRunStates = useInboxFailedRunStates(wsId, useFeatureFlag("cerebro_failed_run_bar"));
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const agentMap = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
@@ -1027,9 +1030,13 @@ export function InboxPage() {
     // CEREBRO-PATCH(inbox-wakeup-running): TECH-3322 — a pending wakeup (no live
     // run) shows a clock with the approximate next-run time; active runs win.
     const wakeupHint = item.issue_id ? wakeupStates.get(item.issue_id) : undefined;
+    // CEREBRO-PATCH(inbox-failed-run-pip): FIR-3901 — a dead failed run outranks
+    // scheduled/sub: it is the only state that needs the user to act.
+    const failedHint = item.issue_id ? failedRunStates.get(item.issue_id) : undefined;
     const agentRunState = item.issue_id
       ? issueRunStates.get(item.issue_id) ??
-        (subIssueRunStates.has(item.issue_id) ? "sub" : wakeupHint ? "scheduled" : undefined)
+        // CEREBRO-PATCH(inbox-failed-run-pip): FIR-3901
+        (failedHint ? "failed" : subIssueRunStates.has(item.issue_id) ? "sub" : wakeupHint ? "scheduled" : undefined)
       : undefined;
     // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — when a row already shows a live
     // run pip but also has a pending wakeup, stack a clock pip next to it so both
@@ -1042,7 +1049,8 @@ export function InboxPage() {
         item={item}
         isSelected={(item.issue_id ?? item.id) === selectedKey}
         agentRunState={agentRunState}
-        agentRunTitle={agentRunState === "scheduled" ? wakeupHint?.title : undefined}
+        // CEREBRO-PATCH(inbox-failed-run-pip): FIR-3901
+        agentRunTitle={agentRunState === "scheduled" ? wakeupHint?.title : agentRunState === "failed" ? failedHint?.title : undefined}
         scheduledStackTitle={scheduledStackTitle} // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521
         scheduledFireAt={wakeupHint?.fireAt} // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — drives the live countdown on the inbox clock
         onClick={() => handleSelect(item)}

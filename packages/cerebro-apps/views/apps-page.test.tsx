@@ -33,7 +33,7 @@ describe("AppsPage", () => {
   it("opens the real app builder from Build app", async () => {
     render(<AppsPage />);
     await waitFor(() => expect(listApps).toHaveBeenCalled());
-    await userEvent.click(screen.getByRole("link", { name: "Build app" }));
+    await userEvent.click(await screen.findByRole("link", { name: "Build app" }));
     expect(push).toHaveBeenCalledWith("/firtal/apps/new");
   });
 

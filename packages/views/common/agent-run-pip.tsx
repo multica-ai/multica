@@ -3,9 +3,10 @@
 // CEREBRO-PATCH(agent-run-pip-states): shared pip distinguishing active vs queued runs (JEH-1332)
 // CEREBRO-PATCH(agent-run-pip-sub): FIR-2326 — orange "sub" state marks a row whose sub-issue is running.
 // CEREBRO-PATCH(agent-run-pip-scheduled): FIR-1521 — "scheduled" renders an orange dot (like the running dot, not a clock) for issues with a pending wakeup.
-export type AgentRunState = "active" | "queued" | "sub" | "scheduled";
+// CEREBRO-PATCH(agent-run-pip-failed): FIR-3901 — "failed" marks an issue whose last run died and that nothing will retry.
+export type AgentRunState = "active" | "queued" | "sub" | "scheduled" | "failed";
 
-export function taskStatusToRunState(status: string): Exclude<AgentRunState, "sub" | "scheduled"> {
+export function taskStatusToRunState(status: string): Exclude<AgentRunState, "sub" | "scheduled" | "failed"> {
   return status === "queued" ? "queued" : "active";
 }
 
@@ -15,6 +16,7 @@ const RUN_PIP_COLOR: Record<AgentRunState, string> = {
   queued: "bg-muted-foreground",
   sub: "bg-orange-500",
   scheduled: "bg-warning",
+  failed: "bg-destructive", // CEREBRO-PATCH(agent-run-pip-failed): FIR-3901
 };
 
 const RUN_PIP_TITLE: Record<AgentRunState, string> = {
@@ -22,6 +24,7 @@ const RUN_PIP_TITLE: Record<AgentRunState, string> = {
   queued: "Agent is queued",
   sub: "A sub-issue is running",
   scheduled: "Scheduled to run",
+  failed: "Run failed", // CEREBRO-PATCH(agent-run-pip-failed): FIR-3901
 };
 
 export function AgentRunPip({

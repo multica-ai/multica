@@ -1626,6 +1626,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/active-task", h.GetActiveTaskForIssue)
 					r.Post("/tasks/{taskId}/cancel", h.CancelTask)
 					r.Post("/rerun", h.RerunIssue)
+					r.Get("/failed-runs", cerebroInboxHandler.ListDeadFailedRunsForIssue) // CEREBRO-PATCH(dead-failed-runs-routes): FIR-3901 red failed bar.
 					r.Get("/task-runs", h.ListTasksByIssue)
 					r.Get("/usage", h.GetIssueUsage)
 					// CEREBRO-PATCH(comment-cost-route): FIR-39 per-comment cost badge.
@@ -2126,6 +2127,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/unread-count", h.CountUnreadInbox)
 				// CEREBRO-PATCH(cerebro-inbox-routes): cerebro-only handler.
 				r.Get("/active-issue-tasks", cerebroInboxHandler.ListActiveIssueTasks)
+				r.Get("/failed-issue-tasks", cerebroInboxHandler.ListDeadFailedIssueTasks) // CEREBRO-PATCH(dead-failed-runs-routes): FIR-3901 red inbox pip.
 				r.Post("/reminders", cerebroInboxHandler.CreateReminder) // CEREBRO-PATCH(inbox-reminders-route): legacy shape, writes cerebro_reminder.
 				r.Post("/mark-all-read", h.MarkAllInboxRead)
 				r.Post("/archive-all", h.ArchiveAllInbox)
