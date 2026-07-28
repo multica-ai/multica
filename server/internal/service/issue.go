@@ -16,7 +16,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
-	"github.com/multica-ai/multica/server/pkg/providerfailover"
 )
 
 // IssueService is the single service-layer entry point for creating issues.
@@ -78,12 +77,6 @@ type IssueCreateParams struct {
 	// Stage groups this issue into an ordered barrier group under its parent
 	// (NULL = unstaged). See issue_child_done.go for the staged-barrier wake.
 	Stage pgtype.Int4
-	// ControlPlaneChainRoot + ControlPlaneTargetRef are set together for an
-	// agent-created child. Create claims the effect in the same transaction as
-	// the issue insert, so a failed insert rolls the claim back and concurrent
-	// original/fallback attempts cannot both create a child.
-	ControlPlaneChainRoot pgtype.UUID
-	ControlPlaneTargetRef string
 }
 
 // IssueCreateOpts groups optional knobs for IssueService.Create. Most
@@ -146,11 +139,6 @@ var ErrProjectNotFound = errors.New("project not found in this workspace")
 // create is rejected so a new issue is never born with a partial or wrong
 // label set. Callers translate this into their transport's 400.
 var ErrIssueLabelNotFound = errors.New("issue label not found in this workspace")
-
-// ErrControlPlaneEffectAlreadyApplied is the idempotent replay result for an
-// agent orchestration effect. The first transaction already owns (or completed)
-// the child create, so the caller must not attempt a second write.
-var ErrControlPlaneEffectAlreadyApplied = errors.New("control-plane effect already applied")
 
 // IssueCreateResult is the typed return from IssueService.Create.
 //
@@ -225,32 +213,6 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 			WorkspaceID: p.WorkspaceID,
 		}); err != nil {
 			return IssueCreateResult{}, ErrProjectNotFound
-		}
-	}
-
-	if p.ControlPlaneChainRoot.Valid || p.ControlPlaneTargetRef != "" {
-		if !p.ControlPlaneChainRoot.Valid || p.ControlPlaneTargetRef == "" {
-			return IssueCreateResult{}, errors.New("incomplete control-plane effect identity")
-		}
-		key := providerfailover.EffectKey(
-			util.UUIDToString(p.ControlPlaneChainRoot),
-			providerfailover.EffectTaskSpawn,
-			p.ControlPlaneTargetRef,
-		)
-		if key == "" {
-			return IssueCreateResult{}, errors.New("unkeyable control-plane task spawn")
-		}
-		if _, err := qtx.ClaimControlPlaneEffect(ctx, db.ClaimControlPlaneEffectParams{
-			WorkspaceID:     p.WorkspaceID,
-			ChainRootTaskID: p.ControlPlaneChainRoot,
-			EffectType:      string(providerfailover.EffectTaskSpawn),
-			EffectKey:       key,
-			TargetRef:       p.ControlPlaneTargetRef,
-		}); err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return IssueCreateResult{}, ErrControlPlaneEffectAlreadyApplied
-			}
-			return IssueCreateResult{}, fmt.Errorf("claim child task spawn: %w", err)
 		}
 	}
 

@@ -80,19 +80,13 @@ const (
 	// agent timeout path.
 	ReasonTimeout Reason = "timeout"
 
-	// ReasonProviderLivenessTimeout: a run went SILENT past its
-	// provider-specific wall-clock liveness deadline — the owning
-	// runtime stopped proving it was alive (stale heartbeat / no
-	// per-task lease) while a task was still 'running'. This is the
-	// silent-hang case the GPT-60min / Claude-180s watchdog targets
-	// (td-836aa9): distinct from ReasonTimeout (an actively-working run
-	// that hit a hard cap) because here the process is WEDGED, not
-	// working. It is a provider-failover trigger (see
-	// providerfailover.IsFailoverTrigger) whereas plain ReasonTimeout is
-	// not, so a hang can hand off while a busy run cannot. The stored
-	// agent_task_queue.failure_reason for a swept row stays 'timeout';
-	// this refined reason is what the sweeper hands to the failover
-	// evaluator to classify the silent-hang subset.
+	// ReasonProviderLivenessTimeout is an internal failover-policy signal for
+	// a started task whose owning runtime stopped proving liveness. The runtime
+	// sweeper derives it only after the hot LivenessStore confirms a stale
+	// runtime is dead. The stored agent_task_queue.failure_reason remains
+	// 'runtime_offline', preserving the existing bounded same-provider retry.
+	// The failover service forces this refined signal to shadow mode because a
+	// dead runtime cannot provide complete terminal side-effect evidence.
 	ReasonProviderLivenessTimeout Reason = "provider_liveness_timeout"
 
 	// ReasonIterationLimit: the agent reached its per-run iteration

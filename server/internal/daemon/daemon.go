@@ -5368,21 +5368,38 @@ func shouldRetryWithFreshSession(result agent.Result, priorSessionID string, too
 //     id (were it attached) would be re-selected. We keep the unrecoverable
 //     first result and only merge usage.
 //
-// Usage is merged across both attempts in every branch so billing is complete.
+// Usage and side-effect observations are merged across both attempts in every
+// branch so billing and failover evidence are complete. The result/session
+// winner does not erase tools or partial output observed during the other
+// process: both attempts actually ran, so both belong to the task's safety
+// surface.
 func reconcileFreshRetryResult(first agent.Result, firstUsage map[string]agent.TokenUsage, firstTools drainObservation, retry agent.Result, retryTools drainObservation, retryErr error) (agent.Result, drainObservation) {
+	combinedTools := mergeDrainObservations(firstTools, retryTools)
 	switch {
 	case retryErr != nil:
 		first.Usage = firstUsage
-		return first, firstTools
+		return first, combinedTools
 	case retry.SessionID != "":
 		retry.Usage = mergeUsage(firstUsage, retry.Usage)
-		return retry, retryTools
+		return retry, combinedTools
 	case retry.Status == "completed":
 		retry.Usage = mergeUsage(firstUsage, retry.Usage)
-		return retry, retryTools
+		return retry, combinedTools
 	default:
 		first.Usage = mergeUsage(firstUsage, retry.Usage)
-		return first, firstTools
+		return first, combinedTools
+	}
+}
+
+func mergeDrainObservations(first, second drainObservation) drainObservation {
+	const maxInt32 = int64(1<<31 - 1)
+	toolCalls := int64(first.toolCalls) + int64(second.toolCalls)
+	if toolCalls > maxInt32 {
+		toolCalls = maxInt32
+	}
+	return drainObservation{
+		toolCalls:         int32(toolCalls),
+		partialUserOutput: first.partialUserOutput || second.partialUserOutput,
 	}
 }
 

@@ -37,51 +37,6 @@ func (q *Queries) ChainHasOwningHandoff(ctx context.Context, arg ChainHasOwningH
 	return owned, err
 }
 
-const claimControlPlaneEffect = `-- name: ClaimControlPlaneEffect :one
-INSERT INTO control_plane_effect_ledger (
-    workspace_id, chain_root_task_id, effect_type, effect_key, target_ref
-)
-VALUES ($1, $2, $3, $4, $5)
-ON CONFLICT (effect_key) DO NOTHING
-RETURNING id, workspace_id, chain_root_task_id, effect_type, effect_key, target_ref, created_at
-`
-
-type ClaimControlPlaneEffectParams struct {
-	WorkspaceID     pgtype.UUID `json:"workspace_id"`
-	ChainRootTaskID pgtype.UUID `json:"chain_root_task_id"`
-	EffectType      string      `json:"effect_type"`
-	EffectKey       string      `json:"effect_key"`
-	TargetRef       string      `json:"target_ref"`
-}
-
-// At-most-once claim for an ORCHESTRATOR control-plane effect (td-836aa9). The
-// first caller to claim a given effect_key inserts and gets the row back
-// (proceed with the effect); a second caller — e.g. a handed-off fallback that
-// re-planned the same orchestration — conflicts on the UNIQUE effect_key and
-// gets no row (pgx.ErrNoRows), which the service treats as "already done, skip".
-// This is what prevents a mid-orchestration handoff from double-spawning
-// children or double-promoting stages.
-func (q *Queries) ClaimControlPlaneEffect(ctx context.Context, arg ClaimControlPlaneEffectParams) (ControlPlaneEffectLedger, error) {
-	row := q.db.QueryRow(ctx, claimControlPlaneEffect,
-		arg.WorkspaceID,
-		arg.ChainRootTaskID,
-		arg.EffectType,
-		arg.EffectKey,
-		arg.TargetRef,
-	)
-	var i ControlPlaneEffectLedger
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.ChainRootTaskID,
-		&i.EffectType,
-		&i.EffectKey,
-		&i.TargetRef,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const createFailoverTask = `-- name: CreateFailoverTask :one
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, chat_session_id,
@@ -104,7 +59,7 @@ SELECT
     p.chat_input_task_id
 FROM agent_task_queue p
 WHERE p.id = $3
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing
 `
 
 type CreateFailoverTaskParams struct {
@@ -182,6 +137,7 @@ func (q *Queries) CreateFailoverTask(ctx context.Context, arg CreateFailoverTask
 		&i.TriggerEvidenceKind,
 		&i.TriggerEvidenceRefID,
 		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
 	)
 	return i, err
 }
@@ -227,29 +183,6 @@ func (q *Queries) FinalizeFailoverHandoffByFallbackTask(ctx context.Context, arg
 		&i.SideEffects,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getControlPlaneEffect = `-- name: GetControlPlaneEffect :one
-SELECT id, workspace_id, chain_root_task_id, effect_type, effect_key, target_ref, created_at FROM control_plane_effect_ledger
-WHERE effect_key = $1
-`
-
-// Reports whether a control-plane effect has already been claimed (by key).
-// Used to answer "are this chain's control-plane effects idempotency-guarded"
-// and for the observability read path.
-func (q *Queries) GetControlPlaneEffect(ctx context.Context, effectKey string) (ControlPlaneEffectLedger, error) {
-	row := q.db.QueryRow(ctx, getControlPlaneEffect, effectKey)
-	var i ControlPlaneEffectLedger
-	err := row.Scan(
-		&i.ID,
-		&i.WorkspaceID,
-		&i.ChainRootTaskID,
-		&i.EffectType,
-		&i.EffectKey,
-		&i.TargetRef,
-		&i.CreatedAt,
 	)
 	return i, err
 }

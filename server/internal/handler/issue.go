@@ -26,7 +26,6 @@ import (
 	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
-	"github.com/multica-ai/multica/server/pkg/providerfailover"
 )
 
 // IssueResponse is the JSON response for an issue.
@@ -2594,56 +2593,26 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return out
 	}
 
-	var controlPlaneChainRoot pgtype.UUID
-	var controlPlaneTargetRef string
-	if creatorType == "agent" && parentIssueID.Valid {
-		var err error
-		controlPlaneChainRoot, err = h.agentControlPlaneChainRoot(r, actualCreatorID, wsUUID)
-		if err != nil {
-			slog.Warn("create child: control-plane chain resolution failed", append(logger.RequestAttrs(r), "error", err)...)
-			writeError(w, http.StatusConflict, "agent child creation is not idempotency-keyed")
-			return
-		}
-		var stage int32
-		if req.Stage != nil {
-			stage = *req.Stage
-		}
-		controlPlaneTargetRef = providerfailover.TaskSpawnTarget(
-			uuidToString(parentIssueID),
-			req.Title,
-			assigneeType.String,
-			uuidToString(assigneeID),
-			uuidToString(projectID),
-			stage,
-		)
-		if controlPlaneTargetRef == "" {
-			writeError(w, http.StatusConflict, "agent child creation is not idempotency-keyed")
-			return
-		}
-	}
-
 	res, err := h.IssueService.Create(r.Context(), service.IssueCreateParams{
-		WorkspaceID:           wsUUID,
-		Title:                 req.Title,
-		Description:           ptrToText(req.Description),
-		Status:                status,
-		Priority:              priority,
-		AssigneeType:          assigneeType,
-		AssigneeID:            assigneeID,
-		CreatorType:           creatorType,
-		CreatorID:             parseUUID(actualCreatorID),
-		ParentIssueID:         parentIssueID,
-		ProjectID:             projectID,
-		StartDate:             startDate,
-		DueDate:               dueDate,
-		OriginType:            originType,
-		OriginID:              originID,
-		Stage:                 ptrToInt4(req.Stage),
-		AttachmentIDs:         attachmentIDs,
-		LabelIDs:              labelIDs,
-		AllowDuplicate:        req.AllowDuplicate,
-		ControlPlaneChainRoot: controlPlaneChainRoot,
-		ControlPlaneTargetRef: controlPlaneTargetRef,
+		WorkspaceID:    wsUUID,
+		Title:          req.Title,
+		Description:    ptrToText(req.Description),
+		Status:         status,
+		Priority:       priority,
+		AssigneeType:   assigneeType,
+		AssigneeID:     assigneeID,
+		CreatorType:    creatorType,
+		CreatorID:      parseUUID(actualCreatorID),
+		ParentIssueID:  parentIssueID,
+		ProjectID:      projectID,
+		StartDate:      startDate,
+		DueDate:        dueDate,
+		OriginType:     originType,
+		OriginID:       originID,
+		Stage:          ptrToInt4(req.Stage),
+		AttachmentIDs:  attachmentIDs,
+		LabelIDs:       labelIDs,
+		AllowDuplicate: req.AllowDuplicate,
 	}, service.IssueCreateOpts{
 		ActorID:          actualCreatorID,
 		AnalyticsAgentID: analyticsAgentID,
@@ -2681,13 +2650,6 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, service.ErrIssueLabelNotFound) {
 		writeError(w, http.StatusBadRequest, "one or more labels not found in this workspace")
-		return
-	}
-	if errors.Is(err, service.ErrControlPlaneEffectAlreadyApplied) {
-		writeJSON(w, http.StatusConflict, map[string]any{
-			"code":  "control_plane_effect_already_applied",
-			"error": "this task chain already created the child",
-		})
 		return
 	}
 	if err != nil {
@@ -2922,76 +2884,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve actor before the write so an agent-driven backlog child
-	// activation can claim its stage-promotion key atomically with the update.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-
-	var issue db.Issue
-	agentStagePromotion := actorType == "agent" &&
-		prevIssue.ParentIssueID.Valid &&
-		prevIssue.Status == "backlog" &&
-		req.Status != nil && *req.Status != "backlog"
-	if agentStagePromotion {
-		chainRoot, chainErr := h.agentControlPlaneChainRoot(r, actorID, prevIssue.WorkspaceID)
-		if chainErr != nil {
-			slog.Warn("stage promotion: control-plane chain resolution failed", append(logger.RequestAttrs(r), "error", chainErr)...)
-			writeError(w, http.StatusConflict, "agent stage promotion is not idempotency-keyed")
-			return
-		}
-		var stage int32
-		if prevIssue.Stage.Valid {
-			stage = prevIssue.Stage.Int32
-		}
-		targetRef := providerfailover.StagePromotionTarget(
-			uuidToString(prevIssue.ParentIssueID),
-			uuidToString(prevIssue.ID),
-			stage,
-		)
-		key := providerfailover.EffectKey(
-			uuidToString(chainRoot),
-			providerfailover.EffectStagePromotion,
-			targetRef,
-		)
-		if key == "" {
-			writeError(w, http.StatusConflict, "agent stage promotion is not idempotency-keyed")
-			return
-		}
-		tx, txErr := h.TxStarter.Begin(r.Context())
-		if txErr != nil {
-			writeError(w, http.StatusInternalServerError, "failed to begin stage promotion")
-			return
-		}
-		defer tx.Rollback(r.Context())
-		qtx := h.Queries.WithTx(tx)
-		if _, claimErr := qtx.ClaimControlPlaneEffect(r.Context(), db.ClaimControlPlaneEffectParams{
-			WorkspaceID:     prevIssue.WorkspaceID,
-			ChainRootTaskID: chainRoot,
-			EffectType:      string(providerfailover.EffectStagePromotion),
-			EffectKey:       key,
-			TargetRef:       targetRef,
-		}); claimErr != nil {
-			if errors.Is(claimErr, pgx.ErrNoRows) {
-				current, getErr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
-					ID:          prevIssue.ID,
-					WorkspaceID: prevIssue.WorkspaceID,
-				})
-				if getErr != nil {
-					writeError(w, http.StatusInternalServerError, "failed to read idempotent stage promotion")
-					return
-				}
-				writeJSON(w, http.StatusOK, issueToResponse(current, h.getIssuePrefix(r.Context(), current.WorkspaceID)))
-				return
-			}
-			writeError(w, http.StatusInternalServerError, "failed to claim stage promotion")
-			return
-		}
-		issue, err = qtx.UpdateIssue(r.Context(), params)
-		if err == nil {
-			err = tx.Commit(r.Context())
-		}
-	} else {
-		issue, err = h.Queries.UpdateIssue(r.Context(), params)
-	}
+	issue, err := h.Queries.UpdateIssue(r.Context(), params)
 	if err != nil {
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
@@ -3023,6 +2916,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	prevDueDate := dateToPtr(prevIssue.DueDate)
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
+
+	// Determine actor identity: agent (via X-Agent-ID header) or member.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
@@ -3242,28 +3138,6 @@ func (h *Handler) isAgentRunningOnIssue(r *http.Request, actorType string, issue
 		return false
 	}
 	return uuidToString(task.IssueID) == uuidToString(issue.ID)
-}
-
-func (h *Handler) agentControlPlaneChainRoot(r *http.Request, actorID string, workspaceID pgtype.UUID) (pgtype.UUID, error) {
-	taskID, err := util.ParseUUID(strings.TrimSpace(r.Header.Get("X-Task-ID")))
-	if err != nil {
-		return pgtype.UUID{}, errors.New("missing or invalid task id")
-	}
-	task, root, err := h.TaskService.ControlPlaneChainRootForTask(r.Context(), taskID)
-	if err != nil {
-		return pgtype.UUID{}, err
-	}
-	if uuidToString(task.AgentID) != actorID {
-		return pgtype.UUID{}, errors.New("task does not match acting agent")
-	}
-	agent, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
-		ID:          task.AgentID,
-		WorkspaceID: workspaceID,
-	})
-	if err != nil || !agent.ID.Valid {
-		return pgtype.UUID{}, errors.New("acting agent does not belong to issue workspace")
-	}
-	return root, nil
 }
 
 // isAgentAssigneeReady checks if an issue is assigned to an active agent

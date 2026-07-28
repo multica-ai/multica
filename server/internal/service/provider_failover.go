@@ -503,92 +503,28 @@ func isOrchestratorTier(task db.AgentTaskQueue) bool {
 	return task.AutopilotRunID.Valid || task.IsLeaderTask
 }
 
-// controlPlaneIdempotentForChain reports whether this chain's control-plane
-// effects (child task-spawns, stage promotions) are guarded by the idempotency
-// ledger, so a handed-off fallback cannot double-dispatch them. It gates active
-// orchestrator handoffs (providerfailover.Input.ControlPlaneIdempotent).
-//
-// The HTTP issue-create and backlog-child promotion boundaries now claim the
-// control-plane effect ledger atomically with their writes. Those are the two
-// agent-driven orchestration effects exposed to a task-token process, so a
-// valid chain root is sufficient proof that an original/fallback replay will
-// contend for the same claims. A missing root remains fail-closed.
-func (s *TaskService) controlPlaneIdempotentForChain(_ context.Context, chainRoot pgtype.UUID) bool {
-	return chainRoot.Valid
+// controlPlaneIdempotentForChain is deliberately false. Multica has more
+// orchestration effects than child creation and stage promotion (mentions,
+// assignee-triggered runs, squads, and autopilots), so a partial ledger cannot
+// prove arbitrary orchestrator replay safe. Active orchestrator handoffs remain
+// closed while shadow records their eligibility.
+func (s *TaskService) controlPlaneIdempotentForChain(_ context.Context, _ pgtype.UUID) bool {
+	return false
 }
 
-// ControlPlaneChainRootForTask resolves the stable root used by effect claims.
-// A fallback task has its own queue id, but the handoff row points back to the
-// original chain root; ordinary/chat tasks use the same root derivation as the
-// failover policy itself.
-func (s *TaskService) ControlPlaneChainRootForTask(ctx context.Context, taskID pgtype.UUID) (db.AgentTaskQueue, pgtype.UUID, error) {
-	task, err := s.Queries.GetAgentTask(ctx, taskID)
-	if err != nil {
-		return db.AgentTaskQueue{}, pgtype.UUID{}, fmt.Errorf("load control-plane task: %w", err)
-	}
-	if handoff, err := s.Queries.GetFailoverHandoffByFallbackTask(ctx, taskID); err == nil {
-		if !handoff.ChainRootTaskID.Valid {
-			return db.AgentTaskQueue{}, pgtype.UUID{}, errors.New("fallback handoff has no chain root")
-		}
-		return task, handoff.ChainRootTaskID, nil
-	} else if !errors.Is(err, pgx.ErrNoRows) {
-		return db.AgentTaskQueue{}, pgtype.UUID{}, fmt.Errorf("resolve fallback handoff: %w", err)
-	}
-	root := chainRootForTask(task)
-	if !root.Valid {
-		return db.AgentTaskQueue{}, pgtype.UUID{}, errors.New("task has no control-plane chain root")
-	}
-	return task, root, nil
-}
-
-// ClaimControlPlaneEffectOnce durably claims an orchestrator control-plane effect
-// so it happens at most once across the original run AND any failover fallback
-// (td-836aa9). It returns claimed=true when THIS caller won the claim (proceed
-// with the effect) and claimed=false when the effect was already recorded (skip —
-// a prior run, possibly the pre-handoff primary, already did it). An unkeyable
-// effect (empty chain/target) is fail-closed to claimed=false: the caller must
-// not perform an effect it cannot dedup under a possible handoff.
-//
-// This is the primitive the task-spawn and stage-promotion call sites wrap their
-// effect in to make ControlPlaneIdempotent provable for a chain.
-func (s *TaskService) ClaimControlPlaneEffectOnce(ctx context.Context, workspaceID, chainRoot pgtype.UUID, effect providerfailover.ControlPlaneEffect, targetRef string) (bool, error) {
-	key := providerfailover.EffectKey(util.UUIDToString(chainRoot), effect, targetRef)
-	if key == "" {
-		return false, nil
-	}
-	_, err := s.Queries.ClaimControlPlaneEffect(ctx, db.ClaimControlPlaneEffectParams{
-		WorkspaceID:     workspaceID,
-		ChainRootTaskID: chainRoot,
-		EffectType:      string(effect),
-		EffectKey:       key,
-		TargetRef:       targetRef,
-	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return false, nil // already claimed by a prior run — skip (idempotent)
-		}
-		return false, fmt.Errorf("claim control-plane effect: %w", err)
-	}
-	return true, nil
-}
-
-// EvaluateLivenessFailover runs the failover policy for tasks the stale-task
-// sweeper just reaped as SILENT HANGS — running tasks whose owning runtime
-// stopped proving liveness past the wall-clock deadline (td-836aa9). Before this,
-// a hung run was failed with reason 'timeout' and never entered failover (plain
-// timeout is structurally excluded); the liveness watchdog reclassifies the
-// running-branch subset as ReasonProviderLivenessTimeout — a trigger — so a hang
-// can hand off instead of silently stalling the task.
+// EvaluateLivenessFailover runs the failover policy for tasks whose owning
+// runtime was just confirmed dead by the LivenessStore-gated stale-runtime
+// sweep. The persisted reason remains runtime_offline so ordinary bounded retry
+// behavior is unchanged; this method supplies the refined
+// ReasonProviderLivenessTimeout signal only to the shadow failover evaluator.
 //
 // Best-effort and post-commit, mirroring EvaluateFailover's contract; the fast
-// path returns immediately when the feature is off. Only RUNNING-branch reaped
-// rows (StartedAt set) are silent hangs; a dispatched-but-never-started timeout
-// (StartedAt null) never ran, so it is skipped. Evidence is nil — the daemon is
-// gone, so nothing was observed. That makes a real handoff unsafe: absence of
-// evidence is not evidence of absence. Liveness evaluations are therefore
-// ALWAYS shadow-only even when ordinary, evidence-bearing callbacks are active.
-// This keeps the watchdog reachable and observable without ever duplicating an
-// unobserved side effect.
+// path returns immediately when the feature is off. Only started rows are
+// evaluated; a dispatched-but-never-started task never ran, so it is skipped.
+// Evidence is nil because the daemon is gone. That makes a real handoff unsafe:
+// absence of evidence is not evidence of absence. Liveness evaluations are
+// therefore ALWAYS shadow-only even when ordinary, evidence-bearing callbacks
+// are active.
 func (s *TaskService) EvaluateLivenessFailover(ctx context.Context, reaped []db.AgentTaskQueue) {
 	mode := livenessFailoverMode(s.failoverMode(ctx))
 	if mode == providerfailover.ModeOff {

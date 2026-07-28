@@ -1,7 +1,8 @@
 // Package providerfailover holds the explicit, auditable, fail-closed policy
 // that hands a task off from one AI provider runtime to another when — and only
-// when — the source run terminated on a usage/rate-limit condition OR went
-// silently unresponsive past a wall-clock liveness deadline.
+// when — the source run terminated on a usage/rate-limit condition. A separate
+// internal liveness signal lets the service record shadow-only observations
+// when an owning runtime stops proving liveness.
 //
 // This package is deliberately pure: no database, no network, no clock. It is
 // the single source of truth for "should this failure become a cross-provider
@@ -13,9 +14,9 @@
 // Direction (td-836aa9 hardening): failover began as single-directional
 // (GPT/codex → Claude, a closed source whitelist). It is now a BIDIRECTIONAL,
 // role/capacity policy: any provider in failoverProviders may be a source when
-// its run hits a limit or hangs, and hands off to a DIFFERENT eligible provider
-// that has capacity. So Claude → GPT works too, which matters when the Claude
-// Max window ends and GPT is the one with headroom. Loop/ping-pong is prevented
+// its run hits a limit, and hands off to a DIFFERENT eligible provider that has
+// capacity. So Claude → GPT works too, which matters when the Claude Max window
+// ends and GPT is the one with headroom. Loop/ping-pong is prevented
 // structurally by the at-most-one-per-chain guard and the already-a-fallback
 // guard (see policy.go), not by direction.
 package providerfailover
@@ -35,9 +36,9 @@ const TargetProvider = "claude"
 
 // failoverProviders is the exact, closed set of runtime providers that
 // participate in capacity-based failover, in EITHER direction. Membership means
-// a provider may act as a failover SOURCE (its run hit a usage/rate-limit or
-// went silently unresponsive) AND/OR as a failover TARGET (it has capacity to
-// take over). It is deliberately a positive whitelist, not "any provider": the
+// a provider may act as a failover SOURCE (its run hit a usage/rate-limit)
+// AND/OR as a failover TARGET (it has capacity to take over). It is deliberately
+// a positive whitelist, not "any provider": the
 // repo has ~17 runtime providers (grok, kimi, cursor, gemini, …) and only the
 // two first-class, mutually-substitutable coding runtimes are in scope.
 //
@@ -122,12 +123,12 @@ func eligibleTargets(source string) []string {
 //     "overloaded", "no capacity available".
 //   - ReasonAgentProviderQuotaLimit — HTTP 402, "usage limit", "quota",
 //     "credits", "insufficient balance".
-//   - ReasonProviderLivenessTimeout — a SILENT HANG: the run went unresponsive
-//     past its provider-specific wall-clock liveness deadline (GPT ~60min,
-//     Claude ~180s) while the owning runtime stopped proving liveness. This is
-//     the td-836aa9 watchdog trigger — before it, failover fired ONLY on
-//     rate-limit/usage errors, so a wedged run that never returned an error
-//     silently stalled the whole task instead of handing off.
+//   - ReasonProviderLivenessTimeout — an internal, shadow-only signal for a
+//     started task whose owning runtime stopped proving liveness. It is derived
+//     from the authoritative LivenessStore-gated stale-runtime transition, not
+//     from a provider-specific task wall clock. The policy recognizes it so
+//     operators can compare what a handoff might have done; the service forces
+//     this path to shadow because terminal side-effect evidence is unavailable.
 //
 // Everything else is structurally excluded, and the exclusions matter:
 //
@@ -137,7 +138,7 @@ func eligibleTargets(source string) []string {
 //   - Plain timeout (ReasonAgentTimeout / ReasonTimeout): the model was actively
 //     WORKING and hit a hard cap; re-running elsewhere risks duplicating what it
 //     had started. Contrast ReasonProviderLivenessTimeout above, which is a
-//     wedged/silent process, not a busy one.
+//     runtime-liveness observation and remains shadow-only.
 //   - Network / server 5xx: transient and resume-safe on the SAME provider; the
 //     platform's own retry path already covers these.
 //   - Context overflow, process failure, config, model-not-found, unknown: none

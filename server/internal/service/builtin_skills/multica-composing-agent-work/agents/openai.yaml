@@ -1,4 +1,0 @@
-interface:
-  display_name: "Compose Agent Work"
-  short_description: "Route skills and agents safely by workload"
-  default_prompt: "Use $multica-composing-agent-work to choose and run a safe solo, serial, parallel, or review workflow."

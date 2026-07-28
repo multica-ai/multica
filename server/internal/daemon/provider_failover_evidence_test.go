@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/providerfailover"
 )
 
@@ -175,5 +176,73 @@ func TestClientFailTask_EvidenceSerialization(t *testing.T) {
 	}
 	if ev["observed_tool_calls"].(float64) != 1 || ev["complete"] != true {
 		t.Errorf("evidence body = %+v, want observed_tool_calls=1 complete=true", ev)
+	}
+}
+
+// A fresh-session retry is still the same platform task. Even when one
+// attempt's result wins for session-continuity purposes, side-effect evidence
+// from both processes must survive so active provider failover cannot mistake
+// the task for untouched work.
+func TestReconcileFreshRetryResult_MergesEvidenceAcrossAttempts(t *testing.T) {
+	t.Parallel()
+
+	first := agent.Result{
+		Status:    "failed",
+		Error:     "resume rejected",
+		SessionID: "poisoned",
+	}
+
+	tests := []struct {
+		name       string
+		retry      agent.Result
+		retryErr   error
+		firstObs   drainObservation
+		retryObs   drainObservation
+		wantTools  int32
+		wantOutput bool
+	}{
+		{
+			name:       "retry result wins but first attempt evidence remains",
+			retry:      agent.Result{Status: "completed", SessionID: "fresh"},
+			firstObs:   drainObservation{toolCalls: 2, partialUserOutput: true},
+			retryObs:   drainObservation{toolCalls: 3},
+			wantTools:  5,
+			wantOutput: true,
+		},
+		{
+			name:       "first result wins but retry evidence remains",
+			retry:      agent.Result{Status: "failed"},
+			firstObs:   drainObservation{toolCalls: 1},
+			retryObs:   drainObservation{toolCalls: 4, partialUserOutput: true},
+			wantTools:  5,
+			wantOutput: true,
+		},
+		{
+			name:       "backend start error still preserves earlier evidence",
+			retryErr:   errors.New("fresh backend failed to start"),
+			firstObs:   drainObservation{toolCalls: 2, partialUserOutput: true},
+			retryObs:   drainObservation{},
+			wantTools:  2,
+			wantOutput: true,
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, got := reconcileFreshRetryResult(
+				first,
+				nil,
+				tc.firstObs,
+				tc.retry,
+				tc.retryObs,
+				tc.retryErr,
+			)
+			if got.toolCalls != tc.wantTools || got.partialUserOutput != tc.wantOutput {
+				t.Fatalf("observation = %+v, want tools=%d partial_output=%v",
+					got, tc.wantTools, tc.wantOutput)
+			}
+		})
 	}
 }

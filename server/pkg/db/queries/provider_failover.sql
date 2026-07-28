@@ -138,25 +138,3 @@ SELECT
 FROM agent_task_queue p
 WHERE p.id = @original_task_id
 RETURNING *;
-
--- name: ClaimControlPlaneEffect :one
--- At-most-once claim for an ORCHESTRATOR control-plane effect (td-836aa9). The
--- first caller to claim a given effect_key inserts and gets the row back
--- (proceed with the effect); a second caller — e.g. a handed-off fallback that
--- re-planned the same orchestration — conflicts on the UNIQUE effect_key and
--- gets no row (pgx.ErrNoRows), which the service treats as "already done, skip".
--- This is what prevents a mid-orchestration handoff from double-spawning
--- children or double-promoting stages.
-INSERT INTO control_plane_effect_ledger (
-    workspace_id, chain_root_task_id, effect_type, effect_key, target_ref
-)
-VALUES (@workspace_id, @chain_root_task_id, @effect_type, @effect_key, @target_ref)
-ON CONFLICT (effect_key) DO NOTHING
-RETURNING *;
-
--- name: GetControlPlaneEffect :one
--- Reports whether a control-plane effect has already been claimed (by key).
--- Used to answer "are this chain's control-plane effects idempotency-guarded"
--- and for the observability read path.
-SELECT * FROM control_plane_effect_ledger
-WHERE effect_key = $1;

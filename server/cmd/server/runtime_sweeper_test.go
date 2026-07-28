@@ -238,13 +238,14 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 	}
 }
 
-// TestSweepSilentHangRecordsShadowBeforeRuntimeCleanup exercises the actual
-// sweeper boundary that used to be unreachable: runRuntimeSweeper marked the
-// runtime offline and failed all of its tasks before FailSilentHangTasks could
-// classify any row. The silent-hang sweep must now claim the row first and,
-// even with ordinary failover configured active, persist a shadow-only liveness
-// decision because a dead runtime cannot provide complete side-effect evidence.
-func TestSweepSilentHangRecordsShadowBeforeRuntimeCleanup(t *testing.T) {
+// TestSweepStaleRuntimeRecordsLivenessShadowAndPreservesRetry verifies the
+// provider-liveness observation is derived from the same authoritative
+// LivenessStore-gated runtime transition as ordinary orphan recovery. The
+// persisted reason remains runtime_offline, so the historical bounded
+// same-provider retry is preserved, while failover records a shadow-only
+// provider_liveness_timeout decision because a dead runtime cannot provide
+// complete side-effect evidence.
+func TestSweepStaleRuntimeRecordsLivenessShadowAndPreservesRetry(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
 	}
@@ -289,7 +290,13 @@ func TestSweepSilentHangRecordsShadowBeforeRuntimeCleanup(t *testing.T) {
 	taskSvc := service.NewTaskService(queries, testPool, nil, events.New())
 	taskSvc.FeatureFlags = featureflag.NewService(static)
 
-	sweepSilentHangTasks(context.Background(), queries, taskSvc)
+	sweepStaleRuntimes(
+		context.Background(),
+		queries,
+		&fakeLiveness{available: true, aliveOK: true},
+		taskSvc,
+		events.New(),
+	)
 
 	var taskStatus, failureReason, handoffState, handoffMode string
 	if err := testPool.QueryRow(context.Background(), `
@@ -306,13 +313,26 @@ func TestSweepSilentHangRecordsShadowBeforeRuntimeCleanup(t *testing.T) {
 	`, taskID).Scan(&handoffState, &handoffMode); err != nil {
 		t.Fatalf("read liveness handoff: %v", err)
 	}
-	if taskStatus != "failed" || failureReason != "provider_liveness_timeout" {
-		t.Fatalf("task status/reason = %q/%q, want failed/provider_liveness_timeout",
+	if taskStatus != "failed" || failureReason != "runtime_offline" {
+		t.Fatalf("task status/reason = %q/%q, want failed/runtime_offline",
 			taskStatus, failureReason)
 	}
 	if handoffState != string(providerfailover.StateShadow) ||
 		handoffMode != string(providerfailover.ModeShadow) {
 		t.Fatalf("liveness handoff = %q/%q, want shadow/shadow", handoffState, handoffMode)
+	}
+
+	var retryCount int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*)
+		FROM agent_task_queue
+		WHERE retry_of_task_id = $1
+		  AND status = 'queued'
+	`, taskID).Scan(&retryCount); err != nil {
+		t.Fatalf("read runtime-offline retry child: %v", err)
+	}
+	if retryCount != 1 {
+		t.Fatalf("runtime_offline retry children = %d, want 1", retryCount)
 	}
 }
 

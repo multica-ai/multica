@@ -474,16 +474,6 @@ type ContactSalesInquiry struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
-type ControlPlaneEffectLedger struct {
-	ID              pgtype.UUID        `json:"id"`
-	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
-	ChainRootTaskID pgtype.UUID        `json:"chain_root_task_id"`
-	EffectType      string             `json:"effect_type"`
-	EffectKey       string             `json:"effect_key"`
-	TargetRef       string             `json:"target_ref"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-}
-
 type DaemonConnection struct {
 	ID              pgtype.UUID        `json:"id"`
 	AgentID         pgtype.UUID        `json:"agent_id"`

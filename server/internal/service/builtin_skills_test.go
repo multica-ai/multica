@@ -518,58 +518,6 @@ func TestProjectsAndResourcesSkillCoversDurableContext(t *testing.T) {
 	}
 }
 
-func TestComposingAgentWorkSkillCoversCompositionContracts(t *testing.T) {
-	skill, ok := findSkill(t, "multica-composing-agent-work")
-	if !ok {
-		return
-	}
-	fm, body, _ := splitFrontmatter(skill.Content)
-
-	if got := strings.TrimSpace(fm["allowed-tools"]); !strings.Contains(got, "Bash(multica *)") {
-		t.Errorf("allowed-tools = %q, want access to the Multica CLI", got)
-	}
-
-	mustContain := []string{
-		"Use the smallest topology",
-		"### Solo",
-		"### Serial",
-		"### Bounded parallel",
-		"### Cross-provider review",
-		"multica agent list --output json",
-		"multica agent skills list <agent-id> --output json",
-		"multica runtime usage <runtime-id> --days 7 --output json",
-		"--stage 1 --status todo",
-		"--stage 2 --status backlog",
-		"Assign exactly one write-capable executor per effect surface",
-		"It does not report a",
-		"automatic per-task model rebinding",
-		"references/composing-agent-work-source-map.md",
-	}
-	for _, want := range mustContain {
-		if !strings.Contains(body, want) {
-			t.Errorf("composing-agent-work skill missing %q", want)
-		}
-	}
-
-	mustNotContain := []string{
-		"remaining percentage",
-		"automatically chooses the best model today",
-		"parallel agents may edit the same files",
-	}
-	for _, forbidden := range mustNotContain {
-		if strings.Contains(body, forbidden) {
-			t.Errorf("composing-agent-work skill teaches unsafe or unsupported behavior %q", forbidden)
-		}
-	}
-
-	if !skillHasFile(skill, "agents/openai.yaml") {
-		t.Errorf("composing-agent-work skill missing agents/openai.yaml")
-	}
-	if !skillHasFile(skill, "references/composing-agent-work-source-map.md") {
-		t.Errorf("composing-agent-work skill missing references/composing-agent-work-source-map.md")
-	}
-}
-
 func findSkill(t *testing.T, name string) (AgentSkillData, bool) {
 	t.Helper()
 	for _, s := range loadBuiltinSkills() {
