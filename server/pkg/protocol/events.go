@@ -102,6 +102,12 @@ const (
 	EventPropertyUpdated        = "property:updated"
 	EventIssuePropertiesChanged = "issue_properties:changed"
 
+	// Issue relation events. A relation change touches two issues, so the
+	// payload carries both endpoint ids ({"issue_ids": [source, target]}) and
+	// the client invalidates the relations cache for each. The frontend
+	// consumer lands with the TypeScript layer (a later PR).
+	EventIssueRelationsChanged = "issue_relations:changed"
+
 	// Pin events
 	EventPinCreated   = "pin:created"
 	EventPinDeleted   = "pin:deleted"

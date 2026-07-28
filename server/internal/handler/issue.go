@@ -3169,10 +3169,9 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// Collect all attachment URLs (issue-level + comment-level) before CASCADE delete.
 	attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
 
-	err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
-		ID:          issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-	})
+	// Delete the issue together with its relation edges in one transaction —
+	// issue_relation has no FK cascade (see deleteIssueWithRelations).
+	relationCounterparts, err := h.deleteIssueWithRelations(r.Context(), issue.ID, issue.WorkspaceID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to delete issue")
 		return
@@ -3186,6 +3185,13 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 	// other clients after an identifier-path delete.
 	resolvedID := uuidToString(issue.ID)
 	h.publish(protocol.EventIssueDeleted, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{"issue_id": resolvedID})
+	// Relations touching this issue were removed with it; tell the surviving
+	// counterparts so their relation caches refresh (no FK, so no cascade event).
+	if len(relationCounterparts) > 0 {
+		h.publish(protocol.EventIssueRelationsChanged, uuidToString(issue.WorkspaceID), actorType, actorID, map[string]any{
+			"issue_ids": relationCounterparts,
+		})
+	}
 	slog.Info("issue deleted", append(logger.RequestAttrs(r), "issue_id", resolvedID, "workspace_id", uuidToString(issue.WorkspaceID))...)
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -3544,10 +3550,12 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		// Collect attachment URLs before CASCADE delete to clean up S3 objects.
 		attachmentURLs, _ := h.Queries.ListAttachmentURLsByIssueOrComments(r.Context(), issue.ID)
 
-		if err := h.Queries.DeleteIssue(r.Context(), db.DeleteIssueParams{
-			ID:          issue.ID,
-			WorkspaceID: issue.WorkspaceID,
-		}); err != nil {
+		// Per-issue transaction (relation cleanup + delete). The batch stays
+		// non-atomic across issues by design — a single failure skips that
+		// issue and the handler reports the count — but each issue's edges are
+		// removed atomically with it.
+		relationCounterparts, err := h.deleteIssueWithRelations(r.Context(), issue.ID, issue.WorkspaceID)
+		if err != nil {
 			slog.Warn("batch delete issue failed", "issue_id", issueID, "error", err)
 			continue
 		}
@@ -3557,6 +3565,11 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		// Always emit the resolved UUID — frontend caches key by UUID.
 		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 		h.publish(protocol.EventIssueDeleted, workspaceID, actorType, actorID, map[string]any{"issue_id": uuidToString(issue.ID)})
+		if len(relationCounterparts) > 0 {
+			h.publish(protocol.EventIssueRelationsChanged, workspaceID, actorType, actorID, map[string]any{
+				"issue_ids": relationCounterparts,
+			})
+		}
 		deleted++
 	}
 

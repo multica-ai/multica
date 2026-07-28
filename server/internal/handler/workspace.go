@@ -777,6 +777,16 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Take the same advisory lock AddIssueRelation holds so a relation add can't
+	// commit after this transaction's issue_relation cleanup snapshot but before
+	// the workspace row is gone — which would orphan the new relation (the table
+	// has no FK cascade). See LockWorkspaceRelations.
+	if err := qtx.LockWorkspaceRelations(r.Context(), uuidToString(requester.WorkspaceID)); err != nil {
+		slog.Warn("lock workspace relations for delete failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
+		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
+		return
+	}
+
 	if _, err := qtx.LockChatSessionsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
 		slog.Warn("lock workspace chat sessions failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to delete workspace")
