@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"strings"
@@ -61,8 +62,11 @@ func TestInstalledOpencodeRejectsPromptFlag(t *testing.T) {
 	if err != nil {
 		t.Skip("opencode not installed")
 	}
+	// Use the permission flag this binary actually advertises, otherwise the
+	// non-zero exit below could come from the permission flag rather than
+	// from --prompt, and the assertion would pass for the wrong reason.
 	cmd := exec.Command(path, "run", "--pure", "--format", "json",
-		"--auto", "--prompt", "you are a bot", "say hi")
+		opencodePermissionFlag(path, slog.Default()), "--prompt", "you are a bot", "say hi")
 	cmd.Env = opencodeContractEnv()
 	cmd.Dir = t.TempDir()
 	out, err := cmd.CombinedOutput()
@@ -79,10 +83,16 @@ func TestOpencodeEmittedFlagsExistInInstalledCLI(t *testing.T) {
 
 	// CEREBRO-PATCH(opencode-permission-flag): keep daemon argv aligned with
 	// the exact installed CLI rather than a provider-version assumption.
-	// The flags opencode.go builds in Execute().
+	// The flags opencode.go builds in Execute(). The permission flag is not
+	// listed literally — it is whichever spelling this binary advertises, and
+	// opencodePermissionFlag() is what Execute() asks too.
+	path, err := exec.LookPath("opencode")
+	if err != nil {
+		t.Skip("opencode not installed")
+	}
 	emitted := []string{
 		"--format",
-		"--auto",
+		opencodePermissionFlag(path, slog.Default()),
 		"--dir",
 		"--model",
 		"--variant",
