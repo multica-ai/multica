@@ -195,14 +195,14 @@ const AgentCapabilitySecretSetSchema = z
   })
   .loose();
 
-// TECH-3738 Bid B — one tool the agent was OBSERVED to actually invoke recently,
-// compared against its declared policy. `status` is the observed-vs-declared
-// verdict; `drift` flags use the declared model does not sanction (blocked or
-// unmapped). Enum drift on `status` downgrades to a neutral badge in the tab.
+// TECH-3738 Bid B — one tool the agent was OBSERVED to invoke or attempt
+// recently, compared against declared policy and its Task Mandate. `drift`
+// flags blocked, mandate-rejected, or unmapped access reality.
 const AgentCapabilityObservedToolSchema = z
   .object({
     name: z.string().default(""),
     uses: z.number().default(0),
+    mandate_denials: z.number().default(0),
     last_used: z.string().default(""),
     permission: z.string().default(""),
     status: z.string().default("unmapped"),

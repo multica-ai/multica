@@ -715,11 +715,9 @@ function StatusBadge({ status }: { status: string }) {
   }
 }
 
-// ObservedAccessSection renders what the agent actually USED recently (Bid B),
-// distinct from the declared layers above. The headline signal is drift: tools
-// the agent invoked that its declared policy does not sanction (blocked or
-// unmapped) — surfaced as a red banner and per-tool warning. Tools only; observed
-// secret use is never shown because it is not recorded anywhere.
+// ObservedAccessSection renders what the agent used or attempted recently (Bid
+// B). Drift means the real call outcome disagreed with declared policy or the
+// Task Mandate.
 function ObservedAccessSection({
   observed,
 }: {
@@ -734,7 +732,7 @@ function ObservedAccessSection({
       <div className="flex flex-wrap items-center gap-1.5">
         <StatusBadge status={observed.status} />
         <span className="text-xs text-muted-foreground">
-          tools actually used in the last {observed.window_days} days
+          tools used or attempted in the last {observed.window_days} days
           {observed.task_count > 0
             ? ` · ${observed.task_count} task${observed.task_count === 1 ? "" : "s"}`
             : ""}
@@ -747,11 +745,12 @@ function ObservedAccessSection({
           <span>
             <strong>
               Reviewer: {observed.drift_count} of the {observed.tools.length} tools
-              below (red) were used but the declared policy does not account for
-              them
+              below (red) were used or attempted but actual access did not match
+              the declared policy
             </strong>{" "}
-            — blocked or unmapped. Confirm each is expected, or tighten the
-            policy. The other tools match the declared policy.
+            — blocked, rejected by the Task Mandate, or unmapped. Confirm each
+            is expected, or correct the access configuration. The other tools
+            match the declared policy.
           </span>
         </p>
       )}
@@ -801,7 +800,13 @@ function observedPill(status: string): string {
 }
 
 function observedTitle(t: AgentCapabilityObservedTool): string {
-  const parts = [`used ${t.uses}×`];
+  const parts: string[] = [];
+  if (t.uses > 0) {
+    parts.push(`used ${t.uses}×`);
+  }
+  if (t.mandate_denials > 0) {
+    parts.push(`Task Mandate denied ${t.mandate_denials}×`);
+  }
   if (t.last_used) parts.push(`last ${t.last_used.slice(0, 10)}`);
   switch (t.status) {
     case "allowed":
@@ -811,7 +816,13 @@ function observedTitle(t: AgentCapabilityObservedTool): string {
       parts.push("policy: needs approval");
       break;
     case "blocked":
-      parts.push("policy: BLOCKED — used despite being denied");
+      parts.push(
+        t.mandate_denials > 0
+          ? t.permission === "allow"
+            ? "policy: allowed, but Task Mandate blocked the call"
+            : `Task Mandate blocked the call; policy: ${t.permission || "unmapped"}`
+          : "policy: BLOCKED — used despite being denied",
+      );
       break;
     case "unmapped":
       parts.push("no policy on record for this tool");
@@ -825,7 +836,12 @@ function ObservedToolPill({ tool }: { tool: AgentCapabilityObservedTool }) {
     <Pill className={observedPill(tool.status)} title={observedTitle(tool)}>
       {tool.drift && <AlertTriangle className="h-3 w-3" />}
       {tool.name}
-      <span className="text-muted-foreground">· {tool.uses}</span>
+      <span className="text-muted-foreground">
+        ·{" "}
+        {tool.mandate_denials > 0
+          ? `${tool.mandate_denials} denied`
+          : tool.uses}
+      </span>
     </Pill>
   );
 }

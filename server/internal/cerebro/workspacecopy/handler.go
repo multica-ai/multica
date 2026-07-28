@@ -19,30 +19,41 @@
 package workspacecopy
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/storage"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type memberLookup interface {
+	GetMemberByUserAndWorkspace(context.Context, db.GetMemberByUserAndWorkspaceParams) (db.Member, error)
+}
 
 // Handler exposes the copy engine over HTTP.
 type Handler struct {
-	Store *Store
+	Store   *Store
+	Members memberLookup
 }
 
 // NewHandler builds a Handler bound to the given pool and blob store. The blob
 // store lets the relink post-pass materialize copied file blobs into the target
 // workspace (TECH-3766).
 func NewHandler(pool *pgxpool.Pool, st storage.Storage) *Handler {
-	return &Handler{Store: New(pool).WithStorage(st)}
+	return &Handler{
+		Store:   New(pool).WithStorage(st),
+		Members: db.New(pool),
+	}
 }
 
 type copyRequest struct {
@@ -83,6 +94,9 @@ func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
 	}
 	target, ok := parseUUIDOrBadRequest(w, req.TargetWorkspaceID, "target_workspace_id")
 	if !ok {
+		return
+	}
+	if !h.requireTargetWorkspaceAdmin(w, r, target) {
 		return
 	}
 
@@ -221,6 +235,34 @@ func (h *Handler) Copy(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeError(w, http.StatusInternalServerError, "copy failed: "+err.Error())
 	}
+}
+
+func (h *Handler) requireTargetWorkspaceAdmin(w http.ResponseWriter, r *http.Request, targetWorkspaceID pgtype.UUID) bool {
+	sourceMember, ok := middleware.MemberFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "user not authenticated")
+		return false
+	}
+	targetMember, err := h.Members.GetMemberByUserAndWorkspace(
+		r.Context(),
+		db.GetMemberByUserAndWorkspaceParams{
+			UserID:      sourceMember.UserID,
+			WorkspaceID: targetWorkspaceID,
+		},
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusForbidden, "insufficient permissions for target workspace")
+		return false
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to verify target workspace permissions")
+		return false
+	}
+	if targetMember.Role != "owner" && targetMember.Role != "admin" {
+		writeError(w, http.StatusForbidden, "insufficient permissions for target workspace")
+		return false
+	}
+	return true
 }
 
 // --- helpers (mirrors the connections handler conventions) ------------------

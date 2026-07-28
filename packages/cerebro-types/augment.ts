@@ -66,6 +66,16 @@ declare module "@multica/core/types/agent" {
     // TECH-3077: included when the server returns metadata (cerebro skill-metadata feature).
     metadata?: SkillMetadata | null;
   }
+  interface AgentContextSnapshot {
+    /**
+     * FIR-3805: the subset of `skill_ids` this version marks always on. The
+     * server already stores and applies it; the frontend needs it on the
+     * snapshot so the field diff, the change-request queue and the version
+     * history can all SEE an always-on-only change. Omitted by the server when
+     * empty (and absent entirely on pre-FIR-3805 versions), so always default.
+     */
+    always_on_skill_ids?: string[];
+  }
   interface CreateAgentContextChangeRequestRequest {
     /**
      * FIR-3805: the subset of `skill_ids` whose full text is pasted into the

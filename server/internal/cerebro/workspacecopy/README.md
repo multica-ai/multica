@@ -83,6 +83,8 @@ One-time bulk (Settings — `CopyFoundation`, `copy_foundation.go` + `copy_roles
 Wiring:
 - [x] Handler entity_types: `foundation`, `skill`, `group_access` added; conflict
       policy plumbed (`handler.go`). Route unchanged (`/cerebro/copy`).
+- [x] Every copy requires the authenticated caller to be owner/admin in both
+      source and target workspaces before any target write can run (FIR-3820).
 - [x] Frontend `packages/cerebro-workspace-copy/`: fixed-order console (foundation
       "do this first" step → agents → projects → issues → chats → autopilots),
       conflict-policy selector, issue status filter, select-all + copy-all,

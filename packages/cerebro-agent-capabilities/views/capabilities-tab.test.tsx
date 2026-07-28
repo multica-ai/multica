@@ -194,7 +194,7 @@ describe("CerebroCapabilitiesTab", () => {
     expect(screen.getByText("Observed access")).toBeInTheDocument();
     expect(screen.getByText("WebFetch")).toBeInTheDocument();
     expect(
-      screen.getByText(/the declared policy does not account for them/i),
+      screen.getByText(/actual access did not match the declared policy/i),
     ).toBeInTheDocument();
     // Honest-scope disclaimer: secret use is not tracked.
     expect(
@@ -284,6 +284,42 @@ describe("CerebroCapabilitiesTab", () => {
     expect(
       screen.getByText("No tool use recorded in this window."),
     ).toBeInTheDocument();
+  });
+
+  it("explains a Task Mandate denial as blocked drift", async () => {
+    mockCerebroRequest.mockResolvedValue({
+      agent_id: "agent-1",
+      name: "Tine",
+      model: "claude",
+      observed_access: {
+        status: "known",
+        window_days: 30,
+        task_count: 1,
+        drift_count: 1,
+        tools: [
+          {
+            name: "mcp__customer_service__handle_message",
+            uses: 1,
+            mandate_denials: 1,
+            permission: "allow",
+            status: "blocked",
+            drift: true,
+          },
+        ],
+      },
+    });
+
+    renderTab();
+
+    const tool = await screen.findByText("mcp__customer_service__handle_message");
+    expect(tool.closest("[title]")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Task Mandate denied 1×"),
+    );
+    expect(tool.closest("[title]")).toHaveAttribute(
+      "title",
+      expect.stringContaining("Task Mandate blocked the call"),
+    );
   });
 
   it("renders the tool availability summary when the runtime proof is known (FIR-3398)", async () => {
