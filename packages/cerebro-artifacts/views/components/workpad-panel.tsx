@@ -116,8 +116,7 @@ function PhaseSection({
 // bottom of the issue, below the composer. It is driven entirely by the presence
 // of a `kind: "plan"` artifact coupled to the issue: no plan → renders nothing;
 // a plan exists → the panel appears automatically, with no agent action
-// required. Clicking the title opens the plan note (where its version history
-// lives). Gated by the cerebro_workpad feature flag.
+// required. Gated by the cerebro_workpad feature flag.
 //
 // FIR-3765 — when the plan groups its steps under markdown headings (phases),
 // each phase renders as a collapsible section headed by a status icon that
@@ -126,9 +125,14 @@ function PhaseSection({
 // with fewer than two named phases renders as a single flat list, exactly as
 // before.
 //
-// Everything starts folded: the panel itself opens collapsed (the Workpad icon
-// toggles it) and so does every phase, so the panel reads as a compact status
-// line until the reader asks for detail.
+// Everything starts folded: the panel itself opens collapsed and so does every
+// phase, so the panel reads as a compact status line until the reader asks for
+// detail.
+//
+// FIR-3659 (Jesper's review) — the whole heading row is the panel's toggle
+// (circle, "Workpad" and the count alike), matching mobile, and the way out to
+// the plan note is an explicit "Open full plan" link inside the opened panel
+// instead of a hover-only affordance on the heading.
 //
 // The header's own icon is a WorkpadProgressCircle — the same circle the phases
 // use, but filled proportionally to the whole plan's progress, so the collapsed
@@ -185,32 +189,22 @@ export function WorkpadPanel({ issueId, className }: { issueId: string; classNam
         className,
       )}
     >
-      <div className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setOpen((o) => !o)}
-          aria-expanded={open}
-          aria-label="Toggle Workpad"
-          title="Toggle Workpad"
-          className="-m-1 shrink-0 rounded-sm p-1 hover:opacity-80 focus:outline-none focus:ring-2 focus:ring-ring"
-        >
-          <WorkpadProgressCircle progress={{ done, total }} className="size-4" />
-        </button>
-        <button
-          type="button"
-          onClick={openPlan}
-          className="group inline-flex min-w-0 items-center gap-1 text-sm font-semibold hover:underline focus:outline-none focus:ring-2 focus:ring-ring rounded-sm"
-          title="Open plan"
-        >
-          <span className="truncate">Workpad</span>
-          <ExternalLink className="size-3 shrink-0 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-        </button>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+        aria-label="Toggle Workpad"
+        title="Toggle Workpad"
+        className="-m-1 flex w-[calc(100%+0.5rem)] items-center gap-2 rounded-sm p-1 text-left hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        <WorkpadProgressCircle progress={{ done, total }} className="size-4" />
+        <span className="min-w-0 truncate text-sm font-semibold">Workpad</span>
         {total > 0 && (
-          <span className="ml-auto text-xs tabular-nums text-muted-foreground">
+          <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
             {done}/{total}
           </span>
         )}
-      </div>
+      </button>
 
       {open && (
         <>
@@ -218,7 +212,7 @@ export function WorkpadPanel({ issueId, className }: { issueId: string; classNam
               so the expanded panel reads as a titled section instead of two
               stacked lines. */}
           <Separator className="mt-2" />
-          <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
+          <div className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
             {plan.title && <span className="truncate">{plan.title}</span>}
             {versionCount > 0 && (
               <>
@@ -233,7 +227,18 @@ export function WorkpadPanel({ issueId, className }: { issueId: string; classNam
                 </button>
               </>
             )}
-          </p>
+            {/* The heading is the panel's toggle, so the way out to the plan
+                note lives inside the opened panel as its own explicit link. */}
+            <button
+              type="button"
+              onClick={openPlan}
+              className="ml-auto inline-flex shrink-0 items-center gap-1 rounded-sm hover:underline focus:outline-none focus:ring-2 focus:ring-ring"
+              title="Open full plan"
+            >
+              Open full plan
+              <ExternalLink className="size-3 shrink-0" />
+            </button>
+          </div>
 
           {total === 0 ? (
             <p className="mt-2 text-xs text-muted-foreground">
