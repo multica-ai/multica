@@ -265,29 +265,34 @@ func TestDashboardUsageDailyBucketsByViewerTimezone(t *testing.T) {
 		t.Fatalf("fetch agent: %v", err)
 	}
 
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM task_usage_hourly WHERE runtime_id = $1 AND provider = 'tz-bucket-test'`, runtimeID)
-	})
-	// One bucket at 04:00 UTC two days ago. 04:00 UTC is still the
+	// One measurement at 04:00 UTC two days ago. 04:00 UTC is still the
 	// previous evening in America/Los_Angeles (UTC-7/-8), so the UTC
 	// viewer and the LA viewer must see this row under different dates.
+	// CEREBRO-PATCH(usage-canonical-ledger): FIR-3940 seed the ledger, not the dead rollup.
+	var taskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, status, created_at)
+		VALUES ($1, $2, 'completed', now())
+		RETURNING id
+	`, agentID, runtimeID).Scan(&taskID); err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	})
 	var bucketHour time.Time
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO task_usage_hourly (
-			bucket_hour, workspace_id, runtime_id, agent_id, project_id,
-			provider, model,
-			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, event_count
+		INSERT INTO task_usage (
+			task_id, provider, model,
+			input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at
 		)
 		VALUES (
-			((CURRENT_DATE - 2)::timestamp + interval '4 hours') AT TIME ZONE 'UTC',
-			$1, $2, $3, NULL, 'tz-bucket-test', 'tz-bucket-model',
-			999, 0, 0, 0, 1
+			$1, 'tz-bucket-test', 'tz-bucket-model', 999, 0, 0, 0,
+			((CURRENT_DATE - 2)::timestamp + interval '4 hours') AT TIME ZONE 'UTC'
 		)
-		ON CONFLICT ON CONSTRAINT uq_task_usage_hourly_key DO UPDATE
-			SET input_tokens = EXCLUDED.input_tokens
-		RETURNING bucket_hour
-	`, testWorkspaceID, runtimeID, agentID).Scan(&bucketHour); err != nil {
-		t.Fatalf("seed hourly row: %v", err)
+		RETURNING created_at
+	`, taskID).Scan(&bucketHour); err != nil {
+		t.Fatalf("seed usage row: %v", err)
 	}
 
 	utcDate := bucketHour.UTC().Format("2006-01-02")
