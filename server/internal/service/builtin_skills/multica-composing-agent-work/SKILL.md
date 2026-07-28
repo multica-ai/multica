@@ -157,21 +157,32 @@ credentials, raw hidden reasoning, or unrelated history.
 ## Current capability boundary
 
 Available now: agent/model/thinking/skill inventory, runtime liveness,
-historical runtime usage, child issues, ordered stages, durable comments, and
-exactly-once guarded child dispatch on provider handoff.
+historical runtime usage, child issues, ordered stages, durable comments,
+exactly-once guarded child dispatch on provider handoff, and a transactional
+adaptive-admission path for explicitly opted-in agents.
 
-The backend also has a pure deterministic routing policy that can rank
-validated model/thinking candidates, enforce required skills/tools/authority,
-preserve a supplied provider reserve, consume only promoted evidence-backed
-skill affinity, and select a safe topology with one write owner. That policy is
-not yet connected to task admission or agent rebinding.
+That admission path ranks validated runtime/model/thinking candidates, enforces
+required skills/tools/authority, consumes a fresh owner-plan capacity snapshot,
+preserves the configured reserve, locks and reserves forecast capacity, and
+persists an auditable per-task decision. It keeps the source agent's identity,
+instructions, skills, MCP access, secrets, and authority. Protected identities
+retain their fixed binding. Shadow mode records without changing execution;
+active mode may defer ordinary work when both plans' reserves are protected.
 
-Not automatically exposed by these commands: provider subscription allowance,
-reset windows, automatic per-task model rebinding through routing-policy
-invocation, or automatic promotion of a new skill/model affinity. Treat live
-capacity and independently promoted evidence as router-policy inputs still
-requiring collectors and service integration; do not describe adaptive routing
-as live.
+This skill does not itself prove that a deployment has enabled routing, that an
+agent has a validated candidate set, or that an external capacity collector is
+fresh. Inspect the task's `route_admission_state` / `route_decision` and the
+operator's rollout evidence before describing adaptive routing as live.
+Separate deployments sharing one paid plan must receive disjoint capacity
+allocations; a database-local reservation is not a cross-database lock.
+
+Not automatically promoted: newly discovered models or experimental
+skill/model affinities. Discovery may create an evaluation candidate, but only
+independently promoted evidence with a revision affects routing.
+
+Automatic admission chooses one executor. It does not silently spawn the
+policy's serial/parallel/review topology; use the explicit bounded workflows
+above so branch count, artifacts, and the single write owner stay visible.
 
 If the user asks only for a design, return the proposed topology without
 creating work. If the user asks to execute, create only the authorized children,

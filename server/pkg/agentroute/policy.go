@@ -303,14 +303,16 @@ func evaluateCandidate(
 		return reject(RejectCapacityUnknown, "provider did not report a current plan snapshot")
 	}
 	if capacity.RemainingPermille < 0 || capacity.RemainingPermille > permilleMax ||
-		capacity.ReservePermille < 0 || capacity.ReservePermille > permilleMax ||
-		capacity.ReservePermille > capacity.RemainingPermille {
+		capacity.ReservePermille < 0 || capacity.ReservePermille > permilleMax {
 		return reject(RejectCapacityInvalid, "remaining or reserve capacity is out of range")
 	}
 
 	available := capacity.RemainingPermille
 	if workload.Urgency != UrgencyEmergency {
 		available -= capacity.ReservePermille
+		if available < 0 {
+			available = 0
+		}
 		if candidate.ExpectedUsePermille > available {
 			return reject(RejectReserveProtected, "forecast use would cross the emergency reserve")
 		}

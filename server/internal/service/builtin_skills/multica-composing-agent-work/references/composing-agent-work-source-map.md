@@ -61,8 +61,23 @@
 - `server/pkg/agentroute/policy_test.go` locks the fail-closed gates,
   aggregate parallel budget, evidence promotion boundary, topology rules,
   deterministic tie breaks, and cross-provider fallback ordering.
-- This package has no task-admission or dispatch side effects. Capacity
-  collection and service integration remain separate work.
+- The package itself stays pure. `server/internal/service/adaptive_routing.go`
+  is its production caller: it validates same-owner/same-workspace runtime
+  candidates, rejects stale capacity, reserves forecast capacity in a
+  transaction, and persists the per-task decision.
+- `server/migrations/240_adaptive_agent_routing.*` adds the owner-plan capacity
+  table, task route fields, claim fence, and terminal reservation release.
+  Migrations 241–242 build and attach the capacity primary key without a
+  blocking index build; migration 243 adds the pending-recovery index
+  concurrently.
+- `server/pkg/db/queries/adaptive_routing.sql` owns the row locks, admission
+  transitions, reservation, and crash-recovery scan.
+- `server/pkg/db/queries/agent.sql` excludes pending admissions from every
+  daemon claim candidate path.
+- `server/internal/handler/daemon.go` applies routed execution overrides at
+  claim time while retaining source-agent identity and authority.
+- `server/cmd/server/runtime_sweeper.go` recovers tasks left pending between
+  insert and admission.
 
 ## Skill conformance
 

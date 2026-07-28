@@ -54,6 +54,10 @@ services:
       JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
+      # Adaptive task admission is shadow-first. It is inert unless an agent
+      # explicitly opts in through runtime_config.adaptive_routing.
+      FF_ADAPTIVE_AGENT_ROUTING: ${FF_ADAPTIVE_AGENT_ROUTING:-true}
+      FF_ADAPTIVE_AGENT_ROUTING_ACTIVE: ${FF_ADAPTIVE_AGENT_ROUTING_ACTIVE:-false}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
       RESEND_FROM_EMAIL: ${RESEND_FROM_EMAIL:-noreply@multica.ai}
       SMTP_HOST: ${SMTP_HOST:-}

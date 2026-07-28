@@ -98,6 +98,11 @@ func runRuntimeSweeper(ctx context.Context, queries *db.Queries, liveness handle
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			// Recover tasks fenced between INSERT and adaptive admission before
+			// queue expiry or runtime cleanup can observe them.
+			if taskSvc != nil {
+				taskSvc.SweepPendingAdaptiveAdmissions(ctx)
+			}
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)

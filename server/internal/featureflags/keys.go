@@ -3,6 +3,7 @@ package featureflags
 import (
 	"context"
 
+	"github.com/multica-ai/multica/server/pkg/agentroute"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 )
 
@@ -24,6 +25,14 @@ const (
 	// key as enabled so installed v0.4.0 desktop clients, which still gate the
 	// switch on this config decision, receive the permanently enabled behavior.
 	agentSkillTogglesCompat = "agents_skill_toggles"
+
+	// AdaptiveAgentRouting gates transactional, per-task runtime/model/thinking
+	// admission for agents that explicitly declare validated candidates in
+	// runtime_config.adaptive_routing. ON alone is shadow-only.
+	AdaptiveAgentRouting = "adaptive_agent_routing"
+	// AdaptiveAgentRoutingActive is the independent actuator gate. It has no
+	// effect unless AdaptiveAgentRouting is also enabled.
+	AdaptiveAgentRoutingActive = "adaptive_agent_routing_active"
 )
 
 var frontendPublicFlags = []string{
@@ -37,6 +46,18 @@ func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) boo
 
 func ResourceLabelsEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, ResourceLabels, false)
+}
+
+// AdaptiveAgentRoutingMode composes the two rollout gates. An accidental
+// active-only enable is inert; operators must observe shadow decisions first.
+func AdaptiveAgentRoutingMode(ctx context.Context, flags *featureflag.Service) agentroute.Mode {
+	if !flags.IsEnabled(ctx, AdaptiveAgentRouting, false) {
+		return agentroute.ModeOff
+	}
+	if flags.IsEnabled(ctx, AdaptiveAgentRoutingActive, false) {
+		return agentroute.ModeActive
+	}
+	return agentroute.ModeShadow
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

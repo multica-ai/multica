@@ -4091,6 +4091,23 @@ func priorityToInt(p string) int32 {
 // waiting for the next poll.
 func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQueue) {
 	s.captureTaskQueued(ctx, task)
+	if task.RouteAdmissionState == "pending" {
+		admitted, err := s.admitAdaptiveTask(ctx, task)
+		if err != nil {
+			// Leave the INSERT-time fence in place. The sweeper retries it; a
+			// polling daemon cannot race ahead because claim SQL excludes
+			// pending admissions.
+			slog.Warn("adaptive routing: task admission failed; left pending for recovery",
+				"task_id", util.UUIDToString(task.ID),
+				"error", err,
+			)
+			return
+		}
+		task = admitted
+	}
+	if task.Status != "queued" || task.RouteAdmissionState == "pending" {
+		return
+	}
 	s.notifyTaskAvailable(task)
 }
 

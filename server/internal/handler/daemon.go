@@ -1651,6 +1651,23 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			RuntimeConfig:         runtimeConfig,
 			DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 		}
+		if err := applyAdaptiveTaskClaimRoute(task, resp.Agent); err != nil {
+			slog.Error("daemon claim: invalid persisted adaptive route",
+				"task_id", uuidToString(task.ID),
+				"error", err,
+			)
+			if _, cancelErr := h.TaskService.CancelTask(r.Context(), task.ID); cancelErr != nil {
+				slog.Error("daemon claim: cancel invalid adaptive route failed",
+					"task_id", uuidToString(task.ID),
+					"error", cancelErr,
+				)
+			}
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_adaptive_route",
+				status:  http.StatusInternalServerError,
+				message: "persisted adaptive route is invalid",
+			}
+		}
 		if useSkillRefs {
 			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
 			agentSkillCount = len(skillRefs)
@@ -2498,6 +2515,38 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	}
 
 	return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil
+}
+
+// applyAdaptiveTaskClaimRoute overlays only provider execution configuration.
+// Agent identity, instructions, skills, MCP access, custom_env, and authority
+// remain unchanged, which is the core authorization boundary of adaptive
+// routing.
+func applyAdaptiveTaskClaimRoute(task *db.AgentTaskQueue, agent *TaskAgentData) error {
+	if task == nil || agent == nil || task.RouteAdmissionState != "routed" {
+		return nil
+	}
+	var routedArgs []string
+	if task.RouteCustomArgs != nil {
+		if err := json.Unmarshal(task.RouteCustomArgs, &routedArgs); err != nil {
+			return fmt.Errorf("decode route_custom_args: %w", err)
+		}
+	}
+	if task.RouteModel.Valid {
+		agent.Model = task.RouteModel.String
+	}
+	if task.RouteThinkingLevel.Valid {
+		agent.ThinkingLevel = task.RouteThinkingLevel.String
+	}
+	if task.RouteServiceTier.Valid {
+		agent.ServiceTier = task.RouteServiceTier.String
+	}
+	if task.RouteRuntimeConfig != nil {
+		agent.RuntimeConfig = json.RawMessage(task.RouteRuntimeConfig)
+	}
+	if task.RouteCustomArgs != nil {
+		agent.CustomArgs = routedArgs
+	}
+	return nil
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.

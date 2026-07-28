@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS provider_plan_capacity_owner_provider_uidx;

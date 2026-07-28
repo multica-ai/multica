@@ -542,7 +542,9 @@ func TestComposingAgentWorkSkillCoversCompositionContracts(t *testing.T) {
 		"--stage 2 --status backlog",
 		"Assign exactly one write-capable executor per effect surface",
 		"It does not report a",
-		"automatic per-task model rebinding",
+		"adaptive-admission path",
+		"route_admission_state",
+		"Automatic admission chooses one executor",
 		"references/composing-agent-work-source-map.md",
 	}
 	for _, want := range mustContain {

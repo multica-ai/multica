@@ -276,6 +276,14 @@ type AgentTaskResponse struct {
 	RuntimeID   string `json:"runtime_id"`
 	IssueID     string `json:"issue_id"`
 	WorkspaceID string `json:"workspace_id"`
+	// Adaptive admission is persisted per task. The decision is non-secret
+	// evidence (capacity/headroom, selected candidate, and rejection reasons);
+	// provider-specific runtime config and custom args remain claim-only.
+	RouteAdmissionState string `json:"route_admission_state,omitempty"`
+	RouteDecision       any    `json:"route_decision,omitempty"`
+	RouteProvider       string `json:"route_provider,omitempty"`
+	RouteModel          string `json:"route_model,omitempty"`
+	RouteThinkingLevel  string `json:"route_thinking_level,omitempty"`
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
 	// as `## Workspace Context` so every agent running in this workspace —
@@ -599,6 +607,10 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.Result != nil {
 		json.Unmarshal(t.Result, &result)
 	}
+	var routeDecision any
+	if t.RouteDecision != nil {
+		json.Unmarshal(t.RouteDecision, &routeDecision)
+	}
 	failureReason := ""
 	if t.FailureReason.Valid {
 		failureReason = t.FailureReason.String
@@ -617,6 +629,11 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		RuntimeID:           uuidToString(t.RuntimeID),
 		IssueID:             uuidToString(t.IssueID),
 		WorkspaceID:         workspaceID,
+		RouteAdmissionState: t.RouteAdmissionState,
+		RouteDecision:       routeDecision,
+		RouteProvider:       t.RouteProvider.String,
+		RouteModel:          t.RouteModel.String,
+		RouteThinkingLevel:  t.RouteThinkingLevel.String,
 		Status:              t.Status,
 		Priority:            t.Priority,
 		DispatchedAt:        timestampToPtr(t.DispatchedAt),

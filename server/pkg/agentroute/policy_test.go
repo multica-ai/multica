@@ -148,6 +148,31 @@ func TestRoutePreservesReserveAndBalancesTowardHeadroom(t *testing.T) {
 	}
 }
 
+func TestRouteTreatsRemainingBelowReserveAsProtectedNotMalformed(t *testing.T) {
+	t.Parallel()
+
+	req := testRequest()
+	req.Candidates = []Candidate{candidate("ordinary", "codex", 9000, 1)}
+	req.Capacities = []Capacity{
+		{Provider: "codex", Known: true, RemainingPermille: 100, ReservePermille: 200},
+	}
+
+	decision, err := Route(req)
+	if !errors.Is(err, ErrNoEligibleCandidate) {
+		t.Fatalf("Route error = %v, want ErrNoEligibleCandidate", err)
+	}
+	assertRejected(t, decision, "ordinary", RejectReserveProtected)
+
+	req.Workload.Urgency = UrgencyEmergency
+	decision, err = Route(req)
+	if err != nil {
+		t.Fatalf("emergency work may use remaining reserve: %v", err)
+	}
+	if decision.Primary.Candidate.ID != "ordinary" {
+		t.Fatalf("unexpected emergency primary: %+v", decision.Primary)
+	}
+}
+
 func TestRouteUsesOnlyPromotedEvidenceBackedAffinity(t *testing.T) {
 	t.Parallel()
 
