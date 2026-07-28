@@ -340,7 +340,17 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 // its wording happened to mention, so Feishu/Lark replies silently went back to
 // carrying interim narration. The two-layer matrix below could not catch that —
 // it only ever asserted the rule on the Slack case.
+//
+// The carve-out is pinned alongside the prohibition on purpose. A rule phrased
+// as "don't say what you just did" reads as forbidding "已创建 Issue X" — the
+// actual deliverable for a do-this request — so the two must move together: the
+// prohibition covers PROCESS, never the completed outcome.
 func TestBuildChatPromptNoNarrationOnEveryChannel(t *testing.T) {
+	const (
+		prohibition = "Do NOT narrate planned or in-progress steps"
+		carveOut    = "Stating what you completed IS that outcome"
+	)
+
 	for _, tc := range []struct {
 		name        string
 		channelType string
@@ -356,10 +366,19 @@ func TestBuildChatPromptNoNarrationOnEveryChannel(t *testing.T) {
 				ChatChannelType: tc.channelType,
 				ChatMessage:     "hi",
 			})
-			for _, phrase := range []string{"Do NOT narrate", "Reply with the final answer only."} {
+			for _, phrase := range []string{prohibition, carveOut} {
 				if got := strings.Contains(out, phrase); got != tc.want {
 					t.Errorf("%q present=%v, want %v\n--- output ---\n%s", phrase, got, tc.want, out)
 				}
+			}
+			if !tc.want {
+				return
+			}
+			// The prohibition must not read as a blanket ban on past tense. If a
+			// future edit drops the carve-out, an agent asked to create an issue
+			// has no way left to report that it did.
+			if strings.Contains(out, "must not say what you are about to do or just did") {
+				t.Errorf("prohibition must scope to process, not completed outcomes\n--- output ---\n%s", out)
 			}
 		})
 	}

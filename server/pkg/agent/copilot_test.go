@@ -693,6 +693,35 @@ func TestCopilotEventLoopDeliversFinalTurnOnly(t *testing.T) {
 	}
 }
 
+// TestCopilotEventLoopToolOnlyTurnClearsPendingDelta covers the turn shape the
+// delta fallback can get wrong: a turn whose authoritative assistant.message
+// reports content:"" because the tool requests ARE the turn. Its deltas must not
+// stay buffered, or a later turn that dies mid-stream would deliver the two
+// stitched together.
+func TestCopilotEventLoopToolOnlyTurnClearsPendingDelta(t *testing.T) {
+	t.Parallel()
+	lines := []string{
+		`{"type":"assistant.message_delta","data":{"messageId":"m1","deltaContent":"Checking the logs now."},"id":"d1","timestamp":"2026-04-16T08:43:38.000Z","parentId":"p1","ephemeral":true}`,
+		`{"type":"assistant.message","data":{"messageId":"m1","content":"","toolRequests":[{"toolCallId":"t1","name":"shell","arguments":{}}]},"id":"a1","timestamp":"2026-04-16T08:43:38.100Z","parentId":"p1"}`,
+		// Next turn starts streaming, then the process dies before its
+		// assistant.message lands.
+		`{"type":"assistant.message_delta","data":{"messageId":"m2","deltaContent":"The retry loop"},"id":"d2","timestamp":"2026-04-16T08:43:40.000Z","parentId":"p1","ephemeral":true}`,
+	}
+
+	st := newCopilotEventState("copilot")
+	for _, line := range lines {
+		var evt copilotEvent
+		if err := json.Unmarshal([]byte(line), &evt); err != nil {
+			t.Fatal(err)
+		}
+		handleCopilotEvent(evt, st)
+	}
+
+	if got := st.finalOutput(); got != "The retry loop" {
+		t.Fatalf("killed mid-turn should deliver that turn's partial only, got %q", got)
+	}
+}
+
 func TestCopilotExecuteSurfacesStderrOnNonZeroResult(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {

@@ -105,8 +105,12 @@ func handleCopilotEvent(evt copilotEvent, st *copilotEventState) []Message {
 		if msg.Content != "" {
 			st.output.Reset()
 			st.output.WriteString(msg.Content)
-			st.pendingDelta.Reset()
 		}
+		// Clear unconditionally — this event IS the turn boundary. A tool-only
+		// turn reports content:"" (the toolRequests below are the whole turn), and
+		// leaving its deltas buffered would let them be stitched onto the NEXT
+		// turn's partial text if the process then died mid-stream.
+		st.pendingDelta.Reset()
 		if msg.ReasoningText != "" {
 			msgs = append(msgs, Message{Type: MessageThinking, Content: msg.ReasoningText})
 		}

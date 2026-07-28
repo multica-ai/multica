@@ -371,7 +371,11 @@ func buildChatPrompt(task Task) string {
 		} else {
 			fmt.Fprintf(&b, "Work from the context already provided to you below — Multica has no history reader for %s, so there is no command that can fetch more of this conversation. If you genuinely need earlier context that is not here, ask the user for it rather than guessing.\n", platform)
 		}
-		fmt.Fprintf(&b, "What you send to %s is the deliverable, not a log of how you produced it. Do NOT narrate: your reply must not say what you are about to do or just did (no \"我先读取…\" / \"let me read the history / check the code\"), and must not carry progress notes from the middle of your work. Reply with the final answer only.\n", platform)
+		// The rule targets PROCESS, not results. "I just created the issue" is the
+		// deliverable for a do-this request, so the wording must forbid planned /
+		// in-progress narration while explicitly protecting the completion
+		// confirmation — otherwise a task-doing agent has nothing left to say.
+		fmt.Fprintf(&b, "What you send to %s is the deliverable, not a log of how you produced it. Do NOT narrate planned or in-progress steps: no \"我先读取…\" / \"let me look into that first\", and no progress notes from the middle of your work. Reply with the final outcome only. Stating what you completed IS that outcome, not narration — when the user asked you to do something, \"已创建 Issue\" / \"deployed to staging\" is exactly the confirmation they need.\n", platform)
 		b.WriteString("\n")
 	}
 	if task.Agent != nil && len(task.Agent.Skills) > 0 {
