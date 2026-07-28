@@ -181,6 +181,17 @@ Qwen Code uses its native JSONL protocol in daemon mode: `qwen -p <prompt> --out
 | Authentication | Run `qwen` once interactively and complete its configured authentication flow before starting the daemon. |
 | Notes | Minimum CLI version: `0.20.0`. Override the binary with `MULTICA_QWEN_PATH` and set a daemon-wide default model with `MULTICA_QWEN_MODEL`. Add daemon-wide non-managed flags with `MULTICA_QWEN_ARGS` (POSIX shellword parsing). Managed agent `mcp_config` is written to a 0600 temporary JSON file and passed through `--mcp-config`; the file is removed after the run. Leave the field null to inherit native Qwen Code MCP settings. |
 
+### Devin CLI (Cognition)
+
+Devin CLI runs through its ACP server: `devin acp`. Session resumption uses ACP `session/load`; the runtime brief is written to `AGENTS.md`; assigned skills are copied to `.devin/skills/`; and personal skills are discovered from `~/.config/devin/skills/`. Devin manages its model in its own CLI configuration, so Multica disables the per-agent model picker.
+
+| | |
+|---|---|
+| Daemon looks for | `devin` |
+| Install | Install Devin CLI using Cognition's current [Devin documentation](https://docs.devin.ai/), then ensure `devin` is on `PATH`. |
+| Authentication | Run `devin` once interactively and complete the configured authentication flow before starting the daemon. |
+| Notes | Override the binary with `MULTICA_DEVIN_PATH`. Add non-managed arguments with `custom_args`; Multica reserves the `acp` subcommand. |
+
 ### Trae CLI (ByteDance)
 
 ByteDance's official TRAE CLI (`traecli`, paired with the Trae IDE — **not** the open-source `bytedance/trae-agent`). It is ACP-native, so Multica drives it over stdio via `traecli acp serve --yolo`, sharing the transport with Hermes, Kimi, Kiro CLI, and Qoder. Session resumption works through ACP `session/load`, MCP config is passed through ACP `mcpServers`, model selection is discovered dynamically (switched per task via `session/set_model`), and skills are copied into `.traecli/skills/`.
