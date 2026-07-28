@@ -833,14 +833,16 @@ WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
 RETURNING *;
 
 -- name: UpdateAgentTaskSession :exec
--- Pins the resume pointer mid-flight so a daemon crash leaves a usable
--- session_id/work_dir on the task row. No-op if the task is no longer
--- in dispatched/running. waiting_local_directory tasks have no session yet
--- so this query intentionally skips them.
+-- Pins the resume pointer as soon as it is known so a daemon crash /
+-- cancel does not lose the conversation. Allowed while the task is still
+-- running and also on failed/cancelled rows whose pointer may still be
+-- empty after an abort race (COALESCE keeps any already-set values).
+-- waiting_local_directory and completed are excluded: the former has no
+-- session yet; the latter is a finished success and must not be rewritten.
 UPDATE agent_task_queue
 SET session_id = COALESCE(sqlc.narg('session_id'), session_id),
     work_dir  = COALESCE(sqlc.narg('work_dir'), work_dir)
-WHERE id = $1 AND status IN ('dispatched', 'running');
+WHERE id = $1 AND status IN ('dispatched', 'running', 'failed', 'cancelled');
 
 -- name: RecoverOrphanedTasksForRuntime :many
 -- Called by the daemon at startup. Atomically fails any dispatched/running/

@@ -514,6 +514,9 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "kiro", want: false},
 		{provider: "kimi", want: true},
 		{provider: "traecli", want: true},
+		// OMP reads AGENTS.md natively (agents-md discovery), so the runtime
+		// brief written there reaches it without inlining — same as hermes.
+		{provider: "omp", want: false},
 		// Qwen Code loads the per-task QWEN.md file natively.
 		{provider: "qwen", want: false},
 		{provider: "codex", want: false},
@@ -2506,6 +2509,59 @@ func TestExecuteAndDrain_ContextCancelled_ReportsCancelled(t *testing.T) {
 	}
 	if result.Status != "cancelled" {
 		t.Fatalf("expected status=cancelled when parent ctx is cancelled, got %q (err=%q)", result.Status, result.Error)
+	}
+}
+
+// lateSessionCancelBackend models the OMP/daemon-restart race: it reveals a
+// session id via MessageStatus, then only emits Result after the parent ctx
+// is cancelled. executeAndDrain must still return that SessionID so FailTask
+// / GetLastTaskSession can resume instead of cold-starting.
+type lateSessionCancelBackend struct{}
+
+func (lateSessionCancelBackend) Execute(ctx context.Context, _ string, _ agent.ExecOptions) (*agent.Session, error) {
+	msgCh := make(chan agent.Message, 2)
+	resCh := make(chan agent.Result, 1)
+	msgCh <- agent.Message{Type: agent.MessageStatus, Status: "running", SessionID: "ses_resume_me"}
+	close(msgCh)
+	go func() {
+		<-ctx.Done()
+		// Small delay so drainCtx.Done() can win the first select and force
+		// the grace / pinned-session salvage path.
+		time.Sleep(50 * time.Millisecond)
+		resCh <- agent.Result{Status: "aborted", Error: "execution cancelled", SessionID: "ses_resume_me"}
+	}()
+	return &agent.Session{Messages: msgCh, Result: resCh}, nil
+}
+
+func TestExecuteAndDrain_ContextCancelled_PreservesSessionID(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	ctx, cancel := context.WithCancel(context.Background())
+
+	type outcome struct {
+		result agent.Result
+		err    error
+	}
+	o := make(chan outcome, 1)
+	go func() {
+		result, _, err := d.executeAndDrain(ctx, lateSessionCancelBackend{}, "p", agent.ExecOptions{}, slog.Default(), "t-session", "", new(atomic.Int32))
+		o <- outcome{result: result, err: err}
+	}()
+
+	// Let MessageStatus pin land, then cancel the parent ctx.
+	time.Sleep(40 * time.Millisecond)
+	cancel()
+
+	got := <-o
+	if got.err != nil {
+		t.Fatalf("unexpected error: %v", got.err)
+	}
+	if got.result.Status != "cancelled" {
+		t.Fatalf("expected status=cancelled, got %q (err=%q)", got.result.Status, got.result.Error)
+	}
+	if got.result.SessionID != "ses_resume_me" {
+		t.Fatalf("expected SessionID=ses_resume_me after cancel, got %q", got.result.SessionID)
 	}
 }
 

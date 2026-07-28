@@ -153,6 +153,7 @@ The daemon auto-detects these AI CLIs on your PATH:
 | [Trae](https://docs.trae.cn/cli) | `traecli` | ByteDance TRAE CLI (ACP via `traecli acp serve`) |
 | [Grok Build CLI](https://docs.x.ai/) | `grok` | xAI Grok Build CLI (ACP via `grok agent stdio`) |
 | [Qwen Code](https://github.com/QwenLM/qwen-code) | `qwen` | Alibaba Qwen Code (`qwen -p` with stream-json) |
+| [OMP](https://pi.dev/) | `omp` | Oh My Pi coding agent (ACP via `omp acp`) |
 
 You need at least one installed. The daemon registers each detected CLI as an available runtime.
 
@@ -234,6 +235,8 @@ Agent-specific overrides:
 | `MULTICA_QWEN_PATH` | Custom path to the `qwen` binary |
 | `MULTICA_QWEN_MODEL` | Override the Qwen Code model used |
 | `MULTICA_QWEN_ARGS` | Daemon-wide extra Qwen arguments (POSIX shellword parsing; managed protocol flags are filtered) |
+| `MULTICA_OMP_PATH` | Custom path to the `omp` binary |
+| `MULTICA_OMP_MODEL` | Override the OMP model used (a model id from your authenticated omp catalog) |
 
 If a previously generated `~/.multica/hooks` wrapper is first on `PATH` and calls the same command name again, the daemon skips that hooks directory during built-in agent discovery and records the real binary path behind it. If your interactive shell still recurses when you run `claude`, `codex`, or `hermes` manually, remove the hooks entry from your shell startup file or replace the wrapper body with an absolute `exec /path/to/real-binary "$@"`.
 

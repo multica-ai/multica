@@ -5709,7 +5709,7 @@ const updateAgentTaskSession = `-- name: UpdateAgentTaskSession :exec
 UPDATE agent_task_queue
 SET session_id = COALESCE($2, session_id),
     work_dir  = COALESCE($3, work_dir)
-WHERE id = $1 AND status IN ('dispatched', 'running')
+WHERE id = $1 AND status IN ('dispatched', 'running', 'failed', 'cancelled')
 `
 
 type UpdateAgentTaskSessionParams struct {
@@ -5718,10 +5718,9 @@ type UpdateAgentTaskSessionParams struct {
 	WorkDir   pgtype.Text `json:"work_dir"`
 }
 
-// Pins the resume pointer mid-flight so a daemon crash leaves a usable
-// session_id/work_dir on the task row. No-op if the task is no longer
-// in dispatched/running. waiting_local_directory tasks have no session yet
-// so this query intentionally skips them.
+// Pins the resume pointer mid-flight (and on failed/cancelled rows when
+// still empty) so a daemon crash or cancel race does not lose the
+// conversation. waiting_local_directory and completed are excluded.
 func (q *Queries) UpdateAgentTaskSession(ctx context.Context, arg UpdateAgentTaskSessionParams) error {
 	_, err := q.db.Exec(ctx, updateAgentTaskSession, arg.ID, arg.SessionID, arg.WorkDir)
 	return err

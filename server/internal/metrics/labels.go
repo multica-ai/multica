@@ -131,6 +131,7 @@ var (
 		"openclaw":      "openclaw",
 		"opencode":      "opencode",
 		"deveco":        "deveco",
+		"omp":           "omp",
 		"pi":            "pi",
 		"qwen":          "qwen",
 		"other":         "other",

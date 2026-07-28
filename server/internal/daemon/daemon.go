@@ -3493,6 +3493,17 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	select {
 	case <-cancelledByPoll:
 		taskLog.Info("task cancelled during execution, discarding result")
+		// Still pin any resume pointer the backend produced: the server may
+		// already have flipped the row to cancelled (so FailTask is a no-op),
+		// but UpdateAgentTaskSession accepts failed/cancelled rows so the next
+		// assign/rerun can resume instead of starting cold.
+		if result.SessionID != "" || result.WorkDir != "" {
+			pinCtx, pinCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if pinErr := d.client.PinTaskSession(pinCtx, task.ID, result.SessionID, result.WorkDir); pinErr != nil {
+				taskLog.Debug("pin session on cancel failed", "error", pinErr)
+			}
+			pinCancel()
+		}
 		// runner.run has returned, so the transcript flush is complete —
 		// tell the server it can settle its deferred chat finalization
 		// (#5219). Best-effort: the sweeper grace period covers a lost ack.
@@ -3531,6 +3542,13 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// signals as the in-flight watcher.
 	if status, err := d.client.GetTaskStatus(ctx, task.ID); shouldInterruptAgent(status, err) {
 		taskLog.Info("task cancelled during execution, discarding result", "status", status, "error", err)
+		if result.SessionID != "" || result.WorkDir != "" {
+			pinCtx, pinCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if pinErr := d.client.PinTaskSession(pinCtx, task.ID, result.SessionID, result.WorkDir); pinErr != nil {
+				taskLog.Debug("pin session on cancel failed", "error", pinErr)
+			}
+			pinCancel()
+		}
 		// Same contract as the poll-cancelled path above: the transcript is
 		// flushed, so let the server settle its deferred chat finalization.
 		if ackErr := d.client.AckTaskCancelled(ctx, task.ID); ackErr != nil {
@@ -3874,6 +3892,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"traecli": "Trae",
 	"grok":    "Grok",
 	"qwen":    "Qwen Code",
+	"omp":     "Oh My Pi",
 }
 
 // providerDisplayName returns the human-facing runtime name for a provider key.
@@ -5458,6 +5477,10 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 	defer drainCancel()
 
 	var toolCount atomic.Int32
+	// pinnedSessionID captures the backend session id as soon as MessageStatus
+	// reveals it so a drain-cancel race can still return it even when the
+	// backend Result channel loses the race with drainCtx.Done().
+	var pinnedSessionID atomic.Value // string
 	// lastActivityAt records (as unix nanos) when the drain loop most
 	// recently received a message from the backend. The idle watchdog
 	// reads this to decide whether the agent has gone silent for too long.
@@ -5584,21 +5607,28 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 					// preserved), while a session whose rollout never lands is never
 					// pinned. The terminal report is the authoritative writer.
 					// Non-Codex providers (codexHome == "") pin immediately.
-					if msg.SessionID != "" && !sessionPinned.Swap(true) {
-						sid := msg.SessionID
-						wd := opts.Cwd
-						go func() {
-							if !waitCodexRolloutPresent(drainCtx, codexHome, sid) {
-								taskLog.Debug("skip pinning codex session: rollout not present before run ended",
-									"session_id", sid, "codex_home", codexHome)
-								return
-							}
-							pinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-							defer cancel()
-							if err := d.client.PinTaskSession(pinCtx, taskID, sid, wd); err != nil {
-								taskLog.Debug("pin session failed", "error", err)
-							}
-						}()
+					// pinnedSessionID is captured for every status regardless of the
+					// rollout-gated server pin, so a drain-cancel race can still
+					// return it even when the backend Result channel loses the race
+					// with drainCtx.Done() (session-preserve fix).
+					if msg.SessionID != "" {
+						pinnedSessionID.Store(msg.SessionID)
+						if !sessionPinned.Swap(true) {
+							sid := msg.SessionID
+							wd := opts.Cwd
+							go func() {
+								if !waitCodexRolloutPresent(drainCtx, codexHome, sid) {
+									taskLog.Debug("skip pinning codex session: rollout not present before run ended",
+										"session_id", sid, "codex_home", codexHome)
+									return
+								}
+								pinCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+								defer cancel()
+								if err := d.client.PinTaskSession(pinCtx, taskID, sid, wd); err != nil {
+									taskLog.Debug("pin session failed", "error", err)
+								}
+							}()
+						}
 					}
 				case agent.MessageToolUse:
 					n := toolCount.Add(1)
@@ -5750,14 +5780,57 @@ func (d *Daemon) executeAndDrain(ctx context.Context, backend agent.Backend, pro
 		// upstream runCtx fired runCancel(); context.DeadlineExceeded is the
 		// drain deadline expiring on its own.
 		if errors.Is(drainCtx.Err(), context.Canceled) {
-			return agent.Result{
-				Status: "cancelled",
-				Error:  "task cancelled by upstream context (server cancel or daemon shutdown)",
-			}, toolCount.Load(), nil
+			// Prefer any backend Result that already landed (or lands shortly
+			// after cancel). Backends like OMP commonly emit Status=aborted with
+			// a real SessionID after ctx cancel; synthesizing an empty cancelled
+			// Result here previously discarded that pointer so FailTask /
+			// GetLastTaskSession could not resume the conversation after a
+			// daemon restart mid-run.
+			normalizeCancel := func(result agent.Result) agent.Result {
+				if sid, ok := pinnedSessionID.Load().(string); ok && result.SessionID == "" {
+					result.SessionID = sid
+				}
+				if idleWatchdogFired.Load() {
+					result.Status = "idle_watchdog"
+					if result.Error == "" {
+						result.Error = idleWatchdogReason(time.Duration(idleWatchdogThreshold.Load()))
+					}
+					return result
+				}
+				result.Status = "cancelled"
+				if result.Error == "" {
+					result.Error = "task cancelled by upstream context (server cancel or daemon shutdown)"
+				}
+				return result
+			}
+			select {
+			case result := <-session.Result:
+				return normalizeCancel(result), toolCount.Load(), nil
+			default:
+			}
+			grace := time.Duration(0)
+			if _, ok := pinnedSessionID.Load().(string); ok {
+				grace = 2 * time.Second
+			} else if toolCount.Load() > 0 {
+				grace = 2 * time.Second
+			}
+			if grace > 0 {
+				timer := time.NewTimer(grace)
+				defer timer.Stop()
+				select {
+				case result := <-session.Result:
+					return normalizeCancel(result), toolCount.Load(), nil
+				case <-timer.C:
+				}
+			}
+			sid, _ := pinnedSessionID.Load().(string)
+			return normalizeCancel(agent.Result{SessionID: sid}), toolCount.Load(), nil
 		}
+		sid, _ := pinnedSessionID.Load().(string)
 		return agent.Result{
-			Status: "timeout",
-			Error:  "agent did not produce result within drain timeout",
+			Status:    "timeout",
+			Error:     "agent did not produce result within drain timeout",
+			SessionID: sid,
 		}, toolCount.Load(), nil
 	}
 }

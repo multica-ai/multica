@@ -269,6 +269,27 @@ function TraeLogo({ className }: { className: string }) {
   return <img src={TRAE_ICON} alt="Trae" className={className} />;
 }
 
+// OMP (oh-my-pi) — official π-monogram mark, sourced from the pi.dev hero.
+// The tri-stop OKLCH gradient runs diagonally (magenta → purple → teal). The
+// gradient id is per-instance (useId) so multiple logos on one page don't
+// collide on a shared id — same technique as the CodeBuddy clipPath.
+function OmpLogo({ className }: { className: string }) {
+  const gradId = `omp-logo-grad-${useId().replace(/:/g, "")}`;
+
+  return (
+    <svg viewBox="0 0 64 64" className={className}>
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="oklch(0.7 0.24 340)" />
+          <stop offset=".5" stopColor="oklch(0.62 0.21 295)" />
+          <stop offset="1" stopColor="oklch(0.81 0.14 200)" />
+        </linearGradient>
+      </defs>
+      <path fill={`url(#${gradId})`} d="M10 14h44v9H43v33h-9V23h-9v22h-9V23H10z" />
+    </svg>
+  );
+}
+
 // Grok (xAI) — simple monochrome wordmark tile (G on dark square). Matches the
 // compact logo style used for Pi / OpenCode so the runtime list stays dense.
 function GrokLogo({ className }: { className: string }) {
@@ -294,7 +315,6 @@ const qwenLogoSrc: string = (() => {
 function QwenLogo({ className }: { className: string }) {
   return <img src={qwenLogoSrc} alt="" aria-hidden className={className} />;
 }
-
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -337,6 +357,8 @@ export function ProviderLogo({
       return <GrokLogo className={className} />;
     case "qwen":
       return <QwenLogo className={className} />;
+    case "omp":
+      return <OmpLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

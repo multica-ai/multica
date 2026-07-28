@@ -527,11 +527,12 @@ func writeSkills(b *strings.Builder, provider string, ctx TaskContextForEnv) {
 	}
 	b.WriteString("## Skills\n\n")
 	switch provider {
-	case "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "qoder", "antigravity", "qwen":
+	case "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "kiro", "qoder", "antigravity", "qwen", "omp":
 		// Hermes discovers these from its per-task HERMES_HOME/skills (seeded by
 		// the daemon), so it needs the same "discovered automatically" framing
 		// as the other native-discovery runtimes rather than a path pointer.
 		b.WriteString("You have the following skills installed (discovered automatically):\n\n")
+
 	default:
 		b.WriteString("Detailed skill instructions are in `.agent_context/skills/`. Each subdirectory contains a `SKILL.md`.\n\n")
 	}

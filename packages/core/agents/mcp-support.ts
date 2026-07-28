@@ -19,6 +19,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "qoder",
   "qwen",
   "traecli",
+  "omp",
 ]);
 
 export function providerSupportsMcpConfig(provider: string | undefined | null): boolean {

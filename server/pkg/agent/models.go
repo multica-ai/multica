@@ -126,6 +126,13 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverTraecliModels(ctx, executablePath)
 		})
+	case "omp":
+		// OMP (oh-my-pi) is ACP-native: it returns its model catalog from
+		// session/new. Enumerate it on demand like the other ACP backends
+		// (requires an authenticated omp; falls back to manual entry on error).
+		return cachedDiscovery(providerType, func() ([]Model, error) {
+			return discoverOmpModels(ctx, executablePath)
+		})
 	case "cursor":
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverCursorModels(ctx, executablePath)
@@ -394,6 +401,31 @@ func discoverTraecliModels(ctx context.Context, executablePath string) ([]Model,
 		tmpdirPrefix: "multica-traecli-discovery-",
 		acpArgs:      []string{"acp", "serve", "--yolo"},
 	})
+}
+
+// discoverOmpModels spins up a throwaway `omp acp --yolo` process and parses
+// the model catalog OMP advertises in its session/new `configOptions`. Unlike
+// the other ACP backends, OMP does NOT emit a `models.availableModels` block —
+// it exposes the model selector as a `category:"model"` config option, and
+// model changes go through `session/set_config_option`, not session/set_model
+// (which omp rejects as an unknown method). OMP must be authenticated for the
+// catalog to be non-empty; on any failure the caller falls back to the
+// manual-entry field.
+func discoverOmpModels(ctx context.Context, executablePath string) ([]Model, error) {
+	result, err := acpSessionNewResult(ctx, executablePath, acpDiscoveryProvider{
+		defaultBin:   "omp",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-omp-discovery-",
+		acpArgs:      []string{"acp", "--yolo"},
+	})
+	if err != nil {
+		return []Model{}, nil
+	}
+	models := parseACPModelConfigOptions(result)
+	if models == nil {
+		return []Model{}, nil
+	}
+	return models, nil
 }
 
 // cursorStaticModels is a minimal fallback used when
@@ -940,11 +972,45 @@ type acpDiscoveryProvider struct {
 // newer `configOptions` list. Provider-specific `launchArgs` select
 // ACP mode (e.g. `acp` vs `--acp`).
 func discoverACPModels(ctx context.Context, executablePath string, p acpDiscoveryProvider) ([]Model, error) {
-	fail := func(stage string, err error) ([]Model, error) {
+	result, err := acpSessionNewResult(ctx, executablePath, p)
+	if err != nil {
 		if p.strictErrors {
-			return nil, fmt.Errorf("ACP model discovery %s failed: %w", stage, err)
+			return nil, err
 		}
 		return []Model{}, nil
+	}
+	models := parseACPSessionNewModels(result)
+	if len(models) == 0 {
+		// session/new succeeded but carried no catalog we recognise. This
+		// is what upstream schema drift looks like from here (MUL-5239:
+		// kimi 0.29 moved the catalog from `models` to `configOptions`),
+		// and without this line it is indistinguishable from "the CLI
+		// really has no models". Log the top-level keys only — never the
+		// response body, which carries session ids and account-shaped data.
+		slog.Debug("ACP model discovery found no models in session/new response",
+			"binary", executablePath,
+			"result_keys", strings.Join(acpResultTopLevelKeys(result), ","),
+		)
+	}
+	if models == nil {
+		if p.strictErrors {
+			return nil, fmt.Errorf("ACP model discovery session/new model parsing failed: response contained no model catalog")
+		}
+		return []Model{}, nil
+	}
+	return models, nil
+}
+
+// acpSessionNewResult runs the minimal ACP handshake (initialize →
+// session/new) against an agent CLI and returns the raw session/new `result`
+// payload. A non-nil error carries the failed stage; best-effort callers
+// (Hermes/Kimi/Kiro/Qoder/Trae/Copilot/OMP) ignore it and fall back to an
+// empty model list, while strict callers (Grok) surface it. Sharing the
+// handshake lets both the `models.availableModels` parsers and the
+// `configOptions` parser (OMP) reuse one code path.
+func acpSessionNewResult(ctx context.Context, executablePath string, p acpDiscoveryProvider) (json.RawMessage, error) {
+	fail := func(stage string, err error) (json.RawMessage, error) {
+		return nil, fmt.Errorf("ACP model discovery %s failed: %w", stage, err)
 	}
 	if executablePath == "" {
 		executablePath = p.defaultBin
@@ -1088,26 +1154,10 @@ func discoverACPModels(ctx context.Context, executablePath string, p acpDiscover
 	if err != nil {
 		return fail("session/new", err)
 	}
-	models := parseACPSessionNewModels(sessionResult)
-	if len(models) == 0 {
-		// session/new succeeded but carried no catalog we recognise. This
-		// is what upstream schema drift looks like from here (MUL-5239:
-		// kimi 0.29 moved the catalog from `models` to `configOptions`),
-		// and without this line it is indistinguishable from "the CLI
-		// really has no models". Log the top-level keys only — never the
-		// response body, which carries session ids and account-shaped data.
-		slog.Debug("ACP model discovery found no models in session/new response",
-			"binary", executablePath,
-			"result_keys", strings.Join(acpResultTopLevelKeys(sessionResult), ","),
-		)
-	}
-	if models == nil {
-		return fail("session/new model parsing", fmt.Errorf("response contained no model catalog"))
-	}
 	if err := runCtx.Err(); err != nil {
 		return fail("completion", err)
 	}
-	return models, nil
+	return sessionResult, nil
 }
 
 // parseACPSessionNewModels extracts the model catalog from an ACP
@@ -1297,6 +1347,75 @@ func acpModelLabel(name, modelID string) string {
 		return modelID
 	}
 	return label
+}
+
+// parseACPModelConfigOptions extracts the model catalog from an ACP
+// session/new response that advertises models as a `configOptions` entry
+// (category/id "model") instead of a `models` block. OMP (oh-my-pi) is the
+// canonical case: its session/new returns
+//
+//	"configOptions": [
+//	  {
+//	    "id": "model", "category": "model", "currentValue": "zai/glm-5.2",
+//	    "options": [{"value":"zai/glm-5.2","name":"GLM-5.2"}, ...]
+//	  }
+//	]
+//
+// and model changes go through session/set_config_option, not session/set_model.
+// The option `value` is the model id; `name` is the display label; the entry
+// matching `currentValue` is flagged Default. Returns nil when no model config
+// option is present so the caller falls back to manual entry.
+func parseACPModelConfigOptions(raw json.RawMessage) []Model {
+	type cfgOptionValue struct {
+		Value string `json:"value"`
+		Name  string `json:"name"`
+	}
+	type cfgOption struct {
+		ID           string           `json:"id"`
+		Category     string           `json:"category"`
+		CurrentValue string           `json:"currentValue"`
+		Options      []cfgOptionValue `json:"options"`
+	}
+	var resp struct {
+		ConfigOptions []cfgOption `json:"configOptions"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil
+	}
+	models := make([]Model, 0)
+	seen := map[string]bool{}
+	for i := range resp.ConfigOptions {
+		opt := &resp.ConfigOptions[i]
+		if opt.Category != "model" && opt.ID != "model" {
+			continue
+		}
+		current := strings.TrimSpace(opt.CurrentValue)
+		for _, o := range opt.Options {
+			id := strings.TrimSpace(o.Value)
+			if id == "" || seen[id] {
+				continue
+			}
+			seen[id] = true
+			provider := ""
+			// OMP model ids use "provider/model" (e.g. "zai/glm-5.2"); other
+			// ACP agents use "provider:model". Split on either so the UI
+			// groups the dropdown correctly.
+			if idx := strings.IndexAny(id, ":/"); idx > 0 {
+				provider = id[:idx]
+			}
+			models = append(models, Model{
+				ID:       id,
+				Label:    acpModelLabel(o.Name, id),
+				Provider: provider,
+				Default:  id == current,
+			})
+		}
+		break
+	}
+	if len(models) == 0 {
+		return nil
+	}
+	return models
 }
 
 // discoverAntigravityModels runs `agy models` and returns the catalog the
