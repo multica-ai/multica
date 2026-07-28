@@ -45,4 +45,7 @@ WHERE workspace.id = $1
 RETURNING issue_counter;
 
 -- name: DeleteWorkspace :exec
-DELETE FROM workspace WHERE id = $1;
+WITH cleared_issue_properties AS (
+    DELETE FROM issue_property WHERE workspace_id = $1
+)
+DELETE FROM workspace WHERE workspace.id = $1;

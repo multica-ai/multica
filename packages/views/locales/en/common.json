@@ -24,5 +24,13 @@
     "error_already_bound": "This Lark account is already bound to a different Multica user. Account transfers must go through an explicit unbind first.",
     "error_not_member": "You're signed in to a Multica account that isn't a member of this workspace.",
     "error_unknown": "Something went wrong. Try again, and if the problem persists, contact the workspace admin."
+  },
+  "color_picker": {
+    "saturation": "Saturation and brightness",
+    "hue": "Hue",
+    "hex": "Hex color",
+    "eyedropper": "Pick a color from the screen",
+    "presets": "Presets",
+    "random": "Random"
   }
 }

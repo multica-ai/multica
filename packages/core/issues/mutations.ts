@@ -5,6 +5,7 @@ import {
   issueKeys,
   ISSUE_PAGE_SIZE,
   type AssigneeGroupedIssuesFilter,
+  type IssueFlatCache,
   type IssueSortParam,
   type MyIssuesFilter,
 } from "./queries";
@@ -52,6 +53,36 @@ export type ToggleIssueReactionVars = {
   emoji: string;
   existing: IssueReaction | undefined;
 };
+
+function patchIssueInFlatCache(
+  cache: IssueFlatCache,
+  issueId: string,
+  patch: Partial<Issue>,
+): IssueFlatCache {
+  return {
+    ...cache,
+    pages: cache.pages.map((page) => ({
+      ...page,
+      issues: page.issues.map((issue) =>
+        issue.id === issueId ? { ...issue, ...patch } : issue,
+      ),
+    })),
+  };
+}
+
+function issueFlatCacheEntries(
+  qc: ReturnType<typeof useQueryClient>,
+  wsId: string,
+): [QueryKey, IssueFlatCache][] {
+  return qc
+    .getQueriesData<unknown>({ queryKey: issueKeys.flatAll(wsId) })
+    .filter(
+      (entry): entry is [QueryKey, IssueFlatCache] =>
+        !!entry[1] &&
+        typeof entry[1] === "object" &&
+        Array.isArray((entry[1] as { pages?: unknown }).pages),
+    );
+}
 
 // ---------------------------------------------------------------------------
 // Per-status pagination
@@ -200,6 +231,7 @@ export function useCreateIssue() {
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -220,7 +252,9 @@ export function useUpdateIssue() {
       // yield to the event loop, letting @dnd-kit reset its visual state
       // before the optimistic update lands.
       qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
+      qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) });
       const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+      const prevFlatLists = issueFlatCacheEntries(qc, wsId);
       const firstListData = prevLists[0]?.[1];
       const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
 
@@ -253,6 +287,9 @@ export function useUpdateIssue() {
       for (const [key, cached] of prevLists) {
         if (cached) qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(cached, id, data));
       }
+      for (const [key, cached] of prevFlatLists) {
+        if (cached) qc.setQueryData<IssueFlatCache>(key, patchIssueInFlatCache(cached, id, data));
+      }
       qc.setQueryData<Issue>(issueKeys.detail(wsId, id), (old) =>
         old ? { ...old, ...data } : old,
       );
@@ -263,11 +300,16 @@ export function useUpdateIssue() {
             old?.map((c) => (c.id === id ? { ...c, ...data } : c)),
         );
       }
-      return { prevLists, prevDetail, prevChildren, parentId, id };
+      return { prevLists, prevFlatLists, prevDetail, prevChildren, parentId, id };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prevLists) {
         for (const [key, snapshot] of ctx.prevLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
+      if (ctx?.prevFlatLists) {
+        for (const [key, snapshot] of ctx.prevFlatLists) {
           qc.setQueryData(key, snapshot);
         }
       }
@@ -283,6 +325,7 @@ export function useUpdateIssue() {
     onSettled: (_data, _err, vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, vars.id) });
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -336,6 +379,7 @@ export function useDeleteIssue() {
       await Promise.all([
         qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
         qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) }),
+        qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
       ]);
       const metadata = collectDeletedIssueCacheMetadata(qc, wsId, id);
       await Promise.all(
@@ -347,6 +391,7 @@ export function useDeleteIssue() {
       const prevMyLists = qc.getQueriesData<ListIssuesCache>({
         queryKey: issueKeys.myAll(wsId),
       });
+      const prevFlatLists = issueFlatCacheEntries(qc, wsId);
       const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
       const prevChildren = new Map<string, Issue[] | undefined>();
       for (const parentId of metadata.parentIssueIds) {
@@ -359,7 +404,7 @@ export function useDeleteIssue() {
       pruneDeletedIssueFromListCaches(qc, wsId, id);
       pruneDeletedIssueFromParentChildrenCaches(qc, wsId, id, metadata);
       qc.removeQueries({ queryKey: issueKeys.detail(wsId, id) });
-      return { id, metadata, prevLists, prevMyLists, prevDetail, prevChildren };
+      return { id, metadata, prevLists, prevMyLists, prevFlatLists, prevDetail, prevChildren };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prevLists) {
@@ -369,6 +414,11 @@ export function useDeleteIssue() {
       }
       if (ctx?.prevMyLists) {
         for (const [key, snapshot] of ctx.prevMyLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
+      if (ctx?.prevFlatLists) {
+        for (const [key, snapshot] of ctx.prevFlatLists) {
           qc.setQueryData(key, snapshot);
         }
       }
@@ -387,6 +437,7 @@ export function useDeleteIssue() {
     },
     onSettled: (_data, _err, _id, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -409,12 +460,20 @@ export function useBatchUpdateIssues() {
     }) => api.batchUpdateIssues(ids, updates),
     onMutate: async ({ ids, updates }) => {
       await qc.cancelQueries({ queryKey: issueKeys.list(wsId) });
+      await qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) });
       const prevLists = qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) });
+      const prevFlatLists = issueFlatCacheEntries(qc, wsId);
       for (const [key, cached] of prevLists) {
         if (!cached) continue;
         let next = cached;
         for (const id of ids) next = patchIssueInBuckets(next, id, updates);
         qc.setQueryData<ListIssuesCache>(key, next);
+      }
+      for (const [key, cached] of prevFlatLists) {
+        if (!cached) continue;
+        let next = cached;
+        for (const id of ids) next = patchIssueInFlatCache(next, id, updates);
+        qc.setQueryData<IssueFlatCache>(key, next);
       }
 
       // Mirror the optimistic patch into any loaded children cache so
@@ -436,11 +495,16 @@ export function useBatchUpdateIssues() {
         );
       }
 
-      return { prevLists, prevChildren, affectedParentIds };
+      return { prevLists, prevFlatLists, prevChildren, affectedParentIds };
     },
     onError: (_err, _vars, ctx) => {
       if (ctx?.prevLists) {
         for (const [key, snapshot] of ctx.prevLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
+      if (ctx?.prevFlatLists) {
+        for (const [key, snapshot] of ctx.prevFlatLists) {
           qc.setQueryData(key, snapshot);
         }
       }
@@ -452,6 +516,7 @@ export function useBatchUpdateIssues() {
     },
     onSettled: (_data, _err, _vars, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });
@@ -482,6 +547,7 @@ export function useBatchDeleteIssues() {
       await Promise.all([
         qc.cancelQueries({ queryKey: issueKeys.list(wsId) }),
         qc.cancelQueries({ queryKey: issueKeys.myAll(wsId) }),
+        qc.cancelQueries({ queryKey: issueKeys.flatAll(wsId) }),
       ]);
       const metadataById = new Map(
         ids.map((id) => [
@@ -504,6 +570,7 @@ export function useBatchDeleteIssues() {
       const prevMyLists = qc.getQueriesData<ListIssuesCache>({
         queryKey: issueKeys.myAll(wsId),
       });
+      const prevFlatLists = issueFlatCacheEntries(qc, wsId);
       const prevChildren = new Map<string, Issue[] | undefined>();
       for (const parentId of parentIssueIds) {
         prevChildren.set(
@@ -519,7 +586,7 @@ export function useBatchDeleteIssues() {
           pruneDeletedIssueFromParentChildrenCaches(qc, wsId, id, metadata);
         }
       }
-      return { prevLists, prevMyLists, prevChildren, parentIssueIds, metadataById };
+      return { prevLists, prevMyLists, prevFlatLists, prevChildren, parentIssueIds, metadataById };
     },
     onError: (_err, _ids, ctx) => {
       if (ctx?.prevLists) {
@@ -529,6 +596,11 @@ export function useBatchDeleteIssues() {
       }
       if (ctx?.prevMyLists) {
         for (const [key, snapshot] of ctx.prevMyLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
+      if (ctx?.prevFlatLists) {
+        for (const [key, snapshot] of ctx.prevFlatLists) {
           qc.setQueryData(key, snapshot);
         }
       }
@@ -558,6 +630,11 @@ export function useBatchDeleteIssues() {
           qc.setQueryData(key, snapshot);
         }
       }
+      if (ctx?.prevFlatLists) {
+        for (const [key, snapshot] of ctx.prevFlatLists) {
+          qc.setQueryData(key, snapshot);
+        }
+      }
       if (ctx?.prevChildren) {
         for (const [parentId, snapshot] of ctx.prevChildren) {
           qc.setQueryData(issueKeys.children(wsId, parentId), snapshot);
@@ -571,6 +648,7 @@ export function useBatchDeleteIssues() {
     },
     onSettled: (_data, _err, _ids, ctx) => {
       qc.invalidateQueries({ queryKey: issueKeys.list(wsId) });
+      qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.assigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.myAssigneeGroupsAll(wsId) });
       qc.invalidateQueries({ queryKey: issueKeys.projectGanttAll(wsId) });

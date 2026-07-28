@@ -6,7 +6,7 @@ import { useSortable, defaultAnimateLayoutChanges } from "@dnd-kit/sortable";
 import type { AnimateLayoutChanges } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { toast } from "sonner";
-import type { Issue, UpdateIssueRequest } from "@multica/core/types";
+import type { Issue, IssueProperty, UpdateIssueRequest } from "@multica/core/types";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { CalendarClock, CalendarDays } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
@@ -17,6 +17,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useTimeAgo } from "../../i18n";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { propertyListOptions } from "@multica/core/properties";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { PriorityPicker, AssigneePicker, StartDatePicker, DueDatePicker } from "./pickers";
@@ -25,6 +26,7 @@ import { ProgressRing } from "./progress-ring";
 import type { ChildProgress } from "./list-row";
 import { IssueActionsContextMenu } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
+import { CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 // CEREBRO-PATCH(board-card-wakeup-dot): FIR-1521 — orange scheduled-wakeup pip stacked next to the running indicator.
 import { CerebroIssueWakeupPip } from "@multica/cerebro-wakeup";
@@ -72,12 +74,20 @@ export const BoardCardContent = memo(function BoardCardContent({
   const wakeupDotEnabled = useFeatureFlag("cerebro_activity_wakeup_dot"); // CEREBRO-PATCH(board-card-wakeup-dot): FIR-1521
   const timeAgo = useTimeAgo();
   const storeProperties = useViewStore((s) => s.cardProperties);
+  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds ?? []);
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),
     enabled: storeProperties.project && !!issue.project_id,
   });
   const project = issue.project_id ? projects.find((p) => p.id === issue.project_id) : undefined;
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
+  const cardCustomProperties = cardPropertyIds
+    .map((id) => workspaceProperties.find((property) => property.id === id))
+    .filter(
+      (property): property is IssueProperty =>
+        property !== undefined && issue.properties?.[property.id] !== undefined,
+    );
   const labels = issue.labels ?? [];
 
   const updateIssueMutation = useUpdateIssue();
@@ -204,8 +214,8 @@ export const BoardCardContent = memo(function BoardCardContent({
         );
       })()}
 
-      {/* Chip row: project + labels */}
-      {(showProject || showLabels) && (
+      {/* Chip row: project + labels + custom property values */}
+      {(showProject || showLabels || cardCustomProperties.length > 0) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           {showProject && (
             <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground max-w-[160px]">
@@ -215,6 +225,17 @@ export const BoardCardContent = memo(function BoardCardContent({
           )}
           {showLabels && labels.map((label) => (
             <LabelChip key={label.id} label={label} />
+          ))}
+          {cardCustomProperties.map((property) => (
+            <span
+              key={property.id}
+              className="inline-flex max-w-[160px] items-center rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+            >
+              <CustomPropertyValueDisplay
+                property={property}
+                value={issue.properties?.[property.id]}
+              />
+            </span>
           ))}
         </div>
       )}

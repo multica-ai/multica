@@ -28,6 +28,7 @@ import {
   PopoverTrigger,
 } from "@multica/ui/components/ui/popover";
 // CEREBRO-PATCH(SA3-project-picker-imports): RestrictedLock indicator from cerebro-access
+// eslint-disable-next-line import-x/no-extraneous-dependencies -- declaring this reverse dependency would create a package cycle.
 import { RestrictedLock } from "@multica/cerebro-access/views";
 import { useT } from "../../i18n";
 
@@ -37,6 +38,8 @@ export function ProjectPicker({
   triggerRender,
   align = "start",
   defaultOpen = false,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   projectId: string | null;
   onUpdate: (updates: Partial<UpdateIssueRequest>) => void;
@@ -45,10 +48,14 @@ export function ProjectPicker({
   /** Open the popover on first mount. Used by progressive-disclosure
    *  sidebars so a newly-added field immediately enters edit state. */
   defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const { t } = useT("projects");
   const wsId = useWorkspaceId();
-  const [open, setOpen] = useState(defaultOpen);
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const open = controlledOpen ?? internalOpen;
+  const setOpen = onOpenChange ?? setInternalOpen;
   // CEREBRO-PATCH(project-picker-search-and-select): FIR-2536.
   const [query, setQuery] = useState("");
   // CEREBRO-PATCH(project-picker-nesting): render the project tree so

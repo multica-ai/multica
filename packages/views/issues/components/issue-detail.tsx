@@ -30,6 +30,7 @@ import {
   PinOff,
   Plus,
   Settings,
+  SlidersHorizontal,
   Tag,
   Trash2,
   UserMinus,
@@ -174,6 +175,8 @@ import { formatDateOnly, todayDateOnly, addDaysDateOnly } from "@multica/core/is
 import { useDeleteIssue } from "@multica/core/issues/mutations";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { issueLabelsOptions } from "@multica/core/labels";
+import { propertyListOptions } from "@multica/core/properties";
+import { CustomPropertyValueEditor } from "./pickers/custom-property-picker";
 import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
 import { useRecentContextStore } from "@multica/core/chat";
@@ -851,6 +854,8 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   const [visibleOptionalProps, setVisibleOptionalProps] = useState<Set<OptionalPropKey>>(
     () => new Set(),
   );
+  const [visibleCustomProps, setVisibleCustomProps] = useState<Set<string>>(() => new Set());
+  const [autoOpenCustomProp, setAutoOpenCustomProp] = useState<string | null>(null);
   // Optional property to auto-open as soon as it's mounted (the user just
   // picked it from "+ Add property" and we want them dropped straight into
   // edit state). Consumed by the row that matches this key, cleared after.
@@ -1331,6 +1336,7 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
   // shown for an issue that already has labels attached.
   const { data: attachedLabels = [] } = useQuery(issueLabelsOptions(wsId, id));
   const attachedLabelsCount = attachedLabels.length;
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId, true));
 
   // Seed the visible-optional-props set:
   //   - on issue switch, reset to whichever fields are currently set
@@ -1343,11 +1349,13 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     if (seededIssueIdRef.current !== issue.id) {
       seededIssueIdRef.current = issue.id;
       setAutoOpenProp(null);
+      setAutoOpenCustomProp(null);
       const seed = new Set<OptionalPropKey>();
       for (const k of OPTIONAL_PROP_KEYS) {
         if (isOptionalPropSet(issue, k, attachedLabelsCount)) seed.add(k);
       }
       setVisibleOptionalProps(seed);
+      setVisibleCustomProps(new Set(Object.keys(issue.properties ?? {})));
       return;
     }
     setVisibleOptionalProps((prev) => {
@@ -1356,6 +1364,16 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
         if (isOptionalPropSet(issue, k, attachedLabelsCount) && !next.has(k)) {
           if (next === prev) next = new Set(prev);
           next.add(k);
+        }
+      }
+      return next;
+    });
+    setVisibleCustomProps((prev) => {
+      let next = prev;
+      for (const propertyId of Object.keys(issue.properties ?? {})) {
+        if (!next.has(propertyId)) {
+          if (next === prev) next = new Set(prev);
+          next.add(propertyId);
         }
       }
       return next;
@@ -1378,6 +1396,17 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     [],
   );
 
+  const addCustomProp = useCallback((propertyId: string) => {
+    setVisibleCustomProps((prev) => {
+      if (prev.has(propertyId)) return prev;
+      const next = new Set(prev);
+      next.add(propertyId);
+      return next;
+    });
+    setAutoOpenCustomProp(propertyId);
+    setAddPropPopoverOpen(false);
+  }, []);
+
   // Clear the auto-open flag after the next render so pickers (which read
   // `defaultOpen` once via a useState initializer) keep the open state they
   // captured on mount, but later interactions don't re-trigger it.
@@ -1385,6 +1414,11 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
     if (autoOpenProp === null) return;
     setAutoOpenProp(null);
   }, [autoOpenProp]);
+
+  useEffect(() => {
+    if (autoOpenCustomProp === null) return;
+    setAutoOpenCustomProp(null);
+  }, [autoOpenCustomProp]);
 
   // CEREBRO-PATCH(issue-detail-add-property-cerebro-rows): FIR-2827 — same
   // seeding contract as visibleOptionalProps above, but "is it set?" comes
@@ -1740,11 +1774,34 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
             </PropRow>
           )}
 
+          {workspaceProperties
+            .filter(
+              (property) =>
+                issue.properties?.[property.id] !== undefined ||
+                (!property.archived && visibleCustomProps.has(property.id)),
+            )
+            .map((property) => (
+              <PropRow key={property.id} label={property.name}>
+                <CustomPropertyValueEditor
+                  issue={issue}
+                  property={property}
+                  defaultOpen={autoOpenCustomProp === property.id}
+                />
+              </PropRow>
+            ))}
+
           {/* "+ Add property" — opens a Popover listing optional fields
               not yet displayed. Hidden once every optional field is on
               screen. Sits inside the same grid as a full-row, with its
               own padding so the visual rhythm follows the rows above. */}
-          {(OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k)) || addableCerebroProps.length > 0) && (
+          {(OPTIONAL_PROP_KEYS.some((k) => !visibleOptionalProps.has(k)) ||
+            addableCerebroProps.length > 0 ||
+            workspaceProperties.some(
+              (property) =>
+                !property.archived &&
+                !visibleCustomProps.has(property.id) &&
+                issue.properties?.[property.id] === undefined,
+            )) && (
             <div className="col-span-2 mt-1">
               <Popover open={addPropPopoverOpen} onOpenChange={setAddPropPopoverOpen}>
                 <PopoverTrigger
@@ -1810,6 +1867,24 @@ export function IssueDetail({ issueId, onDelete, onDone, onUnarchive, defaultSid
                       </span>
                     </button>
                   ))}
+                  {workspaceProperties
+                    .filter(
+                      (property) =>
+                        !property.archived &&
+                        !visibleCustomProps.has(property.id) &&
+                        issue.properties?.[property.id] === undefined,
+                    )
+                    .map((property) => (
+                      <button
+                        key={property.id}
+                        type="button"
+                        onClick={() => addCustomProp(property.id)}
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1 text-xs text-foreground/90 transition-colors hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"
+                      >
+                        <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                        <span className="truncate">{property.name}</span>
+                      </button>
+                    ))}
                 </PopoverContent>
               </Popover>
             </div>

@@ -7,6 +7,7 @@ import type { TimelineEntry } from "./activity";
 import type { Workspace, MemberWithUser, Invitation } from "./workspace";
 import type { Project } from "./project";
 import type { Label } from "./label";
+import type { IssueProperty, IssuePropertyValues } from "./property";
 
 // WebSocket event types (matching Go server protocol/events.go)
 export type WSEventType =
@@ -74,6 +75,9 @@ export type WSEventType =
   | "label:deleted"
   | "issue_labels:changed"
   | "issue_metadata:changed"
+  | "issue_properties:changed"
+  | "property:created"
+  | "property:updated"
   | "pin:created"
   | "pin:deleted"
   | "pin:reordered"
@@ -152,6 +156,15 @@ export interface IssueLabelsChangedPayload {
 export interface IssueMetadataChangedPayload {
   issue_id: string;
   metadata: Record<string, unknown>;
+}
+
+export interface IssuePropertiesChangedPayload {
+  issue_id: string;
+  properties: IssuePropertyValues;
+}
+
+export interface PropertyChangedPayload {
+  property: IssueProperty;
 }
 
 export interface AgentStatusPayload {
@@ -453,6 +466,9 @@ export interface WSEventPayloadMap {
   "issue:deleted": IssueDeletedPayload;
   "issue_labels:changed": IssueLabelsChangedPayload;
   "issue_metadata:changed": IssueMetadataChangedPayload;
+  "issue_properties:changed": IssuePropertiesChangedPayload;
+  "property:created": PropertyChangedPayload;
+  "property:updated": PropertyChangedPayload;
   "issue_reaction:added": IssueReactionAddedPayload;
   "issue_reaction:removed": IssueReactionRemovedPayload;
   "comment:created": CommentCreatedPayload;

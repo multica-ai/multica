@@ -48,6 +48,11 @@ export default function OnboardingPage() {
     ...workspaceListOptions(),
     enabled: !!user,
   });
+  // The Firtal welcome belongs to a workspace. A user who has not joined one
+  // must be sent to the fork's NewWorkspacePage instead of being returned to
+  // this route after completing the welcome screen.
+  const shouldShowFirtalWelcome =
+    firtalWelcomeEnabled && workspaces.length > 0;
   // The bootstrap path calls refreshMe() before returning, which flips
   // hasOnboarded to true while the page is still mounted. Without this
   // flag the guard below races onComplete: the guard's router.replace
@@ -75,7 +80,7 @@ export default function OnboardingPage() {
     // onboarding into a redirect — pass `true` so resolvePostAuthDestination
     // routes onboarded-style (has ws → workspace; no ws → /workspaces/new)
     // instead of looping back to /onboarding.
-    if (hasOnboarded || (disableOnboarding && !firtalWelcomeEnabled)) {
+    if (hasOnboarded || (disableOnboarding && !shouldShowFirtalWelcome)) {
       router.replace(resolvePostAuthDestination(workspaces, true));
     }
   }, [
@@ -83,7 +88,7 @@ export default function OnboardingPage() {
     user,
     hasOnboarded,
     disableOnboarding,
-    firtalWelcomeEnabled,
+    shouldShowFirtalWelcome,
     workspacesFetched,
     workspaces,
     router,
@@ -94,7 +99,7 @@ export default function OnboardingPage() {
   // FIR-2490: cerebro-fork workspaces opt into a Firtal-branded welcome
   // page that replaces upstream onboarding entirely. Feature-flag-gated, so
   // upstream `/onboarding` still ships unchanged when the flag is off.
-  if (firtalWelcomeEnabled) {
+  if (shouldShowFirtalWelcome) {
     return (
       <div className="h-full overflow-y-auto bg-background">
         <FirtalWelcomePage

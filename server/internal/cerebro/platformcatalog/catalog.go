@@ -192,6 +192,8 @@ var catalog = []Capability{
 			"POST /api/issues/batch-update",
 			"PUT /api/issues/{id}/metadata/{key}",
 			"DELETE /api/issues/{id}/metadata/{key}",
+			"PUT /api/issues/{id}/properties/{propertyId}",
+			"DELETE /api/issues/{id}/properties/{propertyId}",
 			"POST /api/issues/{id}/labels",
 			"DELETE /api/issues/{id}/labels/{labelId}",
 			"POST /api/issues/{id}/blocks",
@@ -257,6 +259,17 @@ var catalog = []Capability{
 			"POST /api/labels/",
 			"PUT /api/labels/{id}/",
 			"DELETE /api/labels/{id}/",
+		},
+	},
+	{
+		Key:           "manage_issue_properties",
+		Title:         "Define / edit issue properties",
+		Category:      CategoryIssues,
+		Description:   "Create, edit, archive, or restore workspace custom issue properties (distinct from setting a value on an issue).",
+		DescriptionZh: "创建、编辑、归档或恢复工作区自定义工单属性（区别于在工单上设置属性值）。",
+		Ops: []string{
+			"POST /api/properties",
+			"PATCH /api/properties/{id}",
 		},
 	},
 	{
@@ -1426,6 +1439,7 @@ var excluded = map[string]string{
 	"POST /api/capabilities/report":                  "runtime-self-report — a runtime reporting its own tools, not a user action",
 	"POST /api/workspaces/{id}/cerebro/test-as-user": "read-only — resolves another user+agent's tool verdict (Test as user); reads policy, changes no state; gated in-handler by tools:test-as-user",
 	"POST /api/agents/context/lint/repo-file":        "read-only — drift lint of a repo CLAUDE.md/AGENTS.md's content posted in the body (FIR-1775 Phase 3); pure analysis, changes no state",
+	"POST /api/issues/query":                         "read-only — body-transport twin of GET /api/issues/ (FIR-3447); delegates to ListIssues under workspace-membership access, changes no state",
 	"POST /api/issues/{id}/squad-evaluated":          "system-callback — squad-evaluation marker set by the platform, not a user action",
 }
 

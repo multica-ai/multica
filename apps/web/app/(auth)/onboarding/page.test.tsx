@@ -89,8 +89,18 @@ describe("OnboardingPage — cerebro_disable_onboarding", () => {
     expect(state.replace).not.toHaveBeenCalled();
   });
 
-  it("still shows the Firtal welcome page when its flag is on (not bypassed)", async () => {
+  it("routes a 0-workspace user to NewWorkspacePage when both fork flags are on", async () => {
     state.firtalWelcome = true;
+    render(<OnboardingPage />);
+    await waitFor(() => expect(state.replace).toHaveBeenCalled());
+    expect(state.replace.mock.calls[0]![0]).toContain("/workspaces/new");
+    expect(screen.queryByTestId("firtal-welcome")).toBeNull();
+    expect(screen.queryByTestId("onboarding-flow")).toBeNull();
+  });
+
+  it("still shows the Firtal welcome page for a user in a workspace", async () => {
+    state.firtalWelcome = true;
+    state.workspaces = [{ id: "w1", slug: "firtal" }];
     render(<OnboardingPage />);
     expect(await screen.findByTestId("firtal-welcome")).toBeTruthy();
     expect(state.replace).not.toHaveBeenCalled();

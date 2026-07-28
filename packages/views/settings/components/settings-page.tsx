@@ -21,6 +21,7 @@ import {
   Workflow,
   // CEREBRO-PATCH(settings-page-model-registry): FIR-2698 model registry tab icon
   Coins,
+  ListTodo,
 } from "lucide-react";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@multica/ui/components/ui/tabs";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -37,6 +38,8 @@ import { GitHubTab } from "./github-tab";
 import { GitHubMark } from "./github-mark";
 import { IntegrationsTab } from "./integrations-tab";
 import { LabsTab } from "./labs-tab";
+import { PropertiesTab } from "./properties-tab";
+import { IssueTab } from "./issue-tab";
 // CEREBRO-PATCH(settings-page-notifications): use cerebro notifications-tab (Phase 1b relocation + push UI)
 import { NotificationsTab } from "@multica/cerebro-notifications/views/notifications-tab";
 // CEREBRO-PATCH(settings-page-agent-profile): cerebro agent profile tab
@@ -60,10 +63,12 @@ import {
 } from "./cerebro-mobile-tab-nav";
 import type { MembersTabCerebroExtrasProp } from "./members-tab";
 
-const ACCOUNT_TAB_KEYS = ["profile", "preferences", "notifications", "tokens"] as const;
+// CEREBRO-PATCH(settings-page-issue-tab): FIR-3447 port of upstream create-field settings.
+const ACCOUNT_TAB_KEYS = ["profile", "preferences", "issue", "notifications", "tokens"] as const;
 const ACCOUNT_TAB_ICONS = {
   profile: User,
   preferences: SlidersHorizontal,
+  issue: ListTodo,
   notifications: Bell,
   tokens: Key,
 } as const;
@@ -73,7 +78,7 @@ const AGENT_PROFILE_TAB_VALUE = "agent-profile";
 const ACCOUNTS_TAB_VALUE = "accounts";
 
 // CEREBRO-PATCH(settings-page-github-tab): "github" key restored from upstream (FIR-2172)
-const WORKSPACE_TAB_KEYS = ["general", "repositories", "github", "integrations", "labs", "members"] as const;
+const WORKSPACE_TAB_KEYS = ["general", "repositories", "github", "integrations", "labs", "members", "properties"] as const;
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
   repositories: "repositories",
@@ -81,6 +86,7 @@ const WORKSPACE_TAB_VALUES = {
   integrations: "integrations",
   labs: "labs",
   members: "members",
+  properties: "properties",
 } as const;
 const WORKSPACE_TAB_ICONS = {
   general: Settings,
@@ -89,6 +95,7 @@ const WORKSPACE_TAB_ICONS = {
   integrations: Plug,
   labs: FlaskConical,
   members: Users,
+  properties: SlidersHorizontal,
 } as const;
 // CEREBRO-PATCH(settings-page-groups-tab): JEH-1006 workspace groups tab value
 const GROUPS_TAB_VALUE = "groups";
@@ -392,11 +399,13 @@ export function SettingsPage({
           // CEREBRO-PATCH(settings-page-wide-tab): FIR-1404 wide tabs drop the width cap entirely so the
           // permission table fills the full settings pane on wide monitors (max-w-6xl still left a large
           // empty gutter on ultrawide screens); narrow tabs keep the readable max-w-3xl centered column.
-          <div className={`w-full ${activeTabIsWide ? "max-w-none" : "max-w-3xl mx-auto"} p-4 md:p-6`}>
+          <div className={`w-full ${activeTabIsWide ? "max-w-none" : activeTab === "properties" ? "max-w-5xl mx-auto" : "max-w-3xl mx-auto"} p-4 md:p-6`}>
             <TabsContent value="profile"><AccountTab /></TabsContent>
             {/* CEREBRO-PATCH(settings-page-agent-profile-content): agent profile tab content */}
             <TabsContent value="agent-profile"><AgentProfileTab /></TabsContent>
             <TabsContent value="preferences"><PreferencesTab /></TabsContent>
+            {/* CEREBRO-PATCH(settings-page-issue-content): FIR-3447 create-field visibility controls. */}
+            <TabsContent value="issue"><IssueTab /></TabsContent>
             <TabsContent value="notifications"><NotificationsTab /></TabsContent>
             <TabsContent value="tokens"><TokensTab /></TabsContent>
             <TabsContent value="workspace"><WorkspaceTab /></TabsContent>
@@ -407,6 +416,7 @@ export function SettingsPage({
             <TabsContent value="labs"><LabsTab /></TabsContent>
             {/* CEREBRO-PATCH(settings-page-cerebro-members-extras): JEH-1067 inject Groups column + filter */}
             <TabsContent value="members"><MembersTab cerebroExtras={membersTabCerebroExtras} /></TabsContent>
+            <TabsContent value="properties"><PropertiesTab /></TabsContent>
             {/* CEREBRO-PATCH(settings-page-groups-tab): JEH-1006/JEH-1067 workspace groups list + detail navigation */}
             {groupsEnabled && (
               <TabsContent value={GROUPS_TAB_VALUE}><GroupsTab onSelectGroup={(id) => navigation.push(`/${workspaceSlug}/groups/${id}`)} /></TabsContent>
