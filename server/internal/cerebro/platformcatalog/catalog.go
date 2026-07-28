@@ -1243,7 +1243,7 @@ var excluded = map[string]string{
 	"POST /api/workspaces/{id}/leave":                        "self_only — leaving is the caller's own membership",
 	"POST /api/channels/{id}/leave":                          "self_only — TECH-3758, leaving a channel removes the caller's own subscription",
 	"POST /api/workspaces/{id}/connections/test":             "admin_only — validates a connection config for the current workspace; not an agent runtime tool",
-	"POST /api/workspaces/{id}/cerebro/copy":                 "admin_only — owner/admin-gated workspace copy (TECH-3582); RequireWorkspaceRoleFromURL, not wired to the tool-policy engine, no agent runtime tool equivalent",
+	"POST /api/workspaces/{id}/cerebro/copy":                 "admin_only — owner/admin required in both source and target workspace (TECH-3582/FIR-3820); source is gated by RequireWorkspaceRoleFromURL and target in the handler, not wired to the tool-policy engine, no agent runtime tool equivalent",
 	"PUT /api/cerebro/session-modes/{mode}/draft":            "admin_only — human owner/admin edits versioned Mode configuration; task-token actors are denied, not a runtime tool",
 	"POST /api/cerebro/session-modes/{mode}/publish":         "admin_only — human owner/admin publishes Mode configuration; task-token actors are denied, not a runtime tool",
 	"POST /api/cerebro/session-modes/{mode}/restore":         "admin_only — human owner/admin restores Mode configuration; task-token actors are denied, not a runtime tool",
