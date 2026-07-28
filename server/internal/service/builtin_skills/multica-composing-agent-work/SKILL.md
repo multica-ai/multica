@@ -167,7 +167,9 @@ preserves the configured reserve, locks and reserves forecast capacity, and
 persists an auditable per-task decision. It keeps the source agent's identity,
 instructions, skills, MCP access, secrets, and authority. Protected identities
 retain their fixed binding. Shadow mode records without changing execution;
-active mode may defer ordinary work when both plans' reserves are protected.
+active mode may briefly defer work when both plans' reserves are protected.
+Automatic admission never spends the reserve, regardless of task priority, and
+the defer loop is bounded before it becomes a visible terminal failure.
 
 This skill does not itself prove that a deployment has enabled routing, that an
 agent has a validated candidate set, or that an external capacity collector is

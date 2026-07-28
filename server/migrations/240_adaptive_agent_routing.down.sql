@@ -19,6 +19,7 @@ ALTER TABLE agent_task_queue
     DROP COLUMN IF EXISTS route_admitted_at,
     DROP COLUMN IF EXISTS route_reserved_permille,
     DROP COLUMN IF EXISTS route_capacity_owner_id,
+    DROP COLUMN IF EXISTS route_admission_attempts,
     DROP COLUMN IF EXISTS route_custom_args,
     DROP COLUMN IF EXISTS route_runtime_config,
     DROP COLUMN IF EXISTS route_service_tier,

@@ -29,7 +29,12 @@ func TestApplyAdaptiveTaskClaimRouteOverridesExecutionOnly(t *testing.T) {
 		Model:         "gpt-test",
 		ThinkingLevel: "medium",
 		ServiceTier:   "default",
-		RuntimeConfig: json.RawMessage(`{"baseline":true}`),
+		RuntimeConfig: json.RawMessage(`{
+			"baseline": true,
+			"provider_failover_protected": true,
+			"adaptive_routing": {"enabled": true},
+			"gateway": {"token": "keep-me"}
+		}`),
 	}
 
 	if err := applyAdaptiveTaskClaimRoute(task, agent); err != nil {
@@ -37,9 +42,19 @@ func TestApplyAdaptiveTaskClaimRouteOverridesExecutionOnly(t *testing.T) {
 	}
 	if agent.Model != "claude-sonnet-test" ||
 		agent.ThinkingLevel != "high" ||
-		agent.ServiceTier != "priority" ||
-		string(agent.RuntimeConfig) != `{"provider_mode":"test"}` {
+		agent.ServiceTier != "priority" {
 		t.Fatalf("execution overrides not applied: %+v", agent)
+	}
+	var merged map[string]any
+	if err := json.Unmarshal(agent.RuntimeConfig, &merged); err != nil {
+		t.Fatalf("decode merged runtime config: %v", err)
+	}
+	gateway, _ := merged["gateway"].(map[string]any)
+	if merged["baseline"] != true ||
+		merged["provider_mode"] != "test" ||
+		merged["provider_failover_protected"] != true ||
+		gateway["token"] != "keep-me" {
+		t.Fatalf("runtime config did not preserve source policy/secrets: %#v", merged)
 	}
 	if !reflect.DeepEqual(agent.CustomArgs, []string{}) {
 		t.Fatalf("explicit empty route args must clear baseline: %#v", agent.CustomArgs)
@@ -48,6 +63,26 @@ func TestApplyAdaptiveTaskClaimRouteOverridesExecutionOnly(t *testing.T) {
 		agent.CustomEnv["SAFE"] != "unchanged" ||
 		string(agent.McpConfig) != `{"mcpServers":{"memory":{}}}` {
 		t.Fatalf("route changed identity/authority payload: %+v", agent)
+	}
+}
+
+func TestApplyAdaptiveTaskClaimRouteRejectsProtectedRuntimeConfigOverrideAtomically(t *testing.T) {
+	task := &db.AgentTaskQueue{
+		RouteAdmissionState: "routed",
+		RouteModel:          pgtype.Text{String: "claude-sonnet-test", Valid: true},
+		RouteRuntimeConfig:  []byte(`{"provider_failover_protected":false}`),
+	}
+	agent := &TaskAgentData{
+		Model:         "gpt-test",
+		RuntimeConfig: json.RawMessage(`{"provider_failover_protected":true}`),
+	}
+
+	if err := applyAdaptiveTaskClaimRoute(task, agent); err == nil {
+		t.Fatal("expected protected runtime config override error")
+	}
+	if agent.Model != "gpt-test" ||
+		string(agent.RuntimeConfig) != `{"provider_failover_protected":true}` {
+		t.Fatalf("rejected override partially mutated execution config: %+v", agent)
 	}
 }
 

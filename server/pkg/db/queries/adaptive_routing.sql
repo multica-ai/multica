@@ -6,17 +6,24 @@ WHERE id = $1
   AND route_admission_state = 'pending'
 FOR UPDATE;
 
--- name: ListProviderPlanCapacitiesForOwnerForUpdate :many
+-- name: ListProviderPlanCapacitiesForOwnerProvidersForUpdate :many
 SELECT *
 FROM provider_plan_capacity
-WHERE owner_id = $1
+WHERE owner_id = @owner_id
+  AND provider = ANY(@providers::text[])
 ORDER BY provider
 FOR UPDATE;
+
+-- name: ListAdaptiveCandidateRuntimes :many
+SELECT *
+FROM agent_runtime
+WHERE id = ANY(@runtime_ids::uuid[]);
 
 -- name: ResolveTaskAdaptiveAdmission :one
 UPDATE agent_task_queue
 SET route_admission_state = @route_admission_state,
     route_decision = @route_decision,
+    route_admission_attempts = route_admission_attempts + 1,
     route_admitted_at = now()
 WHERE id = @id
   AND status = 'queued'
@@ -35,6 +42,7 @@ SET runtime_id = @runtime_id,
     route_service_tier = @route_service_tier,
     route_runtime_config = @route_runtime_config,
     route_custom_args = @route_custom_args,
+    route_admission_attempts = route_admission_attempts + 1,
     route_capacity_owner_id = @route_capacity_owner_id,
     route_reserved_permille = @route_reserved_permille,
     route_admitted_at = now()
@@ -49,6 +57,24 @@ SET status = 'deferred',
     fire_at = now() + make_interval(secs => @retry_after_secs::double precision),
     route_admission_state = 'deferred',
     route_decision = @route_decision,
+    route_admission_attempts = route_admission_attempts + 1,
+    route_admitted_at = now()
+WHERE id = @id
+  AND status = 'queued'
+  AND route_admission_state = 'pending'
+RETURNING *;
+
+-- name: FailTaskAdaptiveAdmission :one
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    error = @error,
+    failure_reason = 'adaptive_routing_admission_failed',
+    fire_at = NULL,
+    prepare_lease_expires_at = NULL,
+    route_admission_state = 'failed',
+    route_decision = @route_decision,
+    route_admission_attempts = route_admission_attempts + 1,
     route_admitted_at = now()
 WHERE id = @id
   AND status = 'queued'
@@ -63,7 +89,8 @@ SET reserved_inflight_permille =
 WHERE owner_id = @owner_id
   AND provider = @provider
   AND known
-  AND reserved_inflight_permille + @reserve_permille::int <= remaining_permille
+  AND reserved_inflight_permille + @reserve_permille::int
+      <= GREATEST(remaining_permille - reserve_permille, 0)
 RETURNING *;
 
 -- name: ListPendingAdaptiveAdmissions :many

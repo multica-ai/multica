@@ -507,6 +507,10 @@ SET status = 'dispatched',
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      AND (
+        sqlc.narg('runtime_id')::uuid IS NULL
+        OR atq.runtime_id = sqlc.narg('runtime_id')::uuid
+      )
       AND atq.route_admission_state IN ('not_applicable', 'shadow', 'routed')
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active

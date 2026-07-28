@@ -53,7 +53,7 @@
 - `server/pkg/agentroute/policy.go` defines the pure workload, candidate,
   provider-capacity, and promoted skill-affinity inputs.
 - `agentroute.Route` rejects unknown capacity and capability/authority gaps,
-  preserves an emergency reserve, ranks eligible candidates deterministically,
+  preserves an operator reserve for every automatic task, ranks eligible candidates deterministically,
   and chooses `solo`, `serial`, `bounded_parallel`, or
   `cross_provider_review`.
 - The resulting assignments contain exactly one write-capable lead; explorers

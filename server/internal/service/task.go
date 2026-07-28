@@ -2161,6 +2161,16 @@ func (s *TaskService) broadcastChatCancelFinalized(ctx context.Context, task db.
 // ClaimTask atomically claims the next queued task for an agent,
 // respecting max_concurrent_tasks.
 func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.AgentTaskQueue, error) {
+	return s.claimTask(ctx, agentID, pgtype.UUID{})
+}
+
+// claimTask is ClaimTask with an optional runtime fence. Runtime pollers must
+// pass their runtime ID: adaptive admission can route two queued tasks for the
+// same durable agent to different provider runtimes, and an agent-only claim
+// could otherwise dispatch another runtime's task before noticing the mismatch.
+// Direct test/internal callers retain the legacy any-runtime behavior by
+// passing an invalid UUID through ClaimTask.
+func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	start := time.Now()
 	var (
 		outcome                                                              = "unknown"
@@ -2197,6 +2207,7 @@ func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.A
 		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
 			AgentID:          agentID,
 			PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
+			RuntimeID:        runtimeID,
 		})
 		claimAgentMs = time.Since(t0).Milliseconds()
 		if err != nil {
@@ -2343,13 +2354,13 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		triedAgents[agentKey] = struct{}{}
 		tried++
 
-		task, err := s.ClaimTask(ctx, candidate.AgentID)
+		task, err := s.claimTask(ctx, candidate.AgentID, runtimeID)
 		if err != nil {
 			loopMs = time.Since(loopStart).Milliseconds()
 			outcome = "error_claim"
 			return nil, err
 		}
-		if task != nil && task.RuntimeID == runtimeID {
+		if task != nil {
 			claimed = task
 			break
 		}
@@ -2566,18 +2577,19 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 	// 6. Claim per distinct agent (unchanged path → same per-(issue, agent)
 	// serialization, capacity cap, and dispatch side effects) until maxTasks is
 	// reached.
-	triedAgents := make(map[string]struct{}, len(candidates))
+	triedAgentRuntimes := make(map[string]struct{}, len(candidates))
 	for i := range candidates {
 		if len(claimed) >= maxTasks {
 			break
 		}
-		agentKey := util.UUIDToString(candidates[i].AgentID)
-		if _, tried := triedAgents[agentKey]; tried {
+		agentRuntimeKey := util.UUIDToString(candidates[i].AgentID) + "\x00" +
+			util.UUIDToString(candidates[i].RuntimeID)
+		if _, tried := triedAgentRuntimes[agentRuntimeKey]; tried {
 			continue
 		}
-		triedAgents[agentKey] = struct{}{}
+		triedAgentRuntimes[agentRuntimeKey] = struct{}{}
 
-		task, err := s.ClaimTask(ctx, candidates[i].AgentID)
+		task, err := s.claimTask(ctx, candidates[i].AgentID, candidates[i].RuntimeID)
 		if err != nil {
 			// Each ClaimTask commits in its own transaction, so earlier
 			// iterations (and step-2 reclaims) are already dispatched
@@ -2594,12 +2606,10 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		if task == nil {
 			continue
 		}
-		// ClaimAgentTask selects by agent only; guard that the claimed task
-		// belongs to a runtime this daemon hosts. An agent with a
-		// higher-priority queued task on ANOTHER daemon's runtime could
-		// otherwise be dispatched here and dropped — matching the singular
-		// path's runtime_id guard. Such a stray dispatch is recovered by the
-		// reclaim path on the owning daemon's next poll.
+		// The SQL claim is fenced to candidates[i].RuntimeID. Keep this
+		// set-membership check as a fail-closed assertion at the batch boundary:
+		// a regression in the query or caller must never hand this daemon a task
+		// routed to a runtime it does not host.
 		if _, ok := runtimeInSet[util.UUIDToString(task.RuntimeID)]; !ok {
 			continue
 		}

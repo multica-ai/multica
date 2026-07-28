@@ -137,15 +137,6 @@ func TestRoutePreservesReserveAndBalancesTowardHeadroom(t *testing.T) {
 		t.Fatalf("expected headroom-aware balancing, got %q", got)
 	}
 
-	req.Workload.Urgency = UrgencyEmergency
-	req.Candidates = []Candidate{candidate("emergency", "codex", 9000, 250)}
-	decision, err = Route(req)
-	if err != nil {
-		t.Fatalf("emergency route should be allowed to consume reserve: %v", err)
-	}
-	if decision.Primary.Candidate.ID != "emergency" {
-		t.Fatalf("unexpected emergency primary: %+v", decision.Primary)
-	}
 }
 
 func TestRouteTreatsRemainingBelowReserveAsProtectedNotMalformed(t *testing.T) {
@@ -163,14 +154,6 @@ func TestRouteTreatsRemainingBelowReserveAsProtectedNotMalformed(t *testing.T) {
 	}
 	assertRejected(t, decision, "ordinary", RejectReserveProtected)
 
-	req.Workload.Urgency = UrgencyEmergency
-	decision, err = Route(req)
-	if err != nil {
-		t.Fatalf("emergency work may use remaining reserve: %v", err)
-	}
-	if decision.Primary.Candidate.ID != "ordinary" {
-		t.Fatalf("unexpected emergency primary: %+v", decision.Primary)
-	}
 }
 
 func TestRouteUsesOnlyPromotedEvidenceBackedAffinity(t *testing.T) {
@@ -350,7 +333,7 @@ func TestRouteFallbacksAreCrossProviderAndDeterministic(t *testing.T) {
 
 func testRequest() Request {
 	return Request{
-		Workload: Workload{ID: "work-1", Risk: RiskMedium, Urgency: UrgencyNormal, MaxParallel: 3},
+		Workload: Workload{ID: "work-1", Risk: RiskMedium, MaxParallel: 3},
 		Capacities: []Capacity{
 			{Provider: "codex", Known: true, RemainingPermille: 800, ReservePermille: 200},
 			{Provider: "claude", Known: true, RemainingPermille: 800, ReservePermille: 200},

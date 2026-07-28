@@ -38,6 +38,8 @@ ALTER TABLE agent_task_queue
     ADD COLUMN IF NOT EXISTS route_service_tier TEXT,
     ADD COLUMN IF NOT EXISTS route_runtime_config JSONB,
     ADD COLUMN IF NOT EXISTS route_custom_args JSONB,
+    ADD COLUMN IF NOT EXISTS route_admission_attempts INTEGER NOT NULL DEFAULT 0
+        CHECK (route_admission_attempts >= 0),
     ADD COLUMN IF NOT EXISTS route_capacity_owner_id UUID,
     ADD COLUMN IF NOT EXISTS route_reserved_permille INTEGER NOT NULL DEFAULT 0
         CHECK (route_reserved_permille BETWEEN 0 AND 1000),
@@ -88,7 +90,10 @@ BEGIN
        AND OLD.route_capacity_owner_id IS NOT NULL
        AND OLD.route_provider IS NOT NULL
        AND (
-           TG_OP = 'DELETE'
+           (
+               TG_OP = 'DELETE'
+               AND OLD.status NOT IN ('completed', 'failed', 'cancelled')
+           )
            OR (
                OLD.status NOT IN ('completed', 'failed', 'cancelled')
                AND NEW.status IN ('completed', 'failed', 'cancelled')

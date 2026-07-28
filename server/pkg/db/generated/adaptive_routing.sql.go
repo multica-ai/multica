@@ -17,11 +17,12 @@ SET status = 'deferred',
     fire_at = now() + make_interval(secs => $1::double precision),
     route_admission_state = 'deferred',
     route_decision = $2,
+    route_admission_attempts = route_admission_attempts + 1,
     route_admitted_at = now()
 WHERE id = $3
   AND status = 'queued'
   AND route_admission_state = 'pending'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, route_admission_state, route_decision, route_runtime_id, route_provider, route_model, route_thinking_level, route_service_tier, route_runtime_config, route_custom_args, route_capacity_owner_id, route_reserved_permille, route_admitted_at
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, route_admission_state, route_decision, route_runtime_id, route_provider, route_model, route_thinking_level, route_service_tier, route_runtime_config, route_custom_args, route_admission_attempts, route_capacity_owner_id, route_reserved_permille, route_admitted_at
 `
 
 type DeferTaskAdaptiveAdmissionParams struct {
@@ -91,6 +92,7 @@ func (q *Queries) DeferTaskAdaptiveAdmission(ctx context.Context, arg DeferTaskA
 		&i.RouteServiceTier,
 		&i.RouteRuntimeConfig,
 		&i.RouteCustomArgs,
+		&i.RouteAdmissionAttempts,
 		&i.RouteCapacityOwnerID,
 		&i.RouteReservedPermille,
 		&i.RouteAdmittedAt,
@@ -98,8 +100,145 @@ func (q *Queries) DeferTaskAdaptiveAdmission(ctx context.Context, arg DeferTaskA
 	return i, err
 }
 
+const failTaskAdaptiveAdmission = `-- name: FailTaskAdaptiveAdmission :one
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    error = $1,
+    failure_reason = 'adaptive_routing_admission_failed',
+    fire_at = NULL,
+    prepare_lease_expires_at = NULL,
+    route_admission_state = 'failed',
+    route_decision = $2,
+    route_admission_attempts = route_admission_attempts + 1,
+    route_admitted_at = now()
+WHERE id = $3
+  AND status = 'queued'
+  AND route_admission_state = 'pending'
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, route_admission_state, route_decision, route_runtime_id, route_provider, route_model, route_thinking_level, route_service_tier, route_runtime_config, route_custom_args, route_admission_attempts, route_capacity_owner_id, route_reserved_permille, route_admitted_at
+`
+
+type FailTaskAdaptiveAdmissionParams struct {
+	Error         pgtype.Text `json:"error"`
+	RouteDecision []byte      `json:"route_decision"`
+	ID            pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) FailTaskAdaptiveAdmission(ctx context.Context, arg FailTaskAdaptiveAdmissionParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, failTaskAdaptiveAdmission, arg.Error, arg.RouteDecision, arg.ID)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RouteAdmissionState,
+		&i.RouteDecision,
+		&i.RouteRuntimeID,
+		&i.RouteProvider,
+		&i.RouteModel,
+		&i.RouteThinkingLevel,
+		&i.RouteServiceTier,
+		&i.RouteRuntimeConfig,
+		&i.RouteCustomArgs,
+		&i.RouteAdmissionAttempts,
+		&i.RouteCapacityOwnerID,
+		&i.RouteReservedPermille,
+		&i.RouteAdmittedAt,
+	)
+	return i, err
+}
+
+const listAdaptiveCandidateRuntimes = `-- name: ListAdaptiveCandidateRuntimes :many
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
+FROM agent_runtime
+WHERE id = ANY($1::uuid[])
+`
+
+func (q *Queries) ListAdaptiveCandidateRuntimes(ctx context.Context, runtimeIds []pgtype.UUID) ([]AgentRuntime, error) {
+	rows, err := q.db.Query(ctx, listAdaptiveCandidateRuntimes, runtimeIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentRuntime{}
+	for rows.Next() {
+		var i AgentRuntime
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DaemonID,
+			&i.Name,
+			&i.RuntimeMode,
+			&i.Provider,
+			&i.Status,
+			&i.DeviceInfo,
+			&i.Metadata,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerID,
+			&i.LegacyDaemonID,
+			&i.Visibility,
+			&i.ProfileID,
+			&i.CustomName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingAdaptiveAdmissions = `-- name: ListPendingAdaptiveAdmissions :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, route_admission_state, route_decision, route_runtime_id, route_provider, route_model, route_thinking_level, route_service_tier, route_runtime_config, route_custom_args, route_capacity_owner_id, route_reserved_permille, route_admitted_at
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, route_admission_state, route_decision, route_runtime_id, route_provider, route_model, route_thinking_level, route_service_tier, route_runtime_config, route_custom_args, route_admission_attempts, route_capacity_owner_id, route_reserved_permille, route_admitted_at
 FROM agent_task_queue
 WHERE status = 'queued'
   AND route_admission_state = 'pending'
@@ -180,6 +319,7 @@ func (q *Queries) ListPendingAdaptiveAdmissions(ctx context.Context, arg ListPen
 			&i.RouteServiceTier,
 			&i.RouteRuntimeConfig,
 			&i.RouteCustomArgs,
+			&i.RouteAdmissionAttempts,
 			&i.RouteCapacityOwnerID,
 			&i.RouteReservedPermille,
 			&i.RouteAdmittedAt,
@@ -194,16 +334,22 @@ func (q *Queries) ListPendingAdaptiveAdmissions(ctx context.Context, arg ListPen
 	return items, nil
 }
 
-const listProviderPlanCapacitiesForOwnerForUpdate = `-- name: ListProviderPlanCapacitiesForOwnerForUpdate :many
+const listProviderPlanCapacitiesForOwnerProvidersForUpdate = `-- name: ListProviderPlanCapacitiesForOwnerProvidersForUpdate :many
 SELECT owner_id, provider, known, remaining_permille, reserve_permille, reserved_inflight_permille, window_ends_at, observed_at, source, updated_at
 FROM provider_plan_capacity
 WHERE owner_id = $1
+  AND provider = ANY($2::text[])
 ORDER BY provider
 FOR UPDATE
 `
 
-func (q *Queries) ListProviderPlanCapacitiesForOwnerForUpdate(ctx context.Context, ownerID pgtype.UUID) ([]ProviderPlanCapacity, error) {
-	rows, err := q.db.Query(ctx, listProviderPlanCapacitiesForOwnerForUpdate, ownerID)
+type ListProviderPlanCapacitiesForOwnerProvidersForUpdateParams struct {
+	OwnerID   pgtype.UUID `json:"owner_id"`
+	Providers []string    `json:"providers"`
+}
+
+func (q *Queries) ListProviderPlanCapacitiesForOwnerProvidersForUpdate(ctx context.Context, arg ListProviderPlanCapacitiesForOwnerProvidersForUpdateParams) ([]ProviderPlanCapacity, error) {
+	rows, err := q.db.Query(ctx, listProviderPlanCapacitiesForOwnerProvidersForUpdate, arg.OwnerID, arg.Providers)
 	if err != nil {
 		return nil, err
 	}
@@ -234,7 +380,7 @@ func (q *Queries) ListProviderPlanCapacitiesForOwnerForUpdate(ctx context.Contex
 }
 
 const lockTaskForAdaptiveAdmission = `-- name: LockTaskForAdaptiveAdmission :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, route_admission_state, route_decision, route_runtime_id, route_provider, route_model, route_thinking_level, route_service_tier, route_runtime_config, route_custom_args, route_capacity_owner_id, route_reserved_permille, route_admitted_at
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, route_admission_state, route_decision, route_runtime_id, route_provider, route_model, route_thinking_level, route_service_tier, route_runtime_config, route_custom_args, route_admission_attempts, route_capacity_owner_id, route_reserved_permille, route_admitted_at
 FROM agent_task_queue
 WHERE id = $1
   AND status = 'queued'
@@ -303,6 +449,7 @@ func (q *Queries) LockTaskForAdaptiveAdmission(ctx context.Context, id pgtype.UU
 		&i.RouteServiceTier,
 		&i.RouteRuntimeConfig,
 		&i.RouteCustomArgs,
+		&i.RouteAdmissionAttempts,
 		&i.RouteCapacityOwnerID,
 		&i.RouteReservedPermille,
 		&i.RouteAdmittedAt,
@@ -327,7 +474,7 @@ FROM due
 WHERE task.id = due.id
   AND task.status = 'deferred'
   AND task.route_admission_state = 'deferred'
-RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.route_admission_state, task.route_decision, task.route_runtime_id, task.route_provider, task.route_model, task.route_thinking_level, task.route_service_tier, task.route_runtime_config, task.route_custom_args, task.route_capacity_owner_id, task.route_reserved_permille, task.route_admitted_at
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.route_admission_state, task.route_decision, task.route_runtime_id, task.route_provider, task.route_model, task.route_thinking_level, task.route_service_tier, task.route_runtime_config, task.route_custom_args, task.route_admission_attempts, task.route_capacity_owner_id, task.route_reserved_permille, task.route_admitted_at
 `
 
 func (q *Queries) PromoteDueAdaptiveRoutingTasks(ctx context.Context, maxRows int32) ([]AgentTaskQueue, error) {
@@ -397,6 +544,7 @@ func (q *Queries) PromoteDueAdaptiveRoutingTasks(ctx context.Context, maxRows in
 			&i.RouteServiceTier,
 			&i.RouteRuntimeConfig,
 			&i.RouteCustomArgs,
+			&i.RouteAdmissionAttempts,
 			&i.RouteCapacityOwnerID,
 			&i.RouteReservedPermille,
 			&i.RouteAdmittedAt,
@@ -419,7 +567,8 @@ SET reserved_inflight_permille =
 WHERE owner_id = $2
   AND provider = $3
   AND known
-  AND reserved_inflight_permille + $1::int <= remaining_permille
+  AND reserved_inflight_permille + $1::int
+      <= GREATEST(remaining_permille - reserve_permille, 0)
 RETURNING owner_id, provider, known, remaining_permille, reserve_permille, reserved_inflight_permille, window_ends_at, observed_at, source, updated_at
 `
 
@@ -451,11 +600,12 @@ const resolveTaskAdaptiveAdmission = `-- name: ResolveTaskAdaptiveAdmission :one
 UPDATE agent_task_queue
 SET route_admission_state = $1,
     route_decision = $2,
+    route_admission_attempts = route_admission_attempts + 1,
     route_admitted_at = now()
 WHERE id = $3
   AND status = 'queued'
   AND route_admission_state = 'pending'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, route_admission_state, route_decision, route_runtime_id, route_provider, route_model, route_thinking_level, route_service_tier, route_runtime_config, route_custom_args, route_capacity_owner_id, route_reserved_permille, route_admitted_at
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, route_admission_state, route_decision, route_runtime_id, route_provider, route_model, route_thinking_level, route_service_tier, route_runtime_config, route_custom_args, route_admission_attempts, route_capacity_owner_id, route_reserved_permille, route_admitted_at
 `
 
 type ResolveTaskAdaptiveAdmissionParams struct {
@@ -525,6 +675,7 @@ func (q *Queries) ResolveTaskAdaptiveAdmission(ctx context.Context, arg ResolveT
 		&i.RouteServiceTier,
 		&i.RouteRuntimeConfig,
 		&i.RouteCustomArgs,
+		&i.RouteAdmissionAttempts,
 		&i.RouteCapacityOwnerID,
 		&i.RouteReservedPermille,
 		&i.RouteAdmittedAt,
@@ -544,13 +695,14 @@ SET runtime_id = $1,
     route_service_tier = $6,
     route_runtime_config = $7,
     route_custom_args = $8,
+    route_admission_attempts = route_admission_attempts + 1,
     route_capacity_owner_id = $9,
     route_reserved_permille = $10,
     route_admitted_at = now()
 WHERE id = $11
   AND status = 'queued'
   AND route_admission_state = 'pending'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, route_admission_state, route_decision, route_runtime_id, route_provider, route_model, route_thinking_level, route_service_tier, route_runtime_config, route_custom_args, route_capacity_owner_id, route_reserved_permille, route_admitted_at
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, route_admission_state, route_decision, route_runtime_id, route_provider, route_model, route_thinking_level, route_service_tier, route_runtime_config, route_custom_args, route_admission_attempts, route_capacity_owner_id, route_reserved_permille, route_admitted_at
 `
 
 type RouteTaskAdaptiveAdmissionParams struct {
@@ -640,6 +792,7 @@ func (q *Queries) RouteTaskAdaptiveAdmission(ctx context.Context, arg RouteTaskA
 		&i.RouteServiceTier,
 		&i.RouteRuntimeConfig,
 		&i.RouteCustomArgs,
+		&i.RouteAdmissionAttempts,
 		&i.RouteCapacityOwnerID,
 		&i.RouteReservedPermille,
 		&i.RouteAdmittedAt,

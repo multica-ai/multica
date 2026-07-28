@@ -27,6 +27,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/pkg/agentroute"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -2531,6 +2532,14 @@ func applyAdaptiveTaskClaimRoute(task *db.AgentTaskQueue, agent *TaskAgentData) 
 			return fmt.Errorf("decode route_custom_args: %w", err)
 		}
 	}
+	var routedRuntimeConfig json.RawMessage
+	if task.RouteRuntimeConfig != nil {
+		merged, err := agentroute.MergeRuntimeConfig(agent.RuntimeConfig, task.RouteRuntimeConfig)
+		if err != nil {
+			return fmt.Errorf("merge route_runtime_config: %w", err)
+		}
+		routedRuntimeConfig = merged
+	}
 	if task.RouteModel.Valid {
 		agent.Model = task.RouteModel.String
 	}
@@ -2540,8 +2549,8 @@ func applyAdaptiveTaskClaimRoute(task *db.AgentTaskQueue, agent *TaskAgentData) 
 	if task.RouteServiceTier.Valid {
 		agent.ServiceTier = task.RouteServiceTier.String
 	}
-	if task.RouteRuntimeConfig != nil {
-		agent.RuntimeConfig = json.RawMessage(task.RouteRuntimeConfig)
+	if routedRuntimeConfig != nil {
+		agent.RuntimeConfig = routedRuntimeConfig
 	}
 	if task.RouteCustomArgs != nil {
 		agent.CustomArgs = routedArgs

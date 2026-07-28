@@ -272,6 +272,21 @@ func TestAdaptiveAdmissionFencesRoutesAndReleasesReservation(t *testing.T) {
 	if reserved != 0 {
 		t.Fatalf("terminal transition left reservation = %d, want 0", reserved)
 	}
+	if _, err := fixture.pool.Exec(context.Background(), `
+		DELETE FROM agent_task_queue WHERE id = $1
+	`, util.UUIDToString(task.ID)); err != nil {
+		t.Fatalf("delete terminal routed task: %v", err)
+	}
+	if err := fixture.pool.QueryRow(context.Background(), `
+		SELECT reserved_inflight_permille
+		FROM provider_plan_capacity
+		WHERE owner_id = $1 AND provider = 'claude'
+	`, fixture.userID).Scan(&reserved); err != nil {
+		t.Fatalf("read reservation after terminal delete: %v", err)
+	}
+	if reserved != 0 {
+		t.Fatalf("terminal task delete released reservation twice: got %d, want 0", reserved)
+	}
 }
 
 func TestAdaptiveAdmissionShadowDoesNotChangeExecution(t *testing.T) {
@@ -363,6 +378,47 @@ func TestAdaptiveAdmissionConcurrentReservationsPreserveHeadroom(t *testing.T) {
 	}
 }
 
+func TestAdaptiveRuntimeClaimCannotDispatchAnotherRuntimeTask(t *testing.T) {
+	fixture := newAdaptiveRoutingFixture(t, 100, true, false)
+	codexTask := fixture.seedTask(t, "adaptive codex runtime fence")
+	claudeTask := fixture.seedTask(t, "adaptive claude runtime fence")
+
+	if _, err := fixture.pool.Exec(context.Background(), `
+		UPDATE agent_task_queue
+		SET route_admission_state = 'routed',
+		    runtime_id = CASE WHEN id = $1 THEN $3::uuid ELSE $4::uuid END,
+		    priority = CASE WHEN id = $1 THEN 4 ELSE 1 END
+		WHERE id = ANY($2::uuid[])
+	`, util.UUIDToString(codexTask.ID),
+		[]string{util.UUIDToString(codexTask.ID), util.UUIDToString(claudeTask.ID)},
+		fixture.codexRuntimeID,
+		fixture.claudeRuntimeID,
+	); err != nil {
+		t.Fatalf("prepare cross-runtime tasks: %v", err)
+	}
+
+	svc := NewTaskService(fixture.queries, fixture.pool, nil, events.New())
+	claimed, err := svc.ClaimTaskForRuntime(
+		context.Background(),
+		util.MustParseUUID(fixture.claudeRuntimeID),
+	)
+	if err != nil {
+		t.Fatalf("claim Claude runtime task: %v", err)
+	}
+	if claimed == nil || claimed.ID != claudeTask.ID {
+		t.Fatalf("claimed = %+v, want Claude-routed task %s",
+			claimed, util.UUIDToString(claudeTask.ID))
+	}
+
+	codexCurrent, err := fixture.queries.GetAgentTask(context.Background(), codexTask.ID)
+	if err != nil {
+		t.Fatalf("load Codex task after Claude claim: %v", err)
+	}
+	if codexCurrent.Status != "queued" {
+		t.Fatalf("Claude poller dispatched Codex task: status=%q", codexCurrent.Status)
+	}
+}
+
 func TestAdaptiveAdmissionProtectedIdentityKeepsFixedBinding(t *testing.T) {
 	fixture := newAdaptiveRoutingFixture(t, 100, true, true)
 	fixture.seedCapacity(t, "codex", 500, 200, time.Now().UTC())
@@ -410,16 +466,17 @@ func TestAdaptiveAdmissionRejectsForeignOwnerRuntime(t *testing.T) {
 	svc.FeatureFlags = adaptiveRoutingFlags(true)
 	svc.NotifyTaskEnqueued(ctx, task)
 
-	deferred, err := fixture.queries.GetAgentTask(ctx, task.ID)
+	failed, err := fixture.queries.GetAgentTask(ctx, task.ID)
 	if err != nil {
 		t.Fatalf("load foreign-owner decision: %v", err)
 	}
-	if deferred.Status != "deferred" || deferred.RouteAdmissionState != "deferred" {
-		t.Fatalf("foreign runtime was not deferred: status=%q state=%q",
-			deferred.Status, deferred.RouteAdmissionState)
+	if failed.Status != "failed" || failed.RouteAdmissionState != "failed" ||
+		failed.FailureReason.String != "adaptive_routing_admission_failed" {
+		t.Fatalf("foreign runtime config did not fail terminally: status=%q state=%q reason=%q",
+			failed.Status, failed.RouteAdmissionState, failed.FailureReason.String)
 	}
 	var record adaptiveAdmissionRecord
-	if err := json.Unmarshal(deferred.RouteDecision, &record); err != nil {
+	if err := json.Unmarshal(failed.RouteDecision, &record); err != nil {
 		t.Fatalf("decode foreign-owner decision: %v", err)
 	}
 	found := false
@@ -430,6 +487,46 @@ func TestAdaptiveAdmissionRejectsForeignOwnerRuntime(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("missing foreign-owner rejection in %+v", record.ValidationRejections)
+	}
+}
+
+func TestAdaptiveAdmissionBoundsTemporaryCapacityDeferrals(t *testing.T) {
+	fixture := newAdaptiveRoutingFixture(t, 100, false, false)
+	fixture.seedCapacity(t, "claude", 900, 200, time.Now().UTC().Add(-adaptiveCapacityMaxAge-time.Minute))
+	task := fixture.seedTask(t, "adaptive bounded capacity deferral")
+
+	svc := NewTaskService(fixture.queries, fixture.pool, nil, events.New())
+	svc.FeatureFlags = adaptiveRoutingFlags(true)
+	svc.NotifyTaskEnqueued(context.Background(), task)
+
+	for attempt := 2; attempt <= adaptiveAdmissionMaxAttempts; attempt++ {
+		if _, err := fixture.pool.Exec(context.Background(), `
+			UPDATE agent_task_queue
+			SET fire_at = now() - interval '1 second'
+			WHERE id = $1 AND status = 'deferred'
+		`, util.UUIDToString(task.ID)); err != nil {
+			t.Fatalf("make attempt %d due: %v", attempt, err)
+		}
+		svc.SweepPendingAdaptiveAdmissions(context.Background())
+	}
+
+	failed, err := fixture.queries.GetAgentTask(context.Background(), task.ID)
+	if err != nil {
+		t.Fatalf("load bounded admission result: %v", err)
+	}
+	if failed.Status != "failed" || failed.RouteAdmissionState != "failed" ||
+		failed.RouteAdmissionAttempts != adaptiveAdmissionMaxAttempts {
+		t.Fatalf("bounded result = status=%q state=%q attempts=%d, want failed/failed/%d",
+			failed.Status, failed.RouteAdmissionState, failed.RouteAdmissionAttempts, adaptiveAdmissionMaxAttempts)
+	}
+	var record adaptiveAdmissionRecord
+	if err := json.Unmarshal(failed.RouteDecision, &record); err != nil {
+		t.Fatalf("decode bounded failure decision: %v", err)
+	}
+	if record.Reason != "retry_budget_exhausted" ||
+		record.Attempt != adaptiveAdmissionMaxAttempts ||
+		record.Detail == "" {
+		t.Fatalf("bounded failure decision = %+v", record)
 	}
 }
 

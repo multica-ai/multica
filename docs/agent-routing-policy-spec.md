@@ -11,11 +11,11 @@ agent.
 
 The policy consumes:
 
-- workload risk, urgency, dependency/parallelism shape, and required
+- workload risk, dependency/parallelism shape, and required
   skills/tools/authority;
 - candidate provider, model, thinking mode, measured quality/latency, supported
   capabilities, and forecast plan use;
-- provider-plan remaining capacity and emergency reserve;
+- provider-plan remaining capacity and operator reserve;
 - optional skill affinity records that only influence ranking after independent
   promotion with an evidence revision.
 
@@ -29,29 +29,38 @@ It emits:
 ## Safety invariants
 
 1. Unknown or malformed capacity is unavailable.
-2. Ordinary work cannot spend a provider below its configured reserve.
-3. Emergency work may consume reserve, but cannot exceed reported remaining
-   capacity.
-4. Missing skills, tools, authority scopes, protected-role approval, or usage
+2. Automatic work cannot spend a provider below its configured reserve.
+   Task priority is not authority to consume that reserve; any future override
+   requires a separate operator-controlled signal and audit trail.
+3. Missing skills, tools, authority scopes, protected-role approval, or usage
    forecasts make a candidate ineligible.
-5. Experimental/rejected affinity data and promoted data without an evidence
+4. Experimental/rejected affinity data and promoted data without an evidence
    revision never affect ranking.
-6. Cross-provider review requires high-value uncertainty and a distinct eligible
+5. Cross-provider review requires high-value uncertainty and a distinct eligible
    provider. Parallel and review collaborators are read-only.
-7. Fallbacks are cross-provider only and deterministic; execution remains the
+6. Fallbacks are cross-provider only and deterministic; execution remains the
    existing exactly-once failover subsystem's responsibility.
-8. Admission never changes agent identity, instructions, skills, MCP access,
+7. Admission never changes agent identity, instructions, skills, MCP access,
    custom environment, or authority. It may only override the selected runtime,
    model, thinking level, service tier, provider runtime config, and custom
-   arguments for one task.
-9. Candidate runtimes must be online, fresh, in the same workspace, and owned
+   arguments for one task. Runtime-config overrides merge recursively into the
+   source config and cannot replace routing/protection/identity keys.
+8. Candidate runtimes must be online, fresh, in the same workspace, and owned
    by the same valid human as the source agent. Protected identities are never
    automatically rebound.
-10. Capacity is owner-scoped across workspaces. Admission locks the current
-    capacity rows and reserves forecast usage in the same transaction as the
-    task route. Every terminal transition releases that forecast reservation.
-11. An opted-in task is fenced at insert and cannot be claimed while admission
-    is pending. A sweeper repairs the insert-to-admission crash window.
+9. Capacity is owner-scoped across workspaces. Admission batch-resolves
+    candidate runtimes, locks only their current provider rows, and reserves
+    forecast usage in the same transaction as the task route. Every terminal
+    transition releases that forecast reservation exactly once, including when
+    terminal history is later deleted.
+10. An opted-in task is fenced at insert and cannot be claimed while admission
+    is pending. A sweeper repairs the insert-to-admission crash window. Runtime
+    pollers claim with both agent and routed-runtime identity, so one provider
+    cannot accidentally dispatch a sibling task routed to another provider.
+11. Invalid static configuration fails immediately in active mode. Temporary
+    capacity/runtime unavailability retries every five minutes for at most six
+    total admission evaluations, then reaches a visible terminal failure rather
+    than deferring forever.
 
 ## Transactional admission
 
@@ -63,9 +72,9 @@ Two rollout flags compose:
   `adaptive_agent_routing_active=false`: shadow evaluation; persist the decision
   while executing the original route.
 - both `true`: reserve capacity and persist the selected per-task route. If no
-  ordinary candidate can preserve reserve, defer for five minutes and
-  re-evaluate with a fresh snapshot. Priority-4 emergency tasks may consume
-  reserve through the policy's explicit emergency path.
+  candidate can preserve reserve, defer for five minutes and re-evaluate with a
+  fresh snapshot. Admission is bounded to six evaluations; task priority never
+  bypasses reserve.
 
 Self-host starts shadow-first. Roll back the actuator immediately with
 `FF_ADAPTIVE_AGENT_ROUTING_ACTIVE=false`; disable evaluation with
@@ -76,7 +85,10 @@ The capacity collector upserts `provider_plan_capacity` by
 runtime heartbeats older than three minutes fail closed. `remaining_permille`
 is the provider-reported current-window remainder; `reserve_permille` is the
 operator floor; `reserved_inflight_permille` is maintained by task admission
-and terminal-state triggers.
+and terminal-state triggers. Active routing depends on this external publisher;
+without a fresh row the task follows the bounded defer/terminal path. The server
+does not invent capacity from task history or treat a missing publisher as
+headroom.
 
 Owner scope is atomic only inside one database. When separate Multica
 deployments consume the same paid provider plans, their publishers must use
@@ -148,7 +160,8 @@ additional plan-consuming branches.
 - Unit tests prove all safety invariants above.
 - Real-database tests prove the insert fence, atomic route+reservation,
   concurrent headroom preservation, terminal release, shadow non-mutation,
-  stale-capacity failure, and foreign-owner/protected exclusions.
+  stale-capacity bounded failure, immediate permanent-config failure,
+  terminal-then-delete single release, and foreign-owner/protected exclusions.
 - Rankings and tie breaks are stable regardless of candidate input order.
 - More post-task headroom is preferred when quality and other evidence are
   equal.

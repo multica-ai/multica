@@ -38,14 +38,6 @@ const (
 	RiskCritical Risk = "critical"
 )
 
-// Urgency controls whether emergency reserve may be consumed.
-type Urgency string
-
-const (
-	UrgencyNormal    Urgency = "normal"
-	UrgencyEmergency Urgency = "emergency"
-)
-
 // Topology describes how the selected candidates should collaborate.
 type Topology string
 
@@ -80,7 +72,6 @@ const (
 type Workload struct {
 	ID                       string
 	Risk                     Risk
-	Urgency                  Urgency
 	Protected                bool
 	RequiredSkills           []string
 	RequiredTools            []string
@@ -111,8 +102,8 @@ type Candidate struct {
 }
 
 // Capacity is a provider-plan snapshot. RemainingPermille is remaining plan
-// capacity in the current window; ReservePermille is the emergency floor that
-// ordinary work must leave untouched.
+// capacity in the current window; ReservePermille is the operator-controlled
+// floor that automatic admission must always leave untouched.
 type Capacity struct {
 	Provider          string
 	Known             bool
@@ -146,17 +137,16 @@ type Request struct {
 type RejectionReason string
 
 const (
-	RejectInvalidCandidate   RejectionReason = "invalid_candidate"
-	RejectOffline            RejectionReason = "runtime_offline"
-	RejectProtectedRole      RejectionReason = "protected_role_not_approved"
-	RejectMissingSkill       RejectionReason = "missing_required_skill"
-	RejectMissingTool        RejectionReason = "missing_required_tool"
-	RejectMissingAuthority   RejectionReason = "missing_required_authority"
-	RejectForecastUnknown    RejectionReason = "forecast_usage_unknown"
-	RejectCapacityUnknown    RejectionReason = "provider_capacity_unknown"
-	RejectCapacityInvalid    RejectionReason = "provider_capacity_invalid"
-	RejectReserveProtected   RejectionReason = "emergency_reserve_protected"
-	RejectInsufficientBudget RejectionReason = "insufficient_remaining_capacity"
+	RejectInvalidCandidate RejectionReason = "invalid_candidate"
+	RejectOffline          RejectionReason = "runtime_offline"
+	RejectProtectedRole    RejectionReason = "protected_role_not_approved"
+	RejectMissingSkill     RejectionReason = "missing_required_skill"
+	RejectMissingTool      RejectionReason = "missing_required_tool"
+	RejectMissingAuthority RejectionReason = "missing_required_authority"
+	RejectForecastUnknown  RejectionReason = "forecast_usage_unknown"
+	RejectCapacityUnknown  RejectionReason = "provider_capacity_unknown"
+	RejectCapacityInvalid  RejectionReason = "provider_capacity_invalid"
+	RejectReserveProtected RejectionReason = "provider_reserve_protected"
 )
 
 // Rejection explains why a candidate could not participate.
@@ -308,23 +298,16 @@ func evaluateCandidate(
 	}
 
 	available := capacity.RemainingPermille
-	if workload.Urgency != UrgencyEmergency {
-		available -= capacity.ReservePermille
-		if available < 0 {
-			available = 0
-		}
-		if candidate.ExpectedUsePermille > available {
-			return reject(RejectReserveProtected, "forecast use would cross the emergency reserve")
-		}
-	} else if candidate.ExpectedUsePermille > available {
-		return reject(RejectInsufficientBudget, "forecast use exceeds reported remaining capacity")
+	available -= capacity.ReservePermille
+	if available < 0 {
+		available = 0
+	}
+	if candidate.ExpectedUsePermille > available {
+		return reject(RejectReserveProtected, "forecast use would cross the operator reserve")
 	}
 
 	projectedRemaining := capacity.RemainingPermille - candidate.ExpectedUsePermille
-	projectedHeadroom := projectedRemaining
-	if workload.Urgency != UrgencyEmergency {
-		projectedHeadroom -= capacity.ReservePermille
-	}
+	projectedHeadroom := projectedRemaining - capacity.ReservePermille
 	if projectedHeadroom < 0 {
 		projectedHeadroom = 0
 	}
@@ -434,9 +417,9 @@ func chooseTopology(
 				break
 			}
 			capacity := capacities[candidate.Candidate.Provider]
-			available := capacity.RemainingPermille
-			if workload.Urgency != UrgencyEmergency {
-				available -= capacity.ReservePermille
+			available := capacity.RemainingPermille - capacity.ReservePermille
+			if available < 0 {
+				available = 0
 			}
 			projectedUse := used[candidate.Candidate.Provider] + candidate.Candidate.ExpectedUsePermille
 			if projectedUse > available {

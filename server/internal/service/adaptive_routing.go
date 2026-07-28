@@ -24,6 +24,7 @@ const (
 	adaptiveRuntimeMaxAge          = 3 * time.Minute
 	adaptiveFutureSkew             = 5 * time.Minute
 	adaptiveAdmissionRetry         = 5 * time.Minute
+	adaptiveAdmissionMaxAttempts   = 6
 	adaptivePendingSweepMinAge     = 5 * time.Second
 	adaptivePendingSweepBatch      = 100
 )
@@ -70,6 +71,9 @@ type adaptiveAdmissionRecord struct {
 	Mode                 agentroute.Mode           `json:"mode"`
 	Outcome              string                    `json:"outcome"`
 	Reason               string                    `json:"reason,omitempty"`
+	Detail               string                    `json:"detail,omitempty"`
+	Attempt              int32                     `json:"attempt"`
+	MaxAttempts          int32                     `json:"max_attempts"`
 	Selected             *adaptiveSelectedRecord   `json:"selected,omitempty"`
 	Topology             agentroute.Topology       `json:"topology,omitempty"`
 	Fallbacks            []adaptiveSelectedRecord  `json:"fallbacks,omitempty"`
@@ -166,6 +170,33 @@ func (s *TaskService) admitAdaptiveTask(ctx context.Context, queued db.AgentTask
 		return commit(updated)
 	}
 	deferTask := func(record adaptiveAdmissionRecord) (db.AgentTaskQueue, error) {
+		if record.Attempt >= record.MaxAttempts {
+			lastReason := record.Reason
+			record.Outcome = "admission_failed"
+			record.Reason = "retry_budget_exhausted"
+			record.Detail = lastReason
+			raw, marshalErr := json.Marshal(record)
+			if marshalErr != nil {
+				return queued, fmt.Errorf("marshal failed adaptive admission: %w", marshalErr)
+			}
+			updated, updateErr := qtx.FailTaskAdaptiveAdmission(ctx, db.FailTaskAdaptiveAdmissionParams{
+				Error: pgtype.Text{
+					String: fmt.Sprintf("adaptive routing admission exhausted after %d attempts: %s", record.Attempt, lastReason),
+					Valid:  true,
+				},
+				RouteDecision: raw,
+				ID:            task.ID,
+			})
+			if updateErr != nil {
+				return queued, fmt.Errorf("fail adaptive admission: %w", updateErr)
+			}
+			committed, commitErr := commit(updated)
+			if commitErr != nil {
+				return queued, commitErr
+			}
+			s.HandleFailedTasks(ctx, []db.AgentTaskQueue{committed})
+			return committed, nil
+		}
 		retryAt := now.Add(adaptiveAdmissionRetry)
 		record.RetryAt = &retryAt
 		raw, marshalErr := json.Marshal(record)
@@ -182,11 +213,36 @@ func (s *TaskService) admitAdaptiveTask(ctx context.Context, queued db.AgentTask
 		}
 		return commit(updated)
 	}
+	failTask := func(record adaptiveAdmissionRecord) (db.AgentTaskQueue, error) {
+		raw, marshalErr := json.Marshal(record)
+		if marshalErr != nil {
+			return queued, fmt.Errorf("marshal failed adaptive admission: %w", marshalErr)
+		}
+		updated, updateErr := qtx.FailTaskAdaptiveAdmission(ctx, db.FailTaskAdaptiveAdmissionParams{
+			Error: pgtype.Text{
+				String: "adaptive routing admission failed: " + record.Reason,
+				Valid:  true,
+			},
+			RouteDecision: raw,
+			ID:            task.ID,
+		})
+		if updateErr != nil {
+			return queued, fmt.Errorf("fail adaptive admission: %w", updateErr)
+		}
+		committed, commitErr := commit(updated)
+		if commitErr != nil {
+			return queued, commitErr
+		}
+		s.HandleFailedTasks(ctx, []db.AgentTaskQueue{committed})
+		return committed, nil
+	}
 
 	baseRecord := adaptiveAdmissionRecord{
 		SchemaVersion: adaptiveRoutingDecisionVersion,
 		Mode:          mode,
 		EvaluatedAt:   now,
+		Attempt:       task.RouteAdmissionAttempts + 1,
+		MaxAttempts:   adaptiveAdmissionMaxAttempts,
 	}
 	if mode == agentroute.ModeOff {
 		baseRecord.Outcome = "original_route"
@@ -205,7 +261,7 @@ func (s *TaskService) admitAdaptiveTask(ctx context.Context, queued db.AgentTask
 		if mode == agentroute.ModeShadow {
 			return resolve("shadow", baseRecord)
 		}
-		return deferTask(baseRecord)
+		return failTask(baseRecord)
 	}
 	config := envelope.AdaptiveRouting
 	if !config.Enabled {
@@ -227,7 +283,7 @@ func (s *TaskService) admitAdaptiveTask(ctx context.Context, queued db.AgentTask
 		if mode == agentroute.ModeShadow {
 			return resolve("shadow", baseRecord)
 		}
-		return deferTask(baseRecord)
+		return failTask(baseRecord)
 	}
 	if len(config.Candidates) == 0 {
 		baseRecord.Outcome = "configuration_invalid"
@@ -235,7 +291,7 @@ func (s *TaskService) admitAdaptiveTask(ctx context.Context, queued db.AgentTask
 		if mode == agentroute.ModeShadow {
 			return resolve("shadow", baseRecord)
 		}
-		return deferTask(baseRecord)
+		return failTask(baseRecord)
 	}
 
 	risk, riskErr := normalizeAdaptiveRisk(config.Risk)
@@ -245,34 +301,52 @@ func (s *TaskService) admitAdaptiveTask(ctx context.Context, queued db.AgentTask
 		if mode == agentroute.ModeShadow {
 			return resolve("shadow", baseRecord)
 		}
-		return deferTask(baseRecord)
+		return failTask(baseRecord)
 	}
 
-	capacityRows, err := qtx.ListProviderPlanCapacitiesForOwnerForUpdate(ctx, agent.OwnerID)
-	if err != nil {
-		return queued, fmt.Errorf("lock provider capacities: %w", err)
-	}
-	capacities, capacityRecords := adaptiveCapacities(now, capacityRows)
-	baseRecord.Capacities = capacityRecords
-
-	candidates, resolved, validationRejections := resolveAdaptiveCandidates(
+	candidates, resolved, validationRejections, resolveErr := resolveAdaptiveCandidates(
 		ctx,
 		qtx,
 		now,
 		agent,
 		config.Candidates,
 	)
+	if resolveErr != nil {
+		return queued, fmt.Errorf("resolve adaptive candidates: %w", resolveErr)
+	}
 	baseRecord.ValidationRejections = validationRejections
+	if len(candidates) == 0 {
+		baseRecord.Outcome = "configuration_invalid"
+		baseRecord.Reason = "candidate_validation_failed"
+		if mode == agentroute.ModeShadow {
+			return resolve("shadow", baseRecord)
+		}
+		return failTask(baseRecord)
+	}
+
+	// Resolve candidate runtimes before taking capacity locks, then lock only
+	// the providers this decision can actually consume. This keeps unrelated
+	// provider publishers/admissions moving and bounds the critical section.
+	providers := adaptiveCandidateProviders(candidates)
+	capacityRows, err := qtx.ListProviderPlanCapacitiesForOwnerProvidersForUpdate(
+		ctx,
+		db.ListProviderPlanCapacitiesForOwnerProvidersForUpdateParams{
+			OwnerID:   agent.OwnerID,
+			Providers: providers,
+		},
+	)
+	if err != nil {
+		return queued, fmt.Errorf("lock provider capacities: %w", err)
+	}
+	capacities, capacityRecords := adaptiveCapacities(now, capacityRows)
+	baseRecord.Capacities = capacityRecords
+
 	workload := agentroute.Workload{
 		ID:                util.UUIDToString(task.ID),
 		Risk:              risk,
-		Urgency:           agentroute.UrgencyNormal,
 		RequiredSkills:    config.RequiredSkills,
 		RequiredTools:     config.RequiredTools,
 		RequiredAuthority: config.RequiredAuthority,
-	}
-	if task.Priority >= 4 {
-		workload.Urgency = agentroute.UrgencyEmergency
 	}
 
 	decision, routeErr := agentroute.Route(agentroute.Request{
@@ -296,7 +370,10 @@ func (s *TaskService) admitAdaptiveTask(ctx context.Context, queued db.AgentTask
 		if mode == agentroute.ModeShadow {
 			return resolve("shadow", baseRecord)
 		}
-		return deferTask(baseRecord)
+		if adaptiveRouteFailureTransient(decision.Rejections) {
+			return deferTask(baseRecord)
+		}
+		return failTask(baseRecord)
 	}
 	selectedResolved, ok := resolved[decision.Primary.Candidate.ID]
 	if !ok {
@@ -323,7 +400,7 @@ func (s *TaskService) admitAdaptiveTask(ctx context.Context, queued db.AgentTask
 	}
 
 	runtimeConfig := []byte(nil)
-	if len(selectedResolved.Config.RuntimeConfig) > 0 {
+	if agentroute.HasRuntimeConfigOverride(selectedResolved.Config.RuntimeConfig) {
 		runtimeConfig = selectedResolved.Config.RuntimeConfig
 	}
 	customArgs := []byte(nil)
@@ -404,17 +481,53 @@ func adaptiveCapacities(now time.Time, rows []db.ProviderPlanCapacity) ([]agentr
 	return capacities, records
 }
 
+func adaptiveCandidateProviders(candidates []agentroute.Candidate) []string {
+	seen := make(map[string]struct{}, len(candidates))
+	providers := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		provider := strings.TrimSpace(candidate.Provider)
+		if provider == "" {
+			continue
+		}
+		if _, exists := seen[provider]; exists {
+			continue
+		}
+		seen[provider] = struct{}{}
+		providers = append(providers, provider)
+	}
+	return providers
+}
+
+func adaptiveRouteFailureTransient(rejections []agentroute.Rejection) bool {
+	for _, rejection := range rejections {
+		switch rejection.Reason {
+		case agentroute.RejectOffline,
+			agentroute.RejectCapacityUnknown,
+			agentroute.RejectReserveProtected:
+			return true
+		}
+	}
+	return false
+}
+
 func resolveAdaptiveCandidates(
 	ctx context.Context,
 	q *db.Queries,
 	now time.Time,
 	agent db.Agent,
 	configs []adaptiveCandidateConfig,
-) ([]agentroute.Candidate, map[string]adaptiveResolvedCandidate, []adaptiveRejectionRecord) {
+) ([]agentroute.Candidate, map[string]adaptiveResolvedCandidate, []adaptiveRejectionRecord, error) {
+	type preparedCandidate struct {
+		config    adaptiveCandidateConfig
+		runtimeID pgtype.UUID
+	}
+
 	candidates := make([]agentroute.Candidate, 0, len(configs))
 	resolved := make(map[string]adaptiveResolvedCandidate, len(configs))
 	rejections := make([]adaptiveRejectionRecord, 0)
 	seen := make(map[string]struct{}, len(configs))
+	prepared := make([]preparedCandidate, 0, len(configs))
+	runtimeIDs := make([]pgtype.UUID, 0, len(configs))
 	for _, config := range configs {
 		config.ID = strings.TrimSpace(config.ID)
 		config.RuntimeID = strings.TrimSpace(config.RuntimeID)
@@ -440,8 +553,36 @@ func resolveAdaptiveCandidates(
 			})
 			continue
 		}
-		runtime, err := q.GetAgentRuntime(ctx, runtimeID)
+		if err := agentroute.ValidateRuntimeConfigOverride(config.RuntimeConfig); err != nil {
+			rejections = append(rejections, adaptiveRejectionRecord{
+				CandidateID: config.ID,
+				Reason:      "runtime_config_override_invalid",
+				Detail:      err.Error(),
+			})
+			continue
+		}
+		prepared = append(prepared, preparedCandidate{
+			config:    config,
+			runtimeID: runtimeID,
+		})
+		runtimeIDs = append(runtimeIDs, runtimeID)
+	}
+
+	runtimeByID := make(map[string]db.AgentRuntime, len(runtimeIDs))
+	if len(runtimeIDs) > 0 {
+		runtimes, err := q.ListAdaptiveCandidateRuntimes(ctx, runtimeIDs)
 		if err != nil {
+			return nil, nil, rejections, err
+		}
+		for _, runtime := range runtimes {
+			runtimeByID[util.UUIDToString(runtime.ID)] = runtime
+		}
+	}
+
+	for _, preparedCandidate := range prepared {
+		config := preparedCandidate.config
+		runtime, ok := runtimeByID[util.UUIDToString(preparedCandidate.runtimeID)]
+		if !ok {
 			rejections = append(rejections, adaptiveRejectionRecord{
 				CandidateID: config.ID,
 				Reason:      "runtime_not_found",
@@ -484,7 +625,7 @@ func resolveAdaptiveCandidates(
 		candidates = append(candidates, candidate)
 		resolved[config.ID] = adaptiveResolvedCandidate{Config: config, Runtime: runtime}
 	}
-	return candidates, resolved, rejections
+	return candidates, resolved, rejections, nil
 }
 
 func adaptivePolicyRejections(rejections []agentroute.Rejection) []adaptiveRejectionRecord {
