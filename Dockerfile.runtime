@@ -35,7 +35,7 @@ COPY server/ ./server/
 # this default is what the runtime reports in `multica runtime list`, so keep it
 # bumped to the current release line (homebrew-tap latest) instead of letting it
 # drift back to a stale baseline.
-ARG VERSION=v1.11.2
+ARG VERSION=v1.20.9
 ARG COMMIT=unknown
 RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${COMMIT}" -o bin/multica ./cmd/multica
 
