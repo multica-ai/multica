@@ -121,6 +121,26 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(issue-properties-release-gates): TestIssuePropertyIconRollbackIsRepeatSafe protects the production rollback
+// path for migration 196. Deploy recovery can retry a down migration after the
+// first attempt already removed the column, so both executions must succeed.
+func TestIssuePropertyIconRollbackIsRepeatSafe(t *testing.T) {
+	ctx := context.Background()
+	testPool := newMigratedTestDB(t)
+
+	downPath := filepath.Join(findMigrationsDir(t), "196_issue_property_icon.down.sql")
+	downSQL, err := os.ReadFile(downPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", filepath.Base(downPath), err)
+	}
+
+	for attempt := 1; attempt <= 2; attempt++ {
+		if _, err := testPool.Exec(ctx, string(downSQL)); err != nil {
+			t.Fatalf("rollback attempt %d failed: %v", attempt, err)
+		}
+	}
+}
+
 func applyAll(ctx context.Context, pool *pgxpool.Pool, files []string) error {
 	for _, file := range files {
 		version := strings.TrimSuffix(filepath.Base(file), ".up.sql")
