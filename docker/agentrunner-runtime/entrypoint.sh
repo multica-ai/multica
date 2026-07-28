@@ -44,6 +44,23 @@ fi
 chmod 600 "${SSH_KEY}" 2>/dev/null || true
 chmod 644 "${SSH_KEY}.pub" 2>/dev/null || true
 
+# ── Warm hermes's update-check cache ──────────────────────────────────────────
+# `hermes --version` is not a pure version print: cmd_version() in hermes_cli
+# also runs check_for_updates(), which shells out to `git fetch origin`
+# against github.com/NousResearch/hermes-agent (up to a 10s timeout) unless a
+# cache file under ~/.hermes is less than 6h old. The daemon calls
+# `hermes --version` once per workspace during boot-time runtime registration
+# (registerRuntimesForWorkspace), each with only a 10s budget. If the *first*
+# such call lands during slow GitHub egress and gets killed before the cache
+# is written, every later workspace's call retries the same slow fetch and can
+# also miss the timeout — this is what was causing hermes registrations to
+# fail intermittently across a workspace fleet (AIPLAT-154). Priming the cache
+# here, before the daemon starts, means all of the daemon's later per-workspace
+# probes hit a warm cache and return in well under a second. Bounded and
+# best-effort: a slow or failed warm-up (offline, GitHub down) just means the
+# daemon's own per-call timeout is the fallback, same as before this existed.
+timeout 15 hermes --version >/dev/null 2>&1 || true
+
 # ── Optional one-off tool installs ─────────────────────────────────────────────
 # EXTRA_UV_TOOLS lets a single workspace opt into extra CLIs (e.g. `snow`, the
 # Snowflake CLI) without baking them into agent-runtime-base for every
