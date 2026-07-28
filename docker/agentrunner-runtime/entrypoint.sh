@@ -81,7 +81,12 @@ fi
 # the pod's lifetime and is never written to the node's disk.
 SECRETS_DIR="${HOME}/.secrets"
 mkdir -p "${SECRETS_DIR}"
-chmod 700 "${SECRETS_DIR}"
+# ${SECRETS_DIR} is the mount point of the emptyDir{medium: Memory} volume in
+# gitops/base/agent-runtime/deployment.yaml, created root-owned with group
+# 1000 via fsGroup. fsGroup grants the non-root agent user rw access but not
+# chmod (that needs ownership or CAP_FOWNER), so this fails with EPERM —
+# harmless, since fsGroup already restricts the dir to owner/group only.
+chmod 700 "${SECRETS_DIR}" 2>/dev/null || true
 while IFS='=' read -r -d '' env_name env_value; do
   case "${env_name}" in
     *_PRIVATE_KEY)
