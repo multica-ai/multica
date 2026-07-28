@@ -8,7 +8,6 @@ import {
   KeySquare,
   ListTodo,
   Plug,
-  Shield,
   ShieldCheck,
   Terminal,
   Webhook,
@@ -23,7 +22,6 @@ export type RedesignTab =
   | "env"
   | "infisical"
   | "custom_args"
-  | "sandbox"
   | "mcp_config"
   | "integrations"
   | "tools"
@@ -49,7 +47,6 @@ const BASE_TABS: AgentPageTab[] = [
 
 const ADVANCED_TABS: AgentPageTab[] = [
   { id: "infisical", label: "Infisical secrets", icon: KeySquare },
-  { id: "sandbox", label: "Sandbox", icon: Shield },
   { id: "mcp_config", label: "MCP Config", icon: Plug },
   { id: "custom_args", label: "Custom args", icon: Terminal },
   { id: "env", label: "Env", icon: KeyRound },

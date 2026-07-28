@@ -317,113 +317,7 @@ func TestCreateAgentRejectsPlainMember(t *testing.T) {
 	}
 }
 
-// TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin (E2) verifies that the
-// persona_sandbox field can only be set by a workspace owner/admin. A plain
-// workspace member who owns a private agent CAN update regular fields on it
-// (MUL-2443), but persona_sandbox stays an owner/admin-only workspace policy.
-func TestUpdateAgentPersonaSandboxRequiresWorkspaceAdmin(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-
-	ctx := context.Background()
-
-	// Create a non-admin user and add them as a plain workspace member.
-	memberEmail := "e2-member-" + uuid.NewString() + "@multica.ai"
-	var memberUserID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
-	`, "E2 Member", memberEmail).Scan(&memberUserID); err != nil {
-		t.Fatalf("create member user: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, memberUserID)
-	})
-
-	if _, err := testPool.Exec(ctx, `
-		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
-	`, testWorkspaceID, memberUserID); err != nil {
-		t.Fatalf("add member: %v", err)
-	}
-
-	// Create an agent owned by the non-admin member.
-	var agentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
-			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks, owner_id
-		)
-		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4)
-		RETURNING id
-	`, testWorkspaceID, "e2-test-agent-"+uuid.NewString()[:8], handlerTestRuntimeID(t), memberUserID).Scan(&agentID); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
-	})
-
-	// CEREBRO-PATCH(personal-agent-owner-manage): owner of a private agent can update it.
-	// A plain member who owns the private agent CAN update regular fields (MUL-2443).
-	w := httptest.NewRecorder()
-	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"description": "agent owner can edit description",
-	})
-	req.Header.Set("X-User-ID", memberUserID)
-	req = withURLParam(req, "id", agentID)
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("agent owner non-sandbox update: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var ownerResp AgentResponse
-	if err := json.NewDecoder(w.Body).Decode(&ownerResp); err != nil {
-		t.Fatalf("decode owner update response: %v", err)
-	}
-	if ownerResp.Description != "agent owner can edit description" {
-		t.Fatalf("expected description updated by owner, got %q", ownerResp.Description)
-	}
-
-	// Agent owner WITHOUT workspace admin role: must NOT be able to set persona_sandbox.
-	w = httptest.NewRecorder()
-	req = newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"persona_sandbox": "claude-power",
-	})
-	req.Header.Set("X-User-ID", memberUserID)
-	req = withURLParam(req, "id", agentID)
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("agent owner setting persona_sandbox: expected 403, got %d: %s", w.Code, w.Body.String())
-	}
-
-	// Workspace owner: must be able to set persona_sandbox.
-	w = httptest.NewRecorder()
-	req = newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"persona_sandbox": "claude-power",
-	})
-	req = withURLParam(req, "id", agentID)
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("workspace owner setting persona_sandbox: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	var resp AgentResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if resp.PersonaSandbox != "claude-power" {
-		t.Fatalf("expected persona_sandbox=claude-power, got %q", resp.PersonaSandbox)
-	}
-
-	// Workspace owner: clearing the sandbox via empty string must also work.
-	w = httptest.NewRecorder()
-	req = newRequest("PUT", "/api/agents/"+agentID, map[string]any{
-		"persona_sandbox": "",
-	})
-	req = withURLParam(req, "id", agentID)
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("workspace owner clearing persona_sandbox: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-}
-
+// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona update authorization coverage.
 // CEREBRO-PATCH(personal-agent-owner-manage): FIR-1416 regression coverage.
 // TestManageWorkspaceVisibleAgentByOwner verifies that a plain
 // workspace member who OWNS a workspace-visible (non-private) agent can manage
@@ -505,54 +399,9 @@ func TestManageWorkspaceVisibleAgentByOwner(t *testing.T) {
 	}
 }
 
-// TestUpdateAgentPersonaSandbox_AuditLogged (W4.6) verifies that a
-// successful persona_sandbox change writes an activity_log row so the
-// workspace audit feed in Multica's UI shows who flipped the policy.
-func TestUpdateAgentPersonaSandbox_AuditLogged(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	var agentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
-			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks, owner_id
-		)
-		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4)
-		RETURNING id
-	`, testWorkspaceID, "audit-agent-"+uuid.NewString()[:8], handlerTestRuntimeID(t), testUserID).Scan(&agentID); err != nil {
-		t.Fatalf("create agent: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE workspace_id = $1 AND action = 'agent_persona_sandbox_changed'`, testWorkspaceID)
-	})
-
-	w := httptest.NewRecorder()
-	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{"persona_sandbox": "claude-developer"})
-	req = withURLParam(req, "id", agentID)
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgent: %d %s", w.Code, w.Body.String())
-	}
-
-	var count int
-	if err := testPool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM activity_log
-		WHERE workspace_id = $1 AND action = 'agent_persona_sandbox_changed'
-		  AND details->>'agent_id' = $2 AND details->>'new' = 'claude-developer'
-	`, testWorkspaceID, agentID).Scan(&count); err != nil {
-		t.Fatalf("count activity rows: %v", err)
-	}
-	if count != 1 {
-		t.Fatalf("expected exactly 1 audit row, got %d", count)
-	}
-}
-
+// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the persona audit-write test.
 // TestListWorkspaceActivity (W4.6) verifies that the audit feed
-// endpoint returns persona_sandbox change events and gates non-admin
+// endpoint returns administrative change events and gates non-admin
 // callers with 403.
 func TestListWorkspaceActivity(t *testing.T) {
 	if testHandler == nil {
@@ -560,18 +409,19 @@ func TestListWorkspaceActivity(t *testing.T) {
 	}
 	ctx := context.Background()
 
+	// CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 seeds a surviving audit action.
 	// Seed a couple of audit rows directly so we don't depend on
 	// UpdateAgent's path being green (covered by the test above).
 	for i := 0; i < 2; i++ {
 		if _, err := testPool.Exec(ctx, `
 			INSERT INTO activity_log (workspace_id, actor_type, actor_id, action, details)
-			VALUES ($1, 'member', $2, 'agent_persona_sandbox_changed', $3::jsonb)
-		`, testWorkspaceID, testUserID, `{"new": "claude-developer"}`); err != nil {
+			VALUES ($1, 'member', $2, 'runtime_sandbox_policy_changed', $3::jsonb)
+		`, testWorkspaceID, testUserID, `{"field": "sandbox_policy"}`); err != nil {
 			t.Fatalf("seed: %v", err)
 		}
 	}
 	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE workspace_id = $1 AND action = 'agent_persona_sandbox_changed'`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE workspace_id = $1 AND action = 'runtime_sandbox_policy_changed'`, testWorkspaceID)
 	})
 
 	// Owner can read.

@@ -408,10 +408,10 @@ func (e *FirtalGatewayExecutor) guardPlatformAction(ctx context.Context, agentID
 	if err != nil {
 		return false, err.Error()
 	}
-	effective, err := e.toolPolicy.ResolveGeneral(ctx, toolpolicy.Query{
+	effective, err := e.toolPolicy.ResolveDeclared(ctx, toolpolicy.Query{
 		WorkspaceID: workspaceID, ToolKey: toolName, RuntimeID: agent.RuntimeID,
 		AgentID: agentID, UserID: agent.OwnerID, Base: toolpolicy.SettingAllow,
-	}, e.toolPolicy.MemberOverrideEnabled(ctx, workspaceID))
+	})
 	if err != nil {
 		return false, err.Error()
 	}

@@ -91,6 +91,26 @@ func TestAuthorizeCannotBypassMissingOrOutOfScopeMandate(t *testing.T) {
 	}
 }
 
+func TestAuthorizeAlwaysAllowsSelfCapabilityLookup(t *testing.T) {
+	for _, tool := range []string{
+		"get_agent_capabilities",
+		"mcp__multica__get_agent_capabilities",
+		"platform:get_agent_capabilities",
+	} {
+		t.Run(tool, func(t *testing.T) {
+			if err := (*Store)(nil).Authorize(
+				context.Background(),
+				pgtype.UUID{},
+				pgtype.UUID{},
+				pgtype.UUID{},
+				tool,
+			); err != nil {
+				t.Fatalf("Authorize(%q) = %v, want mandate-independent self lookup", tool, err)
+			}
+		})
+	}
+}
+
 func TestGetReturnsTheExactHistoricalSnapshotAfterExpiry(t *testing.T) {
 	now := time.Date(2026, 7, 24, 9, 0, 0, 0, time.UTC)
 	id := validUUID()

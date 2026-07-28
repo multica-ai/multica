@@ -164,59 +164,31 @@ type Query struct {
 	Eval ExprEvaluator
 }
 
-// Resolve loads the explicit per-layer settings for the query and folds them
-// into one Effective verdict. A query with no stored rows resolves to Base
-// (Allow by default), so an unconfigured workspace keeps working unchanged.
+// Resolve loads and folds a hard-floor policy chain. Callers for ordinary,
+// authorable permissions must use ResolveDeclared so the key classification
+// selects the contract.
 func (s *Store) Resolve(ctx context.Context, in Query) (Effective, error) {
 	input, err := s.loadInput(ctx, in)
 	if err != nil {
 		return Effective{}, err
 	}
-	return Resolve(input), nil
+	return ResolveWithMode(ModeHardFloor, input), nil
 }
 
 // FlagMemberOverride is the workspace feature-flag key that switches the GENERAL
-// tool-policy gate from the pure tighten-only Resolve to ResolveMemberOverride
+// tool-policy gate from the tighten-only mode to the openable mode
 // (FIR-2175 / FIR-3062). Registry default is ON (`true` in
 // packages/cerebro-feature-flags/registry.ts): a workspace with no explicit
 // flag row uses the member-override model unless an admin opts back out. The
-// handlers read it next to their policyCELEvaluator flag read and pass the
-// result into ResolveGeneral. Note: MemberOverrideEnabled below still resolves
+// handlers read it next to their policyCELEvaluator flag read. Note:
+// MemberOverrideEnabled below still resolves
 // a missing/errored workspace row to OFF, not the registry default — see its
 // doc comment.
 const FlagMemberOverride = "cerebro_member_override"
 
-// ResolveGeneral folds the chain for the GENERAL tool-policy gate — the visible
-// per-tool Allow / Ask / Deny permissions an operator authors in the policy
-// table. When memberOverride is true (the workspace cerebro_member_override flag
-// is on) it resolves through ResolveMemberOverride, the two-stage model where a
-// member's own setting overrides an inherited group/workspace default by
-// specificity and can therefore LOOSEN a group Deny. When false it is identical
-// to Resolve (pure most-restrictive-wins), so the flag's default is a no-op.
-//
-// SECURITY — read before adding a caller. Only the general tool-policy gate may
-// pass memberOverride=true. The deny-by-default FLOORS — credentials, the OS
-// sandbox, repo checkout, and the repo-approval cap — MUST keep calling Resolve
-// directly and MUST NEVER reach this method, because ResolveMemberOverride can
-// loosen and a floor that can be loosened is not a floor: a member could grant
-// themselves access to a secret their group denied. Resolve stays the single
-// load-bearing resolver for every floor; this method is for the visible gate
-// only. See ResolveMemberOverride for the model and chain.go for the contrast.
-func (s *Store) ResolveGeneral(ctx context.Context, in Query, memberOverride bool) (Effective, error) {
-	input, err := s.loadInput(ctx, in)
-	if err != nil {
-		return Effective{}, err
-	}
-	mode := ModeHardFloor
-	if memberOverride {
-		mode = ModeOpenable
-	}
-	return ResolveWithMode(mode, input), nil
-}
-
 // ResolveDeclared resolves one ordinary permission with its declared
 // resolution contract. Callers no longer choose between Resolve and
-// ResolveGeneral themselves: hard-floor keys stay tighten-only, while ordinary
+// an openable resolver themselves: hard-floor keys stay tighten-only, while ordinary
 // permissions follow the workspace member-override setting.
 func (s *Store) ResolveDeclared(ctx context.Context, in Query) (Effective, error) {
 	input, err := s.loadInput(ctx, in)

@@ -34,7 +34,6 @@ const baseRuntime: AgentRuntime = {
   metadata: {},
   owner_id: null,
   sandbox_enabled: null,
-  persona_sandbox: "",
   visibility: "private",
   timezone: "UTC",
   capabilities: {},

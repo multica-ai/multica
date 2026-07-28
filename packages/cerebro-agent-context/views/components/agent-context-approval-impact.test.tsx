@@ -182,42 +182,6 @@ describe("AgentContextApprovalImpact", () => {
     expect(rows[1]).toHaveAttribute("data-severity", "logged");
   });
 
-  it("credits Multica, not the engine, for a sandbox change", async () => {
-    mockGetAgentCapabilityApproval.mockResolvedValue({
-      agent_id: "agent-1",
-      runtime: runtime("kiro"),
-      impact: {
-        status: "known",
-        provider: "kiro",
-        fields: [
-          {
-            field: "persona_sandbox",
-            delivered_by: "multica",
-            exec_field: "",
-            handling: "",
-            consequence: "takes_effect",
-            silent: false,
-          },
-        ],
-        effective: ["persona_sandbox"],
-        ineffective: [],
-        silently_ineffective: [],
-      },
-    });
-
-    render(
-      <AgentContextApprovalImpact
-        agent={agent}
-        changedFields={["persona_sandbox"]}
-      />,
-      { wrapper },
-    );
-
-    const row = await screen.findByTestId("approval-effective-persona_sandbox");
-    expect(row).toHaveAttribute("data-delivered-by", "multica");
-    expect(screen.getByText(/Multica applies this/i)).toBeInTheDocument();
-  });
-
   it("states that a prepended instruction lands without system-prompt authority", async () => {
     mockGetAgentCapabilityApproval.mockResolvedValue({
       agent_id: "agent-1",

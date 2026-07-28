@@ -577,18 +577,27 @@ func (b *bufferWriter) String() string {
 	return b.buf.String()
 }
 
-// TestHermesClientAutoApprovesPermissionRequest asserts that when an
-// ACP agent sends us `session/request_permission` (kimi does this on
-// every Shell / file-mutating tool call), the client replies with
-// `approve_for_session` — without this the agent blocks 300s and the
-// task hangs. The id in the reply must match the agent's request id
-// so its in-flight future resolves.
-func TestHermesClientAutoApprovesPermissionRequest(t *testing.T) {
+// CEREBRO-PATCH(acp-tool-policy-seam): the ACP permission reply is resolved against tool policy, not auto-approved.
+// TestHermesClientResolvesPermissionRequestAgainstToolPolicy asserts that when
+// an ACP agent sends us `session/request_permission` (kimi does this on every
+// Shell / file-mutating tool call), the client answers from the task's tool
+// policy rather than auto-approving. The reply must still be prompt and must
+// echo the agent's request id, or the agent blocks 300s and the task hangs.
+//
+// The allowed answer must be the once-scoped option, never
+// `approve_for_session`: an always-scoped approval tells the agent to stop
+// asking, which would end enforcement for the rest of the session.
+func TestHermesClientResolvesPermissionRequestAgainstToolPolicy(t *testing.T) {
 	t.Parallel()
 
 	w := &bufferWriter{}
 	c := &hermesClient{
-		cfg:     Config{Logger: slog.Default()},
+		cfg: Config{
+			Logger: slog.Default(),
+			ToolPolicy: func(_ context.Context, _ string, _ map[string]any) (bool, string) {
+				return true, "Allowed by default"
+			},
+		},
 		stdin:   w,
 		pending: make(map[int]*pendingRPC),
 	}
@@ -618,8 +627,49 @@ func TestHermesClientAutoApprovesPermissionRequest(t *testing.T) {
 	if resp.Result.Outcome.Outcome != "selected" {
 		t.Errorf("outcome.outcome: got %q, want %q", resp.Result.Outcome.Outcome, "selected")
 	}
-	if resp.Result.Outcome.OptionID != "approve_for_session" {
-		t.Errorf("outcome.optionId: got %q, want %q", resp.Result.Outcome.OptionID, "approve_for_session")
+	// CEREBRO-PATCH(acp-tool-policy-seam): was "approve_for_session"; an always-scoped approval ends enforcement.
+	if resp.Result.Outcome.OptionID != "approve" {
+		t.Errorf("outcome.optionId: got %q, want the once-scoped %q", resp.Result.Outcome.OptionID, "approve")
+	}
+}
+
+// A run whose tool policy denies the call must be answered with the rejection
+// option, so the agent never executes the tool. This is the case that used to
+// be impossible: the client approved everything it was asked about.
+func TestHermesClientRejectsPermissionRequestDeniedByToolPolicy(t *testing.T) {
+	t.Parallel()
+
+	w := &bufferWriter{}
+	c := &hermesClient{
+		cfg: Config{
+			Logger: slog.Default(),
+			ToolPolicy: func(_ context.Context, _ string, _ map[string]any) (bool, string) {
+				return false, "Denied by workspace policy"
+			},
+		},
+		stdin:   w,
+		pending: make(map[int]*pendingRPC),
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","id":42,"method":"session/request_permission","params":{"sessionId":"ses_1","options":[{"optionId":"approve","name":"Approve once","kind":"allow_once"},{"optionId":"approve_for_session","name":"Approve for this session","kind":"allow_always"},{"optionId":"reject","name":"Reject","kind":"reject_once"}],"toolCall":{"toolCallId":"tc_1","title":"Shell","content":[]}}}`)
+
+	var resp struct {
+		ID     int `json:"id"`
+		Result struct {
+			Outcome struct {
+				Outcome  string `json:"outcome"`
+				OptionID string `json:"optionId"`
+			} `json:"outcome"`
+		} `json:"result"`
+	}
+	if err := json.Unmarshal([]byte(strings.TrimSpace(w.String())), &resp); err != nil {
+		t.Fatalf("reply is not valid JSON: %q err=%v", w.String(), err)
+	}
+	if resp.ID != 42 {
+		t.Errorf("id: got %d, want 42 (must echo agent's request id)", resp.ID)
+	}
+	if resp.Result.Outcome.OptionID != "reject" {
+		t.Errorf("outcome.optionId: got %q, want %q", resp.Result.Outcome.OptionID, "reject")
 	}
 }
 

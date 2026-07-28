@@ -225,7 +225,7 @@
     "discard_keep": "編集を続ける",
     "discard_confirm": "変更を破棄",
     "infisical": "Infisical secrets",
-    "sandbox": "Sandbox",
+    "_comment_sandbox_tab": "CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the Sandbox tab label.",
     "tools": "Tools",
     "_comment_tools": "CEREBRO-PATCH(agent-tools-tab): JEH-1290 W8 — tools tab label",
     "capabilities": "Capabilities",
@@ -331,7 +331,8 @@
       "input_placeholder": "--flag value",
       "remove_aria": "引数を削除",
       "saved_toast": "カスタム引数を保存しました",
-      "save_failed_toast": "カスタム引数を保存できませんでした"
+      "save_failed_toast": "カスタム引数を保存できませんでした",
+      "_comment": "CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed obsolete sandbox strings."
     },
     "mcp_config": {
       "intro": "ランタイム CLI に転送される MCP server configuration です（Claude は --mcp-config、Codex は $CODEX_HOME/config.toml、Hermes/Kimi/Kiro は ACP mcpServers、OpenClaw はタスクごとの config wrapper 経由）。そのまま保存され、secret が含まれる場合があるため、エージェントのオーナーとワークスペースの admin のみが読み取れます。空のままにすると CLI 自身のデフォルトが使用されます。OpenClaw の HTTP/SSE エントリには、Claude の \"type\" の代わりに OpenClaw 独自のフィールド名（例: \"transport\": \"streamable-http\"）を使用してください。",
@@ -431,15 +432,7 @@
       "environment_placeholder": "production",
       "path_placeholder": "/"
     },
-    "sandbox": {
-      "intro": "Bind this agent to a persona sandbox to gate which tools it may call. The choice applies from the next task spawn — no daemon restart needed.",
-      "label": "Persona sandbox",
-      "no_gating_option": "— No persona gating —",
-      "persona_not_configured": "Persona is not configured for this workspace. Sandbox bindings are unavailable until an admin enables persona.",
-      "admin_only_tooltip": "Only workspace admins or owners can change the sandbox binding.",
-      "saved_toast": "Sandbox binding saved",
-      "save_failed_toast": "Failed to save sandbox binding"
-    },
+    "_comment_sandbox_section": "CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the persona sandbox tab strings.",
     "tools": {
       "_comment": "CEREBRO-PATCH(agent-tools-tab): JEH-1290/1351/1353/1360 W8 — tools tab body strings",
       "intro": "Toggle which tools this agent can use. Tool credentials are configured in workspace settings.",

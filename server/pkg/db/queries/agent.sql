@@ -19,12 +19,13 @@ WHERE id = $1 AND workspace_id = $2;
 
 -- name: CreateAgent :one
 -- CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — surface_visibility column.
+-- CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona_sandbox persistence.
 INSERT INTO agent (
     workspace_id, name, description, avatar_url, runtime_mode,
     runtime_config, runtime_id, visibility, max_concurrent_tasks, owner_id,
-    instructions, custom_env, custom_args, mcp_config, model, persona_sandbox, thinking_level,
+    instructions, custom_env, custom_args, mcp_config, model, thinking_level,
     surface_visibility
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18)
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 RETURNING *;
 
 -- name: UpdateAgent :one
@@ -43,19 +44,15 @@ UPDATE agent SET
     custom_args = COALESCE(sqlc.narg('custom_args'), custom_args),
     mcp_config = COALESCE(sqlc.narg('mcp_config'), mcp_config),
     model = COALESCE(sqlc.narg('model'), model),
-    persona_sandbox = COALESCE(sqlc.narg('persona_sandbox'), persona_sandbox),
     thinking_level = COALESCE(sqlc.narg('thinking_level'), thinking_level),
+    -- CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona_sandbox updates.
     -- CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — per-surface discovery visibility.
     surface_visibility = COALESCE(sqlc.narg('surface_visibility'), surface_visibility),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
 
--- name: ClearAgentPersonaSandbox :one
-UPDATE agent SET persona_sandbox = NULL, updated_at = now()
-WHERE id = $1
-RETURNING *;
-
+-- CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed the persona_sandbox clear query.
 -- name: ClearAgentThinkingLevel :one
 -- Explicit NULL-clear for thinking_level. COALESCE-based UpdateAgent cannot
 -- set the column back to NULL, so the API layer routes "user picked Default"

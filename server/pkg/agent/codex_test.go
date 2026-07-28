@@ -2059,6 +2059,54 @@ func TestEnsureCodexMcpConfigWritesManagedBlock(t *testing.T) {
 	}
 }
 
+// CEREBRO-PATCH(codex-self-mcp-test): preserve user MCP servers during implicit injection.
+func TestEnsureCodexMcpConfigModeInjectsSelfWithoutRemovingUserServers(t *testing.T) {
+	t.Parallel()
+
+	tmp := filepath.Join(t.TempDir(), "config.toml")
+	initial := "[mcp_servers.user_global]\ncommand = \"keep\"\n"
+	if err := os.WriteFile(tmp, []byte(initial), 0o600); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	self := json.RawMessage(`{"mcpServers":{"multica":{"command":"/opt/multica","args":["mcp","serve"]}}}`)
+	if err := ensureCodexMcpConfigMode(tmp, self, false, slog.Default()); err != nil {
+		t.Fatalf("ensure non-strict self config: %v", err)
+	}
+	data, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("read after: %v", err)
+	}
+	got := string(data)
+	for _, want := range []string{
+		"[mcp_servers.user_global]",
+		"[mcp_servers.multica]",
+		`command = "/opt/multica"`,
+		`args = ["mcp", "serve"]`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("expected %q in:\n%s", want, got)
+		}
+	}
+}
+
+func TestCodexConfigHasMCPServerIgnoresPriorManagedBlock(t *testing.T) {
+	t.Parallel()
+
+	content := multicaCodexMcpBeginMarker + "\n" +
+		"[mcp_servers.multica]\ncommand = \"/old/multica\"\n" +
+		multicaCodexMcpEndMarker + "\n\n" +
+		"[mcp_servers.user_global]\ncommand = \"keep\"\n"
+	if codexConfigHasMCPServer(content, "multica") {
+		t.Fatal("prior daemon-managed block must not suppress fresh self injection")
+	}
+
+	content += "\n[mcp_servers.\"multica\"]\ncommand = \"/user/multica\"\n"
+	if !codexConfigHasMCPServer(content, "multica") {
+		t.Fatal("user-defined multica server should suppress duplicate self injection")
+	}
+}
+
 // CEREBRO-PATCH(codex-mcp-http-headers-test): Regression proof for the Codex-specific HTTP header key.
 func TestEnsureCodexMcpConfigTranslatesHTTPHeaders(t *testing.T) {
 	t.Parallel()

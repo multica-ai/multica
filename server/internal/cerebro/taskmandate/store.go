@@ -119,6 +119,14 @@ func (s *Store) Issue(ctx context.Context, taskID, workspaceID, agentID pgtype.U
 // Authorize is intentionally a fresh database read on every tool call. Expiry
 // therefore bites at the call itself, even for a task that started earlier.
 func (s *Store) Authorize(ctx context.Context, taskID, workspaceID, agentID pgtype.UUID, tool string) error {
+	// The self-only capability lookup diagnoses the current policy/mandate
+	// intersection. Keeping it behind the snapshot it explains creates a
+	// circular lockout: a malformed or incomplete mandate would prevent the
+	// agent from discovering that exact fault. The ordinary policy gate and the
+	// tool's self-only actor check still apply after this ceiling.
+	if IsSelfCapabilityLookup(tool) {
+		return nil
+	}
 	if s == nil || s.db == nil || !taskID.Valid {
 		return ErrMissing
 	}
@@ -144,6 +152,19 @@ func (s *Store) Authorize(ctx context.Context, taskID, workspaceID, agentID pgty
 		return ErrToolDeny
 	}
 	return nil
+}
+
+// IsSelfCapabilityLookup recognizes the callable and canonical spellings used
+// by the Gateway, local MCP providers, and the capability catalog.
+func IsSelfCapabilityLookup(tool string) bool {
+	switch strings.TrimSpace(tool) {
+	case "get_agent_capabilities",
+		"mcp__multica__get_agent_capabilities",
+		"platform:get_agent_capabilities":
+		return true
+	default:
+		return false
+	}
 }
 
 // MCPServerWildcard is the immutable task capability for one raw MCP server.

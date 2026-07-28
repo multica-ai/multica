@@ -30,21 +30,10 @@
 // loosen it. This makes resolution a pure, order-independent fold — the layer
 // ordering matters only for attribution (which layer to blame in the reason).
 //
-// Resolve is pure: settings in, decision out. It has no database dependency so
-// it is exhaustively unit-testable.
-//
-// Resolve's pure tighten-only fold is the model for the deny-by-default FLOORS
-// (credentials, the OS sandbox, repo checkout, the repo-approval cap) — those
-// must never be loosened by a lower layer and always call Resolve directly.
-// It is NOT the live default for the GENERAL tool-policy gate (the visible
-// per-tool Allow/Ask/Deny an operator authors in the policy table): that gate
-// calls ResolveGeneral, which as of FIR-2175/FIR-3062 resolves through
-// ResolveMemberOverride by default (registry flag cerebro_member_override,
-// default ON) — a two-stage model where a member's own setting can LOOSEN an
-// inherited group/workspace default by specificity. Resolve stays reachable
-// under ResolveGeneral only as the fallback when member-override is off for a
-// workspace. See ResolveGeneral (store.go) and ResolveMemberOverride below for
-// the two models side by side.
+// Resolution is pure: settings in, decision out. It has no database dependency,
+// so each declared mode is exhaustively unit-testable through ResolveWithMode.
+// Hard-floor keys use the tighten-only model; ordinary permissions may use the
+// openable model when the workspace member-override flag is enabled.
 package toolpolicy
 
 import (
@@ -241,11 +230,10 @@ func (e Effective) Allowed() bool { return e.Setting == SettingAllow }
 // Mode selects which resolution semantics a call site needs (FIR-2351). It is
 // the single switch that keeps chain resolution to ONE function body per
 // semantics instead of two hand-synced top-level algorithms: the on_behalf_of
-// parity gap between Resolve and ResolveMemberOverride (fixed just before this
-// change) drifted in precisely because the two were separate functions that
-// had to be updated in lockstep by hand. ResolveWithMode is now the single
-// place either algorithm is read or changed; Resolve and ResolveMemberOverride
-// below are thin, behavior-preserving wrappers kept for every existing caller.
+// parity gap between the two resolution semantics (fixed just before this
+// change) drifted in precisely because the algorithms were separate functions
+// that had to be updated in lockstep by hand. ResolveWithMode is now the single
+// place either algorithm is read or changed.
 type Mode string
 
 const (
@@ -253,12 +241,12 @@ const (
 	// member layers — Workspace (as the root default), Group, User — may OPEN a
 	// closed floor, the most specific explicit member setting winning. Runtime,
 	// Agent, on_behalf_of, and System sit above the member ceiling and may only
-	// TIGHTEN it, never loosen it. See ResolveMemberOverride for the full model.
+	// TIGHTEN it, never loosen it. See resolveOpenable for the full model.
 	ModeOpenable Mode = "openable"
 	// ModeHardFloor is the deny-by-default floors' semantics — credentials, the
 	// OS sandbox, repo checkout, the repo-approval cap. Every layer may only
 	// tighten below Base; a Base=Deny floor can never be loosened from below by
-	// any layer, member or not. See Resolve for the full model.
+	// any layer, member or not. See resolveHardFloor for the full model.
 	ModeHardFloor Mode = "hard_floor"
 )
 
@@ -266,9 +254,7 @@ const (
 // mode selects. It is the only resolution algorithm in this package —
 // ModeHardFloor and ModeOpenable are two branches of one function, not two
 // independently maintained ones. New call sites should call this directly
-// with an explicit mode; Resolve and ResolveMemberOverride remain for the
-// existing call sites and are equivalent to ResolveWithMode(ModeHardFloor, in)
-// and ResolveWithMode(ModeOpenable, in) respectively.
+// with an explicit mode.
 func ResolveWithMode(mode Mode, in Input) Effective {
 	var out Effective
 	if mode == ModeOpenable {
@@ -277,29 +263,6 @@ func ResolveWithMode(mode Mode, in Input) Effective {
 		out = resolveHardFloor(in)
 	}
 	return decorateRoleSources(out, in)
-}
-
-// Resolve folds the chain into a single Effective verdict using the
-// tighten-only, deny-by-default-floor semantics (ModeHardFloor).
-//
-// Algorithm (walk base → ceiling):
-//
-//  1. Start from Base (the system/workspace default below the runtime).
-//  2. For each layer, an Inherit setting passes the running value through.
-//  3. A concrete setting can only tighten: the running value becomes the more
-//     restrictive of (running, layer). A layer trying to loosen is ignored.
-//  4. On a tie at the current restrictiveness, the higher layer becomes the
-//     decider, so attribution flows toward the ceiling.
-//
-// Because step 3 is a monotonic max over restrictiveness, the effective setting
-// is independent of layer order; only DecidedBy / CappedBy depend on the walk.
-//
-// This is the load-bearing resolver for every deny-by-default floor —
-// credentials, the OS sandbox, repo checkout, the approval cap. It MUST NEVER
-// loosen a Base=Deny floor from below. See ResolveMemberOverride for the
-// openable, member-layer counterpart used by the general tool-policy gate.
-func Resolve(in Input) Effective {
-	return ResolveWithMode(ModeHardFloor, in)
 }
 
 func resolveHardFloor(in Input) Effective {
@@ -359,7 +322,7 @@ func resolveHardFloor(in Input) Effective {
 	}
 }
 
-// ResolveMemberOverride folds the chain using the member-override model
+// resolveOpenable folds the chain using the member-override model
 // (FIR-2175): a two-stage resolution that matches how an operator intuitively
 // reasons about access.
 //
@@ -395,11 +358,8 @@ func resolveHardFloor(in Input) Effective {
 // credentials, the OS sandbox, repo checkout, the approval cap. Because this
 // function can LOOSEN (member overrides group), it MUST NOT be used to gate any
 // deny-by-default floor. It is for the general tool-policy chain only, behind the
-// member-override feature flag. Keep credentials/sandbox/etc. on Resolve.
-func ResolveMemberOverride(in Input) Effective {
-	return ResolveWithMode(ModeOpenable, in)
-}
-
+// member-override feature flag. Keep credentials/sandbox/etc. on the hard-floor
+// mode.
 func decorateRoleSources(out Effective, in Input) Effective {
 	if len(in.RoleSources) == 0 {
 		return out
@@ -570,7 +530,7 @@ func resolveActorOptIn(in Input, agentActor bool) bool {
 func ResolvePermission(in Input, key string, actor platformaccess.Actor) Effective {
 	contract, special := platformaccess.ForKey(key)
 	if !special {
-		return Resolve(in)
+		return ResolveWithMode(ModeHardFloor, in)
 	}
 	if !actor.Authenticated {
 		return Effective{Setting: SettingDeny, Reason: "Authenticated actor required"}
@@ -578,7 +538,7 @@ func ResolvePermission(in Input, key string, actor platformaccess.Actor) Effecti
 	enforcement := contract.Enforcement
 	switch enforcement {
 	case platformaccess.EnforcementPolicy:
-		return Resolve(in)
+		return ResolveWithMode(ModeHardFloor, in)
 	case platformaccess.EnforcementAuthenticatedRead:
 		if actor.Authenticated {
 			return Effective{Setting: SettingAllow, Reason: "Available to authenticated members and agents"}

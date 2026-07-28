@@ -17,10 +17,10 @@ INSERT INTO activity_log (
 RETURNING *;
 
 -- CEREBRO-PATCH(activity-workspace-feed): W4.6 workspace-scoped activity feed.
+-- CEREBRO-PATCH(retire-persona-sandbox): FIR-3820 removed persona audit wording.
 -- name: ListWorkspaceActivities :many
 -- W4.6: workspace-scoped activity feed (no issue_id required) so the
 -- Multica UI can render audit events that are not tied to an issue —
--- agent persona_sandbox changes, runtime persona_sandbox changes, and
 -- similar admin-only operations. Ordered newest-first.
 SELECT * FROM activity_log
 WHERE workspace_id = $1

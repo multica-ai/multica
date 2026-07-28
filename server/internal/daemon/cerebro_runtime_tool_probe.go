@@ -59,6 +59,15 @@ type providerInventory struct {
 	// Reason documents why Probe is nil. Required when Probe is nil, and it is
 	// the text a future implementer needs — what was tried and what blocked it.
 	Reason string
+	// Native lists tool names the runtime dispatches itself and the probe
+	// channel STRUCTURALLY cannot see, so they are unioned onto the measured
+	// result instead of replacing it. This is not a licence to hand-type an
+	// inventory — the rule in this file's header still stands. It exists
+	// because a probe that measures one channel is blind to a second one by
+	// construction, and an unlisted name is denied at call time no matter what
+	// the policy chain says. Every entry must cite the live measurement it came
+	// from, so it is evidence rather than a guess.
+	Native []string
 }
 
 // providerInventories covers every provider agent.New supports. Keep it in
@@ -75,7 +84,21 @@ var providerInventories = map[string]providerInventory{
 	// (packages/cerebro-pi-harness/multica-harness.ts spawns `multica mcp serve`
 	// on session_start and registers every listed tool under its BARE name), so
 	// the measured names are the names Pi sends to /tool-policy/resolve.
-	"pi": {Probe: probeMulticaMCPTools},
+	//
+	// The channel is Multica's, so it lists Multica's tools and NOTHING of Pi's
+	// own — Pi dispatches those from its internal registry, which never crosses
+	// the MCP wire. That blind spot is why agent Mette could start on
+	// 2026-07-27, read her issue and post a comment (all Multica tools) while
+	// every single shell call was denied with "task mandate denied the call":
+	// `bash` had no capability row for the mandate to match, so the policy chain
+	// was never consulted. Native closes exactly that gap.
+	//
+	// Native source — the live observed-access register for agent Mette
+	// (e7b23ae1) on 2026-07-27: {"name":"bash","uses":116,"status":"unmapped",
+	// "drift":true}. That is Pi calling its own tool 116 times and being denied
+	// every time, not a guess about Pi's surface. Add further names the same
+	// way — from an observed call, never from an assumption.
+	"pi": {Probe: probeMulticaMCPTools, Native: []string{"bash"}},
 
 	// Verified 2026-07-26: `opencode serve` exposes GET /experimental/tool/ids,
 	// which answered with 14 bare tool names (bash, read, glob, grep, edit,
@@ -142,7 +165,10 @@ func probeProviderTools(providerType, executable string) (tools []string, ok boo
 	if err != nil || len(measured) == 0 {
 		return nil, false
 	}
-	return dedupeToolNames(measured), true
+	// Union, never replace: Native covers the second channel the probe is blind
+	// to, so dropping it would re-open the lockout the measurement was added to
+	// close. dedupeToolNames keeps the result stable if a name appears in both.
+	return dedupeToolNames(append(measured, entry.Native...)), true
 }
 
 // probeClaudeToolNames adapts the existing claude probe to the toolProbe shape.

@@ -68,7 +68,6 @@ function agent(overrides: Partial<Agent>): Agent {
     updated_at: "",
     archived_at: null,
     archived_by: null,
-    persona_sandbox: "",
     ...overrides,
   };
 }

@@ -67,7 +67,6 @@ const baseSnapshot = {
   description: "",
   model: "claude-opus-4-8",
   thinking_level: "",
-  persona_sandbox: "",
   skill_ids: [],
   custom_env_keys: [],
 };

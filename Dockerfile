@@ -11,6 +11,7 @@ COPY server/go.mod server/go.sum ./server/
 COPY packages/cerebro-pdf-text ./packages/cerebro-pdf-text
 COPY packages/cerebro-attachment-text ./packages/cerebro-attachment-text
 COPY packages/cerebro-pi-harness ./packages/cerebro-pi-harness
+COPY packages/cerebro-opencode-harness ./packages/cerebro-opencode-harness
 RUN cd server && go mod download
 
 # Copy server source

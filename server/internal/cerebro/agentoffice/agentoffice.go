@@ -2,7 +2,7 @@
 // versioning + governance for an agent's full runtime context, mirroring the
 // skill-governance model (skill_version / skill_change_request) but for the
 // agent COMPOSITE — instructions, bound skills, model, thinking_level,
-// mcp_config, custom_args, runtime_config, persona_sandbox, and the NAMES (never
+// mcp_config, custom_args, runtime_config, and the NAMES (never
 // values) of custom_env keys.
 //
 // It lives in the cerebro zone so it survives upstream syncs. The HTTP layer is
@@ -53,16 +53,15 @@ func New(cerebro *cerebrodb.Queries, tx TxStarter, bus *events.Bus) *Service {
 // mirrors the JSONB built by the backfill in the 9100 migration. custom_env
 // holds key NAMES only — secret values are never versioned here.
 type ContextSnapshot struct {
-	Instructions   string          `json:"instructions"`
-	Description    string          `json:"description"`
-	Model          string          `json:"model"`
-	ThinkingLevel  string          `json:"thinking_level"`
-	McpConfig      json.RawMessage `json:"mcp_config"`
-	CustomArgs     json.RawMessage `json:"custom_args"`
-	RuntimeConfig  json.RawMessage `json:"runtime_config"`
-	PersonaSandbox string          `json:"persona_sandbox"`
-	SkillIDs       []string        `json:"skill_ids"`
-	CustomEnvKeys  []string        `json:"custom_env_keys"`
+	Instructions  string          `json:"instructions"`
+	Description   string          `json:"description"`
+	Model         string          `json:"model"`
+	ThinkingLevel string          `json:"thinking_level"`
+	McpConfig     json.RawMessage `json:"mcp_config"`
+	CustomArgs    json.RawMessage `json:"custom_args"`
+	RuntimeConfig json.RawMessage `json:"runtime_config"`
+	SkillIDs      []string        `json:"skill_ids"`
+	CustomEnvKeys []string        `json:"custom_env_keys"`
 	// AlwaysOnSkillIDs (FIR-3805) is the subset of SkillIDs whose full text is
 	// pasted into the agent's instructions on every run instead of being listed
 	// as a one-line, load-on-demand entry. It is a parallel list rather than a
@@ -87,16 +86,15 @@ func ComposeCurrentSnapshot(agent cerebrodb.Agent, bindings []cerebrodb.ListAgen
 		}
 	}
 	return ContextSnapshot{
-		Instructions:   agent.Instructions,
-		Description:    agent.Description,
-		Model:          agent.Model.String,
-		ThinkingLevel:  agent.ThinkingLevel.String,
-		McpConfig:      rawOrEmpty(agent.McpConfig),
-		CustomArgs:     rawOrEmpty(agent.CustomArgs),
-		RuntimeConfig:  rawOrEmpty(agent.RuntimeConfig),
-		PersonaSandbox: agent.PersonaSandbox.String,
-		SkillIDs:       ids,
-		CustomEnvKeys:  customEnvKeys(agent.CustomEnv),
+		Instructions:  agent.Instructions,
+		Description:   agent.Description,
+		Model:         agent.Model.String,
+		ThinkingLevel: agent.ThinkingLevel.String,
+		McpConfig:     rawOrEmpty(agent.McpConfig),
+		CustomArgs:    rawOrEmpty(agent.CustomArgs),
+		RuntimeConfig: rawOrEmpty(agent.RuntimeConfig),
+		SkillIDs:      ids,
+		CustomEnvKeys: customEnvKeys(agent.CustomEnv),
 
 		AlwaysOnSkillIDs: alwaysOn,
 	}
@@ -210,7 +208,6 @@ func (s *Service) ApplySnapshotTx(ctx context.Context, qtx *cerebrodb.Queries, a
 		Description:    snap.Description,
 		Model:          textOrNull(snap.Model),
 		ThinkingLevel:  textOrNull(snap.ThinkingLevel),
-		PersonaSandbox: textOrNull(snap.PersonaSandbox),
 		McpConfig:      jsonOrEmpty(snap.McpConfig),
 		CustomArgs:     jsonOrEmpty(snap.CustomArgs),
 		RuntimeConfig:  jsonOrEmpty(snap.RuntimeConfig),
@@ -286,7 +283,6 @@ func RenderSnapshot(s ContextSnapshot) string {
 	// whole sections of what the agent reads must be legible to a reviewer.
 	fmt.Fprintf(&b, "workspace_brief_mode: %s\n", WorkspaceBriefModeOf(s))
 	fmt.Fprintf(&b, "tools_brief_mode: %s\n", ToolsBriefModeOf(s))
-	fmt.Fprintf(&b, "persona_sandbox: %s\n", s.PersonaSandbox)
 	fmt.Fprintf(&b, "skills: %s\n", strings.Join(s.SkillIDs, ", "))
 	// FIR-3805: rendered on its own line so flipping "always on" for one skill
 	// shows up in review as its own change, not as noise inside the skills line.

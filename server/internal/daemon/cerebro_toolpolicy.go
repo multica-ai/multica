@@ -177,6 +177,14 @@ func (d *Daemon) prepareToolPolicySpawn(provider, workdir, providerHome string, 
 		// harness is not installed (see preparePiHarness).
 		return nil, nil
 	}
+	if adapter.ACPClient {
+		// The before-call seam is the ACP `session/request_permission`
+		// round-trip, answered in-process by the daemon's own ACP client.
+		// There is no settings file to write and nothing to install; the
+		// gate denies when no policy callback is wired, so it cannot be
+		// bypassed by removing a file from the workdir.
+		return nil, nil
+	}
 
 	exe, err := os.Executable()
 	if err != nil {

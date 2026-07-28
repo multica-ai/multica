@@ -29,16 +29,36 @@ class WorkflowDeliveryTest(unittest.TestCase):
 
     def test_desktop_publishes_to_the_private_source_release(self) -> None:
         release = (ROOT / ".github/workflows/release.yml").read_text()
+        desktop_release_config = (
+            ROOT / "apps/desktop/electron-builder.release.yml"
+        ).read_text()
 
         desktop = release[release.index("\n  desktop:\n") :]
         self.assertIn("    needs: release\n", desktop)
         self.assertIn("GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}", desktop)
-        self.assertIn("-c.publish.repo=firtal-cerebro", desktop)
+        self.assertIn("NODE_OPTIONS: --max-old-space-size=4096", desktop)
+        self.assertIn("--config electron-builder.release.yml", desktop)
+        self.assertNotIn("-c.publish.repo=firtal-cerebro", desktop)
+        self.assertIn("extends: electron-builder.yml", desktop_release_config)
+        self.assertIn("repo: firtal-cerebro", desktop_release_config)
 
-    def test_desktop_declares_the_workspace_package_manager(self) -> None:
+    def test_linux_desktop_frees_output_between_architectures(self) -> None:
+        release = (ROOT / ".github/workflows/release.yml").read_text()
+        desktop = release[release.index("\n  desktop:\n") :]
+
+        x64 = desktop.index("node scripts/package.mjs --linux --x64")
+        cleanup = desktop.index("rm -rf dist")
+        arm64 = desktop.index("node scripts/package.mjs --linux --arm64")
+
+        self.assertLess(x64, cleanup)
+        self.assertLess(cleanup, arm64)
+        self.assertNotIn("--linux --x64 --arm64", desktop)
+        self.assertIn("if: matrix.target != 'linux'", desktop)
+
+    def test_desktop_avoids_monorepo_dependency_collection(self) -> None:
         package = json.loads((ROOT / "apps/desktop/package.json").read_text())
 
-        self.assertEqual(package["packageManager"], "pnpm@10.28.2")
+        self.assertNotIn("packageManager", package)
 
 
 if __name__ == "__main__":

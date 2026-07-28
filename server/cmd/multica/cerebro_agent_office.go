@@ -149,9 +149,9 @@ func init() {
 	agentContextProposeCmd.Flags().String("instructions-file", "", "Read replacement instructions from a local file")
 	agentContextProposeCmd.Flags().String("model", "", "Model override")
 	agentContextProposeCmd.Flags().String("thinking-level", "", "Thinking level override")
-	agentContextProposeCmd.Flags().String("persona-sandbox", "", "Persona sandbox override")
 	agentContextProposeCmd.Flags().String("workspace-brief-mode", "", "FIR-3212 shared-workspace-brief mode: off (strip the shared brief) or empty/full for the default")
 	agentContextProposeCmd.Flags().String("tools-brief-mode", "", "FIR-3212 tools-brief mode: summary (fold each connection to one line) or empty/full for the default")
+	agentContextProposeCmd.Flags().String("system-prompt-mode", "", "FIR-3212 system-prompt delivery: append, replace (drop the engine's own system prompt), prepend, or empty for the engine default")
 	agentContextProposeCmd.Flags().StringArray("skill-id", nil, "Full replacement set of bound skill ids (repeatable)")
 	agentContextProposeCmd.Flags().Bool("replace-skills", false, "Apply the --skill-id set even if empty (clears bindings)")
 	agentContextProposeCmd.Flags().String("mcp-config", "", "Full replacement MCP config as a JSON object string (mutually exclusive with --mcp-config-file)")
@@ -240,9 +240,6 @@ func runAgentContextPropose(cmd *cobra.Command, args []string) error {
 	if v, _ := cmd.Flags().GetString("thinking-level"); v != "" {
 		body["thinking_level"] = v
 	}
-	if v, _ := cmd.Flags().GetString("persona-sandbox"); v != "" {
-		body["persona_sandbox"] = v
-	}
 	// FIR-3212 brief-layer modes. Forward on Changed() rather than non-empty so
 	// an explicit --workspace-brief-mode "" resets the agent back to the full
 	// shared brief; the empty default is otherwise indistinguishable from "flag
@@ -254,6 +251,14 @@ func runAgentContextPropose(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("tools-brief-mode") {
 		v, _ := cmd.Flags().GetString("tools-brief-mode")
 		body["tools_brief_mode"] = v
+	}
+	// Same Changed() rule: an explicit --system-prompt-mode "" is how you hand
+	// the engine's own system prompt back, so it must be distinguishable from
+	// "flag not passed". The server rejects a mode the agent's runtime cannot
+	// honour, so a typo fails loudly here instead of being approved and dropped.
+	if cmd.Flags().Changed("system-prompt-mode") {
+		v, _ := cmd.Flags().GetString("system-prompt-mode")
+		body["system_prompt_mode"] = v
 	}
 	skillIDs, _ := cmd.Flags().GetStringArray("skill-id")
 	replaceSkills, _ := cmd.Flags().GetBool("replace-skills")
