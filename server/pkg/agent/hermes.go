@@ -194,8 +194,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	}
 
 	env := buildEnv(b.cfg.Env)
-	// Enable yolo mode so Hermes auto-approves all tool executions.
-	env = append(env, "HERMES_YOLO_MODE=1")
+	// CEREBRO-PATCH(acp-tool-policy-seam): HERMES_YOLO_MODE suppressed
+	// session/request_permission, which is this runtime's mandatory
+	// before-call gate. See cerebro_acp_tool_policy.go.
 	cmd.Env = env
 
 	stdout, err := cmd.StdoutPipe()
@@ -691,17 +692,12 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
+		// CEREBRO-PATCH(acp-tool-policy-seam): resolve against the task's tool policy instead of auto-approving.
 		resp = map[string]any{
 			"jsonrpc": "2.0",
 			"id":      json.RawMessage(rawID),
-			"result": map[string]any{
-				"outcome": map[string]any{
-					"outcome":  "selected",
-					"optionId": "approve_for_session",
-				},
-			},
+			"result":  cerebroACPPermissionResult(context.Background(), c.cfg.ToolPolicy, c.cfg.Logger, raw["params"]),
 		}
-		c.cfg.Logger.Debug("auto-approved agent permission request", "method", method)
 	default:
 		// Unknown agent→client method — reply with standard "method
 		// not found" so the agent doesn't block waiting for us. Better

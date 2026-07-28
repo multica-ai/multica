@@ -6,6 +6,7 @@ COPY server/go.mod server/go.sum ./server/
 COPY packages/cerebro-pdf-text ./packages/cerebro-pdf-text
 COPY packages/cerebro-attachment-text ./packages/cerebro-attachment-text
 COPY packages/cerebro-pi-harness ./packages/cerebro-pi-harness
+COPY packages/cerebro-opencode-harness ./packages/cerebro-opencode-harness
 RUN cd server && go mod download
 COPY server/ ./server/
 RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/browser-verifier-runner ./cmd/browser-verifier-runner

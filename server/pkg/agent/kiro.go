@@ -56,7 +56,9 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs, b.cfg.Logger)...)
+	// CEREBRO-PATCH(acp-tool-policy-seam): --trust-all-tools suppressed
+	// session/request_permission, this runtime's mandatory before-call gate.
+	kiroArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, kiroArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", kiroArgs)

@@ -42,7 +42,7 @@ func TestPrepareToolPolicySpawn_AllLocalProvidersEnforce(t *testing.T) {
 
 func TestPrepareToolPolicySpawn_RejectsLocalProvidersWithoutEnforcementAdapter(t *testing.T) {
 	d := &Daemon{}
-	for _, provider := range []string{"copilot", "opencode", "openclaw", "hermes", "kimi", "kiro", "antigravity"} {
+	for _, provider := range []string{"copilot", "openclaw", "antigravity"} {
 		t.Run(provider, func(t *testing.T) {
 			got, err := d.prepareToolPolicySpawn(provider, t.TempDir(), "", false)
 			if err == nil {
@@ -50,6 +50,25 @@ func TestPrepareToolPolicySpawn_RejectsLocalProvidersWithoutEnforcementAdapter(t
 			}
 			if !strings.Contains(err.Error(), "does not support mandatory tool-policy enforcement") {
 				t.Fatalf("error = %q, want explicit tool-policy rejection", err)
+			}
+		})
+	}
+}
+
+// The ACP family is enforced by the daemon's own ACP client answering
+// session/request_permission, so the spawn is allowed and writes no settings
+// file. A settings path here would mean someone re-routed them through a
+// provider-native hook that these CLIs do not have.
+func TestPrepareToolPolicySpawn_ACPFamilyNeedsNoSettingsFile(t *testing.T) {
+	d := &Daemon{}
+	for _, provider := range []string{"hermes", "kimi", "kiro"} {
+		t.Run(provider, func(t *testing.T) {
+			got, err := d.prepareToolPolicySpawn(provider, t.TempDir(), "", false)
+			if err != nil {
+				t.Fatalf("spawn error = %v, want the ACP client to satisfy enforcement", err)
+			}
+			if got != nil {
+				t.Fatalf("spawn = %+v, want no settings file for an ACP-gated provider", got)
 			}
 		})
 	}

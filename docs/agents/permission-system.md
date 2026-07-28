@@ -349,6 +349,54 @@ gate lives in the extension, turning the workspace flag off no longer falls back
 to an unenforced Pi spawn — `preparePiHarness` refuses to start Pi at all and
 names `cerebro_pi_harness` in the error. Other providers are unchanged.
 
+Pi's probe measures the Multica MCP channel, which by construction lists
+Multica's tools and none of Pi's own — Pi dispatches those from an internal
+registry that never crosses the MCP wire. `providerInventory.Native`
+(`server/internal/daemon/cerebro_runtime_tool_probe.go`) is unioned onto the
+measured result to cover that blind spot; without it `bash` had no capability
+row, the task mandate's allowlist had nothing to match, and every shell call was
+denied before the policy chain was consulted. A failed probe still reports *not
+measured* rather than a Native-only inventory, so a measurement failure never
+reads as a permission decision.
+
+### ACP-gated runtimes (hermes, kimi, kiro)
+
+These three drive one ACP client (`server/pkg/agent/hermes.go`). The Agent
+Client Protocol requires the agent to ask its CLIENT for permission before it
+runs a tool — `session/request_permission` — and the daemon IS that client, so
+the before-call seam exists without any provider-native hook file or installed
+extension. `localtoolpolicy.ProviderAdapterFor` reports them as `ACPClient`
+adapters and `prepareToolPolicySpawn` writes no settings file. Because the gate
+is in-process in the daemon, it cannot be disabled by removing a file from the
+workdir.
+
+`server/pkg/agent/cerebro_acp_tool_policy.go` resolves each request through the
+same `Config.ToolPolicy` callback Codex's approval seam uses. Two properties
+make it a real gate:
+
+- The runtimes are launched WITHOUT their auto-approve modes. `HERMES_YOLO_MODE`
+  and Kiro's `--trust-all-tools` suppressed the permission request entirely and
+  were the actual enforcement hole.
+- The gate answers only once-scoped options and never an `allow_always` kind.
+  An always-scoped approval tells the agent to stop asking, which would end
+  enforcement for the rest of the session.
+
+A missing policy callback, unparseable params, or an options list with no usable
+answer all deny (an ACP `cancelled` outcome where no rejection option is on
+offer).
+
+### OpenCode plugin adapter
+
+OpenCode exposes no provider-native hook file, but it loads plugins from
+`<workdir>/.opencode/plugin` and fires `tool.execute.before` ahead of every tool
+it runs; throwing from that hook aborts the call. The Firtal plugin in
+`packages/cerebro-opencode-harness` is therefore OpenCode's mandatory adapter,
+resolving each call against the daemon's `/tool-policy/resolve` endpoint and
+failing closed on a missing daemon port, a non-OK response, or a transport
+error. `prepareOpenCodeHarness` installs it per run and refuses the spawn when
+it is not on disk, and rewrites it every run so a stale or tampered copy in a
+reused workdir cannot survive.
+
 ## What is enforced LIVE today (no flag required)
 
 Browser credential provisioning has an additional always-on floor:
