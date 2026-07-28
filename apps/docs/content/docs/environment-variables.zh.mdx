@@ -122,6 +122,8 @@ API 返回的 `download_url` 在未配置 CloudFront 签名时会指向 `GET /ap
 
 - **空**：cookie 只对访问的那个 host 生效（单主机部署正确）
 - **设成 `.example.com`**：cookie 在所有子域共享（让 `app.example.com` 和 `api.example.com` 共用登录态）
+- **前后端在不同 host 上时，这是必需项而非可选项**：浏览器必须能从页面自身的 origin 读到 `multica_csrf` cookie，否则所有写请求都会 `403 CSRF validation failed`，而读请求照常
+- 用能覆盖前后端的**最窄**父域（`.agent.example.com`，而不是 `.example.com`）。这个值同时会把 `multica_auth` 会话 cookie 扩散到该域下的每个 host，所以只有当这些 host 都由同一可信主体运维时才用这种部署方式——完整配置见 [Self-Hosting](/getting-started/self-hosting)
 - ⚠️ 不能是 IP 地址（浏览器会忽略）
 
 ## 怎么限制谁能注册
