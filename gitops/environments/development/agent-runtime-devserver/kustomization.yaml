@@ -8,9 +8,9 @@ kind: Kustomization
 # the server URL. The agentrunner-dev-appset (g2crowd/configuration) sources this
 # path and patches PLACEHOLDER -> the workspace slug per Application.
 #
-# secret-store.yaml / external-secret.yaml: phase-1 1Password test (AIPLAT-106)
-# — every dev-server runner gets the ai-platform-engineering vault attached.
-# Scoped to this pipeline only (tools-server's agent-runtime is untouched).
+# secret-store.yaml / external-secret.yaml: per-workspace 1Password integration.
+# SecretStore defines vault per namespace; auth refs the centralized SA token
+# in agentfarm namespace (not exposed to pod env). Scoped to this pipeline only.
 resources:
   - ../../../base/agent-runtime
   - secret-store.yaml
