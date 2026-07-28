@@ -69,6 +69,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
 | `permission-contract-test-resolver` | `server/internal/cerebro/accessdecision/observer_test.go` | 4 test-only lines | FIR-3819 — keeps the existing complete permission contract test compatible with the shared resolver after ordinary tools gained the tighten-only `Resolve` entry point. The helper forwards to its existing `ResolvePermission` fixture behaviour; it changes no product behaviour. |
 | `agent-capabilities-external-security-owner` | `server/internal/handler/agent_capabilities_card_cerebro.go` | 2 lines | FIR-3819 — carries the catalog's read-only `ExternalSecurityOwner` into the agent's Capabilities response, so externally managed permissions name their real gate instead of looking ungoverned. |
+| `task-mandate-api-capability-parity` | `server/internal/handler/agent_capabilities_card_cerebro.go` (1 marked call; implementation in `agent_capabilities_task_mandate_cerebro.go`) | 1 upstream line | FIR-3819 — applies Task Mandate to API endpoints on Capabilities with the same canonical identity that call-time enforcement checks, so a rejected endpoint can never be shown as callable. |
 
 ## FIR-3403 — Access engine legacy-switch retirement
 

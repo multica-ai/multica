@@ -30,7 +30,6 @@ import (
 	cerebrocapabilities "github.com/multica-ai/multica/server/internal/cerebro/capabilities"
 	"github.com/multica-ai/multica/server/internal/cerebro/capabilitycatalog"
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
-	"github.com/multica-ai/multica/server/internal/cerebro/connmeta"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/platformcatalog"
 	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
@@ -413,18 +412,8 @@ func ApplyTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, 
 				tool.HowToFix = "Start a new task whose issued mandate includes this capability."
 			}
 		}
-		for j := range card.Connections[i].Endpoints {
-			endpoint := &card.Connections[i].Endpoints[j]
-			for _, method := range endpoint.Methods {
-				if err := mandates.Authorize(ctx, taskID, workspaceID, agentID, connmeta.APIEndpointToolName(card.Connections[i].Name, method, endpoint.Path)); err != nil {
-					endpoint.Permission, endpoint.Allowed, endpoint.Callable = "deny", false, false
-					endpoint.BlockedReason = fmt.Sprintf("task mandate denied the capability: %v", err)
-					endpoint.HowToFix = "Start a new task whose issued mandate includes this capability."
-					break
-				}
-			}
-		}
 	}
+	applyCerebroTaskMandateEndpointLimits(ctx, mandates, taskID, workspaceID, agentID, card) // CEREBRO-PATCH(task-mandate-api-capability-parity): keep API endpoint capabilities aligned with call-time Task Mandate enforcement.
 }
 
 // BuildAgentCapabilitiesCard assembles the same card as the HTTP route for an
