@@ -36,6 +36,8 @@ export type ServerMessage =
       can_edit: boolean;
       version: number;
       snapshot?: LiveSnapshot | null;
+      /** Steps submitted after `snapshot.version`, replayed to catch us up. */
+      steps?: { version: number; client_id: string; step: unknown }[];
       peers: LivePeer[];
     }
   | { type: "peers"; peers: LivePeer[] }

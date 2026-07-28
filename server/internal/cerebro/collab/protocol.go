@@ -48,14 +48,20 @@ type ClientMessage struct {
 // WelcomeMessage is the first frame a peer receives. Version + Snapshot tell
 // the editor where to start: with a snapshot it adopts that document, without
 // one it keeps the note body it already loaded from the database.
+// Steps carries everything submitted after Snapshot.Version. A snapshot is
+// taken once and then left behind by further typing, so a joiner that adopted
+// it alone would hold an out-of-date document while believing it is current —
+// and its next autosave would write that stale text over everyone's work.
+// Snapshot plus these steps lands the joiner exactly on Version.
 type WelcomeMessage struct {
-	Type     string    `json:"type"`
-	PeerID   string    `json:"peer_id"`
-	Color    string    `json:"color"`
-	CanEdit  bool      `json:"can_edit"`
-	Version  int       `json:"version"`
-	Snapshot *Snapshot `json:"snapshot,omitempty"`
-	Peers    []*Peer   `json:"peers"`
+	Type     string       `json:"type"`
+	PeerID   string       `json:"peer_id"`
+	Color    string       `json:"color"`
+	CanEdit  bool         `json:"can_edit"`
+	Version  int          `json:"version"`
+	Snapshot *Snapshot    `json:"snapshot,omitempty"`
+	Steps    []StepRecord `json:"steps,omitempty"`
+	Peers    []*Peer      `json:"peers"`
 }
 
 // PeersMessage is broadcast whenever somebody joins or leaves.

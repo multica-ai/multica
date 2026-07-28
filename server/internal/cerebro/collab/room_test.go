@@ -247,3 +247,30 @@ func TestRegistryCreatesAndReleasesRooms(t *testing.T) {
 		t.Fatalf("released room must be gone")
 	}
 }
+
+// A joiner is handed the room's snapshot, which is a document as of its OWN
+// version and is normally behind the room. The steps after that version are
+// what close the gap; without them the joiner adopts stale text while believing
+// it is current, and its next autosave writes that stale text over the others'
+// work. This pins the contract the welcome payload depends on.
+func TestSnapshotPlusLaterStepsReachesTheCurrentVersion(t *testing.T) {
+	r := NewRoom("note-1")
+	r.Submit("alice", 0, []json.RawMessage{step("a"), step("b")}) //nolint:errcheck
+	r.SetSnapshot(Snapshot{Version: 2, Doc: json.RawMessage(`{"v":2}`)})
+	r.Submit("bob", 2, []json.RawMessage{step("c"), step("d"), step("e")}) //nolint:errcheck
+
+	snap := r.Snapshot()
+	if snap == nil {
+		t.Fatalf("a joiner must be offered the stored snapshot")
+	}
+	since, err := r.StepsSince(snap.Version)
+	if err != nil {
+		t.Fatalf("steps since the snapshot must be replayable: %v", err)
+	}
+	if len(since) != 3 {
+		t.Fatalf("every step after the snapshot must be replayed, got %d", len(since))
+	}
+	if last := since[len(since)-1].Version; last != r.Version() {
+		t.Fatalf("snapshot + steps must land on the room version %d, landed on %d", r.Version(), last)
+	}
+}

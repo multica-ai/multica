@@ -70,6 +70,15 @@ export function useNoteLiveCollab({
   const caretsRef = React.useRef<RemoteCaret[]>([]);
   const lastCaretSentRef = React.useRef(0);
   const pluginsRegisteredRef = React.useRef(false);
+  // True while a batch of steps is awaiting the authority's answer. The editor
+  // fires several transactions per keystroke and `sendableSteps` keeps handing
+  // back the SAME unconfirmed batch until it is acknowledged, so without this
+  // the identical batch is sent again and again. The server accepts the first
+  // copy and rejects the rest, and each rejection replays our own step a second
+  // time — which double-confirms it, pushes our version permanently ahead of
+  // the server's, and leaves the note desynced with the two sides spinning on
+  // rejections forever.
+  const inFlightRef = React.useRef(false);
 
   // Repaint remote carets by pushing them onto the editor as plugin metadata.
   const paintCarets = React.useCallback(
@@ -91,10 +100,18 @@ export function useNoteLiveCollab({
   // Push any pending local steps to the authority. prosemirror-collab keeps
   // exactly one batch in flight; the next batch goes out when this one is
   // confirmed back to us.
+  //
+  // The collab plugin is only registered once the room answers `welcome`, but
+  // the editor emits transactions from the moment it mounts. Reading collab
+  // state before that point throws (`sendableSteps` dereferences the plugin's
+  // own state), which crashed the whole note page, so nothing is sendable
+  // until the plugin exists.
   const flushSteps = React.useCallback(
     (target: Editor) => {
+      if (!pluginsRegisteredRef.current || inFlightRef.current) return;
       const sendable = sendableSteps(target.state);
       if (!sendable) return;
+      inFlightRef.current = true;
       send({
         type: "steps",
         version: sendable.version,
@@ -109,6 +126,13 @@ export function useNoteLiveCollab({
 
     let disposed = false;
     let reconnectTimer: ReturnType<typeof setTimeout> | undefined;
+
+    // The authority has answered, so whatever we had in flight is settled: it
+    // was either accepted (and comes back to us in `steps_applied`) or refused.
+    // Either way the next batch may go out.
+    const settleInFlight = () => {
+      inFlightRef.current = false;
+    };
 
     const applyRemoteSteps = (
       incoming: { client_id: string; step: unknown }[],
@@ -138,6 +162,14 @@ export function useNoteLiveCollab({
           // A joiner adopts the room's live document before wiring collab, so
           // it starts from what the others actually see rather than from the
           // saved body it loaded a moment ago.
+          // A snapshot is a document as of ITS OWN version, which is usually
+          // behind the room. Adopt it, start collab at that version, then
+          // replay the steps taken since — otherwise we would sit on stale
+          // text while claiming to be current, and autosave would write that
+          // stale text back over everyone else's work.
+          const startVersion = msg.snapshot?.doc
+            ? msg.snapshot.version
+            : msg.version;
           if (msg.snapshot?.doc) {
             editor.commands.setContent(
               msg.snapshot.doc as Parameters<
@@ -148,13 +180,14 @@ export function useNoteLiveCollab({
           }
           if (!pluginsRegisteredRef.current) {
             editor.registerPlugin(
-              collab({ version: msg.version, clientID: msg.peer_id }),
+              collab({ version: startVersion, clientID: msg.peer_id }),
             );
             editor.registerPlugin(remoteCaretsPlugin());
             pluginsRegisteredRef.current = true;
           }
           setPeers(otherPeers(msg.peers, msg.peer_id));
           setConnected(true);
+          if (msg.steps?.length) applyRemoteSteps(msg.steps);
           flushSteps(editor);
           break;
         }
@@ -168,12 +201,17 @@ export function useNoteLiveCollab({
         }
 
         case "steps_applied":
+          settleInFlight();
           applyRemoteSteps(msg.steps);
           break;
 
         case "rejected":
           // Someone else got there first: take their steps, rebase, resend.
+          settleInFlight();
           applyRemoteSteps(msg.missing);
+          // With nothing missing there is no new transaction to trigger a
+          // resend, so push the rebased batch out ourselves.
+          if (msg.missing.length === 0) flushSteps(editor);
           break;
 
         case "caret": {
@@ -212,8 +250,19 @@ export function useNoteLiveCollab({
       if (disposed) return;
       const socket = new WebSocket(liveCollabUrl(api.getBaseUrl(), noteId));
       socketRef.current = socket;
+      // The app authenticates with a bearer token, not a cookie, and a browser
+      // WebSocket cannot set headers — so the server has no identity until we
+      // send the auth frame it waits for. Without this the room refuses every
+      // browser peer and nobody ever appears as present.
+      socket.onopen = () => {
+        const token = api.getToken();
+        if (token) socket.send(JSON.stringify({ type: "auth", token }));
+      };
       socket.onmessage = handleMessage;
       socket.onclose = () => {
+        // Nothing can be acknowledged over a dead socket; a stuck in-flight
+        // marker would mute every send after we reconnect.
+        settleInFlight();
         if (disposed) return;
         setConnected(false);
         setPeers([]);
@@ -241,6 +290,11 @@ export function useNoteLiveCollab({
       editor.off("selectionUpdate", onSelection);
       socketRef.current?.close();
       socketRef.current = null;
+      // The plugins live on the editor instance this effect ran against. A new
+      // editor (note switch, remount) starts without them, so the next
+      // `welcome` must register them again.
+      pluginsRegisteredRef.current = false;
+      inFlightRef.current = false;
       setConnected(false);
       setPeers([]);
     };
