@@ -244,7 +244,10 @@ truth for emission + routing is `server/cmd/server/notification_listeners.go` an
 - **Action category** (`InboxActionCategory` in
   `packages/cerebro-inbox/action-groups.ts`: `act_now` | `reminders` |
   `watching` | `pending` | `waiting` | `calm`) is how the inbox *groups* rows for
-  the user. Also derived from the type, also not the type.
+  the user. Also derived from the type, also not the type — with one exception:
+  a row snoozed with "Remind me" keeps its original type, so an overdue
+  `muted_until` also lands it in `reminders` (FIR-3918), the same predicate that
+  draws the reminder mark on the row.
 
 ---
 
@@ -260,6 +263,21 @@ Three `InboxItemType`s form the **reminders** family — they share the
   (`packages/core/types/inbox.ts`), then resurfaces — it does not spawn a new
   row, it *is* the snoozed row coming back. The reminder picker is the shared
   `ReminderSheet` from `@multica/cerebro-inbox`.
+  **How that stays true (FIR-3918):** snoozing an inbox row also creates a
+  `cerebro_reminder`, and a fired reminder normally drops its own standalone row
+  (see the standalone-row lifecycle below) — which produced the same message
+  twice. The snooze therefore records the row it came from in
+  `cerebro_reminder.source_inbox_item_id` (client:
+  `useSnoozeAsReminder({inboxItemId})`; API: `inbox_item_id` on
+  `POST /api/cerebro/reminders`). When it fires,
+  `resurfacedSnoozedInboxRow` (`server/cmd/server/cerebro_reminder_sweeper.go`)
+  marks the issue's rows unread — so the row arrives like a fired reminder — and
+  skips the standalone row. It falls back to the standalone row whenever the link
+  is absent or the row is not the recipient's own live row, so a reminder is
+  never lost. `fired_inbox_item_id` stays NULL in that branch on purpose: that
+  row is the user's own message, and done/snooze/delete archive what it points
+  at. A **channel/DM** snooze mutes the channel, not an `inbox_item`, so it has
+  no link and keeps its standalone row.
 - **`due_date_reminder`** / **`start_date_reminder`** — **system-generated** when
   an issue's due/start date arrives. Fired by the server-side sweepers
   `server/cmd/server/reminder_due_sweeper.go` and

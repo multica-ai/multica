@@ -184,6 +184,11 @@ type createBody struct {
 	IssueID       string `json:"issue_id"`
 	ProjectID     string `json:"project_id"`
 	ChatMessageID string `json:"chat_message_id"`
+	// CEREBRO-PATCH(cerebro-reminder): FIR-3918 — the inbox row this reminder was
+	// snoozed from. Optional and additive: when it points at a live row of the
+	// recipient's own, the sweeper lets that row be the reminder instead of
+	// creating a duplicate standalone row. Anything else stores NULL.
+	InboxItemID string `json:"inbox_item_id"`
 }
 
 // Create adds a reminder for any recipient, anchored to any (or no) entity.
@@ -331,6 +336,23 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		text = "Reminder"
 	}
 
+	// CEREBRO-PATCH(cerebro-reminder): FIR-3918 — remember the snoozed inbox row.
+	// Only a member recipient has an inbox, and only the recipient's own live row
+	// counts: an unknown, archived, or someone else's id simply stores NULL and
+	// the reminder keeps its standalone row. A bad link must never cost a
+	// reminder, so this never fails the request.
+	var sourceInboxItemID pgtype.UUID
+	if recipientType == "member" && strings.TrimSpace(body.InboxItemID) != "" {
+		if itemID, ierr := util.ParseUUID(strings.TrimSpace(body.InboxItemID)); ierr == nil {
+			if row, lerr := h.Cerebro.FindLiveInboxItemForRecipient(r.Context(), cerebrodb.FindLiveInboxItemForRecipientParams{
+				ID:          itemID,
+				RecipientID: recipientID,
+			}); lerr == nil && util.UUIDToString(row.WorkspaceID) == util.UUIDToString(wsID) {
+				sourceInboxItemID = itemID
+			}
+		}
+	}
+
 	id, err := h.Cerebro.CreateReminder(r.Context(), cerebrodb.CreateReminderParams{
 		WorkspaceID:    wsID,
 		UserID:         userID,
@@ -343,6 +365,8 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		ConversationID: conversationID,
 		ProjectID:      projectID,
 		ChatMessageID:  chatMessageID,
+
+		SourceInboxItemID: sourceInboxItemID,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create reminder")

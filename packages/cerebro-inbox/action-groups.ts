@@ -18,6 +18,7 @@
 // needs a few marked CEREBRO-PATCH touchpoints that delegate into it.
 
 import type { InboxItem, InboxItemType } from "@multica/core/types";
+import { isReminderOverdue } from "./mute-time";
 
 export type InboxActionCategory = "act_now" | "reminders" | "watching" | "pending" | "waiting" | "calm";
 
@@ -100,7 +101,11 @@ function classifyNotif(item: InboxItem, ctx: InboxActionContext): InboxActionCat
   // 1. Reminders and date-arrival items get their own bucket (FIR-2445),
   //    checked before Unread so they don't disappear into the Unread pile
   //    the moment they fire.
-  if (REMINDER_TYPES.has(item.type)) return "reminders";
+  //    FIR-3918: a row snoozed with "Remind me" keeps its original type, so a
+  //    muted_until in the past is the same signal — that row IS the fired
+  //    reminder (it is the one carrying the reminder mark), not a plain unread.
+  if (REMINDER_TYPES.has(item.type) || isReminderOverdue(item.muted_until))
+    return "reminders";
 
   // 2. Unread is a literal bucket: any unread notification belongs here.
   if (!item.read) return "act_now";

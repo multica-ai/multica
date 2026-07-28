@@ -167,6 +167,28 @@ describe("classifyInboxAction — notifications", () => {
       classifyInboxAction(notif({ type: "start_date_reminder", read: false }), ctx()),
     ).toBe("reminders");
   });
+
+  // FIR-3918 — a row snoozed with "Remind me" keeps its original type, so its
+  // fired state is a muted_until in the past. That row IS the reminder now (it
+  // carries the reminder mark), so it belongs in Reminders, not in Unread.
+  it("puts a resurfaced snoozed row in Reminders, not Unread", () => {
+    expect(
+      classifyInboxAction(
+        notif({ type: "mentioned", read: false, muted_until: "2026-05-24T09:00:00Z" }),
+        ctx(),
+      ),
+    ).toBe("reminders");
+  });
+
+  // Still muted (the reminder has not fired yet) → not a reminder signal.
+  it("leaves a row muted into the future out of Reminders", () => {
+    expect(
+      classifyInboxAction(
+        notif({ type: "mentioned", read: false, muted_until: "2999-01-01T09:00:00Z" }),
+        ctx(),
+      ),
+    ).toBe("act_now");
+  });
 });
 
 describe("classifyInboxAction — chats and channels", () => {

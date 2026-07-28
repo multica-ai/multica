@@ -1587,24 +1587,25 @@ type CerebroProjectStatusModel struct {
 }
 
 type CerebroReminder struct {
-	ID               pgtype.UUID        `json:"id"`
-	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
-	UserID           pgtype.UUID        `json:"user_id"`
-	RemindAt         pgtype.Timestamptz `json:"remind_at"`
-	Status           string             `json:"status"`
-	Text             string             `json:"text"`
-	MessageID        pgtype.UUID        `json:"message_id"`
-	ConversationID   pgtype.UUID        `json:"conversation_id"`
-	FiredInboxItemID pgtype.UUID        `json:"fired_inbox_item_id"`
-	FiredAt          pgtype.Timestamptz `json:"fired_at"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
-	CreatorID        pgtype.UUID        `json:"creator_id"`
-	RecipientType    string             `json:"recipient_type"`
-	RecipientID      pgtype.UUID        `json:"recipient_id"`
-	AnchorType       string             `json:"anchor_type"`
-	ProjectID        pgtype.UUID        `json:"project_id"`
-	ChatMessageID    pgtype.UUID        `json:"chat_message_id"`
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	UserID            pgtype.UUID        `json:"user_id"`
+	RemindAt          pgtype.Timestamptz `json:"remind_at"`
+	Status            string             `json:"status"`
+	Text              string             `json:"text"`
+	MessageID         pgtype.UUID        `json:"message_id"`
+	ConversationID    pgtype.UUID        `json:"conversation_id"`
+	FiredInboxItemID  pgtype.UUID        `json:"fired_inbox_item_id"`
+	FiredAt           pgtype.Timestamptz `json:"fired_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	CreatorID         pgtype.UUID        `json:"creator_id"`
+	RecipientType     string             `json:"recipient_type"`
+	RecipientID       pgtype.UUID        `json:"recipient_id"`
+	AnchorType        string             `json:"anchor_type"`
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	ChatMessageID     pgtype.UUID        `json:"chat_message_id"`
+	SourceInboxItemID pgtype.UUID        `json:"source_inbox_item_id"`
 }
 
 type CerebroRock struct {

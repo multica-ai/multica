@@ -456,6 +456,37 @@ func (q *Queries) CreateRuntimePauseInboxCard(ctx context.Context, arg CreateRun
 	return i, err
 }
 
+const findLiveInboxItemForRecipient = `-- name: FindLiveInboxItemForRecipient :one
+SELECT id, issue_id, workspace_id
+FROM inbox_item
+WHERE id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND archived = false
+`
+
+type FindLiveInboxItemForRecipientParams struct {
+	ID          pgtype.UUID `json:"id"`
+	RecipientID pgtype.UUID `json:"recipient_id"`
+}
+
+type FindLiveInboxItemForRecipientRow struct {
+	ID          pgtype.UUID `json:"id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// FIR-3918: resolve the inbox row a reminder was snoozed from — but only if it
+// is still the recipient's own, still exists, and is not archived. Used both
+// when creating the reminder (never store a link to someone else's row) and when
+// it fires (the row must still be there to be able to act as the reminder).
+func (q *Queries) FindLiveInboxItemForRecipient(ctx context.Context, arg FindLiveInboxItemForRecipientParams) (FindLiveInboxItemForRecipientRow, error) {
+	row := q.db.QueryRow(ctx, findLiveInboxItemForRecipient, arg.ID, arg.RecipientID)
+	var i FindLiveInboxItemForRecipientRow
+	err := row.Scan(&i.ID, &i.IssueID, &i.WorkspaceID)
+	return i, err
+}
+
 const findManualInboxItem = `-- name: FindManualInboxItem :one
 SELECT id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details, route, muted_until, archived_at
 FROM inbox_item
@@ -844,6 +875,38 @@ func (q *Queries) SetInboxUnread(ctx context.Context, id pgtype.UUID) (InboxItem
 		&i.ArchivedAt,
 	)
 	return i, err
+}
+
+const setInboxUnreadByIssue = `-- name: SetInboxUnreadByIssue :execrows
+UPDATE inbox_item
+SET read = false
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false
+`
+
+type SetInboxUnreadByIssueParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	RecipientType string      `json:"recipient_type"`
+	RecipientID   pgtype.UUID `json:"recipient_id"`
+	IssueID       pgtype.UUID `json:"issue_id"`
+}
+
+// FIR-3918: a snoozed row coming back IS the fired reminder, so it must arrive
+// unread — otherwise the reminder returns as a grey, already-read row and never
+// rings. Per issue, not per row, because muting is per issue
+// (SetInboxMutedUntilByIssue): every sibling shares the same muted_until, so the
+// one the deduplicated inbox displays is not necessarily the row that was
+// clicked. The inbox groups by issue, so this is one unread signal, not many.
+func (q *Queries) SetInboxUnreadByIssue(ctx context.Context, arg SetInboxUnreadByIssueParams) (int64, error) {
+	result, err := q.db.Exec(ctx, setInboxUnreadByIssue,
+		arg.WorkspaceID,
+		arg.RecipientType,
+		arg.RecipientID,
+		arg.IssueID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const unarchiveInboxByIssue = `-- name: UnarchiveInboxByIssue :execrows
