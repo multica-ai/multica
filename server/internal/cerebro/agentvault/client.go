@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"regexp"
@@ -208,11 +209,43 @@ func (c *Client) resolveConnection(ctx context.Context, workspaceID pgtype.UUID)
 	}
 	want := hostOf(c.cfg.InternalURL)
 	for _, conn := range list {
-		if conn.Type == connections.TypeAPI && want != "" && hostOf(conn.URL) == want {
+		if conn.Type == connections.TypeAPI && want != "" && internalHostsMatch(hostOf(conn.URL), want) {
 			return conn, true, nil
 		}
 	}
 	return connections.Connection{}, false, nil
+}
+
+// sliplaneSuffix matches the random instance suffix Sliplane appends to a
+// service's .internal hostname (e.g. "agent-vault-ekub4x.internal"). The suffix
+// changes every time the service is recreated, so it cannot be part of identity.
+var sliplaneSuffix = regexp.MustCompile(`-[a-z0-9]{6}$`)
+
+// internalHostsMatch reports whether two host:port values refer to the same
+// Sliplane service. Exact equality always matches. For .internal hosts the
+// random instance suffix is stripped from the first label on both sides before
+// comparing, so a recreated service (new suffix) still matches a configured
+// endpoint that carries the old suffix or none at all. Ports must be equal.
+func internalHostsMatch(a, b string) bool {
+	if a == b {
+		return a != ""
+	}
+	return canonicalInternalHost(a) != "" && canonicalInternalHost(a) == canonicalInternalHost(b)
+}
+
+// canonicalInternalHost strips the Sliplane instance suffix from a .internal
+// host:port; any other host returns "" so only .internal names get the relaxed
+// comparison.
+func canonicalInternalHost(hostPort string) string {
+	host, port := hostPort, ""
+	if h, p, err := net.SplitHostPort(hostPort); err == nil {
+		host, port = h, p
+	}
+	if !strings.HasSuffix(host, ".internal") {
+		return ""
+	}
+	label, rest, _ := strings.Cut(host, ".")
+	return sliplaneSuffix.ReplaceAllString(label, "") + "." + rest + ":" + port
 }
 
 // hostOf returns the host:port of a URL, or "" when it does not parse. Used to
