@@ -1028,6 +1028,20 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.captureAutopilotRunCompleted(autopilot, updatedRun)
 		s.publishRunDone(wsID, updatedRun, "completed")
 	case "failed", "cancelled":
+		if task.Status == "failed" {
+			hasActive, err := s.Queries.HasActiveTaskForAutopilotRun(ctx, task.AutopilotRunID)
+			if err != nil {
+				slog.Warn("failed to check active tasks for run-only autopilot failure",
+					"run_id", util.UUIDToString(run.ID),
+					"task_id", util.UUIDToString(task.ID),
+					"error", err,
+				)
+				return
+			}
+			if hasActive {
+				return
+			}
+		}
 		reason := "task " + task.Status
 		if task.Error.Valid {
 			reason = task.Error.String

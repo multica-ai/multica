@@ -3084,6 +3084,24 @@ func (q *Queries) GetWorkspaceAgentRunCounts(ctx context.Context, workspaceID pg
 	return items, nil
 }
 
+const hasActiveTaskForAutopilotRun = `-- name: HasActiveTaskForAutopilotRun :one
+SELECT EXISTS (
+  SELECT 1
+  FROM agent_task_queue
+  WHERE autopilot_run_id = $1
+    AND status IN ('queued', 'deferred', 'dispatched', 'running', 'waiting_local_directory')
+)
+`
+
+// A failed run-only task may already have an atomic provider-network retry.
+// Keep the run open until that child reaches its own terminal state.
+func (q *Queries) HasActiveTaskForAutopilotRun(ctx context.Context, autopilotRunID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasActiveTaskForAutopilotRun, autopilotRunID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const hasActiveTaskForIssue = `-- name: HasActiveTaskForIssue :one
 SELECT count(*) > 0 AS has_active FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')

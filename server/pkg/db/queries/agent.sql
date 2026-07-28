@@ -420,6 +420,16 @@ FROM agent_task_queue p
 WHERE p.id = $1
 RETURNING *;
 
+-- name: HasActiveTaskForAutopilotRun :one
+-- A failed run-only task may already have an atomic provider-network retry.
+-- Keep the run open until that child reaches its own terminal state.
+SELECT EXISTS (
+  SELECT 1
+  FROM agent_task_queue
+  WHERE autopilot_run_id = $1
+    AND status IN ('queued', 'deferred', 'dispatched', 'running', 'waiting_local_directory')
+);
+
 -- name: CancelAgentTasksByIssue :many
 -- Cancels every active task on the issue and returns the affected rows so the
 -- caller can reconcile each agent's status and broadcast task:cancelled events

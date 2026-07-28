@@ -290,7 +290,8 @@ func TestFailTask_RetriesOnTransient5xxThenSucceeds(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
-	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "timeout", true); err != nil {
+	zeroTools := int32(0)
+	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "timeout", &zeroTools, true); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 	if got := calls.Load(); got != 3 {
