@@ -348,7 +348,7 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 func TestBuildChatPromptNoNarrationOnEveryChannel(t *testing.T) {
 	const (
 		prohibition = "Do NOT narrate planned or in-progress steps"
-		carveOut    = "Stating what you completed IS that outcome"
+		carveOut    = "completed actions are part of the outcome"
 	)
 
 	for _, tc := range []struct {
