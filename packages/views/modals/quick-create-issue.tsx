@@ -46,6 +46,7 @@ import {
   checkQuickCreateCliVersion,
   checkQuickCreateFieldsCliVersion,
   readRuntimeCliVersion,
+  providerSupportsQuickCreate,
 } from "@multica/core/runtimes";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
@@ -123,6 +124,7 @@ export function AgentCreatePanel({
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   // Pull `isSuccess` so the stale-id sweep below can distinguish "still
   // loading" from "loaded as empty". Reading length alone treats both as
   // empty and incorrectly clears a valid persisted preference on every open.
@@ -135,16 +137,35 @@ export function AgentCreatePanel({
     [members, userId],
   );
 
-  // Visible = not archived AND assignable by this user. Squads inherit
-  // their leader agent's reachability: the backend always routes a squad
-  // pick to the leader, so hiding squads whose leader isn't visible keeps
-  // the picker honest with what the server would actually accept.
+  // Look up an agent's runtime provider. Empty when the runtime hasn't
+  // registered yet (daemon offline) — the picker leaves the agent visible in
+  // that case; provider-family gating only fires against known families.
+  const runtimeProviderById = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const r of runtimes) m.set(r.id, r.provider);
+    return m;
+  }, [runtimes]);
+
+  // Visible = not archived AND assignable by this user AND its runtime
+  // provider can drive quick-create. The provider gate hides agents whose
+  // runtime executes tools in a remote sandbox (mira) — those agents work
+  // fine for chat/comments but the quick-create prompt hard-codes local
+  // `multica issue create` + `./description.md`, which they can't touch.
+  // Squads inherit their leader agent's reachability: the backend always
+  // routes a squad pick to the leader, so hiding squads whose leader isn't
+  // visible keeps the picker honest with what the server would actually
+  // accept.
   const visibleAgents = useMemo(
     () =>
       agents.filter(
-        (a) => !a.archived_at && canAssignAgent(a, userId, memberRole),
+        (a) =>
+          !a.archived_at &&
+          canAssignAgent(a, userId, memberRole) &&
+          providerSupportsQuickCreate(
+            a.runtime_id ? runtimeProviderById.get(a.runtime_id) : undefined,
+          ),
       ),
-    [agents, userId, memberRole],
+    [agents, userId, memberRole, runtimeProviderById],
   );
   const visibleAgentIds = useMemo(
     () => new Set(visibleAgents.map((a) => a.id)),
@@ -308,7 +329,6 @@ export function AgentCreatePanel({
   // (git-describe shape) are exempted inside checkQuickCreateCliVersion
   // — frontend and server share the same signal there, so they agree by
   // construction across web/desktop/staging without comparing env flags.
-  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const selectedRuntime = useMemo(
     () =>
       selectedAgent?.runtime_id

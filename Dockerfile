@@ -1,9 +1,14 @@
 # --- Build stage ---
 FROM golang:1.26-alpine AS builder
 
-RUN apk add --no-cache git
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apk/repositories \
+    && apk add --no-cache git
 
 WORKDIR /src
+
+ENV GOPROXY=https://goproxy.cn,direct \
+    GOSUMDB=sum.golang.google.cn \
+    GOTOOLCHAIN=auto
 
 # Cache dependencies
 COPY server/go.mod server/go.sum ./server/
@@ -25,7 +30,8 @@ RUN cd server && CGO_ENABLED=0 go build -ldflags "-s -w" -o bin/backfill_codex_u
 # --- Runtime stage ---
 FROM alpine:3.21
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN sed -i 's|dl-cdn.alpinelinux.org|mirrors.tuna.tsinghua.edu.cn|g' /etc/apk/repositories \
+    && apk add --no-cache ca-certificates tzdata
 
 WORKDIR /app
 

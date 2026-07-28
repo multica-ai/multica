@@ -14,13 +14,13 @@ import (
 
 // traecliBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. `acp` and `serve` are the
-// protocol subcommand/action; `-y`/`--yolo` is daemon-owned so headless ACP
-// always runs in bypass-permissions mode (the official traecli gates non-read
-// tools behind a permission prompt otherwise — see
-// https://docs.trae.cn/cli_permission-mode). `--print`/`-p` and
-// `--output-format` would switch the binary out of ACP into print mode and
-// break the daemon↔traecli transport, and `--permission-mode` is owned by the
-// daemon via --yolo.
+// protocol subcommand/action; permission bypass is daemon-owned via
+// `-c permission_mode="bypass_permissions"` (traecli 0.200.x removed the
+// legacy `-y`/`--yolo` flag on `acp serve` — see https://docs.trae.cn/cli).
+// `--print`/`-p` and `--output-format` would switch the binary out of ACP
+// into print mode and break the daemon↔traecli transport, and
+// `--permission-mode` is owned by the daemon via the `-c permission_mode=...`
+// override.
 var traecliBlockedArgs = map[string]blockedArgMode{
 	"acp":               blockedStandalone,
 	"serve":             blockedStandalone,
@@ -31,6 +31,11 @@ var traecliBlockedArgs = map[string]blockedArgMode{
 	"--output-format":   blockedWithValue,
 	"--permission-mode": blockedWithValue,
 }
+
+// traecliACPBaseArgs is the argv the daemon uses to launch traecli 0.200.x
+// in ACP server mode with permissions pre-bypassed. `-c KEY=VAL` is a
+// top-level flag and must precede the `acp serve` subcommand.
+var traecliACPBaseArgs = []string{"-c", `permission_mode="bypass_permissions"`, "acp", "serve"}
 
 // traecliBackend implements Backend by spawning `traecli acp serve --yolo` and
 // communicating via the standard ACP (Agent Client Protocol) JSON-RPC 2.0
@@ -109,7 +114,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	runCtx, cancel := runContext(ctx, timeout)
 
 	traecliArgs := append(
-		[]string{"acp", "serve", "--yolo"},
+		append([]string{}, traecliACPBaseArgs...),
 		filterCustomArgs(opts.CustomArgs, traecliBlockedArgs, b.cfg.Logger)...,
 	)
 	cmd := exec.CommandContext(runCtx, execPath, traecliArgs...)

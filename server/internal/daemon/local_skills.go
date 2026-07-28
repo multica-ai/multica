@@ -165,9 +165,17 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	case "qoder":
 		providerRoot = filepath.Join(home, ".qoder", "skills")
 	case "traecli":
-		// Official TRAE CLI global skills live in ~/.traecli/skills.
-		// See https://docs.trae.cn/cli_skills
-		providerRoot = filepath.Join(home, ".traecli", "skills")
+		// Official TRAE CLI global skills live under $TRAE_HOME/skills, which
+		// defaults to ~/.trae/skills. traecli 0.200.x's `doctor` output shows
+		// `TRAE_HOME: /home/<user>/.trae` — the previous `~/.traecli/skills`
+		// path in this switch never existed on any installed CLI (there is no
+		// separate `.traecli` dot-dir; that name is only the binary alias).
+		// See https://docs.trae.cn/cli_skills.
+		traeHome := strings.TrimSpace(os.Getenv("TRAE_HOME"))
+		if traeHome == "" {
+			traeHome = filepath.Join(home, ".trae")
+		}
+		providerRoot = filepath.Join(traeHome, "skills")
 	case "antigravity":
 		// agy inherits Gemini CLI's global skill root; see
 		// https://antigravity.google/docs/gcli-migration ("Global skills").

@@ -249,25 +249,43 @@ type projectResourceFile struct {
 	Resources          []ProjectResourceForEnv `json:"resources"`
 }
 
+// projectResourceForEnvJSON is the on-wire shape used by both Marshal and
+// Unmarshal so the preparation helper (running with DisallowUnknownFields)
+// can round-trip a ProjectResourceForEnv over stdin/stdout without hitting
+// an "unknown field" decode error on the snake_case keys.
+type projectResourceForEnvJSON struct {
+	ID           string          `json:"id"`
+	ResourceType string          `json:"resource_type"`
+	ResourceRef  json.RawMessage `json:"resource_ref"`
+	Label        string          `json:"label,omitempty"`
+}
+
 // MarshalJSON renders the resource_ref field as raw JSON instead of a base64
 // blob. The struct's other fields are simple strings.
 func (p ProjectResourceForEnv) MarshalJSON() ([]byte, error) {
-	type alias struct {
-		ID           string          `json:"id"`
-		ResourceType string          `json:"resource_type"`
-		ResourceRef  json.RawMessage `json:"resource_ref"`
-		Label        string          `json:"label,omitempty"`
-	}
 	ref := p.ResourceRef
 	if len(ref) == 0 {
 		ref = json.RawMessage("{}")
 	}
-	return json.Marshal(alias{
+	return json.Marshal(projectResourceForEnvJSON{
 		ID:           p.ID,
 		ResourceType: p.ResourceType,
 		ResourceRef:  ref,
 		Label:        p.Label,
 	})
+}
+
+// UnmarshalJSON mirrors MarshalJSON's snake_case shape.
+func (p *ProjectResourceForEnv) UnmarshalJSON(data []byte) error {
+	var raw projectResourceForEnvJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	p.ID = raw.ID
+	p.ResourceType = raw.ResourceType
+	p.ResourceRef = raw.ResourceRef
+	p.Label = raw.Label
+	return nil
 }
 
 // writeProjectResources writes .multica/project/resources.json into the
@@ -408,6 +426,13 @@ func skillsDirPath(workDir, provider string) string {
 		// (and also scans .agents/skills/). Prefer the native .grok tree.
 		// See Grok user-guide skills.md.
 		return filepath.Join(workDir, ".grok", "skills")
+	case "mira":
+		// Mira (mircli) reads project-level skills from .trae/skills/ in
+		// the workdir (its native convention — see MIRA_HOME/mircli.py where
+		// the discovery loop scans .trae/skills/*/SKILL.md and merges with
+		// $MIRA_HOME/skills/). Global skills live in $MIRA_HOME/skills and
+		// are handled in local_skills.go's provider-root branch.
+		return filepath.Join(workDir, "._agent", "skills")
 	default:
 		// Fallback: write to .agent_context/skills/ (referenced by meta config).
 		return filepath.Join(workDir, ".agent_context", "skills")

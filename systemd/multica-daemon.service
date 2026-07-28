@@ -1,0 +1,18 @@
+[Unit]
+Description=Multica local agent runtime daemon
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=HOME=/data00/home/hexin.coco/Workspace/services/multica-cli-home
+Environment=PATH=/data00/home/hexin.coco/Workspace/.local/bin:/data00/home/hexin.coco/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+WorkingDirectory=/data00/home/hexin.coco/Workspace/services/multica-cli-home
+ExecStart=/data00/home/hexin.coco/.local/bin/multica daemon start --foreground --no-auto-update
+Restart=on-failure
+RestartSec=5s
+StandardOutput=append:/data00/home/hexin.coco/Workspace/services/multica-cli-home/.multica/daemon.systemd.log
+StandardError=append:/data00/home/hexin.coco/Workspace/services/multica-cli-home/.multica/daemon.systemd.err.log
+
+[Install]
+WantedBy=default.target

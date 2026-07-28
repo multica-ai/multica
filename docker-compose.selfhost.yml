@@ -16,7 +16,7 @@
 # Frontend: http://localhost:${FRONTEND_PORT:-3000}
 # Backend:  http://localhost:${BACKEND_PORT:-8080}
 
-name: multica
+version: "3.9"
 
 services:
   postgres:
@@ -28,6 +28,8 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     restart: unless-stopped
+    mem_limit: 2g
+    cpus: 2.0
     healthcheck:
       test:
         [
@@ -44,7 +46,7 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "127.0.0.1:${BACKEND_PORT:-8080}:8080"
+      - "0.0.0.0:${BACKEND_PORT:-8080}:8080"
     volumes:
       - backend_uploads:/app/data/uploads
     environment:
@@ -127,13 +129,15 @@ services:
       # VCS integration at-rest encryption key for token-based providers
       MULTICA_VCS_SECRET_KEY: ${MULTICA_VCS_SECRET_KEY:-}
     restart: unless-stopped
+    mem_limit: 3g
+    cpus: 3.0
 
   frontend:
     image: ${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:${MULTICA_IMAGE_TAG:-latest}
     depends_on:
       - backend
     ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+      - "0.0.0.0:${FRONTEND_PORT:-3000}:3000"
     environment:
       HOSTNAME: "0.0.0.0"
       REMOTE_API_URL: ${REMOTE_API_URL:-http://backend:8080}
@@ -141,6 +145,8 @@ services:
       NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-}
       NEXT_PUBLIC_WS_URL: ${NEXT_PUBLIC_WS_URL:-}
     restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.0
 
 volumes:
   pgdata:

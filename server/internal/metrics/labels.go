@@ -127,6 +127,7 @@ var (
 		"hermes":        "hermes",
 		"kiro":          "kiro",
 		"kimi":          "kimi",
+		"mira":          "mira",
 		"multica_agent": "multica_agent",
 		"openclaw":      "openclaw",
 		"opencode":      "opencode",

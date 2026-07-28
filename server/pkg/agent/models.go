@@ -187,6 +187,14 @@ func ListModels(ctx context.Context, providerType, executablePath string) ([]Mod
 		return cachedDiscovery(providerType, func() ([]Model, error) {
 			return discoverGrokModels(ctx, executablePath)
 		})
+	case "mira":
+		// mircli has no machine-readable model catalog command (its
+		// `model --list` output is TUI-decorated), so we ship the static
+		// list baked into mircliStaticModels(). Callers may still enter
+		// a custom key by hand — the daemon just passes it through to
+		// `mircli model <key>` and mircli surfaces an "unknown model"
+		// error on mismatch (see miraBackend.Execute).
+		return mircliStaticModels(), nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q", providerType)
 	}
@@ -383,17 +391,84 @@ func codexStaticModels() []Model {
 	}
 }
 
-// discoverTraecliModels spins up a throwaway `traecli acp serve --yolo` process
-// and parses the model catalog traecli returns from session/new (same shape as
-// Kiro/Qoder). The official TRAE CLI must be logged in for the catalog to be
-// non-empty; on any failure the caller falls back to the manual-entry field.
+// discoverTraecliModels runs `traecli debug models` and returns the catalog
+// the installed TRAE CLI actually advertises. traecli 0.200.x is ACP-native
+// but its `session/new` response ships a placeholder `{modelId:"",name:""}`
+// entry instead of the real model list, so we cannot reuse the shared ACP
+// discovery path here. `traecli debug models` is the officially supported
+// entry point for "render the raw model catalog as JSON" — see
+// `traecli debug --help`. We filter to `visibility=="list"` (which excludes
+// experimental / internal-only slugs that traecli itself hides from the
+// interactive picker) and use each model's slug as the ID.
+//
+// On any failure (traecli missing, not logged in, network error) we return
+// an empty list so the UI falls back to the manual-entry field.
 func discoverTraecliModels(ctx context.Context, executablePath string) ([]Model, error) {
-	return discoverACPModels(ctx, executablePath, acpDiscoveryProvider{
-		defaultBin:   "traecli",
-		clientName:   "multica-model-discovery",
-		tmpdirPrefix: "multica-traecli-discovery-",
-		acpArgs:      []string{"acp", "serve", "--yolo"},
-	})
+	bin := strings.TrimSpace(executablePath)
+	if bin == "" {
+		bin = "traecli"
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, bin, "debug", "models")
+	hideAgentWindow(cmd)
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	if err := cmd.Run(); err != nil {
+		return []Model{}, fmt.Errorf("traecli debug models: %w (stderr: %s)", err, strings.TrimSpace(stderr.String()))
+	}
+	var payload struct {
+		Models []struct {
+			Slug        string `json:"slug"`
+			Description string `json:"description"`
+			Visibility  string `json:"visibility"`
+			ModelFamily string `json:"model_family"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &payload); err != nil {
+		return []Model{}, fmt.Errorf("parse traecli debug models: %w", err)
+	}
+	models := make([]Model, 0, len(payload.Models))
+	seen := map[string]bool{}
+	for _, m := range payload.Models {
+		slug := strings.TrimSpace(m.Slug)
+		if slug == "" || seen[slug] {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(m.Visibility), "list") {
+			continue
+		}
+		seen[slug] = true
+		provider := strings.TrimSpace(m.ModelFamily)
+		if provider == "" {
+			provider = "trae"
+		}
+		models = append(models, Model{
+			ID:       slug,
+			Label:    traecliModelLabel(slug),
+			Provider: provider,
+		})
+	}
+	return models, nil
+}
+
+// traecliModelLabel renders a display label for a traecli slug.
+// Example: "gpt-5.5" -> "GPT-5.5", "gpt-5.1-codex-mini" -> "GPT-5.1-Codex-Mini".
+func traecliModelLabel(slug string) string {
+	parts := strings.Split(slug, "-")
+	for i, p := range parts {
+		if p == "" {
+			continue
+		}
+		switch strings.ToLower(p) {
+		case "gpt", "oss":
+			parts[i] = strings.ToUpper(p)
+		default:
+			parts[i] = strings.ToUpper(p[:1]) + p[1:]
+		}
+	}
+	return strings.Join(parts, "-")
 }
 
 // cursorStaticModels is a minimal fallback used when

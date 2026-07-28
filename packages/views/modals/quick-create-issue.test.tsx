@@ -161,6 +161,7 @@ vi.mock("@multica/core/runtimes", () => ({
   checkQuickCreateCliVersion: () => ({ state: "ok", min: "1.0.0" }),
   checkQuickCreateFieldsCliVersion: () => ({ state: "ok", min: "1.0.0" }),
   readRuntimeCliVersion: () => "1.2.3",
+  providerSupportsQuickCreate: () => true,
   MIN_QUICK_CREATE_CLI_VERSION: "1.0.0",
 }));
 

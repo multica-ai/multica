@@ -45,6 +45,10 @@ RUN pnpm install --frozen-lockfile --offline
 ARG NEXT_PUBLIC_APP_VERSION=dev
 ENV NEXT_PUBLIC_APP_VERSION=$NEXT_PUBLIC_APP_VERSION
 ENV STANDALONE=true
+# BOE network cannot reach fonts.gstatic.com — `next/font/google` fetches font
+# CSS + woff2 at build time. Route via a CN mirror (Loli maintained) so the
+# build works from inside the corp network without touching layout.tsx.
+ENV NEXT_FONT_GOOGLE_MIRROR_URL=https://fonts.loli.net
 
 # Build the web app (standalone output for minimal runtime)
 RUN pnpm --filter @multica/web build

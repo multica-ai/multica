@@ -88,6 +88,22 @@ export function readRuntimeCliVersion(metadata: Record<string, unknown> | undefi
   return typeof v === "string" ? v : "";
 }
 
+// Providers whose runtime can't drive quick-create because their tools
+// execute in a remote sandbox with no access to the local `multica` CLI or
+// workdir. `mira` (mircli) is the first: it needs the miramcp bridge to reach
+// local files, and BOE-hosted devboxes can't install that bridge. The
+// quick-create system prompt hard-codes `multica issue create` and a local
+// `./description.md`, so a remote-sandbox runtime picked here would deadlock
+// on the first tool call. Chat/comment flows are unaffected — they don't
+// require local FS.
+export const QUICK_CREATE_INCAPABLE_PROVIDERS: ReadonlySet<string> = new Set(["mira"]);
+
+/** True when a runtime provider can drive the quick-create flow. */
+export function providerSupportsQuickCreate(provider: string | undefined | null): boolean {
+  if (!provider) return true; // unknown provider — don't block, server re-validates
+  return !QUICK_CREATE_INCAPABLE_PROVIDERS.has(provider);
+}
+
 /**
  * Frontend mirror of the server's `MinHandoffCLIVersion` soft gate
  * (`server/pkg/agent/version.go`). The assignment handoff note is only rendered
