@@ -67,7 +67,7 @@ export interface ObjectConnectionList { connections: ObjectConnection[] }
 export type MeetingCadenceUnit = "manual" | "day" | "week" | "month" | "quarter";
 export type MeetingAgendaBinding = "none" | "scorecard" | "goals" | "issues_list";
 export interface MeetingAgendaSection { id: string; name: string; position: number; binding: MeetingAgendaBinding }
-export interface MeetingNoteType { id: string; name: string; cadence_unit: MeetingCadenceUnit; cadence_count: number; enabled: boolean; current_note_id?: string }
+export interface MeetingNoteType { id: string; name: string; icon?: string; cadence_unit: MeetingCadenceUnit; cadence_count: number; enabled: boolean; current_note_id?: string; anchor_weekday?: number; anchor_week_of_month?: number; next_meeting_date?: string; upcoming_dates?: string[]; year_dates?: string[]; participants?: { type: "member" | "agent"; id: string }[] }
 export interface MeetingConfig { workspace_id: string; note_type_id?: string; note_type_name?: string; current_note_id?: string; cadence_unit: MeetingCadenceUnit; cadence_count: number; agenda: MeetingAgendaSection[]; available_note_types: MeetingNoteType[] }
 export interface MeetingConfigInput { note_type_id?: string; cadence_unit: MeetingCadenceUnit; cadence_count: number; agenda: MeetingAgendaSection[] }
 export interface OrgChartSeat { id: string; workspace_id: string; parent_id?: string; name: string; responsibilities: string[]; owner_type?: "member" | "agent"; owner_id?: string; owner_name?: string; vacant: boolean; position: number }

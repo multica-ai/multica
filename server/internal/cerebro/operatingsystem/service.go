@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
+	notetypes "github.com/multica-ai/multica/server/internal/cerebro/note_types"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -555,18 +556,65 @@ func (s *Service) meetingNoteTypes(ctx context.Context, workspaceID pgtype.UUID)
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
 	out := make([]MeetingNoteTypeResponse, 0, len(rows))
 	for _, row := range rows {
 		if !row.Enabled || row.CadenceUnit == "manual" {
 			continue
 		}
-		out = append(out, MeetingNoteTypeResponse{
-			ID: util.UUIDToString(row.ID), Name: row.Name,
+		item := MeetingNoteTypeResponse{
+			ID: util.UUIDToString(row.ID), Name: row.Name, Icon: row.Icon,
 			CadenceUnit: row.CadenceUnit, CadenceCount: row.CadenceCount, Enabled: row.Enabled,
-			CurrentNoteID: util.UUIDToString(row.RunningDocArtifactID),
-		})
+			CurrentNoteID: s.currentNoteLink(ctx, row),
+		}
+		if row.AnchorWeekday.Valid {
+			v := row.AnchorWeekday.Int16
+			item.AnchorWeekday = &v
+		}
+		if row.AnchorWeekOfMonth.Valid {
+			v := row.AnchorWeekOfMonth.Int16
+			item.AnchorWeekOfMonth = &v
+		}
+		upcoming := notetypes.Upcoming(row, now, 4)
+		dates := make([]string, 0, len(upcoming))
+		for _, d := range upcoming {
+			dates = append(dates, d.Format("2006-01-02"))
+		}
+		if len(dates) > 0 {
+			item.NextMeetingDate = dates[0]
+			item.UpcomingDates = dates
+		}
+		yearAhead := notetypes.UpcomingUntil(row, now, now.AddDate(1, 0, 0), 60)
+		year := make([]string, 0, len(yearAhead))
+		for _, d := range yearAhead {
+			year = append(year, d.Format("2006-01-02"))
+		}
+		if len(year) > 0 {
+			item.YearDates = year
+		}
+		if len(row.Participants) > 0 {
+			var refs []MeetingParticipant
+			if err := json.Unmarshal(row.Participants, &refs); err == nil {
+				item.Participants = refs
+			}
+		}
+		out = append(out, item)
 	}
 	return out, nil
+}
+
+// currentNoteLink resolves the note to open from the planner: the single
+// rolling document for running_doc types, otherwise the newest materialised
+// note for new_note types. Empty when the type has never materialised a note.
+func (s *Service) currentNoteLink(ctx context.Context, row cerebrodb.CerebroNoteType) string {
+	if row.RunningDocArtifactID.Valid {
+		return util.UUIDToString(row.RunningDocArtifactID)
+	}
+	id, err := s.queries.GetLatestNoteTypeArtifact(ctx, row.ID)
+	if err != nil || !id.Valid {
+		return ""
+	}
+	return util.UUIDToString(id)
 }
 
 func applyMeetingNoteType(response *MeetingConfigResponse, noteTypes []MeetingNoteTypeResponse) {

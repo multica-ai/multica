@@ -138,6 +138,23 @@ describe("Vision Plan", () => {
     expect(state.updateItem).toHaveBeenCalledWith(expect.objectContaining({ id: "item-1", input: expect.objectContaining({ position: 1 }) }));
   });
 
+  it("deletes an extra section via an inline confirm instead of a window dialog", () => {
+    renderEdit();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Core Processes section" }));
+    // First click only arms the confirm — nothing is deleted yet.
+    expect(state.deleteSection).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Confirm delete Core Processes section" }));
+    expect(state.deleteSection).toHaveBeenCalledWith("processes");
+  });
+
+  it("cancels a section delete without removing it", () => {
+    renderEdit();
+    fireEvent.click(screen.getByRole("button", { name: "Delete Core Processes section" }));
+    fireEvent.click(screen.getByRole("button", { name: "Cancel delete Core Processes section" }));
+    expect(state.deleteSection).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Delete Core Processes section" })).toBeInTheDocument();
+  });
+
   it("renames an extra section inline", () => {
     renderEdit();
     fireEvent.change(screen.getByDisplayValue("Core Processes"), { target: { value: "Our Processes" } });

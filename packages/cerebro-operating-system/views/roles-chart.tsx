@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { ChevronDown, ChevronRight, Plus, UserRoundX } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Maximize2, Plus, UserRoundX, ZoomIn, ZoomOut } from "lucide-react";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 
 import type { OrgChartSeat } from "../core/types";
@@ -16,6 +16,13 @@ export interface SeatActor {
 }
 
 export type InsertMode = "above" | "beside" | "below";
+
+// Zoom bounds: 0.3 lets a several-hundred-seat chart fit on screen, 1.5 lets a
+// single branch read comfortably. Buttons and Ctrl/Cmd-wheel step by this much.
+const ZOOM_MIN = 0.3;
+const ZOOM_MAX = 1.5;
+const ZOOM_STEP = 0.15;
+const clampZoom = (value: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value * 100) / 100));
 
 // One fixed colour code per ownership state so the chart reads at a glance:
 // agents are violet, people are sky, and an empty seat stays amber. The class
@@ -47,6 +54,9 @@ function seatLabel(seat: OrgChartSeat): string {
 
 // The small round + that sits on a connector line, one per direction. Kept
 // visually tiny per the org-chart design, with a padded hit area for touch.
+// Hidden until the seat is hovered or focused so a dense chart stays calm —
+// group-hover/group-focus-within reveal it (the button stays in the DOM for
+// keyboard users and tests).
 function AddRoleButton({ seat, mode, onInsert, className }: {
   seat: OrgChartSeat;
   mode: InsertMode;
@@ -58,7 +68,7 @@ function AddRoleButton({ seat, mode, onInsert, className }: {
       type="button"
       aria-label={`Add role ${mode} ${seat.name}`}
       onClick={() => onInsert(seat.id, mode)}
-      className={`relative z-20 grid size-6 place-items-center rounded-full border bg-background text-muted-foreground shadow-sm before:absolute before:-inset-2 before:content-[''] hover:bg-muted hover:text-foreground ${className ?? ""}`}
+      className={`relative z-20 grid size-6 place-items-center rounded-full border bg-background text-muted-foreground opacity-0 shadow-sm transition-opacity before:absolute before:-inset-2 before:content-[''] hover:bg-muted hover:text-foreground focus-visible:opacity-100 group-hover:opacity-100 group-focus-within:opacity-100 ${className ?? ""}`}
     >
       <Plus aria-hidden className="size-3.5" />
     </button>
@@ -104,6 +114,20 @@ function SeatCard({ seat, actor, onEdit }: { seat: OrgChartSeat; actor?: SeatAct
   );
 }
 
+// The zoom rail: explicit buttons so zoom never depends on a wheel gesture, plus
+// a readable percentage. Ctrl/Cmd-wheel over the canvas zooms too (wired in the
+// viewport), but the buttons are the guaranteed path.
+function ZoomControls({ scale, onZoom, onReset }: { scale: number; onZoom: (delta: number) => void; onReset: () => void }) {
+  return (
+    <div className="flex items-center gap-1 rounded-lg border bg-background p-1 shadow-sm">
+      <button type="button" aria-label="Zoom out" onClick={() => onZoom(-ZOOM_STEP)} disabled={scale <= ZOOM_MIN} className="grid size-8 place-items-center rounded-md hover:bg-muted disabled:opacity-40"><ZoomOut aria-hidden className="size-4" /></button>
+      <span className="min-w-11 text-center text-xs font-medium tabular-nums text-muted-foreground" aria-live="polite">{Math.round(scale * 100)}%</span>
+      <button type="button" aria-label="Zoom in" onClick={() => onZoom(ZOOM_STEP)} disabled={scale >= ZOOM_MAX} className="grid size-8 place-items-center rounded-md hover:bg-muted disabled:opacity-40"><ZoomIn aria-hidden className="size-4" /></button>
+      <button type="button" aria-label="Reset zoom" onClick={onReset} className="grid size-8 place-items-center rounded-md hover:bg-muted"><Maximize2 aria-hidden className="size-4" /></button>
+    </div>
+  );
+}
+
 export function RolesChart({ seats, onEdit, onInsert, resolveActor }: {
   seats: OrgChartSeat[];
   onEdit: (seatId: string) => void;
@@ -111,6 +135,8 @@ export function RolesChart({ seats, onEdit, onInsert, resolveActor }: {
   resolveActor?: (ownerType: "member" | "agent", ownerId: string) => SeatActor | undefined;
 }) {
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [scale, setScale] = useState(1);
+  const viewportRef = useRef<HTMLDivElement>(null);
   const byId = new Map(seats.map((seat) => [seat.id, seat]));
   const ordered = [...seats].sort((a, b) => a.position - b.position || a.name.localeCompare(b.name));
   const children = (parentId: string) => ordered.filter((seat) => seat.parent_id === parentId);
@@ -135,9 +161,51 @@ export function RolesChart({ seats, onEdit, onInsert, resolveActor }: {
     });
   }
 
+  const zoomBy = (delta: number) => setScale((current) => clampZoom(current + delta));
+
+  // Ctrl/Cmd-wheel zooms the canvas. React's onWheel is passive, so preventing
+  // the browser's own page zoom needs a native non-passive listener.
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+    const onWheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      setScale((current) => clampZoom(current - Math.sign(event.deltaY) * ZOOM_STEP));
+    };
+    viewport.addEventListener("wheel", onWheel, { passive: false });
+    return () => viewport.removeEventListener("wheel", onWheel);
+  }, []);
+
+  // Drag anywhere on the empty canvas to pan; dragging a card or a + button does
+  // its own thing. Pointer capture keeps the pan smooth past the viewport edge.
+  const pan = useRef<{ x: number; y: number; left: number; top: number } | null>(null);
+  const [panning, setPanning] = useState(false);
+  function onPointerDown(event: React.PointerEvent<HTMLDivElement>) {
+    const viewport = viewportRef.current;
+    if (!viewport || event.button !== 0) return;
+    if ((event.target as HTMLElement).closest("button, article, a, input")) return;
+    pan.current = { x: event.clientX, y: event.clientY, left: viewport.scrollLeft, top: viewport.scrollTop };
+    setPanning(true);
+    viewport.setPointerCapture(event.pointerId);
+  }
+  function onPointerMove(event: React.PointerEvent<HTMLDivElement>) {
+    const viewport = viewportRef.current;
+    if (!viewport || !pan.current) return;
+    viewport.scrollLeft = pan.current.left - (event.clientX - pan.current.x);
+    viewport.scrollTop = pan.current.top - (event.clientY - pan.current.y);
+  }
+  function endPan(event: React.PointerEvent<HTMLDivElement>) {
+    if (!pan.current) return;
+    pan.current = null;
+    setPanning(false);
+    viewportRef.current?.releasePointerCapture(event.pointerId);
+  }
+
   // Each seat renders as a fixed-height column: card, connector row, then its
   // reports. Because every card and every connector is the same height, the
-  // columns line up and a level reads as one row across the whole chart.
+  // columns line up and a level reads as one row across the whole chart. The
+  // per-card `group` scopes the hover-reveal of the + buttons to just that seat.
   function node(seat: OrgChartSeat, level: number, path: Set<string>) {
     const cyclic = path.has(seat.id);
     const nextPath = new Set(path).add(seat.id);
@@ -148,27 +216,29 @@ export function RolesChart({ seats, onEdit, onInsert, resolveActor }: {
 
     return (
       <div key={`${seat.id}-${level}`} role="treeitem" aria-level={level} aria-expanded={reports.length > 0 ? !isCollapsed : undefined} aria-label={seatLabel(seat)} className="flex flex-col items-center">
-        <div className="relative">
-          <SeatCard seat={seat} actor={actor} onEdit={onEdit} />
-          {onInsert && <AddRoleButton seat={seat} mode="above" onInsert={onInsert} className="absolute -top-3 left-1/2 -translate-x-1/2" />}
-          {onInsert && <AddRoleButton seat={seat} mode="beside" onInsert={onInsert} className="absolute -right-3 top-1/2 -translate-y-1/2" />}
-        </div>
+        <div className="group flex flex-col items-center">
+          <div className="relative">
+            <SeatCard seat={seat} actor={actor} onEdit={onEdit} />
+            {onInsert && <AddRoleButton seat={seat} mode="above" onInsert={onInsert} className="absolute -top-3 left-1/2 -translate-x-1/2" />}
+            {onInsert && <AddRoleButton seat={seat} mode="beside" onInsert={onInsert} className="absolute -right-3 top-1/2 -translate-y-1/2" />}
+          </div>
 
-        {cyclic && <p role="alert" className="mt-1 text-xs text-destructive">Reporting cycle needs correction.</p>}
+          {cyclic && <p role="alert" className="mt-1 text-xs text-destructive">Reporting cycle needs correction.</p>}
 
-        <div className="mt-1 flex h-7 items-center gap-1">
-          {onInsert && <AddRoleButton seat={seat} mode="below" onInsert={onInsert} />}
-          {reports.length > 0 && (
-            <button
-              type="button"
-              aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${seat.name}`}
-              aria-expanded={!isCollapsed}
-              onClick={() => toggle(seat.id)}
-              className="relative z-20 grid size-6 place-items-center rounded-full border bg-background text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground"
-            >
-              {isCollapsed ? <ChevronRight aria-hidden className="size-3.5" /> : <ChevronDown aria-hidden className="size-3.5" />}
-            </button>
-          )}
+          <div className="mt-1 flex h-7 items-center gap-1">
+            {onInsert && <AddRoleButton seat={seat} mode="below" onInsert={onInsert} />}
+            {reports.length > 0 && (
+              <button
+                type="button"
+                aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${seat.name}`}
+                aria-expanded={!isCollapsed}
+                onClick={() => toggle(seat.id)}
+                className="relative z-20 grid size-6 place-items-center rounded-full border bg-background text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground"
+              >
+                {isCollapsed ? <ChevronRight aria-hidden className="size-3.5" /> : <ChevronDown aria-hidden className="size-3.5" />}
+              </button>
+            )}
+          </div>
         </div>
 
         {showReports && <span aria-hidden className="h-4 w-px bg-border" />}
@@ -191,21 +261,36 @@ export function RolesChart({ seats, onEdit, onInsert, resolveActor }: {
   const unassigned = ordered.filter((seat) => !reachable.has(seat.id));
 
   return (
-    <div className="grid gap-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-label="Colour legend">
-        <span className="flex items-center gap-1.5"><span aria-hidden className={`size-2 rounded-full ${ACCENT.agent.dot}`} />Agent</span>
-        <span className="flex items-center gap-1.5"><span aria-hidden className={`size-2 rounded-full ${ACCENT.member.dot}`} />Person</span>
-        <span className="flex items-center gap-1.5"><span aria-hidden className={`size-2 rounded-full ${ACCENT.vacant.dot}`} />Vacant seat</span>
+    <div className="grid gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground" aria-label="Colour legend">
+          <span className="flex items-center gap-1.5"><span aria-hidden className={`size-2 rounded-full ${ACCENT.agent.dot}`} />Agent</span>
+          <span className="flex items-center gap-1.5"><span aria-hidden className={`size-2 rounded-full ${ACCENT.member.dot}`} />Person</span>
+          <span className="flex items-center gap-1.5"><span aria-hidden className={`size-2 rounded-full ${ACCENT.vacant.dot}`} />Vacant seat</span>
+        </div>
+        <ZoomControls scale={scale} onZoom={zoomBy} onReset={() => setScale(1)} />
       </div>
-      <div className="overflow-x-auto pb-4">
-        <div role="tree" aria-label="Role hierarchy" className="flex w-max min-w-full items-start gap-8 px-2 pt-4">{rootBranches}</div>
+      {/* The viewport clips and scrolls; the canvas inside is scaled and can be
+          dragged to pan, so a chart of several hundred seats stays navigable. */}
+      <div
+        ref={viewportRef}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={endPan}
+        onPointerCancel={endPan}
+        aria-label="Role chart canvas"
+        className={`relative h-[70vh] min-h-96 overflow-auto rounded-xl border bg-muted/20 ${panning ? "cursor-grabbing select-none" : "cursor-grab"}`}
+      >
+        <div className="w-max origin-top-left p-8 transition-transform" style={{ transform: `scale(${scale})` }}>
+          <div role="tree" aria-label="Role hierarchy" className="flex items-start gap-8">{rootBranches}</div>
+          {unassigned.length > 0 && (
+            <section aria-label="Unassigned roles" className="mt-6 grid gap-3 rounded-xl border border-dashed bg-background/60 p-4">
+              <h2 className="text-sm font-semibold">Unassigned roles</h2>
+              <div className="flex flex-wrap items-start gap-8 pt-4">{unassigned.map((seat) => node(seat, 1, new Set()))}</div>
+            </section>
+          )}
+        </div>
       </div>
-      {unassigned.length > 0 && (
-        <section aria-label="Unassigned roles" className="grid gap-3 rounded-xl border border-dashed p-4">
-          <h2 className="text-sm font-semibold">Unassigned roles</h2>
-          <div className="flex flex-wrap items-start gap-8 pt-4">{unassigned.map((seat) => node(seat, 1, new Set()))}</div>
-        </section>
-      )}
     </div>
   );
 }

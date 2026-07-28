@@ -1467,6 +1467,8 @@ type CerebroNoteType struct {
 	NextNumber           int32              `json:"next_number"`
 	AnchorWeekday        pgtype.Int2        `json:"anchor_weekday"`
 	AuthorCodes          bool               `json:"author_codes"`
+	AnchorWeekOfMonth    pgtype.Int2        `json:"anchor_week_of_month"`
+	Participants         []byte             `json:"participants"`
 }
 
 type CerebroNoteVersion struct {

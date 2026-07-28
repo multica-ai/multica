@@ -103,7 +103,16 @@ const meetingCadence = fallbackEnum(["manual", "day", "week", "month", "quarter"
 const meetingBinding = fallbackEnum(["none", "scorecard", "goals", "issues_list"] as const, "none");
 const meetingAgendaSchema = z.object({ id: z.string(), name: z.string(), position: z.number().int().default(0), binding: meetingBinding });
 const safeOptionalId = z.unknown().optional().transform((value) => typeof value === "string" && value.trim() ? value : undefined);
-const meetingNoteTypeSchema = z.object({ id: z.string(), name: z.string(), cadence_unit: meetingCadence, cadence_count: z.number().int().positive().catch(1), enabled: z.boolean().catch(false), current_note_id: safeOptionalId });
+const meetingNoteTypeSchema = z.object({
+  id: z.string(), name: z.string(), icon: z.string().optional(),
+  cadence_unit: meetingCadence, cadence_count: z.number().int().positive().catch(1),
+  enabled: z.boolean().catch(false), current_note_id: safeOptionalId,
+  anchor_weekday: z.number().int().optional(), anchor_week_of_month: z.number().int().optional(),
+  next_meeting_date: z.string().optional(),
+  upcoming_dates: z.array(z.string()).nullable().optional().transform((value) => value ?? undefined),
+  year_dates: z.array(z.string()).nullable().optional().transform((value) => value ?? undefined),
+  participants: z.array(z.object({ type: z.enum(["member", "agent"]), id: z.string() })).nullable().optional().transform((value) => value ?? undefined),
+});
 export const meetingSchema = z.object({
   workspace_id: z.string(), note_type_id: z.string().optional(), note_type_name: z.string().optional(), current_note_id: safeOptionalId,
   cadence_unit: meetingCadence, cadence_count: z.number().int().positive().catch(1),

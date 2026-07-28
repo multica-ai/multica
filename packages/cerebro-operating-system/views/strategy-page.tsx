@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type KeyboardEvent } from "react";
+import { useLayoutEffect, useRef, useState, type ComponentProps, type KeyboardEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   DndContext, DragOverlay, KeyboardSensor, PointerSensor, closestCorners, useDroppable, useSensor, useSensors,
@@ -40,6 +40,19 @@ const usesPartLabels = (section: VisionPlanSection) => section.section_type === 
 const SECTION_PREFIX = "section-";
 const ITEM_PREFIX = "item-";
 const COLUMN_PREFIX = "column-";
+
+// A textarea that always grows to fit its content, so context text is never
+// clipped or scrolled out of view (FIR-3589). No fixed row count, no scrollbar.
+function AutoTextarea({ value, ...props }: ComponentProps<"textarea">) {
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${el.scrollHeight}px`;
+  }, [value]);
+  return <textarea ref={ref} value={value} rows={1} {...props} />;
+}
 
 const itemInput = (item: VisionPlanItem, overrides: Partial<VisionPlanItemInput> = {}): VisionPlanItemInput => ({
   section_id: item.section_id, title: item.title, description: item.description,
@@ -116,7 +129,7 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
             <input aria-label={`${item.title} part`} value={partLabel} onChange={(event) => setPartLabel(event.target.value)} onBlur={() => save()} placeholder="Part label" className="mb-1 w-full bg-transparent text-xs font-semibold uppercase tracking-wide text-muted-foreground outline-none" />
           )}
           <input aria-label={`${item.title} title`} value={title} onChange={(event) => setTitle(event.target.value)} onBlur={() => save()} className="w-full bg-transparent text-sm font-medium outline-none focus:ring-1 focus:ring-ring" />
-          <textarea aria-label={`${item.title} description`} value={description} onChange={(event) => setDescription(event.target.value)} onBlur={() => save()} rows={description ? 2 : 1} placeholder="Add context…" className="mt-1 w-full resize-none bg-transparent text-xs leading-relaxed text-muted-foreground outline-none focus:ring-1 focus:ring-ring" />
+          <AutoTextarea aria-label={`${item.title} description`} value={description} onChange={(event) => setDescription(event.target.value)} onBlur={() => save()} placeholder="Add context…" className="mt-1 w-full resize-none overflow-hidden bg-transparent text-xs leading-relaxed text-muted-foreground outline-none focus:ring-1 focus:ring-ring" />
         </div>
         <div className="flex shrink-0 items-start opacity-60 group-hover:opacity-100">
           <button type="button" aria-label={`Move ${item.title} up`} disabled={itemIndex === 0} onClick={() => move(-1)} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30"><ChevronUp aria-hidden className="size-4" /></button>
@@ -204,6 +217,7 @@ function PlanSection({ section, index, sections, ...body }: PlanSectionProps) {
   const updateSection = useUpdateVisionPlanSection(body.wsId);
   const deleteSection = useDeleteVisionPlanSection(body.wsId);
   const [name, setName] = useState(section.name);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: `${SECTION_PREFIX}${section.id}` });
 
   function move(direction: -1 | 1) {
@@ -221,7 +235,14 @@ function PlanSection({ section, index, sections, ...body }: PlanSectionProps) {
         <input aria-label={`${section.name} section name`} value={name} onChange={(event) => setName(event.target.value)} onBlur={() => updateSection.mutate({ id: section.id, input: sectionInputFrom({ ...section, name: name.trim() || section.name }, section.position) })} className="min-w-0 flex-1 bg-transparent text-base font-semibold outline-none focus:ring-1 focus:ring-ring" />
         <button type="button" aria-label={`Move ${section.name} up`} disabled={index === 0} onClick={() => move(-1)} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30"><ChevronUp aria-hidden className="size-4" /></button>
         <button type="button" aria-label={`Move ${section.name} down`} disabled={index === sections.length - 1} onClick={() => move(1)} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted disabled:opacity-30"><ChevronDown aria-hidden className="size-4" /></button>
-        <button type="button" aria-label={`Delete ${section.name} section`} onClick={() => { if (window.confirm(`Delete ${section.name} and its items?`)) deleteSection.mutate(section.id); }} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"><Trash2 aria-hidden className="size-4" /></button>
+        {confirmingDelete ? (
+          <span className="flex items-center gap-1">
+            <button type="button" aria-label={`Confirm delete ${section.name} section`} onClick={() => deleteSection.mutate(section.id)} className="h-8 rounded bg-destructive px-2 text-xs font-medium text-destructive-foreground">Delete</button>
+            <button type="button" aria-label={`Cancel delete ${section.name} section`} onClick={() => setConfirmingDelete(false)} className="h-8 rounded border px-2 text-xs">Cancel</button>
+          </span>
+        ) : (
+          <button type="button" aria-label={`Delete ${section.name} section`} onClick={() => setConfirmingDelete(true)} className="grid size-8 place-items-center rounded text-muted-foreground hover:bg-muted hover:text-destructive"><Trash2 aria-hidden className="size-4" /></button>
+        )}
       </header>
       <div className="mt-3 flex flex-1 flex-col"><SectionBody section={section} {...body} /></div>
     </section>
@@ -361,7 +382,7 @@ export function StrategyPage() {
               </section>
             )}
 
-            <DragOverlay>{dragLabel ? <div className="rounded-lg border bg-card px-3 py-2 text-sm font-medium shadow-lg">{dragLabel}</div> : null}</DragOverlay>
+            <DragOverlay dropAnimation={null}>{dragLabel ? <div className="rounded-lg border bg-card px-3 py-2 text-sm font-medium shadow-lg">{dragLabel}</div> : null}</DragOverlay>
           </DndContext>
         )}
       </div>
