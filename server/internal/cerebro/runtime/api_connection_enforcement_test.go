@@ -8,19 +8,28 @@ import (
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 )
 
-// With no connection store wired (connDeny == nil), apiEndpointSetting fails open
-// to Allow at call time — the behaviour-safe default when the resolver is
-// unavailable (the always-on call-time guard re-checks; the list-time filter now
-// lives in the shared APIConnectionResolver).
-func TestAPIEndpointSettingFailOpenNilStore(t *testing.T) {
+// A missing connection store may keep a confirmed API tool listed, but the
+// authoritative call-time check must deny it visibly. Otherwise a wiring error
+// bypasses the secrets-box permission completely.
+func TestAPIEndpointSettingNilStoreListsButBlocksCall(t *testing.T) {
 	e := &FirtalGatewayExecutor{logger: slog.Default()}
 	reg := &Registry{tools: map[string]Tool{}}
 	api := &APIConnectionTool{toolName: "c__get_x", connName: "c", method: "GET", path: "/x", baseURL: "http://x"}
 	reg.Register(api)
 
-	got, _ := e.apiEndpointSetting(context.Background(), gateTestUUID(1), gateTestUUID(9), reg, "c__get_x", false, GatewayRequestMeta{})
-	if got != toolpolicy.SettingAllow {
-		t.Fatalf("expected Allow (fail-open, nil store), got %s", got)
+	listSetting, listConn := e.apiEndpointSetting(context.Background(), gateTestUUID(1), gateTestUUID(9), reg, "c__get_x", false, GatewayRequestMeta{})
+	if listSetting != toolpolicy.SettingAllow || listConn != "c" {
+		t.Fatalf("list-time nil store = %s/%q, want Allow/c", listSetting, listConn)
+	}
+	callSetting, callConn := e.apiEndpointSetting(context.Background(), gateTestUUID(1), gateTestUUID(9), reg, "c__get_x", true, GatewayRequestMeta{})
+	if callSetting != toolpolicy.SettingDeny || callConn != "c" {
+		t.Fatalf("call-time nil store = %s/%q, want Deny/c", callSetting, callConn)
+	}
+
+	e.connDeny = &toolpolicy.Store{}
+	callSetting, callConn = e.apiEndpointSetting(context.Background(), gateTestUUID(1), gateTestUUID(9), reg, "c__get_x", true, GatewayRequestMeta{})
+	if callSetting != toolpolicy.SettingDeny || callConn != "c" {
+		t.Fatalf("call-time nil queries = %s/%q, want Deny/c", callSetting, callConn)
 	}
 }
 
@@ -51,4 +60,3 @@ func TestAPIEndpointSettingNonAPITool(t *testing.T) {
 		t.Fatalf("non-API tool must be Allow/\"\", got %s/%q", got, conn)
 	}
 }
-

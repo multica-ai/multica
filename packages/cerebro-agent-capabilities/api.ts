@@ -39,6 +39,7 @@ const AgentCapabilityToolSchema = z
     decided_by: z.string().default(""),
     reason: z.string().default(""),
     managed_externally: z.boolean().default(false),
+    external_security_owner: z.string().default(""),
     capped_by_groups: z.array(z.string()).default([]),
     // FIR-3388 — keep the five different capability questions separate.
     // They are optional for rolling deploy compatibility with an older API;

@@ -239,6 +239,23 @@ func TestResolveWakeupParent_CrossIssueRejected(t *testing.T) {
 	}
 }
 
+func TestValidateIssueAndAgentRejectsForeignWorkspaceOrAgent(t *testing.T) {
+	if wkPool == nil {
+		t.Skip("database unavailable")
+	}
+	ctx := context.Background()
+	svc := wkService()
+
+	foreignWorkspace := pgtype.UUID{Bytes: [16]byte{99}, Valid: true}
+	if err := svc.validateIssueAndAgent(ctx, foreignWorkspace, wkIssueID, wkAgentID); err == nil {
+		t.Fatal("foreign workspace must not admit the issue and agent")
+	}
+	foreignAgent := pgtype.UUID{Bytes: [16]byte{98}, Valid: true}
+	if err := svc.validateIssueAndAgent(ctx, wkWorkspaceID, wkIssueID, foreignAgent); err == nil {
+		t.Fatal("unknown agent must not be admitted into a wakeup")
+	}
+}
+
 func TestResolveWakeupParent_NoOriginFallsBackToLatestMemberThread(t *testing.T) {
 	if wkPool == nil {
 		t.Skip("no test DB")

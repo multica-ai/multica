@@ -354,6 +354,8 @@ function toolTitle(t: AgentCapabilityTool): string {
   const parts = [t.permission || "unknown"];
   if (t.decided_by) parts.push(`via ${t.decided_by}`);
   if (t.reason) parts.push(t.reason);
+  if (t.managed_externally)
+    parts.push(`managed by ${t.external_security_owner || "an external security gate"}`);
   if (t.capped_by_groups.length > 0)
     parts.push(`capped by ${t.capped_by_groups.join(", ")}`);
   // FIR-3398: fold the tool's runtime-availability proof into the tooltip, so a
@@ -444,6 +446,11 @@ function ToolPill({ tool }: { tool: AgentCapabilityTool }) {
       title={toolTitle(tool)}
     >
       {tool.title || tool.key}
+      {tool.managed_externally && (
+        <span className="text-muted-foreground">
+          · managed by {tool.external_security_owner || "external security gate"}
+        </span>
+      )}
       {truthPresent && (
         <span className="text-muted-foreground">
           · {tool.callable ? "callable" : "blocked"}

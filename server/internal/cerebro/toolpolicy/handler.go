@@ -138,16 +138,17 @@ type groupAttributionResponse struct {
 }
 
 type toolPolicyRow struct {
-	ToolKey           string          `json:"tool_key"`
-	ResourcePattern   string          `json:"resource_pattern"`
-	Title             string          `json:"title"`
-	Category          string          `json:"category"`
-	Description       string          `json:"description"`
-	DescriptionZh     string          `json:"description_zh"`
-	Source            string          `json:"source"`
-	ManagedExternally bool            `json:"managed_externally"`
-	Layers            layerSettings   `json:"layers"`
-	Conditions        layerConditions `json:"conditions"`
+	ToolKey               string          `json:"tool_key"`
+	ResourcePattern       string          `json:"resource_pattern"`
+	Title                 string          `json:"title"`
+	Category              string          `json:"category"`
+	Description           string          `json:"description"`
+	DescriptionZh         string          `json:"description_zh"`
+	Source                string          `json:"source"`
+	ManagedExternally     bool            `json:"managed_externally"`
+	ExternalSecurityOwner string          `json:"external_security_owner"`
+	Layers                layerSettings   `json:"layers"`
+	Conditions            layerConditions `json:"conditions"`
 	// EnforcedConditions names the WHEN condition kinds (action/host/cel) that
 	// actually bite for this capability, so the editor renders only those
 	// (FIR-1708 C). Derived server-side from the gate facts; see
@@ -385,6 +386,10 @@ func (h *Handler) Set(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "tool_key required")
 		return
 	}
+	if message, externallyManaged := externallyManagedWriteError(req.ToolKey); externallyManaged {
+		writeError(w, http.StatusConflict, message)
+		return
+	}
 	if !validLayer(Layer(req.Layer)) {
 		writeError(w, http.StatusBadRequest, "invalid layer")
 		return
@@ -508,6 +513,10 @@ func (h *Handler) Clear(w http.ResponseWriter, r *http.Request) {
 	toolKey := q.Get("tool_key")
 	if toolKey == "" {
 		writeError(w, http.StatusBadRequest, "tool_key required")
+		return
+	}
+	if message, externallyManaged := externallyManagedWriteError(toolKey); externallyManaged {
+		writeError(w, http.StatusConflict, message)
 		return
 	}
 	layer := Layer(q.Get("layer"))
@@ -703,6 +712,17 @@ func (h *Handler) loadWorkspace(w http.ResponseWriter, r *http.Request) (db.Memb
 	return member, wsID, true
 }
 
+// externallyManagedWriteError rejects Settings writes for a capability whose
+// actual enforcement point is a separate security boundary. Accepting the row
+// would store an advisory Allow/Ask/Deny choice that call time never reads.
+func externallyManagedWriteError(toolKey string) (string, bool) {
+	capability, ok := platformcatalog.ByKey(toolKey)
+	if !ok || !capability.ManagedExternally {
+		return "", false
+	}
+	return fmt.Sprintf("%s is enforced by %s and cannot be changed in Settings", capability.Title, capability.ExternalSecurityOwner), true
+}
+
 func (h *Handler) serverError(w http.ResponseWriter, r *http.Request, op string, err error) {
 	slog.Error("tool-policy request failed", append(logger.RequestAttrs(r), "op", op, "error", err)...)
 	writeError(w, http.StatusInternalServerError, op+" failed")
@@ -719,15 +739,16 @@ func toRowResponse(row TableRow) toolPolicyRow {
 		enforcedStrs[i] = string(k)
 	}
 	return toolPolicyRow{
-		ToolKey:            row.ToolKey,
-		ResourcePattern:    row.ResourcePattern,
-		Title:              row.Title,
-		Category:           row.Category,
-		Description:        row.Description,
-		DescriptionZh:      row.DescriptionZh,
-		Source:             row.Source,
-		ManagedExternally:  row.ManagedExternally,
-		EnforcedConditions: enforcedStrs,
+		ToolKey:               row.ToolKey,
+		ResourcePattern:       row.ResourcePattern,
+		Title:                 row.Title,
+		Category:              row.Category,
+		Description:           row.Description,
+		DescriptionZh:         row.DescriptionZh,
+		Source:                row.Source,
+		ManagedExternally:     row.ManagedExternally,
+		ExternalSecurityOwner: row.ExternalSecurityOwner,
+		EnforcedConditions:    enforcedStrs,
 		Layers: layerSettings{
 			Workspace: settingPtr(row.Layers, LayerWorkspace),
 			Runtime:   settingPtr(row.Layers, LayerRuntime),

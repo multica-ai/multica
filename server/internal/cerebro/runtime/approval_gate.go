@@ -106,35 +106,62 @@ func askContext(toolName, connName, taskID, issueID, triggerUserID, triggerUserN
 // this runtime, so the daemon's --disallowedTools never sees them — this is the
 // firtal-gateway half of connection enforcement (TECH-3174 Deny, TECH-3498 Ask).
 //
-// Fail-open to Allow on a DB/lookup error (logged at warn): an always-on
-// per-call check must not take the whole gateway fleet offline on a transient
-// error. A genuine Deny/Ask holds in every non-error case, which is the
-// requirement. The caller decides what to do with each verdict.
+// Fail closed on a missing resolver or DB/lookup error. This is the authoritative
+// call-time gate, so an unresolved connection verdict must produce a visible
+// denial instead of silently granting the call.
 // It returns the resolved setting plus the connection name of the deciding row
 // ("" when the tool is not a connection tool), so the caller can surface "which
 // integration" in the approval context (TECH-3498).
 func (e *FirtalGatewayExecutor) connectionToolSetting(
 	ctx context.Context,
 	agentID, workspaceID pgtype.UUID,
+	reg *Registry,
 	toolName string,
 	meta GatewayRequestMeta,
 ) (toolpolicy.Setting, string) {
-	if e.connDeny == nil || !agentID.Valid || toolName == "" {
+	if !agentID.Valid || toolName == "" {
 		return toolpolicy.SettingAllow, ""
+	}
+	resourceName, connectionName, connectionTool := connectionPolicyTarget(reg, toolName)
+	if !connectionTool {
+		return toolpolicy.SettingAllow, ""
+	}
+	if e.connDeny == nil || e.queries == nil {
+		e.logger.Warn("connection policy: resolver unavailable — blocking",
+			"agent_id", meta.AgentID, "tool", toolName)
+		return toolpolicy.SettingDeny, connectionName
 	}
 	agent, err := e.queries.GetAgent(ctx, agentID)
 	if err != nil {
-		e.logger.Warn("connection policy: agent lookup failed — allowing",
+		e.logger.Warn("connection policy: agent lookup failed — blocking",
 			"agent_id", meta.AgentID, "tool", toolName, "error", err)
-		return toolpolicy.SettingAllow, ""
+		return toolpolicy.SettingDeny, connectionName
 	}
-	eff, connName, err := e.connDeny.ConnectionToolEffective(ctx, workspaceID, agent.RuntimeID, agentID, agent.OwnerID, toolName)
+	eff, connName, err := e.connDeny.ConnectionToolEffective(ctx, workspaceID, agent.RuntimeID, agentID, agent.OwnerID, resourceName)
 	if err != nil {
-		e.logger.Warn("connection policy: resolve failed — allowing",
+		e.logger.Warn("connection policy: resolve failed — blocking",
 			"agent_id", meta.AgentID, "tool", toolName, "error", err)
-		return toolpolicy.SettingAllow, ""
+		return toolpolicy.SettingDeny, connectionName
 	}
 	return eff, connName
+}
+
+func connectionPolicyTarget(reg *Registry, toolName string) (resourceName, connectionName string, ok bool) {
+	if reg == nil {
+		return "", "", false
+	}
+	tool, found := reg.Get(toolName)
+	if !found {
+		return "", "", false
+	}
+	switch concrete := tool.(type) {
+	case *gatewayMCPTool:
+		return concrete.toolName, concrete.connectionName, true
+	case *CustomerServiceMCPTool:
+		return concrete.Name(), "customer-service-mcp", true
+	default:
+		return "", "", false
+	}
 }
 
 // guardConnectionAsk routes an Ask verdict on a workspace-connection tool through
@@ -237,7 +264,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// --disallowedTools. A Deny here makes the tool uncallable regardless of the
 	// approval-gate rollout. Ask needs the approval inbox, so it is routed below
 	// alongside the rest of the Ask machinery (a no-op when the gate is off).
-	connSetting, connName := e.connectionToolSetting(ctx, agentID, workspaceID, toolName, meta)
+	connSetting, connName := e.connectionToolSetting(ctx, agentID, workspaceID, reg, toolName, meta)
 	// FIR-2166 C PR3: fold in the API-connection ENDPOINT verdict for API-type
 	// connection tools (api_connection_tools.go), resolved through the same chain
 	// via ConnectionEndpointEffective. connectionToolSetting above keys on the bare
@@ -258,7 +285,7 @@ func (e *FirtalGatewayExecutor) guardToolCall(
 	// FIR-3091 punkt 8 fase 3: usage log — a connection rule that decided this
 	// call (connName is only set when a rule tightened past the allow baseline)
 	// is recorded under its connection:<name> permission key. Best-effort.
-	if connName != "" {
+	if connName != "" && e.connDeny != nil {
 		e.connDeny.RecordUsage(ctx, toolpolicy.UsageParams{
 			WorkspaceID:      workspaceID,
 			ToolKey:          toolpolicy.ConnectionToolKey(connName),
@@ -491,8 +518,8 @@ func (e *FirtalGatewayExecutor) memberOverrideEnabled(ctx context.Context, works
 // cerebro_policy_cel flag is enabled for the workspace, else nil. Returning nil
 // leaves Query.Eval unset, so an Expr condition is undecidable and fails closed —
 // the behaviour-preserving default. A DB lookup miss or error resolves to OFF
-// (the flag's default), unlike the always-on gates which fail open: an unproven
-// expression-evaluation path must not switch itself on by accident.
+// (the flag's default): an unproven expression-evaluation path must not switch
+// itself on by accident.
 func (e *FirtalGatewayExecutor) policyCELEvaluator(ctx context.Context, workspaceID pgtype.UUID) toolpolicy.ExprEvaluator {
 	if e == nil || e.cerebro == nil {
 		return nil

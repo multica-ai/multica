@@ -65,6 +65,11 @@ type TableRow struct {
 	// false for reported runtime tools and repo rows. Shown so the admin sees the
 	// row is informational, not gated (FIR-2594).
 	ManagedExternally bool
+	// ExternalSecurityOwner names the live security boundary that enforces a
+	// managed-external platform capability. It is empty for policy-gated rows.
+	// Returning it with the row prevents Settings from presenting an advisory
+	// decision without naming the system that actually decides access.
+	ExternalSecurityOwner string
 	// Layers holds the explicit setting at each layer for this context. A layer
 	// absent from the map carries no explicit choice (Inherit). LayerGroup, when
 	// present, is the combined value across the context's groups (most permissive

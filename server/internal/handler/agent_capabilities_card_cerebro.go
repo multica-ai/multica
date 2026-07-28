@@ -106,15 +106,16 @@ const (
 // AgentCapabilityTool is one tool/permission resolved for this agent, with the
 // effective verdict and which layer decided it.
 type AgentCapabilityTool struct {
-	Key               string   `json:"key"`
-	Title             string   `json:"title,omitempty"`
-	Source            string   `json:"source,omitempty"`
-	Category          string   `json:"category,omitempty"`
-	Permission        string   `json:"permission"`           // allow | ask | deny
-	DecidedBy         string   `json:"decided_by,omitempty"` // workspace | runtime | agent | group | user
-	Reason            string   `json:"reason,omitempty"`
-	ManagedExternally bool     `json:"managed_externally"`
-	CappedByGroups    []string `json:"capped_by_groups,omitempty"`
+	Key                   string   `json:"key"`
+	Title                 string   `json:"title,omitempty"`
+	Source                string   `json:"source,omitempty"`
+	Category              string   `json:"category,omitempty"`
+	Permission            string   `json:"permission"`           // allow | ask | deny
+	DecidedBy             string   `json:"decided_by,omitempty"` // workspace | runtime | agent | group | user
+	Reason                string   `json:"reason,omitempty"`
+	ManagedExternally     bool     `json:"managed_externally"`
+	ExternalSecurityOwner string   `json:"external_security_owner,omitempty"` // CEREBRO-PATCH(agent-capabilities-external-security-owner): expose the real owner of read-only permissions.
+	CappedByGroups        []string `json:"capped_by_groups,omitempty"`
 	// The effective truth model keeps the distinct questions separate: policy,
 	// runtime presence, live enforcement, callability, and observed proof.
 	Allowed       bool   `json:"allowed"`
@@ -412,6 +413,7 @@ func ApplyTaskMandate(ctx context.Context, mandates AgentCapabilityTaskMandate, 
 			}
 		}
 	}
+	applyCerebroTaskMandateEndpointLimits(ctx, mandates, taskID, workspaceID, agentID, card) // CEREBRO-PATCH(task-mandate-api-capability-parity): keep API endpoint capabilities aligned with call-time Task Mandate enforcement.
 }
 
 // BuildAgentCapabilitiesCard assembles the same card as the HTTP route for an
@@ -731,16 +733,17 @@ func classifyCapabilityRows(rows []cerebrotoolpolicy.TableRow, connectionNames m
 
 func capabilityToolFromRow(row cerebrotoolpolicy.TableRow) AgentCapabilityTool {
 	t := AgentCapabilityTool{
-		Key:               row.ToolKey,
-		Title:             row.Title,
-		Source:            row.Source,
-		Category:          row.Category,
-		Permission:        string(row.Effective.Setting),
-		DecidedBy:         string(row.Effective.DecidedBy),
-		Reason:            row.Effective.Reason,
-		ManagedExternally: row.ManagedExternally,
-		Allowed:           row.Effective.Setting == cerebrotoolpolicy.SettingAllow,
-		Enforced:          true,
+		Key:                   row.ToolKey,
+		Title:                 row.Title,
+		Source:                row.Source,
+		Category:              row.Category,
+		Permission:            string(row.Effective.Setting),
+		DecidedBy:             string(row.Effective.DecidedBy),
+		Reason:                row.Effective.Reason,
+		ManagedExternally:     row.ManagedExternally,
+		ExternalSecurityOwner: row.ExternalSecurityOwner, // CEREBRO-PATCH(agent-capabilities-external-security-owner): keep Capabilities aligned with Settings.
+		Allowed:               row.Effective.Setting == cerebrotoolpolicy.SettingAllow,
+		Enforced:              true,
 	}
 	if row.Source == platformcatalog.Source {
 		t.Available = true

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/cerebro/connections"
+	"github.com/multica-ai/multica/server/internal/cerebro/taskmandate"
 	"github.com/multica-ai/multica/server/internal/cerebro/toolpolicy"
 	"github.com/multica-ai/multica/server/internal/handler"
 )
@@ -249,6 +250,74 @@ func TestConnectionToolResolverBriefAdapter(t *testing.T) {
 	off := NewConnectionToolResolver(apiOff, conns, fakeMCPVerdicts{}, fakeFlag{on: false}, fakeEntry, slog.Default())
 	if got := off.APIConnectionToolsForBrief(context.Background(), ident); got != nil {
 		t.Errorf("flag off must yield nil brief tools, got %v", got)
+	}
+}
+
+// Every connection is evaluated against its own immutable task mandate. An
+// Allow-only MCP server receives its scoped wildcard, while a connection with
+// even one Ask/Deny tool receives no raw relay mandate at all. API endpoints
+// are always exact-name mandates. This is deliberately driven from the resolver
+// output rather than a hand-picked connection name so adding a connection type
+// to the fixture cannot silently bypass the claim contract.
+func TestConnectionToolResolverIssuesOnlyEachConnectionsOwnMandate(t *testing.T) {
+	ident := handler.CerebroAPIConnectionBriefIdentity{
+		WorkspaceID: gateTestUUID(1),
+		RuntimeID:   gateTestUUID(2),
+		AgentID:     gateTestUUID(3),
+		OwnerID:     gateTestUUID(4),
+	}
+	resolved := newMixedResolver().Resolve(context.Background(), mixedIdent())
+	briefs := newMixedResolver().APIConnectionToolsForBrief(context.Background(), ident)
+	issued := map[string]bool{}
+	for _, brief := range briefs {
+		issued[brief.Name] = true
+		if brief.MandatePrefix != "" {
+			issued[brief.MandatePrefix] = true
+		}
+	}
+
+	for _, conn := range mixedVerdictConns() {
+		t.Run(conn.Name, func(t *testing.T) {
+			switch conn.Type {
+			case connections.TypeAPI:
+				for _, endpoint := range conn.EndpointPermissions {
+					for _, method := range endpoint.Methods {
+						name := apiToolName(conn.Name, method, endpoint.Path)
+						if name == "" {
+							t.Fatalf("API endpoint %s %s has no callable identity", method, endpoint.Path)
+						}
+						if !issued[name] {
+							t.Fatalf("allowed API endpoint %q is missing from its task mandate: %v", name, issued)
+						}
+					}
+				}
+			case connections.TypeMCPHTTP:
+				allAllow := true
+				for _, tool := range conn.Tools {
+					for _, resolvedTool := range resolved.Tools {
+						if resolvedTool.Connection == conn.Name && resolvedTool.Name == tool.Name && resolvedTool.Verdict != toolpolicy.SettingAllow {
+							allAllow = false
+						}
+					}
+					for _, denied := range resolved.Deny {
+						if denied == toolpolicy.MCPToolToken(conn.Name, tool.Name) {
+							allAllow = false
+						}
+					}
+				}
+				for _, tool := range conn.Tools {
+					name := toolpolicy.MCPToolToken(conn.Name, tool.Name)
+					wildcard := taskmandate.MCPServerWildcard(name)
+					if allAllow {
+						if !issued[name] || !issued[wildcard] {
+							t.Fatalf("allow-only connection %q must issue %q and %q, got %v", conn.Name, name, wildcard, issued)
+						}
+					} else if issued[name] || issued[wildcard] {
+						t.Fatalf("mixed or denied connection %q leaked %q into the task mandate: %v", conn.Name, name, issued)
+					}
+				}
+			}
+		})
 	}
 }
 

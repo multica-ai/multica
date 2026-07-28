@@ -67,6 +67,10 @@ documents one named patch + its rationale + the file location(s).
 **Marker format:** `// CEREBRO-PATCH(<name>): <description>` (or language-appropriate
 comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 
+| `permission-contract-test-resolver` | `server/internal/cerebro/accessdecision/observer_test.go` | 4 test-only lines | FIR-3819 — keeps the existing complete permission contract test compatible with the shared resolver after ordinary tools gained the tighten-only `Resolve` entry point. The helper forwards to its existing `ResolvePermission` fixture behaviour; it changes no product behaviour. |
+| `agent-capabilities-external-security-owner` | `server/internal/handler/agent_capabilities_card_cerebro.go` | 2 lines | FIR-3819 — carries the catalog's read-only `ExternalSecurityOwner` into the agent's Capabilities response, so externally managed permissions name their real gate instead of looking ungoverned. |
+| `task-mandate-api-capability-parity` | `server/internal/handler/agent_capabilities_card_cerebro.go` (1 marked call; implementation in `agent_capabilities_task_mandate_cerebro.go`) | 1 upstream line | FIR-3819 — applies Task Mandate to API endpoints on Capabilities with the same canonical identity that call-time enforcement checks, so a rejected endpoint can never be shown as callable. |
+
 ## FIR-3403 — Access engine legacy-switch retirement
 
 | Marker | Upstream-zone files | Rationale |
@@ -1739,7 +1743,7 @@ The runtime-image, entrypoint, fallback-provider helpers, canary, and cloud runb
 |---|---|---|
 | `main-access-decision-service` | `server/cmd/server/main.go` | Wire the canonical policy/evidence service and append-only decision ledger into the Gateway. FIR-3388 removed the unused observational/legacy comparison path: this service now supplies the single fail-closed decision used for tool listing and tool calls. |
 | `credential-floor-doc` | `server/docs/fir-1609-phase7-mapping.md` | Keep the historical FIR-1609 credential mapping accurate after FIR-3388 retired its duplicate constant resolver; the deny-by-default credential floor remains in the canonical policy. |
-| `opencode-permission-flag` | `server/pkg/agent/opencode.go`<br>`server/pkg/agent/opencode_test.go` | Keep OpenCode daemon runs non-interactive with the installed CLI's real `--dangerously-skip-permissions` flag. The removed `--auto` assumption caused an immediate usage exit on OpenCode 1.14.31; existing explicit question/plan denies remain in force. The shared test verifies that the retired flag is removed from custom arguments, while the real-binary contract test pins every emitted flag to `opencode run --help`. |
+| `opencode-permission-flag` | `server/pkg/agent/opencode.go`<br>`server/pkg/agent/opencode_test.go`<br>`server/pkg/agent/cerebro_opencode_flag_contract_test.go` | Keep OpenCode daemon runs non-interactive with the installed CLI's real `--auto` flag. OpenCode 1.18.0 removed `--dangerously-skip-permissions`; the permission contract test caught that mismatch before it could cause a usage exit. Existing explicit question/plan denies remain in force, and the real-binary contract test pins every emitted flag to `opencode run --help`. |
 
 ## FIR-3386 — Subscribers and sidebar
 

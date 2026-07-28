@@ -6,6 +6,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http/httptest"
 	"sort"
 	"testing"
@@ -23,6 +24,28 @@ import (
 
 type capabilityTableCapture struct {
 	query cerebrotoolpolicy.TableQuery
+}
+
+type rejectingCapabilityMandate struct{ denied map[string]bool }
+
+func (m rejectingCapabilityMandate) Authorize(_ context.Context, _, _, _ pgtype.UUID, tool string) error {
+	if m.denied[tool] {
+		return fmt.Errorf("tool is outside task mandate")
+	}
+	return nil
+}
+
+func TestApplyTaskMandateDeniesAPIConnectionEndpointOnCapabilitiesCard(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	card := AgentCapabilities{Connections: []AgentCapabilityConnection{{
+		Name:      "infisical-admin",
+		Endpoints: []AgentCapabilityConnEndpoint{{Path: "/secrets", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Callable: true}},
+	}}}
+	ApplyTaskMandate(context.Background(), rejectingCapabilityMandate{denied: map[string]bool{"infisical_admin__get_secrets": true}}, id, id, id, &card)
+	got := card.Connections[0].Endpoints[0]
+	if got.Permission != "deny" || got.Allowed || got.Callable || got.BlockedReason == "" || got.HowToFix == "" {
+		t.Fatalf("API endpoint mandate denial must be visible on the capabilities card: %+v", got)
+	}
 }
 
 func (c *capabilityTableCapture) Table(_ context.Context, in cerebrotoolpolicy.TableQuery) ([]cerebrotoolpolicy.TableRow, error) {
@@ -153,6 +176,17 @@ func TestCapabilityToolFromPlatformRowReportsCallability(t *testing.T) {
 	})
 	if !allowed.Allowed || !allowed.Available || !allowed.Enforced || !allowed.Callable {
 		t.Fatalf("allowed hooks:write = %+v, want callable effective action", allowed)
+	}
+
+	external := capabilityToolFromRow(cerebrotoolpolicy.TableRow{
+		ToolKey:               "autopilot_webhook",
+		Source:                platformcatalog.Source,
+		ManagedExternally:     true,
+		ExternalSecurityOwner: "Autopilot webhook secret",
+		Effective:             cerebrotoolpolicy.Effective{Setting: cerebrotoolpolicy.SettingAllow},
+	})
+	if external.ExternalSecurityOwner != "Autopilot webhook secret" || external.Enforced {
+		t.Fatalf("external permission projection = %+v, want named owner and policy-engine enforced=false", external)
 	}
 }
 

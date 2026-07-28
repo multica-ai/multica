@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/util"
 )
 
 type capabilitiesCardProvider struct {
@@ -53,14 +55,21 @@ func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
 					{Name: "whoami", Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true},
 				},
 			},
+			{
+				Name: "infisical-admin",
+				Endpoints: []handler.AgentCapabilityConnEndpoint{
+					{Path: "/secrets", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true},
+				},
+			},
 		}}},
 		tctx: ToolContext{
 			AgentID:     id,
 			WorkspaceID: id,
 			TaskID:      id,
 			TaskMandates: rejectingTaskMandates{rejected: map[string]bool{
-				"rejected_tool":              true,
-				"mcp__company-brain__whoami": true,
+				"rejected_tool":                true,
+				"mcp__company-brain__whoami":   true,
+				"infisical_admin__get_secrets": true,
 			}},
 		},
 	}
@@ -91,5 +100,49 @@ func TestGetAgentCapabilitiesAppliesRejectedTaskMandate(t *testing.T) {
 	rejectedConnectionTool := card.Connections[1].Tools[0]
 	if rejectedConnectionTool.Permission != "deny" || rejectedConnectionTool.Allowed || rejectedConnectionTool.Callable || rejectedConnectionTool.BlockedReason == "" {
 		t.Fatalf("rejected connection tool left a positive or unexplained verdict: %+v", rejectedConnectionTool)
+	}
+	rejectedEndpoint := card.Connections[2].Endpoints[0]
+	if rejectedEndpoint.Permission != "deny" || rejectedEndpoint.Allowed || rejectedEndpoint.Callable || rejectedEndpoint.BlockedReason == "" || rejectedEndpoint.HowToFix == "" {
+		t.Fatalf("rejected API endpoint left a positive or unexplained verdict: %+v", rejectedEndpoint)
+	}
+}
+
+// The agent must receive the same result in its self-service Capabilities card
+// that the gateway returns when it tries the call: a mandate-denied API endpoint
+// is visible as blocked with a remedy, and the executor rejects it before any
+// connection dispatch can happen.
+func TestTaskMandateDenialMatchesCapabilitiesAndGatewayCall(t *testing.T) {
+	id := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	const endpoint = "infisical_admin__get_secrets"
+	mandates := rejectingTaskMandates{rejected: map[string]bool{endpoint: true}}
+	lookup := FirtalGetAgentCapabilitiesTool{
+		provider: capabilitiesCardProvider{card: handler.AgentCapabilities{Connections: []handler.AgentCapabilityConnection{{
+			Name: "infisical-admin",
+			Endpoints: []handler.AgentCapabilityConnEndpoint{{
+				Path: "/secrets", Methods: []string{"GET"}, Permission: "allow", Allowed: true, Available: true, Enforced: true, Callable: true,
+			}},
+		}}}},
+		tctx: ToolContext{AgentID: id, WorkspaceID: id, TaskID: id, TaskMandates: mandates},
+	}
+
+	raw, err := lookup.Call(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("capabilities lookup: %v", err)
+	}
+	var card handler.AgentCapabilities
+	if err := json.Unmarshal([]byte(raw), &card); err != nil {
+		t.Fatalf("decode capabilities card: %v", err)
+	}
+	capability := card.Connections[0].Endpoints[0]
+	if capability.Permission != "deny" || capability.Allowed || capability.Callable || capability.BlockedReason == "" || capability.HowToFix == "" {
+		t.Fatalf("Capabilities must expose the mandate denial: %+v", capability)
+	}
+
+	reg := NewRegistry(nil)
+	reg.Register(&APIConnectionTool{toolName: endpoint, connName: "infisical-admin", method: "GET", path: "/secrets"})
+	executor := (&FirtalGatewayExecutor{}).SetTaskMandates(mandates)
+	allowed, reason := executor.guardToolCall(context.Background(), id, id, endpoint, nil, reg, GatewayRequestMeta{TaskID: util.UUIDToString(id)})
+	if allowed || !strings.Contains(reason, "outside the issued task mandate") {
+		t.Fatalf("gateway call = (%v, %q), want the same mandate denial", allowed, reason)
 	}
 }
