@@ -346,6 +346,12 @@ func buildChatPrompt(task Task) string {
 	// from the context the inbound enricher already injected, so it gets the
 	// awareness statement without the commands, and ChatInThread — which only ever
 	// picks between those two commands — does not apply to it (MUL-4899).
+	//
+	// The no-narration rule is a THIRD axis and belongs to neither half: it is a
+	// property of delivering to an IM channel at all, so it is emitted for every
+	// channel type. #4776 introduced it that way; the MUL-4899 split moved it into
+	// the Slack branch along with the read commands it happened to mention, which
+	// silently dropped it for Feishu/Lark (GH #6006).
 	if task.ChatChannelType != "" {
 		platform := channelDisplayName(task.ChatChannelType)
 		fmt.Fprintf(&b, "You are operating inside a %s conversation — not the Multica web app. This conversation and its history live in %s, NOT in Multica; never look in Multica issues or comments for it.\n", platform, platform)
@@ -361,10 +367,11 @@ func buildChatPrompt(task Task) string {
 			// These reads are the agent's private context-gathering; narrating them
 			// into a chat reply reads as noise (the user reported every reply being
 			// prefixed with "我先读取…"). Tell the agent to keep them out of its answer.
-			b.WriteString("Do these reads SILENTLY as an internal step — they are how you gather context, not part of your answer. Do NOT narrate them: your reply must not begin with what you are about to read or just read (no \"我先读取…\" / \"let me read the history / open the thread\"). Reply to the user with your answer only.\n")
+			b.WriteString("Do these reads SILENTLY as an internal step — they are how you gather context, not part of your answer.\n")
 		} else {
 			fmt.Fprintf(&b, "Work from the context already provided to you below — Multica has no history reader for %s, so there is no command that can fetch more of this conversation. If you genuinely need earlier context that is not here, ask the user for it rather than guessing.\n", platform)
 		}
+		fmt.Fprintf(&b, "What you send to %s is the deliverable, not a log of how you produced it. Do NOT narrate: your reply must not say what you are about to do or just did (no \"我先读取…\" / \"let me read the history / check the code\"), and must not carry progress notes from the middle of your work. Reply with the final answer only.\n", platform)
 		b.WriteString("\n")
 	}
 	if task.Agent != nil && len(task.Agent.Skills) > 0 {

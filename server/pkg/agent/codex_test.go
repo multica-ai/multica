@@ -1188,6 +1188,83 @@ func TestCodexRawItemAgentMessageFinalAnswer(t *testing.T) {
 	}
 }
 
+// TestCodexDeliverableOutputExcludesNarration pins Result.Output to the turn's
+// deliverable. Codex used to concatenate every agent message, so a tool-using
+// run shipped its intermediate narration to Slack and Lark along with the answer
+// (GH #6006). The wiring mirrors executeOnce: onMessage tracks the last agent
+// message, onFinalAnswer captures the phase-labelled one, and
+// codexDeliverableOutput picks between them.
+func TestCodexDeliverableOutputExcludesNarration(t *testing.T) {
+	t.Parallel()
+
+	const (
+		rawNarration   = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m1","text":"Let me check the logs."}}}`
+		rawFinal       = `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"The retry loop is the cause.","phase":"final_answer"}}}`
+		legacyFirst    = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"Let me check the logs."}}}`
+		legacySecond   = `{"jsonrpc":"2.0","method":"codex/event","params":{"msg":{"type":"agent_message","message":"The retry loop is the cause."}}}`
+		wantDeliverabl = "The retry loop is the cause."
+	)
+
+	cases := []struct {
+		name     string
+		protocol string
+		lines    []string
+		want     string
+	}{
+		{
+			name:     "raw protocol keeps only the labelled final answer",
+			protocol: "raw",
+			lines:    []string{rawNarration, rawFinal},
+			want:     wantDeliverabl,
+		},
+		{
+			name:     "raw protocol without a final_answer falls back to the last message",
+			protocol: "raw",
+			lines:    []string{rawNarration, `{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"agentMessage","id":"m2","text":"The retry loop is the cause."}}}`},
+			want:     wantDeliverabl,
+		},
+		{
+			name:     "legacy protocol carries no phase and falls back to the last message",
+			protocol: "legacy",
+			lines:    []string{legacyFirst, legacySecond},
+			want:     wantDeliverabl,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			c, _, _ := newTestCodexClient(t)
+			c.notificationProtocol = tc.protocol
+			c.turnStarted = true
+
+			var finalAnswer, lastAgentMessage string
+			var streamed []string
+			c.onMessage = func(msg Message) {
+				if msg.Type == MessageText {
+					lastAgentMessage = msg.Content
+					streamed = append(streamed, msg.Content)
+				}
+			}
+			c.onFinalAnswer = func(text string) { finalAnswer = text }
+
+			for _, line := range tc.lines {
+				c.handleLine(line)
+			}
+
+			if got := codexDeliverableOutput(finalAnswer, lastAgentMessage); got != tc.want {
+				t.Fatalf("Result.Output = %q, want %q", got, tc.want)
+			}
+			// Narrowing delivery must not narrow the transcript: both messages
+			// still stream to the timeline the Multica UI renders.
+			if len(streamed) != 2 || streamed[0] != "Let me check the logs." {
+				t.Fatalf("expected both agent messages streamed, got %q", streamed)
+			}
+		})
+	}
+}
+
 func TestCodexRawThreadStatusIdle(t *testing.T) {
 	t.Parallel()
 
@@ -1299,11 +1376,15 @@ func TestCodexRawItemAgentMessageFinalAnswerFromSubagentIgnored(t *testing.T) {
 
 	var messages []Message
 	var doneCount int
+	var finalAnswer string
 	c.onMessage = func(msg Message) {
 		messages = append(messages, msg)
 	}
 	c.onTurnDone = func(aborted bool) {
 		doneCount++
+	}
+	c.onFinalAnswer = func(text string) {
+		finalAnswer = text
 	}
 
 	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr_subagent","item":{"type":"agentMessage","id":"sub-1","text":"subagent leakage","phase":"final_answer"}}}`)
@@ -1313,6 +1394,12 @@ func TestCodexRawItemAgentMessageFinalAnswerFromSubagentIgnored(t *testing.T) {
 	}
 	if doneCount != 0 {
 		t.Fatalf("subagent final_answer must not trigger onTurnDone, got %d calls", doneCount)
+	}
+	// onFinalAnswer selects Result.Output, so a subagent reaching it would ship
+	// another thread's answer as this run's reply. It rides the same
+	// isNotificationFromOtherThread guard; pin that it stays behind it.
+	if finalAnswer != "" {
+		t.Fatalf("subagent final_answer must not become the deliverable, got %q", finalAnswer)
 	}
 }
 

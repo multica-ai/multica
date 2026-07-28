@@ -331,6 +331,40 @@ func TestBuildChatPromptChannelAwareness(t *testing.T) {
 	})
 }
 
+// TestBuildChatPromptNoNarrationOnEveryChannel pins the THIRD axis of the chat
+// channel policy: the no-narration delivery rule keys off "is there a channel at
+// all", like the upload axis and unlike the Slack-only history axis.
+//
+// Regression guard for GH #6006. #4776 introduced the rule for every channel;
+// the MUL-4899 split moved it into the Slack branch along with the read commands
+// its wording happened to mention, so Feishu/Lark replies silently went back to
+// carrying interim narration. The two-layer matrix below could not catch that —
+// it only ever asserted the rule on the Slack case.
+func TestBuildChatPromptNoNarrationOnEveryChannel(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		channelType string
+		want        bool
+	}{
+		{name: "slack", channelType: execenv.ChannelTypeSlack, want: true},
+		{name: "feishu", channelType: execenv.ChannelTypeFeishu, want: true},
+		{name: "direct chat has no channel to deliver into", channelType: "", want: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			out := buildChatPrompt(Task{
+				ChatSessionID:   "sess-1",
+				ChatChannelType: tc.channelType,
+				ChatMessage:     "hi",
+			})
+			for _, phrase := range []string{"Do NOT narrate", "Reply with the final answer only."} {
+				if got := strings.Contains(out, phrase); got != tc.want {
+					t.Errorf("%q present=%v, want %v\n--- output ---\n%s", phrase, got, tc.want, out)
+				}
+			}
+		})
+	}
+}
+
 // TestBuildChatPromptTwoLayerChannelPolicy pins the two INDEPENDENT axes of the
 // chat channel policy (MUL-4899). Collapsing them into one condition is exactly
 // the bug this matrix exists to catch:
