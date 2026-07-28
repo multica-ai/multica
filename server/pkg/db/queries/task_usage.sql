@@ -187,7 +187,7 @@ ORDER BY total_seconds DESC;
 -- failed row whose failure_reason column is NULL or empty (pre-MUL-1949
 -- rows, or a failure path that forgot to classify) collapses into the
 -- 'unclassified' bucket so it stays countable instead of masquerading as a
--- success. Cardinality is bounded by days x (21 reasons + 2), so the whole
+-- success. Cardinality is bounded by days x (22 reasons + 2), so the whole
 -- window fits in one small payload.
 --
 -- Unlike ListDashboardRunTimeDaily this does NOT require started_at — a task

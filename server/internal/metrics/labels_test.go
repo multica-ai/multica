@@ -29,3 +29,10 @@ func TestNormalizeLabelsCollapseUnknownValues(t *testing.T) {
 		t.Fatalf("NormalizeTaskSource unknown = %q, want other", got)
 	}
 }
+
+func TestNormalizeFailureReasonKeepsAdaptiveAdmissionPlatformSide(t *testing.T) {
+	const reason = "adaptive_routing_admission_failed"
+	if got := NormalizeFailureReason(reason); got != reason {
+		t.Fatalf("NormalizeFailureReason(%q) = %q, want canonical platform reason", reason, got)
+	}
+}
