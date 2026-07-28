@@ -366,6 +366,9 @@ func computeObservedCapabilities(usage []cerebrodb.ListAgentObservedToolUsageBet
 		key := capabilityKey(u.Tool)
 		perm, hasRow := permByName[key]
 		status, drift := capabilityStatus(perm, hasRow)
+		if u.MandateDenials > 0 {
+			status, drift = statusBlocked, true
+		}
 		cap := observedCapability{
 			Key:        key,
 			Name:       u.Tool,

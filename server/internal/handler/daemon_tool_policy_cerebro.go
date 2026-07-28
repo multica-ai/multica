@@ -26,7 +26,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/cerebro/accessdecision"
 	"github.com/multica-ai/multica/server/internal/cerebro/approvals"
+	"github.com/multica-ai/multica/server/internal/cerebro/availabilityevidence"
 	cerebrodb "github.com/multica-ai/multica/server/internal/cerebro/db/generated"
 	"github.com/multica-ai/multica/server/internal/cerebro/localtoolpolicy"
 	"github.com/multica-ai/multica/server/internal/cerebro/permgate"
@@ -105,6 +107,7 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 	toolKey, resourcePattern := localtoolpolicy.ProviderToolCallForAgent(r.Context(), h.DB, wsUUID, agentID, req.ToolName, req.ResourcePattern, req.Args) // CEREBRO-PATCH(cursor-tool-policy-key): FIR-3729 normalize Cursor hook names/resources to its runtime inventory.
 	req.ResourcePattern = resourcePattern
 	if err := taskmandate.NewStoreDB(h.DB).Authorize(r.Context(), taskID, wsUUID, agentID, localtoolpolicy.ProviderMandateToolKey(toolKey)); err != nil { // CEREBRO-PATCH(connection-task-mandate-key): FIR-3828 match local workspace Connection hooks to the shared dispatch identity.
+		h.recordDaemonTaskMandateDenial(r.Context(), wsUUID, agentID, taskID, req.ToolName, toolKey)
 		writeJSON(w, http.StatusOK, map[string]any{
 			"allowed": false, "decision": string(localtoolpolicy.KindDeny),
 			"mode": mode, "enforced": true, "would_block": true,
@@ -298,6 +301,43 @@ func (h *Handler) ResolveDaemonToolPolicy(w http.ResponseWriter, r *http.Request
 		"observed":    string(eff.Setting),
 		"reason":      eff.Reason,
 	})
+}
+
+// recordDaemonTaskMandateDenial mirrors the local-runtime call-time rejection
+// into the same append-only ledger the Gateway uses. Capabilities and the drift
+// watcher read this observation so a tool that Permissions allows but the
+// immutable Task Mandate rejects is visible as real access drift.
+func (h *Handler) recordDaemonTaskMandateDenial(ctx context.Context, workspaceID, agentID, taskID pgtype.UUID, observedToolName, capabilityID string) {
+	if h == nil || h.Queries == nil || h.CerebroQueries == nil || !agentID.Valid {
+		return
+	}
+	agent, err := h.Queries.GetAgent(ctx, agentID)
+	if err != nil || !agent.RuntimeID.Valid {
+		return
+	}
+	observedToolName = strings.TrimSpace(observedToolName)
+	if observedToolName == "" {
+		return
+	}
+	if err := h.CerebroQueries.AppendCerebroAccessDecisionLedger(ctx, cerebrodb.AppendCerebroAccessDecisionLedgerParams{
+		WorkspaceID:           workspaceID,
+		AgentID:               agentID,
+		RuntimeID:             agent.RuntimeID,
+		TaskID:                taskID,
+		ObservedToolName:      observedToolName,
+		CanonicalCapabilityID: pgtype.Text{String: strings.TrimSpace(capabilityID), Valid: strings.TrimSpace(capabilityID) != ""},
+		LegacyDecision:        string(accessdecision.DecisionDeny),
+		LegacyPath:            "local_tool_policy",
+		ShadowDecision:        string(accessdecision.DecisionDeny),
+		PolicyDecision:        string(accessdecision.PolicyError),
+		EvidenceLevel:         string(availabilityevidence.LevelDiscovered),
+		Differs:               false,
+		Reason:                "task mandate denied the call",
+	}); err != nil {
+		slog.Warn("local tool-policy: could not record Task Mandate denial",
+			"workspace_id", util.UUIDToString(workspaceID), "agent_id", util.UUIDToString(agentID),
+			"tool", observedToolName, "error", err)
+	}
 }
 
 // agentBrowserToolKey is the capability key agent-browser is registered under.

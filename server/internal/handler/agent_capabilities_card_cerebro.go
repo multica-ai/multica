@@ -223,26 +223,27 @@ type AgentCapabilitySecretSet struct {
 }
 
 // CEREBRO-PATCH(agent-capabilities-observed-tool): TECH-3738 Bid B — one tool the
-// agent ACTUALLY invoked in its recent runs, with how often, when last, and how
-// that observed use lines up against its declared policy. Status is the
-// declared-vs-observed verdict: allowed (used something it may use),
+// agent invoked or attempted in its recent runs, with how often, when last, and
+// how that observation lines up against its declared policy and Task Mandate.
+// Status is the declared-vs-observed verdict: allowed (used something it may use),
 // needs_approval (used an ask-gated tool), blocked (used a denied tool — drift),
 // unmapped (used a tool with no policy row on record — drift, we cannot account
 // for it). Drift is the security signal: observed access the declared policy does
 // not sanction.
 type AgentCapabilityObservedTool struct {
-	Name       string `json:"name"`
-	Uses       int64  `json:"uses"`
-	LastUsed   string `json:"last_used,omitempty"`  // RFC3339, empty if unknown
-	Permission string `json:"permission,omitempty"` // allow | ask | deny | "" (no row)
-	Status     string `json:"status"`               // allowed | needs_approval | blocked | unmapped
-	Drift      bool   `json:"drift"`
+	Name           string `json:"name"`
+	Uses           int64  `json:"uses"`
+	MandateDenials int64  `json:"mandate_denials"`
+	LastUsed       string `json:"last_used,omitempty"`  // RFC3339, empty if unknown
+	Permission     string `json:"permission,omitempty"` // allow | ask | deny | "" (no row)
+	Status         string `json:"status"`               // allowed | needs_approval | blocked | unmapped
+	Drift          bool   `json:"drift"`
 }
 
-// AgentCapabilityObservedAccess is what the agent was OBSERVED to use recently
-// (Bid B), distinct from the declared layers above. It covers tools only — the
-// one runtime-usage signal recorded today (task_message.tool); it never claims
-// observed secret use, which is not recorded anywhere. Status mirrors the
+// AgentCapabilityObservedAccess is what the agent was OBSERVED to use or attempt
+// recently (Bid B), distinct from the declared layers above. It covers tools
+// only, using task_message.tool plus Task Mandate denials from the Decision
+// Ledger; it never claims observed secret use. Status mirrors the
 // secret-set discipline: known (we have run data), not_configured (the agent
 // logged no tool use in the window — genuinely nothing), unknown (lookup failed).
 type AgentCapabilityObservedAccess struct {
@@ -1051,11 +1052,10 @@ const (
 	observedStatusUnmapped      = "unmapped"       // used, but no policy row on record — drift
 )
 
-// buildObservedAccess reads the tools the agent actually invoked in the recent
-// window (task_message.tool aggregated per tool) and compares each against the
-// declared policy rows to flag drift. A missing CerebroQueries handle or a failed
-// lookup yields status=unknown — the card never claims "nothing observed" when it
-// simply could not look it up.
+// buildObservedAccess reads the tools the agent invoked or attempted in the
+// recent window and compares each against declared policy and its call-time Task
+// Mandate result. A failed lookup yields status=unknown rather than claiming
+// that nothing was observed.
 func (h *Handler) buildObservedAccess(r *http.Request, agentID pgtype.UUID, rows []cerebrotoolpolicy.TableRow, provider ...string) AgentCapabilityObservedAccess {
 	out := AgentCapabilityObservedAccess{
 		Status:     capStatusUnknown,
@@ -1147,13 +1147,14 @@ func observedAccessFromUsage(usage []cerebrodb.ListAgentObservedToolUsageRow, ta
 	}
 	for _, u := range usage {
 		perm, hasRow := permByName[strings.ToLower(u.Tool)]
-		status, drift := observedToolStatus(perm, hasRow)
+		status, drift := observedToolStatus(perm, hasRow, u.MandateDenials)
 		tool := AgentCapabilityObservedTool{
-			Name:       u.Tool,
-			Uses:       u.Uses,
-			Permission: perm,
-			Status:     status,
-			Drift:      drift,
+			Name:           u.Tool,
+			Uses:           u.Uses,
+			MandateDenials: u.MandateDenials,
+			Permission:     perm,
+			Status:         status,
+			Drift:          drift,
 		}
 		if u.LastUsed.Valid {
 			tool.LastUsed = u.LastUsed.Time.UTC().Format(time.RFC3339)
@@ -1178,8 +1179,12 @@ func observedAccessFromUsage(usage []cerebrodb.ListAgentObservedToolUsageRow, ta
 // observedToolStatus maps an observed tool's declared permission to its
 // observed-vs-declared verdict and whether it is drift. A tool used with no
 // policy row (hasRow=false) is unmapped drift: we observed access the declared
-// model does not account for. A used-but-denied tool is the strongest drift.
-func observedToolStatus(permission string, hasRow bool) (status string, drift bool) {
+// model does not account for. A used-but-denied tool or Task Mandate rejection
+// is the strongest drift.
+func observedToolStatus(permission string, hasRow bool, mandateDenials ...int64) (status string, drift bool) {
+	if len(mandateDenials) > 0 && mandateDenials[0] > 0 {
+		return observedStatusBlocked, true
+	}
 	if !hasRow {
 		return observedStatusUnmapped, true
 	}

@@ -398,6 +398,28 @@ func TestObservedAccessFromUsage_KnownWithDrift(t *testing.T) {
 	}
 }
 
+func TestObservedAccessFromUsage_TaskMandateDenialIsDrift(t *testing.T) {
+	usage := []cerebrodb.ListAgentObservedToolUsageRow{
+		{
+			Tool:           "mcp__customer_service__handle_message",
+			Uses:           1,
+			MandateDenials: 1,
+			LastUsed:       pgtype.Timestamptz{Time: time.Unix(1_700_000_000, 0), Valid: true},
+		},
+	}
+	perm := map[string]string{"mcp__customer_service__handle_message": "allow"}
+
+	got := observedAccessFromUsage(usage, 1, perm, observedAccessWindowDays)
+
+	if got.DriftCount != 1 || len(got.Tools) != 1 {
+		t.Fatalf("task mandate denial must be one visible drift: %+v", got)
+	}
+	tool := got.Tools[0]
+	if !tool.Drift || tool.Status != observedStatusBlocked || tool.MandateDenials != 1 {
+		t.Fatalf("allowed tool denied by task mandate must be blocked drift: %+v", tool)
+	}
+}
+
 func TestObservedAccessFromUsage_NoRunsIsNotConfigured(t *testing.T) {
 	got := observedAccessFromUsage(nil, 0, map[string]string{}, observedAccessWindowDays)
 	if got.Status != capStatusNotConfigured {
