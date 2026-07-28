@@ -15,7 +15,7 @@ import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-contex
 import { filterIssues } from "../utils/filter";
 import { BOARD_STATUSES } from "@multica/core/issues/config";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter } from "@multica/core/issues/queries";
+import { issueAssigneeGroupsOptions, issueListOptions, childIssueProgressOptions, type AssigneeGroupedIssuesFilter, type IssueFlatFilter } from "@multica/core/issues/queries";
 import { agentTaskSnapshotOptions } from "@multica/core/agents";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -25,6 +25,7 @@ import { BoardView } from "./board-view";
 import { ListView } from "./list-view";
 import { SwimLaneView } from "./swimlane-view";
 import { BatchActionToolbar } from "./batch-action-toolbar";
+import { IssueTableSurface } from "./issue-table-surface";
 import type { ChildProgress } from "./list-row";
 import { useT } from "../../i18n";
 import { useNavigation } from "../../navigation";
@@ -120,6 +121,7 @@ export function IssuesPage({
   const sortDirection = useIssueViewStore((s) => s.sortDirection);
   const agentRunningFilter = useIssueViewStore((s) => s.agentRunningFilter);
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
+  const usesTable = viewMode === "table";
 
   const sort = useMemo(
     () => ({
@@ -172,10 +174,20 @@ export function IssuesPage({
   }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, onBehalfOfFilters, priorityFilters, projectFilters, referenceFilter, scope, statusFilters]);
 
   const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, queryParams);
+  const tableBaseFilter = useMemo<IssueFlatFilter>(() => ({
+    reference: referenceFilter,
+    on_behalf_of_ids: onBehalfOfFilters,
+    assignee_types:
+      scope === "members"
+        ? ["member"]
+        : scope === "agents"
+          ? ["agent", "squad"]
+          : undefined,
+  }), [onBehalfOfFilters, referenceFilter, scope]);
   const statusIssuesQuery = useQuery({
     // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 list view on-behalf-of filter.
     ...issueListOptions(wsId, { reference: referenceFilter, on_behalf_of_ids: onBehalfOfFilters }, queryParams),
-    enabled: !usesAssigneeBoard,
+    enabled: !usesAssigneeBoard && !usesTable,
   });
   const assigneeGroupsQuery = useQuery({
     ...assigneeGroupsOptions,
@@ -193,7 +205,7 @@ export function IssuesPage({
     () => dateFilteredAssigneeGroups?.flatMap((group) => group.issues) ?? [],
     [dateFilteredAssigneeGroups],
   );
-  const loading = usesAssigneeBoard
+  const loading = usesTable ? false : usesAssigneeBoard
     ? assigneeGroupsQuery.isLoading
     : statusIssuesQuery.isLoading;
 
@@ -316,9 +328,10 @@ export function IssuesPage({
           onDateFiltersChange={setDateFilters}
           // CEREBRO-PATCH(boards-date-filter): FIR-1724 due-date presets so the global board matches My Issues.
           dueDatePresets
+          facetCountsExact={!usesTable}
         />
 
-        {loading ? contentSkeleton : headerIssues.length === 0 ? (
+        {loading ? contentSkeleton : !usesTable && headerIssues.length === 0 ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
             <ListTodo className="h-10 w-10 text-muted-foreground/40" />
             <p className="text-sm">{t(($) => $.page.empty_title)}</p>
@@ -337,6 +350,14 @@ export function IssuesPage({
                 onMoveIssue={handleMoveIssue}
                 childProgressMap={childProgressMap}
                 sort={queryParams}
+              />
+            ) : viewMode === "table" ? (
+              <IssueTableSurface
+                scope={`workspace:${scope}`}
+                baseFilter={tableBaseFilter}
+                sort={queryParams}
+                runningIssueIds={runningIssueIds}
+                childProgressMap={childProgressMap}
               />
             ) : viewMode === "swimlane" ? (
               <SwimLaneView

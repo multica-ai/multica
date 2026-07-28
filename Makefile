@@ -245,7 +245,7 @@ setup-worktree: ## Ensure .env.worktree exists, then prepare this worktree
 	@$(MAKE) setup ENV_FILE=$(WORKTREE_ENV_FILE)
 
 start-worktree: ## Start this worktree using .env.worktree
-	@$(MAKE) start ENV_FILE=$(WORKTREE_ENV_FILE)
+	@MULTICA_DEV_MASTER_CODE=$${MULTICA_DEV_MASTER_CODE:-888888} $(MAKE) start ENV_FILE=$(WORKTREE_ENV_FILE)
 
 stop-worktree: ## Stop this worktree's backend and frontend processes
 	@$(MAKE) stop ENV_FILE=$(WORKTREE_ENV_FILE)

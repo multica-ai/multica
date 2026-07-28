@@ -59,6 +59,19 @@ func TestFirtalGatewayCallableToolFamilies(t *testing.T) {
 		_, _ = runtimeAccountTestPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issue.ID)
 		_, _ = runtimeAccountTestPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issue.ID)
 	})
+	property, err := queries.CreateIssueProperty(ctx, db.CreateIssuePropertyParams{
+		WorkspaceID: runtimeAccountTestWSID,
+		Name:        "Gateway Tool Family Value",
+		Type:        "number",
+		Description: "gateway tool family test",
+		Config:      []byte(`{}`),
+	})
+	if err != nil {
+		t.Fatalf("create issue property: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = runtimeAccountTestPool.Exec(context.Background(), `DELETE FROM issue_property WHERE id = $1`, property.ID)
+	})
 
 	var artifactID pgtype.UUID
 	if err := runtimeAccountTestPool.QueryRow(ctx, `
@@ -120,6 +133,9 @@ func TestFirtalGatewayCallableToolFamilies(t *testing.T) {
 		want   string
 	}{
 		{family: "issue/comment", tool: "add_comment", args: map[string]any{"issue_id": util.UUIDToString(issue.ID), "content": "gateway family regression"}, want: "issue_id"},
+		{family: "issue/property-list", tool: "list_issue_properties", args: map[string]any{"issue_id": util.UUIDToString(issue.ID)}, want: "Gateway Tool Family Value"},
+		{family: "issue/property-set", tool: "set_issue_property", args: map[string]any{"issue_id": util.UUIDToString(issue.ID), "property": "Gateway Tool Family Value", "value": 42}, want: util.UUIDToString(property.ID)},
+		{family: "issue/property-unset", tool: "unset_issue_property", args: map[string]any{"issue_id": util.UUIDToString(issue.ID), "property": util.UUIDToString(property.ID)}, want: `"properties":{}`},
 		{family: "project", tool: "create_project", args: map[string]any{"title": "Gateway Tool Family Test Project"}, want: "Gateway Tool Family Test Project"},
 		{family: "artifact", tool: "search_artifacts", args: map[string]any{"q": "Gateway artifact probe"}, want: "Gateway artifact probe"},
 		{family: "group", tool: "list_groups", args: map[string]any{}, want: "Gateway Tool Family Test Group"},

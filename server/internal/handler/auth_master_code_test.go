@@ -74,3 +74,33 @@ func TestVerifyCodeRejectsMasterCode(t *testing.T) {
 		t.Fatalf("888888 returned a token: %s", body)
 	}
 }
+
+func TestVerifyCodeAcceptsExplicitLocalMasterCode(t *testing.T) {
+	const email = "configured-local-master-code-test@multica.ai"
+	ctx := context.Background()
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM verification_code WHERE email = $1`, email)
+		testPool.Exec(ctx, `DELETE FROM "user" WHERE email = $1`, email)
+	})
+	t.Setenv("APP_ENV", "development")
+	t.Setenv("MULTICA_DEV_MASTER_CODE", "888888")
+
+	w := httptest.NewRecorder()
+	var buf bytes.Buffer
+	json.NewEncoder(&buf).Encode(map[string]string{"email": email, "code": "888888"})
+	req := httptest.NewRequest("POST", "/auth/verify-code", &buf)
+	req.Header.Set("Content-Type", "application/json")
+	testHandler.VerifyCode(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("configured local master code: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var response LoginResponse
+	if err := json.NewDecoder(w.Body).Decode(&response); err != nil {
+		t.Fatalf("decode login response: %v", err)
+	}
+	if response.Token == "" || response.User.Email != email {
+		t.Fatalf("configured local master code returned incomplete login response: %+v", response)
+	}
+}

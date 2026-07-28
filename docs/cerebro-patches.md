@@ -869,6 +869,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `issue-detail-sprint-as-project` | packages/views/issues/components/issue-detail.tsx | 0 (comment) | TECH-3620 — clarifies that Project and Sprint are independent sidebar controls now; the Project field is the issue's home project. |
 | `issue-detail-sprint-picker` | packages/views/issues/components/issue-detail.tsx | 0 | FIR-2666/TECH-3620 — sidebar Sprint picker assigns the issue to a real sprint via the `cerebro_sprint_issue` join, leaving `project_id` (home project) untouched, so the issue lives in both its project and the sprint. Renders with the flag on and a project that has real sprints. |
 | `issue-detail-time-picker` | packages/views/issues/components/issue-detail.tsx | 4 | FIR-1597 — marked import + `cerebro_issue_date_times` flag + an `<IssueTimePicker>` rendered inside the Start date and Due date `PropRow`s (only when the date is set and the flag is on). All logic lives in `@multica/cerebro-issue-datetime`. Same gating pattern as `issue-detail-sprint-picker`. |
+| `table-stacked-date-times` | packages/views/issues/components/table-view.tsx | 3 | FIR-3447 — preserves Cerebro's optional Start date / Due date time controls in the upstream Table. The three-line seam is one marked fork-owned picker import and one picker per date column; all gating and behavior stays in `@multica/cerebro-issue-properties` and `@multica/cerebro-issue-datetime`. |
 | `issue-date-times-views-dep` | packages/views/package.json | 2 | FIR-1597 — adds the `@multica/cerebro-issue-datetime` workspace dependency (+ a `_comment_` line) for the `IssueTimePicker` mounted in issue-detail. Same pattern as `recurring-issues-views-dep`. |
 | `project-handler` | server/internal/handler/project.go | 83 | Server handler additions |
 | `projects-page-cerebro` | packages/views/projects/components/projects-page.tsx | 19 | Projects page/access-tab cerebro additions |
@@ -1765,8 +1766,24 @@ Approved through FIR-3411 Gate 0 and plan artifact `019f6fac-0134-7e34-b485-0cdf
 | Patch | Location | Reason |
 |---|---|---|
 | `brief-layer-modes` | `server/internal/daemon/execenv/execenv.go`; `runtime_config.go`; `server/internal/daemon/daemon.go` | Carry the two per-agent brief-layer modes (`workspace_brief_mode`, `tools_brief_mode`) from the agent's `runtime_config` into brief rendering: one guard call-site swaps in the identity-only brief, one call-site routes the tools section through the fold. All logic lives in the cerebro siblings `cerebro_brief_layers.go` (execenv) and `cerebro_brief_layer_modes.go` (daemon + agentoffice). |
+| `opencode-auto-flag` | `server/pkg/agent/opencode.go` | Keep the full-server verification executable on the managed runtime after the installed OpenCode CLI replaced `--dangerously-skip-permissions` with `--auto`; existing explicit question/plan denies remain in force. |
 
 Approved by Jesper Hvejsel on FIR-3212 ("Vi skal kun lave agent configuration fuld scope"), 2026-07-17. Standing FIR-3212 approval for marked patches recorded 2026-07-15.
+
+## FIR-3447 — Custom issue fields in Create issue
+
+| Patch | Location | Reason |
+|---|---|---|
+| `create-issue-custom-properties` | `packages/views/modals/create-issue.tsx`; `packages/views/package.json` | Mount the fork-owned Create issue adapter because upstream v0.4.4 supplies Issue detail editing and the value API, but no Create issue field surface. The typed field UI and post-create writes stay isolated in `packages/cerebro-issue-properties`. |
+| `issue-property-view-label-fallback` | `packages/views/issues/components/issues-header.tsx` | Keep existing static display labels type-safe while the property-aware view-state types are present but the separate list-surface UI slice has not landed. Unknown property-backed persisted values fall back to Manual/Status instead of breaking the header. |
+| `issue-table-surface` | `packages/views/issues/components/issue-table-surface.tsx`; `packages/views/issues/components/issues-page.tsx`; `packages/views/my-issues/components/my-issues-page.tsx`; `packages/views/projects/components/project-detail.tsx` | Mount upstream's configurable Table through Cerebro's existing workspace, My Issues, project, sprint, on-behalf-of, running-agent, progress, and batch-selection seams instead of replacing those fork-owned behaviors with upstream's newer surface stack. |
+| `settings-page-issue-tab` | `packages/views/settings/components/settings-page.tsx` | Add Issue as a workspace settings section without replacing Cerebro's existing settings tabs or permission-aware shell. |
+| `settings-page-issue-content` | `packages/views/settings/components/settings-page.tsx` | Mount the upstream property and create-field configuration inside the existing Cerebro settings layout. |
+| `workspace-default-issue-properties` | `server/internal/handler/workspace.go` | Create Business value (DKK) and Effort (DKK) as number properties for new workspaces while preserving the existing default workspace setup. |
+| `property-task-routes` | `server/cmd/server/router.go`; `server/internal/middleware/auth.go` | Bind `mat_` requests to their task context, allow agents to read the workspace property catalog, and restrict value writes to the issue that created the task. Property-definition writes remain human-only. |
+| `quick-create-custom-properties` | `packages/views/modals/quick-create-issue.tsx`; `server/internal/handler/issue.go`; `server/internal/service/task.go` | Show the settings-enabled custom fields in Quick create, validate their values before queueing, and apply them when the asynchronously created issue is resolved. The reusable typed controls stay isolated in `packages/cerebro-issue-properties`. |
+
+Approved by Jesper Hvejsel through FIR-3447 and plan artifact `019f704e-3865-7220-a109-6df596ccdf28`, 2026-07-17.
 
 ## FIR-3425 — Projects tree table and cards
 

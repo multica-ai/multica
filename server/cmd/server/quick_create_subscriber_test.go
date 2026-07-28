@@ -36,10 +36,13 @@ func TestQuickCreateCompletion_SubscribesRequester(t *testing.T) {
 		parseUUID(agentID),
 		pgtype.UUID{},
 		"please file a bug",
+		"", // priority
+		"", // dueDate
 		pgtype.UUID{},
 		pgtype.UUID{},
 		// CEREBRO-PATCH(quick-create-workflow-id): FIR-2283 followup — new workflowID arg.
 		pgtype.UUID{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)
@@ -112,9 +115,12 @@ func TestQuickCreateFailure_DoesNotSubscribeRequester(t *testing.T) {
 		parseUUID(agentID),
 		pgtype.UUID{},
 		"another bug",
+		"", // priority
+		"", // dueDate
 		pgtype.UUID{},
 		pgtype.UUID{},
 		pgtype.UUID{},
+		nil,
 	)
 	if err != nil {
 		t.Fatalf("EnqueueQuickCreateTask: %v", err)

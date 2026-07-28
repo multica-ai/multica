@@ -441,6 +441,10 @@
       "gate": "issue_scope"
     },
     {
+      "id": "DELETE /api/issues/{id}/properties/{propertyId}",
+      "gate": "issue_scope"
+    },
+    {
       "id": "DELETE /api/issues/{id}/reactions",
       "gate": "issue_scope"
     },
@@ -623,6 +627,10 @@
     {
       "id": "PATCH /api/projects/{id}/access",
       "gate": "project_access"
+    },
+    {
+      "id": "PATCH /api/properties/{id}",
+      "gate": "workspace_admin"
     },
     {
       "id": "PATCH /api/roles/{id}",
@@ -1253,6 +1261,10 @@
       "gate": "platform_action:create_issue (agents) + workspace_member (members)"
     },
     {
+      "id": "POST /api/issues/query",
+      "exempt": "read-only — body-transport twin of GET /api/issues/, delegates to ListIssues and inherits its workspace-membership access controls without mutating data"
+    },
+    {
       "id": "POST /api/issues/batch-delete",
       "gate": "workspace_member"
     },
@@ -1315,6 +1327,10 @@
     {
       "id": "POST /api/labels/",
       "gate": "workspace_member"
+    },
+    {
+      "id": "POST /api/properties",
+      "gate": "workspace_admin"
     },
     {
       "id": "POST /api/lark/binding/redeem",
@@ -1849,6 +1865,10 @@
       "gate": "issue_scope"
     },
     {
+      "id": "PUT /api/issues/{id}/properties/{propertyId}",
+      "gate": "issue_scope"
+    },
+    {
       "id": "PUT /api/labels/{id}/",
       "gate": "workspace_member"
     },
@@ -2071,6 +2091,10 @@
       "exempt": "read-only — GET endpoints carry their own auth, no mutation"
     },
     {
+      "id": "list_issue_properties",
+      "exempt": "read-only — wraps GET /api/issues/{id} and GET /api/properties"
+    },
+    {
       "id": "read_attachment",
       "exempt": "read-only — wraps GET /api/attachments/{id}/content"
     },
@@ -2089,6 +2113,14 @@
     {
       "id": "request_approval",
       "gate": "via:POST /api/workspaces/{id}/mcp"
+    },
+    {
+      "id": "set_issue_property",
+      "gate": "via:PUT /api/issues/{id}/properties/{propertyId}"
+    },
+    {
+      "id": "unset_issue_property",
+      "gate": "via:DELETE /api/issues/{id}/properties/{propertyId}"
     },
     {
       "id": "search_notes",
@@ -3177,6 +3209,18 @@
       "exempt": "read-only — wraps GET /api/issues/"
     },
     {
+      "id": "issue property list",
+      "exempt": "read-only — wraps GET /api/issues/{id} and GET /api/properties"
+    },
+    {
+      "id": "issue property set",
+      "gate": "via:PUT /api/issues/{id}/properties/{propertyId}"
+    },
+    {
+      "id": "issue property unset",
+      "gate": "via:DELETE /api/issues/{id}/properties/{propertyId}"
+    },
+    {
       "id": "issue metadata delete",
       "gate": "via:http"
     },
@@ -3399,6 +3443,30 @@
     {
       "id": "project update",
       "gate": "via:PUT /api/projects/{id}/"
+    },
+    {
+      "id": "property archive",
+      "gate": "via:PATCH /api/properties/{id}"
+    },
+    {
+      "id": "property create",
+      "gate": "via:POST /api/properties"
+    },
+    {
+      "id": "property get",
+      "exempt": "read-only — wraps GET /api/properties"
+    },
+    {
+      "id": "property list",
+      "exempt": "read-only — wraps GET /api/properties"
+    },
+    {
+      "id": "property unarchive",
+      "gate": "via:PATCH /api/properties/{id}"
+    },
+    {
+      "id": "property update",
+      "gate": "via:PATCH /api/properties/{id}"
     },
     {
       "id": "repo check",

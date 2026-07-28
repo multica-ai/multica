@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/cerebro/firtalgateway"
+	issueproperties "github.com/multica-ai/multica/server/internal/cerebro/issueproperties"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -57,7 +58,6 @@ type WorkspaceResponse struct {
 	AvatarURL *string `json:"avatar_url"`
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
-
 }
 
 func workspaceToResponse(w db.Workspace) WorkspaceResponse {
@@ -90,7 +90,6 @@ func workspaceToResponse(w db.Workspace) WorkspaceResponse {
 		AvatarURL: textToPtr(w.AvatarUrl),
 		CreatedAt: timestampToString(w.CreatedAt),
 		UpdatedAt: timestampToString(w.UpdatedAt),
-
 	}
 }
 
@@ -502,6 +501,11 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create workspace: "+err.Error())
 		return
 	}
+	// CEREBRO-PATCH(workspace-default-issue-properties): FIR-3447 seed the two commercial DKK fields transactionally.
+	if err := issueproperties.SeedDefaults(r.Context(), qtx, ws.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to seed default issue fields")
+		return
+	}
 
 	_, err = qtx.CreateMember(r.Context(), db.CreateMemberParams{
 		WorkspaceID: ws.ID,
@@ -570,7 +574,6 @@ type UpdateWorkspaceRequest struct {
 
 	// CEREBRO-PATCH(workspace-avatar-update): FIR-2580 — accept the logo URL ("" clears it; omit to leave unchanged).
 	AvatarURL *string `json:"avatar_url"`
-
 }
 
 func (h *Handler) UpdateWorkspace(w http.ResponseWriter, r *http.Request) {

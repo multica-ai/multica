@@ -122,6 +122,192 @@ describe("ApiClient schema fallback", () => {
       expect(res.issues[0]?.start_date).toBeNull();
       expect(res.total).toBe(1);
     });
+
+    it("preserves typed custom property values", async () => {
+      stubFetchJson({
+        issues: [
+          {
+            id: "issue-1",
+            workspace_id: "workspace-1",
+            number: 42,
+            identifier: "MUL-42",
+            title: "Issue with properties",
+            description: null,
+            status: "todo",
+            priority: "medium",
+            assignee_type: null,
+            assignee_id: null,
+            creator_type: "member",
+            creator_id: "member-1",
+            parent_issue_id: null,
+            project_id: null,
+            position: 0,
+            start_date: null,
+            due_date: null,
+            properties: {
+              "property-text": "planned",
+              "property-number": 125000,
+              "property-checkbox": true,
+              "property-multi": ["option-a", "option-b"],
+            },
+            created_at: "2026-05-17T00:00:00Z",
+            updated_at: "2026-05-17T00:00:00Z",
+          },
+        ],
+        total: 1,
+      });
+
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+
+      expect(res.issues[0]?.properties).toEqual({
+        "property-text": "planned",
+        "property-number": 125000,
+        "property-checkbox": true,
+        "property-multi": ["option-a", "option-b"],
+      });
+    });
+
+    it("defaults missing properties and drops unknown property value shapes", async () => {
+      const baseIssue = {
+        id: "issue-1",
+        workspace_id: "workspace-1",
+        number: 42,
+        identifier: "MUL-42",
+        title: "Existing issue",
+        description: null,
+        status: "todo",
+        priority: "medium",
+        assignee_type: null,
+        assignee_id: null,
+        creator_type: "member",
+        creator_id: "member-1",
+        parent_issue_id: null,
+        project_id: null,
+        position: 0,
+        start_date: null,
+        due_date: null,
+        created_at: "2026-05-17T00:00:00Z",
+        updated_at: "2026-05-17T00:00:00Z",
+      };
+      stubFetchJson({
+        issues: [
+          baseIssue,
+          {
+            ...baseIssue,
+            id: "issue-2",
+            properties: { "property-future": { relation_id: "future" }, "property-text": "kept" },
+          },
+        ],
+        total: 2,
+      });
+
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssues();
+
+      expect(res.issues[0]?.properties).toEqual({});
+      expect(res.issues[1]?.properties).toEqual({ "property-text": "kept" });
+    });
+
+    it("serializes property filters and property sorting", async () => {
+      stubFetchJson({ issues: [], total: 0 });
+      const client = new ApiClient("https://api.example.test");
+
+      await client.listIssues({
+        properties: { "property-channel": ["webshop", "marketplace"] },
+        sort_by: "property:property-business-value",
+        sort_direction: "desc",
+      });
+
+      const requestedUrl = String(vi.mocked(fetch).mock.calls[0]?.[0]);
+      const search = new URL(requestedUrl).searchParams;
+      expect(search.get("properties")).toBe(
+        JSON.stringify({ "property-channel": ["webshop", "marketplace"] }),
+      );
+      expect(search.get("sort")).toBe("property:property-business-value");
+      expect(search.get("direction")).toBe("desc");
+    });
+  });
+
+  describe("listProperties", () => {
+    it("parses definitions while tolerating future types and missing config", async () => {
+      stubFetchJson({
+        properties: [
+          {
+            id: "property-1",
+            workspace_id: "workspace-1",
+            name: "Business value (DKK)",
+            type: "relation",
+            position: 1,
+            archived: false,
+            created_at: "2026-07-17T00:00:00Z",
+            updated_at: "2026-07-17T00:00:00Z",
+          },
+        ],
+        total: 1,
+      });
+
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listProperties();
+
+      expect(res.properties[0]?.type).toBe("relation");
+      expect(res.properties[0]?.config).toEqual({});
+      expect(res.properties[0]?.icon).toBe("");
+    });
+
+    it("degrades malformed catalogs to an empty response", async () => {
+      stubFetchJson({ properties: "not-an-array", total: 1 });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listProperties()).resolves.toEqual({ properties: [], total: 0 });
+    });
+
+    it("treats a 404 from an older backend as an empty catalog", async () => {
+      stubFetchJson({ error: "not found" }, 404);
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.listProperties()).resolves.toEqual({ properties: [], total: 0 });
+    });
+  });
+
+  describe("property mutations", () => {
+    it("degrades a malformed create response to an empty property", async () => {
+      stubFetchJson({ wrong: "shape" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.createProperty({ name: "Value", type: "number" })).resolves.toMatchObject({
+        id: "",
+        name: "",
+      });
+    });
+
+    it("degrades a malformed update response to an empty property", async () => {
+      stubFetchJson({ wrong: "shape" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.updateProperty("property-1", { name: "Value" })).resolves.toMatchObject({
+        id: "",
+        name: "",
+      });
+    });
+
+    it("degrades a malformed set-value response to an empty value bag", async () => {
+      stubFetchJson({ properties: "not-an-object" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.setIssueProperty("issue-1", "property-1", 42)).resolves.toEqual({
+        properties: {},
+      });
+    });
+
+    it("degrades a malformed unset-value response to an empty value bag", async () => {
+      stubFetchJson({ properties: "not-an-object" });
+      const client = new ApiClient("https://api.example.test");
+
+      await expect(client.unsetIssueProperty("issue-1", "property-1")).resolves.toEqual({
+        properties: {},
+      });
+    });
   });
 
   describe("listAutopilots", () => {

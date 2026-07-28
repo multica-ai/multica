@@ -1,6 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -28,6 +28,31 @@ const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockToastCustom = vi.hoisted(() => vi.fn());
 const mockToastDismiss = vi.hoisted(() => vi.fn());
 const mockToastError = vi.hoisted(() => vi.fn());
+const mockSetIssueProperty = vi.hoisted(() => vi.fn());
+const mockIssuePropertyCatalog = vi.hoisted(() => [
+  {
+    id: "property-business-value",
+    workspace_id: "ws-test",
+    name: "Business value (DKK)",
+    type: "number",
+    config: {},
+    position: 0,
+    archived: false,
+    created_at: "2026-07-17T00:00:00Z",
+    updated_at: "2026-07-17T00:00:00Z",
+  },
+  {
+    id: "property-effort",
+    workspace_id: "ws-test",
+    name: "Effort (DKK)",
+    type: "number",
+    config: {},
+    position: 1,
+    archived: false,
+    created_at: "2026-07-17T00:00:00Z",
+    updated_at: "2026-07-17T00:00:00Z",
+  },
+]);
 
 const mockDraftStore = {
   draft: {
@@ -65,6 +90,14 @@ vi.mock("@multica/core/paths", () => ({
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-test",
+}));
+
+vi.mock("@multica/core/properties", () => ({
+  propertyListOptions: (wsId: string) => ({
+    queryKey: ["properties", wsId, "list", false],
+    queryFn: () => Promise.resolve(mockIssuePropertyCatalog),
+  }),
+  useSetIssueProperty: () => ({ mutateAsync: mockSetIssueProperty }),
 }));
 
 vi.mock("@multica/core/issues/queries", () => ({
@@ -372,6 +405,30 @@ describe("CreateIssueModal", () => {
     expect(mockPush).toHaveBeenCalledWith("/ws-test/issues/issue-123");
     expect(mockToastDismiss).toHaveBeenCalledWith("toast-1");
   }, 30_000);
+
+  it("sets selected custom properties on the newly created issue", async () => {
+    const user = userEvent.setup();
+    mockSetIssueProperty.mockResolvedValue({
+      properties: { "property-business-value": 125000 },
+    });
+
+    renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+    await user.click(await screen.findByRole("button", { name: "Business value (DKK)" }));
+    const input = await screen.findByRole("spinbutton");
+    await user.type(input, "125000");
+    fireEvent.submit(input.closest("form")!);
+    await user.type(screen.getByPlaceholderText("Issue title"), "Prioritize growth work");
+    await user.click(screen.getByRole("button", { name: "Create Issue" }));
+
+    await waitFor(() => {
+      expect(mockSetIssueProperty).toHaveBeenCalledWith({
+        issueId: "issue-123",
+        propertyId: "property-business-value",
+        value: 125000,
+      });
+    });
+  });
 
   it("keeps manual mode open and clears content when create another is enabled", async () => {
     const user = userEvent.setup();

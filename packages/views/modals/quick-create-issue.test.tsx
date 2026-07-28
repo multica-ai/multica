@@ -11,6 +11,7 @@ const mockClearPrompt = vi.hoisted(() => vi.fn());
 const mockSetKeepOpen = vi.hoisted(() => vi.fn());
 const mockSetLastMode = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
+const mockCustomPropertyValues = vi.hoisted(() => ({ current: {} as Record<string, unknown> }));
 
 const mockQuickCreateStore = {
   lastActorType: null as "agent" | "squad" | null,
@@ -24,6 +25,22 @@ const mockQuickCreateStore = {
   keepOpen: false,
   setKeepOpen: mockSetKeepOpen,
 };
+
+const mockIssueCreateSettingsStore = {
+  quickCreateFields: ["project"] as Array<"project" | "priority" | "due_date">,
+  hiddenManualPropertyIds: [] as string[],
+};
+
+vi.mock("@multica/cerebro-issue-properties/views", () => ({
+  CreateIssueProperties: forwardRef((_props: unknown, ref) => {
+    useImperativeHandle(ref, () => ({
+      getValues: () => mockCustomPropertyValues.current,
+      applyToIssue: vi.fn(),
+      reset: vi.fn(),
+    }));
+    return <div>Business value (DKK)</div>;
+  }),
+}));
 
 // Per-test override for the projects query, so tests can swap between
 // "loaded as empty" (the deleted-project case) and "still loading" without
@@ -115,6 +132,12 @@ vi.mock("@multica/core/issues/stores/quick-create-store", () => ({
     (selector ? selector(mockQuickCreateStore) : mockQuickCreateStore),
 }));
 
+vi.mock("@multica/core/issues/stores/issue-create-settings-store", () => ({
+  useIssueCreateSettingsStore: (
+    selector: (state: typeof mockIssueCreateSettingsStore) => unknown,
+  ) => selector(mockIssueCreateSettingsStore),
+}));
+
 vi.mock("@multica/core/issues/stores/create-mode-store", () => ({
   useCreateModeStore: (selector?: (state: { setLastMode: typeof mockSetLastMode }) => unknown) =>
     (selector ? selector({ setLastMode: mockSetLastMode }) : { setLastMode: mockSetLastMode }),
@@ -145,8 +168,17 @@ vi.mock("../common/actor-avatar", () => ({
 }));
 
 vi.mock("../issues/components", () => ({
-  PriorityPicker: () => <div data-testid="priority-picker" />,
-  DueDatePicker: () => <div data-testid="due-date-picker" />,
+  PriorityIcon: () => <span data-testid="priority-icon" />,
+  PriorityPicker: ({ onUpdate }: { onUpdate: (value: { priority: "high" }) => void }) => (
+    <button type="button" data-testid="priority-picker" onClick={() => onUpdate({ priority: "high" })}>
+      Set high priority
+    </button>
+  ),
+  DueDatePicker: ({ onUpdate }: { onUpdate: (value: { due_date: string }) => void }) => (
+    <button type="button" data-testid="due-date-picker" onClick={() => onUpdate({ due_date: "2026-08-01" })}>
+      Set due date
+    </button>
+  ),
 }));
 
 vi.mock("../projects/components/project-picker", () => ({
@@ -339,6 +371,8 @@ describe("AgentCreatePanel", () => {
     mockQuickCreateStore.lastProjectId = null;
     mockQuickCreateStore.prompt = "Persisted draft prompt";
     mockQuickCreateStore.keepOpen = false;
+    mockIssueCreateSettingsStore.quickCreateFields = ["project"];
+    mockCustomPropertyValues.current = {};
     mockProjectsQuery.data = [];
     mockProjectsQuery.isSuccess = true;
     mockSquadsData.list = [];
@@ -356,6 +390,57 @@ describe("AgentCreatePanel", () => {
         'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
       ),
     ).toHaveValue("Persisted draft prompt");
+  });
+
+  it("shows configured quick-create fields and submits their selected values", async () => {
+    mockIssueCreateSettingsStore.quickCreateFields = ["project", "priority", "due_date"];
+    const user = userEvent.setup();
+
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    await user.click(screen.getByTestId("priority-picker"));
+    await user.click(screen.getByTestId("due-date-picker"));
+
+    const editor = screen.getByPlaceholderText(
+      'Tell the agent what to do, e.g. "let Bohan fix the inbox loading slowness in the Web project"',
+    );
+    await user.clear(editor);
+    await user.type(editor, "Prioritize the launch work");
+    await user.click(screen.getByRole("button", { name: /^Create \(/i }));
+
+    await waitFor(() => {
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith({
+        agent_id: "agent-1",
+        prompt: "Prioritize the launch work",
+        project_id: undefined,
+        priority: "high",
+        due_date: "2026-08-01",
+      });
+    });
+  });
+
+  it("shows enabled custom fields and submits their values", async () => {
+    mockCustomPropertyValues.current = { "business-value": 125000, effort: 25000 };
+    const user = userEvent.setup();
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.getByText("Business value (DKK)")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: /^Create \(/i }));
+
+    await waitFor(() =>
+      expect(mockQuickCreateIssue).toHaveBeenCalledWith(
+        expect.objectContaining({
+          property_values: { "business-value": 125000, effort: 25000 },
+        }),
+      ),
+    );
+  });
+
+  it("keeps unconfigured quick-create fields off the toolbar", () => {
+    renderPanel({ onClose: vi.fn(), isExpanded: false, setIsExpanded: vi.fn() });
+
+    expect(screen.queryByTestId("priority-picker")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("due-date-picker")).not.toBeInTheDocument();
   });
 
   it("writes prompt changes back to the draft store and clears them after submit", async () => {

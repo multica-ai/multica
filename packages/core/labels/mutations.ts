@@ -3,7 +3,10 @@ import { api } from "../api";
 import { labelKeys } from "./queries";
 import { useWorkspaceId } from "../hooks";
 import { issueKeys } from "../issues/queries";
-import { onIssueLabelsChanged } from "../issues/ws-updaters";
+import {
+  invalidateIssueLabelDerivatives,
+  patchIssueLabels,
+} from "../issues/ws-updaters";
 import type {
   Label,
   CreateLabelRequest,
@@ -116,13 +119,13 @@ export function useAttachLabel(issueId: string) {
       if (!label) return { prev };
       const next: IssueLabelsResponse = { ...prev, labels: [...prev.labels, label] };
       qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), next);
-      onIssueLabelsChanged(qc, wsId, issueId, next.labels);
+      patchIssueLabels(qc, wsId, issueId, next.labels);
       return { prev };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) {
         qc.setQueryData(labelKeys.byIssue(wsId, issueId), ctx.prev);
-        onIssueLabelsChanged(qc, wsId, issueId, ctx.prev.labels);
+        patchIssueLabels(qc, wsId, issueId, ctx.prev.labels);
       }
     },
     onSuccess: (data: IssueLabelsResponse) => {
@@ -132,11 +135,12 @@ export function useAttachLabel(issueId: string) {
       // onMutate stands until onSettled's invalidation refetches.
       if (data && Array.isArray(data.labels)) {
         qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), data);
-        onIssueLabelsChanged(qc, wsId, issueId, data.labels);
+        patchIssueLabels(qc, wsId, issueId, data.labels);
       }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: labelKeys.byIssue(wsId, issueId) });
+      invalidateIssueLabelDerivatives(qc, wsId);
     },
   });
 }
@@ -154,18 +158,19 @@ export function useDetachLabel(issueId: string) {
         : undefined;
       if (next) {
         qc.setQueryData<IssueLabelsResponse>(labelKeys.byIssue(wsId, issueId), next);
-        onIssueLabelsChanged(qc, wsId, issueId, next.labels);
+        patchIssueLabels(qc, wsId, issueId, next.labels);
       }
       return { prev };
     },
     onError: (_err, _id, ctx) => {
       if (ctx?.prev) {
         qc.setQueryData(labelKeys.byIssue(wsId, issueId), ctx.prev);
-        onIssueLabelsChanged(qc, wsId, issueId, ctx.prev.labels);
+        patchIssueLabels(qc, wsId, issueId, ctx.prev.labels);
       }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: labelKeys.byIssue(wsId, issueId) });
+      invalidateIssueLabelDerivatives(qc, wsId);
     },
   });
 }

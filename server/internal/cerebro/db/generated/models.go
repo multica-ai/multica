@@ -2412,6 +2412,7 @@ type Issue struct {
 	StartDate          pgtype.Date        `json:"start_date"`
 	Metadata           []byte             `json:"metadata"`
 	Stage              pgtype.Int4        `json:"stage"`
+	Properties         []byte             `json:"properties"`
 	IsPrivate          bool               `json:"is_private"`
 	Classification     string             `json:"classification"`
 }
@@ -2430,6 +2431,20 @@ type IssueLabel struct {
 	Color       string             `json:"color"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type IssueProperty struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Type        string             `json:"type"`
+	Description string             `json:"description"`
+	Config      []byte             `json:"config"`
+	Position    float64            `json:"position"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	Icon        string             `json:"icon"`
 }
 
 type IssuePullRequest struct {

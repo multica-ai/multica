@@ -8,11 +8,16 @@ import {
   ArrowLeftRight,
   ArrowUp,
   CalendarClock,
+  CalendarDays,
   Check,
   ChevronRight,
   Maximize2,
   Minimize2,
   MoreHorizontal,
+  FolderKanban,
+  Settings2,
+  SignalHigh,
+  UserRound,
   X as XIcon,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
@@ -47,6 +52,10 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
+import {
+  useIssueCreateSettingsStore,
+  type ManualCreateField,
+} from "@multica/core/issues/stores/issue-create-settings-store";
 import { issueDetailOptions } from "@multica/core/issues/queries";
 import { useCreateIssue, useUpdateIssue } from "@multica/core/issues/mutations";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
@@ -65,6 +74,8 @@ import { SprintSelectField } from "@multica/cerebro-sprints/views";
 import { WorkflowSelectField } from "@multica/cerebro-workflows/views";
 // CEREBRO-PATCH(create-issue-workflow-activate-import): FIR-2283 v2 point 8 — activate the picked recipe on the new issue.
 import { useActivateWorkflowForCreate } from "@multica/cerebro-workflows/core";
+// CEREBRO-PATCH(create-issue-custom-properties): FIR-3447 — custom fields use a fork-owned adapter because upstream has no Create issue field surface.
+import { CreateIssueProperties, type CreateIssuePropertiesHandle } from "@multica/cerebro-issue-properties/views";
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -107,6 +118,8 @@ export function ManualCreatePanel({
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
+  const manualFields = useIssueCreateSettingsStore((s) => s.manualCreateFields);
+  const hiddenPropertyIds = useIssueCreateSettingsStore((s) => s.hiddenManualPropertyIds);
 
   const [title, setTitle] = useState(draft.title);
   const [formResetKey, setFormResetKey] = useState(0);
@@ -140,6 +153,8 @@ export function ManualCreatePanel({
   );
   // CEREBRO-PATCH(create-issue-workflow-field): FIR-2283 v2 point 8 — Issue workflow to activate on the new task.
   const [workflowId, setWorkflowId] = useState<string>("");
+  // CEREBRO-PATCH(create-issue-custom-properties): field state and post-create writes stay encapsulated in the fork-owned adapter.
+  const issuePropertiesRef = useRef<CreateIssuePropertiesHandle>(null);
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
@@ -149,6 +164,11 @@ export function ManualCreatePanel({
   // mounts the inline pill (the popover's anchor) AND opens the calendar.
   // When the popover closes without a value set, the pill unmounts again.
   const [startDatePickerOpen, setStartDatePickerOpen] = useState(false);
+  const [dueDatePickerOpen, setDueDatePickerOpen] = useState(false);
+  const [fieldPickerOpen, setFieldPickerOpen] = useState<Exclude<
+    ManualCreateField,
+    "due_date" | "start_date"
+  > | null>(null);
   // Children live as full Issue objects — the picker always returns the whole
   // object, and we never need to hydrate from an ID the way we do for parent.
   const [childIssues, setChildIssues] = useState<Issue[]>([]);
@@ -200,6 +220,20 @@ export function ManualCreatePanel({
   const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
   const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
 
+  const showField = {
+    status: manualFields.includes("status") || status !== "todo" || fieldPickerOpen === "status",
+    priority: manualFields.includes("priority") || priority !== "none" || fieldPickerOpen === "priority",
+    assignee: manualFields.includes("assignee") || assigneeId != null || fieldPickerOpen === "assignee",
+    project: manualFields.includes("project") || projectId != null || fieldPickerOpen === "project",
+    due_date: manualFields.includes("due_date") || dueDate !== null || dueDatePickerOpen,
+    start_date: manualFields.includes("start_date") || startDate !== null || startDatePickerOpen,
+  };
+
+  const openFieldSettings = () => {
+    onClose();
+    router.push(`${p.settings()}?tab=issue`);
+  };
+
   const createIssueMutation = useCreateIssue();
   const updateIssueMutation = useUpdateIssue();
   // CEREBRO-PATCH(create-issue-sprint-assign): TECH-3620 link the new issue to data.sprint_id (set by the sprint board).
@@ -216,6 +250,7 @@ export function ManualCreatePanel({
     setParentIssueId(undefined);
     setChildIssues([]);
     setAttachmentIds([]);
+    issuePropertiesRef.current?.reset(); // CEREBRO-PATCH(create-issue-custom-properties): clear custom values for Create another.
     setDraft({
       title: "",
       description: "",
@@ -247,6 +282,8 @@ export function ManualCreatePanel({
         parent_issue_id: parentIssueId,
         project_id: projectId,
       });
+
+      await issuePropertiesRef.current?.applyToIssue(issue.id); // CEREBRO-PATCH(create-issue-custom-properties): save selected fields through the upstream value API.
 
       // CEREBRO-PATCH(create-issue-sprint-assign): TECH-3620/TECH-3684 join the sprint (board preset or user-picked).
       if (sprintId) {
@@ -500,48 +537,68 @@ export function ManualCreatePanel({
                 desktop keeps the original wrapping flow. */}
             <div className="flex items-center gap-1.5 px-4 py-2 shrink-0 md:flex-wrap max-md:flex-nowrap max-md:overflow-x-auto max-md:[&>*]:shrink-0 max-md:[scrollbar-width:none] max-md:[-ms-overflow-style:none] max-md:[&::-webkit-scrollbar]:hidden">
               {/* Status */}
-              <StatusPicker
-                status={status}
-                onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.status && (
+                <StatusPicker
+                  status={status}
+                  onUpdate={(u) => { if (u.status) updateStatus(u.status); }}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "status" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "status" : null)}
+                />
+              )}
 
               {/* Project — CEREBRO-PATCH(create-issue-project-second): FIR-1878 — project promoted to the 2nd pill (before priority) per Jesper. */}
-              <ProjectPicker
-                projectId={projectId ?? null}
-                onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.project && (
+                <ProjectPicker
+                  projectId={projectId ?? null}
+                  onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "project" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
+                />
+              )}
 
               {/* Priority */}
-              <PriorityPicker
-                priority={priority}
-                onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.priority && (
+                <PriorityPicker
+                  priority={priority}
+                  onUpdate={(u) => { if (u.priority) updatePriority(u.priority); }}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "priority" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "priority" : null)}
+                />
+              )}
 
               {/* Assignee */}
-              <AssigneePicker
-                assigneeType={assigneeType ?? null}
-                assigneeId={assigneeId ?? null}
-                onUpdate={(u) => updateAssignee(
-                  u.assignee_type ?? undefined,
-                  u.assignee_id ?? undefined,
-                )}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.assignee && (
+                <AssigneePicker
+                  assigneeType={assigneeType ?? null}
+                  assigneeId={assigneeId ?? null}
+                  onUpdate={(u) => updateAssignee(
+                    u.assignee_type ?? undefined,
+                    u.assignee_id ?? undefined,
+                  )}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={fieldPickerOpen === "assignee" ? true : undefined}
+                  onOpenChange={(open) => setFieldPickerOpen(open ? "assignee" : null)}
+                />
+              )}
 
               {/* Due date */}
-              <DueDatePicker
-                dueDate={dueDate}
-                onUpdate={(u) => updateDueDate(u.due_date ?? null)}
-                triggerRender={<PillButton />}
-                align="start"
-              />
+              {showField.due_date && (
+                <DueDatePicker
+                  dueDate={dueDate}
+                  onUpdate={(u) => updateDueDate(u.due_date ?? null)}
+                  triggerRender={<PillButton />}
+                  align="start"
+                  open={dueDatePickerOpen}
+                  onOpenChange={setDueDatePickerOpen}
+                />
+              )}
 
               {/* CEREBRO-PATCH(create-issue-sprint-field): TECH-3684 drop the new task straight into a sprint; PillButton trigger matches the sibling chips. */}
               <SprintSelectField workspaceId={wsId} projectId={projectId} value={sprintId} onChange={setSprintId} className="max-w-48" triggerRender={<PillButton />} />
@@ -549,12 +606,18 @@ export function ManualCreatePanel({
               {/* CEREBRO-PATCH(create-issue-workflow-field): FIR-2283 v2 point 8 — pick an Issue workflow at creation; renders nothing when none exist or the flag is off. */}
               <WorkflowSelectField workspaceId={wsId} value={workflowId} onChange={setWorkflowId} className="max-w-48" triggerRender={<PillButton />} />
 
+              {/* CEREBRO-PATCH(create-issue-custom-properties): optional typed fields join the existing Create issue property row. */}
+              <CreateIssueProperties
+                ref={issuePropertiesRef}
+                hiddenPropertyIds={hiddenPropertyIds}
+              />
+
               {/* Start date — collapsed into the ⋯ menu by default since it's
                   a low-frequency field. Renders inline only when the field
                   has a value OR the user just opened it from the overflow
                   menu (the picker's calendar popover needs the inline pill
                   as its anchor). */}
-              {(startDate || startDatePickerOpen) && (
+              {showField.start_date && (
                 <StartDatePicker
                   startDate={startDate}
                   onUpdate={(u) => updateStartDate(u.start_date ?? null)}
@@ -626,7 +689,37 @@ export function ManualCreatePanel({
                   }
                 />
                 <DropdownMenuContent align="start" className="w-auto">
-                  {!startDate && (
+                  {!showField.status && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("status")}>
+                      <StatusIcon status="todo" className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_status)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.project && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("project")}>
+                      <FolderKanban className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_project)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.priority && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("priority")}>
+                      <SignalHigh className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_priority)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.assignee && (
+                    <DropdownMenuItem onClick={() => setFieldPickerOpen("assignee")}>
+                      <UserRound className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_assignee)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.due_date && (
+                    <DropdownMenuItem onClick={() => setDueDatePickerOpen(true)}>
+                      <CalendarDays className="h-3.5 w-3.5" />
+                      {t(($) => $.create_issue.set_due_date)}
+                    </DropdownMenuItem>
+                  )}
+                  {!showField.start_date && (
                     <DropdownMenuItem onClick={() => setStartDatePickerOpen(true)}>
                       <CalendarClock className="h-3.5 w-3.5" />
                       {t(($) => $.create_issue.set_start_date)}
@@ -646,6 +739,11 @@ export function ManualCreatePanel({
                   <DropdownMenuItem onClick={() => setChildPickerOpen(true)}>
                     <ArrowDown className="h-3.5 w-3.5" />
                     {t(($) => $.create_issue.add_subissue)}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={openFieldSettings}>
+                    <Settings2 className="h-3.5 w-3.5" />
+                    {t(($) => $.create_issue.customize_fields)}
                   </DropdownMenuItem>
                   {parentIssueId && parentIssue && (
                     <>
