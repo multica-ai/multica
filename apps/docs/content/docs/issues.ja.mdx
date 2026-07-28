@@ -73,6 +73,91 @@ Multica には7つのステータスがあります。**どのステータスか
 
 プロジェクトを削除しても **その中のイシューは削除されません**: それらのイシューはプロジェクトから切り離されるだけで、ワークスペースにそのまま残ります。
 
+## エージェントの進捗メタデータ
+
+エージェントがイシュー上で複数ステップのパイプラインを実行するとき、予約済みのメタデータキー `progress` に書き込むことで**進捗インジケーター**を公開できます。イシュー詳細ページは、それをアクティビティタイムラインの上にステップバーとして描画します。
+
+値は **JSON 文字列**です（イシューのメタデータ値はスカラーのため）。パース失敗、`phases` が空配列、または値が文字列でない場合は、単に何も描画されません。このフィールドは必須ではありません。
+
+### スキーマ
+
+```json
+{
+  "phases": [
+    {
+      "id": "implement",
+      "name": "Implement",
+      "status": "completed",
+      "agent": "coder",
+      "started_at": "2026-01-01T09:00:00Z",
+      "finished_at": "2026-01-01T09:12:00Z",
+      "summary": "ハンドラーとユニットテストを書きました。",
+      "comment_id": "…",
+      "detail": "失敗理由。status が failed のときのみ表示"
+    }
+  ],
+  "edges": [{ "from": "implement", "to": "review" }],
+  "current_phase": 0,
+  "updated_at": "2026-01-01T09:12:00Z"
+}
+```
+
+| フィールド | 必須 | 説明 |
+|---|---|---|
+| `phases` | はい | 空でない配列。各要素には少なくとも `name` と `status` が必要です。 |
+| `phases[].id` | DAG モードのみ | 安定した一意の id。`edges` が存在する場合のみ必須（エッジがこれを参照するため）。 |
+| `phases[].status` | はい | `completed`、`running`、`failed`、`pending` のいずれか。それ以外は pending として描画されます。 |
+| `phases[].agent` | いいえ | フェーズを実行したエージェント。ノードの下とツールチップに表示されます。 |
+| `phases[].started_at` / `finished_at` | いいえ | ISO-8601。ツールチップの時刻と算出される所要時間に使われます。 |
+| `phases[].summary` | いいえ | 一行の結果。ツールチップに表示されます。 |
+| `phases[].detail` | いいえ | `status` が `failed` のときのみツールチップに表示されます。 |
+| `edges` | いいえ | `phase.id` を参照する有向 `{ from, to }` ペア。存在すると DAG 描画に切り替わります。 |
+
+### リニア vs DAG
+
+`edges` がない（または空の）場合、フェーズは配列順で**左から右への一本の線**として描画されます。固定パイプラインの一般的なケースです。
+
+`edges` が存在**かつ有効**な場合、フェーズは**2 次元 DAG** として描画されます。分岐が広がり、合流ノードはすべての先行ノードの後に配置されるため、並列ステップ（review と test の同時実行など）が一目で分かります。レイアウトは最長経路レイヤリングで計算されます。
+
+DAG データが使用不可のとき、描画は**リニアにフォールバック**し、決して例外を投げません。フェーズに `id` がない、id が重複している、エッジが未知の id を指している、エッジが循環を形成している場合です。
+
+### 例 — 分岐/合流パイプライン
+
+`Analyze → Design → Implement`、そして `Implement` が並列の `Review` と `Test` に分岐し、両方が `Ship` に合流します:
+
+```json
+{
+  "phases": [
+    { "id": "analyze", "name": "Analyze", "status": "completed", "agent": "analyst" },
+    { "id": "design", "name": "Design", "status": "completed", "agent": "designer" },
+    { "id": "implement", "name": "Implement", "status": "completed", "agent": "coder" },
+    { "id": "review", "name": "Review", "status": "running", "agent": "reviewer" },
+    { "id": "test", "name": "Test", "status": "running", "agent": "tester" },
+    { "id": "ship", "name": "Ship", "status": "pending", "agent": "lead" }
+  ],
+  "edges": [
+    { "from": "analyze", "to": "design" },
+    { "from": "design", "to": "implement" },
+    { "from": "implement", "to": "review" },
+    { "from": "implement", "to": "test" },
+    { "from": "review", "to": "ship" },
+    { "from": "test", "to": "ship" }
+  ]
+}
+```
+
+最小のリニアパイプラインには `edges` も `id` も不要です:
+
+```json
+{
+  "phases": [
+    { "name": "Plan", "status": "completed" },
+    { "name": "Build", "status": "running" },
+    { "name": "Ship", "status": "pending" }
+  ]
+}
+```
+
 ## 次に読む
 
 - [コメントとメンション](/comments) — イシューの下で協業する

@@ -73,6 +73,91 @@ Project 有自己的**负责人（lead）**——**和 issue 的 assignee 一样
 
 删除 project **不会删除它下面的 issue**：这些 issue 只是从这个 project 里脱离，还留在工作区里。
 
+## 智能体进度 metadata
+
+当智能体在一个 issue 上执行多步骤流程时，它可以通过写入保留的 metadata key `progress` 来发布**进度指示器**。issue 详情页会把它渲染成活动时间线上方的一条步骤条。
+
+它的值是一个 **JSON 字符串**（issue metadata 的值是标量）。解析失败、`phases` 为空数组、或值不是字符串时，都只是不渲染——这个字段从不是必填的。
+
+### Schema
+
+```json
+{
+  "phases": [
+    {
+      "id": "implement",
+      "name": "Implement",
+      "status": "completed",
+      "agent": "coder",
+      "started_at": "2026-01-01T09:00:00Z",
+      "finished_at": "2026-01-01T09:12:00Z",
+      "summary": "写好了 handler 和单元测试。",
+      "comment_id": "…",
+      "detail": "失败原因，仅在 status 为 failed 时展示"
+    }
+  ],
+  "edges": [{ "from": "implement", "to": "review" }],
+  "current_phase": 0,
+  "updated_at": "2026-01-01T09:12:00Z"
+}
+```
+
+| 字段 | 是否必填 | 说明 |
+|---|---|---|
+| `phases` | 是 | 非空数组。每个元素至少需要 `name` 和 `status`。 |
+| `phases[].id` | 仅 DAG 模式 | 稳定且唯一的 id。仅当存在 `edges` 时必填，因为 edge 通过它引用节点。 |
+| `phases[].status` | 是 | 取值 `completed`、`running`、`failed`、`pending` 之一。其他值按 pending 渲染。 |
+| `phases[].agent` | 否 | 执行该阶段的智能体，显示在节点下方和 tooltip 中。 |
+| `phases[].started_at` / `finished_at` | 否 | ISO-8601。用于 tooltip 中的时间和计算出的时长。 |
+| `phases[].summary` | 否 | 一句话结论，显示在 tooltip 中。 |
+| `phases[].detail` | 否 | 仅当 `status` 为 `failed` 时在 tooltip 中展示。 |
+| `edges` | 否 | 引用 `phase.id` 的有向 `{ from, to }` 对。一旦存在就切换为 DAG 渲染。 |
+
+### 线性 vs DAG
+
+没有 `edges`（或 `edges` 为空）时，各阶段按数组顺序渲染成**从左到右的一条直线**——固定流程的常见形态。
+
+当 `edges` 存在**且合法**时，各阶段渲染成**二维 DAG**——分支散开、汇聚节点排在所有前驱之后，于是并行步骤（比如 review 和 test 同时进行）一眼可见。布局用最长路径分层算法计算。
+
+当 DAG 数据不可用时，渲染会**降级为线性**——绝不抛错：某个阶段缺 `id`、id 重复、edge 指向未知 id、或 edge 构成环。
+
+### 示例——一个分叉/汇聚流程
+
+`Analyze → Design → Implement`，然后 `Implement` 分叉出并行的 `Review` 和 `Test`，两者再汇聚到 `Ship`：
+
+```json
+{
+  "phases": [
+    { "id": "analyze", "name": "Analyze", "status": "completed", "agent": "analyst" },
+    { "id": "design", "name": "Design", "status": "completed", "agent": "designer" },
+    { "id": "implement", "name": "Implement", "status": "completed", "agent": "coder" },
+    { "id": "review", "name": "Review", "status": "running", "agent": "reviewer" },
+    { "id": "test", "name": "Test", "status": "running", "agent": "tester" },
+    { "id": "ship", "name": "Ship", "status": "pending", "agent": "lead" }
+  ],
+  "edges": [
+    { "from": "analyze", "to": "design" },
+    { "from": "design", "to": "implement" },
+    { "from": "implement", "to": "review" },
+    { "from": "implement", "to": "test" },
+    { "from": "review", "to": "ship" },
+    { "from": "test", "to": "ship" }
+  ]
+}
+```
+
+最小的线性流程既不需要 `edges` 也不需要 `id`：
+
+```json
+{
+  "phases": [
+    { "name": "Plan", "status": "completed" },
+    { "name": "Build", "status": "running" },
+    { "name": "Ship", "status": "pending" }
+  ]
+}
+```
+
 ## 下一步
 
 - [评论与提及](/comments) —— 在 issue 下协作

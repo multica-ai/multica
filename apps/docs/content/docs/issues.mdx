@@ -73,6 +73,91 @@ Projects have their own **lead** — **just like an issue's assignee, a lead can
 
 Deleting a project **does not delete the issues inside it**: those issues simply detach from the project and remain in the workspace.
 
+## Agent progress metadata
+
+When an agent runs a multi-step pipeline on an issue, it can publish a **progress indicator** by writing to a reserved metadata key, `progress`. The issue detail page renders it as a step bar above the activity timeline.
+
+The value is a **JSON string** (issue metadata values are scalars). Parse failures, an empty `phases` array, or a non-string value simply render nothing — the field is never required.
+
+### Schema
+
+```json
+{
+  "phases": [
+    {
+      "id": "implement",
+      "name": "Implement",
+      "status": "completed",
+      "agent": "coder",
+      "started_at": "2026-01-01T09:00:00Z",
+      "finished_at": "2026-01-01T09:12:00Z",
+      "summary": "Wrote the handler and unit tests.",
+      "comment_id": "…",
+      "detail": "Failure reason, shown only when status is failed"
+    }
+  ],
+  "edges": [{ "from": "implement", "to": "review" }],
+  "current_phase": 0,
+  "updated_at": "2026-01-01T09:12:00Z"
+}
+```
+
+| Field | Required | Notes |
+|---|---|---|
+| `phases` | yes | Non-empty array. Each entry needs at least `name` and `status`. |
+| `phases[].id` | DAG mode only | A stable, unique id. Required only when `edges` is present, because edges reference it. |
+| `phases[].status` | yes | One of `completed`, `running`, `failed`, `pending`. Anything else renders as pending. |
+| `phases[].agent` | no | Agent that ran the phase, shown under the node and in the tooltip. |
+| `phases[].started_at` / `finished_at` | no | ISO-8601. Drives the tooltip times and the computed duration. |
+| `phases[].summary` | no | One-line result, shown in the tooltip. |
+| `phases[].detail` | no | Rendered in the tooltip only when `status` is `failed`. |
+| `edges` | no | Directed `{ from, to }` pairs referencing `phase.id`. Presence switches to DAG rendering. |
+
+### Linear vs DAG
+
+Without `edges` (or with an empty `edges`), the phases render as a **single left-to-right line** in array order — the common case for a fixed pipeline.
+
+When `edges` is present **and valid**, the phases render as a **2D DAG** — branches fan out and joins land after every predecessor, so parallel steps (e.g. review and test running at once) are visible at a glance. Layout is computed with longest-path layering.
+
+Rendering **degrades to linear** — it never throws — when the DAG data is unusable: a phase is missing its `id`, ids are duplicated, an edge points at an unknown id, or the edges form a cycle.
+
+### Example — a fork/join pipeline
+
+`Analyze → Design → Implement`, then `Implement` fans out to parallel `Review` and `Test`, which both join into `Ship`:
+
+```json
+{
+  "phases": [
+    { "id": "analyze", "name": "Analyze", "status": "completed", "agent": "analyst" },
+    { "id": "design", "name": "Design", "status": "completed", "agent": "designer" },
+    { "id": "implement", "name": "Implement", "status": "completed", "agent": "coder" },
+    { "id": "review", "name": "Review", "status": "running", "agent": "reviewer" },
+    { "id": "test", "name": "Test", "status": "running", "agent": "tester" },
+    { "id": "ship", "name": "Ship", "status": "pending", "agent": "lead" }
+  ],
+  "edges": [
+    { "from": "analyze", "to": "design" },
+    { "from": "design", "to": "implement" },
+    { "from": "implement", "to": "review" },
+    { "from": "implement", "to": "test" },
+    { "from": "review", "to": "ship" },
+    { "from": "test", "to": "ship" }
+  ]
+}
+```
+
+A minimal linear pipeline needs no `edges` and no `id`s:
+
+```json
+{
+  "phases": [
+    { "name": "Plan", "status": "completed" },
+    { "name": "Build", "status": "running" },
+    { "name": "Ship", "status": "pending" }
+  ]
+}
+```
+
 ## Next
 
 - [Comments and mentions](/comments) — collaborating under an issue
