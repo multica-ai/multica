@@ -25,22 +25,23 @@ WHERE id IN (
 )
 RETURNING id, workspace_id, creator_id, recipient_type, recipient_id,
           remind_at, text, anchor_type, message_id, conversation_id, project_id,
-          chat_message_id
+          chat_message_id, source_inbox_item_id
 `
 
 type ClaimDueRemindersRow struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	CreatorID      pgtype.UUID        `json:"creator_id"`
-	RecipientType  string             `json:"recipient_type"`
-	RecipientID    pgtype.UUID        `json:"recipient_id"`
-	RemindAt       pgtype.Timestamptz `json:"remind_at"`
-	Text           string             `json:"text"`
-	AnchorType     string             `json:"anchor_type"`
-	MessageID      pgtype.UUID        `json:"message_id"`
-	ConversationID pgtype.UUID        `json:"conversation_id"`
-	ProjectID      pgtype.UUID        `json:"project_id"`
-	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	CreatorID         pgtype.UUID        `json:"creator_id"`
+	RecipientType     string             `json:"recipient_type"`
+	RecipientID       pgtype.UUID        `json:"recipient_id"`
+	RemindAt          pgtype.Timestamptz `json:"remind_at"`
+	Text              string             `json:"text"`
+	AnchorType        string             `json:"anchor_type"`
+	MessageID         pgtype.UUID        `json:"message_id"`
+	ConversationID    pgtype.UUID        `json:"conversation_id"`
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	ChatMessageID     pgtype.UUID        `json:"chat_message_id"`
+	SourceInboxItemID pgtype.UUID        `json:"source_inbox_item_id"`
 }
 
 // Atomically claim pending reminders whose time has arrived by flipping them to
@@ -70,6 +71,7 @@ func (q *Queries) ClaimDueReminders(ctx context.Context, limit int32) ([]ClaimDu
 			&i.ConversationID,
 			&i.ProjectID,
 			&i.ChatMessageID,
+			&i.SourceInboxItemID,
 		); err != nil {
 			return nil, err
 		}
@@ -85,29 +87,33 @@ const createReminder = `-- name: CreateReminder :one
 INSERT INTO cerebro_reminder (
     workspace_id, user_id, creator_id, recipient_type, recipient_id,
     remind_at, text, anchor_type, message_id, conversation_id, project_id,
-    chat_message_id
+    chat_message_id, source_inbox_item_id
 )
-VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+VALUES ($1, $2, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
 RETURNING id
 `
 
 type CreateReminderParams struct {
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	UserID         pgtype.UUID        `json:"user_id"`
-	RecipientType  string             `json:"recipient_type"`
-	RecipientID    pgtype.UUID        `json:"recipient_id"`
-	RemindAt       pgtype.Timestamptz `json:"remind_at"`
-	Text           string             `json:"text"`
-	AnchorType     string             `json:"anchor_type"`
-	MessageID      pgtype.UUID        `json:"message_id"`
-	ConversationID pgtype.UUID        `json:"conversation_id"`
-	ProjectID      pgtype.UUID        `json:"project_id"`
-	ChatMessageID  pgtype.UUID        `json:"chat_message_id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	UserID            pgtype.UUID        `json:"user_id"`
+	RecipientType     string             `json:"recipient_type"`
+	RecipientID       pgtype.UUID        `json:"recipient_id"`
+	RemindAt          pgtype.Timestamptz `json:"remind_at"`
+	Text              string             `json:"text"`
+	AnchorType        string             `json:"anchor_type"`
+	MessageID         pgtype.UUID        `json:"message_id"`
+	ConversationID    pgtype.UUID        `json:"conversation_id"`
+	ProjectID         pgtype.UUID        `json:"project_id"`
+	ChatMessageID     pgtype.UUID        `json:"chat_message_id"`
+	SourceInboxItemID pgtype.UUID        `json:"source_inbox_item_id"`
 }
 
 // Create a reminder for any recipient, anchored to any (or no) entity. user_id
 // is kept populated (= creator) for back-compat with the v1 column; recipient_id
-// is the authority. Returns the id; the handler re-reads via GetReminder.
+// is the authority. source_inbox_item_id is set only when the reminder came from
+// snoozing an inbox row, so the sweeper can let that row be the reminder instead
+// of creating a duplicate (FIR-3918). Returns the id; the handler re-reads via
+// GetReminder.
 func (q *Queries) CreateReminder(ctx context.Context, arg CreateReminderParams) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, createReminder,
 		arg.WorkspaceID,
@@ -121,6 +127,7 @@ func (q *Queries) CreateReminder(ctx context.Context, arg CreateReminderParams) 
 		arg.ConversationID,
 		arg.ProjectID,
 		arg.ChatMessageID,
+		arg.SourceInboxItemID,
 	)
 	var id pgtype.UUID
 	err := row.Scan(&id)

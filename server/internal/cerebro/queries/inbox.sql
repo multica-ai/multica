@@ -47,6 +47,29 @@ SET read = false
 WHERE id = $1
 RETURNING *;
 
+-- name: SetInboxUnreadByIssue :execrows
+-- FIR-3918: a snoozed row coming back IS the fired reminder, so it must arrive
+-- unread — otherwise the reminder returns as a grey, already-read row and never
+-- rings. Per issue, not per row, because muting is per issue
+-- (SetInboxMutedUntilByIssue): every sibling shares the same muted_until, so the
+-- one the deduplicated inbox displays is not necessarily the row that was
+-- clicked. The inbox groups by issue, so this is one unread signal, not many.
+UPDATE inbox_item
+SET read = false
+WHERE workspace_id = $1 AND recipient_type = $2 AND recipient_id = $3 AND issue_id = $4 AND archived = false;
+
+-- name: FindLiveInboxItemForRecipient :one
+-- FIR-3918: resolve the inbox row a reminder was snoozed from — but only if it
+-- is still the recipient's own, still exists, and is not archived. Used both
+-- when creating the reminder (never store a link to someone else's row) and when
+-- it fires (the row must still be there to be able to act as the reminder).
+SELECT id, issue_id, workspace_id
+FROM inbox_item
+WHERE id = $1
+  AND recipient_type = 'member'
+  AND recipient_id = $2
+  AND archived = false;
+
 -- name: UnarchiveInboxItem :one
 -- Restore an archived inbox item to the active inbox. Mirror of upstream
 -- ArchiveInboxItem; lives in cerebrodb so we can ship the cerebro
