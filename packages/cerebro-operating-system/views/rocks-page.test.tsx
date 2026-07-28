@@ -22,9 +22,11 @@ const state = vi.hoisted(() => ({
   mutate: vi.fn(),
   checkIn: vi.fn(),
   savePeriod: vi.fn(),
+  isMobile: false,
 }));
 
 vi.mock("@multica/cerebro-feature-flags", () => ({ useFeatureFlag: () => state.enabled }));
+vi.mock("@multica/ui/hooks/use-mobile", () => ({ useIsMobile: () => state.isMobile }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 vi.mock("@multica/core/projects", () => ({ projectListOptions: () => ({ queryKey: ["projects"] }) }));
 vi.mock("@multica/core/issues/queries", () => ({ issueListOptions: () => ({ queryKey: ["issues"] }) }));
@@ -75,7 +77,7 @@ const rock: Rock = {
 };
 
 describe("RocksPage", () => {
-  beforeEach(() => { state.enabled = true; state.rocks = []; state.goalTypes = []; state.rocksLoading = false; state.rocksError = false; state.mutate.mockReset(); state.checkIn.mockReset(); state.savePeriod.mockReset(); });
+  beforeEach(() => { state.enabled = true; state.rocks = []; state.goalTypes = []; state.rocksLoading = false; state.rocksError = false; state.isMobile = false; state.mutate.mockReset(); state.checkIn.mockReset(); state.savePeriod.mockReset(); });
 
   it("stays hidden when the feature flag is off", () => {
     state.enabled = false;
@@ -224,16 +226,30 @@ describe("RocksPage", () => {
     expect(state.checkIn).toHaveBeenCalledWith(expect.objectContaining({ id: "rock-1", input: expect.objectContaining({ note: "Decision needed" }) }), expect.any(Object));
   });
 
-  it("opens one combined edit panel with the form, linked-project chip and check-in history", () => {
+  it("opens the edit panel as a modal on desktop with the form, linked-project chip and check-in history", () => {
     state.rocks = [rock];
     render(<RocksPage />);
     fireEvent.click(screen.getByRole("button", { name: "Edit Cut fulfilment cost 12%" }));
-    const panel = screen.getByRole("region", { name: "Edit Cut fulfilment cost 12%" });
-    expect(within(panel).getByRole("heading", { name: "Edit Rock" })).toBeInTheDocument();
+    const panel = screen.getByRole("dialog", { name: "Edit Cut fulfilment cost 12%" });
+    expect(panel).toHaveAttribute("data-slot", "dialog-content");
+    expect(within(panel).getByRole("heading", { name: "Edit Cut fulfilment cost 12%" })).toBeInTheDocument();
+    expect(within(panel).getByLabelText("Rock title")).toHaveValue("Cut fulfilment cost 12%");
     expect(within(panel).getByRole("button", { name: "Remove project Carrier migration" })).toBeInTheDocument();
     expect(within(panel).getByText("Under this Rock — Cut fulfilment cost 12%")).toBeInTheDocument();
     expect(within(panel).getByText("Weekly check-in history")).toBeInTheDocument();
     fireEvent.click(within(panel).getByRole("button", { name: "Close" }));
-    expect(screen.queryByRole("region", { name: "Edit Cut fulfilment cost 12%" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("dialog", { name: "Edit Cut fulfilment cost 12%" })).not.toBeInTheDocument();
+  });
+
+  it("opens the edit panel as a bottom sheet on mobile", () => {
+    state.rocks = [rock];
+    state.isMobile = true;
+    render(<RocksPage />);
+    fireEvent.click(screen.getByRole("button", { name: "Edit Cut fulfilment cost 12%" }));
+    const sheet = screen.getByRole("dialog", { name: "Edit Cut fulfilment cost 12%" });
+    expect(sheet).toHaveAttribute("data-slot", "drawer-content");
+    expect(sheet).toHaveAttribute("data-vaul-drawer-direction", "bottom");
+    expect(within(sheet).getByLabelText("Rock title")).toHaveValue("Cut fulfilment cost 12%");
+    expect(within(sheet).getByText("Weekly check-in history")).toBeInTheDocument();
   });
 });
