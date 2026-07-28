@@ -65,6 +65,39 @@ if [ -n "${EXTRA_UV_TOOLS:-}" ]; then
   done
 fi
 
+# ── Materialize PEM secrets as files ───────────────────────────────────────────
+# gitops/base/agent-runtime/external-secret.yaml sweeps every SSM param under
+# the workspace's slug (and /shared/*) into this container as a plain env var —
+# so a PEM secret always arrives as an env var, never a file. That's fine for
+# tools that accept a key on stdin/fd (see git-credential-platform-bot.sh's
+# `<(printf '%s' "$GITHUB_APP_PRIVATE_KEY")` trick), but tools like `snow
+# --private-key-file` only accept a real path on disk. Bridge the gap once
+# per pod boot: any `<NAME>_PRIVATE_KEY` env var whose value looks like PEM
+# gets written to a pod-lifetime file and gets a sibling `<NAME>_PRIVATE_KEY_FILE`
+# exported pointing at it, so downstream tooling never has to special-case
+# "where did this secret come from" (ROIPPC-2). `${SECRETS_DIR}` is backed by a
+# tmpfs (`emptyDir: {medium: Memory}`) volume mounted in
+# gitops/base/agent-runtime/deployment.yaml, so the material lives in RAM for
+# the pod's lifetime and is never written to the node's disk.
+SECRETS_DIR="${HOME}/.secrets"
+mkdir -p "${SECRETS_DIR}"
+chmod 700 "${SECRETS_DIR}"
+while IFS='=' read -r -d '' env_name env_value; do
+  case "${env_name}" in
+    *_PRIVATE_KEY)
+      case "${env_value}" in
+        -----BEGIN*)
+          key_file="${SECRETS_DIR}/${env_name}"
+          ( umask 077 && printf '%s\n' "${env_value}" > "${key_file}" )
+          chmod 600 "${key_file}"
+          export "${env_name}_FILE=${key_file}"
+          echo "entrypoint: materialized \${${env_name}} -> \${${env_name}_FILE}=${key_file}"
+          ;;
+      esac
+      ;;
+  esac
+done < <(env -0)
+
 # ── Write multica config ───────────────────────────────────────────────────────
 # Defaults to the tools/prod server; override via env (e.g. the dev runner
 # pipeline points this at the development agentfarm server).

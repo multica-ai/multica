@@ -29,6 +29,12 @@ spec:
       serviceAccountName: agentrunner
       imagePullSecrets:
         - name: regcred
+      # fsGroup so the tmpfs-backed secrets volume below is group-writable by
+      # the non-root `agent` user (uid/gid 1000 in agent-runtime-base/Dockerfile) —
+      # emptyDir volumes are otherwise created root-owned and entrypoint.sh's
+      # `chmod 700 "${SECRETS_DIR}"` would fail with EPERM.
+      securityContext:
+        fsGroup: 1000
       containers:
         - name: opencode
           image: ghcr.io/g2crowd/agentrunner-runtime-prod
@@ -63,6 +69,11 @@ spec:
           envFrom:
             - secretRef:
                 name: agentrunner-secrets
+          volumeMounts:
+            # tmpfs-backed so PEM secrets entrypoint.sh materializes under
+            # ~/.secrets (ROIPPC-2) live in RAM only, never the node's disk.
+            - name: secrets
+              mountPath: /home/agent/.secrets
           resources:
             requests:
               cpu: 500m
@@ -93,6 +104,13 @@ spec:
             # session causes — avoid flapping an already-Ready pod on that.
             timeoutSeconds: 5
             failureThreshold: 3
+      volumes:
+        - name: secrets
+          emptyDir:
+            medium: Memory
+            # Generous headroom over the handful of PEM keys this ever holds;
+            # small enough to be a non-issue against the 2Gi pod memory limit.
+            sizeLimit: 16Mi
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:

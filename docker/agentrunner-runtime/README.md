@@ -74,6 +74,45 @@ on PyPI (or needs OS packages) still needs a base-image change or a
 workspace-specific downstream image layer — this hook doesn't attempt to
 solve that case.
 
+## PEM / private-key secrets
+
+This deployment has no file-secret mechanism — `gitops/base/agent-runtime/external-secret.yaml`
+sweeps every SSM param under the workspace's slug (plus `/shared/*`) into the
+pod as a plain env var via `envFrom: secretRef`. So a PEM-format secret (a
+Snowflake key-pair-auth private key, a GitHub App key, etc.) always arrives as
+a raw multi-line env var, never a file, from SSM's perspective.
+
+Most tools that consume a private key accept it via stdin or an fd, and don't
+need a file at all — see `git-credential-platform-bot.sh`, which signs the
+GitHub App JWT via `openssl ... -sign <(printf '%s' "$GITHUB_APP_PRIVATE_KEY")`
+and never touches disk. **Prefer that pattern first** if the tool supports it.
+
+For tools that only accept a real path (`snow --private-key-file`, no
+stdin/fd variant), `entrypoint.sh` bridges the gap once per pod boot: any env
+var named `<NAME>_PRIVATE_KEY` whose value looks like PEM (`-----BEGIN...`)
+is written to `~/.secrets/<NAME>_PRIVATE_KEY` (dir `chmod 700`, file
+`chmod 600`) and a sibling `<NAME>_PRIVATE_KEY_FILE` env var is exported
+pointing at it. No code change needed to pick up a new key — landing
+`SNOWFLAKE_PRIVATE_KEY` (or any other `*_PRIVATE_KEY`) as an SSM param under
+the workspace's slug is enough; the file and its `_FILE` var appear
+automatically at next pod boot. Example, once `snow` is available (see
+`agent-runtime-base`'s README for installing it ad hoc via
+`uv tool install snowflake-cli`):
+
+```bash
+snow connection add my-conn \
+  --account "$SNOWFLAKE_ACCOUNT" \
+  --user "$SNOWFLAKE_USER" \
+  --private-key-file "$SNOWFLAKE_PRIVATE_KEY_FILE"
+```
+
+The materialized file lives under `$HOME/.secrets`, which
+`gitops/base/agent-runtime/deployment.yaml` mounts as a tmpfs
+(`emptyDir: {medium: Memory}`) volume — the PEM material stays in RAM for the
+pod's lifetime, is never written to the node's disk, and doesn't survive a
+pod rebuild. It's a bridge for the pod's lifetime, not a persistent secrets
+store.
+
 ## Smoke test
 
 ```bash
