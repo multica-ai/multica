@@ -12,8 +12,10 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { issueListOptions } from "@multica/core/issues/queries";
+import { projectListOptions } from "@multica/core/projects";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
-import { ChevronDown, ChevronUp, GripVertical, ListTodo, Plus, Trash2 } from "lucide-react";
+import { ChevronDown, ChevronUp, FolderKanban, GripVertical, ListTodo, Plus, Trash2 } from "lucide-react";
 import { DEFAULT_TERMINOLOGY } from "../core/api-schemas";
 import {
   periodsOptions, rocksOptions, settingsOptions, useCreateConnection, useCreateVisionPlanItem,
@@ -21,7 +23,7 @@ import {
   useSaveRock, useUpdateVisionPlanItem, useUpdateVisionPlanSection, visionPlanOptions,
 } from "../core/queries";
 import { moveItem, moveSection } from "../core/strategy-board";
-import type { Rock, VisionPlanItem, VisionPlanItemInput, VisionPlanSection } from "../core/types";
+import type { Rock, VisionPlanItem, VisionPlanItemInput, VisionPlanObjectLink, VisionPlanSection } from "../core/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@multica/ui/components/ui/tabs";
 import { SearchSelect, type SearchSelectOption } from "./search-select";
 import { TractionBoard, VisionBoard, extraSections } from "./vto-board";
@@ -64,6 +66,11 @@ const sectionInputFrom = (section: VisionPlanSection, position: number) => ({
   name: section.name, section_type: section.section_type, position,
 });
 
+// A link is addressed by "<target_type>:<target_id>" so Projects and Issues can
+// share one picker without colliding on id.
+const linkValue = (link: VisionPlanObjectLink) => `${link.target_type}:${link.target_id}`;
+const linkLabel = (link: VisionPlanObjectLink) => (link.identifier ? `${link.identifier} · ${link.title}` : link.title || link.target_id);
+
 interface PlanItemProps {
   item: VisionPlanItem;
   itemIndex: number;
@@ -72,11 +79,12 @@ interface PlanItemProps {
   wsId: string;
   goals: Rock[];
   ownerOptions: SearchSelectOption[];
+  linkOptions: SearchSelectOption[];
   currentPeriodId?: string;
   allowGoalConnections: boolean;
 }
 
-function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOptions, currentPeriodId, allowGoalConnections }: PlanItemProps) {
+function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOptions, linkOptions, currentPeriodId, allowGoalConnections }: PlanItemProps) {
   const update = useUpdateVisionPlanItem(wsId);
   const remove = useDeleteVisionPlanItem(wsId);
   const connect = useCreateConnection(wsId);
@@ -102,6 +110,19 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
     }
   }
 
+  function changeLinks(values: string[]) {
+    const existing = new Map(item.links.map((link) => [linkValue(link), link.connection_id]));
+    for (const value of values) {
+      if (existing.has(value)) continue;
+      const [targetType, targetId] = value.split(":");
+      if (!targetType || !targetId) continue;
+      connect.mutate({ source_type: "strategy_item", source_id: item.id, target_type: targetType, target_id: targetId, relationship_type: "relates_to", provenance: "manual" });
+    }
+    for (const [value, connectionId] of existing) {
+      if (!values.includes(value)) disconnect.mutate(connectionId);
+    }
+  }
+
   function createLinkedGoal(query: string) {
     if (!currentPeriodId) return;
     saveGoal.mutate({ input: {
@@ -117,6 +138,7 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
     update.mutate({ id: other.id, input: itemInput(other, { position: item.position }) });
   }
 
+  const selectedLinks = item.links.map(linkValue);
   const selectedGoals = item.goal_connections.map((connection) => connection.goal_id);
   const connectedGoals = selectedGoals.map((goalId) => goals.find((goal) => goal.id === goalId)).filter((goal): goal is Rock => Boolean(goal));
   const style = { transform: CSS.Transform.toString(transform), transition };
@@ -143,6 +165,22 @@ function PlanItem({ item, itemIndex, siblingItems, section, wsId, goals, ownerOp
           save({ owner_type: ownerId ? ownerType as "member" | "agent" : undefined, owner_id: ownerId || undefined });
         }} clearLabel="No owner" placeholder="Process owner" />
       )}
+      <div className="grid gap-1.5">
+        <SearchSelect compact multiple label={`${item.title} Projects and Issues`} options={linkOptions} values={selectedLinks} onValuesChange={changeLinks} placeholder="Connect Project or Issue" />
+        {item.links.length > 0 && (
+          <ul aria-label={`${item.title} connected Projects and Issues`} className="flex flex-wrap gap-1.5">
+            {item.links.map((link) => (
+              <li key={link.connection_id}>
+                <button type="button" aria-label={`Disconnect ${linkLabel(link)}`} onClick={() => changeLinks(selectedLinks.filter((value) => value !== linkValue(link)))} className="flex max-w-full items-center gap-1 rounded-full border bg-muted/40 px-2 py-0.5 text-xs">
+                  {link.target_type === "project" ? <FolderKanban aria-hidden className="size-3 shrink-0 text-muted-foreground" /> : <ListTodo aria-hidden className="size-3 shrink-0 text-muted-foreground" />}
+                  <span className="truncate">{linkLabel(link)}</span>
+                  <span aria-hidden className="text-muted-foreground">×</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
       {allowGoalConnections && (
         <div className="grid gap-1.5">
           <SearchSelect compact multiple label={`${item.title} Goals`} options={goals.map((goal) => ({ value: goal.id, label: goal.title }))} values={selectedGoals} onValuesChange={changeGoals} placeholder="Connect Goals" actionLabel={currentPeriodId ? "Create linked Goal" : undefined} onAction={currentPeriodId ? createLinkedGoal : undefined} />
@@ -170,12 +208,13 @@ interface SectionBodyProps {
   wsId: string;
   goals: Rock[];
   ownerOptions: SearchSelectOption[];
+  linkOptions: SearchSelectOption[];
   currentPeriodId?: string;
 }
 
 // The contents of one V/TO block: its cards, the named blanks it still wants,
 // and the add row. Shared by the board cells and the extra-section columns.
-function SectionBody({ section, wsId, goals, ownerOptions, currentPeriodId }: SectionBodyProps) {
+function SectionBody({ section, wsId, goals, ownerOptions, linkOptions, currentPeriodId }: SectionBodyProps) {
   const createItem = useCreateVisionPlanItem(wsId);
   const [newItem, setNewItem] = useState("");
   const { setNodeRef: setDropRef } = useDroppable({ id: `${COLUMN_PREFIX}${section.id}` });
@@ -198,7 +237,7 @@ function SectionBody({ section, wsId, goals, ownerOptions, currentPeriodId }: Se
   return (
     <div ref={setDropRef} className="grid flex-1 content-start gap-2">
       <SortableContext items={activeItems.map((item) => `${ITEM_PREFIX}${item.id}`)} strategy={verticalListSortingStrategy}>
-        {activeItems.map((item, itemIndex) => <PlanItem key={item.id} item={item} itemIndex={itemIndex} siblingItems={activeItems} section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} allowGoalConnections={allowGoalConnections} />)}
+        {activeItems.map((item, itemIndex) => <PlanItem key={item.id} item={item} itemIndex={itemIndex} siblingItems={activeItems} section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} linkOptions={linkOptions} currentPeriodId={currentPeriodId} allowGoalConnections={allowGoalConnections} />)}
       </SortableContext>
       {missingParts.length > 0 && <div className="flex flex-wrap gap-1.5">{missingParts.map((part) => <button key={part} type="button" onClick={() => addItem(part, part)} className="flex min-h-8 items-center gap-1 rounded-full border border-dashed px-3 text-xs text-muted-foreground hover:border-foreground hover:text-foreground"><Plus aria-hidden className="size-3.5" />{part}</button>)}</div>}
       <input aria-label={`Add item to ${section.name}`} value={newItem} onChange={(event) => setNewItem(event.target.value)} onKeyDown={onNewItemKeyDown} placeholder={section.section_type === "process" ? "+ Add process and press Enter" : "+ Add item and press Enter"} className="min-h-11 rounded-md border border-dashed bg-transparent px-3 text-sm text-muted-foreground outline-none focus:border-ring focus:text-foreground" />
@@ -268,6 +307,8 @@ export function StrategyPage() {
   const periods = useQuery(periodsOptions(wsId));
   const members = useQuery(memberListOptions(wsId));
   const agents = useQuery(agentListOptions(wsId));
+  const projects = useQuery(projectListOptions(wsId));
+  const issues = useQuery(issueListOptions(wsId));
   const createSection = useCreateVisionPlanSection(wsId);
   const updateSection = useUpdateVisionPlanSection(wsId);
   const updateItem = useUpdateVisionPlanItem(wsId);
@@ -287,6 +328,10 @@ export function StrategyPage() {
   const ownerOptions: SearchSelectOption[] = [
     ...(members.data ?? []).map((member) => ({ value: `member:${member.id}`, label: member.name, group: "Members" })),
     ...(agents.data ?? []).map((agent) => ({ value: `agent:${agent.id}`, label: agent.name, group: "Agents" })),
+  ];
+  const linkOptions: SearchSelectOption[] = [
+    ...(projects.data ?? []).map((project) => ({ value: `project:${project.id}`, label: project.title, group: "Projects" })),
+    ...(issues.data ?? []).map((issue) => ({ value: `issue:${issue.id}`, label: `${issue.identifier} · ${issue.title}`, group: "Issues" })),
   ];
 
   function addSection() {
@@ -348,7 +393,7 @@ export function StrategyPage() {
 
   const currentPeriodId = periods.data?.periods[0]?.id;
   const extras = extraSections(sections);
-  const renderSection = (section: VisionPlanSection) => <SectionBody section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} />;
+  const renderSection = (section: VisionPlanSection) => <SectionBody section={section} wsId={wsId} goals={goals} ownerOptions={ownerOptions} linkOptions={linkOptions} currentPeriodId={currentPeriodId} />;
 
   return (
     <main className="h-full min-w-0 overflow-y-auto bg-muted/20">
@@ -376,7 +421,7 @@ export function StrategyPage() {
                 <h2 className="text-sm font-semibold">Other sections</h2>
                 <SortableContext items={extras.map((section) => `${SECTION_PREFIX}${section.id}`)} strategy={horizontalListSortingStrategy}>
                   <div className="flex flex-col gap-4 md:flex-row md:items-start md:overflow-x-auto md:pb-2">
-                    {extras.map((section, index) => <PlanSection key={section.id} section={section} index={index} sections={extras} wsId={wsId} goals={goals} ownerOptions={ownerOptions} currentPeriodId={currentPeriodId} />)}
+                    {extras.map((section, index) => <PlanSection key={section.id} section={section} index={index} sections={extras} wsId={wsId} goals={goals} ownerOptions={ownerOptions} linkOptions={linkOptions} currentPeriodId={currentPeriodId} />)}
                   </div>
                 </SortableContext>
               </section>

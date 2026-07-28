@@ -28,6 +28,8 @@ vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"] }),
   agentListOptions: () => ({ queryKey: ["agents"] }),
 }));
+vi.mock("@multica/core/projects", () => ({ projectListOptions: () => ({ queryKey: ["projects"] }) }));
+vi.mock("@multica/core/issues/queries", () => ({ issueListOptions: () => ({ queryKey: ["issues"] }) }));
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();
   return { ...actual, useQuery: (options: { queryKey: readonly string[] }) => {
@@ -37,6 +39,8 @@ vi.mock("@tanstack/react-query", async (importOriginal) => {
     if (options.queryKey.includes("periods")) return { data: { periods: [] } };
     if (options.queryKey.includes("members")) return { data: [{ id: "member-1", name: "Maja" }] };
     if (options.queryKey.includes("agents")) return { data: [{ id: "agent-1", name: "Lone" }] };
+    if (options.queryKey.includes("projects")) return { data: [{ id: "project-1", title: "Nordic launch" }] };
+    if (options.queryKey.includes("issues")) return { data: [{ id: "issue-1", identifier: "FIR-42", title: "Ship pricing page" }] };
     return { data: undefined };
   } };
 });
@@ -71,16 +75,16 @@ describe("Vision Plan", () => {
     state.sections = [
       section({ id: "values", key: "core-values", name: "Core Values", position: 0, items: [{
         id: "item-1", workspace_id: "workspace-1", section_id: "values", title: "Own the outcome", description: "",
-        position: 0, state: "active", goal_connections: [], created_at: "", updated_at: "",
+        position: 0, state: "active", goal_connections: [], links: [], created_at: "", updated_at: "",
       }, {
         id: "item-2", workspace_id: "workspace-1", section_id: "values", title: "Care deeply", description: "",
-        position: 1, state: "active", goal_connections: [], created_at: "", updated_at: "",
+        position: 1, state: "active", goal_connections: [], links: [], created_at: "", updated_at: "",
       }] }),
       section({ id: "marketing", key: "marketing-strategy", name: "Marketing Strategy", section_type: "structured", position: 1 }),
       section({ id: "processes", key: "core-processes", name: "Core Processes", section_type: "process", position: 2 }),
       section({ id: "one-year", key: "one-year-plan", name: "One-Year Plan", position: 3, items: [{
         id: "annual-goal", workspace_id: "workspace-1", section_id: "one-year", title: "Reach 100m revenue", description: "",
-        position: 0, state: "active", goal_connections: [], created_at: "", updated_at: "",
+        position: 0, state: "active", goal_connections: [], links: [], created_at: "", updated_at: "",
       }] }),
     ];
     for (const fn of [state.createItem, state.updateItem, state.deleteItem, state.createSection, state.updateSection, state.deleteSection, state.createConnection, state.deleteConnection]) fn.mockReset();
@@ -168,6 +172,38 @@ describe("Vision Plan", () => {
     expect(screen.getByRole("button", { name: "Reorder Core Processes" })).toBeInTheDocument();
     // The six fixed V/TO slots are part of the organiser and cannot be dragged away.
     expect(screen.queryByRole("button", { name: "Reorder Core Values" })).not.toBeInTheDocument();
+  });
+
+  it("couples an item to a Project and to an Issue", () => {
+    renderEdit();
+
+    fireEvent.click(screen.getByRole("button", { name: "Own the outcome Projects and Issues" }));
+    fireEvent.click(screen.getByRole("option", { name: "Nordic launch" }));
+    expect(state.createConnection).toHaveBeenCalledWith(expect.objectContaining({
+      source_type: "strategy_item", source_id: "item-1", target_type: "project", target_id: "project-1",
+    }));
+
+    fireEvent.click(screen.getByRole("option", { name: "FIR-42 · Ship pricing page" }));
+    expect(state.createConnection).toHaveBeenCalledWith(expect.objectContaining({
+      source_type: "strategy_item", source_id: "item-1", target_type: "issue", target_id: "issue-1",
+    }));
+  });
+
+  it("shows a coupled Project on the item and disconnects it again", () => {
+    state.sections[0]!.items[0]!.links = [
+      { connection_id: "connection-1", target_type: "project", target_id: "project-1", title: "Nordic launch", identifier: "" },
+      { connection_id: "connection-2", target_type: "issue", target_id: "issue-1", title: "Ship pricing page", identifier: "FIR-42" },
+    ];
+
+    renderEdit();
+
+    const linked = screen.getByRole("list", { name: "Own the outcome connected Projects and Issues" });
+    expect(linked).toHaveTextContent("Nordic launch");
+    expect(linked).toHaveTextContent("FIR-42 · Ship pricing page");
+
+    fireEvent.click(screen.getByRole("button", { name: "Disconnect Nordic launch" }));
+    expect(state.deleteConnection).toHaveBeenCalledWith("connection-1");
+    expect(state.deleteConnection).not.toHaveBeenCalledWith("connection-2");
   });
 
   it("offers Goal connections only for One-Year Plan items", () => {

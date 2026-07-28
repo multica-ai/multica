@@ -50,6 +50,10 @@ export const visionPlanItemSchema = z.object({
   part_label: z.string().optional(), owner_type: z.enum(["member", "agent"]).optional(), owner_id: z.string().optional(), owner_name: z.string().optional(),
   position: z.number().int(), state: z.enum(["active", "archived"]).catch("active"),
   goal_connections: z.array(z.object({ connection_id: z.string(), goal_id: z.string() })).default([]),
+  links: z.array(z.object({
+    connection_id: z.string(), target_type: z.enum(["project", "issue"]), target_id: z.string(),
+    title: z.string().default(""), identifier: z.string().default(""),
+  })).default([]),
   created_at: z.string(), updated_at: z.string(),
 });
 export const visionPlanSectionSchema = z.object({

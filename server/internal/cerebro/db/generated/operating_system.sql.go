@@ -1669,6 +1669,55 @@ func (q *Queries) ListVisionPlanItems(ctx context.Context, workspaceID pgtype.UU
 	return items, nil
 }
 
+const listVisionPlanObjectLinks = `-- name: ListVisionPlanObjectLinks :many
+SELECT c.id, c.source_id AS strategy_item_id, c.target_type, c.target_id,
+       COALESCE(p.title, i.title, '') AS target_title,
+       COALESCE(w.issue_prefix || '-' || i.number, '')::text AS target_identifier
+FROM cerebro_object_connection c
+LEFT JOIN project p ON c.target_type = 'project' AND p.id = c.target_id AND p.workspace_id = c.workspace_id
+LEFT JOIN issue i ON c.target_type = 'issue' AND i.id = c.target_id AND i.workspace_id = c.workspace_id
+LEFT JOIN workspace w ON w.id = c.workspace_id
+WHERE c.workspace_id = $1 AND c.source_type = 'strategy_item'
+  AND c.target_type IN ('project', 'issue')
+ORDER BY c.created_at ASC
+`
+
+type ListVisionPlanObjectLinksRow struct {
+	ID               pgtype.UUID `json:"id"`
+	StrategyItemID   pgtype.UUID `json:"strategy_item_id"`
+	TargetType       string      `json:"target_type"`
+	TargetID         pgtype.UUID `json:"target_id"`
+	TargetTitle      string      `json:"target_title"`
+	TargetIdentifier string      `json:"target_identifier"`
+}
+
+func (q *Queries) ListVisionPlanObjectLinks(ctx context.Context, workspaceID pgtype.UUID) ([]ListVisionPlanObjectLinksRow, error) {
+	rows, err := q.db.Query(ctx, listVisionPlanObjectLinks, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListVisionPlanObjectLinksRow{}
+	for rows.Next() {
+		var i ListVisionPlanObjectLinksRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.StrategyItemID,
+			&i.TargetType,
+			&i.TargetID,
+			&i.TargetTitle,
+			&i.TargetIdentifier,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listVisionPlanSections = `-- name: ListVisionPlanSections :many
 SELECT id, workspace_id, key, name, section_type, position, created_at, updated_at
 FROM cerebro_vision_plan_section

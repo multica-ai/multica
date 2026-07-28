@@ -97,8 +97,19 @@ type VisionPlanItemResponse struct {
 	Position        int32                      `json:"position"`
 	State           string                     `json:"state"`
 	GoalConnections []VisionPlanGoalConnection `json:"goal_connections"`
+	Links           []VisionPlanObjectLink     `json:"links"`
 	CreatedAt       string                     `json:"created_at"`
 	UpdatedAt       string                     `json:"updated_at"`
+}
+
+// A Project or Issue coupled to a Vision/Traction item, carrying the label the
+// board renders so the client needs no second lookup.
+type VisionPlanObjectLink struct {
+	ConnectionID string `json:"connection_id"`
+	TargetType   string `json:"target_type"`
+	TargetID     string `json:"target_id"`
+	Title        string `json:"title"`
+	Identifier   string `json:"identifier,omitempty"`
 }
 
 type VisionPlanSectionResponse struct {

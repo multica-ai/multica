@@ -5,7 +5,7 @@ import type { VisionPlanItem, VisionPlanSection } from "./types";
 
 const item = (id: string, sectionId: string, position: number, state: "active" | "archived" = "active"): VisionPlanItem => ({
   id, workspace_id: "ws", section_id: sectionId, title: id, description: "",
-  position, state, goal_connections: [], created_at: "", updated_at: "",
+  position, state, goal_connections: [], links: [], created_at: "", updated_at: "",
 });
 
 const section = (id: string, position: number, items: VisionPlanItem[]): VisionPlanSection => ({

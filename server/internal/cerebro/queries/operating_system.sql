@@ -164,6 +164,18 @@ WHERE workspace_id = $1 AND source_type = 'strategy_item'
   AND target_type = 'rock' AND relationship_type = 'supports'
 ORDER BY created_at ASC;
 
+-- name: ListVisionPlanObjectLinks :many
+SELECT c.id, c.source_id AS strategy_item_id, c.target_type, c.target_id,
+       COALESCE(p.title, i.title, '') AS target_title,
+       COALESCE(w.issue_prefix || '-' || i.number, '')::text AS target_identifier
+FROM cerebro_object_connection c
+LEFT JOIN project p ON c.target_type = 'project' AND p.id = c.target_id AND p.workspace_id = c.workspace_id
+LEFT JOIN issue i ON c.target_type = 'issue' AND i.id = c.target_id AND i.workspace_id = c.workspace_id
+LEFT JOIN workspace w ON w.id = c.workspace_id
+WHERE c.workspace_id = $1 AND c.source_type = 'strategy_item'
+  AND c.target_type IN ('project', 'issue')
+ORDER BY c.created_at ASC;
+
 -- name: ListStrategyItemHistory :many
 SELECT id, strategy_item_id, action, title, snapshot, changed_at
 FROM cerebro_strategy_item_history

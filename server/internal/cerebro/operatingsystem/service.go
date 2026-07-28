@@ -912,11 +912,24 @@ func (s *Service) ListVisionPlan(ctx context.Context, workspaceID pgtype.UUID) (
 		return VisionPlanResponse{}, err
 	}
 
+	linkRows, err := s.queries.ListVisionPlanObjectLinks(ctx, workspaceID)
+	if err != nil {
+		return VisionPlanResponse{}, err
+	}
+
 	connections := make(map[string][]VisionPlanGoalConnection)
 	for _, row := range connectionRows {
 		itemID := util.UUIDToString(row.StrategyItemID)
 		connections[itemID] = append(connections[itemID], VisionPlanGoalConnection{
 			ConnectionID: util.UUIDToString(row.ID), GoalID: util.UUIDToString(row.GoalID),
+		})
+	}
+	links := make(map[string][]VisionPlanObjectLink)
+	for _, row := range linkRows {
+		itemID := util.UUIDToString(row.StrategyItemID)
+		links[itemID] = append(links[itemID], VisionPlanObjectLink{
+			ConnectionID: util.UUIDToString(row.ID), TargetType: row.TargetType,
+			TargetID: util.UUIDToString(row.TargetID), Title: row.TargetTitle, Identifier: row.TargetIdentifier,
 		})
 	}
 	items := make(map[string][]VisionPlanItemResponse)
@@ -929,6 +942,10 @@ func (s *Service) ListVisionPlan(ctx context.Context, workspaceID pgtype.UUID) (
 		response.GoalConnections = connections[response.ID]
 		if response.GoalConnections == nil {
 			response.GoalConnections = []VisionPlanGoalConnection{}
+		}
+		response.Links = links[response.ID]
+		if response.Links == nil {
+			response.Links = []VisionPlanObjectLink{}
 		}
 		items[response.SectionID] = append(items[response.SectionID], response)
 	}
@@ -1326,12 +1343,26 @@ func (s *Service) CreateConnection(ctx context.Context, workspaceID pgtype.UUID,
 	if err != nil {
 		return ObjectConnectionResponse{}, err
 	}
-	if input.SourceType == "strategy_item" && input.TargetType == "rock" {
-		if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: params.SourceID, WorkspaceID: workspaceID}); err != nil {
-			return ObjectConnectionResponse{}, err
+	if input.SourceType == "strategy_item" {
+		switch input.TargetType {
+		case "rock", "project", "issue":
+			if _, err := s.queries.GetStrategyItem(ctx, cerebrodb.GetStrategyItemParams{ID: params.SourceID, WorkspaceID: workspaceID}); err != nil {
+				return ObjectConnectionResponse{}, err
+			}
 		}
-		if _, err := s.queries.GetRock(ctx, cerebrodb.GetRockParams{ID: params.TargetID, WorkspaceID: workspaceID}); err != nil {
-			return ObjectConnectionResponse{}, err
+		switch input.TargetType {
+		case "rock":
+			if _, err := s.queries.GetRock(ctx, cerebrodb.GetRockParams{ID: params.TargetID, WorkspaceID: workspaceID}); err != nil {
+				return ObjectConnectionResponse{}, err
+			}
+		case "project":
+			if err := EnsureProjectInWorkspace(ctx, s.projects, params.TargetID, workspaceID); err != nil {
+				return ObjectConnectionResponse{}, err
+			}
+		case "issue":
+			if _, err := s.projects.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{ID: params.TargetID, WorkspaceID: workspaceID}); err != nil {
+				return ObjectConnectionResponse{}, err
+			}
 		}
 	}
 	row, err := s.queries.CreateObjectConnection(ctx, params)
@@ -1546,7 +1577,7 @@ func visionPlanItemResponse(id, workspaceID, sectionID pgtype.UUID, title, descr
 		ID: util.UUIDToString(id), WorkspaceID: util.UUIDToString(workspaceID), SectionID: util.UUIDToString(sectionID),
 		Title: title, Description: description, PartLabel: partLabel,
 		OwnerType: ownerType.String, OwnerID: util.UUIDToString(ownerID), OwnerName: ownerName,
-		Position: position, State: state, GoalConnections: []VisionPlanGoalConnection{},
+		Position: position, State: state, GoalConnections: []VisionPlanGoalConnection{}, Links: []VisionPlanObjectLink{},
 		CreatedAt: timestamp(createdAt), UpdatedAt: timestamp(updatedAt),
 	}
 }

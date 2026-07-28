@@ -23,10 +23,12 @@ export interface StrategyItem { id: string; workspace_id: string; kind: Strategy
 export interface StrategyItemInput { kind: Exclude<StrategyKind, "unknown">; title: string; description?: string; horizon_unit?: HorizonUnit; horizon_count?: number; horizon_label?: string; position: number; state?: Exclude<StrategyState, "unknown"> }
 export type VisionPlanSectionType = "list" | "structured" | "process";
 export interface VisionPlanGoalConnection { connection_id: string; goal_id: string }
+export interface VisionPlanObjectLink { connection_id: string; target_type: "project" | "issue"; target_id: string; title: string; identifier: string }
 export interface VisionPlanItem {
   id: string; workspace_id: string; section_id: string; title: string; description: string;
   part_label?: string; owner_type?: "member" | "agent"; owner_id?: string; owner_name?: string;
   position: number; state: "active" | "archived"; goal_connections: VisionPlanGoalConnection[];
+  links: VisionPlanObjectLink[];
   created_at: string; updated_at: string;
 }
 export interface VisionPlanItemInput {
