@@ -114,6 +114,14 @@ export function snapshotToFields(
     { key: "model", label: "Model", value: (s.model ?? "").trim(), mono: true },
     { key: "thinking_level", label: "Thinking level", value: (s.thinking_level ?? "").trim(), mono: true },
     { key: "skill_ids", label: "Skills", value: skillsToText(s.skill_ids, opts.resolveSkill), mono: !skillsResolved },
+    // FIR-3805: its own field, and always present in the list. The queue and the
+    // version history keep only the requests whose changed keys intersect the
+    // tab's keys, so a proposal that ONLY flips "always on" was filtered out of
+    // the Skills tab — stored server-side, invisible, never approved. Emitting
+    // the row unconditionally also keeps the index-aligned comparison in
+    // changedSnapshotKeys honest: a row that appears in one snapshot and not the
+    // other would shift every field after it.
+    { key: "always_on_skill_ids", label: "Always-on skills", value: skillsToText(s.always_on_skill_ids, opts.resolveSkill), mono: !skillsResolved },
     { key: "custom_env_keys", label: "Secret names", value: listToText(s.custom_env_keys), mono: true },
     { key: "mcp_config", label: "MCP config", value: jsonToText(s.mcp_config), mono: true },
     { key: "custom_args", label: "Custom args", value: jsonToText(s.custom_args), mono: true },
