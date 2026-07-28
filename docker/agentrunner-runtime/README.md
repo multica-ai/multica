@@ -69,6 +69,11 @@ path is best-effort and untested by CI: an unpinned entry can resolve to a
 different (possibly breaking) release the next time a pod boots, with no
 build or review to catch it.
 
+`entrypoint.sh` also exports `~/.local/bin` (where `uv tool install` links
+executables) onto `PATH` before the final `exec` into the daemon, so the
+installed binary (e.g. `snow`) resolves by bare name for every agent task —
+not just in a login shell.
+
 This is scoped to `uv`-installable Python packages for now. A tool that isn't
 on PyPI (or needs OS packages) still needs a base-image change or a
 workspace-specific downstream image layer — this hook doesn't attempt to

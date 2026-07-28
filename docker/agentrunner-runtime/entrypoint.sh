@@ -64,6 +64,13 @@ if [ -n "${EXTRA_UV_TOOLS:-}" ]; then
     uv tool install "${tool}" || echo "entrypoint: WARNING failed to install extra uv tool '${tool}' (continuing)" >&2
   done
 fi
+# `uv tool install` links executables into ~/.local/bin. Login shells pick this
+# up via ~/.profile, but the daemon exec'd at the bottom of this script (and
+# every agent tool-call subprocess it spawns) is not a login shell, so without
+# this export a bare `snow` (or any other EXTRA_UV_TOOLS binary) is
+# "command not found" even though the install above succeeded. Exporting here,
+# before the final exec, makes it inherited by the whole process tree.
+export PATH="${HOME}/.local/bin:${PATH}"
 
 # ── Materialize PEM secrets as files ───────────────────────────────────────────
 # gitops/base/agent-runtime/external-secret.yaml sweeps every SSM param under
