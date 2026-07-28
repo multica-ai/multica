@@ -10,6 +10,9 @@ const planRef = vi.hoisted(() => ({
   value: null as { id: string; title: string; body: string } | null,
 }));
 
+// Captures where the panel sends the reader when it opens the plan note.
+const openInNewTab = vi.hoisted(() => vi.fn());
+
 vi.mock("@multica/cerebro-feature-flags", () => ({
   useFeatureFlag: () => true,
 }));
@@ -39,7 +42,9 @@ vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-1" }));
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({ documentDetail: () => "/doc" }),
 }));
-vi.mock("@multica/views/navigation", () => ({ useNavigation: () => ({}) }));
+vi.mock("@multica/views/navigation", () => ({
+  useNavigation: () => ({ openInNewTab }),
+}));
 // Lightweight StatusIcon stub — surfaces the resolved status for assertions
 // without pulling the full issues barrel into the component test.
 vi.mock("@multica/views/issues/components", () => ({
@@ -93,7 +98,7 @@ const WITH_DONE_PHASE = [
 
 const FLAT = "- [ ] Step one\n- [x] Step two";
 
-// Opens the panel body the way a user does — via the Workpad icon.
+// Opens the panel body the way a user does — by clicking the heading row.
 function openPanel() {
   fireEvent.click(screen.getByRole("button", { name: "Toggle Workpad" }));
 }
@@ -108,6 +113,42 @@ function clickPhaseStatus(index: number) {
 describe("WorkpadPanel", () => {
   beforeEach(() => {
     planRef.value = null;
+    openInNewTab.mockClear();
+  });
+
+  // FIR-3659 (Jesper's review) — the heading itself is the toggle, not just the
+  // circle: the "Workpad" label and the progress count live inside the same
+  // button, so clicking anywhere on the heading row folds the panel open.
+  it("toggles the panel when the Workpad heading text is clicked", () => {
+    planRef.value = { id: "p1", title: "Plan", body: MULTI };
+    render(<WorkpadPanel issueId="issue-1" />);
+
+    const heading = screen.getByText("Workpad");
+    expect(heading.closest("button")).toBe(
+      screen.getByRole("button", { name: "Toggle Workpad" }),
+    );
+
+    fireEvent.click(heading);
+    expect(screen.getByRole("button", { name: /Fase 1: Byg/ })).toBeTruthy();
+
+    fireEvent.click(heading);
+    expect(screen.queryByRole("button", { name: /Fase 1: Byg/ })).toBeNull();
+  });
+
+  // FIR-3659 (Jesper's review) — with the heading turned into the toggle, the
+  // way out to the plan note is an explicit link inside the opened panel.
+  it("offers an Open full plan link inside the expanded panel", () => {
+    planRef.value = { id: "p1", title: "Plan", body: MULTI };
+    render(<WorkpadPanel issueId="issue-1" />);
+
+    // Collapsed: the heading toggles, it does not navigate.
+    expect(screen.queryByRole("button", { name: /Open full plan/ })).toBeNull();
+    fireEvent.click(screen.getByText("Workpad"));
+    expect(openInNewTab).not.toHaveBeenCalled();
+
+    // Expanded: the link is there and opens the plan note.
+    fireEvent.click(screen.getByRole("button", { name: /Open full plan/ }));
+    expect(openInNewTab).toHaveBeenCalledWith("/doc", "Plan");
   });
 
   it("starts collapsed and toggles the whole panel on the Workpad icon", () => {
