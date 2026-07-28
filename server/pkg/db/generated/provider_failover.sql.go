@@ -310,24 +310,32 @@ WHERE a.workspace_id = $1
   AND a.id <> $2
   AND r.provider = $3
   AND r.status = 'online'
+  AND r.last_seen_at >= $4
 ORDER BY a.created_at ASC
 `
 
 type ListFailoverTargetsParams struct {
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-	ExcludeAgentID pgtype.UUID `json:"exclude_agent_id"`
-	TargetProvider string      `json:"target_provider"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ExcludeAgentID pgtype.UUID        `json:"exclude_agent_id"`
+	TargetProvider string             `json:"target_provider"`
+	MinLastSeenAt  pgtype.Timestamptz `json:"min_last_seen_at"`
 }
 
 // Resolves eligible failover target agents in a workspace for a given target
 // provider: a non-archived user-kind agent bound to an ONLINE runtime whose
-// provider is @target_provider. Bidirectional (td-836aa9): @target_provider is
+// provider is @target_provider and whose heartbeat is no older than the
+// caller-supplied cutoff. Bidirectional (td-836aa9): @target_provider is
 // 'claude' for a GPT->Claude handoff and 'codex' for a Claude->GPT handoff, so
 // one query serves both directions. System-kind and archived agents are excluded
 // structurally here; the service layer applies the remaining authority-sensitive
 // exclusions. Emptiness of this result is exactly the "target unavailable" signal.
 func (q *Queries) ListFailoverTargets(ctx context.Context, arg ListFailoverTargetsParams) ([]Agent, error) {
-	rows, err := q.db.Query(ctx, listFailoverTargets, arg.WorkspaceID, arg.ExcludeAgentID, arg.TargetProvider)
+	rows, err := q.db.Query(ctx, listFailoverTargets,
+		arg.WorkspaceID,
+		arg.ExcludeAgentID,
+		arg.TargetProvider,
+		arg.MinLastSeenAt,
+	)
 	if err != nil {
 		return nil, err
 	}

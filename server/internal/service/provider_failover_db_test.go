@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -79,16 +80,24 @@ func TestFailTaskQuotaCreatesExactlyOneAuthorizedContinuation(t *testing.T) {
 	var codexRuntimeID, claudeRuntimeID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
-		) VALUES ($1, 'failover-codex', 'cloud', 'codex', 'online', '', '{}'::jsonb, $2)
+			workspace_id, name, runtime_mode, provider, status, device_info,
+			metadata, owner_id, last_seen_at
+		) VALUES (
+			$1, 'failover-codex', 'cloud', 'codex', 'online', '',
+			'{}'::jsonb, $2, now()
+		)
 		RETURNING id
 	`, workspaceID, userID).Scan(&codexRuntimeID); err != nil {
 		t.Fatalf("seed codex runtime: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, name, runtime_mode, provider, status, device_info, metadata, owner_id
-		) VALUES ($1, 'failover-claude', 'cloud', 'claude', 'online', '', '{}'::jsonb, $2)
+			workspace_id, name, runtime_mode, provider, status, device_info,
+			metadata, owner_id, last_seen_at
+		) VALUES (
+			$1, 'failover-claude', 'cloud', 'claude', 'online', '',
+			'{}'::jsonb, $2, now()
+		)
 		RETURNING id
 	`, workspaceID, userID).Scan(&claudeRuntimeID); err != nil {
 		t.Fatalf("seed claude runtime: %v", err)
@@ -119,6 +128,43 @@ func TestFailTaskQuotaCreatesExactlyOneAuthorizedContinuation(t *testing.T) {
 		RETURNING id
 	`, workspaceID, claudeRuntimeID, userID).Scan(&targetAgentID); err != nil {
 		t.Fatalf("seed target agent: %v", err)
+	}
+
+	targetQuery := db.New(pool)
+	targetParams := db.ListFailoverTargetsParams{
+		WorkspaceID:    util.MustParseUUID(workspaceID),
+		ExcludeAgentID: util.MustParseUUID(sourceAgentID),
+		TargetProvider: "claude",
+		MinLastSeenAt: pgtype.Timestamptz{
+			Time:  time.Now().UTC().Add(-failoverTargetMaxHeartbeatAge),
+			Valid: true,
+		},
+	}
+	freshTargets, err := targetQuery.ListFailoverTargets(ctx, targetParams)
+	if err != nil {
+		t.Fatalf("list fresh failover targets: %v", err)
+	}
+	if len(freshTargets) != 1 || util.UUIDToString(freshTargets[0].ID) != targetAgentID {
+		t.Fatalf("fresh failover targets = %+v, want target %s", freshTargets, targetAgentID)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE agent_runtime
+		SET last_seen_at = now() - interval '4 minutes'
+		WHERE id = $1
+	`, claudeRuntimeID); err != nil {
+		t.Fatalf("stale target runtime: %v", err)
+	}
+	staleTargets, err := targetQuery.ListFailoverTargets(ctx, targetParams)
+	if err != nil {
+		t.Fatalf("list stale failover targets: %v", err)
+	}
+	if len(staleTargets) != 0 {
+		t.Fatalf("stale runtime remained failover-eligible: %+v", staleTargets)
+	}
+	if _, err := pool.Exec(ctx, `
+		UPDATE agent_runtime SET last_seen_at = now() WHERE id = $1
+	`, claudeRuntimeID); err != nil {
+		t.Fatalf("refresh target runtime: %v", err)
 	}
 
 	var issueID, taskID string

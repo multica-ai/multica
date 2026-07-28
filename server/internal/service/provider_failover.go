@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -19,6 +20,8 @@ import (
 	"github.com/multica-ai/multica/server/pkg/providerfailover"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
+
+const failoverTargetMaxHeartbeatAge = 3 * time.Minute
 
 // failoverMode resolves the current operational posture (off/shadow/active) of
 // the provider-failover subsystem from the feature flags. A nil FeatureFlags
@@ -455,6 +458,10 @@ func (s *TaskService) resolveFailoverTarget(ctx context.Context, source db.Agent
 		WorkspaceID:    source.WorkspaceID,
 		ExcludeAgentID: source.ID,
 		TargetProvider: targetProvider,
+		MinLastSeenAt: pgtype.Timestamptz{
+			Time:  time.Now().UTC().Add(-failoverTargetMaxHeartbeatAge),
+			Valid: true,
+		},
 	})
 	if err != nil {
 		slog.Warn("failover: list targets failed",

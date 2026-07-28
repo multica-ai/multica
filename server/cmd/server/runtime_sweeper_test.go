@@ -253,7 +253,7 @@ func TestSweepStaleRuntimeRecordsLivenessShadowAndPreservesRetry(t *testing.T) {
 	if err := testPool.QueryRow(context.Background(),
 		`SELECT to_regclass('provider_failover_handoff')::text`).Scan(&failoverTable); err != nil ||
 		failoverTable == nil {
-		t.Skip("provider failover migrations are not installed in the test database")
+		t.Fatalf("connected test database is missing provider failover migrations")
 	}
 
 	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")

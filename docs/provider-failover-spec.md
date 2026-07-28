@@ -215,7 +215,8 @@ The auditable core. Deterministic, table-tested, no I/O.
   to the server fail path; any observed tool call or partial user output blocks
   an active handoff.
 - Target resolution: an eligible paired-provider target is a non-archived,
-  `kind='user'` agent in the same workspace on an online runtime. The target
+  `kind='user'` agent in the same workspace on an online runtime whose
+  persisted heartbeat is no older than three minutes. The target
   must have the **same owner** as the source agent, explicitly opt in with
   `runtime_config.provider_failover_target=true`, be non-authority-sensitive,
   and pass the exact same `CanInvokeAgent` permission predicate as an ordinary

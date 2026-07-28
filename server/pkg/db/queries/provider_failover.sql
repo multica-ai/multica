@@ -81,7 +81,8 @@ RETURNING *;
 -- name: ListFailoverTargets :many
 -- Resolves eligible failover target agents in a workspace for a given target
 -- provider: a non-archived user-kind agent bound to an ONLINE runtime whose
--- provider is @target_provider. Bidirectional (td-836aa9): @target_provider is
+-- provider is @target_provider and whose heartbeat is no older than the
+-- caller-supplied cutoff. Bidirectional (td-836aa9): @target_provider is
 -- 'claude' for a GPT->Claude handoff and 'codex' for a Claude->GPT handoff, so
 -- one query serves both directions. System-kind and archived agents are excluded
 -- structurally here; the service layer applies the remaining authority-sensitive
@@ -95,6 +96,7 @@ WHERE a.workspace_id = @workspace_id
   AND a.id <> @exclude_agent_id
   AND r.provider = @target_provider
   AND r.status = 'online'
+  AND r.last_seen_at >= @min_last_seen_at
 ORDER BY a.created_at ASC;
 
 -- name: CreateFailoverTask :one
