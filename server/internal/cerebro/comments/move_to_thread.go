@@ -1,7 +1,6 @@
 // This file owns the cerebro-only "move comments to a new thread" feature:
-// lifting a hand-picked set of comments out of one thread into a freshly
-// created thread on the SAME issue, leaving a breadcrumb on each moved comment
-// pointing at the new thread.
+// lifting a hand-picked set of comments out of one thread into a new thread on
+// the SAME issue.
 //
 // It is the multi-select sibling of move_to_subissue.go (JEH-1309). Where the
 // sub-issue flow takes a whole root thread out of the issue, this flow lets the
@@ -9,15 +8,22 @@
 // that stays on the issue — the entry point is the per-comment "Reply in new
 // thread" action.
 //
+// FIR-3880: the move re-parents the original rows instead of copying them —
+// the oldest pick is promoted to a thread root and the rest are hung under it.
+// Nothing is left behind at the old location and no breadcrumb comment is
+// written, so a moved comment keeps its id, author, timestamps, attachments,
+// reactions and approval bindings. Comments that were NOT picked but hung off
+// one that was are re-homed to the nearest comment that stays, so the old
+// thread survives the split (see planMove).
+//
 // The whole operation runs in one transaction so the caller never observes a
-// half-moved set: either the new thread exists with every picked comment copied
-// in order and every original rewritten to a breadcrumb, or nothing changed.
+// half-moved set: either every picked comment sits in the new thread and every
+// comment left behind has a valid parent, or nothing changed.
 package comments
 
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"sort"
@@ -30,6 +36,11 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
+// issueCommentCap bounds the per-issue comment load used to work out which
+// comments stay behind. Mirrors the defensive cap the comment list endpoints
+// use — issue p99 is ~30 comments, the largest ever observed is ~1.1k.
+const issueCommentCap = 2000
+
 // moveToThreadRequest is the POST body. `comment_ids` is the ordered set the
 // user picked in the UI; the backend re-derives chronological order itself, so
 // client ordering is advisory only.
@@ -38,8 +49,9 @@ type moveToThreadRequest struct {
 }
 
 // moveToThreadResponse returns the identity of the new thread so the client can
-// scroll to it without a refetch. `moved_count` is the number of comments that
-// changed threads (== number of breadcrumbs left behind).
+// scroll to it without a refetch. `root_comment_id` is the oldest pick, which
+// the move promotes to the new thread's root; `moved_count` is the number of
+// comments that changed threads.
 type moveToThreadResponse struct {
 	RootCommentID string `json:"root_comment_id"`
 	IssueID       string `json:"issue_id"`
@@ -58,10 +70,10 @@ type moveToThreadResponse struct {
 //   - The host issue is not cancelled (mirrors the UI surface, which hides the
 //     action on cancelled issues).
 //
-// On success the picked comments are copied into a new thread on the same issue
-// (oldest pick = new root, the rest become its replies in chronological order)
-// and each original is rewritten to a one-line breadcrumb linking to the new
-// thread.
+// On success the picked comments form a new thread on the same issue (oldest
+// pick = new root, the rest become its replies in chronological order). The
+// rows are re-parented in place, so nothing is copied and nothing is left
+// behind at the old location.
 func (h *Handler) MoveToThread(w http.ResponseWriter, r *http.Request) {
 	wsID, ok := requireWorkspace(w, r)
 	if !ok {
@@ -144,6 +156,34 @@ func (h *Handler) MoveToThread(w http.ResponseWriter, r *http.Request) {
 		return ta.Before(tb)
 	})
 
+	// The whole issue is needed to work out what happens to the comments that
+	// stay behind: a reply whose parent is moving would otherwise be dragged
+	// along or orphaned. Chronological order, which planMove relies on.
+	all, err := h.Queries.ListCommentsForIssue(r.Context(), db.ListCommentsForIssueParams{
+		IssueID:     issueID,
+		WorkspaceID: wsUUID,
+		Limit:       issueCommentCap,
+	})
+	if err != nil {
+		slog.Error("move-to-thread: list issue comments failed", "issue_id", util.UUIDToString(issueID), "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to load the issue's comments")
+		return
+	}
+
+	pickedIDs := make([]string, 0, len(picked))
+	for _, c := range picked {
+		pickedIDs = append(pickedIDs, util.UUIDToString(c.ID))
+	}
+	newRootID := pickedIDs[0]
+	plan := planMove(toCommentNodes(all), pickedIDs)
+
+	// Every id in the plan came out of `all`, so keep the parsed UUIDs around
+	// instead of re-parsing strings on the write path.
+	uuidByID := make(map[string]pgtype.UUID, len(all))
+	for _, c := range all {
+		uuidByID[util.UUIDToString(c.ID)] = c.ID
+	}
+
 	tx, err := h.Tx.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to start transaction")
@@ -152,63 +192,22 @@ func (h *Handler) MoveToThread(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
 
-	// Create the new root from the oldest pick, preserving its author so the
-	// new thread reads with the original attribution. parent_id is null — this
-	// is a brand-new top-level thread on the same issue.
-	root := picked[0]
-	newRoot, err := qtx.CreateComment(r.Context(), db.CreateCommentParams{
-		IssueID:     issueID,
-		WorkspaceID: wsUUID,
-		AuthorType:  root.AuthorType,
-		AuthorID:    root.AuthorID,
-		Content:     root.Content,
-		Type:        root.Type,
-		ParentID:    pgtype.UUID{},
-	})
-	if err != nil {
-		slog.Error("move-to-thread: create root failed", "comment_id", util.UUIDToString(root.ID), "error", err)
-		writeError(w, http.StatusInternalServerError, "failed to create new thread")
-		return
-	}
-
-	// Recreate the remaining picks as replies under the new root, in order.
-	// Each insert advances now() so the relative order is preserved.
-	created := []db.Comment{newRoot}
-	for _, c := range picked[1:] {
-		reply, err := qtx.CreateComment(r.Context(), db.CreateCommentParams{
-			IssueID:     issueID,
-			WorkspaceID: wsUUID,
-			AuthorType:  c.AuthorType,
-			AuthorID:    c.AuthorID,
-			Content:     c.Content,
-			Type:        c.Type,
-			ParentID:    newRoot.ID,
-		})
-		if err != nil {
-			slog.Error("move-to-thread: create reply failed", "comment_id", util.UUIDToString(c.ID), "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to copy comment into new thread")
-			return
+	// Apply the plan. planMove emits assignments in chronological order, so a
+	// comment is always re-parented after the comment it will hang under.
+	updated := make([]db.Comment, 0, len(plan))
+	for _, a := range plan {
+		var parent pgtype.UUID
+		if a.ParentID != "" {
+			parent = uuidByID[a.ParentID]
 		}
-		created = append(created, reply)
-	}
-
-	// Rewrite every original pick to a breadcrumb pointing at the new thread.
-	// The originals stay in place (not deleted) so the trail is visible exactly
-	// where each moved comment used to be. mention://comment/<id> is resolved
-	// by the frontend to an in-issue scroll-to-comment link.
-	// Link-only breadcrumb: the bracket text is the plain-text fallback (CLI,
-	// notifications, raw markdown); the rich UI swaps it for a localized
-	// "jump to new thread" affordance via the mention://comment renderer.
-	breadcrumb := fmt.Sprintf("[Moved to new thread ↗](mention://comment/%s)", util.UUIDToString(newRoot.ID))
-	updated := make([]db.Comment, 0, len(picked))
-	for _, c := range picked {
-		u, err := qtx.UpdateComment(r.Context(), db.UpdateCommentParams{
-			ID:      c.ID,
-			Content: breadcrumb,
+		u, err := qtx.SetCommentParent(r.Context(), db.SetCommentParentParams{
+			ID:          uuidByID[a.ID],
+			WorkspaceID: wsUUID,
+			ParentID:    parent,
 		})
 		if err != nil {
-			slog.Error("move-to-thread: rewrite original failed", "comment_id", util.UUIDToString(c.ID), "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to rewrite original comment")
+			slog.Error("move-to-thread: re-parent failed", "comment_id", a.ID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to move comment")
 			return
 		}
 		updated = append(updated, u)
@@ -221,21 +220,137 @@ func (h *Handler) MoveToThread(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Publish so every connected client refreshes the timeline without a
-	// refetch: the new thread's comments as created, the rewritten originals as
-	// updated. Workspace channel; the access middleware applies the per-user
-	// filter downstream.
-	for _, c := range created {
-		h.publishComment(wsID, protocol.EventCommentCreated, actorType, actorUUID, c)
-	}
+	// refetch. Nothing is created or deleted — every touched comment simply
+	// hangs somewhere else now. Workspace channel; the access middleware
+	// applies the per-user filter downstream.
 	for _, c := range updated {
 		h.publishComment(wsID, protocol.EventCommentUpdated, actorType, actorUUID, c)
 	}
 
 	writeJSON(w, http.StatusCreated, moveToThreadResponse{
-		RootCommentID: util.UUIDToString(newRoot.ID),
+		RootCommentID: newRootID,
 		IssueID:       util.UUIDToString(issueID),
 		MovedCount:    len(picked),
 	})
+}
+
+// commentNode is the minimal shape planMove needs: an id and its direct parent
+// ("" for a thread root).
+type commentNode struct {
+	ID       string
+	ParentID string
+}
+
+// parentAssignment is a single parent_id write. ParentID "" promotes the
+// comment to a thread root.
+type parentAssignment struct {
+	ID       string
+	ParentID string
+}
+
+func toCommentNodes(all []db.Comment) []commentNode {
+	out := make([]commentNode, 0, len(all))
+	for _, c := range all {
+		parent := ""
+		if c.ParentID.Valid {
+			parent = util.UUIDToString(c.ParentID)
+		}
+		out = append(out, commentNode{ID: util.UUIDToString(c.ID), ParentID: parent})
+	}
+	return out
+}
+
+// planMove works out every parent_id write the move implies.
+//
+// `all` is every comment on the issue in chronological order; `pickedIDs` is
+// the moving set, also chronological. Two groups of comments change parent:
+//
+//   - The picked set becomes one thread: the oldest pick is promoted to a root
+//     and the rest hang directly under it.
+//   - A comment that stays behind but hung off a pick would be orphaned, so it
+//     is re-homed to its nearest ancestor that stays. When its whole ancestor
+//     chain is moving, the old thread has lost its root: the oldest such
+//     comment becomes the root of what is left and its peers hang under it.
+//
+// Assignments come back in `all` order (chronological) with no-ops dropped, so
+// a comment is always written after the comment it will hang under, and no
+// intermediate state can point a comment at a parent that is about to move.
+func planMove(all []commentNode, pickedIDs []string) []parentAssignment {
+	if len(pickedIDs) == 0 {
+		return nil
+	}
+
+	parentOf := make(map[string]string, len(all))
+	order := make(map[string]int, len(all))
+	for i, c := range all {
+		parentOf[c.ID] = c.ParentID
+		order[c.ID] = i
+	}
+	moving := make(map[string]struct{}, len(pickedIDs))
+	for _, id := range pickedIDs {
+		moving[id] = struct{}{}
+	}
+
+	// Nearest ancestor that stays behind; "" when the whole chain is moving.
+	survivingAncestor := func(id string) string {
+		for p := parentOf[id]; p != ""; p = parentOf[p] {
+			if _, gone := moving[p]; !gone {
+				return p
+			}
+		}
+		return ""
+	}
+	oldRoot := func(id string) string {
+		root := id
+		for parentOf[root] != "" {
+			root = parentOf[root]
+		}
+		return root
+	}
+
+	assign := make(map[string]string, len(all))
+	assign[pickedIDs[0]] = ""
+	for _, id := range pickedIDs[1:] {
+		assign[id] = pickedIDs[0]
+	}
+
+	// Comments left behind whose direct parent is moving. Those with no
+	// surviving ancestor are grouped per old thread and re-rooted together.
+	rerootByOldRoot := make(map[string][]string)
+	for _, c := range all {
+		if _, gone := moving[c.ID]; gone {
+			continue
+		}
+		if c.ParentID == "" {
+			continue
+		}
+		if _, parentGone := moving[c.ParentID]; !parentGone {
+			continue
+		}
+		if anc := survivingAncestor(c.ID); anc != "" {
+			assign[c.ID] = anc
+			continue
+		}
+		r := oldRoot(c.ID)
+		rerootByOldRoot[r] = append(rerootByOldRoot[r], c.ID)
+	}
+	for _, ids := range rerootByOldRoot {
+		sort.SliceStable(ids, func(a, b int) bool { return order[ids[a]] < order[ids[b]] })
+		assign[ids[0]] = ""
+		for _, id := range ids[1:] {
+			assign[id] = ids[0]
+		}
+	}
+
+	out := make([]parentAssignment, 0, len(assign))
+	for _, c := range all {
+		next, planned := assign[c.ID]
+		if !planned || next == c.ParentID {
+			continue
+		}
+		out = append(out, parentAssignment{ID: c.ID, ParentID: next})
+	}
+	return out
 }
 
 // dedupeUUIDs parses and de-duplicates the id list, preserving first-seen order.
