@@ -128,22 +128,23 @@ func (q *Queries) GetRuntimeUsageByHour(ctx context.Context, arg GetRuntimeUsage
 
 const listRuntimeUsage = `-- name: ListRuntimeUsage :many
 SELECT
-    DATE(bucket_hour AT TIME ZONE $2::text) AS date,
-    provider,
-    model,
-    SUM(input_tokens)::bigint        AS input_tokens,
-    SUM(output_tokens)::bigint       AS output_tokens,
-    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
-    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    DATE(tu.created_at AT TIME ZONE $2::text) AS date,
+    tu.provider,
+    tu.model,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens,
     -- CEREBRO-PATCH(task-usage-gateway-cost): real gateway spend rolled into
     -- the hourly bucket; the handler prefers it over the token estimate so the
     -- runtimes overview "COST · 7D" column shows the real charge (FIR-2405).
-    SUM(cost_cents)::bigint          AS cost_cents
-FROM task_usage_hourly
-WHERE runtime_id = $1
-  AND bucket_hour >= $3::timestamptz
-GROUP BY DATE(bucket_hour AT TIME ZONE $2::text), provider, model
-ORDER BY DATE(bucket_hour AT TIME ZONE $2::text) DESC, provider, model
+    SUM(tu.cost_cents)::bigint          AS cost_cents
+FROM model_usage_task_rollup tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.runtime_id = $1
+  AND tu.created_at >= $3::timestamptz
+GROUP BY DATE(tu.created_at AT TIME ZONE $2::text), tu.provider, tu.model
+ORDER BY DATE(tu.created_at AT TIME ZONE $2::text) DESC, tu.provider, tu.model
 `
 
 type ListRuntimeUsageParams struct {
@@ -163,14 +164,18 @@ type ListRuntimeUsageRow struct {
 	CostCents        int64       `json:"cost_cents"`
 }
 
-// Reads from the UTC-bucketed `task_usage_hourly` rollup table,
-// aggregated to per-(date, provider, model) under the
-// caller-supplied @tz. Powers the trend chart on the runtime detail
-// page and the per-row cost cell on the runtimes list.
+// Reads the canonical per-call ledger through `model_usage_task_rollup`,
+// aggregated to per-(date, provider, model) under the caller-supplied
+// @tz. Powers the trend chart on the runtime detail page and the per-row
+// cost cell on the runtimes list.
 //
 // @tz is required, even if the caller intends "UTC", so the bucket
-// cast is unambiguous — `bucket_hour` is UTC and the caller picks the
-// calendar boundary per request.
+// cast is unambiguous — usage timestamps are UTC and the caller picks
+// the calendar boundary per request. Bucketing on `tu.created_at` (when
+// the tokens were observed) rather than queue time is deliberate: a run
+// that starts before midnight and finishes after it belongs to the day
+// it burned the tokens.
+// CEREBRO-PATCH(usage-canonical-ledger): FIR-3940 read the canonical ledger view.
 func (q *Queries) ListRuntimeUsage(ctx context.Context, arg ListRuntimeUsageParams) ([]ListRuntimeUsageRow, error) {
 	rows, err := q.db.Query(ctx, listRuntimeUsage, arg.RuntimeID, arg.Tz, arg.Since)
 	if err != nil {

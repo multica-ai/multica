@@ -464,22 +464,25 @@ func (q *Queries) ListDashboardRunTimeDaily(ctx context.Context, arg ListDashboa
 
 const listDashboardUsageByAgent = `-- name: ListDashboardUsageByAgent :many
 SELECT
-    agent_id,
-    model,
-    SUM(input_tokens)::bigint        AS input_tokens,
-    SUM(output_tokens)::bigint       AS output_tokens,
-    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
-    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    atq.agent_id,
+    tu.model,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens,
     -- CEREBRO-PATCH(task-usage-gateway-cost): real gateway spend per (agent, model)
     -- so the dashboard's per-agent cost matches the real charge (FIR-2405).
-    SUM(cost_cents)::bigint          AS cost_cents,
-    SUM(task_count)::int             AS task_count
-FROM task_usage_hourly
-WHERE workspace_id = $1
-  AND bucket_hour >= $2::timestamptz
-  AND ($3::uuid IS NULL OR project_id = $3)
-GROUP BY agent_id, model
-ORDER BY agent_id, model
+    SUM(tu.cost_cents)::bigint          AS cost_cents,
+    COUNT(DISTINCT tu.task_id)::int     AS task_count
+FROM model_usage_task_rollup tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= $2::timestamptz
+  AND ($3::uuid IS NULL OR i.project_id = $3)
+GROUP BY atq.agent_id, tu.model
+ORDER BY atq.agent_id, tu.model
 `
 
 type ListDashboardUsageByAgentParams struct {
@@ -499,18 +502,18 @@ type ListDashboardUsageByAgentRow struct {
 	TaskCount        int32       `json:"task_count"`
 }
 
-// Per-(agent, model) token aggregates from `task_usage_hourly`. No
+// Per-(agent, model) token aggregates from the canonical per-call
+// ledger via `model_usage_task_rollup`. No
 // date grouping in the result, so this query takes no `@tz` — the
 // @since cutoff is a raw timestamptz the Go layer has already computed
 // in the viewer's tz. Model dimension is preserved so the client can
 // compute cost from its per-model pricing table; the client folds rows
 // by agent for the "by agent" list on the dashboard.
 //
-// task_count is summed across hourly buckets — one task that spans
-// multiple hours lands in multiple buckets, so this over-counts by
-// hour the same way the daily version over-counted by day. The
-// frontend prefers `ListDashboardAgentRunTime` for the user-facing
-// "tasks" column, so this stays informational only.
+// task_count is a DISTINCT count of tasks, so a run that spans several
+// hours is counted once. The frontend still prefers
+// `ListDashboardAgentRunTime` for the user-facing "tasks" column.
+// CEREBRO-PATCH(usage-canonical-ledger): FIR-3940 read the canonical ledger view.
 func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboardUsageByAgentParams) ([]ListDashboardUsageByAgentRow, error) {
 	rows, err := q.db.Query(ctx, listDashboardUsageByAgent, arg.WorkspaceID, arg.Since, arg.ProjectID)
 	if err != nil {
@@ -542,23 +545,26 @@ func (q *Queries) ListDashboardUsageByAgent(ctx context.Context, arg ListDashboa
 
 const listDashboardUsageDaily = `-- name: ListDashboardUsageDaily :many
 SELECT
-    DATE(bucket_hour AT TIME ZONE $2::text) AS date,
-    model,
-    SUM(input_tokens)::bigint        AS input_tokens,
-    SUM(output_tokens)::bigint       AS output_tokens,
-    SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
-    SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    DATE(tu.created_at AT TIME ZONE $2::text) AS date,
+    tu.model,
+    SUM(tu.input_tokens)::bigint        AS input_tokens,
+    SUM(tu.output_tokens)::bigint       AS output_tokens,
+    SUM(tu.cache_read_tokens)::bigint   AS cache_read_tokens,
+    SUM(tu.cache_write_tokens)::bigint  AS cache_write_tokens,
     -- CEREBRO-PATCH(task-usage-gateway-cost): real gateway spend rolled into the
     -- hourly bucket so the workspace dashboard trend chart shows the real charge
     -- instead of a token estimate (FIR-2405).
-    SUM(cost_cents)::bigint          AS cost_cents,
-    SUM(task_count)::int             AS task_count
-FROM task_usage_hourly
-WHERE workspace_id = $1
-  AND bucket_hour >= $3::timestamptz
-  AND ($4::uuid IS NULL OR project_id = $4)
-GROUP BY DATE(bucket_hour AT TIME ZONE $2::text), model
-ORDER BY DATE(bucket_hour AT TIME ZONE $2::text) DESC, model
+    SUM(tu.cost_cents)::bigint          AS cost_cents,
+    COUNT(DISTINCT tu.task_id)::int     AS task_count
+FROM model_usage_task_rollup tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND tu.created_at >= $3::timestamptz
+  AND ($4::uuid IS NULL OR i.project_id = $4)
+GROUP BY DATE(tu.created_at AT TIME ZONE $2::text), tu.model
+ORDER BY DATE(tu.created_at AT TIME ZONE $2::text) DESC, tu.model
 `
 
 type ListDashboardUsageDailyParams struct {
@@ -580,7 +586,7 @@ type ListDashboardUsageDailyRow struct {
 }
 
 // Daily per-(date, model) token aggregates for the workspace, served
-// from the UTC-bucketed `task_usage_hourly` table and
+// from the canonical per-call ledger via `model_usage_task_rollup` and
 // sliced to calendar days under the caller-supplied @tz. Optionally
 // scoped to a single project via sqlc.narg('project_id'). Powers the
 // workspace dashboard's daily cost chart.
@@ -593,6 +599,7 @@ type ListDashboardUsageDailyRow struct {
 // with DATE_TRUNC here — DATE_TRUNC operates in the session tz and would
 // snap the cutoff back to UTC midnight, dragging in an extra partial
 // local day for any non-UTC viewer.
+// CEREBRO-PATCH(usage-canonical-ledger): FIR-3940 read the canonical ledger view.
 func (q *Queries) ListDashboardUsageDaily(ctx context.Context, arg ListDashboardUsageDailyParams) ([]ListDashboardUsageDailyRow, error) {
 	rows, err := q.db.Query(ctx, listDashboardUsageDaily,
 		arg.WorkspaceID,
