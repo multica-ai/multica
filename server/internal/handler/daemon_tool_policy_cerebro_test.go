@@ -145,6 +145,36 @@ func TestResolveDaemonToolPolicy_AlwaysEnforced(t *testing.T) {
 	if r := resolve(deniedTool); r["allowed"] != false || r["decision"] != "deny" {
 		t.Fatalf("mandate expanded after policy opened: got allowed=%v decision=%v, want false/deny", r["allowed"], r["decision"])
 	}
+	var mandateDenials int
+	if err := testPool.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM cerebro_access_decision_ledger
+		WHERE agent_id = $1
+		  AND task_id = $2
+		  AND observed_tool_name = $3
+		  AND reason = 'task mandate denied the call'
+	`, agentID, taskID, deniedTool).Scan(&mandateDenials); err != nil {
+		t.Fatalf("read task mandate denial observation: %v", err)
+	}
+	if mandateDenials < 1 {
+		t.Fatal("local Task Mandate denial was not recorded for Capabilities drift")
+	}
+	observed, err := testHandler.CerebroQueries.ListAgentObservedToolUsage(ctx, cerebrodb.ListAgentObservedToolUsageParams{
+		AgentID:    parseUUID(agentID),
+		WindowDays: observedAccessWindowDays,
+	})
+	if err != nil {
+		t.Fatalf("read Capabilities observed access: %v", err)
+	}
+	visible := false
+	for _, tool := range observed {
+		if tool.Tool == deniedTool && tool.MandateDenials >= 1 {
+			visible = true
+		}
+	}
+	if !visible {
+		t.Fatalf("Task Mandate denial is missing from Capabilities observed access: %+v", observed)
+	}
 
 	// ENFORCE: an unconfigured tool resolves to the Base default (Allow) — tools
 	// are not locked by default; the admin tightens specific tools in the screen.

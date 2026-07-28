@@ -84,6 +84,19 @@ func TestComputeDrift_NoneWhenAllSanctioned(t *testing.T) {
 	}
 }
 
+func TestComputeDrift_TaskMandateDenialOverridesAllow(t *testing.T) {
+	usage := []cerebrodb.ListAgentObservedToolUsageRow{
+		{Tool: "mcp__customer_service__handle_message", Uses: 1, MandateDenials: 1},
+	}
+	perm := map[string]string{"mcp__customer_service__handle_message": "allow"}
+
+	drift := computeDrift(usage, perm)
+
+	if len(drift) != 1 || drift[0].Status != statusBlocked {
+		t.Fatalf("Task Mandate denial must alert as blocked drift: %+v", drift)
+	}
+}
+
 func TestDriftSignature_StableAndOrderInsensitive(t *testing.T) {
 	a := []DriftTool{
 		{Name: "WebFetch", Status: statusUnmapped},
@@ -132,6 +145,25 @@ func TestComputeObservedCapabilities_MarksOnlyPreviouslyUnseenToolsNew(t *testin
 	}
 	if len(drifting) != 1 || drifting[0].Name != "DropTable" {
 		t.Fatalf("drifting = %+v, want only DropTable", drifting)
+	}
+}
+
+func TestComputeObservedCapabilities_TaskMandateDenialOverridesAllow(t *testing.T) {
+	usage := []cerebrodb.ListAgentObservedToolUsageBetweenRow{
+		{
+			Tool:           "mcp__customer_service__handle_message",
+			Uses:           1,
+			MandateDenials: 1,
+			FirstUsed:      testTS(2026, 7, 28, 1),
+			LastUsed:       testTS(2026, 7, 28, 1),
+		},
+	}
+	perm := map[string]string{"mcp__customer_service__handle_message": "allow"}
+
+	_, _, drifting := computeObservedCapabilities(usage, perm, map[string]bool{})
+
+	if len(drifting) != 1 || drifting[0].Status != statusBlocked {
+		t.Fatalf("Task Mandate denial must enter scan history as blocked drift: %+v", drifting)
 	}
 }
 

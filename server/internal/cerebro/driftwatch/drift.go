@@ -1,8 +1,7 @@
 // Package driftwatch is the TECH-3738 Bid C capability-drift watcher: a periodic
-// sweeper that compares what each agent ACTUALLY used (observed access, Bid B)
-// against what its declared policy allows (Bid A), and alerts the workspace's
-// owners/admins when an agent shows drift — a tool it used that the policy does
-// not sanction (blocked or unmapped).
+// sweeper that compares what each agent used or attempted (observed access, Bid
+// B) against what declared policy and the Task Mandate actually allowed, and
+// alerts the workspace's owners/admins when those surfaces drift.
 //
 // The drift verdicts here mirror the card's observed-access logic
 // (server/internal/handler/agent_capabilities_card_cerebro.go) on purpose: the
@@ -87,6 +86,9 @@ func computeDrift(usage []cerebrodb.ListAgentObservedToolUsageRow, permByName ma
 	for _, u := range usage {
 		perm, hasRow := permByName[strings.ToLower(u.Tool)]
 		status, drift := driftStatus(perm, hasRow)
+		if u.MandateDenials > 0 {
+			status, drift = statusBlocked, true
+		}
 		if !drift {
 			continue
 		}
