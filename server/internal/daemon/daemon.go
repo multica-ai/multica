@@ -3151,12 +3151,29 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 		return
 	}
 
-	// Prevent concurrent update attempts.
-	if !d.updating.CompareAndSwap(false, true) {
-		d.logger.Warn("update already in progress, ignoring", "runtime_id", runtimeID, "update_id", update.ID)
+	switch d.tryBeginServerUpdate(ctx) {
+	case serverUpdateAlreadyRunning:
+		d.logger.Warn("update deferred: another update is already in progress", "runtime_id", runtimeID, "update_id", update.ID)
+		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  "another runtime update is already in progress on this machine",
+		})
+		return
+	case serverUpdateRuntimeBusy:
+		d.logger.Info("update deferred: task or claim in progress", "runtime_id", runtimeID, "update_id", update.ID)
+		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
+			"status": "failed",
+			"error":  "runtime update deferred because agent work is starting or still active; retry when the machine is idle",
+		})
 		return
 	}
-	defer d.updating.Store(false)
+	restarting := false
+	defer func() {
+		if !restarting {
+			d.releaseClaimBarrier()
+			d.updating.Store(false)
+		}
+	}()
 
 	d.logger.Info("CLI update requested", "runtime_id", runtimeID, "update_id", update.ID, "target_version", update.TargetVersion)
 
@@ -3183,6 +3200,59 @@ func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *Pen
 
 	// Trigger daemon restart with the new binary.
 	d.triggerRestart()
+	restarting = d.RestartBinary() != ""
+}
+
+type serverUpdateAcquireResult uint8
+
+const (
+	serverUpdateAcquired serverUpdateAcquireResult = iota
+	serverUpdateAlreadyRunning
+	serverUpdateRuntimeBusy
+)
+
+// tryBeginServerUpdate atomically claims update ownership, pauses new claims,
+// and lets any claim already in flight finish its handoff. An empty claim can
+// therefore never starve an update; a claim that returns work increments
+// activeTasks before exitClaim, so the final check still defers safely.
+func (d *Daemon) tryBeginServerUpdate(ctx context.Context) serverUpdateAcquireResult {
+	if !d.updating.CompareAndSwap(false, true) {
+		return serverUpdateAlreadyRunning
+	}
+
+	d.claimMu.Lock()
+	if d.pauseClaims || d.activeTasks.Load() > 0 {
+		d.claimMu.Unlock()
+		d.updating.Store(false)
+		return serverUpdateRuntimeBusy
+	}
+	d.pauseClaims = true
+	d.claimMu.Unlock()
+
+	ticker := time.NewTicker(10 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		d.claimMu.Lock()
+		if d.claimsInFlight == 0 {
+			if d.activeTasks.Load() == 0 {
+				d.claimMu.Unlock()
+				return serverUpdateAcquired
+			}
+			d.pauseClaims = false
+			d.claimMu.Unlock()
+			d.updating.Store(false)
+			return serverUpdateRuntimeBusy
+		}
+		d.claimMu.Unlock()
+
+		select {
+		case <-ctx.Done():
+			d.releaseClaimBarrier()
+			d.updating.Store(false)
+			return serverUpdateRuntimeBusy
+		case <-ticker.C:
+		}
+	}
 }
 
 // runUpdate executes the brew-or-download upgrade against targetVersion and
