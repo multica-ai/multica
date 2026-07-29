@@ -8,6 +8,8 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/spf13/cobra"
 )
 
 const (
@@ -30,7 +32,7 @@ func newCerebroConnectionTestServer() (*httptest.Server, *requestRecorder) {
 		"internal":             true,
 		"enabled":              true,
 		"default_access":       "deny",
-		"auth_config": map[string]any{"bearer_token": "***", "session_exchange": map[string]any{"enabled": true, "path": "/sessions/exchange", "ttl_seconds": 3600}},
+		"auth_config":          map[string]any{"bearer_token": "***", "session_exchange": map[string]any{"enabled": true, "path": "/sessions/exchange", "ttl_seconds": 3600}},
 		"endpoint_permissions": []any{},
 		"scopable_args":        []any{},
 	}
@@ -278,4 +280,59 @@ func TestConnectionUpdateWithoutOnBehalfOfLeavesItUntouched(t *testing.T) {
 	if _, present := auth["on_behalf_of"]; present {
 		t.Errorf("on_behalf_of = %v, want absent (untouched) when --on-behalf-of not passed", auth["on_behalf_of"])
 	}
+}
+
+// TestParseEndpointFlags covers the --endpoint spec parser. Before this flag
+// existed, a type=api connection could only get its endpoint catalogue from the
+// admin UI, and an endpoint-less api connection exposes no tools at all.
+func TestParseEndpointFlags(t *testing.T) {
+	t.Run("parses methods, path and summary", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		addConnectionWriteFlags(cmd)
+		if err := cmd.Flags().Set("endpoint", "get,Post:/meta/bases/{baseId}/tables|Read one base"); err != nil {
+			t.Fatalf("set flag: %v", err)
+		}
+		got, err := parseEndpointFlags(cmd)
+		if err != nil {
+			t.Fatalf("parseEndpointFlags: %v", err)
+		}
+		if len(got) != 1 {
+			t.Fatalf("want 1 endpoint, got %d", len(got))
+		}
+		if got[0]["path"] != "/meta/bases/{baseId}/tables" {
+			t.Errorf("path = %v", got[0]["path"])
+		}
+		if got[0]["summary"] != "Read one base" {
+			t.Errorf("summary = %v", got[0]["summary"])
+		}
+		methods, _ := got[0]["methods"].([]string)
+		if len(methods) != 2 || methods[0] != "GET" || methods[1] != "POST" {
+			t.Errorf("methods = %v, want [GET POST] upper-cased", methods)
+		}
+	})
+
+	t.Run("no flag means no endpoint_permissions key", func(t *testing.T) {
+		cmd := &cobra.Command{}
+		addConnectionWriteFlags(cmd)
+		got, err := parseEndpointFlags(cmd)
+		if err != nil {
+			t.Fatalf("parseEndpointFlags: %v", err)
+		}
+		if got != nil {
+			t.Errorf("want nil so create/update leaves the stored list alone, got %v", got)
+		}
+	})
+
+	t.Run("rejects malformed specs", func(t *testing.T) {
+		for _, spec := range []string{"/meta/bases", "GET:meta/bases", ":/meta/bases"} {
+			cmd := &cobra.Command{}
+			addConnectionWriteFlags(cmd)
+			if err := cmd.Flags().Set("endpoint", spec); err != nil {
+				t.Fatalf("set flag: %v", err)
+			}
+			if _, err := parseEndpointFlags(cmd); err == nil {
+				t.Errorf("spec %q: want error, got nil", spec)
+			}
+		}
+	})
 }
