@@ -195,6 +195,49 @@ if [ -n "${STRAY}" ]; then
   exit 3
 fi
 
+# 8c. Deletion guard — the sync may only delete files upstream itself deleted.
+#
+#     8b is blind to deletions. It reports paths that still DIFFER from the
+#     target tag, and a file the sync wrongly deleted matches the tag by absence
+#     — so it reads as compliant. That blind spot shipped a sync with the
+#     production backend Deployment (gitops/base/deployment-backend.yaml)
+#     removed: the sync exited 0, and only the Kustomize Validation job on the
+#     PR caught it, several steps downstream of where it went wrong.
+#
+#     The invariant is deliberately NOT expressed in terms of FORK_OWNED. That
+#     list is exactly what 8a's deletion branch consults, so reusing it here
+#     would re-derive the guard from the thing being guarded and agree with any
+#     bug in it. Independent formulation: a deletion is legitimate only when the
+#     path existed on the upstream side at the fork-point and is gone at the
+#     target tag — i.e. upstream deleted something it owned. Anything the fork
+#     itself introduced never existed at the fork-point, so it can never qualify.
+#
+#     A path upstream deleted that the fork had also modified surfaces earlier as
+#     a modify/delete conflict (exit 2), so it never reaches here.
+#
+#     KEEP_OURS is exempt: step 9 restores those from the fork branch below.
+LOST=()
+while IFS= read -r path; do
+  [ -z "${path}" ] && continue
+  keep=false
+  for k in "${KEEP_OURS[@]}"; do [ "${path}" = "${k}" ] && keep=true; done
+  if "${keep}"; then
+    continue
+  fi
+  if git cat-file -e "${FORK_POINT}:${path}" 2>/dev/null \
+    && ! git cat-file -e "${UPSTREAM_REF}:${path}" 2>/dev/null; then
+    continue
+  fi
+  LOST+=("${path}")
+done < <(git diff --cached --no-renames --diff-filter=D --name-only \
+  "${FORK_REMOTE}/${FORK_BRANCH}" | sort -u)
+if [ "${#LOST[@]}" -gt 0 ]; then
+  echo "ERROR: the sync deleted path(s) ${TARGET_TAG} never owned:"
+  printf -- '  %s\n' "${LOST[@]}"
+  echo "Investigate before pushing — enforcement or fork-owned detection is wrong."
+  exit 3
+fi
+
 # 9. Snapshot upstream README, restore fork-owned docs.
 git show "${UPSTREAM_REF}:README.md" > "${UPSTREAM_README_SNAPSHOT}"
 for keep in "${KEEP_OURS[@]}"; do
