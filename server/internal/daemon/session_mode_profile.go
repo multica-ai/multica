@@ -9,6 +9,9 @@ func effectiveSessionModeProfile(task Task) sessionmode.Profile {
 	if task.SessionMode == "" && task.PlanMode {
 		mode, valid = sessionmode.Plan, true
 	}
+	if !valid {
+		return sessionmode.Profile{} // CEREBRO-PATCH(session-mode-no-profile-fallback): FIR-4013 no Mode selected means no Mode profile — core Multica sets neither a turn cap nor a wall-clock cap, so the run is bounded by MULTICA_AGENT_TIMEOUT and the inactivity watchdogs instead of silently inheriting Build's 80 turns.
+	}
 	if valid && task.SessionModeConfig != nil {
 		config := *task.SessionModeConfig
 		config.Mode = mode
