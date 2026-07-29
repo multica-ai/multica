@@ -53,6 +53,13 @@ vi.mock("@multica/cerebro-sessions", async (importOriginal) => ({
   RunPromptDisclosure: () => null,
 }));
 
+// CEREBRO-PATCH(transcript-run-retry-actions): FIR-4073 — same reason as the stub
+// above: the dialog's Resume / Start over pair reads the failed-run list through
+// TanStack Query, which this button-focused test does not mount.
+vi.mock("@multica/cerebro-runtime/views/components/run-retry-actions", () => ({
+  TranscriptRunRetryActions: () => null,
+}));
+
 function makeTask(overrides: Partial<AgentTask> = {}): AgentTask {
   return {
     id: "task-1",

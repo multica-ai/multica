@@ -16,6 +16,11 @@ import (
 // autoPauseCircuitLimit consecutive auto-pauses without an intervening success
 // — stop auto-resuming (unpause_at NULL) and post the manual-intervention
 // notice exactly once. A later success resets the counter.
+//
+// FIR-4073 tightened "WITHOUT posting routine-pause comments" to mean it
+// literally: a pause that resumes by itself writes nothing to the thread at
+// all, because the grey row in the issue's alert bar already says it. Only the
+// pauses that need a human — circuit open — still interrupt with a comment.
 func TestAutoPauseCircuitBreaker(t *testing.T) {
 	if runtimeAccountTestPool == nil {
 		t.Skip("DATABASE_URL not configured; skipping circuit-breaker integration test")
@@ -100,8 +105,8 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 
 	svc := &Service{Cerebro: queries} // nil TaskSvc/Bus: the failed task is never suspended.
 
-	// Cycles below the limit: counter climbs, unpause_at stays scheduled, the
-	// fallback backoff grows, and each pause posts the issue-facing reason.
+	// Cycles below the limit: counter climbs, unpause_at stays scheduled and the
+	// fallback backoff grows — all in silence, because the pause resumes itself.
 	for cycle := int32(1); cycle < autoPauseCircuitLimit; cycle++ {
 		before := time.Now()
 		if !svc.MaybeAutoPauseOnFailure(ctx, loadTask()) {
@@ -124,8 +129,9 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 		if got < want-time.Minute || got > want+time.Minute {
 			t.Fatalf("cycle %d: backoff %s, want ≈%s", cycle, got, want)
 		}
-		if c := countComments(); c != int(cycle) {
-			t.Fatalf("cycle %d: expected %d notice(s), got %d", cycle, cycle, c)
+		// FIR-4073 — a self-resuming pause must not touch the comment thread.
+		if c := countComments(); c != 0 {
+			t.Fatalf("cycle %d: expected no notice for a self-resuming pause, got %d", cycle, c)
 		}
 	}
 
@@ -144,8 +150,9 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 	if unpauseAt.Valid {
 		t.Fatal("trip cycle: unpause_at must be NULL once the circuit is open")
 	}
-	if c := countComments(); c != int(autoPauseCircuitLimit) {
-		t.Fatalf("trip cycle: expected %d notices, got %d", autoPauseCircuitLimit, c)
+	// The first pause a human actually has to resolve — and the first comment.
+	if c := countComments(); c != 1 {
+		t.Fatalf("trip cycle: expected 1 notice, got %d", c)
 	}
 
 	// Past the trip: circuit stays open and still records why this attempt
@@ -160,8 +167,8 @@ func TestAutoPauseCircuitBreaker(t *testing.T) {
 	if unpauseAt.Valid {
 		t.Fatal("post-trip: unpause_at must stay NULL")
 	}
-	if c := countComments(); c != int(autoPauseCircuitLimit+1) {
-		t.Fatalf("post-trip: expected %d notices, got %d", autoPauseCircuitLimit+1, c)
+	if c := countComments(); c != 2 {
+		t.Fatalf("post-trip: expected 2 notices, got %d", c)
 	}
 
 	// A successful run resets the counter.

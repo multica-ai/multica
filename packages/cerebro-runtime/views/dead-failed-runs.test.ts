@@ -68,6 +68,29 @@ describe("buildInboxFailedRunHints", () => {
   it("survives an empty list", () => {
     expect(buildInboxFailedRunHints([]).size).toBe(0);
   });
+
+  // FIR-4073 — a paused machine is not a failure: grey pip, own wording, and
+  // never resumable by the user (the platform is what picks the run back up).
+  it("marks a run on a paused machine as paused, not failed", () => {
+    const map = buildInboxFailedRunHints([
+      run({ issue_id: "i1", runtime_paused: true, unpause_at: "2026-07-29T16:00:00Z" }),
+    ]);
+    expect(map.get("i1")?.paused).toBe(true);
+    expect(map.get("i1")?.title).toBe("Waiting — the machine is paused");
+    expect(map.get("i1")?.resumePossible).toBe(false);
+  });
+
+  it("says a pause needs a human when there is no unpause time", () => {
+    // No unpause_at means the auto-pause circuit breaker gave up.
+    const map = buildInboxFailedRunHints([run({ issue_id: "i1", runtime_paused: true })]);
+    expect(map.get("i1")?.title).toBe("Paused — needs a human to resume");
+  });
+
+  it("leaves a normal failure red", () => {
+    const map = buildInboxFailedRunHints([run({ issue_id: "i1", runtime_paused: false })]);
+    expect(map.get("i1")?.paused).toBe(false);
+    expect(map.get("i1")?.title).toBe("Run failed — can be continued");
+  });
 });
 
 describe("parseFailedRunsPayload", () => {

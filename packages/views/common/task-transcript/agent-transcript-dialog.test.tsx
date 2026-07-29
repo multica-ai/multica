@@ -31,6 +31,14 @@ vi.mock("@multica/cerebro-sessions", async (importOriginal) => ({
   RunPromptDisclosure: () => null,
 }));
 
+// CEREBRO-PATCH(transcript-run-retry-actions): FIR-4073 — the dialog's Resume /
+// Start over pair reads the failed-run list through TanStack Query, which this
+// upstream test does not mount. Stubbed for the same reason as RunPromptDisclosure
+// above; the real behaviour is covered in @multica/cerebro-runtime.
+vi.mock("@multica/cerebro-runtime/views/components/run-retry-actions", () => ({
+  TranscriptRunRetryActions: () => null,
+}));
+
 vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: copyTextMock,
 }));

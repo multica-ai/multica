@@ -1036,7 +1036,8 @@ export function InboxPage() {
     const agentRunState = item.issue_id
       ? issueRunStates.get(item.issue_id) ??
         // CEREBRO-PATCH(inbox-failed-run-pip): FIR-3901
-        (failedHint ? "failed" : subIssueRunStates.has(item.issue_id) ? "sub" : wakeupHint ? "scheduled" : undefined)
+        // CEREBRO-PATCH(inbox-paused-run-pip): FIR-4073 — a paused machine is grey, not red.
+        (failedHint ? (failedHint.paused ? "paused" : "failed") : subIssueRunStates.has(item.issue_id) ? "sub" : wakeupHint ? "scheduled" : undefined)
       : undefined;
     // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — when a row already shows a live
     // run pip but also has a pending wakeup, stack a clock pip next to it so both
@@ -1050,7 +1051,8 @@ export function InboxPage() {
         isSelected={(item.issue_id ?? item.id) === selectedKey}
         agentRunState={agentRunState}
         // CEREBRO-PATCH(inbox-failed-run-pip): FIR-3901
-        agentRunTitle={agentRunState === "scheduled" ? wakeupHint?.title : agentRunState === "failed" ? failedHint?.title : undefined}
+        // CEREBRO-PATCH(inbox-paused-run-pip): FIR-4073 — same hint carries the paused wording.
+        agentRunTitle={agentRunState === "scheduled" ? wakeupHint?.title : agentRunState === "failed" || agentRunState === "paused" ? failedHint?.title : undefined}
         scheduledStackTitle={scheduledStackTitle} // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521
         scheduledFireAt={wakeupHint?.fireAt} // CEREBRO-PATCH(inbox-wakeup-stack): FIR-1521 — drives the live countdown on the inbox clock
         onClick={() => handleSelect(item)}

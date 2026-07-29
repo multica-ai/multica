@@ -136,13 +136,12 @@ func (s *Service) MaybeAutoPauseOnFailure(ctx context.Context, task db.AgentTask
 	// reset time. Best-effort: a card failure never blocks the pause.
 	s.upsertRuntimePauseCard(ctx, task.RuntimeID, count, unpauseAt, circuitOpen)
 
-	// For the hourly spend-cap re-check (FIR-1889) post the issue comment only
-	// on the first pause of a chain; the daily runtime pause card above keeps
-	// the aggregate fresh, so we avoid an hourly comment on every issue the
-	// re-check happens to land on. The counter resets on the next success.
-	if decision.flatRetry == 0 || count <= 1 {
-		s.notifyAutoPauseFailure(ctx, task, decision, unpauseAt, circuitOpen, count)
-	}
+	// FIR-4073 — the issue comment is now reserved for pauses a human has to
+	// resolve; notifyAutoPauseFailure returns early for the routine ones, whose
+	// grey alert-bar row already says the same thing without touching the
+	// thread. That also subsumes the FIR-1889 throttle: an hourly spend-cap
+	// re-check never trips the breaker, so it never reaches a comment.
+	s.notifyAutoPauseFailure(ctx, task, decision, circuitOpen, count)
 
 	slog.Info("auto-paused runtime on task failure",
 		"runtime_id", util.UUIDToString(task.RuntimeID),
@@ -323,24 +322,31 @@ func circuitOpenForAutoPause(count int32, decision autoPauseDecision) bool {
 // that paused the runtime. Best-effort and deliberately mention-free: an
 // @mention here would re-trigger the agent loop the pause just stopped.
 // Skipped for tasks with no issue (e.g. chat tasks) — there is nowhere to post.
-func (s *Service) notifyAutoPauseFailure(ctx context.Context, task db.AgentTaskQueue, decision autoPauseDecision, unpauseAt time.Time, manualOnly bool, count int32) {
+//
+// FIR-4073 — only the pauses that need a human still get a comment. A routine
+// pause resumes by itself, so its comment was pure noise on the issue thread:
+// the same fact ("paused, back around HH:MM") now rides on the grey row in the
+// issue's alert bar, which the failed-runs endpoint drives off the live pause
+// state and which clears itself the moment the next run starts. What survives
+// here is the circuit-breaker case — auto-resume has given up and someone has
+// to fix the account, key or spend cap — which is exactly the case a comment
+// should interrupt for.
+func (s *Service) notifyAutoPauseFailure(ctx context.Context, task db.AgentTaskQueue, decision autoPauseDecision, manualOnly bool, count int32) {
 	if !task.IssueID.Valid || !task.AgentID.Valid {
 		return
 	}
-	next := "Den genoptager automatisk " + unpauseAt.Format(time.RFC3339) + "."
+	if !manualOnly {
+		return
+	}
 	body := ""
-	if manualOnly {
-		next = "Den genoptager ikke automatisk. Ret årsagen og genoptag runtimen manuelt."
-		if count >= autoPauseCircuitLimit && !decision.manualOnly {
-			body = circuitBreakerAnalysisCommentBody(task, decision, s.runtimeOwnerMention(ctx, task.RuntimeID))
-		}
+	if count >= autoPauseCircuitLimit && !decision.manualOnly {
+		body = circuitBreakerAnalysisCommentBody(task, decision, s.runtimeOwnerMention(ctx, task.RuntimeID))
 	}
 	if body == "" {
 		body = fmt.Sprintf(
-			"Runtimen er sat på pause: %s.\n\n%s\n\n%s",
+			"Runtimen er sat på pause: %s.\n\n%s\n\nDen genoptager ikke automatisk. Ret årsagen og genoptag runtimen manuelt.",
 			decision.title,
 			decision.detail,
-			next,
 		)
 	}
 	comment, err := s.Cerebro.CreateAutoPauseAlertComment(ctx, cerebrodb.CreateAutoPauseAlertCommentParams{

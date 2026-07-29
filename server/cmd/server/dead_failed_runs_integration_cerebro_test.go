@@ -152,6 +152,69 @@ func TestDeadFailedRun_NewerRunClearsTheFailure(t *testing.T) {
 	}
 }
 
+// FIR-4073 — the overlap case that kept the red bar alive indefinitely: you
+// comment while an agent is still working, so the successor run is enqueued
+// BEFORE the running one fails. Under the old `n.created_at > t.completed_at`
+// rule the successor never counted as "newer", so the bar survived a run that
+// had already finished successfully.
+func TestDeadFailedRun_RunEnqueuedBeforeTheFailureStillClearsIt(t *testing.T) {
+	issueID := seedDeadFailedIssue(t, "FIR-4073 overlap")
+	agentID := fixtureAgentID(t)
+	runtimeID := seedRuntime(t, "online")
+	// Failure created 10m ago, settled 5m ago.
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, error, failure_reason,
+		    session_id, work_dir, attempt, max_attempts, dispatched_at, started_at, completed_at, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'failed', 'claude execution failed', 'agent_error.unknown',
+		        'sess-overlap', '/tmp/fir4073', 1, 2, NOW() - interval '10 minutes', NOW() - interval '10 minutes',
+		        NOW() - interval '5 minutes', NOW() - interval '10 minutes')`,
+		agentID, issueID, runtimeID); err != nil {
+		t.Fatalf("seed overlapping failure: %v", err)
+	}
+	// Successor enqueued 8m ago — after the failure started, before it settled.
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, attempt, max_attempts, completed_at, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'completed', 1, 2, NOW() - interval '2 minutes', NOW() - interval '8 minutes')`,
+		agentID, issueID, runtimeID); err != nil {
+		t.Fatalf("seed overlapping successor: %v", err)
+	}
+
+	if got := fetchIssueFailedRuns(t, issueID); len(got.Runs) != 0 {
+		t.Fatalf("a failure that is no longer the latest run must not show, got %d runs", len(got.Runs))
+	}
+}
+
+// FIR-4073 — the alert answers "did the latest run fail?", so a later run by a
+// DIFFERENT agent clears it too. The old per-agent keying left one agent's
+// failure on screen while another agent had since run the issue to success.
+func TestDeadFailedRun_NewerRunByAnotherAgentClearsTheFailure(t *testing.T) {
+	issueID := seedDeadFailedIssue(t, "FIR-4073 other agent")
+	runtimeID := seedRuntime(t, "online")
+	seedFailedTask(t, issueID, fixtureAgentID(t), runtimeID, "sess-other-agent", 10*time.Minute)
+
+	var otherAgentID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
+		VALUES ($1::uuid, 'FIR-4073 second agent', 'local', '{}'::jsonb, $2::uuid, 'workspace', 1)
+		RETURNING id::text`, testWorkspaceID, runtimeID).Scan(&otherAgentID); err != nil {
+		t.Fatalf("seed second agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1::uuid`, otherAgentID)
+	})
+
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO agent_task_queue (agent_id, issue_id, runtime_id, status, attempt, max_attempts, created_at)
+		VALUES ($1::uuid, $2::uuid, $3::uuid, 'running', 1, 2, NOW())`,
+		otherAgentID, issueID, runtimeID); err != nil {
+		t.Fatalf("seed other agent's run: %v", err)
+	}
+
+	if got := fetchIssueFailedRuns(t, issueID); len(got.Runs) != 0 {
+		t.Fatalf("a failure superseded by another agent's run must not show, got %d runs", len(got.Runs))
+	}
+}
+
 // The conversation lives on the machine that ran it. Offering Resume when that
 // machine is gone would silently start a blank run — worse than no button.
 func TestDeadFailedRun_OfflineRuntimeBlocksResumeWithAnExplanation(t *testing.T) {

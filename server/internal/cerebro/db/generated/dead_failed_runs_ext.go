@@ -10,11 +10,21 @@ package cerebrodb
 //      auto-retry path (TaskService.MaybeRetryFailedTask → CreateRetryTask)
 //      creates that descendant in the same failure handler, so its absence is
 //      the authoritative "no automatic retry happened" signal.
-//   2. No later task exists for the same (issue_id, agent_id) pair. A newer run
-//      — a manual rerun, a follow-up comment, a wakeup — means the thread moved
-//      on and the old failure is no longer the thing the user has to act on.
-//      Keying on the agent (not just the issue) keeps a parallel @-mention
-//      agent's run from silently clearing another agent's failure.
+//   2. It is the issue's newest run. A newer run — a manual rerun, a follow-up
+//      comment, a wakeup, another agent's @-mention — means the thread moved on
+//      and the old failure is no longer the thing the user has to act on.
+//
+//      FIR-4073 narrowed this from "no newer run by the SAME agent, created
+//      after this one finished" to "no newer run on the issue at all". Both
+//      halves of the old predicate kept stale bars alive:
+//        - Keying on agent_id meant a second agent's successful run left the
+//          first agent's failure on screen indefinitely.
+//        - Comparing n.created_at against t.completed_at missed the common
+//          overlap case: comment while an agent is still working → the new run
+//          is enqueued BEFORE the old one fails, so it never counted as
+//          "newer" and the red bar outlived a run that had already succeeded.
+//      Comparing created_at to created_at asks the question the user actually
+//      means — "is this still the latest run?" — and is immune to overlap.
 //   3. It settled at least DeadFailedGraceSeconds ago. The retry row lands
 //      within milliseconds of the failure, so without this grace window every
 //      auto-retried failure would flash red for one poll cycle before its
@@ -74,6 +84,15 @@ type DeadFailedTask struct {
 	HasSession     bool               `json:"has_session"`
 	RuntimeOnline  bool               `json:"runtime_online"`
 	RuntimeName    pgtype.Text        `json:"runtime_name"`
+	// FIR-4073 — the run's machine is paused right now (rate limit, quota cap,
+	// expired key). The run did not "fail" in any sense the user should act on:
+	// the pause suspended it and the unpause sweeper resumes it at UnpauseAt.
+	// Surfaced so the alert reads grey "waiting" instead of red "failed", and
+	// so the routine pause no longer needs an issue comment to explain itself.
+	// UnpauseAt is NULL when the auto-pause circuit breaker gave up, i.e. the
+	// pause really does need a human.
+	RuntimePaused bool               `json:"runtime_paused"`
+	UnpauseAt     pgtype.Timestamptz `json:"unpause_at"`
 }
 
 // deadFailedSelect is the shared projection + dead-run predicate. The caller
@@ -93,6 +112,8 @@ SELECT
     (t.session_id IS NOT NULL)                                   AS has_session,
     COALESCE(rt.status = 'online', FALSE)                        AS runtime_online,
     rt.name                                                      AS runtime_name,
+    (rt.paused_at IS NOT NULL)                                   AS runtime_paused,
+    rt.unpause_at                                                AS unpause_at,
     (
         t.session_id IS NOT NULL
         AND COALESCE(t.failure_reason, '') <> ALL($2::text[])
@@ -112,9 +133,8 @@ WHERE t.status = 'failed'
   AND NOT EXISTS (
         SELECT 1 FROM agent_task_queue n
         WHERE n.issue_id = t.issue_id
-          AND n.agent_id = t.agent_id
           AND n.id <> t.id
-          AND n.created_at > t.completed_at
+          AND n.created_at > t.created_at
       )
 `
 
@@ -131,7 +151,8 @@ func scanDeadFailed(rows interface {
 		if err := rows.Scan(
 			&t.ID, &t.AgentID, &t.IssueID, &t.ParentIssueID, &t.RuntimeID,
 			&t.FailureReason, &t.Error, &t.CompletedAt, &t.Attempt, &t.MaxAttempts,
-			&t.HasSession, &t.RuntimeOnline, &t.RuntimeName, &t.ResumePossible,
+			&t.HasSession, &t.RuntimeOnline, &t.RuntimeName,
+			&t.RuntimePaused, &t.UnpauseAt, &t.ResumePossible,
 		); err != nil {
 			return nil, err
 		}

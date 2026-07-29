@@ -1969,11 +1969,67 @@ A run that died and that nothing will retry was visible only under the Runs tab.
 | `resume-failed-run-client` / `dead-failed-runs-client` | `packages/core/api/client.ts` (3 marked methods) | `rerunIssue` takes the optional `resume` flag; `listIssueFailedRuns` / `listWorkspaceFailedRuns` read the two new endpoints. Same shape as the existing cerebro client methods (`listIssueWakeups`). |
 | `agent-run-pip-failed` | `packages/views/common/agent-run-pip.tsx` (3 marked lines) | Adds a `failed` state rendering `bg-destructive`, alongside the existing `active` / `queued` / `sub` / `scheduled` states. `taskStatusToRunState` excludes it — the state is derived from the dead-run endpoint, never from a live task status. |
 | `inbox-failed-run-pip` | `packages/views/inbox/components/inbox-page.tsx` (5 marked lines) | Wires `useInboxFailedRunStates` into the row indicator. A dead failed run outranks `sub` and `scheduled`: it is the only one of the three that needs the user to do something. |
-| `issue-failed-run-bar` | `packages/views/issues/components/issue-detail.tsx` (3 marked lines) | Mounts `FailedRunBar` as a sibling of `AgentLiveCard`, not a state inside it. `AgentLiveCard.reconcile()` deliberately drops any task absent from the *active* set — that is what self-heals a stale "is working" banner — and a failed run is by definition not active, so it needs its own state. |
+| ~~`issue-failed-run-bar`~~ | ~~`packages/views/issues/components/issue-detail.tsx`~~ | **Removed by FIR-4073.** Mounted `FailedRunBar` as a sibling of `AgentLiveCard`, which meant two stacked banners whenever an agent was also working or a run was scheduled. The failed run is now a row inside `AgentLiveCard`'s own fold — see `agent-live-card-failed-run-fold` below. |
 
 | `transcript-revamp-port` | `packages/views/common/task-transcript/agent-transcript-dialog.tsx`<br>`packages/views/common/task-transcript/agent-transcript-dialog.test.tsx`<br>`packages/views/common/task-transcript/build-timeline.ts`<br>`packages/views/common/task-transcript/transcript-button.test.tsx`<br>`packages/core/types/events.ts` | FIR-3782 — ports upstream `00e658401` (#5890, virtualized execution log with the `smart` / `expanded` / `collapsed` density modes). The transcript files, `trace-event-presenter.ts`, `task-transcript.css` and `transcript-view-store.ts` are taken from upstream verbatim; the locale files merge upstream's new `transcript.*` keys while keeping fork-only ones. Six marked adaptations bridge upstream APIs this fork does not carry yet: `AttributionBadge` and `RichContent` call sites degrade (the badge is dropped, agent replies render as plain text), `runtimeDisplayName` falls back to `runtime.name`, `ActorAvatar` takes this fork's pixel size instead of upstream size tiers, the `brand` Button variant becomes `secondary`, and `created_at` is added to `TaskMessagePayload` / `TimelineItem` (the server already sends it — `protocol.TaskMessagePayload` — only the TS type had not synced down). The wholesale file replacement is covered by a `CEREBRO-ALLOW-NO-PATCH:` commit; every fork-side adaptation on top of it carries a marker. |
 
 **Also fixed, cerebro-zone only (no marker needed):** `packages/cerebro-runtime/views/task-failure-severity.ts` keyed `INTERRUPTION_REASONS` on `runtime_paused` and `rate_limit`. Neither string is emitted any more — `taskfailure.Classify` resolves a provider stall to an `agent_error.*` sub-reason and never returns a platform-side reason — so an auto-retried provider rate limit rendered as a hard red failure instead of the amber "Interrupted, retrying" state.
+
+## FIR-4073 — the failed-run notice is one alert among the others, and only for the latest run
+
+FIR-3901 gave a dead failed run its own red banner. Three things were wrong with it: the
+banner outlived the failure it described, it dead-ended (no way into the run log), and it
+stacked as a second bar under `AgentLiveCard` instead of folding into the one alert layer
+that already collapses "is working" and "is scheduled". All new UI lives in the cerebro
+zone (`packages/cerebro-runtime/views/components/run-retry-actions.tsx`,
+`.../components/failed-run-activity.tsx`); the server-side narrowing is entirely inside
+`server/internal/cerebro/db/generated/dead_failed_runs_ext.go` (cerebro zone, no marker).
+`packages/cerebro-runtime/views/components/failed-run-bar.tsx` is deleted.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `agent-live-card-failed-run-fold` | `packages/views/issues/components/agent-live-card.tsx` (9 marked lines)<br>`packages/views/issues/components/agent-live-card.test.tsx` (stub + fold tests) | Folds the issue's failed run into the existing alert bar as a row, exactly like `agent-live-card-wakeup-fold` does for wakeups: it keeps the bar alive on its own, counts toward `totalCount` so 1 failure + 1 scheduled run collapses into a single header, contributes to the collapsed summary, and tints the bar red when the failure is the only alert. The component is imported by its **direct entry**, not the `@multica/cerebro-runtime/views` barrel — the barrel re-exports pages that import `@multica/views`, and that cycle blanks the transcript dialog (same trap as `run-failure-card`). |
+| `transcript-run-retry-actions` | `packages/views/common/task-transcript/agent-transcript-dialog.tsx` (3 marked lines; component in `packages/cerebro-runtime/views/components/run-retry-actions.tsx`) | Puts Resume / Start over in the run log dialog header for a failed run, so the place where you read what broke is also where you restart it. Behind the same `cerebro_failed_run_bar` flag, read with `useFlagValue` (a store read) rather than `useFeatureFlag`, for the same no-`QueryClient` reason as `run-failure-card`. The two upstream transcript tests (`agent-transcript-dialog.test.tsx`, `transcript-button.test.tsx`) stub the component to `null` for the same reason they already stub `RunPromptDisclosure`: the Resume / Start over pair reads the failed-run list through TanStack Query, and neither test mounts a `QueryClient`. |
+
+**Cerebro-zone only (no marker needed):** the dead-failed-run predicate in
+`dead_failed_runs_ext.go` used to clear a failure only when the SAME agent started a newer
+run AFTER the old one finished. Both halves kept stale bars on screen — a second agent's
+successful run left the first agent's failure up forever, and the common overlap case
+(comment while an agent is still working → the new run is enqueued BEFORE the old one
+fails) never counted as "newer" at all. It now asks the question the requirement actually
+means: is any run on this issue newer than this one? Trade-off, accepted deliberately: a
+parallel @-mention of another agent now also clears the bar, which is what "only for the
+latest run" asks for.
+
+## FIR-4073 (part 2) — a paused machine is a grey row, not a red one and not a comment
+
+An issue that stalls on a usage cap looked like two different problems at once. The
+in-flight run is marked `failed` with `failure_reason = 'runtime_paused'` when the runtime
+pauses (`SuspendActiveTasksForRuntime`), so the dead-failed-run endpoint reported it as a
+red "run failed" alert and a red inbox pip — while the auto-pause ALSO wrote a Danish
+comment onto the issue thread explaining the same thing. Nothing was broken and nothing
+needed the user: the unpause sweeper resumes the run by itself. The alert now carries the
+fact in grey, and the routine comment is gone.
+
+The endpoint gained `runtime_paused` / `unpause_at` (read off `agent_runtime` in the same
+query) instead of a parallel "paused runs" endpoint, so the existing "is this still the
+newest run?" predicate keeps doing the work — the row clears itself the moment the next run
+starts, which is exactly "indtil næste run".
+
+| Patch | Location | Reason |
+|---|---|---|
+| `agent-live-card-paused-run-fold` | `packages/views/issues/components/agent-live-card.tsx` (9 marked lines)<br>`packages/views/issues/components/agent-live-card.test.tsx` (stub + fold tests) | Splits the issue's dead-run list into paused vs broken. A paused run renders `PausedRunActivityRow` (grey, no Resume / Start over — retrying against a paused machine fails the same way), is named separately in the collapsed summary, and leaves the bar untinted instead of red when it is the only alert. Same direct-entry import rule as `agent-live-card-failed-run-fold`. |
+| `agent-run-pip-paused` | `packages/views/common/agent-run-pip.tsx` (4 marked lines) | Adds a `paused` state on `bg-muted-foreground` next to `failed`. The pip's `animate-ping` is unchanged, so the grey dot blinks like every other state. Excluded from `taskStatusToRunState` for the same reason as `failed`: the state comes from the dead-run endpoint, never from a live task status. |
+| `inbox-paused-run-pip` | `packages/views/inbox/components/inbox-page.tsx` (3 marked lines) | Routes a paused hint to the grey pip and its own title instead of the red "Run failed" one. Note the dynamic inbox (`packages/cerebro-inbox-dynamic`) renders neither pip — `runStateFor` only handles live runs and scheduled wakeups — so this is classic-inbox parity, not a new gap. |
+
+**Cerebro-zone only (no marker needed):** `dead_failed_runs_ext.go` selects
+`(rt.paused_at IS NOT NULL)` and `rt.unpause_at`; `server/internal/cerebro/inbox/dead_failed_runs.go`
+maps them onto the response. `server/internal/cerebro/runtime/auto_pause.go` now returns
+early from `notifyAutoPauseFailure` unless the pause is manual-only, so a self-resuming
+pause writes nothing to the comment thread while the circuit-breaker escalation ("auto-resume
+gave up, fix the account / key / spend cap") still interrupts. That subsumes the FIR-1889
+comment throttle: a raisable spend cap re-checks hourly and never trips the breaker, so it
+never reaches a comment either.
 
 ## FIR-3805 — Flueben "Altid med": a bound skill's full text in the agent's instructions
 
