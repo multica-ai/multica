@@ -17,8 +17,11 @@
     "./hooks/use-nav-scroll-state": "./hooks/use-nav-scroll-state.ts"
   },
   "dependencies": {
+    "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
-    "lucide-react": "catalog:"
+    "@tiptap/react": "^3.22.1",
+    "lucide-react": "catalog:",
+    "sonner": "^2.0.7"
   },
   "peerDependencies": {
     "react": "catalog:",
