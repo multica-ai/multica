@@ -3,6 +3,19 @@
 Permanent inline modifications and fork-additions in upstream-zone files. Each entry
 documents one named patch + its rationale + the file location(s).
 
+## FIR-3924 — Company Brain migration census
+
+- `server/cmd/server/router.go` wires the Cerebro-owned, read-only
+  `GET /api/workspaces/{id}/connections/company-brain-migration-census` report.
+- **Why:** prior to consolidation, Company Brain source claims only existed behind
+  each legacy connection credential. The report invokes `whoami` server-side,
+  returns only `write_source` and `allowed_read_sources`, and attaches that
+  evidence to a non-offline agent only when the existing connection policy
+  allows that agent to call `whoami`; Ask and Deny stay unverifiable. It is
+  protected by the existing
+  `manage_connections` policy and never returns auth configuration, client IDs,
+  tokens, or raw upstream error text.
+
 ## FIR-3876 — ACP tool-policy seam (hermes, kimi, kiro)
 
 - `server/pkg/agent/cerebro_acp_tool_policy.go` (fork-owned) resolves every ACP

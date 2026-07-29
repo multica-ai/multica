@@ -139,6 +139,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler import
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
+	// CEREBRO-PATCH(company-brain-migration-census): FIR-3924 protected, read-only source-claim census import.
+	cerebrocompanybraincensus "github.com/multica-ai/multica/server/internal/cerebro/companybraincensus"
 	// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools for the Multica MCP server (import).
 	cerebroconnectiontools "github.com/multica-ai/multica/server/internal/cerebro/connectiontools"
 	// CEREBRO-PATCH(workspace-copy-routes): TECH-3582 non-destructive workspace copy handler import
@@ -645,6 +647,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroWorkspaceCopyHandler := cerebroworkspacecopy.NewHandler(pool, store)
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler.
 	cerebroConnectionsHandler := cerebroconnections.NewHandler(pool)
+	cerebroCompanyBrainCensusHandler := cerebrocompanybraincensus.NewHandler(queries, cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool)) // CEREBRO-PATCH(company-brain-migration-census): FIR-3924 read-only report uses the existing Connections store and agent policy surface.
 	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
 	// CEREBRO-PATCH(cerebro-api-connection-resolver): FIR-2388 shared api-connection tool resolver — one filter for the local MCP handler and the claim brief (cloud gateway builds its own from the same stores).
 	cerebroAPIConnResolver := cerebroruntime.NewAPIConnectionResolver(cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries, nil)
@@ -1410,6 +1413,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Use(h.RequireConnectionsManagePolicy("id"))
+					r.Get("/connections/company-brain-migration-census", cerebroCompanyBrainCensusHandler.Get) // CEREBRO-PATCH(company-brain-migration-census): FIR-3924 non-mutating census is visible only to connection managers.
 					r.Post("/connections", cerebroConnectionsHandler.Create)
 					r.Post("/connections/test", cerebroConnectionsHandler.Test) // connection reachability + MCP tool discovery.
 					r.Put("/connections/{connId}", cerebroConnectionsHandler.Update)
