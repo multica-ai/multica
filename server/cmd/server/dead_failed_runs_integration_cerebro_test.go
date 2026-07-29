@@ -204,3 +204,134 @@ func TestDeadFailedRun_WorkspaceEndpointSurfacesTheIssue(t *testing.T) {
 	t.Fatalf("workspace endpoint did not surface issue %s (%d runs returned)", issueID, len(out.Runs))
 }
 
+
+// ─── Access control ──────────────────────────────────────────────────────────
+//
+// The failure reason, the raw error text and the machine name are issue
+// content. Both endpoints originally answered on a bare "is there a user?"
+// check, so knowing an issue's UUID was enough to read its failure text from
+// anywhere. These four cases pin the gate shut.
+
+// seedForeignWorkspaceIssue creates an issue in a DIFFERENT workspace and
+// returns its id, so a caller scoped to the fixture workspace must not see it.
+func seedForeignWorkspaceIssue(t *testing.T, title string) (issueID, agentID, runtimeID string) {
+	t.Helper()
+	ctx := context.Background()
+	var wsID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO workspace (name, slug, description)
+		VALUES ($1, $2, $3) RETURNING id::text`,
+		"FIR-3901 Foreign", fmt.Sprintf("fir3901-foreign-%d", time.Now().UnixNano()),
+		"Temporary workspace for the FIR-3901 access test").Scan(&wsID); err != nil {
+		t.Fatalf("seed foreign workspace: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (workspace_id, name, runtime_mode, provider, status, device_info)
+		VALUES ($1::uuid, 'FIR-3901 foreign runtime', 'local', 'claude', 'online', '')
+		RETURNING id::text`, wsID).Scan(&runtimeID); err != nil {
+		t.Fatalf("seed foreign runtime: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
+		VALUES ($1::uuid, 'FIR-3901 foreign agent', 'local', '{}'::jsonb, $2::uuid, 'workspace', 1)
+		RETURNING id::text`, wsID, runtimeID).Scan(&agentID); err != nil {
+		t.Fatalf("seed foreign agent: %v", err)
+	}
+	// Creator is the fixture user on purpose: even the person who filed it
+	// cannot read it from a workspace they are not a member of.
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
+		VALUES ($1::uuid, $2, 'todo', 'medium', 'member', $3::uuid,
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1::uuid))
+		RETURNING id::text`, wsID, title, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("seed foreign issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1::uuid`, issueID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1::uuid`, issueID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1::uuid`, agentID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1::uuid`, runtimeID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1::uuid`, wsID)
+	})
+	return issueID, agentID, runtimeID
+}
+
+// seedChannelIssue creates a channel in the fixture workspace with NO
+// subscriber rows. Channels are subscriber-gated and workspace owners get no
+// implicit read access, so this is unreadable even for the owner fixture user.
+func seedChannelIssue(t *testing.T, title string) string {
+	t.Helper()
+	ctx := context.Background()
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, kind, number)
+		VALUES ($1, $2, 'todo', 'medium', 'member', $3, 'channel',
+		        (SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1))
+		RETURNING id::text`, testWorkspaceID, title, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("seed channel issue: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE issue_id = $1::uuid`, issueID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM issue_subscriber WHERE issue_id = $1::uuid`, issueID)
+		_, _ = testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1::uuid`, issueID)
+	})
+	return issueID
+}
+
+// The leak this fix closes: an issue in another workspace answered on its UUID
+// alone, handing over the failure reason, the error text and the machine name.
+func TestDeadFailedRun_ForeignWorkspaceIssueIsNotReadable(t *testing.T) {
+	issueID, agentID, runtimeID := seedForeignWorkspaceIssue(t, "FIR-3901 foreign")
+	seedFailedTask(t, issueID, agentID, runtimeID, "sess-foreign", 5*time.Minute)
+
+	resp := authRequest(t, http.MethodGet, "/api/issues/"+issueID+"/failed-runs", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET failed-runs on a foreign workspace's issue: status %d, want 404", resp.StatusCode)
+	}
+}
+
+// Channels are subscriber-gated, and a workspace owner gets no implicit read
+// access. This is the in-workspace half of the same gate.
+func TestDeadFailedRun_ChannelYouAreNotInIsNotReadable(t *testing.T) {
+	issueID := seedChannelIssue(t, "FIR-3901 private channel")
+	seedFailedTask(t, issueID, fixtureAgentID(t), seedRuntime(t, "online"), "sess-channel", 5*time.Minute)
+
+	resp := authRequest(t, http.MethodGet, "/api/issues/"+issueID+"/failed-runs", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("GET failed-runs on a channel the caller is not in: status %d, want 404", resp.StatusCode)
+	}
+}
+
+// The inbox feed is workspace-scoped, which is not the same as visible-scoped.
+// A channel the caller is not in must not reach the pip either.
+func TestDeadFailedRun_WorkspaceEndpointHidesAChannelYouAreNotIn(t *testing.T) {
+	issueID := seedChannelIssue(t, "FIR-3901 hidden channel")
+	seedFailedTask(t, issueID, fixtureAgentID(t), seedRuntime(t, "online"), "sess-hidden", 5*time.Minute)
+
+	resp := authRequest(t, http.MethodGet, "/api/inbox/failed-issue-tasks", nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET failed-issue-tasks: status %d", resp.StatusCode)
+	}
+	var out deadFailedRunPayload
+	readJSON(t, resp, &out)
+
+	for _, run := range out.Runs {
+		if run.IssueID == issueID {
+			t.Fatalf("the inbox feed leaked a channel the caller is not subscribed to (%s)", issueID)
+		}
+	}
+}
+
+// The gate must not swallow the ordinary case: an issue the caller can see
+// still returns its dead run after the access check runs.
+func TestDeadFailedRun_OwnIssueStillReadableThroughTheGate(t *testing.T) {
+	issueID := seedDeadFailedIssue(t, "FIR-3901 gate passthrough")
+	taskID := seedFailedTask(t, issueID, fixtureAgentID(t), seedRuntime(t, "online"), "sess-gate", 5*time.Minute)
+
+	got := fetchIssueFailedRuns(t, issueID)
+	if len(got.Runs) != 1 || got.Runs[0].TaskID != taskID {
+		t.Fatalf("the gate hid a run the caller may read: %+v", got.Runs)
+	}
+}
