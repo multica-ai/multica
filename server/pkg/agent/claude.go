@@ -12,8 +12,22 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
 )
+
+// claudeTerminateGraceNanos optionally overrides, in nanoseconds, how long a
+// cancelled claude process group is given to exit after SIGTERM before it is
+// SIGKILLed. Set via atomic store in tests; zero keeps the default.
+var claudeTerminateGraceNanos atomic.Int64
+
+func claudeTerminateGrace() time.Duration {
+	if n := claudeTerminateGraceNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return 5 * time.Second
+}
 
 // claudeBackend implements Backend by spawning the Claude Code CLI
 // with --output-format stream-json.
@@ -59,6 +73,21 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
+	// Run claude in its own process group so cancellation can reach the whole
+	// tree — the claude CLI plus the MCP servers and tool subprocesses it
+	// spawns — not just the direct child. The default CommandContext behaviour
+	// SIGKILLs only the leader, which orphans those descendants; on a resumed
+	// stream-json session with no wall-clock timeout they then keep running and
+	// burning model budget long after the task was cancelled, and under
+	// --max-concurrent-tasks 1 starve every queued task (#5918). This mirrors
+	// the fix already made for codex (#4520) and opencode (#4533).
+	configureProcessGroup(cmd)
+	// Take over context cancellation: the default would SIGKILL only the leader
+	// the instant runCtx is done. We instead drive a graceful group-wide
+	// SIGTERM→SIGKILL from the cancellation goroutine below and close stdout
+	// only after the tree has been signalled. Returning nil keeps os/exec from
+	// racing us with its own kill; WaitDelay remains the hard backstop.
+	cmd.Cancel = func() error { return nil }
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
@@ -104,6 +133,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
+	// procDone closes once cmd.Wait() returns, letting the cancellation handler
+	// skip a process that already exited and avoid signalling a dead/reused pid.
+	procDone := make(chan struct{})
+
 	// writeClaudeInput runs in its own goroutine so it cannot deadlock
 	// against the stdout reader. With --verbose --output-format stream-json
 	// the CLI emits a startup banner before reading its first stdin frame;
@@ -148,10 +181,35 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		assistantEventCount := 0
 		toolUseCount := 0
 
-		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
+		// On cancellation / timeout, terminate claude (and every MCP server and
+		// tool subprocess it spawned) BEFORE unblocking the scanner. EOF stdin
+		// to nudge a clean exit, then SIGTERM the whole process group, give it a
+		// grace period, and SIGKILL the group if any member is still alive.
+		// SIGKILL is uncatchable, so once delivered no group member can write
+		// again — only then is it safe to close the stdout read end as a
+		// last-resort unblock for a scanner a wedged descendant still keeps
+		// open. WaitDelay is the final backstop (#5918).
 		go func() {
-			<-runCtx.Done()
+			select {
+			case <-procDone:
+				return // finished on its own; nothing to terminate
+			case <-runCtx.Done():
+			}
 			closeStdin()
+			if cmd.Process != nil {
+				signalProcessGroup(cmd.Process, syscall.SIGTERM)
+				// Escalate to a group SIGKILL unless the WHOLE process group has
+				// exited within the grace window. This must key off the process
+				// group, not procDone: procDone only means cmd.Wait() returned
+				// for the leader, so a SIGTERM-ignoring descendant that does not
+				// hold claude's stdout would let the leader exit, close procDone,
+				// and skip the SIGKILL — leaking exactly the orphan this fix
+				// targets. waitProcessGroupGone returns as soon as the group is
+				// empty, so the graceful case adds no latency.
+				if !waitProcessGroupGone(cmd.Process, claudeTerminateGrace()) {
+					signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				}
+			}
 			_ = stdout.Close()
 		}()
 
@@ -223,8 +281,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		closeStdin()
 
-		// Wait for process exit
+		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
+		close(procDone)
 		duration := time.Since(startTime)
 		// writeDone is buffered (cap 1) and the writer always sends — by the
 		// time cmd has exited, the prompt write has either succeeded, hit a
@@ -280,21 +339,25 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", stderrTail)
-		if reportedSessionID != sessionID {
-			b.cfg.Logger.Info("claude resume did not land; clearing fresh session id for daemon fallback",
+		// The account-binding 400 arrives in the result event (finalError);
+		// "no conversation found" is printed to stderr. Check both.
+		resumeRejected := resumeWasRejected(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
+		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
+		if resumeRejected {
+			b.cfg.Logger.Info("claude resume was rejected; dropping session id and signalling fresh-session retry",
 				"requested_resume", opts.ResumeSessionID,
 				"emitted_session", sessionID,
 			)
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  reportedSessionID,
-			Usage:      usage,
+			Status:         finalStatus,
+			Output:         finalOutput,
+			Error:          finalError,
+			DurationMs:     duration.Milliseconds(),
+			SessionID:      reportedSessionID,
+			Usage:          usage,
+			ResumeRejected: resumeRejected,
 		}
 	}()
 
@@ -642,8 +705,22 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}
-	args = append(args, filterCustomArgs(opts.ExtraArgs, claudeBlockedArgs, logger)...)
-	args = append(args, filterCustomArgs(opts.CustomArgs, claudeBlockedArgs, logger)...)
+	blockedArgs := claudeBlockedArgs
+	if opts.ClaudeSettingsPath != "" {
+		// The daemon-owned --settings file is the enforcement layer for disabled
+		// inherited skills. Drop competing per-agent/default flags only while that
+		// policy is active, then append the managed file last.
+		blockedArgs = make(map[string]blockedArgMode, len(claudeBlockedArgs)+1)
+		for key, mode := range claudeBlockedArgs {
+			blockedArgs[key] = mode
+		}
+		blockedArgs["--settings"] = blockedWithValue
+	}
+	args = append(args, filterCustomArgs(opts.ExtraArgs, blockedArgs, logger)...)
+	args = append(args, filterCustomArgs(opts.CustomArgs, blockedArgs, logger)...)
+	if opts.ClaudeSettingsPath != "" {
+		args = append(args, "--settings", opts.ClaudeSettingsPath)
+	}
 	return args
 }
 
@@ -678,29 +755,76 @@ func buildClaudeInput(prompt string) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-// resolveSessionID decides which session id to report on the Result. When the
-// caller requested --resume but claude emitted a fresh, different session id
-// AND the run failed, the resume did not land. Claude can also report the
-// requested id while printing "No conversation found with session ID: ..." to
-// stderr. Returning "" in those cases keeps the daemon's retry-with-fresh-
-// session fallback able to trigger instead of persisting the dead resume id.
-func resolveSessionID(requestedResume, emitted string, failed bool, stderrTail ...string) string {
-	if failed && requestedResume != "" && claudeNoConversationFound(stderrTail...) {
-		return ""
+// resumeRejectedPhrases are the provider messages that positively identify a
+// refused resume, as opposed to a failure that merely happened to occur during
+// a resumed run. Shared by the stream-json backends (claude, codebuddy, qwen);
+// the ACP backends match structured error codes via isACPSessionNotFound
+// instead.
+//
+// Matching must stay tight: a false positive makes the daemon throw away a
+// recoverable session pointer and re-run the task, so anything ambiguous
+// belongs out of this list.
+var resumeRejectedPhrases = []string{
+	// Verified: claude prints this when the transcript named by --resume is
+	// absent. Covered by TestResolveSessionID's existing stderr fixture.
+	"no conversation found",
+	// Verified: qwen-code 0.20.0, captured in
+	// testdata/qwen-code-0.20.0-resume-not-found.stderr.txt — "No saved
+	// session found with ID <id>. Run `qwen --resume` without an ID to
+	// choose from existing sessions."
+	"no saved session found",
+	// Reported verbatim in multica-ai/multica#5704 against Claude Code
+	// 2.1.207 (zh-CN): "400 此 session 已绑定另外的ai账号，请执行 /new 开启新
+	// session". This is the account-switch guardrail this signal exists for.
+	"已绑定另外",
+	// INFERRED, not yet observed: the en-US wording of the same guardrail has
+	// not been captured. These are guesses derived from the zh-CN text and
+	// should be corrected once a real English sample is available. A miss
+	// here degrades to a terminal failure carrying the provider's raw error,
+	// which is diagnosable — it does not silently mis-route the run.
+	"bound to another account",
+	"bound to a different account",
+}
+
+// resumeWasRejected reports whether a failed run's --resume was itself
+// refused. It is the positive-evidence predicate behind Result.ResumeRejected:
+// only a rejected resume can be cured by starting a fresh session.
+//
+// texts should include every place the provider may have written the reason —
+// the final error string and the stderr tail — because the account-binding 400
+// arrives in the stream-json result event while "no conversation found" is
+// printed to stderr.
+func resumeWasRejected(requestedResume, emitted string, failed bool, texts ...string) bool {
+	if !failed || requestedResume == "" {
+		return false
 	}
-	if failed && requestedResume != "" && emitted != "" && emitted != requestedResume {
+	for _, text := range texts {
+		lower := strings.ToLower(text)
+		for _, phrase := range resumeRejectedPhrases {
+			if strings.Contains(lower, phrase) {
+				return true
+			}
+		}
+	}
+	// Claude answered with a different session than the one we asked to
+	// continue: the requested transcript did not load.
+	return emitted != "" && emitted != requestedResume
+}
+
+// resolveSessionID decides which session id to report on the Result. A session
+// known to be dead must not be persisted as the resume pointer, so a rejected
+// resume reports "" regardless of what claude echoed back.
+//
+// This is deliberately no longer the signal the daemon reads to decide *why*
+// a run failed — Result.ResumeRejected carries that. An empty SessionID is
+// also produced by any failure before the first stream message (a 401, a
+// missing binary), which is why inferring "the resume was rejected" from it
+// was wrong in both directions.
+func resolveSessionID(requestedResume, emitted string, failed bool, texts ...string) string {
+	if resumeWasRejected(requestedResume, emitted, failed, texts...) {
 		return ""
 	}
 	return emitted
-}
-
-func claudeNoConversationFound(stderrTail ...string) bool {
-	for _, tail := range stderrTail {
-		if strings.Contains(strings.ToLower(tail), "no conversation found") {
-			return true
-		}
-	}
-	return false
 }
 
 func buildEnv(extra map[string]string) []string {

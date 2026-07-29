@@ -20,6 +20,7 @@ const (
 	EventTeamInviteAccepted            = "team_invite_accepted"
 	EventOnboardingStarted             = "onboarding_started"
 	EventOnboardingQuestionnaireSubmit = "onboarding_questionnaire_submitted"
+	EventOnboardingSourceSubmit        = "onboarding_source_submitted"
 	EventAgentCreated                  = "agent_created"
 	EventOnboardingCompleted           = "onboarding_completed"
 	EventCloudWaitlistJoined           = "cloud_waitlist_joined"
@@ -61,6 +62,7 @@ var metricsOnlyEvents = map[string]struct{}{
 	EventTeamInviteAccepted:            {},
 	EventOnboardingStarted:             {},
 	EventOnboardingQuestionnaireSubmit: {},
+	EventOnboardingSourceSubmit:        {},
 	EventAgentCreated:                  {},
 	EventOnboardingCompleted:           {},
 	EventCloudWaitlistJoined:           {},
@@ -495,6 +497,49 @@ func OnboardingQuestionnaireSubmitted(userID string, source []string, role strin
 			"use_case": useCase,
 		},
 	}
+}
+
+// OnboardingSourceSubmitted fires when the user's acquisition source
+// transitions from unresolved to resolved — answered or explicitly
+// declined. The source question is no longer part of the onboarding
+// flow (MUL-5159): it is asked by the workspace backfill prompt after
+// agents have completed work for the user, so this lands well after
+// `onboarding_questionnaire_submitted` (which now covers role +
+// use_case only). A dedicated event gives the backfill prompt its own
+// Grafana counter (answer/decline rate) without stalling the
+// questionnaire funnel step. Metrics-only like every server event
+// (MUL-4127); the per-user source value reaches analytics through the
+// client-side person-property mirror in saveQuestionnaire.
+//
+// `source` stays a slice for the same v2 back-compat reason as the
+// questionnaire event; the client commits a one-element array. $set
+// is only attached when the user actually answered — moot while the
+// event stays metrics-only, but kept accurate should it ever ship.
+func OnboardingSourceSubmitted(userID string, source []string, skipped, hasOther bool) Event {
+	if source == nil {
+		source = []string{}
+	}
+	// Property key is acquisition_source, not source — core properties
+	// stamp the event-source dimension into props["source"]
+	// (withCoreProperties), and the acquisition answer must not fight
+	// it for the slot. The $set person property below keeps the plain
+	// "source" name for cohort continuity with the client-side mirror.
+	ev := Event{
+		Name:       EventOnboardingSourceSubmit,
+		DistinctID: userID,
+		Properties: withCoreProperties(map[string]any{
+			"acquisition_source": source,
+			"source_skipped":     skipped,
+			"source_has_other":   hasOther,
+		}, CoreProperties{
+			UserID: userID,
+			Source: SourceOnboarding,
+		}),
+	}
+	if len(source) > 0 {
+		ev.Set = map[string]any{"source": source}
+	}
+	return ev
 }
 
 // AgentCreated fires whenever a new agent is added to a workspace — not

@@ -213,12 +213,46 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 		"run the work synchronously instead",
 		"Never background-and-yield",
 		"foreground tool call that blocks",
-		"gh run watch",
+		// MUL-5274: an explicitly requested persistent local service is a
+		// completed handoff, not unfinished run-owned work. Pin the narrow
+		// exception and its readiness / cleanup / honesty requirements.
+		"persistent service handoff",
+		"running service itself is the requested deliverable",
+		"stdio redirected to durable logs",
+		"PID/profile",
+		"verify readiness before replying",
+		"survival as best-effort, not guaranteed",
+		"does not cover tests, builds, CI polling",
+		"are not agent-owned background tasks",
+		"GitHub Actions after a successful push",
+		"Do not wait for them by default",
+		// MUL-5223 pins: named tool-shape bans, merge requirements
+		// denied as acceptance criteria, replacement hand-off phrasing,
+		// and the scoped escape hatch that keeps an explicitly requested
+		// CI result both permitted and executable.
+		"do NOT run `gh pr checks --watch`",
+		"any sleep / retry loop that polls check status",
+		"NOT your delivery acceptance criteria",
+		"CI running: <PR link>",
+		"unless the explicit exception below applies",
+		"The one exception",
+		"ONE foreground blocking call (`gh pr checks <pr> --watch`)",
 		"running in the background so you can keep working",
 		"standing by",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("slim Background Task Safety missing hardened pin %q\n---\n%s", want, out)
 		}
+	}
+	// `gh run watch` may only appear as a banned command, never as the
+	// section's example of how to wait properly.
+	if strings.Contains(out, "e.g. `gh run watch`") {
+		t.Errorf("slim Background Task Safety should not suggest waiting for external GitHub CI\n---\n%s", out)
+	}
+	// MUL-5274 review: with the persistent-service exception in the list, a
+	// "The rules above ..." scoping sentence would sweep in work that is
+	// precisely no longer run-owned after handoff.
+	if strings.Contains(out, "The rules above") {
+		t.Errorf("slim Background Task Safety must not reintroduce the ambiguous \"The rules above\" scoping sentence\n---\n%s", out)
 	}
 }

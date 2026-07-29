@@ -36,6 +36,14 @@ import { HtmlPreviewBody } from "./html-preview-body";
 
 const CODE_BLOCK_IFRAME_HEIGHT = "h-[480px]";
 
+/**
+ * Pixel twin of CODE_BLOCK_IFRAME_HEIGHT. The preview iframe is a fixed height,
+ * so the near-viewport lazy shell (rich-content/lazy-rich-block.tsx) can
+ * reserve exactly the space this component will occupy and mount with zero
+ * layout shift. Keep the two in sync.
+ */
+export const HTML_BLOCK_PREVIEW_HEIGHT_PX = 480;
+
 // Label shown in the code-block header. Not a translatable string — it's a
 // language identifier (matches the `lang === "html"` token below).
 const HTML_LANGUAGE_LABEL = "html";

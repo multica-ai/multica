@@ -32,6 +32,7 @@ const RESET_STATE = {
     priority: "none" as const,
     assigneeType: undefined,
     assigneeId: undefined,
+    projectId: undefined,
     startDate: null,
     dueDate: null,
     labelIds: [],
@@ -111,6 +112,15 @@ describe("issue draft store — last assignee", () => {
     expect(useIssueDraftStore.getState().draft.propertyValues).toEqual({});
   });
 
+  it("clearDraft removes the persisted project selection", () => {
+    const { setDraft, clearDraft } = useIssueDraftStore.getState();
+
+    setDraft({ projectId: "project-1" });
+    clearDraft();
+
+    expect(useIssueDraftStore.getState().draft.projectId).toBeUndefined();
+  });
+
   it("setLastAssignee(undefined) lets the user opt back out of a default", () => {
     const { setLastAssignee, clearDraft } = useIssueDraftStore.getState();
 
@@ -160,6 +170,7 @@ describe("issue draft store — legacy rehydrate", () => {
 
     const { draft } = useIssueDraftStore.getState();
     expect(draft.title).toBe("legacy");
+    expect(draft.projectId).toBeUndefined();
     expect(draft.attachments).toEqual([]);
     expect(draft.propertyValues).toEqual({});
   });

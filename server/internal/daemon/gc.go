@@ -26,6 +26,7 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 		"orphan_ttl", d.cfg.GCOrphanTTL,
 		"artifact_ttl", d.cfg.GCArtifactTTL,
 		"artifact_patterns", d.cfg.GCArtifactPatterns,
+		"managed_artifact_subpaths", execenv.ManagedReclaimableArtifactSubpaths(),
 	)
 
 	// Run once at startup after a short delay (let the daemon finish initializing).
@@ -56,7 +57,7 @@ type gcStats struct {
 	artifactRemoved int            // count of removed artifact subdirs
 	storesReclaimed int            // per-issue Codex session stores reclaimed past their TTL
 	bytesReclaimed  int64          // total bytes freed in this cycle
-	byPattern       map[string]int // basename -> reclaim count, for visibility
+	byPattern       map[string]int // configured basename or managed path label -> reclaim count
 }
 
 // runGC performs a single GC scan across all workspace directories.
@@ -206,7 +207,7 @@ func (d *Daemon) gcWorkspaceIssues(ctx context.Context, workspaceID string, cand
 			continue
 		}
 		action := d.gcDecisionIssueResult(candidate.taskDir, candidate.meta, result)
-		action = applyLocalDirectoryGCOverride(candidate.meta, action)
+		action = d.applyLocalDirectoryGCOverride(candidate.meta, action)
 		cleaned += d.applyGCAction(candidate.taskDir, action, stats)
 	}
 	return cleaned
@@ -239,14 +240,11 @@ func (d *Daemon) applyGCAction(taskDir string, action gcAction, stats *gcStats) 
 		return 1
 	case gcActionCleanArtifacts:
 		removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, d.cfg.GCArtifactPatterns)
-		if removed > 0 {
-			stats.artifactDirs++
-			stats.artifactRemoved += removed
-			stats.bytesReclaimed += bytes
-			for k, v := range perPattern {
-				stats.byPattern[k] += v
-			}
-		}
+		recordArtifactCleanup(stats, removed, bytes, perPattern)
+		stats.skipped++ // task dir itself preserved
+	case gcActionCleanManagedArtifacts:
+		removed, bytes, perPattern := d.cleanManagedTaskArtifacts(taskDir)
+		recordArtifactCleanup(stats, removed, bytes, perPattern)
 		stats.skipped++ // task dir itself preserved
 	default:
 		stats.skipped++
@@ -254,13 +252,29 @@ func (d *Daemon) applyGCAction(taskDir string, action gcAction, stats *gcStats) 
 	return 0
 }
 
+func recordArtifactCleanup(stats *gcStats, removed int, bytes int64, perPattern map[string]int) {
+	if removed == 0 {
+		return
+	}
+	stats.artifactDirs++
+	stats.artifactRemoved += removed
+	stats.bytesReclaimed += bytes
+	if stats.byPattern == nil {
+		stats.byPattern = map[string]int{}
+	}
+	for pattern, count := range perPattern {
+		stats.byPattern[pattern] += count
+	}
+}
+
 type gcAction int
 
 const (
-	gcActionSkip           gcAction = iota
-	gcActionClean                   // issue is done/cancelled and stale
-	gcActionOrphan                  // no meta or unknown issue and dir is old
-	gcActionCleanArtifacts          // task completed long enough ago; drop regenerable artifacts only
+	gcActionSkip                  gcAction = iota
+	gcActionClean                          // issue is done/cancelled and stale
+	gcActionOrphan                         // no meta or unknown issue and dir is old
+	gcActionCleanArtifacts                 // task completed long enough ago; drop regenerable artifacts only
+	gcActionCleanManagedArtifacts          // preserve the task and drop exact daemon-managed artifacts only
 )
 
 // shouldCleanTaskDir decides whether a task directory should be removed.
@@ -268,10 +282,11 @@ const (
 // follow the parent record that actually governs their lifecycle.
 func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcAction {
 	// A task currently running on this env root must never be reclaimed —
-	// not even on the done/cancelled or orphan-404 paths. A new comment on
-	// an already-done issue can dispatch a follow-up task that reuses the
-	// prior workdir without bumping the issue's updated_at, so the regular
-	// TTL check alone wouldn't notice the resumed activity.
+	// not even on the done/cancelled or orphan-404 paths. A re-dispatched or
+	// still-running task can reuse the prior workdir of an already-done issue
+	// whose updated_at is older than the TTL (a task re-claim doesn't advance
+	// updated_at), so the regular TTL check alone wouldn't notice the resumed
+	// activity.
 	if d.isActiveEnvRoot(taskDir) {
 		return gcActionSkip
 	}
@@ -282,34 +297,37 @@ func (d *Daemon) shouldCleanTaskDir(ctx context.Context, taskDir string) gcActio
 	}
 
 	action := d.shouldCleanTaskDirForKind(ctx, taskDir, meta)
-	return applyLocalDirectoryGCOverride(meta, action)
+	return d.applyLocalDirectoryGCOverride(meta, action)
 }
 
-func applyLocalDirectoryGCOverride(meta *execenv.GCMeta, action gcAction) gcAction {
+func (d *Daemon) applyLocalDirectoryGCOverride(meta *execenv.GCMeta, action gcAction) gcAction {
 	if !meta.LocalDirectory {
 		return action
 	}
 	// local_directory tasks keep their envRoot indefinitely so the user
 	// can inspect output/ and logs/ for forensic context. The WorkDir is
-	// the user's own path and lives outside taskDir, so the envRoot
-	// itself is just the daemon's logbook for the run — never large, and
-	// safe to keep.
+	// the user's own path and lives outside taskDir. The envRoot contains
+	// the daemon's durable logbook plus regenerable tool caches, so keep the
+	// former while allowing narrowly scoped cleanup of the latter.
 	//
 	//   gcActionClean   → demote to artifact-pattern cleanup so envRoot
 	//                     (and especially the logbook) survives.
-	//   gcActionOrphan  → skip outright; we don't ever wipe a
-	//                     local_directory envRoot via the mtime path,
-	//                     since the parent issue / chat record going
-	//                     away should not collateral-delete the user's
-	//                     own audit trail.
+	//   gcActionOrphan  → exact managed-artifact cleanup only; we don't ever
+	//                     wipe a local_directory envRoot via the mtime path,
+	//                     since the parent issue / chat record going away
+	//                     should not collateral-delete the user's audit trail.
 	//
-	// gcActionCleanArtifacts and gcActionSkip already obey the
+	// Artifact cleanup remains disabled when GCArtifactTTL is explicitly zero.
+	// gcActionCleanArtifacts, gcActionCleanManagedArtifacts, and gcActionSkip obey the
 	// "no full envRoot RemoveAll" rule.
+	if d.cfg.GCArtifactTTL <= 0 {
+		return gcActionSkip
+	}
 	switch action {
 	case gcActionClean:
 		return gcActionCleanArtifacts
 	case gcActionOrphan:
-		return gcActionSkip
+		return gcActionCleanManagedArtifacts
 	default:
 		return action
 	}
@@ -401,8 +419,7 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 		return gcActionClean
 	}
 
-	if d.cfg.GCArtifactTTL > 0 && len(d.cfg.GCArtifactPatterns) > 0 &&
-		!meta.CompletedAt.IsZero() && time.Since(meta.CompletedAt) > d.cfg.GCArtifactTTL {
+	if d.cfg.GCArtifactTTL > 0 && !meta.CompletedAt.IsZero() && time.Since(meta.CompletedAt) > d.cfg.GCArtifactTTL {
 		d.logger.Info("gc: eligible for artifact cleanup",
 			"dir", filepath.Base(taskDir),
 			"kind", "issue",
@@ -413,7 +430,33 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 		return gcActionCleanArtifacts
 	}
 
+	// Old metadata may not have completed_at. Keep that case conservative:
+	// after the metadata file itself has been idle for the longer orphan TTL,
+	// reclaim only the exact daemon-managed cache. WriteGCMeta replaces this
+	// file after every completed task, so a recent reuse refreshes the signal
+	// even when activity below taskDir leaves the root directory mtime stale.
+	if d.cfg.GCArtifactTTL > 0 && meta.CompletedAt.IsZero() {
+		if age, ok := gcMetaFileAge(taskDir); ok && age > d.cfg.GCOrphanTTL {
+			d.logger.Info("gc: legacy task eligible for managed artifact cleanup",
+				"dir", filepath.Base(taskDir),
+				"kind", "issue",
+				"issue", meta.IssueID,
+				"status", result.Status,
+				"age", age.Round(time.Hour),
+			)
+			return gcActionCleanManagedArtifacts
+		}
+	}
+
 	return gcActionSkip
+}
+
+func gcMetaFileAge(taskDir string) (time.Duration, bool) {
+	info, err := os.Stat(filepath.Join(taskDir, ".gc_meta.json"))
+	if err != nil {
+		return 0, false
+	}
+	return time.Since(info.ModTime()), true
 }
 
 func (d *Daemon) gcDecisionChat(ctx context.Context, taskDir string, meta *execenv.GCMeta) gcAction {
@@ -577,7 +620,8 @@ func (d *Daemon) cleanTaskDir(taskDir string) {
 }
 
 // cleanTaskArtifacts walks taskDir and deletes every directory whose basename
-// matches one of patterns. Returns (removedCount, bytesReclaimed, perPattern).
+// matches one of patterns, plus exact daemon-managed artifact paths. Returns
+// (removedCount, bytesReclaimed, perPattern).
 //
 // Safety contract:
 //   - patterns are basename-only; entries with a path separator are dropped.
@@ -589,19 +633,16 @@ func (d *Daemon) cleanTaskDir(taskDir string) {
 //   - every removal target is verified to live inside taskDir, so a tampered
 //     .gc_meta.json can't trick the daemon into deleting outside its sandbox.
 func (d *Daemon) cleanTaskArtifacts(taskDir string, patterns []string) (removed int, bytes int64, perPattern map[string]int) {
+	return d.cleanTaskArtifactsMatching(taskDir, newArtifactMatcher(patterns, execenv.ManagedReclaimableArtifactSubpaths()))
+}
+
+func (d *Daemon) cleanManagedTaskArtifacts(taskDir string) (removed int, bytes int64, perPattern map[string]int) {
+	return d.cleanTaskArtifactsMatching(taskDir, newArtifactMatcher(nil, execenv.ManagedReclaimableArtifactSubpaths()))
+}
+
+func (d *Daemon) cleanTaskArtifactsMatching(taskDir string, matcher artifactMatcher) (removed int, bytes int64, perPattern map[string]int) {
 	perPattern = map[string]int{}
-	if taskDir == "" || len(patterns) == 0 {
-		return
-	}
-	patternSet := make(map[string]struct{}, len(patterns))
-	for _, p := range patterns {
-		p = strings.TrimSpace(p)
-		if p == "" || strings.ContainsAny(p, "/\\") {
-			continue
-		}
-		patternSet[p] = struct{}{}
-	}
-	if len(patternSet) == 0 {
+	if taskDir == "" || (len(matcher.basenames) == 0 && len(matcher.exactPaths) == 0) {
 		return
 	}
 
@@ -634,13 +675,9 @@ func (d *Daemon) cleanTaskArtifacts(taskDir string, patterns []string) (removed 
 		if info.Mode()&os.ModeSymlink != 0 {
 			return filepath.SkipDir
 		}
-		if _, ok := patternSet[entry.Name()]; !ok {
+		pattern, ok := matcher.matchDirectory(absRoot, path, entry)
+		if !ok {
 			return nil
-		}
-		// Containment check: target must remain inside taskDir.
-		rel, relErr := filepath.Rel(absRoot, path)
-		if relErr != nil || rel == "" || rel == "." || strings.HasPrefix(rel, "..") {
-			return filepath.SkipDir
 		}
 		size := dirSize(path)
 		if rmErr := os.RemoveAll(path); rmErr != nil {
@@ -649,7 +686,7 @@ func (d *Daemon) cleanTaskArtifacts(taskDir string, patterns []string) (removed 
 		}
 		removed++
 		bytes += size
-		perPattern[entry.Name()]++
+		perPattern[pattern]++
 		d.logger.Info("gc: artifact removed", "path", path, "bytes", size)
 		// Don't descend into the now-deleted subtree.
 		return filepath.SkipDir

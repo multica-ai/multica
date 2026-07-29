@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -343,6 +344,92 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 	}
 	if !leaseDuringStart.Load() {
 		t.Fatal("prepare lease was not extended while /start was still in flight")
+	}
+}
+
+func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
+	oldRefresh := taskPrepareLeaseRefresh
+	oldTimeout := taskPrepareLeaseTimeout
+	taskPrepareLeaseRefresh = 10 * time.Millisecond
+	taskPrepareLeaseTimeout = 500 * time.Millisecond
+	t.Cleanup(func() {
+		taskPrepareLeaseRefresh = oldRefresh
+		taskPrepareLeaseTimeout = oldTimeout
+	})
+
+	var leaseCalls atomic.Int64
+	startEntered := make(chan struct{})
+	var closeStartOnce sync.Once
+	releaseStart := make(chan struct{})
+	var releaseStartOnce sync.Once
+	t.Cleanup(func() { releaseStartOnce.Do(func() { close(releaseStart) }) })
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/prepare-lease"):
+			leaseCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(r.URL.Path, "/start"):
+			closeStartOnce.Do(func() { close(startEntered) })
+			<-releaseStart
+			w.WriteHeader(http.StatusOK)
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	workspacesRoot := t.TempDir()
+	fakeBin := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(fakeBin, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake agent: %v", err)
+	}
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.New(slog.NewTextHandler(io.Discard, nil)),
+		workspaces:         make(map[string]*workspaceState),
+		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots:     make(map[string]int),
+		taskPrepareTimeout: 150 * time.Millisecond,
+		cfg: Config{
+			WorkspacesRoot: workspacesRoot,
+			Agents: map[string]AgentEntry{
+				"claude": {Path: fakeBin},
+			},
+		},
+	}
+
+	task := Task{
+		ID:          "task-runtask-start-timeout",
+		WorkspaceID: "ws-runtask-start-timeout",
+		RuntimeID:   "rt-1",
+		IssueID:     "issue-runtask-start-timeout",
+		Agent:       &AgentData{Name: "test-agent"},
+	}
+	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
+	startedAt := time.Now()
+	_, err := d.runTask(context.Background(), task, "claude", 0, taskLog)
+	if !errors.Is(err, errTaskPrepareTimeout) {
+		t.Fatalf("runTask error = %v, want task prepare timeout", err)
+	}
+	if elapsed := time.Since(startedAt); elapsed > time.Second {
+		t.Fatalf("runTask took %s, want prepare deadline to stop blocked /start", elapsed)
+	}
+	select {
+	case <-startEntered:
+	default:
+		t.Fatal("runTask did not reach /start")
+	}
+	releaseStartOnce.Do(func() { close(releaseStart) })
+	if got := leaseCalls.Load(); got == 0 {
+		t.Fatal("prepare lease was never extended while /start was blocked")
+	}
+	leaseCallsAtReturn := leaseCalls.Load()
+	time.Sleep(4 * taskPrepareLeaseRefresh)
+	if got := leaseCalls.Load(); got != leaseCallsAtReturn {
+		t.Fatalf("prepare lease kept extending after timeout: calls %d -> %d", leaseCallsAtReturn, got)
+	}
+	if got := taskRunFailureReason(err); got != "timeout" {
+		t.Fatalf("taskRunFailureReason = %q, want retryable platform timeout", got)
 	}
 }
 

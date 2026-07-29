@@ -62,9 +62,10 @@ multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agen
 
 1. **队长领走 task。** 队长所在的 daemon 在下次轮询时把 task 领走，和普通智能体的分配流程一样。
 2. **队长拿到 briefing。** 领走的瞬间，Multica 会在队长的系统提示后面追加三段内容——详见下文 [队长每次执行看到的内容](#队长每次执行看到的内容)。
-3. **队长发一条"派活"评论。** 评论里用 roster 里给好的 mention markdown `@` 选中的成员——这个 `@` 会触发被派的成员入队新 `task`。
-4. **队长记录 evaluation：** `multica squad activity <issue-id> action --reason "..."`。这一行会写进 issue 的 activity 时间线，方便人类回溯队长确实评估过这一次触发。
-5. **队长停下。** 派完活，队长**不动手干活**。当被派的成员有回复时，队长会被自动唤醒，决定下一步：继续派活、上抛给人类、还是保持沉默。
+3. **队长把父 issue 推到 `in_progress`。** 和直接分配给智能体同一套 Agent-managed 状态约定：首次接单应离开 `todo`（或从 backlog 提升后的状态），进入 `in_progress`。分发成员不等于完成——小队干活期间父 issue 保持 `in_progress`。
+4. **队长发一条"派活"评论。** 评论里用 roster 里给好的 mention markdown `@` 选中的成员——这个 `@` 会触发被派的成员入队新 `task`。
+5. **队长记录 evaluation：** `multica squad activity <issue-id> action --reason "..."`。这一行会写进 issue 的 activity 时间线，方便人类回溯队长确实评估过这一次触发。
+6. **队长停下。** 派完活，队长**不动手干活**。当被派的成员有回复——或子 issue / stage 屏障关闭——时，队长会被自动唤醒，决定下一步：继续派活、上抛给人类、在整体目标达成后把父 issue 推到 `in_review`、还是保持沉默。`done` 留给人工确认或既有集成（例如带 close intent 的 PR merge）。
 
 如果 issue 是 **Backlog** 状态，队长不会被触发——Backlog 是停泊场，规则和直接分配给智能体一样。
 
@@ -72,7 +73,9 @@ multica squad member add <squad-id> --member-id <agent-or-user-uuid> --type agen
 
 每次队长被触发，三段内容会被附加到它的 instructions 上：
 
-- **Squad Operating Protocol（小队工作规范）** —— 一段硬编码的规则集：读 issue → 用 `@` 派活 → 简洁（**不要**复述 issue 内容，被派的成员自己能读）→ 每次都记 evaluation → **派完就停**。这段是系统管理的，不可编辑。
+- **Squad Operating Protocol（小队工作规范）** —— 一段硬编码的规则集：读 issue → 首次接单把父 issue 推到 `in_progress` → 用 `@` 派活 → 简洁（**不要**复述 issue 内容，被派的成员自己能读）→ 每次都记 evaluation → **派完就停** → 只有整体目标达成后才把父 issue 推到 `in_review`。这段是系统管理的，不可编辑。
+
+  其中**状态那一半只对「确实分配给本小队」的 issue 生效**。如果队长是被别人 issue 里的 `@squad` 喊醒的，他照样拿到花名册和派活规则，但会被明确告知**不要碰那个 issue 的状态**——状态仍归该 issue 自己的 assignee。
 - **Squad Roster（小队花名册）** —— 队长自己一行 + 每个未归档成员一行。每一行带上**确切可用**的 mention markdown（`[@Name](mention://agent/<uuid>)` 或 `[@Name](mention://member/<uuid>)`）让队长直接复制——纯文本 `@name` 是**不会**触发任何人的。
 - **Squad Instructions（小队自定义指令）** —— 你为这个小队写的私货（在详情页里编辑，或用 `multica squad update --instructions`）。用来写路由规则（"DB 相关派给 Alice，前端派给 Bob"）、上报策略，或者任何 issue 本身不会有的背景。
 

@@ -8,10 +8,15 @@ import type { IssueGrouping } from "@multica/core/issues/stores/view-store";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import type { BoardColumnGroup } from "../components/board-column";
 
-export type DragMoveUpdates = Pick<
+export type DragMoveTargetUpdates = Pick<
   UpdateIssueRequest,
   "status" | "assignee_type" | "assignee_id" | "position"
 >;
+
+export type DragMoveUpdates = DragMoveTargetUpdates & {
+  before_id: string | null;
+  after_id: string | null;
+};
 
 const UNASSIGNED_GROUP_ID = "assignee:unassigned";
 
@@ -89,6 +94,17 @@ export function computePosition(ids: string[], activeId: string, issueMap: Map<s
   return (getPos(ids[idx - 1]!) + getPos(ids[idx + 1]!)) / 2;
 }
 
+export function getMoveAnchors(
+  ids: readonly string[],
+  activeId: string,
+): Pick<DragMoveUpdates, "before_id" | "after_id"> {
+  const index = ids.indexOf(activeId);
+  return {
+    before_id: index > 0 ? ids[index - 1]! : null,
+    after_id: index >= 0 && index < ids.length - 1 ? ids[index + 1]! : null,
+  };
+}
+
 /**
  * Insert `id` into `ids` at the slot implied by `position ASC`, reading each
  * id's position from `issueMap`. Mirrors `insertByPosition` in
@@ -138,7 +154,7 @@ export function issueMatchesGroup(issue: Issue, group: BoardColumnGroup): boolea
 export function getMoveUpdates(
   group: BoardColumnGroup,
   position: number,
-): DragMoveUpdates {
+): DragMoveTargetUpdates {
   if (group.status) return { status: group.status, position };
   // Property columns: the value change is not part of UpdateIssueRequest —
   // the board applies it through useSetIssueProperty after the position move.

@@ -18,6 +18,7 @@ import { labelKeys } from "../labels/queries";
 import { propertyKeys } from "../properties/queries";
 import {
   agentTaskSnapshotKeys,
+  workspaceWorkingAgentsKeys,
   agentActivityKeys,
   agentRunCountsKeys,
   agentTasksKeys,
@@ -33,6 +34,7 @@ import {
   onIssuePropertiesChanged,
   onIssueMetadataChanged,
 } from "../issues/ws-updaters";
+import { invalidateUpdatedAtSortedIssueLists } from "../issues/cache-coordinator";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
 import {
@@ -191,6 +193,7 @@ function patchLatestChatMessagePage(
 type ChatSessionUpdatedPayload = {
   chat_session_id: string;
   title?: string;
+  project_id?: string | null;
   pinned?: boolean;
   status?: "active" | "archived";
   updated_at?: string;
@@ -225,6 +228,7 @@ export function applyChatSessionUpdatedToCache(
         ? {
             ...s,
             title: payload.title ?? s.title,
+            ...("project_id" in payload ? { project_id: payload.project_id } : {}),
             pinned: payload.pinned ?? s.pinned,
             status: payload.status ?? s.status,
             updated_at: payload.updated_at ?? s.updated_at,
@@ -493,6 +497,7 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.all(wsId) });
+    qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentActivityKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: agentRunCountsKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
@@ -600,6 +605,7 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) {
           qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
+          qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
           // Squad members status is derived per agent, so any agent
           // change (status flip, archive, runtime swap) needs to refresh the
           // per-squad members-status cache without refetching the static squad
@@ -680,6 +686,10 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: slackKeys.installations(wsId) });
       },
+      vcs_connection: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: ["vcs", wsId] });
+      },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all
         // PR queries — the open issue detail page will refetch its own list.
@@ -694,6 +704,12 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (!wsId) return;
         qc.invalidateQueries({ queryKey: agentTaskSnapshotKeys.list(wsId) });
+        qc.invalidateQueries({ queryKey: workspaceWorkingAgentsKeys.all(wsId) });
+        // The Table working-agent shortcut derives an assignee set from the
+        // projection above. Refresh its server-owned graph alongside that set
+        // so rows/groups/facets cannot remain on an old task transition while
+        // the projection refetches (global staleTime is Infinity).
+        qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
         // 30d activity series shares the same lifecycle signal — any task
         // completion / failure shifts the histogram. (Dispatch alone
         // doesn't change a completed_at-anchored series, but invalidating
@@ -854,7 +870,12 @@ export function useRealtimeSync(
     const unsubPropertyChanged = ["property:created", "property:updated"].map((event) =>
       ws.on(event as "property:created" | "property:updated", () => {
         const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+        if (wsId) {
+          qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+          // Group order, supported group types, and unavailable option values
+          // are derived from the property definition, not just issue rows.
+          qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+        }
       }),
     );
 
@@ -889,7 +910,15 @@ export function useRealtimeSync(
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
       const { comment } = p as CommentCreatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      if (!comment?.issue_id) return;
+      invalidateTimeline(comment.issue_id);
+      // A new comment bumps the parent issue's updated_at server-side
+      // (MUL-5009), so any open board/list sorted by "Updated date" has
+      // drifted. Refetch just those keys to re-sort the commented card into
+      // place; every other sort is untouched. Only comment:created bumps
+      // updated_at, so the other comment events below deliberately do not.
+      const wsId = getCurrentWsId();
+      if (wsId) invalidateUpdatedAtSortedIssueLists(qc, wsId);
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {

@@ -7,22 +7,7 @@ import {
   type RefObject,
 } from "react";
 import { motion, useReducedMotion } from "motion/react";
-import {
-  Inbox,
-  CircleUser,
-  ListTodo,
-  Bot,
-  Monitor,
-  BookOpenText,
-  Settings,
-  X,
-  Plus,
-  Pin,
-  PinOff,
-  ListX,
-  AppWindow,
-  type LucideIcon,
-} from "lucide-react";
+import { X, Plus, Pin, PinOff, ListX, AppWindow } from "lucide-react";
 import {
   DndContext,
   PointerSensor,
@@ -50,24 +35,13 @@ import {
 } from "@multica/ui/components/ui/context-menu";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
 import { cn } from "@multica/ui/lib/utils";
-import {
-  useTabStore,
-  useActiveGroup,
-  resolveRouteIcon,
-  type Tab,
-} from "@/stores/tab-store";
+import { useTabStore, useActiveGroup, type Tab } from "@/stores/tab-store";
 import { paths } from "@multica/core/paths";
+import {
+  useTabPresentation,
+  ResourceLeadingVisual,
+} from "@multica/views/layout";
 import { parseIssueWindowPath } from "../../../shared/issue-window";
-
-const TAB_ICONS: Record<string, LucideIcon> = {
-  Inbox,
-  CircleUser,
-  ListTodo,
-  Bot,
-  Monitor,
-  BookOpenText,
-  Settings,
-};
 
 const TAB_SCROLL_FADE_SIZE = 24;
 const TAB_ENTRY_EASE = [0.22, 1, 0.36, 1] as const;
@@ -195,7 +169,24 @@ function SortableTabItem({
   const closeTab = useTabStore((s) => s.closeTab);
   const closeOtherTabs = useTabStore((s) => s.closeOtherTabs);
   const togglePin = useTabStore((s) => s.togglePin);
+  const updateTab = useTabStore((s) => s.updateTab);
   const issueWindowPath = parseIssueWindowPath(tab.url);
+
+  // The tab's leading visual and title are derived live from its URL and the
+  // query cache — a resource's own icon/status/avatar and its real title,
+  // updated as the cache updates. `tab.title` is only a persisted first-frame
+  // fallback. See @multica/views useTabPresentation.
+  const { visual, title } = useTabPresentation(tab.url, tab.title);
+
+  // Persist the active tab's resolved title so it survives as the next
+  // session's first-frame fallback. The tab strip itself always renders the
+  // live resolved `title`; `tab.title` is just the persisted seed. This
+  // replaces the old document.title → MutationObserver → tab.title path (the OS
+  // window title stays page-driven via useDocumentTitle).
+  useEffect(() => {
+    if (!isActive) return;
+    if (tab.title !== title) updateTab(tab.id, { title });
+  }, [isActive, title, tab.id, tab.title, updateTab]);
 
   const {
     attributes,
@@ -206,12 +197,10 @@ function SortableTabItem({
     isDragging,
   } = useSortable({ id: tab.id });
 
-  // Pinned tabs swap the route icon for a Pin glyph as the static "I am
-  // pinned" indicator (RFC §3 D1v-iv FINAL). The route information is still
-  // present in the title, and this avoids a hard left accent border that read
-  // as visually heavy in light mode.
-  const LeadingIcon = tab.pinned ? Pin : TAB_ICONS[tab.icon];
-
+  // Pin is a secondary interaction state, not an identity: a pinned tab keeps
+  // its resource visual (a project's icon, an issue's status, an actor's
+  // avatar) rather than collapsing to a Pin glyph. Pinned-ness is conveyed by
+  // position, the suppressed close button, and the hover Pin/Unpin action.
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -242,14 +231,15 @@ function SortableTabItem({
     if (!issueWindowPath) return;
     void window.desktopAPI.openIssueWindow({
       path: issueWindowPath.path,
-      title: tab.title,
+      title,
     });
   };
 
   // Pinned tabs keep their full title (RFC §3 D1v-ii FINAL). The only visual
-  // differences vs. unpinned tabs are the leading Pin icon (swapped in above)
-  // and the suppressed X (closing requires explicit Unpin). Pin/Unpin is
-  // reachable via the hover action button below and the right-click menu.
+  // differences vs. unpinned tabs are the suppressed X (closing requires
+  // explicit Unpin) — the leading visual is the resource's own identity, same
+  // as an unpinned tab. Pin/Unpin is reachable via the hover action button
+  // below and the right-click menu.
   const showCloseButton = !tab.pinned && !isOnly;
   const [isEntering, setIsEntering] = useState(isNew && !shouldReduceMotion);
   const [showAddedHighlight, setShowAddedHighlight] = useState(isNew);
@@ -266,10 +256,10 @@ function SortableTabItem({
       {...attributes}
       {...listeners}
       onClick={handleClick}
-      aria-label={tab.pinned ? `${tab.title} (pinned)` : tab.title}
+      aria-label={tab.pinned ? `${title} (pinned)` : title}
       data-tab-active={isActive ? "true" : undefined}
       data-tab-entering={isEntering ? "true" : undefined}
-      title={tab.pinned ? `${tab.title} (pinned)` : undefined}
+      title={tab.pinned ? `${title} (pinned)` : undefined}
       style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties}
       className={cn(
         "group relative flex size-full min-w-0 items-center gap-1.5 px-2.5 text-xs transition-colors",
@@ -280,7 +270,7 @@ function SortableTabItem({
         isDragging && "opacity-60",
       )}
     >
-      {LeadingIcon && <LeadingIcon className="size-3.5 shrink-0" />}
+      <ResourceLeadingVisual visual={visual} />
       <span
         className="min-w-0 flex-1 overflow-hidden whitespace-nowrap text-left"
         style={{
@@ -288,7 +278,7 @@ function SortableTabItem({
           WebkitMaskImage: "linear-gradient(to right, black calc(100% - 12px), transparent)",
         }}
       >
-        {tab.title}
+        {title}
       </span>
       <span
         onClick={handleTogglePin}
@@ -499,7 +489,7 @@ function NewTabButton() {
     const activeSlug = useTabStore.getState().activeWorkspaceSlug;
     if (!activeSlug) return;
     const path = paths.workspace(activeSlug).issues();
-    const tabId = addTab(path, "Issues", resolveRouteIcon(path));
+    const tabId = addTab(path, "Issues");
     if (tabId) setActiveTab(tabId);
   };
 

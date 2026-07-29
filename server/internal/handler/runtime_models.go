@@ -74,11 +74,18 @@ type ModelListRequest struct {
 // field, which is fine: the UI hides the selector and the agent runs
 // with the runtime default.
 type ModelEntry struct {
-	ID       string         `json:"id"`
-	Label    string         `json:"label"`
-	Provider string         `json:"provider,omitempty"`
-	Default  bool           `json:"default,omitempty"`
-	Thinking *ModelThinking `json:"thinking,omitempty"`
+	ID           string             `json:"id"`
+	Label        string             `json:"label"`
+	Provider     string             `json:"provider,omitempty"`
+	Default      bool               `json:"default,omitempty"`
+	Thinking     *ModelThinking     `json:"thinking,omitempty"`
+	ServiceTiers []ModelServiceTier `json:"service_tiers,omitempty"`
+}
+
+type ModelServiceTier struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
 }
 
 // ModelThinking is the wire shape for the per-model thinking catalog.

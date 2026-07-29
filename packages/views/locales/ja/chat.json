@@ -21,7 +21,12 @@
     "send_blocked_toast": "メッセージは送信されませんでした — このエージェントを使用する権限がありません",
     "attachment_bind_failed_toast": "メッセージは送信されましたが、ファイルを添付できませんでした。しばらくしてからもう一度お試しください。",
     "add_tooltip": "追加",
-    "upload_file": "画像・ファイル"
+    "upload_file": "画像・ファイル",
+    "project_context": "プロジェクトコンテキスト",
+    "change_project_context": "プロジェクトコンテキストを変更",
+    "remove_project_context": "プロジェクトコンテキストを削除",
+    "no_projects": "プロジェクトがまだありません",
+    "project_context_unsupported": "プロジェクトの説明は適用されません——このエージェントのデーモンのアップグレードが必要です"
   },
   "message_list": {
     "show_details": "詳細を表示",

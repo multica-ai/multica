@@ -1,3 +1,4 @@
+import { StrictMode } from "react";
 import { act, render, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useAutoSave } from "./use-auto-save";
@@ -51,6 +52,23 @@ describe("useAutoSave success feedback", () => {
       expect(onSave).toHaveBeenCalledWith("saved");
       expect(onSuccess).toHaveBeenCalledWith("saved");
     });
+  });
+
+  it("still reports success under StrictMode's double-invoked mount", async () => {
+    // StrictMode runs setup/cleanup/setup on mount. A mount effect that only
+    // clears the mounted flag in cleanup leaves it false for the component's
+    // life, so a successful save is silently dropped: neither the "saved"
+    // status nor onSuccess ever fires and the indicator spins forever.
+    const onSave = vi.fn(async () => undefined);
+    const onSuccess = vi.fn();
+    render(
+      <StrictMode>
+        <AutoSaveHarness value="saved" onSave={onSave} onSuccess={onSuccess} />
+      </StrictMode>,
+    );
+
+    await waitFor(() => expect(onSave).toHaveBeenCalledWith("saved"));
+    await waitFor(() => expect(onSuccess).toHaveBeenCalledWith("saved"));
   });
 
   it("waits for the latest queued value before reporting success", async () => {

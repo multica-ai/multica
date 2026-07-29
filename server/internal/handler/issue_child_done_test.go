@@ -554,3 +554,124 @@ func TestChildDoneWakesLeaderWhenChildIsSameSquad(t *testing.T) {
 		t.Errorf("expected 1 pending leader task for same-squad child (MUL-3969), got %d", got)
 	}
 }
+
+// TestStageLeaderPrepareTimeoutRetryCanAdvanceNextStage covers the full server
+// half of MUL-4923's recovery chain: a stage barrier wakes the squad leader,
+// the pre-start attempt fails with the daemon's timeout reason, the atomic
+// retry preserves leader/squad/trigger provenance, and that retry can promote
+// the parked next stage as the leader actor.
+func TestStageLeaderPrepareTimeoutRetryCanAdvanceNextStage(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	fx := newChildDoneFixture(t, "in_progress")
+	sq := newSquadCommentTriggerFixture(t)
+	setIssueAssigneeDirect(t, fx.parent.ID, "squad", sq.SquadID)
+	setIssueAssigneeDirect(t, fx.child.ID, "squad", sq.SquadID)
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET stage = 1 WHERE id = $1`, fx.child.ID); err != nil {
+		t.Fatalf("set stage 1: %v", err)
+	}
+
+	// Stage 2 exists but is deliberately parked. The server wakes the leader at
+	// the Stage 1 barrier; only the leader decides to promote this child.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":           "stage 2 after prepare timeout",
+		"status":          "backlog",
+		"parent_issue_id": fx.parent.ID,
+		"stage":           2,
+		"assignee_type":   "squad",
+		"assignee_id":     sq.SquadID,
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("create stage 2: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var stage2 IssueResponse
+	if err := json.NewDecoder(w.Body).Decode(&stage2); err != nil {
+		t.Fatalf("decode stage 2: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id IN ($1, $2)`, fx.parent.ID, stage2.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, stage2.ID)
+	})
+
+	updateChildStatus(t, fx.child.ID, "done")
+	content := parentSystemCommentContent(t, fx.parent.ID)
+	if !strings.Contains(content, "Stage 2 is next") {
+		t.Fatalf("stage barrier comment does not identify Stage 2: %s", content)
+	}
+
+	var originalID, originalSquadID, originalTriggerID string
+	var originalLeader bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text, is_leader_task, squad_id::text, trigger_comment_id::text
+		FROM agent_task_queue
+		WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, fx.parent.ID, sq.LeaderID).Scan(&originalID, &originalLeader, &originalSquadID, &originalTriggerID); err != nil {
+		t.Fatalf("load Stage 1 leader wake: %v", err)
+	}
+	if !originalLeader || originalSquadID != sq.SquadID || originalTriggerID == "" {
+		t.Fatalf("leader wake provenance = leader:%v squad:%q trigger:%q", originalLeader, originalSquadID, originalTriggerID)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'dispatched', dispatched_at = now()
+		WHERE id = $1
+	`, originalID); err != nil {
+		t.Fatalf("dispatch original leader task: %v", err)
+	}
+
+	if _, err := testHandler.TaskService.FailTask(ctx, parseUUID(originalID), "task preparation timed out after 5m0s", "", "", "timeout"); err != nil {
+		t.Fatalf("fail original leader task: %v", err)
+	}
+
+	var retryID, retryStatus, retrySquadID, retryTriggerID string
+	var retryLeader bool
+	var retryAttempt int32
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text, status, is_leader_task, squad_id::text,
+		       trigger_comment_id::text, attempt
+		FROM agent_task_queue
+		WHERE parent_task_id = $1
+	`, originalID).Scan(&retryID, &retryStatus, &retryLeader, &retrySquadID, &retryTriggerID, &retryAttempt); err != nil {
+		t.Fatalf("load automatic retry: %v", err)
+	}
+	if retryStatus != "queued" || retryAttempt != 2 || !retryLeader || retrySquadID != originalSquadID || retryTriggerID != originalTriggerID {
+		t.Fatalf("retry provenance = status:%q attempt:%d leader:%v squad:%q trigger:%q; want queued attempt 2 with original leader context",
+			retryStatus, retryAttempt, retryLeader, retrySquadID, retryTriggerID)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'running', dispatched_at = now(), started_at = now()
+		WHERE id = $1
+	`, retryID); err != nil {
+		t.Fatalf("start retry leader task: %v", err)
+	}
+
+	// Act through the normal issue handler with the retry task as the agent
+	// identity. This is the operation the Stage handoff prompt asks the leader
+	// to perform, and proves the retry was not demoted to a generic worker.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/issues/"+stage2.ID, map[string]any{"status": "todo"})
+	req.Header.Set("X-Agent-ID", sq.LeaderID)
+	req.Header.Set("X-Task-ID", retryID)
+	req = withURLParam(req, "id", stage2.ID)
+	testHandler.UpdateIssue(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("retry leader promote Stage 2: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var stage2Status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, stage2.ID).Scan(&stage2Status); err != nil {
+		t.Fatalf("load promoted Stage 2: %v", err)
+	}
+	if stage2Status != "todo" {
+		t.Fatalf("Stage 2 status = %q, want todo", stage2Status)
+	}
+	if got := countPendingTasksForAgent(t, stage2.ID, sq.LeaderID); got != 1 {
+		t.Fatalf("promoted Stage 2 queued %d leader tasks, want 1", got)
+	}
+}

@@ -18,6 +18,8 @@ import (
 
 type fakePatcherQueries struct {
 	mu              sync.Mutex
+	task            db.AgentTaskQueue
+	taskErr         error
 	binding         ChatSessionBinding
 	bindingErr      error
 	installation    Installation
@@ -32,7 +34,7 @@ type fakePatcherQueries struct {
 }
 
 func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
-	return db.AgentTaskQueue{}, nil
+	return f.task, f.taskErr
 }
 func (f *fakePatcherQueries) GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error) {
 	return db.ChatSession{}, nil
@@ -342,6 +344,52 @@ func TestPatcherSkipsWhenNoChatSessionBinding(t *testing.T) {
 	if len(api.textSent) != 0 || len(api.sent) != 0 {
 		t.Fatalf("web-only chat sessions must produce no outbound; got text=%d cards=%d",
 			len(api.textSent), len(api.sent))
+	}
+}
+
+// TestPatcherSkipsDirectChatTaskOnBoundSession guards the channel boundary:
+// opening a Lark-bound session in the web/mobile UI must not make that direct
+// conversation's reply or failure leak back into the external chat. Direct
+// tasks own an input batch through chat_input_task_id; channel tasks leave it
+// NULL and continue through the existing outbound paths.
+func TestPatcherSkipsDirectChatTaskOnBoundSession(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		payload   any
+	}{
+		{
+			name:      "completed reply",
+			eventType: protocol.EventChatDone,
+			payload:   protocol.ChatDonePayload{Content: "web-only answer"},
+		},
+		{
+			name:      "failed run",
+			eventType: protocol.EventTaskFailed,
+			payload:   map[string]any{"error": "web-only failure"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, q, api := newTestPatcher(t)
+			taskID := uuidFromString(t, "ee999999-ee99-ee99-ee99-eeeeeeeeeeee")
+			q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+
+			p.handleEvent(events.Event{
+				Type:          tt.eventType,
+				TaskID:        uuidString(taskID),
+				ChatSessionID: uuidString(q.binding.ChatSessionID),
+				Payload:       tt.payload,
+			})
+
+			api.mu.Lock()
+			defer api.mu.Unlock()
+			if len(api.textSent) != 0 || len(api.mdCardSent) != 0 || len(api.sent) != 0 || len(api.patched) != 0 {
+				t.Fatalf("direct task must produce no channel outbound; got text=%d markdown=%d cards=%d patches=%d",
+					len(api.textSent), len(api.mdCardSent), len(api.sent), len(api.patched))
+			}
+		})
 	}
 }
 

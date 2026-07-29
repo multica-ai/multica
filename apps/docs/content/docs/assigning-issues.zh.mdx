@@ -50,7 +50,9 @@ multica issue assign MUL-42 --unassign
 1. 入队一个 `queued` 状态的 `task`，优先级继承自 issue，路由到该智能体所在的运行时
 2. 该智能体的守护进程下次轮询时把 `task` 领走，状态变成 `dispatched`
 3. 智能体开始执行，`task` 转成 `running`；完成后转成 `completed` / `failed`
-4. 执行过程中智能体可以改 issue 状态、发评论、改字段——这些动作以智能体的身份出现
+4. 执行过程中智能体应按约定管理 issue 状态（通常是 `todo` → `in_progress`，交付后再到 `in_review`）、发评论、改字段——这些动作以智能体的身份出现。`task` 生命周期和 issue 状态是分开的：`task` 完成本身不会自动改 issue 状态
+
+当 assignee 是 [小队](/squads) 时，同样的状态约定适用：Multica 入队的是**队长**，队长首次接单时应把父 issue 推到 `in_progress`，并在成员干活期间保持该状态。只有整体目标达成后，队长才把父 issue 推到 `in_review`——第一次成功分发不等于完成。
 
 **如果智能体离线**，`task` 会在队列里等——**5 分钟没被领走就超时失败**，失败原因 `runtime_offline`。对可重试的来源（分配、@ 提及、对话），Multica 会自动重新排队；完整重试规则见 [**执行任务**](/tasks)。
 

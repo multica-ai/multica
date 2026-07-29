@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 import { afterEach, describe, it, expect } from "vitest";
@@ -429,5 +429,51 @@ describe("envWithLocalBins", () => {
       workspaceBin,
       "runner-bin",
     ]);
+  });
+});
+
+describe("electron-builder.yml packaging config", () => {
+  // Regression guard for github.com/multica-ai/multica/issues/5595. The
+  // multi-arch release build writes each target's output to
+  // dist/<platform>-<arch> in the same apps/desktop dir; electron-builder
+  // only auto-excludes the *current* target's output dir, so without an
+  // explicit `!dist/**` the earlier arch's dist/ was repacked into the next
+  // arch's app.asar. That inflated the Intel (x64) DMG until its Electron
+  // Framework binary was dropped and Intel Macs crashed on launch. Keep the
+  // exclusion pinned so a future edit to the files list cannot drop it
+  // unnoticed.
+  // Resolve electron-builder.yml relative to cwd, tolerating vitest running
+  // from either the desktop package dir or the repo root — import.meta.url is
+  // not a file:// URL under the test transform, so avoid fileURLToPath here.
+  const configPath = [
+    resolve(process.cwd(), "electron-builder.yml"),
+    resolve(process.cwd(), "apps/desktop/electron-builder.yml"),
+  ].find((candidate) => existsSync(candidate));
+
+  // Extract the entries of the top-level `files:` block sequence without a
+  // YAML dependency: collect the `  - "…"` items that follow `files:` up to
+  // the next top-level key. Commented (`#`) lines are ignored, so a
+  // commented-out exclusion would (correctly) not count.
+  function readFilesBlock(raw) {
+    const lines = raw.split("\n");
+    const start = lines.findIndex((l) => /^files:\s*$/.test(l));
+    if (start === -1) return [];
+    const entries = [];
+    for (let i = start + 1; i < lines.length; i += 1) {
+      const line = lines[i];
+      if (/^\S/.test(line)) break; // next top-level key ends the block
+      const trimmed = line.trim();
+      if (trimmed === "" || trimmed.startsWith("#")) continue;
+      const m = trimmed.match(/^-\s*"?(.*?)"?\s*$/);
+      if (m) entries.push(m[1]);
+    }
+    return entries;
+  }
+
+  it("excludes the dist output directory from the packaged files", () => {
+    expect(configPath, "electron-builder.yml not found").toBeTruthy();
+    const entries = readFilesBlock(readFileSync(configPath, "utf-8"));
+    expect(entries.length).toBeGreaterThan(0);
+    expect(entries).toContain("!dist/**");
   });
 });

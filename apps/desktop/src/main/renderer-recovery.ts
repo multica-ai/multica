@@ -37,6 +37,8 @@ type RendererRecoveryOptions = {
   unresponsivePromptDelayMs?: number;
 };
 
+const noopDevLog = () => undefined;
+
 export function installRendererRecoveryHandlers(
   window: RendererRecoveryWindow,
   {
@@ -45,7 +47,7 @@ export function installRendererRecoveryHandlers(
     getDiagnosticContext,
     persistBreadcrumb,
     clearBreadcrumb,
-    log = defaultDevLog,
+    log = noopDevLog,
     unresponsivePromptDelayMs = 1500,
   }: RendererRecoveryOptions,
 ) {
@@ -184,10 +186,6 @@ function rendererRecoveryDetail(payload: ReloadPromptPayload) {
     `kind: ${payload.kind}`,
     `context: ${JSON.stringify(payload.context)}`,
   ].join("\n");
-}
-
-function defaultDevLog(tag: string, ...args: unknown[]) {
-  process.stderr.write(`[renderer ${tag}] ${args.map(String).join(" ")}\n`);
 }
 
 function readDiagnosticContext(

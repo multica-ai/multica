@@ -169,6 +169,20 @@ describe("chat store — open/closed default", () => {
   });
 });
 
+describe("chat store — selected project", () => {
+  it("persists and clears the next chat's project per workspace", () => {
+    const storage = memStorage();
+    const store = createChatStore({ storage });
+
+    store.getState().setSelectedProjectId("project-1");
+    expect(storage.getItem("multica:chat:selectedProjectId")).toBe("project-1");
+    expect(createChatStore({ storage }).getState().selectedProjectId).toBe("project-1");
+
+    store.getState().setSelectedProjectId(null);
+    expect(storage.getItem("multica:chat:selectedProjectId")).toBeNull();
+  });
+});
+
 describe("chat store — draft attachments", () => {
   let store: ReturnType<typeof createChatStore>;
 

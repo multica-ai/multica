@@ -2,6 +2,7 @@
 
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { TriangleAlert } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import {
   ContentEditor,
@@ -17,7 +18,8 @@ import { createLogger } from "@multica/core/logger";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
 import type { UploadResult } from "@multica/core/hooks/use-file-upload";
 import type { MentionItem } from "../../editor/extensions/mention-suggestion";
-import type { Attachment } from "@multica/core/types";
+import type { Attachment, Project } from "@multica/core/types";
+import { ProjectPicker } from "../../projects/components/project-picker";
 import { useT } from "../../i18n";
 
 const logger = createLogger("chat.ui");
@@ -95,6 +97,16 @@ interface ChatInputProps {
   leftAdornment?: ReactNode;
   /** Chat @ suggestions: current/recent issue/project entries. */
   contextItems?: MentionItem[];
+  /** Optional project context for the draft or current chat session. */
+  projects?: Project[];
+  projectId?: string | null;
+  onProjectChange?: (projectId: string | null) => void;
+  isProjectUpdating?: boolean;
+  /** True when the active agent's daemon is too old to inject the project
+   *  description into the run brief. Soft signal: selection stays enabled,
+   *  the composer only surfaces a warning next to the chip and in the
+   *  project submenu. */
+  projectContextUnsupported?: boolean;
   /** Monotonic nonce bumped by the owner whenever the compose box should grab
    *  keyboard focus — currently on "new chat" so the user can type right away.
    *  0 (the initial value) is inert, so a plain deep-link open never steals
@@ -122,6 +134,11 @@ export function ChatInput({
   agentName,
   leftAdornment,
   contextItems,
+  projects = [],
+  projectId,
+  onProjectChange,
+  isProjectUpdating,
+  projectContextUnsupported,
   focusRequest,
   draftKeyOverride,
   editorKeyOverride,
@@ -148,7 +165,7 @@ export function ChatInput({
   //   - Placeholder: ContentEditor's placeholder-sync effect refreshes it live,
   //     so it never needed a remount.
   //   - Draft restore (a cancelled run, a failed send): writes into
-  //     `inputDraft`, and the editor's defaultValue-sync effect pushes it into
+  //     `inputDraft`, and the editor's synchronized-value effect pushes it into
   //     the live instance. There is no second copy to drift or resurface.
   //   - Session switch / lazy create: when the user uploads a file in a
   //     brand-new chat, `handleUploadFile` awaits `ensureSession`, which flips
@@ -175,7 +192,7 @@ export function ChatInput({
   // debounce, so the send affordance cannot be derived from `inputDraft` alone.
   // But `isEmpty` is never re-derived when the composer switches draft slots
   // either: ChatInput does not remount on a session switch, and ContentEditor's
-  // defaultValue-sync pushes the incoming draft in with `emitUpdate: false`, so
+  // synchronized-value effect pushes the incoming draft in with `emitUpdate: false`, so
   // no onUpdate fires. Read BOTH signals — a draft `isEmpty` has not seen yet (a
   // restored or parked one, or any persisted draft the user typed in another
   // session) still enables the button. A false enable costs nothing: handleSend
@@ -230,7 +247,7 @@ export function ChatInput({
 
   // Move the editor from the draft it holds to the draft that is selected.
   //
-  // Two hazards make this more than "let the defaultValue sync handle it":
+  // Two hazards make this more than "let the value sync handle it":
   //
   // 1. Unflushed keystrokes. `onUpdate` is debounced, and by the time a
   //    debounce armed under draft A fires, `onUpdate` resolves to the latest
@@ -243,7 +260,7 @@ export function ChatInput({
   //    a worse trade — the user waits on a network round-trip to change tabs.
   //
   // Case 2 also has to force the adopt afterwards: ContentEditor's sync effect
-  // CONSUMED the defaultValue change while Guard 0 was up (lastDefaultValueRef
+  // CONSUMED the value change while Guard 0 was up (lastSyncedValueRef
   // advances before the guard), so it will never re-run for that value and the
   // target draft would never load on its own.
   //
@@ -488,11 +505,29 @@ export function ChatInput({
         : t(($) => $.input.placeholder_default);
 
   const uploadEnabled = !!onUploadFile && !disabled && !noAgent;
+  // Lock only while the send request itself is creating/resolving the target
+  // session. Once accepted, its project can still be detached while agent work
+  // continues: changing session metadata does not cancel or move that task.
+  const projectSelectionEnabled =
+    !!onProjectChange &&
+    !disabled &&
+    !noAgent &&
+    !isSubmitting &&
+    !isProjectUpdating;
+  const selectedProject = projects.find((project) => project.id === projectId);
 
   return (
     <div
       className={cn(
-        "px-5 pb-3 pt-0",
+        // The composer grows with the draft up to half the surface it sits on
+        // — a fixed 160px cap made long drafts unreadable in a five-line
+        // porthole (MUL-5196). `max-h-[50%]` resolves against the chat
+        // surface (floating window, chat tab, agent builder), all of which
+        // give this wrapper a definite height, so the cap scales when the
+        // user resizes or expands the window. The wrapper must be a flex
+        // column for the card below to shrink into that cap instead of
+        // spilling out of it.
+        "flex max-h-[50%] min-h-0 flex-col px-5 pb-3 pt-0",
         // Outer wrapper carries the disabled cursor. Inner card sets
         // pointer-events-none, which suppresses hover (and therefore
         // any cursor of its own) — splitting the two layers lets hover
@@ -503,7 +538,12 @@ export function ChatInput({
       <div
         {...(uploadEnabled ? dropZoneProps : {})}
         className={cn(
-          "relative mx-auto flex min-h-16 max-h-40 w-full max-w-4xl flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
+          // max-h-96 is the absolute ceiling on top of the wrapper's 50%: on a
+          // tall surface half the height is more composer than anyone reads at
+          // once, and it keeps the cap finite if a future host ever mounts the
+          // composer without a definite height (percentage max-height would
+          // then resolve to none).
+          "relative mx-auto flex min-h-16 max-h-96 w-full max-w-4xl flex-col rounded-lg border border-surface-border bg-surface pb-9 transition-[border-color,box-shadow] focus-within:border-brand focus-within:ring-2 focus-within:ring-ring/20",
           // Visual + interaction lock when there's no agent. We don't
           // toggle ContentEditor's editable mode (Tiptap can't switch
           // cleanly post-mount, and the prop has been removed); instead
@@ -514,13 +554,44 @@ export function ChatInput({
         )}
         aria-disabled={noAgent || undefined}
       >
+        {selectedProject && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pt-2">
+            <div
+              className={cn(
+                "inline-flex max-w-full",
+                !projectSelectionEnabled && "pointer-events-none opacity-60",
+              )}
+            >
+              <ProjectPicker
+                projectId={selectedProject.id}
+                onUpdate={(updates) => onProjectChange?.(updates.project_id ?? null)}
+                disabled={!projectSelectionEnabled}
+                triggerRender={
+                  <button
+                    type="button"
+                    disabled={!projectSelectionEnabled}
+                    aria-label={t(($) => $.input.change_project_context)}
+                    title={t(($) => $.input.change_project_context)}
+                    className="flex h-6 max-w-56 items-center gap-1.5 rounded-full border border-surface-border bg-surface-raised px-2 pr-7 text-xs font-medium text-foreground transition-colors hover:bg-accent/60"
+                  />
+                }
+              />
+            </div>
+            {projectContextUnsupported && (
+              <span className="inline-flex min-w-0 items-center gap-1 text-xs text-warning">
+                <TriangleAlert className="size-3 shrink-0" />
+                {t(($) => $.input.project_context_unsupported)}
+              </span>
+            )}
+          </div>
+        )}
         <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2">
           <ContentEditor
             // See the editorKey / draftKey split note above — editor identity
             // intentionally tracks neither the session nor the agent.
             key={editorKey}
             ref={editorRef}
-            defaultValue={inputDraft}
+            value={inputDraft}
             placeholder={placeholder}
             onUpdate={(md) => {
               setIsEmpty(!md.trim());
@@ -537,16 +608,26 @@ export function ChatInput({
             mentionMode={contextItems ? "context" : "default"}
             mentionContextItems={contextItems}
             enableSlashCommands
-            // Chat is short-form — the floating formatting toolbar is
-            // more distraction than feature here.
-            showBubbleMenu={false}
+            // The bubble menu carries the only affordance that can strip
+            // formatting — "Normal text" (setParagraph) plus the mark/list
+            // toggles. Once a `# ` input rule or a Markdown/HTML paste turns a
+            // line into a heading, chat has no other way to remove it, so
+            // without the bubble menu formatting can be created but never
+            // undone (MUL-5106).
+            showBubbleMenu
           />
         </div>
-        {(uploadEnabled || leftAdornment) && (
+        {(uploadEnabled || projectSelectionEnabled || leftAdornment) && (
           <div className="absolute bottom-1.5 left-1.5 flex items-center gap-1">
-            {uploadEnabled && (
+            {(uploadEnabled || projectSelectionEnabled) && (
               <ChatAddMenu
-                onSelectFile={(file) => editorRef.current?.uploadFile(file)}
+                onSelectFile={uploadEnabled
+                  ? (file) => editorRef.current?.uploadFile(file)
+                  : undefined}
+                projects={projects}
+                projectId={projectId}
+                onSelectProject={projectSelectionEnabled ? onProjectChange : undefined}
+                projectContextUnsupported={projectContextUnsupported}
               />
             )}
             {leftAdornment}

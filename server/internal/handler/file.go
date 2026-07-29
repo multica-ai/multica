@@ -571,7 +571,28 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+	resp := h.attachmentToResponse(att)
+	// Token-mode clients use this authenticated endpoint to replace the
+	// auth-gated API path with a URL that native media elements can load.
+	// Assert the same storage.DownloadPresigner that resolveAttachmentDownloadMode
+	// keys its presign decision on, so the mode resolution and the presign call
+	// can never disagree. An empty content disposition inherits the object's
+	// stored Content-Disposition (inline for media, attachment otherwise), which
+	// keeps images renderable inline while preserving the original download
+	// filename.
+	if h.CFSigner == nil && h.resolveAttachmentDownloadMode(att.Url) == attachmentDownloadModePresign {
+		if presigner, ok := h.Storage.(storage.DownloadPresigner); ok {
+			key := h.Storage.KeyFromURL(att.Url)
+			signedURL, err := presigner.PresignGetWithContentDisposition(r.Context(), key, h.attachmentDownloadURLTTL(), "")
+			if err != nil {
+				slog.Warn("failed to presign inline attachment URL", "id", uuidToString(att.ID), "key", key, "error", err)
+			} else {
+				resp.DownloadURL = signedURL
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) loadAttachmentForRequest(w http.ResponseWriter, r *http.Request) (db.Attachment, bool) {

@@ -124,6 +124,11 @@ backend:
     # every caller. Bootstrap the workspace with this false, then flip to
     # true so users can only join via invitation.
     disableWorkspaceCreation: false
+    # Self-host-only VCS integration (Forgejo / Gitea / GitLab). The official
+    # chart enables the product surface by default; operators must also provide
+    # MULTICA_VCS_SECRET_KEY through existingSecret before connections work.
+    # Set false to hide and reject the integration for this deployment.
+    vcsIntegrationEnabled: true
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
     s3Bucket: ""
@@ -144,23 +149,27 @@ backend:
 
 # -----------------------------------------------------------------------------
 # Frontend (Next.js standalone)
-#
-# The multica-web image bakes REMOTE_API_URL=http://backend:8080 at build time;
-# the chart ships an ExternalName Service named "backend" so that bare host
-# resolves to the in-cluster backend Service.
 # -----------------------------------------------------------------------------
 frontend:
   replicas: 1
-  # Compatibility shim for the prebuilt multica-web image.
+  config:
+    # Backend origin used by the frontend runtime proxy for /api, /auth,
+    # /uploads, and /ws. Empty defaults to this release's backend Service.
+    remoteApiUrl: ""
+    # Optional docs origin used by the frontend runtime proxy for /docs.
+    docsUrl: ""
+    # Optional browser-visible split-origin overrides. Leave empty for the
+    # default same-origin frontend proxy.
+    publicApiUrl: ""
+    publicWsUrl: ""
+  # Compatibility shim for legacy multica-web images built before runtime
+  # URL rewrites. New images do not need this unprefixed Service.
   compatibility:
-    # When true (default) the chart creates an ExternalName Service literally
-    # named "backend" so the REMOTE_API_URL=http://backend:8080 baked into the
-    # web image resolves in-cluster. Because that name is unprefixed, only ONE
-    # release of this chart can run per namespace, and it will collide with any
-    # pre-existing Service/backend (helm install then fails without
-    # --take-ownership). Set to false if you run a web image built with a
-    # patched REMOTE_API_URL and don't need the alias.
-    backendAlias: true
+    # When true the chart creates an ExternalName Service literally named
+    # "backend" for old images that baked REMOTE_API_URL=http://backend:8080.
+    # Because that name is unprefixed, only ONE such release can run per
+    # namespace. Keep false for current images.
+    backendAlias: false
   resources:
     requests:
       cpu: 100m

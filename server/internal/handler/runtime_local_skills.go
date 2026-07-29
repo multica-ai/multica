@@ -183,9 +183,10 @@ type RuntimeLocalSkillSummary struct {
 	// for a skill contributed by an enabled runtime plugin. Daemons
 	// that predate multi-root discovery omit it; an empty value means
 	// "unknown" and the UI should not assert either origin.
-	Root      string `json:"root,omitempty"`
-	Plugin    string `json:"plugin,omitempty"`
-	FileCount int    `json:"file_count"`
+	Root       string `json:"root,omitempty"`
+	Plugin     string `json:"plugin,omitempty"`
+	CanDisable bool   `json:"can_disable,omitempty"`
+	FileCount  int    `json:"file_count"`
 }
 
 // RuntimeLocalMcpServerSummary is deliberately non-secret. The daemon only

@@ -13,7 +13,7 @@ export interface ClientIdentity {
   platform?: string;
   /** Client/app version string (e.g. "0.1.0"). */
   version?: string;
-  /** Operating system: "macos" | "windows" | "linux". */
+  /** Coarse operating-system bucket (for example "macos", "windows", or "linux"). */
   os?: string;
 }
 

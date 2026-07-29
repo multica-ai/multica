@@ -131,13 +131,16 @@ export function useAutoSave<T>({
     };
   }, [delay, enabled, isEqual, runSave, value]);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // Restore the invariant on every mount. Under React StrictMode the initial
+    // setup/cleanup/setup cycle would otherwise leave mountedRef pinned to false
+    // for the component's whole life, stranding status at "saving".
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
       if (timerRef.current) clearTimeout(timerRef.current);
-    },
-    [],
-  );
+    };
+  }, []);
 
   return { status, flush, saveNow };
 }

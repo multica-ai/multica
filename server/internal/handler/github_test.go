@@ -21,6 +21,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -160,6 +161,52 @@ func TestDerivePRState(t *testing.T) {
 			t.Errorf("derivePRState(%q, draft=%v, merged=%v) = %q, want %q",
 				tc.state, tc.draft, tc.merged, got, tc.want)
 		}
+	}
+}
+
+func TestIssuePullRequestResponseHidesUnavailableSnapshot(t *testing.T) {
+	fetchedAt := pgtype.Timestamptz{Time: time.Now(), Valid: true}
+	row := db.ListPullRequestsByIssueRow{
+		State:               "open",
+		HeadSha:             "B",
+		SnapshotHeadSha:     "A",
+		SnapshotFetchedAt:   fetchedAt,
+		ApiMergeable:        pgtype.Text{String: "CONFLICTING", Valid: true},
+		ApiMergeStateStatus: pgtype.Text{String: "DIRTY", Valid: true},
+		ChecksRollupState:   pgtype.Text{String: "FAILURE", Valid: true},
+		ChecksTotal:         1,
+		ChecksFailed:        1,
+		FailedCheckNames:    []string{"backend"},
+	}
+
+	// A synchronize webhook moved the row to B while the last stored snapshot
+	// still belongs to A. Old data must not be presented as fresh B data.
+	resp := issuePullRequestRowToResponse(row, true)
+	if resp.SnapshotAvailable == nil || *resp.SnapshotAvailable {
+		t.Fatal("mismatched-head snapshot must be marked unavailable")
+	}
+	if resp.Mergeable != nil || resp.ChecksRollup != nil || resp.ChecksFailed != 0 {
+		t.Fatalf("mismatched-head snapshot leaked into response: %+v", resp)
+	}
+
+	// Even a current stored snapshot is hidden when no App private key is
+	// configured. This covers deployments that disable the feature after data
+	// was already written.
+	row.SnapshotHeadSha = "B"
+	resp = issuePullRequestRowToResponse(row, false)
+	if resp.SnapshotAvailable == nil || *resp.SnapshotAvailable {
+		t.Fatal("disabled snapshot feature must be marked unavailable")
+	}
+	if resp.Mergeable != nil || resp.ChecksRollup != nil || resp.ChecksFailed != 0 {
+		t.Fatalf("disabled feature exposed last-known snapshot: %+v", resp)
+	}
+
+	resp = issuePullRequestRowToResponse(row, true)
+	if resp.SnapshotAvailable == nil || !*resp.SnapshotAvailable {
+		t.Fatal("enabled current-head snapshot must be available")
+	}
+	if resp.Mergeable == nil || *resp.Mergeable != "conflicting" || resp.ChecksFailed != 1 {
+		t.Fatalf("current snapshot was not exposed: %+v", resp)
 	}
 }
 
@@ -1463,35 +1510,6 @@ func TestDerivePRMergeableState(t *testing.T) {
 	}
 }
 
-func TestAggregateChecksConclusion(t *testing.T) {
-	str := func(p *string) string {
-		if p == nil {
-			return "<nil>"
-		}
-		return *p
-	}
-	cases := []struct {
-		name                           string
-		failed, passed, pending, total int64
-		want                           string
-	}{
-		{"no_suites_nil", 0, 0, 0, 0, "<nil>"},
-		{"any_failure_wins", 1, 5, 0, 6, "failed"},
-		{"failure_beats_pending", 1, 0, 3, 4, "failed"},
-		{"pending_when_no_failure", 0, 1, 2, 3, "pending"},
-		{"all_passed", 0, 3, 0, 3, "passed"},
-		{"counts_zero_but_total_nonzero_returns_nil", 0, 0, 0, 1, "<nil>"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			got := aggregateChecksConclusion(tc.failed, tc.passed, tc.pending, tc.total)
-			if str(got) != tc.want {
-				t.Errorf("aggregateChecksConclusion = %s, want %s", str(got), tc.want)
-			}
-		})
-	}
-}
-
 // firePullRequestWebhookWithHead is like firePullRequestWebhook but lets the
 // caller control the head SHA and mergeable_state on the payload. The CI
 // tests need both knobs to exercise head-change semantics.
@@ -1537,54 +1555,6 @@ func firePullRequestWebhookWithHead(t *testing.T, secret, identifier string, ins
 	}
 }
 
-func fireCheckSuiteWebhook(t *testing.T, secret string, installationID int64, repo string, prNumbers []int32, suiteID, appID int64, headSHA, conclusion, updatedAt string) {
-	t.Helper()
-	fireCheckSuiteWebhookWithStatus(t, secret, installationID, repo, prNumbers,
-		suiteID, appID, headSHA, "completed", "completed", conclusion, updatedAt)
-}
-
-// fireCheckSuiteWebhookWithStatus is the parametric form of
-// fireCheckSuiteWebhook. Tests covering the `requested`/`rerequested` and
-// `queued`/`in_progress` matrix use it directly; the legacy completed-only
-// helper above wraps it for existing call sites.
-func fireCheckSuiteWebhookWithStatus(t *testing.T, secret string, installationID int64, repo string, prNumbers []int32, suiteID, appID int64, headSHA, action, status, conclusion, updatedAt string) {
-	t.Helper()
-	prRefs := make([]map[string]any, 0, len(prNumbers))
-	for _, n := range prNumbers {
-		prRefs = append(prRefs, map[string]any{"number": n})
-	}
-	payload := map[string]any{
-		"action": action,
-		"check_suite": map[string]any{
-			"id":            suiteID,
-			"head_sha":      headSHA,
-			"status":        status,
-			"conclusion":    conclusion,
-			"updated_at":    updatedAt,
-			"app":           map[string]any{"id": appID},
-			"pull_requests": prRefs,
-		},
-		"repository": map[string]any{
-			"name":  repo,
-			"owner": map[string]any{"login": "acme"},
-		},
-		"installation": map[string]any{"id": installationID},
-	}
-	raw, _ := json.Marshal(payload)
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write(raw)
-	sig := "sha256=" + hex.EncodeToString(mac.Sum(nil))
-
-	rec := httptest.NewRecorder()
-	hookReq := httptest.NewRequest("POST", "/api/webhooks/github", bytes.NewReader(raw))
-	hookReq.Header.Set("X-GitHub-Event", "check_suite")
-	hookReq.Header.Set("X-Hub-Signature-256", sig)
-	testHandler.HandleGitHubWebhook(rec, hookReq)
-	if rec.Code != http.StatusAccepted {
-		t.Fatalf("check_suite webhook: expected 202, got %d (%s)", rec.Code, rec.Body.String())
-	}
-}
-
 func setupPRTestIssue(t *testing.T, ctx context.Context, secret string) (IssueResponse, int64) {
 	t.Helper()
 	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
@@ -1619,259 +1589,6 @@ func setupPRTestIssue(t *testing.T, ctx context.Context, secret string) (IssueRe
 		t.Fatalf("CreateGitHubInstallation: %v", err)
 	}
 	return created, installationID
-}
-
-// TestWebhook_CheckSuite_AggregatesAcrossApps ensures the list query reports
-// "failed" when one app's latest suite is a failure and another app's is a
-// success on the same head. Without per-app aggregation, the last-completed
-// suite would silently flip the verdict.
-func TestWebhook_CheckSuite_AggregatesAcrossApps(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	ctx := context.Background()
-	const secret = "ci-aggregate-secret"
-	created, installationID := setupPRTestIssue(t, ctx, secret)
-
-	head := "abc1234567890"
-	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-a", 11, "opened", head, "")
-	// App A → success, App B → failure. The list query must report failed.
-	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-a", []int32{11}, 1001, 7001, head, "success", "2026-05-01T00:00:00Z")
-	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-a", []int32{11}, 1002, 7002, head, "failure", "2026-05-01T00:01:00Z")
-
-	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 PR row, got %d", len(rows))
-	}
-	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
-	if got == nil || *got != "failed" {
-		t.Errorf("expected aggregate failed, got %v (counts: failed=%d passed=%d pending=%d total=%d)",
-			got, rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
-	}
-}
-
-// TestWebhook_CheckSuite_OldHeadIgnored asserts that a late-arriving
-// check_suite for a stale head SHA doesn't contaminate the current head's
-// pending view. Without the head_sha filter in the aggregation query, the
-// new head would inherit the old head's "passed" verdict.
-func TestWebhook_CheckSuite_OldHeadIgnored(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	ctx := context.Background()
-	const secret = "ci-oldhead-secret"
-	created, installationID := setupPRTestIssue(t, ctx, secret)
-
-	oldHead := "old1111111111"
-	newHead := "new2222222222"
-
-	// First: open the PR at old head, run a passing suite.
-	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-b", 22, "opened", oldHead, "")
-	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-b", []int32{22}, 2001, 8001, oldHead, "success", "2026-05-01T00:00:00Z")
-
-	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
-	if got == nil || *got != "passed" {
-		t.Fatalf("setup: expected passed on old head, got %v", got)
-	}
-
-	// Then: synchronize to new head — no new suite yet. Then a late suite
-	// for the OLD head fires (e.g. a delayed delivery). The current aggregate
-	// must be nil (no suite for the new head).
-	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-b", 22, "synchronize", newHead, "")
-	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-b", []int32{22}, 2002, 8001, oldHead, "success", "2026-05-01T00:05:00Z")
-
-	rows, err = testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	got = aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
-	if got != nil {
-		t.Errorf("expected no aggregate (nil) after head change, got %v", got)
-	}
-}
-
-// TestWebhook_CheckSuite_LateOlderEventIgnored guards the single-row ordering
-// rule: for the same (pr_id, suite_id) the upsert must not let a later-
-// delivered older event overwrite the latest one. We send the newer state
-// (failure) first and then the older (success) and assert the row still
-// reads failure.
-func TestWebhook_CheckSuite_LateOlderEventIgnored(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	ctx := context.Background()
-	const secret = "ci-ordering-secret"
-	created, installationID := setupPRTestIssue(t, ctx, secret)
-
-	head := "ord1234567890"
-	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-c", 33, "opened", head, "")
-	// Latest event first.
-	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-c", []int32{33}, 3001, 9001, head, "failure", "2026-05-01T01:00:00Z")
-	// Late-arriving older event for the same suite.
-	fireCheckSuiteWebhook(t, secret, installationID, "ci-repo-c", []int32{33}, 3001, 9001, head, "success", "2026-05-01T00:00:00Z")
-
-	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
-	if got == nil || *got != "failed" {
-		t.Errorf("expected failure to win against later-delivered older success, got %v", got)
-	}
-}
-
-// TestWebhook_CheckSuite_QueuedCountsAsPending covers the "CI 跑到一半" path:
-// GitHub fires `check_suite.requested` with status `queued` and an empty
-// conclusion while CI is still spinning up. The handler must persist these
-// non-terminal events so the per-PR `checks_pending` count reflects work in
-// progress; otherwise the frontend falls through to the "checks not
-// reported yet" placeholder until the first completed suite arrives.
-func TestWebhook_CheckSuite_QueuedCountsAsPending(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	ctx := context.Background()
-	const secret = "ci-pending-secret"
-	created, installationID := setupPRTestIssue(t, ctx, secret)
-
-	head := "pending1234567"
-	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-pending", 55, "opened", head, "")
-	// CI just kicked off — `requested` action, status=queued, no conclusion.
-	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-pending", []int32{55}, 4001, 6001, head, "requested", "queued", "", "2026-05-01T00:00:00Z")
-	// A second app's suite starts a moment later with status=in_progress.
-	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-pending", []int32{55}, 4002, 6002, head, "requested", "in_progress", "", "2026-05-01T00:00:30Z")
-
-	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 PR row, got %d", len(rows))
-	}
-	if rows[0].ChecksPending != 2 || rows[0].ChecksTotal != 2 ||
-		rows[0].ChecksFailed != 0 || rows[0].ChecksPassed != 0 {
-		t.Fatalf("expected pending=2 total=2 failed=0 passed=0, got pending=%d total=%d failed=%d passed=%d",
-			rows[0].ChecksPending, rows[0].ChecksTotal, rows[0].ChecksFailed, rows[0].ChecksPassed)
-	}
-	got := aggregateChecksConclusion(rows[0].ChecksFailed, rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
-	if got == nil || *got != "pending" {
-		t.Errorf("expected aggregate pending while CI is running, got %v", got)
-	}
-
-	// Now one app completes successfully — pending count drops to 1 and the
-	// aggregate stays pending until the second app finishes.
-	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-pending", []int32{55}, 4001, 6001, head, "completed", "completed", "success", "2026-05-01T00:05:00Z")
-	rows, err = testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	if rows[0].ChecksPending != 1 || rows[0].ChecksPassed != 1 || rows[0].ChecksTotal != 2 {
-		t.Fatalf("expected pending=1 passed=1 total=2 after one suite completes, got pending=%d passed=%d total=%d",
-			rows[0].ChecksPending, rows[0].ChecksPassed, rows[0].ChecksTotal)
-	}
-}
-
-// TestWebhook_CheckSuite_OutOfOrderReplaysOnPRUpsert covers the out-of-order
-// path: a `check_suite` event arrives before the matching `pull_request`
-// row has been mirrored locally (e.g. webhook reordering, or the PR was
-// linked to an installation that was suspended/resumed). The handler must
-// stash the suite and replay it when the PR upsert arrives, otherwise the
-// PR's first observed suite is silently lost and `checks_pending` stays at
-// 0 until the next suite ships.
-func TestWebhook_CheckSuite_OutOfOrderReplaysOnPRUpsert(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	ctx := context.Background()
-	const secret = "ci-oooreplay-secret"
-	created, installationID := setupPRTestIssue(t, ctx, secret)
-
-	head := "oo01234567890"
-	// Suite event lands FIRST — the PR row does not exist yet.
-	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-ooo", []int32{66}, 5001, 7501, head, "requested", "in_progress", "", "2026-05-01T00:00:00Z")
-
-	// Verify nothing landed on the PR table yet (no PR row to land on).
-	if rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID)); err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	} else if len(rows) != 0 {
-		t.Fatalf("expected 0 PR rows before PR webhook, got %d", len(rows))
-	}
-
-	// Now the pull_request webhook arrives. The handler must drain the
-	// pending stash and replay it onto this PR.
-	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-ooo", 66, "opened", head, "")
-
-	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 PR row after PR webhook, got %d", len(rows))
-	}
-	if rows[0].ChecksPending != 1 || rows[0].ChecksTotal != 1 {
-		t.Fatalf("expected pending=1 total=1 after replay, got pending=%d total=%d",
-			rows[0].ChecksPending, rows[0].ChecksTotal)
-	}
-
-	// The next PR upsert (a no-op metadata edit) must NOT re-apply or fail
-	// — the drain is one-shot, so the second pull_request webhook drains
-	// an empty pending list.
-	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-ooo", 66, "edited", head, "")
-	rows, err = testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	if rows[0].ChecksPending != 1 || rows[0].ChecksTotal != 1 {
-		t.Fatalf("expected pending=1 total=1 after no-op edit, got pending=%d total=%d",
-			rows[0].ChecksPending, rows[0].ChecksTotal)
-	}
-}
-
-// TestWebhook_CheckSuite_OutOfOrderStashKeepsNewer guards the pending
-// stash against the same out-of-order trap the live table already
-// handles: while the PR row is still missing, an older event for the
-// same suite_id must not overwrite a newer payload that was stashed
-// first. Without the suite_updated_at guard on UpsertPendingCheckSuite,
-// a late `requested/in_progress` arriving after `completed/success`
-// would roll the stash back to pending; the subsequent PR upsert would
-// then replay the stale state and the PR card would stay stuck on
-// "pending" until the next suite shipped.
-func TestWebhook_CheckSuite_OutOfOrderStashKeepsNewer(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	ctx := context.Background()
-	const secret = "ci-stash-order-secret"
-	created, installationID := setupPRTestIssue(t, ctx, secret)
-
-	head := "stash01234567"
-	// Newer event lands FIRST while the PR row does not exist yet.
-	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-stash", []int32{77}, 6001, 8001, head, "completed", "completed", "success", "2026-05-01T00:05:00Z")
-	// Older event for the SAME suite arrives later (webhook reorder). The
-	// pending stash must keep the newer payload.
-	fireCheckSuiteWebhookWithStatus(t, secret, installationID, "ci-repo-stash", []int32{77}, 6001, 8001, head, "requested", "in_progress", "", "2026-05-01T00:00:00Z")
-
-	// PR webhook arrives — drain replays the (still newer) stash.
-	firePullRequestWebhookWithHead(t, secret, created.Identifier, installationID, "ci-repo-stash", 77, "opened", head, "")
-
-	rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
-	if err != nil {
-		t.Fatalf("ListPullRequestsByIssue: %v", err)
-	}
-	if len(rows) != 1 {
-		t.Fatalf("expected 1 PR row after PR webhook, got %d", len(rows))
-	}
-	if rows[0].ChecksPassed != 1 || rows[0].ChecksPending != 0 || rows[0].ChecksTotal != 1 {
-		t.Fatalf("expected passed=1 pending=0 total=1 (newer stash preserved), got passed=%d pending=%d total=%d",
-			rows[0].ChecksPassed, rows[0].ChecksPending, rows[0].ChecksTotal)
-	}
 }
 
 // TestWebhook_PullRequest_SynchronizeClearsMergeable verifies that
@@ -2932,207 +2649,6 @@ func TestWebhook_PullRequest_FansOutToBoundWorkspaces(t *testing.T) {
 	}
 	if issues, _ := testHandler.Queries.ListIssueIDsForPullRequest(ctx, prA.ID); len(issues) != 0 {
 		t.Fatalf("workspace A has no matching issue, expected 0 links, got %d", len(issues))
-	}
-}
-
-// TestWebhook_CheckSuite_FansOutToBoundWorkspaces mirrors the PR fan-out for CI:
-// a check_suite event must be recorded against every bound workspace's copy of
-// the referenced PR, not just one.
-func TestWebhook_CheckSuite_FansOutToBoundWorkspaces(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	ctx := context.Background()
-	secret := "fanout-cs-secret"
-	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
-
-	const repo = "fanout-ci-repo"
-	const prNumber int32 = 4344
-	const installationID int64 = 778899102
-	const suiteID int64 = 90019001
-	head := "fanoutsha123456"
-
-	testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
-	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "fanout-ci-ws-a")
-	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "fanout-ci-ws-b")
-	wsA, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
-		Name: "fanout-ci-ws-a", Slug: "fanout-ci-ws-a", IssuePrefix: "FCA",
-	})
-	if err != nil {
-		t.Fatalf("CreateWorkspace A: %v", err)
-	}
-	wsB, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
-		Name: "fanout-ci-ws-b", Slug: "fanout-ci-ws-b", IssuePrefix: "FCB",
-	})
-	if err != nil {
-		t.Fatalf("CreateWorkspace B: %v", err)
-	}
-
-	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
-		WorkspaceID: wsA.ID, InstallationID: installationID, AccountLogin: "acme", AccountType: "User",
-	}); err != nil {
-		t.Fatalf("CreateGitHubInstallation A: %v", err)
-	}
-	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
-		WorkspaceID: wsB.ID, InstallationID: installationID, AccountLogin: "acme", AccountType: "User",
-	}); err != nil {
-		t.Fatalf("CreateGitHubInstallation B: %v", err)
-	}
-
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM github_pull_request_check_suite WHERE pr_id IN (SELECT id FROM github_pull_request WHERE repo_owner = 'acme' AND repo_name = $1)`, repo)
-		testPool.Exec(ctx, `DELETE FROM github_pending_check_suite WHERE repo_owner = 'acme' AND repo_name = $1`, repo)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE repo_owner = 'acme' AND repo_name = $1`, repo)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
-		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsA.ID)
-		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsB.ID)
-	})
-
-	// Mirror the PR into both workspaces (no issue needed), then fire CI on the
-	// same head SHA.
-	firePullRequestWebhookWithHead(t, secret, "FCX-1", installationID, repo, prNumber, "opened", head, "")
-	fireCheckSuiteWebhook(t, secret, installationID, repo, []int32{prNumber}, suiteID, 7100, head, "failure", "2026-05-01T00:00:00Z")
-
-	// The suite must be recorded against BOTH workspaces' PR rows.
-	assertRecorded := func(label string, prID any) {
-		var n int
-		if err := testPool.QueryRow(ctx,
-			`SELECT count(*) FROM github_pull_request_check_suite WHERE pr_id = $1 AND suite_id = $2`,
-			prID, suiteID).Scan(&n); err != nil {
-			t.Fatalf("workspace %s: count check suites: %v", label, err)
-		}
-		if n != 1 {
-			t.Fatalf("workspace %s: expected 1 recorded check_suite, got %d", label, n)
-		}
-	}
-
-	prA, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
-		WorkspaceID: wsA.ID, RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
-	})
-	if err != nil {
-		t.Fatalf("workspace A: expected PR mirrored: %v", err)
-	}
-	prB, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
-		WorkspaceID: wsB.ID, RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
-	})
-	if err != nil {
-		t.Fatalf("workspace B: expected PR mirrored: %v", err)
-	}
-	assertRecorded("A", prA.ID)
-	assertRecorded("B", prB.ID)
-}
-
-// TestWebhook_CheckSuite_OutOfOrderFansOutToBoundWorkspaces covers the most
-// error-prone multi-workspace path: a check_suite that arrives BEFORE the PR is
-// mirrored. Each bound workspace must stash its own pending row, and when the PR
-// event fans out, each workspace must drain its own pending row and record the
-// suite — one workspace's stash/drain must not stand in for another's.
-func TestWebhook_CheckSuite_OutOfOrderFansOutToBoundWorkspaces(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("handler test fixture not initialized (no DB?)")
-	}
-	ctx := context.Background()
-	secret := "fanout-cs-ooo-secret"
-	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
-
-	const repo = "fanout-ooo-repo"
-	const prNumber int32 = 4345
-	const installationID int64 = 778899103
-	const suiteID int64 = 90019002
-	head := "ooosha7654321"
-
-	testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
-	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "fanout-ooo-ws-a")
-	testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, "fanout-ooo-ws-b")
-	wsA, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
-		Name: "fanout-ooo-ws-a", Slug: "fanout-ooo-ws-a", IssuePrefix: "OOA",
-	})
-	if err != nil {
-		t.Fatalf("CreateWorkspace A: %v", err)
-	}
-	wsB, err := testHandler.Queries.CreateWorkspace(ctx, db.CreateWorkspaceParams{
-		Name: "fanout-ooo-ws-b", Slug: "fanout-ooo-ws-b", IssuePrefix: "OOB",
-	})
-	if err != nil {
-		t.Fatalf("CreateWorkspace B: %v", err)
-	}
-
-	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
-		WorkspaceID: wsA.ID, InstallationID: installationID, AccountLogin: "acme", AccountType: "User",
-	}); err != nil {
-		t.Fatalf("CreateGitHubInstallation A: %v", err)
-	}
-	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
-		WorkspaceID: wsB.ID, InstallationID: installationID, AccountLogin: "acme", AccountType: "User",
-	}); err != nil {
-		t.Fatalf("CreateGitHubInstallation B: %v", err)
-	}
-
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM github_pull_request_check_suite WHERE pr_id IN (SELECT id FROM github_pull_request WHERE repo_owner = 'acme' AND repo_name = $1)`, repo)
-		testPool.Exec(ctx, `DELETE FROM github_pending_check_suite WHERE repo_owner = 'acme' AND repo_name = $1`, repo)
-		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE repo_owner = 'acme' AND repo_name = $1`, repo)
-		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
-		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsA.ID)
-		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, wsB.ID)
-	})
-
-	pendingCount := func(wsID any) int {
-		var n int
-		if err := testPool.QueryRow(ctx,
-			`SELECT count(*) FROM github_pending_check_suite WHERE workspace_id = $1 AND repo_owner = 'acme' AND repo_name = $2 AND pr_number = $3 AND suite_id = $4`,
-			wsID, repo, prNumber, suiteID).Scan(&n); err != nil {
-			t.Fatalf("count pending: %v", err)
-		}
-		return n
-	}
-	suiteCount := func(prID any) int {
-		var n int
-		if err := testPool.QueryRow(ctx,
-			`SELECT count(*) FROM github_pull_request_check_suite WHERE pr_id = $1 AND suite_id = $2`,
-			prID, suiteID).Scan(&n); err != nil {
-			t.Fatalf("count suites: %v", err)
-		}
-		return n
-	}
-
-	// 1. check_suite arrives BEFORE any PR mirror: each bound workspace stashes
-	//    its own pending row.
-	fireCheckSuiteWebhook(t, secret, installationID, repo, []int32{prNumber}, suiteID, 7200, head, "failure", "2026-05-02T00:00:00Z")
-	if got := pendingCount(wsA.ID); got != 1 {
-		t.Fatalf("workspace A: expected 1 pending check_suite, got %d", got)
-	}
-	if got := pendingCount(wsB.ID); got != 1 {
-		t.Fatalf("workspace B: expected 1 pending check_suite, got %d", got)
-	}
-
-	// 2. The PR arrives and fans out: each workspace drains its own pending row
-	//    and records the suite against its own PR mirror.
-	firePullRequestWebhookWithHead(t, secret, "OOX-1", installationID, repo, prNumber, "opened", head, "")
-
-	prA, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
-		WorkspaceID: wsA.ID, RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
-	})
-	if err != nil {
-		t.Fatalf("workspace A: expected PR mirrored: %v", err)
-	}
-	prB, err := testHandler.Queries.GetGitHubPullRequest(ctx, db.GetGitHubPullRequestParams{
-		WorkspaceID: wsB.ID, RepoOwner: "acme", RepoName: repo, PrNumber: prNumber,
-	})
-	if err != nil {
-		t.Fatalf("workspace B: expected PR mirrored: %v", err)
-	}
-	if got := suiteCount(prA.ID); got != 1 {
-		t.Fatalf("workspace A: expected 1 recorded check_suite after drain, got %d", got)
-	}
-	if got := suiteCount(prB.ID); got != 1 {
-		t.Fatalf("workspace B: expected 1 recorded check_suite after drain, got %d", got)
-	}
-	if got := pendingCount(wsA.ID); got != 0 {
-		t.Fatalf("workspace A: expected pending drained to 0, got %d", got)
-	}
-	if got := pendingCount(wsB.ID); got != 0 {
-		t.Fatalf("workspace B: expected pending drained to 0, got %d", got)
 	}
 }
 

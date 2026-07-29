@@ -642,6 +642,64 @@ func TestAttachmentToResponse_NonCloudFrontUsesDownloadEndpoint(t *testing.T) {
 	}
 }
 
+func TestGetAttachmentByID_AutoPublicEndpointReturnsPresignedDownloadURL(t *testing.T) {
+	store := &mockStorageNoCdn{}
+	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
+	origSigner := testHandler.CFSigner
+	testHandler.Storage = store
+	testHandler.cfg.AttachmentDownloadMode = "auto"
+	testHandler.CFSigner = nil
+	t.Cleanup(func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+		testHandler.CFSigner = origSigner
+	})
+
+	key := "downloads/desktop-inline.png"
+	id := seedAttachmentURL(
+		t,
+		"https://s3.example.com/test-bucket/"+key,
+		"desktop-inline.png",
+		"image/png",
+		10,
+	)
+
+	req := httptest.NewRequest("GET", "/api/attachments/"+id, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", id)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	w := httptest.NewRecorder()
+
+	testHandler.GetAttachmentByID(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var resp AttachmentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, w.Body.String())
+	}
+	parsed, err := url.Parse(resp.DownloadURL)
+	if err != nil {
+		t.Fatalf("parse download_url: %v", err)
+	}
+	if got := parsed.Query().Get("X-Amz-Signature"); got != "mock" {
+		t.Fatalf("download_url = %q, want S3 presigned URL", resp.DownloadURL)
+	}
+	if got := parsed.Query().Get("response-content-disposition"); got != "" {
+		t.Fatalf("response-content-disposition = %q, want inline-loadable URL", got)
+	}
+	if want := "/api/attachments/" + id + "/download"; resp.MarkdownURL != want {
+		t.Fatalf("markdown_url = %q, want stable URL %q", resp.MarkdownURL, want)
+	}
+	if len(store.presignCalls) != 1 || store.presignCalls[0] != key {
+		t.Fatalf("presign calls = %v, want [%s]", store.presignCalls, key)
+	}
+}
+
 func TestDownloadAttachment_CloudFrontRedirectSignsAttachmentDisposition(t *testing.T) {
 	origStorage := testHandler.Storage
 	origCfg := testHandler.cfg

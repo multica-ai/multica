@@ -36,6 +36,7 @@ type businessEventMetrics struct {
 	teamInviteAccepted              *prometheus.CounterVec
 	onboardingStarted               *prometheus.CounterVec
 	onboardingQuestionnaireSubmit   *prometheus.CounterVec
+	onboardingSourceSubmit          *prometheus.CounterVec
 	onboardingCompleted             *prometheus.CounterVec
 	cloudWaitlistJoined             *prometheus.CounterVec
 	issueCreated                    *prometheus.CounterVec
@@ -91,6 +92,10 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Name: "multica_onboarding_questionnaire_submitted_total",
 			Help: "Total onboarding questionnaires submitted.",
 		}, metricLabels("multica_onboarding_questionnaire_submitted_total")),
+		onboardingSourceSubmit: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "multica_onboarding_source_submitted_total",
+			Help: "Total acquisition-source answers or declines recorded (workspace backfill prompt).",
+		}, metricLabels("multica_onboarding_source_submitted_total")),
 		onboardingCompleted: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_onboarding_completed_total",
 			Help: "Total onboarding flows completed.",
@@ -216,6 +221,7 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 		e.teamInviteAccepted,
 		e.onboardingStarted,
 		e.onboardingQuestionnaireSubmit,
+		e.onboardingSourceSubmit,
 		e.onboardingCompleted,
 		e.cloudWaitlistJoined,
 		e.issueCreated,
@@ -290,6 +296,8 @@ func (m *BusinessMetrics) IncForEvent(ev analytics.Event) {
 		m.events.onboardingStarted.WithLabelValues(NormalizePlatform(stringProp(ev.Properties, "platform"))).Inc()
 	case analytics.EventOnboardingQuestionnaireSubmit:
 		m.events.onboardingQuestionnaireSubmit.WithLabelValues().Inc()
+	case analytics.EventOnboardingSourceSubmit:
+		m.events.onboardingSourceSubmit.WithLabelValues().Inc()
 	case analytics.EventOnboardingCompleted:
 		m.events.onboardingCompleted.WithLabelValues(NormalizeOnboardingPath(stringProp(ev.Properties, "completion_path"))).Inc()
 	case analytics.EventCloudWaitlistJoined:

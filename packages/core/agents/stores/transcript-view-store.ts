@@ -7,24 +7,31 @@ import { defaultStorage } from "../../platform/storage";
 export type TranscriptSortDirection = "chronological" | "newest_first";
 export type TranscriptFilterKey = string;
 
+/**
+ * Persisted expand-mode preference for the transcript. `smart` applies the
+ * per-kind reading hierarchy (agent text and errors open, process noise
+ * folded); `expanded`/`collapsed` are wholesale overrides. Row-level manual
+ * toggles live in the dialog, sit above all three, and reset on mode switch.
+ */
+export type TranscriptDetailDensity = "smart" | "expanded" | "collapsed";
+
+const DENSITIES: readonly TranscriptDetailDensity[] = ["smart", "expanded", "collapsed"];
+
 interface TranscriptViewState {
   sortDirection: TranscriptSortDirection;
-  preserveFilters: boolean;
   selectedFilterKeys: TranscriptFilterKey[];
-  defaultExpanded: boolean;
+  density: TranscriptDetailDensity;
   setSortDirection: (dir: TranscriptSortDirection) => void;
-  setPreserveFilters: (preserve: boolean) => void;
   setSelectedFilterKeys: (keys: TranscriptFilterKey[]) => void;
   toggleFilterKey: (key: TranscriptFilterKey) => void;
   clearFilterKeys: () => void;
-  setDefaultExpanded: (expanded: boolean) => void;
+  setDensity: (density: TranscriptDetailDensity) => void;
 }
 
 const DEFAULTS = {
   sortDirection: "chronological" as TranscriptSortDirection,
-  preserveFilters: false,
   selectedFilterKeys: [] as TranscriptFilterKey[],
-  defaultExpanded: false,
+  density: "smart" as TranscriptDetailDensity,
 };
 
 function uniqueFilterKeys(keys: TranscriptFilterKey[]): TranscriptFilterKey[] {
@@ -36,7 +43,6 @@ export const useTranscriptViewStore = create<TranscriptViewState>()(
     (set) => ({
       ...DEFAULTS,
       setSortDirection: (sortDirection) => set({ sortDirection }),
-      setPreserveFilters: (preserveFilters) => set({ preserveFilters }),
       setSelectedFilterKeys: (selectedFilterKeys) =>
         set({ selectedFilterKeys: uniqueFilterKeys(selectedFilterKeys) }),
       toggleFilterKey: (key) =>
@@ -46,24 +52,32 @@ export const useTranscriptViewStore = create<TranscriptViewState>()(
             : [...state.selectedFilterKeys, key],
         })),
       clearFilterKeys: () => set({ selectedFilterKeys: [] }),
-      setDefaultExpanded: (defaultExpanded) => set({ defaultExpanded }),
+      setDensity: (density) => set({ density }),
     }),
     {
       name: "multica_transcript_view",
       storage: createJSONStorage(() => defaultStorage),
       partialize: (state) => ({
         sortDirection: state.sortDirection,
-        preserveFilters: state.preserveFilters,
         selectedFilterKeys: state.selectedFilterKeys,
-        defaultExpanded: state.defaultExpanded,
+        density: state.density,
       }),
       merge: (persisted, current) => {
         if (!persisted) return { ...current, ...DEFAULTS };
-        const p = persisted as Partial<TranscriptViewState>;
+        const p = persisted as Partial<TranscriptViewState> & {
+          /** Pre-density persisted shape: a boolean expand-everything flag. */
+          defaultExpanded?: boolean;
+        };
+        const density = DENSITIES.includes(p.density as TranscriptDetailDensity)
+          ? (p.density as TranscriptDetailDensity)
+          : p.defaultExpanded === true
+            ? "expanded"
+            : DEFAULTS.density;
         return {
           ...current,
-          ...p,
+          sortDirection: p.sortDirection ?? DEFAULTS.sortDirection,
           selectedFilterKeys: uniqueFilterKeys(p.selectedFilterKeys ?? []),
+          density,
         };
       },
     },

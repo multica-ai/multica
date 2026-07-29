@@ -38,7 +38,11 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
-import { runtimeListOptions } from "@multica/core/runtimes";
+import {
+  runtimeDisplayLabel,
+  runtimeDisplayName,
+  runtimeListOptions,
+} from "@multica/core/runtimes";
 import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import {
@@ -223,7 +227,7 @@ function OriginSidebarCard({
       </div>
       {runtime && (
         <div className="mt-1 break-all text-xs text-foreground">
-          {runtime.name}
+          {runtimeDisplayName(runtime)}
         </div>
       )}
       {origin.source_path && (
@@ -562,7 +566,9 @@ export function SkillDetailPage({ skillId }: { skillId: string }) {
     if (!origin) return null;
     if (origin.type === "runtime_local") {
       return originRuntime
-        ? t(($) => $.detail.subline.origin_runtime_named, { name: originRuntime.name })
+        ? t(($) => $.detail.subline.origin_runtime_named, {
+            name: runtimeDisplayLabel(originRuntime),
+          })
         : origin.provider
           ? t(($) => $.detail.subline.origin_runtime_provider, { provider: origin.provider })
           : t(($) => $.detail.subline.origin_runtime_unknown);

@@ -4,17 +4,13 @@ import { useStore } from "zustand";
 import { ListTodo } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import {
+  myIssuesRelationFromScope,
   myIssuesViewStore,
-  type MyIssuesScope,
 } from "@multica/core/issues/stores/my-issues-view-store";
 import { PageHeader } from "../../layout/page-header";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { useT } from "../../i18n";
 import { MyIssuesHeader } from "./my-issues-header";
-
-function relationFromScope(scope: MyIssuesScope) {
-  return scope === "agents" ? "involved" : scope;
-}
 
 export function MyIssuesPage() {
   const { t } = useT("my-issues");
@@ -34,20 +30,19 @@ export function MyIssuesPage() {
           scope={{
             type: "my",
             userId: user.id,
-            relation: relationFromScope(scope),
+            relation: myIssuesRelationFromScope(scope),
           }}
           modes={["board", "list", "table", "swimlane"]}
           batchToolbar="list"
-          renderHeader={({ controller, workingIssues }) => (
+          renderHeader={({ controller }) => (
             <MyIssuesHeader
               allIssues={controller.surfaceIssues}
-              workingIssues={workingIssues}
               scope={scope}
               onScopeChange={setScope}
               isRefreshing={controller.isRefreshing}
-              facetCountsExact={
-                !(controller.viewMode === "table" && controller.hasNextFlatPage)
-              }
+              facetCountsExact={controller.facetCountsExact}
+              tableFacetCounts={controller.tableFacetCounts}
+              onTableFacetChange={controller.setActiveTableFacet}
             />
           )}
           renderEmpty={() => (

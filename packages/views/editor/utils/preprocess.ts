@@ -4,7 +4,6 @@ import {
   preprocessFileCards,
   preprocessIssueIdentifiers,
 } from "@multica/ui/markdown";
-import { configStore } from "@multica/core/config";
 
 /**
  * Preprocess a markdown string before loading into Tiptap via contentType: 'markdown'.
@@ -28,13 +27,22 @@ import { configStore } from "@multica/core/config";
  * identifier string (not a real UUID) and corrupt the saved markdown. Only the
  * readonly renderer (which resolves the identifier to a UUID at render time)
  * passes it.
+ *
+ * `cdnDomain` is an explicit parameter rather than an imperative
+ * `configStore.getState()` read inside this function. The CDN config arrives
+ * asynchronously after auth, so a one-shot read made this transform silently
+ * time-dependent: content rendered before the config landed kept its legacy CDN
+ * links as plain anchors forever, because nothing re-ran the transform. Passing
+ * the value in lets a reactive caller (RichContent, which subscribes to the
+ * store) put it in its memo dependencies, while a one-shot caller (the Tiptap
+ * editor, which preprocesses once at load) can still read the store itself.
  */
 export function preprocessMarkdown(
   markdown: string,
-  opts?: { autolinkIssueIdentifiers?: boolean },
+  opts: { cdnDomain: string; autolinkIssueIdentifiers?: boolean },
 ): string {
   if (!markdown) return "";
-  const cdnDomain = configStore.getState().cdnDomain;
+  const { cdnDomain } = opts;
   const step1 = preprocessMentionShortcodes(markdown);
   const step2 = opts?.autolinkIssueIdentifiers
     ? preprocessIssueIdentifiers(step1)

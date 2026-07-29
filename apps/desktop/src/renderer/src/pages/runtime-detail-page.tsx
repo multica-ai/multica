@@ -5,6 +5,7 @@ import {
   RuntimeSettingsPage as SharedRuntimeSettingsPage,
 } from "@multica/views/runtimes";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { DaemonRuntimeActions } from "../components/daemon-runtime-card";
@@ -17,7 +18,7 @@ export function RuntimeDetailPage() {
   const runtime = runtimes?.find((candidate) => candidate.id === id);
   const context = useDesktopRuntimeContext();
 
-  useDocumentTitle(runtime?.name ?? "Runtimes");
+  useDocumentTitle(runtime ? runtimeDisplayLabel(runtime) : "Runtimes");
 
   if (!id) return null;
   return (
@@ -41,7 +42,7 @@ export function RuntimeSettingsPage() {
   const { data: runtimes } = useQuery(runtimeListOptions(wsId));
   const runtime = runtimes?.find((candidate) => candidate.id === runtimeId);
 
-  useDocumentTitle(runtime?.name ?? "Runtime");
+  useDocumentTitle(runtime ? runtimeDisplayLabel(runtime) : "Runtime");
 
   if (!id || !runtimeId) return null;
   return <SharedRuntimeSettingsPage machineId={id} runtimeId={runtimeId} />;

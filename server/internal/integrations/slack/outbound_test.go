@@ -27,6 +27,12 @@ type fakeOutboundQueries struct {
 	bindingErr error
 	inst       db.ChannelInstallation
 	instErr    error
+	task       db.AgentTaskQueue
+	taskErr    error
+}
+
+func (f *fakeOutboundQueries) GetAgentTask(context.Context, pgtype.UUID) (db.AgentTaskQueue, error) {
+	return f.task, f.taskErr
 }
 
 func (f *fakeOutboundQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
@@ -69,7 +75,30 @@ func chatDoneEvent(sessionID string, content string) events.Event {
 	return events.Event{
 		Type:          protocol.EventChatDone,
 		ChatSessionID: sessionID,
-		Payload:       protocol.ChatDonePayload{Content: content},
+		Payload: protocol.ChatDonePayload{
+			TaskID:        "00000000-0000-0000-0000-000000000002",
+			ChatSessionID: sessionID,
+			Content:       content,
+		},
+	}
+}
+
+func TestOutbound_SkipsDirectChatTaskOnBoundSlackSession(t *testing.T) {
+	q := &fakeOutboundQueries{
+		task: db.AgentTaskQueue{ChatInputTaskID: uid(2)},
+		binding: db.ChannelChatSessionBinding{
+			InstallationID: uid(1),
+			ChannelChatID:  "C123",
+			Config:         []byte(`{"channel_id":"C123"}`),
+		},
+		inst: db.ChannelInstallation{ID: uid(1), Status: "active", Config: slackInstallConfigJSON()},
+	}
+	fs := &fakeSender{}
+
+	newTestOutbound(q, fs).handleEvent(chatDoneEvent("00000000-0000-0000-0000-000000000001", "private web reply"))
+
+	if fs.called != 0 {
+		t.Fatalf("sender called %d times, want 0 for a direct-chat task", fs.called)
 	}
 }
 

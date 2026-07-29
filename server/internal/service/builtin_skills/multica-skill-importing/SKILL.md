@@ -79,7 +79,7 @@ skill folder works too. The server:
   wrapper directory name and then the uploaded filename;
 - carries the supporting files — dropping any `SKILL.md`, dotfiles, `__MACOSX`,
   license files, and binary assets — under the same per-file (1 MiB),
-  per-bundle (8 MiB), and file-count (128) caps as URL imports, and rejects path
+  per-bundle (8 MiB), and file-count (256) caps as URL imports, and rejects path
   traversal (zip-slip);
 - returns the same structured result envelope and honors the same
   `--on-conflict` strategies as URL imports.

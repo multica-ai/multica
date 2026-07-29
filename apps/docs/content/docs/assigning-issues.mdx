@@ -50,7 +50,9 @@ When a non-Backlog issue is assigned to an agent, Multica immediately does the f
 1. Enqueues a `queued` `task` with priority inherited from the issue, routed to the runtime where the agent lives.
 2. The agent's daemon picks up the `task` on its next poll and transitions it to `dispatched`.
 3. The agent starts working and the `task` moves to `running`; on completion it becomes `completed` or `failed`.
-4. During execution the agent can change the issue's status, post comments, and edit fields — these actions appear under the agent's identity.
+4. During execution the agent is expected to manage the issue's status (typically `todo` → `in_progress`, then `in_review` when it has delivered), post comments, and edit fields — these actions appear under the agent's identity. Task lifecycle and issue status are separate: completing a `task` does not by itself change the issue status.
+
+The same status expectations apply when the assignee is a [squad](/squads): Multica enqueues the **leader**, who should move the parent issue to `in_progress` on the first turn and keep it there while members work. The leader only moves the parent to `in_review` once the overall goal is met — a successful first dispatch is not completion.
 
 **If the agent is offline**, the `task` waits in the queue — **it times out and fails after 5 minutes** with reason `runtime_offline`. For retryable sources (assign, @-mention, chat), Multica automatically re-enqueues it. See [**Tasks**](/tasks) for the full retry rules.
 

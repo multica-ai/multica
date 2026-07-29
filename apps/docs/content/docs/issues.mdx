@@ -11,7 +11,7 @@ An issue is a self-contained unit of work in Multica — a bug, a new feature, a
 
 ## Assigning an issue to an agent
 
-[Assigning](/assigning-issues) an issue to an agent hands that work over to it. The agent **starts automatically** — executing within seconds, reporting progress in comments, and flipping the status to done when finished. The only difference from handing work to a teammate is that an agent doesn't go offline, doesn't need reminders, and is available 24/7.
+[Assigning](/assigning-issues) an issue to an agent hands that work over to it. The agent **starts automatically** — Multica enqueues a `task` within seconds, the agent reports progress in comments, and during the run it is expected to update the issue status (typically `todo` → `in_progress` → `in_review`). The only difference from handing work to a teammate is that an agent doesn't go offline, doesn't need reminders, and is available 24/7.
 
 <Callout type="info">
 For agent identity, configuration, and where they run, see [Agents](/agents).
@@ -33,7 +33,7 @@ Multica has seven statuses. **Any status can move directly to any other** — Mu
 | `blocked` | Stuck on an external factor |
 | `cancelled` | Cancelled |
 
-Once an issue is assigned to an agent, the agent automatically moves the status from `backlog` / `todo` to `in_progress`, then to `done` on completion. You can also change it manually at any time.
+Once an issue is assigned to an agent, the agent is expected to move the status from `backlog` / `todo` to `in_progress` when it starts, then to `in_review` when it has delivered the work. Status updates are made by the agent through the Multica CLI during the run — the server does **not** flip issue status when a `task` starts or completes. `done` is usually a human confirmation or an integration (for example a PR with close intent that merges). You can also change status manually at any time.
 
 ## Priority
 

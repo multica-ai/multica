@@ -17,6 +17,7 @@
 import { useMemo } from "react";
 import { Pressable, SectionList, View } from "react-native";
 import { useQuery } from "@tanstack/react-query";
+import { useIsFocused } from "@react-navigation/native";
 import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type { Issue, IssuePriority, IssueStatus } from "@multica/core/types";
@@ -60,6 +61,7 @@ const SCOPES: { value: MyIssuesScope; label: string }[] = [
 type IssueSection = { status: IssueStatus; data: Issue[] };
 
 export default function MyIssues() {
+  const isFocused = useIsFocused();
   const userId = useAuthStore((s) => s.user?.id ?? null);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
@@ -189,7 +191,7 @@ export default function MyIssues() {
               }}
             />
           )}
-          refreshing={isRefetching}
+          refreshing={isFocused && isRefetching}
           onRefresh={refetch}
         />
       )}
@@ -370,4 +372,3 @@ function emptyMessageForScope(scope: MyIssuesScope): string {
       return "No issues assigned to your agents or squads yet.";
   }
 }
-

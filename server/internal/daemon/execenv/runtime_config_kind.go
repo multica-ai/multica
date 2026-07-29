@@ -49,13 +49,12 @@ func classifyTask(ctx TaskContextForEnv) taskKind {
 
 // hasIssueContext returns true for the kinds that operate on a real Multica
 // issue and therefore can read / pin issue-scoped state. The slim
-// dispatcher gates these three sections on this predicate:
+// dispatcher gates these two sections on this predicate:
 //
-//   - Project Context
 //   - Issue Metadata
 //   - Sub-issue Creation
 //
-// All three are meaningless on the issue-less kinds (chat / quick-create /
+// Both are meaningless on the issue-less kinds (chat / quick-create /
 // autopilot run-only) and would either render an empty body or steer the
 // agent into a guaranteed-failed CLI call. Note this is a kind-based
 // predicate, not a check on ctx.IssueID — comment- / assignment-triggered

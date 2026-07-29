@@ -23,6 +23,11 @@ dist-electron
 # Desktop production config is public (backend URL, etc.) — track it so
 # `pnpm package` produces a release-ready build without extra setup.
 !apps/desktop/.env.production
+# Desktop staging config is public (staging API/web URLs) — track it so
+# `pnpm dev:desktop:staging` works from a fresh checkout instead of relying
+# on a hand-written local env file (MUL-5025: a misnamed VITE_ var there
+# silently broke copy-link URLs).
+!apps/desktop/.env.staging
 # Mobile staging config is public (staging API URL) — track it so a fresh
 # checkout can run `pnpm dev:mobile:staging` / `ios:mobile*:staging` without
 # the user having to copy `.env.example` first.

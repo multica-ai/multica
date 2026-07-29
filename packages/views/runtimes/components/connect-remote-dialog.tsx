@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Check, ChevronRight, Copy, Terminal } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -19,6 +20,10 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { copyText } from "@multica/ui/lib/clipboard";
+import {
+  UI_EASE_OUT,
+  UI_MOTION_DURATION,
+} from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
@@ -62,6 +67,7 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   const slug = useWorkspaceSlug();
   const qc = useQueryClient();
   const navigation = useNavigation();
+  const shouldReduceMotion = useReducedMotion() ?? false;
   const newRuntimeIdRef = useRef<string | null>(null);
 
   // `multica setup` is one blocking command that handles config + login
@@ -100,15 +106,51 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-lg">
-        {step === "instructions" && <InstructionsStep onClose={onClose} />}
-        {step === "success" && (
-          <SuccessStep
-            onGoToAgents={handleGoToAgents}
-            onGoToRuntime={
-              newRuntimeIdRef.current ? handleGoToRuntime : undefined
-            }
-          />
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={step}
+            className="flex min-h-0 flex-1 flex-col"
+            initial={{
+              opacity: 0,
+              transform: shouldReduceMotion
+                ? "translateY(0)"
+                : "translateY(8px)",
+            }}
+            animate={{
+              opacity: 1,
+              transform: "translateY(0)",
+              transition: {
+                duration: shouldReduceMotion
+                  ? UI_MOTION_DURATION.fast
+                  : UI_MOTION_DURATION.standard,
+                ease: UI_EASE_OUT,
+              },
+            }}
+            exit={{
+              opacity: 0,
+              transform: shouldReduceMotion
+                ? "translateY(0)"
+                : "translateY(-8px)",
+              transition: {
+                duration: shouldReduceMotion
+                  ? UI_MOTION_DURATION.fast
+                  : UI_MOTION_DURATION.micro,
+                ease: UI_EASE_OUT,
+              },
+            }}
+          >
+            {step === "instructions" ? (
+              <InstructionsStep onClose={onClose} />
+            ) : (
+              <SuccessStep
+                onGoToAgents={handleGoToAgents}
+                onGoToRuntime={
+                  newRuntimeIdRef.current ? handleGoToRuntime : undefined
+                }
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
       </DialogContent>
     </Dialog>
   );
@@ -270,7 +312,6 @@ function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
           <li className="flex items-center gap-1.5">
             <span>{t(($) => $.connect.trouble_check_status)}</span>
             {/* CLI command — literal shell string, not i18n content. */}
-            {/* eslint-disable-next-line i18next/no-literal-string */}
             <code
               className={cn(
                 "rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground",
@@ -283,7 +324,6 @@ function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
           <li className="flex items-center gap-1.5">
             <span>{t(($) => $.connect.trouble_view_logs)}</span>
             {/* CLI command — literal shell string, not i18n content. */}
-            {/* eslint-disable-next-line i18next/no-literal-string */}
             <code
               className={cn(
                 "rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground",

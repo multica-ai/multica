@@ -8,6 +8,20 @@ files:
   - "!electron.vite.config.*"
   - "!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}"
   - "!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}"
+  # Never repack the electron-builder output directory into the app.
+  # Multi-arch release builds (scripts/package.mjs) run each target in the
+  # same apps/desktop dir with per-arch output at dist/<platform>-<arch>.
+  # electron-builder only auto-excludes the *current* target's output dir,
+  # so the earlier arch's dist/ (its full .app + DMG + ZIP) would otherwise
+  # be pulled into the next arch's app.asar. That inflated v0.4.3/v0.4.4's
+  # Intel (x64) DMG until the HFS volume was full and the real
+  # `Electron Framework/Versions/A/Electron Framework` binary was dropped,
+  # so Intel Macs crashed on launch with a dyld missing-library error
+  # (github.com/multica-ai/multica/issues/5595). Excluding all of dist/**
+  # fixes it regardless of build order; a pre-build clean alone does not,
+  # because the first arch writes into dist/ mid-run before the second is
+  # packaged.
+  - "!dist/**"
 protocols:
   - name: Multica
     schemes:

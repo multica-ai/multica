@@ -92,6 +92,38 @@ Minimal self-host config:
 If `desktop.json` exists but is invalid, Desktop fails closed and shows a blocking config error instead of silently falling back to Cloud. For development builds, `VITE_API_URL` / `VITE_WS_URL` / `VITE_APP_URL` still take precedence during `electron-vite dev`. Runtime Desktop self-host configuration was implemented for [issue #1371](https://github.com/multica-ai/multica/issues/1371).
 </Callout>
 
+## Windows Defender flags Multica as a virus
+
+**Symptom**: Windows Security reports a threat such as `Trojan:Script/Wacatac.B!ml` and quarantines a file inside the Desktop installation. The affected item is normally the bundled CLI, not the app executable:
+
+```text
+C:\Users\<you>\AppData\Local\Programs\@multicadesktop\resources\app.asar.unpacked\resources\bin\multica.exe
+```
+
+**This is a false positive.** The `!ml` suffix means the verdict came from Defender's machine-learning heuristics rather than a malware signature. Multica's Windows builds are not Authenticode code-signed yet, and a freshly published unsigned binary that starts background processes and opens network connections is exactly the profile those heuristics score as suspicious. Every Windows artifact is built by GitHub Actions from the public source in this repository.
+
+**Verify it yourself** — each GitHub release publishes a `checksums.txt` covering every CLI archive:
+
+```powershell
+Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
+```
+
+Compare the hash with the matching line in `checksums.txt` on the [latest release](https://github.com/multica-ai/multica/releases/latest).
+
+**How to fix**:
+
+1. **Restore the quarantined file** — Windows Security → *Virus & threat protection* → *Protection history* → select the Multica item → *Actions* → *Restore*.
+2. **Add an exclusion** so it isn't quarantined again — *Virus & threat protection* → *Manage settings* → *Exclusions* → *Add an exclusion* → *Folder*, and add both:
+   - `%LOCALAPPDATA%\Programs\@multicadesktop`
+   - `%APPDATA%\Multica`
+
+   Both paths matter: when the bundled CLI goes missing, Desktop downloads a replacement into `%APPDATA%\Multica\bin`, so excluding only the install folder leaves you in a loop where the replacement gets quarantined too.
+3. **Report the false positive to Microsoft** at [Microsoft Security Intelligence — submit a file](https://www.microsoft.com/en-us/wdsi/filesubmission), choosing *Software developer* and *Incorrectly detected as malware*. That is what gets the detection withdrawn for every user, usually within a few days.
+
+<Callout type="warning">
+Only add these exclusions if you installed Multica from the [downloads page](https://multica.ai/download) or [GitHub releases](https://github.com/multica-ai/multica/releases) and the checksum matches. An exclusion disables real-time protection for everything in that folder.
+</Callout>
+
 ## Next steps
 
 - [Cloud Quickstart](/cloud-quickstart) — the Cloud onboarding flow for Desktop

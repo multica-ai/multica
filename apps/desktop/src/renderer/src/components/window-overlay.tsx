@@ -7,6 +7,7 @@ import { useNavigation } from "@multica/views/navigation";
 import { paths } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace/queries";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
+import { useLocalRuntimesPending } from "../platform/use-local-runtimes-pending";
 
 /**
  * Window-level transition overlay: renders above the tab system when the
@@ -37,6 +38,9 @@ function WindowOverlayInner() {
   const close = useWindowOverlayStore((s) => s.close);
   const { push } = useNavigation();
   const { data: wsList = [] } = useQuery(workspaceListOptions());
+  // Live local-daemon signal for the onboarding runtime step so it doesn't
+  // flash "no runtime found" while the daemon is still probing CLI versions.
+  const runtimesPending = useLocalRuntimesPending();
 
   if (!overlay) return null;
 
@@ -81,6 +85,7 @@ function WindowOverlayInner() {
           onRuntimeRefresh={async () => {
             await window.daemonAPI?.restart?.();
           }}
+          runtimesPending={runtimesPending}
         />
       )}
     </div>

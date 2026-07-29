@@ -33,6 +33,7 @@ export function RuntimePicker({
   currentUserId,
   selectedRuntimeId,
   onSelect,
+  disabled = false,
 }: {
   runtimes: RuntimeDevice[];
   runtimesLoading?: boolean;
@@ -40,6 +41,9 @@ export function RuntimePicker({
   currentUserId: string | null;
   selectedRuntimeId: string;
   onSelect: (id: string) => void;
+  /** Blocks opening the picker while the selection cannot be honoured yet
+   *  (e.g. a builder reply or a runtime rebind is in flight). */
+  disabled?: boolean;
 }) {
   const { t } = useT("agents");
   const [open, setOpen] = useState(false);
@@ -109,11 +113,15 @@ export function RuntimePicker({
           {t(($) => $.create_dialog.runtime_label)}
         </Label>
         {hasOtherRuntimes && (
+          // These are not just a view filter: changing tab re-selects the first
+          // usable runtime in the new list, so they are a second way to fire
+          // onSelect and must honour `disabled` alongside the trigger.
           <div className="flex items-center gap-0.5 rounded-md bg-muted p-0.5">
             <button
               type="button"
+              disabled={disabled}
               onClick={() => handleFilterChange("mine")}
-              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
                 filter === "mine"
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
@@ -123,8 +131,9 @@ export function RuntimePicker({
             </button>
             <button
               type="button"
+              disabled={disabled}
               onClick={() => handleFilterChange("all")}
-              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors ${
+              className={`rounded px-2 py-0.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-50 ${
                 filter === "all"
                   ? "bg-background text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
@@ -136,14 +145,15 @@ export function RuntimePicker({
         )}
       </div>
       <Popover
-        open={open}
+        open={open && !disabled}
         onOpenChange={(next) => {
+          if (disabled) return;
           setOpen(next);
           if (!next) setSearch("");
         }}
       >
         <PopoverTrigger
-          disabled={runtimes.length === 0 && !runtimesLoading}
+          disabled={disabled || (runtimes.length === 0 && !runtimesLoading)}
           className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
         >
           {runtimesLoading ? (

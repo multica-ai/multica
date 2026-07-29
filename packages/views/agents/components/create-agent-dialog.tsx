@@ -422,7 +422,12 @@ export function CreateAgentDialog({
               members={members}
               currentUserId={currentUserId}
               selectedRuntimeId={selectedRuntimeId}
-              onSelect={setSelectedRuntimeId}
+              onSelect={(id) => {
+                // Models are per-runtime; a value picked for the old runtime
+                // may not exist on the new one, so drop it on runtime change.
+                if (id !== selectedRuntimeId) setModel("");
+                setSelectedRuntimeId(id);
+              }}
             />
 
             <ModelDropdown

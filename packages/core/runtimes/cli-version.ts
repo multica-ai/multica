@@ -110,10 +110,37 @@ export const MIN_HANDOFF_CLI_VERSION = "0.3.28";
  * round-trip, exactly like the quick-create version gate.
  */
 export function handoffSupported(detected: string | undefined | null): boolean {
+  return meetsMinCliVersion(detected, MIN_HANDOFF_CLI_VERSION);
+}
+
+/**
+ * First release whose daemon renders the chat session's project context
+ * (description + resources) into the run brief (PR #5765, ships in v0.4.10).
+ * Older daemons still receive and honor the project's repos — the server
+ * pre-extracts those into the generic `repos` claim field — but silently skip
+ * the Project Context section, so the durable description never reaches the
+ * agent. SOFT gate: selecting a project always works; the UI only warns.
+ *
+ * Frontend-only constant: unlike handoff there is no server preview endpoint
+ * computing this, so there is no server twin to keep in lockstep with.
+ */
+export const MIN_CHAT_PROJECT_CONTEXT_CLI_VERSION = "0.4.10";
+
+/**
+ * Whether a daemon-reported CLI version is new enough to inject a chat
+ * session's project description into the run brief. Same degrade rules as
+ * `handoffSupported`: missing / unparsable / below-minimum are `false`,
+ * dev-built daemons (git-describe shape) always pass.
+ */
+export function chatProjectContextSupported(detected: string | undefined | null): boolean {
+  return meetsMinCliVersion(detected, MIN_CHAT_PROJECT_CONTEXT_CLI_VERSION);
+}
+
+function meetsMinCliVersion(detected: string | undefined | null, minimum: string): boolean {
   const current = (detected ?? "").trim();
   if (!current) return false;
   if (DEV_DESCRIBE_RE.test(current)) return true;
   const parsed = parseSemver(current);
   if (!parsed) return false;
-  return !lessThan(parsed, parseSemver(MIN_HANDOFF_CLI_VERSION)!);
+  return !lessThan(parsed, parseSemver(minimum)!);
 }

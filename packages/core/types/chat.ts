@@ -31,6 +31,9 @@ export interface ChatSession {
   workspace_id: string;
   agent_id: string;
   creator_id: string;
+  /** Durable project context for every turn in this session. Null when the
+   *  conversation uses workspace context only; optional for older servers. */
+  project_id?: string | null;
   title: string;
   status: "active" | "archived";
   /** True when the session has any unread assistant replies. List-only.

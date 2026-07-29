@@ -171,6 +171,9 @@ func TestCheckMinVersion(t *testing.T) {
 		{"grok", "0.2.89", false},
 		{"grok", "0.2.0", true},
 		{"grok", "0.1.9", true},
+		{"qwen", "0.20.0", false},
+		{"qwen", "qwen 0.20.1", false},
+		{"qwen", "0.19.9", true},
 		{"unknown", "1.0.0", false},
 	}
 	for _, tt := range tests {

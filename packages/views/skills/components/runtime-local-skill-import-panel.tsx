@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -15,7 +16,6 @@ import {
   XCircle,
 } from "lucide-react";
 import type {
-  AgentRuntime,
   RuntimeLocalSkillImportConflict,
   RuntimeLocalSkillSummary,
   Skill,
@@ -23,6 +23,7 @@ import type {
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
+  runtimeDisplayLabel,
   runtimeListOptions,
   runtimeLocalSkillsKeys,
   runtimeLocalSkillsOptions,
@@ -43,14 +44,25 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import {
   Select,
   SelectContent,
+  SelectGroup,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { useScrollFade } from "@multica/ui/hooks/use-scroll-fade";
+import {
+  UI_EASE_OUT,
+  UI_MOTION_DURATION,
+} from "@multica/ui/lib/motion";
 import { useT } from "../../i18n";
 import { HighlightText } from "../../search/highlight-text";
+import { ProviderLogo } from "../../runtimes/components/provider-logo";
+import {
+  buildRuntimeMachines,
+  runtimeRowLabel,
+} from "../../runtimes/components/runtime-machines";
 import { isNameConflictError } from "../lib/utils";
 
 // ---------------------------------------------------------------------------
@@ -103,10 +115,6 @@ const INITIAL_BULK_STATE: BulkImportState = {
  * See also maxLocalSkillImportBatch in server/internal/handler/daemon.go.
  */
 const IMPORT_CONCURRENCY = 10;
-
-function runtimeLabel(runtime: AgentRuntime): string {
-  return `${runtime.name} (${runtime.provider})`;
-}
 
 function defaultRenameName(name: string): string {
   return `${name} copy`;
@@ -506,6 +514,7 @@ export function RuntimeLocalSkillImportPanel({
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
   const userId = useAuthStore((s) => s.user?.id ?? null);
+  const shouldReduceMotion = useReducedMotion() ?? false;
 
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
   const localRuntimes = useMemo(
@@ -516,6 +525,19 @@ export function RuntimeLocalSkillImportPanel({
           (userId == null || r.owner_id === userId),
       ),
     [runtimes, userId],
+  );
+
+  // Group the local runtimes by machine so the picker reads as
+  // "machine → provider/runtime" (alias-aware) instead of a flat list of
+  // raw daemon names (MUL-5248). Reuses the same source of truth as the
+  // agent runtime picker.
+  const runtimeMachines = useMemo(
+    () =>
+      buildRuntimeMachines(localRuntimes, {
+        now: Date.now(),
+        currentUserId: userId,
+      }),
+    [localRuntimes, userId],
   );
 
   const [selectedRuntimeId, setSelectedRuntimeId] = useState<string>("");
@@ -1148,6 +1170,86 @@ export function RuntimeLocalSkillImportPanel({
     }
   };
 
+  const footerContent =
+    bulkState.phase === "done" || bulkState.phase === "cancelled" ? (
+      <>
+        <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {bulkState.phase === "cancelled"
+            ? t(($) => $.runtime_import.bulk_cancelled_hint)
+            : t(($) => $.runtime_import.bulk_complete_hint)}
+        </div>
+        <Button type="button" size="sm" onClick={handleDone}>
+          {t(($) => $.runtime_import.bulk_done_button)}
+        </Button>
+      </>
+    ) : resolvingConflicts ? (
+      <>
+        <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {t(($) => $.runtime_import.conflict_footer, {
+            count: pendingConflicts.length,
+          })}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => void handleApplyConflictResolutions()}
+          disabled={!canApplyConflictResolutions}
+        >
+          {t(($) => $.runtime_import.conflict_apply_button)}
+        </Button>
+      </>
+    ) : importing ? (
+      <>
+        <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {t(($) => $.runtime_import.bulk_progress, {
+            completed: bulkState.completed,
+            total: bulkState.total,
+          })}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={handleCancel}
+        >
+          {t(($) => $.runtime_import.bulk_cancel_button)}
+        </Button>
+      </>
+    ) : (
+      <>
+        <div className="min-w-0 flex-1 text-xs text-muted-foreground">
+          {singleSelectedSkill ? (
+            <>
+              {t(($) => $.runtime_import.ready)}{" "}
+              <span className="font-medium text-foreground">
+                {editName.trim() || singleSelectedSkill.name}
+              </span>{" "}
+              {t(($) => $.runtime_import.into_workspace)}
+            </>
+          ) : selectedKeys.size > 1 ? (
+            t(($) => $.runtime_import.bulk_ready, {
+              count: selectedKeys.size,
+            })
+          ) : (
+            t(($) => $.runtime_import.select_skill)
+          )}
+        </div>
+        <Button
+          type="button"
+          size="sm"
+          onClick={handleBulkImport}
+          disabled={!canImport}
+        >
+          <Download className="h-3 w-3" />
+          {selectedKeys.size > 1
+            ? t(($) => $.runtime_import.bulk_import_button, {
+                count: selectedKeys.size,
+              })
+            : t(($) => $.runtime_import.import_button)}
+        </Button>
+      </>
+    );
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {/* Sticky top: runtime picker + status */}
@@ -1164,21 +1266,42 @@ export function RuntimeLocalSkillImportPanel({
           <Select
             items={localRuntimes.map((runtime) => ({
               value: runtime.id,
-              label: runtimeLabel(runtime),
+              label: runtimeDisplayLabel(runtime),
             }))}
             value={selectedRuntimeId}
             onValueChange={(v) => v && setSelectedRuntimeId(v)}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder={t(($) => $.runtime_import.runtime_placeholder)}>
-                {selectedRuntime ? runtimeLabel(selectedRuntime) : null}
+                {selectedRuntime ? (
+                  <>
+                    <ProviderLogo
+                      provider={selectedRuntime.provider}
+                      className="h-4 w-4 shrink-0"
+                    />
+                    <span className="truncate">
+                      {runtimeDisplayLabel(selectedRuntime)}
+                    </span>
+                  </>
+                ) : null}
               </SelectValue>
             </SelectTrigger>
             <SelectContent>
-              {localRuntimes.map((r) => (
-                <SelectItem key={r.id} value={r.id}>
-                  {runtimeLabel(r)}
-                </SelectItem>
+              {runtimeMachines.map((machine) => (
+                <SelectGroup key={machine.id}>
+                  <SelectLabel>{machine.title}</SelectLabel>
+                  {machine.runtimes.map((r) => (
+                    <SelectItem key={r.id} value={r.id}>
+                      <ProviderLogo
+                        provider={r.provider}
+                        className="h-4 w-4 shrink-0"
+                      />
+                      <span className="truncate">
+                        {runtimeRowLabel(r, machine.title)}
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
               ))}
             </SelectContent>
           </Select>
@@ -1188,7 +1311,7 @@ export function RuntimeLocalSkillImportPanel({
           <div className="flex items-center gap-2 rounded-md border bg-muted/20 px-3 py-1.5 text-xs text-muted-foreground">
             <HardDrive className="h-3.5 w-3.5 shrink-0" />
             <span className="min-w-0 flex-1 truncate">
-              {runtimeLabel(selectedRuntime)}
+              {runtimeDisplayLabel(selectedRuntime)}
             </span>
             <Badge
               variant={
@@ -1210,94 +1333,73 @@ export function RuntimeLocalSkillImportPanel({
           importing && bulkState.phase !== "importing" ? "pointer-events-none opacity-60" : ""
         }`}
       >
-        {middle}
-        {bulkState.phase === "idle" && (
-          <p className="mt-3 text-xs text-muted-foreground">
-            {t(($) => $.runtime_import.ignored_files_hint)}
-          </p>
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={bulkState.phase}
+            initial={{
+              opacity: 0,
+              transform: shouldReduceMotion
+                ? "translateY(0)"
+                : "translateY(8px)",
+            }}
+            animate={{
+              opacity: 1,
+              transform: "translateY(0)",
+              transition: {
+                duration: shouldReduceMotion
+                  ? UI_MOTION_DURATION.fast
+                  : UI_MOTION_DURATION.standard,
+                ease: UI_EASE_OUT,
+              },
+            }}
+            exit={{
+              opacity: 0,
+              transform: shouldReduceMotion
+                ? "translateY(0)"
+                : "translateY(-8px)",
+              transition: {
+                duration: shouldReduceMotion
+                  ? UI_MOTION_DURATION.fast
+                  : UI_MOTION_DURATION.micro,
+                ease: UI_EASE_OUT,
+              },
+            }}
+          >
+            {middle}
+            {bulkState.phase === "idle" && (
+              <p className="mt-3 text-xs text-muted-foreground">
+                {t(($) => $.runtime_import.ignored_files_hint)}
+              </p>
+            )}
+          </motion.div>
+        </AnimatePresence>
       </div>
 
       {/* Sticky bottom: contextual actions per phase */}
       <div className="flex shrink-0 items-center gap-3 border-t bg-muted/30 px-5 py-3">
-        {bulkState.phase === "done" || bulkState.phase === "cancelled" ? (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {bulkState.phase === "cancelled"
-                ? t(($) => $.runtime_import.bulk_cancelled_hint)
-                : t(($) => $.runtime_import.bulk_complete_hint)}
-            </div>
-            <Button type="button" size="sm" onClick={handleDone}>
-              {t(($) => $.runtime_import.bulk_done_button)}
-            </Button>
-          </>
-        ) : resolvingConflicts ? (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {t(($) => $.runtime_import.conflict_footer, {
-                count: pendingConflicts.length,
-              })}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              onClick={() => void handleApplyConflictResolutions()}
-              disabled={!canApplyConflictResolutions}
-            >
-              {t(($) => $.runtime_import.conflict_apply_button)}
-            </Button>
-          </>
-        ) : importing ? (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {t(($) => $.runtime_import.bulk_progress, {
-                completed: bulkState.completed,
-                total: bulkState.total,
-              })}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={handleCancel}
-            >
-              {t(($) => $.runtime_import.bulk_cancel_button)}
-            </Button>
-          </>
-        ) : (
-          <>
-            <div className="min-w-0 flex-1 text-xs text-muted-foreground">
-              {singleSelectedSkill ? (
-                <>
-                  {t(($) => $.runtime_import.ready)}{" "}
-                  <span className="font-medium text-foreground">
-                    {editName.trim() || singleSelectedSkill.name}
-                  </span>{" "}
-                  {t(($) => $.runtime_import.into_workspace)}
-                </>
-              ) : selectedKeys.size > 1 ? (
-                t(($) => $.runtime_import.bulk_ready, {
-                  count: selectedKeys.size,
-                })
-              ) : (
-                t(($) => $.runtime_import.select_skill)
-              )}
-            </div>
-            <Button
-              type="button"
-              size="sm"
-              onClick={handleBulkImport}
-              disabled={!canImport}
-            >
-              <Download className="h-3 w-3" />
-              {selectedKeys.size > 1
-                ? t(($) => $.runtime_import.bulk_import_button, {
-                    count: selectedKeys.size,
-                  })
-                : t(($) => $.runtime_import.import_button)}
-            </Button>
-          </>
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={bulkState.phase}
+            className="flex min-w-0 flex-1 items-center gap-3"
+            initial={{ opacity: 0 }}
+            animate={{
+              opacity: 1,
+              transition: {
+                duration: UI_MOTION_DURATION.fast,
+                ease: UI_EASE_OUT,
+              },
+            }}
+            exit={{
+              opacity: 0,
+              transition: {
+                duration: UI_MOTION_DURATION.micro,
+                ease: UI_EASE_OUT,
+              },
+            }}
+          >
+            {footerContent}
+          </motion.div>
+        </AnimatePresence>
       </div>
     </div>
   );

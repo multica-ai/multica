@@ -42,10 +42,14 @@ export function CustomPropertyValueEditor({
   issue,
   property,
   defaultOpen = false,
+  open,
+  onOpenChange,
 }: {
   issue: Issue;
   property: IssueProperty;
   defaultOpen?: boolean;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const setProperty = useSetIssueProperty();
   const unsetProperty = useUnsetIssueProperty();
@@ -58,6 +62,8 @@ export function CustomPropertyValueEditor({
       property={property}
       value={value}
       defaultOpen={defaultOpen}
+      open={open}
+      onOpenChange={onOpenChange}
       onChange={(next) => {
         if (next === undefined) {
           unsetProperty.mutate(

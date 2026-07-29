@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { QueryClient } from "@tanstack/react-query";
+import { QueryClient, QueryObserver } from "@tanstack/react-query";
 
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
@@ -15,6 +15,7 @@ import {
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
   childrenByParentsOptions,
+  childIssuesOptions,
   compareIssuesForSort,
   issueFlatExportOptions,
   issueFlatListOptions,
@@ -66,6 +67,12 @@ function installFakeChildrenApi(
   setApiInstance({ listChildrenByParents } as unknown as ApiClient);
 }
 
+function installFakeChildApi(
+  listChildIssues: (parentId: string) => Promise<{ issues: Issue[] }>,
+) {
+  setApiInstance({ listChildIssues } as unknown as ApiClient);
+}
+
 function installFakeSearchApi(
   searchIssues: (params: { q: string }) => Promise<SearchIssuesResponse>,
 ) {
@@ -75,6 +82,36 @@ function installFakeSearchApi(
 function makeSearchResult(idx: number, identifier: string) {
   return { ...makeIssue(idx), identifier, match_source: "title" as const };
 }
+
+describe("childIssuesOptions", () => {
+  it("refetches a cached snapshot when the parent issue is opened again", async () => {
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    const parentId = "parent-1";
+    const oldChild = makeIssue(1, { parent_issue_id: parentId });
+    const newChild = makeIssue(2, { parent_issue_id: parentId });
+    const listChildIssues = vi.fn().mockResolvedValue({
+      issues: [oldChild, newChild],
+    });
+    installFakeChildApi(listChildIssues);
+    qc.setQueryData(issueKeys.children(WS_ID, parentId), [oldChild]);
+
+    const observer = new QueryObserver(
+      qc,
+      childIssuesOptions(WS_ID, parentId),
+    );
+    const unsubscribe = observer.subscribe(() => {});
+
+    await vi.waitFor(() => {
+      expect(listChildIssues).toHaveBeenCalledWith(parentId);
+      expect(observer.getCurrentResult().data).toEqual([oldChild, newChild]);
+    });
+
+    unsubscribe();
+    qc.clear();
+  });
+});
 
 describe("projectGanttIssuesOptions", () => {
   let qc: QueryClient;

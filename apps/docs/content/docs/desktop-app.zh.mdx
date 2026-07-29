@@ -92,6 +92,38 @@ macOS 版本已经签名 + 公证，第一次打开不会有"未知开发者"的
 如果 `desktop.json` 存在但内容无效，Desktop 会 fail closed，显示阻塞式配置错误，而不是悄悄回退到 Cloud。开发构建里，`electron-vite dev` 仍然优先使用 `VITE_API_URL` / `VITE_WS_URL` / `VITE_APP_URL`。Desktop 运行时自部署配置能力对应 [issue #1371](https://github.com/multica-ai/multica/issues/1371)。
 </Callout>
 
+## Windows Defender 把 Multica 报成病毒
+
+**现象**：Windows 安全中心报出 `Trojan:Script/Wacatac.B!ml` 之类的威胁，并隔离 Desktop 安装目录里的某个文件。被隔离的通常是内置的 CLI，而不是应用主程序：
+
+```text
+C:\Users\<你>\AppData\Local\Programs\@multicadesktop\resources\app.asar.unpacked\resources\bin\multica.exe
+```
+
+**这是误报。** `!ml` 后缀表示这个结论来自 Defender 的机器学习启发式判断，而不是病毒特征库匹配。Multica 的 Windows 构建目前还没有做 Authenticode 代码签名，而一个刚发布、没有签名、又会拉起后台进程并建立网络连接的二进制，正好落在这类启发式最容易判可疑的画像上。所有 Windows 产物都由 GitHub Actions 从本仓库的公开源码构建。
+
+**可以自己校验** —— 每个 GitHub release 都发布了覆盖全部 CLI 压缩包的 `checksums.txt`：
+
+```powershell
+Get-FileHash .\multica-cli-<version>-windows-amd64.zip -Algorithm SHA256
+```
+
+把输出的哈希和[最新 release](https://github.com/multica-ai/multica/releases/latest) 里 `checksums.txt` 对应那一行比对。
+
+**怎么解决**：
+
+1. **把隔离的文件恢复回来** —— Windows 安全中心 → *病毒和威胁防护* → *保护历史记录* → 选中 Multica 那一条 → *操作* → *还原*。
+2. **加排除项**，避免再次被隔离 —— *病毒和威胁防护* → *管理设置* → *排除项* → *添加或删除排除项* → *文件夹*，两个都要加：
+   - `%LOCALAPPDATA%\Programs\@multicadesktop`
+   - `%APPDATA%\Multica`
+
+   两个路径缺一不可：内置 CLI 被删掉后，Desktop 会把替换版本下载到 `%APPDATA%\Multica\bin`，只排除安装目录的话，下载下来的副本还会再被隔离一次，陷入循环。
+3. **把误报提交给微软** —— 在 [Microsoft Security Intelligence 文件提交页](https://www.microsoft.com/en-us/wdsi/filesubmission)选择 *Software developer* 和 *Incorrectly detected as malware*。这一步才是让检测对所有用户撤销的办法，一般几天内生效。
+
+<Callout type="warning">
+只有在你是从[下载页](https://multica.ai/download)或 [GitHub releases](https://github.com/multica-ai/multica/releases) 安装、且校验和对得上的前提下，才加这些排除项。排除项会关闭该文件夹内所有文件的实时保护。
+</Callout>
+
 ## 下一步
 
 - [Cloud Quickstart](/cloud-quickstart) —— Desktop 版的 Cloud 接入流程

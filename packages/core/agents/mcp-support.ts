@@ -17,6 +17,7 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "opencode",
   "openclaw",
   "qoder",
+  "qwen",
   "traecli",
 ]);
 
