@@ -3,8 +3,10 @@ import { Editor } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import { Markdown } from "@tiptap/markdown";
+import { EditorView } from "@tiptap/pm/view";
 import type { RefObject } from "react";
 import { BaseMentionExtension } from "./mention-extension";
+import { createMarkdownPasteExtension } from "./markdown-paste";
 import {
   createIssueIdentifierAutolinkExtension,
   type IssueIdentifierResolver,
@@ -48,6 +50,12 @@ function makeEditor(): Editor {
       TestMention,
       createIssueIdentifierAutolinkExtension({ resolveRef }),
       Markdown.configure({ indentation: { style: "space", size: 3 } }),
+      // The extension the real editor pastes through. It is a catch-all
+      // `handlePaste` that dispatches its own transaction, so it — not
+      // ProseMirror — decides whether this extension can tell a paste from
+      // typing. Leaving it out is what let the paste cases below pass against a
+      // hand-stamped meta the product never produced (MUL-5429).
+      createMarkdownPasteExtension(),
     ],
   });
 }
@@ -55,6 +63,19 @@ function makeEditor(): Editor {
 /** Flush the resolver microtask + the follow-up replacement dispatch. */
 function flush(): Promise<void> {
   return new Promise((r) => setTimeout(r, 0));
+}
+
+/** Fire a real paste event, so the whole handlePaste chain runs. */
+function paste(ed: Editor, text: string): void {
+  ed.commands.focus("start");
+  const event = new Event("paste", { bubbles: false, cancelable: true });
+  Object.defineProperty(event, "clipboardData", {
+    value: {
+      files: [],
+      getData: (type: string) => (type === "text/plain" ? text : ""),
+    },
+  });
+  ed.view.dom.dispatchEvent(event);
 }
 
 /** Simulate user typing `text` at position 1 (empty paragraph start). */
@@ -65,6 +86,10 @@ function typeAt1(ed: Editor, text: string): void {
 
 beforeEach(() => {
   resolveMock.mockReset();
+  // jsdom has no layout; ProseMirror's post-dispatch scroll needs client rects.
+  (EditorView.prototype as unknown as { scrollToSelection: () => void }).scrollToSelection =
+    () => {};
+  Element.prototype.scrollIntoView = () => {};
 });
 
 afterEach(() => {
@@ -106,9 +131,7 @@ describe("createIssueIdentifierAutolinkExtension", () => {
     resolveMock.mockResolvedValue({ id: "uuid-2", identifier: "MUL-2" });
     editor = makeEditor();
 
-    const tr = editor.state.tr.insertText("See MUL-2 now", 1);
-    tr.setMeta("paste", true);
-    editor.view.dispatch(tr);
+    paste(editor, "See MUL-2 now");
     await flush();
 
     expect(resolveMock).toHaveBeenCalledWith("MUL-2");
@@ -208,9 +231,7 @@ describe("createIssueIdentifierAutolinkExtension", () => {
     await flush();
 
     // Paste two identifiers at the very start of the doc.
-    const tr = editor.state.tr.insertText("MUL-2 plus MUL-3 x ", 1);
-    tr.setMeta("paste", true);
-    editor.view.dispatch(tr);
+    paste(editor, "MUL-2 plus MUL-3 x ");
     await flush();
 
     const md = editor.getMarkdown();

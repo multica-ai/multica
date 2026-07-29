@@ -80,6 +80,7 @@
     "caption_with_deleted": "{{count}} agents · {{deleted}} deleted",
     "sort_label": "Rank agents by",
     "deleted_agents": "Deleted agents",
+    "other_agents": "Other agents",
     "header_agent": "Agent",
     "header_tokens": "Tokens",
     "header_cost": "Cost",

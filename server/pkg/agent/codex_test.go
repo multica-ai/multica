@@ -1790,6 +1790,74 @@ func TestCodexStartOrResumeThreadResumesPriorThread(t *testing.T) {
 	}
 }
 
+// codexRuntimeBriefCanary stands in for the Multica runtime brief the daemon
+// would inline if developerInstructions were ever wired back up.
+const codexRuntimeBriefCanary = "MULTICA-RUNTIME-BRIEF-CANARY"
+
+// assertNoDeveloperInstructions pins the MUL-5392 contract: Codex loads the
+// per-task AGENTS.md from the thread's cwd, so the daemon never inlines the
+// runtime brief here. The field must still be sent — the app-server treats a
+// missing key differently from an explicit null — but always as null.
+func assertNoDeveloperInstructions(t *testing.T, params map[string]any) {
+	t.Helper()
+	got, ok := params["developerInstructions"]
+	if !ok {
+		t.Error("developerInstructions must be sent explicitly, even when null")
+		return
+	}
+	if got != nil {
+		t.Errorf("developerInstructions = %v, want null: the runtime brief is delivered via the workdir AGENTS.md, not inline (MUL-5392)", got)
+	}
+}
+
+func TestCodexThreadStartNeverInlinesSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:   "thread/start",
+			result:   json.RawMessage(`{"thread":{"id":"thr_fresh"}}`),
+			assertFn: assertNoDeveloperInstructions,
+		},
+	})
+	defer wait()
+
+	// SystemPrompt is set deliberately; it must not reach the app-server.
+	if _, _, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", SystemPrompt: codexRuntimeBriefCanary},
+		slog.Default(),
+	); err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+}
+
+func TestCodexThreadResumeNeverInlinesSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	c, fs, _ := newTestCodexClient(t)
+
+	wait := drainRPCScript(t, c, fs, []rpcResponse{
+		{
+			method:   "thread/resume",
+			result:   json.RawMessage(`{"thread":{"id":"thr_prior"}}`),
+			assertFn: assertNoDeveloperInstructions,
+		},
+	})
+	defer wait()
+
+	// SystemPrompt is set deliberately; it must not reach the app-server.
+	if _, _, err := c.startOrResumeThread(
+		context.Background(),
+		ExecOptions{Cwd: "/work", ResumeSessionID: "thr_prior", SystemPrompt: codexRuntimeBriefCanary},
+		slog.Default(),
+	); err != nil {
+		t.Fatalf("startOrResumeThread: %v", err)
+	}
+}
+
 func TestCodexStartOrResumeThreadFallsBackOnResumeError(t *testing.T) {
 	t.Parallel()
 

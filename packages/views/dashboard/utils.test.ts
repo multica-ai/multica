@@ -17,7 +17,9 @@ import {
   DELETED_AGENTS_ROW_ID,
   formatDuration,
   hasRateSample,
+  isSyntheticAgentRow,
   mergeAgentDashboardRows,
+  RESTRICTED_AGENTS_ROW_ID,
   sortAgentFailures,
 } from "./utils";
 
@@ -288,6 +290,40 @@ describe("bucketUnknownAgentRows", () => {
   it("keeps every row untouched while the agent list is still loading (null set)", () => {
     const out = bucketUnknownAgentRows([live, deletedA], null);
     expect(out.map((r) => r.agentId)).toEqual(["live", "deleted-a"]);
+  });
+
+  // MUL-5409: the server folds agents the viewer may not see onto its own
+  // sentinel. That row is not in `knownAgentIds` either, and sweeping it into
+  // the "Deleted agents" bucket is exactly the lie the issue was filed for —
+  // those agents are alive.
+  it("keeps the server's restricted bucket out of the deleted bucket", () => {
+    const restricted = {
+      agentId: RESTRICTED_AGENTS_ROW_ID,
+      tokens: 70,
+      cost: 0.7,
+      seconds: 42,
+      taskCount: 3,
+    };
+    const out = bucketUnknownAgentRows(
+      [live, restricted, deletedA],
+      new Set(["live"]),
+    );
+    expect(out.map((r) => r.agentId)).toEqual([
+      "live",
+      RESTRICTED_AGENTS_ROW_ID,
+      DELETED_AGENTS_ROW_ID,
+    ]);
+    // It passes through whole: unlike a deleted agent it really ran, so its
+    // Time / Tasks columns carry real numbers.
+    expect(out.find((r) => r.agentId === RESTRICTED_AGENTS_ROW_ID)).toEqual(
+      restricted,
+    );
+  });
+
+  it("classifies both bucket ids as synthetic and real agents as not", () => {
+    expect(isSyntheticAgentRow(DELETED_AGENTS_ROW_ID)).toBe(true);
+    expect(isSyntheticAgentRow(RESTRICTED_AGENTS_ROW_ID)).toBe(true);
+    expect(isSyntheticAgentRow("live")).toBe(false);
   });
 });
 

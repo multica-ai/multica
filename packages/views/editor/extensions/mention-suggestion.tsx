@@ -43,6 +43,7 @@ import {
 } from "./mention-recency";
 import { matchesPinyin } from "./pinyin-match";
 import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
+import { isTriggerArmedAt } from "./suggestion-trigger-arming";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -617,6 +618,10 @@ export function createMentionSuggestion(
   return {
     pluginKey,
     allowSpaces: true,
+    // Only open over an `@` the user actually typed. Tiptap matches on document
+    // content alone, so without this a pasted, dropped, undone or server-loaded
+    // `@` opens the picker just as readily (MUL-5429).
+    shouldShow: ({ editor, range }) => isTriggerArmedAt(editor, range.from),
     items: ({ query }) => {
       if (options.mode === "context") {
         const normalizedQuery = query.trim();

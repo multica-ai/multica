@@ -8,6 +8,21 @@ SELECT * FROM agent
 WHERE workspace_id = $1 AND kind = 'user'
 ORDER BY created_at ASC;
 
+-- name: ListAllAgentsAnyKind :many
+-- Every agent row in the workspace, INCLUDING `kind = 'system'` execution
+-- carriers (agent builder sessions) that ListAllAgents deliberately hides.
+--
+-- Only for surfaces that aggregate over raw `agent_task_queue` / task_usage
+-- rows, which carry no kind filter of their own: a system carrier runs real
+-- tasks and books real usage, so a per-agent rollup returns it whether or not
+-- any list endpoint will ever name it. Those surfaces need the full population
+-- to decide what to hide (MUL-5409). Do NOT use this to build a user-facing
+-- agent list — `kind = 'system'` must stay out of every picker and assignee
+-- surface.
+SELECT * FROM agent
+WHERE workspace_id = $1
+ORDER BY created_at ASC;
+
 -- name: GetAgent :one
 SELECT * FROM agent
 WHERE id = $1;

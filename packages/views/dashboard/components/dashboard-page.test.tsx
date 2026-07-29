@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, afterEach, beforeEach, vi } from "vitest";
 import { cleanup, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithI18n } from "../../test/i18n";
@@ -18,6 +18,39 @@ const dashboardDataRef = vi.hoisted(() => ({ current: false }));
 // top-offenders and leaderboard caps. Kept off by default so the other tests
 // keep their exact 4-of-10 arithmetic.
 const manyAgentsRef = vi.hoisted(() => ({ current: false }));
+// Appends the server's `__restricted_agents__` bucket to the per-agent rollups
+// — what a plain member actually receives once the backend folds the agents
+// they may not view (MUL-5409).
+const restrictedBucketRef = vi.hoisted(() => ({ current: false }));
+
+// Kept out of the fixture ternary so the sentinel's shape reads at a glance.
+// Unlike the deleted-agents bucket this one carries real seconds / tasks: the
+// agents behind it are alive and ran.
+const RESTRICTED_BUCKET_ROWS = vi.hoisted(
+  () =>
+    ({
+      "by-agent": [
+        {
+          agent_id: "__restricted_agents__",
+          provider: "anthropic",
+          model: "claude-sonnet-4-6",
+          input_tokens: 500,
+          output_tokens: 500,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          task_count: 4,
+        },
+      ],
+      "agent-runtime": [
+        {
+          agent_id: "__restricted_agents__",
+          total_seconds: 2 * 3_600,
+          task_count: 4,
+          failed_count: 2,
+        },
+      ],
+    }) as Record<string, unknown[]>,
+);
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -158,7 +191,13 @@ vi.mock("@tanstack/react-query", async () => {
                         },
                       ]
                     : [];
-        return { data, isLoading: false, isSuccess: true };
+        return {
+          data: restrictedBucketRef.current
+            ? [...data, ...(RESTRICTED_BUCKET_ROWS[kind as string] ?? [])]
+            : data,
+          isLoading: false,
+          isSuccess: true,
+        };
       }
       return { data: undefined, isLoading: true };
     },
@@ -523,6 +562,60 @@ describe("DashboardPage — Errors card placement and density", () => {
     expect(
       screen.queryByRole("button", { name: /Show all/ }),
     ).not.toBeInTheDocument();
+  });
+});
+
+// MUL-5409. The server folds every agent it won't name — those the viewer may
+// not see, plus the hidden system carriers behind agent-builder sessions — onto
+// one sentinel row. The leaderboard used to have a single synthetic row,
+// labelled "Deleted agents" with a bin icon and dashed-out Time/Tasks, so the
+// user was told "N agents were deleted" about agents that are alive and running.
+describe("DashboardPage — the leaderboard tells the truth about the server's bucket", () => {
+  beforeEach(() => {
+    queryKeys.length = 0;
+    dashboardDataRef.current = true;
+    manyAgentsRef.current = false;
+    restrictedBucketRef.current = true;
+    tzRef.current = "UTC";
+    cleanup();
+  });
+
+  afterEach(() => {
+    restrictedBucketRef.current = false;
+  });
+
+  it("labels the bucket neutrally, never as deleted", () => {
+    const { container } = renderDashboard();
+
+    const list = within(screen.getByRole("list", { name: "Leaderboard" }));
+    expect(list.getByText("Other agents")).toBeInTheDocument();
+    expect(list.queryByText("Deleted agents")).not.toBeInTheDocument();
+    // The sentinel is a placeholder, not an id to render.
+    expect(container).not.toHaveTextContent("__restricted_agents__");
+  });
+
+  it("counts it as neither an agent nor a deletion in the caption", () => {
+    const { container } = renderDashboard();
+
+    // One real agent in the fixture. The bucket is a row, not an agent, and
+    // nothing here was deleted — so no "· N deleted" suffix.
+    expect(container).toHaveTextContent("1 agents");
+    expect(container).not.toHaveTextContent("deleted");
+  });
+
+  it("keeps the bucket's run time and task count instead of dashing them out", () => {
+    // Those agents really ran; the server merely merged them. Blanking these
+    // columns (which is right for a hard-deleted agent) would under-report the
+    // workspace's run time against the Time / Tasks KPIs above.
+    renderDashboard();
+
+    const rows = within(
+      screen.getByRole("list", { name: "Leaderboard" }),
+    ).getAllByRole("listitem");
+    const bucket = rows.find((r) => r.textContent?.includes("Other agents"));
+    expect(bucket).toBeDefined();
+    expect(bucket).toHaveTextContent("2h");
+    expect(bucket).toHaveTextContent("4");
   });
 });
 

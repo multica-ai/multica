@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { BarChart3, FolderKanban, Trash2 } from "lucide-react";
+import { BarChart3, EyeOff, FolderKanban, Trash2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
@@ -80,9 +80,11 @@ import {
   DELETED_AGENTS_ROW_ID,
   formatDuration,
   hasRateSample,
+  isSyntheticAgentRow,
   mergeAgentDashboardRows,
   MIN_RATE_SAMPLE,
   OFFENDER_METRIC,
+  RESTRICTED_AGENTS_ROW_ID,
   sortAgentFailures,
   type AgentDashboardRow,
   type AgentFailureRow,
@@ -481,11 +483,16 @@ export function DashboardPage() {
     [agentRows, knownAgentIds],
   );
   // Distinct hard-deleted agents folded into the bucket — drives the caption's
-  // "· N deleted" suffix (the bucket itself is a single row).
+  // "· N deleted" suffix (the bucket itself is a single row). The server's
+  // restricted bucket is not in `knownAgentIds` either but is not a deletion,
+  // so it must not inflate this count — that mislabelling is exactly the bug
+  // MUL-5409 came with.
   const deletedAgentCount = useMemo(
     () =>
       knownAgentIds
-        ? agentRows.filter((r) => !knownAgentIds.has(r.agentId)).length
+        ? agentRows.filter(
+            (r) => !knownAgentIds.has(r.agentId) && !isSyntheticAgentRow(r.agentId),
+          ).length
         : 0,
     [agentRows, knownAgentIds],
   );
@@ -1350,6 +1357,14 @@ function Leaderboard({
     ? sortedRows
     : sortedRows.slice(0, LEADERBOARD_LIMIT);
 
+  // "N agents" counts the rows that actually name an agent. Up to two of the
+  // rows are synthetic buckets (deleted, restricted), and subtracting a fixed 1
+  // reported one agent too many whenever both were present.
+  const namedAgentCount = useMemo(
+    () => rows.filter((r) => !isSyntheticAgentRow(r.agentId)).length,
+    [rows],
+  );
+
   // Active column gets foreground text; others stay muted. Helps the user
   // see "this is what the bar is measuring" at a glance.
   const colClass = (key: LeaderboardSort) =>
@@ -1369,10 +1384,10 @@ function Leaderboard({
           <span className="text-xs text-muted-foreground">
             {deletedAgentCount > 0
               ? t(($) => $.leaderboard.caption_with_deleted, {
-                  count: rows.length - 1,
+                  count: namedAgentCount,
                   deleted: deletedAgentCount,
                 })
-              : t(($) => $.leaderboard.caption, { count: rows.length })}
+              : t(($) => $.leaderboard.caption, { count: namedAgentCount })}
           </span>
           {/* The caption right beside this already states how many agents the
               window covers, so the toggle carries a count only when
@@ -1410,11 +1425,24 @@ function Leaderboard({
               item boundaries rather than a bag of divs. */}
           <ul aria-label={t(($) => $.leaderboard.title)} className="divide-y">
             {visibleRows.map((row) => {
-              // The deleted-agents bucket is a synthetic row, not a real agent:
-              // render a neutral placeholder (no avatar fetch / hover card / UUID)
-              // and dash out Time/Tasks, which it never carries (see
-              // bucketUnknownAgentRows).
+              // Two synthetic rows, neither a real agent: both render a neutral
+              // placeholder (no avatar fetch / hover card / UUID) instead of
+              // looking the id up in the agent list.
+              //
+              // Only the deleted bucket dashes out Time/Tasks — it genuinely
+              // never carries them (see bucketUnknownAgentRows). The server's
+              // bucket does: those agents are alive and ran, the server just
+              // merged them (MUL-5409), so zeroing their columns would
+              // under-report the workspace's run time.
+              //
+              // Its copy is the neutral "Other agents" rather than anything
+              // about permissions, because it covers two populations: agents
+              // this viewer may not see, and the hidden system carriers behind
+              // agent-builder sessions, which nobody can name — including the
+              // admin who owns them.
               const isDeletedBucket = row.agentId === DELETED_AGENTS_ROW_ID;
+              const isRestrictedBucket = row.agentId === RESTRICTED_AGENTS_ROW_ID;
+              const isBucket = isDeletedBucket || isRestrictedBucket;
               const agent = agents.find((a) => a.id === row.agentId);
               const value = SORT_METRIC[sortBy](row);
               const pct = maxValue > 0 ? (value / maxValue) * 100 : 0;
@@ -1424,13 +1452,19 @@ function Leaderboard({
                   className="grid grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_5rem_5rem_5rem_4rem] items-center gap-3 px-4 py-2"
                 >
                   <div className="flex min-w-0 items-center gap-2">
-                    {isDeletedBucket ? (
+                    {isBucket ? (
                       <>
                         <span className="flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                          <Trash2 className="h-3 w-3" />
+                          {isDeletedBucket ? (
+                            <Trash2 className="h-3 w-3" />
+                          ) : (
+                            <EyeOff className="h-3 w-3" />
+                          )}
                         </span>
                         <span className="truncate text-sm font-medium italic text-muted-foreground">
-                          {t(($) => $.leaderboard.deleted_agents)}
+                          {isDeletedBucket
+                            ? t(($) => $.leaderboard.deleted_agents)
+                            : t(($) => $.leaderboard.other_agents)}
                         </span>
                       </>
                     ) : (

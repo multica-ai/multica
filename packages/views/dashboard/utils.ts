@@ -243,6 +243,17 @@ export function mergeAgentDashboardRows(
 // placeholder instead of looking the id up in the agent list.
 export const DELETED_AGENTS_ROW_ID = "__deleted_agents__";
 
+// Synthetic agentId the SERVER sends for the bucket aggregating every agent it
+// refuses to name (MUL-5409): agents the viewer may not see, plus the hidden
+// system carriers behind agent-builder sessions, which no client can resolve to
+// a name for anyone. Mirrors `restrictedAgentsRowID` in
+// server/internal/handler/dashboard.go — the two strings must stay in sync.
+//
+// Distinct from DELETED_AGENTS_ROW_ID on purpose: those agents are gone, these
+// are alive and still running. Labelling them "Deleted agents" told the user
+// something false, which is why the bucket renders as a neutral "Other agents".
+export const RESTRICTED_AGENTS_ROW_ID = "__restricted_agents__";
+
 // Fold usage rows whose agent no longer exists in the workspace into a single
 // aggregated "Deleted agents" row instead of dropping them. The agent list is
 // fetched with `include_archived: true`, so archived agents keep their names
@@ -262,6 +273,11 @@ export const DELETED_AGENTS_ROW_ID = "__deleted_agents__";
 // `knownAgentIds` is `null` while the agent list is still loading; callers
 // pass `null` in that case so the rows pass through untouched instead of the
 // whole leaderboard collapsing into one bucket on a slow fetch.
+//
+// The server's restricted bucket is NOT in `knownAgentIds` either (it is not an
+// agent), so it is passed through explicitly rather than swept into the deleted
+// bucket. It also keeps its seconds / taskCount: unlike a hard-deleted agent it
+// really did run, and the run-time rollup folds those numbers into it.
 export function bucketUnknownAgentRows(
   rows: AgentDashboardRow[],
   knownAgentIds: ReadonlySet<string> | null,
@@ -277,7 +293,7 @@ export function bucketUnknownAgentRows(
   };
   let hasDeleted = false;
   for (const r of rows) {
-    if (knownAgentIds.has(r.agentId)) {
+    if (knownAgentIds.has(r.agentId) || r.agentId === RESTRICTED_AGENTS_ROW_ID) {
       known.push(r);
       continue;
     }
@@ -286,6 +302,13 @@ export function bucketUnknownAgentRows(
     bucket.cost += r.cost;
   }
   return hasDeleted ? [...known, bucket] : known;
+}
+
+// Rows the leaderboard renders as a synthetic bucket rather than an agent.
+// `deletedAgentCount` and the caption's agent count both have to exclude these,
+// or the card claims more agents (or more deletions) than it is showing.
+export function isSyntheticAgentRow(agentId: string): boolean {
+  return agentId === DELETED_AGENTS_ROW_ID || agentId === RESTRICTED_AGENTS_ROW_ID;
 }
 
 // ---------------------------------------------------------------------------
@@ -594,13 +617,10 @@ export function aggregateFailureReasons(
 
 // Synthetic agentId for the row aggregating every agent the viewer can't
 // resolve to a name. Distinct from DELETED_AGENTS_ROW_ID because this bucket
-// covers two populations at once: hard-deleted agents, and agents that are
-// private to someone else. The failure rollups are workspace-scoped and do
-// NOT apply per-agent visibility (see the access-control note on
-// server/internal/handler/dashboard.go), while the agent list the client
-// joins against DOES — members only see a private agent when they own it or
-// are workspace owner/admin. Naming the bucket after deletion would be a lie
-// for the second group.
+// covers two populations at once: hard-deleted agents, and the server's
+// already-anonymized restricted bucket. Naming it after deletion would be a
+// lie for the second group, so the Errors card labels it neutrally
+// ("Other agents"), which is honest for both.
 export const UNRESOLVED_AGENTS_ROW_ID = "__unresolved_agents__";
 
 export interface AgentFailureRow {
@@ -703,12 +723,13 @@ export function sortAgentFailures(
 // Fold rows whose agent the viewer cannot resolve into one aggregated bucket
 // so the Errors list never renders a bare agent UUID.
 //
-// This is a privacy boundary, not just a cosmetic one. The failure rollups
-// return every agent in the workspace — deliberately, since failure volume is
-// a workspace-level operational metric — but the agent list is filtered by
-// per-agent visibility. Rendering `agentId` for the difference would tell a
-// member that a private agent exists, how often it runs, how often it fails,
-// and what it fails on.
+// The privacy boundary itself now lives on the server: GetDashboardFailuresByAgent
+// folds agents the caller may not view onto RESTRICTED_AGENTS_ROW_ID before
+// serializing (MUL-5409), because client-side filtering is decoration — one
+// curl bypasses it. This function stays as the display-side backstop: it still
+// owns hard-deleted agents, whose ids the server has no reason to hide but
+// which resolve to no name, and it re-anonymizes the server's bucket into the
+// same neutral row so the card has one "not an agent you can open" case.
 //
 // `knownAgentIds` is null while the agent list is still loading. Unlike
 // `bucketUnknownAgentRows`, which passes rows through in that window, this

@@ -7,7 +7,11 @@ import type {
   AgentRuntime,
   MemberWithUser,
 } from "@multica/core/types";
-import { AGENT_DESCRIPTION_MAX_LENGTH } from "@multica/core/agents";
+import {
+  AGENT_DESCRIPTION_MAX_LENGTH,
+  AGENT_MAX_CONCURRENT_TASKS_MAX,
+  AGENT_MAX_CONCURRENT_TASKS_MIN,
+} from "@multica/core/agents";
 import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { isImeComposing } from "@multica/core/utils";
 import { Input } from "@multica/ui/components/ui/input";
@@ -330,14 +334,16 @@ function ConcurrencyField({
 }) {
   const { t } = useT("agents");
   const [draft, setDraft] = useState(String(value));
-  const min = 1;
-  const max = 50;
 
   useEffect(() => setDraft(String(value)), [value]);
 
   const commit = () => {
     const next = Number(draft);
-    if (!Number.isInteger(next) || next < min || next > max) {
+    if (
+      !Number.isInteger(next) ||
+      next < AGENT_MAX_CONCURRENT_TASKS_MIN ||
+      next > AGENT_MAX_CONCURRENT_TASKS_MAX
+    ) {
       setDraft(String(value));
       return;
     }
@@ -352,8 +358,8 @@ function ConcurrencyField({
         name="agent-concurrency"
         autoComplete="off"
         inputMode="numeric"
-        min={min}
-        max={max}
+        min={AGENT_MAX_CONCURRENT_TASKS_MIN}
+        max={AGENT_MAX_CONCURRENT_TASKS_MAX}
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
@@ -369,7 +375,10 @@ function ConcurrencyField({
         className="font-mono tabular-nums"
       />
       <p className="mt-1 text-xs text-muted-foreground">
-        {t(($) => $.pickers.concurrency_range, { min, max })}
+        {t(($) => $.pickers.concurrency_range, {
+          min: AGENT_MAX_CONCURRENT_TASKS_MIN,
+          max: AGENT_MAX_CONCURRENT_TASKS_MAX,
+        })}
       </p>
     </div>
   );

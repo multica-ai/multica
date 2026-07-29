@@ -45,6 +45,7 @@ import {
 } from "./issue-identifier-autolink";
 import { SlashCommandExtension } from "./slash-command-extension";
 import { createSlashCommandSuggestion, createBuiltinCommandSuggestion } from "./slash-command-suggestion";
+import { SuggestionTriggerArmingExtension } from "./suggestion-trigger-arming";
 import { CodeBlockView } from "./code-block-view";
 import { PatchedListItem, PatchedTaskItem } from "./list-item";
 import { createMarkdownPasteExtension } from "./markdown-paste";
@@ -241,6 +242,9 @@ export function createEditorExtensions(
     // so users can copy rich content out as the original Markdown.
     createMarkdownCopyExtension(),
     FileCardExtension,
+    // Must precede the mention and slash pickers: it supplies the "the user
+    // typed this trigger" signal their `shouldShow` reads (MUL-5429).
+    SuggestionTriggerArmingExtension,
     BaseMentionExtension.configure({
       HTMLAttributes: { class: "mention" },
       ...(options.disableMentions

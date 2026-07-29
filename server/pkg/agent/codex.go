@@ -1561,11 +1561,13 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 	if priorThreadID := opts.ResumeSessionID; priorThreadID != "" {
 		// thread/resume reuses the thread's persisted model and reasoning
 		// effort; only override fields the daemon actually cares about.
+		// developerInstructions stays nil for the reason given on thread/start
+		// below.
 		resumeParams := map[string]any{
 			"threadId":              priorThreadID,
 			"cwd":                   opts.Cwd,
 			"model":                 nilIfEmpty(opts.Model),
-			"developerInstructions": nilIfEmpty(opts.SystemPrompt),
+			"developerInstructions": nil,
 		}
 		// Explicit override of the persisted reasoning effort: without
 		// this, a Codex resume silently reuses whatever level the prior
@@ -1589,6 +1591,12 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		}
 	}
 
+	// developerInstructions is always nil: a thread started with this cwd loads
+	// the per-task AGENTS.md the daemon wrote there, so the runtime brief is
+	// already in context and inlining it would duplicate it on every turn.
+	// Confirmed end-to-end against codex-cli 0.144.6 driving the real
+	// app-server (thread/start -> turn/start) with developerInstructions unset
+	// (MUL-5392).
 	startParams := map[string]any{
 		"model":                  nilIfEmpty(opts.Model),
 		"modelProvider":          nil,
@@ -1598,7 +1606,7 @@ func (c *codexClient) startOrResumeThread(ctx context.Context, opts ExecOptions,
 		"sandbox":                nil,
 		"config":                 nil,
 		"baseInstructions":       nil,
-		"developerInstructions":  nilIfEmpty(opts.SystemPrompt),
+		"developerInstructions":  nil,
 		"compactPrompt":          nil,
 		"includeApplyPatchTool":  nil,
 		"experimentalRawEvents":  false,

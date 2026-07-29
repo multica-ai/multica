@@ -122,6 +122,8 @@ If you front S3 with CloudFront, three variables apply: `CLOUDFRONT_DOMAIN`, `CL
 
 - **Empty**: the cookie is valid only on the exact host visited (correct for single-host deployments)
 - **Set to `.example.com`**: the cookie is shared across subdomains (so `app.example.com` and `api.example.com` share a sign-in session)
+- **Required, not optional, when the frontend and backend are on different hostnames**: the browser has to read the `multica_csrf` cookie from the page's own origin, and without it every write request fails with `403 CSRF validation failed` while reads keep working
+- Use the **narrowest** parent domain that still covers both hosts (`.agent.example.com`, not `.example.com`). It also scopes the `multica_auth` session cookie to every host under that domain, so only use this layout when they are all operated by the same trusted party — see [Self-Hosting](/getting-started/self-hosting) for the full configuration
 - Warning: it cannot be an IP address (browsers ignore it)
 
 ## Restricting who can sign up

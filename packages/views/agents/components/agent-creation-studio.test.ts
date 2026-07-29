@@ -527,6 +527,22 @@ describe("Agent creation studio execution overrides", () => {
     expect(request.thinking_level).toBe("high");
   });
 
+  it.each([0, -1, 51])(
+    "omits an invalid historical duplicate concurrency of %i",
+    (maxConcurrentTasks) => {
+      const request = buildCreateAgentRequest({
+        draft: draft(),
+        runtimeId: "runtime-1",
+        duplicateSource: sourceAgent({
+          max_concurrent_tasks: maxConcurrentTasks,
+        }),
+      });
+
+      expect(request.max_concurrent_tasks).toBeUndefined();
+      expect(request).not.toHaveProperty("max_concurrent_tasks");
+    },
+  );
+
   it("clears model, thinking level and service tier on a runtime change", () => {
     const current = {
       ...draft(),

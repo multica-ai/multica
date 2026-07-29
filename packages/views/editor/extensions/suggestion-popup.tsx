@@ -216,7 +216,19 @@ export function createSuggestionPopupRender<
       },
 
       onKeyDown: (props: SuggestionKeyDownProps) => {
-        if (props.event.key === "Escape") {
+        // `Esc` is the legacy alias the suggestion plugin also matches on.
+        if (props.event.key === "Escape" || props.event.key === "Esc") {
+          // Escape while a picker is open must close ONLY the picker. Returning
+          // true makes ProseMirror call preventDefault(), but ProseMirror never
+          // stops propagation, and Base UI's dismiss layer listens for Escape on
+          // `document` in the bubble phase without consulting defaultPrevented.
+          // Without stopPropagation the same keypress that closes this popup
+          // also closes the host Dialog and discards the draft (MUL-5429).
+          // This handler is the only layer that knows a picker is open, so
+          // stopping here fixes every host at once (create-issue dialog, chat
+          // input, comment composer).
+          props.event.preventDefault();
+          props.event.stopPropagation();
           cleanup();
           return true;
         }

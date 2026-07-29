@@ -4,7 +4,7 @@ import StarterKit from "@tiptap/starter-kit";
 import { Suggestion, type SuggestionProps } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
 import { forwardRef, useImperativeHandle } from "react";
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createSuggestionPopupRender, isPickerAcceptKey } from "./suggestion-popup";
 import { PatchedListItem } from "./list-item";
@@ -214,6 +214,61 @@ describe("createSuggestionPopupRender", () => {
       });
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// Escape containment (MUL-5429): Escape while a picker is open must close ONLY
+// the picker. ProseMirror calls preventDefault() for a handled key but never
+// stops propagation, and Base UI's dismiss layer listens for Escape on
+// `document` in the BUBBLE phase without consulting defaultPrevented — so
+// without an explicit stopPropagation the same keypress also closed the host
+// create-issue dialog and threw the draft away. The plain document listener
+// below stands in for that dismiss layer.
+// ---------------------------------------------------------------------------
+
+describe("Escape containment while a picker is open", () => {
+  function watchHostEscape() {
+    const hostEscape = vi.fn();
+    document.addEventListener("keydown", hostEscape);
+    return {
+      hostEscape,
+      stop: () => document.removeEventListener("keydown", hostEscape),
+    };
+  }
+
+  it.each(["@", "/"] as const)(
+    "closes the %s popup on Escape without letting the key reach the host dialog",
+    async (char) => {
+      const ed = makeEditor(char);
+      await triggerSuggestion(ed, `${char}a`);
+      const { hostEscape, stop } = watchHostEscape();
+
+      await act(async () => {
+        fireEvent.keyDown(ed.view.dom, { key: "Escape" });
+      });
+      stop();
+
+      await expectPopupClosed();
+      expect(hostEscape).not.toHaveBeenCalled();
+    },
+  );
+
+  it("still lets Escape reach the host when no picker is open", async () => {
+    const ed = makeEditor("@");
+    await act(async () => {
+      ed.commands.focus("end");
+    });
+    const { hostEscape, stop } = watchHostEscape();
+
+    await act(async () => {
+      fireEvent.keyDown(ed.view.dom, { key: "Escape" });
+    });
+    stop();
+
+    // With no picker open Escape is the host dialog's own close shortcut and
+    // must keep working — the fix must not swallow Escape unconditionally.
+    expect(hostEscape).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

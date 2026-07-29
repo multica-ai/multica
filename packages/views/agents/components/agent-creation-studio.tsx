@@ -18,6 +18,8 @@ import { api, ApiError } from "@multica/core/api";
 import { useAuthStore } from "@multica/core/auth";
 import {
   AGENT_DESCRIPTION_MAX_LENGTH,
+  AGENT_MAX_CONCURRENT_TASKS_MAX,
+  AGENT_MAX_CONCURRENT_TASKS_MIN,
   agentTemplateDetailOptions,
   agentTemplateListOptions,
 } from "@multica/core/agents";
@@ -1943,7 +1945,14 @@ export function buildCreateAgentRequest(options: {
     if (duplicateSource.custom_args.length > 0) {
       request.custom_args = duplicateSource.custom_args;
     }
-    request.max_concurrent_tasks = duplicateSource.max_concurrent_tasks;
+    const sourceConcurrency = duplicateSource.max_concurrent_tasks;
+    if (
+      Number.isInteger(sourceConcurrency) &&
+      sourceConcurrency >= AGENT_MAX_CONCURRENT_TASKS_MIN &&
+      sourceConcurrency <= AGENT_MAX_CONCURRENT_TASKS_MAX
+    ) {
+      request.max_concurrent_tasks = sourceConcurrency;
+    }
   }
   return request;
 }
