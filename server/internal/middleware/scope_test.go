@@ -16,6 +16,7 @@ var pass = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 })
 
+// CEREBRO-PATCH(task-scope-hotfix): lock the temporary FIR-4076 pass-through.
 func TestRequireUserScope_CompatibilityModeAllowsTaskScope(t *testing.T) {
 	t.Parallel()
 	req := httptest.NewRequest("GET", "/anything", nil)

@@ -115,6 +115,7 @@ func createTaskScopedPropertyFixture(t *testing.T) (token, ownIssueID, otherIssu
 	return token, ownIssueID, otherIssueID, propertyID
 }
 
+// CEREBRO-PATCH(task-scope-hotfix): prove the FIR-4076 compatibility boundary.
 func TestTaskTokenCompatibilityModeRestoresGeneralRoutes(t *testing.T) {
 	token, ownIssueID, otherIssueID, propertyID := createTaskScopedPropertyFixture(t)
 

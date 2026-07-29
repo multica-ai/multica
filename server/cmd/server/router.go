@@ -1142,7 +1142,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.With(agentToolScope).Post("/api/agents/{id}/tools/{name}/invoke", h.InvokeAgentTool)
 			r.With(agentToolScope).Get("/api/agents/{id}/capabilities", h.GetAgentCapabilities) // CEREBRO-PATCH(agent-capabilities-card-task-route): FIR-2243 — an agent reads its OWN capabilities card via its task token to discover what it may do; AllowTaskScopeForAgent restricts task tokens to their own id, user tokens pass through unchanged.
 			// CEREBRO-PATCH(agent-memory-settings-routes): FIR-1794 Gate 3 — the
-			// caller's own per-agent memory read/write toggle. Normally human-only;
+			// CEREBRO-PATCH(task-scope-hotfix): caller's own per-agent memory toggle is normally human-only;
 			// FIR-4076 temporarily passes task tokens until platform-action gates land.
 			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/memory-settings", h.GetAgentMemorySettings)
 			r.With(middleware.RequireUserScope).Put("/api/agents/{id}/memory-settings", h.SetAgentMemorySettings)
