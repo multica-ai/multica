@@ -288,23 +288,25 @@ test("Setup: control-first instructions and runtime settings persist in the vers
       .getByRole("region", { name: "Instructions" })
       .locator('[contenteditable="true"]');
     await expect(instructions).toHaveText("Original instructions");
-    await expect(page.getByLabel("Workspace guidance")).toHaveValue("");
-    await expect(page.getByLabel("Tool descriptions")).toHaveValue("");
-    await expect(page.getByLabel("Where it runs")).toHaveValue(
+    await expect(page.getByRole("button", { name: "Reads it" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.getByRole("button", { name: "Every tool" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(page.getByLabel("Engine", { exact: true })).toHaveValue(
       s.runtimeId,
     );
-    await expect(page.getByLabel("Maximum steps")).toHaveValue("");
+    await expect(page.getByLabel("Stop after")).toHaveValue("");
 
     // The title/rationale/buttons block only renders once the form is dirty.
     await instructions.fill("Tightened instructions for FIR-3212");
-    await page.getByLabel("Workspace guidance").selectOption("off");
-    await page.getByLabel("Tool descriptions").selectOption("summary");
-    await page
-      .locator("summary")
-      .filter({ hasText: "instruction delivery and technical settings" })
-      .click();
-    await page.getByLabel("Instruction delivery").selectOption("replace");
-    await page.getByLabel("Maximum steps").fill("18");
+    await page.getByRole("button", { name: "Skips it" }).click();
+    await page.getByRole("button", { name: "One line per connection" }).click();
+    await page.getByRole("button", { name: "Drop them" }).click();
+    await page.getByLabel("Stop after").fill("18");
     await page.getByLabel("Change title").fill("Tighten the instructions");
     await page.getByRole("button", { name: "Save & approve" }).click();
     await expect(page.getByText(/Change approved/)).toBeVisible();
@@ -317,14 +319,18 @@ test("Setup: control-first instructions and runtime settings persist in the vers
         .getByRole("region", { name: "Instructions" })
         .locator('[contenteditable="true"]'),
     ).toHaveText("Tightened instructions for FIR-3212");
-    await expect(page.getByLabel("Workspace guidance")).toHaveValue("off");
-    await expect(page.getByLabel("Tool descriptions")).toHaveValue("summary");
-    await expect(page.getByLabel("Maximum steps")).toHaveValue("18");
-    await page
-      .locator("summary")
-      .filter({ hasText: "instruction delivery and technical settings" })
-      .click();
-    await expect(page.getByLabel("Instruction delivery")).toHaveValue("replace");
+    await expect(page.getByRole("button", { name: "Skips it" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    await expect(
+      page.getByRole("button", { name: "One line per connection" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    await expect(page.getByLabel("Stop after")).toHaveValue("18");
+    await expect(page.getByRole("button", { name: "Drop them" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
 
     // What a run reads: the approved text is on the agent, the version is
     // bumped, and an immutable version row exists for a run to pin.
@@ -546,7 +552,7 @@ test("Approval: a pending proposal shows its consequences and approving applies 
       .locator('[contenteditable="true"]')
       .fill("Proposed instructions for FIR-3212");
     await page
-      .getByLabel("Where it runs")
+      .getByLabel("Engine", { exact: true })
       .selectOption(s.otherRuntimeId);
     await page.getByLabel("Change title").fill("Proposed change");
     await page.getByRole("button", { name: "Propose", exact: true }).click();
@@ -703,23 +709,23 @@ test("Production prompt: recorded parts and pending runtime differences stay vis
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: "Production prompt" }).click();
 
-    // The default view explains the run in ordinary language. Raw evidence is
-    // available only when the user opens Advanced.
+    // The default view exposes both the parts and the exact selected text.
     await expect(
-      page.getByRole("region", { name: "Run summary" }),
+      page.getByRole("region", { name: "Prompt evidence" }),
     ).toBeVisible();
-    await expect(page.getByText("What shaped this run")).toBeVisible();
-    await page
-      .getByText("Advanced: exact prompt and technical evidence")
-      .click();
+    await expect(page.getByText("The parts it is made of")).toBeVisible();
+    await expect(page.getByText("Original instructions")).toBeVisible();
+    await expect(
+      page.getByRole("link", { name: "Edit instructions" }),
+    ).toHaveAttribute("href", "?tab=context#agent-instructions");
 
-    // Evidence framing must remain explicit — this view never reconstructs.
+    // Technical provenance is secondary, while exact text stays visible.
+    await page.getByText("Technical evidence", { exact: false }).click();
     await expect(
       page.getByText("Captured from the run — not reconstructed"),
     ).toBeVisible();
 
     // Drive the parts nav: recorded role, tools and case stay understandable.
-    await expect(page.getByText("Original instructions")).toBeVisible();
     await page.getByRole("button", { name: /Tools & connections/ }).click();
     await expect(page.getByText("Tools layer content")).toBeVisible();
     await page.getByRole("button", { name: /Case itself/ }).click();
@@ -727,29 +733,19 @@ test("Production prompt: recorded parts and pending runtime differences stay vis
 
     // Drive the run selector: switching runs shows that run's own evidence.
     await page.locator("#cerebro-prompt-snapshot-run").selectOption(olderTaskId);
-    await page
-      .getByText("Advanced: exact prompt and technical evidence")
-      .click();
     await expect(page.getByText("Older run content")).toBeVisible();
     await expect(page.getByText("Case layer content")).toHaveCount(0);
 
     // Create a real pending proposal through the control-first surface.
     await page.getByRole("button", { name: "Instructions", exact: true }).click();
-    await page
-      .locator("summary")
-      .filter({ hasText: "instruction delivery and technical settings" })
-      .click();
-    await page.getByLabel("Instruction delivery").selectOption("replace");
-    await page.getByLabel("Maximum steps").fill("18");
+    await page.getByRole("button", { name: "Drop them" }).click();
+    await page.getByLabel("Stop after").fill("18");
     await page.getByLabel("Change title").fill("Bound the next run");
     await page.getByRole("button", { name: "Propose", exact: true }).click();
     await expect(page.getByText(/Change proposed/)).toBeVisible();
 
     await page.getByRole("button", { name: "Production prompt" }).click();
-    await page.getByRole("button", { name: "What changes" }).click();
-    await page
-      .getByText("Advanced: exact prompt and technical evidence")
-      .click();
+    await page.getByRole("button", { name: "Difference" }).click();
     await page.getByRole("button", { name: /Run controls/ }).click();
     await expect(page.getByText("+ System prompt: replace")).toBeVisible();
     await expect(page.getByText("+ Stop after: 18")).toBeVisible();

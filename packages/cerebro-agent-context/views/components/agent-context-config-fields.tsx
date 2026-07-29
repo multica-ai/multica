@@ -155,300 +155,269 @@ function ControlFirstFields(props: SharedProps) {
     systemModes,
     ignored,
   } = props;
-  const tokenEstimate = Math.ceil(instructions.length / 4);
-  const workspaceSummary =
-    workspaceBriefMode === "off"
-      ? "Uses this agent's role only"
-      : "Uses the shared workspace guidance";
-  const toolsSummary =
-    toolsBriefMode === "summary"
-      ? "Reads short connection summaries"
-      : "Reads full tool descriptions";
-  const runSummary = [
-    props.runtimeName,
-    props.model || "engine-selected model",
-    maxTurns ? `up to ${maxTurns} steps` : "run-mode step limit",
-    timeoutMinutes ? `${timeoutMinutes}-minute limit` : "run-mode time limit",
-  ].join(" · ");
+  const keepsEngineInstructions = systemPromptMode !== "replace";
 
   return (
-    <div className="space-y-5">
-      <section
-        aria-label="Configuration summary"
-        className="rounded-xl border bg-muted/20 p-4"
-      >
-        <div className="mb-3">
-          <h4 className="text-sm font-semibold">At a glance</h4>
-          <p className="mt-1 text-xs text-muted-foreground">
-            This is what the next run will use after the change is approved.
-          </p>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <SummaryCard
-            title="Role"
-            value={
-              instructions.trim()
-                ? "Follows the role and boundaries below"
-                : "No role instructions have been written"
-            }
-          />
-          <SummaryCard
-            title="Reads before work"
-            value={`${workspaceSummary}. ${toolsSummary}.`}
-          />
-          <SummaryCard title="Run setup" value={runSummary} />
-        </div>
-      </section>
-
-      <ControlGroup
-        eyebrow="What this agent does"
-        description="Write the job, the expected response and the boundaries in ordinary language."
-      >
-        <div className="grid gap-4">
-          <ControlField
-            label="Role and instructions"
-            htmlFor="agent-instructions"
-            helper={`${instructions.length.toLocaleString("en-US")} characters · about ${tokenEstimate.toLocaleString("en-US")} tokens`}
-          >
-            {InstructionsEditor ? (
-              <div
-                role="region"
-                aria-label="Instructions"
-                aria-disabled={busy}
-                className={`min-h-64 rounded-md border bg-background ${
-                  busy ? "pointer-events-none opacity-60" : ""
-                }`}
-              >
-                <InstructionsEditor
-                  key={`${props.agent.id}:${editorKey}`}
-                  defaultValue={instructions}
-                  onUpdate={onInstructions}
-                  placeholder="Write what this agent should do, how it should respond, and what it must never do…"
-                  className="min-h-64 px-4 py-3 text-sm"
-                  debounceMs={0}
-                  disableMentions
-                />
-              </div>
-            ) : (
-              <Textarea
-                id="agent-instructions"
-                aria-label="Instructions"
-                value={instructions}
-                onChange={(event) => onInstructions?.(event.target.value)}
-                readOnly={busy}
-                rows={16}
-                className="min-h-64 resize-y bg-background text-sm leading-relaxed"
+    <div className="overflow-hidden rounded-xl border bg-card">
+      <ControlSectionLabel>Who this agent is</ControlSectionLabel>
+      <div className="border-b px-4 pb-4 pt-2 md:px-5">
+        <ControlField
+          label="Instructions"
+          htmlFor="agent-instructions"
+          helper={`${instructions.length.toLocaleString("en-US")} characters in this agent's own role and boundaries.`}
+        >
+          {InstructionsEditor ? (
+            <div
+              id="agent-instructions"
+              role="region"
+              aria-label="Instructions"
+              aria-disabled={busy}
+              className={`min-h-48 rounded-md border bg-background ${
+                busy ? "pointer-events-none opacity-60" : ""
+              }`}
+            >
+              <InstructionsEditor
+                key={`${props.agent.id}:${editorKey}`}
+                defaultValue={instructions}
+                onUpdate={onInstructions}
+                placeholder="Write what this agent should do, how it should respond, and what it must never do…"
+                className="min-h-48 px-4 py-3 text-sm"
+                debounceMs={0}
+                disableMentions
               />
-            )}
-          </ControlField>
-        </div>
-      </ControlGroup>
-
-      <ControlGroup
-        eyebrow="What this agent reads before work"
-        description="Choose how much shared guidance is added before each task. Tool access itself is managed under Tools."
+            </div>
+          ) : (
+            <Textarea
+              id="agent-instructions"
+              aria-label="Instructions"
+              value={instructions}
+              onChange={(event) => onInstructions?.(event.target.value)}
+              readOnly={busy}
+              rows={10}
+              className="min-h-48 resize-y bg-background text-sm leading-relaxed"
+            />
+          )}
+        </ControlField>
+      </div>
+      <ControlRow
+        label="Engine's own instructions"
+        helper="Keep the engine's general instructions, or drop them so only this agent's role shapes its work."
+        consequence={
+          keepsEngineInstructions
+            ? "Adds engine text before the task"
+            : "Only this agent's role is used"
+        }
+        ignored={ignored("system_prompt")}
       >
-        <div className="grid gap-4 md:grid-cols-2">
-          <ControlField
-            label="Workspace guidance"
-            htmlFor="ac-workspace-brief"
-            helper="Shared rules, product context and working conventions."
-          >
-            <NativeSelect
-              id="ac-workspace-brief"
-              value={workspaceBriefMode}
-              onChange={(event) => onWorkspaceBriefMode(event.target.value)}
-              className="w-full"
-            >
-              <NativeSelectOption value="">
-                Read all workspace guidance
-              </NativeSelectOption>
-              <NativeSelectOption value="off">
-                Use this agent&apos;s role only
-              </NativeSelectOption>
-            </NativeSelect>
-          </ControlField>
+        <ChoiceGroup
+          value={keepsEngineInstructions ? "keep" : "drop"}
+          disabled={ignored("system_prompt") || systemModes.length === 0}
+          options={[
+            {
+              value: "keep",
+              label: "Keep them",
+              onSelect: () =>
+                onSystemPromptMode(
+                  systemModes.includes("append") ? "append" : "",
+                ),
+            },
+            {
+              value: "drop",
+              label: "Drop them",
+              onSelect: () => onSystemPromptMode("replace"),
+            },
+          ]}
+        />
+      </ControlRow>
 
-          <ControlField
-            label="Tool descriptions"
-            htmlFor="ac-tools-brief"
-            helper="How much explanation the agent reads about tools it already has."
-          >
-            <NativeSelect
-              id="ac-tools-brief"
-              value={toolsBriefMode}
-              onChange={(event) => onToolsBriefMode(event.target.value)}
-              className="w-full"
-            >
-              <NativeSelectOption value="">
-                Read full tool descriptions
-              </NativeSelectOption>
-              <NativeSelectOption value="summary">
-                Read short connection summaries
-              </NativeSelectOption>
-            </NativeSelect>
-          </ControlField>
-        </div>
-      </ControlGroup>
-
-      <ControlGroup
-        eyebrow="How this agent runs"
-        description="Choose the engine, response effort and safety limits for one run."
+      <ControlSectionLabel>What this agent reads before a task</ControlSectionLabel>
+      <ControlRow
+        id="ac-workspace-brief"
+        label="The shared workspace brief"
+        helper="Workspace rules, product context and working conventions."
+        consequence={
+          workspaceBriefMode === "off"
+            ? "Removed from the next prompt"
+            : "Its full text is added"
+        }
       >
-        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-6">
-          <ControlField
-            label="Where it runs"
-            htmlFor="ac-runtime"
-            helper="Moving the agent is reviewed with the rest of this change."
-          >
-            <NativeSelect
-              id="ac-runtime"
-              aria-label="Where it runs"
-              value={runtimeId}
-              onChange={(event) => onRuntimeId(event.target.value)}
-              className="w-full"
-            >
-              {props.runtimes.map((item) => (
-                <NativeSelectOption key={item.id} value={item.id}>
-                  {item.custom_name || item.name} · {item.provider}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </ControlField>
-          <ModelControl {...props} />
-          <ThinkingControl {...props} />
-          <ControlField
-            label="Response speed"
-            htmlFor="ac-speed"
-            helper="Fast is available only when the selected model supports it."
-            ignored={ignored("speed_mode")}
-          >
-            <NativeSelect
-              id="ac-speed"
-              value={speedMode}
-              onChange={(event) => onSpeedMode(event.target.value)}
-              className="w-full"
-              disabled={ignored("speed_mode")}
-            >
-              <NativeSelectOption value="">Standard</NativeSelectOption>
-              <NativeSelectOption value="fast">Fast</NativeSelectOption>
-            </NativeSelect>
-          </ControlField>
-          <ControlField
-            label="Maximum steps"
-            htmlFor="ac-max-turns"
-            helper="Stops a run that keeps working without finishing."
-            ignored={ignored("max_turns")}
-          >
+        <ChoiceGroup
+          value={workspaceBriefMode === "off" ? "skip" : "read"}
+          options={[
+            {
+              value: "read",
+              label: "Reads it",
+              onSelect: () => onWorkspaceBriefMode(""),
+            },
+            {
+              value: "skip",
+              label: "Skips it",
+              onSelect: () => onWorkspaceBriefMode("off"),
+            },
+          ]}
+        />
+      </ControlRow>
+      <ControlRow
+        id="ac-tools-brief"
+        label="Its tool list"
+        helper="Only the wording changes. The agent keeps access to every tool either way."
+        consequence={
+          toolsBriefMode === "summary"
+            ? "Shorter text; access is unchanged"
+            : "Every tool description is added"
+        }
+      >
+        <ChoiceGroup
+          value={toolsBriefMode === "summary" ? "summary" : "full"}
+          options={[
+            {
+              value: "full",
+              label: "Every tool",
+              onSelect: () => onToolsBriefMode(""),
+            },
+            {
+              value: "summary",
+              label: "One line per connection",
+              onSelect: () => onToolsBriefMode("summary"),
+            },
+          ]}
+        />
+      </ControlRow>
+      <div className="flex flex-wrap items-center gap-2 border-b bg-muted/40 px-4 py-3 text-xs md:px-5">
+        <span className="font-medium">
+          The exact total before the task is recorded after every run.
+        </span>
+        <a
+          className="ml-auto underline underline-offset-2"
+          href="?tab=production_prompt"
+        >
+          See the whole thing →
+        </a>
+      </div>
+
+      <ControlSectionLabel id="how-agent-runs">
+        How this agent runs
+      </ControlSectionLabel>
+      <div className="divide-y border-b">
+        <div className="px-4 py-3 md:px-5">
+          <ModelControl {...props} row />
+        </div>
+        <div className="px-4 py-3 md:px-5">
+          <ThinkingControl {...props} row />
+        </div>
+        <ControlRow
+          label="Speed"
+          helper="Fast answers with the same model. It is only used where the model supports it."
+          ignored={ignored("speed_mode")}
+        >
+          <ChoiceGroup
+            value={speedMode === "fast" ? "fast" : "standard"}
+            disabled={ignored("speed_mode")}
+            options={[
+              {
+                value: "standard",
+                label: "Standard",
+                onSelect: () => onSpeedMode(""),
+              },
+              {
+                value: "fast",
+                label: "Fast",
+                onSelect: () => onSpeedMode("fast"),
+              },
+            ]}
+          />
+        </ControlRow>
+        <ControlRow
+          label="Stop after"
+          helper="Stops a run that keeps taking steps without finishing."
+          ignored={ignored("max_turns")}
+        >
+          <div className="flex items-center gap-2">
             <Input
               id="ac-max-turns"
-              aria-label="Maximum steps"
+              aria-label="Stop after"
               type="number"
               min={1}
               step={1}
               value={maxTurns}
               onChange={(event) => onMaxTurns(event.target.value)}
-              placeholder="Use run-mode limit"
+              placeholder="Default"
               disabled={ignored("max_turns")}
-              className="font-mono text-xs"
+              className="w-28 text-right font-mono text-xs"
             />
-          </ControlField>
-          <ControlField
-            label="Time limit"
-            htmlFor="ac-timeout-minutes"
-            helper="Stops one run after this many minutes."
-            ignored={ignored("timeout_minutes")}
-          >
+            <span className="text-xs text-muted-foreground">steps</span>
+          </div>
+        </ControlRow>
+        <ControlRow
+          label="Give up after"
+          helper="Sets the hard time limit for one run."
+          ignored={ignored("timeout_minutes")}
+        >
+          <div className="flex items-center gap-2">
             <Input
               id="ac-timeout-minutes"
-              aria-label="Time limit"
+              aria-label="Give up after"
               type="number"
               min={1}
               step={1}
               value={timeoutMinutes}
               onChange={(event) => onTimeoutMinutes(event.target.value)}
-              placeholder="Use run-mode limit"
+              placeholder="Default"
               disabled={ignored("timeout_minutes")}
-              className="font-mono text-xs"
+              className="w-28 text-right font-mono text-xs"
             />
-          </ControlField>
-        </div>
-      </ControlGroup>
-
-      <details className="rounded-xl border bg-card">
-        <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
-          Advanced
-          <span className="ml-2 text-xs font-normal text-muted-foreground">
-            instruction delivery and technical settings
-          </span>
-        </summary>
-        <div className="space-y-4 border-t p-4">
-          <ControlField
-            label="Instruction delivery"
-            htmlFor="ac-system-prompt-mode"
-            helper="Controls how this role is combined with instructions supplied by the selected engine."
-            ignored={ignored("system_prompt")}
-          >
-            <NativeSelect
-              id="ac-system-prompt-mode"
-              aria-label="Instruction delivery"
-              value={systemPromptMode}
-              onChange={(event) => onSystemPromptMode(event.target.value)}
-              className="w-full md:max-w-xl"
-              disabled={systemModes.length === 0}
-            >
-              <NativeSelectOption value="">
-                Use the engine&apos;s default behavior
-              </NativeSelectOption>
-              {systemModes.includes("append") && (
-                <NativeSelectOption value="append">
-                  Keep engine instructions and add this role
-                </NativeSelectOption>
-              )}
-              {systemModes.includes("replace") && (
-                <NativeSelectOption value="replace">
-                  Use only this agent&apos;s role
-                </NativeSelectOption>
-              )}
-              {systemModes.includes("prepend") && (
-                <NativeSelectOption value="prepend">
-                  Send this role as task text
-                </NativeSelectOption>
-              )}
-            </NativeSelect>
-          </ControlField>
-
-          <div className="rounded-lg border border-dashed px-4 py-3 text-xs text-muted-foreground">
-            <span className="font-medium text-foreground">
-              Managed in their own tabs:
-            </span>{" "}
-            <a className="underline underline-offset-2" href="?tab=tools">
-              Tools
-            </a>
-            ,{" "}
-            <a className="underline underline-offset-2" href="?tab=skills">
-              Skills
-            </a>
-            ,{" "}
-            <a className="underline underline-offset-2" href="?tab=env">
-              Secrets
-            </a>
-            ,{" "}
-            <a className="underline underline-offset-2" href="?tab=infisical">
-              Infisical
-            </a>
-            ,{" "}
-            <a className="underline underline-offset-2" href="?tab=mcp_config">
-              MCP
-            </a>
-            , and{" "}
-            <a className="underline underline-offset-2" href="?tab=custom_args">
-              Custom args
-            </a>
-            .
+            <span className="text-xs text-muted-foreground">minutes</span>
           </div>
-        </div>
-      </details>
+        </ControlRow>
+        <ControlRow
+          label="Engine"
+          helper="Any loss of supported settings is shown before this change is approved."
+        >
+          <NativeSelect
+            id="ac-runtime"
+            aria-label="Engine"
+            value={runtimeId}
+            onChange={(event) => onRuntimeId(event.target.value)}
+            className="w-full min-w-56"
+          >
+            {props.runtimes.map((item) => (
+              <NativeSelectOption key={item.id} value={item.id}>
+                {item.custom_name || item.name} · {item.provider}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </ControlRow>
+      </div>
+
+      <div className="bg-muted/40 px-4 py-3 text-xs text-muted-foreground md:px-5">
+        <span className="font-medium text-foreground">
+          Not on this screen, on purpose.
+        </span>{" "}
+        <a className="underline underline-offset-2" href="?tab=tools">
+          Tools
+        </a>
+        ,{" "}
+        <a className="underline underline-offset-2" href="?tab=skills">
+          Skills
+        </a>
+        ,{" "}
+        <a className="underline underline-offset-2" href="?tab=env">
+          Secrets
+        </a>
+        ,{" "}
+        <a className="underline underline-offset-2" href="?tab=infisical">
+          Infisical
+        </a>
+        ,{" "}
+        <a className="underline underline-offset-2" href="?tab=mcp_config">
+          MCP
+        </a>
+        , and{" "}
+        <a className="underline underline-offset-2" href="?tab=custom_args">
+          Custom args
+        </a>{" "}
+        stay in their own tabs.
+      </div>
     </div>
   );
 }
@@ -497,7 +466,7 @@ function LegacyFields(props: SharedProps) {
   );
 }
 
-function ModelControl(props: SharedProps) {
+function ModelControl(props: SharedProps & { row?: boolean }) {
   const {
     model,
     models,
@@ -522,6 +491,7 @@ function ModelControl(props: SharedProps) {
           : undefined
       }
       ignored={ignored("model")}
+      row={props.row}
     >
       {hasModelCatalog && !modelCustom ? (
         <NativeSelect
@@ -560,7 +530,7 @@ function ModelControl(props: SharedProps) {
   );
 }
 
-function ThinkingControl(props: SharedProps) {
+function ThinkingControl(props: SharedProps & { row?: boolean }) {
   const {
     thinkingLevel,
     levels,
@@ -570,7 +540,7 @@ function ThinkingControl(props: SharedProps) {
   } = props;
   return (
     <ControlField
-      label={props.controlFirst ? "Reasoning effort" : "Thinking time"}
+      label="Thinking time"
       htmlFor="ac-thinking"
       helper={
         props.controlFirst
@@ -578,6 +548,7 @@ function ThinkingControl(props: SharedProps) {
           : "Values come from the selected model."
       }
       ignored={ignored("thinking_level")}
+      row={props.row}
     >
       {levels.length > 0 ? (
         <NativeSelect
@@ -614,37 +585,93 @@ function ThinkingControl(props: SharedProps) {
   );
 }
 
-function ControlGroup({
-  eyebrow,
-  description,
+function ControlSectionLabel({
+  id,
   children,
 }: {
-  eyebrow: string;
-  description?: string;
+  id?: string;
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-xl border bg-card p-4">
-      <div className="mb-4">
-        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-          {eyebrow}
-        </p>
-        {description && (
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            {description}
-          </p>
-        )}
-      </div>
+    <h4
+      id={id}
+      className="scroll-mt-4 border-b px-4 pb-2 pt-4 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground md:px-5"
+    >
       {children}
-    </section>
+    </h4>
   );
 }
 
-function SummaryCard({ title, value }: { title: string; value: string }) {
+function ControlRow({
+  id,
+  label,
+  helper,
+  consequence,
+  ignored = false,
+  children,
+}: {
+  id?: string;
+  label: string;
+  helper?: string;
+  consequence?: string;
+  ignored?: boolean;
+  children: React.ReactNode;
+}) {
   return (
-    <div className="rounded-lg border bg-background px-3 py-3">
-      <p className="text-xs font-medium text-muted-foreground">{title}</p>
-      <p className="mt-1 text-sm leading-relaxed">{value}</p>
+    <div
+      id={id}
+      className="grid scroll-mt-4 gap-3 border-b px-4 py-3 md:grid-cols-[minmax(0,1fr)_minmax(16rem,auto)] md:items-center md:px-5"
+    >
+      <div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-sm font-medium">{label}</span>
+          {ignored && <Badge variant="outline">Ignored by engine</Badge>}
+        </div>
+        {helper && (
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            {helper}
+          </p>
+        )}
+      </div>
+      <div className="flex flex-wrap items-center gap-2 md:justify-end">
+        {children}
+        {consequence && (
+          <span className="text-xs font-medium text-emerald-700 dark:text-emerald-300">
+            {consequence}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function ChoiceGroup({
+  value,
+  options,
+  disabled = false,
+}: {
+  value: string;
+  options: Array<{ value: string; label: string; onSelect: () => void }>;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="inline-flex overflow-hidden rounded-md border bg-muted/40">
+      {options.map((option) => (
+        <button
+          key={option.value}
+          type="button"
+          aria-pressed={value === option.value}
+          disabled={disabled}
+          onClick={option.onSelect}
+          className={`border-r px-3 py-2 text-xs last:border-r-0 disabled:cursor-not-allowed disabled:opacity-50 ${
+            value === option.value
+              ? "bg-background font-semibold shadow-sm"
+              : "text-muted-foreground hover:bg-background/70"
+          }`}
+        >
+          {option.label}
+        </button>
+      ))}
     </div>
   );
 }
@@ -654,14 +681,37 @@ function ControlField({
   htmlFor,
   helper,
   ignored = false,
+  row = false,
   children,
 }: {
   label: string;
   htmlFor?: string;
   helper?: string;
   ignored?: boolean;
+  row?: boolean;
   children: React.ReactNode;
 }) {
+  if (row) {
+    return (
+      <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(16rem,22rem)] md:items-center">
+        <div>
+          <div className="flex min-h-5 items-center gap-2">
+            <Label htmlFor={htmlFor} className="text-sm">
+              {label}
+            </Label>
+            {ignored && <Badge variant="outline">Ignored by engine</Badge>}
+          </div>
+          {helper && (
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              {helper}
+            </p>
+          )}
+        </div>
+        <div className="md:justify-self-end md:w-full">{children}</div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-1.5">
       <div className="flex min-h-5 items-center justify-between gap-2">
