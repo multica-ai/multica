@@ -14,8 +14,22 @@ import {
   skillListOptions,
   squadListOptions,
 } from "@multica/core/workspace/queries";
+import { buildRuntimeMachines } from "@multica/views/runtimes";
 import { formatEntityPageTitle, formatIssuePageTitle } from "@/lib/page-title";
 import { PageTitle } from "./page-title";
+
+const SETTINGS_DEFAULT_TAB = "profile";
+
+function findRuntimeMachine(
+  machines: ReturnType<typeof buildRuntimeMachines>,
+  locator: string,
+) {
+  return machines.find(
+    (candidate) =>
+      candidate.id === locator ||
+      candidate.runtimes.some((runtime) => runtime.id === locator),
+  );
+}
 
 type DetailKind =
   | "issue"
@@ -75,7 +89,9 @@ export function dashboardRouteTitle(pathname: string, settingsTab: string | null
     case "members":
       return id ? { fallback: "Member", detail: { kind: "member", id } } : { fallback: "Members" };
     case "settings": {
-      const tab = settingsTab && SETTINGS_TITLES[settingsTab];
+      const tabKey =
+        settingsTab && SETTINGS_TITLES[settingsTab] ? settingsTab : SETTINGS_DEFAULT_TAB;
+      const tab = SETTINGS_TITLES[tabKey];
       return { fallback: tab ? `Settings · ${tab}` : "Settings" };
     }
     case "inbox": return { fallback: "Inbox" };
@@ -131,7 +147,14 @@ export function DashboardPageTitle() {
   if (isDetail("project")) title = formatEntityPageTitle("Project", entityName(project));
   if (isDetail("agent")) title = formatEntityPageTitle("Agent", entityName(agents.find((agent) => agent.id === detail?.id)));
   if (isDetail("autopilot")) title = formatEntityPageTitle("Autopilot", entityName(autopilots.find((autopilot) => autopilot.id === detail?.id)));
-  if (isDetail("runtime")) title = formatEntityPageTitle("Runtime", entityName(runtimes.find((runtime) => runtime.id === detail?.id)));
+  if (isDetail("runtime")) {
+    const locator = detail?.id ?? "";
+    const machine = findRuntimeMachine(
+      buildRuntimeMachines(runtimes, { now: Date.now() }),
+      locator,
+    );
+    title = formatEntityPageTitle("Runtime", entityName(machine));
+  }
   if (isDetail("skill")) title = formatEntityPageTitle("Skill", entityName(skills.find((skill) => skill.id === detail?.id)));
   if (isDetail("squad")) title = formatEntityPageTitle("Squad", entityName(squads.find((squad) => squad.id === detail?.id)));
   if (isDetail("member")) title = formatEntityPageTitle("Member", entityName(members.find((member) => member.user_id === detail?.id)));
