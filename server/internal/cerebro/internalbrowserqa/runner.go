@@ -43,6 +43,10 @@ type Target struct {
 	PasswordSelector string
 	SubmitSelector   string
 	NavigateLinkName string
+	// NavigatePath opens a fixed same-origin route after authentication. Use it
+	// when the app's navigation has no stable accessible label, such as an
+	// icon-only sidebar.
+	NavigatePath     string
 	NavigateSelector string
 	NavigateTabName  string
 	ExpectedURLPart  string
@@ -110,10 +114,15 @@ var targets = map[string]Target{
 		Vault: "Shared/browser-login/registry", AccessHeaders: true,
 		AccessClientIDKey: "CF_ACCESS_CLIENT_ID", AccessClientSecretKey: "CF_ACCESS_CLIENT_SECRET",
 		UsernameSelector: "#email", PasswordSelector: "#password",
-		SubmitSelector: "button[type=submit]", NavigateLinkName: "API Keys",
-		NavigateSelector: "tbody tr", NavigateTabName: "Permissions",
-		ExpectedURLPart: "/authentication/api-keys/",
-		ExpectedText:    []string{"Data Sources", "API Endpoints", "AI Models", "Apps", "API Access", "Save"},
+		// The Authentication section sits below the fold of the scrollable
+		// sidebar, and agent-browser's find-by-role only matches on-screen
+		// elements, so the run opens the route directly. The test user's key
+		// table is legitimately empty (keys require an Access-synced actor),
+		// so the run proves the API Keys management page itself rather than a
+		// key's detail view.
+		SubmitSelector: "button[type=submit]", NavigatePath: "/authentication/api-keys",
+		ExpectedURLPart: "/authentication/api-keys",
+		ExpectedText:    []string{"API Keys", "Generate New Key", "Your Registry API URL", "Actors", "Systems"},
 	},
 	// Finance is firtal-agents-private, not firtal-internal-private — those are
 	// two different apps that share a login, so pointing at the wrong one logged
@@ -123,7 +132,7 @@ var targets = map[string]Target{
 	"finance": {
 		Name: "finance", URL: "http://firtal-agents-private.internal:3000/auth/login?manual=true",
 		Vault: "Shared/browser-login/finance", UsernameSelector: "#email", PasswordSelector: "#password",
-		SubmitSelector: "button[type=submit]", NavigateLinkName: "AI CFO",
+		SubmitSelector: "button[type=submit]", NavigatePath: "/cfo", ExpectedPathSuffix: "/cfo",
 		ExpectedText: []string{"Monthly overview", "Controllership review", "Versus budget"},
 	},
 	"pricing": {
@@ -153,7 +162,12 @@ var targets = map[string]Target{
 		Name: "data-catalog", URL: "https://atlas.firtal.com/",
 		Vault: "Shared/browser-login/data-catalog", AccessHeaders: true,
 		AccessClientIDKey: "ADMIN_CF_ACCESS_CLIENT_ID", AccessClientSecretKey: "ADMIN_CF_ACCESS_CLIENT_SECRET",
-		NavigateLinkName: "Permissions", ExpectedText: []string{"Permissions", "Roles", "Assignments"},
+		// The Identities section sits below the fold of the scrollable sidebar,
+		// and agent-browser's find-by-role only matches on-screen elements, so
+		// the run opens /permissions directly — the same route the reader token
+		// must be denied on, which keeps the admin/reader contrast exact.
+		NavigatePath: "/permissions", ExpectedPathSuffix: "/permissions",
+		ExpectedText: []string{"Permissions", "Roles", "Assignments"},
 	},
 	"data-catalog-reader": {
 		Name: "data-catalog-reader", URL: "https://atlas.firtal.com/",
@@ -194,6 +208,9 @@ func TargetFor(name string) (Target, error) {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	if target.VersionPath != "" && (!strings.HasPrefix(target.VersionPath, "/") || strings.Contains(target.VersionPath, "://")) {
+		return Target{}, fmt.Errorf("internal browser target is misconfigured")
+	}
+	if target.NavigatePath != "" && (!strings.HasPrefix(target.NavigatePath, "/") || strings.Contains(target.NavigatePath, "://")) {
 		return Target{}, fmt.Errorf("internal browser target is misconfigured")
 	}
 	if target.ExpectedPathSuffix != "" && (!strings.HasPrefix(target.ExpectedPathSuffix, "/") || strings.Contains(target.ExpectedPathSuffix, "://")) {
@@ -435,9 +452,11 @@ const (
 )
 
 // countedStages is how many stageTimeout-bounded steps the longest verification
-// can spend after the open stage. Registry adds a row click, a Permissions-tab
-// click, and their render waits after the shared login/navigation sequence;
-// Multica additionally verifies its deployed commit through /version.
+// can spend after the open stage. A target may chain a direct route open, a
+// link click, a row click, and a tab click with their render waits after the
+// shared login sequence; Multica additionally verifies its deployed commit
+// through /version. The count stays at the historical maximum so the ceiling
+// never shrinks under a target that composes several navigation steps.
 const countedStages = 14
 
 // MaxVerificationDuration is the longest a single Verify can legitimately take:
@@ -881,6 +900,16 @@ func (r *Runner) Verify(ctx context.Context, app string, credential Credential) 
 	}
 	if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
 		return r.failure(target, baseArgs, target.URL, err)
+	}
+	if target.NavigatePath != "" {
+		parsed, _ := url.Parse(target.URL)
+		navigationURL := parsed.Scheme + "://" + parsed.Host + target.NavigatePath
+		if _, err := r.runStage(ctx, target, "navigation", "", append(baseArgs, "open", navigationURL)...); err != nil {
+			return r.failure(target, baseArgs, navigationURL, err)
+		}
+		if _, err := r.runStage(ctx, target, "render", "", append(baseArgs, "wait", "2500")...); err != nil {
+			return r.failure(target, baseArgs, navigationURL, err)
+		}
 	}
 	if target.NavigateLinkName != "" {
 		r.dismissBlockingDialog(ctx, target, baseArgs)
