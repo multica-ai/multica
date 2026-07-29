@@ -3,7 +3,7 @@
 // CEREBRO-PATCH(agent-live-card-cerebro): cerebro modification of upstream file
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Bot, ChevronRight, ChevronDown, Loader2, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Play, GitFork, Plus, Terminal as TerminalIcon, AlarmClock } from "lucide-react"; // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 AlarmClock for wakeup-only fold
+import { Bot, ChevronRight, ChevronDown, Loader2, Brain, AlertCircle, Clock, CheckCircle2, XCircle, Square, Maximize2, Play, GitFork, Plus, Terminal as TerminalIcon, AlarmClock, PauseCircle } from "lucide-react"; // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 AlarmClock for wakeup-only fold; CEREBRO-PATCH(agent-live-card-paused-run-fold): FIR-4073 PauseCircle for paused-only fold
 // CEREBRO-PATCH(agent-live-card-terminal-link): use cerebro-terminal hook to render an "Open terminal" affordance for tasks running in interactive presentation mode.
 import { useIssueTerminalLink, openTerminalPopout } from "@multica/cerebro-terminal";
 import { api } from "@multica/core/api";
@@ -39,6 +39,13 @@ import {
 // bar's multi-collapse so a running agent + a scheduled run read as one bar, not two.
 import { useFeatureFlag } from "@multica/cerebro-feature-flags";
 import { useIssueWakeups, WakeupActivityRow } from "@multica/cerebro-wakeup";
+// CEREBRO-PATCH(agent-live-card-failed-run-fold): FIR-4073 — a failed last run folds into
+// this same bar, so alerts collapse together regardless of type. Direct entry, not the
+// cerebro-runtime views barrel: the barrel pulls in pages that import @multica/views.
+import { useIssueFailedRuns, isPausedRun } from "@multica/cerebro-runtime/views/dead-failed-runs"; // CEREBRO-PATCH(agent-live-card-paused-run-fold): FIR-4073
+import { FailedRunActivityRow } from "@multica/cerebro-runtime/views/components/failed-run-activity";
+// CEREBRO-PATCH(agent-live-card-paused-run-fold): FIR-4073 — grey row for a run waiting on a paused machine.
+import { PausedRunActivityRow } from "@multica/cerebro-runtime/views/components/paused-run-activity";
 import { useT } from "../../i18n";
 import { TerminateTaskConfirmDialog } from "./terminate-task-confirm-dialog";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
@@ -98,6 +105,11 @@ export function AgentLiveCard({ issueId, wakeupIssueId }: AgentLiveCardProps) {
   // a UUID is available.
   const wakeupBarEnabled = useFeatureFlag("cerebro_wakeup_bar");
   const wake = useIssueWakeups(wakeupIssueId ?? "", wakeupBarEnabled && !!wakeupIssueId);
+  // CEREBRO-PATCH(agent-live-card-failed-run-fold): FIR-4073 — the issue's unresolved
+  // failed run, folded in below. The endpoint resolves a route identifier, so `issueId`
+  // is enough here (unlike wakeups, which need the UUID).
+  const failedRunBarEnabled = useFeatureFlag("cerebro_failed_run_bar");
+  const failedRuns = useIssueFailedRuns(issueId, failedRunBarEnabled);
   const [taskStates, setTaskStates] = useState<Map<string, TaskState>>(new Map());
   // Cancel confirmation is hoisted here (not per-card) so a single dialog
   // serves both the inline single banner and the multi-agent popover. A
@@ -299,7 +311,9 @@ export function AgentLiveCard({ issueId, wakeupIssueId }: AgentLiveCardProps) {
   // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — keep the bar alive when
   // there are no tasks but a pending wakeup exists, so the scheduled run folds in here.
   const wakeups = wake.wakeups;
-  if (taskStates.size === 0 && wakeups.length === 0) return null;
+  // CEREBRO-PATCH(agent-live-card-failed-run-fold): FIR-4073 — a failed last run alone
+  // also keeps the bar alive, so it is one alert layer and not a second banner.
+  if (taskStates.size === 0 && wakeups.length === 0 && failedRuns.length === 0) return null;
 
   // Order: running → dispatched → waiting → queued. The most-active task
   // takes the sticky slot; the parked / queued tasks sit below so the
@@ -331,7 +345,13 @@ export function AgentLiveCard({ issueId, wakeupIssueId }: AgentLiveCardProps) {
   // short.
   // CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — pending wakeups count
   // toward the fold, so "1 running agent + 1 scheduled run" collapses into one bar.
-  const totalCount = entries.length + wakeups.length;
+  // CEREBRO-PATCH(agent-live-card-failed-run-fold): FIR-4073 — failed runs count toward the
+  // same fold, so "1 failed run + 1 scheduled run" collapses into one row, not two banners.
+  // CEREBRO-PATCH(agent-live-card-paused-run-fold): FIR-4073 — a paused machine is not a
+  // failure: same bar, same fold, but grey wording and no retry buttons.
+  const pausedRuns = failedRuns.filter(isPausedRun);
+  const brokenRuns = failedRuns.filter((r) => !isPausedRun(r));
+  const totalCount = entries.length + wakeups.length + failedRuns.length;
   const isMulti = totalCount > 1;
   const agentIds = [
     ...new Set(
@@ -345,12 +365,13 @@ export function AgentLiveCard({ issueId, wakeupIssueId }: AgentLiveCardProps) {
   // Summary text for the collapsed multi header. Pure-task stays on the upstream
   // localized string; once a wakeup joins, append the scheduled-run count.
   const agentSummary = t(($) => $.agent_activity.hover_header, { count: agentIds.length });
-  const multiSummary =
-    wakeups.length === 0
-      ? agentSummary
-      : hasTask
-        ? `${agentSummary} · ${wakeups.length} scheduled`
-        : `${wakeups.length} scheduled run${wakeups.length > 1 ? "s" : ""}`;
+  // CEREBRO-PATCH(agent-live-card-failed-run-fold): FIR-4073 — one summary built from all
+  // three alert kinds, so the collapsed header names what is folded whatever the type.
+  const failedSummary = brokenRuns.length > 0 ? `${brokenRuns.length} failed run${brokenRuns.length > 1 ? "s" : ""}` : null;
+  // CEREBRO-PATCH(agent-live-card-paused-run-fold): FIR-4073 — paused named separately in the fold.
+  const pausedSummary = pausedRuns.length > 0 ? `${pausedRuns.length} run${pausedRuns.length > 1 ? "s" : ""} waiting on a paused machine` : null;
+  const wakeupSummary = wakeups.length > 0 ? `${wakeups.length} scheduled run${wakeups.length > 1 ? "s" : ""}` : null;
+  const multiSummary = [hasTask ? agentSummary : null, failedSummary, pausedSummary, wakeupSummary].filter(Boolean).join(" · "); // CEREBRO-PATCH(agent-live-card-paused-run-fold): FIR-4073
 
   return (
     // Sticky bar at the top of the main content, above the editable title —
@@ -361,7 +382,8 @@ export function AgentLiveCard({ issueId, wakeupIssueId }: AgentLiveCardProps) {
     // CEREBRO-PATCH(agent-live-card-wakeup-sticky): FIR-3296 — every rendered bar stays sticky,
     // including a lone wakeup; the orange wakeup-only tint remains unchanged.
     <div className="mt-4 sticky top-4 z-10 rounded-lg bg-background/80 supports-[backdrop-filter]:bg-background/55 backdrop-blur-md">
-      <div className={cn("overflow-hidden rounded-lg border", hasTask ? "border-info/20 bg-info/5" : "border-warning/30 bg-warning/10")}>
+      {/* CEREBRO-PATCH(agent-live-card-failed-run-fold): FIR-4073 — a failure-only bar tints red. */}
+      <div className={cn("overflow-hidden rounded-lg border", hasTask ? "border-info/20 bg-info/5" : brokenRuns.length > 0 ? "border-destructive/30 bg-destructive/10" : pausedRuns.length > 0 && wakeups.length === 0 ? "border-border bg-muted/40" : "border-warning/30 bg-warning/10")}>
         {isMulti ? (
           <>
             <button
@@ -374,6 +396,12 @@ export function AgentLiveCard({ issueId, wakeupIssueId }: AgentLiveCardProps) {
                   task is present, otherwise an alarm clock for a wakeup-only fold. */}
               {hasTask ? (
                 <AgentAvatarStack agentIds={agentIds} size={20} max={4} />
+              ) : brokenRuns.length > 0 ? (
+                /* CEREBRO-PATCH(agent-live-card-failed-run-fold): FIR-4073 — failure-led fold. */
+                <AlertCircle className="h-3.5 w-3.5 shrink-0 text-destructive" />
+              ) : pausedRuns.length > 0 && wakeups.length === 0 ? (
+                /* CEREBRO-PATCH(agent-live-card-paused-run-fold): FIR-4073 — paused-led fold. */
+                <PauseCircle className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
               ) : (
                 <AlarmClock className="h-3.5 w-3.5 shrink-0 text-warning" />
               )}
@@ -403,6 +431,15 @@ export function AgentLiveCard({ issueId, wakeupIssueId }: AgentLiveCardProps) {
                     cancelling={cancellingIds.has(task.id)}
                   />
                 ))}
+                {/* CEREBRO-PATCH(agent-live-card-failed-run-fold): FIR-4073 — failed runs as rows
+                    in the same fold; each row opens the run log and offers Resume / Start over. */}
+                {brokenRuns.map((r) => (
+                  <FailedRunActivityRow key={r.task_id} issueId={issueId} run={r} />
+                ))}
+                {/* CEREBRO-PATCH(agent-live-card-paused-run-fold): FIR-4073 — paused rows, same fold. */}
+                {pausedRuns.map((r) => (
+                  <PausedRunActivityRow key={r.task_id} issueId={issueId} run={r} />
+                ))}
                 {/* CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — pending wakeups as
                     rows below the agent rows, so the scheduled run is part of the same fold. */}
                 {wakeups.map((w) => (
@@ -425,6 +462,12 @@ export function AgentLiveCard({ issueId, wakeupIssueId }: AgentLiveCardProps) {
             onRequestCancel={() => setCancelTarget(firstEntry.task)}
             cancelling={cancellingIds.has(firstEntry.task.id)}
           />
+        ) : brokenRuns[0] ? (
+          /* CEREBRO-PATCH(agent-live-card-failed-run-fold): FIR-4073 — lone failed run. */
+          <FailedRunActivityRow issueId={issueId} run={brokenRuns[0]} />
+        ) : pausedRuns[0] ? (
+          /* CEREBRO-PATCH(agent-live-card-paused-run-fold): FIR-4073 — lone paused run. */
+          <PausedRunActivityRow issueId={issueId} run={pausedRuns[0]} />
         ) : (
           /* CEREBRO-PATCH(agent-live-card-wakeup-fold): FIR-1714 — single wakeup, no task. */
           <WakeupActivityRow

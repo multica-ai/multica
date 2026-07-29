@@ -4,9 +4,10 @@
 // CEREBRO-PATCH(agent-run-pip-sub): FIR-2326 — orange "sub" state marks a row whose sub-issue is running.
 // CEREBRO-PATCH(agent-run-pip-scheduled): FIR-1521 — "scheduled" renders an orange dot (like the running dot, not a clock) for issues with a pending wakeup.
 // CEREBRO-PATCH(agent-run-pip-failed): FIR-3901 — "failed" marks an issue whose last run died and that nothing will retry.
-export type AgentRunState = "active" | "queued" | "sub" | "scheduled" | "failed";
+// CEREBRO-PATCH(agent-run-pip-paused): FIR-4073 — "paused" marks an issue waiting on a paused machine; the platform resumes it, so it is grey, not red.
+export type AgentRunState = "active" | "queued" | "sub" | "scheduled" | "failed" | "paused";
 
-export function taskStatusToRunState(status: string): Exclude<AgentRunState, "sub" | "scheduled" | "failed"> {
+export function taskStatusToRunState(status: string): Exclude<AgentRunState, "sub" | "scheduled" | "failed" | "paused"> {
   return status === "queued" ? "queued" : "active";
 }
 
@@ -17,6 +18,7 @@ const RUN_PIP_COLOR: Record<AgentRunState, string> = {
   sub: "bg-orange-500",
   scheduled: "bg-warning",
   failed: "bg-destructive", // CEREBRO-PATCH(agent-run-pip-failed): FIR-3901
+  paused: "bg-muted-foreground", // CEREBRO-PATCH(agent-run-pip-paused): FIR-4073
 };
 
 const RUN_PIP_TITLE: Record<AgentRunState, string> = {
@@ -25,6 +27,7 @@ const RUN_PIP_TITLE: Record<AgentRunState, string> = {
   sub: "A sub-issue is running",
   scheduled: "Scheduled to run",
   failed: "Run failed", // CEREBRO-PATCH(agent-run-pip-failed): FIR-3901
+  paused: "Waiting — the machine is paused", // CEREBRO-PATCH(agent-run-pip-paused): FIR-4073
 };
 
 export function AgentRunPip({

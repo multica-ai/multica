@@ -27,6 +27,20 @@ export interface DeadFailedRun {
   /** Plain-words explanation shown when resume_possible is false. */
   blocked_reason?: string;
   runtime_name?: string;
+  /**
+   * FIR-4073 — the machine this run was on is paused right now (rate limit,
+   * quota cap, expired key), so the platform picks the run back up by itself.
+   * Nothing failed that the user can act on, which is why these render grey
+   * ("waiting for the machine") rather than red ("this needs you").
+   */
+  runtime_paused?: boolean;
+  /** When the paused machine resumes. Absent when a human has to unpause it. */
+  unpause_at?: string;
+}
+
+/** True when the run is only waiting for a paused machine, not broken. */
+export function isPausedRun(run: DeadFailedRun): boolean {
+  return run.runtime_paused === true;
 }
 
 interface FailedRunsPayload {
@@ -98,25 +112,47 @@ export function useIssueFailedRuns(issueId: string, enabled: boolean): DeadFaile
  */
 export function buildInboxFailedRunHints(
   runs: DeadFailedRun[],
-): Map<string, { title: string; resumePossible: boolean }> {
-  const map = new Map<string, { title: string; resumePossible: boolean }>();
+): Map<string, InboxFailedRunHint> {
+  const map = new Map<string, InboxFailedRunHint>();
   for (const run of runs) {
     if (!run?.issue_id) continue;
     // Newest-first from the server, so the first entry for an issue wins.
     if (map.has(run.issue_id)) continue;
+    // FIR-4073 — a paused machine is not a failure, so it gets the grey pip and
+    // its own wording. resumePossible stays false: the platform, not the user,
+    // is what picks this run back up.
+    if (isPausedRun(run)) {
+      map.set(run.issue_id, {
+        title: run.unpause_at
+          ? "Waiting — the machine is paused"
+          : "Paused — needs a human to resume",
+        resumePossible: false,
+        paused: true,
+      });
+      continue;
+    }
     map.set(run.issue_id, {
       title: run.resume_possible ? "Run failed — can be continued" : "Run failed",
       resumePossible: run.resume_possible === true,
+      paused: false,
     });
   }
   return map;
+}
+
+/** What the inbox needs to know about an issue's newest unresolved run. */
+export interface InboxFailedRunHint {
+  title: string;
+  resumePossible: boolean;
+  /** FIR-4073 — render the grey "waiting" pip instead of the red one. */
+  paused: boolean;
 }
 
 /** Issues in this workspace with an unresolved failed run. Drives the red pip. */
 export function useInboxFailedRunStates(
   wsId: string,
   enabled: boolean,
-): Map<string, { title: string; resumePossible: boolean }> {
+): Map<string, InboxFailedRunHint> {
   const { data } = useQuery({
     queryKey: INBOX_FAILED_RUNS_KEY(wsId),
     queryFn: () => api.listWorkspaceFailedRuns<unknown>(),

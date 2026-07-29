@@ -41,6 +41,8 @@ import { ActorAvatar } from "../actor-avatar";
 // CEREBRO-PATCH(transcript-revamp-port): FIR-3782 — AttributionBadge and RichContent land in later upstream commits this fork does not carry yet; their two call sites below degrade instead of importing.
 import { RunFailureCard } from "@multica/cerebro-runtime/views/components/run-failure-card"; // CEREBRO-PATCH(run-failure-card): FIR-3782 — direct entry, not the views barrel: the barrel re-exports pages that import @multica/views and the cycle blanks this dialog.
 import { useFlagValue } from "@multica/cerebro-feature-flags"; // CEREBRO-PATCH(run-failure-card): FIR-3782 — a store read, so the dialog needs no QueryClient of its own.
+// CEREBRO-PATCH(transcript-run-retry-actions): FIR-4073 — Resume / Start over inside the run log modal. Direct entry, not the views barrel, for the same cycle reason as RunFailureCard above.
+import { TranscriptRunRetryActions } from "@multica/cerebro-runtime/views/components/run-retry-actions";
 import { api } from "@multica/core/api";
 import {
   useTranscriptViewStore,
@@ -500,6 +502,7 @@ export function AgentTranscriptDialog({
       })
     : null;
   const failureCardEnabled = useFlagValue("cerebro_run_failure_card"); // CEREBRO-PATCH(run-failure-card): FIR-3782 — gate the failure summary card.
+  const failedRunActionsEnabled = useFlagValue("cerebro_failed_run_bar"); // CEREBRO-PATCH(transcript-run-retry-actions): FIR-4073 — same flag as the failed-run alert.
   const hasRunDetails =
     !!runtimeInfo ||
     !!task.relative_work_dir ||
@@ -547,6 +550,9 @@ export function AgentTranscriptDialog({
             </div>
 
             <div className="flex shrink-0 items-center gap-0.5">
+              {/* CEREBRO-PATCH(transcript-run-retry-actions): FIR-4073 — the run log is where you
+                  read what broke, so it is also where you restart it. Renders only for a failed run. */}
+              {failedRunActionsEnabled && <TranscriptRunRetryActions task={task} />}
               {hasRunDetails && (
                 <Popover>
                   <PopoverTrigger

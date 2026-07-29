@@ -38,6 +38,13 @@ type deadFailedRunResponse struct {
 	ResumePossible bool   `json:"resume_possible"`
 	BlockedReason  string `json:"blocked_reason,omitempty"`
 	RuntimeName    string `json:"runtime_name,omitempty"`
+	// FIR-4073 — RuntimePaused true means the machine is paused right now and
+	// the platform resumes this run by itself at UnpauseAt. The UI renders
+	// those grey ("waiting for the machine") instead of red ("act on this"),
+	// which is what lets the routine auto-pause drop its issue comment.
+	// UnpauseAt is empty when the pause needs a human (circuit breaker open).
+	RuntimePaused bool   `json:"runtime_paused,omitempty"`
+	UnpauseAt     string `json:"unpause_at,omitempty"`
 }
 // resumeBlockedReason explains a false resume_possible. Order matters: report
 // the most actionable cause first. English copy — app-facing strings are
@@ -81,6 +88,10 @@ func toDeadFailedResponse(t cerebrodb.DeadFailedTask) deadFailedRunResponse {
 		ResumePossible: t.ResumePossible,
 		BlockedReason:  resumeBlockedReason(t),
 		RuntimeName:    t.RuntimeName.String,
+		RuntimePaused:  t.RuntimePaused,
+	}
+	if t.RuntimePaused && t.UnpauseAt.Valid {
+		out.UnpauseAt = t.UnpauseAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
 	}
 	if t.AgentID.Valid {
 		out.AgentID = util.UUIDToString(t.AgentID)
