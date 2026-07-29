@@ -23,6 +23,7 @@ const DATABASE_URL =
 const FLAG_SETUP_CAPABILITIES = "cerebro_agent_setup_capabilities"; // Swap + Approval consequences
 const FLAG_PRODUCTION_PROMPT = "cerebro_agent_production_prompt";
 const FLAG_QUALITY = "cerebro_agent_quality";
+const FLAG_AGENT_PAGE_REDESIGN = "cerebro_agent_page_redesign";
 
 interface Seed {
   api: TestApiClient;
@@ -283,22 +284,27 @@ test("Setup: control-first instructions and runtime settings persist in the vers
     await openAgent(page, s);
     await page.getByRole("button", { name: "Instructions", exact: true }).click();
 
-    const instructions = page.getByRole("textbox", { name: "Instructions" });
-    await expect(instructions).toHaveValue("Original instructions");
-    await expect(page.getByLabel("Shared brief")).toHaveValue("");
-    await expect(page.getByLabel("Tools list")).toHaveValue("");
-    await expect(page.getByLabel("Engine system prompt")).toHaveValue("");
-    await expect(page.getByLabel("Engine", { exact: true })).toHaveValue(
+    const instructions = page
+      .getByRole("region", { name: "Instructions" })
+      .locator('[contenteditable="true"]');
+    await expect(instructions).toHaveText("Original instructions");
+    await expect(page.getByLabel("Workspace guidance")).toHaveValue("");
+    await expect(page.getByLabel("Tool descriptions")).toHaveValue("");
+    await expect(page.getByLabel("Where it runs")).toHaveValue(
       s.runtimeId,
     );
-    await expect(page.getByLabel("Stop after")).toHaveValue("");
+    await expect(page.getByLabel("Maximum steps")).toHaveValue("");
 
     // The title/rationale/buttons block only renders once the form is dirty.
     await instructions.fill("Tightened instructions for FIR-3212");
-    await page.getByLabel("Shared brief").selectOption("off");
-    await page.getByLabel("Tools list").selectOption("summary");
-    await page.getByLabel("Engine system prompt").selectOption("replace");
-    await page.getByLabel("Stop after").fill("18");
+    await page.getByLabel("Workspace guidance").selectOption("off");
+    await page.getByLabel("Tool descriptions").selectOption("summary");
+    await page
+      .locator("summary")
+      .filter({ hasText: "instruction delivery and technical settings" })
+      .click();
+    await page.getByLabel("Instruction delivery").selectOption("replace");
+    await page.getByLabel("Maximum steps").fill("18");
     await page.getByLabel("Change title").fill("Tighten the instructions");
     await page.getByRole("button", { name: "Save & approve" }).click();
     await expect(page.getByText(/Change approved/)).toBeVisible();
@@ -306,13 +312,19 @@ test("Setup: control-first instructions and runtime settings persist in the vers
     // Survives a reload — not just optimistic UI state.
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: "Instructions" }).click();
-    await expect(page.getByRole("textbox", { name: "Instructions" })).toHaveValue(
-      "Tightened instructions for FIR-3212",
-    );
-    await expect(page.getByLabel("Shared brief")).toHaveValue("off");
-    await expect(page.getByLabel("Tools list")).toHaveValue("summary");
-    await expect(page.getByLabel("Engine system prompt")).toHaveValue("replace");
-    await expect(page.getByLabel("Stop after")).toHaveValue("18");
+    await expect(
+      page
+        .getByRole("region", { name: "Instructions" })
+        .locator('[contenteditable="true"]'),
+    ).toHaveText("Tightened instructions for FIR-3212");
+    await expect(page.getByLabel("Workspace guidance")).toHaveValue("off");
+    await expect(page.getByLabel("Tool descriptions")).toHaveValue("summary");
+    await expect(page.getByLabel("Maximum steps")).toHaveValue("18");
+    await page
+      .locator("summary")
+      .filter({ hasText: "instruction delivery and technical settings" })
+      .click();
+    await expect(page.getByLabel("Instruction delivery")).toHaveValue("replace");
 
     // What a run reads: the approved text is on the agent, the version is
     // bumped, and an immutable version row exists for a run to pin.
@@ -351,6 +363,114 @@ test("Setup: control-first instructions and runtime settings persist in the vers
   }
 });
 
+test("Rich editors: Instructions work on both agent pages and skill files preserve their format", async ({
+  page,
+}) => {
+  const flags: string[] = [];
+  const s = await seed(page, flags);
+  const frontmatter = "---\nname: fir-4000\ntags:\n  - editor\n---\n";
+  const originalSkillBody = "# Original skill body\n";
+  const originalMdx = '<Example label="original" />\n';
+  let skillId: string | null = null;
+
+  try {
+    await openAgent(page, s);
+    await page.getByRole("button", { name: "Instructions" }).click();
+    const legacyInstructions = page
+      .getByRole("region", { name: "Instructions" })
+      .locator('[contenteditable="true"]');
+    await legacyInstructions.fill("Legacy rich instructions for FIR-4000");
+    await page.getByLabel("Change title").fill("Update legacy instructions");
+    await page.getByRole("button", { name: "Save & approve" }).click();
+    await expect(page.getByText(/Change approved/)).toBeVisible();
+
+    await s.api.setWorkspaceFeatureFlag(FLAG_AGENT_PAGE_REDESIGN, true);
+    flags.push(FLAG_AGENT_PAGE_REDESIGN);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Instructions" }).click();
+    const redesignedInstructions = page
+      .getByRole("region", { name: "Instructions" })
+      .locator('[contenteditable="true"]');
+    await expect(redesignedInstructions).toHaveText(
+      "Legacy rich instructions for FIR-4000",
+    );
+    await redesignedInstructions.fill(
+      "Redesigned rich instructions for FIR-4000",
+    );
+    await page.getByLabel("Change title").fill("Update redesigned instructions");
+    await page.getByRole("button", { name: "Save & approve" }).click();
+    await expect(page.getByText(/Change approved/)).toBeVisible();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByRole("button", { name: "Instructions" }).click();
+    await expect(
+      page
+        .getByRole("region", { name: "Instructions" })
+        .locator('[contenteditable="true"]'),
+    ).toHaveText("Redesigned rich instructions for FIR-4000");
+
+    skillId = (
+      await s.database.query(
+        `INSERT INTO skill (workspace_id, name, description, content, created_by, owner_id)
+         VALUES ($1, $2, 'FIR-4000 editor fixture', $3, $4, $4)
+         RETURNING id`,
+        [
+          s.workspaceId,
+          `FIR-4000 skill ${Date.now()}`,
+          `${frontmatter}${originalSkillBody}`,
+          s.userId,
+        ],
+      )
+    ).rows[0].id as string;
+    await s.database.query(
+      `INSERT INTO skill_file (skill_id, path, content) VALUES ($1, 'reference.mdx', $2)`,
+      [skillId, originalMdx],
+    );
+
+    await page.goto(`/${s.slug}/skills/${skillId}`, {
+      waitUntil: "domcontentloaded",
+    });
+    const editFile = () =>
+      page
+        .locator("div.flex.h-10.items-center.justify-between.gap-3.border-b.px-4")
+        .getByRole("button");
+
+    await editFile().click();
+    const skillEditor = page.locator('[contenteditable="true"]');
+    await expect(skillEditor).toHaveText("Original skill body");
+    await skillEditor.fill("# Edited skill body");
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await editFile().click();
+    await expect(page.locator('[contenteditable="true"]')).toHaveText(
+      "# Edited skill body",
+    );
+
+    await page.getByText("reference.mdx", { exact: true }).click();
+    await editFile().click();
+    const mdxEditor = page.getByRole("textbox", { name: "File content..." });
+    await expect(mdxEditor).toHaveValue(originalMdx);
+    await mdxEditor.fill('<Example label="edited" />\n');
+    await page.getByRole("button", { name: "Save changes", exact: true }).click();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await page.getByText("reference.mdx", { exact: true }).click();
+    await editFile().click();
+    await expect(
+      page.getByRole("textbox", { name: "File content..." }),
+    ).toHaveValue('<Example label="edited" />\n');
+
+    const storedSkill = (
+      await s.database.query(`SELECT content FROM skill WHERE id = $1`, [skillId])
+    ).rows[0].content as string;
+    expect(storedSkill.slice(0, frontmatter.length)).toBe(frontmatter);
+    expect(storedSkill).toContain("Edited skill body");
+  } finally {
+    if (skillId) {
+      await s.database.query(`DELETE FROM skill WHERE id = $1`, [skillId]);
+    }
+    await teardown(s, flags);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // 2. Swap — compare the agent against another engine.
 // ---------------------------------------------------------------------------
@@ -364,7 +484,7 @@ test("Swap: selecting another engine reports what that engine changes", async ({
     await page.getByRole("button", { name: "Instructions" }).click();
 
     await page
-      .getByText("Engine support, effective prompt and swap impact")
+      .getByText("Advanced: engine compatibility and swap checks")
       .click();
     await expect(page.getByText("Engine swap")).toBeVisible();
     const select = page.getByLabel("Compare with another engine");
@@ -422,17 +542,18 @@ test("Approval: a pending proposal shows its consequences and approving applies 
 
     // Propose (not Save & approve) so the change request stays pending.
     await page
-      .getByRole("textbox", { name: "Instructions" })
+      .getByRole("region", { name: "Instructions" })
+      .locator('[contenteditable="true"]')
       .fill("Proposed instructions for FIR-3212");
     await page
-      .getByLabel("Engine", { exact: true })
+      .getByLabel("Where it runs")
       .selectOption(s.otherRuntimeId);
     await page.getByLabel("Change title").fill("Proposed change");
     await page.getByRole("button", { name: "Propose", exact: true }).click();
     await expect(page.getByText(/Change proposed/)).toBeVisible();
 
     // The consequences panel explains the pending proposal before approval.
-    await expect(page.getByText("What approving this changes")).toBeVisible();
+    await expect(page.getByText("What changes after approval")).toBeVisible();
     await expect(
       page.locator('[data-testid^="approval-"]').first(),
     ).toBeVisible();
@@ -468,9 +589,11 @@ test("Approval: a pending proposal shows its consequences and approving applies 
 
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: "Instructions" }).click();
-    await expect(page.getByRole("textbox", { name: "Instructions" })).toHaveValue(
-      "Proposed instructions for FIR-3212",
-    );
+    await expect(
+      page
+        .getByRole("region", { name: "Instructions" })
+        .locator('[contenteditable="true"]'),
+    ).toHaveText("Proposed instructions for FIR-3212");
 
     const reviewed = (
       await s.database.query(
@@ -580,7 +703,17 @@ test("Production prompt: recorded parts and pending runtime differences stay vis
     await page.reload({ waitUntil: "domcontentloaded" });
     await page.getByRole("button", { name: "Production prompt" }).click();
 
-    // Evidence framing must be explicit — this view never reconstructs.
+    // The default view explains the run in ordinary language. Raw evidence is
+    // available only when the user opens Advanced.
+    await expect(
+      page.getByRole("region", { name: "Run summary" }),
+    ).toBeVisible();
+    await expect(page.getByText("What shaped this run")).toBeVisible();
+    await page
+      .getByText("Advanced: exact prompt and technical evidence")
+      .click();
+
+    // Evidence framing must remain explicit — this view never reconstructs.
     await expect(
       page.getByText("Captured from the run — not reconstructed"),
     ).toBeVisible();
@@ -594,19 +727,29 @@ test("Production prompt: recorded parts and pending runtime differences stay vis
 
     // Drive the run selector: switching runs shows that run's own evidence.
     await page.locator("#cerebro-prompt-snapshot-run").selectOption(olderTaskId);
+    await page
+      .getByText("Advanced: exact prompt and technical evidence")
+      .click();
     await expect(page.getByText("Older run content")).toBeVisible();
     await expect(page.getByText("Case layer content")).toHaveCount(0);
 
     // Create a real pending proposal through the control-first surface.
     await page.getByRole("button", { name: "Instructions", exact: true }).click();
-    await page.getByLabel("Engine system prompt").selectOption("replace");
-    await page.getByLabel("Stop after").fill("18");
+    await page
+      .locator("summary")
+      .filter({ hasText: "instruction delivery and technical settings" })
+      .click();
+    await page.getByLabel("Instruction delivery").selectOption("replace");
+    await page.getByLabel("Maximum steps").fill("18");
     await page.getByLabel("Change title").fill("Bound the next run");
     await page.getByRole("button", { name: "Propose", exact: true }).click();
     await expect(page.getByText(/Change proposed/)).toBeVisible();
 
     await page.getByRole("button", { name: "Production prompt" }).click();
-    await page.getByRole("button", { name: "Difference" }).click();
+    await page.getByRole("button", { name: "What changes" }).click();
+    await page
+      .getByText("Advanced: exact prompt and technical evidence")
+      .click();
     await page.getByRole("button", { name: /Run controls/ }).click();
     await expect(page.getByText("+ System prompt: replace")).toBeVisible();
     await expect(page.getByText("+ Stop after: 18")).toBeVisible();

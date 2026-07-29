@@ -119,6 +119,11 @@ describe("AgentContextChangeRequestQueue — approval consequences", () => {
 
     await waitFor(() => expect(mocks.impactSpy).toHaveBeenCalled());
     expect(mocks.impactSpy).toHaveBeenCalledWith(["instructions"]);
+    expect(
+      screen
+        .getByText("Advanced: exact before-and-after values")
+        .closest("details"),
+    ).not.toHaveAttribute("open");
   });
 
   // "What will approving this do?" is a question about a decision not yet made.

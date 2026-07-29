@@ -34,7 +34,7 @@ const baseAgent: Agent = {
   instructions: "",
   avatar_url: null,
   runtime_mode: "cloud",
-  runtime_config: {},
+  runtime_config: { max_turns: 12, timeout_minutes: 30 },
   custom_args: [],
   custom_env_redacted: false,
   visibility: "workspace",
@@ -96,6 +96,13 @@ function renderTab() {
   );
 }
 
+async function openAdvanced() {
+  const summary = await screen.findByText(
+    /Advanced: exact prompt and technical evidence/i,
+  );
+  await userEvent.click(summary);
+}
+
 beforeEach(() => {
   mockCerebroRequest.mockReset();
 });
@@ -110,9 +117,34 @@ function mockHappyPath() {
 }
 
 describe("CerebroAgentPromptSnapshotTab", () => {
+  it("opens on a plain-language summary and keeps raw evidence under Advanced", async () => {
+    mockHappyPath();
+    renderTab();
+
+    expect(
+      await screen.findByRole("region", { name: "Run summary" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("What shaped this run")).toBeInTheDocument();
+    expect(screen.getByText("Role and boundaries")).toBeInTheDocument();
+    expect(screen.getByText("Workspace guidance")).toBeInTheDocument();
+    expect(
+      screen.getByText("Up to 12 steps · Up to 30 minutes."),
+    ).toBeInTheDocument();
+
+    const advanced = screen
+      .getByText(/Advanced: exact prompt and technical evidence/i)
+      .closest("details");
+    expect(advanced).not.toHaveAttribute("open");
+    await userEvent.click(
+      screen.getByText(/Advanced: exact prompt and technical evidence/i),
+    );
+    expect(advanced).toHaveAttribute("open");
+  });
+
   it("renders provenance for the recorded run", async () => {
     mockHappyPath();
     renderTab();
+    await openAdvanced();
 
     // Provider + runtime version + config version + hash provenance.
     expect(await screen.findByText(/claude 2\.1\.209/)).toBeInTheDocument();
@@ -128,6 +160,7 @@ describe("CerebroAgentPromptSnapshotTab", () => {
   it("shows the run the snapshot was captured from", async () => {
     mockHappyPath();
     renderTab();
+    await openAdvanced();
 
     // Provenance is only checkable if the reader can tell WHICH run produced
     // this prompt. Without the run id the header describes an anonymous blob.
@@ -138,6 +171,7 @@ describe("CerebroAgentPromptSnapshotTab", () => {
   it("shows prompt size in tokens alongside bytes", async () => {
     mockHappyPath();
     renderTab();
+    await openAdvanced();
 
     await screen.findByText(/claude 2\.1\.209/);
     // 93153 recorded bytes / 3.8 chars-per-token ≈ 24514 tokens, always
@@ -148,6 +182,7 @@ describe("CerebroAgentPromptSnapshotTab", () => {
   it("lists layers with byte sizes and shows layer content with line numbers", async () => {
     mockHappyPath();
     renderTab();
+    await openAdvanced();
 
     expect((await screen.findAllByText("Role & instructions")).length).toBeGreaterThan(0);
     expect(screen.getAllByText("Case itself").length).toBeGreaterThan(0);
@@ -159,6 +194,7 @@ describe("CerebroAgentPromptSnapshotTab", () => {
   it("marks user-prompt delivery honestly (no native system prompt claim)", async () => {
     mockHappyPath();
     renderTab();
+    await openAdvanced();
 
     await screen.findAllByText("Case itself");
     await userEvent.click(screen.getByRole("button", { name: /case itself/i }));
@@ -179,7 +215,7 @@ describe("CerebroAgentPromptSnapshotTab", () => {
     renderTab();
 
     await screen.findAllByText("Role & instructions");
-    const afterTab = screen.getByRole("button", { name: /pending change approved/i });
+    const afterTab = screen.getByRole("button", { name: /after pending change/i });
     await userEvent.click(afterTab);
     expect(
       screen.getByText(/no pending configuration change exists/i),
@@ -189,6 +225,7 @@ describe("CerebroAgentPromptSnapshotTab", () => {
   it("shows redaction provenance with both hashes when redacted", async () => {
     mockHappyPath();
     renderTab();
+    await openAdvanced();
 
     await screen.findAllByText("Role & instructions");
     // Both hashes are distinguishable: original vs redacted view.

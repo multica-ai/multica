@@ -5,15 +5,21 @@ import { Pencil, Eye } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/ui/tooltip";
+import { CerebroSkillMarkdownEditor } from "@multica/cerebro-skill-ownership/views"; // CEREBRO-PATCH(rich-text-skill-markdown): use the Cerebro-owned wrapper that protects skill frontmatter.
 import {
   parseFrontmatter,
   type SkillFrontmatter,
 } from "@multica/core/skills/frontmatter";
 import { Markdown } from "../../common/markdown";
+import { ContentEditor } from "../../editor"; // CEREBRO-PATCH(rich-text-skill-markdown): provide the shared editor without reversing package dependencies.
 import { useT } from "../../i18n";
 
 function isMarkdown(path: string) {
   return path.endsWith(".md") || path.endsWith(".mdx");
+}
+
+function supportsRichTextMarkdown(path: string) {
+  return path.endsWith(".md");
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +60,7 @@ export function FileViewer({
   const { t } = useT("skills");
   const [editing, setEditing] = useState(false);
   const isMd = isMarkdown(path);
+  const usesRichTextEditor = supportsRichTextMarkdown(path);
 
   const { frontmatter, body } = useMemo(
     () => (isMd ? parseFrontmatter(content) : { frontmatter: null, body: content }),
@@ -105,15 +112,20 @@ export function FileViewer({
               {body || t(($) => $.file_viewer.no_content)}
             </Markdown>
           </div>
+        ) : usesRichTextEditor ? (
+          // CEREBRO-PATCH(rich-text-skill-markdown): Markdown body edits use
+          // the visual editor while YAML remains unchanged.
+          <CerebroSkillMarkdownEditor
+            Editor={ContentEditor}
+            content={content}
+            onChange={onChange}
+            placeholder={t(($) => $.file_viewer.markdown_placeholder)}
+          />
         ) : (
           <Textarea
             value={content}
             onChange={(e) => onChange(e.target.value)}
-            placeholder={
-              isMd
-                ? t(($) => $.file_viewer.markdown_placeholder)
-                : t(($) => $.file_viewer.raw_placeholder)
-            }
+            placeholder={t(($) => $.file_viewer.raw_placeholder)}
             className="h-full min-h-full resize-none rounded-none border-0 font-mono text-sm leading-relaxed focus-visible:ring-0"
           />
         )}

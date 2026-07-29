@@ -186,7 +186,7 @@ describe("AgentContextConfigFields brief-layer controls (FIR-3212)", () => {
 });
 
 describe("AgentContextConfigFields control-first layout (FIR-4000)", () => {
-  it("groups identity, context and run controls in one governed home", () => {
+  it("groups the job, reading context and run controls in one human-readable home", () => {
     renderFields({
       controlFirst: true,
       instructions: "Own customer outcomes.",
@@ -195,18 +195,26 @@ describe("AgentContextConfigFields control-first layout (FIR-4000)", () => {
       timeoutMinutes: "45",
     });
 
-    expect(screen.getByText("Who she is")).toBeTruthy();
-    expect(screen.getByText("What she reads")).toBeTruthy();
-    expect(screen.getByText("How she runs")).toBeTruthy();
+    expect(screen.getByText("At a glance")).toBeTruthy();
+    expect(screen.getByText("What this agent does")).toBeTruthy();
+    expect(screen.getByText("What this agent reads before work")).toBeTruthy();
+    expect(screen.getByText("How this agent runs")).toBeTruthy();
     expect((screen.getByLabelText("Instructions") as HTMLTextAreaElement).value).toBe(
       "Own customer outcomes.",
     );
-    expect((screen.getByLabelText("Speed") as HTMLSelectElement).value).toBe("fast");
-    expect((screen.getByLabelText("Engine") as HTMLSelectElement).value).toBe(
+    expect(
+      (screen.getByLabelText("Response speed") as HTMLSelectElement).value,
+    ).toBe("fast");
+    expect((screen.getByLabelText("Where it runs") as HTMLSelectElement).value).toBe(
       agent.runtime_id,
     );
-    expect((screen.getByLabelText("Stop after") as HTMLInputElement).value).toBe("18");
-    expect((screen.getByLabelText("Give up after") as HTMLInputElement).value).toBe("45");
+    expect((screen.getByLabelText("Maximum steps") as HTMLInputElement).value).toBe(
+      "18",
+    );
+    expect((screen.getByLabelText("Time limit") as HTMLInputElement).value).toBe(
+      "45",
+    );
+    expect(screen.getByText("Advanced")).toBeTruthy();
   });
 
   it("emits versioned run-control changes", () => {
@@ -222,12 +230,18 @@ describe("AgentContextConfigFields control-first layout (FIR-4000)", () => {
       onTimeoutMinutes,
     });
 
-    fireEvent.change(screen.getByLabelText("Speed"), { target: { value: "fast" } });
-    fireEvent.change(screen.getByLabelText("Engine"), {
+    fireEvent.change(screen.getByLabelText("Response speed"), {
+      target: { value: "fast" },
+    });
+    fireEvent.change(screen.getByLabelText("Where it runs"), {
       target: { value: agent.runtime_id },
     });
-    fireEvent.change(screen.getByLabelText("Stop after"), { target: { value: "21" } });
-    fireEvent.change(screen.getByLabelText("Give up after"), { target: { value: "50" } });
+    fireEvent.change(screen.getByLabelText("Maximum steps"), {
+      target: { value: "21" },
+    });
+    fireEvent.change(screen.getByLabelText("Time limit"), {
+      target: { value: "50" },
+    });
 
     expect(onSpeedMode).toHaveBeenCalledWith("fast");
     expect(onRuntimeId).toHaveBeenCalledWith(agent.runtime_id);
