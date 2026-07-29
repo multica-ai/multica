@@ -748,6 +748,17 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/uploads/*", h.ServeLocalUpload)
 	}
 
+	// Capability-authenticated attachment download (MUL-5292). Public by
+	// necessity: a native download (Electron's webContents.downloadURL, a
+	// cross-site webview <img>) carries neither Authorization nor a session
+	// cookie, so there is nothing here for middleware.Auth to read. The
+	// short-lived, single-attachment signature in the query is the credential,
+	// and it is only ever minted by the AUTHENTICATED GET
+	// /api/attachments/{id} after that request's membership check passed.
+	// The authenticated /api/attachments/{id}/download route below is
+	// unchanged — this one is purely additive.
+	r.Get("/api/attachments/{id}/signed-download", h.DownloadAttachmentWithCapability)
+
 	// Auth (public) — per-IP rate limiting.
 	if rdb == nil {
 		slog.Warn("rate limiting disabled: REDIS_URL not configured")
