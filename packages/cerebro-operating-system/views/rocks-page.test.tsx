@@ -34,6 +34,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"] }),
   agentListOptions: () => ({ queryKey: ["agents"] }),
 }));
+vi.mock("@multica/core/api", () => ({ api: { createComment: vi.fn() } }));
+vi.mock("@multica/core/auth", () => ({ useAuthStore: (selector: (s: { user: { id: string } }) => unknown) => selector({ user: { id: "member-1" } }) }));
+vi.mock("@multica/core/channels", () => ({ useCreateChannel: () => ({ mutateAsync: vi.fn() }) }));
+vi.mock("@multica/core/paths", () => ({ useWorkspaceSlug: () => "firtal" }));
 
 vi.mock("@tanstack/react-query", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@tanstack/react-query")>();

@@ -2,6 +2,7 @@ import { useState, type FormEvent } from "react";
 import type { Rock, Terminology } from "../core/types";
 import { useRockCheckIn } from "../core/queries";
 import { HealthBadge, HealthScore } from "./health-score";
+import { RockCheckInRequest } from "./rock-check-in-request";
 import { RockTree } from "./rock-tree";
 import { SearchSelect } from "./search-select";
 
@@ -36,6 +37,7 @@ export function RockDetail({ wsId, rock, terminology }: { wsId: string; rock: Ro
       </div>
       <form onSubmit={submit} className="h-fit rounded-xl bg-muted/50 p-4">
         <h3 className="font-semibold">Weekly check-in</h3>
+        <RockCheckInRequest rock={rock} terminology={terminology} />
         <label className="mt-4 grid gap-1 text-sm">Confidence
           <input aria-label="Check-in confidence" type="range" min={0} max={100} value={confidence} onChange={(event) => setConfidence(Number(event.target.value))} />
           <span className="text-right text-xs text-muted-foreground">{confidence}%</span>

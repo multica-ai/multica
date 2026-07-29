@@ -1,5 +1,6 @@
 export * from "./api";
 export * from "./api-schemas";
+export * from "./check-in-request";
 export * from "./periods";
 export * from "./queries";
 export * from "./rock-input";
