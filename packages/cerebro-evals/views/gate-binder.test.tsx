@@ -1,13 +1,11 @@
 // @vitest-environment jsdom
 
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, fireEvent } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen, fireEvent } from "@testing-library/react";
 import { GateBinder } from "./gate-binder";
 
 const evals = [{ id: "e1", title: "Answer quality", version: "1.0.0" }];
 const workflows = [{ id: "w1", name: "Standard build loop" }];
-
-afterEach(cleanup);
 
 describe("GateBinder", () => {
   it("renders a phase selector and a Block/Warn toggle", () => {

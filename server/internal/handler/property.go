@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -804,10 +805,10 @@ func (h *Handler) SetIssueProperty(w http.ResponseWriter, r *http.Request) {
 	workspaceID := uuidToString(updated.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	properties := parseIssueProperties(updated.Properties)
-	h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
+	h.publishToAudience(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
 		"issue_id":   uuidToString(updated.ID),
 		"properties": properties,
-	})
+	}, h.audienceForIssue(r.Context(), updated))
 	writeJSON(w, http.StatusOK, map[string]any{"properties": properties})
 }
 
@@ -854,11 +855,84 @@ func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
 	workspaceID := uuidToString(updated.WorkspaceID)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	properties := parseIssueProperties(updated.Properties)
-	h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
+	h.publishToAudience(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
 		"issue_id":   uuidToString(updated.ID),
 		"properties": properties,
-	})
+	}, h.audienceForIssue(r.Context(), updated))
 	writeJSON(w, http.StatusOK, map[string]any{"properties": properties})
+}
+
+// ApplyQuickCreateIssueProperties is the asynchronous quick-create counterpart
+// to SetIssueProperty. The full bag commits atomically after every definition
+// has been locked and revalidated against its current configuration.
+func (h *Handler) ApplyQuickCreateIssueProperties(
+	ctx context.Context,
+	issue db.Issue,
+	values map[string]json.RawMessage,
+	actorType, actorID string,
+) error {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+
+	tx, err := h.TxStarter.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+	q := h.Queries.WithTx(tx)
+	var updated = issue
+	for _, key := range keys {
+		propertyID, err := util.ParseUUID(key)
+		if err != nil {
+			return fmt.Errorf("invalid property id %q", key)
+		}
+		if _, err := tx.Exec(ctx, "SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", "prop:"+key); err != nil {
+			return err
+		}
+		def, err := q.GetIssueProperty(ctx, db.GetIssuePropertyParams{
+			ID: propertyID, WorkspaceID: issue.WorkspaceID,
+		})
+		if err != nil {
+			return fmt.Errorf("property %s is unavailable: %w", key, err)
+		}
+		if def.ArchivedAt.Valid {
+			return fmt.Errorf("property %q is archived and cannot receive new values", def.Name)
+		}
+		canonical, err := validatePropertyValue(def, values[key])
+		if err != nil {
+			return fmt.Errorf("property %q: %w", def.Name, err)
+		}
+		updated, err = q.SetIssuePropertyValue(ctx, db.SetIssuePropertyValueParams{
+			ID: issue.ID, WorkspaceID: issue.WorkspaceID, Key: key, Value: canonical,
+		})
+		if err != nil {
+			if isCheckViolation(err) {
+				return errors.New("issue properties exceed the 16KB size limit")
+			}
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return err
+	}
+	h.publishToAudience(
+		protocol.EventIssuePropertiesChanged,
+		uuidToString(updated.WorkspaceID),
+		actorType,
+		actorID,
+		map[string]any{
+			"issue_id":   uuidToString(updated.ID),
+			"properties": parseIssueProperties(updated.Properties),
+		},
+		h.audienceForIssue(ctx, updated),
+	)
+	return nil
 }
 
 // withPropertyLock runs fn inside a transaction holding the advisory lock

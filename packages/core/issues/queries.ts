@@ -130,7 +130,10 @@ export type MyIssuesFilter = Pick<
 >;
 
 // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 allow filtering the list view by on-behalf-of member.
-export type IssueListFilter = Pick<ListIssuesParams, "reference" | "on_behalf_of_ids">;
+export type IssueListFilter = Pick<
+  ListIssuesParams,
+  "reference" | "on_behalf_of_ids" | "properties"
+>;
 
 export type IssueFlatFilter = MyIssuesFilter &
   IssueListFilter &
@@ -476,7 +479,13 @@ export function issueListOptions(
 ) {
   // CEREBRO-PATCH(issue-reference-filter): reference filter keys its own cache;
   // otherwise fall back to the upstream sort-keyed list cache.
-  const hasFilter = Boolean(filter.reference);
+  const hasFilter = Object.values(filter).some((value) =>
+    Array.isArray(value)
+      ? value.length > 0
+      : typeof value === "object" && value !== null
+        ? Object.keys(value).length > 0
+        : Boolean(value),
+  );
   return queryOptions({
     queryKey: hasFilter
       ? issueKeys.listFiltered(wsId, filter)

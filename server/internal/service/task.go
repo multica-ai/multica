@@ -76,8 +76,9 @@ type TaskService struct {
 	// CEREBRO-PATCH(workflow-loop-advancer): FIR-3052 — advance Plan -> Build on
 	// plan-task completion so the loop moves without a manual status flip. Set
 	// from router.go; nil-safe.
-	WorkflowLoopAdvancer   WorkflowLoopAdvancer
-	WorkflowCompletionGate WorkflowCompletionGate // CEREBRO-PATCH(workflow-hooks-completion-field): FIR-3101 delegates pre-completion policy to the Workflow feature.
+	WorkflowLoopAdvancer      WorkflowLoopAdvancer
+	WorkflowCompletionGate    WorkflowCompletionGate // CEREBRO-PATCH(workflow-hooks-completion-field): FIR-3101 delegates pre-completion policy to the Workflow feature.
+	QuickCreatePropertyWriter QuickCreatePropertyWriter
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -102,6 +103,17 @@ type IssueWorkflowActivator interface {
 
 type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
+}
+
+// QuickCreatePropertyWriter applies the delayed property bag through the same
+// validation, locking and privacy-scoped realtime path as an HTTP value write.
+type QuickCreatePropertyWriter interface {
+	ApplyQuickCreateIssueProperties(
+		ctx context.Context,
+		issue db.Issue,
+		values map[string]json.RawMessage,
+		actorType, actorID string,
+	) error
 }
 
 // CEREBRO-PATCH(workflow-session-stamper-iface): FIR-2283 followup point b seam.
@@ -2998,15 +3010,22 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 		)
 	}
 
-	// CEREBRO-PATCH(quick-create-custom-properties): apply pre-validated values after the agent-created issue is deterministically resolved.
-	for propertyID, value := range qc.PropertyValues {
-		pid, perr := util.ParseUUID(propertyID)
-		if perr != nil {
-			slog.Warn("quick-create completion: invalid property id", "property_id", propertyID, "error", perr)
-			continue
-		}
-		if _, perr = s.Queries.SetIssuePropertyValue(ctx, db.SetIssuePropertyValueParams{ID: issue.ID, WorkspaceID: workspaceID, Key: propertyID, Value: value}); perr != nil {
-			slog.Warn("quick-create completion: custom property failed", "issue_id", util.UUIDToString(issue.ID), "property_id", util.UUIDToString(pid), "error", perr)
+	// Values are deliberately revalidated here: the definition may have been
+	// archived or edited while the asynchronous agent was creating the issue.
+	if len(qc.PropertyValues) > 0 {
+		if s.QuickCreatePropertyWriter == nil {
+			slog.Error("quick-create completion: property writer is not configured",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+			)
+		} else if perr := s.QuickCreatePropertyWriter.ApplyQuickCreateIssueProperties(
+			ctx, issue, qc.PropertyValues, "member", qc.RequesterID,
+		); perr != nil {
+			slog.Error("quick-create completion: custom properties rejected",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"error", perr,
+			)
 		}
 	}
 

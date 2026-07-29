@@ -513,7 +513,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
-	return &Handler{
+	h := &Handler{
 		Queries:               queries,
 		DB:                    executor,
 		TxStarter:             txStarter,
@@ -545,6 +545,8 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		PushService:         pushService,
 		InternalBrowserJobs: newInternalBrowserJobStore(), // CEREBRO-PATCH(internal-agent-browser-qa-async): FIR-3006
 	}
+	taskSvc.QuickCreatePropertyWriter = h
+	return h
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
