@@ -483,7 +483,7 @@ WITH connected_issue AS (
     JOIN issue i ON c.target_type = 'project' AND i.project_id = c.target_id AND i.workspace_id = c.workspace_id
     WHERE c.workspace_id = $1 AND c.source_type = 'rock' AND c.source_id = $2
 )
-SELECT i.id, (w.issue_prefix || '-' || i.number)::text AS identifier, i.title, i.status, i.project_id, COALESCE(p.title, '') AS project_title
+SELECT i.id, (w.issue_prefix || '-' || i.number)::text AS identifier, i.title, i.status, i.project_id, COALESCE(p.title, '') AS project_title, i.parent_issue_id
 FROM connected_issue ci
 JOIN issue i ON i.id = ci.id AND i.workspace_id = $1
 JOIN workspace w ON w.id = i.workspace_id

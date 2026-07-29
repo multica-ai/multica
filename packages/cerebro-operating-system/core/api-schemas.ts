@@ -74,7 +74,7 @@ export const visionPlanSchema = z.object({
 const health = fallbackEnum(["on_track", "at_risk", "off_track", "unset", "unknown"] as const, "unknown");
 const reportedHealth = fallbackEnum(["on_track", "at_risk", "off_track", "unset"] as const, "unset");
 const rockProjectSchema = z.object({ id: z.string(), title: z.string(), issue_count: z.number().int().min(0), done_issue_count: z.number().int().min(0) });
-const rockIssueSchema = z.object({ id: z.string(), identifier: z.string(), title: z.string(), status: z.string(), project_id: z.string().optional(), project_title: z.string().optional() });
+const rockIssueSchema = z.object({ id: z.string(), identifier: z.string(), title: z.string(), status: z.string(), project_id: z.string().optional(), project_title: z.string().optional(), parent_id: z.string().optional() });
 export const rockCheckInSchema = z.object({
   id: z.string(), confidence: z.number().min(0).max(100), reported_health: health, note: z.string().default(""),
   created_by_type: z.string(), created_by_id: z.string(), created_at: z.string(),

@@ -50,7 +50,7 @@ export interface VisionPlanPageInput { name: string; column_count: number; posit
 export interface VisionPlan { pages: VisionPlanPage[]; sections: VisionPlanSection[] }
 export interface DerivedHealth { state: HealthState; reason: string; calculated_at: string }
 export interface RockProject { id: string; title: string; issue_count: number; done_issue_count: number }
-export interface RockIssue { id: string; identifier: string; title: string; status: string; project_id?: string; project_title?: string }
+export interface RockIssue { id: string; identifier: string; title: string; status: string; project_id?: string; project_title?: string; parent_id?: string }
 export interface RockCheckIn { id: string; confidence: number; reported_health: HealthState; note: string; created_by_type: string; created_by_id: string; created_at: string }
 export interface Rock {
   id: string; workspace_id: string; title: string; description?: string;

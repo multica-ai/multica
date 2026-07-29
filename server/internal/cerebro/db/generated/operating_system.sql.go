@@ -1398,7 +1398,7 @@ WITH connected_issue AS (
     JOIN issue i ON c.target_type = 'project' AND i.project_id = c.target_id AND i.workspace_id = c.workspace_id
     WHERE c.workspace_id = $1 AND c.source_type = 'rock' AND c.source_id = $2
 )
-SELECT i.id, (w.issue_prefix || '-' || i.number)::text AS identifier, i.title, i.status, i.project_id, COALESCE(p.title, '') AS project_title
+SELECT i.id, (w.issue_prefix || '-' || i.number)::text AS identifier, i.title, i.status, i.project_id, COALESCE(p.title, '') AS project_title, i.parent_issue_id
 FROM connected_issue ci
 JOIN issue i ON i.id = ci.id AND i.workspace_id = $1
 JOIN workspace w ON w.id = i.workspace_id
@@ -1412,12 +1412,13 @@ type ListRockIssuesParams struct {
 }
 
 type ListRockIssuesRow struct {
-	ID           pgtype.UUID `json:"id"`
-	Identifier   string      `json:"identifier"`
-	Title        string      `json:"title"`
-	Status       string      `json:"status"`
-	ProjectID    pgtype.UUID `json:"project_id"`
-	ProjectTitle string      `json:"project_title"`
+	ID            pgtype.UUID `json:"id"`
+	Identifier    string      `json:"identifier"`
+	Title         string      `json:"title"`
+	Status        string      `json:"status"`
+	ProjectID     pgtype.UUID `json:"project_id"`
+	ProjectTitle  string      `json:"project_title"`
+	ParentIssueID pgtype.UUID `json:"parent_issue_id"`
 }
 
 func (q *Queries) ListRockIssues(ctx context.Context, arg ListRockIssuesParams) ([]ListRockIssuesRow, error) {
@@ -1436,6 +1437,7 @@ func (q *Queries) ListRockIssues(ctx context.Context, arg ListRockIssuesParams) 
 			&i.Status,
 			&i.ProjectID,
 			&i.ProjectTitle,
+			&i.ParentIssueID,
 		); err != nil {
 			return nil, err
 		}

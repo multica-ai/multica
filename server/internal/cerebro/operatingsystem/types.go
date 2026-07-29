@@ -270,6 +270,7 @@ type RockIssue struct {
 	Status       string `json:"status"`
 	ProjectID    string `json:"project_id,omitempty"`
 	ProjectTitle string `json:"project_title,omitempty"`
+	ParentID     string `json:"parent_id,omitempty"`
 }
 
 type RockCheckInInput struct {

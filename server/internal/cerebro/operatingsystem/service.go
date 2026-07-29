@@ -1570,6 +1570,7 @@ func (s *Service) enrichRockResponse(ctx context.Context, workspaceID pgtype.UUI
 		rock.Issues = append(rock.Issues, RockIssue{
 			ID: util.UUIDToString(issue.ID), Identifier: issue.Identifier, Title: issue.Title,
 			Status: issue.Status, ProjectID: util.UUIDToString(issue.ProjectID), ProjectTitle: issue.ProjectTitle,
+			ParentID: util.UUIDToString(issue.ParentIssueID),
 		})
 	}
 	checkIns, err := s.queries.ListRockCheckIns(ctx, cerebrodb.ListRockCheckInsParams{WorkspaceID: workspaceID, RockID: rockID})
