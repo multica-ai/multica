@@ -26,11 +26,13 @@ import {
   type ContextDraftFields,
 } from "../../core/context-draft";
 import { AgentContextConfigFields } from "./agent-context-config-fields";
+import type { AgentInstructionsEditor } from "../context-tab";
 
 interface Props {
   agent: Agent;
   canReview?: boolean;
   controlFirst?: boolean;
+  instructionsEditor?: AgentInstructionsEditor;
 }
 
 function currentDraft(agent: Agent): ContextDraftFields {
@@ -58,6 +60,7 @@ export function AgentContextProposeDialog({
   agent,
   canReview = false,
   controlFirst = false,
+  instructionsEditor: InstructionsEditor,
 }: Props) {
   const wsId = useWorkspaceId();
   const initial = currentDraft(agent);
@@ -77,6 +80,7 @@ export function AgentContextProposeDialog({
   const [speedMode, setSpeedMode] = useState(initial.speedMode);
   const [maxTurns, setMaxTurns] = useState(initial.maxTurns);
   const [timeoutMinutes, setTimeoutMinutes] = useState(initial.timeoutMinutes);
+  const [editorKey, setEditorKey] = useState(0);
 
   const { data: versions = [] } = useQuery(
     agentContextVersionsOptions(agent.id),
@@ -121,6 +125,7 @@ export function AgentContextProposeDialog({
     setSpeedMode(next.speedMode);
     setMaxTurns(next.maxTurns);
     setTimeoutMinutes(next.timeoutMinutes);
+    setEditorKey((key) => key + 1);
   };
 
   const submit = async (approve: boolean) => {
@@ -180,6 +185,8 @@ export function AgentContextProposeDialog({
       maxTurns={maxTurns}
       timeoutMinutes={timeoutMinutes}
       instructions={instructions}
+      instructionsEditor={InstructionsEditor}
+      editorKey={editorKey}
       busy={busy}
       controlFirst={controlFirst}
       onInstructions={setInstructions}
@@ -203,32 +210,55 @@ export function AgentContextProposeDialog({
             id="agent-instructions-heading"
             className={controlFirst ? "text-lg font-semibold" : "text-sm font-semibold"}
           >
-            {controlFirst ? `${agent.name} configuration` : "Instructions"}
+            {controlFirst ? `How ${agent.name} works` : "Instructions"}
           </h3>
           <p className="mt-1 max-w-3xl text-xs text-muted-foreground">
             {controlFirst
-              ? "Control what the agent reads and how each run behaves. Every change is versioned, reviewable and reversible."
+              ? "Define the job, what the agent reads before work and the limits for one run. Nothing changes until it is approved."
               : "Edit the versioned instructions here. Changes stay reviewable and can be rolled back."}
           </p>
         </div>
-        <span className="shrink-0 rounded-md border px-2 py-1 font-mono text-xs text-muted-foreground">
-          {currentVersion} → {proposedVersion}
-        </span>
+        {!controlFirst && (
+          <span className="shrink-0 rounded-md border px-2 py-1 font-mono text-xs text-muted-foreground">
+            {currentVersion} → {proposedVersion}
+          </span>
+        )}
       </div>
 
       {controlFirst ? (
         configFields
       ) : (
         <>
-          <Textarea
-            id="agent-instructions"
-            aria-label="Instructions"
-            value={instructions}
-            onChange={(event) => setInstructions(event.target.value)}
-            readOnly={busy}
-            rows={18}
-            className="min-h-72 resize-y bg-background font-mono text-xs leading-relaxed"
-          />
+          {InstructionsEditor ? (
+            <div
+              role="region"
+              aria-label="Instructions"
+              aria-disabled={busy}
+              className={`min-h-72 rounded-md border bg-background ${
+                busy ? "pointer-events-none opacity-60" : ""
+              }`}
+            >
+              <InstructionsEditor
+                key={`${agent.id}:${editorKey}`}
+                defaultValue={instructions}
+                onUpdate={setInstructions}
+                placeholder="Write what this agent should do, how it should respond, and what it must never do…"
+                className="min-h-72 px-4 py-3 text-sm"
+                debounceMs={0}
+                disableMentions
+              />
+            </div>
+          ) : (
+            <Textarea
+              id="agent-instructions"
+              aria-label="Instructions"
+              value={instructions}
+              onChange={(event) => setInstructions(event.target.value)}
+              readOnly={busy}
+              rows={18}
+              className="min-h-72 resize-y bg-background font-mono text-xs leading-relaxed"
+            />
+          )}
           {configFields}
         </>
       )}

@@ -5,7 +5,7 @@
 // factory returns an AgentDetailTabExtension that agent-overview-pane spreads
 // into its tab list and renders by id.
 
-import type { ComponentType, ReactNode } from "react";
+import type { ComponentType, ElementType, ReactNode } from "react";
 import { GitBranch } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -20,6 +20,17 @@ import { AgentContextObservabilityPanel } from "./components/agent-context-obser
 import { AgentContextRuntimeSupportPanel } from "./components/agent-context-runtime-support-panel";
 import { AgentContextEffectivePromptPanel } from "./components/agent-context-effective-prompt-panel";
 import { AgentContextSwapPanel } from "./components/agent-context-swap-panel";
+
+export interface AgentInstructionsEditorProps {
+  defaultValue?: string;
+  onUpdate?: (markdown: string) => void;
+  placeholder?: string;
+  className?: string;
+  debounceMs?: number;
+  disableMentions?: boolean;
+}
+
+export type AgentInstructionsEditor = ElementType<AgentInstructionsEditorProps>;
 
 export interface AgentDetailTabExtension {
   id: string;
@@ -53,10 +64,12 @@ export function CerebroAgentContextTab({
   agent,
   runtimes = [],
   canEdit = true,
+  instructionsEditor,
 }: {
   agent: Agent;
   runtimes?: AgentRuntime[];
   canEdit?: boolean;
+  instructionsEditor?: AgentInstructionsEditor;
 }) {
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id ?? null);
@@ -72,19 +85,22 @@ export function CerebroAgentContextTab({
         agent={agent}
         canReview={canManage}
         controlFirst={runtimeSupportOn}
+        instructionsEditor={instructionsEditor}
       />
 
       {runtimeSupportOn && (
-        <details className="rounded-xl border bg-card">
-          <summary className="cursor-pointer px-4 py-3 text-xs font-medium">
-            Engine support, effective prompt and swap impact
-          </summary>
-          <div className="grid gap-4 border-t p-4 xl:grid-cols-2">
-            <AgentContextRuntimeSupportPanel agent={agent} />
-            <AgentContextEffectivePromptPanel agent={agent} />
-            <AgentContextSwapPanel agent={agent} runtimes={runtimes} />
-          </div>
-        </details>
+        <>
+          <AgentContextEffectivePromptPanel agent={agent} />
+          <details className="rounded-xl border bg-card">
+            <summary className="cursor-pointer px-4 py-3 text-xs font-medium">
+              Advanced: engine compatibility and swap checks
+            </summary>
+            <div className="grid gap-4 border-t p-4 xl:grid-cols-2">
+              <AgentContextRuntimeSupportPanel agent={agent} />
+              <AgentContextSwapPanel agent={agent} runtimes={runtimes} />
+            </div>
+          </details>
+        </>
       )}
 
       <div className="my-1 h-px bg-border" />

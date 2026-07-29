@@ -223,9 +223,6 @@ export function AgentContextChangeRequestQueue({
                     <Clock className="h-2.5 w-2.5" />
                     {formatRelativeTime(req.created_at)}
                     <span>· by {proposerName(req.proposed_by)}</span>
-                    <span className="font-mono">
-                      · {req.base_version} → {req.proposed_version}
-                    </span>
                   </div>
                   {req.description && (
                     <div className="mt-1 rounded bg-muted/40 px-2 py-1 text-xs text-muted-foreground">
@@ -238,17 +235,7 @@ export function AgentContextChangeRequestQueue({
 
               <div className="border-t px-2.5 py-2">
                 {baseSnapshotFor(req) ? (
-                  // Mockup M3: what changed on the left, what it means on the
-                  // right. The diff alone cannot tell the approver whether the
-                  // change lands at all on this agent's engine.
-                  <div className="grid gap-4 lg:grid-cols-2">
-                    <AgentContextFieldDiff
-                      base={baseSnapshotFor(req)!}
-                      proposed={req.proposed_snapshot}
-                      baseLabel={`base (${req.base_version})`}
-                      proposedLabel={req.proposed_version}
-                      onlyKeys={onlyKeys}
-                    />
+                  <div className="space-y-4">
                     {/* Pending only: the panel answers "what will approving
                         this do?". On a merged or rejected request that question
                         is already settled, and the engine's CURRENT matrix would
@@ -259,6 +246,21 @@ export function AgentContextChangeRequestQueue({
                         changedFields={changedFieldsFor(req)}
                       />
                     )}
+
+                    <details className="rounded-md border bg-muted/10">
+                      <summary className="cursor-pointer px-3 py-2 text-xs font-medium">
+                        Advanced: exact before-and-after values
+                      </summary>
+                      <div className="border-t p-3">
+                        <AgentContextFieldDiff
+                          base={baseSnapshotFor(req)!}
+                          proposed={req.proposed_snapshot}
+                          baseLabel={`Current (${req.base_version})`}
+                          proposedLabel={`After approval (${req.proposed_version})`}
+                          onlyKeys={onlyKeys}
+                        />
+                      </div>
+                    </details>
                   </div>
                 ) : (
                   <div className="rounded-md border border-dashed px-3 py-3 text-center text-xs text-muted-foreground">

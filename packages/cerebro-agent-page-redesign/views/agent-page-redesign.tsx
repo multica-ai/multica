@@ -84,6 +84,7 @@ import { InfisicalFoldersTab } from "@multica/views/agents/components/tabs/infis
 import { IntegrationsTab } from "@multica/views/agents/components/tabs/integrations-tab";
 import { McpConfigTab } from "@multica/views/agents/components/tabs/mcp-config-tab";
 import { SkillsTab } from "@multica/views/agents/components/tabs/skills-tab";
+import { ContentEditor } from "@multica/views/editor";
 import { PageHeader } from "@multica/views/layout/page-header";
 import { AppLink, useNavigation } from "@multica/views/navigation";
 import { advancedTabs, agentPageTabs, type RedesignTab } from "./agent-page-tabs";
@@ -500,7 +501,11 @@ export function CerebroAgentDetailPage({ agentId }: { agentId: string }) {
                   </div>
                 )}
                 {effectiveTab === "instructions" && (
-                  <CerebroAgentContextTab agent={agent} canEdit={canEdit} />
+                  <CerebroAgentContextTab
+                    agent={agent}
+                    canEdit={canEdit}
+                    instructionsEditor={ContentEditor}
+                  />
                 )}
                 {effectiveTab === "skills" && (
                   <div className="p-5 md:p-6">

@@ -405,7 +405,7 @@ export function CerebroAgentPromptSnapshotTab({ agent }: { agent: Agent }) {
         {(
           [
             ["current", "This run"],
-            ["after_proposal", "If pending change approved"],
+            ["after_proposal", "If the pending change is approved"],
             ["diff", "Difference"],
           ] as const
         ).map(([value, label]) => (
@@ -514,69 +514,56 @@ function PromptExplorer({
   const [copied, setCopied] = useState(false);
 
   return (
-    <div className="space-y-4">
-      <div className="grid gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-3 xl:grid-cols-6">
-        <Metric label="Characters" value={snapshot.total_bytes.toLocaleString("en-US")} />
-        <Metric label="Estimated tokens" value={`~${tokens.toLocaleString("en-US")} tokens`} />
+    <section
+      role="region"
+      aria-label="Prompt evidence"
+      className="space-y-4"
+    >
+      <div className="grid gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-3">
+        <Metric
+          label="Characters"
+          value={snapshot.total_bytes.toLocaleString("en-US")}
+        />
+        <Metric
+          label="Estimated tokens"
+          value={`~${tokens.toLocaleString("en-US")} tokens`}
+        />
         <Metric label="Parts" value={String(parts.length)} />
-        <Metric label="Delivery" value={snapshot.system_prompt_mode || "Engine default"} />
-        <Metric label="Redaction" value={snapshot.redacted ? "Applied" : "Not needed"} />
-        <Metric label="Config" value={snapshot.agent_context_version || "Unversioned"} />
-      </div>
-
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <Badge variant="secondary">Captured from the run — not reconstructed</Badge>
-        <span className="font-mono">run {snapshot.task_id}</span>
       </div>
 
       {viewMode !== "current" && pending && (
         <p className="rounded-lg border border-blue-500/30 bg-blue-500/5 px-3 py-2 text-xs text-muted-foreground">
-          This view applies the stored pending configuration to recorded
-          evidence. The next run will create the byte-exact after snapshot.
+          This comparison applies the pending settings to recorded evidence.
+          The next run creates the exact after snapshot.
         </p>
       )}
 
-      <div className="grid min-h-[34rem] overflow-hidden rounded-xl border lg:grid-cols-[18rem_minmax(0,1fr)]">
-        <nav className="border-b bg-muted/20 p-3 lg:border-b-0 lg:border-r" aria-label="Prompt parts">
+      <div className="flex min-h-[34rem] flex-col overflow-hidden rounded-xl border lg:grid lg:grid-cols-[19rem_minmax(0,1fr)]">
+        <nav
+          className="border-b bg-muted/20 p-3 lg:border-b-0 lg:border-r"
+          aria-label="Prompt parts"
+        >
           <p className="mb-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-            Parts
+            The parts it is made of
           </p>
-          <div className="space-y-1">
-            {parts.map((part) => {
-              const partTokens = estimateTokensFromLength(
-                part.byteSize,
-                "en",
-              ).tokens;
-              return (
-                <button
-                  key={part.id}
-                  type="button"
-                  className={`w-full rounded-lg border px-3 py-2.5 text-left transition-colors ${
-                    activePart === part.id
-                      ? "border-primary/30 bg-background shadow-sm"
-                      : "border-transparent hover:bg-background/70"
-                  }`}
-                  onClick={() => onSelectPart(part.id)}
-                >
-                  <span className="flex items-center justify-between gap-2 text-xs font-medium">
-                    <span>{part.label}</span>
-                    <span className="font-mono text-muted-foreground">
-                      {part.byteSize === 0 ? "0" : `~${partTokens}`}
-                    </span>
-                  </span>
-                  <span className="mt-1 block text-xs text-muted-foreground">
-                    {part.state ?? deliveryLabel(part.delivery)}
-                  </span>
-                </button>
-              );
-            })}
+          <div className="space-y-2">
+            {parts.map((part) => (
+              <PromptPartChoice
+                key={part.id}
+                part={part}
+                active={activePart === part.id}
+                onSelect={() => onSelectPart(part.id)}
+              />
+            ))}
           </div>
         </nav>
 
         <div className="min-w-0">
           <header className="flex flex-wrap items-center gap-2 border-b bg-muted/10 px-4 py-3">
             <span className="text-sm font-semibold">{selected.label}</span>
-            <Badge variant="outline">{deliveryLabel(selected.delivery)}</Badge>
+            <Badge variant="outline">
+              {deliveryLabel(selected.delivery)}
+            </Badge>
             {snapshot.redacted && <Badge variant="secondary">Redacted</Badge>}
             <Button
               type="button"
@@ -590,24 +577,166 @@ function PromptExplorer({
                 });
               }}
             >
-              {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
+              {copied ? (
+                <Check className="size-3.5" />
+              ) : (
+                <Copy className="size-3.5" />
+              )}
               {copied ? "Copied" : "Copy whole prompt"}
             </Button>
           </header>
-          <LineNumberedText content={selected.content} diff={viewMode === "diff"} />
-          <footer className="flex flex-wrap gap-x-4 gap-y-1 border-t px-4 py-3 font-mono text-xs text-muted-foreground">
+          <LineNumberedText
+            content={selected.content}
+            diff={viewMode === "diff"}
+          />
+        </div>
+      </div>
+
+      <details className="rounded-xl border bg-card">
+        <summary className="cursor-pointer px-4 py-3 text-sm font-medium">
+          Technical evidence
+          <span className="ml-2 text-xs font-normal text-muted-foreground">
+            run identity, delivery and hashes
+          </span>
+        </summary>
+        <div className="space-y-4 border-t p-4">
+          <div className="grid gap-px overflow-hidden rounded-xl border bg-border sm:grid-cols-3">
+            <Metric
+              label="Delivery"
+              value={snapshot.system_prompt_mode || "Engine default"}
+            />
+            <Metric
+              label="Redaction"
+              value={snapshot.redacted ? "Applied" : "Not needed"}
+            />
+            <Metric
+              label="Config"
+              value={snapshot.agent_context_version || "Unversioned"}
+            />
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge variant="secondary">
+              Captured from the run — not reconstructed
+            </Badge>
+            <span className="font-mono">run {snapshot.task_id}</span>
+            <span className="font-mono">
+              {snapshot.provider} {snapshot.runtime_version}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-x-4 gap-y-1 rounded-lg bg-muted/40 px-3 py-2 font-mono text-xs text-muted-foreground">
             <span title={snapshot.sha256_original}>
               original {shortSha(snapshot.sha256_original)}
             </span>
             <span title={snapshot.sha256_redacted}>
               view {shortSha(snapshot.sha256_redacted)}
             </span>
-            <span>{snapshot.provider} {snapshot.runtime_version}</span>
-          </footer>
+          </div>
         </div>
-      </div>
+      </details>
+    </section>
+  );
+}
+
+function PromptPartChoice({
+  part,
+  active,
+  onSelect,
+}: {
+  part: PromptPart;
+  active: boolean;
+  onSelect: () => void;
+}) {
+  const partTokens = estimateTokensFromLength(part.byteSize, "en").tokens;
+  const action = promptPartAction(part.id);
+  return (
+    <div
+      className={`rounded-lg border p-3 ${
+        active
+          ? "border-primary/40 bg-background shadow-sm"
+          : "border-transparent hover:bg-background/70"
+      }`}
+    >
+      <button type="button" className="w-full text-left" onClick={onSelect}>
+        <span className="flex items-center justify-between gap-2 text-xs font-medium">
+          <span>{part.label}</span>
+          <span className="font-mono text-muted-foreground">
+            {part.byteSize === 0 ? "0" : `~${partTokens}`}
+          </span>
+        </span>
+        <span className="mt-1 block text-xs leading-relaxed text-muted-foreground">
+          {promptPartDescription(part)}
+        </span>
+      </button>
+      {action ? (
+        <a
+          href={action.href}
+          className="mt-2 inline-block text-xs font-medium underline underline-offset-2"
+        >
+          {action.label}
+        </a>
+      ) : (
+        <span className="mt-2 block text-xs font-medium text-muted-foreground">
+          Not configuration.
+        </span>
+      )}
     </div>
   );
+}
+
+function promptPartDescription(part: PromptPart): string {
+  if (part.state) return part.state;
+  switch (part.id) {
+    case "role":
+      return "The job, boundaries and engine instructions.";
+    case "tools":
+      return "The wording for tools and connections.";
+    case "skills":
+      return "The skills available for this run.";
+    case "shared":
+      return "Workspace rules and shared context.";
+    case "case":
+      return "The task that started this run.";
+    case "controls":
+      return runLimitSummary(part.content);
+  }
+}
+
+function promptPartAction(
+  id: PromptPart["id"],
+): { label: string; href: string } | null {
+  switch (id) {
+    case "role":
+      return {
+        label: "Edit instructions",
+        href: "?tab=context#agent-instructions",
+      };
+    case "tools":
+      return {
+        label: "Change tool wording",
+        href: "?tab=context#ac-tools-brief",
+      };
+    case "skills":
+      return { label: "Change skills", href: "?tab=skills" };
+    case "shared":
+      return {
+        label: "Change shared brief",
+        href: "?tab=context#ac-workspace-brief",
+      };
+    case "controls":
+      return {
+        label: "Change run controls",
+        href: "?tab=context#how-agent-runs",
+      };
+    case "case":
+      return null;
+  }
+}
+
+function runLimitSummary(content: string): string {
+  const steps = /^Stop after:\s*(.+)$/m.exec(content)?.[1] ?? "Run mode default";
+  const minutes =
+    /^Give up after:\s*(.+)$/m.exec(content)?.[1] ?? "Run mode default";
+  return `Stops after ${steps} steps and gives up after ${minutes} minutes.`;
 }
 
 function LineNumberedText({

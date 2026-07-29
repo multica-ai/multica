@@ -72,6 +72,8 @@ function renderFields(overrides: {
   onWorkspaceBriefMode?: (v: string) => void;
   onToolsBriefMode?: (v: string) => void;
   onSystemPromptMode?: (v: string) => void;
+  onModel?: (v: string) => void;
+  onThinkingLevel?: (v: string) => void;
   onSpeedMode?: (v: string) => void;
   onMaxTurns?: (v: string) => void;
   onTimeoutMinutes?: (v: string) => void;
@@ -93,9 +95,9 @@ function renderFields(overrides: {
         timeoutMinutes={overrides.timeoutMinutes ?? ""}
         instructions={overrides.instructions}
         controlFirst={overrides.controlFirst}
-        onModel={() => {}}
+        onModel={overrides.onModel ?? (() => {})}
         onRuntimeId={overrides.onRuntimeId ?? (() => {})}
-        onThinkingLevel={() => {}}
+        onThinkingLevel={overrides.onThinkingLevel ?? (() => {})}
         onWorkspaceBriefMode={overrides.onWorkspaceBriefMode ?? (() => {})}
         onToolsBriefMode={overrides.onToolsBriefMode ?? (() => {})}
         onSystemPromptMode={overrides.onSystemPromptMode ?? (() => {})}
@@ -186,49 +188,93 @@ describe("AgentContextConfigFields brief-layer controls (FIR-3212)", () => {
 });
 
 describe("AgentContextConfigFields control-first layout (FIR-4000)", () => {
-  it("groups identity, context and run controls in one governed home", () => {
+  it("shows one understandable row per choice instead of generic summary cards", () => {
     renderFields({
       controlFirst: true,
       instructions: "Own customer outcomes.",
+      systemPromptMode: "replace",
+      workspaceBriefMode: "off",
+      toolsBriefMode: "summary",
       speedMode: "fast",
       maxTurns: "18",
       timeoutMinutes: "45",
     });
 
-    expect(screen.getByText("Who she is")).toBeTruthy();
-    expect(screen.getByText("What she reads")).toBeTruthy();
-    expect(screen.getByText("How she runs")).toBeTruthy();
+    expect(screen.queryByText("At a glance")).toBeNull();
+    expect(screen.getByText("Who this agent is")).toBeTruthy();
+    expect(screen.getByText("What this agent reads before a task")).toBeTruthy();
+    expect(screen.getByText("How this agent runs")).toBeTruthy();
     expect((screen.getByLabelText("Instructions") as HTMLTextAreaElement).value).toBe(
       "Own customer outcomes.",
     );
-    expect((screen.getByLabelText("Speed") as HTMLSelectElement).value).toBe("fast");
+    expect(screen.getByRole("button", { name: "Drop them" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Skips it" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(
+      screen.getByRole("button", { name: "One line per connection" }),
+    ).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Fast" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
     expect((screen.getByLabelText("Engine") as HTMLSelectElement).value).toBe(
       agent.runtime_id,
     );
-    expect((screen.getByLabelText("Stop after") as HTMLInputElement).value).toBe("18");
-    expect((screen.getByLabelText("Give up after") as HTMLInputElement).value).toBe("45");
+    expect((screen.getByLabelText("Stop after") as HTMLInputElement).value).toBe(
+      "18",
+    );
+    expect((screen.getByLabelText("Give up after") as HTMLInputElement).value).toBe(
+      "45",
+    );
+    expect(
+      screen.getByRole("link", { name: "See the whole thing →" }),
+    ).toHaveAttribute("href", "?tab=production_prompt");
+    expect(screen.getByText("Not on this screen, on purpose.")).toBeTruthy();
   });
 
-  it("emits versioned run-control changes", () => {
+  it("emits every plain-language choice through the versioned controls", () => {
+    const onSystemPromptMode = vi.fn();
+    const onWorkspaceBriefMode = vi.fn();
+    const onToolsBriefMode = vi.fn();
     const onRuntimeId = vi.fn();
     const onSpeedMode = vi.fn();
     const onMaxTurns = vi.fn();
     const onTimeoutMinutes = vi.fn();
     renderFields({
       controlFirst: true,
+      onSystemPromptMode,
+      onWorkspaceBriefMode,
+      onToolsBriefMode,
       onRuntimeId,
       onSpeedMode,
       onMaxTurns,
       onTimeoutMinutes,
     });
 
-    fireEvent.change(screen.getByLabelText("Speed"), { target: { value: "fast" } });
+    fireEvent.click(screen.getByRole("button", { name: "Drop them" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skips it" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "One line per connection" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Fast" }));
     fireEvent.change(screen.getByLabelText("Engine"), {
       target: { value: agent.runtime_id },
     });
-    fireEvent.change(screen.getByLabelText("Stop after"), { target: { value: "21" } });
-    fireEvent.change(screen.getByLabelText("Give up after"), { target: { value: "50" } });
+    fireEvent.change(screen.getByLabelText("Stop after"), {
+      target: { value: "21" },
+    });
+    fireEvent.change(screen.getByLabelText("Give up after"), {
+      target: { value: "50" },
+    });
 
+    expect(onSystemPromptMode).toHaveBeenCalledWith("replace");
+    expect(onWorkspaceBriefMode).toHaveBeenCalledWith("off");
+    expect(onToolsBriefMode).toHaveBeenCalledWith("summary");
     expect(onSpeedMode).toHaveBeenCalledWith("fast");
     expect(onRuntimeId).toHaveBeenCalledWith(agent.runtime_id);
     expect(onMaxTurns).toHaveBeenCalledWith("21");
