@@ -102,8 +102,12 @@ var targets = map[string]Target{
 		Vault: "Shared/browser-login/cerebro", AccessHeaders: true,
 		AccessClientIDKey: "CF_ACCESS_CLIENT_ID", AccessClientSecretKey: "CF_ACCESS_CLIENT_SECRET",
 		UsernameSelector: "#login-email", SubmitButtonName: "Continue",
-		CodeSelector:     "input[data-input-otp]",
-		NavigateLinkName: "Issues", ExpectedText: []string{"Issues", "Agents", "Settings"},
+		CodeSelector: "input[data-input-otp]",
+		// Login can preserve /workspaces/new from an earlier session. Opening
+		// the root is the browser-equivalent of that page's Back action and
+		// lets the workspace router select the user's existing workspace.
+		NavigatePath: "/", NavigateLinkName: "Issues",
+		ExpectedText: []string{"Issues", "Agents", "Settings"},
 	},
 	"registry": {
 		// Registry and the verifier run on different Sliplane servers. Internal
