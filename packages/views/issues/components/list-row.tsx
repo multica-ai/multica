@@ -12,7 +12,7 @@ import {
   ListGridCell,
 } from "@multica/ui/components/ui/list-grid";
 import { AppLink } from "../../navigation";
-import type { Issue } from "@multica/core/types";
+import type { Issue, IssueProperty } from "@multica/core/types";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { useIssueSelectionStore } from "@multica/core/issues/stores/selection-store";
@@ -20,11 +20,13 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { projectListOptions } from "@multica/core/projects/queries";
+import { propertyListOptions } from "@multica/core/properties";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { PriorityIcon } from "./priority-icon";
 import { ProgressRing } from "./progress-ring";
 import { IssueActionsContextMenu, IssueActionsDropdown } from "../actions";
 import { LabelChip } from "../../labels/label-chip";
+import { CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 // CEREBRO-PATCH(list-row-wakeup-dot): FIR-1521 — orange scheduled-wakeup pip stacked next to the running indicator.
 import { CerebroIssueWakeupPip } from "@multica/cerebro-wakeup";
@@ -68,12 +70,20 @@ function ListRowContent({
   const toggle = useIssueSelectionStore((s) => s.toggle);
   const p = useWorkspacePaths();
   const storeProperties = useViewStore((s) => s.cardProperties);
+  const cardPropertyIds = useViewStore((s) => s.cardPropertyIds ?? []);
   const wsId = useWorkspaceId();
   const { data: projects = [] } = useQuery({
     ...projectListOptions(wsId),
     enabled: storeProperties.project && !!issue.project_id,
   });
   const project = issue.project_id ? projects.find((pr) => pr.id === issue.project_id) : undefined;
+  const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
+  const cardCustomProperties = cardPropertyIds
+    .map((id) => workspaceProperties.find((property) => property.id === id))
+    .filter(
+      (property): property is IssueProperty =>
+        property !== undefined && issue.properties?.[property.id] !== undefined,
+    );
   const labels = issue.labels ?? [];
 
   const showProject = storeProperties.project && project;
@@ -162,6 +172,21 @@ function ListRowContent({
                       +{labels.length - 3}
                     </span>
                   )}
+                </span>
+              )}
+              {cardCustomProperties.length > 0 && (
+                <span className="ml-1.5 hidden shrink-0 items-center gap-1 overflow-hidden @2xl:inline-flex">
+                  {cardCustomProperties.slice(0, 3).map((property) => (
+                    <span
+                      key={property.id}
+                      className="inline-flex max-w-[120px] items-center rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+                    >
+                      <CustomPropertyValueDisplay
+                        property={property}
+                        value={issue.properties?.[property.id]}
+                      />
+                    </span>
+                  ))}
                 </span>
               )}
             </AppLink>

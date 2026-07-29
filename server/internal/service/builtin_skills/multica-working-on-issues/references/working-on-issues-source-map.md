@@ -175,6 +175,16 @@ targets the issue's assignee agent. Response adds a `fresh_run` object
 (`root_comment_id`, `task_id`, `agent_id`). See
 `server/internal/cerebro/sessions/handler.go`.
 
+## Custom properties CLI
+
+| Behavior | File:line |
+|---|---|
+| `multica property list/get/create/update/archive/unarchive` | `server/cmd/multica/cmd_property.go` |
+| `multica issue property list/set/unset` (name→id translation) | `server/cmd/multica/cmd_property.go` (`encodeIssuePropertyValue`) |
+| Definition CRUD, admin gate, agent-actor rejection | `server/internal/handler/property.go` (`requirePropertyAdmin`) |
+| Per-type value validation (self-correcting errors) | `server/internal/handler/property.go` (`validatePropertyValue`) |
+| API routes (`/api/properties`, PUT/DELETE `/api/issues/{id}/properties/{propertyId}`) | `server/cmd/server/router.go` |
+
 ## Verification command
 
 Re-derive any line above before depending on it:

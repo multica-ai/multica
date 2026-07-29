@@ -1,6 +1,7 @@
 import { forwardRef, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -10,6 +11,32 @@ import enIssues from "../../locales/en/issues.json";
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+const mockIssuePropertyCatalog = vi.hoisted(() => [
+  {
+    id: "property-business-value",
+    workspace_id: "ws-1",
+    name: "Business value (DKK)",
+    type: "number",
+    config: {},
+    position: 0,
+    archived: false,
+    created_at: "2026-07-17T00:00:00Z",
+    updated_at: "2026-07-17T00:00:00Z",
+  },
+  {
+    id: "property-effort",
+    workspace_id: "ws-1",
+    name: "Effort (DKK)",
+    type: "number",
+    config: {},
+    position: 1,
+    archived: false,
+    created_at: "2026-07-17T00:00:00Z",
+    updated_at: "2026-07-17T00:00:00Z",
+  },
+]);
+const mockSetIssueProperty = vi.hoisted(() => vi.fn());
+const mockUnsetIssueProperty = vi.hoisted(() => vi.fn());
 
 // FIR-3765 — the Workpad is stubbed so the assertion below is about WHERE
 // issue-detail mounts it (below the composer), not about the panel's own
@@ -29,6 +56,15 @@ vi.mock("@multica/ui/hooks/use-mobile", () => ({
 // directly so the bridge hook returns the test UUID.
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
+}));
+
+vi.mock("@multica/core/properties", () => ({
+  propertyListOptions: (wsId: string, includeArchived = false) => ({
+    queryKey: ["properties", wsId, "list", includeArchived],
+    queryFn: () => Promise.resolve(mockIssuePropertyCatalog),
+  }),
+  useSetIssueProperty: () => ({ mutate: mockSetIssueProperty }),
+  useUnsetIssueProperty: () => ({ mutate: mockUnsetIssueProperty }),
 }));
 
 // ---------------------------------------------------------------------------
@@ -473,6 +509,7 @@ const mockIssue: Issue = {
   project_id: null,
   position: 0,
   metadata: {},
+  properties: {},
   start_date: null,
   due_date: "2026-06-01T00:00:00Z",
   created_at: "2026-01-15T00:00:00Z",
@@ -745,6 +782,35 @@ describe("IssueDetail (shared)", () => {
     // The "+ Add property" affordance is always offered while any
     // optional field is still hidden.
     expect(screen.getByText("Add property")).toBeInTheDocument();
+  });
+
+  it("adds an empty custom property and saves its typed value from the sidebar", async () => {
+    const user = userEvent.setup();
+    mockApiObj.getIssue.mockResolvedValue({
+      ...mockIssue,
+      properties: { "property-business-value": 125000 },
+    });
+
+    renderIssueDetail();
+
+    expect(await screen.findByText("Business value (DKK)")).toBeInTheDocument();
+    expect(screen.getByText("125000")).toBeInTheDocument();
+    expect(screen.queryByText("Effort (DKK)")).not.toBeInTheDocument();
+
+    await user.click(screen.getByText("Add property"));
+    await user.click(await screen.findByRole("button", { name: "Effort (DKK)" }));
+    const input = await screen.findByRole("spinbutton");
+    await user.type(input, "50000");
+    fireEvent.submit(input.closest("form")!);
+
+    expect(mockSetIssueProperty).toHaveBeenCalledWith(
+      {
+        issueId: "issue-1",
+        propertyId: "property-effort",
+        value: 50000,
+      },
+      expect.objectContaining({ onError: expect.any(Function) }),
+    );
   });
 
   it("hides every optional property row when none are set", async () => {

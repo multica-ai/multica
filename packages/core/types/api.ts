@@ -45,17 +45,31 @@ export interface ListIssuesParams {
   limit?: number;
   offset?: number;
   workspace_id?: string;
+  q?: string;
   status?: IssueStatus;
+  statuses?: IssueStatus[];
   priority?: IssuePriority;
+  priorities?: IssuePriority[];
   assignee_id?: string;
   assignee_ids?: string[];
+  assignee_types?: IssueAssigneeType[];
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 filter by on-behalf-of member (user UUIDs).
   on_behalf_of_ids?: string[];
   // CEREBRO-PATCH(issue-sprint-filter): TECH-3620 filter to a sprint's members (cerebro_sprint_issue).
   sprint_id?: string;
   creator_id?: string;
   project_id?: string;
+  assignee_filters?: IssueActorRef[];
+  include_no_assignee?: boolean;
+  creator_filters?: IssueActorRef[];
+  project_ids?: string[];
+  include_no_project?: boolean;
+  label_ids?: string[];
+  top_level_only?: boolean;
+  ids?: string[];
   involves_user_id?: string;
+  /** Custom-property filter: definition id to accepted values. */
+  properties?: Record<string, string[]>;
   open_only?: boolean;
   /**
    * Restrict the result to issues with at least one of `start_date` /
@@ -73,7 +87,16 @@ export interface ListIssuesParams {
   date_field?: "created_at" | "updated_at" | "due_date";
   date_start?: string;
   date_end?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_by?:
+    | "position"
+    | "status"
+    | "priority"
+    | "title"
+    | "created_at"
+    | "updated_at"
+    | "start_date"
+    | "due_date"
+    | `property:${string}`;
   sort_direction?: "asc" | "desc";
 }
 
@@ -99,6 +122,8 @@ export interface ListGroupedIssuesParams {
   creator_id?: string;
   project_id?: string;
   involves_user_id?: string;
+  /** Custom-property filter: definition id to accepted values. */
+  properties?: Record<string, string[]>;
   assignee_filters?: IssueActorRef[];
   include_no_assignee?: boolean;
   creator_filters?: IssueActorRef[];
@@ -117,7 +142,16 @@ export interface ListGroupedIssuesParams {
   date_field?: "created_at" | "updated_at" | "due_date";
   date_start?: string;
   date_end?: string;
-  sort_by?: "position" | "priority" | "title" | "created_at" | "start_date" | "due_date";
+  sort_by?:
+    | "position"
+    | "status"
+    | "priority"
+    | "title"
+    | "created_at"
+    | "updated_at"
+    | "start_date"
+    | "due_date"
+    | `property:${string}`;
   sort_direction?: "asc" | "desc";
 }
 

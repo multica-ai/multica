@@ -1,6 +1,7 @@
 import type {
   Issue,
   IssueAssigneeType,
+  IssuePriority,
   IssueStatus,
   CreateIssueRequest,
   UpdateIssueRequest,
@@ -133,6 +134,12 @@ import type {
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
   Label,
+  IssueProperty,
+  IssuePropertyValue,
+  CreatePropertyRequest,
+  UpdatePropertyRequest,
+  ListPropertiesResponse,
+  IssuePropertiesResponse,
   CreateLabelRequest,
   UpdateLabelRequest,
   ListLabelsResponse,
@@ -243,6 +250,12 @@ import {
   ListAutopilotsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   ListIssuesResponseSchema,
+  IssuePropertySchema,
+  ListPropertiesResponseSchema,
+  IssuePropertiesResponseSchema,
+  EMPTY_ISSUE_PROPERTY,
+  EMPTY_LIST_PROPERTIES_RESPONSE,
+  EMPTY_ISSUE_PROPERTIES_RESPONSE,
   ListWebhookDeliveriesResponseSchema,
   OnboardingNoRuntimeBootstrapResponseSchema,
   OnboardingRuntimeBootstrapResponseSchema,
@@ -1501,17 +1514,36 @@ export class ApiClient {
     if (params?.limit) search.set("limit", String(params.limit));
     if (params?.offset) search.set("offset", String(params.offset));
     if (params?.workspace_id) search.set("workspace_id", params.workspace_id);
+    if (params?.q?.trim()) search.set("q", params.q.trim());
     if (params?.status) search.set("status", params.status);
+    if (params?.statuses?.length) search.set("statuses", params.statuses.join(","));
     if (params?.priority) search.set("priority", params.priority);
+    if (params?.priorities?.length) search.set("priorities", params.priorities.join(","));
     if (params?.assignee_id) search.set("assignee_id", params.assignee_id);
     if (params?.assignee_ids?.length) search.set("assignee_ids", params.assignee_ids.join(","));
+    if (params?.assignee_types?.length) search.set("assignee_types", params.assignee_types.join(","));
     // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 forward on-behalf-of member filter.
     if (params?.on_behalf_of_ids?.length) search.set("on_behalf_of_ids", params.on_behalf_of_ids.join(","));
     // CEREBRO-PATCH(issue-sprint-filter): TECH-3620 forward sprint member filter.
     if (params?.sprint_id) search.set("sprint_id", params.sprint_id);
     if (params?.creator_id) search.set("creator_id", params.creator_id);
     if (params?.project_id) search.set("project_id", params.project_id);
+    if (params?.assignee_filters?.length) {
+      search.set("assignee_filters", params.assignee_filters.map((filter) => `${filter.type}:${filter.id}`).join(","));
+    }
+    if (params?.include_no_assignee) search.set("include_no_assignee", "true");
+    if (params?.creator_filters?.length) {
+      search.set("creator_filters", params.creator_filters.map((filter) => `${filter.type}:${filter.id}`).join(","));
+    }
+    if (params?.project_ids?.length) search.set("project_ids", params.project_ids.join(","));
+    if (params?.include_no_project) search.set("include_no_project", "true");
+    if (params?.label_ids?.length) search.set("label_ids", params.label_ids.join(","));
+    if (params?.top_level_only) search.set("top_level_only", "true");
+    if (params?.ids) search.set("ids", params.ids.join(","));
     if (params?.involves_user_id) search.set("involves_user_id", params.involves_user_id);
+    if (params?.properties && Object.keys(params.properties).length > 0) {
+      search.set("properties", JSON.stringify(params.properties));
+    }
     if (params?.open_only) search.set("open_only", "true");
     if (params?.scheduled) search.set("scheduled", "true");
     if (params?.reference) search.set("reference", params.reference);
@@ -1520,6 +1552,19 @@ export class ApiClient {
     if (params?.date_end) search.set("date_end", params.date_end);
     if (params?.sort_by) search.set("sort", params.sort_by);
     if (params?.sort_direction) search.set("direction", params.sort_direction);
+    // An ids facet can carry hundreds of UUIDs (agents-working filter) —
+    // enough to blow the ~8 KB request-line cap of common reverse proxies.
+    // Route those windows through the POST twin, which takes the SAME
+    // key/value pairs as a JSON body.
+    if (params?.ids) {
+      const raw = await this.fetch<unknown>("/api/issues/query", {
+        method: "POST",
+        body: JSON.stringify(Object.fromEntries(search)),
+      });
+      return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
+        endpoint: "POST /api/issues/query",
+      });
+    }
     const path = `/api/issues?${search}`;
     const raw = await this.fetch<unknown>(path);
     return parseWithFallback(raw, ListIssuesResponseSchema, EMPTY_LIST_ISSUES_RESPONSE, {
@@ -1544,6 +1589,9 @@ export class ApiClient {
     if (params.creator_id) search.set("creator_id", params.creator_id);
     if (params.project_id) search.set("project_id", params.project_id);
     if (params.involves_user_id) search.set("involves_user_id", params.involves_user_id);
+    if (params.properties && Object.keys(params.properties).length > 0) {
+      search.set("properties", JSON.stringify(params.properties));
+    }
     if (params.assignee_filters?.length) {
       search.set("assignee_filters", params.assignee_filters.map((f) => `${f.type}:${f.id}`).join(","));
     }
@@ -1607,8 +1655,11 @@ export class ApiClient {
     agent_id?: string;
     squad_id?: string;
     prompt: string;
+    priority?: IssuePriority;
+    due_date?: string;
     project_id?: string | null;
     parent_issue_id?: string | null;
+    property_values?: Record<string, IssuePropertyValue>;
     // CEREBRO-PATCH(quick-create-workflow-id-client): FIR-2283 followup —
     // optional Issue workflow the created issue is started on (server attaches
     // it once the agent's async-created issue is resolved).
@@ -2779,11 +2830,22 @@ export class ApiClient {
     });
   }
 
-  async rerunIssue(issueId: string, taskId?: string): Promise<AgentTask> {
+  // CEREBRO-PATCH(resume-failed-run-client): FIR-3901 — resume continues the failed run's conversation.
+  async rerunIssue(issueId: string, taskId?: string, resume?: boolean): Promise<AgentTask> {
     return this.fetch(`/api/issues/${issueId}/rerun`, {
       method: "POST",
-      body: taskId ? JSON.stringify({ task_id: taskId }) : undefined,
+      body: taskId || resume ? JSON.stringify({ task_id: taskId, resume: resume === true }) : undefined,
     });
+  }
+
+  // CEREBRO-PATCH(dead-failed-runs-client): FIR-3901 — failed runs nothing will pick up again; drives the red bar.
+  async listIssueFailedRuns<T = unknown>(issueId: string): Promise<T> {
+    return this.fetch<T>(`/api/issues/${issueId}/failed-runs`);
+  }
+
+  // CEREBRO-PATCH(dead-failed-runs-client): FIR-3901 — same, workspace-wide, for the inbox pip.
+  async listWorkspaceFailedRuns<T = unknown>(): Promise<T> {
+    return this.fetch<T>(`/api/inbox/failed-issue-tasks`);
   }
 
   // Inbox
@@ -3795,6 +3857,68 @@ export class ApiClient {
 
   async deleteLabel(id: string): Promise<void> {
     await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
+  }
+
+  // Custom issue properties
+  async listProperties(includeArchived = false): Promise<ListPropertiesResponse> {
+    const suffix = includeArchived ? "?include_archived=true" : "";
+    let raw: unknown;
+    try {
+      raw = await this.fetch<unknown>(`/api/properties${suffix}`);
+    } catch (error) {
+      // A backend predating custom properties returns 404. Treat that as an
+      // empty catalog so old-server desktop connections remain usable.
+      if (error instanceof ApiError && error.status === 404) {
+        return EMPTY_LIST_PROPERTIES_RESPONSE;
+      }
+      throw error;
+    }
+    return parseWithFallback(raw, ListPropertiesResponseSchema, EMPTY_LIST_PROPERTIES_RESPONSE, {
+      endpoint: "GET /api/properties",
+    });
+  }
+
+  async createProperty(data: CreatePropertyRequest): Promise<IssueProperty> {
+    const raw = await this.fetch<unknown>("/api/properties", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssuePropertySchema, EMPTY_ISSUE_PROPERTY, {
+      endpoint: "POST /api/properties",
+    });
+  }
+
+  async updateProperty(id: string, data: UpdatePropertyRequest): Promise<IssueProperty> {
+    const raw = await this.fetch<unknown>(`/api/properties/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssuePropertySchema, EMPTY_ISSUE_PROPERTY, {
+      endpoint: "PATCH /api/properties/{id}",
+    });
+  }
+
+  async setIssueProperty(
+    issueId: string,
+    propertyId: string,
+    value: IssuePropertyValue,
+  ): Promise<IssuePropertiesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/properties/${propertyId}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+    return parseWithFallback(raw, IssuePropertiesResponseSchema, EMPTY_ISSUE_PROPERTIES_RESPONSE, {
+      endpoint: "PUT /api/issues/{id}/properties/{propertyId}",
+    });
+  }
+
+  async unsetIssueProperty(issueId: string, propertyId: string): Promise<IssuePropertiesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/properties/${propertyId}`, {
+      method: "DELETE",
+    });
+    return parseWithFallback(raw, IssuePropertiesResponseSchema, EMPTY_ISSUE_PROPERTIES_RESPONSE, {
+      endpoint: "DELETE /api/issues/{id}/properties/{propertyId}",
+    });
   }
 
   async listLabelsForIssue(issueId: string): Promise<IssueLabelsResponse> {

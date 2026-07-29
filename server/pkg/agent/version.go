@@ -25,6 +25,10 @@ var MinVersions = map[string]string{
 // requirement: missing / unparsable / below this threshold all fail closed.
 const MinQuickCreateCLIVersion = "0.2.20"
 
+// MinQuickCreateFieldsCLIVersion is the first daemon release that carries
+// explicit quick-create priority and due-date fields into the generated prompt.
+const MinQuickCreateFieldsCLIVersion = "0.4.3"
+
 // Errors returned by CheckMinCLIVersion. Callers branch on these to surface
 // "needs upgrade" vs "version not reported" with the right user message.
 var (
@@ -49,6 +53,12 @@ var devDescribeRe = regexp.MustCompile(`^v?\d+\.\d+\.\d+-\d+-g[0-9a-fA-F]+`)
 // itself is the shared signal, so the modal pre-check and this server gate
 // agree by construction without needing to compare separate env flags.
 func CheckMinCLIVersion(detected string) error {
+	return CheckMinCLIVersionFor(detected, MinQuickCreateCLIVersion)
+}
+
+// CheckMinCLIVersionFor applies the quick-create version policy against a
+// caller-provided capability floor while preserving the dev-build exemption.
+func CheckMinCLIVersionFor(detected, minimum string) error {
 	d := strings.TrimSpace(detected)
 	if d == "" {
 		return ErrCLIVersionMissing
@@ -60,7 +70,7 @@ func CheckMinCLIVersion(detected string) error {
 	if err != nil {
 		return ErrCLIVersionMissing
 	}
-	min, err := parseSemver(MinQuickCreateCLIVersion)
+	min, err := parseSemver(minimum)
 	if err != nil {
 		// Misconfiguration in the constant itself — fail closed as missing.
 		return ErrCLIVersionMissing

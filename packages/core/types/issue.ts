@@ -1,6 +1,7 @@
 // CEREBRO-PATCH(core-types-issue): cerebro modification of upstream file
 import type { Attachment } from "./attachment";
 import type { Label } from "./label";
+import type { IssuePropertyValues } from "./property";
 
 export type IssueStatus =
   | "backlog"
@@ -71,6 +72,9 @@ export interface Issue {
   project_id: string | null;
   position: number;
   metadata?: Record<string, unknown>;
+  // Custom property values keyed by property definition id. API responses
+  // always supply an empty object when no values are set.
+  properties: IssuePropertyValues;
   // Calendar days as date-only "YYYY-MM-DD" (no time, no timezone). Use the
   // helpers in @multica/core/issues/date to format/compare — never `new Date()`
   // + local formatting, which shifts the day by the viewer's offset.

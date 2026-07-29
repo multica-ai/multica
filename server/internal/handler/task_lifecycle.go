@@ -105,6 +105,8 @@ type RerunIssueRequest struct {
 	// assignee — so clicking retry on row that belonged to a now-displaced
 	// agent re-fires that same agent, not the new assignee.
 	TaskID string `json:"task_id,omitempty"`
+	// CEREBRO-PATCH(resume-failed-run): FIR-3901 — Resume continues the failed run's conversation instead of starting blank.
+	Resume bool `json:"resume,omitempty"`
 }
 
 // RerunIssue manually re-enqueues an agent run for the issue. By default it
@@ -143,7 +145,7 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		sourceTaskID = parsed
 	}
 
-	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{})
+	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, req.Resume) // CEREBRO-PATCH(resume-failed-run): FIR-3901
 	if err != nil {
 		slog.Warn("issue rerun failed", "issue_id", id, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())

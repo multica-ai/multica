@@ -76,8 +76,9 @@ type TaskService struct {
 	// CEREBRO-PATCH(workflow-loop-advancer): FIR-3052 — advance Plan -> Build on
 	// plan-task completion so the loop moves without a manual status flip. Set
 	// from router.go; nil-safe.
-	WorkflowLoopAdvancer   WorkflowLoopAdvancer
-	WorkflowCompletionGate WorkflowCompletionGate // CEREBRO-PATCH(workflow-hooks-completion-field): FIR-3101 delegates pre-completion policy to the Workflow feature.
+	WorkflowLoopAdvancer      WorkflowLoopAdvancer
+	WorkflowCompletionGate    WorkflowCompletionGate // CEREBRO-PATCH(workflow-hooks-completion-field): FIR-3101 delegates pre-completion policy to the Workflow feature.
+	QuickCreatePropertyWriter QuickCreatePropertyWriter
 
 	analyticsContextMu    sync.Mutex
 	analyticsContextCache map[string]analytics.TaskContext
@@ -102,6 +103,17 @@ type IssueWorkflowActivator interface {
 
 type TaskWakeupNotifier interface {
 	NotifyTaskAvailable(runtimeID, taskID string)
+}
+
+// QuickCreatePropertyWriter applies the delayed property bag through the same
+// validation, locking and privacy-scoped realtime path as an HTTP value write.
+type QuickCreatePropertyWriter interface {
+	ApplyQuickCreateIssueProperties(
+		ctx context.Context,
+		issue db.Issue,
+		values map[string]json.RawMessage,
+		actorType, actorID string,
+	) error
 }
 
 // CEREBRO-PATCH(workflow-session-stamper-iface): FIR-2283 followup point b seam.
@@ -912,6 +924,8 @@ type QuickCreateContext struct {
 	Prompt        string   `json:"prompt"`
 	RequesterID   string   `json:"requester_id"`
 	WorkspaceID   string   `json:"workspace_id"`
+	Priority      string   `json:"priority,omitempty"`
+	DueDate       string   `json:"due_date,omitempty"`
 	ProjectID     string   `json:"project_id,omitempty"`
 	SquadID       string   `json:"squad_id,omitempty"`
 	AttachmentIDs []string `json:"attachment_ids,omitempty"`
@@ -928,6 +942,8 @@ type QuickCreateContext struct {
 	// attached once the completion handler resolves that issue by origin; this
 	// carries the recipe id across that async gap.
 	WorkflowID string `json:"workflow_id,omitempty"`
+	// CEREBRO-PATCH(quick-create-custom-properties): canonical values applied once the async-created issue is resolved.
+	PropertyValues map[string]json.RawMessage `json:"property_values,omitempty"`
 }
 
 // QuickCreateContextType marks a task as a quick-create job.
@@ -952,7 +968,7 @@ const QuickCreateContextType = "quick_create"
 // parentIssueID is optional (zero-valued pgtype.UUID when the user didn't
 // open the modal from "Add sub issue"). The handler is responsible for
 // validating it belongs to the same workspace before passing it in.
-func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt string, projectID, parentIssueID, workflowID pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, requesterID pgtype.UUID, agentID, squadID pgtype.UUID, prompt, priority, dueDate string, projectID, parentIssueID, workflowID pgtype.UUID, propertyValues map[string]json.RawMessage) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, agentID)
 	if err != nil {
 		return db.AgentTaskQueue{}, fmt.Errorf("load agent: %w", err)
@@ -965,10 +981,13 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 	}
 
 	payload := QuickCreateContext{
-		Type:        QuickCreateContextType,
-		Prompt:      prompt,
-		RequesterID: util.UUIDToString(requesterID),
-		WorkspaceID: util.UUIDToString(workspaceID),
+		Type:           QuickCreateContextType,
+		Prompt:         prompt,
+		RequesterID:    util.UUIDToString(requesterID),
+		WorkspaceID:    util.UUIDToString(workspaceID),
+		Priority:       priority,
+		DueDate:        dueDate,
+		PropertyValues: propertyValues,
 	}
 	if projectID.Valid {
 		payload.ProjectID = util.UUIDToString(projectID)
@@ -2134,7 +2153,8 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 // Tasks owned by other agents on the same issue (e.g. a parallel
 // @-mention agent) are left alone — rerun must not collateral-cancel
 // them.
-func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourceTaskID pgtype.UUID, triggerCommentID pgtype.UUID) (*db.AgentTaskQueue, error) {
+// CEREBRO-PATCH(resume-failed-run): FIR-3901 — resume=true keeps the prior session so a dead run continues instead of restarting blank.
+func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourceTaskID pgtype.UUID, triggerCommentID pgtype.UUID, resume bool) (*db.AgentTaskQueue, error) {
 	issue, err := s.Queries.GetIssue(ctx, issueID)
 	if err != nil {
 		return nil, fmt.Errorf("load issue: %w", err)
@@ -2204,7 +2224,7 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, t)
 	}
 
-	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID)
+	task, err := s.enqueueRerunTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID, resume) // CEREBRO-PATCH(resume-failed-run): FIR-3901
 	if err != nil {
 		return nil, err
 	}
@@ -2225,12 +2245,13 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 // stays in sync; otherwise (squad member, prior assignee that has since been
 // reassigned, mention agent) we use the mention path with the same
 // force_fresh_session=true contract.
-func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, isLeader bool, squadID pgtype.UUID, resume bool) (db.AgentTaskQueue, error) {
+	fresh := !resume // CEREBRO-PATCH(resume-failed-run): FIR-3901 — resume keeps the (agent, issue) session pointer.
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTask(ctx, issue, triggerCommentID, true, TaskDelegationContext{})
+		return s.enqueueIssueTask(ctx, issue, triggerCommentID, fresh, TaskDelegationContext{})
 	}
-	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID, true, "", TaskDelegationContext{})
+	return s.enqueueMentionTask(ctx, issue, agentID, triggerCommentID, isLeader, squadID, fresh, "", TaskDelegationContext{})
 }
 
 // HandleFailedTasks runs the post-failure side effects for a batch of
@@ -2987,6 +3008,25 @@ func (s *TaskService) notifyQuickCreateCompleted(ctx context.Context, task db.Ag
 			"issue_id", util.UUIDToString(issue.ID),
 			"error", err,
 		)
+	}
+
+	// Values are deliberately revalidated here: the definition may have been
+	// archived or edited while the asynchronous agent was creating the issue.
+	if len(qc.PropertyValues) > 0 {
+		if s.QuickCreatePropertyWriter == nil {
+			slog.Error("quick-create completion: property writer is not configured",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+			)
+		} else if perr := s.QuickCreatePropertyWriter.ApplyQuickCreateIssueProperties(
+			ctx, issue, qc.PropertyValues, "member", qc.RequesterID,
+		); perr != nil {
+			slog.Error("quick-create completion: custom properties rejected",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"error", perr,
+			)
+		}
 	}
 
 	// CEREBRO-PATCH(quick-create-workflow-activate): FIR-2283 followup — if the

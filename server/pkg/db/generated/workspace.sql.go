@@ -52,7 +52,10 @@ func (q *Queries) CreateWorkspace(ctx context.Context, arg CreateWorkspaceParams
 }
 
 const deleteWorkspace = `-- name: DeleteWorkspace :exec
-DELETE FROM workspace WHERE id = $1
+WITH cleared_issue_properties AS (
+    DELETE FROM issue_property WHERE workspace_id = $1
+)
+DELETE FROM workspace WHERE workspace.id = $1
 `
 
 func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {

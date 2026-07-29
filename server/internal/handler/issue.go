@@ -26,7 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
-	"github.com/multica-ai/multica/server/pkg/agent"
+	agentpkg "github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -61,7 +61,10 @@ type IssueResponse struct {
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
-	Metadata    map[string]any          `json:"metadata"`
+	Metadata map[string]any `json:"metadata"`
+	// Properties is the custom-property value bag keyed by property definition
+	// UUID (see property.go). Always emitted, mirroring Metadata.
+	Properties  map[string]any          `json:"properties"`
 	Reactions   []IssueReactionResponse `json:"reactions,omitempty"`
 	Attachments []AttachmentResponse    `json:"attachments,omitempty"`
 	// Labels are bulk-attached by list/detail endpoints so the client can render
@@ -172,14 +175,13 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		ParentIssueID: uuidToPtr(i.ParentIssueID),
 		ProjectID:     uuidToPtr(i.ProjectID),
 		Position:      i.Position,
-
-		StartDate: dateToPtr(i.StartDate),
-		DueDate:   dateToPtr(i.DueDate),
-		IsPrivate: i.IsPrivate,
-
-		CreatedAt: timestampToString(i.CreatedAt),
-		UpdatedAt: timestampToString(i.UpdatedAt),
-		Metadata:  parseIssueMetadata(i.Metadata),
+		StartDate:     dateToPtr(i.StartDate),
+		DueDate:       dateToPtr(i.DueDate),
+		IsPrivate:     i.IsPrivate,
+		CreatedAt:     timestampToString(i.CreatedAt),
+		UpdatedAt:     timestampToString(i.UpdatedAt),
+		Metadata:      parseIssueMetadata(i.Metadata),
+		Properties:    parseIssueProperties(i.Properties),
 	}
 }
 
@@ -208,6 +210,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
+		Properties:    parseIssueProperties(i.Properties),
 	}
 }
 
@@ -266,6 +269,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		CreatedAt:     timestampToString(i.CreatedAt),
 		UpdatedAt:     timestampToString(i.UpdatedAt),
 		Metadata:      parseIssueMetadata(i.Metadata),
+		Properties:    parseIssueProperties(i.Properties),
 	}
 }
 
@@ -679,12 +683,36 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 	h.SearchIssuesCerebro(w, r)
 }
 
+// QueryIssues is the POST twin of ListIssues for filter sets too large for a
+// GET request line. The body uses the same string encodings as query params.
+func (h *Handler) QueryIssues(w http.ResponseWriter, r *http.Request) {
+	var params map[string]string
+	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&params); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	values := make(url.Values, len(params))
+	for key, value := range params {
+		values.Set(key, value)
+	}
+	r.URL.RawQuery = values.Encode()
+	h.ListIssues(w, r)
+}
+
 func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 
 	workspaceID := h.resolveWorkspaceID(r)
 	wsUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
 	if !ok {
+		return
+	}
+	// Every list variant, including the early open_only branch, must resolve
+	// the caller before selecting rows so private and restricted issues never
+	// enter the response.
+	member, ok := h.resolveMemberFromRequest(r)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "not authenticated")
 		return
 	}
 
@@ -761,6 +789,10 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	propertiesFilter, ok := parsePropertiesFilterParam(w, r.URL.Query().Get("properties"))
+	if !ok {
+		return
+	}
 	dateFilter, ok := parseIssueDateFilter(w, r.URL.Query())
 	if !ok {
 		return
@@ -791,16 +823,30 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// open_only=true returns all non-done/cancelled issues (no limit).
 	if r.URL.Query().Get("open_only") == "true" {
+		// Serialize the parsed AND-of-ORs groups into the single jsonb param
+		// the static query unrolls (see properties_filter in ListOpenIssues).
+		var openPropertiesFilter []byte
+		if len(propertiesFilter) > 0 {
+			marshaled, marshalErr := json.Marshal(propertiesFilter)
+			if marshalErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to list issues")
+				return
+			}
+			openPropertiesFilter = marshaled
+		}
 		issues, err := h.Queries.ListOpenIssues(ctx, db.ListOpenIssuesParams{
-			WorkspaceID:    wsUUID,
-			Priority:       priorityFilter,
-			AssigneeID:     assigneeFilter,
-			AssigneeIds:    assigneeIdsFilter,
-			CreatorID:      creatorFilter,
-			ProjectID:      projectFilter,
-			ProjectIds:     projectIDsFilter,
-			InvolvesUserID: involvesUserFilter,
-			MetadataFilter: metadataFilter,
+			WorkspaceID:      wsUUID,
+			IsAdmin:          isWorkspaceAdmin(member),
+			UserID:           member.UserID,
+			Priority:         priorityFilter,
+			AssigneeID:       assigneeFilter,
+			AssigneeIds:      assigneeIdsFilter,
+			CreatorID:        creatorFilter,
+			ProjectID:        projectFilter,
+			ProjectIds:       projectIDsFilter,
+			InvolvesUserID:   involvesUserFilter,
+			MetadataFilter:   metadataFilter,
+			PropertiesFilter: openPropertiesFilter,
 		})
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -848,9 +894,13 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	var statusFilter pgtype.Text
-	if s := r.URL.Query().Get("status"); s != "" {
-		statusFilter = pgtype.Text{String: s, Valid: true}
+	statusesFilter := splitCommaParam(r.URL.Query().Get("statuses"))
+	if len(statusesFilter) == 0 {
+		statusesFilter = splitCommaParam(r.URL.Query().Get("status"))
+	}
+	prioritiesFilter := splitCommaParam(r.URL.Query().Get("priorities"))
+	if len(prioritiesFilter) == 0 {
+		prioritiesFilter = splitCommaParam(r.URL.Query().Get("priority"))
 	}
 
 	// scheduled=true restricts the result to issues that have at least one of
@@ -861,28 +911,46 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		scheduledFilter = pgtype.Bool{Bool: true, Valid: true}
 	}
 
-	// CEREBRO-PATCH(list-issues-access-context): the access/privacy predicate
-	// below needs the caller's role and user id.
-	member, ok := h.resolveMemberFromRequest(r)
-	if !ok {
-		writeError(w, http.StatusUnauthorized, "not authenticated")
-		return
-	}
-
 	// Parse sort and direction params for dynamic ORDER BY.
 	// Manual sort (position) is always ASC — direction is ignored because
 	// the user defines order through drag-and-drop, reversing it has no
 	// product meaning.
 	sortCol := "position"
+	sortIsExpr := false
+	sortIsProperty := false
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
-		case "position", "title", "created_at", "start_date", "due_date":
+		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
 			sortCol = s
+		case "status":
+			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+			sortIsExpr = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
+			sortIsExpr = true
 		default:
-			writeError(w, http.StatusBadRequest, "invalid sort value")
-			return
+			// property:<definitionId> sorts by the custom-property value
+			// (typed expression); unknown/archived definitions degrade to
+			// position order instead of erroring stale clients.
+			expr, handled, sortErr := h.propertySortExpr(r, workspaceID, s)
+			if !handled {
+				writeError(w, http.StatusBadRequest, "invalid sort value")
+				return
+			}
+			if sortErr != nil {
+				if sortErr.Error() == "invalid sort value" || sortErr.Error() == "invalid workspace id" {
+					writeError(w, http.StatusBadRequest, sortErr.Error())
+					return
+				}
+				slog.Warn("propertySortExpr failed", append(logger.RequestAttrs(r), "error", sortErr)...)
+				writeError(w, http.StatusInternalServerError, "failed to resolve sort")
+				return
+			}
+			if expr != "" {
+				sortCol = expr
+				sortIsExpr = true
+				sortIsProperty = true
+			}
 		}
 	}
 	sortDir := "ASC"
@@ -929,11 +997,21 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 )`, userRef))
 	}
 
-	if statusFilter.Valid {
-		where = append(where, fmt.Sprintf("i.status = %s", addArg(statusFilter.String)))
+	if len(statusesFilter) > 0 {
+		where = append(where, fmt.Sprintf("i.status = ANY(%s::text[])", addArg(statusesFilter)))
 	}
-	if priorityFilter.Valid {
-		where = append(where, fmt.Sprintf("i.priority = %s", addArg(priorityFilter.String)))
+	if len(prioritiesFilter) > 0 {
+		where = append(where, fmt.Sprintf("i.priority = ANY(%s::text[])", addArg(prioritiesFilter)))
+	}
+	assigneeTypes := splitCommaParam(r.URL.Query().Get("assignee_types"))
+	if len(assigneeTypes) > 0 {
+		for _, assigneeType := range assigneeTypes {
+			if !isIssueActorType(assigneeType) {
+				writeError(w, http.StatusBadRequest, "invalid assignee_types")
+				return
+			}
+		}
+		where = append(where, fmt.Sprintf("i.assignee_type = ANY(%s::text[])", addArg(assigneeTypes)))
 	}
 	if assigneeFilter.Valid {
 		where = append(where, fmt.Sprintf("i.assignee_id = %s::uuid", addArg(assigneeFilter)))
@@ -951,11 +1029,98 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	if projectFilter.Valid {
 		where = append(where, fmt.Sprintf("i.project_id = %s::uuid", addArg(projectFilter)))
 	}
+
+	// Table facets must be part of the server window. Applying them after
+	// LIMIT/OFFSET hides matches that live on later pages and makes `total`
+	// disagree with the rows the user sees/exports.
+	assigneeFilters, ok := parseActorFilterList(w, r.URL.Query().Get("assignee_filters"), "assignee_filters")
+	if !ok {
+		return
+	}
+	includeNoAssignee := r.URL.Query().Get("include_no_assignee") == "true"
+	if len(assigneeFilters) > 0 || includeNoAssignee {
+		ors := make([]string, 0, len(assigneeFilters)+1)
+		for _, filter := range assigneeFilters {
+			ors = append(ors, fmt.Sprintf(
+				"(i.assignee_type = %s::text AND i.assignee_id = %s::uuid)",
+				addArg(filter.actorType),
+				addArg(filter.actorID),
+			))
+		}
+		if includeNoAssignee {
+			ors = append(ors, "(i.assignee_type IS NULL AND i.assignee_id IS NULL)")
+		}
+		where = append(where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	creatorFilters, ok := parseActorFilterList(w, r.URL.Query().Get("creator_filters"), "creator_filters")
+	if !ok {
+		return
+	}
+	if len(creatorFilters) > 0 {
+		ors := make([]string, 0, len(creatorFilters))
+		for _, filter := range creatorFilters {
+			ors = append(ors, fmt.Sprintf(
+				"(i.creator_type = %s::text AND i.creator_id = %s::uuid)",
+				addArg(filter.actorType),
+				addArg(filter.actorID),
+			))
+		}
+		where = append(where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	projectIDs, ok := parseUUIDParamList(w, r.URL.Query().Get("project_ids"), "project_ids")
+	if !ok {
+		return
+	}
+	includeNoProject := r.URL.Query().Get("include_no_project") == "true"
+	if len(projectIDs) > 0 || includeNoProject {
+		ors := make([]string, 0, 2)
+		if len(projectIDs) > 0 {
+			ors = append(ors, fmt.Sprintf("i.project_id = ANY(%s::uuid[])", addArg(projectIDs)))
+		}
+		if includeNoProject {
+			ors = append(ors, "i.project_id IS NULL")
+		}
+		where = append(where, "("+strings.Join(ors, " OR ")+")")
+	}
+
+	labelIDs, ok := parseUUIDParamList(w, r.URL.Query().Get("label_ids"), "label_ids")
+	if !ok {
+		return
+	}
+	if len(labelIDs) > 0 {
+		where = append(where, fmt.Sprintf(
+			"EXISTS (SELECT 1 FROM issue_to_label itl WHERE itl.issue_id = i.id AND itl.label_id = ANY(%s::uuid[]))",
+			addArg(labelIDs),
+		))
+	}
+	// ids restricts the window to an explicit id set (the table's
+	// agents-working facet sends the live running-issue ids). Presence with an
+	// EMPTY list is meaningful — it must yield an empty window, not degrade to
+	// the unrestricted one, so gate on Has() rather than the parsed length.
+	if r.URL.Query().Has("ids") {
+		idsFilter, ok := parseUUIDParamList(w, r.URL.Query().Get("ids"), "ids")
+		if !ok {
+			return
+		}
+		if idsFilter == nil {
+			idsFilter = []pgtype.UUID{}
+		}
+		where = append(where, fmt.Sprintf("i.id = ANY(%s::uuid[])", addArg(idsFilter)))
+	}
+	if r.URL.Query().Get("top_level_only") == "true" {
+		where = append(where, "i.parent_issue_id IS NULL")
+	}
+	where = appendIssueTableSearchFilter(where, addArg, r.URL.Query().Get("q"))
 	if scheduledFilter.Valid {
 		where = append(where, "(i.start_date IS NOT NULL OR i.due_date IS NOT NULL)")
 	}
 	if metadataFilter != nil {
 		where = append(where, fmt.Sprintf("i.metadata @> %s::jsonb", addArg(string(metadataFilter))))
+	}
+	if propertiesFilter != nil {
+		where = append(where, propertiesFilterPredicate(propertiesFilter, addArg))
 	}
 	where = appendIssueDateFilter(where, addArg, dateFilter)
 	if involvesUserFilter.Valid {
@@ -1017,21 +1182,26 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	// Build ORDER BY clause.
 	orderBy := sortCol
-	if !strings.HasPrefix(sortCol, "CASE") {
+	if !sortIsExpr {
 		orderBy = "i." + sortCol
 	}
 	orderBy += " " + sortDir
-	if sortCol == "start_date" || sortCol == "due_date" {
+	if sortCol == "start_date" || sortCol == "due_date" || sortIsProperty {
+		// Property values are sparse: issues without one sort last in both
+		// directions (mirrors the client comparator).
 		orderBy += " NULLS LAST"
 	}
-	orderBy += ", i.created_at DESC"
+	// created_at alone is not unique (bulk imports share timestamps); without
+	// a unique final key the database may reorder ties between two
+	// LIMIT/OFFSET requests, duplicating or dropping rows at page boundaries.
+	orderBy += ", i.created_at DESC, i.id DESC"
 
 	offsetRef := addArg(int64(offset))
 	limitRef := addArg(int64(limit))
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.kind, i.is_private, i.metadata
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.kind, i.is_private, i.metadata, i.properties
 FROM issue i
 LEFT JOIN project p ON p.id = i.project_id
 WHERE %s
@@ -1071,6 +1241,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Kind,
 			&row.IsPrivate,
 			&row.Metadata,
+			&row.Properties,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -1189,6 +1360,36 @@ func appendIssueDateFilter(where []string, addArg func(any) string, filter *issu
 		filter.column,
 		endRef,
 	))
+}
+
+// appendIssueTableSearchFilter adds a quick identity search to the ordinary
+// ListIssues window. Unlike the ranked global search endpoint, this predicate
+// preserves the table's active filters, explicit sort, total, and pagination.
+// Every word must appear in the title; a complete identifier (or bare issue
+// number) also matches the immutable numeric issue number.
+func appendIssueTableSearchFilter(where []string, addArg func(any) string, raw string) []string {
+	query := strings.TrimSpace(raw)
+	if query == "" {
+		return where
+	}
+
+	words := splitSearchTerms(strings.ToLower(query))
+	ors := make([]string, 0, 2)
+	if len(words) > 0 {
+		titleMatches := make([]string, 0, len(words))
+		for _, word := range words {
+			pattern := "%" + escapeLike(word) + "%"
+			titleMatches = append(titleMatches, fmt.Sprintf("LOWER(i.title) LIKE %s", addArg(pattern)))
+		}
+		ors = append(ors, "("+strings.Join(titleMatches, " AND ")+")")
+	}
+	if number, ok := parseQueryNumber(query); ok {
+		ors = append(ors, fmt.Sprintf("i.number = %s", addArg(number)))
+	}
+	if len(ors) == 0 {
+		return where
+	}
+	return append(where, "("+strings.Join(ors, " OR ")+")")
 }
 
 func splitCommaParam(raw string) []string {
@@ -1411,6 +1612,11 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 			addArg(id),
 		))
 	}
+	if filter, ok := parsePropertiesFilterParam(w, r.URL.Query().Get("properties")); !ok {
+		return
+	} else if filter != nil {
+		where = append(where, propertiesFilterPredicate(filter, addArg))
+	}
 	// Mirror the involves_user_id 4-branch UNION from sqlc's ListIssues /
 	// ListOpenIssues / CountIssues. ListGroupedIssues is a hand-written dynamic
 	// SQL builder that does not share parameters with sqlc, so the fragment is
@@ -1567,15 +1773,41 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sortCol := "position"
+	sortIsExpr := false
+	sortIsProperty := false
 	if s := r.URL.Query().Get("sort"); s != "" {
 		switch s {
-		case "position", "title", "created_at", "start_date", "due_date":
+		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
 			sortCol = s
+		case "status":
+			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
+			sortIsExpr = true
 		case "priority":
 			sortCol = "CASE i.priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1 WHEN 'medium' THEN 2 WHEN 'low' THEN 3 ELSE 4 END"
+			sortIsExpr = true
 		default:
-			writeError(w, http.StatusBadRequest, "invalid sort value")
-			return
+			// property:<definitionId> sorts by the custom-property value
+			// (typed expression); unknown/archived definitions degrade to
+			// position order instead of erroring stale clients.
+			expr, handled, sortErr := h.propertySortExpr(r, workspaceID, s)
+			if !handled {
+				writeError(w, http.StatusBadRequest, "invalid sort value")
+				return
+			}
+			if sortErr != nil {
+				if sortErr.Error() == "invalid sort value" || sortErr.Error() == "invalid workspace id" {
+					writeError(w, http.StatusBadRequest, sortErr.Error())
+					return
+				}
+				slog.Warn("propertySortExpr failed", append(logger.RequestAttrs(r), "error", sortErr)...)
+				writeError(w, http.StatusInternalServerError, "failed to resolve sort")
+				return
+			}
+			if expr != "" {
+				sortCol = expr
+				sortIsExpr = true
+				sortIsProperty = true
+			}
 		}
 	}
 	sortDir := "ASC"
@@ -1594,14 +1826,16 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 	}
 
 	intraGroupOrder := sortCol
-	if !strings.HasPrefix(sortCol, "CASE") {
+	if !sortIsExpr {
 		intraGroupOrder = "i." + sortCol
 	}
 	intraGroupOrder += " " + sortDir
-	if sortCol == "start_date" || sortCol == "due_date" {
+	if sortCol == "start_date" || sortCol == "due_date" || sortIsProperty {
 		intraGroupOrder += " NULLS LAST"
 	}
-	intraGroupOrder += ", i.created_at DESC"
+	// Unique final key — see ListIssues: created_at ties would otherwise make
+	// ROW_NUMBER() unstable across per-group offset pages.
+	intraGroupOrder += ", i.created_at DESC, i.id DESC"
 
 	offsetRef := addArg(int64(offset))
 	limitRef := addArg(int64(limit))
@@ -1610,8 +1844,8 @@ WITH ranked AS (
 	SELECT
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-		i.parent_issue_id, i.position, i.due_date, i.created_at, i.updated_at,
-		i.number, i.project_id, i.metadata,
+		i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at,
+		i.number, i.project_id, i.metadata, i.properties,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
@@ -1623,8 +1857,8 @@ WITH ranked AS (
 SELECT
 	id, workspace_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
-	parent_issue_id, position, due_date, created_at, updated_at,
-	number, project_id, metadata, group_total
+	parent_issue_id, position, start_date, due_date, created_at, updated_at,
+	number, project_id, metadata, properties, group_total
 FROM ranked
 WHERE rn > %s AND rn <= %s + %s
 ORDER BY
@@ -1662,12 +1896,14 @@ ORDER BY
 			&row.CreatorID,
 			&row.ParentIssueID,
 			&row.Position,
+			&row.StartDate,
 			&row.DueDate,
 			&row.CreatedAt,
 			&row.UpdatedAt,
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
+			&row.Properties,
 			&row.GroupTotal,
 		); err != nil {
 			slog.Warn("ListGroupedIssues scan failed", "error", err)
@@ -1917,8 +2153,12 @@ type QuickCreateIssueRequest struct {
 	AgentID       string `json:"agent_id,omitempty"`
 	SquadID       string `json:"squad_id,omitempty"`
 	Prompt        string `json:"prompt"`
+	Priority      string `json:"priority,omitempty"`
+	DueDate       string `json:"due_date,omitempty"`
 	ProjectID     string `json:"project_id,omitempty"`
 	ParentIssueID string `json:"parent_issue_id,omitempty"`
+	// CEREBRO-PATCH(quick-create-custom-properties): FIR-3447 — values selected before the async issue exists.
+	PropertyValues map[string]json.RawMessage `json:"property_values,omitempty"`
 	// CEREBRO-PATCH(quick-create-workflow-id): FIR-2283 followup — optional
 	// Issue workflow recipe to start the created issue on (the Create-with-
 	// agent modal's workflow picker). The agent creates the issue async, so
@@ -1942,6 +2182,20 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 	if prompt == "" {
 		writeError(w, http.StatusBadRequest, "prompt is required")
 		return
+	}
+	priority := strings.ToLower(strings.TrimSpace(req.Priority))
+	if priority != "" && priority != "urgent" && priority != "high" && priority != "medium" && priority != "low" {
+		writeError(w, http.StatusBadRequest, "priority must be one of: urgent, high, medium, low")
+		return
+	}
+	dueDate := strings.TrimSpace(req.DueDate)
+	if dueDate != "" {
+		parsed, err := util.ParseCalendarDate(dueDate)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid due_date format, expected YYYY-MM-DD")
+			return
+		}
+		dueDate = parsed.Time.Format("2006-01-02")
 	}
 
 	hasAgent := strings.TrimSpace(req.AgentID) != ""
@@ -2049,6 +2303,14 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, status, payload)
 		return
 	}
+	if priority != "" || dueDate != "" {
+		if status, payload := h.checkQuickCreateDaemonVersionAtLeast(
+			r.Context(), agent.RuntimeID, agentpkg.MinQuickCreateFieldsCLIVersion,
+		); status != 0 {
+			writeJSON(w, status, payload)
+			return
+		}
+	}
 
 	// Optional project_id — validate it belongs to the same workspace before
 	// pinning the task to it. The handler is the trust boundary; the frontend
@@ -2105,7 +2367,27 @@ func (h *Handler) QuickCreateIssue(w http.ResponseWriter, r *http.Request) {
 		workflowUUID = wid
 	}
 
-	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, projectUUID, parentIssueUUID, workflowUUID)
+	// CEREBRO-PATCH(quick-create-custom-properties): validate ownership and type at the HTTP trust boundary, then carry canonical JSON to completion.
+	propertyValues := make(map[string]json.RawMessage, len(req.PropertyValues))
+	for propertyID, raw := range req.PropertyValues {
+		pid, ok := parseUUIDOrBadRequest(w, propertyID, "property_id")
+		if !ok {
+			return
+		}
+		definition, err := h.Queries.GetIssueProperty(r.Context(), db.GetIssuePropertyParams{ID: pid, WorkspaceID: wsUUID})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "issue property not found")
+			return
+		}
+		canonical, err := ValidateIssuePropertyValue(definition, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		propertyValues[propertyID] = canonical
+	}
+
+	task, err := h.TaskService.EnqueueQuickCreateTask(r.Context(), wsUUID, requesterUUID, agentUUID, squadUUID, prompt, priority, dueDate, projectUUID, parentIssueUUID, workflowUUID, propertyValues)
 	if err != nil {
 		slog.Warn("quick-create enqueue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to enqueue quick-create task")
@@ -2153,6 +2435,10 @@ func (h *Handler) isRuntimeOnline(ctx context.Context, runtimeID pgtype.UUID) bo
 //	  "runtime_id":      "<uuid>"
 //	}
 func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, runtimeID pgtype.UUID) (int, map[string]any) {
+	return h.checkQuickCreateDaemonVersionAtLeast(ctx, runtimeID, agentpkg.MinQuickCreateCLIVersion)
+}
+
+func (h *Handler) checkQuickCreateDaemonVersionAtLeast(ctx context.Context, runtimeID pgtype.UUID, minimum string) (int, map[string]any) {
 	rt, err := h.Queries.GetAgentRuntime(ctx, runtimeID)
 	if err != nil {
 		// Runtime row vanished between the online check and here — treat
@@ -2163,14 +2449,14 @@ func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, runtimeID p
 		}
 	}
 	current := readRuntimeCLIVersion(rt.Metadata)
-	switch err := agent.CheckMinCLIVersion(current); {
+	switch err := agentpkg.CheckMinCLIVersionFor(current, minimum); {
 	case err == nil:
 		return 0, nil
-	case errors.Is(err, agent.ErrCLIVersionMissing), errors.Is(err, agent.ErrCLIVersionTooOld):
+	case errors.Is(err, agentpkg.ErrCLIVersionMissing), errors.Is(err, agentpkg.ErrCLIVersionTooOld):
 		return http.StatusUnprocessableEntity, map[string]any{
 			"code":            "daemon_version_unsupported",
 			"current_version": current,
-			"min_version":     agent.MinQuickCreateCLIVersion,
+			"min_version":     minimum,
 			"runtime_id":      uuidToString(runtimeID),
 		}
 	default:
@@ -2180,7 +2466,7 @@ func (h *Handler) checkQuickCreateDaemonVersion(ctx context.Context, runtimeID p
 		return http.StatusUnprocessableEntity, map[string]any{
 			"code":            "daemon_version_unsupported",
 			"current_version": current,
-			"min_version":     agent.MinQuickCreateCLIVersion,
+			"min_version":     minimum,
 			"runtime_id":      uuidToString(runtimeID),
 		}
 	}

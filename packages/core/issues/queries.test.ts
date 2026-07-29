@@ -12,19 +12,23 @@ import type {
 } from "../types";
 import {
   CHILDREN_BY_PARENTS_CHUNK_SIZE,
+  ISSUE_FLAT_PAGE_SIZE,
   PROJECT_GANTT_MAX_ISSUES,
   PROJECT_GANTT_PAGE_LIMIT,
   issueAssigneeGroupsOptions,
   childrenByParentsOptions,
+  issueFlatExportOptions,
+  issueFlatListOptions,
   issueKeys,
   projectGanttIssuesOptions,
   issueListOptions,
+  myIssueListOptions,
 } from "./queries";
 
 const WS_ID = "ws-1";
 const PROJECT_ID = "project-1";
 
-function makeIssue(idx: number): Issue {
+function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
   return {
     id: `issue-${idx}`,
     workspace_id: WS_ID,
@@ -45,8 +49,10 @@ function makeIssue(idx: number): Issue {
     start_date: "2026-05-01T00:00:00Z",
     due_date: null,
     labels: [],
+    properties: {},
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
+    ...overrides,
   };
 }
 
@@ -164,6 +170,77 @@ describe("projectGanttIssuesOptions", () => {
   });
 });
 
+describe("flat issue table queries", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("loads one offset page for the interactive table window", async () => {
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockResolvedValue({ issues: [makeIssue(1)], total: 1 });
+    installFakeApi({ listIssues });
+
+    const data = await qc.fetchInfiniteQuery(
+      issueFlatListOptions(
+        WS_ID,
+        "project:project-1",
+        { project_id: PROJECT_ID, q: "release train", statuses: ["todo"] },
+        undefined,
+        { sort_by: "updated_at", sort_direction: "desc" },
+      ),
+    );
+
+    expect(data.pages[0]?.issues.map((issue) => issue.id)).toEqual(["issue-1"]);
+    expect(listIssues).toHaveBeenCalledWith({
+      project_id: PROJECT_ID,
+      q: "release train",
+      statuses: ["todo"],
+      sort_by: "updated_at",
+      sort_direction: "desc",
+      limit: ISSUE_FLAT_PAGE_SIZE,
+      offset: 0,
+    });
+  });
+
+  it("walks every page only for an explicit full CSV export", async () => {
+    const first = Array.from({ length: ISSUE_FLAT_PAGE_SIZE }, (_, index) =>
+      makeIssue(index + 1),
+    );
+    const second = [makeIssue(101), makeIssue(102), makeIssue(103)];
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => ({
+        issues: (params?.offset ?? 0) === 0 ? first : second,
+        total: 103,
+      }));
+    installFakeApi({ listIssues });
+
+    const issues = await qc.fetchQuery(
+      issueFlatExportOptions(
+        WS_ID,
+        "project:project-1",
+        { project_id: PROJECT_ID },
+        undefined,
+        { sort_by: "status", sort_direction: "asc" },
+      ),
+    );
+
+    expect(issues).toHaveLength(103);
+    expect(listIssues.mock.calls.map(([params]) => params?.offset)).toEqual([
+      0,
+      ISSUE_FLAT_PAGE_SIZE,
+    ]);
+  });
+});
+
 describe("issueListOptions", () => {
   let qc: QueryClient;
 
@@ -196,6 +273,70 @@ describe("issueListOptions", () => {
         reference: "github_pr:firtal-group/firtal-cerebro#525",
       });
     }
+  });
+
+  it("passes custom-property filters through every status page request", async () => {
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockResolvedValue({ issues: [], total: 0 });
+    installFakeApi({ listIssues });
+    const properties = { "property-1": ["option-1"] };
+
+    await qc.fetchQuery(issueListOptions(WS_ID, { properties }));
+
+    expect(listIssues).toHaveBeenCalled();
+    for (const call of listIssues.mock.calls) {
+      expect(call[0]).toMatchObject({ properties });
+    }
+  });
+});
+
+describe("myIssueListOptions property sorting", () => {
+  let qc: QueryClient;
+
+  beforeEach(() => {
+    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+
+  afterEach(() => {
+    qc.clear();
+    vi.restoreAllMocks();
+  });
+
+  it("re-sorts the merged all-scope globally by a numeric custom property", async () => {
+    const propertyId = "property-business-value";
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockImplementation(async (params) => {
+        if (params?.status !== "todo") return { issues: [], total: 0 };
+        if (params.assignee_id) {
+          return { issues: [{ ...makeIssue(9), properties: { [propertyId]: 900000 } }], total: 1 };
+        }
+        if (params.creator_id) {
+          return { issues: [{ ...makeIssue(1), properties: { [propertyId]: 100000 } }], total: 1 };
+        }
+        if (params.involves_user_id) {
+          return { issues: [{ ...makeIssue(5), properties: { [propertyId]: 500000 } }], total: 1 };
+        }
+        return { issues: [], total: 0 };
+      });
+    installFakeApi({ listIssues });
+
+    const data = await qc.fetchQuery(
+      myIssueListOptions(
+        WS_ID,
+        "all",
+        {},
+        "user-1",
+        { sort_by: `property:${propertyId}`, sort_direction: "asc" },
+      ),
+    );
+
+    expect(data.byStatus.todo?.issues.map((issue) => issue.id)).toEqual([
+      "issue-1",
+      "issue-5",
+      "issue-9",
+    ]);
   });
 });
 

@@ -111,6 +111,8 @@ export type { Comment, CommentType, CommentAuthorType, Reaction, MoveCommentToSu
 // CEREBRO-PATCH(issue-comment-cost-types): FIR-39 per-comment cost badge response types.
 export type { IssueCommentCost, IssueCommentCosts } from "./comment";
 export type { Label, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse } from "./label";
+export type { IssueProperty, IssuePropertyType, IssuePropertyOption, IssuePropertyConfig, IssuePropertyValue, IssuePropertyValues, CreatePropertyRequest, UpdatePropertyRequest, ListPropertiesResponse, IssuePropertiesResponse } from "./property";
+export { ISSUE_PROPERTY_TYPES, isKnownPropertyType } from "./property";
 export type {
   TimelineEntry,
   AssigneeFrequencyEntry,

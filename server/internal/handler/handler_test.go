@@ -3194,6 +3194,8 @@ func createVerificationCodeForTest(t *testing.T, email, code string) {
 
 func TestVerifyCodeRejectsDevCodeUnlessExplicitlyConfigured(t *testing.T) {
 	t.Setenv(devVerificationCodeEnv, "")
+	// CEREBRO-PATCH(issue-properties-release-gates): isolate this production-posture test from local worktree login configuration.
+	t.Setenv("MULTICA_DEV_MASTER_CODE", "")
 	t.Setenv("APP_ENV", "")
 
 	const email = "dev-code-disabled-test@multica.ai"

@@ -330,6 +330,12 @@ task token's Multica CLI/MCP surface over stdio and the claim's enabled MCP HTTP
 Connections directly; API Connection credentials remain in the server-side
 relay configuration and are never copied into the task environment.
 
+Task tokens may read the workspace property catalog and set or unset property
+values only on their bound issue. Property definition creation and editing
+remain human-only. Authentication loads the task row and attaches its issue,
+agent, and workspace scope before these routes run; a token whose task/agent
+binding cannot be verified is rejected.
+
 Before every managed tool call the extension asks the existing daemon
 `/tool-policy/resolve` endpoint for the acting task's decision. `Allow`
 dispatches, `Ask` dispatches only after the resolver returns a final approved
@@ -530,6 +536,34 @@ This is separate from the runtime tool registry inventory. The registry may
 list eval and eval-schedule MCP tools, but their handler-level authorization and
 the blocking-binding capability check remain authoritative; adding a tool to the
 registry does not grant permission to create a blocking gate.
+
+### Dead failed-run reads are issue-access gated (FIR-3901)
+
+The two endpoints behind the red failed-run bar and the red inbox pip return
+issue content — the failure reason, the raw error text and the name of the
+machine that ran it — so they carry the same access floor as reading the issue
+itself.
+
+- `GET /api/issues/{id}/failed-runs` resolves the id through
+  `Handler.CerebroIssueAccessGate`, which delegates to `loadIssueForUser`:
+  workspace scoping first, then `canAccessIssue` (project access, standalone
+  privacy, channel/DM subscriber membership). A caller who cannot read the
+  issue gets 404, not 403 — the same existence-hiding rule as every other
+  issue endpoint.
+- `GET /api/inbox/failed-issue-tasks` is workspace-scoped in SQL, which is not
+  the same as visible-scoped: a private issue or a channel the member is not in
+  is still inside the workspace. `Handler.CerebroVisibleIssuesFilter` narrows
+  the rows to the ones `canAccessIssue` allows before the response is written.
+
+Both gates are injected into `server/internal/cerebro/inbox` by the router,
+because that package cannot reach the unexported loader. Both **fail closed**:
+an unwired gate answers 404 / an empty list rather than falling back to
+"any authenticated user may read".
+
+Before FIR-3901's follow-up the per-issue endpoint checked only that a user was
+signed in and looked the run up by raw UUID, so knowing an issue id was enough
+to read its failure text from any workspace. The regression cases are pinned in
+`server/cmd/server/dead_failed_runs_integration_cerebro_test.go`.
 
 ## What is OFF by default (and only this)
 

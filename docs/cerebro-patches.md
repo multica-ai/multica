@@ -863,6 +863,7 @@ comment for SQL/CSS/SBPL/JSON-with-_comment-field).
 | `issue-detail-sprint-as-project` | packages/views/issues/components/issue-detail.tsx | 0 (comment) | TECH-3620 — clarifies that Project and Sprint are independent sidebar controls now; the Project field is the issue's home project. |
 | `issue-detail-sprint-picker` | packages/views/issues/components/issue-detail.tsx | 0 | FIR-2666/TECH-3620 — sidebar Sprint picker assigns the issue to a real sprint via the `cerebro_sprint_issue` join, leaving `project_id` (home project) untouched, so the issue lives in both its project and the sprint. Renders with the flag on and a project that has real sprints. |
 | `issue-detail-time-picker` | packages/views/issues/components/issue-detail.tsx | 4 | FIR-1597 — marked import + `cerebro_issue_date_times` flag + an `<IssueTimePicker>` rendered inside the Start date and Due date `PropRow`s (only when the date is set and the flag is on). All logic lives in `@multica/cerebro-issue-datetime`. Same gating pattern as `issue-detail-sprint-picker`. |
+| `table-stacked-date-times` | packages/views/issues/components/table-view.tsx | 3 | FIR-3447 — preserves Cerebro's optional Start date / Due date time controls in the upstream Table. The three-line seam is one marked fork-owned picker import and one picker per date column; all gating and behavior stays in `@multica/cerebro-issue-properties` and `@multica/cerebro-issue-datetime`. |
 | `issue-date-times-views-dep` | packages/views/package.json | 2 | FIR-1597 — adds the `@multica/cerebro-issue-datetime` workspace dependency (+ a `_comment_` line) for the `IssueTimePicker` mounted in issue-detail. Same pattern as `recurring-issues-views-dep`. |
 | `project-handler` | server/internal/handler/project.go | 83 | Server handler additions |
 | `projects-page-cerebro` | packages/views/projects/components/projects-page.tsx | 19 | Projects page/access-tab cerebro additions |
@@ -1758,8 +1759,24 @@ Approved through FIR-3411 Gate 0 and plan artifact `019f6fac-0134-7e34-b485-0cdf
 | Patch | Location | Reason |
 |---|---|---|
 | `brief-layer-modes` | `server/internal/daemon/execenv/execenv.go`; `runtime_config.go`; `server/internal/daemon/daemon.go` | Carry the two per-agent brief-layer modes (`workspace_brief_mode`, `tools_brief_mode`) from the agent's `runtime_config` into brief rendering: one guard call-site swaps in the identity-only brief, one call-site routes the tools section through the fold. All logic lives in the cerebro siblings `cerebro_brief_layers.go` (execenv) and `cerebro_brief_layer_modes.go` (daemon + agentoffice). |
+| `opencode-auto-flag` | `server/pkg/agent/opencode.go` | Keep the full-server verification executable on the managed runtime after the installed OpenCode CLI replaced `--dangerously-skip-permissions` with `--auto`; existing explicit question/plan denies remain in force. |
 
 Approved by Jesper Hvejsel on FIR-3212 ("Vi skal kun lave agent configuration fuld scope"), 2026-07-17. Standing FIR-3212 approval for marked patches recorded 2026-07-15.
+
+## FIR-3447 — Custom issue fields in Create issue
+
+| Patch | Location | Reason |
+|---|---|---|
+| `create-issue-custom-properties` | `packages/views/modals/create-issue.tsx`; `packages/views/package.json` | Mount the fork-owned Create issue adapter because upstream v0.4.4 supplies Issue detail editing and the value API, but no Create issue field surface. The typed field UI and post-create writes stay isolated in `packages/cerebro-issue-properties`. |
+| `issue-property-view-label-fallback` | `packages/views/issues/components/issues-header.tsx` | Keep existing static display labels type-safe while the property-aware view-state types are present but the separate list-surface UI slice has not landed. Unknown property-backed persisted values fall back to Manual/Status instead of breaking the header. |
+| `issue-table-surface` | `packages/views/issues/components/issue-table-surface.tsx`; `packages/views/issues/components/issues-page.tsx`; `packages/views/my-issues/components/my-issues-page.tsx`; `packages/views/projects/components/project-detail.tsx` | Mount upstream's configurable Table through Cerebro's existing workspace, My Issues, project, sprint, on-behalf-of, running-agent, progress, and batch-selection seams instead of replacing those fork-owned behaviors with upstream's newer surface stack. |
+| `settings-page-issue-tab` | `packages/views/settings/components/settings-page.tsx` | Add Issue as a workspace settings section without replacing Cerebro's existing settings tabs or permission-aware shell. |
+| `settings-page-issue-content` | `packages/views/settings/components/settings-page.tsx` | Mount the upstream property and create-field configuration inside the existing Cerebro settings layout. |
+| `workspace-default-issue-properties` | `server/internal/handler/workspace.go` | Create Business value (DKK) and Effort (DKK) as number properties for new workspaces while preserving the existing default workspace setup. |
+| `property-task-routes` | `server/cmd/server/router.go`; `server/internal/middleware/auth.go` | Bind `mat_` requests to their task context, allow agents to read the workspace property catalog, and restrict value writes to the issue that created the task. Property-definition writes remain human-only. |
+| `quick-create-custom-properties` | `packages/views/modals/quick-create-issue.tsx`; `server/internal/handler/issue.go`; `server/internal/service/task.go` | Show the settings-enabled custom fields in Quick create, validate their values before queueing, and apply them when the asynchronously created issue is resolved. The reusable typed controls stay isolated in `packages/cerebro-issue-properties`. |
+
+Approved by Jesper Hvejsel through FIR-3447 and plan artifact `019f704e-3865-7220-a109-6df596ccdf28`, 2026-07-17.
 
 ## FIR-3425 — Projects tree table and cards
 
@@ -1940,6 +1957,20 @@ A failed run showed a red icon and a timestamp and nothing else. Three defects c
 | `failure-reason-visible` | `packages/views/issues/components/execution-log-section.tsx` (1 marked line) | The reason span was `sr-only`, so the text existed only for screen readers and the `title` tooltip. It now renders as visible `text-destructive` copy when a reason is present, falling back to `sr-only` for the plain status label. |
 | `tool-output-keep-tail` | `server/internal/daemon/daemon.go` (1 marked line; helper in the net-new cerebro sibling `server/internal/daemon/cerebro_output_clip.go`) | `output[:8192]` kept the head. A command that prints a lot and then fails puts its error on the last lines, so head-only truncation preserved the part that succeeded and discarded the diagnosis. `clipToolOutput` keeps a weighted head and tail with an explicit elision marker. |
 | `run-failure-card` | `packages/views/common/task-transcript/agent-transcript-dialog.tsx` (3 marked lines; component in the cerebro-zone `packages/cerebro-runtime/views/components/run-failure-card.tsx`) | Renders the reason, the last step and the tail of its output above the event list on a failed run, behind `cerebro_run_failure_card` (ON). Two wiring constraints are marked in place: the component is imported by its **direct entry**, not the `/views` barrel (the barrel re-exports pages that import `@multica/views`, and the cycle blanks the dialog), and the flag is read with `useFlagValue` (a store read) rather than `useFeatureFlag` (which runs a query), so the dialog needs no `QueryClient` of its own. |
+## FIR-3901 — a failed run says so where you already look
+
+A run that died and that nothing will retry was visible only under the Runs tab. The issue page and the inbox both went quiet, so a dead run looked identical to a finished one. All new logic lives in the cerebro zone (`packages/cerebro-runtime/views/dead-failed-runs.ts`, `.../components/failed-run-bar.tsx`, `server/internal/cerebro/db/generated/dead_failed_runs_ext.go`, `server/internal/cerebro/inbox/dead_failed_runs.go`); the upstream files carry one marked call site each.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `dead-failed-runs-routes` | `server/cmd/server/router.go` (2 marked lines) | Registers the two cerebro read endpoints — `GET /api/issues/{id}/failed-runs` (red bar) and `GET /api/inbox/failed-issue-tasks` (red pip). |
+| `dead-failed-runs-access` | `server/cmd/server/router.go` (2 marked lines) | Injects the per-issue access rule into the cerebro inbox handler. Both endpoints return issue content (failure reason, error text, machine name), and `server/internal/cerebro/inbox` cannot reach the unexported `loadIssueForUser` / `canAccessIssue`. The closures live in `server/internal/handler/dead_failed_runs_access_cerebro.go` (cerebro zone by filename), so the rule stays in one place instead of being copied and left to drift. See `docs/agents/permission-system.md`. |
+| `resume-failed-run` | `server/internal/service/task.go` (3 marked lines)<br>`server/internal/handler/task_lifecycle.go` (2 marked lines)<br>`server/cmd/server/rerun_session_test.go` (4 marked lines) | `RerunIssue` hard-coded `force_fresh_session=true`, which is right for "the output was bad" but wrong for "the machine died mid-run". A `resume` flag threads through to `enqueueRerunTask`; `resume=true` keeps the `(agent, issue)` session pointer so the agent continues the same conversation. Default stays `false`, so every existing caller — CLI included — is unchanged. |
+| `resume-failed-run-client` / `dead-failed-runs-client` | `packages/core/api/client.ts` (3 marked methods) | `rerunIssue` takes the optional `resume` flag; `listIssueFailedRuns` / `listWorkspaceFailedRuns` read the two new endpoints. Same shape as the existing cerebro client methods (`listIssueWakeups`). |
+| `agent-run-pip-failed` | `packages/views/common/agent-run-pip.tsx` (3 marked lines) | Adds a `failed` state rendering `bg-destructive`, alongside the existing `active` / `queued` / `sub` / `scheduled` states. `taskStatusToRunState` excludes it — the state is derived from the dead-run endpoint, never from a live task status. |
+| `inbox-failed-run-pip` | `packages/views/inbox/components/inbox-page.tsx` (5 marked lines) | Wires `useInboxFailedRunStates` into the row indicator. A dead failed run outranks `sub` and `scheduled`: it is the only one of the three that needs the user to do something. |
+| `issue-failed-run-bar` | `packages/views/issues/components/issue-detail.tsx` (3 marked lines) | Mounts `FailedRunBar` as a sibling of `AgentLiveCard`, not a state inside it. `AgentLiveCard.reconcile()` deliberately drops any task absent from the *active* set — that is what self-heals a stale "is working" banner — and a failed run is by definition not active, so it needs its own state. |
+
 | `transcript-revamp-port` | `packages/views/common/task-transcript/agent-transcript-dialog.tsx`<br>`packages/views/common/task-transcript/agent-transcript-dialog.test.tsx`<br>`packages/views/common/task-transcript/build-timeline.ts`<br>`packages/views/common/task-transcript/transcript-button.test.tsx`<br>`packages/core/types/events.ts` | FIR-3782 — ports upstream `00e658401` (#5890, virtualized execution log with the `smart` / `expanded` / `collapsed` density modes). The transcript files, `trace-event-presenter.ts`, `task-transcript.css` and `transcript-view-store.ts` are taken from upstream verbatim; the locale files merge upstream's new `transcript.*` keys while keeping fork-only ones. Six marked adaptations bridge upstream APIs this fork does not carry yet: `AttributionBadge` and `RichContent` call sites degrade (the badge is dropped, agent replies render as plain text), `runtimeDisplayName` falls back to `runtime.name`, `ActorAvatar` takes this fork's pixel size instead of upstream size tiers, the `brand` Button variant becomes `secondary`, and `created_at` is added to `TaskMessagePayload` / `TimelineItem` (the server already sends it — `protocol.TaskMessagePayload` — only the TS type had not synced down). The wholesale file replacement is covered by a `CEREBRO-ALLOW-NO-PATCH:` commit; every fork-side adaptation on top of it carries a marker. |
 
 **Also fixed, cerebro-zone only (no marker needed):** `packages/cerebro-runtime/views/task-failure-severity.ts` keyed `INTERRUPTION_REASONS` on `runtime_paused` and `rate_limit`. Neither string is emitted any more — `taskfailure.Classify` resolves a provider stall to an `agent_error.*` sub-reason and never returns a platform-side reason — so an auto-retried provider rate limit rendered as a hard red failure instead of the amber "Interrupted, retrying" state.
@@ -1985,3 +2016,40 @@ The upstream files carry one-line field/call-site additions each. Behind
 hold all the way through a very long run — the context is compacted and the earliest
 instructions dilute first. Enough for style and form rules. A watertight
 check-before-you-send gate has to run as a check at send time; that is a separate build.
+
+# FIR-4013 — a run that hits its turn cap must say so, and no-Mode runs must not inherit one
+
+Two defects behind the `claude execution failed` message on the issue board.
+
+The Claude Code CLI ends a run it could not finish with a `result` message
+carrying `is_error: true`. For a turn-cap stop (`error_max_turns`) that message
+has no `result` text — the only field naming the cause is `subtype`, which
+`claude.go` parsed into the struct but never read on the failure path. The empty
+`Result.Error` then hit the daemon's generic
+`fmt.Sprintf("%s execution %s", provider, status)` fallback, producing
+`claude execution failed`: a string that matches no rule in
+`taskfailure.Classify`, lands in `agent_error.unknown`, and is the one bucket
+`failrouter` never retries. Production evidence: 5 runs carried that exact
+string, and 21 runs in 30 days reached the empty-error state behind it.
+
+Separately, `effectiveSessionModeProfile` fell through to `ProfileFor("")`,
+which `ProfileFor` maps to the **Build** defaults. Every run that never had a
+Mode recorded — issue assignment, wakeup, autopilot, promoted sub-issue, a
+mention in an unlabelled thread — silently inherited Build's 80-turn cap and
+120-minute timeout, neither of which is reachable from any interface. Core
+Multica sets no turn cap at all (`MaxTurns` has a single writer, added by this
+fork in FIR-3111) and no wall-clock cap by default
+(`DefaultAgentTimeout = 0`); a run is bounded by `MULTICA_AGENT_TIMEOUT` and the
+inactivity watchdogs. Measured on the 100 most recent Claude spawns: 54 carried
+`--max-turns 80` from this fallback, while the workspace's own published Build
+profile (199 turns) reached only the 8 runs that did carry a Mode.
+
+Everything else the Build fallback supplied was already gated on a valid Mode
+(`thinkingLevel` at `daemon.go`, and the whole MODE section of the runtime brief
+in `execenv/context.go`), so returning a zero profile changes exactly the two
+values above and nothing else.
+
+| Patch | Location | Reason |
+|---|---|---|
+| `agent-claude-result-subtype` | `server/pkg/agent/claude.go` (1 marked branch), `server/pkg/agent/cerebro_claude_result_subtype.go` (new) | When a failed `result` carries no text, render its `subtype` instead. Turns `claude execution failed` into `claude stopped: the run reached its maximum number of turns (error_max_turns)`. The wording is deliberately checked against `taskfailure.Classify` so it cannot trip a rule it does not belong to — it still classifies as `agent_error.unknown` until the taxonomy gains a turn-cap reason of its own. |
+| `session-mode-no-profile-fallback` | `server/internal/daemon/session_mode_profile.go` (1 marked line) | No Mode selected means no Mode profile. Removes the invisible 80-turn cap and 120-minute timeout from every run nobody labelled, restoring core Multica behaviour; runs that DO carry a Mode keep their published profile unchanged. |

@@ -22,6 +22,7 @@ import {
   childIssueProgressOptions,
   type AssigneeGroupedIssuesFilter,
   type IssueSortParam,
+  type IssueFlatFilter,
   type MyIssuesFilter,
 } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
@@ -55,6 +56,7 @@ import { ListView } from "../../issues/components/list-view";
 import { GanttView } from "../../issues/components/gantt-view";
 import { SwimLaneView } from "../../issues/components/swimlane-view";
 import { BatchActionToolbar } from "../../issues/components/batch-action-toolbar";
+import { IssueTableSurface } from "../../issues/components/issue-table-surface";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Button } from "@multica/ui/components/ui/button";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@multica/ui/components/ui/resizable";
@@ -282,7 +284,12 @@ function ProjectIssuesContent({
   // but non-empty project would surface a misleading "no issues" CTA.
   // For Board/List the bucketed cache really is the ground truth,
   // so an empty result means an empty project.
-  if (viewMode !== "gantt" && viewMode !== "swimlane" && projectIssues.length === 0) {
+  if (
+    viewMode !== "gantt" &&
+    viewMode !== "swimlane" &&
+    viewMode !== "table" &&
+    projectIssues.length === 0
+  ) {
     return (
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-muted-foreground">
         <ListTodo className="h-10 w-10 text-muted-foreground/40" />
@@ -334,6 +341,14 @@ function ProjectIssuesContent({
           sort={sort}
           projectId={projectId}
           onMoveIssue={handleMoveIssue}
+        />
+      ) : viewMode === "table" ? (
+        <IssueTableSurface
+          scope={scope}
+          baseFilter={filter as IssueFlatFilter}
+          sort={sort}
+          runningIssueIds={runningIssueIds}
+          childProgressMap={childProgressMap}
         />
       ) : null}
       {viewMode === "gantt" && <GanttView issues={filteredGanttIssues} />}
@@ -393,6 +408,7 @@ export function ProjectIssuesSurface({
   const [selectedSprintId, setSelectedSprintId] = useState(initialSprintId ?? "");
   const usesAssigneeBoard = viewMode === "board" && grouping === "assignee";
   const usesGantt = viewMode === "gantt";
+  const usesTable = viewMode === "table";
   // Sprint is a cerebro_sprint row, not a project: keep the project scope and
   // add sprint_id so the SERVER narrows to the sprint's members with the same
   // pagination — no client-side first-page filtering that drops members.
@@ -445,7 +461,7 @@ export function ProjectIssuesSurface({
   const statusIssuesQuery = useQuery({
     // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 project list on-behalf-of filter.
     ...myIssueListOptions(wsId, scope, statusIssuesFilter, undefined, sort),
-    enabled: !usesAssigneeBoard && !usesGantt,
+    enabled: !usesAssigneeBoard && !usesGantt && !usesTable,
   });
   const assigneeGroupsQuery = useQuery({
     ...assigneeGroupsOptions,
@@ -469,13 +485,16 @@ export function ProjectIssuesSurface({
       <IssuesHeader
         scopedIssues={projectIssues}
         allowGantt
+        facetCountsExact={!usesTable}
         dateFilters={dateFilters}
         onDateFiltersChange={setDateFilters}
         dueDatePresets
       />
       {/* CEREBRO-PATCH(project-detail-sprint-filter): FIR-2666 sprint selector for project board/list. */}
       {/* CEREBRO-PATCH(sprint-board-reuse): TECH-3684 hide the sprint switcher when locked to one sprint. */}
-      {sprintsFlag && !lockSprint && (viewMode === "board" || viewMode === "list") && (
+      {sprintsFlag &&
+        !lockSprint &&
+        (viewMode === "board" || viewMode === "list" || viewMode === "table") && (
         <div className="border-b px-4 py-2">
           <SprintFilter
             workspaceId={wsId}
@@ -499,7 +518,7 @@ export function ProjectIssuesSurface({
         // CEREBRO-PATCH(project-detail-sprint-create): TECH-3620 new issues created here join the selected sprint.
         selectedSprintId={selectedSprintId}
       />
-      <BatchActionToolbar />
+      {viewMode !== "table" && <BatchActionToolbar />}
     </CerebroStatusModelProvider>
   );
 }

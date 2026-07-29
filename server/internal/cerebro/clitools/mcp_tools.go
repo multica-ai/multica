@@ -101,6 +101,7 @@ func RegisterTools(srv *mcp.Server, client *cli.APIClient, session *SessionState
 	registerAnalyticsTools(srv, client)
 	registerArtifactTools(srv, client)
 	registerAttachmentReadTools(srv, client)
+	registerIssuePropertyTools(srv, client)
 	// CEREBRO-PATCH(cerebro-groups-mcp): JEH-1172 register group MCP tools.
 	registerCerebroGroupTools(srv, client)
 	// CEREBRO-PATCH(mcp-agent-capabilities): TECH-3642 per-agent capabilities card MCP tool.
