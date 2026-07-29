@@ -130,7 +130,7 @@ export function AgentContextVersionsPanel({
                       {v.version}
                     </span>
                     {isCurrent && (
-                      <Badge variant="secondary" className="h-4 text-[10px]">
+                      <Badge variant="secondary" className="h-5 text-xs">
                         current
                       </Badge>
                     )}

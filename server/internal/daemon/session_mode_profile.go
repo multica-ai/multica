@@ -13,8 +13,10 @@ func effectiveSessionModeProfile(task Task) sessionmode.Profile {
 		config := *task.SessionModeConfig
 		config.Mode = mode
 		if sessionmode.ValidateConfig(config) == nil {
-			return config.Profile()
+			// CEREBRO-PATCH(agent-runtime-profile): FIR-4000 agent caps override the selected Mode profile.
+			return applyAgentRuntimeProfileOverrides(task, config.Profile())
 		}
 	}
-	return sessionmode.ProfileFor(mode)
+	// CEREBRO-PATCH(agent-runtime-profile): FIR-4000 agent caps override the selected Mode profile.
+	return applyAgentRuntimeProfileOverrides(task, sessionmode.ProfileFor(mode))
 }

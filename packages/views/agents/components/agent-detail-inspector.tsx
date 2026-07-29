@@ -107,6 +107,8 @@ export function AgentDetailInspector({
   const update = (data: Record<string, unknown>) => onUpdate(agent.id, data);
   // CEREBRO-PATCH(agent-surface-visibility): TECH-3670 — flag-gated surface row.
   const surfaceVisibilityEnabled = useFeatureFlag("cerebro_agent_surface_visibility");
+  // CEREBRO-PATCH(agent-configuration-single-home): FIR-4000 governed run controls live in Instructions when enabled.
+  const agentConfigurationEnabled = useFeatureFlag("cerebro_agent_setup_capabilities");
   const isOnline = runtime?.status === "online";
 
   return (
@@ -127,46 +129,49 @@ export function AgentDetailInspector({
           permission, each picker self-renders a static read-only display so
           the value is visible but not interactive. */}
       <Section label={t(($) => $.inspector.section_properties)}>
-        <PropRow label={t(($) => $.inspector.prop_runtime)} interactive={false}>
-          <RuntimePicker
-            value={agent.runtime_id}
-            runtimes={runtimes}
-            members={members}
-            currentUserId={currentUserId}
-            canEdit={canEdit}
-            onChange={(id) => update({ runtime_id: id })}
-          />
-        </PropRow>
-        <PropRow label={t(($) => $.inspector.prop_model)} interactive={false}>
-          <ModelPicker
+        {/* CEREBRO-PATCH(agent-configuration-single-home): FIR-4000 hides direct writes when governed Instructions is enabled. */}
+        <div className={agentConfigurationEnabled ? "hidden" : "contents"}>
+          <PropRow label={t(($) => $.inspector.prop_runtime)} interactive={false}>
+            <RuntimePicker
+              value={agent.runtime_id}
+              runtimes={runtimes}
+              members={members}
+              currentUserId={currentUserId}
+              canEdit={canEdit}
+              onChange={(id) => update({ runtime_id: id })}
+            />
+          </PropRow>
+          <PropRow label={t(($) => $.inspector.prop_model)} interactive={false}>
+            <ModelPicker
+              runtimeId={agent.runtime_id}
+              runtimeOnline={!!isOnline}
+              value={agent.model ?? ""}
+              canEdit={canEdit}
+              onChange={(m) => update({ model: m })}
+            />
+          </PropRow>
+          <ThinkingPropRow
             runtimeId={agent.runtime_id}
             runtimeOnline={!!isOnline}
-            value={agent.model ?? ""}
+            model={agent.model ?? ""}
+            value={agent.thinking_level ?? ""}
             canEdit={canEdit}
-            onChange={(m) => update({ model: m })}
+            onChange={(v) => update({ thinking_level: v })}
           />
-        </PropRow>
-        <ThinkingPropRow
-          runtimeId={agent.runtime_id}
-          runtimeOnline={!!isOnline}
-          model={agent.model ?? ""}
-          value={agent.thinking_level ?? ""}
-          canEdit={canEdit}
-          onChange={(v) => update({ thinking_level: v })}
-        />
-        <SpeedPropRow
-          runtimeId={agent.runtime_id}
-          runtimeOnline={!!isOnline}
-          model={agent.model ?? ""}
-          value={typeof agent.runtime_config?.speed_mode === "string" ? agent.runtime_config.speed_mode : ""}
-          canEdit={canEdit}
-          onChange={(speedMode) => {
-            const runtimeConfig = { ...(agent.runtime_config ?? {}) };
-            if (speedMode === "fast") runtimeConfig.speed_mode = speedMode;
-            else delete runtimeConfig.speed_mode;
-            return update({ runtime_config: runtimeConfig });
-          }}
-        />
+          <SpeedPropRow
+            runtimeId={agent.runtime_id}
+            runtimeOnline={!!isOnline}
+            model={agent.model ?? ""}
+            value={typeof agent.runtime_config?.speed_mode === "string" ? agent.runtime_config.speed_mode : ""}
+            canEdit={canEdit}
+            onChange={(speedMode) => {
+              const runtimeConfig = { ...(agent.runtime_config ?? {}) };
+              if (speedMode === "fast") runtimeConfig.speed_mode = speedMode;
+              else delete runtimeConfig.speed_mode;
+              return update({ runtime_config: runtimeConfig });
+            }}
+          />
+        </div>
         <PropRow label={t(($) => $.inspector.prop_visibility)} interactive={false}>
           <VisibilityPicker
             value={agent.visibility}

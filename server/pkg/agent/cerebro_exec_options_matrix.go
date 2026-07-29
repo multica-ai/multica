@@ -31,8 +31,9 @@ import "sort"
 // proof must not be served as proof of absence.
 
 // ExecOptionField names an ExecOptions field whose support varies per provider.
-// Fields every backend treats identically (Cwd, Timeout) are deliberately absent
-// — a matrix entry that is always the same answer teaches nobody anything.
+// Cwd is deliberately absent because every backend treats it identically.
+// Timeout is included because Agent Office exposes it beside provider-varying
+// controls and its approval/swap summaries must still state that it is retained.
 type ExecOptionField string
 
 const (
@@ -43,6 +44,9 @@ const (
 	FieldSystemPrompt ExecOptionField = "system_prompt"
 	// FieldMaxTurns caps agent turns. ExecOptions.MaxTurns.
 	FieldMaxTurns ExecOptionField = "max_turns"
+	// FieldTimeout caps wall-clock run time. ExecOptions.Timeout. The daemon
+	// enforces it around every provider process, so it is always honoured.
+	FieldTimeout ExecOptionField = "timeout_minutes"
 	// FieldThinkingLevel sets runtime-native reasoning effort.
 	FieldThinkingLevel ExecOptionField = "thinking_level"
 	// FieldSpeedMode selects a provider-native fast response tier.
@@ -66,6 +70,7 @@ func ExecOptionFields() []ExecOptionField {
 		FieldModel,
 		FieldSystemPrompt,
 		FieldMaxTurns,
+		FieldTimeout,
 		FieldThinkingLevel,
 		FieldSpeedMode,
 		FieldResumeSession,
@@ -278,6 +283,9 @@ func ExecOptionsHandling(providerType string, field ExecOptionField) (handling F
 	support, ok := execOptionsSupport[providerType]
 	if !ok {
 		return HandlingIgnoredSilent, false
+	}
+	if field == FieldTimeout {
+		return HandlingHonoured, true
 	}
 	h, present := support[field]
 	if !present {

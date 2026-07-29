@@ -88,6 +88,7 @@ func TestEncodeDecodeSnapshotRoundTrip(t *testing.T) {
 	s := ContextSnapshot{
 		Instructions:  "be helpful\nfollow the gates",
 		Description:   "a test agent",
+		RuntimeID:     "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
 		Model:         "claude-opus-4-8",
 		ThinkingLevel: "high",
 		McpConfig:     json.RawMessage(`{"servers":["a"]}`),
@@ -95,7 +96,7 @@ func TestEncodeDecodeSnapshotRoundTrip(t *testing.T) {
 		CustomEnvKeys: []string{"FOO", "BAR"},
 	}
 	out := DecodeSnapshot(EncodeSnapshot(s))
-	if out.Instructions != s.Instructions || out.Model != s.Model || out.ThinkingLevel != s.ThinkingLevel {
+	if out.Instructions != s.Instructions || out.RuntimeID != s.RuntimeID || out.Model != s.Model || out.ThinkingLevel != s.ThinkingLevel {
 		t.Errorf("scalar fields did not round-trip: %+v", out)
 	}
 	if len(out.SkillIDs) != 2 || out.SkillIDs[0] != "id-1" {

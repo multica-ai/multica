@@ -147,11 +147,15 @@ func init() {
 	agentContextProposeCmd.Flags().String("version", "", "Proposed semver X.Y.Z (must be > current; required)")
 	agentContextProposeCmd.Flags().String("instructions", "", "Full replacement instructions (mutually exclusive with --instructions-file)")
 	agentContextProposeCmd.Flags().String("instructions-file", "", "Read replacement instructions from a local file")
+	agentContextProposeCmd.Flags().String("runtime-id", "", "FIR-4000 Engine runtime UUID")
 	agentContextProposeCmd.Flags().String("model", "", "Model override")
 	agentContextProposeCmd.Flags().String("thinking-level", "", "Thinking level override")
 	agentContextProposeCmd.Flags().String("workspace-brief-mode", "", "FIR-3212 shared-workspace-brief mode: off (strip the shared brief) or empty/full for the default")
 	agentContextProposeCmd.Flags().String("tools-brief-mode", "", "FIR-3212 tools-brief mode: summary (fold each connection to one line) or empty/full for the default")
 	agentContextProposeCmd.Flags().String("system-prompt-mode", "", "FIR-3212 system-prompt delivery: append, replace (drop the engine's own system prompt), prepend, or empty for the engine default")
+	agentContextProposeCmd.Flags().String("speed-mode", "", "FIR-4000 response tier: fast, standard, or empty for the engine default")
+	agentContextProposeCmd.Flags().Int("max-turns", 0, "FIR-4000 stop after this many agent turns; zero inherits the session Mode profile")
+	agentContextProposeCmd.Flags().Int("timeout-minutes", 0, "FIR-4000 give up after this many minutes; zero inherits the session Mode profile")
 	agentContextProposeCmd.Flags().StringArray("skill-id", nil, "Full replacement set of bound skill ids (repeatable)")
 	agentContextProposeCmd.Flags().Bool("replace-skills", false, "Apply the --skill-id set even if empty (clears bindings)")
 	agentContextProposeCmd.Flags().String("mcp-config", "", "Full replacement MCP config as a JSON object string (mutually exclusive with --mcp-config-file)")
@@ -234,6 +238,9 @@ func runAgentContextPropose(cmd *cobra.Command, args []string) error {
 	if instructions != "" {
 		body["instructions"] = instructions
 	}
+	if v, _ := cmd.Flags().GetString("runtime-id"); v != "" {
+		body["runtime_id"] = v
+	}
 	if v, _ := cmd.Flags().GetString("model"); v != "" {
 		body["model"] = v
 	}
@@ -259,6 +266,18 @@ func runAgentContextPropose(cmd *cobra.Command, args []string) error {
 	if cmd.Flags().Changed("system-prompt-mode") {
 		v, _ := cmd.Flags().GetString("system-prompt-mode")
 		body["system_prompt_mode"] = v
+	}
+	if cmd.Flags().Changed("speed-mode") {
+		v, _ := cmd.Flags().GetString("speed-mode")
+		body["speed_mode"] = v
+	}
+	if cmd.Flags().Changed("max-turns") {
+		v, _ := cmd.Flags().GetInt("max-turns")
+		body["max_turns"] = v
+	}
+	if cmd.Flags().Changed("timeout-minutes") {
+		v, _ := cmd.Flags().GetInt("timeout-minutes")
+		body["timeout_minutes"] = v
 	}
 	skillIDs, _ := cmd.Flags().GetStringArray("skill-id")
 	replaceSkills, _ := cmd.Flags().GetBool("replace-skills")

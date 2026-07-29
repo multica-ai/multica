@@ -168,7 +168,7 @@ export function AgentTabSections({
             }
             className="flex shrink-0 flex-col overflow-hidden rounded-lg border bg-muted/20"
           >
-            <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground md:px-4">
+            <CollapsibleTrigger className="flex w-full items-center gap-1.5 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground md:px-4">
               <ChevronDown
                 className={`h-3.5 w-3.5 shrink-0 transition-transform ${
                   open ? "" : "-rotate-90"

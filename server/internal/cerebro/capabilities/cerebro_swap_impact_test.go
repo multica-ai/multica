@@ -120,6 +120,19 @@ func TestSwapImpactFieldsAreStablySorted(t *testing.T) {
 	}
 }
 
+func TestSwapImpactIncludesVersionedRuntimeSettings(t *testing.T) {
+	impact := SwapImpactFor("claude", "kiro")
+	if got := fieldByName(t, impact, "speed_mode").Outcome; got != OutcomeLost {
+		t.Fatalf("speed_mode outcome = %q, want %q", got, OutcomeLost)
+	}
+	if got := fieldByName(t, impact, "max_turns").Outcome; got != OutcomeLost {
+		t.Fatalf("max_turns outcome = %q, want %q", got, OutcomeLost)
+	}
+	if got := fieldByName(t, impact, "timeout_minutes").Outcome; got != OutcomeRetained {
+		t.Fatalf("timeout_minutes outcome = %q, want %q", got, OutcomeRetained)
+	}
+}
+
 func contains(list []string, want string) bool {
 	for _, v := range list {
 		if v == want {

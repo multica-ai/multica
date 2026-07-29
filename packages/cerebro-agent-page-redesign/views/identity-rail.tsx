@@ -203,6 +203,7 @@ export function IdentityRail({
   const isOnline = runtime?.status === "online";
   const skills = agent.skills ?? [];
   const surfaceVisibilityEnabled = useFeatureFlag("cerebro_agent_surface_visibility");
+  const agentConfigurationEnabled = useFeatureFlag("cerebro_agent_setup_capabilities");
 
   return (
     <div className="w-full flex-shrink-0 border-b bg-muted/30 md:w-80 md:border-b-0 md:border-r">
@@ -262,33 +263,37 @@ export function IdentityRail({
       <ResponsiveRailSection title="Properties">
         <SectionLabel>Properties</SectionLabel>
         <div className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
-          <PropRow label="Runtime" interactive={false}>
-            <RuntimePicker
-              value={agent.runtime_id}
-              runtimes={runtimes}
-              members={members}
-              currentUserId={currentUserId}
-              canEdit={canEdit}
-              onChange={(id) => onUpdate({ runtime_id: id })}
-            />
-          </PropRow>
-          <PropRow label="Model" interactive={false}>
-            <ModelPicker
-              runtimeId={agent.runtime_id}
-              runtimeOnline={!!isOnline}
-              value={agent.model ?? ""}
-              canEdit={canEdit}
-              onChange={(m) => onUpdate({ model: m })}
-            />
-          </PropRow>
-          <ThinkingPropRow
-            runtimeId={agent.runtime_id}
-            runtimeOnline={!!isOnline}
-            model={agent.model ?? ""}
-            value={agent.thinking_level ?? ""}
-            canEdit={canEdit}
-            onChange={(v) => onUpdate({ thinking_level: v })}
-          />
+          {!agentConfigurationEnabled && (
+            <>
+              <PropRow label="Runtime" interactive={false}>
+                <RuntimePicker
+                  value={agent.runtime_id}
+                  runtimes={runtimes}
+                  members={members}
+                  currentUserId={currentUserId}
+                  canEdit={canEdit}
+                  onChange={(id) => onUpdate({ runtime_id: id })}
+                />
+              </PropRow>
+              <PropRow label="Model" interactive={false}>
+                <ModelPicker
+                  runtimeId={agent.runtime_id}
+                  runtimeOnline={!!isOnline}
+                  value={agent.model ?? ""}
+                  canEdit={canEdit}
+                  onChange={(m) => onUpdate({ model: m })}
+                />
+              </PropRow>
+              <ThinkingPropRow
+                runtimeId={agent.runtime_id}
+                runtimeOnline={!!isOnline}
+                model={agent.model ?? ""}
+                value={agent.thinking_level ?? ""}
+                canEdit={canEdit}
+                onChange={(v) => onUpdate({ thinking_level: v })}
+              />
+            </>
+          )}
           <PropRow label="Visibility" interactive={false}>
             <VisibilityPicker
               value={agent.visibility}
