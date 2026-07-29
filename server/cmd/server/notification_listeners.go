@@ -19,7 +19,6 @@ type mention struct {
 	ID   string // user_id, agent_id, issue_id, or "all"
 }
 
-
 // statusLabels maps DB status values to human-readable labels for notifications.
 var statusLabels = map[string]string{
 	"backlog":     "Backlog",
@@ -78,19 +77,19 @@ var parentBubbleNotifTypes = map[string]bool{
 // notifTypeToGroup maps each InboxItemType to a user-configurable preference
 // group. Types not in this map are always delivered (not configurable).
 var notifTypeToGroup = map[string]string{
-	"issue_assigned":  "assignments",
-	"unassigned":      "assignments",
-	"assignee_changed": "assignments",
-	"status_changed":  "status_changes",
-	"new_comment":     "comments",
-	"mentioned":       "comments",
-	"priority_changed": "updates",
+	"issue_assigned":     "assignments",
+	"unassigned":         "assignments",
+	"assignee_changed":   "assignments",
+	"status_changed":     "status_changes",
+	"new_comment":        "comments",
+	"mentioned":          "comments",
+	"priority_changed":   "updates",
 	"start_date_changed": "updates",
-	"due_date_changed": "updates",
-	"task_completed":  "agent_activity",
-	"task_failed":     "agent_activity",
-	"agent_blocked":   "agent_activity",
-	"agent_completed": "agent_activity",
+	"due_date_changed":   "updates",
+	"task_completed":     "agent_activity",
+	"task_failed":        "agent_activity",
+	"agent_blocked":      "agent_activity",
+	"agent_completed":    "agent_activity",
 }
 
 // isNotifMuted returns true if the given notification type is muted for a user
@@ -825,7 +824,10 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		issueTitle, _ := payload["issue_title"].(string)
 		issueStatus, _ := payload["issue_status"].(string)
 
-		if creatorType == "" || creatorID == "" {
+		// Platform-authored issues have no inbox recipient. Their persisted
+		// zero UUID is only a NOT NULL storage sentinel; passing it to
+		// notifyDirect would violate inbox_item's recipient_type check.
+		if creatorType == "system" || creatorType == "" || creatorID == "" {
 			return
 		}
 
@@ -861,7 +863,9 @@ func registerNotificationListeners(bus *events.Bus, queries *db.Queries) {
 		issueTitle, _ := payload["issue_title"].(string)
 		issueStatus, _ := payload["issue_status"].(string)
 
-		if commentAuthorType == "" || commentAuthorID == "" {
+		// Platform-authored comments use the same zero-UUID storage sentinel
+		// as platform-authored issues; there is no inbox recipient to notify.
+		if commentAuthorType == "system" || commentAuthorType == "" || commentAuthorID == "" {
 			return
 		}
 

@@ -52,7 +52,6 @@ vi.mock("@multica/core/auth", () => ({
 const mockListAgents = vi.fn();
 const mockCreateAgent = vi.fn();
 const mockCreateIssue = vi.fn();
-const mockCreateComment = vi.fn();
 const mockGetWorkspace = vi.fn();
 
 // `useCurrentWorkspace` is gated by `WorkspaceSlugProvider`; in tests
@@ -78,7 +77,6 @@ vi.mock("@multica/core/api", () => ({
     listAgents: (...args: unknown[]) => mockListAgents(...args),
     createAgent: (...args: unknown[]) => mockCreateAgent(...args),
     createIssue: (...args: unknown[]) => mockCreateIssue(...args),
-    createComment: (...args: unknown[]) => mockCreateComment(...args),
     getWorkspace: (...args: unknown[]) => mockGetWorkspace(...args),
   },
 }));
@@ -127,7 +125,6 @@ beforeEach(() => {
   mockListAgents.mockReset();
   mockCreateAgent.mockReset();
   mockCreateIssue.mockReset();
-  mockCreateComment.mockReset();
   mockGetWorkspace.mockReset();
   mockPush.mockReset();
   useWelcomeStore.getState().reset();
@@ -148,6 +145,8 @@ describe("WelcomeAfterOnboarding", () => {
     useWelcomeStore.getState().set({
       workspaceId: "ws-2",
       choice: "skip",
+      installIssueId: "issue-install",
+      agentGuideIssueId: "issue-guide",
     });
     const { container } = renderWelcome();
     expect(container.firstChild).toBeNull();
@@ -396,188 +395,42 @@ describe("WelcomeAfterOnboarding", () => {
   });
 
   describe("skip path", () => {
-    it("provisions install-runtime → agent-guide → follow-up comment, then opens the celebration Modal", async () => {
-      // Sequential provisioning order in the implementation:
-      //   1. install-runtime (Step 1, body is static, becomes the mention
-      //      chip target inside agent-guide's body)
-      //   2. agent-guide (Step 2, body embeds install-runtime mention)
-      //   3. comment on install-runtime (mentions agent-guide back)
-      mockCreateIssue
-        .mockResolvedValueOnce({
-          id: "issue-install",
-          identifier: "MUL-1",
-          workspace_id: "ws-1",
-        })
-        .mockResolvedValueOnce({
-          id: "issue-agent",
-          identifier: "MUL-2",
-          workspace_id: "ws-1",
-        });
-      mockCreateComment.mockResolvedValueOnce({ id: "comment-1" });
-
+    function setSkipSignal() {
       useWelcomeStore.getState().set({
         workspaceId: "ws-1",
         choice: "skip",
+        installIssueId: "issue-install",
+        agentGuideIssueId: "issue-agent",
       });
+    }
 
+    it("opens the celebration Modal from the already-created bundle", () => {
+      setSkipSignal();
       renderWelcome();
 
-      // Loading veil shows first.
-      expect(screen.getByText(/Setting up your workspace/i)).toBeInTheDocument();
-
-      // Modal appears once all 3 API calls succeed.
-      await waitFor(() => {
-        expect(screen.getByText(/Welcome to Multica/i)).toBeInTheDocument();
-      });
-
-      expect(mockCreateIssue).toHaveBeenCalledTimes(2);
-      expect(mockCreateComment).toHaveBeenCalledTimes(1);
-
-      // First createIssue call: install-runtime (Step 1).
-      const [firstCall] = mockCreateIssue.mock.calls;
-      expect(firstCall![0].title).toBe(
-        "Step 1 — Connect a runtime to start using agents",
-      );
-      expect(firstCall![0].status).toBe("in_progress");
-      expect(firstCall![0].assignee_type).toBe("member");
-      expect(firstCall![0].assignee_id).toBe("user-1");
-
-      // Second createIssue call: agent-guide (Step 2), body must embed
-      // install-runtime mention chip pointing at MUL-1 / issue-install.
-      const [secondCall] = mockCreateIssue.mock.calls.slice(1);
-      expect(secondCall![0].title).toBe(
-        "Step 2 — Create your first Multica Agent",
-      );
-      expect(secondCall![0].status).toBe("todo");
-      expect(secondCall![0].description).toContain(
-        "[MUL-1](mention://issue/issue-install)",
-      );
-
-      // Follow-up comment posted on install-runtime as a mention chip
-      // pointing at the agent-guide issue.
-      const [commentIssueId, commentContent] =
-        mockCreateComment.mock.calls[0]!;
-      expect(commentIssueId).toBe("issue-install");
-      expect(commentContent).toContain("[MUL-2](mention://issue/issue-agent)");
+      expect(screen.getByText(/Welcome to Multica/i)).toBeInTheDocument();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
     });
 
-    it("silently dismisses without showing the Modal when provisioning fails", async () => {
-      mockCreateIssue.mockRejectedValueOnce(new Error("network down"));
-      useWelcomeStore.getState().set({
-        workspaceId: "ws-1",
-        choice: "skip",
-      });
-
+    it("navigates to the install issue from the completion response", async () => {
+      setSkipSignal();
       renderWelcome();
 
-      // Failure path: loading veil shows, then unmounts as the store is
-      // dismissed. No celebration Modal ever appears.
-      await waitFor(() =>
-        expect(useWelcomeStore.getState().dismissed).toBe(true),
-      );
-      expect(screen.queryByText(/Welcome to Multica/i)).not.toBeInTheDocument();
-    });
-
-    it("uses Korean persisted skip-path issue and comment artifacts under ko locale", async () => {
-      mockCreateIssue
-        .mockResolvedValueOnce({
-          id: "issue-install",
-          identifier: "MUL-1",
-          workspace_id: "ws-1",
-        })
-        .mockResolvedValueOnce({
-          id: "issue-agent",
-          identifier: "MUL-2",
-          workspace_id: "ws-1",
-        });
-      mockCreateComment.mockResolvedValueOnce({ id: "comment-1" });
-
-      useWelcomeStore.getState().set({
-        workspaceId: "ws-1",
-        choice: "skip",
-      });
-
-      renderWelcome({ locale: "ko" });
-
+      fireEvent.click(screen.getByRole("button", { name: /got it/i }));
       await waitFor(() => {
-        expect(screen.getByText(/Multica에 오신 것을 환영합니다/i)).toBeInTheDocument();
+        expect(mockPush).toHaveBeenCalledWith(
+          expect.stringContaining("issue-install"),
+        );
       });
-
-      expect(mockCreateIssue).toHaveBeenCalledTimes(2);
-      const [installCall, guideCall] = mockCreateIssue.mock.calls;
-      expect(installCall![0].title).toBe(
-        "1단계 — agent를 사용하려면 runtime 연결하기",
-      );
-      expect(installCall![0].description).toContain(
-        "Multica에 오신 것을 환영합니다.",
-      );
-      expect(guideCall![0].title).toBe(
-        "2단계 — 첫 Multica Agent 만들기",
-      );
-      expect(guideCall![0].description).toContain(
-        "runtime이 online 상태가 되면",
-      );
-      expect(guideCall![0].description).toContain(
-        "[MUL-1](mention://issue/issue-install)",
-      );
-
-      const [commentIssueId, commentContent] =
-        mockCreateComment.mock.calls[0]!;
-      expect(commentIssueId).toBe("issue-install");
-      expect(commentContent).toContain("다음 단계:");
-      expect(commentContent).toContain(
-        "[MUL-2](mention://issue/issue-agent)",
-      );
+      expect(useWelcomeStore.getState().dismissed).toBe(true);
     });
 
-    it("uses Japanese persisted skip-path issue and comment artifacts under ja locale", async () => {
-      mockCreateIssue
-        .mockResolvedValueOnce({
-          id: "issue-install",
-          identifier: "MUL-1",
-          workspace_id: "ws-1",
-        })
-        .mockResolvedValueOnce({
-          id: "issue-agent",
-          identifier: "MUL-2",
-          workspace_id: "ws-1",
-        });
-      mockCreateComment.mockResolvedValueOnce({ id: "comment-1" });
-
-      useWelcomeStore.getState().set({
-        workspaceId: "ws-1",
-        choice: "skip",
-      });
-
+    it("renders localized celebration copy without performing persistence", () => {
+      setSkipSignal();
       renderWelcome({ locale: "ja" });
 
-      await waitFor(() => {
-        expect(
-          screen.getByText(/Multica へようこそ/),
-        ).toBeInTheDocument();
-      });
-
-      expect(mockCreateIssue).toHaveBeenCalledTimes(2);
-      const [installCall, guideCall] = mockCreateIssue.mock.calls;
-      expect(installCall![0].title).toBe(
-        "ステップ1 — agent を使うために runtime を接続する",
-      );
-      expect(installCall![0].description).toContain("Multica へようこそ。");
-      expect(guideCall![0].title).toBe(
-        "ステップ2 — 最初の Multica Agent を作成する",
-      );
-      expect(guideCall![0].description).toContain("runtime が online になったら");
-      expect(guideCall![0].description).toContain(
-        "[MUL-1](mention://issue/issue-install)",
-      );
-
-      const [commentIssueId, commentContent] =
-        mockCreateComment.mock.calls[0]!;
-      expect(commentIssueId).toBe("issue-install");
-      expect(commentContent).toContain("次のステップ:");
-      expect(commentContent).toContain(
-        "[MUL-2](mention://issue/issue-agent)",
-      );
+      expect(screen.getByText(/Multica へようこそ/)).toBeInTheDocument();
+      expect(mockCreateIssue).not.toHaveBeenCalled();
     });
   });
 });

@@ -10,7 +10,7 @@ import { paths, useCurrentWorkspace } from "@multica/core/paths";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { issueKeys } from "@multica/core/issues/queries";
 import { workspaceKeys } from "@multica/core/workspace/queries";
-import type { Agent, CreateIssueRequest, Issue } from "@multica/core/types";
+import type { Agent } from "@multica/core/types";
 import {
   Dialog,
   DialogContent,
@@ -23,14 +23,9 @@ import { useNavigation } from "../navigation";
 import { useT } from "../i18n";
 import {
   buildUserContextSection,
-  CREATE_AGENT_GUIDE_ISSUE_TITLE,
-  FOLLOWUP_COMMENT_PREFIX,
-  getCreateAgentGuideBody,
   HELPER_DESCRIPTION,
   HELPER_INSTRUCTIONS,
   HELPER_STARTER_PROMPTS,
-  INSTALL_RUNTIME_ISSUE_BODY,
-  INSTALL_RUNTIME_ISSUE_TITLE,
   pickContentLang,
   STARTER_CARD_IDS,
   type StarterCardId,
@@ -60,22 +55,19 @@ import {
  *     5. Failure surfaces a Retry UI; the modal stays put.
  *
  *   "skip":
- *     1. Dialog opens immediately (closable).
- *     2. Background: `createIssue × 2` with the install-runtime and
- *        create-agent-guide bodies, assigned to the user themselves.
- *     3. Cards render with their static titles + subtitles; per-card
- *        spinner switches to "Open issue" once the issue id arrives.
- *     4. Click a card → `dismiss()` → navigate. Close the modal →
+ *     1. The atomic onboarding completion response has already provisioned
+ *        the platform-authored install-runtime and agent-guide issues.
+ *     2. A celebration Dialog renders immediately; cards are pure
+ *        display.
+ *     3. Got it → `dismiss()` → navigate to the install issue. Close →
  *        `dismiss()` → stay on issues list; seeded issues remain.
- *     5. Per-card failure surfaces a Retry button on that card only.
  *
  * Why subscribe-not-consume: React 18+ StrictMode dev mounts components
  * twice. A consume-on-init pattern would empty the store on the first
  * mount, then render null on the second. Subscribing + recording
  * dismissal in the store sidesteps both mounts seeing the same state.
- * Async work (Helper agent setup, skip-path seed issues) is deduped at
- * module level via `findOrCreateHelper` / `seedIssueDeduped` so the
- * double-mount can't race two API calls for the same workspace.
+ * Runtime Helper setup is deduped at module level via `findOrCreateHelper`
+ * so the double-mount cannot race two API calls for the same workspace.
  */
 export function WelcomeAfterOnboarding() {
   const me = useAuthStore((s) => s.user);
@@ -102,7 +94,7 @@ export function WelcomeAfterOnboarding() {
     return null;
   }
 
-  if (signal.choice === "runtime" && signal.runtimeId) {
+  if (signal.choice === "runtime") {
     return (
       <RuntimeWelcome
         workspaceId={signal.workspaceId}
@@ -116,13 +108,11 @@ export function WelcomeAfterOnboarding() {
     return (
       <SkipWelcome
         workspaceId={signal.workspaceId}
+        installIssueId={signal.installIssueId}
         onDismiss={dismiss}
       />
     );
   }
-  // Malformed signal (e.g. choice === "runtime" with no runtimeId) is
-  // a programming error in the producer side; render nothing to avoid
-  // putting the user in a stuck modal.
   return null;
 }
 
@@ -190,68 +180,6 @@ async function findOrCreateHelper(
     .finally(() => {
       if (pendingHelperSetup.get(key) === promise) {
         pendingHelperSetup.delete(key);
-      }
-    })
-    .catch(() => {});
-  return promise;
-}
-
-/**
- * Module-level dedupe for skip-path seed issues. Same StrictMode rationale
- * as `findOrCreateHelper`: each mount has its own useRef, so without a
- * cross-mount cache the dev double-mount would race two CreateIssue calls
- * for the same title — the server-side LockAndFindActiveDuplicate gate
- * returns 409 on the second one, but a 409 in the catch block populates
- * the per-card error state with a misleading message ("an issue with this
- * title already exists") even though the issue WAS created.
- *
- * Keyed on `${workspaceId}:${title}` because the seed identity is the
- * issue title (server's duplicate dedupe also keys on title).
- */
-const pendingIssueSeed = new Map<string, Promise<Issue>>();
-
-function seedIssueDeduped(
-  cacheKey: string,
-  body: CreateIssueRequest,
-): Promise<Issue> {
-  const existing = pendingIssueSeed.get(cacheKey);
-  if (existing) return existing;
-  const promise = api.createIssue(body);
-  pendingIssueSeed.set(cacheKey, promise);
-  // .finally() returns a NEW promise that mirrors the rejection of the
-  // original. Silence it with .catch so the cleanup chain never surfaces
-  // as an unhandled rejection — the original `promise` we return still
-  // carries the rejection to the caller's await.
-  promise
-    .finally(() => {
-      if (pendingIssueSeed.get(cacheKey) === promise) {
-        pendingIssueSeed.delete(cacheKey);
-      }
-    })
-    .catch(() => {});
-  return promise;
-}
-
-/**
- * Same module-level dedup pattern for the follow-up comment on the
- * skip-path install-runtime issue (linking to the create-agent-guide
- * issue). Keeps the two StrictMode mounts from posting the comment twice.
- */
-const pendingCommentSeed = new Map<string, Promise<unknown>>();
-
-function postCommentDeduped(
-  cacheKey: string,
-  issueId: string,
-  content: string,
-): Promise<unknown> {
-  const existing = pendingCommentSeed.get(cacheKey);
-  if (existing) return existing;
-  const promise = api.createComment(issueId, content);
-  pendingCommentSeed.set(cacheKey, promise);
-  promise
-    .finally(() => {
-      if (pendingCommentSeed.get(cacheKey) === promise) {
-        pendingCommentSeed.delete(cacheKey);
       }
     })
     .catch(() => {});
@@ -662,152 +590,41 @@ function RuntimeWelcome({
 // Skip sub-template
 // ---------------------------------------------------------------------------
 
-interface SkipBundle {
-  installIssueId: string;
-  agentGuideId: string;
-}
-
 interface SkipWelcomeProps {
   workspaceId: string;
+  installIssueId: string;
   onDismiss: () => void;
 }
 
 /**
- * Skip-path welcome. v3 product decision (see /Users/qingnaiyuan/.claude/plans):
+ * Skip-path welcome.
  *
- *   1. Full-screen loading veil while we provision EVERYTHING in a fixed
- *      sequence — install-runtime issue → create-agent-guide issue →
- *      follow-up comment on the install-runtime issue linking to the
- *      create-agent-guide identifier.
- *   2. Only after the whole chain succeeds do we mount the celebration
- *      Modal. Cards inside the Modal are pure display — no interactive
- *      per-card state, no spinners, no error boundaries.
- *   3. If ANY step fails we silently dismiss; the user lands on the
- *      issues list and finds whatever subset of issues did get created.
- *      Onboarded_at is already set by Step 3, so this isn't blocking.
- *   4. The Modal has a single primary action [Got it] which dismisses and
+ *   1. The no-runtime completion request has already atomically marked the
+ *      user onboarded and created both server-owned issues with platform
+ *      attribution.
+ *   2. The Modal has a single primary action [Got it] which dismisses and
  *      navigates to the install-runtime issue. Closing via X or outside
  *      click dismisses but doesn't navigate.
- *
- * Why provision-then-show instead of show-with-loading: the previous
- * design had cards with their own spinners and retry buttons, which made
- * the Modal feel like a busy task list rather than a celebration of
- * finishing onboarding. The product brief asked for emotional value.
  */
-function SkipWelcome({ workspaceId, onDismiss }: SkipWelcomeProps) {
-  // i18n.language is the LIVE runtime locale (browser fallback + saved
-  // me.language). Reading me.language directly would miss new users
-  // whose preference field is still null but who are browsing in another
-  // supported locale.
-  const { t, i18n } = useT("onboarding");
+function SkipWelcome({
+  workspaceId,
+  installIssueId,
+  onDismiss,
+}: SkipWelcomeProps) {
+  const { t } = useT("onboarding");
   const navigation = useNavigation();
   const qc = useQueryClient();
-  const me = useAuthStore((s) => s.user);
 
-  const [bundle, setBundle] = useState<SkipBundle | null>(null);
-  const [failed, setFailed] = useState(false);
-
-  // Provision sequence — runs once on mount. StrictMode double-mount is
-  // safe because each step uses module-level dedup (seedIssueDeduped /
-  // postCommentDeduped) keyed on `${workspaceId}:<purpose>`.
   useEffect(() => {
-    if (!me) return;
-    if (bundle || failed) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const lang = pickContentLang(i18n.language);
-        // Order matters — each step's input depends on the previous step's
-        // output (issue identifier / uuid for cross-reference mention
-        // chips). Module-level dedupes (seedIssueDeduped /
-        // postCommentDeduped) make StrictMode double-mounts share the same
-        // in-flight promise per step.
-        //
-        // 1. install-runtime first (body is a static const, no deps).
-        //    Step 1 of the bundle, in_progress so the user sees it's the
-        //    active next step.
-        const installRuntime = await seedIssueDeduped(
-          `${workspaceId}:install-runtime`,
-          {
-            title: INSTALL_RUNTIME_ISSUE_TITLE[lang],
-            description: INSTALL_RUNTIME_ISSUE_BODY[lang],
-            status: "in_progress",
-            priority: "high",
-            assignee_type: "member",
-            assignee_id: me.id,
-          },
-        );
-        // 2. agent-guide. Body is composed at call-time so it can embed
-        //    a mention chip pointing back at install-runtime — the user
-        //    reads agent-guide and can jump to its prerequisite with one
-        //    click.
-        const agentGuide = await seedIssueDeduped(
-          `${workspaceId}:create-agent-guide`,
-          {
-            title: CREATE_AGENT_GUIDE_ISSUE_TITLE[lang],
-            description: getCreateAgentGuideBody({
-              lang,
-              installRuntimeIdentifier: installRuntime.identifier,
-              installRuntimeId: installRuntime.id,
-            }),
-            status: "todo",
-            priority: "medium",
-            assignee_type: "member",
-            assignee_id: me.id,
-          },
-        );
-        // 3. follow-up comment on install-runtime pointing at agent-guide
-        //    via the same mention-chip protocol (renders as the styled
-        //    IssueChip pill). Prefix is a TS const — anything that gets
-        //    persisted to DB must not depend on the i18n bundle (stale
-        //    bundle would write raw key text into comment.content
-        //    permanently).
-        const prefix = FOLLOWUP_COMMENT_PREFIX[lang];
-        const commentText = `${prefix} [${agentGuide.identifier}](mention://issue/${agentGuide.id})`;
-        await postCommentDeduped(
-          `${workspaceId}:install-runtime-followup`,
-          installRuntime.id,
-          commentText,
-        );
-        qc.invalidateQueries({ queryKey: issueKeys.all(workspaceId) });
-        if (!cancelled) {
-          setBundle({
-            installIssueId: installRuntime.id,
-            agentGuideId: agentGuide.id,
-          });
-        }
-      } catch {
-        if (!cancelled) setFailed(true);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [bundle, failed, i18n.language, me, qc, t, workspaceId]);
-
-  // Failure path: dismiss the welcome signal so the next render returns
-  // null. We don't surface an error UI — the user is already onboarded;
-  // anything that did get created is visible in the issues list.
-  useEffect(() => {
-    if (failed) onDismiss();
-  }, [failed, onDismiss]);
-
-  if (failed || !me) return null;
-
-  if (!bundle) {
-    return (
-      <FullScreenLoading
-        label={t(($) => $.welcome_after_onboarding.skip.loading)}
-      />
-    );
-  }
+    void qc.invalidateQueries({ queryKey: issueKeys.all(workspaceId) });
+  }, [qc, workspaceId]);
 
   const handleGotIt = async () => {
     // Dismiss BEFORE navigating so the destination doesn't re-render
     // the Modal from the (still-set) welcome-store signal.
     onDismiss();
     const slug = await resolveWorkspaceSlug(qc, workspaceId);
-    navigation.push(paths.workspace(slug).issueDetail(bundle.installIssueId));
+    navigation.push(paths.workspace(slug).issueDetail(installIssueId));
   };
 
   return (

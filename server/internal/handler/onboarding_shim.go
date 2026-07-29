@@ -2,7 +2,9 @@
 //
 // Background: v3 moved Helper-agent creation and starter-issue seeding to
 // the frontend welcome hook (packages/views/workspace/welcome-after-onboarding.tsx),
-// which calls generic CreateAgent / CreateIssue. Pre-v3 desktop builds
+// which calls generic CreateAgent / CreateIssue on the runtime path and the
+// dedicated system-attributed seed endpoint (onboarding_seed.go, MUL-5118)
+// on the skip path. Pre-v3 desktop builds
 // however still call BootstrapOnboardingRuntime / BootstrapOnboardingNoRuntime
 // during their onboarding flow. Server-side removal would break those
 // users during the rollout window where v3 server is live but their

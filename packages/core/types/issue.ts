@@ -14,6 +14,15 @@ export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
 export type IssueAssigneeType = "member" | "agent" | "squad";
 
+/**
+ * Who created an issue. Assignees can never be "system", but the platform
+ * seeds some issues itself (onboarding no-runtime starter content,
+ * MUL-5118) — those rows carry creator_type "system" with a zero-UUID
+ * creator_id; resolve display via the actor helpers ("Multica"), never by
+ * looking the id up in a directory.
+ */
+export type IssueCreatorType = IssueAssigneeType | "system";
+
 export interface IssueReaction {
   id: string;
   issue_id: string;
@@ -44,7 +53,7 @@ export interface Issue {
   priority: IssuePriority;
   assignee_type: IssueAssigneeType | null;
   assignee_id: string | null;
-  creator_type: IssueAssigneeType;
+  creator_type: IssueCreatorType;
   creator_id: string;
   parent_issue_id: string | null;
   project_id: string | null;
