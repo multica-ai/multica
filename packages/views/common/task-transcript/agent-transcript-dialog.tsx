@@ -1380,7 +1380,9 @@ function DiffDetailSurface({ lines, path }: { lines: TraceDiffLine[]; path: stri
           <button
             type="button"
             onClick={() => setShowAll(true)}
-            className="mb-1.5 rounded px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            // Opaque: the gradient alone does not clear the clipped line, so a
+            // transparent label lands on top of it and both become unreadable.
+            className="mb-1.5 rounded border bg-background px-2 py-0.5 text-[11px] text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
           >
             {t(($) => $.transcript.show_all)}
           </button>
@@ -1418,7 +1420,9 @@ function ToolDetailSurface({ text, language }: { text: string; language?: string
           <button
             type="button"
             onClick={() => setShowAll(true)}
-            className="mb-1.5 rounded px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            // Opaque: the gradient alone does not clear the clipped line, so a
+            // transparent label lands on top of it and both become unreadable.
+            className="mb-1.5 rounded border bg-background px-2 py-0.5 text-[11px] text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
           >
             {t(($) => $.transcript.show_all)}
           </button>
