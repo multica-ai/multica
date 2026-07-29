@@ -1,6 +1,7 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type { InboxItem } from "@multica/core/types";
+import { INBOX_SCROLL_TO_LATEST_UNREAD_EVENT } from "../inbox-scroll-event";
 import { InboxPage } from "./inbox-page";
 
 vi.mock("react-resizable-panels", () => ({
@@ -81,12 +82,18 @@ vi.mock("./inbox-list", () => ({
     items,
     view,
     onSelect,
+    scrollRequest,
   }: {
     items: InboxItem[];
     view: string;
     onSelect: (item: InboxItem) => void;
+    scrollRequest: { itemId: string; sequence: number } | null;
   }) => (
-    <div data-testid="list" data-view={view}>
+    <div
+      data-testid="list"
+      data-view={view}
+      data-scroll-target={scrollRequest?.itemId}
+    >
       {items.map((i) => (
         <button key={i.id} data-testid="row" onClick={() => onSelect(i)}>
           {i.id}
@@ -149,6 +156,53 @@ describe("InboxPage", () => {
 
     expect(screen.getByTestId("list").dataset.view).toBe("inbox");
     expect(screen.getByTestId("row").textContent).toBe("active-1");
+  });
+
+  it("targets the newest unread item when the inbox navigation is double-clicked", () => {
+    reset();
+    listData.active = [
+      item({ id: "newest-read", read: true }),
+      item({ id: "newest-unread", read: false }),
+      item({ id: "older-unread", read: false }),
+    ];
+
+    render(<InboxPage />);
+    fireEvent(window, new Event(INBOX_SCROLL_TO_LATEST_UNREAD_EVENT));
+
+    expect(screen.getByTestId("list")).toHaveAttribute(
+      "data-scroll-target",
+      "newest-unread",
+    );
+  });
+
+  it("does not request scrolling when every inbox item is read", () => {
+    reset();
+    listData.active = [
+      item({ id: "newest-read", read: true }),
+      item({ id: "older-read", read: true }),
+    ];
+
+    render(<InboxPage />);
+    fireEvent(window, new Event(INBOX_SCROLL_TO_LATEST_UNREAD_EVENT));
+
+    expect(screen.getByTestId("list")).not.toHaveAttribute("data-scroll-target");
+  });
+
+  it("returns from the archive before targeting an unread item", () => {
+    reset();
+    searchParams = new URLSearchParams("view=archived");
+    listData.active = [item({ id: "unread", read: false })];
+    listData.archived = [item({ id: "archived", archived: true })];
+
+    render(<InboxPage />);
+    fireEvent(window, new Event(INBOX_SCROLL_TO_LATEST_UNREAD_EVENT));
+
+    expect(screen.getByTestId("list")).toHaveAttribute("data-view", "inbox");
+    expect(screen.getByTestId("list")).toHaveAttribute(
+      "data-scroll-target",
+      "unread",
+    );
+    expect(replace).toHaveBeenCalledWith("/acme/inbox");
   });
 
   it("renders the archived list when the URL asks for it", () => {

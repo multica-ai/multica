@@ -1,6 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@multica/core/api";
+import { INBOX_SCROLL_TO_LATEST_UNREAD_EVENT } from "../inbox/inbox-scroll-event";
 import { AppSidebar } from "./app-sidebar";
 
 const { appForeground, chatSessions, chatStore, detail, deletePin, inboxItems, navigation, pins, summary, workspaces } = vi.hoisted(() => ({
@@ -56,12 +57,19 @@ vi.mock("@multica/ui/components/ui/sidebar", () => ({
     children,
     isActive,
     render,
+    ...props
   }: {
     children: React.ReactNode;
     isActive?: boolean;
     render?: React.ReactElement<{ href?: string }>;
+    onDoubleClick?: React.MouseEventHandler<HTMLButtonElement>;
   }) => (
-    <button type="button" data-active={isActive ? "true" : undefined} data-href={render?.props.href}>
+    <button
+      type="button"
+      data-active={isActive ? "true" : undefined}
+      data-href={render?.props.href}
+      {...props}
+    >
       {children}
     </button>
   ),
@@ -186,6 +194,35 @@ vi.mock("@tanstack/react-query", async (importOriginal) => ({
   },
   useQueryClient: () => ({ fetchQuery: vi.fn(), invalidateQueries: vi.fn() }),
 }));
+
+describe("inbox navigation", () => {
+  beforeEach(() => {
+    navigation.current.pathname = "/acme/inbox";
+  });
+
+  it("requests the latest unread row when the active inbox item is double-clicked", () => {
+    const listener = vi.fn();
+    window.addEventListener(INBOX_SCROLL_TO_LATEST_UNREAD_EVENT, listener);
+
+    const { container } = render(<AppSidebar />);
+    fireEvent.doubleClick(container.querySelector('button[data-href="/acme/inbox"]')!);
+
+    expect(listener).toHaveBeenCalledTimes(1);
+    window.removeEventListener(INBOX_SCROLL_TO_LATEST_UNREAD_EVENT, listener);
+  });
+
+  it("does not request unread scrolling from another page", () => {
+    navigation.current.pathname = "/acme/issues";
+    const listener = vi.fn();
+    window.addEventListener(INBOX_SCROLL_TO_LATEST_UNREAD_EVENT, listener);
+
+    const { container } = render(<AppSidebar />);
+    fireEvent.doubleClick(container.querySelector('button[data-href="/acme/inbox"]')!);
+
+    expect(listener).not.toHaveBeenCalled();
+    window.removeEventListener(INBOX_SCROLL_TO_LATEST_UNREAD_EVENT, listener);
+  });
+});
 
 describe("PinRow", () => {
   beforeEach(() => {

@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
-import { Virtuoso } from "react-virtuoso";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { Archive, ChevronRight, Inbox } from "lucide-react";
 import type { InboxItem } from "@multica/core/types";
 import type { InboxView } from "./inbox-view";
@@ -38,6 +38,7 @@ export function InboxList({
   onSelect,
   onAction,
   onOpenArchived,
+  scrollRequest,
 }: {
   items: InboxItem[];
   view: InboxView;
@@ -48,13 +49,29 @@ export function InboxList({
   onSelect: (item: InboxItem) => void;
   onAction: (id: string) => void;
   onOpenArchived: () => void;
+  scrollRequest: { itemId: string; sequence: number } | null;
 }) {
   const { t } = useT("inbox");
   // Virtuoso's `customScrollParent` wants the actual HTMLElement, not a ref.
   // A callback ref into state hands the element over once it mounts and
   // triggers the re-render that lets Virtuoso attach to it.
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
   const isArchivedView = view === "archived";
+  const scrollTargetIndex = scrollRequest
+    ? items.findIndex((item) => item.id === scrollRequest.itemId)
+    : -1;
+  const scrollRequestSequence = scrollRequest?.sequence;
+
+  useEffect(() => {
+    if (!scrollEl || scrollTargetIndex < 0) return;
+    if (scrollEl.scrollHeight <= scrollEl.clientHeight) return;
+    virtuosoRef.current?.scrollToIndex({
+      index: scrollTargetIndex,
+      align: "start",
+      behavior: "smooth",
+    });
+  }, [scrollEl, scrollTargetIndex, scrollRequestSequence]);
 
   // The entry into the archive sits below the last row and scrolls with the
   // list (same placement as chat's). Virtuoso mounts it via `components.Footer`,
@@ -124,6 +141,7 @@ export function InboxList({
       <div className="px-2 py-1">
         {scrollEl ? (
           <Virtuoso
+            ref={virtuosoRef}
             customScrollParent={scrollEl}
             data={items}
             computeItemKey={computeItemKey}
