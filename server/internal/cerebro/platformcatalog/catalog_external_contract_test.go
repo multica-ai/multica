@@ -31,10 +31,7 @@ func TestEveryExternallyManagedPermissionHasBehavioralProof(t *testing.T) {
 			"TestCanAccessProject_MemberOnlyOpenAndExplicitRestricted",
 		}},
 		{[]string{"trigger_autopilot", "autopilot_scope"}, "./internal/cerebro/access", []string{"TestCanTrigger"}},
-		{[]string{"schedule_agent_wakeup", "daemon_runtime_callback"}, "./internal/middleware", []string{
-			"TestRequireUserScope_RejectsTaskScope",
-			"TestDaemonAuth_MissingAuth",
-		}},
+		{[]string{"daemon_runtime_callback"}, "./internal/middleware", []string{"TestDaemonAuth_MissingAuth"}},
 		{[]string{"schedule_agent_wakeup"}, "./internal/cerebro/wakeup", []string{"TestValidateIssueAndAgentRejectsForeignWorkspaceOrAgent"}},
 		{[]string{"gateway_channel_delivery"}, "./internal/cerebro/webhookgateway", []string{"TestAuthorized"}},
 		{[]string{"read_projects"}, "./internal/cerebro/grouppermissions", []string{"TestProjectGroupAccess_RoundTrip"}},

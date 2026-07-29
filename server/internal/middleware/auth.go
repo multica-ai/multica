@@ -95,7 +95,7 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 					return
 				}
 				// CEREBRO-PATCH(property-task-routes): attach the existing task-scope
-				// context so the route allowlist can bind property writes to one issue.
+				// CEREBRO-PATCH(task-scope-hotfix): keep resource-bound routes restricted during FIR-4076.
 				task, err := queries.GetAgentTask(r.Context(), tt.TaskID)
 				if err != nil || task.AgentID != tt.AgentID {
 					slog.Warn("auth: task token binding is invalid", "path", r.URL.Path, "error", err)
