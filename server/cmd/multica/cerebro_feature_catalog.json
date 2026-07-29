@@ -918,6 +918,13 @@
       "default": true
     },
     {
+      "key": "cerebro_company_brain_migration_census",
+      "label": "Company Brain migration census",
+      "description": "Enable the temporary read-only Company Brain identity and policy census for connection managers. Calls remain subject to the requesting member's connection-tool permissions. FIR-3924.",
+      "group": "agents",
+      "default": false
+    },
+    {
       "key": "cerebro_api_connection_tools",
       "label": "API connection tools for agents",
       "description": "Expose an api-type Workspace connection's endpoints as tools agents can call. Calls are dispatched server-side, so credentials stay on the backend and never reach the agent. Off by default because it opens external endpoints to agents; turn on per workspace to let agents use connections like the Infisical secrets API. Requires the connection's tool-policy to also allow the agent. FIR-2273.",

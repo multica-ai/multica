@@ -149,10 +149,10 @@ describe("CerebroAgentPromptSnapshotTab", () => {
     mockHappyPath();
     renderTab();
 
-    expect((await screen.findAllByText("agent_identity")).length).toBeGreaterThan(0);
-    expect(screen.getAllByText("task_prompt").length).toBeGreaterThan(0);
-    // Layer content is rendered.
+    expect((await screen.findAllByText("Role & instructions")).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Case itself").length).toBeGreaterThan(0);
     expect(screen.getByText(/You are Kathrine\./)).toBeInTheDocument();
+    await userEvent.click(screen.getByRole("button", { name: /case itself/i }));
     expect(screen.getByText(/Fix the login redirect\./)).toBeInTheDocument();
   });
 
@@ -160,10 +160,9 @@ describe("CerebroAgentPromptSnapshotTab", () => {
     mockHappyPath();
     renderTab();
 
-    await screen.findAllByText("task_prompt");
-    // The user_prompt delivery is labelled as delivered user text, not as a
-    // native system prompt.
-    expect(screen.getAllByText(/user text/i).length).toBeGreaterThan(0);
+    await screen.findAllByText("Case itself");
+    await userEvent.click(screen.getByRole("button", { name: /case itself/i }));
+    expect(screen.getAllByText(/user message/i).length).toBeGreaterThan(0);
   });
 
   it("renders an honest empty state when no snapshots exist", async () => {
@@ -171,19 +170,19 @@ describe("CerebroAgentPromptSnapshotTab", () => {
     renderTab();
 
     expect(
-      await screen.findByText(/no prompt snapshots recorded/i),
+      await screen.findByText(/no recorded run exists yet/i),
     ).toBeInTheDocument();
   });
 
-  it("keeps After proposal and Diff honest while preview is not built", async () => {
+  it("keeps pending comparison honest when no proposal exists", async () => {
     mockHappyPath();
     renderTab();
 
-    await screen.findAllByText("agent_identity");
-    const afterTab = screen.getByRole("button", { name: /after proposal/i });
+    await screen.findAllByText("Role & instructions");
+    const afterTab = screen.getByRole("button", { name: /pending change approved/i });
     await userEvent.click(afterTab);
     expect(
-      screen.getByText(/preview of a pending proposal is not available yet/i),
+      screen.getByText(/no pending configuration change exists/i),
     ).toBeInTheDocument();
   });
 
@@ -191,7 +190,7 @@ describe("CerebroAgentPromptSnapshotTab", () => {
     mockHappyPath();
     renderTab();
 
-    await screen.findAllByText("agent_identity");
+    await screen.findAllByText("Role & instructions");
     // Both hashes are distinguishable: original vs redacted view.
     expect(screen.getByText(/original/i)).toBeInTheDocument();
     await waitFor(() =>

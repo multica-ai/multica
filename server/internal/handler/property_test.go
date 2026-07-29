@@ -13,7 +13,9 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 
+	"github.com/multica-ai/multica/server/internal/events"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func makePropertyDef(propType string, options []PropertyOption) db.IssueProperty {
@@ -336,6 +338,59 @@ func TestIssuePropertyValues(t *testing.T) {
 	json.NewDecoder(wdel.Body).Decode(&afterDelete)
 	if _, present := afterDelete.Properties[sel.ID]; present {
 		t.Fatalf("value not removed: %v", afterDelete.Properties)
+	}
+}
+
+func TestIssuePropertyEventUsesIssueAudience(t *testing.T) {
+	property := createTestProperty(t, map[string]any{
+		"name": "PrivateValue" + uuid.NewString()[:8],
+		"type": "text",
+	})
+	ctx := context.Background()
+	var issueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			number, is_private
+		)
+		VALUES (
+			$1, 'private property event', 'todo', 'none', 'member', $2,
+			COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1,
+			true
+		)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
+		t.Fatalf("create private issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	var got events.Event
+	testHandler.Bus.Subscribe(protocol.EventIssuePropertiesChanged, func(event events.Event) {
+		payload, _ := event.Payload.(map[string]any)
+		if payload["issue_id"] == issueID {
+			got = event
+		}
+	})
+
+	if rec := setIssuePropertyRaw(t, issueID, property.ID, "secret"); rec.Code != http.StatusOK {
+		t.Fatalf("set property: expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if got.Type == "" {
+		t.Fatal("property event was not published")
+	}
+	if got.AudienceUserIDs == nil {
+		t.Fatal("private issue property event was broadcast to the workspace")
+	}
+	foundCreator := false
+	for _, userID := range got.AudienceUserIDs {
+		if userID == testUserID {
+			foundCreator = true
+		}
+	}
+	if !foundCreator {
+		t.Fatalf("private issue creator missing from event audience: %v", got.AudienceUserIDs)
 	}
 }
 

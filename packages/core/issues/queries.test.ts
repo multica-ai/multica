@@ -274,6 +274,21 @@ describe("issueListOptions", () => {
       });
     }
   });
+
+  it("passes custom-property filters through every status page request", async () => {
+    const listIssues = vi
+      .fn<(params?: ListIssuesParams) => Promise<ListIssuesResponse>>()
+      .mockResolvedValue({ issues: [], total: 0 });
+    installFakeApi({ listIssues });
+    const properties = { "property-1": ["option-1"] };
+
+    await qc.fetchQuery(issueListOptions(WS_ID, { properties }));
+
+    expect(listIssues).toHaveBeenCalled();
+    for (const call of listIssues.mock.calls) {
+      expect(call[0]).toMatchObject({ properties });
+    }
+  });
 });
 
 describe("myIssueListOptions property sorting", () => {

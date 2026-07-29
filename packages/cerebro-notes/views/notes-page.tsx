@@ -67,6 +67,7 @@ import {
   ReadonlyContent,
 } from "@multica/views/editor";
 import { EditorImageTray } from "@multica/cerebro-composer";
+import { EditorFormattingToolbar } from "@multica/cerebro-ui";
 import { api } from "@multica/core/api";
 import { useFileUpload } from "@multica/core/hooks/use-file-upload";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -1592,6 +1593,12 @@ export function NoteEditor({
                   <span>{presenceLabel(live.peers)}</span>
                 </div>
               )}
+              <EditorFormattingToolbar
+                editor={editor}
+                onCommentOnSelection={
+                  commentsEnabled ? startCommentOnSelection : undefined
+                }
+              />
               <EditorImageTray
                 key={`${note.id}:${replaceToken}`}
                 ref={editorRef}
@@ -1600,6 +1607,7 @@ export function NoteEditor({
                 onUploadFile={uploadWithToast}
                 onBlur={() => saveBody(editorRef.current?.getMarkdown() ?? "")}
                 onEditorReady={setEditor}
+                showBubbleMenu={false}
                 onCommentOnSelection={
                   commentsEnabled ? startCommentOnSelection : undefined
                 }

@@ -72,7 +72,7 @@ export function AgentContextFieldDiff({
 
       {changed.map((r) => (
         <div key={r.key} className="space-y-1">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-foreground">
+          <div className="text-xs font-semibold uppercase tracking-wide text-foreground">
             {r.label}
           </div>
           <AgentContextDiffView
@@ -85,7 +85,7 @@ export function AgentContextFieldDiff({
       ))}
 
       {unchanged.length > 0 && (
-        <div className="text-[11px] text-muted-foreground">
+        <div className="text-xs text-muted-foreground">
           Unchanged: {unchanged.map((r) => r.label).join(", ")}
         </div>
       )}

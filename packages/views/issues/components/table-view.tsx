@@ -666,13 +666,17 @@ export function TableView({
   const updateIssueMutation = useUpdateIssue();
   const selection = useIssueSelectionStore();
   const { getActorName } = useActorName();
-  const { data: properties = [] } = useQuery(propertyListOptions(wsId));
+  const { data: properties = [] } = useQuery(propertyListOptions(wsId, true));
   const propertyById = useMemo(
     () => new Map(properties.map((property) => [property.id, property])),
     [properties],
   );
-  const activePropertyIds = useMemo(
+  const knownPropertyIds = useMemo(
     () => new Set(properties.map((property) => property.id)),
+    [properties],
+  );
+  const activeProperties = useMemo(
+    () => properties.filter((property) => !property.archived),
     [properties],
   );
   const tableColumns = useViewStore((state) => state.tableColumns ?? []);
@@ -698,7 +702,7 @@ export function TableView({
 
   const groupingPropertyId = propertyIdFromViewKey(tableGrouping);
   const effectiveTableGrouping =
-    groupingPropertyId && !activePropertyIds.has(groupingPropertyId)
+    groupingPropertyId && !knownPropertyIds.has(groupingPropertyId)
       ? "none"
       : tableGrouping;
 
@@ -747,9 +751,9 @@ export function TableView({
     () =>
       tableColumns.filter((column) => {
         const propertyId = propertyIdFromViewKey(column.key);
-        return !propertyId || activePropertyIds.has(propertyId);
+        return !propertyId || knownPropertyIds.has(propertyId);
       }),
-    [activePropertyIds, tableColumns],
+    [knownPropertyIds, tableColumns],
   );
 
   const displayRows = useMemo(
@@ -1054,7 +1058,7 @@ export function TableView({
         enableResizing: false,
         header: () => (
           <TableColumnPicker
-            properties={properties}
+            properties={activeProperties}
             trigger={
               <button
                 type="button"
@@ -1139,7 +1143,7 @@ export function TableView({
       );
       // fetchQuery bypasses the options' `select`, so unwrap the response.
       const exportProperties = needsPropertyCatalog
-        ? (await queryClient.fetchQuery(propertyListOptions(wsId))).properties
+        ? (await queryClient.fetchQuery(propertyListOptions(wsId, true))).properties
         : [];
       const exportPropertyById = new Map(
         exportProperties.map((property) => [property.id, property]),

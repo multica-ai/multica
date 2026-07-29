@@ -85,12 +85,19 @@ type CreateChangeRequestRequest struct {
 	// Convenience overrides applied on top of the current snapshot when
 	// ProposedSnapshot is absent.
 	Instructions  *string `json:"instructions"`
+	RuntimeID     *string `json:"runtime_id"`
 	Model         *string `json:"model"`
 	ThinkingLevel *string `json:"thinking_level"`
 	// SystemPromptMode sets how the prompt reaches the model (append|replace|
 	// prepend); empty restores the runtime default. FIR-3212. It is stored inside
 	// runtime_config, so this is a typed shortcut past hand-editing that blob.
 	SystemPromptMode *string `json:"system_prompt_mode"`
+	// SpeedMode, MaxTurns and TimeoutMinutes are typed shortcuts for the
+	// versioned run settings stored in runtime_config. Zero/default removes the
+	// key and inherits the selected session Mode profile.
+	SpeedMode      *string `json:"speed_mode"`
+	MaxTurns       *int    `json:"max_turns"`
+	TimeoutMinutes *int    `json:"timeout_minutes"`
 	// WorkspaceBriefMode ("off") and ToolsBriefMode ("summary") configure the
 	// two largest layers of the injected brief; empty or "full" restores the
 	// default. FIR-3212. Stored inside runtime_config like SystemPromptMode.
@@ -253,6 +260,29 @@ func (h *Handler) agentProvider(r *http.Request, agentID pgtype.UUID) string {
 		return ""
 	}
 	return provider
+}
+
+// snapshotProvider validates a proposed Engine and resolves the provider used
+// for every provider-dependent setting in the same snapshot. Historical
+// snapshots omit runtime_id; applying one preserves the live Engine.
+func (h *Handler) snapshotProvider(w http.ResponseWriter, r *http.Request, agent cerebrodb.Agent, snap ContextSnapshot) (string, bool) {
+	if snap.RuntimeID == "" {
+		return h.agentProvider(r, agent.ID), true
+	}
+	runtimeID, err := util.ParseUUID(snap.RuntimeID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid runtime_id")
+		return "", false
+	}
+	provider, err := h.Svc.Cerebro.GetAgentContextRuntimeProvider(r.Context(), cerebrodb.GetAgentContextRuntimeProviderParams{
+		ID:          runtimeID,
+		WorkspaceID: agent.WorkspaceID,
+	})
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "runtime_id is not available in this workspace")
+		return "", false
+	}
+	return provider, true
 }
 
 // validateSnapshotSystemPromptMode rejects a snapshot whose mode the agent's own
@@ -469,6 +499,9 @@ func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 		if req.Instructions != nil {
 			snap.Instructions = *req.Instructions
 		}
+		if req.RuntimeID != nil {
+			snap.RuntimeID = *req.RuntimeID
+		}
 		if req.Model != nil {
 			snap.Model = *req.Model
 		}
@@ -521,6 +554,30 @@ func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 			}
 			snap = updated
 		}
+		if req.SpeedMode != nil {
+			updated, err := WithSpeedMode(snap, *req.SpeedMode)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			snap = updated
+		}
+		if req.MaxTurns != nil {
+			updated, err := WithMaxTurns(snap, *req.MaxTurns)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			snap = updated
+		}
+		if req.TimeoutMinutes != nil {
+			updated, err := WithTimeoutMinutes(snap, *req.TimeoutMinutes)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, err.Error())
+				return
+			}
+			snap = updated
+		}
 	}
 
 	// FIR-3805: an "always on" id only means something for a skill that is still
@@ -536,14 +593,25 @@ func (h *Handler) CreateChangeRequest(w http.ResponseWriter, r *http.Request) {
 	// unknown mode — or one this agent's runtime cannot honour — being stored,
 	// versioned, approved, and then silently dropped at run time: the failure
 	// FIR-3212 exists to remove.
-	if !h.validateSnapshotSystemPromptMode(w, r, agent.ID, snap) {
+	provider, ok := h.snapshotProvider(w, r, agent, snap)
+	if !ok {
 		return
+	}
+	if mode, present := rawSystemPromptMode(snap); present {
+		if err := ValidateSystemPromptModeForProvider(provider, mode); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 	}
 	// FIR-3212: same chokepoint for the brief-layer modes — the proposed_snapshot
 	// path and a raw runtime_config override both bypass the With* writers. No
 	// provider dimension: the layers render identically for every provider, so
 	// only the vocabulary can be wrong.
 	if err := ValidateSnapshotBriefLayerModes(snap); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := ValidateSnapshotRuntimeSettings(provider, snap); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}

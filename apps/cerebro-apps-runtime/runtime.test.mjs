@@ -26,6 +26,27 @@ const DEADLINE_TEST_TIMEOUT_MS = 30_000;
 
 const DEFAULT_BACKEND = `export default async (input) => ({ formatted: String(input.value).toUpperCase(), leaked: process.env.FIRTAL_REGISTRY_KEY ?? null, grantLeaked: input.grant_token ?? null });`;
 
+test("built-in Allergen Formatter returns ingredients when the AI omits formatted_ingredients", async () => {
+  const backendURL = new URL("../../server/internal/cerebro/apps/builtin/allergen/backend/index.mjs", import.meta.url);
+  const { default: formatAllergens } = await import(backendURL);
+  const multica = {
+    connections: {
+      call: async () => ({
+        choices: [{
+          message: {
+            content: JSON.stringify({ allergens: ["milk"] }),
+          },
+        }],
+      }),
+    },
+  };
+
+  assert.deepEqual(
+    await formatAllergens({ ingredients: "wheat flour, milk" }, multica),
+    { formatted_ingredients: "wheat flour, MILK", allergens: ["MILK"] },
+  );
+});
+
 async function fixture(backendSource = DEFAULT_BACKEND) {
   const root = await mkdtemp(join(tmpdir(), "multica-app-runtime-"));
   const version = join(root, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "1.0.0");
@@ -166,7 +187,7 @@ test("allergen fixture loads a CSP-safe client that obtains a personal token bef
   const runtime = createAppsRuntime({ bundleRoot: fixtureRoot, workerIsolation: "process" });
   const page = await runtime.fetch(new Request("http://runtime/apps/f1540000-0000-4154-8154-000000000001/1.0.0/"));
   const html = await page.text();
-  assert.match(html, /<script type="module" src="\.\/app\.js"><\/script>/);
+  assert.match(html, /<script type="module" src="\.\/app\.js" crossorigin="use-credentials"><\/script>/);
   assert.doesNotMatch(html, /<script>[^<]/);
 
   const script = await runtime.fetch(new Request("http://runtime/apps/f1540000-0000-4154-8154-000000000001/1.0.0/app.js"));

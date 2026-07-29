@@ -90,24 +90,44 @@ vi.mock("@multica/views/editor", () => ({
       props: {
         defaultValue?: string;
         onUpdate?: (markdown: string) => void;
+        onEditorReady?: (editor: unknown) => void;
+        showBubbleMenu?: boolean;
       },
       ref: React.ForwardedRef<{ getMarkdown: () => string }>,
     ) => {
       const [value, setValue] = React.useState(props.defaultValue ?? "");
+      React.useEffect(() => {
+        props.onEditorReady?.({ state: { selection: { empty: true } } });
+        // The real ContentEditor reports its stable editor instance once.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+      }, []);
       React.useImperativeHandle(ref, () => ({
         getMarkdown: () => value,
       }));
       return (
-        <textarea
-          aria-label="Markdown editor"
-          value={value}
-          onChange={(event) => {
-            setValue(event.target.value);
-            props.onUpdate?.(event.target.value);
-          }}
-        />
+        <>
+          <span data-testid="bubble-menu-setting">
+            {String(props.showBubbleMenu)}
+          </span>
+          <textarea
+            aria-label="Markdown editor"
+            value={value}
+            onChange={(event) => {
+              setValue(event.target.value);
+              props.onUpdate?.(event.target.value);
+            }}
+          />
+        </>
       );
     },
+  ),
+}));
+
+vi.mock("@multica/cerebro-ui", () => ({
+  EditorFormattingToolbar: ({ editor }: { editor: unknown }) => (
+    <div role="toolbar" aria-label="Formatting toolbar">
+      {editor ? "Ready" : "Loading"}
+    </div>
   ),
 }));
 
@@ -170,6 +190,10 @@ describe("DocumentViewPage markdown body", () => {
     ).not.toBeInTheDocument();
     // Google-Docs style: no Save button — editing autosaves.
     expect(screen.queryByText("Save")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("toolbar", { name: "Formatting toolbar" }),
+    ).toHaveTextContent("Ready");
+    expect(screen.getByTestId("bubble-menu-setting")).toHaveTextContent("false");
 
     fireEvent.change(screen.getByLabelText("Markdown editor"), {
       target: { value: "# Readme\n\nChanged body" },

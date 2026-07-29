@@ -50,18 +50,31 @@ export const visionPlanItemSchema = z.object({
   part_label: z.string().optional(), owner_type: z.enum(["member", "agent"]).optional(), owner_id: z.string().optional(), owner_name: z.string().optional(),
   position: z.number().int(), state: z.enum(["active", "archived"]).catch("active"),
   goal_connections: z.array(z.object({ connection_id: z.string(), goal_id: z.string() })).default([]),
+  links: z.array(z.object({
+    connection_id: z.string(), target_type: z.enum(["project", "issue"]), target_id: z.string(),
+    title: z.string().default(""), identifier: z.string().default(""),
+  })).default([]),
   created_at: z.string(), updated_at: z.string(),
 });
 export const visionPlanSectionSchema = z.object({
   id: z.string(), workspace_id: z.string(), key: z.string(), name: z.string(),
-  section_type: z.enum(["list", "structured", "process"]).catch("list"), position: z.number().int(),
+  section_type: z.enum(["list", "structured", "process", "goals"]).catch("list"), position: z.number().int(),
+  page_id: z.string().default(""), column_index: z.number().int().min(0).catch(0),
   items: z.array(visionPlanItemSchema).default([]), created_at: z.string(), updated_at: z.string(),
 });
-export const visionPlanSchema = z.object({ sections: z.array(visionPlanSectionSchema) });
+export const visionPlanPageSchema = z.object({
+  id: z.string(), workspace_id: z.string(), key: z.string(), name: z.string(),
+  column_count: z.number().int().min(1).max(3).catch(3), position: z.number().int().catch(0),
+  created_at: z.string().default(""), updated_at: z.string().default(""),
+});
+export const visionPlanSchema = z.object({
+  pages: z.array(visionPlanPageSchema).nullable().optional().transform((value) => value ?? []),
+  sections: z.array(visionPlanSectionSchema),
+});
 const health = fallbackEnum(["on_track", "at_risk", "off_track", "unset", "unknown"] as const, "unknown");
 const reportedHealth = fallbackEnum(["on_track", "at_risk", "off_track", "unset"] as const, "unset");
 const rockProjectSchema = z.object({ id: z.string(), title: z.string(), issue_count: z.number().int().min(0), done_issue_count: z.number().int().min(0) });
-const rockIssueSchema = z.object({ id: z.string(), identifier: z.string(), title: z.string(), status: z.string(), project_id: z.string().optional(), project_title: z.string().optional() });
+const rockIssueSchema = z.object({ id: z.string(), identifier: z.string(), title: z.string(), status: z.string(), project_id: z.string().optional(), project_title: z.string().optional(), parent_id: z.string().optional() });
 export const rockCheckInSchema = z.object({
   id: z.string(), confidence: z.number().min(0).max(100), reported_health: health, note: z.string().default(""),
   created_by_type: z.string(), created_by_id: z.string(), created_at: z.string(),
@@ -134,5 +147,5 @@ export const EMPTY_GOAL_TYPES = { goal_types: [] };
 export const EMPTY_CONNECTIONS = { connections: [] };
 export const EMPTY_MEETING = { workspace_id: "", cadence_unit: "manual" as const, cadence_count: 1, agenda: [], available_note_types: [] };
 export const EMPTY_ORG_CHART = { seats: [] };
-export const EMPTY_VISION_PLAN = { sections: [] };
+export const EMPTY_VISION_PLAN = { pages: [], sections: [] };
 export const DEFAULT_SETTINGS = { workspace_id: "", terminology: { ...DEFAULT_TERMINOLOGY } };

@@ -142,6 +142,58 @@ export const TestResultSchema = z
 
 export type TestResult = z.infer<typeof TestResultSchema>;
 
+const CompanyBrainClaimSchema = z
+  .object({
+    write_source: z.string(),
+    allowed_read_sources: z.array(z.string()).default([]),
+  })
+  .loose();
+
+const CompanyBrainSourceSchema = z
+  .object({
+    connection_id: z.string(),
+    connection_name: z.string(),
+    claim: CompanyBrainClaimSchema.optional(),
+    tool_access: z.array(z.object({
+      tool: z.string(),
+      decision: z.enum(["allow", "ask", "deny"]).catch("deny"),
+    }).loose()).default([]),
+    status: z.enum(["verified", "unverifiable"]).catch("unverifiable"),
+    error_code: z.string().optional(),
+  })
+  .loose();
+
+export const CompanyBrainMigrationCensusSchema = z
+  .object({
+    generated_at: z.string(),
+    actors: z.array(z.object({
+      agent_id: z.string(),
+      name: z.string(),
+      status: z.string(),
+      sources: z.array(CompanyBrainSourceSchema).default([]),
+    }).loose()).default([]),
+    automations: z.array(z.object({
+      automation_id: z.string(),
+      title: z.string(),
+      status: z.string(),
+      assignee_type: z.string(),
+      assignee_id: z.string().optional(),
+      trigger_kinds: z.array(z.string()).default([]),
+      sources: z.array(CompanyBrainSourceSchema).default([]),
+    }).loose()).default([]),
+    connections: z.array(CompanyBrainSourceSchema).default([]),
+    references: z.array(z.object({
+      owner_type: z.string(),
+      owner_id: z.string(),
+      owner_name: z.string(),
+      field: z.string(),
+      reference: z.string(),
+    }).loose()).default([]),
+  })
+  .loose();
+
+export type CompanyBrainMigrationCensus = z.infer<typeof CompanyBrainMigrationCensusSchema>;
+
 // ---------------------------------------------------------------------------
 // Query keys
 // ---------------------------------------------------------------------------

@@ -198,8 +198,33 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.kind, i.metadata, i.properties
 FROM issue i
+LEFT JOIN project p ON p.id = i.project_id
 WHERE i.workspace_id = $1
   AND i.kind = 'issue'
+  AND (
+    sqlc.arg('is_admin')::boolean
+    OR (
+      i.project_id IS NULL AND (
+        i.is_private = FALSE
+        OR (i.creator_type = 'member' AND i.creator_id = sqlc.arg('user_id')::uuid)
+      )
+    )
+    OR (
+      i.project_id IS NOT NULL AND (
+        p.access = 'workspace'
+        OR EXISTS (
+          SELECT 1 FROM project_member pm
+          WHERE pm.project_id = p.id AND pm.user_id = sqlc.arg('user_id')::uuid
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM cerebro_project_group_member pgm
+          JOIN cerebro_group_member gm ON gm.group_id = pgm.group_id
+          WHERE pgm.project_id = p.id AND gm.user_id = sqlc.arg('user_id')::uuid
+        )
+      )
+    )
+  )
   AND i.status NOT IN ('done', 'cancelled')
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))

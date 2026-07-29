@@ -25,7 +25,7 @@ export function AgentContextSnapshotView({ snapshot, exclude = [] }: Props) {
     <div className="space-y-2.5">
       {fields.map((f) => (
         <div key={f.key}>
-          <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          <div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
             {f.label}
           </div>
           {f.value ? (

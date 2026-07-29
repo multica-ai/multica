@@ -103,7 +103,14 @@ func (h *Handler) VerifyInternalAgentBrowser(w http.ResponseWriter, r *http.Requ
 		credential = vaultCredential
 		if err != nil {
 			h.auditPersonalBrowser(wsID, agentID, target.Host(), "internal-agent-browser-verify", "deny", "credential unavailable")
-			writeError(w, http.StatusBadGateway, "credential unavailable")
+			// Not 502: Cloudflare replaces a 502 body with its own error page, so
+			// the caller would see no diagnostics at all. 422 matches the failed-
+			// verification contract and keeps the stage/cause readable.
+			writeJSON(w, http.StatusUnprocessableEntity, map[string]string{
+				"error":         "credential unavailable",
+				"failure_stage": "credential",
+				"failure_cause": "unavailable",
+			})
 			return
 		}
 	}

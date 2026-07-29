@@ -214,7 +214,7 @@ export function AgentContextChangeRequestQueue({
                       {req.title}
                     </span>
                     <span
-                      className={`rounded-full px-1.5 py-0.5 text-[10px] font-medium ${STATUS_CLASS[req.status]}`}
+                      className={`rounded-full px-1.5 py-0.5 text-xs font-medium ${STATUS_CLASS[req.status]}`}
                     >
                       {STATUS_LABEL[req.status]}
                     </span>

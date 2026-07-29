@@ -139,6 +139,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler import
 	cerebroconnections "github.com/multica-ai/multica/server/internal/cerebro/connections"
+	// CEREBRO-PATCH(company-brain-migration-census): FIR-3924 protected, read-only source-claim census import.
+	cerebrocompanybraincensus "github.com/multica-ai/multica/server/internal/cerebro/companybraincensus"
 	// CEREBRO-PATCH(cerebro-connection-tools-routes): FIR-2273 api-type connection tools for the Multica MCP server (import).
 	cerebroconnectiontools "github.com/multica-ai/multica/server/internal/cerebro/connectiontools"
 	// CEREBRO-PATCH(workspace-copy-routes): TECH-3582 non-destructive workspace copy handler import
@@ -604,6 +606,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// surface to a single line per cerebro inbox feature.
 	// CEREBRO-PATCH(cerebro-inbox-realtime): FIR-2394 event bus fans inbox metadata mutations out to other sessions; FIR-2385 task service backs the owner-run endpoint.
 	cerebroInboxHandler := cerebroinbox.New(queries, cerebroQueries, bus, h.TaskService)
+	// CEREBRO-PATCH(dead-failed-runs-access): FIR-3901 — failed-run endpoints reuse the upstream per-issue access rule.
+	cerebroInboxHandler.IssueAccess = h.CerebroIssueAccessGate()
+	cerebroInboxHandler.VisibleIssues = h.CerebroVisibleIssuesFilter()
 	cerebroNoteHandler := cerebronote.New(queries, cerebroQueries, bus, h.TaskService) // CEREBRO-PATCH(cerebro-notes-handler): TECH-3421 Notes + FIR-1621 send-to-agent dispatch.
 	// CEREBRO-PATCH(cerebro-note-collab): FIR-1317 live co-editing rooms; reuses the Notes see/edit rules.
 	cerebroCollabHandler := cerebrocollab.New(pool, cerebronote.CollabAccess{Cerebro: cerebroQueries})
@@ -642,6 +647,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	cerebroWorkspaceCopyHandler := cerebroworkspacecopy.NewHandler(pool, store)
 	// CEREBRO-PATCH(cerebro-connections-routes): TECH-3108 workspace connection registry handler.
 	cerebroConnectionsHandler := cerebroconnections.NewHandler(pool)
+	cerebroCompanyBrainCensusHandler := cerebrocompanybraincensus.NewHandler(queries, cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries) // CEREBRO-PATCH(company-brain-migration-census): FIR-3924 report uses Connections, policy, and its default-off workspace flag.
 	h.ConnectionsInjector = cerebroConnectionsHandler.Store // CEREBRO-PATCH(cerebro-connections-mcp-merge): wire injector for claim-time MCP config merge.
 	// CEREBRO-PATCH(cerebro-api-connection-resolver): FIR-2388 shared api-connection tool resolver — one filter for the local MCP handler and the claim brief (cloud gateway builds its own from the same stores).
 	cerebroAPIConnResolver := cerebroruntime.NewAPIConnectionResolver(cerebroConnectionsHandler.Store, cerebrotoolpolicy.NewStore(pool), cerebroQueries, nil)
@@ -1407,6 +1413,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Use(h.RequireConnectionsManagePolicy("id"))
+					r.Get("/connections/company-brain-migration-census", cerebroCompanyBrainCensusHandler.Get) // CEREBRO-PATCH(company-brain-migration-census): FIR-3924 non-mutating census is visible only to connection managers.
 					r.Post("/connections", cerebroConnectionsHandler.Create)
 					r.Post("/connections/test", cerebroConnectionsHandler.Test) // connection reachability + MCP tool discovery.
 					r.Put("/connections/{connId}", cerebroConnectionsHandler.Update)

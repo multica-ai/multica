@@ -135,3 +135,73 @@ func TestAllergenFormatterInstallsIdempotentlyInTwoWorkspacesDB(t *testing.T) {
 		t.Fatalf("idempotent installs started %d deployments, want 2", len(runtime.deployments))
 	}
 }
+
+func TestAllergenFormatterUpgradesAnExistingOlderBuiltinDB(t *testing.T) {
+	fixture := newAppAccessFixture(t)
+	runtime := &successfulAppRuntime{}
+	fixture.handler.runtime = runtime
+	appID := uuid.New()
+
+	_, err := fixture.pool.Exec(context.Background(), `
+		INSERT INTO cerebro_app(id,workspace_id,slug,name,owner_id,current_version,status)
+		VALUES($1,$2,'allergen-formatter','Allergen Formatter',$3,'1.0.2','published')
+	`, appID, fixture.workspaceID, fixture.appOwnerID)
+	if err == nil {
+		_, err = fixture.pool.Exec(context.Background(), `
+		INSERT INTO cerebro_app_version(app_id,version,content_snapshot,release_notes,created_by)
+		VALUES($1,'1.0.2','{}','Previous built-in release',$2)
+		`, appID, fixture.appOwnerID)
+	}
+	if err == nil {
+		_, err = fixture.pool.Exec(context.Background(), `
+		INSERT INTO cerebro_app_deployment(app_id,version,provider,status,bundle_sha256)
+		VALUES($1,'1.0.2','docker','ready','old-bundle')
+		`, appID)
+	}
+	if err != nil {
+		t.Fatalf("seed older Allergen Formatter: %v", err)
+	}
+
+	install := func() *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost, "/api/cerebro/apps/builtins/allergen-formatter/install", strings.NewReader("{}"))
+		request.Header.Set("X-User-ID", fixture.appOwnerID.String())
+		request = request.WithContext(middleware.SetMemberContext(request.Context(), fixture.workspaceID.String(), db.Member{}))
+		response := httptest.NewRecorder()
+		fixture.handler.InstallAllergenFormatter(response, request)
+		return response
+	}
+
+	first := install()
+	if first.Code != http.StatusAccepted {
+		t.Fatalf("upgrade returned %d, want %d: %s", first.Code, http.StatusAccepted, first.Body.String())
+	}
+	if len(runtime.deployments) != 1 || runtime.deployments[0].Version != allergenFormatterVersion {
+		t.Fatalf("upgrade deployments = %#v, want one deployment of %s", runtime.deployments, allergenFormatterVersion)
+	}
+
+	var status string
+	var indexHTML []byte
+	err = fixture.pool.QueryRow(context.Background(), `
+		SELECT d.status,f.content
+		FROM cerebro_app_deployment d
+		JOIN cerebro_app_version_file f ON f.app_id=d.app_id AND f.version=d.version
+		WHERE d.app_id=$1 AND d.version=$2 AND f.path='frontend/index.html'
+	`, appID, allergenFormatterVersion).Scan(&status, &indexHTML)
+	if err != nil {
+		t.Fatalf("load upgraded deployment: %v", err)
+	}
+	if status != "provisioning" {
+		t.Fatalf("upgraded deployment status = %q, want provisioning", status)
+	}
+	if !strings.Contains(string(indexHTML), `crossorigin="use-credentials"`) {
+		t.Fatal("upgraded bundle is missing the authenticated module-loading fix")
+	}
+
+	second := install()
+	if second.Code != http.StatusOK {
+		t.Fatalf("repeated upgrade returned %d, want %d: %s", second.Code, http.StatusOK, second.Body.String())
+	}
+	if len(runtime.deployments) != 1 {
+		t.Fatalf("repeated upgrade started %d deployments, want 1", len(runtime.deployments))
+	}
+}
