@@ -180,6 +180,7 @@ func Classify(rawError string) Reason {
 	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
 	case containsAny(lower,
 		"stream disconnected",
+		"response stalled mid-stream",
 		"connection closed",
 		"mid-response",
 		"error sending request",

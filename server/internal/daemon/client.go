@@ -396,7 +396,7 @@ func (c *Client) ReportTaskUsage(ctx context.Context, taskID string, usage []Tas
 	}, nil)
 }
 
-func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string, sessionRolloutMissing bool) error {
+func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDir, failureReason string, observedToolCalls *int32, sessionRolloutMissing bool) error {
 	body := map[string]any{"error": errMsg}
 	if sessionID != "" {
 		body["session_id"] = sessionID
@@ -406,6 +406,9 @@ func (c *Client) FailTask(ctx context.Context, taskID, errMsg, sessionID, workDi
 	}
 	if failureReason != "" {
 		body["failure_reason"] = failureReason
+	}
+	if observedToolCalls != nil {
+		body["observed_tool_calls"] = *observedToolCalls
 	}
 	if sessionRolloutMissing {
 		body["session_rollout_missing"] = true

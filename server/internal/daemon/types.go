@@ -259,6 +259,10 @@ type TaskResult struct {
 	WorkDir       string `json:"work_dir,omitempty"`   // working directory used during execution
 	EnvRoot       string `json:"-"`                    // env root dir for writing GC metadata (not sent to server)
 	FailureReason string `json:"-"`                    // classifier forwarded to FailTask on the blocked path; empty falls back to 'agent_error'
+	// ObservedToolCalls is the number of tool-use events seen during this run.
+	// The fail callback forwards it so the server can retry a run-only
+	// provider-network cut only when the daemon positively observed no tools.
+	ObservedToolCalls int32 `json:"-"`
 	// SessionRolloutMissing is set when the daemon withheld this task's Codex
 	// session because its rollout was not in the store (MUL-5305). Forwarded to
 	// the terminal report so the server clears the resume pointer and flags the

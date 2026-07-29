@@ -280,6 +280,29 @@ func TestTaskFailureClassifiers(t *testing.T) {
 	}
 }
 
+func TestRetryEligibleRunOnlyProviderNetworkRequiresZeroObservedTools(t *testing.T) {
+	task := db.AgentTaskQueue{
+		AutopilotRunID: pgtype.UUID{Valid: true},
+		Attempt:        1,
+		MaxAttempts:    2,
+	}
+	zero := int32(0)
+	one := int32(1)
+
+	if !retryEligibleWithObservedTools("agent_error.provider_network", task, &zero) {
+		t.Fatal("run-only provider-network failure with explicit zero tools should retry")
+	}
+	if retryEligibleWithObservedTools("agent_error.provider_network", task, &one) {
+		t.Fatal("run-only provider-network failure after a tool call must not retry")
+	}
+	if retryEligibleWithObservedTools("agent_error.provider_network", task, nil) {
+		t.Fatal("run-only provider-network failure without tool evidence must fail closed")
+	}
+	if retryEligibleWithObservedTools("timeout", task, &zero) {
+		t.Fatal("run-only timeout is outside the narrow provider-network policy")
+	}
+}
+
 // TestSkillBundleFailureFromLegacyDaemonRetries is the mixed-version
 // regression for MUL-5370. It walks the exact chain FailTask runs for a task
 // an un-upgraded daemon just failed, and asserts the user-visible outcome:

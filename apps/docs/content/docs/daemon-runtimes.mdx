@@ -156,7 +156,7 @@ Multica uses heartbeats to decide whether a runtime is online. Three key numbers
 Missing is not permanent — as soon as the daemon sends another heartbeat it returns to online, and the runtime record is preserved. Restarting the daemon does not lose runtimes.
 
 <Callout type="warning">
-**Tasks running on a missing runtime are marked as failed** (failure reason `runtime_offline`). For retryable sources (issues, chat), Multica automatically requeues them; Autopilot-triggered tasks are not retried automatically. See [Tasks → Which failures retry automatically](/tasks#which-failures-retry-automatically-which-dont).
+**Tasks running on a missing runtime are marked as failed** (failure reason `runtime_offline`). Multica automatically requeues retryable issue and chat tasks. Run-only Autopilots have only the narrower zero-tool provider-network retry described in [Tasks → Which failures retry automatically](/tasks#which-failures-retry-automatically-which-dont).
 </Callout>
 
 ## How many tasks can run in parallel

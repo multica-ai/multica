@@ -141,6 +141,9 @@ type terminalTaskReport struct {
 	sessionID     string
 	workDir       string
 	failureReason string
+	// observedToolCalls is nil for failure paths that never reached the agent
+	// stream. RunTask terminal failures always provide a value, including zero.
+	observedToolCalls *int32
 	// sessionRolloutMissing is true when the daemon withheld this task's Codex
 	// session because its rollout was not in the store (MUL-5305). The server
 	// clears the resume pointer and flags the continuity gap for the next claim.
@@ -3808,6 +3811,7 @@ func (d *Daemon) reportTaskResult(ctx context.Context, taskID string, result Tas
 			sessionID:             result.SessionID,
 			workDir:               result.WorkDir,
 			failureReason:         failureReason,
+			observedToolCalls:     &result.ObservedToolCalls,
 			sessionRolloutMissing: result.SessionRolloutMissing,
 		}); err != nil {
 			taskLog.Error("report failed task failed", "error", err)
@@ -3828,7 +3832,7 @@ func (d *Daemon) reportTerminalTask(parentCtx context.Context, report terminalTa
 	case terminalTaskReportComplete:
 		return d.client.CompleteTask(ctx, report.taskID, report.output, report.branchName, report.sessionID, report.workDir, report.sessionRolloutMissing)
 	case terminalTaskReportFail:
-		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.failureReason, report.sessionRolloutMissing)
+		return d.client.FailTask(ctx, report.taskID, report.errorMessage, report.sessionID, report.workDir, report.failureReason, report.observedToolCalls, report.sessionRolloutMissing)
 	default:
 		return fmt.Errorf("unsupported terminal task report kind %d", report.kind)
 	}
@@ -5131,6 +5135,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// returns (SessionID is already blanked above); reportTaskResult forwards it
 	// as session_rollout_missing on the terminal callback (MUL-5305).
 	defer func() { taskResult.SessionRolloutMissing = sessionRolloutMissing }()
+	defer func() { taskResult.ObservedToolCalls = tools }()
 
 	switch result.Status {
 	case "completed":

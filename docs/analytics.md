@@ -366,7 +366,7 @@ Fires from `autopilot_run` lifecycle changes. `source` is always
 | `duration_ms` | int64 | Terminal events only. |
 | `failure_reason` | string | Failed events only. |
 | `error_type` | string | Failed events only; stable coarse classifier such as `configuration`, `issue_terminal`, `dispatch_error`, `task_error`, or `autopilot_error`. |
-| `will_retry` | bool | Failed events only; currently `false` because autopilot retry cadence is owned by triggers/schedules. |
+| `will_retry` | bool | Failed events only. Terminal run events currently report `false`; a zero-tool provider-network retry keeps the run open and therefore does not emit a failed run event yet. |
 
 ### `issue_executed`
 

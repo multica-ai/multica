@@ -122,6 +122,95 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 	}
 }
 
+func TestAutopilotRunOnlyProviderNetworkRetrySync(t *testing.T) {
+	ctx := context.Background()
+	queries := db.New(testPool)
+	bus := events.New()
+	taskSvc := service.NewTaskService(queries, testPool, nil, bus)
+	autopilotSvc := service.NewAutopilotService(queries, testPool, bus, taskSvc)
+	registerAutopilotListeners(bus, autopilotSvc)
+
+	var agentID string
+	if err := testPool.QueryRow(ctx,
+		`SELECT id::text FROM agent WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name        string
+		tools       int32
+		wantRetry   bool
+		wantRunStat string
+	}{
+		{name: "connection closed before tools retries", tools: 0, wantRetry: true, wantRunStat: "running"},
+		{name: "stalled stream after tool stays terminal", tools: 1, wantRetry: false, wantRunStat: "failed"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ap, err := queries.CreateAutopilot(ctx, db.CreateAutopilotParams{
+				WorkspaceID:        parseUUID(testWorkspaceID),
+				Title:              "Run-only provider network " + tc.name,
+				Description:        pgtype.Text{String: "KAP-1227 regression", Valid: true},
+				AssigneeType:       "agent",
+				AssigneeID:         parseUUID(agentID),
+				Status:             "active",
+				ExecutionMode:      "run_only",
+				IssueTitleTemplate: pgtype.Text{},
+				CreatedByType:      "member",
+				CreatedByID:        parseUUID(testUserID),
+			})
+			if err != nil {
+				t.Fatalf("CreateAutopilot: %v", err)
+			}
+			t.Cleanup(func() {
+				_, _ = testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+			})
+
+			run, err := autopilotSvc.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "schedule", nil)
+			if err != nil {
+				t.Fatalf("DispatchAutopilot: %v", err)
+			}
+			if _, err := testPool.Exec(ctx,
+				`UPDATE agent_task_queue SET status = 'dispatched', dispatched_at = now() WHERE id = $1`,
+				run.TaskID,
+			); err != nil {
+				t.Fatalf("mark task dispatched: %v", err)
+			}
+			if _, err := queries.StartAgentTask(ctx, run.TaskID); err != nil {
+				t.Fatalf("StartAgentTask: %v", err)
+			}
+
+			errMsg := "API Error: Connection closed mid-response."
+			if tc.tools > 0 {
+				errMsg = "API Error: Response stalled mid-stream."
+			}
+			if _, err := taskSvc.FailTaskWithObservedTools(ctx, run.TaskID, errMsg, "session", "/tmp/workdir", "agent_error.provider_network", &tc.tools, false); err != nil {
+				t.Fatalf("FailTaskWithObservedTools: %v", err)
+			}
+
+			var children int
+			if err := testPool.QueryRow(ctx,
+				`SELECT count(*) FROM agent_task_queue WHERE parent_task_id = $1`,
+				run.TaskID,
+			).Scan(&children); err != nil {
+				t.Fatalf("count retry children: %v", err)
+			}
+			if got := children == 1; got != tc.wantRetry {
+				t.Fatalf("retry child present = %v, want %v", got, tc.wantRetry)
+			}
+
+			updated, err := queries.GetAutopilotRun(ctx, run.ID)
+			if err != nil {
+				t.Fatalf("GetAutopilotRun: %v", err)
+			}
+			if updated.Status != tc.wantRunStat {
+				t.Fatalf("run status = %q, want %q", updated.Status, tc.wantRunStat)
+			}
+		})
+	}
+}
+
 // linkedIssueAutopilotFixture is the starting state every create_issue
 // linked-issue listener test shares: a dispatched create_issue run sitting in
 // issue_created with exactly one issue task that carries no autopilot_run_id

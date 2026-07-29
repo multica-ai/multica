@@ -51,18 +51,19 @@ Failures fall into two categories: **retryable** and **non-retryable**.
 - `runtime_offline` — the daemon went missing after the task was dispatched
 - `runtime_recovery` — the daemon crashed and restarted, reclaiming tasks it didn't finish
 - `timeout` — runtime or dispatch timeout
+- `agent_error.provider_network` — the provider stream disconnected or stalled
 
 **Non-retryable** (the task stays in failed):
 
-- `agent_error` — the AI coding tool itself reported an error (API error, quota exceeded, internal bug). Underlying problems aren't retried — that would loop forever.
+- other `agent_error.*` reasons — the AI coding tool or provider reported a durable error (quota, auth, invalid request, internal bug).
 
 Automatic retry also has two extra conditions:
 
-1. **At most 2 attempts** — 1 original + 1 retry. If the retry also fails, no further retries, even if the reason is retryable.
-2. **Only for issue- and chat-triggered tasks** — Autopilot-triggered tasks do **not** retry automatically.
+1. **At most 2 attempts** by default. Provider-network cuts get up to 3 attempts.
+2. **Issue and chat tasks retry normally.** A run-only Autopilot retries only a provider-network cut for which the daemon positively observed zero tool calls.
 
 <Callout type="warning">
-**Autopilot tasks don't retry automatically** by design. An Autopilot has its own firing cadence (e.g. daily); automatic retries on failure would overlap with the next scheduled run. If you need an immediate re-run after failure, use a manual rerun (next section).
+**Autopilot retry is fail-closed.** Once any tool call was observed, a provider-network failure stays terminal because replaying the run could duplicate an external side effect. Older daemons that do not report the tool count also do not enable this retry.
 
 **How you'll know an Autopilot task failed**: a notification lands in your [Inbox](/inbox), and the associated issue's status reverts from `in_progress` back to `todo`. The [Autopilots](/autopilots) page also shows the latest run result per autopilot.
 </Callout>

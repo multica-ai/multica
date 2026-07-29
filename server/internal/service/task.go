@@ -3096,6 +3096,13 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 // (via classifyPoisonedError, the timeout / runtime classifier, etc.)
 // will have their value preserved untouched.
 func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string, sessionRolloutMissing bool) (*db.AgentTaskQueue, error) {
+	return s.FailTaskWithObservedTools(ctx, taskID, errMsg, sessionID, workDir, failureReason, nil, sessionRolloutMissing)
+}
+
+// FailTaskWithObservedTools is the daemon-facing failure path. A non-nil
+// observedToolCalls is positive stream evidence from a current daemon; nil
+// means an older daemon or a failure before the agent stream was observed.
+func (s *TaskService) FailTaskWithObservedTools(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, failureReason string, observedToolCalls *int32, sessionRolloutMissing bool) (*db.AgentTaskQueue, error) {
 	// MUL-2946: synthesise a refined reason from the error text whenever the
 	// caller didn't supply one. This is the last write-path guard against
 	// "agent_error" coarse rows ending up in agent_task_queue.failure_reason
@@ -3133,7 +3140,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
+		} else if retryEligibleWithObservedTools(failureReason, parent, observedToolCalls) {
 			wantRetry = true
 			// Persist the reason-aware effective budget into the child so the
 			// retry chain self-describes (e.g. provider_network → max_attempts=3),
@@ -3421,10 +3428,23 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 // FailTask's in-transaction retry and the orphan sweeper's MaybeRetryFailedTask
 // so both agree on which failures re-run.
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
+	return retryEligibleWithObservedTools(failureReason, t, nil)
+}
+
+// retryEligibleWithObservedTools keeps the historical issue/chat policy and
+// adds one deliberately narrow run-only exception. A provider-network stream
+// cut may retry an autopilot task only when a current daemon positively
+// reports zero tool calls. Any tool may have caused an external side effect,
+// so one or more tools suppress retry. Missing evidence also suppresses retry,
+// making rolling upgrades fail closed.
+func retryEligibleWithObservedTools(failureReason string, t db.AgentTaskQueue, observedToolCalls *int32) bool {
+	runOnlyProviderNetworkSafe := t.AutopilotRunID.Valid &&
+		failureReason == string(taskfailure.ReasonAgentProviderNetwork) &&
+		observedToolCalls != nil && *observedToolCalls == 0
 	return retryableReasons[failureReason] &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
-		!t.AutopilotRunID.Valid &&
-		(t.IssueID.Valid || t.ChatSessionID.Valid)
+		((!t.AutopilotRunID.Valid && (t.IssueID.Valid || t.ChatSessionID.Valid)) ||
+			runOnlyProviderNetworkSafe)
 }
 
 // MaybeRetryFailedTask spawns a fresh queued attempt for a recently-failed
