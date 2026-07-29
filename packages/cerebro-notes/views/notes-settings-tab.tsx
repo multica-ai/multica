@@ -7,6 +7,7 @@ import {
   useFeatureFlagsQuery,
   type CerebroFlagKey,
 } from "@multica/cerebro-feature-flags";
+import { EditorToolbarSettings } from "@multica/cerebro-ui";
 
 // The note features the user can switch on/off (TECH-3637). These flags exist
 // in the registry but had no settings surface, which is why Jesper couldn't
@@ -65,7 +66,7 @@ export function NotesSettingsTab() {
   const isAdmin = role === "owner" || role === "admin";
 
   return (
-    <section className="space-y-4">
+    <section className="space-y-8">
       <div className="space-y-1">
         <h2 className="text-sm font-semibold">Notes</h2>
         <p className="text-xs text-muted-foreground">
@@ -92,6 +93,8 @@ export function NotesSettingsTab() {
           />
         ))}
       </div>
+
+      <EditorToolbarSettings />
     </section>
   );
 }
