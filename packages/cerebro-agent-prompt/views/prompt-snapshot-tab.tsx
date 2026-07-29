@@ -538,7 +538,7 @@ function PromptExplorer({
         </p>
       )}
 
-      <div className="grid min-h-[34rem] overflow-hidden rounded-xl border lg:grid-cols-[19rem_minmax(0,1fr)]">
+      <div className="flex min-h-[34rem] flex-col overflow-hidden rounded-xl border lg:grid lg:grid-cols-[19rem_minmax(0,1fr)]">
         <nav
           className="border-b bg-muted/20 p-3 lg:border-b-0 lg:border-r"
           aria-label="Prompt parts"

@@ -35,7 +35,10 @@ export async function loginAsDefault(page: Page): Promise<string> {
     timeout: 15000,
   });
   await page.goto(destination, { waitUntil: "domcontentloaded" });
-  await expect(page.getByText("Agents", { exact: true }).first()).toBeVisible({
+  // "Agents" lives in the desktop sidebar and is intentionally hidden at
+  // phone widths. The page heading proves the workspace route has rendered
+  // in both layouts.
+  await expect(page.getByRole("heading", { name: "Issues", exact: true })).toBeVisible({
     timeout: 15000,
   });
   return workspace.slug;
