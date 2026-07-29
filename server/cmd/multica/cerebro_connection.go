@@ -102,6 +102,45 @@ func init() {
 	connectionTestCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
+// parseEndpointFlags turns the repeatable --endpoint values into the
+// endpoint_permissions array the connections API expects. Each value is
+// METHOD[,METHOD]:/path[|summary]; the path keeps its OpenAPI-style {braces}.
+// Without this, a type=api connection can only get its endpoint catalogue from
+// the admin UI, and an endpoint-less api connection exposes no tools at all.
+func parseEndpointFlags(cmd *cobra.Command) ([]map[string]any, error) {
+	raw, _ := cmd.Flags().GetStringArray("endpoint")
+	if len(raw) == 0 {
+		return nil, nil
+	}
+	out := make([]map[string]any, 0, len(raw))
+	for _, spec := range raw {
+		methodPart, rest, ok := strings.Cut(spec, ":")
+		if !ok {
+			return nil, fmt.Errorf("--endpoint %q: expected METHOD[,METHOD]:/path", spec)
+		}
+		pathPart, summary, _ := strings.Cut(rest, "|")
+		path := strings.TrimSpace(pathPart)
+		if !strings.HasPrefix(path, "/") {
+			return nil, fmt.Errorf("--endpoint %q: path must start with /", spec)
+		}
+		methods := make([]string, 0, 4)
+		for _, m := range strings.Split(methodPart, ",") {
+			if m = strings.ToUpper(strings.TrimSpace(m)); m != "" {
+				methods = append(methods, m)
+			}
+		}
+		if len(methods) == 0 {
+			return nil, fmt.Errorf("--endpoint %q: at least one HTTP method is required", spec)
+		}
+		ep := map[string]any{"path": path, "methods": methods}
+		if s := strings.TrimSpace(summary); s != "" {
+			ep["summary"] = s
+		}
+		out = append(out, ep)
+	}
+	return out, nil
+}
+
 // addConnectionWriteFlags registers the flags shared by create and update. The
 // URL, auth, and internal-path flags mirror the createRequest / updateRequest
 // body fields in server/internal/cerebro/connections/handler.go.
@@ -114,6 +153,7 @@ func addConnectionWriteFlags(cmd *cobra.Command) {
 	cmd.Flags().String("api-key-header", "", "Header name to send the API key under (e.g. X-API-Key)")
 	cmd.Flags().String("cf-access-id", "", "Cloudflare Access service-token client ID")
 	cmd.Flags().String("cf-access-secret", "", "Cloudflare Access service-token client secret")
+	cmd.Flags().StringArray("endpoint", nil, "type=api only: an endpoint agents may call, as METHOD[,METHOD]:/path[|summary] (e.g. GET,POST:/orders/{id}|Order lookup). Repeat per path; the flag replaces the whole endpoint list.")
 	cmd.Flags().String("default-access", "", "Baseline verdict for actors with no explicit rule: allow, ask, or deny (default deny)")
 	cmd.Flags().Bool("on-behalf-of", false, "Stamp the calling agent's identity onto every dispatch as X-On-Behalf-Of: agent:<uuid> (type=api connections only). The remote API then authorizes the call as that agent's own delegation grant instead of the shared connection key (FIR-2668).")
 }
@@ -224,6 +264,13 @@ func runConnectionCreate(cmd *cobra.Command, _ []string) error {
 	if v, _ := cmd.Flags().GetString("default-access"); v != "" {
 		body["default_access"] = v
 	}
+	endpoints, err := parseEndpointFlags(cmd)
+	if err != nil {
+		return err
+	}
+	if endpoints != nil {
+		body["endpoint_permissions"] = endpoints
+	}
 
 	var result map[string]any
 	path := "/api/workspaces/" + url.PathEscape(client.WorkspaceID) + "/connections"
@@ -274,6 +321,13 @@ func runConnectionUpdate(cmd *cobra.Command, args []string) error {
 	}
 	if cmd.Flags().Changed("default-access") {
 		body["default_access"], _ = cmd.Flags().GetString("default-access")
+	}
+	if cmd.Flags().Changed("endpoint") {
+		endpoints, err := parseEndpointFlags(cmd)
+		if err != nil {
+			return err
+		}
+		body["endpoint_permissions"] = endpoints
 	}
 	if auth := connectionAuthConfig(cmd); len(auth) > 0 {
 		// Merge changed credential fields over the stored (masked) auth_config so
