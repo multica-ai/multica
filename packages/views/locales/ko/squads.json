@@ -66,7 +66,15 @@
     "status_archived": "보관됨",
     "issue_status_blocked": "막힘",
     "active_issue_more": "외 {{count}}개",
-    "last_active_label": "마지막 활동 {{time}}"
+    "last_active_label": "마지막 활동 {{time}}",
+    "status_summary_label": "상태",
+    "filter_all": "전체",
+    "agents_section": "에이전트",
+    "humans_section": "멤버",
+    "archived_section": "보관됨",
+    "no_role": "역할 없음",
+    "no_match_filter": "이 필터와 일치하는 에이전트가 없습니다",
+    "empty_roster": "아직 멤버가 없습니다. 에이전트 또는 멤버를 추가하세요."
   },
   "profile_card": {
     "unavailable": "스쿼드를 사용할 수 없습니다",

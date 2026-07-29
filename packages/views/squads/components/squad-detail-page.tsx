@@ -48,6 +48,11 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@multica/ui/components/ui/collapsible";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { AvatarUploadControl } from "../../common/avatar-upload-control";
@@ -59,7 +64,8 @@ import {
 } from "../../issues/components/pickers/property-picker";
 import { ChevronDown, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import type { Squad, SquadMember, SquadMemberStatus, SquadMemberStatusValue, Agent, MemberWithUser } from "@multica/core/types";
+import type { Squad, SquadMember, SquadMemberStatus, SquadMemberStatusValue, SquadActiveIssueBrief, Agent, MemberWithUser } from "@multica/core/types";
+import type { TFunction } from "i18next";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
@@ -1081,8 +1087,32 @@ const SQUAD_STATUS_DOT_CLASS: Record<SquadMemberStatusValue, string> = {
   archived: "bg-muted-foreground/40",
 };
 
-// Members tab body — re-uses the existing list/role editing patterns.
-function SquadMembersTab({
+// Status buckets surfaced as filter chips above the roster. Archived is
+// excluded - it has its own collapsed section below - and humans (status
+// === null) never match a chip, so they stay listed under their own
+// People group regardless of the active filter.
+const SQUAD_FILTERABLE_STATUSES: SquadMemberStatusValue[] = [
+  "working",
+  "idle",
+  "offline",
+  "unstable",
+];
+
+// Members tab body. The roster is split into four regions, top to bottom:
+//   1. Leader card - the squad leader pulled out of the flat list and
+//      rendered with an amber accent so it reads as "in charge", not just
+//      "first in the list".
+//   2. Status summary - clickable chips (working / idle / offline /
+//      unstable) that filter the Agents group by presence. People have no
+//      presence signal and are never filtered out.
+//   3. Agents group + People group - members split by type, each with a
+//      count. The leader and archived agents live elsewhere, so these are
+//      the regular working roster.
+//   4. Archived - collapsed by default; archived agents don't pollute the
+//      active roster but are still reachable.
+// `canManage` gates every mutating control (add / create / make-leader /
+// remove / role edit); read-only viewers see the same layout, inert.
+export function SquadMembersTab({
   members,
   memberStatusById,
   canManage,
@@ -1105,7 +1135,7 @@ function SquadMembersTab({
   isArchived: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
-  // Hidden for viewers who can't manage — see SquadOverviewPane.
+  // Hidden for viewers who can't manage - see SquadOverviewPane.
   onCreateAgentClick?: () => void;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
@@ -1113,8 +1143,46 @@ function SquadMembersTab({
   setLeaderPending: boolean;
 }) {
   const { t } = useT("squads");
-  const timeAgo = useTimeAgo();
-  const p = useWorkspacePaths();
+  const [statusFilter, setStatusFilter] = useState<SquadMemberStatusValue | null>(null);
+  const [archivedExpanded, setArchivedExpanded] = useState(false);
+
+  // Partition the roster. `members` is the server-ordered list; we slice it
+  // rather than re-fetch so the leader / archived / working regions stay in
+  // sync with the same query.
+  const leaderMember = members.find(isLeader) ?? null;
+  const archivedMembers = members.filter(isArchived);
+  const activeMembers = members.filter((m) => !isLeader(m) && !isArchived(m));
+  const agentMembers = activeMembers.filter((m) => m.member_type === "agent");
+  const humanMembers = activeMembers.filter((m) => m.member_type === "member");
+
+  // Presence distribution across every non-archived agent in the squad
+  // (leader + working roster). Humans are excluded - they carry status ===
+  // null and don't belong in a presence summary.
+  const statusCounts = useMemo(() => {
+    const counts: Record<SquadMemberStatusValue, number> = {
+      working: 0,
+      idle: 0,
+      offline: 0,
+      unstable: 0,
+      archived: 0,
+    };
+    for (const m of members) {
+      if (m.member_type !== "agent" || isArchived(m)) continue;
+      const s = memberStatusById.get(m.member_id)?.status;
+      if (s && s in counts) counts[s] += 1;
+    }
+    return counts;
+  }, [members, memberStatusById, isArchived]);
+
+  const visibleAgentMembers = statusFilter
+    ? agentMembers.filter((m) => memberStatusById.get(m.member_id)?.status === statusFilter)
+    : agentMembers;
+
+  // Hide the summary bar entirely when the squad has no presence-bearing
+  // agents (e.g. a humans-only squad) - chips that all read 0 are noise.
+  const showStatusSummary = agentMembers.length > 0 || !!leaderMember;
+  const hasRoster = agentMembers.length > 0 || humanMembers.length > 0;
+
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
@@ -1140,160 +1208,544 @@ function SquadMembersTab({
         )}
       </div>
 
-      <div className="space-y-2">
-        {members.map((m) => {
-          const status = memberStatusById.get(m.member_id);
-          const statusValue = status?.status ?? null;
-          const dotClass =
-            statusValue && statusValue in SQUAD_STATUS_DOT_CLASS
-              ? SQUAD_STATUS_DOT_CLASS[statusValue as keyof typeof SQUAD_STATUS_DOT_CLASS]
-              : null;
-          const statusLabel =
-            statusValue === "working" ? t(($) => $.members_tab.status_working)
-              : statusValue === "idle" ? t(($) => $.members_tab.status_idle)
-              : statusValue === "offline" ? t(($) => $.members_tab.status_offline)
-              : statusValue === "unstable" ? t(($) => $.members_tab.status_unstable)
-              : statusValue === "archived" ? t(($) => $.members_tab.status_archived)
-              : null;
-          const activeIssues = status?.active_issues ?? [];
-          const primaryIssue = activeIssues[0];
-          const extraIssueCount = Math.max(0, activeIssues.length - 1);
-          // Show last_active only when the agent isn't currently working —
-          // a "working" pill already implies the agent is live, and a
-          // "last active 2s ago" line next to it is just noise.
-          const showLastActive =
-            m.member_type === "agent" && statusValue && statusValue !== "working" && status?.last_active_at;
-          return (
-            <div key={m.id} className="group flex items-start gap-3 rounded-lg border p-3">
-              <ActorAvatar
-                actorType={m.member_type}
-                actorId={m.member_id}
-                size="lg"
-                showStatusDot
-                enableHoverCard={m.member_type === "agent"}
-                hoverCardVariant="live"
-              />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">{getEntityName(m.member_type, m.member_id)}</span>
-                  <span className="text-xs text-muted-foreground capitalize">{m.member_type}</span>
-                  {isLeader(m) && (
-                    <span className="inline-flex items-center gap-0.5 text-xs bg-amber-100 dark:bg-amber-900/30 text-amber-700 dark:text-amber-400 px-1.5 py-0.5 rounded">
-                      <Crown className="size-3" />
-                      {t(($) => $.members_tab.leader_chip)}
-                    </span>
-                  )}
-                  {m.member_type === "agent" && statusLabel && (
-                    <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-                      <span className={`h-1.5 w-1.5 rounded-full ${dotClass ?? "bg-muted-foreground/40"}`} />
-                      {statusLabel}
-                    </span>
-                  )}
-                </div>
-                {canManage ? (
-                  <RoleEditor
-                    value={m.role ?? ""}
-                    onSave={async (next) => { await onUpdateRole(m, next); }}
+      {leaderMember && (
+        <LeaderCard
+          member={leaderMember}
+          status={memberStatusById.get(leaderMember.member_id)}
+          canManage={canManage}
+          getEntityName={getEntityName}
+          onUpdateRole={onUpdateRole}
+        />
+      )}
+
+      {showStatusSummary && (
+        <StatusSummaryBar
+          counts={statusCounts}
+          activeFilter={statusFilter}
+          onChange={setStatusFilter}
+        />
+      )}
+
+      <div className="flex flex-col gap-4">
+        {(agentMembers.length > 0 || statusFilter) && (
+          <MemberSubsection
+            label={t(($) => $.members_tab.agents_section)}
+            count={agentMembers.length}
+          >
+            {visibleAgentMembers.length > 0 ? (
+              <div className="space-y-2">
+                {visibleAgentMembers.map((m) => (
+                  <SquadMemberRow
+                    key={m.id}
+                    member={m}
+                    status={memberStatusById.get(m.member_id)}
+                    canManage={canManage}
+                    isLeader={false}
+                    isArchived={false}
+                    getEntityName={getEntityName}
+                    onSetLeader={onSetLeader}
+                    onRemoveMember={onRemoveMember}
+                    onUpdateRole={onUpdateRole}
+                    setLeaderPending={setLeaderPending}
                   />
-                ) : m.role ? (
-                  <div className="mt-0.5 text-xs text-muted-foreground">{m.role}</div>
-                ) : null}
-                {primaryIssue && (
-                  <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground min-w-0">
-                    <AppLink
-                      href={p.issueDetail(primaryIssue.issue_id)}
-                      className="inline-flex items-center gap-1 min-w-0 hover:text-foreground transition-colors"
-                    >
-                      <span className="font-mono text-[10px] uppercase shrink-0">{primaryIssue.identifier}</span>
-                      <span className="truncate">{primaryIssue.title}</span>
-                      {primaryIssue.issue_status === "blocked" && (
-                        <span className="shrink-0 inline-flex items-center text-[10px] uppercase tracking-wide text-warning">
-                          {t(($) => $.members_tab.issue_status_blocked)}
-                        </span>
-                      )}
-                    </AppLink>
-                    {extraIssueCount > 0 && (
-                      <span className="shrink-0">
-                        · {t(($) => $.members_tab.active_issue_more, { count: extraIssueCount })}
-                      </span>
-                    )}
-                  </div>
-                )}
-                {showLastActive && (
-                  <div className="mt-0.5 text-xs text-muted-foreground">
-                    {t(($) => $.members_tab.last_active_label, {
-                      time: timeAgo(status!.last_active_at!),
-                    })}
-                  </div>
-                )}
+                ))}
               </div>
-            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
-              {m.member_type === "agent" && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <AppLink
-                        href={p.agentDetail(m.member_id)}
-                        className="inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                        aria-label={t(($) => $.members_tab.view_agent_tooltip)}
-                      >
-                        <ArrowUpRight className="size-3.5" />
-                      </AppLink>
-                    }
-                  />
-                  <TooltipContent>
-                    {t(($) => $.members_tab.view_agent_tooltip)}
-                  </TooltipContent>
-                </Tooltip>
-              )}
-              {canManage && m.member_type === "agent" && !isLeader(m) && !isArchived(m) && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-muted-foreground hover:text-amber-600 h-8 w-8 p-0"
-                        onClick={() => onSetLeader(m.member_id)}
-                        disabled={setLeaderPending}
-                        aria-label={t(($) => $.members_tab.make_leader_tooltip)}
-                      >
-                        <Crown className="size-3.5" />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>
-                    {t(($) => $.members_tab.make_leader_tooltip)}
-                  </TooltipContent>
-                </Tooltip>
-              )}
-              {canManage && !isLeader(m) && (
-                <Tooltip>
-                  <TooltipTrigger
-                    render={
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="text-muted-foreground hover:text-destructive h-8 w-8 p-0"
-                        onClick={() => onRemoveMember(m)}
-                        aria-label={t(($) => $.members_tab.remove_member_tooltip)}
-                      >
-                        <Trash2 className="size-3.5" />
-                      </Button>
-                    }
-                  />
-                  <TooltipContent>
-                    {t(($) => $.members_tab.remove_member_tooltip)}
-                  </TooltipContent>
-                </Tooltip>
-              )}
+            ) : (
+              <p className="rounded-lg border border-dashed px-3 py-4 text-xs text-muted-foreground">
+                {t(($) => $.members_tab.no_match_filter)}
+              </p>
+            )}
+          </MemberSubsection>
+        )}
+
+        {humanMembers.length > 0 && (
+          <MemberSubsection
+            label={t(($) => $.members_tab.humans_section)}
+            count={humanMembers.length}
+          >
+            <div className="space-y-2">
+              {humanMembers.map((m) => (
+                <SquadMemberRow
+                  key={m.id}
+                  member={m}
+                  status={memberStatusById.get(m.member_id)}
+                  canManage={canManage}
+                  isLeader={false}
+                  isArchived={false}
+                  getEntityName={getEntityName}
+                  onSetLeader={onSetLeader}
+                  onRemoveMember={onRemoveMember}
+                  onUpdateRole={onUpdateRole}
+                  setLeaderPending={setLeaderPending}
+                />
+              ))}
             </div>
+          </MemberSubsection>
+        )}
+
+        {!hasRoster && !leaderMember && (
+          <p className="rounded-lg border border-dashed px-3 py-6 text-center text-xs text-muted-foreground">
+            {t(($) => $.members_tab.empty_roster)}
+          </p>
+        )}
+      </div>
+
+      {archivedMembers.length > 0 && (
+        <Collapsible open={archivedExpanded} onOpenChange={setArchivedExpanded}>
+          <CollapsibleTrigger className="flex w-full items-center gap-1.5 rounded-md px-1 py-1 text-xs font-medium text-muted-foreground hover:text-foreground transition-colors">
+            <ChevronDown
+              className={`size-3.5 transition-transform ${archivedExpanded ? "" : "-rotate-90"}`}
+            />
+            {t(($) => $.members_tab.archived_section)}
+            <span className="tabular-nums">· {archivedMembers.length}</span>
+          </CollapsibleTrigger>
+          <CollapsibleContent>
+            <div className="mt-2 space-y-2">
+              {archivedMembers.map((m) => (
+                <SquadMemberRow
+                  key={m.id}
+                  member={m}
+                  status={memberStatusById.get(m.member_id)}
+                  canManage={canManage}
+                  isLeader={false}
+                  isArchived
+                  getEntityName={getEntityName}
+                  onSetLeader={onSetLeader}
+                  onRemoveMember={onRemoveMember}
+                  onUpdateRole={onUpdateRole}
+                  setLeaderPending={setLeaderPending}
+                />
+              ))}
+            </div>
+          </CollapsibleContent>
+        </Collapsible>
+      )}
+    </div>
+  );
+}
+
+// Section label + count, mirroring the muted "Members · 3" style used in
+// SquadProfileCard so group headers read the same on the detail page and the
+// list card.
+function MemberSubsection({ label, count, children }: { label: string; count: number; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center gap-1.5 px-1">
+        <span className="text-xs font-medium text-foreground">{label}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">· {count}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+// Amber-accented leader card. Pulled out of the flat roster so the leader
+// reads as "in charge" at a glance instead of just being the row with the
+// Crown chip. The amber matches the existing leader chip palette so the
+// accent is consistent across the page. The leader exposes no make-leader /
+// remove controls - it can only be visited or (when manageable) re-roled
+// in place.
+function LeaderCard({
+  member,
+  status,
+  canManage,
+  getEntityName,
+  onUpdateRole,
+}: {
+  member: SquadMember;
+  status: SquadMemberStatus | undefined;
+  canManage: boolean;
+  getEntityName: (type: string, id: string) => string;
+  onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
+}) {
+  const { t } = useT("squads");
+  const p = useWorkspacePaths();
+  const timeAgo = useTimeAgo();
+  const statusValue = status?.status ?? null;
+  const dotClass = squadStatusDotClass(statusValue);
+  const statusLabel = squadStatusLabel(t, statusValue);
+  const activeIssues = status?.active_issues ?? [];
+  const primaryIssue = activeIssues[0];
+  const extraIssueCount = Math.max(0, activeIssues.length - 1);
+  const showLastActive =
+    !!statusValue && statusValue !== "working" && !!status?.last_active_at;
+
+  return (
+    <section className="rounded-lg border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-950/15">
+      <div className="mb-2 flex items-center gap-1.5">
+        <Crown className="size-3.5 text-amber-600 dark:text-amber-400" />
+        <span className="text-[10px] font-medium uppercase tracking-wider text-amber-700 dark:text-amber-400">
+          {t(($) => $.members_tab.leader_chip)}
+        </span>
+      </div>
+      <div className="flex items-start gap-3">
+        <ActorAvatar
+          actorType="agent"
+          actorId={member.member_id}
+          size="lg"
+          showStatusDot
+          enableHoverCard
+          hoverCardVariant="live"
+        />
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-semibold">{getEntityName("agent", member.member_id)}</span>
+            {statusLabel && (
+              <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
+                {statusLabel}
+              </span>
+            )}
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <AppLink
+                    href={p.agentDetail(member.member_id)}
+                    className="ml-auto inline-flex items-center justify-center h-7 w-7 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                    aria-label={t(($) => $.members_tab.view_agent_tooltip)}
+                  >
+                    <ArrowUpRight className="size-3.5" />
+                  </AppLink>
+                }
+              />
+              <TooltipContent>
+                {t(($) => $.members_tab.view_agent_tooltip)}
+              </TooltipContent>
+            </Tooltip>
           </div>
-          );
-        })}
+          <RoleLine
+            role={member.role ?? ""}
+            canManage={canManage}
+            onSave={async (next) => { await onUpdateRole(member, next); }}
+          />
+          {primaryIssue && (
+            <ActiveIssueLine primaryIssue={primaryIssue} extraIssueCount={extraIssueCount} />
+          )}
+          {showLastActive && (
+            <div className="mt-0.5 text-xs text-muted-foreground">
+              {t(($) => $.members_tab.last_active_label, {
+                time: timeAgo(status!.last_active_at!),
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// A single member row. Shared across the Agents group, the People group,
+// and the Archived group so the layout, status dot, role line, active
+// issue, and hover actions stay consistent. `isLeader` / `isArchived`
+// resolve the action set: the leader exposes neither make-leader nor remove
+// (handled in LeaderCard instead), archived members expose remove only.
+function SquadMemberRow({
+  member,
+  status,
+  canManage,
+  isLeader: leaderFlag,
+  isArchived: archivedFlag,
+  getEntityName,
+  onSetLeader,
+  onRemoveMember,
+  onUpdateRole,
+  setLeaderPending,
+}: {
+  member: SquadMember;
+  status: SquadMemberStatus | undefined;
+  canManage: boolean;
+  isLeader: boolean;
+  isArchived: boolean;
+  getEntityName: (type: string, id: string) => string;
+  onSetLeader: (agentId: string) => void;
+  onRemoveMember: (m: SquadMember) => void;
+  onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
+  setLeaderPending: boolean;
+}) {
+  const { t } = useT("squads");
+  const p = useWorkspacePaths();
+  const timeAgo = useTimeAgo();
+  const statusValue = status?.status ?? null;
+  const dotClass = squadStatusDotClass(statusValue);
+  const statusLabel = squadStatusLabel(t, statusValue);
+  const activeIssues = status?.active_issues ?? [];
+  const primaryIssue = activeIssues[0];
+  const extraIssueCount = Math.max(0, activeIssues.length - 1);
+  const showLastActive =
+    member.member_type === "agent" &&
+    !!statusValue &&
+    statusValue !== "working" &&
+    !!status?.last_active_at;
+
+  return (
+    <div className="group flex items-start gap-3 rounded-lg border p-3">
+      <ActorAvatar
+        actorType={member.member_type}
+        actorId={member.member_id}
+        size="lg"
+        showStatusDot
+        enableHoverCard={member.member_type === "agent"}
+        hoverCardVariant="live"
+      />
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium">{getEntityName(member.member_type, member.member_id)}</span>
+          <span className="text-xs text-muted-foreground capitalize">{member.member_type}</span>
+          {statusLabel && member.member_type === "agent" && (
+            <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+              <span className={`h-1.5 w-1.5 rounded-full ${dotClass}`} />
+              {statusLabel}
+            </span>
+          )}
+        </div>
+        <RoleLine
+          role={member.role ?? ""}
+          canManage={canManage}
+          onSave={async (next) => { await onUpdateRole(member, next); }}
+        />
+        {primaryIssue && (
+          <ActiveIssueLine primaryIssue={primaryIssue} extraIssueCount={extraIssueCount} />
+        )}
+        {showLastActive && (
+          <div className="mt-0.5 text-xs text-muted-foreground">
+            {t(($) => $.members_tab.last_active_label, {
+              time: timeAgo(status!.last_active_at!),
+            })}
+          </div>
+        )}
+      </div>
+      <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity">
+        {member.member_type === "agent" && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <AppLink
+                  href={p.agentDetail(member.member_id)}
+                  className="inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                  aria-label={t(($) => $.members_tab.view_agent_tooltip)}
+                >
+                  <ArrowUpRight className="size-3.5" />
+                </AppLink>
+              }
+            />
+            <TooltipContent>
+              {t(($) => $.members_tab.view_agent_tooltip)}
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {canManage && member.member_type === "agent" && !leaderFlag && !archivedFlag && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-muted-foreground hover:text-amber-600 h-8 w-8 p-0"
+                  onClick={() => onSetLeader(member.member_id)}
+                  disabled={setLeaderPending}
+                  aria-label={t(($) => $.members_tab.make_leader_tooltip)}
+                >
+                  <Crown className="size-3.5" />
+                </Button>
+              }
+            />
+            <TooltipContent>
+              {t(($) => $.members_tab.make_leader_tooltip)}
+            </TooltipContent>
+          </Tooltip>
+        )}
+        {canManage && !leaderFlag && (
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-muted-foreground hover:text-destructive h-8 w-8 p-0"
+                  onClick={() => onRemoveMember(member)}
+                  aria-label={t(($) => $.members_tab.remove_member_tooltip)}
+                >
+                  <Trash2 className="size-3.5" />
+                </Button>
+              }
+            />
+            <TooltipContent>
+              {t(($) => $.members_tab.remove_member_tooltip)}
+            </TooltipContent>
+          </Tooltip>
+        )}
       </div>
     </div>
   );
+}
+
+// Role line shared by LeaderCard and SquadMemberRow. Always renders a row so
+// the layout doesn't shift between members with and without a role. In
+// manage mode it's an inline editor (placeholder when empty); read-only
+// viewers see the role text, or a muted "no role" hint when empty, so role
+// stays visible even outside manage mode.
+function RoleLine({
+  role,
+  canManage,
+  onSave,
+}: {
+  role: string;
+  canManage: boolean;
+  onSave: (next: string) => Promise<void>;
+}) {
+  const { t } = useT("squads");
+  if (canManage) {
+    return <RoleEditor value={role} onSave={onSave} />;
+  }
+  if (role) {
+    return <div className="mt-0.5 text-xs text-muted-foreground">{role}</div>;
+  }
+  return (
+    <div className="mt-0.5 text-xs italic text-muted-foreground/60">
+      {t(($) => $.members_tab.no_role)}
+    </div>
+  );
+}
+
+// Active-issue link line shared by LeaderCard and SquadMemberRow.
+function ActiveIssueLine({
+  primaryIssue,
+  extraIssueCount,
+}: {
+  primaryIssue: SquadActiveIssueBrief;
+  extraIssueCount: number;
+}) {
+  const { t } = useT("squads");
+  const p = useWorkspacePaths();
+  return (
+    <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground min-w-0">
+      <AppLink
+        href={p.issueDetail(primaryIssue.issue_id)}
+        className="inline-flex items-center gap-1 min-w-0 hover:text-foreground transition-colors"
+      >
+        <span className="font-mono text-[10px] uppercase shrink-0">{primaryIssue.identifier}</span>
+        <span className="truncate">{primaryIssue.title}</span>
+        {primaryIssue.issue_status === "blocked" && (
+          <span className="shrink-0 inline-flex items-center text-[10px] uppercase tracking-wide text-warning">
+            {t(($) => $.members_tab.issue_status_blocked)}
+          </span>
+        )}
+      </AppLink>
+      {extraIssueCount > 0 && (
+        <span className="shrink-0">
+          · {t(($) => $.members_tab.active_issue_more, { count: extraIssueCount })}
+        </span>
+      )}
+    </div>
+  );
+}
+
+// Presence distribution chips above the roster. Clicking a status toggles a
+// filter that narrows the Agents group to that status; clicking the active
+// status again (or "All") clears it. Counts cover every non-archived agent
+// (leader + working roster), so the summary reflects the whole squad.
+function StatusSummaryBar({
+  counts,
+  activeFilter,
+  onChange,
+}: {
+  counts: Record<SquadMemberStatusValue, number>;
+  activeFilter: SquadMemberStatusValue | null;
+  onChange: (next: SquadMemberStatusValue | null) => void;
+}) {
+  const { t } = useT("squads");
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="mr-1 text-xs text-muted-foreground">
+        {t(($) => $.members_tab.status_summary_label)}
+      </span>
+      <FilterChip
+        active={activeFilter === null}
+        onClick={() => onChange(null)}
+        label={t(($) => $.members_tab.filter_all)}
+      />
+      {SQUAD_FILTERABLE_STATUSES.map((s) => {
+        const count = counts[s] ?? 0;
+        return (
+          <FilterChip
+            key={s}
+            active={activeFilter === s}
+            disabled={count === 0 && activeFilter !== s}
+            onClick={() => onChange(activeFilter === s ? null : s)}
+            label={squadStatusLabel(t, s) ?? s}
+            count={count}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function FilterChip({
+  active,
+  disabled,
+  onClick,
+  label,
+  count,
+}: {
+  active: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  label: string;
+  count?: number;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      aria-pressed={active}
+      className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+        active
+          ? "border-foreground/30 bg-foreground/5 text-foreground"
+          : "border-border text-muted-foreground hover:bg-accent/50 hover:text-foreground"
+      }`}
+    >
+      <span>{label}</span>
+      {typeof count === "number" && <span className="tabular-nums">{count}</span>}
+    </button>
+  );
+}
+
+// Resolves a squad member status value to its dot class. Returns the neutral
+// muted dot for unknown / null statuses (humans, server-side enum drift) -
+// the "downgrade, don't crash" defense from CLAUDE.md > API Response
+// Compatibility.
+function squadStatusDotClass(statusValue: SquadMemberStatusValue | null): string {
+  if (statusValue && statusValue in SQUAD_STATUS_DOT_CLASS) {
+    return SQUAD_STATUS_DOT_CLASS[statusValue];
+  }
+  return "bg-muted-foreground/40";
+}
+
+// Resolves a squad member status value to its localized label. Shared by the
+// row status pill, the leader card, and the status-summary chips. Returns
+// null for unknown / null statuses (humans, server-side enum drift) so
+// callers can render the neutral fallback instead of a stale label.
+function squadStatusLabel(
+  t: TFunction<"squads">,
+  statusValue: SquadMemberStatusValue | null,
+): string | null {
+  if (!statusValue) return null;
+  switch (statusValue) {
+    case "working":
+      return t(($) => $.members_tab.status_working);
+    case "idle":
+      return t(($) => $.members_tab.status_idle);
+    case "offline":
+      return t(($) => $.members_tab.status_offline);
+    case "unstable":
+      return t(($) => $.members_tab.status_unstable);
+    case "archived":
+      return t(($) => $.members_tab.status_archived);
+    default:
+      return null;
+  }
 }
 
 // Instructions tab body — mirrors agent's InstructionsTab. ContentEditor +
