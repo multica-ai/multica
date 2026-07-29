@@ -115,7 +115,7 @@ func createTaskScopedPropertyFixture(t *testing.T) (token, ownIssueID, otherIssu
 	return token, ownIssueID, otherIssueID, propertyID
 }
 
-func TestTaskTokenPropertyRoutesAreBoundToTheirIssue(t *testing.T) {
+func TestTaskTokenCompatibilityModeRestoresGeneralRoutes(t *testing.T) {
 	token, ownIssueID, otherIssueID, propertyID := createTaskScopedPropertyFixture(t)
 
 	resp := taskTokenRequest(t, token, http.MethodGet, "/api/properties", nil)
@@ -123,6 +123,17 @@ func TestTaskTokenPropertyRoutesAreBoundToTheirIssue(t *testing.T) {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		t.Fatalf("list properties: expected 200, got %d: %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	resp = taskTokenRequest(t, token, http.MethodPost, "/api/properties", map[string]any{
+		"name": "Agent-created definition",
+		"type": "number",
+	})
+	if resp.StatusCode != http.StatusForbidden {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("create property definition: expected 403, got %d: %s", resp.StatusCode, body)
 	}
 	resp.Body.Close()
 
@@ -150,11 +161,11 @@ func TestTaskTokenPropertyRoutesAreBoundToTheirIssue(t *testing.T) {
 	}
 	resp.Body.Close()
 
-	resp = taskTokenRequest(t, token, http.MethodGet, "/api/me", nil)
-	if resp.StatusCode != http.StatusForbidden {
+	resp = taskTokenRequest(t, token, http.MethodGet, "/api/issues?workspace_id="+testWorkspaceID, nil)
+	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
-		t.Fatalf("user-only route: expected 403, got %d: %s", resp.StatusCode, body)
+		t.Fatalf("list issues: expected 200, got %d: %s", resp.StatusCode, body)
 	}
 	resp.Body.Close()
 }

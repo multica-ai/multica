@@ -16,7 +16,7 @@ var pass = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 	w.WriteHeader(http.StatusOK)
 })
 
-func TestRequireUserScope_RejectsTaskScope(t *testing.T) {
+func TestRequireUserScope_CompatibilityModeAllowsTaskScope(t *testing.T) {
 	t.Parallel()
 	req := httptest.NewRequest("GET", "/anything", nil)
 	req = req.WithContext(withTaskScope(req.Context(), TaskScopeContext{TaskID: "t", IssueID: "i", AgentID: "a", WorkspaceID: "w"}))
@@ -24,8 +24,8 @@ func TestRequireUserScope_RejectsTaskScope(t *testing.T) {
 
 	RequireUserScope(pass).ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for task-scoped request, got %d", rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for task-scoped request during FIR-4076 compatibility mode, got %d", rec.Code)
 	}
 }
 
