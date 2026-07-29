@@ -39,7 +39,6 @@ type deadFailedRunResponse struct {
 	BlockedReason  string `json:"blocked_reason,omitempty"`
 	RuntimeName    string `json:"runtime_name,omitempty"`
 }
-
 // resumeBlockedReason explains a false resume_possible. Order matters: report
 // the most actionable cause first. English copy — app-facing strings are
 // English everywhere in this codebase.
@@ -171,5 +170,4 @@ func mapDeadFailed(rows []cerebrodb.DeadFailedTask) []deadFailedRunResponse {
 	}
 	return out
 }
-
 
