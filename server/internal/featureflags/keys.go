@@ -16,6 +16,10 @@ const (
 	// ResourceLabels controls the agent- and skill-scoped label namespaces.
 	// Issue labels remain available while this release flag is off.
 	ResourceLabels = "settings_resource_labels"
+	// ApprovalFlow gates the sensitive-operation approval flow (WS-721). Off
+	// by default; a workspace must additionally enable it via its settings
+	// (see handler approval config). When off, no operation requires approval.
+	ApprovalFlow = "approval_flow"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -37,6 +41,13 @@ func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) boo
 
 func ResourceLabelsEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, ResourceLabels, false)
+}
+
+// ApprovalFlowEnabled reports whether the sensitive-operation approval flow
+// is available platform-wide. Per-workspace enablement is separate (handler
+// reads workspace.settings.approval_flow.enabled).
+func ApprovalFlowEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, ApprovalFlow, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

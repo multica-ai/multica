@@ -3524,6 +3524,15 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+
+	// Approval gate (WS-721): when the workspace requires approval for batch
+	// issue deletion, create a pending request and return 202 instead of
+	// deleting. An approved ?approval_id= satisfies the gate and the delete
+	// proceeds normally.
+	if _, ok := h.requireApproval(w, r, "issue.batch_delete", "", map[string]any{"issue_ids": req.IssueIDs}); !ok {
+		return
+	}
+
 	deleted := 0
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
