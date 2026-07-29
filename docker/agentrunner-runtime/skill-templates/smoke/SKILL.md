@@ -26,7 +26,7 @@ The issue was created by an autopilot or manually and does NOT contain a `SMOKE_
 
 ## Case B — Inner test-verification issue
 
-The issue description contains a `SMOKE_OK_` token (placed there by `smoke-test-agentrunner.sh` phase 7).
+The issue description contains a `SMOKE_OK_` token (placed there by `smoke-test-agentrunner.sh` phase 8, "smoke task create").
 
 1. Extract the exact `SMOKE_OK_...` token from the description.
 2. Post a comment containing **only** that token — no other text.
