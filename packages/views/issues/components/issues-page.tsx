@@ -111,6 +111,7 @@ export function IssuesPage({
   const includeNoProject = useIssueViewStore((s) => s.includeNoProject);
   const subIssueDisplay = useIssueViewStore((s) => s.subIssueDisplay);
   const labelFilters = useIssueViewStore((s) => s.labelFilters);
+  const propertyFilters = useIssueViewStore((s) => s.propertyFilters ?? {});
   // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 on-behalf-of member filter.
   const onBehalfOfFilters = useIssueViewStore((s) => s.onBehalfOfFilters);
   const referenceFilter = useMemo(
@@ -164,6 +165,8 @@ export function IssuesPage({
       project_ids: projectFilters,
       include_no_project: includeNoProject,
       label_ids: labelFilters,
+      properties:
+        Object.keys(propertyFilters).length > 0 ? propertyFilters : undefined,
       reference: referenceFilter,
       // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 board view on-behalf-of filter.
       on_behalf_of_ids: onBehalfOfFilters,
@@ -171,7 +174,7 @@ export function IssuesPage({
     if (scope === "members") filter.assignee_types = ["member"];
     if (scope === "agents") filter.assignee_types = ["agent", "squad"];
     return filter;
-  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, onBehalfOfFilters, priorityFilters, projectFilters, referenceFilter, scope, statusFilters]);
+  }, [assigneeFilters, creatorFilters, includeNoAssignee, includeNoProject, labelFilters, onBehalfOfFilters, priorityFilters, projectFilters, propertyFilters, referenceFilter, scope, statusFilters]);
 
   const assigneeGroupsOptions = issueAssigneeGroupsOptions(wsId, assigneeGroupFilter, queryParams);
   const tableBaseFilter = useMemo<IssueFlatFilter>(() => ({
@@ -186,7 +189,12 @@ export function IssuesPage({
   }), [onBehalfOfFilters, referenceFilter, scope]);
   const statusIssuesQuery = useQuery({
     // CEREBRO-PATCH(issue-on-behalf-of-filter): MUL-2553 list view on-behalf-of filter.
-    ...issueListOptions(wsId, { reference: referenceFilter, on_behalf_of_ids: onBehalfOfFilters }, queryParams),
+    ...issueListOptions(wsId, {
+      reference: referenceFilter,
+      on_behalf_of_ids: onBehalfOfFilters,
+      properties:
+        Object.keys(propertyFilters).length > 0 ? propertyFilters : undefined,
+    }, queryParams),
     enabled: !usesAssigneeBoard && !usesTable,
   });
   const assigneeGroupsQuery = useQuery({

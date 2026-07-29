@@ -168,6 +168,49 @@ func TestListIssues_FiltersRestrictedForOutsider(t *testing.T) {
 	}
 }
 
+func TestListOpenIssues_FiltersPrivateAndRestrictedForOutsider(t *testing.T) {
+	f := setupFilterFixture(t)
+	ctx := context.Background()
+
+	var privateIssueID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO issue (
+			workspace_id, title, status, priority, creator_type, creator_id,
+			position, number, is_private
+		)
+		VALUES (
+			$1, 'filter-private-open-issue', 'todo', 'medium', 'member', $2,
+			0, COALESCE((SELECT MAX(number) FROM issue WHERE workspace_id = $1), 0) + 1, true
+		)
+		RETURNING id
+	`, testWorkspaceID, f.memberUserID).Scan(&privateIssueID); err != nil {
+		t.Fatalf("create private issue: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, privateIssueID)
+	})
+
+	req := newReqAs("GET", "/api/issues?open_only=true", f.outsideUserID, f.outsideMember)
+	rec := httptest.NewRecorder()
+	testHandler.ListIssues(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status: want 200, got %d body=%s", rec.Code, rec.Body.String())
+	}
+
+	var body struct {
+		Issues []map[string]any `json:"issues"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	for _, issue := range body.Issues {
+		id, _ := issue["id"].(string)
+		if id == f.restrictIssID || id == privateIssueID {
+			t.Fatalf("outsider got protected issue %s from open_only", id)
+		}
+	}
+}
+
 func TestListIssues_IncludesRestrictedForMember(t *testing.T) {
 	f := setupFilterFixture(t)
 

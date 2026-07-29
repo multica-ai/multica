@@ -1065,25 +1065,50 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.kind, i.metadata, i.properties
 FROM issue i
+LEFT JOIN project p ON p.id = i.project_id
 WHERE i.workspace_id = $1
   AND i.kind = 'issue'
+  AND (
+    $2::boolean
+    OR (
+      i.project_id IS NULL AND (
+        i.is_private = FALSE
+        OR (i.creator_type = 'member' AND i.creator_id = $3::uuid)
+      )
+    )
+    OR (
+      i.project_id IS NOT NULL AND (
+        p.access = 'workspace'
+        OR EXISTS (
+          SELECT 1 FROM project_member pm
+          WHERE pm.project_id = p.id AND pm.user_id = $3::uuid
+        )
+        OR EXISTS (
+          SELECT 1
+          FROM cerebro_project_group_member pgm
+          JOIN cerebro_group_member gm ON gm.group_id = pgm.group_id
+          WHERE pgm.project_id = p.id AND gm.user_id = $3::uuid
+        )
+      )
+    )
+  )
   AND i.status NOT IN ('done', 'cancelled')
-  AND ($2::text IS NULL OR i.priority = $2)
-  AND ($3::uuid IS NULL OR i.assignee_id = $3)
-  AND ($4::uuid[] IS NULL OR i.assignee_id = ANY($4::uuid[]))
-  AND ($5::uuid IS NULL OR i.creator_id = $5)
-  AND ($6::uuid IS NULL OR i.project_id = $6)
-  AND ($7::jsonb IS NULL OR i.metadata @> $7::jsonb)
+  AND ($4::text IS NULL OR i.priority = $4)
+  AND ($5::uuid IS NULL OR i.assignee_id = $5)
+  AND ($6::uuid[] IS NULL OR i.assignee_id = ANY($6::uuid[]))
+  AND ($7::uuid IS NULL OR i.creator_id = $7)
+  AND ($8::uuid IS NULL OR i.project_id = $8)
+  AND ($9::jsonb IS NULL OR i.metadata @> $9::jsonb)
   -- properties_filter is a jsonb array of groups, each group an array of
   -- containment patterns (built by parsePropertiesFilterParam): the issue
   -- must match at least one pattern from EVERY group (AND of ORs). The
   -- correlated form skips the GIN index, which is fine here: open_only is
   -- an unpaginated workspace scan already narrowed by status.
   AND (
-    $8::jsonb IS NULL
+    $10::jsonb IS NULL
     OR NOT EXISTS (
       SELECT 1
-      FROM jsonb_array_elements($8::jsonb) AS pf(alternatives)
+      FROM jsonb_array_elements($10::jsonb) AS pf(alternatives)
       WHERE NOT EXISTS (
         SELECT 1
         FROM jsonb_array_elements(pf.alternatives) AS alt(pattern)
@@ -1092,15 +1117,15 @@ WHERE i.workspace_id = $1
     )
   )
   AND (
-    $9::uuid[] IS NULL
-    OR i.project_id = ANY($9::uuid[])
+    $11::uuid[] IS NULL
+    OR i.project_id = ANY($11::uuid[])
   )
   AND (
-    $10::uuid IS NULL
+    $12::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (
           SELECT a.id FROM agent a
            WHERE a.workspace_id = $1
-             AND a.owner_id     = $10::uuid
+             AND a.owner_id     = $12::uuid
     ))
     OR (i.assignee_type = 'squad' AND i.assignee_id IN (
           SELECT sm.squad_id
@@ -1108,14 +1133,14 @@ WHERE i.workspace_id = $1
             JOIN squad s ON s.id = sm.squad_id
            WHERE s.workspace_id = $1
              AND sm.member_type = 'member'
-             AND sm.member_id   = $10::uuid
+             AND sm.member_id   = $12::uuid
           UNION
           SELECT s.id
             FROM squad s
             JOIN agent a ON a.id = s.leader_id
            WHERE s.workspace_id = $1
              AND a.workspace_id = $1
-             AND a.owner_id     = $10::uuid
+             AND a.owner_id     = $12::uuid
           UNION
           SELECT sm.squad_id
             FROM squad_member sm
@@ -1124,7 +1149,7 @@ WHERE i.workspace_id = $1
            WHERE s.workspace_id = $1
              AND sm.member_type = 'agent'
              AND a.workspace_id = $1
-             AND a.owner_id     = $10::uuid
+             AND a.owner_id     = $12::uuid
     ))
   )
 ORDER BY i.position ASC, i.created_at DESC
@@ -1132,6 +1157,8 @@ ORDER BY i.position ASC, i.created_at DESC
 
 type ListOpenIssuesParams struct {
 	WorkspaceID      pgtype.UUID   `json:"workspace_id"`
+	IsAdmin          bool          `json:"is_admin"`
+	UserID           pgtype.UUID   `json:"user_id"`
 	Priority         pgtype.Text   `json:"priority"`
 	AssigneeID       pgtype.UUID   `json:"assignee_id"`
 	AssigneeIds      []pgtype.UUID `json:"assignee_ids"`
@@ -1172,6 +1199,8 @@ type ListOpenIssuesRow struct {
 func (q *Queries) ListOpenIssues(ctx context.Context, arg ListOpenIssuesParams) ([]ListOpenIssuesRow, error) {
 	rows, err := q.db.Query(ctx, listOpenIssues,
 		arg.WorkspaceID,
+		arg.IsAdmin,
+		arg.UserID,
 		arg.Priority,
 		arg.AssigneeID,
 		arg.AssigneeIds,

@@ -330,6 +330,12 @@ task token's Multica CLI/MCP surface over stdio and the claim's enabled MCP HTTP
 Connections directly; API Connection credentials remain in the server-side
 relay configuration and are never copied into the task environment.
 
+Task tokens may read the workspace property catalog and set or unset property
+values only on their bound issue. Property definition creation and editing
+remain human-only. Authentication loads the task row and attaches its issue,
+agent, and workspace scope before these routes run; a token whose task/agent
+binding cannot be verified is rejected.
+
 Before every managed tool call the extension asks the existing daemon
 `/tool-policy/resolve` endpoint for the acting task's decision. `Allow`
 dispatches, `Ask` dispatches only after the resolver returns a final approved
