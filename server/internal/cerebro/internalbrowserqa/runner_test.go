@@ -1254,12 +1254,16 @@ func TestTargetForRejectsAPublicURLWithoutAccessHeaders(t *testing.T) {
 // login was driven, without the payload ever reaching an argument vector.
 type codeLoginCommander struct {
 	stageFailingCommander
-	authStdin string
+	authStdin      string
+	navigationURLs []string
 }
 
 func (c *codeLoginCommander) Run(ctx context.Context, stdin string, args ...string) ([]byte, error) {
 	if strings.HasSuffix(strings.Join(args, " "), "batch") && strings.Contains(stdin, "fill") {
 		c.authStdin = stdin
+	}
+	if len(args) >= 2 && args[len(args)-2] == "open" {
+		c.navigationURLs = append(c.navigationURLs, args[len(args)-1])
 	}
 	return c.stageFailingCommander.Run(ctx, stdin, args...)
 }
@@ -1280,5 +1284,8 @@ func TestVerifyDrivesTheCodeLoginAndKeepsSecretsOffTheCommandLine(t *testing.T) 
 	}
 	if strings.Contains(commander.authStdin, "PASSWORD") {
 		t.Fatal("a code-login target must never send a password")
+	}
+	if !slices.Contains(commander.navigationURLs, "https://cerebro.firtal.com/") {
+		t.Fatal("cerebro verification did not return through the workspace root after login")
 	}
 }
