@@ -1142,8 +1142,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.With(agentToolScope).Post("/api/agents/{id}/tools/{name}/invoke", h.InvokeAgentTool)
 			r.With(agentToolScope).Get("/api/agents/{id}/capabilities", h.GetAgentCapabilities) // CEREBRO-PATCH(agent-capabilities-card-task-route): FIR-2243 — an agent reads its OWN capabilities card via its task token to discover what it may do; AllowTaskScopeForAgent restricts task tokens to their own id, user tokens pass through unchanged.
 			// CEREBRO-PATCH(agent-memory-settings-routes): FIR-1794 Gate 3 — the
-			// caller's own per-agent memory read/write toggle. Human-only (RequireUserScope):
-			// a user turns memory on for themselves on one agent, never a task token.
+			// CEREBRO-PATCH(task-scope-hotfix): caller's own per-agent memory toggle is normally human-only;
+			// FIR-4076 temporarily passes task tokens until platform-action gates land.
 			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/memory-settings", h.GetAgentMemorySettings)
 			r.With(middleware.RequireUserScope).Put("/api/agents/{id}/memory-settings", h.SetAgentMemorySettings)
 			r.With(middleware.RequireUserScope).Get("/api/agents/{id}/tool-access", h.ExplainAgentToolAccess) // CEREBRO-PATCH(cerebro-agent-tool-access-diagnostic): FIR-1480 admin diagnostic — effective tool access for a user.
@@ -1160,8 +1160,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// {id} line — once a flat /{id} GET exists in this tree,
 			// chi greedily routes /search → GetIssue with id="search"
 			// and the user-only nested registration becomes
-			// unreachable. RequireUserScope keeps them user-only so a
-			// task token still gets 403, not 200.
+			// unreachable. RequireUserScope keeps the route seam explicit;
+			// CEREBRO-PATCH(task-scope-hotfix): FIR-4076 temporarily lets
+			// task tokens pass this seam until platform-action gates land.
 			r.With(middleware.RequireUserScope).Get("/api/issues/search", h.SearchIssues)
 			r.With(middleware.RequireUserScope).Get("/api/issues/child-progress", h.ChildIssueProgress)
 			r.With(middleware.RequireUserScope).Get("/api/issues/grouped", h.ListGroupedIssues)

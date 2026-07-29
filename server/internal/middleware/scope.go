@@ -79,17 +79,15 @@ func withUserScope(ctx context.Context) context.Context {
 	return context.WithValue(ctx, ctxKeyAuthScope, ScopeUser)
 }
 
-// RequireUserScope rejects requests authenticated via a per-task token.
-// It is the default policy for member-facing routes — a compromised
-// agent must not be able to use the task token for general access.
+// RequireUserScope is the user-only route boundary. FIR-4076 temporarily
+// restores the legacy pass-through while platform-action authorization is
+// added; resource-specific middleware and handler actor guards remain active.
 func RequireUserScope(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if AuthScopeFromContext(r.Context()) == ScopeTask {
-			http.Error(w, `{"error":"task-scoped tokens cannot access this route"}`, http.StatusForbidden)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
+	// CEREBRO-PATCH(task-scope-hotfix): temporarily restore the pre-FIR-3447
+	// route surface while resource-bound middleware keeps enforcing task scope.
+	// FIR-4076 replaces this compatibility pass-through with platform-action
+	// Task Mandate and Permissions checks before task scope is enforced globally.
+	return next
 }
 
 // AllowTaskScopeForIssue lets a route be reached by a task-scoped token
