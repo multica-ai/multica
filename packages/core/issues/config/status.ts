@@ -27,7 +27,7 @@ export const BOARD_STATUSES: IssueStatus[] = ALL_STATUSES.filter((s) => s !== "a
 // Single source of truth (frontend side) for classifying an issue status as
 // "closed" vs "completed".  Keep in lock-step with the Go helpers in
 // server/internal/issueguard/issue_status.go and the Postgres functions in
-// server/migrations/235_issue_status_classifier_functions.*.sql.
+// server/migrations/236_issue_status_classifier_functions.*.sql.
 //
 //   closed    = done | cancelled | archived
 //   completed = done | cancelled             (archived is closed, NOT completed)

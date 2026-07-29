@@ -4,7 +4,7 @@ package issueguard
 // "completed".  Before this file existed the `('done','cancelled','archived')`
 // and `('done','cancelled')` literals were repeated across SQL and Go, so
 // adding a new status meant hand-auditing every site.  Now the classification
-// is decided here (and, for SQL, in the migration-235 Postgres functions
+// is decided here (and, for SQL, in the migration-236 Postgres functions
 // issue_status_is_closed / issue_status_is_completed, which MUST be kept in
 // lock-step with these helpers) and every other site derives from it.
 //
@@ -21,7 +21,7 @@ package issueguard
 // into the wrong bucket — that is a review/classification decision, not
 // something a constant can catch.
 //
-// Keep in sync with server/migrations/214_issue_status_classifier_functions.*.sql.
+// Keep in sync with server/migrations/236_issue_status_classifier_functions.*.sql.
 
 // closedStatuses classifies an issue as closed: it disappears from default
 // list/board/search and counts as terminal for the stage barrier.

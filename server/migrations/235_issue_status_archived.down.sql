@@ -5,7 +5,7 @@
 DO $$
 BEGIN
     IF EXISTS (SELECT 1 FROM issue WHERE status = 'archived') THEN
-        RAISE EXCEPTION 'cannot roll back migration 213: archived rows exist; run scripts/sweep_archived_issues.sql first';
+        RAISE EXCEPTION 'cannot roll back migration 235: archived rows exist; run scripts/sweep_archived_issues.sql first';
     END IF;
 END $$;
 

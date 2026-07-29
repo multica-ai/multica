@@ -8,7 +8,7 @@ import {
 } from "./status";
 
 // Mirrors server/internal/issueguard/issue_status_test.go and the Postgres
-// functions in migration 235 — all three encode the closed-vs-completed split.
+// functions in migration 236 — all three encode the closed-vs-completed split.
 describe("issue status classification", () => {
   it("closed = done | cancelled | archived", () => {
     expect(CLOSED_STATUSES).toEqual(["done", "cancelled", "archived"]);
