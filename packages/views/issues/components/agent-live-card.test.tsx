@@ -110,6 +110,24 @@ vi.mock("@multica/cerebro-wakeup", () => ({
   WakeupActivityRow: () => <div data-testid="wakeup-row" />,
 }));
 
+// CEREBRO-PATCH(agent-live-card-failed-run-fold): FIR-4073 — same reason as the
+// wakeup stub above: this task-focused test mounts no QueryClient, and the
+// failed-run hook + row have their own coverage in @multica/cerebro-runtime.
+const mockFailedRuns = vi.hoisted(() => ({
+  runs: [] as Array<{ task_id: string; runtime_paused?: boolean }>,
+}));
+vi.mock("@multica/cerebro-runtime/views/dead-failed-runs", () => ({
+  useIssueFailedRuns: () => mockFailedRuns.runs,
+  isPausedRun: (r: { runtime_paused?: boolean }) => r.runtime_paused === true,
+}));
+vi.mock("@multica/cerebro-runtime/views/components/failed-run-activity", () => ({
+  FailedRunActivityRow: () => <div data-testid="failed-run-row" />,
+}));
+// CEREBRO-PATCH(agent-live-card-paused-run-fold): FIR-4073 — same stub reasoning.
+vi.mock("@multica/cerebro-runtime/views/components/paused-run-activity", () => ({
+  PausedRunActivityRow: () => <div data-testid="paused-run-row" />,
+}));
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -168,6 +186,8 @@ beforeEach(() => {
   mockApi.listTaskMessages.mockResolvedValue([]);
   mockApi.cancelTask.mockReset();
   mockWakeupState.wakeups = [];
+  // CEREBRO-PATCH(agent-live-card-failed-run-fold): FIR-4073 — reset the folded failed runs.
+  mockFailedRuns.runs = [];
   mockWakeupState.cancel.mockReset();
   mockWakeupState.cancellingIds.clear();
 });
@@ -188,6 +208,72 @@ describe("AgentLiveCard wakeup-only layout", () => {
       "bg-background/80",
       "backdrop-blur-md",
     );
+  });
+});
+
+// CEREBRO-PATCH(agent-live-card-failed-run-fold): FIR-4073 — the failed run is one
+// alert among the others, so it must share the same bar and the same fold.
+describe("AgentLiveCard failed-run fold", () => {
+  it("shows a lone failed run as the bar itself, not a second banner", async () => {
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [] });
+    mockFailedRuns.runs = [{ task_id: "task-1" }];
+
+    renderCard("issue-1", "issue-uuid-1");
+
+    expect(await screen.findByTestId("failed-run-row")).toBeInTheDocument();
+    // A single alert renders as the bar itself — no fold toggle above it.
+    expect(document.querySelector("[aria-expanded]")).toBeNull();
+  });
+
+  it("collapses a failed run together with a scheduled run into one summary", async () => {
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [] });
+    mockFailedRuns.runs = [{ task_id: "task-1" }];
+    mockWakeupState.wakeups = [{ id: "wakeup-1" }];
+
+    renderCard("issue-1", "issue-uuid-1");
+
+    expect(await screen.findByText(/1 failed run · 1 scheduled run/)).toBeInTheDocument();
+    // Folded, so neither row is on screen until the summary is opened.
+    expect(screen.queryByTestId("failed-run-row")).toBeNull();
+    expect(screen.queryByTestId("wakeup-row")).toBeNull();
+  });
+});
+
+// CEREBRO-PATCH(agent-live-card-paused-run-fold): FIR-4073 — a run waiting on a
+// paused machine belongs in the same bar, but must not read as a failure.
+describe("AgentLiveCard paused-run fold", () => {
+  it("shows a lone paused run as a grey row, not the red failed row", async () => {
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [] });
+    mockFailedRuns.runs = [{ task_id: "task-1", runtime_paused: true }];
+
+    renderCard("issue-1", "issue-uuid-1");
+
+    expect(await screen.findByTestId("paused-run-row")).toBeInTheDocument();
+    expect(screen.queryByTestId("failed-run-row")).toBeNull();
+  });
+
+  it("does not tint the bar red when the only alert is a pause", async () => {
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [] });
+    mockFailedRuns.runs = [{ task_id: "task-1", runtime_paused: true }];
+
+    const { container } = renderCard("issue-1", "issue-uuid-1");
+
+    await screen.findByTestId("paused-run-row");
+    expect(container.querySelector(".bg-destructive\\/10")).toBeNull();
+  });
+
+  it("names a pause separately from a failure in the collapsed summary", async () => {
+    mockApi.getActiveTasksForIssue.mockResolvedValueOnce({ tasks: [] });
+    mockFailedRuns.runs = [
+      { task_id: "task-1", runtime_paused: true },
+      { task_id: "task-2" },
+    ];
+
+    renderCard("issue-1", "issue-uuid-1");
+
+    expect(
+      await screen.findByText(/1 failed run · 1 run waiting on a paused machine/),
+    ).toBeInTheDocument();
   });
 });
 
