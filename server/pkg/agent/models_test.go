@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -1230,5 +1231,264 @@ func TestCachedDiscovery(t *testing.T) {
 	}
 	if calls != 1 {
 		t.Errorf("expected 1 underlying call due to cache, got %d", calls)
+	}
+}
+
+func TestParseKimiSessionNewConfigOptions(t *testing.T) {
+	// Mirrors the real shape emitted by kimi 0.27.0's ACP server:
+	// no `models` block; the catalog is the configOptions select
+	// entry with category "model" (alongside thinking/mode selects).
+	raw := []byte(`{
+      "sessionId": "session_4a38f007-ca7e-4f44-a4ce-e88e9d042767",
+      "configOptions": [
+        {"type": "select", "id": "model", "name": "Model", "category": "model",
+         "currentValue": "kimi-code/k3",
+         "options": [
+           {"value": "kimi-code/kimi-for-coding", "name": "K2.7 Coding"},
+           {"value": "kimi-code/kimi-for-coding-highspeed", "name": "K2.7 Coding Highspeed"},
+           {"value": "kimi-code/k3", "name": "K3"}
+         ]},
+        {"type": "select", "id": "thinking", "name": "Thinking", "category": "thought_level",
+         "currentValue": "on", "options": [{"value": "on", "name": "Thinking On"}]},
+        {"type": "select", "id": "mode", "name": "Mode", "category": "mode",
+         "currentValue": "default", "options": [{"value": "default", "name": "Default"}]}
+      ]
+    }`)
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 3 {
+		t.Fatalf("expected 3 models, got %d: %+v", len(models), models)
+	}
+	if models[0].ID != "kimi-code/kimi-for-coding" || models[0].Label != "K2.7 Coding" {
+		t.Errorf("unexpected first model: %+v", models[0])
+	}
+	if models[0].Default {
+		t.Errorf("non-current entry must not be marked default: %+v", models[0])
+	}
+	if !models[2].Default || models[2].ID != "kimi-code/k3" {
+		t.Errorf("currentValue kimi-code/k3 must be the default: %+v", models[2])
+	}
+	for _, m := range models {
+		if m.ID == "on" || m.ID == "default" {
+			t.Errorf("thinking/mode select values leaked into the model catalog: %+v", models)
+		}
+	}
+}
+
+func TestParseACPThoughtLevelOptions(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		raw  string
+		want []string
+	}{
+		{
+			name: "kimi 0.27.0 single on option",
+			raw: `{
+				"sessionId": "s1",
+				"configOptions": [
+					{"type": "select", "id": "thinking", "name": "Thinking", "category": "thought_level",
+					 "currentValue": "on", "options": [{"value": "on", "name": "Thinking On"}]}
+				]
+			}`,
+			want: []string{"on"},
+		},
+		{
+			name: "multiple effort levels",
+			raw: `{
+				"configOptions": [
+					{"type": "select", "id": "thinking", "category": "thought_level",
+					 "currentValue": "max",
+					 "options": [
+						{"value": "on", "name": "On"},
+						{"value": "max", "name": "Max"},
+						{"value": "high", "name": "High"}
+					 ]}
+				]
+			}`,
+			want: []string{"on", "max", "high"},
+		},
+		{
+			name: "fallback to id when category omitted",
+			raw: `{
+				"configOptions": [
+					{"type": "select", "id": "thinking", "currentValue": "on",
+					 "options": [{"value": "on", "name": "On"}]}
+				]
+			}`,
+			want: []string{"on"},
+		},
+		{
+			name: "model select ignored",
+			raw: `{
+				"configOptions": [
+					{"type": "select", "id": "model", "category": "model",
+					 "currentValue": "m", "options": [{"value": "m", "name": "M"}]}
+				]
+			}`,
+			want: nil,
+		},
+		{
+			name: "snake_case config_options",
+			raw: `{
+				"config_options": [
+					{"type": "select", "id": "thinking", "category": "thought_level",
+					 "current_value": "max",
+					 "options": [
+						{"value": "on", "name": "On"},
+						{"value": "max", "name": "Max"}
+					 ]}
+				]
+			}`,
+			want: []string{"on", "max"},
+		},
+		{
+			name: "no configOptions",
+			raw:  `{"sessionId": "s1"}`,
+			want: nil,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := parseACPThoughtLevelOptions([]byte(tc.raw))
+			if tc.want == nil {
+				if got != nil {
+					t.Fatalf("expected nil, got %+v", got)
+				}
+				return
+			}
+			if got == nil {
+				t.Fatalf("expected non-nil, got nil")
+			}
+			var values []string
+			for _, lvl := range got.SupportedLevels {
+				values = append(values, lvl.Value)
+			}
+			if !slices.Equal(values, tc.want) {
+				t.Errorf("got values %v, want %v", values, tc.want)
+			}
+		})
+	}
+}
+
+// TestParseACPSessionNewModelsAndThoughtLevelsSnakeCase verifies that both
+// the model catalog and the thinking-effort catalog can be parsed from a
+// session/new response that uses snake_case `config_options` keys.
+func TestParseACPSessionNewModelsAndThoughtLevelsSnakeCase(t *testing.T) {
+	raw := []byte(`{
+      "session_id": "session_abc",
+      "config_options": [
+        {
+          "id": "primary_model",
+          "category": "MODEL",
+          "current_value": "kimi-code/k3",
+          "options": [
+            {"value": "kimi-code/k3", "name": "K3"},
+            {"value": "kimi-code/kimi-for-coding", "name": "K2.7 Coding"}
+          ]
+        },
+        {
+          "type": "select",
+          "id": "thinking",
+          "category": "thought_level",
+          "current_value": "max",
+          "options": [
+            {"value": "on", "name": "On"},
+            {"value": "max", "name": "Max"},
+            {"value": "high", "name": "High"}
+          ]
+        }
+      ]
+    }`)
+
+	models := parseACPSessionNewModels(raw)
+	if len(models) != 2 {
+		t.Fatalf("expected 2 models from snake_case config_options, got %d: %+v", len(models), models)
+	}
+	if !models[0].Default || models[0].ID != "kimi-code/k3" {
+		t.Errorf("expected k3 default, got %+v", models[0])
+	}
+
+	thinking := parseACPThoughtLevelOptions(raw)
+	if thinking == nil {
+		t.Fatal("expected thinking catalog from snake_case config_options, got nil")
+	}
+	if thinking.DefaultLevel != "max" {
+		t.Errorf("expected default thought level max, got %q", thinking.DefaultLevel)
+	}
+	if len(thinking.SupportedLevels) != 3 {
+		t.Fatalf("expected 3 thought levels, got %+v", thinking.SupportedLevels)
+	}
+	for i, want := range []string{"on", "max", "high"} {
+		if thinking.SupportedLevels[i].Value != want {
+			t.Errorf("thought level[%d] = %q, want %q", i, thinking.SupportedLevels[i].Value, want)
+		}
+	}
+}
+
+func TestDiscoverKimiModelsAnnotatesThinking(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fake binary requires a POSIX shell")
+	}
+	t.Parallel()
+
+	script := `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_discover","configOptions":[{"type":"select","id":"model","category":"model","currentValue":"kimi-code/k3","options":[{"value":"kimi-code/k3","name":"K3"}]},{"type":"select","id":"thinking","category":"thought_level","currentValue":"on","options":[{"value":"on","name":"Thinking On"},{"value":"max","name":"Max"}]}]}}\n' "$id"
+      ;;
+  esac
+done
+`
+	dir := t.TempDir()
+	fake := filepath.Join(dir, "kimi")
+	writeTestExecutable(t, fake, []byte(script))
+
+	ctx := context.Background()
+	modelCacheMu.Lock()
+	delete(modelCache, "kimi")
+	modelCacheMu.Unlock()
+
+	models, err := discoverKimiModels(ctx, fake)
+	if err != nil {
+		t.Fatalf("discoverKimiModels: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %+v", models)
+	}
+	if models[0].ID != "kimi-code/k3" {
+		t.Errorf("unexpected model id: %q", models[0].ID)
+	}
+	if models[0].Provider != "kimi" {
+		t.Errorf("unexpected provider: %q", models[0].Provider)
+	}
+	if models[0].Thinking == nil {
+		t.Fatalf("expected thinking catalog, got nil")
+	}
+	if len(models[0].Thinking.SupportedLevels) != 2 {
+		t.Fatalf("expected 2 thinking levels, got %+v", models[0].Thinking)
+	}
+	if models[0].Thinking.DefaultLevel != "on" {
+		t.Errorf("expected default level on, got %q", models[0].Thinking.DefaultLevel)
+	}
+}
+
+func TestDiscoverKimiModelsNonexistentBinaryReturnsEmpty(t *testing.T) {
+	t.Parallel()
+	// With a nonexistent binary, discovery fails soft: an empty
+	// catalog (no error) so the UI offers manual entry, and the
+	// uncached result lets the next load retry. No static fallback.
+	ctx := context.Background()
+	models, err := discoverKimiModels(ctx, "/nonexistent/kimi")
+	if err != nil {
+		t.Fatalf("discoverKimiModels returned error: %v", err)
+	}
+	if len(models) != 0 {
+		t.Fatalf("expected empty catalog on discovery failure, got %+v", models)
 	}
 }
