@@ -280,4 +280,3 @@ func TestScopeAuthorizer_MissingResourceIsPlainDenial(t *testing.T) {
 		t.Fatalf("missing chat session must be a plain denial: ok=%v err=%v", ok, err)
 	}
 }
-
