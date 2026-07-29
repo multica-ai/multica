@@ -39,6 +39,9 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 		// Subscribe @mentioned users in description
 		if issue.Description != nil && *issue.Description != "" {
 			for _, m := range parseMentions(*issue.Description) {
+				if !isIssueSubscriberUserType(m.Type) {
+					continue
+				}
 				addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
 			}
 		}
@@ -69,10 +72,16 @@ func registerSubscriberListeners(bus *events.Bus, queries *db.Queries) {
 				prevMentioned := map[string]bool{}
 				if prevDescription, _ := payload["prev_description"].(*string); prevDescription != nil {
 					for _, m := range parseMentions(*prevDescription) {
+						if !isIssueSubscriberUserType(m.Type) {
+							continue
+						}
 						prevMentioned[m.Type+":"+m.ID] = true
 					}
 				}
 				for _, m := range newMentions {
+					if !isIssueSubscriberUserType(m.Type) {
+						continue
+					}
 					if !prevMentioned[m.Type+":"+m.ID] {
 						addSubscriber(bus, queries, e.WorkspaceID, issue.ID, m.Type, m.ID, "mentioned")
 					}
@@ -147,6 +156,16 @@ func extractIssueFields(v any) (handler.IssueResponse, bool) {
 // addSubscriber adds a user as an issue subscriber and publishes a
 // subscriber:added event for real-time frontend sync.
 func addSubscriber(bus *events.Bus, queries *db.Queries, workspaceID, issueID, userType, userID, reason string) {
+	if !isIssueSubscriberUserType(userType) {
+		slog.Debug("skipping non-user issue subscriber",
+			"issue_id", issueID,
+			"user_type", userType,
+			"user_id", userID,
+			"reason", reason,
+		)
+		return
+	}
+
 	err := queries.AddIssueSubscriber(context.Background(), db.AddIssueSubscriberParams{
 		IssueID:  parseUUID(issueID),
 		UserType: userType,
@@ -174,4 +193,8 @@ func addSubscriber(bus *events.Bus, queries *db.Queries, workspaceID, issueID, u
 			"reason":    reason,
 		},
 	})
+}
+
+func isIssueSubscriberUserType(userType string) bool {
+	return userType == "member" || userType == "agent"
 }

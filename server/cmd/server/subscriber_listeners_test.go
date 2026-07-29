@@ -309,6 +309,30 @@ func TestSubscriberCommentCreated_CommenterSubscribed(t *testing.T) {
 	}
 }
 
+func TestAddSubscriberSkipsNonUserTypes(t *testing.T) {
+	queries := db.New(testPool)
+	bus := events.New()
+
+	issueID := createTestIssue(t, testWorkspaceID, testUserID)
+	t.Cleanup(func() { cleanupTestIssue(t, issueID) })
+
+	var subscriberEvents []events.Event
+	bus.Subscribe(protocol.EventSubscriberAdded, func(e events.Event) {
+		subscriberEvents = append(subscriberEvents, e)
+	})
+
+	addSubscriber(bus, queries, testWorkspaceID, issueID, "issue", issueID, "mentioned")
+	addSubscriber(bus, queries, testWorkspaceID, issueID, "squad", issueID, "mentioned")
+	addSubscriber(bus, queries, testWorkspaceID, issueID, "all", "all", "mentioned")
+
+	if count := subscriberCount(t, queries, issueID); count != 0 {
+		t.Fatalf("expected 0 subscribers for non-user mention types, got %d", count)
+	}
+	if len(subscriberEvents) != 0 {
+		t.Fatalf("expected 0 subscriber:added events, got %d", len(subscriberEvents))
+	}
+}
+
 func TestSubscriberAddedEventPublished(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
