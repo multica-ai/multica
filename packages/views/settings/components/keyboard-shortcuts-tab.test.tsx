@@ -27,14 +27,16 @@ describe("KeyboardShortcutsTab", () => {
       name: "Change shortcut for Open search",
     });
 
+    // Use Ctrl+; — a key not bound to any default action, so the conflict
+    // checker allows it.
     fireEvent.click(recorder);
-    fireEvent.keyDown(recorder, { key: "j", ctrlKey: true });
+    fireEvent.keyDown(recorder, { key: ";", ctrlKey: true });
 
     expect(getShortcut("openSearch")).toEqual(
-      createShortcutChord("J", { primary: true }),
+      createShortcutChord(";", { primary: true }),
     );
     expect(within(recorder).getByTitle("Ctrl")).toHaveTextContent("Ctrl");
-    expect(within(recorder).getByTitle("J")).toHaveTextContent("J");
+    expect(within(recorder).getByTitle(";")).toHaveTextContent(";");
   });
 
   it("only captures keys while the recorder is active", () => {
@@ -44,22 +46,23 @@ describe("KeyboardShortcutsTab", () => {
     });
 
     recorder.focus();
-    fireEvent.keyDown(recorder, { key: "j", ctrlKey: true });
+    // Ctrl+; while not recording → should be rejected (openSearch stays K).
+    fireEvent.keyDown(recorder, { key: ";", ctrlKey: true });
     expect(getShortcut("openSearch")).toEqual(
       createShortcutChord("K", { primary: true }),
     );
 
     fireEvent.click(recorder);
-    fireEvent.keyDown(recorder, { key: "j", ctrlKey: true });
+    fireEvent.keyDown(recorder, { key: ";", ctrlKey: true });
     expect(getShortcut("openSearch")).toEqual(
-      createShortcutChord("J", { primary: true }),
+      createShortcutChord(";", { primary: true }),
     );
 
     // Focus remains on the button after a successful recording. Tab must move
     // focus normally instead of silently replacing the shortcut with Tab.
     fireEvent.keyDown(recorder, { key: "Tab" });
     expect(getShortcut("openSearch")).toEqual(
-      createShortcutChord("J", { primary: true }),
+      createShortcutChord(";", { primary: true }),
     );
   });
 

@@ -9,6 +9,7 @@ export type ShortcutActionId =
   | "openSearch"
   | "createIssue"
   | "toggleSidebar"
+  | "toggleChat"
   | "findInIssue"
   | "send"
   | "goInbox"
@@ -75,6 +76,7 @@ export const SHORTCUT_ACTIONS: readonly ShortcutActionDefinition[] = [
   { id: "openSearch", category: "general", defaultShortcut: primary("K"), allowInEditable: true },
   { id: "createIssue", category: "general", defaultShortcut: createShortcutChord("C"), allowInEditable: false },
   { id: "toggleSidebar", category: "general", defaultShortcut: primary("B"), allowInEditable: false },
+  { id: "toggleChat", category: "general", defaultShortcut: primary("J"), allowInEditable: false },
   { id: "findInIssue", category: "general", defaultShortcut: primary("F"), allowInEditable: true },
   { id: "send", category: "general", defaultShortcut: primary("Enter"), allowInEditable: true },
   { id: "goInbox", category: "navigation", defaultShortcut: null, allowInEditable: false },

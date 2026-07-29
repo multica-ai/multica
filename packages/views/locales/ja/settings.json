@@ -66,6 +66,7 @@
       "openSearch": { "label": "検索を開く", "description": "どこからでも検索やコマンドを実行します。" },
       "createIssue": { "label": "Issueを作成", "description": "優先するissue作成フローを開きます。" },
       "toggleSidebar": { "label": "サイドバーを切り替え", "description": "メインサイドバーの表示を切り替えます。" },
+      "toggleChat": { "label": "チャットを切り替え", "description": "フローティングチャットウィンドウの表示を切り替えます。" },
       "findInIssue": { "label": "Issue内を検索", "description": "開いているissueの詳細を検索します。" },
       "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログで issue を作成します。" },
       "goInbox": { "label": "受信トレイへ移動", "description": "ワークスペースの受信トレイを開きます。" },

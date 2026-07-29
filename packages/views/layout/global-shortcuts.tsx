@@ -14,6 +14,7 @@ import { openCreateIssueWithPreference } from "@multica/core/issues/stores";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { isImeComposing } from "@multica/core/utils";
+import { useChatStore } from "@multica/core/chat";
 import { useNavigation } from "../navigation";
 import { useSearchStore } from "../search/search-store";
 
@@ -21,6 +22,7 @@ const GLOBAL_ACTIONS: readonly ShortcutActionId[] = [
   "openSearch",
   "createIssue",
   "toggleSidebar",
+  "toggleChat",
   "goInbox",
   "goChat",
   "goMyIssues",
@@ -87,6 +89,15 @@ export function GlobalShortcuts() {
       }
       if (actionId === "toggleSidebar") {
         toggleSidebar();
+        return;
+      }
+      if (actionId === "toggleChat") {
+        // Only toggles the floating overlay — if the user has disabled
+        // floating chat in Settings, the shortcut is a no-op rather than
+        // silently re-enabling a feature they chose to turn off.
+        if (useChatStore.getState().floatingChatEnabled) {
+          useChatStore.getState().toggle();
+        }
         return;
       }
       if (actionId === "createIssue") {
