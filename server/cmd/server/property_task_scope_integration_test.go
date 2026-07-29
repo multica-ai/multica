@@ -162,6 +162,7 @@ func TestTaskTokenCompatibilityModeRestoresGeneralRoutes(t *testing.T) {
 	}
 	resp.Body.Close()
 
+	// CEREBRO-PATCH(task-scope-hotfix): general platform actions must pass again.
 	resp = taskTokenRequest(t, token, http.MethodGet, "/api/issues?workspace_id="+testWorkspaceID, nil)
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)

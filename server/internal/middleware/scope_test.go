@@ -25,6 +25,7 @@ func TestRequireUserScope_CompatibilityModeAllowsTaskScope(t *testing.T) {
 
 	RequireUserScope(pass).ServeHTTP(rec, req)
 
+	// CEREBRO-PATCH(task-scope-hotfix): lock the temporary compatibility verdict.
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for task-scoped request during FIR-4076 compatibility mode, got %d", rec.Code)
 	}
