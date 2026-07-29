@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -381,6 +382,57 @@ func TestDaemonRestartUnauthenticatedFailsBeforeStopping(t *testing.T) {
 	case <-stopped:
 		t.Fatal("restart asked the running daemon to shut down before the auth check")
 	default:
+	}
+}
+
+func TestDaemonRestartCommandExposesDrainFlag(t *testing.T) {
+	t.Parallel()
+
+	flag := daemonRestartCmd.Flags().Lookup("drain")
+	if flag == nil {
+		t.Fatal("daemon restart is missing the --drain flag")
+	}
+	if flag.DefValue != "false" {
+		t.Fatalf("--drain default = %q, want false for backwards compatibility", flag.DefValue)
+	}
+}
+
+func TestRequestDaemonDrainShutdownUsesDedicatedEndpointAndCallerContext(t *testing.T) {
+	t.Parallel()
+
+	requestSeen := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		if got := r.URL.Path; got != "/shutdown/drain" {
+			t.Errorf("path = %q, want /shutdown/drain", got)
+		}
+		close(requestSeen)
+		<-r.Context().Done()
+	}))
+	defer srv.Close()
+
+	port := srv.Listener.Addr().(*net.TCPAddr).Port
+	ctx, cancel := context.WithCancel(context.Background())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- requestDaemonDrainShutdown(ctx, port)
+	}()
+
+	select {
+	case <-requestSeen:
+	case <-time.After(time.Second):
+		t.Fatal("drain shutdown request was not delivered")
+	}
+	cancel()
+	select {
+	case err := <-errCh:
+		if err == nil || !strings.Contains(err.Error(), "context canceled") {
+			t.Fatalf("request error = %v, want caller context cancellation", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("drain shutdown request ignored caller cancellation")
 	}
 }
 
