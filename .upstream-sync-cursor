@@ -1,1 +1,5 @@
-1869b1b5e0577be8e9f5f4c385af79bd1e03eb72
+# Upstream release the fork currently sits on. Written by scripts/upstream-sync.sh.
+# `tag` is empty only until the first tag-aligned sync lands — this SHA is an
+# upstream commit 14 behind v0.4.12, so there is no honest tag to name yet.
+tag=
+sha=1869b1b5e0577be8e9f5f4c385af79bd1e03eb72

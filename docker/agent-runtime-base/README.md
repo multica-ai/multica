@@ -48,14 +48,18 @@ purged before the layer commits — it does not ship in the final image.
 ## Build args
 
 All version-pinned via build args. Defaults match the Dockerfile so a bare
-`docker buildx bake` works locally; CI passes explicit values per release.
+`docker buildx bake` works locally.
+
+CI passes **no** overrides for these — `publish.yml` and `dev.yml` both hand the
+bakefile to `gitops-bake-build.yml` without any `--set`, so **the bakefile
+default is exactly what ships**. Treat every default below as a production value.
 
 | Build arg              | Default                                  | Notes                                                              |
 |------------------------|------------------------------------------|--------------------------------------------------------------------|
 | `NODE_VERSION`         | `22`                                     | Node LTS major. Bump in lockstep with hermes' supported Node range.|
 | `GO_VERSION`           | `1.26.1`                                 | Matches CI (`CLAUDE.md`: "CI runs on Node 22 and Go 1.26.1").       |
-| `MULTICA_VERSION`      | `0.3.21`                                 | `-X main.version=` ldflag → the version the daemon reports. Must parse as semver ≥ `0.2.21` or the quick-create gate rejects the daemon ("doesn't report a CLI version"). CI does **not** override this, so the default ships; bump it when the fork's `server/` is synced to a newer upstream tag. |
-| `MULTICA_COMMIT`       | `unknown`                                | `-X main.commit=` ldflag. CI passes the agentfarm commit SHA.       |
+| `MULTICA_VERSION`      | the synced upstream tag — see `docker-bake.hcl` | `-X main.version=` ldflag → the version `multica version` reports. **Do not bump by hand and do not restate the value here** (this row said `0.3.21` while the bakefile said `0.4.12`): `scripts/upstream-sync.sh` rewrites the bakefile default to the tag it syncs to, as part of the sync commit. It is the only semver marker in the deployment — there is no server version endpoint and backend/web images are SHA-tagged — so the sync pipeline reads it to decide whether a release is deployed. Must parse as semver ≥ `0.2.21` or the quick-create gate rejects the daemon ("doesn't report a CLI version"). |
+| `MULTICA_COMMIT`       | `unknown`                                | `-X main.commit=` ldflag. **Not wired:** CI passes no value, so pods report `commit: unknown`. Pass it explicitly for a local build; wiring it in CI is tracked separately. |
 | `CLAUDE_CODE_VERSION`  | `latest`                                 | npm tag or version. Pin for prod (e.g. `1.7.4`).                    |
 | `CODEX_VERSION`        | `latest`                                 | npm tag or version.                                                 |
 | `OPENCODE_VERSION`     | `latest`                                 | npm tag or version.                                                 |
@@ -113,9 +117,10 @@ docker buildx bake -f docker/agent-runtime-base/docker-bake.hcl \
   --set default.platform=linux/$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/') \
   --load default
 
-# Multi-arch publish to ghcr (matches what CI does)
+# Multi-arch publish to ghcr. NOTE: CI overrides none of these — it passes the
+# bakefile as-is. Setting them here only affects your local publish.
 IMG_SHA=v0.1.0 \
-MULTICA_VERSION=v0.1.0 \
+MULTICA_VERSION=0.1.0 \
 MULTICA_COMMIT=$(git rev-parse --short HEAD) \
   docker buildx bake -f docker/agent-runtime-base/docker-bake.hcl --push default
 ```
@@ -128,10 +133,12 @@ one of the baked tools:
 
 1. **Identify which arg to bump.** Find the tool in the table above; the
    right column names the build arg.
-2. **For `multica`:** no bump needed — every base bake picks up the
-   agentfarm commit at HEAD via the build context, and CI passes the SHA
-   through as `MULTICA_COMMIT`. Sync upstream into agentfarm first if you
-   need a new multica daemon revision.
+2. **For `multica`:** don't bump it by hand. The binary is built from
+   `server/` at the agentfarm commit in the build context, and
+   `scripts/upstream-sync.sh` rewrites the `MULTICA_VERSION` default to the
+   upstream release tag it syncs to, in the sync commit itself. So: sync
+   upstream, and the version follows. (`MULTICA_COMMIT` is a separate
+   matter — CI passes nothing, so pods report `unknown`.)
 3. **For npm tools (`claude`, `codex`, `opencode`, `pi`):** bump the
    variable default in `docker-bake.hcl`. Commit.
 4. **For `hermes`:** bump both `HERMES_REF` and `HERMES_COMMIT` in
