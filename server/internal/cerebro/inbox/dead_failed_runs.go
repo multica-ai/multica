@@ -61,7 +61,6 @@ func resumeBlockedReason(t cerebrodb.DeadFailedTask) string {
 	}
 	return "This run cannot be continued."
 }
-
 // isPoisonedReason mirrors the blacklist the resume lookup applies.
 func isPoisonedReason(reason string) bool {
 	switch reason {
@@ -170,4 +169,3 @@ func mapDeadFailed(rows []cerebrodb.DeadFailedTask) []deadFailedRunResponse {
 	}
 	return out
 }
-
