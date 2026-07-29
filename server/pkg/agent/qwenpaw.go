@@ -15,9 +15,13 @@ import (
 // qwenpawBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. `acp` is the protocol
 // subcommand that drives the ACP JSON-RPC transport; overriding it
-// would break the daemon↔QwenPaw communication contract.
+// would break the daemon↔QwenPaw communication contract. `--workspace`
+// and `--agent` are set per-task by the daemon for skill isolation and
+// agent identity isolation respectively.
 var qwenpawBlockedArgs = map[string]blockedArgMode{
-	"acp": blockedStandalone,
+	"acp":         blockedStandalone,
+	"--workspace": blockedWithValue,
+	"--agent":     blockedWithValue,
 }
 
 // qwenpawBackend implements Backend by spawning `qwenpaw acp` and
@@ -52,6 +56,18 @@ func (b *qwenpawBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	// auto-approves in hermesClient.handleAgentRequest by selecting
 	// a safe granting option for each session/request_permission request.
 	qwenpawArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, qwenpawBlockedArgs, b.cfg.Logger)...)
+
+	// Inject --workspace and --agent for per-task isolation. These are
+	// blocked in qwenpawBlockedArgs so user-defined custom_args cannot
+	// override them. The daemon sets them via opts.QwenpawWorkspace and
+	// opts.QwenpawAgentID.
+	if opts.QwenpawWorkspace != "" {
+		qwenpawArgs = append(qwenpawArgs, "--workspace", opts.QwenpawWorkspace)
+	}
+	if opts.QwenpawAgentID != "" {
+		qwenpawArgs = append(qwenpawArgs, "--agent", opts.QwenpawAgentID)
+	}
+
 	cmd := exec.CommandContext(runCtx, execPath, qwenpawArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", qwenpawArgs)

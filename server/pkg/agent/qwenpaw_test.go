@@ -250,6 +250,18 @@ func TestQwenpawBlockedArgs(t *testing.T) {
 	if qwenpawBlockedArgs["acp"] != blockedStandalone {
 		t.Fatalf("expected acp to be blockedStandalone, got %v", qwenpawBlockedArgs["acp"])
 	}
+	if _, ok := qwenpawBlockedArgs["--workspace"]; !ok {
+		t.Fatal("expected --workspace to be in qwenpawBlockedArgs")
+	}
+	if qwenpawBlockedArgs["--workspace"] != blockedWithValue {
+		t.Fatalf("expected --workspace to be blockedWithValue, got %v", qwenpawBlockedArgs["--workspace"])
+	}
+	if _, ok := qwenpawBlockedArgs["--agent"]; !ok {
+		t.Fatal("expected --agent to be in qwenpawBlockedArgs")
+	}
+	if qwenpawBlockedArgs["--agent"] != blockedWithValue {
+		t.Fatalf("expected --agent to be blockedWithValue, got %v", qwenpawBlockedArgs["--agent"])
+	}
 }
 
 func TestQwenpawUsesSessionLoad(t *testing.T) {
@@ -297,34 +309,28 @@ func TestQwenpawUsesSessionLoad(t *testing.T) {
 }
 
 // TestQwenpawTimeout tests that a context timeout during session/new
-// is reported as status=timeout. Uses a signal file to synchronise:
-// the fake script writes to the file after initialize completes, so
-// the timeout only starts counting after the handshake is done,
-// making the test deterministic.
+// is reported as status=timeout. The fake script responds to
+// initialize immediately, then sleeps 30s on session/new so the
+// 5s context deadline expires during the session/new RPC.
 func TestQwenpawTimeout(t *testing.T) {
 	t.Parallel()
 
-	signalDir := t.TempDir()
-	readyFile := filepath.Join(signalDir, "initialize_done")
-
-	script := fmt.Sprintf(`#!/bin/sh
+	script := `#!/bin/sh
 while IFS= read -r line; do
-  id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
-      > "%s"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
       ;;
     *'"method":"session/new"'*)
       sleep 30
-      printf '{"jsonrpc":"2.0","id":%%s,"result":{"sessionId":"ses_late"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_late"}}\n' "$id"
       ;;
     *)
-      printf '{"jsonrpc":"2.0","id":%%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
       ;;
   esac
-done
-`, readyFile)
+done`
 
 	bin := writeFakeQwenpawScript(t, script)
 
@@ -612,6 +618,156 @@ func TestQwenpawSessionLoadSendsCodingProjectDir(t *testing.T) {
 	}
 	if !strings.Contains(requests, `"qwenpaw.coding_project_dir"`) {
 		t.Fatalf("expected qwenpaw.coding_project_dir inside _meta in session/load request, got:\n%s", requests)
+	}
+}
+
+// TestQwenpawWorkspaceAndAgentArgs verifies that --workspace and --agent
+// flags are passed to the qwenpaw acp command when set in ExecOptions.
+func TestQwenpawWorkspaceAndAgentArgs(t *testing.T) {
+	t.Parallel()
+
+	// Fake script that writes its command-line args to a file and then
+	// runs the standard ACP loop.
+	argsFile := filepath.Join(t.TempDir(), "args.txt")
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$@" > "%s"
+while IFS= read -r line; do
+  id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"sessionId":"ses_qwenpaw_ws"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":5,"outputTokens":10}}}\n' "$id"
+      ;;
+    *)
+      printf '{"jsonrpc":"2.0","id":%%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      ;;
+  esac
+done
+`, argsFile)
+
+	bin := writeFakeQwenpawScript(t, script)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	b, err := New("qwenpaw", Config{
+		ExecutablePath: bin,
+		Logger:         logger,
+	})
+	if err != nil {
+		t.Fatalf("New(qwenpaw) error: %v", err)
+	}
+
+	ctx := context.Background()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:              t.TempDir(),
+		QwenpawWorkspace: "/tmp/test-qwenpaw-workspace",
+		QwenpawAgentID:   "multica-agent-123-issue-456",
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	for range session.Messages {
+	}
+	<-session.Result
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := string(raw)
+
+	if !strings.Contains(args, "--workspace") {
+		t.Fatalf("expected --workspace in command args, got:\n%s", args)
+	}
+	if !strings.Contains(args, "/tmp/test-qwenpaw-workspace") {
+		t.Fatalf("expected workspace path in command args, got:\n%s", args)
+	}
+	if !strings.Contains(args, "--agent") {
+		t.Fatalf("expected --agent in command args, got:\n%s", args)
+	}
+	if !strings.Contains(args, "multica-agent-123-issue-456") {
+		t.Fatalf("expected agent ID in command args, got:\n%s", args)
+	}
+}
+
+// TestQwenpawBlockedWorkspaceAndAgentArgs verifies that user-defined
+// --workspace and --agent in custom_args are stripped by the blocked-args
+// filter.
+func TestQwenpawBlockedWorkspaceAndAgentArgs(t *testing.T) {
+	t.Parallel()
+
+	argsFile := filepath.Join(t.TempDir(), "args_blocked.txt")
+	script := fmt.Sprintf(`#!/bin/sh
+echo "$@" > "%s"
+while IFS= read -r line; do
+  id=$(printf '%%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"sessionId":"ses_qwenpaw_blocked"}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":5,"outputTokens":10}}}\n' "$id"
+      ;;
+    *)
+      printf '{"jsonrpc":"2.0","id":%%s,"error":{"code":-32601,"message":"method not found"}}\n' "$id"
+      ;;
+  esac
+done
+`, argsFile)
+
+	bin := writeFakeQwenpawScript(t, script)
+
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	b, err := New("qwenpaw", Config{
+		ExecutablePath: bin,
+		Logger:         logger,
+	})
+	if err != nil {
+		t.Fatalf("New(qwenpaw) error: %v", err)
+	}
+
+	ctx := context.Background()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:              t.TempDir(),
+		CustomArgs:       []string{"--workspace", "/evil/path", "--agent", "evil-agent"},
+		QwenpawWorkspace: "/tmp/correct-workspace",
+		QwenpawAgentID:   "multica-correct-agent",
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	for range session.Messages {
+	}
+	<-session.Result
+
+	raw, err := os.ReadFile(argsFile)
+	if err != nil {
+		t.Fatalf("read args file: %v", err)
+	}
+	args := string(raw)
+
+	// User-defined --workspace and --agent must be stripped by the filter
+	if strings.Contains(args, "/evil/path") {
+		t.Fatal("user-defined --workspace value should be blocked")
+	}
+	if strings.Contains(args, "evil-agent") {
+		t.Fatal("user-defined --agent value should be blocked")
+	}
+	// Daemon-injected --workspace and --agent must be present
+	if !strings.Contains(args, "/tmp/correct-workspace") {
+		t.Fatalf("expected daemon-injected workspace path in command args, got:\n%s", args)
+	}
+	if !strings.Contains(args, "multica-correct-agent") {
+		t.Fatalf("expected daemon-injected agent ID in command args, got:\n%s", args)
 	}
 }
 
